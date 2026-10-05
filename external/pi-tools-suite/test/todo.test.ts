@@ -782,6 +782,7 @@ describe.serial("/todos command", () => {
 describe.serial("todo extension lifecycle", () => {
 	test.serial("adds one repo knowledge reminder before the final active todo in repo-aware projects", async () => {
 		const extension = (await import("../src/todo/index.js")).default;
+		const { getTodos } = await import("../src/todo/todo.js");
 		const pi = new FakePi();
 		const cwd = mkdtempSync(join(tmpdir(), "todo-repo-finalization-"));
 		mkdirSync(join(cwd, ".indexer-cli"));
@@ -809,8 +810,17 @@ describe.serial("todo extension lifecycle", () => {
 			expect(completed.content[0].text).toContain("exact project-relative paths changed by this task");
 			expect(completed.content[0].text).toContain("Obtain its result");
 			expect(completed.content[0].text).toContain("escalations/unreviewed specs");
-			expect(completed.content[0].text).toContain("remaining knowledge dirty state");
+			expect(completed.content[0].text).toContain("Close the audit todo when task-scoped review is complete");
+			expect(completed.content[0].text).toContain("global knowledge dirty=yes alone must not keep it open");
+			expect(completed.content[0].text).toContain("Report global dirty state separately");
+			expect(completed.content[0].text).toContain("without claiming the whole project is clean or acknowledging unrelated specs");
 			expect(completed.content[0].text).toContain("Spawning alone is not completion");
+
+			// The reminder is advisory: closing the final todo does not require
+			// obtaining a project-wide knowledge verdict from idx.
+			const final = await tool.execute("todo-4", { action: "update", id: 2, status: "completed" }, undefined, undefined, ctx);
+			expect(final.isError).not.toBe(true);
+			expect(getTodos()).toHaveLength(0);
 		} finally {
 			rmSync(cwd, { recursive: true, force: true });
 		}

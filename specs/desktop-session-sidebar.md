@@ -1,4 +1,4 @@
-# Desktop session activity
+# Desktop session activity HUD
 
 <!-- markdownlint-disable MD013 -->
 
@@ -12,15 +12,14 @@ Active implemented contract.
 
 ## Goal
 
-Add live views of the active session's execution Plan and Subagents to Pix Desktop, with a runtime-backed Plan clear action, without conflating either runtime surface with project tasks, and present that state in session-scoped IDE chrome rather than as a workspace-level destination.
+Show live execution Plan, Subagents, and brainstorm activity for the active session in session-scoped IDE chrome, with a runtime-backed Plan clear action, without conflating runtime plans with project tasks. Plan and Subagents are presented through compact status-bar popups, not a persistent Session side pane.
 
 ## Scope
 
 - Keep session activity out of the workspace Activity Bar; Project, Tasks, Source Control, Registry, Package Scripts, IDX, and Settings remain workspace/tool destinations.
 - Give every visible session tab a compact semantic status icon derived from that session's own snapshots, prompt-running state, input attention, and unseen successful completion.
-- Keep **Session activity** at the far-right edge of the status bar only when it conveys real hidden activity. When the inspector is closed and the active session has live Plan/Subagent activity, a compact summary shows the active agents' configured icons and completed/total Plan progress. Clicking any part of the summary opens the inspector. While the inspector is open, or when the active session has no visible Plan/Subagent activity, no Session status control is rendered.
-- Add a right-side contextual **Session** inspector for the active session. On narrow windows it becomes an overlay so the primary transcript retains usable width.
-- Use `Activity` for the inspector header, `Workflow` for the Agents section, and `ListChecks` for the Plan section.
+- Keep **Session activity** at the far-right edge of the status bar only when it conveys live Plan/Subagent activity. A compact summary shows active agents' configured icons and completed/total Plan progress; each activity popup is independently accessible from the status bar.
+- Do not mount or persist a Session inspector. HUD availability depends only on active-session activity; no prior pane preference can hide it.
 - Bridge versioned, session-scoped extension state from pi RPC through a private ACP notification.
 - Render the todo hierarchy, status, active form, thinking level, owner, and blockers read-only.
 - Exclude deleted todos and match the TUI's rule that a completed-only snapshot has no open todo panel.
@@ -48,33 +47,29 @@ Add live views of the active session's execution Plan and Subagents to Pix Deskt
 
 ## Behavior
 
-- The Session inspector always reflects the active Desktop session; switching sessions switches both runtime views immediately and never leaks another session's snapshot.
+- The status HUD always reflects the active Desktop session; switching sessions switches runtime views immediately and never leaks another session's snapshot.
 - State may arrive before `session/new` resolves, so Desktop stages up to one snapshot per activity channel under its pending attachment token, then binds that activity to the returned ACP session ID. The visible snapshot follows the active ID.
 - Snapshot freshness is tracked independently per channel within the current activity attachment. ACP tags each enqueued Todo/Subagent notification with its Desktop attachment token; Desktop ignores mismatched tokens after forget/reopen, regardless of `checkedAt`. The live ACP runtime caches the latest two channel snapshots and replays them on lazy reattachment, retaining their original timestamps. New/fork startup notifications stage under a bounded pending request until its response identifies the session. Closing/forgetting discards ownership without retaining historical ID tombstones.
-- Inspector open/closed state is a Desktop IDE preference rather than session data, and opening it is always an explicit user action. New Plan/Subagent activity never auto-opens the pane. The preference is persisted best-effort in local storage, but an open or restored inspector automatically closes as soon as the active session has neither visible Plan todos nor live Subagents.
-- Activity changes for a closed inspector update only the compact status-bar summary. They do not change the pane-open preference. Switching sessions follows the same rule: an inspector may remain open only while the newly active session has visible Plan/Subagent activity; an empty active session closes it immediately.
-- Agents and Plan are independent native keyboard-accessible accordions with informative summary headers. They start collapsed without a snapshot, then use their first available snapshot to expand only when live agents or an open plan exist. A manual toggle before that snapshot takes precedence, and ordinary later snapshot updates never reset the accordion. Session switches reset these section defaults for the newly displayed session. DCP context capacity, category colors, savings, and statistics remain in the status-bar Context surface defined in [desktop-runtime-status.md](./desktop-runtime-status.md), rather than occupying a third Session-inspector section.
-- With no active session, including while the selected conversation is a UI-only draft, no Session status control or inspector is rendered. With a real but activity-empty session, no inert Session button is rendered and an open inspector closes instead of showing an empty persistent pane.
-- With an active session, Plan and Agents remain distinct sections and each shows a compact informational empty state when it has no live content.
+- With no active session, including while the selected conversation is a UI-only draft, no session activity HUD is rendered. With a real but activity-empty session, no inert Session status control is rendered.
 - When at least one pending, in-progress, or deferred todo exists, all non-deleted todos are shown in stable hierarchy order, including completed items.
-- The Plan header offers a compact, accessible Clear session plan action when its active session is ready and idle and has visible todos. It invokes private ACP `pix/session/clear_todos`, which dispatches the existing `/todos-clear` extension handler directly without running a user prompt, adding `/todos-clear` to chat, or creating a user transcript entry. It preserves the composer draft, reports request failures, disables while unavailable or in flight (including after inspector remounts or switching away and back), never mutates the displayed snapshot locally, and never toggles the Plan accordion. The ACP session lock is claimed before asynchronous work so duplicate clears cannot race; the existing extension handler remains authoritative for state publishing and persistence. Success depends on that handler, not an unrelated session-list metadata write.
+- The Plan popup offers a compact, accessible Clear session plan action when its active session is ready and idle and has visible todos. It invokes private ACP `pix/session/clear_todos`, which dispatches the existing `/todos-clear` extension handler directly without running a user prompt, adding `/todos-clear` to chat, or creating a user transcript entry. It preserves the composer draft, reports request failures, disables while unavailable or in flight (including after popup remounts or switching away and back), and never mutates the displayed snapshot locally. The ACP session lock is claimed before asynchronous work so duplicate clears cannot race; the existing extension handler remains authoritative for state publishing and persistence. Success depends on that handler, not an unrelated session-list metadata write.
 - Subagents matches the TUI live-panel rule: only planned, running, or retrying agents are visible; terminal agents disappear with the next snapshot, and the section does not invent historical state.
 - Multiple live runs remain distinct even when they reuse an agent id. Run and task ordering follows the source snapshot.
-- Agent rows and status-HUD tooltips show the role in a separate, non-truncated header badge (`auto` when absent), alongside status and elapsed duration. The header can wrap at narrow widths. The agent id occupies its own ellipsized line with the full id and run path available on hover. Run date/time labels are not displayed; run grouping and accessible run identity remain intact. In tooltips, role, identity and model/activity remain outside the scrollable task body. Both model footers show the shared provider icon beside the model label when the model reference has a recognized provider; missing or unrecognized providers remain text-only.
-- The status HUD is intentionally denser than the inspector. While the inspector is closed, each of the first six live Subagents contributes its configured agent icon (falling back to the generic agent icon) as an individual accessible control, with excess icons compacted behind a `+N` control. Running and retrying icons pulse gently to draw attention; planned icons remain still, and reduced-motion preferences disable the pulse. Hovering or keyboard-focusing one of those icons reveals the same key live details as the Agents inspector row: run/agent identity, status, elapsed time, task or scope, model, latest activity, and retry count. An open Plan contributes a neighboring `completed/total` progress control such as `2/5`; hovering or focusing it reveals the full non-deleted Plan in the same stable hierarchy order as the inspector, including completed items plus each task's subject, status, active form/description, thinking, owner, and blockers when present. The bounded tooltip list is scrollable and automatically centers the current item on each hover/focus open, using the same `in_progress` → `pending` → `deferred` current-item priority as the rest of Desktop. Clicking any visible HUD control opens the inspector. Once opened, the summary disappears completely; the inspector's own close control and the existing Session Activity command own closing.
+- Status-HUD click popups show agent role, identity, status, elapsed time, task/scope, model, latest activity, and retry count. Agent id and run path have accessible labels. Run date/time labels are not displayed; run grouping and accessible run identity remain intact. Model footers show the shared provider icon beside recognized providers.
+- Each of the first six live Subagents contributes its configured agent icon (falling back to the generic icon) as an accessible status-bar popup, with excess icons compacted behind a `+N` popup listing the remaining agents. Running and retrying icons pulse gently; planned icons remain still, and reduced-motion preferences disable the pulse. All status-bar popups toggle on click, Enter or Space, never hover or mere focus. Pointer departure leaves them open; repeat activation, Escape, outside click or focus leaving the region dismisses them. Escape restores trigger focus. An open Plan contributes a neighboring `completed/total` progress popup; it reveals the full non-deleted Plan in stable hierarchy order, including completed items and each task's subject, status, active form/description, thinking, owner, and blockers. The bounded list is scrollable and centers the current item on popup open using `in_progress` → `pending` → `deferred` priority. See [0048](../docs/decisions/0048-status-bar-click-popups.md).
 - Background sessions remain observable from the top tab strip. The leading session status uses IDE-style semantic icons rather than a color-only dot: idle uses a success check, a running prompt or live Subagent uses a spinning info loader, elicitation waiting uses a warning question icon, and retrying Subagents use a warning triangle. Blocked Plan items are normal dependency-waiting state and do not trigger a tab warning. Plan status alone, including an in-progress item retained after execution stops, does not masquerade as active execution; its progress remains visible in the tab tooltip and Session activity surfaces.
 - Successful completion that reaches the same fully-settled boundary used by Desktop notifications marks an inactive session tab as unseen-complete: the idle success check gains a small accent badge until that session tab is opened. The marker is cleared when the tab is viewed, when new work starts in that session, when the session is cleared, or when prompt/runtime state resets. Completion does not mark the session when its workbench tab is already selected.
 - Status precedence is `needs-input` → `warning` → `running` → `unseen-complete` → `idle`, so a stale completion badge never masks current execution or attention. Fork identity remains a separate `GitFork` marker between the status icon and title.
 - Elicitation attention stays attached to each requesting session when another tab becomes active, including when several background sessions are independently waiting for input.
 - Tab activity never changes tab membership or order and does not replace the existing active-tab affordance.
 - Plan is the Desktop label for the session-scoped todo execution surface; project-scoped work continues to use **Tasks**.
-- The inspector is a connected workbench pane with compact rows and separators rather than nested cards. At normal widths it is a resizable auxiliary region with sensible bounds, pointer and keyboard resizing, and best-effort persisted width so repeated desktop work retains spatial memory. Below the narrow-window breakpoint it overlays the right edge of the workspace instead of shrinking the transcript further; its restored width remains constrained by the available window width.
 - Desktop updates the derived activity summary only for the session whose Todo/Subagent snapshot changed. A live activity event does not rescan every retained session plan/run merely to refresh the tab strip or status HUD.
 
 The status HUD Plan control vertically centers its `completed/total` count next
 to a compact circular progress ring in place of the todo icon. The ring fills
 clockwise from the top according to the completed fraction; no linear progress
-track is rendered. Visibility, tooltip and inspector-opening behavior are unchanged.
+track is rendered. Visibility depends only on live activity; click popup behavior
+follows decision 0048.
 
 ## Related files
 
@@ -89,12 +84,10 @@ track is rendered. Visibility, tooltip and inspector-opening behavior are unchan
 - `desktop/src/lib/session-todos.ts`
 - `desktop/src/lib/session-subagents.ts`
 - `desktop/src/lib/session-activity.ts`
-- `desktop/src/components/SessionInspector.svelte`
 - `desktop/src/components/WorkbenchTabs.svelte`
 - `desktop/src/components/StatusBar.svelte`
 - `desktop/src/components/SessionActivityStatusHud.svelte`
-- `desktop/src/components/SessionSubagentsPanel.svelte`
-- `desktop/src/components/SessionTodosPanel.svelte`
+- `desktop/src/components/StatusBarPopover.svelte`
 - `desktop/src/components/WorkspaceSidebar.svelte`
 - `desktop/src/app/session-activity.svelte.ts`
 - `desktop/src/app/desktop-presentation-state.svelte.ts`
@@ -106,7 +99,7 @@ track is rendered. Visibility, tooltip and inspector-opening behavior are unchan
 - Suite tests cover RPC-only publishing for both runtime channels and preserve the existing event-bus snapshots.
 - ACP tests cover startup delivery, envelope decoding, session scoping, and malformed payload rejection.
 - Todo-clear tests cover private ACP routing without a user prompt/transcript, idle and duplicate-request guards, handler failure propagation, completion acknowledgement, and the existing hidden-snapshot replay contract.
-- Desktop tests cover notification decoding; todo validation, deleted filtering, open-state semantics, hierarchy, and current-item priority; Subagents validation, active-state filtering, indicator detail projection, icon extraction, run grouping, elapsed labels, and stale/session-isolated snapshots; plus incremental session-activity summary/tone/progress derivation, close-only inspector policy, detailed hover/focus status HUD presentation, background-session isolation, and attachment ownership across forget/reopen.
+- Desktop tests cover notification decoding; todo validation, deleted filtering, hierarchy, and current-item priority; Subagents validation, active-state filtering, indicator detail projection, icon extraction, run grouping, elapsed labels, and stale/session-isolated snapshots; plus incremental session-activity summary/tone/progress derivation, detailed status HUD presentation, background-session isolation, and attachment ownership across forget/reopen.
 - `npm --prefix external/pi-tools-suite run check`
 - `npm --prefix acp run check`
 - `npm --prefix desktop test`

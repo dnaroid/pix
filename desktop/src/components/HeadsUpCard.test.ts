@@ -11,6 +11,7 @@ describe("Heads up card", () => {
     } }).body;
     expect(html).toContain("&lt;img"); expect(html).not.toContain("<script>"); expect(html).not.toContain("hidden()");
     expect(html).toContain('aria-expanded="false"'); expect(html).not.toContain('type="submit"');
+    for (const label of ["Useful", "Incorrect", "Already know", "Not useful", "Dismiss"]) expect(html).toContain(label);
   });
   it("exposes accessible previous/next controls and the selected position", () => {
     const notice = { id: "note-b", title: "B", consequence: "Second", evidence: [{ id: "entry", text: "Evidence" }], createdAt: 1, expiresAt: 30001 };

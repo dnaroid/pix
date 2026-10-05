@@ -76,6 +76,51 @@ test("observer is off by default and requires explicit opt-in", async () => {
 	h.observer.dispose(); assert.equal(h.timers.size, 0);
 });
 
+test("negative feedback slows new discovery, not manual checks or hidden-card review", async () => {
+	let calls = 0;
+	const second = { ...finding.notices[0]!, title: "Independent finding", consequence: "Other consequence" };
+	const h = harness({ request: async () => { calls++; return reply({ kind: "heads_up", notices: [finding.notices[0], second] }); } });
+	h.observer.setEnabled(true); await h.observer.check(true);
+	const cards = h.observer.snapshot().notices!;
+	h.observer.feedbackNotice(cards[0]!.id, "incorrect");
+	assert.equal(h.observer.snapshot().details?.discoveryMultiplier, 2);
+	h.observer.noteAgentStart(); h.observer.noteTurn({ role: "assistant", content: "New progress" }, "p", [], []);
+	h.observer.noteAgentSettled(true); h.advance(60_000); await flush();
+	assert.equal(calls, 2, "hidden retained card reviewed at the base interval");
+	assert.ok(h.observer.currentNotice);
+	h.observer.feedbackNotice(h.observer.currentNotice!.id, "irrelevant");
+	assert.equal(h.observer.snapshot().details?.discoveryMultiplier, 4);
+	h.observer.noteDelegatedCompletion();
+	h.advance(60_000); await flush(); assert.equal(calls, 2, "new discovery delayed");
+	await h.observer.check(true); assert.equal(calls, 3, "manual check bypasses adaptation");
+	assert.equal(h.observer.snapshot().details?.feedback?.incorrect, 1);
+	assert.equal(h.observer.snapshot().details?.feedback?.irrelevant, 1);
+	h.observer.noteDelegatedCompletion(); h.advance(239_999); await flush(); assert.equal(calls, 3);
+	h.advance(1); await flush(); assert.equal(calls, 4);
+	h.advance(240_000); await flush(); assert.equal(calls, 4, "no periodic polling");
+	h.observer.dispose(); assert.equal(h.timers.size, 0);
+});
+
+test("queued review becoming discovery is rescheduled; lifecycle clears memory but not session counters", async () => {
+	let calls = 0;
+	const h = harness({ request: async () => { calls++; return reply(finding); } });
+	h.observer.setEnabled(true); await h.observer.check(true);
+	const id = h.observer.currentNotice!.id;
+	h.observer.noteDelegatedCompletion(); // review queued at 60s, privately retained
+	assert.equal(h.observer.feedbackNotice(id, "incorrect"), true);
+	h.advance(60_000); await flush(); assert.equal(calls, 1);
+	h.advance(60_000); await flush(); assert.equal(calls, 2);
+	assert.equal(h.observer.currentNotice, null, "same finding suppressed within the task");
+	h.observer.noteUserRequest(); await h.observer.check(true);
+	assert.equal(calls, 3); assert.equal(h.observer.snapshot().notices?.length, 1, "new task can reconsider prior topics");
+	assert.equal(h.observer.snapshot().details?.feedback?.incorrect, 1);
+	assert.equal(h.observer.snapshot().details?.discoveryMultiplier, 2);
+	h.observer.feedbackNotice(h.observer.snapshot().notice!.id, "useful");
+	assert.equal(h.observer.snapshot().details?.discoveryMultiplier, 1);
+	h.observer.dispose();
+	assert.equal(h.timers.size, 0);
+});
+
 test("cadence counts six agent turns in one user request, and enforces elapsed time", async () => {
 	const h = harness(); h.observer.setEnabled(true); h.observer.noteUserRequest();
 	for (let i = 0; i < 6; i++) {
@@ -263,7 +308,7 @@ test("same notice is deduplicated and feedback is included in later requests; st
 	assert.equal(h.observer.feedbackNotice("stale-id", "dismiss"), false);
 	assert.equal(h.observer.feedbackNotice(notice.id, "known"), true);
 	assert.equal(await h.observer.check(true), false); assert.equal(h.observer.currentNotice, null);
-	assert.match(calls[1]!, /known: Compatibility/); h.observer.dispose();
+	assert.equal(JSON.parse(calls[1]!).feedback.at(-1).outcome, "known"); h.observer.dispose();
 });
 
 test("an open HUD card is reviewed once on settled new evidence and removed after the same check passes", async () => {

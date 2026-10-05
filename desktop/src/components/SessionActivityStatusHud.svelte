@@ -9,6 +9,7 @@
   import { agentIcon } from "../lib/agent-icons";
   import { modelProviderBrand } from "../lib/model-display";
   import ModelProviderIcon from "./ModelProviderIcon.svelte";
+  import StatusBarPopover from "./StatusBarPopover.svelte";
   import {
     sessionActivityLabel,
     sessionActivityTone,
@@ -36,10 +37,8 @@
     todoSnapshot,
     promptRunning,
     sessionNeedsInput,
-    sessionActivityOpen,
     canClearTodos = false,
     onClearTodos,
-    onOpenSessionActivity,
   }: {
     summary: SessionActivitySummary;
     leadingSeparator?: boolean;
@@ -47,10 +46,8 @@
     todoSnapshot: SessionTodoSnapshot | undefined;
     promptRunning: boolean;
     sessionNeedsInput: boolean;
-    sessionActivityOpen: boolean;
     canClearTodos?: boolean;
     onClearTodos?: () => Promise<boolean>;
-    onOpenSessionActivity: () => void;
   } = $props();
 
   const hasTodoProgress = $derived(summary.openTodos > 0 && summary.totalTodos > 0);
@@ -62,7 +59,7 @@
   const activityTone = $derived(sessionActivityTone(summary, promptRunning, sessionNeedsInput));
   const activityLabel = $derived(sessionActivityLabel(summary, promptRunning, sessionNeedsInput));
   const visible = $derived(
-    !sessionActivityOpen && (summary.activeSubagents > 0 || hasTodoProgress),
+    summary.activeSubagents > 0 || hasTodoProgress,
   );
   let todoTooltipBody = $state<HTMLDivElement>();
   let clearingTodos = $state(false);
@@ -79,7 +76,6 @@
 
   function scrollTodoTooltipToCurrent(): void {
     if (!currentTodo || !todoTooltipBody) return;
-    requestAnimationFrame(() => {
       const body = todoTooltipBody;
       if (!body) return;
       const target = body.querySelector<HTMLElement>('[data-session-todo-current="true"]');
@@ -91,7 +87,6 @@
         - bodyRect.top
         - Math.max(0, (bodyRect.height - targetRect.height) / 2);
       body.scrollTop = Math.max(0, centered);
-    });
   }
 
   function activityToneClass(): string {
@@ -140,21 +135,23 @@
     {#if leadingSeparator}
       <span class="h-3 w-px shrink-0 bg-border" aria-hidden="true" data-status-separator="observer-activity"></span>
     {/if}
-    {#each compactIndicators as indicator, index (indicator.runDir + "\0" + indicator.agent.id)}
-      {@const tooltipId = "session-subagent-status-tooltip-" + index}
+    {#each compactIndicators as indicator (indicator.runDir + "\0" + indicator.agent.id)}
       {@const AgentIcon = agentIcon(indicator.preview?.icon)}
       {@const task = indicator.preview?.task?.trim() || indicator.preview?.scope?.trim() || "Task unavailable"}
       {@const role = indicator.preview?.subagentType?.trim() || "auto"}
-      <div class="group relative">
+      <StatusBarPopover label={"Subagent " + indicator.agent.id}>
+        {#snippet trigger({ open, toggle, id })}
         <button
           class={[
             "grid h-6 w-6 place-items-center rounded-sm bg-transparent transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring",
             subagentStatusTone(indicator.agent.status),
           ]}
           type="button"
-          aria-label={"Open session activity. Subagent " + indicator.agent.id + " (" + role + "): " + subagentStatusLabel(indicator.agent.status)}
-          aria-describedby={tooltipId}
-          onclick={onOpenSessionActivity}
+          aria-label={"Subagent " + indicator.agent.id + " (" + role + "): " + subagentStatusLabel(indicator.agent.status)}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-controls={id}
+          onclick={toggle}
         >
           <AgentIcon
             class={[
@@ -165,10 +162,10 @@
             aria-hidden="true"
           />
         </button>
+        {/snippet}
+        {#snippet children()}
         <div
-          id={tooltipId}
-          class="pointer-events-auto absolute right-0 bottom-full z-40 hidden w-80 max-w-[calc(100vw-16px)] rounded-md border border-border bg-popover px-2 py-2 text-popover-foreground shadow-md group-hover:block group-focus-within:block"
-          role="tooltip"
+          class="rounded-md border border-border bg-popover px-2 py-2 text-popover-foreground shadow-md"
           data-session-subagent-tooltip
         >
           <div class="min-w-0">
@@ -190,9 +187,13 @@
               <div class="mt-0.5 truncate font-mono text-xs text-foreground" aria-label={`${indicator.agent.id} · ${indicator.runDir}`} data-session-subagent-name>
                 {indicator.agent.id}
               </div>
+              <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard access to scrollable task details) -->
               <div
                 class="mt-0.5 max-h-[min(40vh,18rem)] overflow-y-auto overscroll-contain pr-1"
                 data-session-subagent-tooltip-body
+                tabindex="0"
+                role="region"
+                aria-label="Subagent task"
               >
                 <p class="mt-1 break-words text-xs leading-4 text-foreground/80">{task}</p>
               </div>
@@ -216,37 +217,67 @@
             </div>
           </div>
         </div>
-      </div>
+        {/snippet}
+      </StatusBarPopover>
     {/each}
 
     {#if hiddenAgentCount > 0}
+      <StatusBarPopover label="More active subagents">
+      {#snippet trigger({ open, toggle, id })}
       <button
         class="h-6 rounded-sm bg-transparent px-1 font-mono text-xs leading-none tabular-nums text-muted-foreground transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
         type="button"
-        aria-label={"Open session activity. " + hiddenAgentCount + " more active " + (hiddenAgentCount === 1 ? "subagent" : "subagents")}
-        onclick={onOpenSessionActivity}
+        aria-label={hiddenAgentCount + " more active " + (hiddenAgentCount === 1 ? "subagent" : "subagents")}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls={id}
+        onclick={toggle}
       >
         +{hiddenAgentCount}
       </button>
+      {/snippet}
+      {#snippet children()}
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard access to scrollable agent details) -->
+        <div class="max-h-[min(60vh,24rem)] overflow-y-auto rounded-md border border-border bg-popover px-2 py-2 text-popover-foreground shadow-md" tabindex="0" role="region" aria-label="Additional subagent details">
+          {#each indicators.slice(6) as indicator (indicator.runDir + "\0" + indicator.agent.id)}
+            <article class="space-y-1 border-b border-border py-2 last:border-0" aria-label={`${indicator.agent.id} · ${indicator.runDir}`}>
+              <div class="flex flex-wrap items-center justify-between gap-1 text-xs">
+                <span class="rounded-sm bg-muted px-1 font-semibold">{indicator.preview?.subagentType?.trim() || "auto"}</span>
+                <span class={subagentStatusTone(indicator.agent.status)}>{subagentStatusLabel(indicator.agent.status)}</span>
+                <span>{formatSessionSubagentElapsed(indicator.agent.startedAt, subagentSnapshot?.checkedAt ?? Date.now())}</span>
+              </div>
+              <div class="break-words font-mono text-xs">{indicator.agent.id}</div>
+              <p class="break-words text-xs text-muted-foreground">{indicator.preview?.task?.trim() || indicator.preview?.scope?.trim() || "Task unavailable"}</p>
+              <div class="flex items-center gap-1 text-xs">
+                <ModelProviderIcon provider={indicator.preview?.model ?? ""} />
+                {sessionSubagentModelLabel(indicator.preview)}
+              </div>
+              {#if indicator.agent.lastActivity}<p class="break-words text-xs text-muted-foreground">{formatSessionSubagentActivity(indicator.agent.lastActivity)}</p>{/if}
+              {#if indicator.agent.retryCount}<span class="text-xs text-tool-warning">retry {indicator.agent.retryCount}</span>{/if}
+            </article>
+          {/each}
+        </div>
+      {/snippet}
+      </StatusBarPopover>
     {/if}
 
     {#if hasTodoProgress}
       {#if indicators.length > 0}
         <span class="h-3 w-px shrink-0 bg-border" aria-hidden="true" data-status-separator="agents-plan"></span>
       {/if}
-      <div class="group relative">
+      <StatusBarPopover label="Session plan" onOpen={scrollTodoTooltipToCurrent}>
+        {#snippet trigger({ open, toggle, id })}
         <button
           class={[
             "flex h-6 items-center justify-center gap-1 rounded-sm bg-transparent px-1.5 font-mono tabular-nums transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring",
             activityToneClass(),
           ]}
           type="button"
-          aria-label={"Open session activity. Plan " + summary.completedTodos + "/" + summary.totalTodos + (currentTodo ? ". Current item " + currentTodo.subject : "")}
-          aria-haspopup={currentTodo ? "dialog" : undefined}
-          aria-controls={currentTodo ? "session-todo-status-tooltip" : undefined}
-          onmouseenter={scrollTodoTooltipToCurrent}
-          onfocus={scrollTodoTooltipToCurrent}
-          onclick={onOpenSessionActivity}
+          aria-label={"Plan " + summary.completedTodos + "/" + summary.totalTodos + (currentTodo ? ". Current item " + currentTodo.subject : "")}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-controls={id}
+          onclick={toggle}
         >
           <svg
             class="h-3.5 w-3.5 shrink-0 -rotate-90"
@@ -270,13 +301,11 @@
           </svg>
           <span>{summary.completedTodos}/{summary.totalTodos}</span>
         </button>
-
+        {/snippet}
+        {#snippet children()}
         {#if currentTodo}
           <div
-            id="session-todo-status-tooltip"
-            class="pointer-events-auto absolute right-0 bottom-full z-40 hidden w-80 max-w-[calc(100vw-16px)] rounded-md border border-border bg-popover px-2.5 py-2 text-popover-foreground shadow-md group-hover:block group-focus-within:block"
-            role="dialog"
-            aria-label="Session plan"
+            class="rounded-md border border-border bg-popover px-2.5 py-2 text-popover-foreground shadow-md"
             data-session-todo-tooltip
           >
             <div class="flex items-center gap-2">
@@ -292,10 +321,14 @@
                 {summary.completedTodos}/{summary.totalTodos}
               </span>
             </div>
+            <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard access to scrollable Plan tasks) -->
             <div
               bind:this={todoTooltipBody}
               class="mt-1 max-h-[min(40vh,18rem)] overflow-y-auto overscroll-contain pr-1"
               data-session-todo-tooltip-body
+              tabindex="0"
+              role="region"
+              aria-label="Plan tasks"
             >
               <div class="space-y-0.5">
                 {#each todoRows as row (row.task.id)}
@@ -346,7 +379,8 @@
             </div>
           </div>
         {/if}
-      </div>
+        {/snippet}
+      </StatusBarPopover>
     {/if}
   </div>
 {/if}

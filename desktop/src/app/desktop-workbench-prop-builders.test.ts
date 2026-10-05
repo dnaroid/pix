@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildWorkbenchConversationProps,
   buildWorkbenchEditorProps,
-  buildWorkbenchInspectorProps,
 } from "./desktop-workbench-prop-builders";
 import { createQuotaWaitStore } from "./quota-wait.svelte";
 import { createHeadsUpStore } from "./heads-up.svelte";
@@ -143,6 +142,14 @@ describe("workbench composer props", () => {
     } });
     const props = buildWorkbenchConversationProps(options).composer.headsUp!;
     expect(props.notices).toHaveLength(2);
+    const send = vi.spyOn(options.headsUp, "sendFeedback").mockResolvedValue(undefined);
+    for (const feedback of ["useful", "incorrect"] as const) {
+      props.onFeedback(feedback);
+      expect(send).toHaveBeenLastCalledWith("session-1", feedback, "notice-a", "runtime-a");
+      const pending = vi.spyOn(options.headsUp, "isPending").mockImplementation((_id, command) => command === `/heads-up ${feedback} notice-a`);
+      expect(buildWorkbenchConversationProps(options).composer.headsUp?.pending).toBe(true);
+      pending.mockRestore();
+    }
     props.onNavigate?.(1);
     expect(options.headsUp.notice("session-1")?.id).toBe("notice-b");
     options.headsUp.handleSessionState({ sessionId: "session-1", channel: "heads-up", data: {
@@ -153,35 +160,6 @@ describe("workbench composer props", () => {
     props.onNavigate?.(1);
     expect(options.headsUp.notice("session-1")?.id).toBe("notice-a");
     options.headsUp.reset();
-  });
-});
-
-describe("workbench inspector props", () => {
-  function inspectorOptions(sessionId: string | null, open = true) {
-    return {
-      activeSessionId: () => sessionId,
-      activeTitle: () => "Session",
-      activeSessionActivity: () => undefined,
-      activeTodoSnapshot: () => undefined,
-      activeSubagentSnapshot: () => undefined,
-      activeBrainstormSnapshot: () => undefined,
-      openBrainstormParticipant: vi.fn(),
-      canClearTodos: () => false,
-      clearSessionTodos: vi.fn(async () => true),
-      inspectorPreference: {
-        open,
-        setOpen: vi.fn(),
-      },
-    } as any;
-  }
-
-  it("does not render the Session inspector for a UI-only draft", () => {
-    expect(buildWorkbenchInspectorProps(inspectorOptions(null)).inspector).toBeNull();
-  });
-
-  it("renders the Session inspector for a real active session when preferred open", () => {
-    const props = buildWorkbenchInspectorProps(inspectorOptions("session-1"));
-    expect(props.inspector?.activeSessionId).toBe("session-1");
   });
 });
 

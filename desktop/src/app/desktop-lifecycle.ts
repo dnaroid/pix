@@ -9,7 +9,6 @@ type DesktopLifecycleOptions = {
   disposeGitCi: () => void;
   restoreProjects: () => void;
   refreshProjectColors: () => void;
-  restoreSessionInspector: () => void;
   workspace: () => string;
   loadWorkspaceData: (workspace: string) => void;
   canAcceptDroppedAttachments: () => boolean;
@@ -39,7 +38,6 @@ export function createDesktopLifecycle(options: DesktopLifecycleOptions) {
 
     options.restoreProjects();
     options.refreshProjectColors();
-    options.restoreSessionInspector();
     const workspace = options.workspace();
     if (workspace) {
       options.loadWorkspaceData(workspace);

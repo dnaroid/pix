@@ -37,7 +37,6 @@ type DesktopCommandControllerOptions = {
   draftSessionTabActive: () => boolean;
   draftConfigAvailable: () => boolean;
   changingConfig: () => string | null;
-  sessionInspectorOpen: () => boolean;
   modelThinkingPickerOpen: () => boolean;
   sessionSelectorOpen: () => boolean;
   closeProjectSelector: () => void;
@@ -49,7 +48,6 @@ type DesktopCommandControllerOptions = {
   openSessionStartTab: () => void | Promise<void>;
   openJumpPicker: (query: string) => void | Promise<void>;
   openHistoryPicker: (query: string) => void | Promise<void>;
-  setSessionInspectorOpen: (open: boolean) => void;
   openModelThinkingPicker: () => void | Promise<void>;
   focusComposer: () => void | Promise<void>;
   jumpToUserMessage: (entryId: string) => void | Promise<void>;
@@ -98,8 +96,6 @@ export function createDesktopCommandController(options: DesktopCommandController
           && !!options.activeSessionId()
           && options.activeSessionRuntimeReady()
           && !options.sessionMutationRunning();
-      case "session.activity":
-        return !!options.activeSessionId();
       case "session.modelThinking":
         return options.canUseSession() && (options.draftSessionTabActive()
           ? options.draftConfigAvailable()
@@ -172,9 +168,6 @@ export function createDesktopCommandController(options: DesktopCommandController
         return;
       case "session.history":
         await options.openHistoryPicker("");
-        return;
-      case "session.activity":
-        options.setSessionInspectorOpen(!options.sessionInspectorOpen());
         return;
       case "session.modelThinking":
         await options.openModelThinkingPicker();

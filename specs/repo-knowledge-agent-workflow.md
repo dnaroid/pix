@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # Indexed repository discovery and audit workflow
 
 <!-- markdownlint-disable MD013 -->
@@ -95,10 +100,25 @@ without treating generated answers or audit candidates as semantic proof.
   rechecks dirty. Audit, indexing and passing tests alone do not acknowledge
   review. Later dependency edits require re-review. Report remaining dirty
   state/check errors; unrelated specs must not be acknowledged to force `no`.
+- Task audit completion and global knowledge cleanliness are separate verdicts.
+  Report `task audit: passed | blocked` and `global knowledge dirty: yes | no |
+  unknown` with check errors/exit codes. The audit todo closes once this task's
+  changes and genuinely affected specs are reviewed, drift/escalations resolved,
+  required dependency coverage complete, and eligible acknowledgments successful
+  (or a reviewed no-impact result explains why none is needed). A global `yes`
+  alone, even with an unclassified cause, is not a task blocker or proof that
+  the remaining dirtiness is unrelated. Global-check errors remain visible and
+  block task review only if they prevent establishing its evidence. A global
+  clean claim still requires a successful complete `no` check.
+- Parallel edits outside reviewed specs/dependencies do not require waiting or
+  re-review. Edits to a reviewed spec or its dependencies, including shared files,
+  invalidate that review and require resolution before acknowledging it or
+  closing the audit todo. Do not expand task scope to clear global dirtiness.
 
 ## Decision history
 
 Rationale: [0002 — Agent-owned decision history](../docs/decisions/0002-agent-owned-decision-history.md).
+Audit completion: [0046 — Task-scoped knowledge audit completion](../docs/decisions/0046-task-scoped-knowledge-completion.md).
 
 - Specs remain the current behavior contract; `docs/decisions/` records why
   significant choices were made. Use the project's convention and template,
@@ -125,15 +145,22 @@ Rationale: [0002 — Agent-owned decision history](../docs/decisions/0002-agent-
   escalation. It may fix small proven links/typos, but never invent, accept or
   supersede decisions itself. Parent-owned fallback audits use the same checks.
 
-## Implementation and related files
+## Implementation
 
 - `external/pi-tools-suite/src/tool-descriptions.ts`
 - `external/pi-tools-suite/src/repo-discovery/index.ts`
 - `external/pi-tools-suite/src/async-subagents/agents/knowledge-auditor.md`
 - `external/pi-tools-suite/src/async-subagents/core/config.ts`
-- `external/pi-tools-suite/test/tool-descriptions.test.ts`
-- `external/pi-tools-suite/test/repo-discovery.test.ts`
+- `external/pi-tools-suite/src/async-subagents/core/agent-catalog.ts`
+- `external/pi-tools-suite/src/todo/index.ts`
 - `external/pi-tools-suite/README.md`
+
+## Tests
+
+- `external/pi-tools-suite/test/tool-descriptions.test.ts`
+- `external/pi-tools-suite/test/async-subagents/knowledge-auditor.test.ts`
+- `external/pi-tools-suite/test/todo.test.ts`
+- `external/pi-tools-suite/test/repo-discovery.test.ts`
 
 ## Verification
 

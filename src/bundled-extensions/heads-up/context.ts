@@ -1,3 +1,5 @@
+import type { HeadsUpFeedbackRecord } from "./contract.js";
+
 /** Bounded transcript data, never executable instructions or hidden thinking. */
 export interface ContextRecord {
 	readonly id: string;
@@ -86,22 +88,34 @@ export class HeadsUpContext {
 	}
 
 	/** Exact serialized payload bound, including JSON escaping and feedback. */
-	toInput(maxChars: number, previous: readonly string[] = [], activeNotices?: readonly { id: string; title: string; consequence: string }[]): { records: ContextRecord[]; body: string } {
+	toInput(maxChars: number, previous: readonly string[] = [], activeNotices?: readonly { id: string; title: string; consequence: string; topic?: string; subject?: string }[], feedback: readonly HeadsUpFeedbackRecord[] = []): { records: ContextRecord[]; body: string } {
 		const chosen = new Map<string, ContextRecord>();
 		// Keep every review identity, but reserve room for actual evidence even at
 		// the minimum input limit. Clipping prior analysis is explicit, not resolution.
 		let active = activeNotices;
 		for (let limit = 250; active && JSON.stringify(active).length > maxChars / 2 && limit >= 15; limit = Math.floor(limit / 2)) {
-			active = activeNotices!.map(({ id, title, consequence }) => ({ id,
+			active = activeNotices!.map(({ id, title, consequence, topic, subject }) => ({ id,
 				title: cleanObserverText(title, Math.min(160, limit)), consequence: cleanObserverText(consequence, limit),
+				...(topic && subject ? { topic, subject } : {}),
 				...(title.length > Math.min(160, limit) || consequence.length > limit ? { clipped: true } : {}),
 			}));
 		}
 		// Feedback must not crowd all evidence out when a small context limit is configured.
+		if (active && JSON.stringify(active).length > maxChars / 2) {
+			active = active.map(({ id, title, consequence }) => ({ id, title, consequence, clipped: true }));
+		}
 		const past: string[] = [];
+		const memory: HeadsUpFeedbackRecord[] = [];
+		for (const entry of feedback.slice(-16).toReversed()) {
+			const candidate = { ...entry, title: cleanObserverText(entry.title, 160), consequence: cleanObserverText(entry.consequence, 300),
+				...(entry.topic && entry.subject ? { topic: cleanObserverText(entry.topic, 80), subject: cleanObserverText(entry.subject, 160) } : {}),
+			};
+			if (JSON.stringify([candidate, ...memory]).length > maxChars / 4) break;
+			memory.unshift(candidate);
+		}
 		for (const text of previous.slice(-16).toReversed()) {
 			const candidate = cleanObserverText(text, 400);
-			if (JSON.stringify([candidate, ...past]).length > maxChars / 4) break;
+			if (JSON.stringify([candidate, ...past]).length + JSON.stringify(memory).length > maxChars / 4) break;
 			past.unshift(candidate);
 		}
 		const ordered = () => {
@@ -109,7 +123,7 @@ export class HeadsUpContext {
 			if (this.firstUser && chosen.has(this.firstUser.id) && !records.some((entry) => entry.id === this.firstUser!.id)) records.unshift(this.firstUser);
 			return records;
 		};
-		const serialize = () => JSON.stringify({ records: ordered(), omitted: this.omitted + this.records.filter((entry) => !chosen.has(entry.id)).length, previousNotices: past, activeNotices: active });
+		const serialize = () => JSON.stringify({ records: ordered(), omitted: this.omitted + this.records.filter((entry) => !chosen.has(entry.id)).length, previousNotices: past, activeNotices: active, ...(feedback.length ? { feedback: memory } : {}) });
 		const add = (record: ContextRecord) => {
 			if (chosen.has(record.id)) return true;
 			chosen.set(record.id, record);

@@ -4,7 +4,6 @@ import { createAutocompleteStore } from "./autocomplete.svelte";
 import { createSessionActivityStore } from "./session-activity.svelte";
 import { createSessionCatalog } from "./session-catalog.svelte";
 import { createSessionHistory } from "./session-history.svelte";
-import { createSessionInspectorPreference } from "./session-inspector-preference.svelte";
 import { createSessionMetadataStore } from "./session-metadata.svelte";
 import { createSessionRuntimeStore } from "./session-runtime.svelte";
 import { createSessionTabsState } from "./session-tabs-state.svelte";
@@ -28,7 +27,6 @@ type DesktopSessionServicesOptions = {
 
 export function createDesktopSessionServices(options: DesktopSessionServicesOptions) {
   const activity = createSessionActivityStore({ onChange: options.onActivityChanged });
-  const inspectorPreference = createSessionInspectorPreference();
   const tabs = createSessionTabsState();
   const catalog = createSessionCatalog({
     client: options.client,
@@ -78,7 +76,6 @@ export function createDesktopSessionServices(options: DesktopSessionServicesOpti
 
   return {
     activity,
-    inspectorPreference,
     tabs,
     catalog,
     runtime,

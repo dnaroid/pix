@@ -159,7 +159,7 @@ describe("tool descriptions", () => {
 	test("knowledge finalization covers receipts and fallback without mechanical bypass or prompt bloat", () => {
 		const audit = REPO_DISCOVERY_TOOLS.find((tool) => tool.name === "repo_audit")!;
 		const text = [audit.promptSnippet, ...audit.promptGuidelines].join("\n");
-		expect(text).toContain("obtain the result");
+		expect(text).toContain("Obtain the result");
 		expect(text).toContain("missing review coverage");
 		expect(text).toContain("mechanical edits still need review-state checks");
 		expect(text).toContain("auditor (or parent fallback)");
@@ -172,6 +172,16 @@ describe("tool descriptions", () => {
 			expect(tool.description).toContain("repo_audit finalization guidance");
 			expect(tool.description).not.toContain("skip for mechanical");
 		}
+	});
+
+	test("task audit completion does not depend on global knowledge cleanliness", () => {
+		const audit = REPO_DISCOVERY_TOOLS.find((tool) => tool.name === "repo_audit")!;
+		const text = [audit.promptSnippet, ...audit.promptGuidelines].join("\n");
+		expect(text).toContain("Close the audit todo when task-scoped review is complete");
+		expect(text).toContain("global knowledge dirty=yes alone must not keep it open");
+		expect(text).toContain("task audit passed/blocked separately from global dirty yes/no/unknown");
+		expect(text).toContain("unclassified global dirtiness alone is not a task blocker");
+		expect(text).toContain("concurrent changes to reviewed specs/dependencies still require resolution");
 	});
 
 	test("subagents descriptions and parent catalog agree on parent-first role selection", () => {

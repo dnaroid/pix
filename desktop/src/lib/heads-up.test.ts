@@ -34,4 +34,11 @@ describe("Heads up state validation", () => {
       { ...waiting, awaitingReview: "true" },
     ]) expect(parseHeadsUpSnapshot(invalid)).toBeUndefined();
   });
+  it("round-trips optional issue identity without accepting malformed pairs", () => {
+    const notice = { ...note, topic: "api-return-type", subject: "src/sdk.ts:getUser" };
+    expect(parseHeadsUpSnapshot({ ...state, notice })?.notice).toEqual(notice);
+    for (const patch of [{ subject: undefined }, { topic: "" }, { topic: "x".repeat(81) }, { subject: "a\nb" }]) {
+      expect(parseHeadsUpSnapshot({ ...state, notice: { ...notice, ...patch } })).toBeUndefined();
+    }
+  });
 });

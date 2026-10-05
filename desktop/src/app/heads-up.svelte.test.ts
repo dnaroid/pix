@@ -98,6 +98,12 @@ describe("Heads up session mirror", () => {
     h.push(snapshot({ revision: 2, notice: { ...snapshot().notice!, id: "note-b" } })); wait.resolve(); await command;
     expect(h.store.notice("s1")?.id).toBe("note-b"); h.store.reset();
   });
+  it.each(["useful", "incorrect"] as const)("routes %s feedback without taking over the parent", async (feedback) => {
+    const h = setup(); h.push();
+    await h.store.sendFeedback("s1", feedback, "note-a", "runtime-a");
+    expect(h.prompt).toHaveBeenCalledWith("s1", [{ type: "text", text: `/heads-up ${feedback} note-a` }]);
+    h.store.reset();
+  });
   it("allows off during pending check and old finally cannot remove newer pending command", async () => {
     const h = setup(); h.push(); const first = deferred(); const second = deferred();
     h.prompt.mockImplementationOnce(() => first.promise);

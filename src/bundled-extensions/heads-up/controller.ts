@@ -94,6 +94,9 @@ export class HeadsUpController {
 				inputCharsInWindow: reservations.reduce((sum, entry) => sum + entry.chars, 0),
 				windowResetsAt: reservations.length ? Math.min(...reservations.map((entry) => entry.at + 3_600_000)) : null,
 				lastCheck: this.lastCheck,
+				feedback: this.notices.memory.summary,
+				discoveryMultiplier: this.notices.memory.discoveryMultiplier,
+				discoveryEligibleAt: this.lastCheckAt + this.config.minIntervalMs * this.notices.memory.discoveryMultiplier,
 			},
 			...(this.reason ? { reason: this.reason } : {}),
 		};
@@ -196,10 +199,20 @@ export class HeadsUpController {
 		this.evidencePending = true; this.scheduleEvidence();
 	}
 	private scheduleEvidence(): void {
-		if (!this.evidencePending || this.stopEvidence || this.active || this.parentRunning || this.disposed || !this.enabled) return;
-		this.stopEvidence = this.after(Math.max(0, this.lastCheckAt + this.config.minIntervalMs - this.now()), () => {
+		// Membership/feedback may change the interval while an opportunity is queued.
+		this.stopEvidence?.(); this.stopEvidence = undefined;
+		if (!this.evidencePending || this.active || this.parentRunning || this.disposed || !this.enabled) return;
+		const wait = Math.max(0, this.lastCheckAt + this.automaticInterval() - this.now());
+		if (wait > 0 && !this.notices.all.length && this.notices.memory.discoveryMultiplier > 1) {
+			this.refuse("cooldown", "new discovery slowed after explicit negative feedback");
+		}
+		this.stopEvidence = this.after(wait, () => {
 			this.stopEvidence = undefined; void this.check().catch(() => {});
 		});
+	}
+	private automaticInterval(): number {
+		// Hidden cards remain review candidates: feedback must never delay their review.
+		return this.config.minIntervalMs * (this.notices.all.length ? 1 : this.notices.memory.discoveryMultiplier);
 	}
 	noteTurn(message: MessageLike, id: string, results: readonly MessageLike[], resultIds: readonly string[]): void {
 		if (this.disposed) return;
@@ -211,6 +224,8 @@ export class HeadsUpController {
 	invalidateForLifecycle(reason: string, clearContext = false): void {
 		if (this.disposed) return;
 		this.invalidate(); this.checkedTurns = this.turns;
+		// A new prompt is a conservative task boundary, not an inferred user profile.
+		if (reason === "new user request" || clearContext) this.notices.memory.resetTask();
 		if (clearContext) this.context.reset();
 		this.phase = this.enabled ? "idle" : "off"; this.reason = reason; this.publish();
 	}
@@ -228,7 +243,7 @@ export class HeadsUpController {
 		if (!(this.options.allowed?.() ?? true)) { this.setEnabled(false); return false; }
 		if (!explicit && this.parentRunning) return false;
 		if (this.active) return this.refuse(this.active.signal.aborted ? "cooldown" : "checking", "waiting for the current request to finish");
-		if (!explicit && ((!this.evidencePending && (this.notices.all.length || this.turns - this.checkedTurns < this.config.minTurns)) || this.now() - this.lastCheckAt < this.config.minIntervalMs)) return false;
+		if (!explicit && ((!this.evidencePending && (this.notices.all.length || this.turns - this.checkedTurns < this.config.minTurns)) || this.now() - this.lastCheckAt < this.automaticInterval())) return false;
 		// Consume once even when limited/unavailable: no timer polling or budget bypass.
 		this.evidencePending = false; this.stopEvidence?.(); this.stopEvidence = undefined;
 		this.reservations = this.currentReservations();
@@ -241,8 +256,8 @@ export class HeadsUpController {
 		const reviewing = this.notices.all;
 		const stackVersion = this.notices.version;
 		if (!explicit && this.noticesFresh && reviewing.length && !this.context.evidenceChanged(this.noticeEvidence, reviewing.flatMap((card) => card.evidence.map((entry) => entry.id)))) return false;
-		const activeNotices = reviewing.map(({ id, title, consequence }) => ({ id, title, consequence }));
-		const input = this.context.toInput(this.config.maxInputChars, this.notices.previous, activeNotices);
+		const activeNotices = reviewing.map(({ id, title, consequence, topic, subject }) => ({ id, title, consequence, ...(topic && subject ? { topic, subject } : {}) }));
+		const input = this.context.toInput(this.config.maxInputChars, [], activeNotices, this.notices.memory.records);
 		const evidence = this.context.snapshot();
 		const evidenceRevision = this.evidenceRevision;
 		if (!input.records.some((entry) => entry.kind === "user") || !input.records.some((entry) => entry.kind !== "user")) return this.refuse("cooldown", "not enough user and work context");

@@ -2,11 +2,13 @@ import { createDesktopOverlaysViewModel } from "./desktop-overlays-view-model.sv
 import { createDesktopStatusBarViewModel } from "./desktop-status-bar-view-model.svelte";
 import type { DesktopViewModelServicesOptions } from "./desktop-view-model-service-options";
 import type { createSessionTodoActions } from "./session-todo-actions";
+import { createBrainstormSessionOpener } from "./desktop-brainstorm-navigation";
 
 export function createDesktopShellViewModelServices(
   options: DesktopViewModelServicesOptions,
   todoActions: ReturnType<typeof createSessionTodoActions>,
 ) {
+  const openBrainstormSession = createBrainstormSessionOpener(options);
   const overlays = createDesktopOverlaysViewModel({
     pendingElicitation: () => options.presentation.activePendingElicitation,
     displayedConfigOptions: options.displayedConfigOptions,
@@ -47,10 +49,12 @@ export function createDesktopShellViewModelServices(
     runtime: options.sessions.runtime,
     modelConfig: options.model.config,
     sessionCoordinator: options.orchestration.coordinator,
-    inspectorPreference: options.sessions.inspectorPreference,
     quotaWait: options.quotaWait,
     headsUp: options.headsUp,
     openObserverSettings: options.openObserverSettings,
+    openBrainstormParticipant: (sessionId) => {
+      void openBrainstormSession(sessionId).catch(options.errors.report);
+    },
   });
 
   return { overlays, statusBar };

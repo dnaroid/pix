@@ -96,13 +96,26 @@ Supported unresolved cards retain ID, creation time and expiry; omitted cards ar
 removed and `none` clears the set. A successful unrelated check does not imply
 resolution. Retained cards keep their relative order before new discoveries;
 the prompt prioritizes supported active cards over filling slots. Exact normalized
-topic duplicates are merged (including a new candidate matching an active card),
+issue-identity duplicates are merged (including a new candidate matching an active card),
 and previously closed topics remain subject to bounded deduplication. Semantic
 independence/deduplication still relies on the model, not a deterministic classifier.
 Invalid/error/unavailable/budget-refused assessments preserve retained identities under
 the original per-card TTLs, but never restore unconfirmed cards to visibility.
 No extra request is made per card and no periodic
 polling is added. Manual Check now reviews and discovers even without new evidence.
+
+New-discovery-only automatic opportunities use a runtime-local adaptive interval:
+each explicit `irrelevant` or `incorrect` verdict raises the multiplier from 1 to 2
+to 4 (capped); `useful` resets it to 1. Already-known, dismiss, expiry, silence,
+ordinary work and successful/empty assessments do not change it. The completed-turn
+threshold is unchanged; delegated opportunities still bypass only that threshold.
+Any retained card, including a hidden one awaiting review, keeps the base interval
+for the combined review/discovery request. Manual checks bypass adaptation as well
+as normal cadence. Removing/expiring the last card reschedules a queued opportunity
+under the discovery interval; feedback never creates an opportunity by itself.
+Existing budgets, availability, physical request ownership and no-polling rules
+remain intact. Status explains negative-feedback slowing and the unchanged review/
+manual paths; eligibility is not a promised launch time.
 
 ### Strict visible freshness
 
@@ -212,9 +225,45 @@ independently even when hidden. Feedback and discussion target the displayed ID;
 Desktop rejects callbacks captured from a replaced instance. This
 bounded in-memory retirement history is not an arbitrary-history replay guard:
 an instance evicted from it is no longer rejected solely by its instance ID.
-Feedback actions include already-known, irrelevant and dismiss, keyed by notice
-ID, removing only that card so a stale button cannot clear a newer notice. Recent shown/feedback topics
-are included in subsequent checks; exact normalized duplicates are suppressed.
+Feedback actions include `known` (already understood), `irrelevant` (not useful to
+this task), `incorrect` (disputed accuracy), `useful` and `dismiss` (no accuracy or
+relevance verdict). Each removes only its target ID so a stale action cannot clear
+a newer card. TUI exposes these `/heads-up` commands; Desktop has labelled buttons.
+Shown is recorded separately from explicit feedback. Nothing is inferred from silence.
+
+Each notice may carry the paired bounded `topic` (issue kind, 80 characters) and
+`subject` (affected symbol/path, 160 characters). The prompt requests both; legacy
+four-field responses remain accepted and use normalized title/consequence identity.
+Malformed pairs/unknown fields reject the whole reply. A retained ID cannot change
+its existing topic/subject; a legacy reply omitting the pair inherits it. A legacy
+card without a pair may gain one during review, preserving its ID, TTL and shown
+count; the pair is immutable thereafter. Same-key
+paraphrases merge while preserving active ID/order/TTL. Subject punctuation/case
+is preserved; distinct subjects may have independent issues of the same kind.
+Model-provided identity is a hint, not a semantic correctness guarantee.
+
+Task memory contains at most 32 structured records: shown/verdict, issue identity,
+title/consequence and supporting IDs. Internal bounded evidence-text fingerprints
+(case/whitespace-normalized, independent of citation IDs/order) suppress the same
+issue on the same evidence, including after dismissal or expiry. Changed evidence
+can make it eligible again, but the prompt requires materially new circumstances,
+not extra irrelevant citations or mere rewording. Known is not permission to violate
+a requirement. The model must still establish relevance; deterministic identity/
+fingerprint matching is not a semantic classifier. New non-extension user input
+is a conservative task boundary and clears this memory, as does lifecycle context
+clearing (branch/switch/fork/compaction). Off/on and model changes retain it within
+the task. Runtime recreation resets it; no persistence or cross-session profile exists.
+
+Up to 16 recent structured records share at most a quarter of the serialized input
+budget with legacy textual history. Evidence keeps priority; active descriptors
+can omit optional topic/subject when space is tight, explicitly marked clipped,
+without dropping active IDs. Feedback is untrusted data, not repository evidence.
+Counters for shown/useful/known/irrelevant/incorrect/dismiss and the discovery
+multiplier are runtime-local, survive task boundaries, and reset on runtime
+recreation. Status shows them locally; no external analytics, transcript feedback
+logging or automatic judgments of user expertise are added. Optional snapshot
+details and notice identity fields preserve readability of older snapshots.
+Shown counts accepted new cards, not navigation impressions or retained-card reviews.
 
 `/heads-up explain` expands existing evidence in TUI. Desktop has an evidence
 expander and feedback actions; expansion never makes another model request.
@@ -238,11 +287,12 @@ The statusbar popup contains the standard SettingsSwitch for the current session
 explicit Check now and an Observer settings deep link. It shows dynamic state and
 wait/error reasons, last check time/result/duration, new completed turns, actual
 rolling/total checks, used input characters and recorded input/cache/output tokens.
-It opens on pointer hover or keyboard focus without stealing focus; clicks are
-idempotent. Pointer or focus within the trigger/popup keeps it open, and leaving
-both dismisses it. The popup lower edge touches the trigger's top, matching Plan
+It toggles on button activation (click, Enter or Space), never pointer hover or
+mere focus. Pointer departure leaves it open; repeat activation, outside click,
+Escape or focus leaving the trigger/popup dismisses it. Opening does not steal
+focus. The popup lower edge touches the trigger's top, matching Plan
 without a visual gap or intervening dead pointer region.
-The trigger has no browser-native tooltip. See [status-bar hover details](../docs/decisions/0037-status-bar-hover-details.md).
+The trigger has no browser-native tooltip. See [status-bar click popups](../docs/decisions/0048-status-bar-click-popups.md).
 Configured model, cadence, interval and budget ceilings stay in Settings, not the
 popup. Earliest reservation expiry is shown only while limited. Never-run,
 no finding, finding, suppressed duplicate, malformed reply, error, timeout and
@@ -316,6 +366,7 @@ observer. This feature does not inherit into ordinary async-subagent workers.
 - `src/bundled-extensions/heads-up/desktop-preference.ts`
 - `src/bundled-extensions/heads-up/controller.ts`
 - `src/bundled-extensions/heads-up/notices.ts`
+- `src/bundled-extensions/heads-up/feedback.ts`
 - `src/bundled-extensions/heads-up/config.ts`
 - `src/bundled-extensions/heads-up/context.ts`
 - `src/bundled-extensions/heads-up/delegated.ts`
@@ -362,6 +413,7 @@ observer. This feature does not inherit into ordinary async-subagent workers.
 
 - `tests/heads-up-controller.test.ts`
 - `tests/heads-up-notices.test.ts`
+- `tests/heads-up-feedback.test.ts`
 - `tests/heads-up-context.test.ts`
 - `tests/heads-up-extension.test.ts`
 - `tests/heads-up-delegated.test.ts`
@@ -408,4 +460,11 @@ no retries/fallback or judge model, and never reads real conversation histories.
 It reports false positives, missed warnings, source/consequence-anchor matches,
 invalid replies, incomplete runs, latency and recorded usage separately. Lexical
 scoring is a proxy; every emitted notice still requires human semantic review.
+The prompt requires current requirement → observed state → concrete consequence,
+with the correct direction, and distinguishes proposals, applied changes, rejected
+mutations, later fixes and explicit approvals. The corpus covers these pairs,
+opposite API directions and multiple independent/duplicate findings. Order-independent
+one-to-one rubric matching and narrow known-inversion checks reject covered errors;
+they do not establish general semantic accuracy. Historical live scores predate
+the current prompt/schema/corpus and are not a current quality measurement.
 See that guide for commands, limits, interpretation and artifact retention.

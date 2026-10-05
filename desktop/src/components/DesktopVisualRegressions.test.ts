@@ -18,9 +18,7 @@ import lspInstallPaneSource from "./LspInstallPane.svelte?raw";
 import packageScriptsSource from "./PackageScriptsPanel.svelte?raw";
 import runtimeStatusSource from "./RuntimeStatusBarItems.svelte?raw";
 import sessionActivityStatusHudSource from "./SessionActivityStatusHud.svelte?raw";
-import sessionInspectorSource from "./SessionInspector.svelte?raw";
-import sessionSubagentsSource from "./SessionSubagentsPanel.svelte?raw";
-import sessionTodosSource from "./SessionTodosPanel.svelte?raw";
+import statusBarPopoverSource from "./StatusBarPopover.svelte?raw";
 import settingsSource from "./SettingsPanel.svelte?raw";
 import settingsConfigSource from "./settings/SettingsConfigEditor.svelte?raw";
 import settingsNavigationSource from "../lib/settings-navigation.ts?raw";
@@ -281,12 +279,12 @@ describe("desktop visual regressions", () => {
     expect(sessionActivityStatusHudSource).toContain('data-session-subagent-tooltip-body');
     expect(sessionActivityStatusHudSource).toContain('data-session-todo-tooltip-body');
     expect(sessionActivityStatusHudSource.match(/max-h-\[min\(40vh,18rem\)\] overflow-y-auto overscroll-contain/g)).toHaveLength(2);
-    expect(sessionActivityStatusHudSource.match(/pointer-events-auto absolute right-0 bottom-full/g)).toHaveLength(2);
-    expect(sessionActivityStatusHudSource).toContain("group-hover:block group-focus-within:block");
+    expect(statusBarPopoverSource).toContain("absolute right-0 bottom-full");
+    expect(sessionActivityStatusHudSource).not.toContain("group-hover:block group-focus-within:block");
     expect(sessionActivityStatusHudSource).toContain("formatSessionSubagentElapsed");
     expect(sessionActivityStatusHudSource).toContain("sessionSubagentModelLabel");
     expect(sessionActivityStatusHudSource).toContain("indicator.preview?.subagentType?.trim()");
-    for (const source of [sessionActivityStatusHudSource, sessionSubagentsSource]) {
+    for (const source of [sessionActivityStatusHudSource]) {
       expect(source).toContain('?.subagentType?.trim() || "auto"');
       expect(source).toContain('data-session-subagent-header');
       expect(source).toContain('data-session-subagent-role');
@@ -304,13 +302,9 @@ describe("desktop visual regressions", () => {
       expect(source).toContain('formatSessionSubagentElapsed');
     }
     expect(sessionActivityStatusHudSource).not.toContain('{indicator.runName}');
-    expect(sessionSubagentsSource).not.toContain('<h3');
-    expect(sessionSubagentsSource).toContain('aria-label={`Subagent run ${sessionSubagentRunName(run.runDir)}`}');
     expect(sessionActivityStatusHudSource).toContain("bind:this={todoTooltipBody}");
-    expect(sessionActivityStatusHudSource).toContain("onmouseenter={scrollTodoTooltipToCurrent}");
-    expect(sessionActivityStatusHudSource).toContain("onfocus={scrollTodoTooltipToCurrent}");
+    expect(sessionActivityStatusHudSource).toContain("onOpen={scrollTodoTooltipToCurrent}");
     expect(sessionActivityStatusHudSource).toContain('data-session-todo-current={isCurrent ? "true" : undefined}');
-    expect(sessionActivityStatusHudSource).toContain("requestAnimationFrame");
     expect(sessionActivityStatusHudSource).toContain("task.activeForm");
     expect(sessionActivityStatusHudSource).toContain("task.description");
     expect(sessionActivityStatusHudSource).toContain("task.blockedBy");
@@ -322,7 +316,7 @@ describe("desktop visual regressions", () => {
     expect(statusBarViewModelSource).toContain("options.clearSessionTodos(sessionId)");
     expect(statusSource).not.toContain('disabled={!canOpenSessionActivity}');
     expect(statusSource).not.toContain('title={`Session activity · ${activityLabel}`}');
-    expect(statusBarViewModelSource).toContain("onOpenSessionActivity: () => options.inspectorPreference.setOpen(true)");
+    expect(statusBarViewModelSource).not.toContain("inspectorPreference");
     expect(statusBarViewModelSource).not.toContain("canNavigateMessages");
     expect(statusBarViewModelSource).not.toContain("commandPaletteShortcut");
     expect(statusBarViewModelSource).not.toContain("onToggleSessionActivity");
@@ -453,23 +447,17 @@ describe("desktop visual regressions", () => {
     expect(runtimeStatusSource).toContain("dcpContextMap(status?.context");
     expect(runtimeStatusSource).toContain("w-16");
     expect(runtimeStatusSource).toContain('kind === "retained" || kind === "occupied"');
-    expect(sessionInspectorSource).not.toContain("DcpContextPanel");
   });
 
-  it("opens context and usage details on hover or focus without toggling them on click", () => {
+  it("opens context and usage details by click with keyboard-safe dismissal", () => {
     for (const panel of ["Context", "Usage"]) {
-      expect(runtimeStatusSource).toContain(`onpointerenter={open${panel}}`);
-      expect(runtimeStatusSource).toContain(`onfocusin={open${panel}}`);
-      expect(runtimeStatusSource).toContain(`onclick={open${panel}}`);
+      expect(runtimeStatusSource).toContain(`onclick={toggle${panel}}`);
     }
-    expect(runtimeStatusSource).not.toContain("toggleContext");
-    expect(runtimeStatusSource).not.toContain("toggleUsage");
-    expect(runtimeStatusSource).toContain("if (usageOpen) return;");
-    expect(runtimeStatusSource).toContain('onpointerleave={(event) => leaveDetails(event, "context")}');
+    expect(runtimeStatusSource).not.toContain("onpointerenter=");
+    expect(runtimeStatusSource).not.toContain("onfocusin=");
+    expect(runtimeStatusSource).not.toContain("onpointerleave=");
     expect(runtimeStatusSource).toContain('onfocusout={(event) => leaveDetails(event, "usage")}');
     expect(runtimeStatusSource).toContain("region.contains(event.relatedTarget)");
-    expect(runtimeStatusSource).toContain("region.contains(document.activeElement)");
-    expect(runtimeStatusSource).toContain('region.matches(":hover")');
     // Panels touch their triggers, matching Plan's lower edge without a dead gap.
     expect(runtimeStatusSource.match(/bottom-full/g)).toHaveLength(2);
     expect(runtimeStatusSource).not.toContain("pb-1.5");
@@ -494,28 +482,10 @@ describe("desktop visual regressions", () => {
     expect(statusBarViewModelSource).not.toContain("refreshActiveDcpStats");
   });
 
-  it("keeps Session inspector activity sections as independently persistent native accordions", () => {
-    for (const source of [sessionSubagentsSource, sessionTodosSource]) {
-      expect(source).toContain('<details');
-      expect(source).toContain("<summary");
-      expect(source).toContain("[&::-webkit-details-marker]:hidden");
-      expect(source).not.toContain("bind:open");
-      expect(source).not.toContain("open={$derived");
-    }
-
-    for (const source of [sessionSubagentsSource, sessionTodosSource]) {
-      expect(source).toContain('ontoggle={noteToggle}');
-      expect(source).toContain('receivedInitialSnapshot || snapshot === undefined');
-      expect(source).toContain('if (!manuallyToggled) applyInitialOpenState()');
-    }
-
-    expect(sessionTodosSource).toContain("{summary.completedTodos}/{summary.totalTodos} tasks");
-    expect(sessionTodosSource).toContain('aria-label="Clear session plan"');
-    expect(sessionTodosSource).toContain("onclick={() => { void clearTodos(); }}");
-    // A header action inside details would disappear when the accordion closes.
-    expect(sessionTodosSource.indexOf('aria-label="Clear session plan"')).toBeGreaterThan(sessionTodosSource.indexOf("</details>"));
-    expect(sessionTodosSource).toContain("disabled={!canClearTodos || clearingTodos || rows.length === 0}");
-    expect(sessionSubagentsSource).toContain("{activeCount} active");
+  it("keeps Plan clear in the status popup without a Session pane", () => {
+    expect(sessionActivityStatusHudSource).toContain('aria-label="Clear session plan"');
+    expect(statusBarViewModelSource).not.toContain("sessionActivityOpen");
+    expect(statusSource).not.toContain("onOpenSessionActivity");
   });
 
   it("uses neutral light-gray normal percentage text while preserving warning/error tones and original tracks", () => {
@@ -768,7 +738,7 @@ describe("desktop visual regressions", () => {
     }
 
     expect(idxSource).toContain('className="text-xs leading-[1.55]"');
-    expect(sessionTodosSource).toContain("text-xs leading-4 text-muted-foreground");
+    expect(sessionActivityStatusHudSource).toContain("text-xs leading-4 text-muted-foreground");
     expect(toolResultSource).toContain("font-size: 12px");
     expect(terminalSource).toContain("fontSize: 10");
     expect(markdownSource).not.toMatch(/font-size:\s+0\.(?:85|88|9|92|94)em;/);

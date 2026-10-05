@@ -66,4 +66,17 @@ describe("Observer status presentation and protocol", () => {
       }
     }
   });
+  it("validates local feedback and explains slower discovery without delaying hidden reviews", () => {
+    const current = snapshot();
+    const details = { ...current.details!, discoveryMultiplier: 4 as const, discoveryEligibleAt: 240000,
+      feedback: { shown: 3, useful: 0, known: 1, irrelevant: 1, incorrect: 1, dismiss: 0 } };
+    const state = { ...current, details };
+    expect(parseHeadsUpSnapshot(state)).toEqual(state);
+    expect(observerWaitingReason(state, 60000)).toContain("4× interval after explicit negative feedback");
+    expect(observerWaitingReason({ ...state, awaitingReview: true }, 60000)).toContain("Previous findings are hidden");
+    for (const patch of [{ discoveryMultiplier: 8 }, { discoveryEligibleAt: -1 }, { discoveryEligibleAt: undefined },
+      { feedback: { ...details.feedback, incorrect: -1 } }, { feedback: { ...details.feedback, ignored: 1 } }]) {
+      expect(parseHeadsUpSnapshot({ ...state, details: { ...details, ...patch } })).toBeUndefined();
+    }
+  });
 });

@@ -2,6 +2,7 @@ import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
 import { HeadsUpContext, cleanObserverText } from "../../src/bundled-extensions/heads-up/context.js";
 import { DEFAULT_HEADS_UP_CONFIG } from "../../src/bundled-extensions/heads-up/config.js";
 import { parseHeadsUpResponse } from "../../src/bundled-extensions/heads-up/parser.js";
+import { issueKey } from "../../src/bundled-extensions/heads-up/feedback.js";
 import { validObserverUsage } from "../../src/bundled-extensions/heads-up/usage.js";
 import { DelegatedEvidence } from "../../src/bundled-extensions/heads-up/delegated.js";
 import type { EvalCase } from "./cases.js";
@@ -28,7 +29,7 @@ export function buildCaseInput(testCase: EvalCase) {
 	const delegated = new DelegatedEvidence();
 	for (const event of testCase.delegatedEvents ?? []) delegated.accept(event, "eval-parent");
 	for (const record of delegated.records(new Set(testCase.entries.map((entry) => entry.id)))) context.add(record);
-	return context.toInput(DEFAULT_HEADS_UP_CONFIG.maxInputChars, testCase.previousNotices);
+	return context.toInput(DEFAULT_HEADS_UP_CONFIG.maxInputChars, testCase.previousNotices, testCase.activeNotices, testCase.structuredFeedback);
 }
 
 function normalize(text: string): string { return text.toLowerCase().replace(/ё/g, "е"); }
@@ -36,7 +37,8 @@ function normalize(text: string): string { return text.toLowerCase().replace(/ё
 /** Quality checks are an intentionally transparent proxy; a human must read accepted notices. */
 export function assess(testCase: EvalCase, message: AssistantMessage): Pick<CaseResult, "outcome" | "issues" | "response" | "servedModel" | "stopReason" | "usage"> {
 	const input = buildCaseInput(testCase);
-	const parsed = parseHeadsUpResponse(message, input.records, 0, DEFAULT_HEADS_UP_CONFIG.noticeTtlMs);
+	const active = (testCase.activeNotices ?? []).map((card) => ({ ...card, evidence: [], createdAt: 0, expiresAt: Number.MAX_SAFE_INTEGER }));
+	const parsed = parseHeadsUpResponse(message, input.records, 0, DEFAULT_HEADS_UP_CONFIG.noticeTtlMs, active);
 	const response = cleanObserverText(message.content.filter((part) => part.type === "text").map((part) => part.text).join("\n"), 8000);
 	const base = { response, servedModel: `${message.provider}/${message.model}`, stopReason: message.stopReason,
 		...(validObserverUsage(message.usage) ? { usage: message.usage } : {}) };
@@ -50,18 +52,35 @@ export function assess(testCase: EvalCase, message: AssistantMessage): Pick<Case
 	if (parsed.kind === "invalid") return { ...base, outcome: "invalid", issues: ["production parser rejected the response"] };
 	if (parsed.kind === "none") return { ...base, outcome: testCase.expected.kind === "none" ? "tn" : "fn", issues: [] };
 	if (testCase.expected.kind === "none") return { ...base, outcome: "fp", issues: [testCase.rationale] };
-	const notice = parsed.notices[0]!;
-	const cited = new Set(notice.evidence.map((entry) => entry.id));
-	const text = normalize(`${notice.title} ${notice.consequence}`);
-	const issues: string[] = [];
-	// The current corpus specifies one supported problem per positive case. Extra
-	// warnings must not hide behind a correct first card and earn a false pass.
-	if (parsed.notices.length !== 1) issues.push("additional notices outside the single-problem rubric; human review required");
-	for (const group of testCase.expected.evidenceGroups) {
-		if (!group.some((id) => cited.has(id))) issues.push(`missing supporting evidence: ${group.join(" or ")}`);
-	}
-	for (const group of testCase.expected.concepts) {
-		if (!group.some((concept) => text.includes(normalize(concept)))) issues.push(`missing consequence anchor: ${group.join(" / ")}`);
+	const expected = testCase.expected;
+	if (new Set(parsed.notices.map(issueKey)).size !== parsed.notices.length) return { ...base, outcome: "wrong_notice", issues: ["duplicate issue identities or exact wording; independent notices required"] };
+	if (parsed.notices.length !== expected.rubrics.length) return { ...base, outcome: "wrong_notice", issues: [
+		`expected ${expected.rubrics.length} notice(s), received ${parsed.notices.length}; missing/additional problems require human review`,
+	] };
+	// Find the best one-to-one assignment; notice order has no meaning.
+	let best: string[] | undefined;
+	const assign = (index: number, used: Set<number>, issues: string[]) => {
+		if (index === parsed.notices.length) { if (!best || issues.length < best.length) best = issues; return; }
+		for (let rubricIndex = 0; rubricIndex < expected.rubrics.length; rubricIndex++) {
+			if (used.has(rubricIndex)) continue;
+			const rubric = expected.rubrics[rubricIndex]!;
+			const notice = parsed.notices[index]!;
+			const cited = new Set(notice.evidence.map((entry) => entry.id));
+			const text = normalize(`${notice.title} ${notice.consequence}`);
+			const local: string[] = [];
+			const expectedId = expected.reference.notices[rubricIndex]!.id;
+			if (expectedId !== null ? notice.id !== expectedId : active.some((card) => card.id === notice.id)) local.push("wrong active/new notice identity");
+			for (const group of rubric.evidenceGroups) if (!group.some((id) => cited.has(id))) local.push(`missing supporting evidence: ${group.join(" or ")}`);
+			for (const group of rubric.concepts) if (!group.some((concept) => text.includes(normalize(concept)))) local.push(`missing consequence anchor: ${group.join(" / ")}`);
+			used.add(rubricIndex); assign(index + 1, used, [...issues, ...local]); used.delete(rubricIndex);
+		}
+	};
+	assign(0, new Set(), []);
+	const issues = best ?? ["notices could not be matched to expected problems"];
+	// Regression for one observed reversed-direction explanation. This is a
+	// narrow lexical tripwire, not a general semantic judge.
+	if (testCase.id === "api-break" && parsed.notices.some((notice) => /returning to (?:the )?synchronous|возврат к синхрон/i.test(`${notice.title} ${notice.consequence}`))) {
+		issues.push("known reversed-direction API wording: warning frames restoring the synchronous contract as the break");
 	}
 	return { ...base, outcome: issues.length ? "wrong_notice" : "tp", issues };
 }
@@ -79,11 +98,12 @@ export function validateCases(cases: readonly EvalCase[]): void {
 		if (!input.records.some((record) => record.kind === "user") || !input.records.some((record) => record.kind !== "user")) throw new Error(`Missing user/work context: ${testCase.id}`);
 		if (/EVAL_(?:SECRET|PRIVATE_THINKING|IMAGE)_CANARY/.test(input.body)) throw new Error(`Private canary escaped in ${testCase.id}`);
 		if (testCase.expected.kind === "heads_up") {
-			if (!testCase.expected.evidenceGroups.length || !testCase.expected.concepts.length) throw new Error(`Empty rubric: ${testCase.id}`);
-			for (const group of testCase.expected.evidenceGroups) {
-				if (!group.length || !group.some((id) => input.records.some((record) => record.id === id))) throw new Error(`Required evidence clipped out: ${testCase.id}`);
+			if (!testCase.expected.rubrics.length || testCase.expected.rubrics.length !== testCase.expected.reference.notices.length) throw new Error(`Invalid rubric/notice count: ${testCase.id}`);
+			for (const rubric of testCase.expected.rubrics) {
+				if (!rubric.evidenceGroups.length || !rubric.concepts.length) throw new Error(`Empty rubric: ${testCase.id}`);
+				for (const group of rubric.evidenceGroups) if (!group.length || !group.some((id) => input.records.some((record) => record.id === id))) throw new Error(`Required evidence clipped out: ${testCase.id}`);
+				if (rubric.concepts.some((group) => !group.length || group.some((text) => !text.trim()))) throw new Error(`Empty concept: ${testCase.id}`);
 			}
-			if (testCase.expected.concepts.some((group) => !group.length || group.some((text) => !text.trim()))) throw new Error(`Empty concept: ${testCase.id}`);
 		}
 	}
 }

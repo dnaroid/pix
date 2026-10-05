@@ -11,7 +11,7 @@ status: active
 Desktop councils only. ACP owns one native session per roster slot across all
 five rounds, including the wait for the parent's draft. `[BS:<run-id>]` names
 are recognition aids; explicit run, orchestrator, slot and native session IDs
-are authoritative. The compact storm panel displays round/status and participants,
+are authoritative. The status-bar council popup displays round/status and participants,
 opens their existing sessions and supports returning to the orchestrator. Opening
 a participant must not create another runtime writing the same history. Direct
 user writes/mutations are blocked while the orchestrator owns the participant.
@@ -21,18 +21,20 @@ of the active participant's mutation permission.
 
 Closing a participant tab hides its view only, including after council completion:
 it does not send `session/close`, cancel work, delete history, or forget runtime
-and activity state. The panel can reopen that same participant session. Active-tab
+and activity state. The council popup can reopen that same participant session. Active-tab
 closure selects another visible conversation or opens the draft start tab. Ordinary
 conversation tab closure retains its existing stop/close behavior.
 
 The Desktop status bar shows a brain icon (not a `BS` label) and round `N/5`
-for the active orchestrator or its participant. Hover or keyboard focus shows the
-topic, council state, and each participant's model, name, state and round. Clicking
-opens the session inspector's council panel. When several runs exist, the compact
+for the active orchestrator or its participant. Button activation (click, Enter
+or Space) toggles the topic, council state, and each participant's model, name,
+state and round. Hover or mere focus never opens it. There is no Session inspector.
+When several runs exist, the compact
 indicator prioritizes the latest nonterminal run, falling back to the latest run;
-the custom hover surface lists all runs and its lower edge touches the trigger's
-top, matching Plan without a visual gap so moving into it does not close it.
-No browser-native tooltip is used. See [status-bar hover details](../docs/decisions/0037-status-bar-hover-details.md).
+the custom click surface lists all runs and its lower edge touches the trigger's
+top, matching Plan without a visual gap. Pointer departure does not close it;
+repeat activation, Escape, outside click or focus departure dismisses it.
+No browser-native tooltip is used. See [status-bar click popups](../docs/decisions/0048-status-bar-click-popups.md).
 Terminal runs remain visible while their snapshot is
 available; this indicator does not introduce host-crash recovery or new persistence.
 
@@ -308,6 +310,13 @@ Dependency: [async-subagents](async-subagents.md).
 
 ## Implementation
 
+- `desktop/src/components/SessionBrainstormStatus.svelte`
+- `desktop/src/components/StatusBarPopover.svelte`
+- `desktop/src/components/StatusBar.svelte`
+- `desktop/src/app/desktop-brainstorm-navigation.ts`
+- `desktop/src/app/desktop-shell-view-model-services.ts`
+- `desktop/src/app/desktop-status-bar-view-model.svelte.ts`
+- `desktop/src/app/desktop-workbench-view-model-services.ts`
 - `external/pi-tools-suite/src/brainstorm/config.ts`
 - `external/pi-tools-suite/src/brainstorm/index.ts`
 - `external/pi-tools-suite/src/brainstorm/subagents.ts`
@@ -330,6 +339,9 @@ Dependency: [async-subagents](async-subagents.md).
 
 ## Tests
 
+- `desktop/src/components/SessionBrainstormStatus.test.ts`
+- `desktop/src/components/StatusBarHover.test.ts`
+- `desktop/src/app/desktop-brainstorm-navigation.test.ts`
 - `external/pi-tools-suite/test/brainstorm/desktop-sessions.test.ts`
 - `external/pi-tools-suite/test/brainstorm/persistent-workflow.test.ts`
 

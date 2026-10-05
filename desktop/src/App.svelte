@@ -158,9 +158,6 @@
     reportError,
   });
 
-  const sessionInspectorPreference = sessionServices.inspectorPreference;
-  const sessionInspectorOpen = $derived(sessionInspectorPreference.open);
-  const setSessionInspectorOpen = sessionInspectorPreference.setOpen;
 
   const sessionTabsState = sessionServices.tabs;
   const sessionSelectorOpen = $derived(sessionTabsState.selectorOpen);
@@ -375,7 +372,6 @@
     state: activeSessionState,
     draftSession: () => draftSession,
     changingConfig: () => changingConfig,
-    sessionInspectorOpen: () => sessionInspectorOpen,
     sessionSelectorOpen: () => sessionSelectorOpen,
     closeProjectSelector: () => workspaceSidebar?.closeProjectSwitcher(),
     sessionTabs: () => sessionTabController,
@@ -383,7 +379,6 @@
     chooseWorkspace,
     workbenchController: () => workbenchController,
     conversation: conversationServices,
-    setSessionInspectorOpen,
     focusComposer: () => promptComposer?.focus(),
     setPromptText: (text) => promptText = text,
   });
@@ -681,11 +676,6 @@
     activeWorkbenchTabId: () => activeWorkbenchTabId,
     setActiveWorkbenchTabId: (id) => activeWorkbenchTabId = id,
     workbenchTabs: () => workbenchTabs,
-    activeTodoSnapshot: () => presentationState.activeTodoSnapshot,
-    activeSubagentSnapshot: () => presentationState.activeSubagentSnapshot,
-    activeBrainstormSnapshot: () => presentationState.activeBrainstormSnapshot,
-    sessionInspectorOpen: () => sessionInspectorOpen,
-    setSessionInspectorOpen,
     markSessionTabViewed: sessionTabAttention.clear,
   });
   const viewModels = createDesktopViewModelServices({

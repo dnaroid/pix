@@ -1,6 +1,7 @@
 import type {
   HeadsUpDetails,
   HeadsUpEvidence,
+  HeadsUpFeedbackSummary,
   HeadsUpLastCheck,
   HeadsUpNotice,
   HeadsUpPhase,
@@ -61,7 +62,12 @@ function parseEvidence(value: unknown): HeadsUpEvidence | undefined {
 function parseDetails(value: unknown): HeadsUpDetails | undefined {
   if (!record(value) || !keysAre(value, [
     "config", "newTurns", "intervalEligibleAt", "checksInWindow", "inputCharsInWindow", "windowResetsAt", "lastCheck",
-  ])) return undefined;
+  ], ["feedback", "discoveryMultiplier", "discoveryEligibleAt"])) return undefined;
+  const feedbackKeys = ["shown", "useful", "known", "irrelevant", "incorrect", "dismiss"] as const;
+  if ("feedback" in value && (!record(value.feedback) || !keysAre(value.feedback, feedbackKeys)
+    || feedbackKeys.some((key) => !nonNegativeInteger((value.feedback as Record<string, unknown>)[key])))) return undefined;
+  if (("discoveryMultiplier" in value || "discoveryEligibleAt" in value)
+    && (![1, 2, 4].includes(value.discoveryMultiplier as number) || !nonNegativeInteger(value.discoveryEligibleAt))) return undefined;
   const config = value.config;
   if (!record(config) || !keysAre(config, CONFIG_KEYS)
     || CONFIG_KEYS.some((key) => !nonNegativeInteger(config[key], HEADS_UP_CONFIG_LIMITS[key][1]) || (config[key] as number) < HEADS_UP_CONFIG_LIMITS[key][0])
@@ -94,12 +100,16 @@ function parseDetails(value: unknown): HeadsUpDetails | undefined {
     inputCharsInWindow: value.inputCharsInWindow,
     windowResetsAt: value.windowResetsAt,
     lastCheck,
+    ...("feedback" in value ? { feedback: { ...value.feedback as unknown as HeadsUpFeedbackSummary } } : {}),
+    ...("discoveryMultiplier" in value ? { discoveryMultiplier: value.discoveryMultiplier as 1 | 2 | 4, discoveryEligibleAt: value.discoveryEligibleAt as number } : {}),
   };
 }
 
 function parseNotice(value: unknown): HeadsUpNotice | null | undefined {
   if (value === null) return null;
-  if (!record(value) || !keysAre(value, ["id", "title", "consequence", "evidence", "createdAt", "expiresAt"])) return undefined;
+  if (!record(value) || !keysAre(value, ["id", "title", "consequence", "evidence", "createdAt", "expiresAt"], ["topic", "subject"])) return undefined;
+  if (("topic" in value || "subject" in value) && (!boundedString(value.topic, 80) || !value.topic.trim()
+    || !boundedString(value.subject, 160) || !value.subject.trim() || /[\r\n\t]/.test(`${value.topic}${value.subject}`))) return undefined;
   if (!identifier(value.id)
     || !boundedString(value.title, 160) || !value.title.trim() || !boundedString(value.consequence, 500) || !value.consequence.trim()
     || !Array.isArray(value.evidence) || value.evidence.length < 1 || value.evidence.length > MAX_EVIDENCE
@@ -114,6 +124,7 @@ function parseNotice(value: unknown): HeadsUpNotice | null | undefined {
   if (new Set(evidence.map((item) => item.id)).size !== evidence.length) return undefined;
   return {
     id: value.id,
+    ...(typeof value.topic === "string" && typeof value.subject === "string" ? { topic: value.topic, subject: value.subject } : {}),
     title: value.title,
     consequence: value.consequence,
     evidence,

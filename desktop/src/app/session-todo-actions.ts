@@ -1,7 +1,7 @@
 import { SvelteSet } from "svelte/reactivity";
 import type { AcpClient } from "../lib/acp-client";
 
-/** Session-owned pending state survives inspector remounts and tab switches. */
+/** Session-owned pending state survives view remounts and tab switches. */
 export function createSessionTodoActions(options: {
   client: () => Pick<AcpClient, "clearTodos"> | null;
   ready: (sessionId: string) => boolean;

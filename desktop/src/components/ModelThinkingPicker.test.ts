@@ -22,14 +22,25 @@ describe("ModelThinkingPicker staged selection", () => {
     expect(pickerSource).toContain("selectedIndex = pickerModelIndex(filteredModels, selectedModelRef, query, visibilityMode)");
   });
 
-  it("handles effort arrows throughout the dialog without double-stepping radio events", () => {
+  it("handles effort arrows throughout the popup without double-stepping radio events", () => {
     expect(pickerSource).toContain("if (event.defaultPrevented) return;");
     expect(pickerSource).toContain('!visibilityMode && (event.key === "ArrowLeft" || event.key === "ArrowRight")');
     expect(pickerSource).toContain('moveThinking(event.key === "ArrowRight" ? 1 : -1, true)');
-    expect(pickerSource).toContain("activateModalDialog(dialogElement, () => search, restoreFocus)");
+    expect(pickerSource).toContain("activateModelPickerPopover(dialogElement, search, onClose");
     expect(pickerSource).not.toContain("{:else if model.ref === selectedModelRef}");
     expect(pickerSource).not.toContain("!dirty || disabled");
     expect(pickerSource).toContain("if (!dirty) {\n      onClose();");
+  });
+
+  it("uses a bounded nonmodal dialog and guards stale apply completion", () => {
+    expect(pickerSource).toContain("data-model-thinking-popover");
+    expect(pickerSource).toContain("\n  open\n");
+    expect(pickerSource).not.toContain("activateModalDialog");
+    expect(pickerSource).not.toContain("showModal");
+    expect(pickerSource).not.toContain("backdrop:bg-overlay");
+    expect(pickerSource).toContain("popover?.dispose()");
+    expect(pickerSource).toContain("await onApply(selectedModel.ref, selectedThinking);\n      if (!alive) return;");
+    expect(pickerSource).toContain("if (selectedAuto) return;");
   });
 
   it("confirms the staged selection with Enter from model rows in select mode only", () => {

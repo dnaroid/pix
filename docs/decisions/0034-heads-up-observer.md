@@ -340,3 +340,51 @@ and expiry semantics. Consequences: cards can remain absent while review is
 blocked, and clipping can prevent reconfirmation. Hidden does not mean resolved.
 Revisit if measured missed findings or excessive conservative hiding outweigh
 stale-warning risk, or authoritative fresh repository evidence becomes available.
+
+## Semantic evaluation, structured feedback and adaptive discovery — 2026-10-05
+
+Status: accepted. Supersedes exact-wording-only memory and fixed-interval new
+discovery above, not strict freshness, stack review or resource limits. Contract:
+[Heads up observer](../../specs/heads-up-observer.md).
+
+Context/evidence: the user approved improvements in priority order after comparison
+with a local Claude Code reconstruction. That reconstruction is not authoritative
+upstream source and no upstream code is copied. Historical Pix live evaluation had
+a rejected-edit false positive and a keyword-accepted API warning with reversed
+contract direction; those runs predate current stacking/freshness. Current code
+used shown/feedback text and exact normalized wording as its duplicate key.
+Assumptions: structured hints help continuity, explicit negative feedback is a more
+defensible frequency signal than silence, and conservative bounded adaptation is
+preferable to inferred user expertise. No improved model accuracy is claimed.
+
+Decision/scope:
+- Expand synthetic evaluation with change-state/direction pairs, multi-problem and
+  active-review cases; require one-to-one rubric matches and human semantic review.
+  Known inversion checks remain narrow heuristics, not a judge model. No paid live
+  inference is part of this implementation verification.
+- Ask the existing single inference for stable topic/subject hints; keep legacy
+  responses readable. Retain at most 32 structured task-local shown/verdict records,
+  suppress equal identities on equal bounded evidence text, and permit reconsideration
+  on changed circumstances. Fresh user input/context-clearing ends this coarse task
+  scope. Topic matching still depends on model consistency.
+- Add explicit useful/incorrect feedback alongside known/irrelevant/dismiss and
+  expose runtime-only counters. Negative relevance/accuracy verdicts multiply only
+  new-discovery intervals 1→2→4; useful resets. Silence, dismiss and known never
+  penalize cadence. Keep the base interval for all retained-card reviews and manual
+  bypass unchanged. Session-local cadence/counters survive task boundaries, not
+  runtime recreation. No telemetry, transcript logging or global/persisted memory.
+
+Alternatives: semantic embedding/judge requests add cost and authority not justified
+by evidence; exact wording misses paraphrases; permanent topic suppression hides new
+circumstances; persistent user profiles need separate privacy/product approval;
+upstream-style silence/ignored-submit backoff incorrectly treats attention as rejection;
+slowing reviews leaves old findings hidden longer. Additional explanation calls,
+full-context forks, auto-submit and weaker freshness are explicitly excluded.
+
+Consequences: optional identity metadata increases payload size under unchanged
+budgets. False key matches or unstable keys remain possible; changed citation content
+is eligibility, not proof of novelty. New prompts reset task memory conservatively,
+even when the user continues a task. The 4× cap and reset rule are bounded product
+choices, not measured optima. Revisit with manually reviewed semantic precision,
+duplicate/recurrence rates, usefulness feedback and missed independent findings;
+perform any paid live evaluation separately and report coverage/cost honestly.

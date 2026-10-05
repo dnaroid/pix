@@ -20,7 +20,7 @@ describe("session todo actions", () => {
     expect(actions.canClear("b")).toBe(true);
     const second = actions.clear("b");
     active = "a";
-    // A remounted inspector asks the same session-owned controller again.
+    // A remounted view asks the same session-owned controller again.
     expect(actions.canClear("a")).toBe(false);
     expect(await actions.clear("a")).toBe(false);
     expect(calls).toEqual(["a", "b"]);

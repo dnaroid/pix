@@ -12,7 +12,6 @@ export type DesktopCommandId =
   | "session.open"
   | "session.jump"
   | "session.history"
-  | "session.activity"
   | "session.modelThinking"
   | "composer.focus"
   | "composer.enhance"
@@ -122,13 +121,6 @@ const DEFINITIONS: Record<DesktopCommandId, DesktopCommandDefinition> = {
     scope: "session",
     keywords: ["prompt", "history", "restore", "composer"],
   },
-  "session.activity": {
-    id: "session.activity",
-    label: "Toggle Session Activity",
-    description: "Show or hide the Plan and Agents inspector",
-    scope: "session",
-    keywords: ["inspector", "plan", "agents", "activity"],
-  },
   "session.modelThinking": {
     id: "session.modelThinking",
     label: "Select Model and Thinking…",
@@ -213,7 +205,6 @@ export const COMMAND_PALETTE_IDS: readonly DesktopCommandId[] = [
   "session.jump",
   "session.history",
   "session.modelThinking",
-  "session.activity",
 ];
 
 export function desktopCommandDefinition(id: DesktopCommandId): DesktopCommandDefinition {

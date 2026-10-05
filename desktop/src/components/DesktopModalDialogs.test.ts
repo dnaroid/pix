@@ -6,7 +6,7 @@ import settingsSource from "./ProjectSettingsDialog.svelte?raw";
 
 describe("desktop modal dialog lifecycle", () => {
   it("uses native modal dialogs with shared focus lifecycle", () => {
-    for (const source of [commandSource, elicitationSource, modelSource, settingsSource]) {
+    for (const source of [commandSource, elicitationSource, settingsSource]) {
       expect(source).toContain("<dialog");
       expect(source).toContain("activateModalDialog");
     }

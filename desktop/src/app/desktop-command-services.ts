@@ -39,7 +39,6 @@ type DesktopCommandServicesOptions = {
   state: ActiveSessionState;
   draftSession: () => DraftSessionRef;
   changingConfig: () => string | null;
-  sessionInspectorOpen: () => boolean;
   sessionSelectorOpen: () => boolean;
   closeProjectSelector: () => void;
   sessionTabs: () => SessionTabsRef;
@@ -47,7 +46,6 @@ type DesktopCommandServicesOptions = {
   chooseWorkspace: () => void | Promise<void>;
   workbenchController: () => WorkbenchControllerRef;
   conversation: DesktopConversationServices;
-  setSessionInspectorOpen: (open: boolean) => void;
   focusComposer: () => void | Promise<void>;
   setPromptText: (text: string) => void;
 };
@@ -75,7 +73,6 @@ export function createDesktopCommandServices(options: DesktopCommandServicesOpti
     draftSessionTabActive: () => options.draftSession().active,
     draftConfigAvailable: () => options.model.config.draftConfigOptions.length > 0,
     changingConfig: options.changingConfig,
-    sessionInspectorOpen: options.sessionInspectorOpen,
     modelThinkingPickerOpen: () => options.model.config.pickerOpen,
     sessionSelectorOpen: options.sessionSelectorOpen,
     closeProjectSelector: options.closeProjectSelector,
@@ -87,7 +84,6 @@ export function createDesktopCommandServices(options: DesktopCommandServicesOpti
     openSessionStartTab: () => options.draftSession().openStartTab(),
     openJumpPicker: options.conversation.navigation.openJumpPicker,
     openHistoryPicker: options.conversation.navigation.openHistoryPicker,
-    setSessionInspectorOpen: options.setSessionInspectorOpen,
     openModelThinkingPicker: options.model.config.openPicker,
     focusComposer: options.focusComposer,
     jumpToUserMessage: options.conversation.navigation.jumpToUserMessage,

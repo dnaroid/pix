@@ -1,19 +1,15 @@
 import { MAX_HEADS_UP_NOTICES, type HeadsUpFeedback, type HeadsUpNotice } from "./contract.js";
-
-function noteKey(notice: HeadsUpNotice): string {
-	return `${notice.title} ${notice.consequence}`.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
-}
+import { HeadsUpFeedbackMemory, issueKey } from "./feedback.js";
 
 /** Bounded runtime-only cards, selection and topic memory. No timers or inference. */
 export class HeadsUpNotices {
 	private cards: HeadsUpNotice[] = [];
 	private selectedId: string | undefined;
-	private seen = new Set<string>();
-	private history: string[] = [];
+	readonly memory = new HeadsUpFeedbackMemory();
 	/** Changes to membership/content, not navigation; protects in-flight assessments. */
 	version = 0;
 	get all(): readonly HeadsUpNotice[] { return this.cards; }
-	get previous(): readonly string[] { return this.history; }
+	get previous(): readonly string[] { return this.memory.records.map((entry) => `${entry.outcome}: ${entry.title}. ${entry.consequence}`); }
 	get current(): HeadsUpNotice | null { return this.cards.find((card) => card.id === this.selectedId) ?? this.cards[0] ?? null; }
 	private replace(cards: HeadsUpNotice[]): void {
 		const index = Math.max(0, this.cards.findIndex((card) => card.id === this.selectedId));
@@ -35,32 +31,28 @@ export class HeadsUpNotices {
 		this.selectedId = this.cards[(index + direction + this.cards.length) % this.cards.length]!.id;
 		return true;
 	}
-	private remember(text: string): void { this.history = [...this.history, text].slice(-16); }
 	feedback(id: string, feedback: HeadsUpFeedback): boolean {
 		const card = this.cards.find((card) => card.id === id);
 		if (!card) return false;
-		this.remember(`${feedback}: ${card.title}. ${card.consequence}`);
+		this.memory.feedback(card, feedback);
 		this.replace(this.cards.filter((card) => card.id !== id)); return true;
 	}
 	/** The model returns the entire supported set. Existing cards retain order/TTL. */
 	apply(candidates: readonly HeadsUpNotice[]): void {
 		const byId = new Map(this.cards.map((card) => [card.id, card]));
-		const byKey = new Map(this.cards.map((card) => [noteKey(card), card]));
+		const byKey = new Map(this.cards.map((card) => [issueKey(card), card]));
 		const accepted = new Map<string, HeadsUpNotice>();
 		const keys = new Set<string>();
 		// Process retained identities before discoveries, so duplicates cannot replace them.
 		for (const candidate of [...candidates.filter((card) => byId.has(card.id)), ...candidates.filter((card) => !byId.has(card.id))]) {
-			const key = noteKey(candidate);
+			const key = issueKey(candidate);
 			const existing = byId.get(candidate.id) ?? byKey.get(key);
-			if (keys.has(key) || (existing && accepted.has(existing.id)) || (!existing && this.seen.has(key))) continue;
+			if (keys.has(key) || (existing && accepted.has(existing.id)) || (!existing && this.memory.isRepeat(candidate))) continue;
 			keys.add(key);
 			const card = existing ? { ...candidate, id: existing.id, createdAt: existing.createdAt, expiresAt: existing.expiresAt } : candidate;
 			accepted.set(card.id, card);
-			if (!existing || noteKey(existing) !== key) {
-				this.seen.add(key);
-				while (this.seen.size > 32) this.seen.delete(this.seen.values().next().value!);
-				this.remember(`Shown: ${card.title}. ${card.consequence}`);
-			}
+			if (!existing) this.memory.shown(card);
+			else this.memory.remember(card, "shown");
 		}
 		const retained = this.cards.flatMap((card) => accepted.has(card.id) ? [accepted.get(card.id)!] : []);
 		this.replace([...retained, ...[...accepted.values()].filter((card) => !byId.has(card.id))].slice(0, MAX_HEADS_UP_NOTICES));

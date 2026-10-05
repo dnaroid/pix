@@ -1,9 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { windowLayoutKey } from "./window-layout-storage";
-import { createSessionInspectorPreference } from "../app/session-inspector-preference.svelte";
 import { createWorkspaceSidebarLayoutController } from "../components/workspace-sidebar-layout-controller.svelte";
 import sidebarSource from "../components/WorkspaceSidebar.svelte?raw";
-import inspectorSource from "../components/SessionInspector.svelte?raw";
 
 const native = vi.hoisted(() => ({ label: "main", enabled: true }));
 vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => native.enabled }));
@@ -27,7 +25,7 @@ describe("per-window pane layout", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("separates every pane preference by native label, including browser preview", () => {
-    for (const preference of ["workspaceSidebarTab", "taskSidebarCollapsed", "taskSidebarWidth", "sessionInspectorOpen", "sessionInspectorWidth"]) {
+    for (const preference of ["workspaceSidebarTab", "taskSidebarCollapsed", "taskSidebarWidth"]) {
       const mainKey = windowLayoutKey(preference);
       native.label = "project-one";
       const projectKey = windowLayoutKey(preference);
@@ -39,29 +37,6 @@ describe("per-window pane layout", () => {
       native.label = "main";
     }
     expect(sidebarSource).toContain('windowLayoutKey("workspaceSidebarTab")');
-    expect(inspectorSource).toContain('windowLayoutKey("sessionInspectorWidth")');
-  });
-
-  it("retains different inspector choices across reloads without adopting shared legacy state", () => {
-    values.set("pix.desktop.sessionInspectorOpen", "true");
-    const main = createSessionInspectorPreference();
-    main.restore();
-    expect(main.open).toBe(false);
-    main.setOpen(true);
-
-    native.label = "project-one";
-    const project = createSessionInspectorPreference();
-    project.restore();
-    expect(project.open).toBe(false);
-    project.setOpen(false);
-    // Existing controllers keep their identity even if a later controller is created.
-    main.setOpen(true);
-    project.restore();
-    expect(project.open).toBe(false);
-    native.label = "main";
-    const reloaded = createSessionInspectorPreference();
-    reloaded.restore();
-    expect(reloaded.open).toBe(true);
   });
 
   it("restores distinct sidebar visibility and widths for two windows", () => {
@@ -94,10 +69,6 @@ describe("per-window pane layout", () => {
       getItem: () => { throw new Error("unavailable"); },
       setItem: () => { throw new Error("unavailable"); },
     });
-    const inspector = createSessionInspectorPreference();
-    inspector.restore();
-    inspector.setOpen(true);
-    expect(inspector.open).toBe(true);
     const sidebar = createWorkspaceSidebarLayoutController({ activeTab: () => "project" });
     sidebar.mount()();
     sidebar.setCollapsed(true);

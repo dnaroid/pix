@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { HeadsUpNotice, HeadsUpSnapshot } from "../lib/heads-up";
+  import type { HeadsUpFeedback } from "../../../src/bundled-extensions/heads-up/contract";
 
   let {
     notice,
@@ -14,7 +15,7 @@
     snapshot: HeadsUpSnapshot;
     notices?: readonly HeadsUpNotice[];
     pending?: boolean;
-    onFeedback: (feedback: "known" | "irrelevant" | "dismiss") => void | Promise<void>;
+    onFeedback: (feedback: HeadsUpFeedback) => void | Promise<void>;
     onDiscuss: () => void;
     onNavigate?: (direction: -1 | 1) => void;
   } = $props();
@@ -55,7 +56,9 @@
       {evidenceOpen ? "Hide details" : "Show evidence"}
     </button>
     <button type="button" class="rounded-sm px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" disabled={pending} onclick={() => void onFeedback("known")}>Already know</button>
+    <button type="button" class="rounded-sm px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" disabled={pending} onclick={() => void onFeedback("useful")}>Useful</button>
     <button type="button" class="rounded-sm px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" disabled={pending} onclick={() => void onFeedback("irrelevant")}>Not useful</button>
+    <button type="button" class="rounded-sm px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" disabled={pending} onclick={() => void onFeedback("incorrect")}>Incorrect</button>
     <button type="button" class="rounded-sm px-1.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" disabled={pending} onclick={() => void onFeedback("dismiss")}>Dismiss</button>
     <button type="button" class="ml-auto rounded-sm bg-primary px-2 py-1 text-xs font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" disabled={pending} onclick={onDiscuss}>Discuss / Insert question</button>
   </div>

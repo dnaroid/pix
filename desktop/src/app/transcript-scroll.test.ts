@@ -257,6 +257,60 @@ describe("transcript scroll scheduling", () => {
     expect(pane.scrollTop).toBe(1200);
   });
 
+  it("keeps following a sent image through composer collapse and render-time scroll events", async () => {
+    const { controller, pane, runFrame } = setup({ clampScroll: true });
+
+    const pending = controller.scrollToLatest();
+    // Clearing the attachment composer and appending the compact preview can
+    // emit a layout/queued scroll before the explicit action's tick completes.
+    pane.clientHeight = 380;
+    pane.scrollTop = 300; // browser clamps the offset as the composer shrinks
+    pane.scrollHeight = 650;
+    controller.handleScroll();
+    await pending;
+    expect(pane.scrollTop).toBe(270);
+    expect(controller.followsLatest).toBe(true);
+
+    // The image decodes later, after the explicit scroll has finished.
+    pane.scrollHeight = 970;
+    controller.scheduleScrollToLatest(); // content ResizeObserver
+    runFrame();
+    expect(pane.scrollTop).toBe(590);
+    expect(controller.followsLatest).toBe(true);
+
+    // Delayed image growth must not override subsequent reader intent.
+    pane.scrollTop = 100;
+    controller.handleScroll();
+    pane.scrollHeight = 1100;
+    controller.scheduleScrollToLatest();
+    runFrame();
+    expect(pane.scrollTop).toBe(100);
+    expect(controller.followsLatest).toBe(false);
+  });
+
+  it("ignores queued old-offset scroll events while an explicit latest action awaits rendering", async () => {
+    const { controller, pane } = setup({ clampScroll: true });
+    pane.scrollTop = 100;
+    controller.handleScroll();
+    const pending = controller.scrollToLatest();
+    controller.handleScroll();
+    await pending;
+    expect(pane.scrollTop).toBe(300);
+    expect(controller.followsLatest).toBe(true);
+  });
+
+  it("keeps following when explicit latest actions overlap", async () => {
+    const { controller, pane } = setup({ clampScroll: true });
+    pane.scrollTop = 100;
+    controller.handleScroll();
+    const older = controller.scrollToLatest();
+    const newer = controller.scrollToLatest();
+    controller.handleScroll();
+    await Promise.all([older, newer]);
+    expect(pane.scrollTop).toBe(300);
+    expect(controller.followsLatest).toBe(true);
+  });
+
   it("cancels pending tab restoration on disposal", () => {
     const { controller, pane, callbacks, runFrame } = setup();
     controller.setVisible(false);

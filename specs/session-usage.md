@@ -65,15 +65,12 @@ failures that return no usage cannot be reconstructed. Its model rows participat
 in the same provider/model breakdown; its own status additionally reports check
 and token counters without estimating subscription quota.
 
-- In Pix TUI, clicking `Usage` opens session usage. Desktop opens it on pointer
-  hover or keyboard focus, without requiring a click. Neither forces a provider
-  quota refresh. See [status-bar hover details](../docs/decisions/0037-status-bar-hover-details.md).
-  Desktop keeps the panel open while pointer or focus remains in its trigger/panel
-  region. Pointer departure has a 200ms grace period, cancelled on reentry or
-  focus/activation, with pointer/focus ownership rechecked at expiry. Focus leaving
-  an unhovered region, Escape and outside pointer interaction dismiss immediately.
-  Clicking an already-open trigger does not toggle it
-  closed or duplicate the spend request.
+- In Pix TUI, clicking `Usage` opens session usage. Desktop opens it only on
+  button activation (click, Enter or Space), not hover or mere focus. Neither
+  forces a provider quota refresh. See [status-bar click popups](../docs/decisions/0048-status-bar-click-popups.md).
+  Desktop keeps the panel open after pointer departure. Repeat activation closes
+  it without another spend request; Escape, outside pointer interaction or focus
+  leaving the trigger/panel region also dismiss it. Escape restores trigger focus.
 - The session detail remains intentionally compact and does not split parent-agent
   and sub-agent consumption into separate presentation rows; both are one session.
   Desktop keeps recorded cost in its on-demand detail popover, but does not show a

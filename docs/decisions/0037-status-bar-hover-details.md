@@ -1,11 +1,11 @@
 # 0037 — Status-bar hover details
 
-- Status: accepted
+- Status: superseded for popup activation/retention/dismissal; content and chrome choices remain accepted
 - Recorded: 2026-10-05
 - Decided: 2026-10-05
 - Owner / approval evidence: user explicitly requested Desktop Context and Usage details on hover rather than click (conversation-only evidence).
 - Governing specs: [Desktop runtime status](../../specs/desktop-runtime-status.md), [Session usage](../../specs/session-usage.md), [Observer](../../specs/heads-up-observer.md), [Council](../../specs/brainstorm.md)
-- Replaces / replaced by: none; revises the specs' former click-open interaction, not a prior decision record.
+- Replaces / replaced by: [0048 — Status-bar click popups](0048-status-bar-click-popups.md) supersedes hover/focus opening and pointer-departure dismissal. The historical rationale below is retained.
 
 ## Context
 

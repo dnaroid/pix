@@ -23,8 +23,8 @@ function result(testCase: EvalCase, response: AssistantMessage): CaseResult {
 
 test("corpus has positive/negative controls and every oracle satisfies its own visible-source rubric", () => {
 	validateCases(HEADS_UP_CASES);
-	assert.equal(HEADS_UP_CASES.length, 21);
-	assert.equal(HEADS_UP_CASES.filter((item) => item.expected.kind === "heads_up").length, 8);
+	assert.equal(HEADS_UP_CASES.length, 31);
+	assert.equal(HEADS_UP_CASES.filter((item) => item.expected.kind === "heads_up").length, 13);
 	for (const item of HEADS_UP_CASES) {
 		const scored = assess(item, reference(item));
 		assert.equal(scored.outcome, item.expected.kind === "none" ? "tn" : "tp", `${item.id}: ${scored.issues.join(", ")}`);
@@ -35,8 +35,13 @@ test("input uses production redaction/budget and never includes grading labels, 
 	for (const item of HEADS_UP_CASES) {
 		const input = buildCaseInput(item);
 		assert.ok(input.body.length <= 16000);
-		assert.deepEqual(Object.keys(JSON.parse(input.body)).sort(), ["omitted", "previousNotices", "records"]);
+		const keys = Object.keys(JSON.parse(input.body)).sort();
+		assert.deepEqual(keys, ["activeNotices", "feedback", "omitted", "previousNotices", "records"].filter((key) => key === "records" || key === "omitted" || key === "previousNotices" || (key === "activeNotices" && !!item.activeNotices) || (key === "feedback" && !!item.structuredFeedback)));
 		assert.ok(!input.body.includes(item.rationale));
+		if (item.expected.kind === "heads_up") {
+			assert.ok(!input.body.includes(JSON.stringify(item.expected.rubrics)));
+			assert.ok(!input.body.includes(JSON.stringify(item.expected.reference)));
+		}
 		assert.doesNotMatch(input.body, /EVAL_(?:SECRET|PRIVATE_THINKING|IMAGE)_CANARY/);
 	}
 	const long = buildCaseInput(HEADS_UP_CASES.find((item) => item.id === "long-session-api")!);
@@ -47,15 +52,15 @@ test("input uses production redaction/budget and never includes grading labels, 
 
 test("always-none cannot pass the eval and undefined precision is not reported as 100 percent", () => {
 	const summary = summarize(HEADS_UP_CASES.map((item) => result(item, message({ kind: "none" }))));
-	assert.equal(summary.counts.fn, 8); assert.equal(summary.counts.tn, 13);
+	assert.equal(summary.counts.fn, 13); assert.equal(summary.counts.tn, 18);
 	assert.equal(summary.recall, 0); assert.equal(summary.precisionProxy, null);
-	assert.equal(summary.passed, 13); assert.equal(summary.complete, true);
+	assert.equal(summary.passed, 18); assert.equal(summary.complete, true);
 });
 
 test("always-warning gets false positives; a wrong topic with real IDs is not a positive hit", () => {
 	const results = HEADS_UP_CASES.map((item) => result(item, message({ kind: "heads_up", notices: [{ id: null, title: "Add more tests", consequence: "It might be useful.", evidenceIds: [buildCaseInput(item).records[0]!.id] }] })));
 	const summary = summarize(results);
-	assert.equal(summary.counts.wrong_notice, 8); assert.equal(summary.counts.fp, 13);
+	assert.equal(summary.counts.wrong_notice, 13); assert.equal(summary.counts.fp, 18);
 	assert.equal(summary.precisionProxy, 0); assert.equal(summary.falsePositiveRate, 1);
 });
 
@@ -64,7 +69,62 @@ test("a correct first card cannot hide extra warnings outside the single-problem
 	if (positive.expected.kind !== "heads_up") throw new Error("Expected positive case");
 	const notices = positive.expected.reference.notices;
 	const scored = assess(positive, message({ kind: "heads_up", notices: [...notices, { ...notices[0], title: "Unrelated warning" }] }));
-	assert.equal(scored.outcome, "wrong_notice"); assert.match(scored.issues.join(" "), /additional notices/);
+	assert.equal(scored.outcome, "wrong_notice"); assert.match(scored.issues.join(" "), /additional/);
+});
+
+test("multi-problem matching is one-to-one and independent of notice order", () => {
+	const item = HEADS_UP_CASES.find((testCase) => testCase.id === "three-independent-problems")!;
+	assert.equal(item.expected.kind, "heads_up");
+	if (item.expected.kind !== "heads_up") return;
+	const reversed = [...item.expected.reference.notices].reverse();
+	assert.equal(assess(item, message({ kind: "heads_up", notices: reversed })).outcome, "tp");
+	assert.equal(assess(item, message({ kind: "heads_up", notices: reversed.slice(0, 2) })).outcome, "wrong_notice");
+	assert.equal(assess(item, message({ kind: "heads_up", notices: [...reversed.slice(0, 2), { ...reversed[0]!, title: "Duplicate" }] })).outcome, "wrong_notice");
+});
+
+test("paraphrased cards with one issue identity cannot fill independent rubrics", () => {
+	const item = HEADS_UP_CASES.find((testCase) => testCase.id === "two-independent-problems")!;
+	if (item.expected.kind !== "heads_up") throw new Error("Expected multiple problems");
+	const notices = item.expected.reference.notices.map((card) => ({ ...card, topic: "same-issue", subject: "same-subject" }));
+	const scored = assess(item, message({ kind: "heads_up", notices }));
+	assert.equal(scored.outcome, "wrong_notice"); assert.match(scored.issues.join(" "), /duplicate issue/);
+});
+
+test("known reversed API direction is a transparent targeted regression, not a semantic judge", () => {
+	const item = HEADS_UP_CASES.find((testCase) => testCase.id === "api-break")!;
+	const response = message({ kind: "heads_up", notices: [{ id: null, title: "API compatibility", consequence: "Returning to synchronous getUser would change the public API and break clients.", evidenceIds: ["e03"] }] });
+	const scored = assess(item, response);
+	assert.equal(scored.outcome, "wrong_notice"); assert.match(scored.issues.join(" "), /known reversed-direction/);
+});
+
+test("legacy notices and bounded optional topic/subject identities are both scored", () => {
+	const item = HEADS_UP_CASES.find((testCase) => testCase.id === "api-break")!;
+	assert.equal(assess(item, reference(item)).outcome, "tp");
+	const card = item.expected.kind === "heads_up" ? item.expected.reference.notices[0]! : undefined;
+	assert.ok(card);
+	assert.equal(assess(item, message({ kind: "heads_up", notices: [{ ...card, topic: "api-compatibility", subject: "sdk.getUser" }] })).outcome, "tp");
+	assert.equal(assess(item, message({ kind: "heads_up", notices: [{ ...card, topic: "x".repeat(81), subject: "sdk.getUser" }] })).outcome, "invalid");
+});
+
+test("active review accepts supported subset plus discovery, and resolved cards can be dismissed", () => {
+	const review = HEADS_UP_CASES.find((item) => item.id === "active-review-and-discovery")!;
+	assert.equal(review.expected.kind, "heads_up");
+	if (review.expected.kind !== "heads_up") return;
+	assert.equal(assess(review, message(review.expected.reference)).outcome, "tp");
+	const withoutRetainedId = review.expected.reference.notices.map((card) => ({ ...card, id: null }));
+	assert.equal(assess(review, message({ kind: "heads_up", notices: withoutRetainedId })).outcome, "wrong_notice");
+	const wrongReuse = review.expected.reference.notices.map((card) => ({ ...card, id: card.id ?? "active-api" }));
+	assert.equal(assess(review, message({ kind: "heads_up", notices: wrongReuse })).outcome, "wrong_notice");
+	const resolved = HEADS_UP_CASES.find((item) => item.id === "active-review-resolved")!;
+	assert.equal(assess(resolved, message({ kind: "none" })).outcome, "tn");
+});
+
+test("structured feedback is passed as model input but stays separate from grading rubrics", () => {
+	const item = HEADS_UP_CASES.find((testCase) => testCase.id === "migration-feedback-known")!;
+	const input = JSON.parse(buildCaseInput(item).body);
+	assert.equal(input.feedback[0].outcome, "known");
+	assert.deepEqual(input.feedback[0].evidenceIds, ["e02", "e03"]);
+	assert.ok(!buildCaseInput(item).body.includes(JSON.stringify(item.expected)));
 });
 
 test("invalid JSON, truncation and invented evidence are failures, never correct silence", () => {
@@ -83,7 +143,7 @@ test("required evidence and consequence anchors are separate and transparent che
 	const wrong = assess(positive, message({ ...positive.expected.reference, notices: [{ ...positive.expected.reference.notices[0], evidenceIds: ["e01"] }] }));
 	assert.equal(wrong.outcome, "wrong_notice");
 	assert.match(wrong.issues[0]!, /missing supporting evidence/);
-	const bad = structuredClone(positive); bad.id = "bad-case"; bad.expected = { ...positive.expected, evidenceGroups: [["not-sent"]] };
+	const bad = structuredClone(positive); bad.id = "bad-case"; bad.expected = { ...positive.expected, rubrics: [{ ...positive.expected.rubrics[0]!, evidenceGroups: [["not-sent"]] }] };
 	assert.throws(() => validateCases([bad]), /clipped out/);
 });
 

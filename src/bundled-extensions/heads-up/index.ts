@@ -150,7 +150,7 @@ export default function headsUp(pi: ExtensionAPI, settingsLoader = loadHeadsUpSe
 	pi.on("ui_prompt_end", () => { uiBlocked = false; });
 
 	pi.registerCommand("heads-up", {
-		description: "Passive observer: on | off | check | status | snapshot | model provider/id | prev | next | explain | discuss | dismiss | known | irrelevant",
+		description: "Passive observer: on | off | check | status | snapshot | model provider/id | prev | next | explain | discuss | dismiss | known | irrelevant | useful | incorrect",
 		handler: async (args, ctx) => {
 			const commandEpoch = epoch;
 			await initializing;
@@ -168,9 +168,9 @@ export default function headsUp(pi: ExtensionAPI, settingsLoader = loadHeadsUpSe
 				else ctx.ui.notify("Use /heads-up model provider/model-id", "info");
 			}
 			else if (action === "prev" || action === "next") { expanded = false; current.selectNotice(action === "prev" ? -1 : 1); }
-			else if (["dismiss", "known", "irrelevant"].includes(action)) {
+			else if (["dismiss", "known", "irrelevant", "useful", "incorrect"].includes(action)) {
 				const id = value ?? current.currentNotice?.id;
-				if (id) current.feedbackNotice(id, action as "dismiss" | "known" | "irrelevant");
+				if (id) current.feedbackNotice(id, action as "dismiss" | "known" | "irrelevant" | "useful" | "incorrect");
 			} else if (action === "explain") { if (current.explain(value)) { expanded = !expanded; render(); } }
 			else if (action === "discuss") {
 				const notice = current.explain(value);
@@ -180,10 +180,13 @@ export default function headsUp(pi: ExtensionAPI, settingsLoader = loadHeadsUpSe
 					ctx.ui.notify("Use an empty composer with no attachments to insert a note; Desktop has an Insert question button.", "info"); return;
 				}
 				ui.setEditorText(headsUpDiscussionDraft(notice));
-			} else if (action !== "status") { ctx.ui.notify("Use /heads-up on, off, check, status, snapshot, model, prev, next, explain, discuss, dismiss, known or irrelevant.", "info"); return; }
+			} else if (action !== "status") { ctx.ui.notify("Use /heads-up on, off, check, status, snapshot, model, prev, next, explain, discuss, dismiss, known, irrelevant, useful or incorrect.", "info"); return; }
 			if (action === "status" || action === "check" || action === "on" || action === "model") {
 				const state = current.snapshot();
-				ctx.ui.notify(`Heads up: ${state.phase} · ${state.model}\n${state.checks} checks · ${state.inputTokens} input/cache tokens · ${state.outputTokens} output tokens${state.reason ? `\n${state.reason}` : ""}`, "info");
+				const feedback = state.details?.feedback;
+				const local = feedback ? `\nLocal feedback: ${feedback.shown} shown · ${feedback.useful} useful · ${feedback.known} known · ${feedback.irrelevant} irrelevant · ${feedback.incorrect} incorrect · ${feedback.dismiss} dismissed` : "";
+				const cadence = (state.details?.discoveryMultiplier ?? 1) > 1 ? `\nNew discovery: ${state.details!.discoveryMultiplier}× interval after negative feedback; reviews and manual checks unchanged` : "";
+				ctx.ui.notify(`Heads up: ${state.phase} · ${state.model}\n${state.checks} checks · ${state.inputTokens} input/cache tokens · ${state.outputTokens} output tokens${state.reason ? `\n${state.reason}` : ""}${local}${cadence}`, "info");
 			}
 		},
 	});

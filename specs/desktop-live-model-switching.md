@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # Desktop live model switching
 
 <!-- markdownlint-disable MD013 -->
@@ -16,11 +21,12 @@ Keep Desktop model and thinking selection available while the agent is running, 
 
 ## Behavior
 
+- Model + Thinking opens as a [nonmodal status-bar popup](desktop-model-picker-popup.md), not a blocking modal; see [decision 0049](../docs/decisions/0049-nonmodal-model-picker.md). Its actual current model is the initial search-active row. Model rows remain outside the normal Tab sequence. Enter on a model row or thinking chip confirms like Apply; footer controls retain their own native Enter activation. Visibility-manage Enter toggles visibility instead.
 - Desktop keeps the combined model/thinking picker enabled while the active session is processing a prompt. When first-prompt model routing is enabled, the live picker also exposes `Auto`; selecting it opens or reuses the UI-only New Conversation draft and stages routing there instead of mutating the active live session.
 - `Auto` stays at the top of the normal combined picker independent of current-model sorting and fuzzy search. Visibility-management mode remains concrete-model-only.
 - On opening, the staged selection and keyboard-active row are the actual current session/draft model, not the pinned `Auto` row (unless Auto is current). An empty search preserves the staged model. Selection uses the row background and `current` label, without a selection checkmark; visibility-management checkboxes remain.
 - In selection mode, Left/Right cycle the staged model's supported thinking levels from search, model rows, or other picker controls; Up/Down in search navigate models. Thinking-radio arrows also move radio focus and apply only one step. Auto has no manual thinking adjustment.
-- Apply/Enter confirms even an unchanged selection without a redundant config request. Successful confirmation closes the picker; closing restores input focus to the composer after the native dialog teardown. Failed apply keeps the picker open with its error.
+- Apply/Enter confirms even an unchanged selection without a redundant config request. Successful confirmation closes the picker and restores input focus to the composer. Escape/Cancel restore trigger focus; outside dismissal does not redirect focus. Failed apply keeps the picker open with its error.
 - The picker exposes `Set default`. For a concrete staged selection it persists that model and staged thinking as the Desktop future-session default; for `Auto` it enables routing and persists `modelRouting.default: true`. The picker marks the saved default and does not have to apply the staged selection to save it.
 - The same picker is visible on a UI-only New Conversation draft before its first prompt. In that state the selection is staged locally from the sessionless draft config catalogue; it does not require an active session runtime and does not send `session/set_config_option`. The catalogue loads workspace and bundled extensions without creating an `AgentSession`, so extension-registered providers such as pi-tools-suite's Antigravity models are selectable before materialization.
 - Each draft catalogue request reloads extension discovery, so newly added workspace providers do not require an ACP backend restart. Changes to an already-loaded extension module follow Pi's normal module-cache lifecycle.
@@ -37,7 +43,7 @@ Keep Desktop model and thinking selection available while the agent is running, 
 - Model-specific resource reload is not forced in the middle of an active run. TUI explicitly skips `session.reload()` while streaming, and Desktop continues to use the existing ACP/Pi model-change path rather than introducing a separate reload or cancellation flow.
 - Existing guards still prevent live-session model changes when the Desktop session runtime is unavailable, another config change is in progress, or a conflicting Desktop operation is running. The runtime-availability guard is intentionally replaced by draft-config availability while the UI-only draft is active.
 
-## Related files
+## Implementation
 
 - `desktop/src/app/model-config.svelte.ts`
 - `desktop/src/app/model-config-actions.ts`
@@ -53,14 +59,28 @@ Keep Desktop model and thinking selection available while the agent is running, 
 - `desktop/src/lib/model-display.ts`
 - `desktop/src/lib/model-thinking-preferences.ts`
 - `desktop/src/lib/model-picker-navigation.ts`
-- `desktop/src/lib/modal-dialog.ts`
+- `desktop/src/lib/model-picker-popover.ts`
 - `src/config.ts`
 - `schemas/pix-desktop.json`
 - `acp/src/acp/config-options.ts`
 - `acp/src/acp/draft-model-runtime.ts`
 - `acp/src/acp/pix-acp-agent.ts`
 - `src/app/commands/command-model-actions.ts`
+
+## Tests
+
+- `desktop/src/components/ModelThinkingPicker.test.ts`
+- `desktop/src/components/DesktopModelThinkingPreferences.test.ts`
+- `desktop/src/app/model-draft-config.test.ts`
+- `desktop/src/app/model-picker-state.test.ts`
+- `desktop/src/app/session-metadata.test.ts`
+- `desktop/src/lib/model-thinking-preferences.test.ts`
+- `desktop/src/lib/model-display.test.ts`
+- `desktop/src/lib/model-picker-navigation.test.ts`
+- `desktop/src/lib/model-picker-popover.test.ts`
 - `tests/command-model-actions.test.ts`
+- `acp/test/config-options.test.ts`
+- `acp/test/agent.test.ts`
 
 ## Verification
 
@@ -72,4 +92,4 @@ Keep Desktop model and thinking selection available while the agent is running, 
 - ACP agent tests cover the `thinking_level_changed` → `config_option_update` push: notification content and session id, burst coalescing through the generation guard, and skipping the push when pi state discovery fails.
 - Desktop metadata-store coverage applies a pushed `config_option_update` to the active session state and the per-session runtime map (background sessions update only the runtime map).
 - Desktop model-display tests cover the Claude Code provider's Anthropic glyph and color mapping.
-- `desktop/src/lib/model-picker-navigation.test.ts` covers current/Auto initialization, search, and supported-effort arrow cycling; `desktop/src/lib/modal-dialog.test.ts` covers teardown ordering and non-competing composer focus restoration. `desktop/src/components/ModelThinkingPicker.test.ts` guards the keyboard/confirmation wiring.
+- `desktop/src/lib/model-picker-navigation.test.ts` covers current/Auto initialization, search, and supported-effort arrow cycling. `desktop/src/lib/model-picker-popover.test.ts` covers popup placement, dismissal, focus and listener cleanup; `desktop/src/app/model-picker-state.test.ts` covers repeat activation and late opening completion. `desktop/src/components/ModelThinkingPicker.test.ts` guards keyboard/confirmation wiring and stale Apply completion.

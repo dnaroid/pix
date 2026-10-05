@@ -12,6 +12,9 @@ export interface HeadsUpEvidence {
 
 export interface HeadsUpNotice {
 	readonly id: string;
+	/** Model-supplied issue identity; both fields present or both absent (legacy). */
+	readonly topic?: string;
+	readonly subject?: string;
 	readonly title: string;
 	readonly consequence: string;
 	readonly evidence: readonly HeadsUpEvidence[];
@@ -20,7 +23,26 @@ export interface HeadsUpNotice {
 }
 
 export type HeadsUpPhase = "off" | "idle" | "checking" | "cooldown" | "unavailable" | "limited" | "error";
-export type HeadsUpFeedback = "dismiss" | "known" | "irrelevant";
+export type HeadsUpFeedback = "dismiss" | "known" | "irrelevant" | "useful" | "incorrect";
+
+export interface HeadsUpFeedbackRecord {
+	readonly outcome: "shown" | HeadsUpFeedback;
+	readonly topic?: string;
+	readonly subject?: string;
+	readonly title: string;
+	readonly consequence: string;
+	readonly evidenceIds: readonly string[];
+}
+
+/** Runtime-local counters only, not durable telemetry or a user knowledge profile. */
+export interface HeadsUpFeedbackSummary {
+	readonly shown: number;
+	readonly useful: number;
+	readonly known: number;
+	readonly irrelevant: number;
+	readonly incorrect: number;
+	readonly dismiss: number;
+}
 
 export type HeadsUpCheckResult = "running" | "none" | "notice" | "duplicate" | "invalid" | "error" | "timeout" | "cancelled";
 
@@ -41,6 +63,9 @@ export interface HeadsUpDetails {
 	/** Earliest reservation expiry; it need not release enough budget for a check. */
 	readonly windowResetsAt: number | null;
 	readonly lastCheck: HeadsUpLastCheck | null;
+	readonly feedback?: HeadsUpFeedbackSummary;
+	readonly discoveryMultiplier?: 1 | 2 | 4;
+	readonly discoveryEligibleAt?: number;
 }
 
 /** Carried as `data` on the session-scoped `heads-up` state channel. */

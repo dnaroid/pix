@@ -7,7 +7,6 @@
   import PreviewPane from "./PreviewPane.svelte";
   import PromptComposer from "./PromptComposer.svelte";
   import QueuedMessagesPanel from "./QueuedMessagesPanel.svelte";
-  import SessionInspector from "./SessionInspector.svelte";
   import SessionStartView from "./SessionStartView.svelte";
   import TranscriptPane from "./TranscriptPane.svelte";
   import WorkbenchTerminalPane from "./WorkbenchTerminalPane.svelte";
@@ -42,7 +41,6 @@
     lspInstallVisible,
     terminal,
     terminalVisible,
-    inspector,
     transcriptPane = $bindable(null),
     transcriptContent = $bindable(null),
     promptComposer = $bindable(null),
@@ -66,7 +64,6 @@
     lspInstallVisible: boolean;
     terminal: ComponentProps<typeof WorkbenchTerminalPane> | null;
     terminalVisible: boolean;
-    inspector: ComponentProps<typeof SessionInspector> | null;
     transcriptPane?: HTMLDivElement | null;
     transcriptContent?: HTMLDivElement | null;
     promptComposer?: PromptComposerHandle | null;
@@ -170,8 +167,4 @@
       </div>
     {/if}
   </div>
-
-  {#if inspector}
-    <SessionInspector {...inspector} />
-  {/if}
 </div>

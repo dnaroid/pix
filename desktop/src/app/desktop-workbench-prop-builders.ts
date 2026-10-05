@@ -21,12 +21,11 @@ import type { createPromptRuntime } from "./prompt-runtime.svelte";
 import type { createPromptSubmit } from "./prompt-submit";
 import type { createQuestionImageController } from "./question-images";
 import type { createSessionHistory } from "./session-history.svelte";
-import type { createSessionInspectorPreference } from "./session-inspector-preference.svelte";
 import type { createSessionTabController } from "./session-tab-controller";
 import type { createTranscriptAttachmentController } from "./transcript-attachments";
 import type { createTranscriptScrollController } from "./transcript-scroll.svelte";
 import type { QuotaWaitStore } from "./quota-wait.svelte";
-import type { HeadsUpStore } from "./heads-up.svelte";
+import type { HeadsUpFeedback, HeadsUpStore } from "./heads-up.svelte";
 import type { createWorkspaceController } from "./workspace-controller";
 
 export type DesktopWorkbenchSurfaceViewProps = Omit<
@@ -34,7 +33,6 @@ export type DesktopWorkbenchSurfaceViewProps = Omit<
   "transcriptPane" | "transcriptContent" | "promptComposer" | "promptText" | "previewPane" | "terminalPane"
 >;
 
-type InspectorProps = NonNullable<DesktopWorkbenchSurfaceViewProps["inspector"]>;
 type SessionStartProps = NonNullable<DesktopWorkbenchSurfaceViewProps["sessionStart"]>;
 
 export type WorkbenchShellBuilderOptions = {
@@ -103,19 +101,6 @@ export type WorkbenchEditorBuilderOptions = {
   git: ReturnType<typeof createGitWorkspaceStore>;
   gitAssist: ReturnType<typeof createGitAssist>;
   lspOnboarding: LspOnboardingStore;
-};
-
-export type WorkbenchInspectorBuilderOptions = {
-  activeSessionId: () => string | null;
-  activeTitle: () => string;
-  activeSessionActivity: () => InspectorProps["summary"];
-  activeTodoSnapshot: () => InspectorProps["todoSnapshot"];
-  activeSubagentSnapshot: () => InspectorProps["subagentSnapshot"];
-  activeBrainstormSnapshot: () => InspectorProps["brainstormSnapshot"];
-  canClearTodos: () => boolean;
-  clearSessionTodos: (sessionId: string) => Promise<boolean>;
-  openBrainstormParticipant: (sessionId: string) => void | Promise<void>;
-  inspectorPreference: ReturnType<typeof createSessionInspectorPreference>;
 };
 
 export function buildWorkbenchShellProps(
@@ -198,14 +183,14 @@ export function buildWorkbenchConversationProps(
         const observerNotice = options.headsUp.notice(sessionId);
         const observerSnapshot = options.headsUp.state(sessionId);
         if (!observerNotice || !observerSnapshot) return null;
-        const feedbackCommands = ["known", "irrelevant", "dismiss"].map((action) => `/heads-up ${action} ${observerNotice.id}`);
+        const feedbackCommands = ["known", "irrelevant", "dismiss", "useful", "incorrect"].map((action) => `/heads-up ${action} ${observerNotice.id}`);
         return {
           notice: observerNotice,
           snapshot: observerSnapshot,
           notices: options.headsUp.notices(sessionId),
           onNavigate: (direction: -1 | 1) => options.headsUp.selectNotice(sessionId!, observerNotice.id, direction, observerSnapshot.instanceId),
           pending: feedbackCommands.some((command) => options.headsUp.isPending(sessionId, command)),
-          onFeedback: (feedback: "known" | "irrelevant" | "dismiss") => {
+          onFeedback: (feedback: HeadsUpFeedback) => {
             void options.headsUp.sendFeedback(sessionId!, feedback, observerNotice.id, observerSnapshot.instanceId);
           },
           onDiscuss: () => {
@@ -342,28 +327,5 @@ export function buildWorkbenchEditorProps(
     lspInstallVisible: options.activeWorkbenchTabId() === "lsp-install",
     terminal: options.terminalOpen() ? { workspace: options.workspace() } : null,
     terminalVisible: options.activeWorkbenchTabId() === "terminal",
-  };
-}
-
-export function buildWorkbenchInspectorProps(
-  options: WorkbenchInspectorBuilderOptions,
-): Pick<DesktopWorkbenchSurfaceViewProps, "inspector"> {
-  const sessionId = options.activeSessionId();
-  return {
-    inspector: options.inspectorPreference.open && sessionId ? {
-      activeSessionId: sessionId,
-      sessionTitle: options.activeTitle(),
-      summary: options.activeSessionActivity(),
-      todoSnapshot: options.activeTodoSnapshot(),
-      subagentSnapshot: options.activeSubagentSnapshot(),
-      brainstormSnapshot: options.activeBrainstormSnapshot(),
-      canClearTodos: options.canClearTodos(),
-      onClearTodos: () => {
-        const activeSessionId = options.activeSessionId();
-        return activeSessionId ? options.clearSessionTodos(activeSessionId) : Promise.resolve(false);
-      },
-      onClose: () => options.inspectorPreference.setOpen(false),
-      onOpenBrainstormParticipant: options.openBrainstormParticipant,
-    } : null,
   };
 }

@@ -39,7 +39,7 @@
     sessionSubagentSnapshot,
     sessionTodoSnapshot,
     sessionBrainstormSnapshot,
-    sessionActivityOpen,
+    onOpenBrainstormParticipant,
     sessionNeedsInput,
     canClearTodos,
     onSetConfig,
@@ -47,7 +47,6 @@
     onOpenSessionUsage,
     onRefreshClaudeLimits = () => {},
     onClearTodos,
-    onOpenSessionActivity,
   }: {
     showSkeletons?: boolean;
     configOptions: SessionConfigOption[];
@@ -79,7 +78,7 @@
     sessionSubagentSnapshot: SessionSubagentSnapshot | undefined;
     sessionTodoSnapshot: SessionTodoSnapshot | undefined;
     sessionBrainstormSnapshot?: SessionBrainstormSnapshot;
-    sessionActivityOpen: boolean;
+    onOpenBrainstormParticipant?: (sessionId: string) => void;
     sessionNeedsInput: boolean;
     canClearTodos: boolean;
     onSetConfig: (option: SessionConfigOption, value: string | boolean) => void;
@@ -87,7 +86,6 @@
     onOpenSessionUsage: () => void;
     onRefreshClaudeLimits?: () => void;
     onClearTodos: () => Promise<boolean>;
-    onOpenSessionActivity: () => void;
   } = $props();
 
   const modelThinking = $derived(modelThinkingConfigState(configOptions));
@@ -118,6 +116,7 @@
         ]}
         type="button"
         aria-label="Select model and thinking level"
+        data-model-thinking-trigger
         aria-haspopup="dialog"
         aria-expanded={modelThinkingOpen}
         disabled={!canConfigure || changingConfig !== null}
@@ -163,6 +162,7 @@
         <span class="max-w-[240px] truncate font-mono tabular-nums">{quotaWaitIndicator.label}</span>
       </button>
     {/if}
+    {#key observer?.sessionId}
     <RuntimeStatusBarItems
       status={runtimeStatus}
       {showSkeletons}
@@ -176,6 +176,7 @@
       onOpenSessionUsage={onOpenSessionUsage}
       onRefreshClaudeLimits={onRefreshClaudeLimits}
     />
+    {/key}
     {#each configOptions as option (option.id)}
       {#if option.id === "model" || option.id === "thought_level"}
         <!-- Model + thinking are presented as one staged control above. -->
@@ -213,11 +214,11 @@
   </div>
 
   <div class="flex shrink-0 items-center gap-0.5" data-status-right>
+  {#key observer?.sessionId}
   <SessionBrainstormStatus
     snapshot={sessionBrainstormSnapshot}
-    open={sessionActivityOpen}
-    trailingSeparator={!!observer || (!sessionActivityOpen && (sessionActivity.activeSubagents > 0 || (sessionActivity.openTodos > 0 && sessionActivity.totalTodos > 0)))}
-    onOpen={onOpenSessionActivity}
+    onOpenParticipant={onOpenBrainstormParticipant}
+    trailingSeparator={!!observer || sessionActivity.activeSubagents > 0 || (sessionActivity.openTodos > 0 && sessionActivity.totalTodos > 0)}
   />
   {#if observer}
     <ObserverStatus {...observer} />
@@ -229,10 +230,9 @@
     todoSnapshot={sessionTodoSnapshot}
     {promptRunning}
     {sessionNeedsInput}
-    {sessionActivityOpen}
     {canClearTodos}
     {onClearTodos}
-    {onOpenSessionActivity}
   />
+  {/key}
   </div>
 </footer>

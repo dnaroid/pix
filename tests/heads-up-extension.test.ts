@@ -120,6 +120,13 @@ test("TUI stack commands navigate one card without inference and discuss/feedbac
 	await h.command("dismiss"); assert.equal(h.snapshots.at(-1)?.notices?.length, 2);
 	assert.equal(h.snapshots.at(-1)?.notice?.title, "Isolation");
 	await h.command("prev"); assert.equal(h.snapshots.at(-1)?.notice?.title, "Compatibility");
+	await h.command("incorrect");
+	assert.equal(h.snapshots.at(-1)?.details?.feedback?.incorrect, 1);
+	assert.equal(h.snapshots.at(-1)?.details?.discoveryMultiplier, 2);
+	await h.command("useful");
+	assert.equal(h.snapshots.at(-1)?.notices?.length, 0);
+	assert.equal(h.snapshots.at(-1)?.details?.feedback?.useful, 1);
+	assert.equal(h.snapshots.at(-1)?.details?.discoveryMultiplier, 1);
 	assert.equal(h.requests.length, 1);
 });
 

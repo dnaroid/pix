@@ -1,12 +1,5 @@
 import type { SessionConfigOption } from "@agentclientprotocol/sdk";
 import { modelThinkingConfigState } from "../lib/model-thinking";
-import {
-  createSessionInspectorActivityTracker,
-  syncSessionInspectorActivity,
-} from "../lib/session-inspector-activity-policy";
-import type { SessionSubagentSnapshot } from "../lib/session-subagents";
-import type { SessionTodoSnapshot } from "../lib/session-todos";
-import type { SessionBrainstormSnapshot } from "../lib/session-brainstorm";
 import { createAttachmentDraftOwnership } from "./attachment-draft-ownership";
 import { createRegistryStartupLoader, type RegistryStartupState } from "./registry-startup";
 import {
@@ -34,11 +27,6 @@ type DesktopRootEffectsOptions = {
   activeWorkbenchTabId: () => WorkbenchTabId | null;
   setActiveWorkbenchTabId: (id: WorkbenchTabId | null) => void;
   workbenchTabs: () => readonly WorkbenchTab[];
-  activeTodoSnapshot: () => SessionTodoSnapshot | undefined;
-  activeSubagentSnapshot: () => SessionSubagentSnapshot | undefined;
-  activeBrainstormSnapshot: () => SessionBrainstormSnapshot | undefined;
-  sessionInspectorOpen: () => boolean;
-  setSessionInspectorOpen: (open: boolean) => void;
   markSessionTabViewed: (sessionId: string) => void;
 };
 
@@ -56,7 +44,6 @@ export function createDesktopRootEffects(options: DesktopRootEffectsOptions) {
   });
   let previousPreviewWorkspace: string | null = null;
   let previousConversationWorkbenchTabId: WorkbenchTabId | null = null;
-  const inspectorActivityTracker = createSessionInspectorActivityTracker();
 
   $effect(() => {
     const sessionId = options.activeSessionId();
@@ -84,18 +71,6 @@ export function createDesktopRootEffects(options: DesktopRootEffectsOptions) {
       options.resetPreviewForWorkspaceChange();
     }
     previousPreviewWorkspace = currentWorkspace;
-  });
-
-  $effect(() => {
-    syncSessionInspectorActivity(
-      inspectorActivityTracker,
-      options.activeSessionId(),
-      options.activeTodoSnapshot(),
-      options.activeSubagentSnapshot(),
-      options.sessionInspectorOpen(),
-      options.setSessionInspectorOpen,
-      options.activeBrainstormSnapshot(),
-    );
   });
 
   $effect(() => {

@@ -16,7 +16,7 @@ export function createDesktopViewModelServices(options: DesktopViewModelServices
     reportError: (error) => options.errors.report(error),
   });
   const navigation = createDesktopNavigationViewModelServices(options);
-  const workbench = createDesktopWorkbenchViewModelServices(options, todoActions);
+  const workbench = createDesktopWorkbenchViewModelServices(options);
   const shell = createDesktopShellViewModelServices(options, todoActions);
 
   return {

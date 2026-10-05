@@ -31,7 +31,6 @@
     providerUsageUrl,
   } from "../lib/session-usage";
   import { openExternalHref } from "../lib/external-links";
-  import { createHoverDismissal } from "../lib/hover-dismissal";
   import { modelDisplayToneClass, modelProviderBrand, modelRefTone } from "../lib/model-display";
   import ModelProviderIcon from "./ModelProviderIcon.svelte";
   import QuotaResetCalendar from "./QuotaResetCalendar.svelte";
@@ -70,7 +69,6 @@
   let now = $state(Date.now());
   let usageLinkFailed = $state(false);
   let usageLinkRequest = 0;
-  const hoverDismissal = createHoverDismissal();
   const WEEKLY_DAY_SEGMENTS = 7;
   const contextPercent = $derived(status?.context?.percent);
   const contextTone = $derived(contextPercent === null || contextPercent === undefined ? undefined : contextUsageTone(contextPercent));
@@ -87,35 +85,36 @@
     const timer = window.setInterval(() => now = Date.now(), 60_000);
     return () => {
       window.clearInterval(timer);
-      hoverDismissal.dispose();
     };
   });
 
   function closeOutside(event: PointerEvent): void {
     if ((!contextOpen && !usageOpen) || root?.contains(event.target as Node)) return;
-    hoverDismissal.cancel();
     contextOpen = false;
     usageOpen = false;
   }
 
   function handleKeydown(event: KeyboardEvent): void {
     if (event.key === "Escape" && (contextOpen || usageOpen)) {
-      hoverDismissal.cancel();
+      event.preventDefault();
+      const panel = root?.querySelector<HTMLElement>(contextOpen ? '[data-context-region] button' : '[data-usage-region] button');
+      panel?.focus();
       contextOpen = false;
       usageOpen = false;
       event.stopPropagation();
     }
   }
 
-  function openContext(): void {
-    hoverDismissal.cancel();
-    contextOpen = true;
+  function toggleContext(): void {
+    contextOpen = !contextOpen;
     usageOpen = false;
   }
 
-  function openUsage(): void {
-    hoverDismissal.cancel();
-    if (usageOpen) return;
+  function toggleUsage(): void {
+    if (usageOpen) {
+      usageOpen = false;
+      return;
+    }
     usageLinkRequest += 1;
     usageOpen = true;
     usageLinkFailed = false;
@@ -123,27 +122,11 @@
     onOpenSessionUsage();
   }
 
-  function leaveDetails(event: PointerEvent | FocusEvent, panel: "context" | "usage"): void {
+  function leaveDetails(event: FocusEvent, panel: "context" | "usage"): void {
     const region = event.currentTarget as HTMLElement;
     if (event.relatedTarget instanceof Node && region.contains(event.relatedTarget)) return;
-    // Keep interactive details reachable by either pointer or keyboard.
-    if (event.type === "pointerleave" && region.contains(document.activeElement)) return;
-    if (event.type === "focusout" && region.matches(":hover")) return;
-    function dismiss(): void {
-      if (panel === "context") contextOpen = false;
-      else usageOpen = false;
-    }
-    if (event.type === "pointerleave") {
-      // A diagonal path can briefly leave the narrow trigger before reaching
-      // the wider popup. Recheck ownership in case focus arrived meanwhile.
-      hoverDismissal.schedule(
-        () => region.matches(":hover") || region.contains(document.activeElement),
-        dismiss,
-      );
-    } else {
-      hoverDismissal.cancel();
-      dismiss();
-    }
+    if (panel === "context") contextOpen = false;
+    else usageOpen = false;
   }
 
   async function openProviderUsage(url: string): Promise<void> {
@@ -295,9 +278,7 @@
   >
     {#if status?.context || status?.dcpTokensSaved !== undefined}
       <div class="relative min-w-0" data-runtime-context role="group" aria-label="Context"
-        onpointerenter={openContext}
-        onpointerleave={(event) => leaveDetails(event, "context")}
-        onfocusin={openContext}
+        data-context-region
         onfocusout={(event) => leaveDetails(event, "context")}
       >
         <button
@@ -307,7 +288,7 @@
           aria-haspopup="dialog"
           aria-expanded={contextOpen}
           aria-controls="runtime-context-popover"
-          onclick={openContext}
+          onclick={toggleContext}
         >
           <span class="font-sans text-xs text-muted-foreground">ctx</span>
           <span class={contextTone ? toneTextClass(contextTone) : "text-muted-foreground"}>{contextPercent === null || contextPercent === undefined ? "?%" : `${Math.round(contextPercent)}%`}</span>
@@ -323,6 +304,7 @@
             class="absolute bottom-full left-0 z-50 w-max max-w-[min(360px,calc(100vw-16px))]"
             role="dialog"
             aria-label="Context usage details"
+            tabindex="0"
           >
             <div class="rounded-md border border-border bg-popover px-2.5 py-2 text-popover-foreground shadow-md">
               <div class="font-mono text-xs text-muted-foreground">{contextTitle()}</div>
@@ -347,9 +329,7 @@
 
     {#if sessionUsageAvailable || status?.modelUsage || status?.headerUsage}
       <div class="relative ml-auto min-w-0 shrink-0 max-w-full" role="group" aria-label="Usage"
-        onpointerenter={openUsage}
-        onpointerleave={(event) => leaveDetails(event, "usage")}
-        onfocusin={openUsage}
+        data-usage-region
         onfocusout={(event) => leaveDetails(event, "usage")}
       >
         <button
@@ -359,7 +339,7 @@
           aria-haspopup="dialog"
           aria-expanded={usageOpen}
           aria-controls="runtime-usage-popover"
-          onclick={openUsage}
+          onclick={toggleUsage}
         >
           <span class="font-sans text-xs text-muted-foreground @max-[380px]/runtime-status:hidden">Usage</span>
           {#if usageAccountLabel}

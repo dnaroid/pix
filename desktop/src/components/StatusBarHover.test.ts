@@ -6,6 +6,7 @@ import brainstormStatus from "./SessionBrainstormStatus.svelte?raw";
 import activityHud from "./SessionActivityStatusHud.svelte?raw";
 import providerIcon from "./ModelProviderIcon.svelte?raw";
 import resetCredits from "./ResetCreditsSection.svelte?raw";
+import popover from "./StatusBarPopover.svelte?raw";
 
 const sources = {
   StatusBar: statusBar,
@@ -21,7 +22,7 @@ function source(name: keyof typeof sources): string {
   return sources[name];
 }
 
-describe("Status bar hover surfaces", () => {
+describe("Status bar click surfaces", () => {
   it("layers opaque runtime popovers above positioned composer content", () => {
     expect(source("StatusBar")).toMatch(/<footer class="relative z-20 /);
     expect(source("RuntimeStatusBarItems").match(/\bbg-popover\b/g)).toHaveLength(2);
@@ -46,14 +47,16 @@ describe("Status bar hover surfaces", () => {
     }
   });
 
-  it("opens Observer idempotently without stealing focus and retains pointer/focus ownership", () => {
+  it("opens all status details only on activation, never hover or focus", () => {
+    for (const content of [runtimeStatus, observerStatus, brainstormStatus, activityHud, popover]) {
+      expect(content).not.toMatch(/on(?:pointerenter|mouseenter|focusin|focus)=/);
+      expect(content).not.toContain("group-hover:block");
+      expect(content).not.toContain("group-focus-within:block");
+    }
     const observer = source("ObserverStatus");
-    expect(observer).toContain("onpointerenter={openPopup}");
-    expect(observer).toContain("onfocusin={openPopup}");
-    expect(observer).toContain("if (open) return;");
+    expect(observer).toContain("onclick={togglePopup}");
+    expect(observer).toContain("if (open) closePopup(false);");
     expect(observer).toContain("region.contains(event.relatedTarget)");
-    expect(observer).toContain("region.contains(document.activeElement)");
-    expect(observer).toContain('region.matches(":hover")');
     expect(observer).not.toContain("popup?.focus()");
     expect(observer.indexOf("trigger?.focus()")).toBeLessThan(observer.indexOf("open = false;", observer.indexOf("function closePopup")));
   });
@@ -61,26 +64,28 @@ describe("Status bar hover surfaces", () => {
   it("aligns popup lower edges with Plan, touching the trigger without a gap", () => {
     expect(source("ObserverStatus")).toContain("bottom:${position.bottom}px");
     expect(source("ObserverStatus")).not.toContain("position.bottom - 6");
-    expect(source("SessionBrainstormStatus")).toContain("bottom-full");
+    expect(popover).toContain("bottom-full");
     expect(source("RuntimeStatusBarItems").match(/bottom-full/g)).toHaveLength(2);
-    expect(source("SessionActivityStatusHud").match(/bottom-full/g)).toHaveLength(2);
+    expect(source("SessionActivityStatusHud")).toContain("<StatusBarPopover");
     expect(source("SessionActivityStatusHud")).toContain('"flex h-6 items-center justify-center gap-1');
     for (const name of ["ObserverStatus", "SessionBrainstormStatus", "RuntimeStatusBarItems"] as const) {
       expect(source(name)).not.toContain("pb-1.5");
     }
   });
 
-  it("allows pointer travel to runtime details without delaying explicit dismissal", () => {
+  it("toggles details and dismisses outside or on Escape without hover timers", () => {
     const runtime = source("RuntimeStatusBarItems");
-    expect(runtime).toContain("const hoverDismissal = createHoverDismissal();");
-    for (const next of ["contextOpen = true;", "if (usageOpen) return;", "contextOpen = false;\n    usageOpen = false;"]) {
-      expect(runtime).toContain(`hoverDismissal.cancel();\n    ${next}`);
+    expect(runtime).toContain("contextOpen = !contextOpen;");
+    expect(runtime).toContain("if (usageOpen) {");
+    expect(runtime).not.toContain("hoverDismissal");
+    for (const content of [runtime, popover]) {
+      expect(content).toContain('event.key === "Escape"');
+      expect(content).toMatch(/onpointerdown=\{(?:closeOutside|outside)\}/);
     }
-    expect(runtime).toContain('if (event.type === "pointerleave")');
-    expect(runtime).toContain("hoverDismissal.schedule(");
-    expect(runtime).toContain('() => region.matches(":hover") || region.contains(document.activeElement)');
-    expect(runtime).toContain("hoverDismissal.dispose();");
-    expect(runtime).toContain("hoverDismissal.cancel();\n      dismiss();");
+    expect(popover).toContain("open = !open;");
+    expect(popover).toContain("hidden={!open}");
+    expect(popover).toContain("invoker?.focus()");
+    expect(statusBar.match(/\{#key observer\?\.sessionId\}/g)).toHaveLength(2);
   });
 
   it("replaces quota prose with a separately labelled reset calendar", () => {

@@ -1,12 +1,10 @@
 import {
   buildWorkbenchConversationProps,
   buildWorkbenchEditorProps,
-  buildWorkbenchInspectorProps,
   buildWorkbenchShellProps,
   type DesktopWorkbenchSurfaceViewProps,
   type WorkbenchConversationBuilderOptions,
   type WorkbenchEditorBuilderOptions,
-  type WorkbenchInspectorBuilderOptions,
   type WorkbenchShellBuilderOptions,
 } from "./desktop-workbench-prop-builders";
 
@@ -18,7 +16,6 @@ type DesktopWorkbenchViewModelOptions = {
   shell: WorkbenchShellBuilderOptions;
   conversation: WorkbenchConversationBuilderOptions;
   editor: WorkbenchEditorBuilderOptions;
-  inspector: WorkbenchInspectorBuilderOptions;
 };
 
 export function createDesktopWorkbenchViewModel(options: DesktopWorkbenchViewModelOptions) {
@@ -28,7 +25,6 @@ export function createDesktopWorkbenchViewModel(options: DesktopWorkbenchViewMod
     ...buildWorkbenchShellProps(options.shell),
     ...buildWorkbenchConversationProps(options.conversation),
     ...buildWorkbenchEditorProps(options.editor),
-    ...buildWorkbenchInspectorProps(options.inspector),
   }));
 
   return {

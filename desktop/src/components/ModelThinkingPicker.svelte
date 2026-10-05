@@ -5,7 +5,7 @@
   import type { SessionConfigOption } from "@agentclientprotocol/sdk";
   import ModelProviderIcon from "./ModelProviderIcon.svelte";
   import { fuzzySearch } from "../lib/fuzzy";
-  import { activateModalDialog } from "../lib/modal-dialog";
+  import { activateModelPickerPopover } from "../lib/model-picker-popover";
   import { pickerModelIndex, nextPickerThinking } from "../lib/model-picker-navigation";
   import { modelDisplayToneClass, thinkingLevelTone } from "../lib/model-display";
   import {
@@ -55,6 +55,9 @@
   let visibilityMode = $state(false);
   let visibleRefs = $state<string[] | undefined>(undefined);
   let initialized = false;
+  let alive = false;
+  let popover: ReturnType<typeof activateModelPickerPopover> | undefined;
+  let position = $state({ left: 8, bottom: 32, width: 520, maxHeight: 600 });
   const thinkingByModel = new Map<string, string>();
 
   const pickerModels = $derived(visibilityMode
@@ -91,6 +94,7 @@
   );
 
   onMount(() => {
+    alive = true;
     visibleRefs = visibleModelRefs === undefined ? undefined : [...visibleModelRefs];
     for (const [modelRef, thinkingLevel] of Object.entries(rememberedThinkingByModel)) {
       thinkingByModel.set(modelRef, thinkingLevel);
@@ -103,9 +107,16 @@
     }
     selectedIndex = pickerModelIndex(filteredModels, selectedModelRef, query, visibilityMode);
     initialized = true;
-    if (!dialogElement) return;
-    return activateModalDialog(dialogElement, () => search, restoreFocus);
+    if (dialogElement) popover = activateModelPickerPopover(dialogElement, search, onClose, (next) => position = next);
+    return () => {
+      alive = false;
+      popover?.dispose();
+    };
   });
+
+  function closePopup(): void {
+    popover?.close();
+  }
 
   $effect(() => {
     query;
@@ -126,6 +137,7 @@
     const model = filteredModels[selectedIndex];
     if (!model) return;
     void tick().then(() => {
+      if (!alive) return;
       panel?.querySelector<HTMLElement>(`[data-model-ref="${CSS.escape(model.ref)}"]`)
         ?.scrollIntoView({ block: "nearest" });
     });
@@ -242,6 +254,7 @@
       return;
     }
     if (!visibilityMode && event.target === search && event.key === "Tab" && !event.shiftKey) {
+      if (selectedAuto) return;
       const level = selectedThinking;
       event.preventDefault();
       void tick().then(() => {
@@ -283,13 +296,16 @@
     if (!selectedModel || disabled || applying) return;
     if (!dirty) {
       onClose();
+      restoreFocus?.();
       return;
     }
     applying = true;
     applyError = "";
     try {
       await onApply(selectedModel.ref, selectedThinking);
+      if (!alive) return;
       onClose();
+      restoreFocus?.();
     } catch (error) {
       applyError = error instanceof Error ? error.message : String(error);
     } finally {
@@ -312,21 +328,20 @@
     }
   }
 
-  function handleBackdropClick(event: MouseEvent): void {
-    if (event.target === event.currentTarget) onClose();
-  }
 </script>
 
 <dialog
   bind:this={dialogElement}
-  class="fixed inset-0 z-40 m-auto h-screen max-h-none w-screen max-w-none place-items-center border-0 bg-transparent p-6 text-foreground backdrop:bg-overlay open:grid"
+  open
+  data-model-thinking-popover
+  style={`left:${position.left}px;bottom:${position.bottom}px;width:${position.width}px`}
+  class="fixed z-50 m-0 max-w-none border-0 bg-transparent p-0 text-foreground"
   aria-labelledby="model-thinking-picker-title"
-  onclick={handleBackdropClick}
   onkeydown={handleKeydown}
-  oncancel={(event) => { event.preventDefault(); onClose(); }}
 >
   <div
-    class="grid max-h-[min(660px,calc(100vh-48px))] w-[min(620px,100%)] grid-rows-[auto_auto_minmax(0,1fr)_auto_auto] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-md"
+    class="grid w-full grid-rows-[auto_auto_minmax(0,1fr)_auto_auto] overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-md"
+    style:max-height={`${position.maxHeight}px`}
     bind:this={panel}
   >
     <header class="flex items-start justify-between gap-3 px-3.5 pt-3.5 pb-2.5">
@@ -349,7 +364,7 @@
           class="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
           type="button"
           aria-label="Close model and thinking picker"
-          onclick={onClose}
+          onclick={() => closePopup()}
         ><X class="h-4 w-4" aria-hidden="true" /></button>
       </div>
     </header>
@@ -477,7 +492,7 @@
         <button
           class="h-7 rounded-md px-2.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
           type="button"
-          onclick={onClose}
+          onclick={() => closePopup()}
         >{visibilityMode ? "Done" : "Cancel"}</button>
         {#if !visibilityMode}<button
           class="h-7 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"

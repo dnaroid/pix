@@ -113,9 +113,36 @@ use that initialized project (also from nested directories); do not pass
    A remaining `yes` can reflect unrelated unreviewed specs, not audit failure;
    report that distinction without claiming an unverified cause. Later changes
    can make acknowledged specs dirty again, so do not acknowledge while the
-   parent or another worker is still editing their declared dependencies.
+   parent or another worker is still editing the reviewed spec or its declared
+   dependencies. Unrelated concurrent edits do not require waiting or re-review.
 
-Return a compact result containing: audit outcome, documentation paths changed
+## Task completion versus global state
+
+Return two independent verdicts:
+
+- `task audit: passed | blocked`. Passed means the supplied task changes and
+  genuinely affected governing specs were reviewed, task-related drift and
+  escalations are resolved, required dependency coverage is complete, and any
+  eligible acknowledgment succeeded (or a reviewed no-impact result explains
+  why none is needed). Missing task evidence, uncovered task-related specs,
+  task-scoped command failures, or concurrent edits to reviewed specs/dependencies
+  remain blockers. Audit candidates are leads, not automatically affected specs.
+- `global knowledge dirty: yes | no | unknown`, with command exit codes and
+  check errors. A failed/incomplete check is unknown, never clean.
+
+The parent should close the audit todo when task-scoped review is complete;
+global knowledge dirty=yes alone must not keep it open. Do not require a global
+`no`, expand into other agents' work, or acknowledge unrelated specs to finish
+the task. If the cause of a remaining global `yes` is unknown, say unclassified;
+this alone does not block a fully evidenced task audit, but is not proof that
+the remaining dirtiness is unrelated. Likewise, report global-check errors
+separately; block the task only when they prevent establishing its review.
+Never call the entire knowledge base clean based on task-scoped success.
+Re-review only when later edits touch a reviewed spec or its dependencies,
+including shared files changed by another worker, not for any project mutation.
+
+Return a compact result containing: task audit verdict and blockers (if any),
+global knowledge dirty verdict separately, documentation paths changed
 (if any), index/final-audit results, knowledge dirty values/exit codes before and
 after review, exact acknowledged spec paths (or why acknowledgment was skipped),
 and an `ESCALATE` section for every serious

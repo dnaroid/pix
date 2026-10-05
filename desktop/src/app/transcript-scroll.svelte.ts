@@ -36,6 +36,7 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
   let savedScrollTop = 0;
   let activatedSessionId: string | null | undefined;
   let scrollRevision = 0;
+  let latestPendingRevision: number | undefined;
   const sessionPositions = new Map<string | null, { followsLatest: boolean; scrollTop: number }>();
   let lastScroll = snapshotScroll();
 
@@ -56,7 +57,11 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
   }
 
   function handleScroll(): void {
+    // Sending clears the composer and appends an attachment preview in the
+    // same render. Its layout/queued scrolls must not cancel explicit follow
+    // before tick completes, or later image decoding will no longer follow.
     if (!visible || restorePending || !options.pane()?.clientHeight) return;
+    if (latestPendingRevision === scrollRevision) return;
     const current = snapshotScroll()!;
     const previous = lastScroll?.pane === current.pane ? lastScroll : undefined;
     const geometryChanged = previous !== undefined
@@ -142,7 +147,9 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
     followsLatest = true;
     const sessionId = options.activeSessionId();
     const revision = ++scrollRevision;
+    latestPendingRevision = revision;
     await tick();
+    if (latestPendingRevision === revision) latestPendingRevision = undefined;
     if (revision !== scrollRevision || sessionId !== options.activeSessionId()) return;
     const pane = options.pane();
     if (visible && pane?.clientHeight) {

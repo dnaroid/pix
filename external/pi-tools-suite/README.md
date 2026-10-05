@@ -138,6 +138,14 @@ model-facing contract is:
    role is unavailable/disabled, run the existing parent-owned `repo_audit`
    fallback. An audit candidate is not proof of an error, and a reviewed
    no-impact result is valid.
+   Obtain the result before finalizing. Close the audit todo when task-scoped
+   review is complete, not only when the whole knowledge base is clean. Report
+   task audit `passed/blocked` separately from global dirty `yes/no/unknown` and
+   check errors. A global `yes` alone (including an unclassified cause) does not
+   block completion or prove unrelated dirtiness. Missing task coverage, drift,
+   and concurrent edits to reviewed specs/dependencies still require resolution;
+   unrelated parallel edits do not. Never acknowledge unrelated specs just to
+   obtain `no`, or claim global cleanliness from task-scoped success.
 
 Retrieval is bounded: output may be truncated, hybrid mode may degrade with
 diagnostics, and an empty result does not prove that no contract exists.
@@ -167,8 +175,9 @@ from code alone. The parent performs the same check if the auditor is absent.
 This is a prompt/workflow contract, not automatic enforcement or measurement.
 
 Mechanical refactors, typo/formatting edits, exact renames, and other changes
-that do not alter project behavior do not require this knowledge-maintenance
-lifecycle. Repo-aware tools still require both indexed project state and an
+that do not alter project behavior still need task-scoped review-state checks;
+a reviewed no-impact result is sufficient and no new contract is required.
+Repo-aware tools still require both indexed project state and an
 executable `idx`. The `knowledge-auditor` visibility gate intentionally
 requires only `.indexer-cli/`; if `idx` is missing at execution time, the
 child reports a blocker instead of installing or initializing anything. For

@@ -76,13 +76,31 @@ describe("built-in knowledge-auditor role", () => {
 		const catalog = buildSubagentCatalogPrompt(config, undefined, cwd)!;
 		expect(catalog).toContain("- knowledge-auditor:");
 		expect(catalog).toContain("Before finalizing, obtain its result");
-		expect(catalog).toContain("Later edits require re-review");
+		expect(catalog).toContain("Later edits to reviewed specs/dependencies require re-review");
+		expect(catalog).toContain("global knowledge dirty=yes alone must not keep it open");
+		expect(catalog).toContain("never acknowledge unrelated specs");
 		expect(catalog).toContain("spawning alone is not completion");
 		const routed = await routeSubagentTasks([
 			{ id: "audit", task: "Run the final knowledge audit", subagentType: "knowledge-auditor" },
 		], config, { cwd });
 		expect(routed.usedLlm).toBe(false);
 		expect(routed.tasks[0]?.subagentType).toBe("knowledge-auditor");
+	});
+
+	test("separates task completion from parallel agents' global dirtiness without weakening review", () => {
+		const role = loadSubagentConfig(tempDir(), {}).types["knowledge-auditor"];
+		const prompt = role.promptAppend!.replace(/\s+/g, " ");
+		expect(prompt).toContain("task audit: passed | blocked");
+		expect(prompt).toContain("global knowledge dirty: yes | no | unknown");
+		expect(prompt).toContain("global knowledge dirty=yes alone must not keep it open");
+		expect(prompt).toContain("cause of a remaining global `yes` is unknown, say unclassified");
+		expect(prompt).toContain("not proof that the remaining dirtiness is unrelated");
+		expect(prompt).toContain("failed/incomplete check is unknown, never clean");
+		expect(prompt).toContain("Unrelated concurrent edits do not require waiting or re-review");
+		expect(prompt).toContain("concurrent edits to reviewed specs/dependencies remain blockers");
+		expect(prompt).toContain("required dependency coverage is complete");
+		expect(prompt).toContain("Never call the entire knowledge base clean based on task-scoped success");
+		expect(prompt).toContain("never all specs merely to clear");
 	});
 
 	test("a same-name project role completely replaces the built-in role and announces the replacement", () => {

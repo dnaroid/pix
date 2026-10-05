@@ -4,7 +4,7 @@ import { EMPTY_SESSION_ACTIVITY } from "../lib/session-activity";
 import type { SessionTodoSnapshot } from "../lib/session-todos";
 import SessionActivityStatusHud from "./SessionActivityStatusHud.svelte";
 
-function renderProgress(completedTodos: number, totalTodos: number, sessionActivityOpen = false) {
+function renderProgress(completedTodos: number, totalTodos: number) {
   return render(SessionActivityStatusHud, {
     props: {
       summary: { ...EMPTY_SESSION_ACTIVITY, completedTodos, totalTodos, openTodos: totalTodos - completedTodos },
@@ -12,29 +12,45 @@ function renderProgress(completedTodos: number, totalTodos: number, sessionActiv
       todoSnapshot: undefined,
       promptRunning: false,
       sessionNeedsInput: false,
-      sessionActivityOpen,
-      onOpenSessionActivity: () => {},
     },
   }).body;
 }
 
 describe("status HUD todo progress ring", () => {
+  it("renders live activity as initially closed click popups without an inspector opener", () => {
+    const html = renderProgress(1, 3);
+    expect(html).toContain('aria-haspopup="dialog"');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain('hidden');
+    expect(html).not.toContain("Open session activity");
+  });
+
+  it("keeps excess agents accessible in the +N click popup", () => {
+    const agents = Array.from({ length: 8 }, (_, index) => ({ id: `worker-${index}`, status: "running" as const }));
+    const html = render(SessionActivityStatusHud, { props: {
+      summary: { ...EMPTY_SESSION_ACTIVITY, activeSubagents: 8 },
+      subagentSnapshot: { version: 1, count: 8, checkedAt: 1, runs: [{ runDir: "/run", agents }] },
+      todoSnapshot: undefined, promptRunning: false, sessionNeedsInput: false,
+    } }).body;
+    expect(html).toContain("+2");
+    expect(html).toContain("worker-6");
+    expect(html).toContain("worker-7");
+    expect(html).toContain('aria-label="More active subagents"');
+    expect(html).toContain('aria-expanded="false"');
+  });
   it.each([
-    [true, true, false, 2],
-    [true, false, false, 1],
-    [false, true, false, 1],
-    [false, false, false, 0],
-    [true, true, true, 0],
-  ])("renders separators only between visible groups (agents=%s plan=%s inspector=%s)", (agents, plan, inspector, count) => {
+    [true, true, 2],
+    [true, false, 1],
+    [false, true, 1],
+    [false, false, 0],
+  ])("renders separators only between visible groups (agents=%s plan=%s)", (agents, plan, count) => {
     const html = render(SessionActivityStatusHud, { props: {
       summary: { ...EMPTY_SESSION_ACTIVITY, activeSubagents: agents ? 1 : 0, completedTodos: 0, totalTodos: plan ? 2 : 0, openTodos: plan ? 2 : 0 },
       subagentSnapshot: agents ? { version: 1, count: 1, checkedAt: 1, runs: [{ runDir: "/run", agents: [{ id: "worker", status: "running" }] }] } : undefined,
       todoSnapshot: undefined,
       promptRunning: false,
       sessionNeedsInput: false,
-      sessionActivityOpen: inspector,
       leadingSeparator: true,
-      onOpenSessionActivity: () => {},
     } }).body;
     expect(html.match(/data-status-separator=/g) ?? []).toHaveLength(count);
     if (count) expect(html).toContain("h-3 w-px shrink-0 bg-border");
@@ -61,8 +77,8 @@ describe("status HUD todo progress ring", () => {
     },
   );
 
-  it("preserves existing hiding rules for empty, finished and inspector-visible plans", () => {
-    for (const html of [renderProgress(0, 0), renderProgress(4, 4), renderProgress(2, 4, true)]) {
+  it("preserves existing hiding rules for empty and finished plans", () => {
+    for (const html of [renderProgress(0, 0), renderProgress(4, 4)]) {
       expect(html).not.toContain("data-session-todo-progress");
     }
   });
@@ -92,8 +108,6 @@ describe("status HUD plan popup emphasis", () => {
         todoSnapshot,
         promptRunning: false,
         sessionNeedsInput: false,
-        sessionActivityOpen: false,
-        onOpenSessionActivity: () => {},
       },
     }).body;
     const articles = html.match(/<article\b[^>]*>/g) ?? [];

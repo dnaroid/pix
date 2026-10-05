@@ -1,22 +1,12 @@
 import { externalEditorLabel } from "../lib/desktop-config";
 import type { DesktopViewModelServicesOptions } from "./desktop-view-model-service-options";
 import { createDesktopWorkbenchViewModel } from "./desktop-workbench-view-model.svelte";
-import type { createSessionTodoActions } from "./session-todo-actions";
+import { createBrainstormSessionOpener } from "./desktop-brainstorm-navigation";
 
 export function createDesktopWorkbenchViewModelServices(
   options: DesktopViewModelServicesOptions,
-  todoActions: ReturnType<typeof createSessionTodoActions>,
 ) {
-  async function openBrainstormSession(sessionId: string): Promise<void> {
-    const workspace = options.workspace();
-    const activeSessionId = options.state.sessionId;
-    const client = options.client();
-    await options.sessions.catalog.refresh();
-    if (workspace !== options.workspace() || activeSessionId !== options.state.sessionId || client !== options.client()) return;
-    if (options.sessions.catalog.sessions.some((session) => session.sessionId === sessionId)) {
-      await options.transitions.sessionTabs.loadSession(sessionId);
-    } else options.errors.report(new Error("This brainstorm session is no longer available."));
-  }
+  const openBrainstormSession = createBrainstormSessionOpener(options);
   return createDesktopWorkbenchViewModel({
     layout: {
       conversationVisible: () => options.presentation.activeWorkbenchTab?.kind === "session",
@@ -88,20 +78,6 @@ export function createDesktopWorkbenchViewModelServices(
       git: options.project.git,
       gitAssist: options.workbenchGit.gitAssist,
       lspOnboarding: options.lspOnboarding,
-    },
-    inspector: {
-      activeSessionId: () => options.state.sessionId,
-      activeTitle: () => options.presentation.activeTitle,
-      activeSessionActivity: () => options.presentation.activeSessionActivity,
-      activeTodoSnapshot: () => options.presentation.activeTodoSnapshot,
-      activeSubagentSnapshot: () => options.presentation.activeSubagentSnapshot,
-      activeBrainstormSnapshot: () => options.presentation.activeBrainstormSnapshot,
-      canClearTodos: () => Boolean(
-        options.state.sessionId && todoActions.canClear(options.state.sessionId),
-      ),
-      clearSessionTodos: todoActions.clear,
-      openBrainstormParticipant: openBrainstormSession,
-      inspectorPreference: options.sessions.inspectorPreference,
     },
   });
 }

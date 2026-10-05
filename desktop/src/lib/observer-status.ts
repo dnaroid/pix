@@ -35,7 +35,10 @@ export function observerWaitingReason(snapshot: HeadsUpSnapshot, now: number): s
   const details = snapshot.details;
   if (!details) return snapshot.reason ?? "Waiting for new work. This runtime does not report detailed progress.";
   const remaining = Math.max(0, details.config.minTurns - details.newTurns);
-  const interval = now < details.intervalEligibleAt;
+  const slowed = !snapshot.notice && (details.discoveryMultiplier ?? 1) > 1;
+  const eligibleAt = slowed ? details.discoveryEligibleAt ?? details.intervalEligibleAt : details.intervalEligibleAt;
+  const interval = now < eligibleAt;
+  if (slowed && interval) return `New discovery uses a ${details.discoveryMultiplier}× interval after explicit negative feedback. Existing-card reviews and Check now are not slowed. Automatic checks still need new work.`;
   if (remaining) return `Waiting for ${remaining} more completed agent ${remaining === 1 ? "turn" : "turns"}${interval ? " and the minimum interval" : ""}.`;
   if (interval) return "Enough new turns; waiting for the minimum interval and a completed agent turn.";
   if (snapshot.reason === "not enough user and work context") return snapshot.reason;

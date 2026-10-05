@@ -14,6 +14,7 @@ export function presentHeadsUp(ctx: ExtensionContext, state: HeadsUpSnapshot, ex
 		note.consequence,
 		...(expanded ? note.evidence.flatMap((entry) => [`[${entry.id}]`, ...entry.text.split("\n").slice(0, 4).map((line) => line.slice(0, 160))]) : []),
 		"/heads-up explain · /heads-up discuss · /heads-up dismiss",
+		"/heads-up useful · /heads-up known · /heads-up irrelevant · /heads-up incorrect",
 		...(cards.length > 1 ? ["/heads-up prev · /heads-up next"] : []),
 	] : state.awaitingReview ? ["Heads up · Awaiting fresh review", "Previous findings are hidden until revalidated."] : undefined;
 	ctx.ui.setWidget("heads-up", lines, { placement: "aboveEditor" });

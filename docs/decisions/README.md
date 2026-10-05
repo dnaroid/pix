@@ -78,5 +78,9 @@ errors, not invent or approve decisions.
 
 - [0033 — Assistant prompt hygiene](0033-assistant-prompt-hygiene.md)
 - [0034 — Bounded, opt-in Heads up observer](0034-heads-up-observer.md)
+- [0046 — Task-scoped knowledge audit completion](0046-task-scoped-knowledge-completion.md)
+- [0047 — Remove the Desktop Session inspector](0047-remove-session-inspector.md)
+- [0048 — Status-bar click popups](0048-status-bar-click-popups.md)
+- [0049 — Nonmodal model picker](0049-nonmodal-model-picker.md)
 
 Workflow contract: [repository knowledge workflow](../../specs/repo-knowledge-agent-workflow.md).

@@ -2,7 +2,6 @@ import type { ComponentProps } from "svelte";
 import DesktopStatusBar from "../components/DesktopStatusBar.svelte";
 import type { createModelConfig } from "./model-config.svelte";
 import type { createSessionCoordinator } from "./session-coordinator";
-import type { createSessionInspectorPreference } from "./session-inspector-preference.svelte";
 import type { createSessionRuntimeStore } from "./session-runtime.svelte";
 import type { QuotaWaitStore } from "./quota-wait.svelte";
 import type { HeadsUpStore } from "./heads-up.svelte";
@@ -35,10 +34,10 @@ export function createDesktopStatusBarViewModel(options: {
   runtime: ReturnType<typeof createSessionRuntimeStore>;
   modelConfig: ReturnType<typeof createModelConfig>;
   sessionCoordinator: ReturnType<typeof createSessionCoordinator>;
-  inspectorPreference: ReturnType<typeof createSessionInspectorPreference>;
   quotaWait: QuotaWaitStore;
   headsUp: HeadsUpStore;
   openObserverSettings: () => void;
+  openBrainstormParticipant?: (sessionId: string) => void;
 }) {
   const props = $derived.by<StatusBarProps>(() => {
     const sessionId = options.activeSessionId();
@@ -115,7 +114,7 @@ export function createDesktopStatusBarViewModel(options: {
       sessionSubagentSnapshot: options.sessionSubagentSnapshot(),
       sessionTodoSnapshot: options.sessionTodoSnapshot(),
       sessionBrainstormSnapshot: options.sessionBrainstormSnapshot?.(),
-      sessionActivityOpen: options.inspectorPreference.open,
+      onOpenBrainstormParticipant: options.openBrainstormParticipant,
       sessionNeedsInput: options.sessionNeedsInput(),
       canClearTodos: options.canClearTodos(),
       onSetConfig: (option, value) => void options.modelConfig.setConfig(option, value),
@@ -123,7 +122,6 @@ export function createDesktopStatusBarViewModel(options: {
       onOpenSessionUsage: () => void options.sessionCoordinator.refreshActiveSessionUsage(),
       onRefreshClaudeLimits: () => void options.sessionCoordinator.refreshActiveClaudeLimits(),
       onClearTodos: () => sessionId ? options.clearSessionTodos(sessionId) : Promise.resolve(false),
-      onOpenSessionActivity: () => options.inspectorPreference.setOpen(true),
     };
   });
 

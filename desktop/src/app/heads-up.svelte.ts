@@ -10,7 +10,8 @@ import type { Attachment } from "../lib/attachments";
 import type { SessionStateNotification } from "../lib/session-state";
 import { headsUpDiscussionDraft } from "../../../src/bundled-extensions/heads-up/contract";
 
-export type HeadsUpFeedback = "known" | "irrelevant" | "dismiss";
+export type { HeadsUpFeedback } from "../../../src/bundled-extensions/heads-up/contract";
+import type { HeadsUpFeedback } from "../../../src/bundled-extensions/heads-up/contract";
 
 type HeadsUpStoreOptions = {
   client: () => AcpClient | null;

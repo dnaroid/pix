@@ -68,15 +68,16 @@
   }
   function closePopup(restoreFocus = true): void {
     if (!open) return;
-    // Restore while still open so focusin cannot reopen a dismissed panel.
     if (restoreFocus && popup?.contains(document.activeElement)) trigger?.focus();
     open = false;
   }
-  function leavePopup(event: PointerEvent | FocusEvent): void {
+  function togglePopup(): void {
+    if (open) closePopup(false);
+    else openPopup();
+  }
+  function leavePopup(event: FocusEvent): void {
     const region = event.currentTarget as HTMLElement;
     if (event.relatedTarget instanceof Node && region.contains(event.relatedTarget)) return;
-    if (event.type === "pointerleave" && region.contains(document.activeElement)) return;
-    if (event.type === "focusout" && region.matches(":hover")) return;
     closePopup(false);
   }
   function outside(event: PointerEvent): void {
@@ -100,13 +101,12 @@
   function settings(): void { closePopup(false); onOpenSettings(); }
 </script>
 
-<svelte:window onpointerdown={outside} onresize={reposition} />
+<svelte:window onpointerdown={outside} onresize={reposition} onkeydown={keydown} />
 
 <div class="shrink-0" data-observer-status role="group" aria-label="Observer"
-  onpointerenter={openPopup} onpointerleave={leavePopup}
-  onfocusin={openPopup} onfocusout={leavePopup}>
+  onfocusout={leavePopup}>
   <button bind:this={trigger} type="button" aria-label={`${status.label} · ${status.detail}`}
-    aria-haspopup="dialog" aria-expanded={open} aria-controls={popupId} onclick={openPopup} onkeydown={keydown}
+    aria-haspopup="dialog" aria-expanded={open} aria-controls={popupId} onclick={togglePopup} onkeydown={keydown}
     class={["grid h-6 w-6 place-items-center rounded-sm transition-colors hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-ring",
       iconColor]}>
     <Binoculars class={["h-4 w-4", status.kind === "checking" && "animate-pulse motion-reduce:animate-none"]} aria-hidden="true" />
@@ -134,6 +134,12 @@
             <dt class="text-muted-foreground">Checks</dt><dd>{snapshot.details ? `${snapshot.details.checksInWindow} in the past hour · ` : ""}{snapshot.checks} total</dd>
             <dt class="text-muted-foreground">Input used</dt><dd>{snapshot.details ? `${snapshot.details.inputCharsInWindow.toLocaleString()} chars in the past hour` : "Unavailable"}</dd>
             <dt class="text-muted-foreground">Recorded tokens</dt><dd>{snapshot.inputTokens.toLocaleString()} input/cache · {snapshot.outputTokens.toLocaleString()} output</dd>
+            {#if snapshot.details?.feedback}
+              <dt class="text-muted-foreground">Local feedback</dt><dd>{snapshot.details.feedback.shown} shown · {snapshot.details.feedback.useful} useful · {snapshot.details.feedback.known} known · {snapshot.details.feedback.irrelevant} not useful · {snapshot.details.feedback.incorrect} incorrect · {snapshot.details.feedback.dismiss} dismissed</dd>
+            {/if}
+            {#if (snapshot.details?.discoveryMultiplier ?? 1) > 1}
+              <dt class="text-muted-foreground">New findings</dt><dd>{snapshot.details?.discoveryMultiplier}× interval after negative feedback. Existing-card reviews and Check now are not slowed.</dd>
+            {/if}
           </dl>
         {:else}
           <p class="leading-4 text-muted-foreground">{sessionId ? "No Observer status has been received. A new or reloaded session may be needed." : "Start a session to enable Observer. You can set defaults in Settings."}</p>

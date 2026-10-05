@@ -36,7 +36,7 @@ describe("Observer statusbar ownership", () => {
       activeSessionId: () => id, sessionActivity: () => ({}), sessionSubagentSnapshot: () => undefined, sessionTodoSnapshot: () => undefined,
       sessionNeedsInput: () => false, canClearTodos: () => false,
       runtime: { statuses: new Map(), sessionUsageBySession: new Map(), sessionUsageRefreshing: new Set(), sessionUsageFailed: new Set(), claudeLimitsRefreshing: new Set(), claudeLimitsFailed: new Set() },
-      modelConfig: { pickerOpen: false }, sessionCoordinator: {}, inspectorPreference: { open: false },
+      modelConfig: { pickerOpen: false }, sessionCoordinator: {},
       quotaWait: { indicator: () => undefined, nowMs: 0 }, headsUp: store, openObserverSettings: vi.fn(),
     } as unknown as Parameters<typeof createDesktopStatusBarViewModel>[0]);
     const first = view.props.observer!;

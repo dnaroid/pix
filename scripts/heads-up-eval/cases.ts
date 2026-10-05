@@ -1,13 +1,12 @@
 import type { MessageLike } from "../../src/bundled-extensions/heads-up/context.js";
+import type { HeadsUpFeedbackRecord } from "../../src/bundled-extensions/heads-up/contract.js";
 
 export interface EvalEntry { id: string; message: MessageLike; }
 export interface NoticeExpectation {
 	kind: "heads_up";
-	/** Each group requires at least one cited source. Never sent to the model. */
-	evidenceGroups: string[][];
-	/** OR within a group, AND across groups; a transparent lexical proxy, not a semantic judge. */
-	concepts: string[][];
-	reference: { kind: "heads_up"; notices: { id: null; title: string; consequence: string; evidenceIds: string[] }[] };
+	/** Rubrics correspond one-to-one with expected notices and are never sent to the model. */
+	rubrics: { evidenceGroups: string[][]; concepts: string[][] }[];
+	reference: { kind: "heads_up"; notices: { id: string | null; title: string; consequence: string; evidenceIds: string[] }[] };
 }
 export interface EvalCase {
 	id: string;
@@ -17,6 +16,9 @@ export interface EvalCase {
 	/** Runtime bridge envelopes passed through the production reducer, not transcript messages. */
 	delegatedEvents?: unknown[];
 	previousNotices?: string[];
+	/** Production-compatible untrusted active-card descriptors; never grading labels. */
+	activeNotices?: { id: string; title: string; consequence: string }[];
+	structuredFeedback?: HeadsUpFeedbackRecord[];
 	expected: { kind: "none" } | NoticeExpectation;
 }
 
@@ -26,8 +28,12 @@ function tool(id: string, text: string, isError = false): EvalEntry {
 	return { id, message: { role: "toolResult", toolName: "read", content: [{ type: "text", text }], isError } };
 }
 function notice(title: string, consequence: string, evidenceIds: string[], concepts: string[][]): NoticeExpectation {
-	return { kind: "heads_up", evidenceGroups: evidenceIds.map((id) => [id]), concepts,
+	return { kind: "heads_up", rubrics: [{ evidenceGroups: evidenceIds.map((id) => [id]), concepts }],
 		reference: { kind: "heads_up", notices: [{ id: null, title, consequence, evidenceIds }] } };
+}
+function multipleNotices(items: { title: string; consequence: string; evidenceIds: string[]; concepts: string[][] }[]): NoticeExpectation {
+	return { kind: "heads_up", rubrics: items.map((item) => ({ evidenceGroups: item.evidenceIds.map((id) => [id]), concepts: item.concepts })),
+		reference: { kind: "heads_up", notices: items.map(({ title, consequence, evidenceIds }) => ({ id: null, title, consequence, evidenceIds })) } };
 }
 
 const api = [
@@ -84,6 +90,56 @@ export const HEADS_UP_CASES: readonly EvalCase[] = [
 	{ id: "long-session-api", category: "context-budget", rationale: "The original API constraint must survive a long stream of irrelevant successful work.", entries: [
 		api[0]!, ...Array.from({ length: 100 }, (_, i) => tool(`n${i}`, `Completed formatting fixture ${i}; no behavior changed. `.repeat(30))), api[1]!, api[2]!,
 	], expected: apiWarning },
+	{ id: "api-proposed-only", category: "mutation-state", rationale: "An unexecuted async proposal is not an applied change; current source remains synchronous.", entries: [
+		api[0]!, assistant("e02", "I could make getUser async for this refactor."), tool("e03", "Read-only snapshot: current saved sdk.ts remains export function getUser(id): User { return db.findSync(id); }. No edit executed; the proposal is awaiting approval."),
+	], expected: { kind: "none" } },
+	{ id: "api-applied", category: "mutation-state", rationale: "The async API change was applied and saved despite the protected synchronous contract.", entries: [
+		...api, assistant("e04", "Applied the async conversion."),
+	], expected: apiWarning },
+	{ id: "api-rejected", category: "mutation-state", rationale: "A failed/rejected async mutation is not an applied contract break.", entries: [
+		api[0]!, assistant("e02", "Attempted to replace getUser with async Promise<User>."), tool("e03", "Write rejected by validation. No files changed."), tool("e04", "Current saved export remains getUser(id): User."),
+	], expected: { kind: "none" } },
+	{ id: "api-fixed", category: "mutation-state", rationale: "An applied breaking change was reverted and current synchronous behavior retested.", entries: [
+		...api, assistant("e04", "The async change was reverted."), tool("e05", "Current saved sdk.ts exports synchronous getUser(id): User. Existing sync-client regression passes."),
+	], expected: { kind: "none" } },
+	{ id: "async-contract-break", category: "opposite-contract", rationale: "The requested contract is async Promise<User>; changing it to synchronous User is the breaking direction.", entries: [
+		user("e01", "Keep the public API asynchronous: getUser(id) must return Promise<User>; existing callers chain .then(renderUser)."),
+		tool("e02", "Saved sdk.ts: export function getUser(id: string): User { return db.findSync(id); }. Existing caller getUser(id).then(renderUser) now throws TypeError: getUser(...).then is not a function."),
+	], expected: notice("Async API became synchronous", "getUser now returns User instead of the required Promise<User>, so existing callers chaining .then throw TypeError.", ["e02"], [["getUser"], ["Promise", "async", "асинхрон"], ["sync", "synchronous", "синхрон", "instead", "вместо"], ["caller", "клиент", ".then"]]) },
+	{ id: "two-independent-problems", category: "multiple-problems", rationale: "Both independent defects are evidenced and should produce two distinct notices.", entries: [
+		user("e01", "Keep tenant profiles isolated and preserve all existing notes when renaming the field to annotations."),
+		tool("e02", "Saved handler.ts uses cache key `profile:${userId}` without tenantId; alpha/7 and beta/7 both return Alpha profile."),
+		tool("e03", "Saved migration.sql drops notes and adds annotations without copying data. Fixture: old notes='call client' becomes annotations=null."),
+	], expected: multipleNotices([
+		{ title: "Tenant cache crosses accounts", consequence: "The cache key omits tenantId, so another tenant's profile can be returned.", evidenceIds: ["e02"], concepts: [["tenant", "арендатор"], ["cache", "кэш", "кеш"], ["profile", "профил"]] },
+		{ title: "Migration drops existing notes", consequence: "Dropping notes without copying loses existing text in annotations.", evidenceIds: ["e03"], concepts: [["notes", "замет"], ["annotations", "аннотац"], ["drop", "los", "потер"]] },
+	]) },
+	{ id: "three-independent-problems", category: "multiple-problems", rationale: "Three separately evidenced regressions require three one-to-one matched notices.", entries: [
+		user("e01", "Keep tenant isolation, preserve old notes, and ensure checkout retries charge at most once."),
+		tool("e02", "Cache key profile:${userId} omits tenantId; beta/7 receives alpha's profile."),
+		tool("e03", "Migration drops notes and creates annotations without copy; old text becomes null."),
+		tool("e04", "Timeout trace: first POST /charge created ch1; retry created ch2 for the same order."),
+	], expected: multipleNotices([
+		{ title: "Tenant cache leaks profiles", consequence: "Missing tenantId in the cache key lets one tenant receive another's profile.", evidenceIds: ["e02"], concepts: [["tenant", "арендатор"], ["cache", "кэш"], ["profile", "профил"]] },
+		{ title: "Notes are lost", consequence: "The migration drops notes without copying their text to annotations.", evidenceIds: ["e03"], concepts: [["notes", "замет"], ["annotations", "аннотац"], ["drop", "los", "потер"]] },
+		{ title: "Retry charges twice", consequence: "The timeout retry created two charges for the same order.", evidenceIds: ["e04"], concepts: [["charg", "платеж"], ["twice", "two", "double", "двойн", "дважды"]] },
+	]) },
+	{ id: "active-review-and-discovery", category: "active-review", rationale: "Retain the supported card, drop a resolved active card and independently discover a new issue.", entries: [
+		...tenant, user("u2", "Keep the tenant isolation requirement. Also preserve existing notes and retain the synchronous getUser API."),
+		tool("e04", "Also saved migration.sql drops notes without copying them to annotations; old row text is null."),
+		tool("e05", "The earlier getUser API regression is fixed: current saved getUser(id): User is synchronous. Existing sync-client tests pass."),
+	], activeNotices: [{ id: "active-tenant", title: "Tenant profiles share cache", consequence: "The cache key excludes tenant identity." },
+		{ id: "active-api", title: "getUser API became async", consequence: "Promise breaks synchronous callers." }],
+	 expected: { ...multipleNotices([
+		{ title: "Tenant cache still crosses tenants", consequence: "The shared cache key can return another tenant's profile.", evidenceIds: ["e03"], concepts: [["tenant", "арендатор"], ["cache", "кэш"], ["profile", "профил"]] },
+		{ title: "Migration loses notes", consequence: "The migration drops old notes without copying their text.", evidenceIds: ["e04"], concepts: [["notes", "замет"], ["drop", "los", "потер"]] },
+	]), reference: { kind: "heads_up", notices: [
+		{ id: "active-tenant", title: "Tenant cache still crosses tenants", consequence: "The shared cache key can return another tenant's profile.", evidenceIds: ["e03"] },
+		{ id: null, title: "Migration loses notes", consequence: "The migration drops old notes without copying their text.", evidenceIds: ["e04"] },
+	] } } },
+	{ id: "active-review-resolved", category: "active-review", rationale: "Current evidence fixes the active issue; resolve it with no output card.", entries: [
+		...tenant, assistant("e04", "Fixed the cache key."), tool("e05", "Current key is `${tenantId}:profile:${userId}`; alpha/7 and beta/7 return their own profiles in regression tests."),
+	], activeNotices: [{ id: "active-tenant", title: "Tenant profiles share cache", consequence: "The cache key excludes tenant identity." }], expected: { kind: "none" } },
 	{ id: "api-approved", category: "superseded", rationale: "The latest user explicitly approves the previously forbidden API break.", entries: [
 		...api, user("e04", "Изменение требований: я согласен на Promise и breaking change в v2; клиенты обновим. Не предупреждай про старый синхронный API."),
 	], expected: { kind: "none" } },
@@ -93,6 +149,8 @@ export const HEADS_UP_CASES: readonly EvalCase[] = [
 	], expected: { kind: "none" } },
 	{ id: "migration-already-known", category: "feedback", rationale: "Do not repeat an unchanged issue that the user has already acknowledged.", entries: migration,
 		previousNotices: ["known: Migration loses existing notes. Dropping notes before copying to annotations loses old rows' text."], expected: { kind: "none" } },
+	{ id: "migration-feedback-known", category: "structured-feedback", rationale: "Structured user feedback marks the same issue known; do not repeat that card.", entries: migration,
+		structuredFeedback: [{ outcome: "known", topic: "migration-data-loss", subject: "tasks.notes", title: "Migration loses existing notes", consequence: "Dropping notes before copying loses old rows' text.", evidenceIds: ["e02", "e03"] }], expected: { kind: "none" } },
 	{ id: "safe-rename", category: "benign", rationale: "A small internal rename with unchanged output warrants no educational advice.", entries: [
 		user("e01", "Rename the local variable tmp to subtotal in calculateTotal. No behavior changes."),
 		tool("e02", "Diff: const tmp = price * count; return tmp + tax; -> const subtotal = price * count; return subtotal + tax;. Public signature unchanged. Tests unchanged and pass."),

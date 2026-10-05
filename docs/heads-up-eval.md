@@ -27,12 +27,12 @@ npm run eval:heads-up -- --live
 # A small smoke run, or rerun one failure:
 npm run eval:heads-up -- --live --case api-break --case api-approved
 
-# Check variability across three independent passes (21 x 3 = 63 requests):
-npm run eval:heads-up -- --live --repeat 3 --max-calls 63
+# Check variability across three independent passes (31 x 3 = 93 requests):
+npm run eval:heads-up -- --live --repeat 3 --max-calls 93
 
 # Compare explicitly selected providers/models, with a total-request budget:
 npm run eval:heads-up -- --live --model provider-a/model-a \
-  --model provider-b/model-b --max-calls 42
+  --model provider-b/model-b --max-calls 62
 ```
 
 Without `--model`, the evaluator imports the feature's initial model reference
@@ -51,8 +51,8 @@ and credential refresh can still perform their normal initialization. No active
 conversation or its usage ledger is modified. Keep debug logging disabled when
 testing providers that log requests themselves.
 
-`PI_OFFLINE` forbids live runs even with `--live`. The default matrix cap is 24
-inference calls, checked before model setup. Repetitions are 1..5; the largest
+`PI_OFFLINE` forbids live runs even with `--live`. The default matrix cap is 31
+inference calls (the full current corpus), checked before model setup. Repetitions are 1..5; the largest
 explicit cap is 120 calls. Requests run sequentially with production prompt,
 context builder, parser, 900 output-token budget, low reasoning, no tools, no
 retries and no cache retention. The default timeout is 20 seconds. An explicit
@@ -66,10 +66,16 @@ passes. Invalid JSON is a quality failure; it is never treated as correct silenc
 
 ## Corpus and scoring
 
-The development corpus contains 21 hand-authored synthetic cases: eight
-positive and thirteen negative controls. Positives cover public API compatibility,
+The development corpus contains 31 hand-authored synthetic cases: thirteen
+positive and eighteen negative controls. Positives cover public API compatibility,
 cross-tenant caching, migration data loss, duplicate billing, old config loading,
-prohibited logging, and preservation of requirements in a long conversation.
+prohibited logging, preservation of requirements in a long conversation, the
+opposite-direction async API contract, and two-/three-problem cases. Mutation-state
+pairs distinguish proposed, applied, rejected, fixed, and explicitly approved
+changes. Structured known-feedback and prior-notice controls exercise suppression.
+Active-card fixtures cover retaining a supported subset while discovering a new
+issue, and dismissing resolved cards. These are synthetic review fixtures,
+not an evaluation of production cadence or an adaptive-frequency policy.
 Negative controls cover a user-approved tradeoff, a fixed issue, an already-known
 notice, benign changes, insufficient information, a failed edit, tool-output prompt
 injection, agreed omission of tests, an unverified assistant claim, a changed task,
@@ -103,23 +109,33 @@ References are checked *after* context budgeting so lost required evidence canno
 silently make a positive fixture impossible.
 
 A positive `tp` requires a valid warning, required supporting sources and all
-configured consequence-anchor groups. Each anchor group accepts several English
-or Russian substrings. This is a **lexical proxy**, not proof that the explanation
-is correct. Real IDs alone are not proof either. A correct paraphrase can fail the
-proxy; conversely, a misleading warning containing the right words can pass.
+configured consequence-anchor groups for each one-to-one matched issue. Each
+anchor group accepts several English or Russian substrings. This is a **lexical
+proxy**, not proof that the explanation is correct. Real IDs alone are not proof
+either. A correct paraphrase can fail the proxy; conversely, a misleading warning
+containing the right words can pass. A targeted regression catches the previously
+observed reversed API-direction wording; it is a narrow lexical tripwire, not a
+general semantic judge. Human reviewers must verify contract direction (what was
+required versus what changed), whether a mutation was actually applied, whether a
+rejected mutation left current state unchanged, whether later fixes resolve it,
+and whether explicit user approval supersedes the concern. Read all emitted cards,
+including automated passes; automated match scores do not assess semantic truth.
 
-The production reply now contains a bounded `notices` array (up to three) and can
-review existing cards while discovering others. This corpus still has exactly one
-expected problem per positive case: multiple cards are `wrong_notice` requiring
-human review, even if the first matches its rubric. Negative cases treat any card
-as a false positive. Runtime deterministic tests cover stack revalidation and
-selection separately; the historical live results above predate this prompt/schema
-and do not establish the new stack's model quality.
+The production reply contains a bounded `notices` array (up to three) and can
+review existing cards while discovering others. Positive scoring requires a
+one-to-one matching between expected and emitted notices; order is irrelevant, but
+missing, detected duplicate, or extra cards fail. Retained IDs must match the
+expected surviving card; a new issue cannot repurpose a resolved card's ID.
+Duplicate structured identities or exact wording fail even if keyword groups
+overlap. Detecting other semantic paraphrases still requires human review.
+Active-card descriptors are untrusted
+production-shaped input, never grading rubrics. Runtime deterministic tests cover
+stack revalidation and selection separately. Historical live results below predate
+the current prompt/schema/corpus and do not establish current model quality.
 
 Report outcomes are `tp`, `tn`, `fp`, `fn`, `wrong_notice`, `invalid`, `error`,
 `timeout`, `cancelled` and `not_run`. `wrong_notice` means rubric mismatch,
-not an
-independent semantic verdict. Missing attributable usage is a transport or
+not an independent semantic verdict. Missing attributable usage is a transport or
 accounting failure, matching the production controller's refusal to display it.
 
 Metrics are deliberately separate:
