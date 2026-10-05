@@ -1,12 +1,16 @@
 # 0038 — Focus on hover
 
-- Status: accepted
+- Status: superseded
 - Recorded: 2026-10-04
 - Decided: 2026-10-04
 - Owner / approval evidence: user reported “не работает” and requested
   “передавать фокус окна при ховере над ним”.
 - Governing spec: [Desktop focus on hover](../../specs/desktop-inactive-hover.md)
-- Replaces / replaced by: replaces [0036](0036-inactive-window-hover.md)
+- Replaces / replaced by: replaces [0036](0036-inactive-window-hover.md);
+  replaced by [0045](0045-remove-hover-focus.md)
+
+Superseded on 2026-10-05: the user reported that accidental hover raised Pix over
+other windows and requested removal. The rationale below is historical.
 
 ## Context
 

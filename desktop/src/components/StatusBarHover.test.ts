@@ -22,6 +22,12 @@ function source(name: keyof typeof sources): string {
 }
 
 describe("Status bar hover surfaces", () => {
+  it("layers opaque runtime popovers above positioned composer content", () => {
+    expect(source("StatusBar")).toMatch(/<footer class="relative z-20 /);
+    expect(source("RuntimeStatusBarItems").match(/\bbg-popover\b/g)).toHaveLength(2);
+    expect(source("RuntimeStatusBarItems")).not.toContain("bg-popover/");
+  });
+
   it("places Usage left and Observer before right-hand activity, with a distinct binoculars", () => {
     const status = source("StatusBar");
     expect(status.indexOf("<RuntimeStatusBarItems")).toBeLessThan(status.indexOf("<ObserverStatus"));

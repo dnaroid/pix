@@ -23,9 +23,6 @@ pub(crate) fn build(
             }
         })
         .build()?;
-    if let Err(error) = crate::inactive_hover::install(&window) {
-        eprintln!("failed to install focus-on-hover tracking: {error}");
-    }
     Ok(window)
 }
 

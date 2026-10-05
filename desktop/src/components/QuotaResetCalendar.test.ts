@@ -8,7 +8,7 @@ const window = { remainingPercent: 35, resetAt: new Date(2026, 9, 17, 23).getTim
 describe("QuotaResetCalendar", () => {
   it("colors weekend labels and dates while preserving today and reset markers, without a legend", () => {
     const { body } = render(QuotaResetCalendar, { props: { window, now: new Date(2026, 9, 18, 12).getTime() } });
-    expect(body.match(/truncate text-xs text-tool-error/g)).toHaveLength(2);
+    expect(body.match(/truncate text-xs text-tool-error/g)).toHaveLength(3);
     expect(body).toMatch(/border-muted-foreground bg-muted text-tool-error[^>]*aria-label="[^"]*, today"/);
     expect(body).not.toContain("Outlined date:");
     expect(body).not.toContain("Highlighted date:");
@@ -36,7 +36,7 @@ describe("QuotaResetCalendar", () => {
   it("shows today across the week boundary and formats reset time without a timezone", () => {
     const resetAt = new Date(2026, 9, 10, 1, 57).getTime();
     const { body } = render(QuotaResetCalendar, { props: { window: { ...window, resetAt }, now: new Date(2026, 9, 4, 21).getTime() } });
-    expect(body).toContain('aria-label="Seven days starting today"');
+    expect(body).toContain('aria-label="Today’s week and reset date"');
     expect(body).toContain('aria-current="date"');
     expect(body.match(/quota reset/g)).toHaveLength(1);
     expect(body).toContain(new Date(resetAt).toLocaleString(undefined, {
@@ -49,5 +49,14 @@ describe("QuotaResetCalendar", () => {
     expect(body).toContain("Reset time unavailable");
     expect(body).not.toContain("quota reset");
     expect(body).not.toContain("Resets in");
+  });
+  it("keeps the eighth-day reset and today in one eight-column row", () => {
+    const resetAt = new Date(2026, 9, 12, 10, 23).getTime();
+    const { body } = render(QuotaResetCalendar, { props: { window: { ...window, resetAt }, now: new Date(2026, 9, 5).getTime() } });
+    expect(body).toContain("grid-template-columns: repeat(8, minmax(0, 1fr))");
+    expect(body.match(/quota reset/g)).toHaveLength(1);
+    expect(body.match(/aria-current="date"/g)).toHaveLength(1);
+    expect(body).toContain("border-primary bg-primary/10");
+    expect(body).not.toContain("grid-cols-7");
   });
 });

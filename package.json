@@ -100,9 +100,9 @@
   },
   "dependencies": {
     "@cortexkit/antigravity-auth-core": "2.2.1",
-    "@earendil-works/pi-ai": "1.0.2",
-    "@earendil-works/pi-coding-agent": "1.0.2",
-    "@earendil-works/pi-tui": "1.0.2",
+    "@earendil-works/pi-ai": "1.0.3",
+    "@earendil-works/pi-coding-agent": "1.0.3",
+    "@earendil-works/pi-tui": "1.0.3",
     "@lydell/node-pty": "1.1.0",
     "@mariozechner/clipboard": "^0.3.9",
     "@xterm/headless": "^6.0.0",

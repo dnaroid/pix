@@ -1,11 +1,11 @@
 # 0031 — Single-channel subagent completion delivery
 
-- Status: accepted
+- Status: superseded
 - Recorded: 2026-10-04
 - Decided: 2026-10-04
 - Owner / approval evidence: user approved the proposed single-delivery behavior in this task conversation.
 - Governing spec: [async-subagents — Parent completion delivery](../../specs/async-subagents.md#parent-completion-delivery)
-- Replaces / replaced by: none
+- Replaces / replaced by: replaced by [0044 — Retractable parent completion delivery](0044-retractable-subagent-completions.md)
 
 ## Context
 

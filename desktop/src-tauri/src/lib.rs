@@ -33,7 +33,6 @@ mod desktop_notification;
 mod git_ci;
 mod git_ignore;
 mod git_operations;
-mod inactive_hover;
 mod lsp_install;
 #[cfg(test)]
 mod native_lifecycle_tests;

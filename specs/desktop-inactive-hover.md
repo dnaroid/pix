@@ -1,66 +1,49 @@
 ---
 kind: spec
-status: proposed
+status: active
 ---
 
-# Desktop focus on hover
+# Desktop inactive-window pointer behavior
 
 ## Behavior
 
-On macOS, moving the pointer into or over the visible webview of an inactive
-Pix window activates Pix and makes that exact window key and frontmost without
-a click. This applies when another Pix window or another application is active.
-Keyboard focus deliberately transfers to the hovered window; its existing first
-responder is preserved. Moving out does not restore the previous focus.
+Pointer enter/move over an inactive Pix window must not activate Pix, transfer
+keyboard focus or raise the window. Normal WebKit/AppKit hover behavior is used;
+there is no Pix-owned inactive-window hover bridge or event forwarding workaround.
+The existing activating first click (`acceptFirstMouse: true`) stays unchanged.
+This applies to initial, restored, fallback and newly opened project windows.
+Explicit activation paths such as notification clicks are outside this contract.
 
-The shared native creation path installs this support for initial, restored,
-fallback and newly opened project windows. Active-window event delivery and
-the existing activating first click remain unchanged.
+## Constraints
 
-## Constraints and failure cases
+- No native hover tracking child, global pointer monitor, polling or synthetic
+  DOM events are installed to compensate for inactive WebKit hover behavior.
+- Inactive CSS hover and HTML title tooltips are not guaranteed by Pix.
+- Restart the updated native binary to remove tracking views from a running old
+  build; source changes alone do not remove those already-installed views.
 
-- macOS only; no browser-preview or other-platform changes.
-- No synthetic JavaScript events, polling, global event monitors or private
-  WebKit selectors/classes. Use public AppKit activation and window APIs.
-- A passive, hit-test-transparent child NSView owns an ActiveAlways tracking
-  area. Enter/move callbacks activate the app and make the owning window key
-  only if it is not already key in the active app. WebKit's own tracking areas
-  are neither inspected nor replaced; normal WebKit hover resumes after focus.
-- Visible bounds follow native resizing. Ownership is entirely the native view
-  hierarchy; no application registry, timers or closures retain closed windows.
-  Installation is idempotent. Hidden/minimized/detached views do not take focus.
-  Tracking is not enabled during mouse drags; clicks/drag hit testing remains
-  with the webview. No explicit input focus, unhide or deminiaturize calls.
-- Installation failures log a diagnostic but do not prevent opening a window.
-- Native HTML `title` tooltip display is controlled by WebKit/AppKit and needs
-  separate native runtime verification; CSS/DOM hover evidence alone is not
-  evidence of tooltip display. This contract remains proposed until native QA.
-- Focus transfer intentionally raises the hovered window. It is not inactive
-  hover without focus stealing; that earlier approach failed per user report.
-
-Decision: [Focus on hover](../docs/decisions/0038-focus-on-hover.md), superseding
-[inactive-only forwarding](../docs/decisions/0036-inactive-window-hover.md).
-Window click/persistence contract: [Desktop window state](desktop-window-state.md).
+Decision: [Remove hover focus](../docs/decisions/0045-remove-hover-focus.md).
+Historical approaches: [focus on hover](../docs/decisions/0038-focus-on-hover.md)
+and [inactive forwarding](../docs/decisions/0036-inactive-window-hover.md).
+Related: [Desktop window state](desktop-window-state.md).
 
 ## Implementation
 
-- `desktop/src-tauri/src/inactive_hover.rs`
 - `desktop/src-tauri/src/startup_theme.rs`
 - `desktop/src-tauri/src/lib.rs`
 - `desktop/src-tauri/Cargo.toml`
+- `desktop/src-tauri/tauri.conf.json`
 
 ## Tests
 
-- `desktop/src-tauri/src/inactive_hover.rs` (focus policy and tracking option tests)
-- `desktop/src-tauri/src/startup_theme.rs` (shared creation/reveal behavior)
-- `desktop/src/lib/native-window-config.test.ts` (first-click compatibility)
+- `desktop/src-tauri/src/startup_theme.rs`
+- `desktop/src/lib/native-window-config.test.ts`
+- `desktop/src/startup-theme.test.ts`
 
 ## Verification
 
-Run Cargo check and focused native Rust tests; run the native-window-config
-Vitest regression. Real native QA must distinguish CSS hover, DOM event
-delivery and native HTML title tooltip display. Check another Pix key window
-and another frontmost app without clicking the hovered window; assert that Pix
-activates and the hovered window becomes key, CSS hover and title tooltips work,
-and exit does not restore focus. Check resize/new-window/close and reopen, hidden
-and minimized windows, and normal active-window clicks and titlebar dragging.
+Run Cargo check/tests and the native-window-config/startup-theme Vitest tests.
+Confirm no hover bridge installation or module remains. In native macOS Desktop,
+after restarting the updated build, move the pointer over an inactive Pix window
+while another app is frontmost: focus and ordering must remain unchanged. Clicking
+the window should still activate it and deliver that first click.

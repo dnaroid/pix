@@ -30,10 +30,31 @@ describe("quota reset calendar", () => {
     expect(days[0]).toMatchObject({ today: true, reset: false });
     expect(days[6]).toMatchObject({ today: false, reset: true });
   });
-  it("keeps today visible without manufacturing a reset outside the range", () => {
+  it("adds a distant reported reset without manufacturing intervening dates", () => {
     const days = quotaCalendarDays(new Date(2026, 10, 17).getTime(), new Date(2026, 9, 12).getTime());
     expect(days.filter(day => day.today)).toHaveLength(1);
-    expect(days.some(day => day.reset)).toBe(false);
+    expect(days).toHaveLength(8);
+    expect(days.slice(0, 7).map(day => day.day)).toEqual([12, 13, 14, 15, 16, 17, 18]);
+    expect(days[7]).toMatchObject({ key: "2026-11-17", reset: true });
+  });
+  it("includes the eighth-day reset in the same bounded range", () => {
+    const days = quotaCalendarDays(new Date(2026, 9, 12, 10, 23).getTime(), new Date(2026, 9, 5).getTime());
+    expect(days.map(day => day.day)).toEqual([5, 6, 7, 8, 9, 10, 11, 12]);
+    expect(days[0]?.today).toBe(true);
+    expect(days[7]?.reset).toBe(true);
+  });
+  it("includes a passed reset once without predicting its successor", () => {
+    const days = quotaCalendarDays(new Date(2026, 9, 4, 10).getTime(), new Date(2026, 9, 5).getTime());
+    expect(days.map(day => day.day)).toEqual([4, 5, 6, 7, 8, 9, 10, 11]);
+    expect(days.filter(day => day.reset)).toHaveLength(1);
+    expect(days[0]).toMatchObject({ today: false, reset: true });
+    expect(days[1]?.today).toBe(true);
+  });
+  it("adds a reset outside the week across a year boundary", () => {
+    const days = quotaCalendarDays(new Date(2027, 0, 5).getTime(), new Date(2026, 11, 29).getTime());
+    expect(days.map(day => day.day)).toEqual([29, 30, 31, 1, 2, 3, 4, 5]);
+    expect(new Set(days.map(day => day.key)).size).toBe(8);
+    expect(days[7]).toMatchObject({ key: "2027-1-5", reset: true });
   });
   it("advances the range after local midnight", () => {
     const reset = new Date(2026, 9, 10).getTime();

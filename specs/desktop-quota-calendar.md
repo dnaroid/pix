@@ -17,13 +17,16 @@ The Usage scroll area allows up to `min(640px, 100vh - 120px)` of content,
 retaining room for the popup header and status bar on smaller windows.
 
 The calendar shows seven consecutive local civil dates starting today, so today's
-outlined date is always visible. It highlights the provider's reported reset date
-when it falls within that range. Saturday/Sunday labels and dates use the
+outlined date is always visible. It always includes and highlights the provider's
+reported valid reset date: when outside that week, add that actual date as an
+eighth cell in chronological order, without manufacturing intervening dates or
+future resets. All seven or eight cells share one horizontal row with equal-width
+columns, never wrapping to a second week. Saturday/Sunday labels and dates use the
 theme's muted red (`text-tool-error`), preserving today's outline and the
 reset background. No explanatory
 today/reset legend is shown. The reset detail always shows the actual date/year,
 exact minute-level local time without a timezone suffix or duplicate countdown, even
-when the reset falls outside the seven-date range. It does not predict
+when the reset falls outside the seven-date base range. It does not predict
 subsequent resets
 or infer past daily consumption. The selected compact-week concept supersedes
 the former no-quota-block policy in [session usage](session-usage.md); other
@@ -73,7 +76,8 @@ remain visible without weekly/hourly windows and precede recorded session usage.
   decrement the snapshot total; unknown expirations cannot be inferred. Countdowns
   round up to minutes while the exact local expiry retains seconds.
 - Date construction uses local civil-day arithmetic, not fixed 24-hour steps,
-  so DST and month/year boundaries preserve seven unique consecutive dates.
+  so DST and month/year boundaries preserve seven unique consecutive base dates
+  and, when needed, one distinct reported reset date.
 - No weekly data means no calendar. Existing hourly/rate triggers are unchanged.
 - Opening and focus/click remain idempotent, gap-free, and perform no quota
   refresh. Explicit Claude limits refresh remains independent.

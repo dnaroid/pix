@@ -22,7 +22,7 @@
       <span class="font-medium">{new Date(now).toLocaleDateString(undefined, { month: "long", year: "numeric" })}</span>
       <span class="text-muted-foreground">Next reset</span>
     </div>
-    <div class="mt-2 grid grid-cols-7 gap-1" aria-label="Seven days starting today">
+    <div class="mt-2 grid gap-1" style:grid-template-columns={`repeat(${days.length}, minmax(0, 1fr))`} aria-label="Today’s week and reset date">
       {#each days as day (day.key)}
         <div class="min-w-0 text-center">
           <div class={["truncate text-xs", day.weekend ? "text-tool-error" : "text-muted-foreground"]}>{day.weekday}</div>

@@ -80,3 +80,21 @@ remaining use muted red. Exact expiry is retained as an accessible label rather
 than a repeated visible card. Increase the scroll-area cap to 640px, bounded by
 viewport height minus 120px. This supersedes earlier aggregate-display and
 expanded-credit presentation choices, not the data or refresh contracts below.
+
+## Follow-up: reset date always visible in a single row
+
+Evidence: the user required the reset date in the calendar grid, rejected a
+two-row mockup, and approved a single row showing October 5–12 with the 12th
+highlighted. Keep the rolling seven civil dates including today; append the
+actual reset date when outside that week and sort chronologically. Render seven
+or eight equal-width columns without wrapping. This supersedes the earlier
+choice to leave out-of-range resets only in the text detail.
+
+For distant or passed timestamps, the added cell is the reported civil date,
+not a predicted successor. Bounded eight-cell rendering avoids an unbounded
+row for unusual provider data; intervening dates outside the base week are not
+invented. Alternatives rejected: a second calendar row (explicitly rejected by
+the user), omitting today (prior user requirement), or an arbitrarily long row
+(unreadable in compact popup chrome). Exact date/year and time below remain
+authoritative across month/year boundaries. Revisit if unusually distant resets
+need a more explicit visual gap marker.

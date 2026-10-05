@@ -16,6 +16,7 @@ import {
 import { activityFromRpcEvent } from "./core/activity.js";
 import { buildAgentCompletionNotification } from "./core/notifications.js";
 import { CompletionDelivery } from "./completion-delivery.js";
+import { CompletionReceipts } from "./completion-receipts.js";
 import { buildUltraworkPrompt, isUltraworkEnvEnabled, registerCommands } from "./commands.js";
 import { agentStrategyPrompt, appendAgentStrategyPrompt } from "./core/agent-strategy.js";
 import { buildSubagentCatalogPrompt } from "./core/agent-catalog.js";
@@ -134,6 +135,7 @@ export default function (pi: ExtensionAPI) {
 	let completionWatchTimer: ReturnType<typeof setInterval> | undefined;
 	let shuttingDown = false;
 	const completionDelivery = new CompletionDelivery(liveAgents, refreshSubagentOverlay);
+	const completionReceipts = new CompletionReceipts(liveAgents, completionDelivery);
 
 	function publishSubagentCatalogState(ctx: unknown): void {
 		const state = createSubagentCatalogState(ctx);
@@ -161,8 +163,11 @@ export default function (pi: ExtensionAPI) {
 		if (liveRun?.size === 0) liveAgents.delete(runDir);
 	}
 
-	function reconcileLiveAgentCompletions(): void {
+	function reconcileLiveAgentCompletions(boundaryMessages?: ReturnType<typeof buildAgentCompletionNotification>[]): void {
 		if (shuttingDown) return;
+		// Keep busy-parent completions retractable here, not in the SDK follow-up
+		// queue. A result/read/wait can still consume them before settlement.
+		if (!boundaryMessages && currentSessionStateContext?.isIdle?.() === false) return;
 		for (const [runDir, liveRun] of [...liveAgents.entries()]) {
 			const states = new Map(
 				getRunState(runDir, [...liveRun.keys()], {
@@ -186,18 +191,27 @@ export default function (pi: ExtensionAPI) {
 				// Keep its completion pending until its originating session is active.
 				if (!agentMatchesSession(liveAgent, currentSessionFile)) continue;
 				removeLiveAgent(runDir, agentId);
-				pi.sendMessage(buildAgentCompletionNotification({
+				const message = buildAgentCompletionNotification({
 					agentId, runDir, state,
 					runAgents: getRunState(runDir, undefined, {
 						includeLineCounts: false, checkRpcPromptFailure: false,
 					}).agents,
-				}), { triggerTurn: true, deliverAs: "followUp" });
+				});
+				if (boundaryMessages) boundaryMessages.push(message);
+				else {
+					pi.sendMessage(message, { triggerTurn: true, deliverAs: "followUp" });
+					// In agent_settled the SDK defers the new run. Do not schedule
+					// several independent prompts before that run has started.
+					return;
+				}
 			}
 		}
 	}
 
 	function hasLiveAgentsForCurrentSession(): boolean {
-		return createLiveStatePayload(liveAgents, currentSessionFile).count > 0;
+		// Terminal-but-undelivered entries also need a watcher (e.g. completion
+		// during another extension's asynchronous settlement handler).
+		return [...liveAgents.values()].some((run) => [...run.values()].some((agent) => agentMatchesSession(agent, currentSessionFile)));
 	}
 
 	function updateCompletionWatcher(): void {
@@ -232,6 +246,8 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_start", async (_event, ctx) => {
 		try {
+			shuttingDown = true;
+			completionReceipts.clear();
 			shuttingDown = false;
 			sawAutoUltraworkCandidate = false;
 			currentSessionFile = sessionFileFromContext(ctx);
@@ -252,10 +268,27 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
-	pi.on("tool_execution_end", async (event) => {
+	pi.on("tool_call", (event, ctx) => completionReceipts.start(event, ctx));
+	pi.on("tool_execution_end", async (event, ctx) => {
+		// Observe the accepted result AFTER every tool_result transform (e.g.
+		// truncation/firewall). An earlier hook could acknowledge unseen text.
+		await completionReceipts.finish({ toolCallId: event.toolCallId, isError: event.isError,
+			content: event.result?.content ?? [], details: event.result?.details }, ctx);
 		if (event.toolName !== "subagents" && !event.toolName.startsWith("async_subagents_")) return;
 		refreshSubagentOverlay();
 	});
+
+	pi.on("agent_before_settle", (event, ctx) => {
+		if (event.outcome !== "completed" || !event.context.canContinue || ctx.signal?.aborted) return;
+		const session = sessionFileFromContext(ctx);
+		if (session !== currentSessionFile && (!session || !currentSessionFile || !pathsEqual(session, currentSessionFile))) return;
+		const messages: ReturnType<typeof buildAgentCompletionNotification>[] = [];
+		reconcileLiveAgentCompletions(messages);
+		if (!messages.length) return;
+		updateCompletionWatcher();
+		return { entries: messages.map((message) => ({ type: "custom_message" as const, ...message })), continue: true };
+	});
+	pi.on("agent_settled", () => refreshSubagentOverlay());
 
 	pi.on("before_agent_start", async (event, ctx) => {
 		const strategyPrompt = agentStrategyPrompt({
@@ -315,6 +348,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_shutdown", async (event, ctx) => {
 		try {
 			shuttingDown = true;
+			completionReceipts.clear();
 			clearSubagentsNativeWidget(ctx);
 			subagentOverlay.dispose();
 			if (completionWatchTimer) {

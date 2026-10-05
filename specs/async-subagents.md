@@ -171,7 +171,7 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 
 ### Parent completion delivery
 
-- Decision: [0031 — Single-channel subagent completion delivery](../docs/decisions/0031-subagent-completion-delivery.md).
+- Decision: [0044 — Retractable parent completion delivery](../docs/decisions/0044-retractable-subagent-completions.md), superseding [0031](../docs/decisions/0031-subagent-completion-delivery.md).
 - The optional parent [Heads Up observer](heads-up-observer.md#delegated-work-first-increment)
   receives a separate runtime-only evidence bridge: spawn captures session/anchor
   ownership before routing awaits, and final retry/fallback completion publishes
@@ -179,12 +179,14 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
   mutation/test receipt or an additional completion-delivery channel. It does not
   change wait/watch arbitration and does not replay adopted launches. Rationale:
   [0034 — Heads Up observer](../docs/decisions/0034-heads-up-observer.md#delegated-evidence-follow-up--2026-10-04).
-- A tracked child's terminal status (`done`, `failed`, or `stopped`) sends
-  an `async-subagents-agent-completion` custom message with result retrieval
-  instructions via `triggerTurn: true` and `deliverAs: "followUp"`. An idle
-  parent starts a new turn; a busy parent receives a queued follow-up rather
-  than an interruption, unless the completion is consumed by an active
-  `wait` or `spawn` watch as described below. `[confirmed by code,
+- A tracked child's terminal status (`done`, `failed`, or `stopped`) remains
+  extension-owned and retractable while the parent is busy, rather than entering
+  the SDK follow-up queue immediately. At the successful `agent_before_settle`
+  boundary, still-unconsumed completions become `async-subagents-agent-completion`
+  custom-message drafts with one continuation request. An idle parent is woken
+  via `triggerTurn: true`, `deliverAs: "followUp"`; only one idle wakeup is submitted
+  per reconciliation. Completions arriving after the boundary remain eligible at
+  settlement or the next two-second watcher tick. `[confirmed by code,
   index.ts/core/notifications.ts/completion-delivery.ts]`
 - `wait` reserves only its selected tracked agents in the originating session;
   `spawn` reserves its newly scheduled agents before launch. During that call,
@@ -197,8 +199,19 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 - Reservations are scoped to live launch objects, not just agent IDs, and
   overlapping calls release only their own reservations. Polling does not report
   an in-process intermediate disk receipt as terminal while its final
-  retry/fallback callback is pending. Already queued follow-ups are not retracted
-  by a later explicit wait. Arbitration is in-memory for the current extension
+  retry/fallback callback is pending. Successful `result` tool responses also
+  acknowledge the matching final state captured before execution. Successful
+  `read` calls acknowledge only a registered launch's complete `result.md`, read
+  from the beginning, whose returned text exactly matches the bounded (50 KiB)
+  artifact captured before execution and rechecked afterward. Partial/truncated,
+  failed, aborted, nonterminal, foreign-session or changed-result reads do not
+  acknowledge completion. Reads of unrelated files and progress/status calls do
+  not acknowledge it. Receipts inspect `tool_execution_end`, after all `tool_result`
+  transformations, so downstream truncation or rejection cannot acknowledge a
+  full artifact read. Tool hooks also cover nested tool calls; acknowledgement is
+  tool-execution evidence, not proof that an outer script printed the result.
+  Reads split across several calls are not accumulated. Already delivered SDK
+  messages are not retracted. Arbitration is in-memory for the current extension
   instance, not a durable cross-restart delivery ledger.
 - Completion callbacks and the two-second disk watcher share reconciliation:
   removing the tracked child before delivery prevents duplicate notifications.
@@ -212,7 +225,7 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
   duplicate refreshes, session isolation and shutdown suppression in
   `external/pi-tools-suite/test/async-subagents/tools.test.ts`. Arbitration,
   watched spawn/wait callbacks, filtered waits, timeout-boundary races, abort,
-  error and fail-fast are covered in
+  error, fail-fast, busy-parent boundary delivery and result/artifact receipts are covered in
   `external/pi-tools-suite/test/async-subagents/completion-delivery.test.ts`.
 
 ### Concurrency (`core/concurrency.ts`)
@@ -1101,6 +1114,7 @@ runtime is unchanged.
 ## Implementation
 
 - `external/pi-tools-suite/src/async-subagents/completion-delivery.ts`
+- `external/pi-tools-suite/src/async-subagents/completion-receipts.ts`
 - `external/pi-tools-suite/src/async-subagents/index.ts`
 - `external/pi-tools-suite/src/async-subagents/polling.ts`
 - `external/pi-tools-suite/src/async-subagents/tools/wait.ts`
@@ -1137,6 +1151,9 @@ runtime is unchanged.
   provenance labels, redaction and duplicate suppression.
 - `external/pi-tools-suite/test/async-subagents/completion-delivery.test.ts`:
   tool-result/follow-up arbitration and reservation lifecycle regressions.
+- `external/pi-tools-suite/test/async-subagents/completion-sdk.test.ts`:
+  real SDK tool hooks, settlement continuation and provider-request counts
+  with a deterministic offline provider.
 - `external/pi-tools-suite/test/async-subagents/owned-launch/`: launcher
   transport/parser units, real pipe/socket backpressure regression, and opt-in
   native launchd crash/recovery tests.

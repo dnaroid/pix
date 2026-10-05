@@ -1,7 +1,6 @@
 <script lang="ts">
   import Binoculars from "@lucide/svelte/icons/binoculars";
   import SettingsSwitch from "./settings/SettingsSwitch.svelte";
-  import X from "@lucide/svelte/icons/x";
   import type { HeadsUpSnapshot } from "../lib/heads-up";
   import { observerDuration, observerPopoverPosition, observerResultLabel, observerStatus, observerTime } from "../lib/observer-status";
 
@@ -121,7 +120,6 @@
       <div class="flex items-start gap-2 border-b border-border px-3 py-2.5">
         <Binoculars class="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
         <div class="min-w-0 flex-1"><h2 class="text-sm font-medium">{status.label}</h2><p class="mt-0.5 text-xs leading-4 text-muted-foreground">{status.detail}</p></div>
-        <button type="button" class="grid h-6 w-6 place-items-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" aria-label="Close Observer status" onclick={() => closePopup()}><X class="h-3.5 w-3.5" aria-hidden="true" /></button>
       </div>
       <div class="space-y-3 px-3 py-3 text-xs">
         <div class="flex items-center justify-between gap-3 font-medium">

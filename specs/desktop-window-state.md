@@ -42,8 +42,8 @@ persistent layout setting. Its resulting normal geometry is persisted here.
   titlebar and 28 px status bar visible, with 24 px spare vertical space.
   Default dimensions remain 1240 × 820; restored geometry respects this minimum.
 - On macOS, clicking a control in an inactive window activates the window and delivers that same click to the webview (`acceptFirstMouse: true`), without requiring a second click. The shared configuration applies to default, restored, and newly opened project windows.
-- On macOS, pointer enter/move over a visible inactive Pix webview activates
-  its window without clicking; see the [focus-on-hover contract](desktop-inactive-hover.md).
+- Pointer enter/move does not activate or raise an inactive Pix window; see the
+  [inactive-window pointer contract](desktop-inactive-hover.md).
 - On subsequent launches, recreate each saved window with its original stable
   label and workspace URL; do not add an extra main window when only project
   windows were open. Desktop session tabs and active-session pointers are scoped

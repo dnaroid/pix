@@ -107,7 +107,8 @@
 
 </script>
 
-<footer class="flex h-full min-w-0 select-none items-center gap-2 border-t border-border bg-chrome px-2.5 text-xs text-muted-foreground">
+<!-- Keep status popovers above positioned composer content, including its textarea. -->
+<footer class="relative z-20 flex h-full min-w-0 select-none items-center gap-2 border-t border-border bg-chrome px-2.5 text-xs text-muted-foreground">
   <div class="flex min-w-0 flex-1 items-center gap-2">
     {#if modelThinking.currentModel}
       <button

@@ -114,7 +114,8 @@ async function entryHarness(ids = ["child"]) {
 	const cwd = fs.mkdtempSync(path.join(scratchRoot, "case-"));
 	dirs.push(cwd);
 	const parent = path.join(cwd, "parent.jsonl");
-	const ctx = { cwd, sessionManager: { getSessionFile: () => parent, getSessionId: () => parent, getLeafId: () => "spawn-entry" } };
+	let busy = false;
+	const ctx = { cwd, isIdle: () => !busy, sessionManager: { getSessionFile: () => parent, getSessionId: () => parent, getLeafId: () => "spawn-entry" } };
 	const runDir = createRunDir(cwd, "delivery");
 	for (const id of ids) {
 		const dir = path.join(runDir, id);
@@ -137,6 +138,12 @@ async function entryHarness(ids = ["child"]) {
 	await handlers.get("session_start")({}, ctx);
 	return {
 		ctx, runDir, messages, evidenceEvents,
+		setBusy: (value: boolean) => { busy = value; },
+		boundary: (context = ctx, outcome = "completed", canContinue = true) => handlers.get("agent_before_settle")({ outcome, context: { canContinue } }, context),
+		settle: () => { busy = false; return handlers.get("agent_settled")({}, ctx); },
+		startTool: (event: any, context = ctx) => handlers.get("tool_call")(event, context),
+		endTool: (event: any, context = ctx) => handlers.get("tool_execution_end")({ ...event, result: { content: event.content, details: event.details } }, context),
+		result: () => tools.get("subagents").execute("result", { action: "result", runDir, agentId: "child" }, undefined, undefined, ctx),
 		finish: (id = "child", code = "0") => fs.writeFileSync(path.join(runDir, id, "exit_code"), code),
 		refresh: () => handlers.get("tool_execution_end")({ toolName: "subagents" }),
 		close: (stopChildren = false) => handlers.get("session_shutdown")(stopChildren ? {} : { reason: "reload" }, ctx),
@@ -150,6 +157,92 @@ async function entryHarness(ids = ["child"]) {
 }
 
 describe.serial("completion delivery through the entrypoint", () => {
+	test("result consumed after busy completion does not schedule a second report", async () => {
+		const h = await entryHarness();
+		try {
+			h.setBusy(true);
+			h.finish();
+			await h.refresh();
+			expect(h.messages).toHaveLength(0);
+			const event = { toolCallId: "result", toolName: "subagents", input: { action: "result", runDir: h.runDir, agentId: "child" } };
+			await h.startTool(event);
+			await h.endTool({ ...event, ...await h.result(), isError: false });
+			expect(h.boundary()).toBeUndefined();
+			await h.settle();
+			expect(h.messages).toHaveLength(0);
+		} finally { await h.close(); }
+	});
+
+	test("unconsumed busy completions share one boundary continuation", async () => {
+		const h = await entryHarness(["child", "other"]);
+		try {
+			h.setBusy(true);
+			h.finish(); h.finish("other", "1");
+			await h.refresh();
+			expect(h.messages).toHaveLength(0);
+			const boundary = h.boundary();
+			expect(boundary.continue).toBe(true);
+			expect(boundary.entries.map((entry: any) => entry.details.agentId).sort()).toEqual(["child", "other"]);
+			expect(h.boundary()).toBeUndefined();
+			await h.settle();
+			expect(h.messages).toHaveLength(0);
+		} finally { await h.close(); }
+	});
+
+	test("a completion after the boundary still wakes the idle parent", async () => {
+		const h = await entryHarness();
+		try {
+			h.setBusy(true);
+			expect(h.boundary()).toBeUndefined();
+			h.finish("child", "1");
+			await h.refresh();
+			expect(h.messages).toHaveLength(0);
+			await h.settle();
+			expect(h.messages).toHaveLength(1);
+			expect(h.messages[0].details.status).toBe("failed");
+		} finally { await h.close(); }
+	});
+
+	for (const mode of ["full", "partial", "error", "changed", "late-error", "aborted", "sibling", "nonterminal", "shutdown"]) {
+		test(`direct artifact read: ${mode}`, async () => {
+			const h = await entryHarness();
+			try {
+				h.setBusy(true);
+				const file = path.join(h.runDir, "child", "result.md");
+				fs.writeFileSync(file, "audit complete\nno changes\n");
+				if (mode !== "nonterminal") h.finish();
+				await h.refresh();
+				const event = { toolCallId: "read", toolName: "read", input: { path: file } };
+				await h.startTool(event);
+				if (mode === "nonterminal") h.finish();
+				if (mode === "late-error") h.finish("child", "1");
+				if (mode === "changed") fs.writeFileSync(file, "new version");
+				if (mode === "shutdown") await h.close();
+				const controller = new AbortController();
+				if (mode === "aborted") controller.abort();
+				const context = mode === "sibling"
+					? { ...h.ctx, sessionManager: { ...h.ctx.sessionManager, getSessionFile: () => "/sibling" } }
+					: { ...h.ctx, signal: controller.signal };
+				await h.endTool({ ...event, isError: mode === "error", content: [{ type: "text", text: mode === "partial" ? "audit complete" : "audit complete\nno changes\n" }] }, context);
+				const boundary = h.boundary();
+				if (mode === "full" || mode === "shutdown") expect(boundary).toBeUndefined();
+				else expect(boundary.entries).toHaveLength(1);
+				expect(h.messages).toHaveLength(0);
+			} finally { await h.close(); }
+		});
+	}
+
+	test("foreign, aborted and noncontinuable boundaries do not consume pending results", async () => {
+		const h = await entryHarness();
+		try {
+			h.setBusy(true); h.finish();
+			const sibling = { ...h.ctx, sessionManager: { ...h.ctx.sessionManager, getSessionFile: () => "/sibling" } };
+			expect(h.boundary(sibling)).toBeUndefined();
+			expect(h.boundary(h.ctx, "aborted")).toBeUndefined();
+			expect(h.boundary(h.ctx, "completed", false)).toBeUndefined();
+			expect(h.boundary().entries).toHaveLength(1);
+		} finally { await h.close(); }
+	});
 	test("routing rejection retires the observer launch without delivering a completion", async () => {
 		const h = await entryHarness([]);
 		try {
