@@ -5,7 +5,6 @@
   import Folder from "@lucide/svelte/icons/folder";
   import GripVertical from "@lucide/svelte/icons/grip-vertical";
   import ListTodo from "@lucide/svelte/icons/list-todo";
-  import Plus from "@lucide/svelte/icons/plus";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import Settings from "@lucide/svelte/icons/settings";
@@ -609,13 +608,14 @@
     projectSwitcher?.close();
   }
 
-  function openCreate(): void {
+  function openCreate(type: ProjectTaskType): void {
+    if (!workspace || busy) return;
     statusMenuController.close();
     editingTaskId = null;
     title = "";
     description = "";
     editorAttachments = [];
-    taskType = "feature";
+    taskType = type;
     editorOpen = true;
     void focusEditorTitle();
   }
@@ -703,14 +703,6 @@
         <strong class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs font-semibold tracking-wide text-muted-foreground uppercase">{activeTabTitle}</strong>
         {#if activeTab === "tasks"}
           <span class="shrink-0 text-xs text-muted-foreground">{tasks.length} {tasks.length === 1 ? "task" : "tasks"} · {doneCount} done</span>
-          <button
-            class="ml-auto grid h-6 w-6 shrink-0 place-items-center rounded-sm text-muted-foreground transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
-            type="button"
-            title="Add task"
-            aria-label="Add task"
-            onclick={openCreate}
-            disabled={!workspace || busy}
-          ><Plus class="h-3.5 w-3.5" aria-hidden="true" /></button>
         {:else if activeTab === "project"}
           <div class="ml-auto flex shrink-0 items-center gap-0.5">
             <button
@@ -810,6 +802,7 @@
           onSetTaskStatus={statusMenuController.setStatus}
           {onRun}
           {onOpenSession}
+          onCreate={openCreate}
           onEdit={openEdit}
           onDeleteRequest={(taskId) => deleteTaskId = taskId}
         />
@@ -1002,17 +995,17 @@
   {#if deleteTaskId && !layoutController.collapsed}
     {@const deleteTask = tasks.find((task) => task.id === deleteTaskId)}
     <div
-      class="absolute inset-y-0 right-0 left-12 z-30 grid place-items-center border-r border-sidebar-border bg-overlay p-4"
+      class="absolute inset-y-0 right-0 left-12 z-30 grid place-items-center border-r border-sidebar-border bg-overlay/20 p-4"
       role="dialog"
       aria-modal="true"
       aria-label="Delete task"
     >
       <div class="w-full rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-md">
         <strong class="text-xs font-semibold">Delete task?</strong>
-        <p class="mt-1.5 break-words text-xs leading-4 text-muted-foreground">“{deleteTask ? projectTaskDisplayLabel(deleteTask) : "This task"}” will be removed from the project task file.</p>
+        <p class="mt-1.5 break-words text-xs leading-4 text-muted-foreground">“{deleteTask ? projectTaskDisplayLabel(deleteTask) : "This task"}”</p>
         <div class="mt-3 flex justify-end gap-2">
           <button class="h-8 rounded-md px-3 text-xs text-muted-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring" type="button" onclick={() => deleteTaskId = null}>Cancel</button>
-          <button class="h-8 rounded-md bg-destructive px-3 text-xs font-medium text-destructive-foreground hover:opacity-90 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" onclick={confirmDelete} disabled={busy}>Delete</button>
+          <button class="h-8 rounded-md bg-destructive/10 px-3 text-xs font-medium text-destructive hover:bg-destructive/20 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" onclick={confirmDelete} disabled={busy}>Delete</button>
         </div>
       </div>
     </div>

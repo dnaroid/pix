@@ -5,8 +5,28 @@ import { readFileSync } from "node:fs";
 import sectionSource from "./GitCiSection.svelte?raw";
 import panelSource from "./GitPanel.svelte?raw";
 import toolsSource from "./GitRepositoryTools.svelte?raw";
+import changesSource from "./GitChangesSection.svelte?raw";
 
 describe("Git CI setup UI", () => {
+  it("has only the outer CI disclosure and loads all runs when it opens", () => {
+    expect(sectionSource.match(/<details\b/g)).toHaveLength(1);
+    expect(sectionSource).toContain('bind:open={expanded}');
+    expect(sectionSource).toContain("if (!expanded) return;");
+    expect(sectionSource).toContain("const runs = ci.snapshot?.runs ?? [];");
+    expect(sectionSource).toContain("untrack(() => {");
+    expect(sectionSource).toContain("for (const run of runs) ci.onLoadJobs(run.id);");
+    expect(sectionSource).not.toContain("group/run");
+  });
+
+  it("collapses file rows independently without nesting scope actions in the toggle", () => {
+    expect(changesSource).toContain("let expanded = $state(true)");
+    expect(changesSource).toContain('aria-expanded={expanded} onclick={() => expanded = !expanded}');
+    expect(changesSource).toContain("{#if expanded}\n  {#each visible as change");
+    const toggle = changesSource.slice(changesSource.indexOf("aria-expanded={expanded}"), changesSource.indexOf("</button>"));
+    expect(toggle).toContain('isStaged ? "Staged" : "Changes"');
+    expect(toggle).not.toContain("onToggle");
+    expect(toggle).not.toContain("onOpenDiff");
+  });
   it("shows copyable install/auth guidance with provider documentation links", () => {
     expect(sectionSource).toContain("gitCiSetupGuide(ci.snapshot)");
     expect(sectionSource).toContain("writeText(command)");

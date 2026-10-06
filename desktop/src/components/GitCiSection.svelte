@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import Check from "@lucide/svelte/icons/check";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
@@ -23,6 +24,16 @@
   const setupGuide = $derived(gitCiSetupGuide(ci.snapshot));
   let copiedCommand = $state<string | null>(null);
   let fixingWithAi = $state(false);
+  let expanded = $state(false);
+
+  // Loading/cache mutations must not trigger repeated job requests.
+  $effect(() => {
+    if (!expanded) return;
+    const runs = ci.snapshot?.runs ?? [];
+    untrack(() => {
+      for (const run of runs) ci.onLoadJobs(run.id);
+    });
+  });
 
   function statusClass(status: GitCiStatus | undefined): string {
     if (status === "success") return "text-tool-success";
@@ -70,7 +81,7 @@
   }
 </script>
 
-<details class="group/ci border-t border-sidebar-border bg-panel">
+<details class="group/ci border-t border-sidebar-border bg-panel" bind:open={expanded}>
   <summary class="flex h-8 items-center gap-1.5 px-2 text-xs font-medium text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
     <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open/ci:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
     <span class="min-w-0 flex-1 truncate">{providerLabel}</span>
@@ -141,16 +152,15 @@
     {/if}
 
     {#each ci.snapshot?.runs ?? [] as run (run.id)}
-      <details class="group/run rounded-sm border border-border bg-panel-strong" ontoggle={(event) => { if (event.currentTarget.open) ci.onLoadJobs(run.id); }}>
-        <summary class="flex min-h-7 items-center gap-1.5 px-2 py-1 text-xs hover:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
+      <section class="rounded-sm border border-border bg-panel-strong" aria-label={run.name}>
+        <header class="flex min-h-7 items-center gap-1.5 px-2 py-1 text-xs">
           {#if run.status === "success"}<Check class="h-3.5 w-3.5 shrink-0 text-tool-success" aria-hidden="true" />
           {:else if run.status === "failure"}<X class="h-3.5 w-3.5 shrink-0 text-tool-error" aria-hidden="true" />
           {:else if run.status === "queued" || run.status === "running"}<RefreshCw class="h-3.5 w-3.5 shrink-0 text-tool-warning" aria-hidden="true" />
           {:else}<Minus class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />{/if}
           <span class="min-w-0 flex-1 truncate font-medium text-foreground" title={run.name}>{run.name}</span>
           <span class={["shrink-0", statusClass(run.status)]}>{gitCiStatusLabel(run.status)}</span>
-          <ChevronRight class="h-3 w-3 shrink-0 text-muted-foreground transition-transform group-open/run:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
-        </summary>
+        </header>
         <div class="space-y-2 border-t border-border px-2 py-2">
           <div class="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
             <span class="min-w-0 flex-1 truncate font-mono" title={run.headSha}>{run.headSha.slice(0, 8)}{run.branch ? ` · ${run.branch}` : ""}</span>
@@ -178,7 +188,7 @@
             </ol>
           {/if}
         </div>
-      </details>
+      </section>
     {/each}
   </div>
 </details>

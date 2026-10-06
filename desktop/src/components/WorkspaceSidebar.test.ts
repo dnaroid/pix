@@ -9,6 +9,15 @@ import sidebarViewModelSource from "../app/desktop-sidebar-view-model.svelte.ts?
 import navigationViewModelSource from "../app/desktop-navigation-view-model-services.ts?raw";
 
 describe("WorkspaceSidebar project sizing", () => {
+  it("creates tasks from group headers with the selected type instead of the toolbar", () => {
+    expect(sidebarSource).toContain("function openCreate(type: ProjectTaskType): void");
+    expect(sidebarSource).toContain("if (!workspace || busy) return;");
+    expect(sidebarSource).toContain("taskType = type;");
+    expect(sidebarSource).toContain("onCreate={openCreate}");
+    expect(tasksPanelSource).toContain("onclick={() => onCreate(group.type)}");
+    expect(sidebarSource).not.toContain('aria-label="Add task"');
+  });
+
   it("uses self-refreshing eligibility for the combined Git command and does not open a panel", () => {
     expect(sidebarSource).toContain('"git.commit-push": Boolean(onGitStageGenerateCommitPush) && gitAssistantReady && !gitBusy && !gitStageGenerateCommitPushBlockedReason(gitSnapshot)');
     expect(sidebarSource).toContain('"git.commit-push": () => { void onGitStageGenerateCommitPush?.(); }');

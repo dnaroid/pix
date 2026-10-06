@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # Spec: Desktop Project Task Manager
 
 ## Type
@@ -50,6 +55,10 @@ agent's session-local todo list.
    a compact activity rail available while collapsed.
 2. Tasks are grouped by type. Dragging a task reorders it; dropping it into a
    different group also changes its type and updates `updatedAt`.
+   Each group header (`Bug`, `Feature`, `Improve`) has an inline `+` button
+   beside its count, opening the task editor with that group's type selected.
+   The buttons replace the panel-toolbar Add action; all three groups remain
+   visible even when the project has no tasks so the first task can be created.
 3. Task rows show the title when present. Untitled tasks use the first line of
    description as their display label, or `Untitled task` when they contain only
    attachments. Rows also show status, session/run action, edit, and delete
@@ -101,6 +110,10 @@ agent's session-local todo list.
     the existing list (including an empty list) visible until replacement data
     arrives, without flashing a loading screen. Conflicting controls remain
     disabled during the read; read failures still show the storage error.
+    Temporary save/read locking does not dim every task's controls: row and
+    group-add controls keep stable opacity while disabled for this transient
+    work, avoiding list-wide flashes during post-save synchronization. An
+    unavailable session still dims the Run/Open session action.
 
 ## Contracts
 
@@ -150,9 +163,10 @@ agent's session-local todo list.
 - Save, session creation, attachment preparation, and prompt failures remain
   visible and retryable.
 
-## Related files
+## Implementation
 
 - `desktop/src/app/project-actions.svelte.ts`
+- `desktop/src/app/project-tasks.svelte.ts`
 - `desktop/src/app/desktop-project-action-services.ts`
 - `desktop/src/components/PromptComposerActionsMenu.svelte`
 - `desktop/src/components/WorkspaceSidebar.svelte`
@@ -161,16 +175,28 @@ agent's session-local todo list.
 - `desktop/src/components/WorkspaceSidebarTasksPanel.svelte`
 - `desktop/src/components/WorkspaceSidebarTaskEditor.svelte`
 - `desktop/src/lib/attachments.ts`
-- `desktop/src/lib/attachments.test.ts`
 - `desktop/src/lib/project-tasks.ts`
-- `desktop/src/lib/project-tasks.test.ts`
 - `desktop/src-tauri/src/lib.rs`
 - `src/schemas/tasks-schema.ts`
+
+## Tests
+
+- `desktop/src/app/project-tasks-store.test.ts`
+- `desktop/src/components/WorkspaceSidebar.test.ts`
+- `desktop/src/components/WorkspaceSidebarTasksPanel.test.ts`
+- `desktop/src/lib/project-tasks.test.ts`
+- `desktop/src/lib/attachments.test.ts`
+- `desktop/src/app/desktop-project-action-services.test.ts`
+- `desktop/src-tauri/src/lib.rs`
 
 ## Verification
 
 - `desktop/src/app/project-tasks-store.test.ts` covers initial versus repeat
   loading, empty snapshots, workspace switches, reset, and stale read completion.
+- `desktop/src/components/WorkspaceSidebarTasksPanel.test.ts` covers group-add
+  controls including empty projects, stable task-row styles during transient
+  locking, and initial loading/error states. Sidebar wiring tests cover passing
+  the selected group type into the task editor.
 - `desktop/src/lib/project-tasks.test.ts` covers untitled composer task creation,
   parsing, prompt generation, and drag/reorder semantics.
 - `desktop/src/lib/attachments.test.ts` covers data-URL decoding used when a

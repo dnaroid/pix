@@ -8,6 +8,7 @@
   import ListTodo from "@lucide/svelte/icons/list-todo";
   import Pencil from "@lucide/svelte/icons/pencil";
   import Play from "@lucide/svelte/icons/play";
+  import Plus from "@lucide/svelte/icons/plus";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import {
@@ -26,10 +27,10 @@
     position: TaskDropPosition;
   };
 
-  const TASK_GROUPS: readonly { type: ProjectTaskType; label: string }[] = [
-    { type: "bug", label: "Bug" },
-    { type: "feature", label: "Feature" },
-    { type: "improvement", label: "Improve" },
+  const TASK_GROUPS: readonly { type: ProjectTaskType; label: string; tone: string }[] = [
+    { type: "bug", label: "Bug", tone: "text-tool-error/75" },
+    { type: "feature", label: "Feature", tone: "text-tool-success/75" },
+    { type: "improvement", label: "Improve", tone: "text-tool-info/75" },
   ];
 
   let {
@@ -57,6 +58,7 @@
     onSetTaskStatus,
     onRun,
     onOpenSession,
+    onCreate,
     onEdit,
     onDeleteRequest,
   }: {
@@ -84,6 +86,7 @@
     onSetTaskStatus: (taskId: string, status: ProjectTaskStatus) => void;
     onRun: (task: ProjectTask) => void;
     onOpenSession: (task: ProjectTask) => void;
+    onCreate: (type: ProjectTaskType) => void;
     onEdit: (task: ProjectTask) => void;
     onDeleteRequest: (taskId: string) => void;
   } = $props();
@@ -123,16 +126,22 @@
       </div>
     {:else if !workspace}
       <div class="px-4 py-8 text-center"><Folder class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" /><p class="text-xs font-medium">Choose a project</p><p class="mt-1 text-xs text-muted-foreground">Tasks are stored inside its .pi folder.</p></div>
-    {:else if tasks.length === 0}
-      <div class="px-4 py-8 text-center"><ListTodo class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" /><p class="text-xs font-medium">No tasks yet</p><p class="mt-1 text-xs text-muted-foreground">Add the first project task.</p></div>
     {:else}
       <div class="space-y-2">
         {#each TASK_GROUPS as group (group.type)}
           {@const groupTasks = tasks.filter((task) => task.type === group.type)}
           <section class="space-y-0.5" aria-label={`${group.label} tasks`} data-task-group={group.type}>
             <div class="flex h-6 items-center gap-1.5 px-1.5 text-xs font-medium text-muted-foreground">
-              <span>{group.label}</span>
+              <span class={group.tone}>{group.label}</span>
               <span class="font-mono text-xs font-normal opacity-65">{groupTasks.length}</span>
+              <button
+                class="grid h-6 w-6 shrink-0 place-items-center rounded-sm text-muted-foreground transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default"
+                type="button"
+                title={`Add ${group.label} task`}
+                aria-label={`Add ${group.label} task`}
+                onclick={() => onCreate(group.type)}
+                disabled={busy}
+              ><Plus class="h-3.5 w-3.5" aria-hidden="true" /></button>
             </div>
 
             <div
@@ -169,7 +178,7 @@
                 >
                   <div class="flex min-w-0 items-start gap-1">
                     <button
-                      class="mt-px grid h-6 w-5 shrink-0 touch-none cursor-grab place-items-center rounded text-muted-foreground/70 hover:bg-accent hover:text-foreground active:cursor-grabbing focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-30"
+                      class="mt-px grid h-6 w-5 shrink-0 touch-none cursor-grab place-items-center rounded text-muted-foreground/70 hover:bg-accent hover:text-foreground active:cursor-grabbing focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default"
                       type="button"
                       title="Drag to reorder or move between groups"
                       aria-label={`Drag ${taskLabel} to reorder or change type`}
@@ -187,7 +196,7 @@
                         <div class="flex shrink-0 items-center opacity-65 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
                           <div class="relative" data-task-status-control>
                             <button
-                              class={["grid h-6 w-6 place-items-center rounded-md hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-35", statusTone(task.status)]}
+                              class={["grid h-6 w-6 place-items-center rounded-md hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring", statusTone(task.status)]}
                               type="button"
                               title={`Status: ${taskStatusLabel(task.status)}`}
                               aria-label={`Change status for ${taskLabel}. Current status: ${taskStatusLabel(task.status)}`}
@@ -234,7 +243,8 @@
                           </div>
                           <button
                             class={[
-                              "grid h-6 w-6 place-items-center rounded-md hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-35",
+                              "grid h-6 w-6 place-items-center rounded-md hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring",
+                              !sessionReady ? "opacity-35" : "",
                               activeTaskId === task.id ? "text-primary" : "text-muted-foreground hover:text-primary",
                             ]}
                             type="button"
@@ -247,8 +257,8 @@
                             {:else if task.sessionId}<Folder class="h-3 w-3" aria-hidden="true" />
                             {:else}<Play class="h-3 w-3" aria-hidden="true" />{/if}
                           </button>
-                          <button class="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-35" type="button" title="Edit task" aria-label={`Edit ${taskLabel}`} onclick={() => onEdit(task)} disabled={busy}><Pencil class="h-3 w-3" aria-hidden="true" /></button>
-                          <button class="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-tool-error focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-35" type="button" title="Delete task" aria-label={`Delete ${taskLabel}`} onclick={() => onDeleteRequest(task.id)} disabled={busy}><Trash2 class="h-3 w-3" aria-hidden="true" /></button>
+                          <button class="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" type="button" title="Edit task" aria-label={`Edit ${taskLabel}`} onclick={() => onEdit(task)} disabled={busy}><Pencil class="h-3 w-3" aria-hidden="true" /></button>
+                          <button class="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-tool-error focus-visible:outline-2 focus-visible:outline-ring" type="button" title="Delete task" aria-label={`Delete ${taskLabel}`} onclick={() => onDeleteRequest(task.id)} disabled={busy}><Trash2 class="h-3 w-3" aria-hidden="true" /></button>
                         </div>
                       </div>
                     </div>

@@ -3,6 +3,7 @@
   import Plus from "@lucide/svelte/icons/plus";
   import FileDiff from "@lucide/svelte/icons/file-diff";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import { gitChangeCode, gitChangeLabel, gitChangeLineStats, type GitFileChange, type GitDiffScope } from "../lib/git";
   let { changes, scope, query, busy, onOpenDiff, onToggle, onDiscard }: {
     changes: GitFileChange[]; scope: "staged" | "unstaged"; query: string; busy: boolean;
@@ -11,6 +12,7 @@
   } = $props();
   const visible = $derived(changes.filter((change) => change.path.toLowerCase().includes(query.trim().toLowerCase())));
   const isStaged = $derived(scope === "staged");
+  let expanded = $state(true);
   const formatter = new Intl.NumberFormat("en-US");
   function tone(change: GitFileChange): string {
     const code = gitChangeCode(change, scope);
@@ -20,8 +22,11 @@
 
 <section aria-label={isStaged ? "Staged changes" : "Working tree changes"}>
   <header class="sticky top-0 z-[1] flex h-8 items-center gap-1.5 border-y border-sidebar-border bg-chrome px-2">
-    <strong class="text-xs font-medium">{isStaged ? "Staged" : "Changes"}</strong>
-    <span class="font-mono text-xs text-muted-foreground">{query ? `${visible.length}/` : ""}{changes.length}</span>
+    <button class="flex h-full min-w-0 flex-1 items-center gap-1.5 text-left hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring" type="button" aria-expanded={expanded} onclick={() => expanded = !expanded}>
+      <ChevronRight class={["h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none", expanded && "rotate-90"]} aria-hidden="true" />
+      <strong class="text-xs font-medium">{isStaged ? "Staged" : "Changes"}</strong>
+      <span class="font-mono text-xs text-muted-foreground">{query ? `${visible.length}/` : ""}{changes.length}</span>
+    </button>
     {#if changes.length}
       <button class="ml-auto grid h-6 w-6 place-items-center rounded-sm text-muted-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button"
         title={isStaged ? "Open staged diff" : "Open working-tree diff"} aria-label={isStaged ? "Open staged diff" : "Open working-tree diff"} disabled={busy} onclick={() => onOpenDiff(undefined, scope)}><FileDiff class="h-3.5 w-3.5" aria-hidden="true" /></button>
@@ -31,6 +36,7 @@
       </button>
     {/if}
   </header>
+  {#if expanded}
   {#each visible as change (change.path)}
     {@const stats = gitChangeLineStats(change, scope)}
     {@const separator = change.path.lastIndexOf("/")}
@@ -55,4 +61,5 @@
   {:else}
     <p class="px-3 py-2 text-xs text-muted-foreground">{query && changes.length ? "No matching files." : isStaged ? "Choose the files to include in your commit." : "No unstaged changes."}</p>
   {/each}
+  {/if}
 </section>
