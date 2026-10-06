@@ -2178,7 +2178,9 @@ async fn resolve_home_media(app: AppHandle, path: String) -> Result<AttachmentFi
             .map_err(|error| format!("failed to resolve the home directory: {error}"))?;
         let (_, file_path) = resolve_home_file_path(&home, Path::new(&path))?;
         if !is_supported_project_media(&file_path) {
-            return Err(format!("{path} is not a supported image, video or GLB model"));
+            return Err(format!(
+                "{path} is not a supported image, video or GLB model"
+            ));
         }
         let file = attachment_file(&file_path)?;
         app.state::<AttachmentPathState>()

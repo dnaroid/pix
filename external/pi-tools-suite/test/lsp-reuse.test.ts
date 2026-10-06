@@ -284,6 +284,9 @@ describe("LSP idle process lifecycle without a monitor", () => {
     clock.advance(LSP_IDLE_TIMEOUT_MS);
     expect(manager.runtimeSnapshot()).toEqual([]);
     expect(pids()).toHaveLength(1);
-    expect(isAlive(pids()[0])).toBe(false);
+    // A SIGKILLed child can briefly linger as an unreaped zombie that still
+    // answers signal 0 under CI load; poll for death instead of asserting the
+    // synchronous kill landed already. A resurrected process would time out.
+    await eventually(() => !isAlive(pids()[0]));
   });
 });

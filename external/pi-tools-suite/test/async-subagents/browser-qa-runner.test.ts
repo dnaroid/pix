@@ -26,7 +26,7 @@ beforeAll(() => {
 		"-Command",
 		"Get-CimInstance Win32_Process -Filter \"ProcessId = $PID\" | Out-Null; & taskkill.exe /PID $PID /F *> $null",
 	], { stdio: "ignore", timeout: 60_000, windowsHide: true });
-});
+}, 60_000);
 
 afterEach(() => {
 	for (const directory of tempDirs.splice(0)) {
