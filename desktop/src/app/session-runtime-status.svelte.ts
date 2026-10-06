@@ -20,20 +20,11 @@ import {
   type SessionStateNotification,
 } from "../lib/session-state";
 import type { SessionRuntimeStoreOptions } from "./session-runtime-options";
+import { createRuntimeQuotaRecovery } from "./session-runtime-quota-recovery";
 
 type SessionRuntimeStatusOptions = Pick<SessionRuntimeStoreOptions, "client"> & {
   isReady: (sessionId: string) => boolean;
 };
-
-/**
- * Delay before retrying a quota refresh whose response flagged
- * `modelUsageCredentialPending`: the Claude Code credential was missing, so
- * the retry's provider query reads only local credentials (Keychain /
- * `.credentials.json`) and performs no provider network traffic until Claude
- * Code refreshes its login. The chain stops at the first response that is
- * ready, failed, or unavailable without the flag.
- */
-const MODEL_USAGE_CREDENTIAL_RETRY_MS = 60_000;
 
 export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions) {
   let statuses = $state<Map<string, RuntimeStatus>>(new Map());
@@ -54,7 +45,11 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
     headerPushSnapshotGeneration?: number;
   };
   const owners = new Map<string, StatusOwner>();
-  const credentialRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const quotaRecovery = createRuntimeQuotaRecovery((sessionId) => { void refreshStatus(sessionId, true); });
+  const {
+    clearStartupQuotaRetry, clearModelUsageCredentialRetry, settleStartupQuotaRetry,
+    scheduleModelUsageCredentialRetry,
+  } = quotaRecovery;
   let lifecycleGeneration = 0;
 
   function ownerFor(sessionId: string): StatusOwner {
@@ -74,6 +69,7 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
     if (claudeLimitsRefreshing.has(sessionId)) refreshModelUsage = false;
     const requestLifecycleGeneration = lifecycleGeneration;
     const owner = ownerFor(sessionId);
+    if (refreshModelUsage) clearStartupQuotaRetry(sessionId);
     let startupClaudeNudge = false;
     const request = beginRuntimeStatusRefresh(
       owner.generations,
@@ -135,11 +131,19 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
           if (!startupClaudeNudge) scheduleModelUsageCredentialRetry(sessionId);
         } else {
           clearModelUsageCredentialRetry(sessionId);
+          if (next.modelUsageRefresh === "failed") scheduleStartupQuotaRetry(sessionId, owner);
+          else settleStartupQuotaRetry(sessionId, owner);
         }
       }
     } catch {
       // Runtime chrome is best-effort. Keep the previous snapshot when the
       // private status request races a session reload or transient transport failure.
+      if (
+        requestLifecycleGeneration === lifecycleGeneration && requestClient === options.client()
+        && options.isReady(sessionId) && owners.get(sessionId) === owner
+        && request.quotaGeneration !== undefined && owner.generations.quota === request.quotaGeneration
+        && !(owner.headerPushSnapshotGeneration !== undefined && request.snapshotGeneration < owner.headerPushSnapshotGeneration)
+      ) scheduleStartupQuotaRetry(sessionId, owner);
     } finally {
       if (requestLifecycleGeneration === lifecycleGeneration && requestClient === options.client()
         && owners.get(sessionId) === owner && request.quotaGeneration !== undefined && owner.generations.quota === request.quotaGeneration) {
@@ -221,6 +225,7 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
       // fresh quota replies may merge normally again (OAuth is authoritative).
       if (headerUsage) owner.headerPushSnapshotGeneration = pushRequest.snapshotGeneration;
       else owner.headerPushSnapshotGeneration = undefined;
+      if (headerUsage) settleStartupQuotaRetry(notification.sessionId, owner);
       const nextStatuses = new Map(statuses);
       nextStatuses.set(
         notification.sessionId,
@@ -364,6 +369,7 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
     // Discard quota responses begun before the login/credential change.
     owner.generations = { ...owner.generations, quota: owner.generations.quota + 1 };
     clearModelUsageCredentialRetry(sessionId);
+    clearStartupQuotaRetry(sessionId);
     const refreshing = new Set(claudeLimitsRefreshing);
     refreshing.add(sessionId);
     claudeLimitsRefreshing = refreshing;
@@ -392,6 +398,8 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
       // A successful refresh means the credential exists again; the
       // bounded credential-pending retry is no longer needed.
       if (next.modelUsageCredentialPending) scheduleModelUsageCredentialRetry(sessionId);
+      else if (next.refresh === "failed") scheduleStartupQuotaRetry(sessionId, owner);
+      else settleStartupQuotaRetry(sessionId, owner);
     } catch {
       if (
         requestLifecycleGeneration === lifecycleGeneration
@@ -418,27 +426,20 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
     }
   }
 
-  function scheduleModelUsageCredentialRetry(sessionId: string): void {
-    if (credentialRetryTimers.has(sessionId)) return;
-    const timer = setTimeout(() => {
-      credentialRetryTimers.delete(sessionId);
-      void refreshStatus(sessionId, true);
-    }, MODEL_USAGE_CREDENTIAL_RETRY_MS);
-    credentialRetryTimers.set(sessionId, timer);
-  }
-
-  function clearModelUsageCredentialRetry(sessionId: string): void {
-    const timer = credentialRetryTimers.get(sessionId);
-    if (!timer) return;
-    clearTimeout(timer);
-    credentialRetryTimers.delete(sessionId);
+  function scheduleStartupQuotaRetry(sessionId: string, owner: StatusOwner): void {
+    const requestClient = options.client();
+    const quotaGeneration = owner.generations.quota;
+    quotaRecovery.scheduleStartupQuotaRetry(sessionId, owner, () => (
+      owners.get(sessionId) === owner && requestClient === options.client()
+      && options.isReady(sessionId) && owner.generations.quota === quotaGeneration
+    ));
   }
 
   function forget(sessionId: string): void {
     // Pending continuations retain their owner object; a reopened ID gets a
     // different owner even when its local counters start from one again.
     owners.delete(sessionId);
-    clearModelUsageCredentialRetry(sessionId);
+    quotaRecovery.forget(sessionId);
     if (statuses.has(sessionId)) {
       const next = new Map(statuses);
       next.delete(sessionId);
@@ -483,8 +484,7 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
 
   function reset(): void {
     lifecycleGeneration += 1;
-    for (const timer of credentialRetryTimers.values()) clearTimeout(timer);
-    credentialRetryTimers.clear();
+    quotaRecovery.reset();
     owners.clear();
     statuses = new Map();
     modelUsageRefreshing = new Set();
