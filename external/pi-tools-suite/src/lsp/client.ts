@@ -141,10 +141,12 @@ export class LspClient {
   /**
    * vscode-jsonrpc's `sendRequest` rethrows write failures from an async
    * promise executor, so a write into a child that died before its exit event
-   * reached us surfaces as an unhandled EPIPE rejection. An EPIPE on stdin can
-   * only mean the reader is gone, and the child exit handler already owns
-   * failure reporting, so complete stdin writes silently instead. On Windows
-   * this is the common crash-at-startup path; POSIX usually wins the race.
+   * reached us surfaces as an unhandled rejection (EPIPE on POSIX, or
+   * ERR_STREAM_DESTROYED once Bun/Windows has destroyed the stdin stream).
+   * Both codes can only mean the reader is gone, and the child exit handler
+   * already owns failure reporting, so complete stdin writes silently instead.
+   * On Windows this is the common crash-at-startup path; POSIX usually wins
+   * the race with a plain EPIPE.
    */
   private swallowStdinEpipe(child: ChildProcessWithoutNullStreams): void {
     child.stdin.on("error", () => {
@@ -152,20 +154,22 @@ export class LspClient {
     });
     const originalWrite = child.stdin.write.bind(child.stdin);
     type WriteCallback = (error: Error | null | undefined) => void;
-    const isEpipe = (error: unknown): boolean =>
-      Boolean(error) && (error as NodeJS.ErrnoException).code === "EPIPE";
+    const isBrokenPipe = (error: unknown): boolean => {
+      const code = Boolean(error) && (error as NodeJS.ErrnoException).code;
+      return code === "EPIPE" || code === "ERR_STREAM_DESTROYED";
+    };
     child.stdin.write = ((chunk: unknown, encoding?: unknown, callback?: unknown) => {
       const done = (typeof encoding === "function" ? encoding : callback) as WriteCallback | undefined;
       const passedEncoding = typeof encoding === "function" ? undefined : encoding;
       const fail = (error: Error | null | undefined): void => {
-        if (done && isEpipe(error)) done(null);
+        if (done && isBrokenPipe(error)) done(null);
         else if (done) done(error);
       };
       try {
         if (!done) return originalWrite(chunk as never, passedEncoding as never) as boolean;
         return originalWrite(chunk as never, passedEncoding as never, fail) as boolean;
       } catch (error) {
-        if (isEpipe(error)) {
+        if (isBrokenPipe(error)) {
           done?.(null);
           return false;
         }
