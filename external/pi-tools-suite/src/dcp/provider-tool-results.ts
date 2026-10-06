@@ -49,7 +49,10 @@ export function collectProviderToolResultEvidence(payload: unknown): ProviderToo
     if (record.role === "tool" && typeof record.tool_call_id === "string") {
       evidence.ids.add(record.tool_call_id);
     }
-    if (record.type === "function_call_output" && typeof record.call_id === "string") {
+    // Responses grammar tools (e.g. codemode) use custom output items, but
+    // carry the same call_id as ordinary function outputs. Calls alone are
+    // never evidence that a result reached the provider.
+    if ((record.type === "function_call_output" || record.type === "custom_tool_call_output") && typeof record.call_id === "string") {
       evidence.ids.add(record.call_id);
     }
     if (record.type === "tool_result" && typeof record.tool_use_id === "string") {

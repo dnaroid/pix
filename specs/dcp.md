@@ -311,6 +311,15 @@ Diagnostic events distinguish the important blocked/emergency paths, including
 Manual mode never enables autonomous summary creation. Failed/ambiguous provider
 completion does not count as evidence that a result was seen.
 
+OpenAI Responses delivery evidence recognizes both ordinary
+`function_call_output` and grammar-tool `custom_tool_call_output` items (including
+`codemode`). Their wire `call_id` matches the session's compound call/item ID.
+Assistant call items alone are not result evidence. Both output formats still
+require a correlated successful assistant completion; HTTP acceptance, failed
+streams and aborted streams do not promote results. Completed grammar-tool
+results can therefore participate in normal emergency recovery instead of
+accumulating as permanently unknown evidence until capacity is exhausted.
+
 ## Summary quality and protected data
 
 Auto summary preparation uses a bounded source manifest containing visible
@@ -470,11 +479,13 @@ undo configuration.
 
 - `external/pi-tools-suite/src/dcp/index.ts`
 - `external/pi-tools-suite/src/dcp/context-usage.ts`
+- `external/pi-tools-suite/src/dcp/provider-tool-results.ts`
 
 ## Tests
 
 - `external/pi-tools-suite/test/dcp-context-usage.test.ts`
 - `tests/dcp-usage-fallback.integration.test.ts`
+- `tests/dcp-provider-evidence.integration.test.ts`
 
 ## Related files
 
