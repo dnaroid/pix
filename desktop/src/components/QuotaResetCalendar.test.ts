@@ -9,11 +9,11 @@ describe("QuotaResetCalendar", () => {
   it("colors weekend labels and dates while preserving today and reset markers, without a legend", () => {
     const { body } = render(QuotaResetCalendar, { props: { window, now: new Date(2026, 9, 18, 12).getTime() } });
     expect(body.match(/truncate text-xs text-tool-error/g)).toHaveLength(3);
-    expect(body).toMatch(/border-muted-foreground\/40 bg-muted\/40 text-tool-error[^>]*aria-label="[^"]*, today"/);
+    expect(body).toMatch(/border-muted-foreground\/60 bg-muted\/40 text-foreground[^>]*aria-label="[^"]*, today"/);
     expect(body).not.toContain("Outlined date:");
     expect(body).not.toContain("Highlighted date:");
     const resetBody = render(QuotaResetCalendar, { props: { window, now } }).body;
-    expect(resetBody).toMatch(/border-primary\/40 bg-primary\/10 text-tool-error[^>]*aria-label="[^"]*, quota reset"/);
+    expect(resetBody).toMatch(/border-primary bg-primary font-semibold text-primary-foreground[^>]*aria-label="[^"]*, quota reset"/);
   });
   it("shows the reset calendar without duplicate percentage, track or countdown", () => {
     const { body } = render(QuotaResetCalendar, { props: { window, now } });
@@ -26,7 +26,9 @@ describe("QuotaResetCalendar", () => {
     expect(body.match(/quota reset/g)).toHaveLength(1);
     expect(body).toContain('aria-current="date"');
     expect(body).not.toContain("Cached");
-    expect(body).toContain("flex h-6 items-center");
+    expect(body).toContain("flex h-7 items-center");
+    expect(body).toContain("Weekly reset");
+    expect(body).toContain('class="font-medium tabular-nums"');
     expect(body).toContain("data-quota-reset-detail");
     expect(body).not.toContain("rounded-md bg-muted px-2.5 py-2");
   });
@@ -59,7 +61,7 @@ describe("QuotaResetCalendar", () => {
     expect(body).toContain("grid-template-columns: repeat(8, minmax(0, 1fr))");
     expect(body.match(/quota reset/g)).toHaveLength(1);
     expect(body.match(/aria-current="date"/g)).toHaveLength(1);
-    expect(body).toContain("border-primary/40 bg-primary/10");
+    expect(body).toContain("border-primary bg-primary font-semibold text-primary-foreground");
     expect(body).not.toContain("grid-cols-7");
   });
 });

@@ -16,7 +16,11 @@ describe("UsageLimitBars", () => {
     expect(body).toContain("Weekly");
     expect(body).toContain("62%");
     expect(body).toContain("32%");
-    expect(body).toContain("bg-muted-foreground/50");
+    expect(body).toContain("bg-muted-foreground");
+    expect(body).not.toContain("bg-muted-foreground/50");
+    expect(body).toContain("remaining</span>");
+    expect(body).toContain("Resets in 2h0m");
+    expect(body).toContain("h-2 w-full");
     expect(body).not.toContain("Rate");
     expect(body).not.toContain("Cached");
   });
@@ -32,6 +36,17 @@ describe("UsageLimitBars", () => {
       props: { windows: [{ key: "H", label: "H" as const, window: hourly }], now, stale: true },
     });
     expect(body).toContain("Cached");
+  });
+
+  it("explains an exhausted, passed window without claiming replenishment", () => {
+    const { body } = render(UsageLimitBars, {
+      props: { windows: [{ key: "H", label: "H" as const, window: { ...hourly, remainingPercent: 0, resetAt: now } }], now },
+    });
+    expect(body).toContain("0%");
+    expect(body).toContain("remaining</span>");
+    expect(body).toContain("width: 0%");
+    expect(body).toContain("Reset time reached · Awaiting quota refresh");
+    expect(body).not.toContain("Resets in");
   });
 
   it("flags a window projected to exhaust before its reset", () => {

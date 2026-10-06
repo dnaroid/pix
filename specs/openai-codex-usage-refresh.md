@@ -50,7 +50,7 @@ still stored by pi core and break subsequent model requests.
 
 - Expired credentials can trigger a POST to
   `https://auth.openai.com/oauth/token`.
-- A successful refresh atomically updates the `openai-codex` entry in
+- A successful refresh updates the `openai-codex` entry under the auth-file lock in
   `~/.pi/agent/auth.json` (or the test override path) via pi core.
 - The quota request remains
   `https://chatgpt.com/backend-api/wham/usage`.
@@ -70,7 +70,7 @@ still stored by pi core and break subsequent model requests.
 ## Implementation
 
 - `src/app/model/model-usage-status.ts` — host-side implementation.
-  `refreshOpenAICodexAuth` delegates to pi core via
+  `refreshPiOAuthCredential` delegates to pi core via
   `ModelRuntime.create({ authPath }).getAuth("openai-codex")`, which owns the
   file-backed `AuthStorage` refresh and rotation lock. `[confirmed by code]`
 

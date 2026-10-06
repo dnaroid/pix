@@ -39,21 +39,23 @@
       {#each windows as { key, label, window } (key)}
         {@const tone = modelUsageTone(window.remainingPercent)}
         {@const exhaustsEarly = modelUsageWindowWillExhaustBeforeReset(window, now)}
-        <div class="flex items-center gap-2" aria-label={`${modelUsageWindowLabel(label, window)} ${Math.round(window.remainingPercent)}% remaining, ${formatResetDuration(window.resetAt, now)}`}>
-          <span class="w-16 shrink-0 truncate text-muted-foreground">{modelUsageWindowLabel(label, window)}</span>
-          <span class="relative h-1.5 flex-1 overflow-hidden rounded-sm bg-border" aria-hidden="true">
+        <div class="flex flex-col gap-1.5" aria-label={`${modelUsageWindowLabel(label, window)} ${Math.round(window.remainingPercent)}% remaining, ${formatResetDuration(window.resetAt, now)}`}>
+          <div class="flex items-baseline justify-between gap-2 text-sm">
+            <span class="font-medium text-foreground">{modelUsageWindowLabel(label, window)}</span>
+            <span class={["font-semibold tabular-nums", toneTextClass(tone)]}>{Math.round(window.remainingPercent)}% <span class="text-xs font-normal text-muted-foreground">remaining</span></span>
+          </div>
+          <span class="relative h-2 w-full overflow-hidden rounded-sm bg-border" aria-hidden="true">
             <span
-              class="absolute inset-y-0 left-0 bg-muted-foreground/50"
+              class="absolute inset-y-0 left-0 bg-muted-foreground"
               style={`width: ${clampUsagePercent(window.remainingPercent)}%`}
             ></span>
           </span>
-          <span class={["w-9 shrink-0 text-right tabular-nums", toneTextClass(tone)]}>{Math.round(window.remainingPercent)}%</span>
-          <span class="w-14 shrink-0 text-right text-muted-foreground">{formatResetDuration(window.resetAt, now)}</span>
-          <span class="flex w-2.5 shrink-0 items-center justify-center">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-foreground tabular-nums">{window.resetAt <= now ? "Reset time reached · Awaiting quota refresh" : `Resets in ${formatResetDuration(window.resetAt, now)}`}</span>
             {#if exhaustsEarly}
-              <TriangleAlert class="h-2.5 w-2.5 text-tool-warning" aria-label="Projected to exhaust before reset" />
+              <TriangleAlert class="h-3 w-3 shrink-0 text-tool-warning" aria-label="Projected to exhaust before reset" />
             {/if}
-          </span>
+          </div>
         </div>
       {/each}
     </div>

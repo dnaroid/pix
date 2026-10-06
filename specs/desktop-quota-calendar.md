@@ -15,12 +15,17 @@ starting today, plus the actual reported reset date as an eighth cell when
 outside that range. The grid stays on one row, highlights today and the reset,
 and colors weekends with the theme's muted red. Exact local reset date/year
 and minute-level time remain visible below it, without predicted future resets.
-Date cells are compact (24px high) with subtle today/reset borders; the exact
-reset time is an unboxed line, not a separate filled card.
+Date cells are compact (28px high), with an outlined today and a solid primary
+reset marker with contrasting text (also on weekends). Ordinary weekend dates
+retain muted red. The exact reset time is a higher-contrast, medium-weight
+unboxed line, not a separate filled card.
 
 A provider-agnostic **Limits** section adds the short account quota window
 (`hourly`) above the calendar when available. It shows a neutral progress track,
-remaining percentage, reset countdown and projected-exhaustion warning.
+remaining percentage explicitly labelled “remaining”, reset countdown and
+projected-exhaustion warning. Each window has a readable label/percentage row,
+a full-width track and a separate “Resets in …” line. A passed reset explicitly
+says “Reset time reached · Awaiting quota refresh”, not just “reset”.
 Weekly reset timing remains in the calendar; header-derived rate windows are
 excluded from this section. Stale windows remain visibly marked as cached.
 The complete popup is bounded by the application viewport height minus 70px,
