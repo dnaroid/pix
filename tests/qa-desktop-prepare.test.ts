@@ -8,6 +8,12 @@ import { discoverWatcher, verifyOwner, successfulState } from "../scripts/qa-des
 import { prepareDesktop, boundedTimeout } from "../scripts/qa-desktop/prepare.mjs";
 import { seedProfile, filterApiKeys } from "../scripts/qa-desktop/seed.mjs";
 
+// These fixtures and the scripts they exercise enforce macOS app-bundle structure,
+// POSIX ownership/mode bits, exec permissions and O_NOFOLLOW; Windows cannot express them.
+const skipWindows = process.platform === "win32"
+ ? "QA desktop prepare enforces macOS bundle and POSIX ownership/permission invariants that Windows cannot express"
+ : false;
+
 async function fixture(t) {
  const base = join(process.cwd(), ".pi", "artifacts");
  await mkdir(base, { recursive: true });
@@ -40,7 +46,7 @@ async function fixture(t) {
 async function json(path) { return JSON.parse(await readFile(path, "utf8")); }
 async function absent(path) { await assert.rejects(stat(path), { code: "ENOENT" }); }
 
-test("prepare pins native and embedded contents into separate private profile/workspace without mutating source", async (t) => {
+test("prepare pins native and embedded contents into separate private profile/workspace without mutating source", { skip: skipWindows }, async (t) => {
  const f = await fixture(t);
  const before = await Promise.all([readFile(f.owner), readFile(f.statePath), readFile(f.target), stat(f.target)]);
  const result = await prepareDesktop(f.options, f.dependencies);
@@ -58,7 +64,7 @@ test("prepare pins native and embedded contents into separate private profile/wo
  assert.deepEqual((await readdir(m.runDir)).sort(), ["manifest.json", "native", "profile", "workspace"]);
  });
 
-for (const status of ["queued", "building"]) test(`prepare waits for ${status} then pins idle`, async (t) => {
+for (const status of ["queued", "building"]) test(`prepare waits for ${status} then pins idle`, { skip: skipWindows }, async (t) => {
  const f = await fixture(t); await f.publish(status); let waits = 0;
  const result = await prepareDesktop(f.options, { ...f.dependencies, wait: async (ms) => { waits++; await f.dependencies.wait(ms); await f.publish(); } });
  assert.equal(waits, 1); assert.equal((await json(result.manifestPath)).source.target, f.target);
@@ -74,7 +80,7 @@ test("bounded timeout removes run and does not copy queued old target", async (t
  for (const value of [99, 300001, 1.5, "bad", Infinity]) assert.throws(() => boundedTimeout(value));
  assert.equal(boundedTimeout(), 120000);
 });
-for (const race of ["changed-target", "ENOENT"]) test(`prepare cleans staging and retries ${race} pruning race`, async (t) => {
+for (const race of ["changed-target", "ENOENT"]) test(`prepare cleans staging and retries ${race} pruning race`, { skip: skipWindows }, async (t) => {
  const f = await fixture(t); const next = await f.bundle("Second"); let copies = 0;
  const result = await prepareDesktop(f.options, { ...f.dependencies, copy: async (source, destination, options) => {
   copies++; await cp(source, destination, options);
@@ -84,7 +90,7 @@ for (const race of ["changed-target", "ENOENT"]) test(`prepare cleans staging an
  assert.deepEqual(await readdir(join(m.runDir, "native")), ["Second.app"]);
  assert.equal((await readdir(m.runDir)).some((name) => name.startsWith(".snapshot")), false);
 });
-test("copy errors clean owned run but never remove a preexisting run", async (t) => {
+test("copy errors clean owned run but never remove a preexisting run", { skip: skipWindows }, async (t) => {
  const f = await fixture(t);
  await assert.rejects(prepareDesktop(f.options, { ...f.dependencies, copy: async () => { throw new Error("copy failure"); } }), /copy failure/);
  await absent(f.options.runDir);
@@ -128,7 +134,7 @@ test("watch state rejects escaped/non-app targets, oversized state and symlink o
  await rm(f.owner); const outside = join(f.scratch, "owner.json"); await privateJson(outside, { pid: 4242 }); await symlink(outside, f.owner);
  await assert.rejects(verifyOwner(f.statePath, f.checkout, f.tempRoot, f.probe), /symlink/);
 });
-test("paths reject traversal, symlinks, oversized inputs and invalid bundles; default run is harness-owned", async (t) => {
+test("paths reject traversal, symlinks, oversized inputs and invalid bundles; default run is harness-owned", { skip: skipWindows }, async (t) => {
  const f = await fixture(t);
  for (const path of ["../escape", "bad\npath", "x".repeat(4097), ""]) assert.throws(() => checkedPath(path));
  const file = join(f.checkout, "input"); await writeFile(file, "secret".repeat(1000));
@@ -153,7 +159,7 @@ async function seedFixture(f) {
  for (const dir of [agent, user, suite, join(profile, "home", ".pi", "agent"), join(profile, "home", ".config", "pi")]) await mkdir(dir, { recursive: true });
  return { home, agent, user, suite, profile, env: { HOME: home, PI_CODING_AGENT_DIR: agent, PI_CONFIG_DIR: suite } };
 }
-test("seed config fixed allowlist is explicit and retains suite precedence, never session/extension inputs", async (t) => {
+test("seed config fixed allowlist is explicit and retains suite precedence, never session/extension inputs", { skip: skipWindows }, async (t) => {
  const f = await fixture(t), s = await seedFixture(f);
  for (const name of ["settings.json", "models.json", "sessions.json", "auth.json", "extensions.js"]) await writeFile(join(s.agent, name), name);
  for (const name of ["pix-desktop.jsonc", "pi-tools-suite.jsonc", "session.json"]) await writeFile(join(s.user, name), name);
@@ -166,7 +172,7 @@ test("seed config fixed allowlist is explicit and retains suite precedence, neve
  assert.equal(await readFile(join(s.profile, "home", ".config", "pi", "pi-tools-suite.jsonc"), "utf8"), "override");
  assert.equal((await stat(join(s.profile, "suite-config", "pi-tools-suite.jsonc"))).mode & 0o777, 0o600);
 });
-test("seed copies only literal API keys, not OAuth/session/env/commands or bare SDK variable expressions", async (t) => {
+test("seed copies only literal API keys, not OAuth/session/env/commands or bare SDK variable expressions", { skip: skipWindows }, async (t) => {
  const f = await fixture(t), s = await seedFixture(f);
  const input = { literal: { type: "api_key", key: "fake-literal-key", refresh: "discard" }, oauth: { type: "oauth", access: "fake" }, session: { type: "session", key: "fake" }, env: { type: "api_key", key: "$SECRET" }, bare: { type: "api_key", key: "SECRET_API_KEY" }, lower: { type: "api_key", key: "secretName" }, command: { type: "api_key", key: "  !touch never" }, explicit: { type: "api_key", key: "fake-key", env: "SECRET" }, "bad/provider": { type: "api_key", key: "fake-key" } };
  assert.deepEqual(JSON.parse(JSON.stringify(filterApiKeys(input))), { literal: { type: "api_key", key: "fake-literal-key" } });

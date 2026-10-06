@@ -31,16 +31,16 @@ mod desktop_bootstrap;
 mod desktop_context_menu;
 mod desktop_notification;
 mod git_ci;
-mod git_ignore;
 mod git_identity;
+mod git_ignore;
 mod git_operations;
 mod lsp_install;
 #[cfg(test)]
 mod native_lifecycle_tests;
 mod native_process;
 mod preview_file;
-mod project_directory_link;
 mod preview_file_action;
+mod project_directory_link;
 mod qa_profile;
 #[cfg(feature = "bundled-runtime")]
 mod release_smoke;
@@ -10064,15 +10064,16 @@ fn ui_qa_workspace_url(current_url: &tauri::Url, workspace: &Path) -> Result<tau
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Validate explicit isolation before plugins, user storage or windows exist.
-    let qa_profile = qa_profile::QaProfile::from_environment()
-        .expect("invalid isolated Desktop QA profile");
+    let qa_profile =
+        qa_profile::QaProfile::from_environment().expect("invalid isolated Desktop QA profile");
     // Register before any isolated handshake; failure must not advertise a
     // runtime that the runner cannot shut down through the native exit worker.
     #[cfg(unix)]
-    let qa_signal_bridge = std::sync::Arc::new(std::sync::Mutex::new(
-        qa_profile.as_ref().map(|_| qa_profile::SignalBridge::register()
-            .expect("failed to register isolated QA shutdown signals")),
-    ));
+    let qa_signal_bridge =
+        std::sync::Arc::new(std::sync::Mutex::new(qa_profile.as_ref().map(|_| {
+            qa_profile::SignalBridge::register()
+                .expect("failed to register isolated QA shutdown signals")
+        })));
     #[cfg(unix)]
     let setup_signal_bridge = qa_signal_bridge.clone();
     let mut context = tauri::generate_context!();

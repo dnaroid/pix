@@ -28,7 +28,8 @@ mod tests {
 
     #[test]
     fn directory_links_are_confined_and_do_not_accept_files() {
-        let root = std::env::temp_dir().join(format!("pix-directory-link-{}", uuid::Uuid::new_v4()));
+        let root =
+            std::env::temp_dir().join(format!("pix-directory-link-{}", uuid::Uuid::new_v4()));
         let workspace = root.join("project");
         fs::create_dir_all(workspace.join("nested/folder.png")).unwrap();
         fs::write(workspace.join("file.txt"), "text").unwrap();

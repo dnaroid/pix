@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { lstat, mkdir, open, realpath, rm } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, posix } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { checkedPath, ownedRoot, privateJson, readJson, safePath, validateBundle } from "./paths.mjs";
 import { quitMacDesktopApp } from "../watch-all-desktop-quit.mjs";
@@ -68,11 +68,11 @@ export function launchEnvironment(manifest, inherited = process.env) {
 	for (const key of ["PATH", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "USER", "LOGNAME", "TERM", "NO_COLOR"]) {
 		if (inherited[key] !== undefined) env[key] = inherited[key];
 	}
-	const home = join(manifest.profileDir, "home");
+	const home = posix.join(manifest.profileDir, "home");
 	return { ...env, PI_UI_QA: "1", PI_UI_QA_PROFILE_DIR: manifest.profileDir, HOME: home,
-		PI_CODING_AGENT_DIR: join(home, ".pi", "agent"), PI_CONFIG_DIR: join(home, ".config", "pi"),
-		XDG_CONFIG_HOME: join(home, ".config"), XDG_CACHE_HOME: join(home, ".cache"),
-		XDG_DATA_HOME: join(home, ".local", "share"), XDG_STATE_HOME: join(home, ".local", "state"),
+		PI_CODING_AGENT_DIR: posix.join(home, ".pi", "agent"), PI_CONFIG_DIR: posix.join(home, ".config", "pi"),
+		XDG_CONFIG_HOME: posix.join(home, ".config"), XDG_CACHE_HOME: posix.join(home, ".cache"),
+		XDG_DATA_HOME: posix.join(home, ".local", "share"), XDG_STATE_HOME: posix.join(home, ".local", "state"),
 		PI_UI_QA_WORKSPACE: manifest.workspace };
 }
 

@@ -26,7 +26,7 @@ test("doctor uses the normal helper preparation without a watcher, profile or pe
 	assert.equal(result.code, 0);
 	assert.equal(deps.calls[0][0], "prepare");
 	assert.equal(deps.calls[0][1].projectRoot, "/project");
-	assert.equal(deps.calls[0][1].source.endsWith("/drivers/macos/macos-accessibility.swift"), true);
+	assert.equal(deps.calls[0][1].source.replaceAll("\\", "/").endsWith("/drivers/macos/macos-accessibility.swift"), true);
 	assert.deepEqual(deps.calls[1].slice(1, 3), [result.helperPath, ["doctor"]]);
 });
 

@@ -265,9 +265,13 @@ pub(crate) fn infrastructure_exit(
     manager: &impl tauri::Manager<tauri::Wry>,
     code: Option<i32>,
 ) -> bool {
-    manager.try_state::<Option<QaProfile>>().is_some_and(|state| {
-        state.as_ref().is_some_and(|profile| profile.infrastructure_exit(code))
-    })
+    manager
+        .try_state::<Option<QaProfile>>()
+        .is_some_and(|state| {
+            state
+                .as_ref()
+                .is_some_and(|profile| profile.infrastructure_exit(code))
+        })
 }
 
 #[cfg(test)]
@@ -409,7 +413,9 @@ mod tests {
     #[test]
     fn only_an_owned_infrastructure_exit_can_skip_confirmation() {
         let (_fixture, env) = fixture();
-        let profile = QaProfile::from_values(|k| env.get(k).cloned()).unwrap().unwrap();
+        let profile = QaProfile::from_values(|k| env.get(k).cloned())
+            .unwrap()
+            .unwrap();
         assert!(!profile.infrastructure_exit(None));
         assert!(!profile.infrastructure_exit(Some(0)));
         profile.shutdown_requested.store(true, Ordering::Release);

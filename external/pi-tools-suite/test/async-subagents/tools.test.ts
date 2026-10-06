@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { createPiAiMock } from "../support/pi-ai-mock.js";
+import { SUBAGENT_COMMON_TOOLS } from "../../src/async-subagents/core/child-tools.js";
 
 // Snapshot the real modules before mocking: bun's top-level mock.module swaps
 // the live export slots for every later-loaded file in the same `bun test`
@@ -1485,9 +1486,15 @@ setTimeout(() => {}, 1000);
 		const runDir = result.details.runDir;
 		expect(result.content[0].text).toContain("LLM-routed 2 inferred subagent type(s).");
 		expect(routerCompleteMock).toHaveBeenCalled();
-		expect(fs.readFileSync(path.join(runDir, "scan-agent", "pi_args"), "utf-8")).toContain("--model\nfast/scan\n--tools\nRead,Grep\n--thinking\noff");
+		const scanArgs = fs.readFileSync(path.join(runDir, "scan-agent", "pi_args"), "utf-8");
+		expect(scanArgs).toContain("--model\nfast/scan");
+		expect(scanArgs).toContain("--thinking\noff");
+		expect(scanArgs).toContain(`--tools\nRead,Grep,${SUBAGENT_COMMON_TOOLS.join(",")}`);
 		expect(fs.readFileSync(path.join(runDir, "scan-agent", "subagent_type"), "utf-8")).toBe("scan");
-		expect(fs.readFileSync(path.join(runDir, "review-agent", "pi_args"), "utf-8")).toContain("--model\nsmart/review\n--tools\nRead,Grep\n--thinking\nhigh\n--temperature\n0.1");
+		const reviewArgs = fs.readFileSync(path.join(runDir, "review-agent", "pi_args"), "utf-8");
+		expect(reviewArgs).toContain("--model\nsmart/review");
+		expect(reviewArgs).toContain("--thinking\nhigh\n--temperature\n0.1");
+		expect(reviewArgs).toContain(`--tools\nRead,Grep,${SUBAGENT_COMMON_TOOLS.join(",")}`);
 		expect(fs.readFileSync(path.join(runDir, "review-agent", "subagent_type"), "utf-8")).toBe("review");
 		expect(fs.readFileSync(path.join(runDir, "review-agent", "prompt.md"), "utf-8")).toContain("Additional instructions from sub-agent profile:\nReview-only instruction for Code review payment module");
 		await waitUntil(() => liveAgents.size === 0);

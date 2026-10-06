@@ -10,6 +10,12 @@ import { acquireLaunchLock, launchDesktop, launchEnvironment, matchesRuntime, NA
 import { privateJson, readJson } from "../scripts/qa-desktop/paths.mjs";
 import { filterApiKeys } from "../scripts/qa-desktop/seed.mjs";
 
+// These fixtures and the scripts they exercise enforce macOS app-bundle structure,
+// POSIX ownership/mode bits and exec permissions; Windows cannot express them.
+const skipWindows = process.platform === "win32"
+	? "QA desktop launch enforces macOS bundle and POSIX ownership/permission invariants that Windows cannot express"
+	: false;
+
 async function fixture(t) {
 	const artifacts = join(process.cwd(), ".pi", "artifacts");
 	await mkdir(artifacts, { recursive: true });
@@ -60,7 +66,7 @@ test("API key filter never includes OAuth, command/env keys or extra credential 
 	assert.deepEqual(JSON.parse(JSON.stringify(filtered)), { api: { type: "api_key", key: "fake-only" } });
 });
 
-test("manifest exact identity, symlink rejection and exclusive lock", async (t) => {
+test("manifest exact identity, symlink rejection and exclusive lock", { skip: skipWindows }, async (t) => {
 	const { manifest: m, manifestPath, checkout } = await fixture(t);
 	assert.equal((await validateManifest(manifestPath, checkout)).profileId, m.profileId);
 	const release = await acquireLaunchLock(m);
@@ -81,7 +87,7 @@ test("runtime proof requires exact true child PID, executable, profile and isola
 	for (const patch of [{ pid: 4242 }, { executable: "/working/app" }, { profileDir: "/working/profile" }, { isolated: false }, { contract: "old" }, { appIdentifier: "dev.pix.desktop" }]) assert.equal(matchesRuntime({ ...runtime(m, 7070), ...patch }, m, 7070), false);
 });
 
-test("pre-isolation binary is rejected before spawn; capability can cross a read boundary", async (t) => {
+test("pre-isolation binary is rejected before spawn; capability can cross a read boundary", { skip: skipWindows }, async (t) => {
 	const { manifest: m, manifestPath, checkout } = await fixture(t);
 	await writeFile(m.executable, "old Desktop without isolation");
 	await assert.rejects(launchDesktop({ manifest: manifestPath, checkout }, {
@@ -102,7 +108,7 @@ test("ambient runtime, credential and provider-home overrides are not forwarded"
 	assert.equal(env.USER, "developer");
 });
 
-test("direct same-PGID launch verifies child marker then propagates exit", async (t) => {
+test("direct same-PGID launch verifies child marker then propagates exit", { skip: skipWindows }, async (t) => {
 	const { manifest: m, manifestPath, checkout } = await fixture(t);
 	const c = child(); const signals = new EventEmitter(); let tick = 0, observed;
 	const result = await launchDesktop({ manifest: manifestPath, checkout }, {
@@ -120,7 +126,7 @@ test("direct same-PGID launch verifies child marker then propagates exit", async
 	await assert.rejects(access(join(m.profileDir, "launch.lock")));
 });
 
-test("missing handshake closes only owned child and releases lock", async (t) => {
+test("missing handshake closes only owned child and releases lock", { skip: skipWindows }, async (t) => {
 	const { manifest: m, manifestPath, checkout } = await fixture(t);
 	const c = child(); let tick = 0, quitPid;
 	await privateJson(join(m.profileDir, "runtime.json"), runtime(m, 4242)); // stale marker must be removed
@@ -134,7 +140,7 @@ test("missing handshake closes only owned child and releases lock", async (t) =>
 	await assert.rejects(access(join(m.profileDir, "launch.lock")));
 });
 
-test("signal cancellation cleanly quits exact child, removes listeners and unlocks", async (t) => {
+test("signal cancellation cleanly quits exact child, removes listeners and unlocks", { skip: skipWindows }, async (t) => {
 	const { manifest: m, manifestPath, checkout } = await fixture(t);
 	const c = child(); const signals = new EventEmitter(); let tick = 0, quitPid;
 	const result = await launchDesktop({ manifest: manifestPath, checkout }, {
