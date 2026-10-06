@@ -79,11 +79,17 @@ Expose installed IDX v2 repository intelligence in Pix Desktop with typed querie
 
 - `desktop/src/lib/idx.test.ts`
 - `desktop/src/app/project-actions.test.ts`
+- `desktop/src/components/IdxPanel.test.ts`
+- `desktop/src/components/idx-panel-query-controller.test.ts`
+- `desktop/src/components/idx-panel-audit-controller.test.ts`
+- `desktop/src-tauri/src/lib.rs`
 
 ## Verification
 
 - Desktop tests cover task path normalization/rejection, link candidates with line ranges, stale-completion guards, managed-install unavailable state, operation reconciliation, and the OpenRouter checkbox default (openrouter provider, missing/malformed/other provider, manual override preserved across refreshes, reset on workspace change).
 - Rust unit tests cover typed domain/context/audit argument construction, path validation, and overview embedding-provider parsing for openrouter/missing/malformed/other-provider/oversized configs. Run focused Desktop tests, `npm --prefix desktop run check`, and the Rust IDX tests.
+- `IdxPanel.test.ts` checks source contracts, not rendered/native UI interaction;
+  query and audit controller tests exercise stale completions directly.
 
 ## Decision
 

@@ -83,6 +83,9 @@ See [image retention decision](../docs/decisions/0016-streaming-image-dom-retent
 - `desktop/src/app/session-history.test.ts`
 - `desktop/src/components/markdown-image-layout.test.ts`
 - `desktop/src/components/transcript-image-layout.test.ts`
+- `desktop/src/lib/acp-client.test.ts`
+- `acp/test/session-history-file.test.ts`
+- `acp/test/agent.test.ts`
 
 ## Verification
 

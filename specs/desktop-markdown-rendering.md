@@ -36,7 +36,7 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - Rendering raw HTML.
 - Treating arbitrary tool output as Markdown; only Markdown `read` results use the
   Markdown renderer.
-- Changing table layout or remote-image behavior in regular transcript Markdown.
+- Fetching remote images in regular transcript Markdown.
 
 ## Behavior
 
@@ -71,7 +71,7 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - Explicit Markdown links with relative destinations and inline-code values that look like relative file paths become project-file links. Explicit links preserve GitHub-style `#Lline` and `#Lstart-Lend` fragments as source line ranges; other fragments remain ordinary fragment-free project links. Inline-code references may carry `:line`, `:start-end`, or `:line:column` suffixes; the column is ignored and the line/range is preserved for preview navigation. Activating a project link reads the target only when its canonical path remains inside the active workspace, then activates the Preview editor with syntax highlighting and line numbers. A preserved line range opens the source view (including for Markdown files), highlights the requested lines, and reveals the first requested line on an otherwise fresh preview entry.
 - Explicit Markdown links and inline-code values beginning with `~/` become home-file links. Activating one expands `~` in the trusted Tauri backend, requires the canonical target to remain inside the user's home directory, and opens text or supported media in the existing Preview editor tab.
 - Trailing prose punctuation is not included in a bare URL; balanced URL parentheses remain part of it.
-- Activating a link delegates it to Tauri's opener plugin so the operating system opens it in the default browser or mail application.
+- Activating an external link delegates it to Tauri's opener plugin so the operating system opens it in the default browser or mail application.
 - Unsupported destinations render as plain labels and are never passed to the system opener.
 - In a Markdown file Preview editor, project links and local `file://` links use the same trusted preview/open handlers as transcript links. For a project path, the preview first tries the workspace-root interpretation commonly emitted by agents, then falls back to the Markdown document-relative interpretation. Following another preview target pushes/replaces the current Preview editor history entry according to the existing navigation mode.
 - In a Markdown file Preview editor, supported project and local images resolve through the existing confined Tauri media commands instead of remaining in a loading state.
@@ -124,12 +124,14 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - Right-clicking an image in Markdown or the Preview tab offers Copy Image and
   Open Image in External App through the shared native context menu (see
   `specs/desktop-context-menus.md`).
-- In a Markdown file Preview editor, tables use the available content width and
+- In the Markdown Preview editor, transcript messages, and Markdown `read`
+  results, tables use the available content width and
   wrap cell text at word boundaries. Intrinsic column sizing preserves whole
   words and inline-code identifiers (for example, `station` must not become
   `statio` / `n` just to narrow a column). Exceptionally wide tables retain a
-  horizontal scroll fallback rather than overflowing the Preview surface.
-  Transcript tables retain horizontal scrolling.
+  horizontal scroll fallback rather than overflowing the containing surface.
+  Renderer callers that do not opt into fitting retain intrinsic-width tables
+  with horizontal scrolling.
 - Internal preview navigations push file or media entries onto a browser-like history stack inside the single Preview editor tab. Back and forward controls traverse that stack; following a new link after going back discards the old forward branch. Opening a preview from outside Preview starts a new history and activates the Preview tab; closing the Preview editor clears the history.
 - Each preview history entry retains its horizontal and vertical scroll position, which is restored when Back or Forward returns to that entry.
 - Preview consumes the central workbench region rather than a resizable modal. Switching to a conversation or Git Diff tab in the unified top strip leaves the still-open Preview component mounted so its current edit draft and scroll/history state are not reset merely by tab switching.
@@ -143,8 +145,7 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
   reserving room for the copy control and adjacent feedback, never wider than the container) and is capped at the
   available content width. Long logical lines visually wrap without horizontal
   scrolling while preserving whitespace, source line breaks, and syntax
-  highlighting. Tables retain their existing horizontal scrolling behavior
-  outside the Preview editor.
+  highlighting. Exceptionally wide tables retain their horizontal scroll fallback.
 - Shared source/fenced-code highlighting skips tokenization for blocks larger than 32,768 UTF-16 code units and for unknown/plaintext languages. These blocks remain fully escaped, untruncated plaintext with the same per-line structure, preserving source line numbers and line-range navigation without generating token markup for the whole large input.
 - Markdown parsing uses a small local parser rather than a parser/sanitizer runtime dependency.
 
@@ -211,8 +212,10 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - Syntax-highlighting tests cover the large-source fallback, escaped markup, retained empty/CRLF lines, and unchanged small-source highlighting.
 - Preview-scroll tests cover ordering the requested line reveal after pending
   saved-position restoration and cancelling stale scheduled reveals.
-- Table-style regression tests guard word-preserving intrinsic column sizing,
-  the Preview scroll fallback, and unchanged transcript table sizing.
+- Table-style source-contract tests guard word-preserving intrinsic column sizing,
+  fitting and intrinsic-width styles, and the horizontal scroll fallback. These
+  assertions do not exercise caller opt-in or real UI layout; transcript and
+  Markdown tool-result fitting is confirmed by their renderer props.
 - Rust tests also cover project/absolute media confinement, traversal, unsupported
   local binary files, and allowed media resolution.
 - `npm run test`, `npm run check`, and `npm run build:web` pass in `desktop/`.

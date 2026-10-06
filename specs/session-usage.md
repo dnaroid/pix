@@ -88,7 +88,7 @@ blocks further BTW inference until reload rather than silently losing known spen
   dollar amount inline in the status bar. TUI shows token totals only and does not
   render monetary prices.
   Desktop displays monetary values without an approximation prefix; estimated
-  model values explain in a tooltip that these are original-model API rates, not
+  model values explain in an accessible label that these are original-model API rates, not
   subscription charges. `costEstimated` propagates from calls to model, provider
   and session totals through ACP.
   Known subscription provider headings offer an accessible external-link icon:
@@ -169,7 +169,7 @@ blocks further BTW inference until reload rather than silently losing known spen
   the nested `get_tree` response, which cannot be JSON-serialized once a linear
   session chain grows past the RPC process stack limit.
 
-## Related files
+## Implementation
 
 - `src/app/session/session-usage.ts`
 - `src/app/session/session-usage-pricing.ts`
@@ -186,6 +186,17 @@ blocks further BTW inference until reload rather than silently losing known spen
 - `desktop/src/app/session-runtime-status.svelte.ts`
 - `desktop/src/components/RuntimeStatusBarItems.svelte`
 
+## Tests
+
+- `tests/session-usage.test.ts`
+- `tests/mouse-controller.test.ts`
+- `external/pi-tools-suite/test/async-subagents-usage.test.ts`
+- `acp/test/agent.test.ts`
+- `desktop/src/lib/acp-client.test.ts`
+- `desktop/src/lib/session-usage.test.ts`
+- `desktop/src/app/session-runtime-status.test.ts`
+- `desktop/src/components/StatusBarHover.test.ts`
+
 ## Verification
 
 - Shared unit tests cover provider/model grouping, merging parent and async-agent
@@ -200,8 +211,8 @@ blocks further BTW inference until reload rather than silently losing known spen
   append on the captured parent manager.
 - Desktop ACP-client and runtime lifecycle tests cover the independent usage
   request and stale forget/reset completion handling.
-- Desktop visual regression tests pin the Usage popover and the absence of the
-  former click-to-refresh interaction.
+- Desktop source-contract tests pin click-only popup activation, dismissal and
+  Usage content placement; they do not establish rendered or native UI behavior.
 
 ## Risks / compatibility
 

@@ -113,7 +113,9 @@ invalidate an existing diff review. Native reads/writes use `run_blocking` and t
 noninteractive argument-vector helpers. See
 [decision 0053](../docs/decisions/0053-repository-commit-author.md).
 
-Repository tools is a keyboard-operable, collapsed-by-default disclosure inside the sidebar scroller. It provides:
+**Branches & stashes** and **Log** are separate keyboard-operable, collapsed-by-default disclosures inside the sidebar scroller. The header additionally offers Fetch and Update project:
+
+- **Update project** fetches, then fast-forwards the upstream without merging or rebasing. It requires a non-detached branch with an upstream and no conflicts, but permits local changes: it temporarily stashes staged, unstaged and untracked work, restores it after the attempt, and drops only its own stash after successful restoration. If index restoration is impossible before any files were touched, it may restore without the index state; conflicts retain the recovery stash and explicit error. Existing user stashes remain untouched. Divergence aborts before stashing. An already-current branch reports no incoming commits and leaves local changes alone.
 
 - Fetch all configured remotes without changing local files; Pull is **fast-forward only**, requires a clean working tree and an upstream, disables autostash/rebase, and refuses divergence rather than merging, rebasing or resetting.
 - Create a branch and switch via the header selector. The inline branch-name input receives focus; Escape closes it and returns focus to the trigger.
@@ -126,7 +128,7 @@ All new Git commands use the existing noninteractive argument-vector process hel
 
 ## Implementation
 
-Repository commit-author dependencies (the broader workflow ownership map follows):
+Repository commit-author and secondary synchronization dependencies (the broader workflow ownership map follows):
 
 - `desktop/src/components/GitPanel.svelte`
 - `desktop/src/components/GitIdentitySection.svelte`
@@ -135,6 +137,8 @@ Repository commit-author dependencies (the broader workflow ownership map follow
 - `desktop/src/app/git-workspace.svelte.ts`
 - `desktop/src/app/desktop-sidebar-view-model.svelte.ts`
 - `desktop/src-tauri/src/git_identity.rs`
+- `desktop/src-tauri/src/git_operations.rs`
+- `desktop/src/components/GitRepositoryTools.svelte`
 - `desktop/src-tauri/src/lib.rs`
 
 ## Tests
@@ -142,6 +146,7 @@ Repository commit-author dependencies (the broader workflow ownership map follow
 - `desktop/src/lib/git-identity-editor.test.ts`
 - `desktop/src/app/git-workspace.test.ts`
 - `desktop/src-tauri/src/git_identity.rs`
+- `desktop/src-tauri/src/git_operations.rs`
 - `desktop/scripts/fixtures/GitWorkflowFixture.svelte`
 
 ## Implementation ownership
