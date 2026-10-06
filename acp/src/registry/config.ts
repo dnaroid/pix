@@ -16,7 +16,7 @@ export function cacheRoot(): string {
 }
 
 export function registryUiCacheRoot(): string {
-	return `${cacheRoot()}-desktop-${process.pid}`;
+	return `${cacheRoot()}-desktop`;
 }
 
 export function loadRuntimeConfig(cwd: string): RegistryRuntime {

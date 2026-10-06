@@ -11,8 +11,7 @@ status: active
 > project-local config behind a trust decision, while allowing unrestricted
 > execution from global (user-owned) config.
 >
-> _Investigated by a read-only sub-agent; re-verify against current code. Line
-> numbers are approximate._
+> _Source line numbers below are approximate._
 
 ## Type
 
@@ -45,8 +44,11 @@ trust decision; global config servers run with no gate. `[confirmed by code]`
   They never prompt for trust; execution retains the normal trust gate.
 - With [project-shared runtime ownership](lsp-runtime-control.md), each requesting
   Pi process performs this gate before sending an approved config snapshot to
-  the broker. Trust once does not propagate to another Pi process. A caller may
-  inspect or Stop an already-owned shared server without permission to Start it.
+  the broker. Trust once does not propagate to another Pi process. Public
+  Desktop/TUI monitors may inspect without granting execution trust, but expose
+  no Start/Stop/Restart/Trust actions (see [0056](../docs/decisions/0056-lsp-monitoring.md)).
+  Internal lifecycle helpers can Stop an already-owned server without obtaining
+  permission to Start it; these helpers are not public monitor controls.
 
 ### Command resolution & execution
 - Each `LspServerConfig` `bin`/`args`/`cwd`/`env` is resolved via template substitution (`{root}`, `{file}`, `{relFile}`, …) and path expansion (`~` → `$HOME`, relative → absolute). `[confirmed by code: paths.ts resolveCommand, createPathPlaceholders]`
@@ -124,6 +126,7 @@ trust decision; global config servers run with no gate. `[confirmed by code]`
 - `external/pi-tools-suite/src/lsp/child-process.ts`
 - `external/pi-tools-suite/src/lsp/process-owner.ts`
 - `external/pi-tools-suite/src/lsp/runtime-control.ts`
+- `external/pi-tools-suite/src/lsp/local-runtime-control.ts`
 - `external/pi-tools-suite/src/lsp/shared-manager.ts`
 - `external/pi-tools-suite/src/lsp/broker-server.ts`
 - `external/pi-tools-suite/src/lsp/index.ts`

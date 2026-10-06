@@ -93,11 +93,11 @@ export interface TaskMutationParams {
 
 export const TodoParamsSchema = Type.Object({
 	action: StringEnum(["create", "update", "batch_create", "batch_update", "list", "get", "delete", "clear", "export", "import"] as const),
-	subject: Type.Optional(Type.String({ description: "Task subject line (required for create)" })),
-	description: Type.Optional(Type.String({ description: "Long-form task description" })),
+	subject: Type.Optional(Type.String({ description: "Short action phrase (required for create)" })),
+	description: Type.Optional(Type.String({ description: "Optional brief scope, acceptance criteria, or current blocker/next action (1–2 short sentences). Omit when subject suffices. On update, change only for changed scope/criteria/blocker/next action or an explicitly requested brief checkpoint; normally omit on completion. No progress journals or results reports." })),
 	activeForm: Type.Optional(
 		Type.String({
-			description: "Present-continuous spinner label shown while status is in_progress (e.g. 'writing tests')",
+			description: "Short present-continuous action phrase shown while status is in_progress (e.g. 'writing tests'); not a progress report",
 		}),
 	),
 	status: Type.Optional(

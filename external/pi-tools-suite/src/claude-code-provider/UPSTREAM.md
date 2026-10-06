@@ -53,6 +53,9 @@ Maintained differences:
    recompressed. Stable private files/labels, deduplication, byte limits,
    transcript cache breakpoint and attachment-read recovery remain intact.
    Native transport tests include a valid >256 KiB PNG through subprocess stdin.
+8. `extensions/pi-claude-code-provider.ts`: default suite autoload is quiet when
+   the optional Claude CLI is absent from PATH. The doctor remains registered;
+   explicit path and other preflight failures still report startup errors.
 
 `DESIGN.md`, `SECURITY.md` and `CHANGELOG.md` are retained upstream reference
 documents, **not** current Pix contracts. Upstream command/install instructions

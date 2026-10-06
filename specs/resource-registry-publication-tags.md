@@ -116,6 +116,20 @@ status: active
 
 ## Constraints and failure cases
 
+- Desktop reuses one disposable checkout at
+  `${XDG_CACHE_HOME:-~/.cache}/pi/resource-registry-desktop`, not a new clone
+  per ACP process or restart. This is separate from project `.pi`: local
+  resource copies and provenance are project data, not a remote Registry
+  checkout, and must never be subjected to cache reset/clean.
+- Every Desktop Registry action, diff and post-action snapshot is serialized
+  across ACP processes with a heartbeat filesystem lock beside the checkout,
+  as well as a process-local queue. Remote/branch changes reuse or replace the
+  same checkout under that lock. Configuration and tag editors do not hold it. Failure releases
+  the lock and queue; crashed owners expire after two minutes. Lock acquisition
+  retries for up to ten minutes and never falls back to unlocked access.
+- Legacy `resource-registry-desktop-<PID>` clones are not reused or created by
+  new processes. They may be deleted when their old ACP owners are stopped;
+  deleting a checkout in use by an older running process is unsafe.
 - Scope is relative to the currently configured registry, not every possible
   registry. Unpublication is shared; already installed copies remain unchanged.
 - No silent overwrite of an unrelated same-named remote resource, including
@@ -132,6 +146,9 @@ status: active
 
 ## Implementation
 
+- `acp/src/registry/config.ts`
+- `acp/src/registry/cache-lock.ts`
+- `acp/src/registry/git.ts`
 - `acp/src/registry/service.ts`
 - `acp/src/registry/resources.ts`
 - `acp/src/registry/publication-location.ts`
@@ -157,6 +174,7 @@ status: active
 
 ## Tests
 
+- `acp/test/registry-cache.test.ts`
 - `acp/test/registry.test.ts`
 - `acp/test/registry-metadata.test.ts`
 - `acp/test/agent.test.ts`

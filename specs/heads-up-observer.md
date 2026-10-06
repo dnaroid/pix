@@ -458,6 +458,14 @@ comment/parent-model preservation and narrow popup bounds. Evidence is written
 under `.pi/artifacts/observer-ui-*`. This is not a native Tauri/window-system
 test and never contacts a model or writes a real user profile.
 
+Known verification gap: browser QA reproduced the popup closing after Check now
+when the focused button becomes disabled and focus leaves the popup. The smoke
+currently reopens the popup to continue its assertions; that workaround is not a
+product fix or proof that the popup stays open during checking. The failed run
+did not establish the disabled Checking button, enabled Off control or draft
+preservation after cancellation. Those interactions still need a product fix
+and a fresh real-UI verification; native Tauri QA has not been performed.
+
 The [Heads up evaluator](../docs/heads-up-eval.md) supplies a synthetic development
 corpus and an opt-in, sequential live-model runner. `npm run eval:heads-up` only
 validates/lists fixtures; `--live` authorizes real inference using the production

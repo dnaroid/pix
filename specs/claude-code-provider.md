@@ -24,6 +24,16 @@ load only the suite-relative standalone module entrypoint, not the whole suite
 and not a user/project npm package. Existing owned-launch, tool-guard and
 provider-web-search policies continue to apply.
 
+Claude Code is optional. When `claude` is absent from PATH and no nonblank
+`PI_CLAUDE_CODE_PROVIDER_PATH` is configured, initialization quietly leaves the
+provider, models and search tool unregistered: normal session startup has no
+unavailable-provider notice. The doctor command remains available and reports
+the missing executable when explicitly invoked. A nonblank explicit executable
+path that is missing, or other preflight failures (including authentication or
+capability errors), still produce the existing startup error. Install/configure
+Claude and reload/restart to activate the provider; there is no background
+installation or automatic reprobe.
+
 Before enabling the suite, `scripts/migrate-claude-provider.mjs` changes
 only legacy provider package declarations to `extensions: []` and removes
 explicit legacy extension paths. It preserves package files, model selections,

@@ -1,6 +1,8 @@
 import { SESSION_EVAL_CASES } from "./session-cases.js";
+import { TODO_CONCISENESS_CASES } from "./todo-conciseness.js";
 
 const SESSION_LIVE_IDS = SESSION_EVAL_CASES.map((evalCase) => evalCase.id);
+const TODO_CONCISE_IDS = TODO_CONCISENESS_CASES.map((evalCase) => evalCase.id);
 
 export type EvalCoverageEntry = {
 	deterministic: string[];
@@ -20,7 +22,7 @@ export const EXTENSION_EVAL_COVERAGE: Record<string, EvalCoverageEntry> = {
 	"antigravity-auth": { deterministic: ["test/antigravity-auth.test.ts"] },
 	"opencode-import": { deterministic: ["test/opencode-import.test.ts"] },
 	"question": { deterministic: ["test/native-pi-tui.test.ts"] },
-	"todo": { deterministic: ["test/todo.test.ts", "test/todo-persistence-e2e.test.ts"], live: ["tool.todo-plan", "negative.trivial-chat-no-tools"] },
+	"todo": { deterministic: ["test/todo.test.ts", "test/todo-persistence-e2e.test.ts", "test/evals/todo-conciseness.test.ts"], live: ["tool.todo-plan", ...TODO_CONCISE_IDS, "negative.trivial-chat-no-tools"] },
 	"model-tools": { deterministic: ["test/model-tools.test.ts"], live: ["tool.exact-literal-direct", "negative.small-known-edit-no-plan"] },
 	"usage": { deterministic: ["test/evals/extension-contracts.test.ts"] },
 	"web-search": { deterministic: ["test/web-search.test.ts"] },
@@ -60,7 +62,7 @@ export const TOOL_EVAL_COVERAGE: Record<string, EvalCoverageEntry> = {
 	repo_deps: { deterministic: ["test/repo-discovery.test.ts", "test/repo-native-compact.test.ts"] },
 	repo_context: { deterministic: ["test/repo-discovery.test.ts", "test/tool-descriptions.test.ts"], live: ["tool.repo-context-general", "tool.repo-context"] },
 	repo_audit: { deterministic: ["test/repo-discovery.test.ts", "test/tool-descriptions.test.ts"], live: ["tool.repo-audit"] },
-	todo: { deterministic: ["test/todo.test.ts"], live: ["tool.todo-plan"] },
+	todo: { deterministic: ["test/todo.test.ts", "test/evals/todo-conciseness.test.ts"], live: ["tool.todo-plan", ...TODO_CONCISE_IDS] },
 	session: { deterministic: ["test/session-name.test.ts", "test/session-recovery.test.ts", "test/session.test.ts", "test/codemode-sdk.test.ts", "test/evals/session-cases.test.ts"], live: SESSION_LIVE_IDS },
 	web_search: { deterministic: ["test/web-search.test.ts"] },
 	web_fetch: { deterministic: ["test/web-search.test.ts"] },

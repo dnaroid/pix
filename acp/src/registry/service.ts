@@ -1,7 +1,8 @@
 import { join } from "node:path";
 import type { DesktopRegistryActionRequest, DesktopRegistryDiffRequest } from "../acp/desktop-commands.js";
 import { loadRegistryConfig } from "./config-reader.js";
-import { loadRuntimeConfig, registryUiCacheRoot, saveProjectKeyConfig, saveRegistryConfig } from "./config.js";
+import { loadRuntimeConfig, saveProjectKeyConfig, saveRegistryConfig } from "./config.js";
+import { withRegistryCache } from "./cache-lock.js";
 import type { RegistryContext, RegistryExecutor } from "./context.js";
 import { collectRegistryDiff } from "./diff-service.js";
 import { registryExecutor } from "./executor.js";
@@ -16,24 +17,6 @@ import { publishResourceTags } from "./tag-publication.js";
 import { selectPublicationRuntime } from "./publication-location.js";
 import { togglePublicationScope } from "./publication-scope.js";
 import { pushProjectResourceChanges, syncProjectResources } from "./project-resource-sync.js";
-
-const queues = new Map<string, Promise<void>>();
-
-/** Serialize the shared checkout AND provenance writes, including post-action reads. */
-export async function withRegistryCache<T>(task: () => Promise<T>): Promise<T> {
-	const key = registryUiCacheRoot();
-	const previous = queues.get(key) ?? Promise.resolve();
-	let release!: () => void;
-	const turn = new Promise<void>((resolve) => { release = resolve; });
-	const tail = previous.then(() => turn);
-	queues.set(key, tail);
-	await previous;
-	try { return await task(); }
-	finally {
-		release();
-		if (queues.get(key) === tail) queues.delete(key);
-	}
-}
 
 async function configure(ctx: RegistryContext): Promise<void> {
 	const current = loadRegistryConfig(ctx.cwd);

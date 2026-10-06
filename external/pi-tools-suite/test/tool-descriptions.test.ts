@@ -12,6 +12,7 @@ import {
 	codexAliasToolDescriptions,
 } from "../src/tool-descriptions.js";
 import { COMPRESS_RANGE_DESCRIPTION } from "../src/dcp/prompts.js";
+import { TodoParamsSchema } from "../src/todo/tool/types.js";
 import { buildSubagentCatalogPrompt, SUBAGENT_TYPE_SELECTION_GUIDANCE } from "../src/async-subagents/core/agent-catalog.js";
 import { agentStrategyPrompt, SUBAGENT_DELEGATION_GUIDANCE } from "../src/async-subagents/core/agent-strategy.js";
 
@@ -256,6 +257,22 @@ describe("tool descriptions", () => {
 
 		expect(promptText).toContain("complex work with 3+ steps");
 		expect(promptText).toContain("Skip single trivial tasks");
+		expect(TODO_TOOL_DESCRIPTION.description).toContain("no progress journals");
+		expect(promptText).toContain("For create/update and batch items");
+		expect(promptText).toContain("Omit description when the subject suffices");
+		expect(promptText).toContain("1–2 short sentences");
+		expect(promptText).toContain("Replace stale details rather than appending progress history");
+		expect(promptText).toContain("On completion, update status without expanding the description");
+		expect(promptText).toContain("normally send only action, id and status");
+		expect(promptText).toContain("Change description only when scope, criteria, blocker or next action changes");
+		expect(promptText).toContain("replace obsolete details with the current blocker and next action");
+		expect(promptText).toContain("put test results and detailed evidence in the final response");
+		expect(promptText).toContain("stop without cosmetic text updates or applying background results");
+		expect(JSON.stringify(TodoParamsSchema.properties.subject)).toContain("Short action phrase");
+		expect(JSON.stringify(TodoParamsSchema.properties.description)).toContain("1–2 short sentences");
+		expect(JSON.stringify(TodoParamsSchema.properties.description)).not.toContain("Long-form");
+		expect(JSON.stringify(TodoParamsSchema.properties.description)).toContain("normally omit on completion");
+		expect(JSON.stringify(TodoParamsSchema.properties.activeForm)).toContain("not a progress report");
 		expect(promptText).toContain("final user-facing report todo");
 		expect(promptText).toContain("changed files/behavior, verification results, and remaining manual actions");
 		expect(promptText).toContain("close it immediately before the final response");

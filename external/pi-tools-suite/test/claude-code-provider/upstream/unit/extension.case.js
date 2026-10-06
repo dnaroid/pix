@@ -67,7 +67,7 @@ function sessionContext(cwd, ui) {
     return { cwd, ui, sessionManager: { getSessionId: () => sessionId } };
 }
 
-async function createFakeClaude(searchResult = "ok", { searchDelayMs = 0, rateLimitInfo, reportCwd = false, providerTools = [], holdProviderUntilInput = false } = {}) {
+async function createFakeClaude(searchResult = "ok", { searchDelayMs = 0, rateLimitInfo, reportCwd = false, providerTools = [], holdProviderUntilInput = false, authStatus = ELIGIBLE_CLAUDE_AUTH } = {}) {
     const directory = await mkdtemp(join(tmpdir(), "pi-claude-code-provider-extension-"));
     const executable = join(directory, process.platform === "win32" ? "claude.cjs" : "claude");
     const rateLimitEvents = Array.isArray(rateLimitInfo) ? rateLimitInfo : rateLimitInfo ? [rateLimitInfo] : [];
@@ -80,7 +80,7 @@ async function createFakeClaude(searchResult = "ok", { searchDelayMs = 0, rateLi
     // Keep fake Claude JSONL visible in sandboxes that lose buffered Node child stdout.
     await writeFile(executable, nodeFixtureSource(`
 if (process.argv.includes("--version")) process.stdout.write(${JSON.stringify(`${VERIFIED_VERSIONS.claudeCode}\n`)});
-else if (process.argv[2] === "auth" && process.argv[3] === "status") process.stdout.write(JSON.stringify(${JSON.stringify(ELIGIBLE_CLAUDE_AUTH)}));
+else if (process.argv[2] === "auth" && process.argv[3] === "status") process.stdout.write(JSON.stringify(${JSON.stringify(authStatus)}));
 else if (process.argv.includes("--help")) process.stdout.write(require("node:fs").readFileSync(${JSON.stringify(CAPTURED_CLAUDE_HELP_PATH)}, "utf8"));
 else {
   const mcpIndex = process.argv.indexOf("--mcp-config");
@@ -404,7 +404,61 @@ test("converts fractional weekly utilization to a percentage", async () => {
     }
 });
 
-test("failed preflight retains the doctor and reports one session error", async () => {
+test("absent optional Claude CLI is quiet at startup but the doctor still explains it", async () => {
+    const originalPath = process.env.PATH;
+    const originalExecutable = process.env.PI_CLAUDE_CODE_PROVIDER_PATH;
+    // Empty PATH makes this deterministic even on a developer machine with Claude.
+    process.env.PATH = "";
+    try {
+        for (const configured of [undefined, "   "]) {
+            if (configured === undefined) delete process.env.PI_CLAUDE_CODE_PROVIDER_PATH;
+            else process.env.PI_CLAUDE_CODE_PROVIDER_PATH = configured;
+            const pi = fakePi();
+            await piClaudeCodeProvider(pi.api);
+            assert.equal(pi.commands.has("pi-claude-code-provider-doctor"), true);
+            assert.equal(pi.providers.size, 0);
+            assert.equal(pi.tools.size, 0);
+            assert.equal(getApiProvider("pi-claude-code-provider-headless"), undefined);
+            const notices = [];
+            const ctx = sessionContext(tmpdir(), { notify(message, level) { notices.push({ message, level }); } });
+            for (const handler of pi.handlers.get("session_start") ?? []) await handler({}, ctx);
+            assert.deepEqual(notices, []);
+            await pi.commands.get("pi-claude-code-provider-doctor").handler("", ctx);
+            assert.equal(notices.length, 1);
+            assert.equal(notices[0].level, "error");
+            assert.match(notices[0].message, /not found on PATH/);
+        }
+    } finally {
+        if (originalPath === undefined) delete process.env.PATH;
+        else process.env.PATH = originalPath;
+        if (originalExecutable === undefined) delete process.env.PI_CLAUDE_CODE_PROVIDER_PATH;
+        else process.env.PI_CLAUDE_CODE_PROVIDER_PATH = originalExecutable;
+    }
+});
+
+test("installed Claude with invalid authentication still reports a startup error", async () => {
+    const { directory, executable } = await createFakeClaude("ok", { authStatus: { loggedIn: false } });
+    const original = process.env.PI_CLAUDE_CODE_PROVIDER_PATH;
+    process.env.PI_CLAUDE_CODE_PROVIDER_PATH = executable;
+    try {
+        const pi = fakePi();
+        await piClaudeCodeProvider(pi.api);
+        assert.equal(pi.providers.size, 0);
+        assert.equal(pi.tools.size, 0);
+        const notices = [];
+        const ctx = sessionContext(tmpdir(), { notify(message, level) { notices.push({ message, level }); } });
+        for (const handler of pi.handlers.get("session_start") ?? []) await handler({}, ctx);
+        assert.equal(notices.length, 1);
+        assert.equal(notices[0].level, "error");
+        assert.match(notices[0].message, /unavailable.*first-party claude.ai subscription/);
+    } finally {
+        if (original === undefined) delete process.env.PI_CLAUDE_CODE_PROVIDER_PATH;
+        else process.env.PI_CLAUDE_CODE_PROVIDER_PATH = original;
+        await rm(directory, { recursive: true, force: true });
+    }
+});
+
+test("explicit missing Claude path retains the doctor and reports one session error", async () => {
     const original = process.env.PI_CLAUDE_CODE_PROVIDER_PATH;
     process.env.PI_CLAUDE_CODE_PROVIDER_PATH = "/does/not/exist/claude";
     try {

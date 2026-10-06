@@ -1,6 +1,7 @@
 import type { EvalCase, EvalRunResult } from "./harness/types.js";
 import { DECISION_POLICY_CASES } from "./decision-policy.js";
 import { SESSION_EVAL_CASES } from "./session-cases.js";
+import { TODO_CONCISENESS_CASES } from "./todo-conciseness.js";
 
 const DIRECT_TOOLS = ["read", "Read", "grep", "Grep", "find", "Glob", "bash", "Bash", "shell", "shell_command"];
 const MUTATION_TOOLS = ["edit", "Edit", "write", "Write", "apply_patch", "ast_apply"];
@@ -10,6 +11,7 @@ const REPO_SEMANTIC_TOOLS = ["repo_architecture", "repo_search", "repo_context",
 export const EVAL_CASES: EvalCase[] = [
 	...DECISION_POLICY_CASES,
 	...SESSION_EVAL_CASES,
+	...TODO_CONCISENESS_CASES,
 	{
 		id: "tool.semantic-repo-search",
 		category: "tool-selection",

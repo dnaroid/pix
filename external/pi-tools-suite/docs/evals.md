@@ -262,8 +262,56 @@ passing merely because the answer was embedded in the prompt.
   `ast_grep`.
 - `tool.todo-plan`: non-trivial four-stage work should initialize synchronized
   todo state.
+- `tool.todo-concise-{create,verification,blocked,completion}`: supplied-facts
+  plan-maintenance checkpoints test short subjects/active forms (80 Unicode
+  characters) and optional descriptions (240 characters, at most two lines).
+  These are eval tolerances, not runtime limits. Each mutation is inspected,
+  including text later overwritten or auto-cleared. Cases require successful
+  todo calls, preserve the no-duplicate-charge acceptance criterion, retain the
+  current user-approval blocker, and reject copying stale history/log inventories.
+  The user scenario does not request brevity; the shipped todo prompt must guide
+  it. These are four independent single-request exercises, not a real multi-turn
+  user approval interaction or an exhaustive semantic detector of verbosity.
 - `tool.session-recovery-overview`: lost context with no reliable search phrase
   should begin with `session` and `action: "overview"`.
+
+Run only this todo slice (from the suite package):
+
+```bash
+PI_TOOLS_SUITE_EVAL_MODELS=zai/glm-5-turbo \
+PI_TOOLS_SUITE_EVAL_CASES=tool.todo-concise-create,tool.todo-concise-verification,tool.todo-concise-blocked,tool.todo-concise-completion \
+npm run evals:report
+```
+
+`npm run evals:todo-paired` compares the previous brief prompt with the strengthened
+prompt using frozen package snapshots; it never edits the working source or live
+mirror. Set `PI_TOOLS_SUITE_EVAL_MODELS` and optionally `PI_TODO_EVAL_REPEATS`
+(1–5, default 3). Each pair gets fresh sessions/fixtures, alternating variant
+order. At most two model tracks run concurrently. Output defaults to a unique
+directory under the caller project's `.pi/artifacts/`; the normal eval output
+override also applies. `comparison.md/json` records each run, separate brevity
+and lifecycle gates, execution failures/timeouts, costs and description lengths;
+`prompt-manifest.json` preserves the exact prompt source and hashes. Partial
+reports persist after each run, and `complete` distinguishes unfinished runs.
+The previous wording is pinned; changed current fragments fail closed rather
+than silently comparing the wrong prompts. Snapshots retain shared installed
+dependencies, so do not update dependencies during the comparison.
+
+Initial `batch_create replace:true` on an empty fixture is equivalent to creation;
+replacing an existing plan is rejected. To rescore a finalized report without
+paid model calls, set `PI_TODO_EVAL_RESCORE_DIR` to its output directory and run
+the paired command again. Raw live assertions/events and the original JSON are
+retained; final gates use the current scorer, saved with a hash and rescore time.
+Rescoring incomplete live output is rejected to avoid report-write races.
+Acceptance criteria allow equivalent wording such as "does not cause a duplicate
+charge"; mentioning a possible duplicate charge without preventing it fails.
+
+Checkpoint controls accept explicit test success and complete nonzero test ratios
+(including supplied results rather than independently executed tests), and reject
+failed/unequal ratios, negated success, pending/unrun tests and nonzero exit codes.
+Lifecycle scoring is independent of text length/history scoring, but both must
+pass for overall acceptance. Three repeats are a descriptive sample, not proof
+of statistical superiority; these cases do not measure actual coding/test work.
 
 ### Coding quality
 
@@ -457,7 +505,7 @@ provider does not populate monetary cost metadata.
 .pi/artifacts/evals/report-<timestamp>-<uuid>/eval-report.md
 ```
 
-The default artifact directory is ignored by Git. All five report entrypoints
+The default artifact directory is ignored by Git. All six report entrypoints
 use the shared output resolver and `PROJECT_ARTIFACTS_DIR` constant. Resolution
 starts at the caller's cwd and uses the nearest ancestor with `.pi` or `.git`
 (including Git worktree marker files), falling back to cwd for standalone use.

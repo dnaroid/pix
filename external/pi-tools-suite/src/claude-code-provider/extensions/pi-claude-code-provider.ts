@@ -10,7 +10,7 @@ import { bridgeArgv } from "../src/claude-args.ts";
 import { readClaudeModelAliases } from "../src/claude-models.ts";
 import { MINIMUM_VERSIONS, VERIFIED_VERSIONS, platformStatus, startupPlatformWarning, versionStatus } from "../src/compatibility.ts";
 import { writeDiagnosticReport } from "../src/diagnostics.ts";
-import { errorText, normalizeClaudeOverflow } from "../src/errors.ts";
+import { errorCode, errorText, normalizeClaudeOverflow } from "../src/errors.ts";
 import { formatDoctorSummary, probeBridge } from "../src/doctor.ts";
 import { flushMetricsLog, getLastRequestMetrics, getLastSearchMetrics, getMetricsLogError } from "../src/metrics.ts";
 import { createClaudeStream } from "../src/provider.ts";
@@ -36,7 +36,12 @@ export default async function piClaudeCodeProvider(pi: ExtensionAPI): Promise<vo
   try {
     installation = await inspectClaudeInstallation();
   } catch (error) {
-    registerUnavailableNotice(pi, errorText(error));
+    // The suite enables this optional adapter by default, including on clean
+    // machines. An absent CLI is not a broken setup unless a path was explicit.
+    // Keep the doctor available, and don't hide auth/capability/preflight errors.
+    if (errorCode(error) !== "executable_missing" || process.env.PI_CLAUDE_CODE_PROVIDER_PATH?.trim()) {
+      registerUnavailableNotice(pi, errorText(error));
+    }
     return;
   }
   const providerModels = catalogModels();

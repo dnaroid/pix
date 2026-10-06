@@ -11,6 +11,56 @@ import { PI_TOOLS_SUITE_MODULE_CATALOG } from "../external/pi-tools-suite/src/mo
 const exec = promisify(execFile);
 const suite = resolve("external/pi-tools-suite");
 
+test("SDK suite autoload without Claude leaves no provider or startup error", { timeout: 45_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), "pix-provider-optional-"));
+  try {
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "project");
+    const emptyPath = join(root, "empty-path");
+    await mkdir(join(agentDir, "extensions"), { recursive: true });
+    await mkdir(cwd);
+    await mkdir(emptyPath);
+    await symlink(suite, join(agentDir, "extensions/pi-tools-suite"));
+    const runner = join(root, "probe.mjs");
+    await writeFile(runner, `
+      import assert from 'node:assert/strict';
+      const { DefaultResourceLoader, SettingsManager } = await import(${JSON.stringify(import.meta.resolve("@earendil-works/pi-coding-agent"))});
+      const loader = new DefaultResourceLoader({ cwd: ${JSON.stringify(cwd)}, agentDir: ${JSON.stringify(agentDir)},
+        settingsManager: SettingsManager.create(${JSON.stringify(cwd)}, ${JSON.stringify(agentDir)}),
+        noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true });
+      await loader.reload();
+      const result = loader.getExtensions();
+      assert.deepEqual(result.errors, []);
+      assert.equal(result.runtime.pendingProviderRegistrations.some(p => p.name === 'pi-claude-code-provider'), false);
+      assert.ok(result.extensions.some(e => e.commands.has('pi-claude-code-provider-doctor')));
+      assert.ok(result.extensions.every(e => !e.tools.has('pi_claude_code_provider_web_search')));
+      // Discovery has no session runner. Supply the action used by suite guards.
+      result.runtime.getActiveTools = () => [];
+      const notices = [];
+      const ctx = { cwd: ${JSON.stringify(cwd)}, ui: { notify(message, level) { notices.push({ message, level }); } } };
+      for (const extension of result.extensions) {
+        for (const handler of extension.handlers.get('session_start') ?? []) {
+          await handler({ type: 'session_start', reason: 'startup' }, ctx);
+        }
+      }
+      assert.deepEqual(notices, []);
+      console.log('OPTIONAL_PROVIDER_QUIET');
+    `);
+    const { stdout } = await exec(process.execPath, ["--import", import.meta.resolve("tsx"), runner], {
+      cwd,
+      env: {
+        HOME: root, TMPDIR: root, PATH: emptyPath,
+        PI_CODING_AGENT_DIR: agentDir, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0",
+        PI_TOOLS_SUITE_DISABLED_MODULES: PI_TOOLS_SUITE_MODULE_CATALOG.filter(m => m.name !== "claude-code-provider").map(m => m.name).join(","),
+      },
+      timeout: 40_000, maxBuffer: 256 * 1024,
+    });
+    assert.match(stdout, /OPTIONAL_PROVIDER_QUIET/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("SDK discovery loads exactly one local suite provider after migration (personal + project)", { timeout: 45_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "pix-provider-registration-"));
   try {

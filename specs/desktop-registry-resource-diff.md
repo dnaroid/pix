@@ -46,9 +46,14 @@ of a misleading empty diff. Loading/failed/empty states are distinct, and
 late responses from a closed view, previous selection or previous workspace
 must not replace the current view.
 
+Diff collection holds the shared cross-process checkout lock described in
+[Registry publication](resource-registry-publication-tags.md), so another ACP
+process cannot reset or replace the checkout during comparison.
+
 ## Implementation
 
 - `acp/src/registry/service.ts`
+- `acp/src/registry/cache-lock.ts`
 - `acp/src/registry/diff-service.ts`
 - `acp/src/registry/diff.ts`
 - `acp/src/registry/publication-location.ts`
@@ -68,6 +73,7 @@ must not replace the current view.
 
 ## Tests
 
+- `acp/test/registry-cache.test.ts`
 - `acp/test/registry.test.ts`
 - `acp/test/desktop-commands.test.ts`
 - `acp/test/agent.test.ts`

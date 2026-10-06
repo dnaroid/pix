@@ -34,7 +34,8 @@ locations, including `.pi/subagents/`, are preserved; media outside the project
 use absolute paths or absolute `file://` Markdown destinations. Video links expose
 inline playback controls.
 
-The five eval report entrypoints share one resolver. It starts from cwd, uses
+The six eval report entrypoints, including the paired Todo prompt runner, share
+one resolver. It starts from cwd, uses
 the nearest ancestor containing `.pi` or `.git` (directory or Git worktree
 marker file), and falls back to cwd if none exists. Defaults are
 `.pi/artifacts/evals/<runner>-<timestamp>-<uuid>/`, resolved against that project.
@@ -81,6 +82,8 @@ Decision: [0015 — Canonical disposable harness output](../docs/decisions/0015-
 - `external/pi-tools-suite/test/evals/harness/output-dir.ts`
 - `external/pi-tools-suite/test/evals/run-evals.ts`
 - `external/pi-tools-suite/test/evals/run-p01n-paired.ts`
+- `external/pi-tools-suite/test/evals/run-todo-paired.ts`
+- `external/pi-tools-suite/test/evals/todo-prompt-snapshots.ts`
 - `external/pi-tools-suite/test/evals/run-context-gateway-observe.ts`
 - `external/pi-tools-suite/test/evals/run-context-gateway-recovery.ts`
 - `external/pi-tools-suite/test/evals/delivery-review/live.test.ts`
@@ -90,11 +93,12 @@ Decision: [0015 — Canonical disposable harness output](../docs/decisions/0015-
 - `external/pi-tools-suite/test/tool-descriptions.test.ts`
 - `external/pi-tools-suite/test/async-subagents/core.test.ts`
 - `external/pi-tools-suite/test/evals/output-dir.test.ts`
+- `external/pi-tools-suite/test/evals/todo-conciseness.test.ts`
 - `external/pi-tools-suite/test/desktop-visual-prompt.test.ts`
 
 ## Verification
 
-Run the four focused Bun test files above and suite source typecheck.
+Run the five focused Bun test files above and suite source typecheck.
 Assertions cover log guidance on shell/Bash aliases, generic child prompts,
 project-relative eval paths, unique run directories and explicit overrides.
 Check generated runtime/live synchronization and review task-scoped knowledge

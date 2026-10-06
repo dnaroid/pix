@@ -271,7 +271,7 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 
 ### Model fallback (`core/model-fallback.ts`)
 - In-memory session state: `exhaustedModels`/`exhaustedProviders` Sets, `fallbackByModel`/`fallbackByProvider` Maps; resettable via `resetSessionModelFallbacks()`. `[confirmed by code]`
-- `selectSessionModelWithFallback` / `nextFallbackModel` walk the chain skipping exhausted models/providers (fallback must be a different provider). `[confirmed by code]`
+- `selectSessionModelWithFallback` / `nextFallbackModel` walk the resolved chain skipping exhausted models/providers. They do not independently require a different provider; remembered provider exhaustion can exclude same-provider candidates. `[confirmed by code; model-pool-contract.test.ts]`
 - `isQuotaLimitCompletion` scans result.md + stderr.log + last 20 events.jsonl lines for: HTTP 429, "rate limit", "quota exceeded", "insufficient quota", "resource exhausted", "usage limit", "billing limit"; for the antigravity provider also "antigravity_all_accounts_exhausted". `[confirmed by code, model-fallback.ts ~40-66]`
 - Antigravity providers are **never** marked exhausted at the provider level (`shouldRememberProviderExhaustion` returns false) — each account is tried individually. `[confirmed by code]`
 
