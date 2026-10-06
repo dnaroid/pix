@@ -823,7 +823,12 @@ describe.serial("LSP library post-edit diagnostics", () => {
 		await registerSuite(pi as any);
 
 		expect([...pi.handlers.keys()].sort()).toEqual(expect.arrayContaining(["before_agent_start", "before_provider_request", "model_select", "session_shutdown", "session_start", "tool_result"]));
-	});
+		// Importing and registering the whole top-level suite touches every
+		// module file; on a cold Windows CI runner real-time AV scanning of the
+		// fresh checkout can push the one-off import well past the 5s default
+		// (observed ~150ms warm vs >5s cold). Keep the budget generous but
+		// bounded so genuine registration hangs still fail.
+	}, 30_000);
 
 	test.serial("registers post-edit diagnostics hook without TUI renderers", async () => {
 		const cwd = tempDir();
