@@ -337,8 +337,9 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 
 #### G1/T3 durable ownership candidate (not yet accepted)
 
-`core/owned-launch/` is an in-development macOS launcher, not an accepted
-replacement for the lifecycle contract above. Its intended boundary is a
+`core/owned-launch/` now contains a macOS candidate launcher integrated in
+`core/spawn.ts`, but it is not an accepted replacement for the lifecycle
+contract above. Its intended boundary is a
 fresh launchd resource coalition for ordinary unprivileged fork/exec
 descendants, including detached process groups and sessions. A separate
 KeepAlive supervisor must durably record ownership before payload release,
