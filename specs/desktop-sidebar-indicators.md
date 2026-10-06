@@ -47,12 +47,12 @@ Make the Workspace Activity Bar a compact live health/status rail. Every activit
 ## Activity Bar keyboard contract
 
 - The Workspace Activity Bar is one vertical `toolbar` composite rather than
-  seven unrelated Tab stops.
+  eight unrelated Tab stops.
 - The currently remembered workspace view owns the toolbar's roving Tab stop,
   including when its panel is collapsed.
 - ArrowUp/ArrowDown move focus between Project, Tasks, Source Control, Registry,
-  Package Scripts, IDX, and Settings; Home/End move to the bounds and movement
-  wraps at the rail ends.
+  Package Scripts, IDX, LSP, and Settings; Home/End move to the bounds and
+  movement wraps at the rail ends.
 - Moving keyboard focus does not activate or expand a view. Enter/Space/click
   retains the existing `selectTab` behavior, including collapsing the current
   panel when its active button is invoked again.
@@ -201,6 +201,7 @@ Decision: [0027 — Cause-specific sidebar quick actions](../docs/decisions/0027
 - `desktop/src/components/WorkspaceSidebar.svelte`
 - `desktop/src/components/SidebarIndicatorDot.svelte`
 - `desktop/src/components/ProjectExplorer.svelte`
+- `desktop/src/components/sidebar-project-retry.ts`
 - `desktop/src/components/SettingsPanel.svelte`
 - `desktop/src/lib/sidebar-indicators.ts`
 - `desktop/src/lib/sidebar-indicator-types.ts`
@@ -221,6 +222,7 @@ Decision: [0027 — Cause-specific sidebar quick actions](../docs/decisions/0027
 
 ## Tests
 
+- `desktop/src-tauri/src/lib.rs` (sidebar indicator unit tests)
 - `desktop/src-tauri/src/sidebar_registry_resource_hash.rs`
 - `desktop/src/lib/sidebar-indicators.test.ts`
 - `desktop/src/lib/sidebar-indicator-service.test.ts`
@@ -229,6 +231,7 @@ Decision: [0027 — Cause-specific sidebar quick actions](../docs/decisions/0027
 - `desktop/src/components/workspace-sidebar-indicator-actions.test.ts`
 - `desktop/src/lib/sidebar-indicator-actions.test.ts`
 - `desktop/src/components/WorkspaceSidebar.test.ts`
+- `desktop/src/components/sidebar-project-retry.test.ts`
 - `desktop/src/app/registry-store.test.ts`
 
 ## Verification

@@ -301,7 +301,9 @@
 {/snippet}
 
 {#snippet contextRing()}
-  {@const segments = ringSegments()}
+  {@const segments = ringSegments().filter((segment) => segment.pct > 0)}
+  {@const occupiedPct = segments.reduce((sum, segment) => sum + segment.pct, 0)}
+  {@const sectors = [...segments, { kind: "free", pct: Math.max(0, 100 - occupiedPct) }].filter((segment) => segment.pct > 0)}
   <div class="relative h-[88px] w-[88px] shrink-0" data-context-ring aria-hidden="true">
     <svg viewBox="0 0 36 36" class="h-[88px] w-[88px] -rotate-90">
       <circle cx="18" cy="18" r="15.915" fill="none" class="stroke-border" stroke-width="3.5"></circle>
@@ -315,6 +317,18 @@
           stroke-dashoffset={-offset}
         ></circle>
       {/each}
+      {#if sectors.length > 1}
+        {#each sectors as _, index}
+          {@const offset = sectors.slice(0, index).reduce((sum, s) => sum + s.pct, 0)}
+          <line
+            x1={18 + 15.915 - 1.75} y1="18"
+            x2={18 + 15.915 + 1.75} y2="18"
+            transform={`rotate(${offset / 100 * 360} 18 18)`}
+            stroke="var(--popover)" stroke-width="0.5"
+            data-context-separator
+          ></line>
+        {/each}
+      {/if}
     </svg>
     <div class="absolute inset-0 grid place-items-center">
       <span class={["font-mono text-sm font-semibold", contextTone ? toneTextClass(contextTone) : "text-foreground"]}>

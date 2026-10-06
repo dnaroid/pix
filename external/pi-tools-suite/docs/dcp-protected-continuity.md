@@ -32,6 +32,11 @@ safe deterministic representation:
 The raw Pi session remains the exact historical source. Compression continuity
 is working memory for the next provider request, not a second archival copy.
 
+When ledgers are combined, repeated recognised inspection or test/build shell
+observations with identical inputs keep the newest result. This supersession
+does not apply to mutations, unknown commands, non-shell evidence, or outputs
+matching protected-file patterns.
+
 New blocks store semantic summary core separately from `protectedFragments`.
 Provider projection renders the core plus the continuity ledger. Legacy v2
 blocks with an inline ledger remain readable; a later roll-up or maintenance
@@ -39,7 +44,7 @@ repack extracts their semantic core and re-applies the current continuity
 policy without mutating the published old block.
 
 Tool continuity has a block-wide provider-visible byte budget. The default is
-64 KiB and can be overridden with
+16 KiB and can be overridden with
 `dcp.compress.maxProtectedToolContinuityBytes`. Actionable failures and mutation
 receipts are retained ahead of ordinary shaped evidence. Shaped overflow is
 replaced by a deterministic aggregate containing counts, tool classes, source

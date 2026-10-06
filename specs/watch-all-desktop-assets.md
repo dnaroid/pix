@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # watch:all Desktop web asset embedding
 
 <!-- markdownlint-disable MD013 -->
@@ -49,6 +54,15 @@ Make the newest successfully built Vite bundle available to the Desktop process 
   watcher file/target inspection runs on a native blocking worker, not the UI
   thread. A late restart error after teardown does not restart polling.
 - `watch:all` disables Tauri's `beforeBuildCommand` because it has already built the web bundle once in the ordered build plan.
+- Watch web builds write directly to `frontend-dist` inside that watcher's
+  unique temporary runtime root, with Vite's explicit `--outDir` and
+  `--emptyOutDir`. Native builds override Tauri's `frontendDist` with this
+  absolute private path; they never embed the shared `desktop/dist`. This
+  prevents a concurrent ordinary web build (or another watcher) from deleting
+  assets while Tauri reads them. Within one watcher web/native steps remain
+  serialized. Rust-only rebuilds reuse its last successful private web output;
+  a failed web rebuild invalidates it and cannot feed a native build. The
+  private output follows the existing runtime-root cleanup/retention lifecycle.
 - Every native watch build uses the persistent, isolated
   `desktop/src-tauri/target/watch-all` cache with `CARGO_INCREMENTAL=0` and
   `CARGO_PROFILE_DEV_DEBUG=0`, overriding inherited values for that subprocess.
@@ -61,7 +75,11 @@ Make the newest successfully built Vite bundle available to the Desktop process 
   under Cargo's lock, not dependencies or the running Desktop's copied bundle.
   A cleanup failure aborts the build without publishing an artifact. Other target
   directories and obsolete dependency artifacts are not automatically cleaned.
-- `desktop/src-tauri/build.rs` explicitly tracks the generated `<repo>/desktop/dist/index.html` as a Cargo input. Vite's production entrypoint contains hashed references to the emitted JS/CSS assets, so a successful web rebuild invalidates the native crate even when no Rust source changed.
+- For ordinary builds, `desktop/src-tauri/build.rs` explicitly tracks the
+  generated `<repo>/desktop/dist/index.html` as a Cargo input. Vite's production
+  entrypoint contains hashed references to emitted JS/CSS assets. Watch builds
+  instead use the private frontend config and package-scoped cleanup above to
+  force regeneration, without depending on shared `dist` changes.
 - The native rebuild therefore regenerates and recompiles Tauri's embedded asset context before the first Desktop launch or a user-requested restart into the newly bundled artifact.
 - A failed web/native build keeps the previous working Desktop process alive and does not mark it stale; the watcher never restarts into a partially built frontend.
 - macOS launch success is based on the real Tauri app process, not only the
@@ -110,16 +128,13 @@ a separate explicitly requested scenario.
 
 - [Decision: disk-saving native watch builds](../docs/decisions/0005-watch-all-cargo-disk.md)
 
+## Implementation
+
 - `scripts/pix-watch`
-- `tests/pix-watch.test.ts`
 - `scripts/watch-all.mjs`
 - `scripts/watch-all-desktop-quit.mjs`
-- `tests/watch-all-desktop-quit.test.ts`
 - `scripts/watch-all-state.mjs`
-- `tests/watch-all-state.test.ts`
-- `desktop/src/app/desktop-watch-restart.test.ts`
 - `scripts/watch-all-temp.mjs`
-- `tests/watch-all.test.ts`
 - `desktop/src/app/desktop-watch-restart.svelte.ts`
 - `desktop/src/App.svelte`
 - `desktop/src/components/DesktopTitlebar.svelte`
@@ -127,6 +142,15 @@ a separate explicitly requested scenario.
 - `desktop/src-tauri/src/lib.rs`
 - `desktop/src-tauri/tauri.conf.json`
 - `desktop/vite.config.ts`
+
+## Tests
+
+- `tests/pix-watch.test.ts`
+- `tests/watch-all-desktop-quit.test.ts`
+- `tests/watch-all-state.test.ts`
+- `desktop/src/app/desktop-watch-restart.test.ts`
+- `tests/watch-all.test.ts`
+- `tests/watch-all-frontend.test.ts`
 
 ## Verification
 
@@ -146,6 +170,9 @@ a separate explicitly requested scenario.
 - It also verifies that initial and repeated native watch builds use the same
   disk-saving Cargo environment and package-only cleanup before build/capture,
   without applying them to the web build, and abort on cleanup failure.
+- `tests/watch-all-frontend.test.ts` covers private Vite output and Tauri config,
+  asset survival when shared output is removed, separate watcher paths,
+  Rust-only output reuse, and failed web-output rejection/recovery.
 - `tests/watch-all.test.ts` also covers bounded failed-command output retention
   and the repeated bottom-of-terminal failure report, plus exact app-PID
   liveness checks used by the macOS startup gate, artifact retention and stale
@@ -154,4 +181,6 @@ a separate explicitly requested scenario.
   a missed bulk checkout event, duplicate suppression, and the conservative
   full-rebuild fallback when the Git diff probe fails.
 - After changing/rebuilding Desktop web output, the subsequent native build must rerun the `pix-desktop` build script and produce a launchable bundle with `index.html` embedded.
-- Run `node --import tsx --test tests/watch-all.test.ts`, `npm --prefix desktop run check`, and a production Desktop web/native smoke build.
+- Run `node --import tsx --test tests/watch-all*.test.ts`,
+  `npm --prefix desktop run check`, and a production Desktop web/native smoke
+  build using the private frontend override.

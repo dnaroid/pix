@@ -14,11 +14,13 @@ status: active
   install it. Project artifacts remain in the separate project-sync section.
 - Desktop displays **Installed** (all project copies, published or not) and
   **Available** (remote copies absent locally) tabs. Cards independently show
-  **Local** / **Published** badges and synchronization/conflict state.
-- Catalog entries use three rows: name, **SKILL** / **AGENT** type badge and
-  optional tags after the badge; description; then status and **Local** / **Published** on the left with
-  action buttons on the right. Missing descriptions still reserve the second
-  row; long text truncates with full-value tooltips. Entries are separated by
+  publication and synchronization/conflict state through icons and accessible
+  labels/tooltips: Local only, Published · Project, or Published · Global.
+- Catalog entries show a colored skill/agent icon and name; description;
+  an optional separate tag-chip row (three visible tags plus an overflow count);
+  then status/publication icons on the left with action buttons on the right.
+  Missing descriptions still reserve the second row; long text truncates with
+  full-value tooltips. Entries are separated by
   spacing, not colored divider lines. Project-sync rows are unchanged.
 - Resource cards keep at most two direct commands: the routine Install / Update /
   Push / Pull action, plus Compare when a two-sided diff is available. Other
@@ -50,7 +52,11 @@ status: active
   companions are retained; globally/context-loaded skills without project copies
   are never published automatically. Existing published edits and unsafe states
   (untracked collisions, diverged, registry-changed or removed-remote) are not
-  automatic publication targets. Later body/asset edits still require explicit push.
+  targets of this new-resource saving operation. Separately, Desktop debounces
+  automatic pushes of installed Project publications with `local-changes`,
+  including later body/asset edits. Global publications remain manual; unsafe
+  states are skipped. Background work is serialized with foreground Registry
+  actions, and obsolete workspace completions cannot update current state.
 - **Save to project registry** explicitly publishes an unpublished project copy
   in the Project namespace. Pushes to existing publications retain their scope.
   Existing collision/conflict protection applies.
@@ -103,8 +109,9 @@ status: active
   configured registry using the existing collision/provenance safeguards.
   A failed sync leaves the saved local edit intact and reports the error;
   automatic tag sync modifies remote tags only: unrelated local body, companion,
-  or asset changes remain unpublished and still show as local changes.
-  a changed remote revision or configuration during editing is never overwritten.
+  or asset changes remain local changes after that operation (eligible Project
+  edits may subsequently be pushed by Desktop background sync).
+  A changed remote revision or configuration during editing is never overwritten.
   Desktop displays tags and includes them in resource search.
 
 ## Constraints and failure cases
@@ -131,6 +138,8 @@ status: active
 - `acp/src/registry/publication-scope.ts`
 - `acp/src/registry/project-resource-sync.ts`
 - `acp/src/registry/metadata.ts`
+- `acp/src/registry/tag-publication.ts`
+- `acp/src/registry/status.ts`
 - `acp/src/registry/agent-markdown.ts`
 - `external/pi-tools-suite/src/async-subagents/core/agents-dir.ts`
 - `acp/src/acp/desktop-commands.ts`
@@ -140,6 +149,7 @@ status: active
 - `desktop/src/components/RegistryCatalog.svelte`
 - `desktop/src/components/RegistryItemActions.svelte`
 - `desktop/src/lib/registry-card-actions.ts`
+- `desktop/src/lib/registry-background-sync.ts`
 - `skills/skill-creator/SKILL.md`
 - `skills/skill-creator/scripts/quick_validate.py`
 - `.pi/skills/project-agent-creator/SKILL.md`
@@ -155,6 +165,7 @@ status: active
 - `desktop/src/app/registry-store.test.ts`
 - `desktop/src/components/RegistryPanel.test.ts`
 - `desktop/src/lib/registry-card-actions.test.ts`
+- `desktop/src/lib/registry-background-sync.test.ts`
 
 ## Verification
 

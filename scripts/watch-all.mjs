@@ -197,8 +197,9 @@ export function usesDesktopAppBundle(platform = process.platform) {
  * `beforeBuildCommand` stays empty; only macOS bundles a debug .app for the Dock icon and to keep
  * the prior Tauri/WebKit workspace localStorage context. Other platforms keep the raw executable.
  */
-export function desktopBuildArguments(platform = process.platform) {
+export function desktopBuildArguments(platform = process.platform, frontendDist) {
 	const config = { build: { beforeBuildCommand: "" } };
+	if (frontendDist) config.build.frontendDist = frontendDist;
 	if (usesDesktopAppBundle(platform)) config.bundle = { active: true };
 	const args = ["--debug"];
 	if (usesDesktopAppBundle(platform)) {
@@ -552,6 +553,7 @@ export class WatchAllSupervisor {
 		this.candidateExecutable = undefined;
 		this.copiedArtifacts = new Set();
 		this.tempDirectory = undefined;
+		this.desktopFrontendDist = undefined;
 		this.executableSequence = 0;
 		this.watchedPathStamps = new Map();
 		this.lastBuildFailure = undefined;
@@ -916,10 +918,21 @@ export class WatchAllSupervisor {
 			case PARTS.ACP:
 				await this.runNpmCommand("build ACP", ["--prefix", "acp", "run", "--silent", "build", "--", "--noEmitOnError"], REPO_ROOT);
 				break;
-			case PARTS.WEB:
-				await this.runNpmCommand("build desktop web", ["--prefix", "desktop", "run", "--silent", "build:web"], REPO_ROOT);
+			case PARTS.WEB: {
+				if (!this.tempDirectory) throw new Error("temporary frontend directory is unavailable");
+				const frontendDist = join(this.tempDirectory, "frontend-dist");
+				// Build directly into our private output: copying shared dist would still
+				// race with another Vite build clearing it. Steps within this watcher serialize.
+				this.desktopFrontendDist = undefined;
+				await this.runNpmCommand("build desktop web", [
+					"--prefix", "desktop", "run", "--silent", "build:web", "--",
+					"--outDir", frontendDist, "--emptyOutDir",
+				], REPO_ROOT);
+				this.desktopFrontendDist = frontendDist;
 				break;
+			}
 			case PARTS.NATIVE: {
+				if (!this.desktopFrontendDist) throw new Error("successful private frontend build is unavailable");
 				const environment = {
 					CARGO_TARGET_DIR,
 					CARGO_INCREMENTAL: "0",
@@ -937,7 +950,7 @@ export class WatchAllSupervisor {
 				);
 				await this.runNpmCommand(
 					"build desktop native",
-					["--prefix", "desktop", "exec", "tauri", "build", "--", ...desktopBuildArguments(process.platform)],
+					["--prefix", "desktop", "exec", "tauri", "build", "--", ...desktopBuildArguments(process.platform, this.desktopFrontendDist)],
 					REPO_ROOT,
 					environment,
 				);

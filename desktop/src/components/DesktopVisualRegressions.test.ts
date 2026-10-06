@@ -499,6 +499,16 @@ describe("desktop visual regressions", () => {
     expect(statusBarViewModelSource).not.toContain("refreshActiveDcpStats");
   });
 
+  it("separates nonzero Context ring sectors, including free capacity, like the Usage donut", () => {
+    expect(runtimeStatusSource).toContain('ringSegments().filter((segment) => segment.pct > 0)');
+    expect(runtimeStatusSource).toContain('pct: Math.max(0, 100 - occupiedPct)');
+    expect(runtimeStatusSource).toContain('{#if sectors.length > 1}');
+    expect(runtimeStatusSource).toContain('sectors.slice(0, index).reduce((sum, s) => sum + s.pct, 0)');
+    expect(runtimeStatusSource).toContain('transform={`rotate(${offset / 100 * 360} 18 18)`}');
+    expect(runtimeStatusSource).toContain('stroke="var(--popover)" stroke-width="0.5"');
+    expect(runtimeStatusSource).toContain('data-context-separator');
+  });
+
   it("keeps Plan clear in the status popup without a Session pane", () => {
     expect(sessionActivityStatusHudSource).toContain('aria-label="Clear session plan"');
     expect(statusBarViewModelSource).not.toContain("sessionActivityOpen");

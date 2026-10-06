@@ -63,11 +63,19 @@ Present conversations, file/media Preview, Source Control Git Diff, interactive 
 - `desktop/src/app/workbench-controller.ts`
 - `desktop/src/app/desktop-presentation-state.svelte.ts`
 - `desktop/src/app/preview-state.svelte.ts`
+- `desktop/src/app/preview.svelte.ts`
 - `desktop/src/app/preview-file-io.ts`
 - `desktop/src/app/project-documents.svelte.ts`
 - `desktop/src/app/desktop-project-services.ts`
 - `desktop/src/app/session-tab-controller.ts`
+- `desktop/src/app/workbench-terminal.svelte.ts`
+- `desktop/src/app/desktop-command-controller.svelte.ts`
+- `desktop/src/app/desktop-workbench-prop-builders.ts`
+- `desktop/src/App.svelte`
+- `desktop/src/components/DesktopWorkbenchSurface.svelte`
+- `desktop/src/components/WorkbenchTerminalPane.svelte`
 - `desktop/src/components/WorkbenchTabs.svelte`
+- `desktop/src/components/SessionTabStatusIcon.svelte`
 - `desktop/src/components/PreviewPane.svelte`
 - `desktop/src/components/preview-editor-controller.svelte.ts`
 - `desktop/src/components/preview-file-search-controller.svelte.ts`
@@ -78,6 +86,7 @@ Present conversations, file/media Preview, Source Control Git Diff, interactive 
 - `desktop/src/app/lsp-onboarding.svelte.ts`
 - `desktop/src/lib/workbench-tabs.ts`
 - `desktop/src/lib/session-tabs.ts`
+- `desktop/src/lib/session-tab-status.ts`
 - `desktop/src/lib/preview-history.ts`
 - `desktop/src/lib/file-search.ts`
 - `desktop/src/lib/desktop-commands.ts`
@@ -91,10 +100,13 @@ Present conversations, file/media Preview, Source Control Git Diff, interactive 
 
 - `desktop/src/lib/workbench-tabs.test.ts` covers mixed insertion, session-id separation, close fallback, and stale-active normalization.
 - `desktop/src/components/WorkbenchTabs.test.ts` covers the unified roving tablist, shrink-wrapped non-growing tablist/action layout, tab preferred-width/flex-basis consistency, semantic session-status icon set, and kind-specific close dispatch.
+- `desktop/src/components/DesktopEditorSurfaces.test.ts` covers top-level editor surfaces, `!!` Terminal routing, Preview edit/find wiring, and active-Preview shortcut gating.
+- `desktop/src/app/workbench-terminal.test.ts` covers Terminal tab reuse, opener anchoring, and close/reset state.
+- `desktop/src/lib/session-tabs.test.ts` and `desktop/src/app/session-tabs-state.test.ts` cover real-session membership, restore precedence, and persistence; `desktop/src/app/draft-tab-selection.test.ts` covers selection behavior during UI-only draft materialization.
 - `desktop/src/app/workbench-model.test.ts` covers propagation of fork metadata into the session-tab presentation model; `desktop/src/lib/session-tab-status.test.ts` covers status precedence and unseen-completion semantics.
-- Existing session-tab/draft tests verify that session membership and lazy draft materialization remain session-only.
 - `desktop/src/app/preview.test.ts`, `desktop/src/app/project-documents.test.ts`, and `desktop/src/components/preview-editor-controller.test.ts` use controlled promises to verify late-load/save ownership, same-file write serialization, and preservation of newer drafts.
-- `desktop/src/lib/file-search.test.ts` covers literal match offsets, ASCII-case-insensitive behavior, non-overlapping navigation data, and match bounds; editor-surface source tests pin active-tab shortcut gating, find UI, navigation, and highlight wiring.
+- `desktop/src/lib/file-search.test.ts` covers literal match offsets, ASCII-case-insensitive behavior, non-overlapping navigation data, and match bounds; `desktop/src/components/DesktopEditorSurfaces.test.ts` pins active-tab shortcut gating, find UI, navigation, and highlight wiring.
+- `desktop/src/app/desktop-workbench-prop-builders.test.ts` covers Preview/Git Diff/Terminal surface props, project/config editability, and visibility derived from workbench selection.
 - `npm --prefix desktop test`
 - `npm --prefix desktop run check`
 - `npm --prefix desktop run build:web`

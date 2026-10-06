@@ -87,6 +87,8 @@ describe("watch:all change classification", () => {
 describe("watch:all build planning", () => {
 	it("uses disk-saving Cargo settings for every native watch build", async () => {
 		const supervisor = new WatchAllSupervisor();
+		supervisor.tempDirectory = resolve(".pi/artifacts/watch-all-test");
+		supervisor.desktopFrontendDist = join(supervisor.tempDirectory, "frontend-dist");
 		const calls: { step: string; environment: Record<string, string> }[] = [];
 		const order: string[] = [];
 		let captures = 0;
@@ -127,6 +129,7 @@ describe("watch:all build planning", () => {
 
 	it("does not build or publish an artifact if package cache cleanup fails", async () => {
 		const supervisor = new WatchAllSupervisor();
+		supervisor.desktopFrontendDist = resolve(".pi/artifacts/watch-all-test/frontend-dist");
 		supervisor.runCommand = async () => { throw new Error("cache cleanup failed"); };
 		supervisor.runNpmCommand = async () => { assert.fail("must not build after failed cleanup"); };
 		supervisor.captureDesktopArtifact = async () => { assert.fail("must not publish after failed cleanup"); };

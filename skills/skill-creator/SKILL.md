@@ -126,14 +126,17 @@ Two practical consequences for this skill:
 
 #### Publishing to the skill registry
 
-A finished skill lives locally until someone deliberately shares it. Sharing goes through the common Git registry:
+A finished skill lives in the project. With a configured registry and project key,
+Pix Desktop saves new project copies and eligible later Project-publication edits
+to the Project namespace in the background. Sharing with other projects requires
+explicit Global promotion through the common Git registry:
 
-- In Pix Desktop's Registry, **Make global** publishes the skill. The **full skill tree travels** — SKILL.md plus everything bundled with it (`scripts/`, `references/`, `assets/`, eval files), so check the tree for stray or private content before publishing. There is no TUI Registry command.
+- In Pix Desktop's Registry, **Save to project registry** explicitly publishes an unpublished skill; **Make global** promotes an existing publication for other projects. The **full skill tree travels** — SKILL.md plus everything bundled with it (`scripts/`, `references/`, `assets/`, eval files), so check the tree for stray or private content before placing it in a registry-enabled project. There is no TUI Registry command.
 - Publishing does not auto-load the skill anywhere. Other projects get it only when someone there installs it explicitly from the registry.
 - **Make local** removes the publication while retaining the project copy.
 - If `<name>` collides with an entry already in the registry, the collision requires review before pushing — check whether the existing entry is yours or someone else's, and rename or coordinate rather than blindly overwriting.
 - The optional `tags` frontmatter is what makes the skill findable once published: tags are searchable and editable in the Registry.
-- Don't add a `scope` frontmatter key — there is no such field. Scope is determined by publication presence, nothing else.
+- Don't add a `scope` frontmatter key — there is no such field. Registry publication and its Project/Global namespace determine visibility, not frontmatter.
 
 #### Principle of Lack of Surprise
 
