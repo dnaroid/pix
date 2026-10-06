@@ -121,8 +121,12 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
   actionable caption; a media load failure does not replace the whole transcript
   with a global error.
 - Local GLB 2.0 Markdown links to `models/chair.glb` (or absolute/file URI or `~/` paths)
-  embed an interactive 3D viewer. Drag rotates, wheel/pinch zooms, keyboard arrows
-  rotate and plus/minus zoom; Reset camera fits the model. The caption opens the
+  embed an interactive 3D viewer. Left-button drag rotates freely through a full
+  vertical revolution, including both poles, without an angle stop or upright
+  snap. Middle-button drag
+  pans the view without zooming, wheel/pinch zooms, keyboard arrows
+  rotate without the vertical angle stop and plus/minus zoom; Reset camera fits
+  the model and restores its upright orientation. The caption opens the
   same model in Preview. Remote GLB links remain ordinary external links.
 - GLB uses a lazily imported Three.js renderer with demand-driven drawing, not a
   continuous animation loop. Identical model occurrences retain their DOM and
@@ -212,6 +216,7 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - `desktop/src-tauri/tauri.conf.json`
 - `desktop/src/lib/glb.ts`
 - `desktop/src/lib/glb-scene.ts`
+- `desktop/src/lib/glb-controls.ts`
 - `desktop/src/lib/glb-source.ts`
 - `desktop/src/components/glb-viewer-action.ts`
 - `desktop/src/styles/glb-viewer.css`
@@ -223,6 +228,7 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - `desktop/src/lib/markdown.test.ts`
 - `desktop/src/lib/glb.test.ts`
 - `desktop/src/lib/glb-scene.test.ts`
+- `desktop/src/lib/glb-controls.test.ts`
 - `desktop/src/lib/glb-source.test.ts`
 - `desktop/src/components/glb-viewer-action.test.ts`
 - `desktop/src/components/markdown-image-layout.test.ts`

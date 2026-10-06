@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { GLTFLoader, type GLTF } from "three/addons/loaders/GLTFLoader.js";
-import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { createGlbControls, rotateGlbCamera } from "./glb-controls";
 
 function disposeModel(gltf: GLTF): void {
   const geometries = new Set<THREE.BufferGeometry>();
@@ -101,7 +101,7 @@ export async function createGlbScene(
     canvas.tabIndex = 0;
     canvas.setAttribute(
       "aria-label",
-      "3D model. Drag to rotate, scroll to zoom, arrow keys to rotate, plus/minus to zoom.",
+      "3D model. Drag to rotate, middle-button drag to pan, scroll to zoom, arrow keys to rotate, plus/minus to zoom.",
     );
     host.append(canvas);
     const scene = new THREE.Scene();
@@ -111,9 +111,6 @@ export async function createGlbScene(
     light.position.set(3, 5, 4);
     scene.add(light);
     const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 1000);
-    const controls = new OrbitControls(camera, canvas);
-    cleanups.push(() => controls.dispose());
-    controls.enablePan = false;
     const box = new THREE.Box3().setFromObject(gltf.scene);
     const center = box.isEmpty()
       ? new THREE.Vector3()
@@ -122,6 +119,8 @@ export async function createGlbScene(
       ? 1
       : Math.max(box.getSize(new THREE.Vector3()).length() / 2, 0.001);
     let pendingFrame: number | undefined;
+    const controller = createGlbControls(camera, canvas, draw);
+    cleanups.push(() => controller.dispose());
     cleanups.push(() => {
       if (pendingFrame !== undefined) cancelAnimationFrame(pendingFrame);
       pendingFrame = undefined;
@@ -131,27 +130,33 @@ export async function createGlbScene(
       // Paint after layout/visibility changes settle, not synchronously while
       // the workbench is hiding or restoring retained viewer canvases.
       pendingFrame = requestAnimationFrame(() => {
-        pendingFrame = undefined;
-        if (!disposed && host.isConnected && host.clientWidth > 0 && host.clientHeight > 0)
+        if (!disposed && host.isConnected && host.clientWidth > 0 && host.clientHeight > 0) {
+          // Consume input once; staticMoving avoids inertia or an idle loop.
+          // Keep this frame marked pending while update emits change.
+          controller.controls.update();
           renderer.render(scene, camera);
+        }
+        pendingFrame = undefined;
       });
     }
     function reset() {
+      controller.controls.update(); // Consume any input queued before Reset.
       const halfFov = Math.atan(
         Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) *
           Math.min(camera.aspect, 1),
       );
       const distance = (radius / Math.sin(halfFov)) * 1.15;
-      controls.target.copy(center);
+      controller.controls.target.copy(center);
+      camera.up.set(0, 1, 0);
       camera.position
         .copy(center)
         .add(new THREE.Vector3(1, 0.7, 1).normalize().multiplyScalar(distance));
       camera.near = radius / 100;
       camera.far = Math.max(distance * 10, radius * 100);
-      controls.minDistance = radius * 1.05;
-      controls.maxDistance = distance * 5;
+      controller.controls.minDistance = radius * 1.05;
+      controller.controls.maxDistance = distance * 5;
       camera.updateProjectionMatrix();
-      controls.update();
+      controller.controls.update();
       draw();
     }
     function resize() {
@@ -161,6 +166,7 @@ export async function createGlbScene(
       // A hidden tab is not a new viewport; retain its buffer and camera aspect.
       if (width <= 0 || height <= 0) return;
       renderer.setSize(width, height, false);
+      controller.controls.handleResize();
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
       draw();
@@ -170,26 +176,32 @@ export async function createGlbScene(
         ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)
       ) {
         event.preventDefault();
-        if (event.key === "ArrowLeft" || event.key === "ArrowRight")
-          controls.rotateLeft(event.key === "ArrowLeft" ? 0.15 : -0.15);
-        else controls.rotateUp(event.key === "ArrowUp" ? 0.15 : -0.15);
-        controls.update();
+        controller.controls.update();
+        const direction = event.key === "ArrowLeft" || event.key === "ArrowUp" ? 0.15 : -0.15;
+        const horizontal = event.key === "ArrowLeft" || event.key === "ArrowRight";
+        rotateGlbCamera(
+          camera,
+          controller.controls.target,
+          horizontal ? direction : 0,
+          horizontal ? 0 : direction,
+        );
+        controller.controls.update();
+        draw();
       } else if (["+", "=", "-"].includes(event.key)) {
         event.preventDefault();
+        controller.controls.update();
         const offset = camera.position
           .clone()
-          .sub(controls.target)
+          .sub(controller.controls.target)
           .multiplyScalar(event.key === "-" ? 1.15 : 1 / 1.15);
-        offset.clampLength(controls.minDistance, controls.maxDistance);
-        camera.position.copy(controls.target).add(offset);
-        controls.update();
+        offset.clampLength(controller.controls.minDistance, controller.controls.maxDistance);
+        camera.position.copy(controller.controls.target).add(offset);
+        controller.controls.update();
         draw();
       }
     }
     canvas.addEventListener("keydown", keydown);
     cleanups.push(() => canvas.removeEventListener("keydown", keydown));
-    controls.addEventListener("change", draw);
-    cleanups.push(() => controls.removeEventListener("change", draw));
     const observer = new ResizeObserver(resize);
     cleanups.push(() => observer.disconnect());
     observer.observe(host);

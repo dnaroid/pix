@@ -6,8 +6,8 @@ const mocks = vi.hoisted(() => ({ parse: vi.fn(), manager: vi.fn(), renderer: vi
 vi.mock("three", async (original) => ({
   ...await original<object>(), WebGLRenderer: class { constructor() { return mocks.renderer(); } },
 }));
-vi.mock("three/addons/controls/OrbitControls.js", () => ({
-  OrbitControls: class { constructor() { return mocks.controls(); } },
+vi.mock("three/addons/controls/TrackballControls.js", () => ({
+  TrackballControls: class { constructor() { return mocks.controls(); } },
 }));
 vi.mock("three/addons/loaders/GLTFLoader.js", () => ({
   GLTFLoader: class { constructor(manager: THREE.LoadingManager) { mocks.manager(manager); } parseAsync = mocks.parse; },
@@ -19,9 +19,9 @@ function visibleSceneFixture() {
   const scene = new THREE.Group();
   scene.add(new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshStandardMaterial()));
   mocks.parse.mockResolvedValue({ scene, scenes: [scene] });
-  const canvas = { style: {}, setAttribute: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), remove: vi.fn() };
+  const canvas = { style: {}, ownerDocument: { addEventListener: vi.fn(), removeEventListener: vi.fn() }, setAttribute: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), remove: vi.fn() };
   const renderer = { domElement: canvas, setPixelRatio: vi.fn(), setSize: vi.fn(), render: vi.fn(), dispose: vi.fn(), forceContextLoss: vi.fn() };
-  const controls = { target: new THREE.Vector3(), update: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispose: vi.fn() };
+  const controls = { target: new THREE.Vector3(), update: vi.fn(), handleResize: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispose: vi.fn() };
   mocks.renderer.mockReturnValue(renderer);
   mocks.controls.mockReturnValue(controls);
   const frames = new Map<number, FrameRequestCallback>();
@@ -56,6 +56,44 @@ function visibleSceneFixture() {
 }
 
 describe("GLB retained viewer visibility", () => {
+  it("keyboard rotation can invert the camera and Reset restores its fitted upright view", async () => {
+    const fixture = visibleSceneFixture();
+    const viewer = await createGlbScene(fixture.host as unknown as HTMLElement, new ArrayBuffer(0), new AbortController().signal);
+    fixture.paint();
+    const camera = fixture.renderer.render.mock.calls[0]![1] as THREE.PerspectiveCamera;
+    const initial = camera.position.clone();
+    const keydown = fixture.renderer.domElement.addEventListener.mock.calls.find(([type]) => type === "keydown")![1];
+    for (let step = 0; step < 22; step++) keydown({ key: "ArrowUp", preventDefault: vi.fn() });
+    expect(camera.up.y).toBeLessThan(0);
+    viewer?.reset();
+    expect(camera.up.toArray()).toEqual([0, 1, 0]);
+    expect(camera.position.distanceTo(initial)).toBeCloseTo(0);
+    viewer?.dispose();
+  });
+
+  it("consumes deferred controls input in the pending frame without an idle RAF loop", async () => {
+    const fixture = visibleSceneFixture();
+    const viewer = await createGlbScene(fixture.host as unknown as HTMLElement, new ArrayBuffer(0), new AbortController().signal);
+    const change = fixture.controls.addEventListener.mock.calls.find(([type]) => type === "change")![1];
+    fixture.controls.update.mockImplementation(() => change());
+    fixture.controls.update.mockClear();
+    fixture.paint();
+    expect(fixture.controls.update).toHaveBeenCalledOnce();
+    expect(fixture.renderer.render).toHaveBeenCalledOnce();
+    expect(fixture.frames.size).toBe(0);
+    viewer?.dispose();
+  });
+
+  it("maps middle-button dragging to pan rather than dolly", async () => {
+    const fixture = visibleSceneFixture();
+    const viewer = await createGlbScene(fixture.host as unknown as HTMLElement, new ArrayBuffer(0), new AbortController().signal);
+    const controls = fixture.controls as unknown as { staticMoving: boolean; mouseButtons: { LEFT: THREE.MOUSE; MIDDLE: THREE.MOUSE } };
+    expect(controls.staticMoving).toBe(true);
+    expect(controls.mouseButtons.MIDDLE).toBe(THREE.MOUSE.PAN);
+    expect(controls.mouseButtons.LEFT).toBe(THREE.MOUSE.ROTATE);
+    viewer?.dispose();
+  });
+
   it("redraws after Preview closes without reloading the model or resetting its camera", async () => {
     const fixture = visibleSceneFixture();
     const viewer = await createGlbScene(fixture.host as unknown as HTMLElement, new ArrayBuffer(0), new AbortController().signal);
@@ -145,7 +183,7 @@ describe("GLB scene late parse cleanup", () => {
     const scene = new THREE.Group(); scene.add(new THREE.Mesh(geometry, material));
     const geometryDispose = vi.spyOn(geometry, "dispose");
     mocks.parse.mockResolvedValue({ scene, scenes: [scene] });
-    const canvas = { style: {}, setAttribute: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), remove: vi.fn() };
+    const canvas = { style: {}, ownerDocument: { addEventListener: vi.fn(), removeEventListener: vi.fn() }, setAttribute: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), remove: vi.fn() };
     const renderer = { domElement: canvas, setPixelRatio: vi.fn(), dispose: vi.fn(), forceContextLoss: vi.fn() };
     const controls = { target: new THREE.Vector3(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispose: vi.fn() };
     mocks.renderer.mockReturnValue(renderer);
@@ -157,8 +195,9 @@ describe("GLB scene late parse cleanup", () => {
     for (const release of [geometryDispose, canvas.remove, renderer.dispose, renderer.forceContextLoss, controls.dispose, disconnect]) {
       expect(release).toHaveBeenCalledOnce();
     }
-    expect(canvas.removeEventListener).toHaveBeenCalledOnce();
-    expect(controls.removeEventListener).toHaveBeenCalledOnce();
+    expect(canvas.removeEventListener).toHaveBeenCalledTimes(3);
+    expect(controls.removeEventListener).toHaveBeenCalledTimes(3);
+    expect(canvas.ownerDocument.removeEventListener).toHaveBeenCalledTimes(2);
   });
   it("does not begin parsing for an already canceled owner", async () => {
     mocks.parse.mockClear();

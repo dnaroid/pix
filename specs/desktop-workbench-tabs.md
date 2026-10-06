@@ -73,6 +73,7 @@ Present conversations, file/media Preview, Source Control Git Diff, interactive 
 - `desktop/src/components/glb-viewer-action.ts`
 - `desktop/src/lib/glb.ts`
 - `desktop/src/lib/glb-scene.ts`
+- `desktop/src/lib/glb-controls.ts`
 - `desktop/src/lib/glb-source.ts`
 - `desktop/src/styles/glb-viewer.css`
 - `desktop/src/app/project-documents.svelte.ts`
@@ -111,6 +112,7 @@ Present conversations, file/media Preview, Source Control Git Diff, interactive 
 - `desktop/src/components/glb-viewer-action.test.ts`
 - `desktop/src/lib/glb.test.ts`
 - `desktop/src/lib/glb-scene.test.ts`
+- `desktop/src/lib/glb-controls.test.ts`
 - `desktop/src/lib/glb-source.test.ts`
 
 - `desktop/src/lib/workbench-tabs.test.ts` covers mixed insertion, session-id separation, close fallback, and stale-active normalization.
