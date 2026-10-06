@@ -8,6 +8,16 @@ import {
 } from "./markdown";
 
 describe("renderMarkdown", () => {
+  it("embeds project, absolute, file URI and home GLB links, but not remote links or code", () => {
+    for (const path of ["models/chair.glb", "/tmp/chair.GLB", "file:///tmp/chair.glb", "~/models/chair.glb"]) {
+      const html = renderMarkdown(`[Chair](${path})`);
+      expect(html).toMatch(/data-(?:project|local)-media="model"/);
+      expect(html).toContain("markdown-media-caption");
+    }
+    expect(renderMarkdown("[Chair](https://example.org/chair.glb)")).not.toContain('media="model"');
+    expect(renderMarkdown("`[Chair](models/chair.glb)`")).not.toContain('media="model"');
+    expect(renderMarkdown("```md\n[Chair](models/chair.glb)\n```")).not.toContain('media="model"');
+  });
   it("renders the transcript Markdown subset", () => {
     const html = renderMarkdown([
       "## Result",

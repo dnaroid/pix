@@ -4,6 +4,8 @@ import type { Attachment } from "../lib/attachments";
 
 vi.mock("@tauri-apps/api/core", () => ({ convertFileSrc: (path: string) => `asset:${path}` }));
 vi.mock("../lib/mermaid", () => ({ renderMermaidDiagram: vi.fn() }));
+const glb = vi.hoisted(() => ({ mount: vi.fn(() => vi.fn()) }));
+vi.mock("./glb-viewer-action", () => ({ mountGlbViewer: glb.mount }));
 
 // Minimal DOM surface: deterministic hydration, dimensions and lifecycle tests.
 class Element {
@@ -84,6 +86,7 @@ function setup(resolver = vi.fn(async () => attachment)) {
 }
 
 beforeEach(() => {
+  glb.mount.mockClear();
   Observer.instances = [];
   vi.stubGlobal("HTMLElement", Element);
   vi.stubGlobal("document", { createElement: () => new Element() });
@@ -93,6 +96,49 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Markdown natural image reservation", () => {
+  it("retains GLB viewers and camera ownership across streaming, releasing removed occurrences", async () => {
+    const model: Attachment = { id: "model", name: "chair.glb", kind: "file", mimeType: "model/gltf-binary", path: "/chair.glb" };
+    const { root, first, action, resolver } = setup(vi.fn(async () => model));
+    first.dataset.projectMedia = "model";
+    first.dataset.projectFile = "chair.glb";
+    const second = preview("project", "chair.glb", "model");
+    root.append(second);
+    await flush();
+    intersect(first);
+    intersect(second);
+    await flush();
+    expect(glb.mount).toHaveBeenCalledTimes(2);
+    const disposers = glb.mount.mock.results.map((result) => result.value);
+    root.children = [];
+    root.append(preview("project", "chair.glb", "model"));
+    root.append(preview("project", "chair.glb", "model"));
+    action.update("streamed model links");
+    await flush();
+    expect(root.children).toEqual([first, second]);
+    expect(glb.mount).toHaveBeenCalledTimes(2);
+    expect(resolver).toHaveBeenCalledOnce();
+    root.children = [first];
+    action.update("removed second model");
+    await flush();
+    expect(disposers[0]).not.toHaveBeenCalled();
+    expect(disposers[1]).toHaveBeenCalledOnce();
+    action.destroy();
+    expect(disposers[0]).toHaveBeenCalledOnce();
+    expect(disposers[1]).toHaveBeenCalledOnce();
+  });
+
+  it("does not mount a GLB viewer after a delayed resolver's owner is destroyed", async () => {
+    let complete!: (value: Attachment) => void;
+    const { first, action } = setup(vi.fn(() => new Promise<Attachment>((resolve) => { complete = resolve; })));
+    first.dataset.projectMedia = "model";
+    first.dataset.projectFile = "chair.glb";
+    await flush();
+    intersect(first);
+    action.destroy();
+    complete({ id: "model", name: "chair.glb", kind: "file", mimeType: "model/gltf-binary", path: "/chair.glb" });
+    await flush();
+    expect(glb.mount).not.toHaveBeenCalled();
+  });
   it("retains the loaded image and its proportions before lazy observers on streaming replacements", async () => {
     const { root, first, action, resolver } = setup();
     await flush();

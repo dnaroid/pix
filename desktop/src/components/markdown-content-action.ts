@@ -3,6 +3,9 @@ import type { Attachment } from "../lib/attachments";
 import { imageDimensions, imagePreviewStyle, type ImageDimensions } from "../lib/image-preview-layout";
 import { renderMermaidDiagram } from "../lib/mermaid";
 import { MarkdownImageRetention } from "./markdown-image-retention";
+import { mountGlbViewer } from "./glb-viewer-action";
+import { isGlbPath } from "../lib/glb";
+import "../styles/glb-viewer.css";
 import {
   FileLinkValidationCache,
   type FileLinkScope,
@@ -40,6 +43,8 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
     let destroyed = false;
     const fileLinkValidationCache = new FileLinkValidationCache();
     const retainedImages = new MarkdownImageRetention();
+    const retainedModels = new MarkdownImageRetention("model");
+    const modelViewers = new Map<HTMLElement, () => void>();
     let mediaObserver: IntersectionObserver | undefined;
     let diagramObserver: IntersectionObserver | undefined;
     let fileLinkObserver: IntersectionObserver | undefined;
@@ -51,6 +56,10 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
       queueMicrotask(() => {
         if (scheduledGeneration !== generation) return;
         retainedImages.restore(node);
+        retainedModels.restore(node);
+        for (const [preview, dispose] of modelViewers) {
+          if (!node.contains(preview)) { dispose(); modelViewers.delete(preview); }
+        }
         decorateExternalLinks(node);
         observeFileLinks(scheduledGeneration);
         observeDiagrams(scheduledGeneration);
@@ -185,10 +194,10 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
       // Retained images may span render generations. Containment is their
       // lifecycle guard; videos still use the existing generation guard.
       const isCurrent = () => !destroyed && node.contains(preview)
-        && (kind === "image" || scheduledGeneration === generation);
+        && (kind === "image" || kind === "model" || scheduledGeneration === generation);
       const resolver = projectPath ? options.onResolveProjectMedia() : options.onResolveLocalMedia();
       const frame = preview.querySelector<HTMLElement>(".markdown-media-frame");
-      if (!path || !resolver || (kind !== "image" && kind !== "video") || !frame) return;
+      if (!path || !resolver || (kind !== "image" && kind !== "video" && kind !== "model") || !frame) return;
       const label = projectPath
         ? preview.dataset.projectMediaLabel || path
         : preview.dataset.localMediaLabel || path;
@@ -204,11 +213,18 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
         }
         const attachment = await request;
         if (!isCurrent()) return;
-        if (!attachment?.path || attachment.kind !== kind) {
+        if (!attachment?.path || (kind === "model" ? !isGlbPath(attachment.path) : attachment.kind !== kind)) {
           showMediaError(frame, preview);
           return;
         }
         preview.dataset.contextFilePath = attachment.path;
+
+        if (kind === "model") {
+          modelViewers.set(preview, mountGlbViewer(frame, convertFileSrc(attachment.path)));
+          frame.removeAttribute("aria-busy");
+          preview.dataset.mediaState = "ready";
+          return;
+        }
 
         let media: HTMLImageElement | HTMLVideoElement;
         if (kind === "image") {
@@ -338,6 +354,9 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
         mediaCache.clear();
         mediaDimensions.clear();
         retainedImages.clear();
+        retainedModels.clear();
+        for (const dispose of modelViewers.values()) dispose();
+        modelViewers.clear();
         fileLinkObserver?.disconnect();
         mediaObserver?.disconnect();
         diagramObserver?.disconnect();

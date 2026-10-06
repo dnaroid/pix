@@ -28,6 +28,11 @@ Present conversations, file/media Preview, Source Control Git Diff, interactive 
 - Exactly one workbench tab is visually/ARIA selected. Selecting a session tab activates/loads that conversation and displays `conversation-workspace`. Selecting Preview, Git Diff, Terminal, or LSP installer changes only the visible central work surface; the active conversation runtime remains available in the background.
 - Opening a bounded project/home/absolute UTF-8 text file or supported media creates/updates the single Preview tab and selects it. Interactive non-media files over 256 KiB or 2,000 source lines open in the configured external editor without creating/selecting Preview or adding history; missing editor configuration prompts Desktop Settings. Absolute local directories and small binary/non-UTF-8 files retain the system-opener fallback. Preview retains its existing browser-like back/forward history instead of opening one tab per followed link. See [desktop-markdown-rendering.md](./desktop-markdown-rendering.md) for the bounded-read and editor-launch contract.
 - Opening Source Control diff/review creates/updates the single Git Diff tab and selects it. Opening a file reference from Git Diff selects Preview while Git Diff remains open.
+- Local `.glb` files route through approved media resolution rather than text
+  reads and open in Preview's shared interactive model viewer. Project, absolute,
+  home-relative paths and prepared file attachments are supported. The viewer
+  provides orbit/zoom/reset and the same 64 MiB embedded-only GLB 2.0 policy and
+  lifecycle ownership as [Markdown model previews](./desktop-markdown-rendering.md).
 - Conversation, Preview, and Git Diff remain mounted while merely hidden by another workbench tab so composer/transcript state, Preview edit draft/history/scroll, media state, and Git review output do not reset on ordinary tab switching.
 - Switching to a different conversation selects that session's workbench tab but does not discard workspace-scoped Preview or Git Diff tabs. Their state remains available until explicitly closed or the workspace lifecycle invalidates it.
 - Preview shows a dirty indicator while its editable project-text draft differs from the loaded file. Any existing UTF-8 project file that is small enough to open in Preview can enter edit mode; home-file and absolute local-file previews remain read-only. Closing dirty Preview asks before discard; cancellation keeps the tab/state intact. Workspace changes and project-reloading Git mutations keep the existing dirty-preview confirmation.
@@ -65,6 +70,11 @@ Present conversations, file/media Preview, Source Control Git Diff, interactive 
 - `desktop/src/app/preview-state.svelte.ts`
 - `desktop/src/app/preview.svelte.ts`
 - `desktop/src/app/preview-file-io.ts`
+- `desktop/src/components/glb-viewer-action.ts`
+- `desktop/src/lib/glb.ts`
+- `desktop/src/lib/glb-scene.ts`
+- `desktop/src/lib/glb-source.ts`
+- `desktop/src/styles/glb-viewer.css`
 - `desktop/src/app/project-documents.svelte.ts`
 - `desktop/src/app/desktop-project-services.ts`
 - `desktop/src/app/session-tab-controller.ts`
@@ -97,6 +107,11 @@ Present conversations, file/media Preview, Source Control Git Diff, interactive 
 - `specs/desktop-session-parity.md`
 
 ## Tests
+
+- `desktop/src/components/glb-viewer-action.test.ts`
+- `desktop/src/lib/glb.test.ts`
+- `desktop/src/lib/glb-scene.test.ts`
+- `desktop/src/lib/glb-source.test.ts`
 
 - `desktop/src/lib/workbench-tabs.test.ts` covers mixed insertion, session-id separation, close fallback, and stale-active normalization.
 - `desktop/src/components/WorkbenchTabs.test.ts` covers the unified roving tablist, shrink-wrapped non-growing tablist/action layout, tab preferred-width/flex-basis consistency, semantic session-status icon set, and kind-specific close dispatch.

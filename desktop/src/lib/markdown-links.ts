@@ -7,6 +7,9 @@ import {
 import type { ProjectFileLineRange } from "./project-files";
 import type { MarkdownRenderContext } from "./markdown-context";
 import { escapeAttribute } from "./markdown-escape";
+import { isGlbPath } from "./glb";
+
+type MarkdownMediaKind = Exclude<AttachmentKind, "file"> | "model";
 
 const SAFE_LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
 
@@ -62,7 +65,8 @@ export function homeFileLink(path: string, label: string): string {
   return `<span class="markdown-file-candidate" data-local-file-candidate="${escapedPath}">${label}</span>`;
 }
 
-export function mediaKindForPath(path: string): Exclude<AttachmentKind, "file"> | undefined {
+export function mediaKindForPath(path: string): MarkdownMediaKind | undefined {
+  if (isGlbPath(path)) return "model";
   const kind = attachmentKind(mimeTypeForName(path));
   return kind === "file" ? undefined : kind;
 }
@@ -71,7 +75,7 @@ export function projectMedia(
   path: string,
   label: string,
   accessibleLabel: string,
-  kind: Exclude<AttachmentKind, "file">,
+  kind: MarkdownMediaKind,
 ): string {
   const escapedPath = escapeAttribute(path);
   const escapedLabel = escapeAttribute(accessibleLabel);
@@ -87,7 +91,7 @@ export function localMedia(
   path: string,
   label: string,
   accessibleLabel: string,
-  kind: Exclude<AttachmentKind, "file">,
+  kind: MarkdownMediaKind,
 ): string {
   const escapedPath = escapeAttribute(path);
   const escapedLabel = escapeAttribute(accessibleLabel);

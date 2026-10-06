@@ -2178,7 +2178,7 @@ async fn resolve_home_media(app: AppHandle, path: String) -> Result<AttachmentFi
             .map_err(|error| format!("failed to resolve the home directory: {error}"))?;
         let (_, file_path) = resolve_home_file_path(&home, Path::new(&path))?;
         if !is_supported_project_media(&file_path) {
-            return Err(format!("{path} is not a supported image or video"));
+            return Err(format!("{path} is not a supported image, video or GLB model"));
         }
         let file = attachment_file(&file_path)?;
         app.state::<AttachmentPathState>()
@@ -2217,7 +2217,7 @@ fn resolve_project_media_from(
     let (_, file_path) = resolve_project_file_path(workspace, relative_path)?;
     if !is_supported_project_media(&file_path) {
         return Err(format!(
-            "{} is not a supported image or video",
+            "{} is not a supported image, video or GLB model",
             relative_path.display()
         ));
     }
@@ -2228,7 +2228,7 @@ fn resolve_local_media_from(path: &Path) -> Result<AttachmentFile, String> {
     let file_path = resolve_local_file_path(path)?;
     if !is_supported_project_media(&file_path) {
         return Err(format!(
-            "{} is not a supported image or video",
+            "{} is not a supported image, video or GLB model",
             path.display()
         ));
     }
@@ -8018,6 +8018,7 @@ fn is_supported_project_media(path: &Path) -> bool {
             | "mp4"
             | "ogv"
             | "webm"
+            | "glb"
     )
 }
 
@@ -12579,6 +12580,20 @@ mod tests {
         );
         assert!(resolve_project_media_from(&workspace, Path::new("artifacts/result.bin")).is_err());
         assert!(resolve_project_media_from(&workspace, Path::new("../outside.png")).is_err());
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn resolves_glb_media_with_the_same_project_and_local_boundaries() {
+        let workspace = temporary_workspace("glb-media");
+        let model = workspace.join("chair.GLB");
+        fs::write(&model, b"glTF").expect("write model");
+        assert!(is_supported_project_media(&model));
+        assert!(resolve_project_media_from(&workspace, Path::new("chair.GLB")).is_ok());
+        assert!(resolve_local_media_from(&model).is_ok());
+        assert!(resolve_project_media_from(&workspace, Path::new("../chair.GLB")).is_err());
+        assert!(resolve_local_media_from(Path::new("chair.GLB")).is_err());
+        assert!(!is_supported_project_media(Path::new("chair.gltf")));
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }
 

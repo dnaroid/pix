@@ -26,9 +26,9 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - Complete and still-streaming ACP message chunks.
 - Preview-editor navigation, embedded media, remote images, and table fitting behavior.
 - Markdown content returned by `read` tools when the read target is Markdown.
-- Inline previews for supported project/local image and video links in transcript
+- Inline previews for supported project/local image, video and GLB links in transcript
   Markdown. Supported image extensions are AVIF, BMP, GIF, JPEG, PNG, SVG, and
-  WebP; supported video extensions are M4V, MOV, MP4, OGV, and WebM.
+  WebP; supported video extensions are M4V, MOV, MP4, OGV, and WebM. Models use `.glb`.
 
 ## Non-goals
 
@@ -100,7 +100,7 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
   See [image retention decision](../docs/decisions/0016-streaming-image-dom-retention.md).
 - `file://` media is accepted only after decoding to an absolute existing regular
   file. The backend canonicalizes it and grants scoped asset access only for a
-  supported image/video extension. Existing bounded UTF-8 non-media files from
+  supported image/video/GLB extension. Existing bounded UTF-8 non-media files from
   `file://`, raw absolute Markdown destinations, or inline-code absolute paths
   open read-only in the Desktop Preview. Absolute directories and small
   binary/non-UTF-8 files retain the OS-opener fallback after user action.
@@ -120,6 +120,32 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - Missing, disallowed, or unrenderable local media keeps a readable fallback and
   actionable caption; a media load failure does not replace the whole transcript
   with a global error.
+- Local GLB 2.0 Markdown links to `models/chair.glb` (or absolute/file URI or `~/` paths)
+  embed an interactive 3D viewer. Drag rotates, wheel/pinch zooms, keyboard arrows
+  rotate and plus/minus zoom; Reset camera fits the model. The caption opens the
+  same model in Preview. Remote GLB links remain ordinary external links.
+- GLB uses a lazily imported Three.js renderer with demand-driven drawing, not a
+  continuous animation loop. Identical model occurrences retain their DOM and
+  camera through streaming updates, while duplicates own separate viewers.
+  Returning from Preview (including closing its tab) or another hidden workbench
+  panel repaints the retained inline model without reloading it or resetting its
+  camera. Drawing is coalesced into one requested animation frame after layout;
+  hidden zero-sized viewports do not replace the last visible camera aspect.
+  Removal, source changes and teardown abort reads and release controls, resize
+  and visibility observers, pending draws, GPU resources, decoded image bitmaps
+  and WebGL contexts; late parse
+  completion is discarded and disposed.
+- GLB preview caps streamed input at 64 MiB and requires embedded resources.
+  Asset files are fetched only with bounded single Range requests, checking
+  Content-Range totals before allocating the model buffer; oversized native
+  files never take Tauri's unrestricted full-file asset read path.
+  Metadata nesting beyond 128 levels is rejected. Three.js parser work already
+  in progress cannot be interrupted; resource reads abort where supported and
+  stale parsed scenes are disposed without attaching to the UI.
+  External resource URIs are rejected before parsing; runtime loading permits
+  only embedded data/blob URLs. Invalid files, unavailable WebGL and required
+  Draco/Basis/Meshopt decoders show a readable error instead of fetching sidecars
+  or external decoder scripts. Model animations do not auto-play.
 - Remote `http` and `https` image syntax is embedded only in the Markdown file Preview editor. Remote images do not send a referrer, and linked remote images retain their safe local or external destination behavior.
 - Right-clicking an image in Markdown or the Preview tab offers Copy Image and
   Open Image in External App through the shared native context menu (see
@@ -184,10 +210,22 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - `desktop/src-tauri/src/lib.rs`
 - `desktop/src-tauri/capabilities/default.json`
 - `desktop/src-tauri/tauri.conf.json`
+- `desktop/src/lib/glb.ts`
+- `desktop/src/lib/glb-scene.ts`
+- `desktop/src/lib/glb-source.ts`
+- `desktop/src/components/glb-viewer-action.ts`
+- `desktop/src/styles/glb-viewer.css`
+- `desktop/package.json`
+- `desktop/package-lock.json`
 
 ## Tests
 
 - `desktop/src/lib/markdown.test.ts`
+- `desktop/src/lib/glb.test.ts`
+- `desktop/src/lib/glb-scene.test.ts`
+- `desktop/src/lib/glb-source.test.ts`
+- `desktop/src/components/glb-viewer-action.test.ts`
+- `desktop/src/components/markdown-image-layout.test.ts`
 - `desktop/src/lib/syntax-highlight.test.ts`
 - `desktop/src/lib/preview-history.test.ts`
 - `desktop/src/lib/external-links.test.ts`

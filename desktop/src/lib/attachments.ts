@@ -23,6 +23,7 @@ export interface AttachmentFile {
 }
 
 const MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
+  glb: "model/gltf-binary",
   avif: "image/avif",
   bmp: "image/bmp",
   gif: "image/gif",

@@ -10,6 +10,7 @@ import type { ProjectFileLineRange, ProjectFilePreview } from "../lib/project-fi
 import type { SettingsConfigDocument, SettingsConfigKind } from "../lib/settings";
 import type { PreviewStoreOptions } from "./preview-options";
 import type { PreviewNavigation, PreviewState } from "./preview-state.svelte";
+import { isGlbPath } from "../lib/glb";
 
 type PreviewRead = { kind: "text"; file: ProjectFilePreview } | { kind: "external" };
 
@@ -40,7 +41,8 @@ export function createPreviewFileIo(options: PreviewStoreOptions, state: Preview
     }
     if (!isCurrent()) return;
     const preparedAttachment = options.preparedAttachment(attachment);
-    if (preparedAttachment.kind === "image" || preparedAttachment.kind === "video") {
+    if (preparedAttachment.kind === "image" || preparedAttachment.kind === "video"
+      || isGlbPath(preparedAttachment.path ?? preparedAttachment.name)) {
       state.show({ kind: "attachment", attachment: preparedAttachment }, "replace");
       return;
     }
@@ -106,7 +108,7 @@ export function createPreviewFileIo(options: PreviewStoreOptions, state: Preview
           return;
         }
       }
-      if (mediaKind !== "file") {
+      if (mediaKind !== "file" || isGlbPath(path)) {
         const attachment = await resolveProjectMedia(path);
         if (!attachment || !isCurrent()) return;
         state.show({ kind: "attachment", attachment }, navigation);
@@ -126,7 +128,7 @@ export function createPreviewFileIo(options: PreviewStoreOptions, state: Preview
 
   async function resolveProjectMedia(path: string): Promise<Attachment | undefined> {
     const workspace = options.workspace();
-    if (!workspace || attachmentKind(mimeTypeForName(path)) === "file") return undefined;
+    if (!workspace || (attachmentKind(mimeTypeForName(path)) === "file" && !isGlbPath(path))) return undefined;
     const file = await invoke<AttachmentFile>("resolve_project_media", { workspace, path });
     if (options.workspace() !== workspace) return undefined;
     return attachmentFromFile(file, `project-media:${workspace}:${path}`);
@@ -137,7 +139,7 @@ export function createPreviewFileIo(options: PreviewStoreOptions, state: Preview
     const workspace = options.workspace();
     const isCurrent = () => state.fileLoadIsCurrent(generation) && options.workspace() === workspace;
     const isHomePath = path.startsWith("~/");
-    if (attachmentKind(mimeTypeForName(path)) !== "file") {
+    if (attachmentKind(mimeTypeForName(path)) !== "file" || isGlbPath(path)) {
       try {
         const attachment = isHomePath ? await resolveHomeMedia(path) : await resolveLocalMedia(path);
         if (!attachment || !isCurrent()) return;
@@ -219,13 +221,13 @@ export function createPreviewFileIo(options: PreviewStoreOptions, state: Preview
   }
 
   async function resolveHomeMedia(path: string): Promise<Attachment | undefined> {
-    if (attachmentKind(mimeTypeForName(path)) === "file") return undefined;
+    if (attachmentKind(mimeTypeForName(path)) === "file" && !isGlbPath(path)) return undefined;
     const file = await invoke<AttachmentFile>("resolve_home_media", { path });
     return attachmentFromFile(file, `home-media:${path}`);
   }
 
   async function resolveLocalMedia(path: string): Promise<Attachment | undefined> {
-    if (attachmentKind(mimeTypeForName(path)) === "file") return undefined;
+    if (attachmentKind(mimeTypeForName(path)) === "file" && !isGlbPath(path)) return undefined;
     const file = await invoke<AttachmentFile>("resolve_local_media", { path });
     return attachmentFromFile(file, `local-media:${path}`);
   }

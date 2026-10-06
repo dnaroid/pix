@@ -115,7 +115,8 @@ export function renderInline(
         } else if (localPath && localKind) {
           output += localMedia(localPath, label, link.label, localKind);
         } else if (homePath) {
-          output += homeFileLink(homePath, label);
+          const kind = mediaKindForPath(homePath);
+          output += kind === "model" ? localMedia(homePath, label, link.label, kind) : homeFileLink(homePath, label);
         } else if (char === "!") {
           const source = context.remoteImages ? normalizeRemoteImageHref(link.destination) : undefined;
           output += source ? remoteImage(source, link.label) : label;

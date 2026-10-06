@@ -35,6 +35,27 @@ function fixture(revealProjectEntry?: (path: string) => Promise<void>) {
 }
 
 describe("Preview async ownership", () => {
+  it("routes project GLB through approved media resolution, never through text reading", async () => {
+    const { preview } = fixture();
+    tauri.invoke.mockImplementation(async (command: string) => command === "project_directory_exists"
+      ? false : { path: "/one/chair.glb", name: "chair.glb", size: 100 });
+    await preview.openProjectFile("chair.glb");
+    expect(preview.active).toMatchObject({ kind: "attachment", attachment: {
+      kind: "file", mimeType: "model/gltf-binary", path: "/one/chair.glb",
+    } });
+    expect(tauri.invoke).toHaveBeenCalledWith("resolve_project_media", { workspace: "/one", path: "chair.glb" });
+    expect(tauri.invoke).not.toHaveBeenCalledWith("read_preview_file", expect.anything());
+  });
+
+  it("routes absolute and home GLB to media Preview and resolves inline models", async () => {
+    const { preview } = fixture();
+    tauri.invoke.mockResolvedValue({ path: "/home/models/chair.glb", name: "chair.glb", size: 100 });
+    await preview.openLocalFile("~/models/chair.glb");
+    expect(tauri.invoke).toHaveBeenCalledWith("resolve_home_media", { path: "~/models/chair.glb" });
+    expect(preview.active).toMatchObject({ kind: "attachment" });
+    expect(await preview.resolveLocalMedia("/home/models/chair.glb")).toMatchObject({ mimeType: "model/gltf-binary" });
+    expect(await preview.resolveProjectMedia("models/chair.glb")).toMatchObject({ mimeType: "model/gltf-binary" });
+  });
   beforeEach(() => { tauri.invoke.mockReset(); });
 
   it("does not reopen a closed preview after attachment preparation", async () => {

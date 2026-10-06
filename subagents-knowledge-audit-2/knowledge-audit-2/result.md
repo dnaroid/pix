@@ -1,0 +1,5 @@
+1. **Result:** Task audit **passed**. The final stdin wrapper in `external/pi-tools-suite/src/lsp/client.ts:140–180` handles both `EPIPE` and `ERR_STREAM_DESTROYED` as benign write completion; the child exit handler remains responsible for failure reporting. This is consistent with the reviewed LSP runtime and trust contracts. No documentation drift or escalation found.
+
+2. **Evidence:** Ran `idx audit` and `idx knowledge dirty` before and after review; dirty was `yes` each time (exit 0). Reviewed `specs/lsp-runtime-control.md`, `specs/lsp-trust.md`, and the superseding-status context in `docs/decisions/0054-project-shared-lsp.md`. No docs changed; no index refresh or final audit was needed. Acknowledgment was skipped: neither reviewed spec declares this wrapper-specific behavior, and their broader declared implementation/test dependencies exceed this task’s scope.
+
+3. **Limits:** Global knowledge remains dirty (`yes`); cause unclassified. Audit output also reports unresolved reference warnings, but none establishes task-related drift.
