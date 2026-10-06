@@ -23,6 +23,11 @@ function source(name: keyof typeof sources): string {
 }
 
 describe("Status bar click surfaces", () => {
+  it("uses neutral model and thinking labels in persistent chrome", () => {
+    expect(statusBar).toContain('truncate font-medium text-foreground');
+    expect(statusBar).toContain('class="text-muted-foreground">{modelThinking.currentThinking}');
+    expect(statusBar).not.toContain("modelDisplayToneClass");
+  });
   it("keeps Observer diagnostics behind an accessible disclosure, reset on opening", () => {
     expect(observerStatus).toContain('let showDiagnostics = $state(false)');
     expect(observerStatus).toContain('aria-expanded={showDiagnostics} aria-controls={diagnosticsId}');

@@ -62,7 +62,7 @@ describe("desktop visual regressions", () => {
     expect(transcriptSource).not.toContain('"border-t border-border pt-3"');
   });
   it("keeps compact context and quota controls from painting over one another", () => {
-    expect(runtimeStatusSource).toContain('class="runtime-status-layout grid min-w-0 items-center gap-1"');
+    expect(runtimeStatusSource).toContain('class="runtime-status-layout grid min-w-0 items-center gap-3"');
     expect(runtimeStatusSource).not.toContain("grid-cols-[minmax(0,1fr)_minmax(0,1fr)]");
     expect(runtimeStatusSource).toContain('class="relative min-w-0" data-runtime-context');
     expect(runtimeStatusSource).toContain("overflow-hidden whitespace-nowrap");
@@ -71,18 +71,20 @@ describe("desktop visual regressions", () => {
     expect(runtimeStatusSource.match(/>ctx<\/span>/g)).toHaveLength(2);
     expect(runtimeStatusSource).not.toContain(">resets {formatResetDuration");
   });
-  it("reserves identical fixed slots for telemetry and loading without growing gaps", () => {
+  it("keeps fixed telemetry slots and only reserves inline savings when positive", () => {
     expect(runtimeStatusSource).toContain("grid-template-columns: minmax(0, max-content) minmax(0, max-content)");
     expect(runtimeStatusSource).toContain("flex: 0 1 auto");
     expect(runtimeStatusSource.match(/class="context-status-slots grid/g)).toHaveLength(2);
     expect(runtimeStatusSource.match(/class="usage-status-slots grid/g)).toHaveLength(2);
     expect(runtimeStatusSource).toContain("grid-template-columns: 3ch 4ch 64px 11ch");
+    expect(runtimeStatusSource).toContain("grid-template-columns: 3ch 4ch 64px;");
+    expect(runtimeStatusSource).toContain("class:with-savings={showSavings}");
     expect(runtimeStatusSource).toContain('{contextTitle(false)}</div>');
     expect(runtimeStatusSource).toContain('~{savedTokensFormatter.format(status.dcpTokensSaved)} tokens</span>');
     expect(runtimeStatusSource).toContain("grid-auto-columns: max-content");
-    expect(runtimeStatusSource).toContain("grid-template-columns: 56px 4ch 5ch 10px");
-    expect(runtimeStatusSource).toContain("grid-template-columns: 32px 4ch 5ch 10px");
-    expect(runtimeStatusSource.match(/column-gap: 2px/g)).toHaveLength(2);
+    expect(runtimeStatusSource).toContain("grid-template-columns: 56px 5ch 1ch 4ch 10px");
+    expect(runtimeStatusSource).toContain("grid-template-columns: 32px 5ch 1ch 4ch 10px");
+    expect(runtimeStatusSource).toContain("column-gap: 8px");
     expect(runtimeStatusSource).toContain("column-gap: 6px");
     expect(runtimeStatusSource).not.toContain("quotaColumn");
     expect(runtimeStatusSource).not.toContain("/runtime-status:hidden");

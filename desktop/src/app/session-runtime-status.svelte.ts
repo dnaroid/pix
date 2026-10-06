@@ -45,7 +45,14 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
   let claudeLimitsRefreshing = $state<Set<string>>(new Set());
   let claudeLimitsFailed = $state<Set<string>>(new Set());
 
-  type StatusOwner = { generations: RuntimeStatusGenerations; dcp: number; usage: number; claudeLimits: number; headerPushSnapshotGeneration?: number };
+  type StatusOwner = {
+    generations: RuntimeStatusGenerations;
+    dcp: number;
+    usage: number;
+    claudeLimits: number;
+    startupQuotaChecked?: boolean;
+    headerPushSnapshotGeneration?: number;
+  };
   const owners = new Map<string, StatusOwner>();
   const credentialRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   let lifecycleGeneration = 0;
@@ -62,11 +69,12 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
   async function refreshStatus(sessionId: string, refreshModelUsage = false): Promise<void> {
     const requestClient = options.client();
     if (!requestClient || !options.isReady(sessionId)) return;
-    // A manual login nudge owns the quota lane until its credential reread
+    // A login nudge owns the quota lane until its credential reread
     // completes. Ordinary snapshot updates may still proceed in parallel.
     if (claudeLimitsRefreshing.has(sessionId)) refreshModelUsage = false;
     const requestLifecycleGeneration = lifecycleGeneration;
     const owner = ownerFor(sessionId);
+    let startupClaudeNudge = false;
     const request = beginRuntimeStatusRefresh(
       owner.generations,
       refreshModelUsage,
@@ -106,13 +114,29 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
       const nextStatuses = new Map(statuses);
       nextStatuses.set(sessionId, merged);
       statuses = nextStatuses;
-      // Only a current-owner quota refresh that reported a missing local
-      // Claude Code credential schedules the bounded local-only retry.
+      // Only an authoritative quota reply may trigger credential recovery.
+      // Context pushes do not supersede this lane; newer quota requests do.
       if (
         request.quotaGeneration !== undefined
-        && next.modelUsageRefresh === "unavailable"
-        && next.modelUsageCredentialPending === true
-      ) scheduleModelUsageCredentialRetry(sessionId);
+        && owner.generations.quota === request.quotaGeneration
+        && !quotaPredatesHeaderPush
+        && next.modelUsageRefresh !== "skipped"
+      ) {
+        const firstQuotaCheck = !owner.startupQuotaChecked;
+        owner.startupQuotaChecked = true;
+        if (
+          next.modelUsageRefresh === "unavailable"
+          && next.modelUsageCredentialPending === true
+        ) {
+          // ACP sets this flag only for missing Claude Code credentials.
+          // Try the existing bounded login nudge once at runtime startup;
+          // subsequent polling stays local-only until credentials return.
+          startupClaudeNudge = firstQuotaCheck;
+          if (!startupClaudeNudge) scheduleModelUsageCredentialRetry(sessionId);
+        } else {
+          clearModelUsageCredentialRetry(sessionId);
+        }
+      }
     } catch {
       // Runtime chrome is best-effort. Keep the previous snapshot when the
       // private status request races a session reload or transient transport failure.
@@ -122,6 +146,9 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
         const next = new Set(modelUsageRefreshing);
         next.delete(sessionId);
         modelUsageRefreshing = next;
+        // Release the automatic quota busy flag before the nudge takes its
+        // own quota generation. Do not await CLI work on the activation path.
+        if (startupClaudeNudge) void refreshClaudeLimits(sessionId, true);
       }
     }
   }
@@ -317,21 +344,24 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
   }
 
   /**
-   * Manual Claude Code quota refresh (session-usage popover button). The
+   * Claude Code quota refresh (popover button or one startup recovery). The
    * request briefly launches the Claude CLI headless on the agent side and
    * can therefore run long; per-session generation guards (owner, lifecycle,
    * client, readiness, and this refresh's own counter) ensure a completion
    * that lands after forget/reset or a superseding refresh can never
    * repopulate another selection's status.
    */
-  async function refreshClaudeLimits(sessionId: string): Promise<void> {
+  async function refreshClaudeLimits(sessionId: string, startupRecovery = false): Promise<void> {
     const requestClient = options.client();
     if (!requestClient || !options.isReady(sessionId) || claudeLimitsRefreshing.has(sessionId)) return;
 
     const requestLifecycleGeneration = lifecycleGeneration;
     const owner = ownerFor(sessionId);
+    // An explicit refresh also consumes startup recovery; never follow a
+    // manual attempt with another automatic CLI launch for this owner.
+    owner.startupQuotaChecked = true;
     const generation = ++owner.claudeLimits;
-    // Discard quota responses begun before the manual login/credential change.
+    // Discard quota responses begun before the login/credential change.
     owner.generations = { ...owner.generations, quota: owner.generations.quota + 1 };
     clearModelUsageCredentialRetry(sessionId);
     const refreshing = new Set(claudeLimitsRefreshing);
@@ -359,7 +389,7 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
         nextFailed.add(sessionId);
         claudeLimitsFailed = nextFailed;
       }
-      // A successful manual refresh means the credential exists again; the
+      // A successful refresh means the credential exists again; the
       // bounded credential-pending retry is no longer needed.
       if (next.modelUsageCredentialPending) scheduleModelUsageCredentialRetry(sessionId);
     } catch {
@@ -372,6 +402,9 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
         const nextFailed = new Set(claudeLimitsFailed);
         nextFailed.add(sessionId);
         claudeLimitsFailed = nextFailed;
+        // A rejected startup nudge must not lose the original pending
+        // credential retry. It rechecks locally without launching more CLI work.
+        if (startupRecovery) scheduleModelUsageCredentialRetry(sessionId);
       }
       // Keep the last successfully merged quota; expose the failure so the
       // popover can offer an explicit retry.

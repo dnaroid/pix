@@ -77,6 +77,7 @@
   const WEEKLY_DAY_SEGMENTS = 7;
   const savedTokensFormatter = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 0 });
   const contextPercent = $derived(status?.context?.percent);
+  const showSavings = $derived((status?.dcpTokensSaved ?? 0) > 0);
   const contextTone = $derived(contextPercent === null || contextPercent === undefined ? undefined : contextUsageTone(contextPercent));
   const contextMap = $derived(dcpContextMap(status?.context, parseDcpContextMap(status?.dcpContextMap)));
   const contextLegend = $derived(contextLegendItems());
@@ -358,7 +359,7 @@
 {#if status || showSkeletons || quotaWaitIndicator}
   <div
     bind:this={root}
-    class="runtime-status-layout grid min-w-0 items-center gap-1"
+    class="runtime-status-layout grid min-w-0 items-center gap-3"
     data-runtime-status
   >
     {#if status?.context || status?.dcpTokensSaved !== undefined}
@@ -368,6 +369,7 @@
       >
         <button
           class="context-status-slots grid h-6 w-full items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-sm px-1.5 font-mono text-xs tabular-nums hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring text-left"
+          class:with-savings={showSavings}
           type="button"
           aria-label={contextTitle()}
           aria-haspopup="dialog"
@@ -378,7 +380,7 @@
           <span class="font-sans text-xs text-muted-foreground">ctx</span>
           <span class={["truncate text-right", contextTone ? toneTextClass(contextTone) : "text-muted-foreground"]}>{contextPercent === null || contextPercent === undefined ? "?%" : `${Math.round(contextPercent)}%`}</span>
           {@render contextScale()}
-          {#if status?.dcpTokensSaved !== undefined}
+          {#if showSavings && status?.dcpTokensSaved !== undefined}
             <span class="truncate text-muted-foreground">saved {savedTokensFormatter.format(status.dcpTokensSaved)}</span>
           {/if}
         </button>
@@ -417,7 +419,6 @@
         <span class="font-sans text-xs text-muted-foreground">ctx</span>
         <span class="h-3 w-6 rounded-sm bg-muted-foreground/20"></span>
         <span class="h-1.5 w-16 rounded-sm bg-border"></span>
-        <span class="h-3 w-14 rounded-sm bg-muted-foreground/15"></span>
       </div>
     {/if}
 
@@ -426,10 +427,10 @@
         data-usage-region
         onfocusout={(event) => leaveDetails(event, "usage")}
       >
-        <div class="usage-status-slots grid relative h-6 w-full items-center gap-1.5 whitespace-nowrap rounded-sm px-1.5 font-mono text-xs tabular-nums text-left">
+        <div class="usage-status-slots grid relative h-6 w-full items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-sm px-1.5 font-mono text-xs tabular-nums text-left">
         <!-- Separate sibling controls: retry must not nest inside the Usage button. -->
         <button
-          class="absolute inset-0 rounded-sm hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+          class="absolute inset-0 rounded-sm hover:bg-chrome-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
           type="button"
           aria-label="Session usage and cost"
           aria-haspopup="dialog"
@@ -442,7 +443,7 @@
               {@const tone = modelUsageTone(window.remainingPercent)}
               {@const exhaustsEarly = modelUsageWindowWillExhaustBeforeReset(window, now)}
               <span class="quota-status-slots grid items-center gap-1" class:quota-short-track={label !== "W"} aria-label={limitTitle(label, window)}>
-                <span class="quota-values pointer-events-none relative col-span-3 grid items-center">
+                <span class="quota-values pointer-events-none relative col-span-4 grid items-center">
                 <span class="flex h-6 flex-col justify-center gap-0.5 overflow-hidden">
                 {#if label === "R"}
                   <span class="truncate leading-3 text-muted-foreground">{modelUsageWindowLabel(label, window)}</span>
@@ -464,8 +465,9 @@
                   {/if}
                 </span>
                 </span>
-                <span class={["truncate text-right", toneTextClass(tone)]}>{Math.round(window.remainingPercent)}%</span>
                 <span class="truncate text-muted-foreground">{label !== "R" || window.resetAt > now ? formatResetDuration(window.resetAt, now) : ""}</span>
+                <span class="text-muted-foreground/50" aria-hidden="true">·</span>
+                <span class={["truncate text-right", toneTextClass(tone)]}>{Math.round(window.remainingPercent)}%</span>
                 </span>
                 <span class="relative flex w-2.5 items-center">
                   {#if quotaWaitIndicator && key === usageWindowItems[0]?.key}
@@ -627,8 +629,9 @@
         <span class="font-sans text-xs text-muted-foreground">Usage</span>
           <span class="quota-status-slots grid items-center gap-1">
             <span class="h-1.5 w-14 rounded-sm bg-border"></span>
-            <span class="h-3 w-6 rounded-sm bg-muted-foreground/20"></span>
             <span class="h-3 w-12 rounded-sm bg-muted-foreground/15"></span>
+            <span class="text-muted-foreground/50">·</span>
+            <span class="h-3 w-6 rounded-sm bg-muted-foreground/20"></span>
             <span></span>
           </span>
       </div>
@@ -646,25 +649,29 @@
   }
 
   .context-status-slots {
-    /* saved (6ch including space), whole estimate (4ch), and 1ch headroom. */
+    grid-template-columns: 3ch 4ch 64px;
+    column-gap: 6px;
+  }
+
+  .context-status-slots.with-savings {
+    /* Reserve a bounded estimate only when there are actual savings. */
     grid-template-columns: 3ch 4ch 64px 11ch;
-    column-gap: 2px;
   }
 
   .usage-status-slots {
     grid-template-columns: 36px;
-    column-gap: 2px;
+    column-gap: 8px;
     grid-auto-columns: max-content;
     grid-auto-flow: column;
   }
 
   .quota-status-slots {
-    grid-template-columns: 56px 4ch 5ch 10px;
+    grid-template-columns: 56px 5ch 1ch 4ch 10px;
     column-gap: 6px;
   }
 
   .quota-short-track {
-    grid-template-columns: 32px 4ch 5ch 10px;
+    grid-template-columns: 32px 5ch 1ch 4ch 10px;
   }
 
   .quota-values {

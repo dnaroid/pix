@@ -399,10 +399,15 @@ describe("model usage credential retry", () => {
   it("retries a credential-pending quota refresh once per interval and stops once it resolves", async () => {
     vi.useFakeTimers();
     try {
-      const { store, requests } = setup();
+      const { store, requests, limits } = setup();
       const first = store.refreshStatus("a", true);
       requests[0]!.resolve({ ...status(10), modelUsageRefresh: "unavailable", modelUsageCredentialPending: true });
       await first;
+      // Startup recovery runs first; polling resumes only if credentials
+      // remain absent after the bounded CLI attempt.
+      expect(limits).toHaveLength(1);
+      limits[0]!.resolve({ sessionId: "a", launched: false, refresh: "unavailable", modelUsageCredentialPending: true });
+      await vi.advanceTimersByTimeAsync(0);
 
       // The transient flag never persists into the merged snapshot.
       expect(store.statuses.get("a")?.modelUsageCredentialPending).toBeUndefined();
@@ -418,6 +423,7 @@ describe("model usage credential retry", () => {
       vi.advanceTimersByTime(120_000);
       expect(requests).toHaveLength(2);
       expect(store.statuses.get("a")?.modelUsage?.hourly?.remainingPercent).toBe(60);
+      expect(limits).toHaveLength(1);
     } finally {
       vi.useRealTimers();
     }

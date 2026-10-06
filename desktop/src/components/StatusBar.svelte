@@ -2,7 +2,7 @@
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import type { SessionConfigOption } from "@agentclientprotocol/sdk";
   import type { RuntimeStatus, SessionUsageReport } from "../lib/acp-client";
-  import { modelDisplayToneClass, modelProviderBrand, thinkingLevelTone } from "../lib/model-display";
+  import { modelProviderBrand } from "../lib/model-display";
   import { AUTO_MODEL_REF, modelThinkingConfigState } from "../lib/model-thinking";
   import type { SessionActivitySummary } from "../lib/session-activity";
   import type { SessionSubagentSnapshot } from "../lib/session-subagents";
@@ -124,16 +124,10 @@
         {#if modelProviderBrand(modelThinking.currentModel.provider)}
           <ModelProviderIcon provider={modelThinking.currentModel.provider} />
         {/if}
-        <span class={[
-          "max-w-[220px] truncate font-medium",
-          modelDisplayToneClass(modelThinking.currentModel.tone),
-        ]}>{modelThinking.currentModel.name}</span>
+        <span class="max-w-[220px] truncate font-medium text-foreground">{modelThinking.currentModel.name}</span>
         {#if modelThinking.currentModel.ref !== AUTO_MODEL_REF}
           <span class="text-muted-foreground/50">·</span>
-          <span class={[
-            "font-medium",
-            modelDisplayToneClass(thinkingLevelTone(modelThinking.currentThinking, modelThinking.currentModel.thinkingLevels)),
-          ]}>{modelThinking.currentThinking}</span>
+          <span class="text-muted-foreground">{modelThinking.currentThinking}</span>
         {/if}
         <ChevronDown class="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
       </button>

@@ -57,6 +57,23 @@ describe("runtime status fixed telemetry slots", () => {
     }
   });
 
+  it("hides zero savings without reserving an empty inline savings slot", () => {
+    const html = markup({ ...base, context: { tokens: 100, contextWindow: 1000, percent: 10 }, dcpTokensSaved: 0 });
+    expect(html).not.toContain("saved 0</span>");
+    expect(html).not.toContain("with-savings");
+    expect(html).toContain("DCP saved ~0 tokens");
+    expect(markup({ ...base, dcpTokensSaved: 100 })).toContain("with-savings");
+  });
+
+  it("shows countdown before remaining percent while preserving danger colors", () => {
+    const html = markup({ ...base, modelUsage: {
+      modelKey: "test", provider: "anthropic", updatedAt: Date.now(),
+      hourly: { remainingPercent: 0, resetAt: Date.now() + 72 * 60_000, windowSeconds: 18000 },
+    } });
+    expect(html.indexOf("1h 12m</span>")).toBeLessThan(html.indexOf("0%</span>"));
+    expect(html).toMatch(/text-tool-error[^>]*>0%<\/span>/);
+  });
+
   it("retains both slot layouts during loading, missing data and value changes", () => {
     for (const html of [
       markup(undefined, true),
