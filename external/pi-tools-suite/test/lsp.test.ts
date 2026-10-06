@@ -8,6 +8,12 @@ const LSP_DIAGNOSTIC_ICON = "\u{f0026}";
 
 mock.module("typebox", () => createTypeboxMock());
 
+// CI-DEBUG (temporary): surface unhandled rejections with stacks.
+process.on("unhandledRejection", (reason: unknown) => {
+	console.error("[CI-DEBUG UNHANDLED]", reason);
+});
+
+
 class FakePi {
 	tools = new Map<string, any>();
 	commands = new Map<string, any>();
@@ -511,8 +517,21 @@ describe.serial("LSP runtime control", () => {
 
 	test.serial("failed startup remains visible and Stop clears its error", async () => {
 		const { cwd, ctx, controlLsp } = await setup("crash");
-		await expect(controlLsp(ctx, "start", "fake", cwd)).rejects.toThrow();
-		const failed = (await controlLsp(ctx, "status")).servers.find((server) => server.id === "fake")!;
+		// CI-DEBUG (temporary): capture the start rejection and dump manager state.
+		let startError: unknown;
+		try { await controlLsp(ctx, "start", "fake", cwd); } catch (error) { startError = error; }
+		console.error("[CI-DEBUG] start rejected with:", startError instanceof Error ? `${startError.message}\n${startError.stack}` : startError);
+		const { getGlobalLspManager } = await import("../src/lsp/manager");
+		const manager = getGlobalLspManager() as unknown as { records?: Map<string, unknown>; clients?: Map<string, unknown>; ownerGeneration?: number; disposed?: boolean };
+		console.error("[CI-DEBUG] manager:", JSON.stringify({
+			generation: manager.ownerGeneration,
+			disposed: manager.disposed,
+			recordKeys: [...(manager.records?.keys() ?? [])],
+			clientKeys: [...(manager.clients?.keys() ?? [])],
+		}));
+		const debugStatus = await controlLsp(ctx, "status");
+		console.error("[CI-DEBUG] status.servers:", JSON.stringify(debugStatus.servers));
+		const failed = debugStatus.servers.find((server) => server.id === "fake")!;
 		expect(failed.state).toBe("failed");
 		expect(failed.error).toBeTruthy();
 		expect((await controlLsp(ctx, "stop", "fake", cwd)).servers.find((server) => server.id === "fake")!.state).toBe("stopped");
