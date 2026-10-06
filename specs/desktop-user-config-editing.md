@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # Desktop user config editing
 
 <!-- markdownlint-disable MD013 -->
@@ -42,6 +47,7 @@ Let Pix Desktop users view and edit its independent JSONC application profile (`
 - The editor keeps one in-memory draft per kind (source, saved source, parsed schema); filtering or remounting the panel preserves drafts, but restarting the app discards them. Both files load independently on mount and keep separate reload/save actions and lifecycle guards. Updating one file's cache entry merges against the latest cache so another mounted editor's draft cannot be overwritten.
 - Field edits and resets apply through JSONC-aware path modification so comments elsewhere in the file survive. Booleans use switches; bounded enums use selects; numbers use constrained number inputs; secrets use password inputs. Desktop model fields and fallback lists consume the same ACP session model catalog as the existing Model & Thinking picker instead of requiring `provider/model` text entry. Existing configured refs that are absent from the current catalog remain representable and are never rewritten merely because the catalog changed. The Git section includes a **CI fix model** selector for `desktop.git.ciFixModelRef`; leaving it unset intentionally means “use the normal default model” rather than introducing a second hard-coded default.
 - `visibleModels` is edited as an explicit “limit model picker” switch plus a model checklist; omitting the key means every catalog model is visible. Internal `thinkingByModel` memory is not exposed in the normal settings UI because Desktop maintains it automatically; it remains visible/editable only through the full JSONC editor launched from `Advanced`.
+- Assistant features includes **Knowledge review model**, a catalog-backed model/optional-thinking selector for `desktop.knowledge.reviewModelRef`. Reset/empty selection removes the override so knowledge-base AI review uses the normal new-session default; saved changes apply to the next review, not existing sessions. Project-local Desktop config can override the global value. This setting is separate from the `knowledge-auditor` role; see [Desktop IDX panel](desktop-idx-panel.md).
 - Pi Tools Suite fields that are semantically model references (lookup model/fallbacks and DCP summarizer/fallbacks) reuse the same catalog-backed model selectors; free-form model-pattern maps such as todo/DCP overrides remain structured JSON because wildcard keys are part of their contract.
 - Pi Tools Suite `disabledBuiltinAgents` is edited as a curated checklist of the
   bundled async-subagent catalog. Desktop discovers the top-level bundled
@@ -95,6 +101,45 @@ Let Pix Desktop users view and edit its independent JSONC application profile (`
 - Writes preserve JSONC comments and formatting outside edited values; the only mandatory mutation is the trailing newline.
 - Desktop serializes config saves against sidebar health reads with a backend read/write lock, so the live Settings indicator cannot observe the intermediate truncate/write window of `fs::write`.
 - Conditional writes compare the current file content and write the replacement while holding one backend write lock. This prevents two Desktop read/modify/write flows from losing each other's updates between separate read and write commands.
+
+## Implementation
+
+- `desktop/src-tauri/src/lib.rs`
+- `desktop/src/components/SettingsPanel.svelte`
+- `desktop/src/components/settings/SettingsConfigEditor.svelte`
+- `desktop/src/components/settings/SettingsSectionNav.svelte`
+- `desktop/src/components/settings/DesktopSettingsEditor.svelte`
+- `desktop/src/components/settings/ToolsSuiteSettingsEditor.svelte`
+- `desktop/src/components/settings/SettingsBuiltinAgentVisibility.svelte`
+- `desktop/src/components/settings/SettingsModuleVisibility.svelte`
+- `desktop/src/components/settings/SettingsFieldRow.svelte`
+- `desktop/src/lib/settings.ts`
+- `desktop/src/lib/settings-navigation.ts`
+- `desktop/src/lib/settings-viewport.ts`
+- `desktop/src/lib/builtin-agent-catalog.ts`
+- `desktop/src/lib/tools-suite-module-visibility.ts`
+- `desktop/src/lib/default-desktop-config.ts`
+- `desktop/src/lib/desktop-config.ts`
+- `desktop/src/app/preview-file-io.ts`
+- `desktop/src/app/preview-state.svelte.ts`
+- `desktop/src/app/preview.svelte.ts`
+- `desktop/src/app/desktop-workbench-prop-builders.ts`
+- `desktop/src/app/desktop-sidebar-view-model.svelte.ts`
+- `desktop/src/components/WorkspaceSidebar.svelte`
+- `src/schemas/pix-desktop-schema.ts`
+- `schemas/pix-desktop.json`
+- `schemas/pi-tools-suite.json`
+- `acp/src/acp/pix-config-paths.ts`
+
+## Tests
+
+- `desktop/src-tauri/src/lib.rs` (`user_settings` module)
+- `desktop/src/lib/desktop-config.test.ts`
+- `desktop/src/lib/settings.test.ts`
+- `desktop/src/lib/settings-navigation.test.ts`
+- `desktop/src/lib/settings-viewport.test.ts`
+- `desktop/src/app/desktop-workbench-prop-builders.test.ts`
+- `desktop/src/components/DesktopVisualRegressions.test.ts`
 
 ## Related files
 

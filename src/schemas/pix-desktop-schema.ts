@@ -123,6 +123,12 @@ const DesktopAppConfig = Type.Object(
 			},
 			{ description: "Desktop native system notification preferences." },
 		)),
+		knowledge: Type.Optional(Type.Object(
+			{
+				reviewModelRef: Type.Optional(Type.String({ description: "Model used by knowledge-base AI review sessions, optionally with a :thinking suffix. Omit to use the normal default model." })),
+			},
+			{ description: "Desktop knowledge-base AI review preferences." },
+		)),
 		git: Type.Optional(Type.Object(
 			{
 				ciFixModelRef: Type.Optional(Type.String({ description: "Model used by Desktop Fix with AI CI-repair sessions, optionally with a :thinking suffix. Omit to use the normal default model." })),

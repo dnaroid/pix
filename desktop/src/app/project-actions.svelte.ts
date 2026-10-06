@@ -8,26 +8,24 @@ import {
 } from "../lib/project-tasks";
 import { buildPromptPayload } from "./prompt-payload";
 import { materializeComposerTaskAttachments } from "./attachment-io";
+import { parseDesktopModelRef } from "./desktop-helpers";
 
 const KNOWLEDGE_REFRESH_PROMPT = [
-  "Restore the entire project knowledge base to a verified clean state: the goal is a successful final idx knowledge dirty check returning no. This is a global AI review, not the task-scoped read-only Audit paths action; its scope is not limited to paths entered in the panel. Completing one task's audit does not establish that this global cleanup succeeded.",
-  "Check idx knowledge dirty before reviewing. A dirty result indicates missing or changed review receipts, not proof that documentation is outdated; review the monitored active specs against their declared implementation and tests, including specs that need no edits.",
-  "Use idx context for general behavior/task discovery and idx search for focused code/document lookup. Read the primary sources and verify the actual behavior rather than treating retrieval rankings as proof.",
-  "Review each affected primary spec against code and tests; update an existing spec if behavior changed. Only when no current spec covers the behavior, create a focused new spec using .indexer-cli/spec-template.md (ask before setup if the template is missing).",
-  "After material changes, run idx audit <changed-paths...> with only the paths changed for this task. Review its document relationships against final code and tests, resolve real semantic drift, and report any remaining gaps; audit candidates alone are not proof of drift.",
-  "Only after actually comparing a spec with its current implementation and tests and resolving any confirmed drift, run idx knowledge acknowledge <spec-paths...> with the explicit project-relative paths of those reviewed specs. Acknowledge unchanged specs too when the review confirms they are accurate. Never acknowledge unreviewed specs, specs with unresolved drift, or specs whose required sources could not be checked merely to clear the dirty indicator. Indexing and audit do not replace this review or acknowledgment.",
-  "Concurrent changes to a reviewed spec or any declared implementation/test dependency invalidate that review. Re-review stable current sources before acknowledgment; do not acknowledge work that is still being edited by another agent. Do not overwrite another agent's in-progress changes, wait indefinitely for them, or infer that unexplained dirtiness is unrelated.",
-  "Use at most two review passes total: the initial pass and, only if the remaining gaps are identified, safely actionable and unblocked, one corrective pass. Stop early when a successful final dirty check returns no. Do not poll for cleanliness, repeat unchanged failed commands, launch replacement sessions, or delegate repeated cleanup loops to bypass this limit.",
-  "Escalate to the user and stop autonomous cleanup immediately if concurrent edits prevent a stable review, required sources are unavailable, commands fail or are unsupported in a way that prevents reliable review, or resolving drift needs a product decision. Also escalate if the final dirty check is still yes or unknown after the pass limit, or no safe corrective pass can be identified. Report global cleanup: blocked, the observed dirty result (unknown for failed/incomplete checks), concrete blockers or explicitly unclassified remaining dirtiness, reviewed/acknowledged spec paths, command errors/exit codes, and the next action or decision needed from the user. Leave the global cleanup todo blocked/deferred rather than completed; end the turn and resume only on explicit user instruction, without scheduling retries or waiting for other agents.",
-  "Finally, run idx knowledge dirty again and report the observed result, the reviewed and acknowledged spec paths, and any remaining review gaps or command failures. Do not claim the knowledge base is clean unless the command succeeds and returns no; if review is incomplete or the command is unsupported, report that limitation rather than forcing a clean state.",
-  "Report global cleanup: passed and complete the global cleanup todo only when the final complete exit-0 dirty check returns no. Any separate task-scoped audit success must be reported independently and must not override a blocked global cleanup verdict.",
-  "Do not add or preserve legacy compatibility unless current product requirements explicitly demand it. Treat legacy behavior found in active code/specs as a mismatch to investigate, not as automatically supported behavior.",
+  "1. Restore the entire project knowledge base to verified clean state, not just Audit paths or one task's audit. Check idx knowledge dirty before review; dirty receipts alone do not prove documentation drift.",
+  "2. Use idx context / idx search to locate sources, then review monitored active specs against every declared Implementation/Tests dependency, including unchanged specs. Repair only proven documentation drift; escalate product decisions, not product code/tests/configuration changes. For uncovered behavior use .indexer-cli/spec-template.md; ask before setup if missing. Do not assume legacy behavior is supported without current requirements.",
+  "3. Delegate bounded slices to knowledge-auditor in explicit spec-review mode only if the effective role permits it: supply exact spec paths, goal and pass budget; require dependency coverage, findings and gaps. Follow role/tool permissions, including project-local replacements; extra tools do not override read-only instructions. Otherwise review in the parent. Use verify for command-only checks and research for read-only evidence returned as text. Workers must not acknowledge specs independently.",
+  "4. Store disposable reports/logs in unique directories under the target project's .pi/artifacts/, never root artifacts/ or .artifacts/; retain harness evidence in .pi/subagents/. After documentation changes run idx audit <changed-paths...> for task-changed paths only and check relationships against sources; indexing/audit is not proof of review.",
+  "5. The parent runs idx knowledge acknowledge <spec-paths...> only for explicit specs fully reviewed against stable current dependencies with no unresolved drift; acknowledge accurate unchanged specs too. Never acknowledge unreviewed/incomplete/unstable work to clear dirtiness. Concurrent spec/dependency changes invalidate review: re-review stable sources, do not overwrite others' edits or assume unexplained dirtiness is unrelated.",
+  "6. Allow at most two review passes total: initial plus one corrective pass only for identified, safe, unblocked gaps. Run idx knowledge dirty after each pass; stop on verified no. Do not poll, repeat unchanged failed commands, launch replacement sessions or delegate cleanup loops to bypass the limit.",
+  "7. Escalate immediately and stop for unstable concurrent edits, missing sources, review-blocking failed/unsupported commands or product decisions; also stop if no safe corrective pass exists or dirty remains yes/unknown at the limit. Defer the global cleanup todo, end the turn, and resume only on explicit user instruction; no scheduled retries or waiting for agents.",
+  "8. Report global cleanup passed only on a final complete exit-0 idx knowledge dirty result of no; only then complete its todo. Otherwise report blocked, dirty yes/unknown (unknown for failed/incomplete checks), concrete blockers or explicitly unclassified dirtiness, reviewed/acknowledged paths, coverage gaps, command errors/exit codes and next user action. Report task-scoped audit success separately; it cannot override blocked global cleanup.",
 ].join("\n\n");
 
 type ProjectActionsOptions = {
   client: () => AcpClient | null;
   workspace: () => string;
   canUseSession: () => boolean;
+  knowledgeReviewModelRef: () => Promise<string | undefined>;
   tasksSaving: () => boolean;
   taskLoadFailed: () => boolean;
   taskDocument: () => ProjectTaskDocument;
@@ -136,7 +134,18 @@ export function createProjectActions(options: ProjectActionsOptions) {
     let createdSessionId: string | undefined;
     let activated = false;
     try {
-      const response = await requestClient.newSession(requestWorkspace);
+      const configuredModel = (await options.knowledgeReviewModelRef())?.trim();
+      if (requestClient !== options.client() || requestWorkspace !== options.workspace()) return;
+      const parsed = configuredModel ? parseDesktopModelRef(configuredModel) : undefined;
+      if (configuredModel && !parsed) {
+        throw new Error("Knowledge review model must use provider/model[:thinking] format.");
+      }
+      const response = parsed
+        ? await requestClient.newSession(requestWorkspace, {
+            modelRef: parsed.modelRef,
+            ...(parsed.thinking ? { thinkingLevel: parsed.thinking } : {}),
+          })
+        : await requestClient.newSession(requestWorkspace);
       createdSessionId = response.sessionId;
       if (requestClient !== options.client() || requestWorkspace !== options.workspace()) {
         await requestClient.closeSession(response.sessionId).catch(() => undefined);

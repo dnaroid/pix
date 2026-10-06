@@ -620,6 +620,8 @@ describe("desktop visual regressions", () => {
     expect(settingsModelVisibilitySource).toContain("Choose visible models");
     expect(settingsModelVisibilitySource).toContain("searchSettingsModels");
     expect(desktopSettingsEditorSource).toContain('ariaLabel="CI fix model"');
+    expect(desktopSettingsEditorSource).toContain('ariaLabel="Knowledge review model"');
+    expect(desktopSettingsEditorSource).toContain('["desktop", "knowledge", "reviewModelRef"]');
     expect(desktopSettingsEditorSource).toContain('emptyLabel="Default model"');
     expect(desktopSettingsEditorSource).toContain('ariaLabel="Review model"');
     expect(desktopSettingsEditorSource).toContain('ariaLabel="Commit message model"');

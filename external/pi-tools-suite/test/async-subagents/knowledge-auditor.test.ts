@@ -75,6 +75,43 @@ describe("built-in knowledge-auditor role", () => {
 		expect(prompt).toContain("A justified no-record handoff is valid");
 	});
 
+	test("supports explicit bounded spec-review without weakening default task audit", () => {
+		const role = loadSubagentConfig(tempDir(), {}).types["knowledge-auditor"];
+		const task = "Use spec-review mode for specs/example.md; review current dependencies in one pass.";
+		const generated = generatePrompt({
+			id: "spec-slice",
+			task,
+			subagentType: "knowledge-auditor",
+			model: role.models![0],
+			promptAppend: role.promptAppend,
+		}).replace(/\s+/g, " ");
+		expect(role.description).toContain("explicit spec-review slices");
+		expect(generated).toContain(task);
+		expect(generated).toContain("Default to **task-audit**");
+		expect(generated).toContain("Use **spec-review** only when the parent explicitly requests that mode");
+		expect(generated).toContain("explicit list of project-relative spec paths and the review goal");
+		expect(generated).toContain("Changed product paths are not required in this mode");
+		expect(generated).toContain("every declared Implementation/Tests dependency against current content");
+		expect(generated).toContain("If the inputs required by the selected mode are missing, return a blocker");
+		expect(generated).toContain("Never run `idx knowledge acknowledge` in this mode, even for unchanged specs");
+		expect(generated).toContain("Respect the parent's pass/time budget");
+		expect(generated).toContain("do not run a global cleanup loop");
+		expect(generated).toContain("spec review: passed | blocked");
+		expect(generated).toContain("For eligible specs, run `idx knowledge acknowledge <spec-paths...>`");
+	});
+
+	test("permits disposable review evidence but not product edits or invented coverage", () => {
+		const role = loadSubagentConfig(tempDir(), {}).types["knowledge-auditor"];
+		const prompt = role.promptAppend!.replace(/\s+/g, " ");
+		expect(prompt).toContain("Never modify product/source code, tests, configuration, lockfiles, generated files");
+		expect(prompt).toContain("except disposable reports/logs in unique run/task directories under the target project's `.pi/artifacts/`");
+		expect(prompt).toContain("Never use root `artifacts/` or `.artifacts/`");
+		expect(prompt).toContain("Return the evidence inline if no report path was requested");
+		expect(prompt).toContain("report the gap; do not pretend coverage");
+		expect(prompt).toContain("concurrent changes to reviewed specs/dependencies as invalidated coverage");
+		expect(role.tools).toEqual(["read", "grep", "bash", "edit", "write"]);
+	});
+
 	test("is hidden without .indexer-cli and becomes available from the project marker alone", async () => {
 		const cwd = tempDir();
 		const config = loadSubagentConfig(cwd, {});

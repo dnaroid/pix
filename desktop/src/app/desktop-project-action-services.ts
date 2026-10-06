@@ -43,6 +43,12 @@ export function createDesktopProjectActionServices(options: DesktopProjectAction
     client: options.client,
     workspace: options.workspace,
     canUseSession: options.canUseSession,
+    knowledgeReviewModelRef: async () => {
+      const workspace = options.workspace();
+      if (!workspace) return undefined;
+      await options.project.workspace.loadPreferences(workspace);
+      return options.workspace() === workspace ? options.project.workspace.knowledgeReviewModelRef : undefined;
+    },
     tasksSaving: () => options.project.tasks.saving,
     taskLoadFailed: () => options.project.tasks.loadFailed,
     taskDocument: () => options.project.tasks.document,

@@ -4,6 +4,7 @@ export interface DesktopPreferences {
   readonly externalEditor: string | undefined;
   readonly notificationsEnabled: boolean;
   readonly gitCiFixModelRef: string | undefined;
+  readonly knowledgeReviewModelRef: string | undefined;
 }
 
 export const EXTERNAL_EDITOR_OPTIONS = [
@@ -30,6 +31,7 @@ export function resolveDesktopPreferences(
     externalEditor: projectEditor ?? globalEditor,
     notificationsEnabled: projectNotificationsEnabled ?? globalNotificationsEnabled ?? true,
     gitCiFixModelRef: projectGitCiFixModelRef ?? globalGitCiFixModelRef,
+    knowledgeReviewModelRef: knowledgeReviewModelRefFromSource(projectSource) ?? knowledgeReviewModelRefFromSource(globalSource),
   };
 }
 
@@ -91,4 +93,16 @@ function gitCiFixModelRefFromSource(source: string | undefined): string | undefi
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function knowledgeReviewModelRefFromSource(source: string | undefined): string | undefined {
+  if (!source?.trim()) return undefined;
+  try {
+    const parsed = parse(source, undefined, { allowTrailingComma: true }) as unknown;
+    if (!isRecord(parsed) || !isRecord(parsed.desktop) || !isRecord(parsed.desktop.knowledge)) return undefined;
+    const modelRef = parsed.desktop.knowledge.reviewModelRef;
+    return typeof modelRef === "string" && modelRef.trim() ? modelRef.trim() : undefined;
+  } catch {
+    return undefined;
+  }
 }

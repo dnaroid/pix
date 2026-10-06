@@ -18,6 +18,7 @@ describe("desktop config", () => {
     expect(defaults.externalEditor).toBeUndefined();
     expect(defaults.notificationsEnabled).toBe(true);
     expect(defaults.gitCiFixModelRef).toBeUndefined();
+    expect(defaults.knowledgeReviewModelRef).toBeUndefined();
     expect(EXTERNAL_EDITOR_OPTIONS).toContainEqual({ value: "gram", label: "Gram" });
     expect(externalEditorLabel("gram")).toBe("Gram");
     expect(externalEditorLabel("vscode")).toBe("VS Code");
@@ -46,5 +47,18 @@ describe("desktop config", () => {
       `{ "desktop": { "git": { "ciFixModelRef": "openai-codex/gpt-5.3:high" } } }`,
       `{ "desktop": { "git": { "ciFixModelRef": "anthropic/claude-sonnet-4-5" } } }`,
     ).gitCiFixModelRef).toBe("anthropic/claude-sonnet-4-5");
+  });
+
+  it("resolves knowledge review model with project precedence and ignores empty/non-string overrides", () => {
+    const global = `{ "desktop": { "knowledge": { "reviewModelRef": "provider/global:high" } } }`;
+    expect(resolveDesktopPreferences(global, undefined).knowledgeReviewModelRef).toBe("provider/global:high");
+    expect(resolveDesktopPreferences(global,
+      `{ // override\n "desktop": { "knowledge": { "reviewModelRef": " provider/project:off ", }, }, }`,
+    ).knowledgeReviewModelRef).toBe("provider/project:off");
+    for (const value of ['" "', "false", "null"]) {
+      expect(resolveDesktopPreferences(global,
+        `{ "desktop": { "knowledge": { "reviewModelRef": ${value} } } }`,
+      ).knowledgeReviewModelRef).toBe("provider/global:high");
+    }
   });
 });

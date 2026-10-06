@@ -91,6 +91,18 @@ without treating generated answers or audit candidates as semantic proof.
   paths. It runs `idx audit` through its shell, fixes only small unambiguous
   documentation drift grounded in final code/tests, refreshes the index after
   edits, and escalates substantial/ambiguous/new-contract work without guessing.
+- The same docs-only specialist supports explicit **spec-review** mode for
+  bounded slices of global knowledge cleanup. The parent supplies exact spec
+  paths, review goal and pass budget; changed product paths are not required.
+  The child reads assigned specs, applicable decisions and every declared
+  Implementation/Tests dependency, reports actual coverage/gaps, and may fix
+  only small proven documentation drift. Commands and disposable report/log
+  writes use its existing tools; reports live in unique target-project
+  `.pi/artifacts/` directories. It returns one bounded result, not a global
+  cleanup loop, and never acknowledges in this mode. Final acknowledgment is
+  parent-owned after integrated, stable coverage. Default task-audit behavior
+  remains unchanged; incompatible project-local replacements require fallback
+  to the parent, not a tool override that bypasses role instructions.
 - When `knowledge-auditor` is effective, the final audit responsibility is
   delegated to it instead of spending the parent model on routine drift cleanup.
   The parent retains decisions and handles escalations. If the role is disabled

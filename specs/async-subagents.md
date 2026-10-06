@@ -190,6 +190,14 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
     paths; the child runs task-scoped `idx audit`, fixes only small confirmed
     documentation drift, and escalates substantial or ambiguous drift rather
     than inventing a contract.
+    It also accepts explicit **spec-review** assignments for bounded global
+    knowledge-review slices: the parent supplies exact spec paths, review goal
+    and pass budget rather than changed product paths. The child reviews every
+    declared dependency, repairs only small proven documentation drift, and
+    returns actual coverage, gaps and evidence (inline or as disposable reports
+    under `.pi/artifacts/`). In this mode only the parent may acknowledge after
+    integrated, stable review coverage; the child must not own a global cleanup
+    loop. Project-local replacements must explicitly support this mode.
 11. **Session persistence**: only when `ASYNC_SUBAGENTS_ENABLE_SESSIONS` is truthy (child gets `--session-dir <agentDir>/sessions`; otherwise `--no-session`). `[confirmed by code]`
 12. **Timeout**: default 30 min (`DEFAULT_AGENT_TIMEOUT_MS`). On timeout: writes `timeout_ms`/`timed_out_at`/result.md, SIGTERM, SIGKILL after 5s grace, exit code 124. `[confirmed by code, spawn.ts ~168-187]`
 13. **agent_end**: writes result.md, SIGTERM after 50ms grace, SIGKILL after 1s fallback. `[confirmed by code]`
@@ -1156,6 +1164,7 @@ runtime is unchanged.
 - `external/pi-tools-suite/src/async-subagents/agents/implement.md`
 - `external/pi-tools-suite/src/async-subagents/agents/implement-core.md`
 - `external/pi-tools-suite/src/async-subagents/agents/mechanical.md`
+- `external/pi-tools-suite/src/async-subagents/agents/knowledge-auditor.md`
 - `external/pi-tools-suite/src/async-subagents/agents/frontier-review.md`
 - `external/pi-tools-suite/src/todo/subagent.ts`
 - `external/pi-tools-suite/src/repo-discovery/subagent.ts`
@@ -1226,6 +1235,8 @@ runtime is unchanged.
 - `external/pi-tools-suite/test/async-subagents/core.test.ts`: config/profile
   loading, semaphore behavior, process lifecycle, retry, model fallback, running
   stop behavior, structured results, and project-agent definitions.
+- `external/pi-tools-suite/test/async-subagents/knowledge-auditor.test.ts`: default
+  task-audit and explicit spec-review modes, tools, visibility and boundaries.
 - `external/pi-tools-suite/test/async-subagents/tools.test.ts`: public tool
   validation and spawn/status/wait/result/stop integration.
 - `external/pi-tools-suite/test/async-subagents/routing.test.ts`: explicit and

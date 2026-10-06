@@ -37,13 +37,35 @@ Expose installed IDX v2 repository intelligence in Pix Desktop with typed querie
 - Context offers bounded budget and spec/code/test result counts. Advanced inspections are restricted to architecture, structure, ast, explain, deps with typed targets and limits; AST file targets must be safe project-relative paths.
 - The Knowledge tab requires at least one explicit project-relative changed path before running `idx_audit`. Blank, absolute and traversing paths are rejected in the UI, with backend validation authoritative. The request contract is `{ workspace, paths: string[] }` returning `IdxCommandResult`; audit output is shown through `IdxOutput`, which validates candidate links before activation. In-flight results are invalidated on workspace change or path-list edits; stale errors/results cannot overwrite the current workspace.
 - **AI review** starts a fresh Desktop session for project knowledge review. Its prompt checks `idx knowledge dirty` before and after review, compares monitored active specs with their declared implementation/tests, and explicitly runs `idx knowledge acknowledge <spec-paths...>` only for genuinely reviewed specs with no unresolved drift (including accurate unchanged specs). Unreviewed specs, unresolved drift, unavailable sources, unsupported commands and other failures must be reported, not hidden by acknowledgment. A clean result may be claimed only after a successful final dirty check returns `no`; indexing/audit alone do not establish review. The panel itself does not acknowledge specs. It is not an IDX wiki command.
+- The review session uses optional `desktop.knowledge.reviewModelRef` (`provider/model[:thinking]`), exposed as **Knowledge review model** in Settings → Assistant features. Preferences are re-read on each action from `~/.config/pi/pix-desktop.jsonc` and `$WORKSPACE/.pi/pix-desktop.jsonc`; a non-empty project value overrides the global value. Omission uses the normal new-session default. An invalid model reference reports an error without creating a session. The model/thinking override is passed at session creation, before runtime initialization or the review prompt. Stale workspace/client completions cannot start the review in another project. This setting does not change the separate `knowledge-auditor` sub-agent role or the global cleanup prompt/budget.
 - Global **AI review** aims to restore the entire knowledge base to verified clean
   state, not merely complete an individual task audit. It does not consume the
   changed-path field used by **Audit paths**. Its cleanup todo succeeds only on a
   final complete exit-0 `idx knowledge dirty` result of `no`; a separate task audit
   may pass while global cleanup remains blocked.
+- Delegated review assignments must match the effective role's instructions and
+  tool permissions, including project-local replacements. Bounded documentation
+  reviews needing commands, documentation repairs or report-file writes use
+  `knowledge-auditor` in explicit **spec-review** mode, with exact spec paths,
+  review goal and pass budget. Its standard `[read, grep, bash, edit, write]`
+  tools support those actions; check the effective role permits that mode,
+  especially for project-local replacements. Tool overrides do not remove
+  read-only role boundaries. Product code/tests/configuration and generated review
+  state are outside those workers' edit scope. Command-only checks use `verify`;
+  read-only research returns evidence in its final response rather than requiring
+  file writes. The parent may persist that response. Disposable reports/logs use
+  unique target-project `.pi/artifacts/` directories; harness evidence remains in
+  `.pi/subagents/`. Workers report actual spec/dependency coverage and gaps; the
+  parent owns final acknowledgment after complete stable review, not workers.
+  This mode reviews bounded global slices; it does not own the global cleanup
+  loop or replace the role's default task-audit workflow. When no compatible
+  auditor is available, the parent performs the bounded work itself.
 - The prompt allows at most two review passes total (initial plus one corrective
-  pass only for identified, safely actionable, unblocked gaps). Stop early on
+  pass). Its eight concise instructions retain the global success, stable-review,
+  delegation and escalation rules below; role-specific mechanics stay in the
+  effective role instructions. The generated prompt is regression-tested for
+  those safeguards and a compact size budget. The corrective
+  pass is allowed only for identified, safely actionable, unblocked gaps. Stop early on
   verified `no`. Do not poll for cleanliness or bypass the limit with repeated
   commands, delegated loops or replacement sessions. Concurrent edits to a
   reviewed spec/dependency invalidate review; do not acknowledge unstable work
@@ -73,12 +95,21 @@ Expose installed IDX v2 repository intelligence in Pix Desktop with typed querie
 - `desktop/src/components/IdxOutput.svelte`
 - `desktop/src/lib/idx.ts`
 - `desktop/src/app/project-actions.svelte.ts`
+- `desktop/src/app/desktop-project-action-services.ts`
+- `desktop/src/app/project-workspace.svelte.ts`
+- `desktop/src/lib/desktop-config.ts`
+- `desktop/src/components/settings/DesktopSettingsEditor.svelte`
+- `src/schemas/pix-desktop-schema.ts`
+- `schemas/pix-desktop.json`
 - `desktop/src-tauri/src/lib.rs`
 
 ## Tests
 
 - `desktop/src/lib/idx.test.ts`
 - `desktop/src/app/project-actions.test.ts`
+- `desktop/src/lib/desktop-config.test.ts`
+- `desktop/src/app/project-workspace.test.ts`
+- `desktop/src/components/DesktopVisualRegressions.test.ts`
 - `desktop/src/components/IdxPanel.test.ts`
 - `desktop/src/components/idx-panel-query-controller.test.ts`
 - `desktop/src/components/idx-panel-audit-controller.test.ts`

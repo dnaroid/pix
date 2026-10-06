@@ -316,9 +316,24 @@
 {:else if section === "assistant"}
   <div class="px-2.5 py-2.5">
     <h2 class="text-sm font-semibold text-foreground">Assistant features</h2>
-    <p class="mt-0.5 text-xs leading-4 text-muted-foreground">Models and limits used by prompt enhancement, autocomplete, and automatic session titles.</p>
+    <p class="mt-0.5 text-xs leading-4 text-muted-foreground">Models and limits used by knowledge review, prompt enhancement, autocomplete, and automatic session titles.</p>
   </div>
   <div class="border-y border-sidebar-border/70 bg-panel">
+    <SettingsFieldRow
+      label="Knowledge review model"
+      description="Model and optional thinking level for knowledge-base AI review. When omitted, the review session uses the normal default model. Does not change the knowledge-auditor sub-agent."
+      explicit={has(["desktop", "knowledge", "reviewModelRef"])}
+      defaultLabel="Default model"
+      onReset={() => reset(["desktop", "knowledge", "reviewModelRef"])}
+    >
+      <SettingsModelSelect
+        value={text(["desktop", "knowledge", "reviewModelRef"])}
+        options={gitModelOptions}
+        ariaLabel="Knowledge review model"
+        emptyLabel="Default model"
+        onChange={(value) => value ? set(["desktop", "knowledge", "reviewModelRef"], value) : reset(["desktop", "knowledge", "reviewModelRef"])}
+      />
+    </SettingsFieldRow>
     <SettingsFieldRow
       label="Prompt enhancer model"
       description="Model used when Desktop improves a draft prompt."

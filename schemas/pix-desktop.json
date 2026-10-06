@@ -393,6 +393,16 @@
           },
           "description": "Desktop native system notification preferences."
         },
+        "knowledge": {
+          "type": "object",
+          "properties": {
+            "reviewModelRef": {
+              "type": "string",
+              "description": "Model used by knowledge-base AI review sessions, optionally with a :thinking suffix. Omit to use the normal default model."
+            }
+          },
+          "description": "Desktop knowledge-base AI review preferences."
+        },
         "git": {
           "type": "object",
           "properties": {
