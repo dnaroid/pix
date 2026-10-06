@@ -87,13 +87,11 @@
   const modelUsage = $derived(displayModelUsage(status, now));
   const usageAccountLabel = $derived(shortModelUsageAccountLabel(modelUsage?.accountEmail));
   const usageWindowItems = $derived(usageWindows());
-  // The popup keeps the existing weekly QuotaResetCalendar below. The new
-  // Limits section only adds the short Session(5h) window, which the
-  // calendar cannot represent; it excludes Weekly (already the calendar) and
-  // the header-derived rate window (a request-level observation, not an
-  // account quota scale).
+  // Account quota bars show both remaining balances; the calendar below
+  // keeps the exact weekly reset date. Header-derived rate windows remain
+  // trigger-only because they are request-level observations.
   const popupLimitWindows = $derived(
-    usageWindowItems.filter((item): item is { key: string; label: "H"; window: ModelUsageLimitWindow } => item.label === "H"),
+    usageWindowItems.filter((item): item is { key: string; label: "H" | "W"; window: ModelUsageLimitWindow } => item.label === "H" || item.label === "W"),
   );
   const donutModels = $derived(
     (sessionUsage?.providers ?? []).flatMap((provider) =>
@@ -443,7 +441,8 @@
               {@const tone = modelUsageTone(window.remainingPercent)}
               {@const exhaustsEarly = modelUsageWindowWillExhaustBeforeReset(window, now)}
               <span class="quota-status-slots grid items-center gap-1" class:quota-short-track={label !== "W"} aria-label={limitTitle(label, window)}>
-                <span class="quota-values pointer-events-none relative col-span-4 grid items-center">
+                <span class="quota-values pointer-events-none relative col-span-3 grid items-center">
+                <span class={["truncate text-right", toneTextClass(tone)]}>{Math.round(window.remainingPercent)}%</span>
                 <span class="flex h-6 flex-col justify-center gap-0.5 overflow-hidden">
                 {#if label === "R"}
                   <span class="truncate leading-3 text-muted-foreground">{modelUsageWindowLabel(label, window)}</span>
@@ -466,8 +465,6 @@
                 </span>
                 </span>
                 <span class="truncate text-muted-foreground">{label !== "R" || window.resetAt > now ? formatResetDuration(window.resetAt, now) : ""}</span>
-                <span class="text-muted-foreground/50" aria-hidden="true">·</span>
-                <span class={["truncate text-right", toneTextClass(tone)]}>{Math.round(window.remainingPercent)}%</span>
                 </span>
                 <span class="relative flex w-2.5 items-center">
                   {#if quotaWaitIndicator && key === usageWindowItems[0]?.key}
@@ -628,10 +625,9 @@
       >
         <span class="font-sans text-xs text-muted-foreground">Usage</span>
           <span class="quota-status-slots grid items-center gap-1">
+            <span class="h-3 w-6 rounded-sm bg-muted-foreground/20"></span>
             <span class="h-1.5 w-14 rounded-sm bg-border"></span>
             <span class="h-3 w-12 rounded-sm bg-muted-foreground/15"></span>
-            <span class="text-muted-foreground/50">·</span>
-            <span class="h-3 w-6 rounded-sm bg-muted-foreground/20"></span>
             <span></span>
           </span>
       </div>
@@ -666,12 +662,12 @@
   }
 
   .quota-status-slots {
-    grid-template-columns: 56px 5ch 1ch 4ch 10px;
+    grid-template-columns: 4ch 56px 5ch 10px;
     column-gap: 6px;
   }
 
   .quota-short-track {
-    grid-template-columns: 32px 5ch 1ch 4ch 10px;
+    grid-template-columns: 4ch 32px 5ch 10px;
   }
 
   .quota-values {

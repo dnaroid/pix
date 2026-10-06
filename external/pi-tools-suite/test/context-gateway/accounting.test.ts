@@ -111,21 +111,29 @@ describe("context gateway efficiency accounting", () => {
 		expect(artifactResult?.retrievalEstimatedTokens).toBeGreaterThan(0);
 
 		const recoveryCall = tracker.recordToolCall({
-			toolCallId: "session-recovery",
-			toolName: "session_read_section",
-			input: { section_id: "private-section" },
+			toolCallId: "session-title",
+			toolName: "session",
+			input: { action: "name", name: "Explicit title" },
 		});
-		expect(recoveryCall?.retrievalKind).toBe("session-recovery");
+		expect(recoveryCall?.retrievalKind).toBeUndefined();
+		const titleRead = tracker.recordToolCall({ toolCallId: "title-read", toolName: "session", input: { action: "name" } });
+		expect(titleRead?.retrievalKind).toBeUndefined();
+		const historyCall = tracker.recordToolCall({
+			toolCallId: "session-recovery",
+			toolName: "session",
+			input: { action: "read", section_id: "private-section" },
+		});
+		expect(historyCall?.retrievalKind).toBe("session-recovery");
 		const recoveryObservation = observeToolResult({
 			toolCallId: "session-recovery",
-			toolName: "session_read_section",
+			toolName: "session",
 			content: [{ type: "text", text: "recovered session body" }],
 			details: {},
 			isError: false,
 		}, 32768);
 		const recoveryResult = tracker.recordToolResult({
 			toolCallId: "session-recovery",
-			toolName: "session_read_section",
+			toolName: "session",
 			content: [{ type: "text", text: "recovered session body" }],
 			details: {},
 			isError: false,

@@ -37,12 +37,12 @@ describe("Desktop context inventory formatting", () => {
 			model: "zai/glm-5.3",
 			thinking: "high",
 			skills: ["repo_knowledge"],
-			tools: ["repo_architecture", "session_read_section"],
+			tools: ["repo_architecture", "repo_search"],
 			agents: ["test_runner"],
 		});
 
 		assert.match(text, /Skills \(in context\): repo\\_knowledge/u);
-		assert.match(text, /Tools \(active\): repo\\_architecture, session\\_read\\_section/u);
+		assert.match(text, /Tools \(active\): repo\\_architecture, repo\\_search/u);
 		assert.match(text, /Agents \(available\): test\\_runner/u);
 	});
 

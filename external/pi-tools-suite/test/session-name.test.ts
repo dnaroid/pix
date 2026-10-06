@@ -1,8 +1,4 @@
-import { describe, expect, mock, test } from "bun:test";
-
-import { createTypeboxMock } from "./support/typebox-mock.js";
-
-mock.module("typebox", () => createTypeboxMock());
+import { describe, expect, test } from "bun:test";
 
 class FakePi {
 	tools = new Map<string, any>();
@@ -13,17 +9,17 @@ class FakePi {
 	getSessionName() { return this.sessionName; }
 }
 
-describe("session_name tool", () => {
+describe("session action=name", () => {
 	test("registers and sets the current session name", async () => {
-		const { default: register } = await import("../src/session-name/index.js");
+		const { default: register } = await import("../src/session/index.js");
 		const pi = new FakePi();
 
 		register(pi as any);
-		const tool = pi.tools.get("session_name");
+		const tool = pi.tools.get("session");
 
 		expect(tool).toBeTruthy();
 
-		const result = await tool.execute("call", { name: "Short Story" });
+		const result = await tool.execute("call", { action: "name", name: "Short Story" });
 
 		expect(pi.getSessionName()).toBe("Short Story");
 		expect(result).toMatchObject({
@@ -33,14 +29,14 @@ describe("session_name tool", () => {
 	});
 
 	test("returns the current session name when no name is provided", async () => {
-		const { default: register } = await import("../src/session-name/index.js");
+		const { default: register } = await import("../src/session/index.js");
 		const pi = new FakePi();
 		pi.setSessionName("Existing Session");
 
 		register(pi as any);
-		const tool = pi.tools.get("session_name");
+		const tool = pi.tools.get("session");
 
-		const result = await tool.execute("call", {});
+		const result = await tool.execute("call", { action: "name" });
 
 		expect(result).toMatchObject({
 			content: [{ type: "text", text: "Current session name: Existing Session" }],

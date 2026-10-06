@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # GitHub Release distribution
 
 ## Scope and version

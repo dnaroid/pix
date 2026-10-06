@@ -22,7 +22,13 @@ status: active
 - Existing staged selection, thinking navigation, visibility management and
   defaults are unchanged. Apply/Enter closes and restores composer focus on
   success (including unchanged confirmation); failed Apply keeps the error open.
+  The focus callback is captured before closing invalidates the parent's popup
+  props, so both changed and unchanged confirmation can restore the composer.
   See [Desktop live model switching](desktop-live-model-switching.md).
+- Confirming Auto from a live session restores focus to the New Conversation
+  composer after its draft configuration is ready, even though changing owners
+  unmounts the original popup. A late transition must not steal focus from another
+  session/workspace or a newly opened picker.
 - [BTW](desktop-btw.md) reuses this popup with its own explicit invoker and local
   selection callback. The header invoker opens it below when that side has more
   room; the status-bar invoker opens it above. Its Apply changes only subsequent side questions; it
@@ -53,6 +59,9 @@ status: active
 - `desktop/src/components/ModelThinkingPicker.svelte`
 - `desktop/src/components/StatusBar.svelte`
 - `desktop/src/app/model-picker-state.svelte.ts`
+- `desktop/src/app/model-config-actions.ts`
+- `desktop/src/app/desktop-model-services.ts`
+- `desktop/src/App.svelte`
 - `desktop/src/lib/model-picker-popover.ts`
 
 ## Tests
@@ -60,6 +69,7 @@ status: active
 - `desktop/src/components/ModelThinkingPicker.test.ts`
 - `desktop/src/components/DesktopModalDialogs.test.ts`
 - `desktop/src/app/model-picker-state.test.ts`
+- `desktop/src/app/model-config-actions.test.ts`
 - `desktop/src/lib/model-picker-popover.test.ts`
 
 ## Verification

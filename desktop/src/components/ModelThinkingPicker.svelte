@@ -299,8 +299,7 @@
   async function applySelection(): Promise<void> {
     if (!selectedModel || disabled || applying) return;
     if (!dirty) {
-      onClose();
-      restoreFocus?.();
+      confirmSelection();
       return;
     }
     applying = true;
@@ -308,13 +307,20 @@
     try {
       await onApply(selectedModel.ref, selectedThinking);
       if (!alive) return;
-      onClose();
-      restoreFocus?.();
+      confirmSelection();
     } catch (error) {
       applyError = error instanceof Error ? error.message : String(error);
     } finally {
       applying = false;
     }
+  }
+
+  function confirmSelection(): void {
+    // onClose invalidates the parent's conditional spread props immediately.
+    // Capture the callback while the picker still owns its selection props.
+    const focusComposer = restoreFocus;
+    onClose();
+    focusComposer?.();
   }
 
   async function setDefaultSelection(): Promise<void> {

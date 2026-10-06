@@ -17,11 +17,16 @@ export function createModelConfigActions(
   async function applySelection(modelRef: string, thinkingLevel: string): Promise<void> {
     if (!picker.draft && modelRef === AUTO_MODEL_REF) {
       if (!draftConfig.autoRoutingAvailable) throw new Error("Automatic model routing is disabled.");
+      const workspace = options.workspace();
       picker.close();
       await options.openDraftSessionTab();
-      if (!options.draftSessionTabActive()) return;
+      if (!options.draftSessionTabActive() || options.workspace() !== workspace) return;
       if (draftConfig.configOptions.length === 0) await draftConfig.refresh();
+      if (!options.draftSessionTabActive() || options.workspace() !== workspace || picker.open) return;
       draftConfig.applySelection(AUTO_MODEL_REF, "off");
+      // Auto changes owners and unmounts the live picker before onApply resolves.
+      // Its component cannot restore focus; the completed draft transition owns it.
+      await options.focusComposer();
       return;
     }
     if (picker.draft) {

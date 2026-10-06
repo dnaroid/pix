@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "svelte/server";
 import type { RuntimeStatus } from "../lib/acp-client";
 import RuntimeStatusBarItems from "./RuntimeStatusBarItems.svelte";
@@ -22,6 +22,8 @@ function waitingMarkup(status?: RuntimeStatus): string {
 const base: RuntimeStatus = { sessionId: "test", modelUsageRefresh: "ready" };
 
 describe("runtime status fixed telemetry slots", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   it("puts a single icon after the short-window countdown without rendering the wait reason inline", () => {
     const resetAt = Date.now() + 72 * 60_000;
     const html = waitingMarkup({ ...base, modelUsage: {
@@ -65,12 +67,19 @@ describe("runtime status fixed telemetry slots", () => {
     expect(markup({ ...base, dcpTokensSaved: 100 })).toContain("with-savings");
   });
 
-  it("shows countdown before remaining percent while preserving danger colors", () => {
+  it("shows remaining percent before the track and countdown without bullets, preserving danger colors", () => {
+    vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
     const html = markup({ ...base, modelUsage: {
       modelKey: "test", provider: "anthropic", updatedAt: Date.now(),
       hourly: { remainingPercent: 0, resetAt: Date.now() + 72 * 60_000, windowSeconds: 18000 },
     } });
-    expect(html.indexOf("1h 12m</span>")).toBeLessThan(html.indexOf("0%</span>"));
+    const percent = html.indexOf("0%</span>");
+    const track = html.indexOf('relative h-1.5 overflow-hidden rounded-sm bg-border', percent);
+    expect(percent).toBeGreaterThan(-1);
+    expect(track).toBeGreaterThan(percent);
+    expect(track).toBeLessThan(html.indexOf("1h12m</span>"));
+    expect(html).not.toMatch(/>\s*[·•]\s*<\/span>/);
+    expect(markup(undefined, true)).not.toMatch(/>\s*[·•]\s*<\/span>/);
     expect(html).toMatch(/text-tool-error[^>]*>0%<\/span>/);
   });
 

@@ -20,13 +20,14 @@ reset marker with contrasting text (also on weekends). Ordinary weekend dates
 retain muted red. The exact reset time is a higher-contrast, medium-weight
 unboxed line, not a separate filled card.
 
-A provider-agnostic **Limits** section adds the short account quota window
-(`hourly`) above the calendar when available. It shows a neutral progress track,
+A provider-agnostic **Limits** section shows the account quota windows
+(`hourly`, then `weekly`) above the calendar when available, including weekly-only
+snapshots. Each shows a neutral progress track,
 remaining percentage explicitly labelled “remaining”, reset countdown and
 projected-exhaustion warning. Each window has a readable label/percentage row,
 a full-width track and a separate “Resets in …” line. A passed reset explicitly
 says “Reset time reached · Awaiting quota refresh”, not just “reset”.
-Weekly reset timing remains in the calendar; header-derived rate windows are
+The weekly calendar also retains the exact reset date/time; header-derived rate windows are
 excluded from this section. Stale windows remain visibly marked as cached.
 The complete popup is bounded by the application viewport height minus 70px,
 with internal scrolling and no extra timers or refresh-on-open requests.

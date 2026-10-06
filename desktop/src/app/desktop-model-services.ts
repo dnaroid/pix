@@ -15,6 +15,7 @@ type DesktopModelServicesOptions = {
   sessions: DesktopSessionServices;
   draftSession: () => DesktopSessionTransitionServices["draft"];
   closeCommandPicker: () => void;
+  focusComposer: () => void | Promise<void>;
   reloadResources: (options?: { echo?: boolean }) => Promise<void>;
   reportError: (error: unknown) => void;
 };
@@ -35,6 +36,7 @@ export function createDesktopModelServices(options: DesktopModelServicesOptions)
     operationRunning: options.operationRunning,
     changingConfig: options.changingConfig,
     closeCommandPicker: options.closeCommandPicker,
+    focusComposer: options.focusComposer,
     reloadResources: options.reloadResources,
     preferences,
     runtime: options.sessions.runtime,

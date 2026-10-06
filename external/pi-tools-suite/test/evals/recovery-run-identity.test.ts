@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "bun:test";
@@ -7,6 +8,8 @@ import { buildRecoveryRunIdentity } from "./recovery-run-identity.js";
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const REPO_ROOT = path.resolve(PACKAGE_ROOT, "..", "..");
+const SDK_PIN = JSON.parse(readFileSync(path.join(PACKAGE_ROOT, "package.json"), "utf8"))
+	.peerDependencies["@earendil-works/pi-coding-agent"];
 
 describe("Context Gateway recovery run identity", () => {
 	test("pins dirty source, harness, validator, corpus, SDK/runtime/config, and arm order without absolute paths", () => {
@@ -26,7 +29,7 @@ describe("Context Gateway recovery run identity", () => {
 		expect(identity.testedPackage.sourceSha256).toMatch(sha256);
 		expect(identity.testedPackage.sourceFileCount).toBeGreaterThan(10);
 		for (const hash of Object.values(identity.hashes)) expect(hash).toMatch(sha256);
-		expect(identity.sdk.piCodingAgentVersion).toBe("1.0.3");
+		expect(identity.sdk.piCodingAgentVersion).toBe(SDK_PIN);
 		expect(identity.runtime.command).toBe("pi");
 		expect(identity.runtime.bun).toBeTruthy();
 		expect(identity.effectiveConfig).toMatchObject({

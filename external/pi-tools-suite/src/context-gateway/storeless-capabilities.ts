@@ -43,7 +43,7 @@ export const STORELESS_CAPABILITIES: readonly StorelessCapabilityEntry[] = Objec
 		status: "limited",
 		strategy: "raw-session-recoverable-compact",
 		lifetime: "raw-session",
-		reason: "In enforce mode, over-budget web_search/web_fetch results are compacted only when the producer supplied full structured details. Those raw details remain in the session toolResult and are recoverable by toolCallId through session-recovery; unsupported web shapes remain passthrough.",
+		reason: "In enforce mode, over-budget web_search/web_fetch results are compacted only when the producer supplied full structured details. Those raw details remain in the session toolResult and are recoverable by toolCallId through session action=search/read; unsupported web shapes remain passthrough.",
 	},
 	{
 		surface: "structured-json",

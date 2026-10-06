@@ -8,6 +8,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { createAssistantMessageEventStream, fauxAssistantMessage, fauxProvider, fauxToolCall, Type } from "@earendil-works/pi-ai";
 import codemode from "../src/codemode/index.js";
+import sessionTools from "../src/session/index.js";
 
 const cleanups: (() => void)[] = [];
 beforeEach(() => {
@@ -82,6 +83,24 @@ test("real SDK runs QuickJS alongside direct tools and retains nested-call event
 	const declared = contexts[0].messages.flatMap((message: any) => message.role === "system" ? message.toolsAdded ?? [] : []);
 	expect(declared.some((tool: any) => tool.name === "read")).toBe(true);
 	expect(declared.some((tool: any) => tool.name === "codemode")).toBe(true);
+});
+
+test("session actions share one schema and dispatch through real SDK codemode", async () => {
+	const { session, events, contexts } = await sessionHarness(`
+		console.log(await tools.session({ action: "name", name: "Codemode session" }));
+		console.log(await tools.session({ action: "name" }));
+		console.log(await tools.session({ action: "overview", max_sections: 1 }));
+	`, [sessionTools]);
+	expect(session.getAllTools().filter((tool) => tool.name === "session")).toHaveLength(1);
+	expect(session.getActiveToolNames()).not.toContain("session_name");
+	await session.prompt("run script");
+	const result = JSON.stringify(session.messages.filter((message) => message.role === "toolResult"));
+	expect(result).toContain("Session name set: Codemode session");
+	expect(result).toContain("Current session name: Codemode session");
+	expect(result).toContain("selectedEntries");
+	expect(events.filter((event) => event.type === "tool_execution_start" && event.toolName === "session" && event.parentToolCallId === "script")).toHaveLength(3);
+	const declared = contexts[0].messages.flatMap((message: any) => message.role === "system" ? message.toolsAdded ?? [] : []);
+	expect(declared.filter((tool: any) => tool.name === "session")).toHaveLength(1);
 });
 
 test("nested calls respect blockers and cannot reach inactive direct tools", async () => {

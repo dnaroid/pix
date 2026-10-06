@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { isSessionRecoveryCall } from "../session/actions.js";
 
 import { contextGatewayReadIdentity } from "./telemetry.js";
 import type { ContextGatewayObservation } from "./types.js";
@@ -177,9 +178,9 @@ function assistantUsage(message: AssistantMessageLike): ContextGatewayProviderCo
 	};
 }
 
-function retrievalKindForToolName(toolName: string): ContextGatewayRetrievalKind | undefined {
+function retrievalKindForToolCall(toolName: string, input: unknown): ContextGatewayRetrievalKind | undefined {
 	if (toolName === "artifact_read" || toolName === "artifact_search") return "artifact";
-	if (["session_overview", "session_read_section", "session_search", "session_recovery_context"].includes(toolName)) {
+	if (isSessionRecoveryCall(toolName, input)) {
 		return "session-recovery";
 	}
 	return undefined;
@@ -262,7 +263,7 @@ export class ContextGatewayEfficiencyTracker {
 	recordToolCall(event: ToolCallLike): ContextGatewayEfficiencyToolCall | undefined {
 		if (typeof event.toolCallId !== "string" || typeof event.toolName !== "string") return undefined;
 		const toolName = event.toolName.trim().toLowerCase();
-		let retrievalKind = retrievalKindForToolName(toolName);
+		let retrievalKind = retrievalKindForToolCall(toolName, event.input);
 		if (toolName === "read") {
 			const identity = contextGatewayReadIdentity(event.input);
 			if (identity.source && this.artifactReadSources.has(identity.source)) {

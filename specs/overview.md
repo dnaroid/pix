@@ -143,7 +143,7 @@ not duplicate those; IDX document retrieval can find them independently.
   loses that content from the summary. `[confirmed by code]`
 - **dcp ↔ antigravity-auth coupling.** `antigravity-auth/constants.ts` exports
   `STATUS_KEY = "dcp:antigravity"`, a status channel keyed by DCP. `[confirmed by code]`
-- **dcp ↔ session-recovery coupling.** `session-recovery` knows the
+- **dcp ↔ session coupling.** The `session` history handlers know the
   `dcp-journal` / `dcp-nudge` custom entry types. `[confirmed by code]`
 - **No production code was changed** to produce or refresh these specs. The
   original screening used read-only sub-agents plus direct file reading.

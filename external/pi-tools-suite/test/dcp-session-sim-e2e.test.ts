@@ -234,7 +234,10 @@ describe("DCP deterministic session-simulation E2E", () => {
       await sim.toolTurn({ toolName: "read", input: { path: "src/other.ts" }, output: "other", label: "fresh-read" });
       expect(sim.report()).toMatchObject({ regretRefetches: 0 });
       await sim.toolTurn({ toolName: "read", input: { path: "src/config.ts" }, output: body("CONFIG_BODY"), label: "regret-reread" });
-      await sim.toolTurn({ toolName: "session_search", input: { query: "CONFIG_BODY" }, output: "match", label: "recovery" });
+      await sim.toolTurn({ toolName: "session", input: { action: "name", name: "Explicit title" }, output: "renamed", label: "rename" });
+      await sim.toolTurn({ toolName: "session", input: { action: "name" }, output: "Explicit title", label: "title-read" });
+      expect(sim.report()).toMatchObject({ regretRefetches: 1, regretRecoveryCalls: 0 });
+      await sim.toolTurn({ toolName: "session", input: { action: "search", query: "CONFIG_BODY" }, output: "match", label: "recovery" });
       expect(sim.report()).toMatchObject({ regretRefetches: 1, regretRecoveryCalls: 1 });
       expect(formatDcpStatistics({ branch: sim.branch() })).toContain(
         "Regret signals: 1 re-runs of compressed/pruned observations; 1 session-recovery calls after compression",

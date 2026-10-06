@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # CI and release verification
 
 ## Scope
@@ -114,4 +119,3 @@ remain true when CI or UI-QA tests change.
 - `npm run test:release`
 - `npm run test:tools-suite` with an isolated `HOME` when reproducing CI defaults locally
 - `git diff --check`
-

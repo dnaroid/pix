@@ -82,8 +82,8 @@ describe("desktop visual regressions", () => {
     expect(runtimeStatusSource).toContain('{contextTitle(false)}</div>');
     expect(runtimeStatusSource).toContain('~{savedTokensFormatter.format(status.dcpTokensSaved)} tokens</span>');
     expect(runtimeStatusSource).toContain("grid-auto-columns: max-content");
-    expect(runtimeStatusSource).toContain("grid-template-columns: 56px 5ch 1ch 4ch 10px");
-    expect(runtimeStatusSource).toContain("grid-template-columns: 32px 5ch 1ch 4ch 10px");
+    expect(runtimeStatusSource).toContain("grid-template-columns: 4ch 56px 5ch 10px");
+    expect(runtimeStatusSource).toContain("grid-template-columns: 4ch 32px 5ch 10px");
     expect(runtimeStatusSource).toContain("column-gap: 8px");
     expect(runtimeStatusSource).toContain("column-gap: 6px");
     expect(runtimeStatusSource).not.toContain("quotaColumn");

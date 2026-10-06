@@ -108,7 +108,7 @@ function planRecoverableWebCompact(details: unknown, toolCallId: string | undefi
 	if (!isRecord(details)) return undefined;
 	const recovery = [
 		"[Context Gateway: over-budget web result compacted for provider context.]",
-		"Full structured source is retained in the raw session toolResult.details and can be recovered with session-recovery.",
+		"Full structured source is retained in the raw session toolResult.details; use session action=search by toolCallId, then action=read to recover it.",
 		toolCallId ? `Recovery key: toolCallId=${toolCallId}` : undefined,
 	].filter((line): line is string => Boolean(line));
 

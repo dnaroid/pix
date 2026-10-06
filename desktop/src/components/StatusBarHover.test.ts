@@ -105,10 +105,10 @@ describe("Status bar click surfaces", () => {
     expect(statusBar.match(/\{#key observer\?\.sessionId\}/g)).toHaveLength(2);
   });
 
-  it("adds a Session limit bar and a per-model token donut around the existing weekly calendar", () => {
+  it("adds hourly and weekly limit bars and a per-model token donut around the existing weekly calendar", () => {
     expect(source("RuntimeStatusBarItems")).toContain("<UsageLimitBars windows={popupLimitWindows}");
     expect(source("RuntimeStatusBarItems")).toContain("<QuotaResetCalendar window={modelUsage.weekly}");
-    expect(source("RuntimeStatusBarItems")).toContain('=> item.label === "H"');
+    expect(source("RuntimeStatusBarItems")).toContain('=> item.label === "H" || item.label === "W"');
     expect(source("RuntimeStatusBarItems")).toContain("<ModelUsageDonut models={donutModels}");
     expect(source("RuntimeStatusBarItems")).toContain("displayModelUsage(status, now)");
     expect(source("RuntimeStatusBarItems")).not.toContain('aria-label="Model quota"');

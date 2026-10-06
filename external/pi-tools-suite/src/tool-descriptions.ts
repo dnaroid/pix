@@ -258,55 +258,19 @@ export const TODO_TOOL_DESCRIPTION: ToolDescription = {
 	],
 };
 
-export const SESSION_NAME_TOOL_DESCRIPTION: ToolDescription = {
-	name: "session_name",
-	label: "Session Name",
-	description: "Show or set the current session name so the agent can retitle the active session without relying on slash-command parsing.",
-	promptSnippet: "Use session_name only for explicit renames, opaque first prompts (such as image-only or task links) once understood, or when the current name no longer fits the active task; ordinary first prompts are auto-named.",
+export const SESSION_TOOL_DESCRIPTION: ToolDescription = {
+	name: "session",
+	label: "Session",
+	description: "Name or inspect the current session. Actions: name (get/set title), overview (map raw history), read (section/entry), search (literal substring), recovery (deterministic task signals). Start lost-context recovery with overview when no reliable search phrase is known. All history actions default to the active branch; scope all includes abandoned branches. Pass only arguments for the selected action.",
+	promptSnippet: "Use session action=name for explicit renames; action=overview first for unknown lost context, then read/search; recovery is a post-overview convenience.",
 	promptGuidelines: [
-		"Pass a short, user-meaningful name to rename; call without a name only to read the current session name.",
+		"Use session action=name only for explicit renames, opaque first prompts once understood, or when the current name no longer fits; ordinary first prompts are auto-named. Pass a short user-meaningful name; omit name to read the title.",
+		"Use session action=overview first when task context was lost or compressed and no reliable search phrase is known; then inspect relevant section IDs with action=read.",
+		"For session action=read, pass section_id or entry_id with the same active/all scope; use nextCursor as cursor to continue long sections or entries instead of restarting.",
+		"Use session action=search when a concrete phrase, path, symbol, tool, or error is known. Search raw session history lexically, not semantically; use nextCursor as cursor to continue matches.",
+		"Use session action=recovery only after overview has mapped the raw history. Treat recentErrors as historical evidence, not unresolved errors; verify ambiguous state with read or search.",
 	],
 };
-
-export const SESSION_RECOVERY_TOOL_DESCRIPTIONS = {
-	overview: {
-		name: "session_overview",
-		label: "Session Overview",
-		description: "Map raw persisted session history into stable, bounded sections. Defaults to the active branch and can include abandoned branches without applying context compaction.",
-		promptSnippet: "Map raw session history into stable sections before drilling into context lost to compaction.",
-		promptGuidelines: [
-			"Use session_overview first when task context was lost or compressed and no reliable search phrase is known; then inspect relevant section IDs.",
-		],
-	},
-	readSection: {
-		name: "session_read_section",
-		label: "Session Read Section",
-		description: "Read bounded raw session history by stable section ID or exact entry ID, with opaque continuation cursors for long sections and long entries.",
-		promptSnippet: "Read one raw-session section or exact entry; continue with the returned cursor when more text is available.",
-		promptGuidelines: [
-			"Pass either section_id or entry_id with the same active/all scope; use next_cursor to continue instead of restarting from the section head.",
-		],
-	},
-	search: {
-		name: "session_search",
-		label: "Session Search",
-		description: "Search raw session messages, summaries, tool results, and serialized tool arguments with a bounded literal substring query.",
-		promptSnippet: "Search raw session history lexically when a concrete phrase, path, symbol, tool, or error is known.",
-		promptGuidelines: [
-			"Use session_search when a concrete query is known; it is lexical rather than semantic, scope defaults to the active branch, and next_cursor continues large match sets.",
-		],
-	},
-	recoveryContext: {
-		name: "session_recovery_context",
-		label: "Session Recovery Context (after overview)",
-		description: "Post-overview convenience tool for summarizing deterministic task signals: user requests, file activity, recent errors, pending tool calls, last action, and compaction references. When the task and search terms are unknown, call session_overview first instead of this tool.",
-		promptSnippet: "Use only after session_overview has mapped the raw history; verify details through section reads or search.",
-		promptGuidelines: [
-			"Do not use session_recovery_context as the first tool when the task and useful search terms are unknown; start with session_overview.",
-			"Use it as a convenience after the overview, but treat recentErrors as historical evidence and verify ambiguous state with session_read_section.",
-		],
-	},
-} satisfies Record<string, ToolDescription>;
 
 export const WEB_SEARCH_TOOL_DESCRIPTIONS = {
 	webSearch: {

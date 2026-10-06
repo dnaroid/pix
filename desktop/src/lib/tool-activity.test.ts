@@ -39,7 +39,24 @@ describe("safe ingestion-time activity inference", () => {
   });
 
   it("ignores commands on unrelated tools", () => {
+    expect(inferToolAction({ name: "session", title: "session", kind: "other", rawInput: { action: "unknown" } })).toBeUndefined();
     expect(inferToolAction({ name: "read", title: "npm test", kind: "read", rawInput: { command: "npm test" } })).toBeUndefined();
+  });
+
+  it.each([
+    [{ action: "name", name: "Short title" }, "Naming session"],
+    [{ action: "name" }, "Reviewing session title"],
+    [{ action: "overview" }, "Reviewing session history"],
+    [{ action: "read", entry_id: "entry" }, "Reviewing session history"],
+    [{ action: "recovery" }, "Reviewing session history"],
+    [{ action: "search", query: "secret" }, "Searching session history"],
+  ])("caches session action %j without rendering raw payloads", (rawInput, action) => {
+    const start = { sessionUpdate: "tool_call", toolCallId: "s", name: "session", title: "session", status: "in_progress", rawInput } as const;
+    const cached = transcriptFromSessionUpdates([start]).items[0] as ToolItem;
+    expect(cached.activityAction).toBe(action);
+    const safe = { ...cached, get rawInput(): unknown { throw new Error("render parsed payload"); } };
+    const live = { sessionId: "s", running: true, ready: true, historyLoading: false, draft: false, controlState: "idle", waitingForInput: false } as const;
+    expect(composerActivity({ items: [safe] }, live)?.action).toBe(action);
   });
 
   it("caches at ingestion, retains on status updates, invalidates on argument or name updates, and renders without payload access", () => {

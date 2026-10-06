@@ -1,5 +1,6 @@
 import type { EvalCase, EvalRunResult } from "./harness/types.js";
 import { DECISION_POLICY_CASES } from "./decision-policy.js";
+import { SESSION_EVAL_CASES } from "./session-cases.js";
 
 const DIRECT_TOOLS = ["read", "Read", "grep", "Grep", "find", "Glob", "bash", "Bash", "shell", "shell_command"];
 const MUTATION_TOOLS = ["edit", "Edit", "write", "Write", "apply_patch", "ast_apply"];
@@ -8,6 +9,7 @@ const REPO_SEMANTIC_TOOLS = ["repo_architecture", "repo_search", "repo_context",
 
 export const EVAL_CASES: EvalCase[] = [
 	...DECISION_POLICY_CASES,
+	...SESSION_EVAL_CASES,
 	{
 		id: "tool.semantic-repo-search",
 		category: "tool-selection",
@@ -86,14 +88,6 @@ export const EVAL_CASES: EvalCase[] = [
 		prompt: "Before exploring files, initialize one tracked four-stage plan for this non-trivial change: investigate checkout behavior; implement the fix; run focused and full verification; prepare the final user-facing report. Mark exactly one first stage in progress. Stop after creating the plan.",
 		assert: { requiredTools: ["todo"], forbiddenTools: NO_ORCHESTRATION, maxToolCalls: 2 },
 		validate: validateTodoPlan,
-	},
-	{
-		id: "tool.session-recovery-overview",
-		category: "tool-selection",
-		description: "Lost context without a search phrase should begin with session_overview.",
-		fixture: "demo",
-		prompt: "My working context was aggressively compressed and I no longer remember the task. I have no reliable phrase to search for. Use the appropriate raw-session recovery tool first and stop immediately after that first tool call.",
-		assert: { firstTool: "session_overview", maxToolCalls: 1 },
 	},
 	{
 		id: "quality.two-hypotheses-before-fix",

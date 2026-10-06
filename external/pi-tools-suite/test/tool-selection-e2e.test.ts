@@ -682,10 +682,12 @@ describe("repo-aware tool-selection live e2e", () => {
 		});
 	}, E2E_TIMEOUT_MS);
 
-	e2eTest("starts unknown-query context recovery with session_overview", async () => {
+	e2eTest("starts unknown-query context recovery with session action=overview", async () => {
 		await withFixtureProject({ indexed: false }, async (projectDir) => {
 			const result = await runPiToolSelectionE2E(projectDir, SESSION_RECOVERY_PROMPT, "session overview recovery selection");
-			expect(toolCallNames(result.events)[0]).toBe("session_overview");
+			expect(toolCallNames(result.events)[0]).toBe("session");
+			const call = result.events.find((event) => event.type === "tool_call");
+			expect((call?.input as { action?: string })?.action).toBe("overview");
 		});
 	}, E2E_TIMEOUT_MS);
 

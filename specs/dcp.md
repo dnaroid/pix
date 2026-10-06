@@ -23,7 +23,7 @@ Active implemented contract.
 DCP keeps a long-running agent inside its context budget without rewriting the
 raw conversation. It exposes stable `mNNN`/`bN` addressing and the `compress`
 tool, can apply exact continuation summaries, and has a bounded emergency path.
-Historical details are recovered through `session-recovery`, not by expanding a
+Historical details are recovered through `session` history actions, not by expanding a
 compressed block back into the provider prefix.
 
 Only sessions created by the journal implementation are supported. There is no
@@ -387,7 +387,7 @@ work must remain usable in the working context.
 
 ## Recovery instead of decompression
 
-Raw session history remains unchanged by DCP. `session-recovery` can navigate it
+Raw session history remains unchanged by DCP. `session` history actions can navigate it
 with bounded overview/search pages, read a known raw `entry_id` directly, and
 continue long entry bodies using opaque cursors. DCP control custom entries are
 excluded from archive output.

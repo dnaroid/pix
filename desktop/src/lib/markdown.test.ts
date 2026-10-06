@@ -398,9 +398,9 @@ describe("renderMarkdown", () => {
   });
 
   it("renders escaped underscores in inventory identifiers literally", () => {
-    const html = renderMarkdown("Tools (active): repo\\_architecture, session\\_read\\_section");
+    const html = renderMarkdown("Tools (active): repo\\_architecture, repo\\_search");
 
-    expect(html).toContain("repo_architecture, session_read_section");
+    expect(html).toContain("repo_architecture, repo_search");
     expect(html).not.toContain("<em>");
   });
 

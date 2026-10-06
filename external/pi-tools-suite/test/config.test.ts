@@ -22,6 +22,9 @@ describe("pi-tools-suite config", () => {
 		expect(PI_TOOLS_SUITE_MODULE_CATALOG.every((module) => module.description.trim().length > 0)).toBe(true);
 		expect(PI_TOOLS_SUITE_MODULE_CATALOG.every((module) => existsSync(new URL(`../src/${module.name}/index.ts`, import.meta.url)))).toBe(true);
 		expect(PI_TOOLS_SUITE_MODULE_CATALOG.find((module) => module.name === "question")?.cleanPiOnly).toBe(true);
+		expect(PI_TOOLS_SUITE_MODULE_CATALOG.find((module) => module.name === "session")?.defaultEnabled).toBe(true);
+		expect(REGISTERED_MODULES.map((module) => module.name)).not.toContain("session-name");
+		expect(REGISTERED_MODULES.map((module) => module.name)).not.toContain("session-recovery");
 		expect(PI_TOOLS_SUITE_MODULE_CATALOG.filter((module) => !module.defaultEnabled).map((module) => module.name).sort())
 			.toEqual(["credential-firewall"]);
 	});

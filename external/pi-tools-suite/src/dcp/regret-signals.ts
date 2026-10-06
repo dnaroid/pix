@@ -1,8 +1,7 @@
 import type { DcpConfig } from "./config.js";
 import { createInputFingerprint, type DcpState, type ToolRecord } from "./state.js";
 import { observationKey } from "./stale-observations.js";
-
-const RECOVERY_TOOLS = new Set(["session_search", "session_read_section", "session_overview", "session_recovery_context"]);
+import { isSessionRecoveryCall } from "../session/actions.js";
 
 export type CompressionRegretKind = "refetch" | "recovery";
 
@@ -59,7 +58,7 @@ export class CompressionRegretTracker {
     state: DcpState,
     config: DcpConfig,
   ): CompressionRegretKind | undefined {
-    if (RECOVERY_TOOLS.has(toolName)) {
+    if (isSessionRecoveryCall(toolName, input)) {
       return state.compressionBlocks.length > 0 || state.prunedToolIds.size > 0 ? "recovery" : undefined;
     }
     if (this.hidden.size === 0) return undefined;

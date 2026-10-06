@@ -124,7 +124,7 @@ describe("DCP direct live summary prompt eval", () => {
 				systemPrompt: `${registeredCompressContract()}\n\nChoose compression boundaries using only this contract. Return one JSON object and no prose.`,
 				messages: [{ role: "user", timestamp: 1, content: [{ type: "text", text: [
 					"Return exactly: {\"startCut\":{\"startId\":\"...\",\"endId\":\"...\"},\"endCut\":{\"startId\":\"...\",\"endId\":\"...\"}}.",
-					"startCut: m004 is one assistant message that calls todo, session_overview, and read in parallel; m005, m006, m007 are those three results. Older stale evidence of interest starts at m006 and continues through m058. Select the protocol-safe compression range that covers that evidence.",
+					"startCut: m004 is one assistant message that calls todo, session action=overview, and read in parallel; m005, m006, m007 are those three results. Older stale evidence of interest starts at m006 and continues through m058. Select the protocol-safe compression range that covers that evidence.",
 					"endCut: stale history starts at m010. m020 is one assistant message that calls read A and read B in parallel; m021 and m022 are those two results. The desired stale slice reaches m020. Select the protocol-safe compression range that covers that slice.",
 				].join("\n") }] }],
 			}, { apiKey: auth.apiKey, headers: auth.headers, env: auth.env, signal: AbortSignal.timeout(60_000), maxTokens: 1024 } as any);

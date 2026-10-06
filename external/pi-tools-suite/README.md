@@ -19,9 +19,8 @@ This package keeps shared Pi tools as ordinary source folders under `src/` and r
 - `src/async-subagents` — `subagents` tool and sub-agent slash commands, including oh-my-openagent-style `/ultrawork` (`/ulw`) and `/hyperplan` orchestration prompts; agent roles are Markdown files under `src/async-subagents/agents/*.md` plus project `.pi/agents/*.md`, and each role owns its ordered model candidate list (or selects from the suite-level `frontierModels` list) and optional parent-vendor policy; includes a cross-vendor `oracle` profile for strong second opinions and explicitly requested read-only `delivery-review` readiness assessments; enforces a 30-minute per-agent execution timeout, project-wide concurrency queueing, optional per-agent retry/backoff, and `result.json` structured metadata/chaining fields next to raw `result.md`; stores project-local run files and a registry under `.pi/subagents/` so result/status collection can recover after compaction or reload while the main session remains alive; clean Pi TUI sessions additionally get a live native widget for queued/running/retrying agents, while Pix keeps its renderer-owned presentation
 - `src/lsp` — shared LSP diagnostics hook/library that enriches mutating tool results with diagnostics and shuts down language servers on session shutdown
 - `src/comment-checker` — AI-slop comment guard that listens to the `tool_result` event for `write` / `edit` / `apply_patch` mutations, extracts net-new code comment lines, classifies them (filler phrasing, restating code, decorative separators, generic paraphrasing, or — under aggressive strictness — any non-valuable comment), and appends a short nudge to the tool result so the agent removes unnecessary comments on its next turn; TODO/FIXME, license headers, docstrings, pragmas, linter directives, shebangs, and decorators are never flagged; language-agnostic across `//` / `/* */` / `#` / `--` / `<!-- -->` / triple-quote comment styles; per-session deduplication (at most one nudge per 30 s) prevents fix/remark loops; configured via the `commentChecker` section (`enabled`, `strictness`: `conservative` | `balanced` | `aggressive`, default `balanced`) or `PI_COMMENT_CHECKER_ENABLED` / `PI_COMMENT_CHECKER_STRICTNESS`
-- `src/session-name` — `session_name` tool for reading or setting the current session title directly from tool calls, without relying on slash-command parsing
-- `src/session-recovery` — branch- and compaction-aware `session_overview`, `session_read_section`, `session_search`, and `session_recovery_context` tools for bounded recovery from Pi's raw append-only session history
-- `src/context-gateway` — off/observe/enforce result shaping; enforce keeps safe test/build compacts and bounds over-budget structured `web_search` / `web_fetch` provider content while retaining the complete producer details in raw session history for `session-recovery`; active modes also keep a privacy-safe rotated JSONL efficiency log with gross avoided context, recovery/artifact-read tax, conservative net estimates, and finalized provider usage
+- `src/session` — one `session` tool for naming and bounded raw-history recovery through `action: name | overview | read | search | recovery`; no old tool aliases
+- `src/context-gateway` — off/observe/enforce result shaping; enforce keeps safe test/build compacts and bounds over-budget structured `web_search` / `web_fetch` provider content while retaining the complete producer details in raw session history for `session` history actions; active modes also keep a privacy-safe rotated JSONL efficiency log with gross avoided context, recovery/artifact-read tax, conservative net estimates, and finalized provider usage
 - `src/truncation-metadata-normalizer` — default-on metadata cleanup for SDK-truncated `Read` / shell / `ast_grep` results; removes only a proven duplicate `details.truncation.content` copy while preserving visible content and structural truncation metadata; can be disabled through the normal module config
 - `src/repo-discovery` — `/idx-init`, `/idx-update`, and idx-backed `repo_context` / `repo_audit` / `repo_architecture` / `repo_structure` / `repo_ast` / `repo_search` / `repo_explain` / `repo_deps`; repo tools and repo-aware mutation guidance register only when the launch project has `.indexer-cli` **and** an executable `idx` is available on `PATH`
 - `src/antigravity-auth` — `antigravity` custom provider with Google Antigravity OAuth login, startup account list, auth.json-only runtime account loading, `/antigravity-add-account` OAuth append into rotation, `/antigravity-account` status display, account rotation/failover, model registration with live route mapping (current Antigravity catalog: Gemini 3.5/3.6/3.7/3.8 Flash, Gemini 3.1 Pro, Claude Sonnet 4.6 Thinking, Claude Opus 4.6 Thinking, GPT-OSS 120B Medium, plus legacy Antigravity aliases and Gemini CLI mirrors), and streaming through the Cloud Code Assist unified gateway
@@ -37,7 +36,7 @@ This package keeps shared Pi tools as ordinary source folders under `src/` and r
 
 `index.ts` is intentionally only a thin auto-discovery shim that re-exports `src/index.ts`. There is no `pi.extensions` manifest here, so local Pi auto-discovery loads the suite once via `~/.pi/agent/extensions/pi-tools-suite/index.ts` and does not double-register tools. `src/module-catalog.ts` is the ordered single source of truth for bundled module names, defaults, descriptions, and host policy; runtime registration derives each conventional `src/<module-name>/index.ts` loader from that catalog, and Desktop Settings consumes the same metadata without importing runtime modules.
 
-Registration order is preserved by the ordered catalog in `src/module-catalog.ts`: coding-discipline, ast-grep, async-subagents, lsp, comment-checker, session-name, session-recovery, repo-discovery command/tool gate, antigravity-auth provider, local claude-code-provider, OpenCode import, clean-Pi-only question, todo, model-tools, usage, web-search, context-gateway, truncation-metadata-normalizer, dcp, prompt-commands, resource-registry, credential-firewall, then codex-reasoning-fix. Tool metadata and active model-specific tool sets have two modes: standard and repo-aware. Repo-aware mode requires both project `.indexer-cli` state and an executable `idx`; when enabled, `repo_*` tools stay active ahead of overlapping lower-level aliases. If `idx` is unavailable, the suite falls back to ordinary Read/Grep/LSP/sub-agent guidance and does **not** implicitly install, initialize, or create index state. `/idx-init` is the explicit setup/repair path and should be run only with user permission. Independently of the catalog, `src/index.ts` registers an unconditional guard (see [provider-web-search-policy](../../specs/provider-web-search-policy.md)) that removes and blocks the Claude provider's metered `pi_claude_code_provider_web_search` tool in parent sessions while keeping the provider itself and the suite's own `web_search` available. Sub-agents exclude that tool through their separate tool guard.
+Registration order is preserved by the ordered catalog in `src/module-catalog.ts`: coding-discipline, ast-grep, async-subagents, lsp, comment-checker, session, repo-discovery command/tool gate, antigravity-auth provider, local claude-code-provider, OpenCode import, clean-Pi-only question, todo, model-tools, usage, web-search, context-gateway, truncation-metadata-normalizer, dcp, prompt-commands, resource-registry, credential-firewall, then codex-reasoning-fix. Tool metadata and active model-specific tool sets have two modes: standard and repo-aware. Repo-aware mode requires both project `.indexer-cli` state and an executable `idx`; when enabled, `repo_*` tools stay active ahead of overlapping lower-level aliases. If `idx` is unavailable, the suite falls back to ordinary Read/Grep/LSP/sub-agent guidance and does **not** implicitly install, initialize, or create index state. `/idx-init` is the explicit setup/repair path and should be run only with user permission. Independently of the catalog, `src/index.ts` registers an unconditional guard (see [provider-web-search-policy](../../specs/provider-web-search-policy.md)) that removes and blocks the Claude provider's metered `pi_claude_code_provider_web_search` tool in parent sessions while keeping the provider itself and the suite's own `web_search` available. Sub-agents exclude that tool through their separate tool guard.
 
 The [Codex reasoning replay spec](../../specs/codex-reasoning-fix.md) owns the
 last suite hook's narrow wire-only contract, evidence, and known cached
@@ -201,15 +200,17 @@ mutations themselves do not emit knowledge reminders.
 
 ## Session recovery
 
-When context compaction obscures the task, start with `session_overview`, inspect a
-relevant ID with `session_read_section`, and use `session_search` once a concrete
-phrase, path, symbol, tool, or error is known. `session_recovery_context` is the
+When context compaction obscures the task, start with `session action=overview`, inspect a
+relevant ID with `session action=read`, and use `session action=search` once a concrete
+phrase, path, symbol, tool, or error is known. `session action=recovery` is the
 compact convenience view for original/latest user instructions, file evidence,
-recent errors, pending calls, and the last meaningful action. All four tools read
+recent errors, pending calls, and the last meaningful action. All four history actions read
 through Pi's active `SessionManager`; they do not accept arbitrary session paths.
 They default to the active branch, while `scope: "all"` includes abandoned branches.
 See [`docs/session-recovery.md`](docs/session-recovery.md) for the full contract and
-limits.
+limits. `session action=name` reads or explicitly sets the current title. The
+default-on `session` module owns all five actions; old `session-name` and
+`session-recovery` config keys are not migrated and do not control it.
 
 ## Disabling modules
 
@@ -1082,8 +1083,8 @@ When Context Gateway is in `enforce` mode, an over-budget `web_search` or
 `web_fetch` result with complete structured producer details is delivered to the
 next model as a bounded `web-recoverable-compact` view. The original structured
 details stay in the raw session tool result (they are not serialized into the
-provider request) and can be found by `toolCallId` with `session_search`, then
-read or paged with `session_read_section`. Unsupported web result shapes remain
+provider request) and can be found by `toolCallId` with `session action=search`, then
+read or paged with `session action=read`. Unsupported web result shapes remain
 passthrough instead of being irreversibly sliced.
 
 The recommended interactive setup is:
@@ -1137,6 +1138,7 @@ pi-tools-suite/
     comment-checker/
     session-name/
     session-recovery/
+    session/
     repo-discovery/
     antigravity-auth/
     opencode-import/

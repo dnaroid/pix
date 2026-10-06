@@ -32,7 +32,7 @@
     "test:prompt-evals:async": "PROMPT_EVAL_E2E=1 bun test --concurrent --max-concurrency=5 test/async-subagents/selection-e2e.test.ts test/prompt-evals/async-routing-e2e.test.ts",
     "test:prompt-evals:dcp": "PROMPT_EVAL_E2E=1 bun test --concurrent --max-concurrency=5 test/prompt-evals/dcp-summary-e2e.test.ts test/prompt-evals/dcp-reminder-e2e.test.ts",
     "test:prompt-evals": "PROMPT_EVAL_E2E=1 bun test --concurrent --max-concurrency=5 test/tool-selection-e2e.test.ts test/async-subagents/selection-e2e.test.ts test/prompt-evals",
-    "test:evals:contracts": "bun test test/evals/extension-contracts.test.ts test/evals/harness.test.ts test/evals/decision-policy.test.ts",
+    "test:evals:contracts": "bun test test/evals/extension-contracts.test.ts test/evals/harness.test.ts test/evals/decision-policy.test.ts test/evals/session-cases.test.ts",
     "test:evals:live": "PI_TOOLS_SUITE_EVALS_LIVE=1 bun test --concurrent --max-concurrency=4 test/evals/live-evals.test.ts",
     "evals": "npm run test:evals:contracts && bun test test/evals/live-evals.test.ts",
     "evals:report": "bun test/evals/run-evals.ts",
@@ -57,9 +57,9 @@
     "vscode-languageserver-protocol": "^3.18.3"
   },
   "peerDependencies": {
-    "@earendil-works/pi-ai": "1.0.3",
-    "@earendil-works/pi-coding-agent": "1.0.3",
-    "@earendil-works/pi-tui": "1.0.3",
+    "@earendil-works/pi-ai": "1.0.4",
+    "@earendil-works/pi-coding-agent": "1.0.4",
+    "@earendil-works/pi-tui": "1.0.4",
     "typebox": "*"
   },
   "devDependencies": {

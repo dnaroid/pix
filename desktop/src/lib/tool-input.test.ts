@@ -15,7 +15,7 @@ describe("expanded tool inputs", () => {
   it.each(["codemode", "shell", "bash", "repo_context", "repo_search", "repo_audit", "ast_grep", "ast_apply", "subagents", "brainstorm", "web_search", "question"])("selects %s", (name) => {
     expect(hasToolInput(source(name, { prompt: "full input" }))).toBe(true);
   });
-  it.each(["apply_patch", "read", "web_fetch", "todo", "session_search", "unknown"])("leaves %s unchanged", (name) => {
+  it.each(["apply_patch", "read", "web_fetch", "todo", "session", "unknown"])("leaves %s unchanged", (name) => {
     expect(toolInputText(source(name, { input: "text" }))).toBeUndefined();
   });
   it("handles namespaced and legacy names without inventing missing input", () => {

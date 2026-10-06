@@ -1,8 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { StringEnum } from "@earendil-works/pi-ai";
-import { Type } from "typebox";
-
-import { SESSION_RECOVERY_TOOL_DESCRIPTIONS } from "../tool-descriptions.js";
+import { SESSION_LIMITS } from "../session/parameters.js";
 
 type Scope = "active" | "all";
 type UnknownRecord = Record<string, unknown>;
@@ -48,24 +44,20 @@ type RecoveryCursor =
 	| { version: 1; kind: "search"; scope: Scope; query: string; caseSensitive: boolean; afterEntryId: string }
 	| { version: 1; kind: "read"; scope: Scope; sectionId?: string; entryId: string; offset: number };
 
-const SCOPE_SCHEMA = StringEnum(["active", "all"] as const, {
-	description: "Raw session scope. Defaults to the active root-to-leaf branch; all includes abandoned branches.",
-});
-
 const MAX_OUTPUT_CHARS = 30_000;
 const DEFAULT_BODY_CHARS = 2_000;
-const MAX_BODY_CHARS = 8_000;
+const MAX_BODY_CHARS = SESSION_LIMITS.bodyChars;
 const DEFAULT_SECTION_ENTRIES = 20;
-const MAX_SECTION_ENTRIES = 50;
+const MAX_SECTION_ENTRIES = SESSION_LIMITS.entries;
 const DEFAULT_SEARCH_RESULTS = 20;
-const MAX_SEARCH_RESULTS = 50;
+const MAX_SEARCH_RESULTS = SESSION_LIMITS.matches;
 const DEFAULT_OVERVIEW_SECTIONS = 20;
-const MAX_OVERVIEW_SECTIONS = 100;
+const MAX_OVERVIEW_SECTIONS = SESSION_LIMITS.sections;
 const DEFAULT_RECENT_ERRORS = 5;
-const MAX_RECENT_ERRORS = 20;
+const MAX_RECENT_ERRORS = SESSION_LIMITS.errors;
 const MAX_RECOVERY_FILES = 200;
 const MAX_PENDING_TOOL_CALLS = 50;
-const MAX_SEARCH_QUERY_CHARS = 500;
+const MAX_SEARCH_QUERY_CHARS = SESSION_LIMITS.queryChars;
 const CURSOR_VERSION = 1;
 const DCP_CONTROL_CUSTOM_TYPES = new Set(["dcp-journal", "dcp-nudge"]);
 
@@ -517,321 +509,278 @@ function meaningfulAction(entry: EntryLike, excludedToolCallId: string): Unknown
 	};
 }
 
-export default function sessionRecovery(pi: ExtensionAPI): void {
-	pi.registerTool({
-		...SESSION_RECOVERY_TOOL_DESCRIPTIONS.overview,
-		parameters: Type.Object({
-			scope: Type.Optional(SCOPE_SCHEMA),
-			cursor: Type.Optional(Type.String({ description: "Opaque continuation cursor returned by a previous session_overview call.", maxLength: 2_000 })),
-			max_sections: Type.Optional(Type.Number({
-				description: "Maximum consecutive section summaries to return.",
-				minimum: 1,
-				maximum: MAX_OVERVIEW_SECTIONS,
-			})),
-		}, { additionalProperties: false }),
-		async execute(_toolCallId: string, params: { scope?: Scope; cursor?: string; max_sections?: number }, _signal: AbortSignal, _onUpdate: unknown, ctx: unknown) {
-			const scope = scopeFrom(params.scope);
-			const cursor = params.cursor ? decodeCursor(params.cursor) : undefined;
-			if (params.cursor && (!cursor || cursor.kind !== "overview" || cursor.scope !== scope)) {
-				return contentResult("Invalid or stale session_overview cursor for this scope.", { scope, cursorValid: false });
-			}
-			const manager = sessionManagerFrom(ctx);
-			const entries = entriesFor(manager, scope);
-			if (entries.length === 0) return emptyResult(scope);
+export function createRecoveryHandlers() {
+	const overview = async (_toolCallId: string, params: { scope?: Scope; cursor?: string; max_sections?: number }, _signal: AbortSignal | undefined, _onUpdate: unknown, ctx: unknown) => {
+		const scope = scopeFrom(params.scope);
+		const cursor = params.cursor ? decodeCursor(params.cursor) : undefined;
+		if (params.cursor && (!cursor || cursor.kind !== "overview" || cursor.scope !== scope)) {
+			return contentResult("Invalid or stale session action=overview cursor for this scope.", { scope, cursorValid: false });
+		}
+		const manager = sessionManagerFrom(ctx);
+		const entries = entriesFor(manager, scope);
+		if (entries.length === 0) return emptyResult(scope);
 
-			const activeEntries = entriesFor(manager, "active");
-			const allEntries = entriesFor(manager, "all");
-			const sections = buildSections(entries);
-			const maximum = clampInteger(params.max_sections, DEFAULT_OVERVIEW_SECTIONS, 1, MAX_OVERVIEW_SECTIONS);
-			let startIndex = 0;
-			if (cursor?.kind === "overview") {
-				const index = sections.findIndex((section) => section.id === cursor.afterSectionId);
-				if (index < 0) {
-					return contentResult("The session changed and the overview cursor no longer resolves on this branch.", { scope, cursorValid: false });
-				}
-				startIndex = index + 1;
+		const activeEntries = entriesFor(manager, "active");
+		const allEntries = entriesFor(manager, "all");
+		const sections = buildSections(entries);
+		const maximum = clampInteger(params.max_sections, DEFAULT_OVERVIEW_SECTIONS, 1, MAX_OVERVIEW_SECTIONS);
+		let startIndex = 0;
+		if (cursor?.kind === "overview") {
+			const index = sections.findIndex((section) => section.id === cursor.afterSectionId);
+			if (index < 0) {
+				return contentResult("The session changed and the overview cursor no longer resolves on this branch.", { scope, cursorValid: false });
 			}
-			const selected = sections.slice(startIndex, startIndex + maximum);
-			const hasMore = startIndex + selected.length < sections.length;
-			const nextCursor = hasMore && selected.length > 0
-				? encodeCursor({ version: CURSOR_VERSION, kind: "overview", scope, afterSectionId: selected[selected.length - 1]!.id })
-				: undefined;
-			const allLeaves = leafCount(allEntries);
-			const header = callSafely<unknown>(() => manager?.getHeader?.(), undefined);
-			const sessionId = callSafely<unknown>(() => manager?.getSessionId?.(), undefined);
-			const sessionName = callSafely<unknown>(() => manager?.getSessionName?.(), undefined);
-			const sessionFile = callSafely<unknown>(() => manager?.getSessionFile?.(), undefined);
-			const payload = {
-				scope,
-				session: {
-					id: typeof sessionId === "string" ? sessionId : null,
-					name: typeof sessionName === "string" ? sessionName : null,
-					persisted: typeof sessionFile === "string" && sessionFile.length > 0,
-					hasParentSession: isRecord(header) && header.parentSession != null,
-				},
-				counts: {
-					selectedEntries: entries.length,
-					activeEntries: activeEntries.length,
-					allEntries: allEntries.length,
-					sections: sections.length,
-					compactions: entries.filter((entry) => entry.type === "compaction").length,
-					leaves: allLeaves,
-					otherBranches: Math.max(0, allLeaves - (activeEntries.length > 0 ? 1 : 0)),
-				},
-				sections: selected.map(sectionSummary),
-				hasMore,
-				nextCursor: nextCursor ?? null,
-			};
-			return contentResult(payload, { scope, entryCount: entries.length, sectionCount: sections.length, returnedSections: selected.length, hasMore, nextCursor });
-		},
-	});
+			startIndex = index + 1;
+		}
+		const selected = sections.slice(startIndex, startIndex + maximum);
+		const hasMore = startIndex + selected.length < sections.length;
+		const nextCursor = hasMore && selected.length > 0
+			? encodeCursor({ version: CURSOR_VERSION, kind: "overview", scope, afterSectionId: selected[selected.length - 1]!.id })
+			: undefined;
+		const allLeaves = leafCount(allEntries);
+		const header = callSafely<unknown>(() => manager?.getHeader?.(), undefined);
+		const sessionId = callSafely<unknown>(() => manager?.getSessionId?.(), undefined);
+		const sessionName = callSafely<unknown>(() => manager?.getSessionName?.(), undefined);
+		const sessionFile = callSafely<unknown>(() => manager?.getSessionFile?.(), undefined);
+		const payload = {
+			scope,
+			session: {
+				id: typeof sessionId === "string" ? sessionId : null,
+				name: typeof sessionName === "string" ? sessionName : null,
+				persisted: typeof sessionFile === "string" && sessionFile.length > 0,
+				hasParentSession: isRecord(header) && header.parentSession != null,
+			},
+			counts: {
+				selectedEntries: entries.length,
+				activeEntries: activeEntries.length,
+				allEntries: allEntries.length,
+				sections: sections.length,
+				compactions: entries.filter((entry) => entry.type === "compaction").length,
+				leaves: allLeaves,
+				otherBranches: Math.max(0, allLeaves - (activeEntries.length > 0 ? 1 : 0)),
+			},
+			sections: selected.map(sectionSummary),
+			hasMore,
+			nextCursor: nextCursor ?? null,
+		};
+		return contentResult(payload, { scope, entryCount: entries.length, sectionCount: sections.length, returnedSections: selected.length, hasMore, nextCursor });
+	};
 
-	pi.registerTool({
-		...SESSION_RECOVERY_TOOL_DESCRIPTIONS.readSection,
-		parameters: Type.Object({
-			section_id: Type.Optional(Type.String({ description: "Stable section ID returned by session_overview or session_search.", maxLength: 200 })),
-			entry_id: Type.Optional(Type.String({ description: "Read one exact raw session entry by ID without scanning from the start of its section.", maxLength: 200 })),
-			cursor: Type.Optional(Type.String({ description: "Opaque continuation cursor returned by a previous session_read_section call.", maxLength: 2_000 })),
-			scope: Type.Optional(SCOPE_SCHEMA),
-			max_entries: Type.Optional(Type.Number({ description: "Maximum entries to render from the section.", minimum: 1, maximum: MAX_SECTION_ENTRIES })),
-			max_body_chars: Type.Optional(Type.Number({ description: "Maximum rendered characters per entry page. Use the returned cursor to continue long entries.", minimum: 100, maximum: MAX_BODY_CHARS })),
-		}, { additionalProperties: false }),
-		async execute(_toolCallId: string, params: { section_id?: string; entry_id?: string; cursor?: string; scope?: Scope; max_entries?: number; max_body_chars?: number }, _signal: AbortSignal, _onUpdate: unknown, ctx: unknown) {
-			const scope = scopeFrom(params.scope);
-			if (!params.cursor && Boolean(params.section_id) === Boolean(params.entry_id)) {
-				return contentResult("Pass exactly one of section_id or entry_id, or continue with cursor.", { scope, found: false });
-			}
-			const cursor = params.cursor ? decodeCursor(params.cursor) : undefined;
-			if (params.cursor && (!cursor || cursor.kind !== "read" || cursor.scope !== scope)) {
-				return contentResult("Invalid or stale session_read_section cursor for this scope.", { scope, cursorValid: false, sourceAvailable: false });
-			}
-			const entries = entriesFor(sessionManagerFrom(ctx), scope);
-			if (entries.length === 0) return emptyResult(scope);
-			const sections = buildSections(entries);
-			const requestedSectionId = cursor?.kind === "read" ? cursor.sectionId : params.section_id;
-			const requestedEntryId = cursor?.kind === "read" ? cursor.entryId : params.entry_id;
-			const offset = cursor?.kind === "read" ? cursor.offset : 0;
-			const section = requestedSectionId ? sections.find((candidate) => candidate.id === requestedSectionId) : undefined;
-			if (requestedSectionId && !section) {
-				return contentResult(
-					`Section ${requestedSectionId} was not found in scope ${scope}. Run session_overview with the same scope to refresh section IDs.`,
-					{ scope, sectionId: requestedSectionId, found: false, sourceAvailable: false },
-				);
-			}
-
-			const maximum = clampInteger(params.max_entries, DEFAULT_SECTION_ENTRIES, 1, MAX_SECTION_ENTRIES);
-			const bodyChars = clampInteger(params.max_body_chars, DEFAULT_BODY_CHARS, 100, MAX_BODY_CHARS);
-			const candidates = section ? section.entries : entries;
-			let startIndex = requestedEntryId ? candidates.findIndex((entry) => entry.id === requestedEntryId) : 0;
-			if (startIndex < 0) {
-				return contentResult(
-					`Entry ${requestedEntryId} was not found in scope ${scope}${section ? ` within ${section.id}` : ""}.`,
-					{ scope, sectionId: section?.id, entryId: requestedEntryId, found: false, sourceAvailable: false },
-				);
-			}
-			const rendered: string[] = [];
-			let renderedChars = 0;
-			let nextCursor: string | undefined;
-			let renderedCount = 0;
-			for (let index = startIndex; index < candidates.length && renderedCount < maximum; index += 1) {
-				const entry = candidates[index]!;
-				const entryOffset = index === startIndex ? offset : 0;
-				const chunk = readEntryChunk(entry, entryOffset, bodyChars);
-				const heading = entryOffset > 0 ? `[${entry.id}] continuation @${entryOffset}` : undefined;
-				const next = [heading, chunk.text].filter(Boolean).join("\n");
-				if (renderedChars + next.length + 2 > MAX_OUTPUT_CHARS - 1_000) break;
-				rendered.push(next);
-				renderedChars += next.length + 2;
-				renderedCount += 1;
-				if (chunk.nextOffset !== undefined) {
-					nextCursor = encodeCursor({ version: CURSOR_VERSION, kind: "read", scope, sectionId: section?.id, entryId: entry.id, offset: chunk.nextOffset });
-					break;
-				}
-				const nextEntry = candidates[index + 1];
-				if (nextEntry && (renderedCount >= maximum || renderedChars >= MAX_OUTPUT_CHARS - 1_000)) {
-					nextCursor = encodeCursor({ version: CURSOR_VERSION, kind: "read", scope, sectionId: section?.id, entryId: nextEntry.id, offset: 0 });
-					break;
-				}
-			}
-			if (!nextCursor) {
-				const lastRendered = renderedCount > 0 ? startIndex + renderedCount - 1 : startIndex - 1;
-				const nextEntry = candidates[lastRendered + 1];
-				if (nextEntry) nextCursor = encodeCursor({ version: CURSOR_VERSION, kind: "read", scope, sectionId: section?.id, entryId: nextEntry.id, offset: 0 });
-			}
-			const hasMore = nextCursor !== undefined;
-			const title = section ? `Section ${section.id}: ${section.label}` : `Entry ${requestedEntryId}`;
+	const readSection = async (_toolCallId: string, params: { section_id?: string; entry_id?: string; cursor?: string; scope?: Scope; max_entries?: number; max_body_chars?: number }, _signal: AbortSignal | undefined, _onUpdate: unknown, ctx: unknown) => {
+		const scope = scopeFrom(params.scope);
+		if (!params.cursor && Boolean(params.section_id) === Boolean(params.entry_id)) {
+			return contentResult("Pass exactly one of section_id or entry_id, or continue with cursor.", { scope, found: false });
+		}
+		const cursor = params.cursor ? decodeCursor(params.cursor) : undefined;
+		if (params.cursor && (!cursor || cursor.kind !== "read" || cursor.scope !== scope)) {
+			return contentResult("Invalid or stale session action=read cursor for this scope.", { scope, cursorValid: false, sourceAvailable: false });
+		}
+		const entries = entriesFor(sessionManagerFrom(ctx), scope);
+		if (entries.length === 0) return emptyResult(scope);
+		const sections = buildSections(entries);
+		const requestedSectionId = cursor?.kind === "read" ? cursor.sectionId : params.section_id;
+		const requestedEntryId = cursor?.kind === "read" ? cursor.entryId : params.entry_id;
+		const offset = cursor?.kind === "read" ? cursor.offset : 0;
+		const section = requestedSectionId ? sections.find((candidate) => candidate.id === requestedSectionId) : undefined;
+		if (requestedSectionId && !section) {
 			return contentResult(
-				[title, ...rendered, hasMore ? "… more available; continue with next_cursor" : ""].filter(Boolean).join("\n\n"),
-				{
-					scope,
-					sectionId: section?.id,
-					entryId: requestedEntryId,
-					entryCount: candidates.length,
-					renderedCount,
-					found: true,
-					sourceAvailable: true,
-					hasMore,
-					truncated: hasMore,
-					nextCursor,
-				},
+				`Section ${requestedSectionId} was not found in scope ${scope}. Run session action=overview with the same scope to refresh section IDs.`,
+				{ scope, sectionId: requestedSectionId, found: false, sourceAvailable: false },
 			);
-		},
-	});
+		}
 
-	pi.registerTool({
-		...SESSION_RECOVERY_TOOL_DESCRIPTIONS.search,
-		parameters: Type.Object({
-			query: Type.String({
-				description: "Literal substring to find in raw session text and tool arguments.",
-				minLength: 1,
-				maxLength: MAX_SEARCH_QUERY_CHARS,
-			}),
-			scope: Type.Optional(SCOPE_SCHEMA),
-			cursor: Type.Optional(Type.String({ description: "Opaque continuation cursor returned by a previous session_search call.", maxLength: 2_000 })),
-			case_sensitive: Type.Optional(Type.Boolean({ description: "Use exact case matching. Defaults to false." })),
-			limit: Type.Optional(Type.Number({ description: "Maximum matches to return.", minimum: 1, maximum: MAX_SEARCH_RESULTS })),
-		}, { additionalProperties: false }),
-		async execute(_toolCallId: string, params: { query: string; scope?: Scope; cursor?: string; case_sensitive?: boolean; limit?: number }, _signal: AbortSignal, _onUpdate: unknown, ctx: unknown) {
-			const scope = scopeFrom(params.scope);
-			const entries = entriesFor(sessionManagerFrom(ctx), scope);
-			if (entries.length === 0) return emptyResult(scope);
-			const query = params.query.trim().slice(0, MAX_SEARCH_QUERY_CHARS);
-			if (!query) return contentResult("Search query must not be empty.", { scope, query, matchCount: 0 });
-
-			const caseSensitive = params.case_sensitive === true;
-			const cursor = params.cursor ? decodeCursor(params.cursor) : undefined;
-			if (
-				params.cursor && (!cursor || cursor.kind !== "search" || cursor.scope !== scope
-					|| cursor.query !== query || cursor.caseSensitive !== caseSensitive)
-			) {
-				return contentResult("Invalid or stale session_search cursor for this scope/query.", { scope, query, cursorValid: false });
+		const maximum = clampInteger(params.max_entries, DEFAULT_SECTION_ENTRIES, 1, MAX_SECTION_ENTRIES);
+		const bodyChars = clampInteger(params.max_body_chars, DEFAULT_BODY_CHARS, 100, MAX_BODY_CHARS);
+		const candidates = section ? section.entries : entries;
+		let startIndex = requestedEntryId ? candidates.findIndex((entry) => entry.id === requestedEntryId) : 0;
+		if (startIndex < 0) {
+			return contentResult(
+				`Entry ${requestedEntryId} was not found in scope ${scope}${section ? ` within ${section.id}` : ""}.`,
+				{ scope, sectionId: section?.id, entryId: requestedEntryId, found: false, sourceAvailable: false },
+			);
+		}
+		const rendered: string[] = [];
+		let renderedChars = 0;
+		let nextCursor: string | undefined;
+		let renderedCount = 0;
+		for (let index = startIndex; index < candidates.length && renderedCount < maximum; index += 1) {
+			const entry = candidates[index]!;
+			const entryOffset = index === startIndex ? offset : 0;
+			const chunk = readEntryChunk(entry, entryOffset, bodyChars);
+			const heading = entryOffset > 0 ? `[${entry.id}] continuation @${entryOffset}` : undefined;
+			const next = [heading, chunk.text].filter(Boolean).join("\n");
+			if (renderedChars + next.length + 2 > MAX_OUTPUT_CHARS - 1_000) break;
+			rendered.push(next);
+			renderedChars += next.length + 2;
+			renderedCount += 1;
+			if (chunk.nextOffset !== undefined) {
+				nextCursor = encodeCursor({ version: CURSOR_VERSION, kind: "read", scope, sectionId: section?.id, entryId: entry.id, offset: chunk.nextOffset });
+				break;
 			}
-			const needle = caseSensitive ? query : query.toLocaleLowerCase();
-			const limit = clampInteger(params.limit, DEFAULT_SEARCH_RESULTS, 1, MAX_SEARCH_RESULTS);
-			const sections = buildSections(entries);
-			const entrySections = sectionIdByEntry(sections);
-			const allMatches: UnknownRecord[] = [];
+			const nextEntry = candidates[index + 1];
+			if (nextEntry && (renderedCount >= maximum || renderedChars >= MAX_OUTPUT_CHARS - 1_000)) {
+				nextCursor = encodeCursor({ version: CURSOR_VERSION, kind: "read", scope, sectionId: section?.id, entryId: nextEntry.id, offset: 0 });
+				break;
+			}
+		}
+		if (!nextCursor) {
+			const lastRendered = renderedCount > 0 ? startIndex + renderedCount - 1 : startIndex - 1;
+			const nextEntry = candidates[lastRendered + 1];
+			if (nextEntry) nextCursor = encodeCursor({ version: CURSOR_VERSION, kind: "read", scope, sectionId: section?.id, entryId: nextEntry.id, offset: 0 });
+		}
+		const hasMore = nextCursor !== undefined;
+		const title = section ? `Section ${section.id}: ${section.label}` : `Entry ${requestedEntryId}`;
+		return contentResult(
+			[title, ...rendered, hasMore ? "… more available; continue with next_cursor" : ""].filter(Boolean).join("\n\n"),
+			{
+				scope,
+				sectionId: section?.id,
+				entryId: requestedEntryId,
+				entryCount: candidates.length,
+				renderedCount,
+				found: true,
+				sourceAvailable: true,
+				hasMore,
+				truncated: hasMore,
+				nextCursor,
+			},
+		);
+	};
 
-			for (const entry of entries) {
-				const text = entryText(entry);
-				const haystack = caseSensitive ? text : text.toLocaleLowerCase();
-				if (!text || !haystack.includes(needle)) continue;
-				allMatches.push({
+	const search = async (_toolCallId: string, params: { query: string; scope?: Scope; cursor?: string; case_sensitive?: boolean; limit?: number }, _signal: AbortSignal | undefined, _onUpdate: unknown, ctx: unknown) => {
+		const scope = scopeFrom(params.scope);
+		const entries = entriesFor(sessionManagerFrom(ctx), scope);
+		if (entries.length === 0) return emptyResult(scope);
+		const query = params.query.trim().slice(0, MAX_SEARCH_QUERY_CHARS);
+		if (!query) return contentResult("Search query must not be empty.", { scope, query, matchCount: 0 });
+
+		const caseSensitive = params.case_sensitive === true;
+		const cursor = params.cursor ? decodeCursor(params.cursor) : undefined;
+		if (
+			params.cursor && (!cursor || cursor.kind !== "search" || cursor.scope !== scope
+				|| cursor.query !== query || cursor.caseSensitive !== caseSensitive)
+		) {
+			return contentResult("Invalid or stale session action=search cursor for this scope/query.", { scope, query, cursorValid: false });
+		}
+		const needle = caseSensitive ? query : query.toLocaleLowerCase();
+		const limit = clampInteger(params.limit, DEFAULT_SEARCH_RESULTS, 1, MAX_SEARCH_RESULTS);
+		const sections = buildSections(entries);
+		const entrySections = sectionIdByEntry(sections);
+		const allMatches: UnknownRecord[] = [];
+
+		for (const entry of entries) {
+			const text = entryText(entry);
+			const haystack = caseSensitive ? text : text.toLocaleLowerCase();
+			if (!text || !haystack.includes(needle)) continue;
+			allMatches.push({
+				entryId: entry.id,
+				sectionId: entrySections.get(entry.id),
+				type: entry.type,
+				...(messageRole(entry) ? { role: messageRole(entry) } : {}),
+				timestamp: entry.timestamp ?? null,
+				snippet: searchSnippet(text, query, caseSensitive),
+			});
+		}
+
+		let startIndex = 0;
+		if (cursor?.kind === "search") {
+			const index = allMatches.findIndex((match) => match.entryId === cursor.afterEntryId);
+			if (index < 0) {
+				return contentResult("The session changed and the search cursor no longer resolves on this branch.", { scope, query, cursorValid: false });
+			}
+			startIndex = index + 1;
+		}
+		const matches = allMatches.slice(startIndex, startIndex + limit);
+		const hasMore = startIndex + matches.length < allMatches.length;
+		const lastEntryId = matches.at(-1)?.entryId;
+		const nextCursor = hasMore && typeof lastEntryId === "string"
+			? encodeCursor({ version: CURSOR_VERSION, kind: "search", scope, query, caseSensitive, afterEntryId: lastEntryId })
+			: undefined;
+		const payload = {
+			scope,
+			query,
+			caseSensitive,
+			totalMatches: allMatches.length,
+			returnedMatches: matches.length,
+			hasMore,
+			nextCursor: nextCursor ?? null,
+			matches,
+		};
+		return contentResult(payload, { scope, query, matchCount: allMatches.length, returnedCount: matches.length, hasMore, truncated: hasMore, nextCursor });
+	};
+
+	const recoveryContext = async (toolCallId: string, params: { scope?: Scope; recent_error_limit?: number }, _signal: AbortSignal | undefined, _onUpdate: unknown, ctx: unknown) => {
+		const scope = scopeFrom(params.scope);
+		const entries = entriesFor(sessionManagerFrom(ctx), scope);
+		if (entries.length === 0) return emptyResult(scope);
+
+		const sections = buildSections(entries);
+		const entrySections = sectionIdByEntry(sections);
+		const userEntries = entries.filter((entry) => messageRole(entry) === "user" && entryText(entry).trim().length > 0);
+		const pending = new Map<string, ToolCallLike>();
+		const errors: UnknownRecord[] = [];
+
+		for (const entry of entries) {
+			for (const call of toolCallsFrom(entry)) pending.set(call.id, call);
+			const result = toolResultFrom(entry);
+			if (!result) continue;
+			if (typeof result.toolCallId === "string") pending.delete(result.toolCallId);
+			if (result.isError === true) {
+				errors.push({
 					entryId: entry.id,
 					sectionId: entrySections.get(entry.id),
-					type: entry.type,
-					...(messageRole(entry) ? { role: messageRole(entry) } : {}),
-					timestamp: entry.timestamp ?? null,
-					snippet: searchSnippet(text, query, caseSensitive),
+					toolCallId: typeof result.toolCallId === "string" ? result.toolCallId : null,
+					toolName: typeof result.toolName === "string" ? result.toolName : null,
+					message: preview(textFromContent(result.content), 500),
 				});
 			}
+		}
+		pending.delete(toolCallId);
 
-			let startIndex = 0;
-			if (cursor?.kind === "search") {
-				const index = allMatches.findIndex((match) => match.entryId === cursor.afterEntryId);
-				if (index < 0) {
-					return contentResult("The session changed and the search cursor no longer resolves on this branch.", { scope, query, cursorValid: false });
-				}
-				startIndex = index + 1;
-			}
-			const matches = allMatches.slice(startIndex, startIndex + limit);
-			const hasMore = startIndex + matches.length < allMatches.length;
-			const lastEntryId = matches.at(-1)?.entryId;
-			const nextCursor = hasMore && typeof lastEntryId === "string"
-				? encodeCursor({ version: CURSOR_VERSION, kind: "search", scope, query, caseSensitive, afterEntryId: lastEntryId })
-				: undefined;
-			const payload = {
-				scope,
-				query,
-				caseSensitive,
-				totalMatches: allMatches.length,
-				returnedMatches: matches.length,
-				hasMore,
-				nextCursor: nextCursor ?? null,
-				matches,
-			};
-			return contentResult(payload, { scope, query, matchCount: allMatches.length, returnedCount: matches.length, hasMore, truncated: hasMore, nextCursor });
-		},
-	});
-
-	pi.registerTool({
-		...SESSION_RECOVERY_TOOL_DESCRIPTIONS.recoveryContext,
-		parameters: Type.Object({
-			scope: Type.Optional(SCOPE_SCHEMA),
-			recent_error_limit: Type.Optional(Type.Number({ description: "Maximum recent error tool results to report.", minimum: 1, maximum: MAX_RECENT_ERRORS })),
-		}, { additionalProperties: false }),
-		async execute(toolCallId: string, params: { scope?: Scope; recent_error_limit?: number }, _signal: AbortSignal, _onUpdate: unknown, ctx: unknown) {
-			const scope = scopeFrom(params.scope);
-			const entries = entriesFor(sessionManagerFrom(ctx), scope);
-			if (entries.length === 0) return emptyResult(scope);
-
-			const sections = buildSections(entries);
-			const entrySections = sectionIdByEntry(sections);
-			const userEntries = entries.filter((entry) => messageRole(entry) === "user" && entryText(entry).trim().length > 0);
-			const pending = new Map<string, ToolCallLike>();
-			const errors: UnknownRecord[] = [];
-
-			for (const entry of entries) {
-				for (const call of toolCallsFrom(entry)) pending.set(call.id, call);
-				const result = toolResultFrom(entry);
-				if (!result) continue;
-				if (typeof result.toolCallId === "string") pending.delete(result.toolCallId);
-				if (result.isError === true) {
-					errors.push({
-						entryId: entry.id,
-						sectionId: entrySections.get(entry.id),
-						toolCallId: typeof result.toolCallId === "string" ? result.toolCallId : null,
-						toolName: typeof result.toolName === "string" ? result.toolName : null,
-						message: preview(textFromContent(result.content), 500),
-					});
-				}
-			}
-			pending.delete(toolCallId);
-
-			const errorLimit = clampInteger(params.recent_error_limit, DEFAULT_RECENT_ERRORS, 1, MAX_RECENT_ERRORS);
-			const firstUser = userEntries[0];
-			const latestUser = userEntries[userEntries.length - 1];
-			const files = evidenceFromEntries(entries);
-			const readFiles = boundedHeadAndTail(files.readFiles, MAX_RECOVERY_FILES);
-			const modifiedFiles = boundedHeadAndTail(files.modifiedFiles, MAX_RECOVERY_FILES);
-			const pendingCalls = boundedHeadAndTail([...pending.values()], MAX_PENDING_TOOL_CALLS);
-			const lastAction = [...entries].reverse().map((entry) => meaningfulAction(entry, toolCallId)).find(Boolean) ?? null;
-			const payload = {
-				scope,
-				originalUserRequest: firstUser ? {
-					entryId: firstUser.id,
-					sectionId: entrySections.get(firstUser.id),
-					text: truncate(entryText(firstUser), DEFAULT_BODY_CHARS),
-				} : null,
-				latestUserInstruction: latestUser ? {
-					entryId: latestUser.id,
-					sectionId: entrySections.get(latestUser.id),
-					text: truncate(entryText(latestUser), DEFAULT_BODY_CHARS),
-				} : null,
-				readFiles: readFiles.values,
-				modifiedFiles: modifiedFiles.values,
-				omittedReadFiles: readFiles.omitted,
-				omittedModifiedFiles: modifiedFiles.omitted,
-				recentErrors: errors.slice(-errorLimit),
-				pendingToolCalls: pendingCalls.values.map((call) => ({
-					id: call.id,
-					name: call.name,
-					entryId: call.entryId,
-					sectionId: entrySections.get(call.entryId),
-				})),
-				omittedPendingToolCalls: pendingCalls.omitted,
-				lastMeaningfulAction: lastAction,
-				compactionCount: entries.filter((entry) => entry.type === "compaction").length,
-				entryCount: entries.length,
-				sectionCount: sections.length,
-			};
-			return contentResult(payload, {
-				scope,
-				entryCount: entries.length,
-				sectionCount: sections.length,
-				recentErrorCount: payload.recentErrors.length,
-				pendingToolCallCount: payload.pendingToolCalls.length,
-			});
-		},
-	});
+		const errorLimit = clampInteger(params.recent_error_limit, DEFAULT_RECENT_ERRORS, 1, MAX_RECENT_ERRORS);
+		const firstUser = userEntries[0];
+		const latestUser = userEntries[userEntries.length - 1];
+		const files = evidenceFromEntries(entries);
+		const readFiles = boundedHeadAndTail(files.readFiles, MAX_RECOVERY_FILES);
+		const modifiedFiles = boundedHeadAndTail(files.modifiedFiles, MAX_RECOVERY_FILES);
+		const pendingCalls = boundedHeadAndTail([...pending.values()], MAX_PENDING_TOOL_CALLS);
+		const lastAction = [...entries].reverse().map((entry) => meaningfulAction(entry, toolCallId)).find(Boolean) ?? null;
+		const payload = {
+			scope,
+			originalUserRequest: firstUser ? {
+				entryId: firstUser.id,
+				sectionId: entrySections.get(firstUser.id),
+				text: truncate(entryText(firstUser), DEFAULT_BODY_CHARS),
+			} : null,
+			latestUserInstruction: latestUser ? {
+				entryId: latestUser.id,
+				sectionId: entrySections.get(latestUser.id),
+				text: truncate(entryText(latestUser), DEFAULT_BODY_CHARS),
+			} : null,
+			readFiles: readFiles.values,
+			modifiedFiles: modifiedFiles.values,
+			omittedReadFiles: readFiles.omitted,
+			omittedModifiedFiles: modifiedFiles.omitted,
+			recentErrors: errors.slice(-errorLimit),
+			pendingToolCalls: pendingCalls.values.map((call) => ({
+				id: call.id,
+				name: call.name,
+				entryId: call.entryId,
+				sectionId: entrySections.get(call.entryId),
+			})),
+			omittedPendingToolCalls: pendingCalls.omitted,
+			lastMeaningfulAction: lastAction,
+			compactionCount: entries.filter((entry) => entry.type === "compaction").length,
+			entryCount: entries.length,
+			sectionCount: sections.length,
+		};
+		return contentResult(payload, {
+			scope,
+			entryCount: entries.length,
+			sectionCount: sections.length,
+			recentErrorCount: payload.recentErrors.length,
+			pendingToolCallCount: payload.pendingToolCalls.length,
+		});
+	};
+	return { overview, read: readSection, search, recovery: recoveryContext };
 }

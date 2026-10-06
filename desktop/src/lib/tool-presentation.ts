@@ -81,7 +81,7 @@ export function toolTone(toolName: string, toolKind?: string, rawInput?: unknown
   ) return "inspect";
   if (["question"].includes(name)) return "interact";
   if (
-    ["todo", "get_plan", "update_plan", "project", "projects", "skills", "session_name", "session_overview", "session_read_section", "session_search", "session_recovery_context", "multi_tool_use", "parallel"].includes(name)
+    ["todo", "get_plan", "update_plan", "project", "projects", "skills", "session", "multi_tool_use", "parallel"].includes(name)
   ) return "context";
   if (["subagent", "subagents", "agent", "agents", "task"].includes(name)) return "agent";
   return "neutral";

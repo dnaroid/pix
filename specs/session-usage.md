@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # Session usage and billing accounting
 
 <!-- markdownlint-disable MD013 -->
@@ -122,7 +127,7 @@ blocks further BTW inference until reload rather than silently losing known spen
 - The recorded-spend breakdown shows no quota percentages and no synthetic
   provider/session-share percentage. Desktop's shared Usage surface additionally
   preserves the weekly reset calendar and adds a separately labelled **Limits**
-  row for the short account quota window when supplied. Header-derived rate
+  row for each hourly and weekly account quota window when supplied. Header-derived rate
   windows remain status-bar-trigger-only. This is account-wide telemetry,
   never session-attributed usage. See [usage limits and model
   chart](desktop-quota-calendar.md) and [decision

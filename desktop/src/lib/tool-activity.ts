@@ -1,7 +1,8 @@
 import { toolPresentationName } from "./tool-presentation";
 
 export type InferredToolAction = "Running tests" | "Building project" | "Checking project"
-  | "Starting agents" | "Waiting for agents" | "Checking agents" | "Stopping agents";
+  | "Starting agents" | "Waiting for agents" | "Checking agents" | "Stopping agents"
+  | "Naming session" | "Reviewing session title" | "Reviewing session history" | "Searching session history";
 
 const DIRECTORY_OPTIONS: Readonly<Record<string, readonly string[]>> = {
   npm: ["--prefix"], pnpm: ["--dir", "-C"], yarn: ["--cwd"], bun: ["--cwd"],
@@ -13,6 +14,16 @@ export function inferToolAction(tool: { name?: string; title: string; kind: stri
   if (!input || typeof input !== "object" || Array.isArray(input)) return undefined;
   const args = input as Record<string, unknown>;
   const name = toolPresentationName(tool);
+  if (name === "session") {
+    switch (args.action) {
+      case "name": return typeof args.name === "string" && args.name.trim() ? "Naming session" : "Reviewing session title";
+      case "search": return "Searching session history";
+      case "overview":
+      case "read":
+      case "recovery": return "Reviewing session history";
+      default: return undefined;
+    }
+  }
   if (name === "subagents") {
     switch (args.action) {
       case "spawn": return "Starting agents";

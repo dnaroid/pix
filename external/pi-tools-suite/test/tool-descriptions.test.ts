@@ -5,7 +5,7 @@ import {
 	CODEX_ALIAS_TOOL_DESCRIPTIONS,
 	COMPRESS_TOOL_DESCRIPTION,
 	REPO_DISCOVERY_TOOLS,
-	SESSION_RECOVERY_TOOL_DESCRIPTIONS,
+	SESSION_TOOL_DESCRIPTION,
 	TODO_TOOL_DESCRIPTION,
 	asyncSubagentToolDescriptions,
 	astGrepToolDescriptions,
@@ -272,22 +272,17 @@ describe("tool descriptions", () => {
 	});
 
 	test("session recovery prompt guides overview-first raw-history recovery", () => {
-		const tools = Object.values(SESSION_RECOVERY_TOOL_DESCRIPTIONS);
+		const tools = [SESSION_TOOL_DESCRIPTION];
 		const promptText = tools.flatMap((tool) => [
 			tool.description,
 			tool.promptSnippet,
 			...(tool.promptGuidelines ?? []),
 		]).join("\n");
 
-		expect(tools.map((tool) => tool.name)).toEqual([
-			"session_overview",
-			"session_read_section",
-			"session_search",
-			"session_recovery_context",
-		]);
-		expect(promptText).toContain("Use session_overview first");
+		expect(tools.map((tool) => tool.name)).toEqual(["session"]);
+		expect(promptText).toContain("Use session action=overview first");
 		expect(promptText).toContain("raw session history");
-		expect(promptText).toContain("lexical rather than semantic");
+		expect(promptText).toContain("lexically, not semantically");
 		expect(promptText).toContain("recentErrors as historical evidence");
 	});
 

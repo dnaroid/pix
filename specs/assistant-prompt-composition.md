@@ -28,6 +28,14 @@ knowledge-audit and worker-briefing reminders remain. Disabling the strategy doe
 not remove the policy. Conditional review gates stay conditional on the effective
 role catalog; this does not change role/model selection or authorize new gates.
 
+The delegation policy instructs parents to write sub-agent task prompts and
+instructions in English for token economy, regardless of the user's language.
+This covers task, scope, parentObjective, promptAppend, promptOverride and
+focus/attention text. Exact quotes, code, paths, identifiers and required
+user-facing text retain their original language. Replies to the user stay in
+the user's language. This is prompt guidance, not automatic translation or
+language validation of tool arguments.
+
 Related behavior: [search routing](repo-knowledge-agent-workflow.md),
 [todo statuses and blocked-work handoff](todo-initial-status.md),
 [parent-first delegation and nonblocking spawn](parent-first-subagent-routing.md).

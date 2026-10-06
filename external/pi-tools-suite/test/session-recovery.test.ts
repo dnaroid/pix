@@ -1,8 +1,4 @@
-import { describe, expect, mock, test } from "bun:test";
-
-import { createTypeboxMock } from "./support/typebox-mock.js";
-
-mock.module("typebox", () => createTypeboxMock());
+import { describe, expect, test } from "bun:test";
 
 class FakePi {
 	tools = new Map<string, any>();
@@ -117,7 +113,7 @@ function fixture() {
 				role: "assistant",
 				content: [
 					toolCall("pending-other", "read", { path: "src/pending.ts" }),
-					toolCall("current-call", "session_recovery_context", {}),
+					toolCall("current-call", "session", { action: "recovery" }),
 				],
 			},
 		},
@@ -135,7 +131,7 @@ function fixture() {
 }
 
 async function setup() {
-	const { default: register } = await import("../src/session-recovery/index.js");
+	const { default: register } = await import("../src/session/index.js");
 	const pi = new FakePi();
 	register(pi as any);
 	const entries = fixture();
@@ -143,8 +139,8 @@ async function setup() {
 	return { pi, ctx };
 }
 
-async function execute(tool: any, callId: string, params: unknown, ctx: unknown) {
-	return tool.execute(callId, params, undefined, undefined, ctx);
+async function execute(tool: any, action: string, callId: string, params: any, ctx: unknown) {
+	return tool.execute(callId, { action, ...params }, undefined, undefined, ctx);
 }
 
 function jsonContent(result: any) {
@@ -152,17 +148,12 @@ function jsonContent(result: any) {
 }
 
 describe("session recovery tools", () => {
-	test("registers four tools and maps stable active/all sections", async () => {
+	test("registers one tool and maps stable active/all sections", async () => {
 		const { pi, ctx } = await setup();
-		expect([...pi.tools.keys()]).toEqual([
-			"session_overview",
-			"session_read_section",
-			"session_search",
-			"session_recovery_context",
-		]);
+		expect([...pi.tools.keys()]).toEqual(["session"]);
 
-		const activeResult = await execute(pi.tools.get("session_overview"), "overview", {}, ctx);
-		const allResult = await execute(pi.tools.get("session_overview"), "overview", { scope: "all" }, ctx);
+		const activeResult = await execute(pi.tools.get("session"), "overview", "overview", {}, ctx);
+		const allResult = await execute(pi.tools.get("session"), "overview", "overview", { scope: "all" }, ctx);
 		const active = jsonContent(activeResult);
 		const all = jsonContent(allResult);
 
@@ -175,16 +166,16 @@ describe("session recovery tools", () => {
 
 	test("searches raw pre-compaction history and Unicode case-insensitively", async () => {
 		const { pi, ctx } = await setup();
-		const activeResult = await execute(pi.tools.get("session_search"), "search", { query: "файл" }, ctx);
+		const activeResult = await execute(pi.tools.get("session"), "search", "search", { query: "файл" }, ctx);
 		const active = jsonContent(activeResult);
 
 		expect(active.totalMatches).toBe(1);
 		expect(active.matches[0]).toMatchObject({ entryId: "u1", sectionId: "section:u1", role: "user" });
 
-		const hiddenResult = await execute(pi.tools.get("session_search"), "search", { query: "Abandoned" }, ctx);
+		const hiddenResult = await execute(pi.tools.get("session"), "search", "search", { query: "Abandoned" }, ctx);
 		expect(jsonContent(hiddenResult).totalMatches).toBe(0);
 
-		const allResult = await execute(pi.tools.get("session_search"), "search", { query: "Abandoned", scope: "all" }, ctx);
+		const allResult = await execute(pi.tools.get("session"), "search", "search", { query: "Abandoned", scope: "all" }, ctx);
 		expect(jsonContent(allResult).matches[0].entryId).toBe("u-abandoned");
 	});
 
@@ -218,16 +209,16 @@ describe("session recovery tools", () => {
 		];
 		const ctx = { sessionManager: new FakeSessionManager(entries, entries) };
 
-		const search = jsonContent(await execute(pi.tools.get("session_search"), "find-web", { query: "web-large" }, ctx));
+		const search = jsonContent(await execute(pi.tools.get("session"), "search", "find-web", { query: "web-large" }, ctx));
 		expect(search.matches[0]).toMatchObject({ entryId: "r-web", role: "toolResult" });
-		const recovered = await execute(pi.tools.get("session_read_section"), "read-web", { entry_id: "r-web", max_body_chars: 10_000 }, ctx);
+		const recovered = await execute(pi.tools.get("session"), "read", "read-web", { entry_id: "r-web", max_body_chars: 8_000 }, ctx);
 		expect(recovered.content[0].text).toContain("recoverable_raw_details:");
 		expect(recovered.content[0].text).toContain("RAW_WEB_DETAIL_SENTINEL");
 	});
 
 	test("reads a bounded section and reports unknown section IDs normally", async () => {
 		const { pi, ctx } = await setup();
-		const readResult = await execute(pi.tools.get("session_read_section"), "read-section", {
+		const readResult = await execute(pi.tools.get("session"), "read", "read-section", {
 			section_id: "section:u1",
 			max_entries: 2,
 			max_body_chars: 100,
@@ -237,7 +228,7 @@ describe("session recovery tools", () => {
 		expect(readResult.details).toMatchObject({ sectionId: "section:u1", entryCount: 3, renderedCount: 2, hasMore: true, truncated: true, sourceAvailable: true });
 		expect(typeof readResult.details.nextCursor).toBe("string");
 
-		const missing = await execute(pi.tools.get("session_read_section"), "read-section", { section_id: "section:nope" }, ctx);
+		const missing = await execute(pi.tools.get("session"), "read", "read-section", { section_id: "section:nope" }, ctx);
 		expect(missing.details).toMatchObject({ found: false, sectionId: "section:nope", sourceAvailable: false });
 	});
 
@@ -260,7 +251,7 @@ describe("session recovery tools", () => {
 		}));
 		const ctx = { sessionManager: new FakeSessionManager(entries, entries) };
 
-		const direct = await execute(pi.tools.get("session_read_section"), "direct", {
+		const direct = await execute(pi.tools.get("session"), "read", "direct", {
 			entry_id: "r-119",
 			max_body_chars: 500,
 		}, ctx);
@@ -271,7 +262,7 @@ describe("session recovery tools", () => {
 		let cursor = direct.details.nextCursor as string | undefined;
 		let collected = direct.content[0].text;
 		for (let page = 0; cursor && page < 40; page += 1) {
-			const next = await execute(pi.tools.get("session_read_section"), `direct-${page}`, { cursor, max_body_chars: 500 }, ctx);
+			const next = await execute(pi.tools.get("session"), "read", `direct-${page}`, { cursor, max_body_chars: 500 }, ctx);
 			collected += next.content[0].text;
 			cursor = next.details.nextCursor as string | undefined;
 		}
@@ -304,25 +295,33 @@ describe("session recovery tools", () => {
 		});
 		const ctx = { sessionManager: new FakeSessionManager(entries, entries) };
 
-		const overviewOne = jsonContent(await execute(pi.tools.get("session_overview"), "overview-1", { max_sections: 20 }, ctx));
+		const overviewOne = jsonContent(await execute(pi.tools.get("session"), "overview", "overview-1", { max_sections: 20 }, ctx));
 		expect(overviewOne.sections).toHaveLength(20);
 		expect(overviewOne.hasMore).toBe(true);
-		const overviewTwo = jsonContent(await execute(pi.tools.get("session_overview"), "overview-2", { max_sections: 20, cursor: overviewOne.nextCursor }, ctx));
+		const overviewTwo = jsonContent(await execute(pi.tools.get("session"), "overview", "overview-2", { max_sections: 20, cursor: overviewOne.nextCursor }, ctx));
 		expect(overviewTwo.sections[0].id).toBe("section:u-page-20");
+		const wrongAction = await execute(pi.tools.get("session"), "read", "wrong-action", { cursor: overviewOne.nextCursor }, ctx);
+		expect(wrongAction.details.cursorValid).toBe(false);
+		const wrongScope = await execute(pi.tools.get("session"), "overview", "wrong-scope", { cursor: overviewOne.nextCursor, scope: "all" }, ctx);
+		expect(wrongScope.details.cursorValid).toBe(false);
+		const invalidCursor = await execute(pi.tools.get("session"), "overview", "invalid-cursor", { cursor: "not-a-cursor" }, ctx);
+		expect(invalidCursor.details.cursorValid).toBe(false);
 
-		const searchOne = jsonContent(await execute(pi.tools.get("session_search"), "search-1", { query: "PAGE_SENTINEL", limit: 20 }, ctx));
+		const searchOne = jsonContent(await execute(pi.tools.get("session"), "search", "search-1", { query: "PAGE_SENTINEL", limit: 20 }, ctx));
 		expect(searchOne.matches).toHaveLength(20);
 		expect(searchOne.hasMore).toBe(true);
-		const searchTwo = jsonContent(await execute(pi.tools.get("session_search"), "search-2", { query: "PAGE_SENTINEL", limit: 20, cursor: searchOne.nextCursor }, ctx));
+		const searchTwo = jsonContent(await execute(pi.tools.get("session"), "search", "search-2", { query: "PAGE_SENTINEL", limit: 20, cursor: searchOne.nextCursor }, ctx));
 		expect(searchTwo.matches[0].entryId).toBe("u-page-20");
+		const wrongQuery = await execute(pi.tools.get("session"), "search", "wrong-query", { query: "different", cursor: searchOne.nextCursor }, ctx);
+		expect(wrongQuery.details.cursorValid).toBe(false);
 
-		const hidden = jsonContent(await execute(pi.tools.get("session_search"), "hidden", { query: "DCP_CONTROL_SECRET" }, ctx));
+		const hidden = jsonContent(await execute(pi.tools.get("session"), "search", "hidden", { query: "DCP_CONTROL_SECRET" }, ctx));
 		expect(hidden.totalMatches).toBe(0);
 	});
 
 	test("recovers deterministic context, file evidence, errors, and pending calls", async () => {
 		const { pi, ctx } = await setup();
-		const result = await execute(pi.tools.get("session_recovery_context"), "current-call", {}, ctx);
+		const result = await execute(pi.tools.get("session"), "recovery", "current-call", {}, ctx);
 		const recovered = jsonContent(result);
 
 		expect(recovered.originalUserRequest).toMatchObject({ entryId: "u1", sectionId: "section:u1" });
@@ -340,7 +339,7 @@ describe("session recovery tools", () => {
 
 	test("returns a clear normal result for an empty or unavailable session", async () => {
 		const { pi } = await setup();
-		const result = await execute(pi.tools.get("session_overview"), "overview", {}, {});
+		const result = await execute(pi.tools.get("session"), "overview", "overview", {}, {});
 
 		expect(result.content[0].text).toContain("No raw session entries are available");
 		expect(result.details).toEqual({ scope: "active", entryCount: 0 });
@@ -356,7 +355,7 @@ describe("session recovery tools", () => {
 			message: { role: "user", content: "x".repeat(10_000) },
 		};
 		const ctx = { sessionManager: new FakeSessionManager([longEntry], [longEntry]) };
-		const result = await execute(pi.tools.get("session_read_section"), "read", {
+		const result = await execute(pi.tools.get("session"), "read", "read", {
 			section_id: "section:long-user",
 			max_body_chars: 100,
 		}, ctx);

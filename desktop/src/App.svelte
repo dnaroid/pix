@@ -378,6 +378,7 @@
     sessions: sessionServices,
     draftSession: () => draftSession,
     closeCommandPicker: () => desktopCommands.setPicker(null),
+    focusComposer: () => promptComposer?.focus(),
     reloadResources,
     reportError,
   });

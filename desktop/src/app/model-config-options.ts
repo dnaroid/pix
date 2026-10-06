@@ -20,6 +20,7 @@ export type ModelConfigOptions = {
   operationRunning: () => boolean;
   changingConfig: () => string | null;
   closeCommandPicker: () => void;
+  focusComposer: () => void | Promise<void>;
   reloadResources: (options?: { echo?: boolean }) => Promise<void>;
   preferences: ModelPreferencesStore;
   runtime: SessionRuntimeStore;

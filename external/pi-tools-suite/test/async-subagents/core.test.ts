@@ -62,7 +62,7 @@ import {
 	writeStructuredResult,
 } from "../../src/async-subagents/lib.js";
 import { isRecord, isoNow, serializeJsonLine } from "../../src/async-subagents/core/utils.js";
-import { agentStrategyPrompt, appendAgentStrategyPrompt } from "../../src/async-subagents/core/agent-strategy.js";
+import { agentStrategyPrompt, appendAgentStrategyPrompt, SUBAGENT_DELEGATION_GUIDANCE } from "../../src/async-subagents/core/agent-strategy.js";
 import { activityFromRpcEvent } from "../../src/async-subagents/core/activity.js";
 import { buildAgentCompletionNotification, isTerminalAgentStatus } from "../../src/async-subagents/core/notifications.js";
 import type { AgentTask } from "../../src/async-subagents/lib.js";
@@ -417,6 +417,12 @@ describe.serial("core utils and prompt generation", () => {
 		expect(isRecord({})).toBe(true);
 		expect(isRecord(null)).toBe(false);
 		expect(isRecord("x")).toBe(false);
+	});
+
+	test.serial("instructs parents to brief sub-agents in English without translating literal content", () => {
+		expect(SUBAGENT_DELEGATION_GUIDANCE).toContain("Write sub-agent briefs in English to save tokens.");
+		expect(SUBAGENT_DELEGATION_GUIDANCE).toContain("Preserve exact literals and required user-facing text");
+		expect(SUBAGENT_DELEGATION_GUIDANCE).toContain("reply to the user in their language");
 	});
 
 	test.serial("uses economical context-aware orchestration regardless of parent tier", () => {

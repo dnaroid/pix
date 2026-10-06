@@ -29,7 +29,7 @@ describe("ModelThinkingPicker staged selection", () => {
     expect(pickerSource).toContain("activateModelPickerPopover(dialogElement, search, onClose");
     expect(pickerSource).not.toContain("{:else if model.ref === selectedModelRef}");
     expect(pickerSource).not.toContain("!dirty || disabled");
-    expect(pickerSource).toContain("if (!dirty) {\n      onClose();");
+    expect(pickerSource).toContain("if (!dirty) {\n      confirmSelection();");
   });
 
   it("uses a bounded nonmodal dialog and guards stale apply completion", () => {
@@ -41,6 +41,12 @@ describe("ModelThinkingPicker staged selection", () => {
     expect(pickerSource).toContain("popover?.dispose()");
     expect(pickerSource).toContain("await onApply(selectedModel.ref, selectedThinking);\n      if (!alive) return;");
     expect(pickerSource).toContain("if (selectedAuto) return;");
+  });
+
+  it("captures composer focus before closing invalidates the picker props", () => {
+    expect(pickerSource).toContain("const focusComposer = restoreFocus;\n    onClose();\n    focusComposer?.();");
+    expect(pickerSource).toContain("if (!alive) return;\n      confirmSelection();");
+    expect(pickerSource).not.toContain("onClose();\n      restoreFocus?.();");
   });
 
   it("confirms the staged selection with Enter from model rows in select mode only", () => {

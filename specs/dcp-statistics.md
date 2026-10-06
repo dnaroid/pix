@@ -84,9 +84,10 @@ The report separates these quantities:
   result the latest DCP projection hides (compressed into a block, including a
   message-mode body replacement, or pruned) while no result with the same key
   is still visible;
-- `recovery`: a session-recovery tool (`session_search`, `session_read_section`,
-  `session_overview`, `session_recovery_context`) is called after DCP has
-  compressed or pruned something in the current state.
+- `recovery`: `session` with action `search`, `read`, `overview`, or `recovery`
+  is called after DCP has compressed or pruned something in the current state.
+  Title reads and renames (`action: "name"`) do not count. Old tool names are
+  not classified.
 
 The detector (`regret-signals.ts`) is runtime-only: it is reset with the other
 per-epoch trackers and only observes; it never changes projection, pruning,

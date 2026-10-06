@@ -51,8 +51,8 @@ archive. The original producer details remain attached to the persisted raw
 tool result; installed provider serialization does not send tool-result details
 to the model.
 
-`session-recovery` is the recovery surface: `session_search` can locate the raw
-tool result by `toolCallId`, and `session_read_section` can return or paginate
+`session` is the recovery surface: `action: "search"` can locate the raw
+tool result by `toolCallId`, and `action: "read"` can return or paginate
 its `recoverable_raw_details` from the append-only session. If the required
 structured details are absent or malformed, Gateway leaves the web result
 passthrough instead of applying an irreversible truncation.
@@ -87,7 +87,7 @@ bytes as proven token savings:
   it is not a billing counter;
 - **retrieval tax**: delivered bytes/estimated tokens from recognised follow-up
   retrievals. These include `artifact_read` / `artifact_search`, all
-  `session-recovery` read/search/overview/context tools, exact repeated `Read`
+  `session` actions `read`/`search`/`overview`/`recovery` (never `name`), exact repeated `Read`
   calls, same-source different-range `Read` continuations, and `Read` calls that
   consume a producer-issued artifact handle such as `details.fullOutputPath`.
   Every persisted retrieval `tool.result` carries its own `retrievalBytes` and

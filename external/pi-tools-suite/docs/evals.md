@@ -99,6 +99,33 @@ controls (narration without files, unrequested records, historical pruning,
 wrong links/actions, malformed output and unrelated mutations). A single live
 run is a behavioral observation, not a statistical reliability guarantee.
 
+### Session action selection
+
+`session-cases.ts` supplies six bounded live scenarios covering every action:
+unknown-context `overview`, explicit title rename and title read via `name`,
+`overview` followed by a successful raw `read`, known-literal `search` without
+an overview preflight, and `overview` followed by bounded `recovery` signals.
+Validators check the exact action sequence, request-specific arguments and a
+successful result for every call before the next action. Narration alone,
+legacy tool names, extra calls, missing/failed results and wrong arguments fail.
+`session-cases.test.ts` checks these positive and negative controls deterministically.
+
+Run this slice from the suite package:
+
+```bash
+PI_TOOLS_SUITE_EVAL_MODELS=zai/glm-5-turbo \
+PI_TOOLS_SUITE_EVAL_CASES=tool.session-recovery-overview,tool.session-name-set,tool.session-name-read,tool.session-recovery-read,tool.session-recovery-search,tool.session-recovery-signals \
+PI_TOOLS_SUITE_EVAL_KEEP=1 npm run evals:report
+```
+
+These are tool/action-selection observations against each run's actual current
+session, not a seeded pre-compaction recovery benchmark. Search uses a literal
+in the scenario's own user message; read targets the mapped current request.
+They do not establish recovery of hidden historical facts, pagination quality,
+or rename persistence across restarts. Raw pre-compaction history and pagination
+are covered separately by deterministic session tests; this slice does not
+certify restart persistence. One live run is not a reliability guarantee.
+
 ## Framework layout
 
 ```text
@@ -163,8 +190,7 @@ Representative coverage:
 | `brainstorm` | config, command/tool routing instructions, audit/brainstorm prompts, mode persistence/v2–v3→v4 migration, quorum gaps, ledger history/position matrix, outputDir/publish, nested subagent adapter, isolated SDK research-tool inventory/guards, five-round workflow and locked review/finalization tests | deterministic only; no paid council/routing or live web-service eval yet; actual routing, clarification and audit/synthesis quality are not certified |
 | `lsp` | LSP tests | deterministic only |
 | `comment-checker` | comment-checker tests | deterministic only |
-| `session-name` | session-name tests | deterministic only |
-| `session-recovery` | recovery tests | overview-first recovery |
+| `session` | naming, recovery, action dispatch, codemode SDK tests + live-validator controls | all five actions; title read/rename; overview before raw read/recovery; known-literal search |
 | `repo-discovery` | repo-discovery tests | search/architecture selection |
 | `antigravity-auth` | provider/auth tests | deterministic only |
 | `opencode-import` | import tests | deterministic only |
@@ -237,7 +263,7 @@ passing merely because the answer was embedded in the prompt.
 - `tool.todo-plan`: non-trivial four-stage work should initialize synchronized
   todo state.
 - `tool.session-recovery-overview`: lost context with no reliable search phrase
-  should begin with `session_overview`.
+  should begin with `session` and `action: "overview"`.
 
 ### Coding quality
 

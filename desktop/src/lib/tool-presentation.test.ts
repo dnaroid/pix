@@ -138,7 +138,7 @@ describe("toolTone", () => {
     expect(toolTone("web_search")).toBe("search");
     expect(toolTone("shell")).toBe("execute");
     expect(toolTone("compress")).toBe("compress");
-    expect(toolTone("session_search")).toBe("context");
+    expect(toolTone("session")).toBe("context");
     expect(toolTone("parallel")).toBe("context");
     expect(toolTone("question")).toBe("interact");
     expect(toolTone("subagents")).toBe("agent");

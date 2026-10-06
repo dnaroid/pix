@@ -25,6 +25,17 @@ describe("UsageLimitBars", () => {
     expect(body).not.toContain("Cached");
   });
 
+  it("shows a weekly balance and countdown even without an hourly window", () => {
+    const { body } = render(UsageLimitBars, {
+      props: { windows: [{ key: "W", label: "W" as const, window: weekly }], now },
+    });
+    expect(body).toContain("Weekly");
+    expect(body).toContain("32%");
+    expect(body).toContain("width: 32%");
+    expect(body).toContain("Resets in 2d0h");
+    expect(body).not.toContain("Hourly");
+  });
+
   it("renders nothing when there are no account quota windows", () => {
     const { body } = render(UsageLimitBars, { props: { windows: [], now } });
     expect(body).not.toContain("data-usage-limit-bars");
