@@ -51,7 +51,7 @@ function reviewHarness() {
 }
 
 describe("IDX AI knowledge review in new session", () => {
-  it("submits global cleanup with bounded escalation and task-scoped CLI v2 audit guidance", async () => {
+  it("submits self-contained sequential cleanup without subagents, with bounded escalation", async () => {
     const { client, options, appendUserMessage, runPrompt } = reviewHarness();
     await createProjectActions(options).refreshKnowledgeBase();
     expect(client.newSession).toHaveBeenCalledWith("/project");
@@ -64,15 +64,14 @@ describe("IDX AI knowledge review in new session", () => {
       "dirty receipts alone do not prove documentation drift", "idx context / idx search",
       "every declared Implementation/Tests dependency", "including unchanged specs",
       "Repair only proven documentation drift", ".indexer-cli/spec-template.md",
-      "knowledge-auditor in explicit spec-review mode", "effective role permits it",
-      "exact spec paths, goal and pass budget", "dependency coverage, findings and gaps",
-      "project-local replacements", "extra tools do not override read-only instructions",
-      "Otherwise review in the parent", "verify for command-only checks",
-      "research for read-only evidence returned as text", "Workers must not acknowledge",
+      "Perform all work yourself in this session", "source review, documentation repairs, command checks, task audit and final acknowledgment",
+      "Do not invoke subagents or spawn/delegate to any agents", "including knowledge-auditor, verify or research",
+      "even if general workflow instructions require delegation", "lock conflicts",
+      "Run knowledge-base operations sequentially, never in parallel", "track dependency coverage, findings and gaps yourself",
       "target project's .pi/artifacts/", "never root artifacts/ or .artifacts/",
       "harness evidence in .pi/subagents/", "idx audit <changed-paths...>",
       "task-changed paths only", "indexing/audit is not proof of review",
-      "idx knowledge acknowledge <spec-paths...>", "no unresolved drift",
+      "Run idx knowledge acknowledge <spec-paths...> yourself", "no unresolved drift",
       "acknowledge accurate unchanged specs too", "Never acknowledge unreviewed/incomplete/unstable work",
       "Concurrent spec/dependency changes invalidate review", "do not overwrite others' edits",
       "at most two review passes total", "one corrective pass", "identified, safe, unblocked gaps",

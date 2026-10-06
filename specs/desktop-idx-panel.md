@@ -43,27 +43,19 @@ Expose installed IDX v2 repository intelligence in Pix Desktop with typed querie
   changed-path field used by **Audit paths**. Its cleanup todo succeeds only on a
   final complete exit-0 `idx knowledge dirty` result of `no`; a separate task audit
   may pass while global cleanup remains blocked.
-- Delegated review assignments must match the effective role's instructions and
-  tool permissions, including project-local replacements. Bounded documentation
-  reviews needing commands, documentation repairs or report-file writes use
-  `knowledge-auditor` in explicit **spec-review** mode, with exact spec paths,
-  review goal and pass budget. Its standard `[read, grep, bash, edit, write]`
-  tools support those actions; check the effective role permits that mode,
-  especially for project-local replacements. Tool overrides do not remove
-  read-only role boundaries. Product code/tests/configuration and generated review
-  state are outside those workers' edit scope. Command-only checks use `verify`;
-  read-only research returns evidence in its final response rather than requiring
-  file writes. The parent may persist that response. Disposable reports/logs use
-  unique target-project `.pi/artifacts/` directories; harness evidence remains in
-  `.pi/subagents/`. Workers report actual spec/dependency coverage and gaps; the
-  parent owns final acknowledgment after complete stable review, not workers.
-  This mode reviews bounded global slices; it does not own the global cleanup
-  loop or replace the role's default task-audit workflow. When no compatible
-  auditor is available, the parent performs the bounded work itself.
+- **AI review** performs all work itself in the new session: source review,
+  documentation repairs, command checks, task audit and final acknowledgment.
+  It must not invoke subagents or delegate to any role (including
+  `knowledge-auditor`, `verify` or `research`), even when general workflow
+  instructions require delegation. This service-specific rule prevents concurrent
+  knowledge-base updates and lock conflicts; knowledge-base operations run
+  sequentially, never in parallel. The session tracks dependency coverage,
+  findings and gaps itself. This does not change general agent workflows outside
+  this service. Disposable reports/logs use unique target-project `.pi/artifacts/`
+  directories; existing harness evidence remains in `.pi/subagents/`.
 - The prompt allows at most two review passes total (initial plus one corrective
   pass). Its eight concise instructions retain the global success, stable-review,
-  delegation and escalation rules below; role-specific mechanics stay in the
-  effective role instructions. The generated prompt is regression-tested for
+  self-contained sequential execution and escalation rules. The generated prompt is regression-tested for
   those safeguards and a compact size budget. The corrective
   pass is allowed only for identified, safely actionable, unblocked gaps. Stop early on
   verified `no`. Do not poll for cleanliness or bypass the limit with repeated
