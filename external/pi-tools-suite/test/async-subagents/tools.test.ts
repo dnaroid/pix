@@ -707,7 +707,9 @@ setTimeout(() => {}, 1000);
 			action: "result", agentId: "done",
 		}, undefined, undefined, { cwd });
 		expect(result.isError).not.toBe(true);
-		expect(JSON.stringify(result)).toContain(completedRun);
+		// Compare parsed fields: JSON.stringify escapes Windows path separators,
+		// so a serialized-path contains() can never match on win32.
+		expect((result as { details?: { runDir?: string } }).details?.runDir).toBe(completedRun);
 	});
 
 	test.serial("keeps project sub-agent files across reload and fork shutdowns", async () => {

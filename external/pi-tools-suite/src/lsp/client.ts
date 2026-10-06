@@ -138,6 +138,46 @@ export class LspClient {
     finally { finishActivity?.(); }
   }
 
+  /**
+   * vscode-jsonrpc's `sendRequest` rethrows write failures from an async
+   * promise executor, so a write into a child that died before its exit event
+   * reached us surfaces as an unhandled EPIPE rejection. An EPIPE on stdin can
+   * only mean the reader is gone, and the child exit handler already owns
+   * failure reporting, so complete stdin writes silently instead. On Windows
+   * this is the common crash-at-startup path; POSIX usually wins the race.
+   */
+  private swallowStdinEpipe(child: ChildProcessWithoutNullStreams): void {
+    child.stdin.on("error", () => {
+      // Handled per-write below; keep the stream from ever crashing the host.
+    });
+    const originalWrite = child.stdin.write.bind(child.stdin);
+    type WriteCallback = (error: Error | null | undefined) => void;
+    const isEpipe = (error: unknown): boolean =>
+      Boolean(error) && (error as NodeJS.ErrnoException).code === "EPIPE";
+    child.stdin.write = ((chunk: unknown, encoding?: unknown, callback?: unknown) => {
+      const done = (typeof encoding === "function" ? encoding : callback) as WriteCallback | undefined;
+      const passedEncoding = typeof encoding === "function" ? undefined : encoding;
+      const fail = (error: Error | null | undefined): void => {
+        if (done && isEpipe(error)) done(null);
+        else if (done) done(error);
+      };
+      try {
+        if (!done) return originalWrite(chunk as never, passedEncoding as never) as boolean;
+        return originalWrite(chunk as never, passedEncoding as never, fail) as boolean;
+      } catch (error) {
+        if (isEpipe(error)) {
+          done?.(null);
+          return false;
+        }
+        if (done) {
+          done(error as Error);
+          return false;
+        }
+        throw error;
+      }
+    }) as typeof child.stdin.write;
+  }
+
   private async start(signal?: AbortSignal): Promise<void> {
     if (!isExecutableAvailable(this.command.bin)) {
       this.unavailableReason = `${this.server.id}: LSP binary not found: ${this.command.bin}`;
@@ -145,6 +185,7 @@ export class LspClient {
     }
 
     const child = spawnOwnedLsp(this.command);
+    this.swallowStdinEpipe(child);
 
     this.process = child;
     let failStartup: ((error: Error) => void) | undefined;

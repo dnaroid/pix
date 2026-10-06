@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -11,6 +11,22 @@ const runner = path.resolve(
 	"../../src/async-subagents/agents/ui-qa/browser/scripts/browser-qa-runner.mjs",
 );
 const tempDirs: string[] = [];
+
+beforeAll(() => {
+	// First use of powershell.exe + Get-CimInstance + taskkill.exe on a cold
+	// Windows CI runner can take several seconds while AV scans the binaries;
+	// that delay is exactly what the runner's bounded descendant-cleanup path
+	// must survive. Warm the same query/kill binaries once (taskkill targeting
+	// the helper's own PID doubles as its exit) so cold-start jitter cannot
+	// flip the hung-stage tests.
+	if (process.platform !== "win32") return;
+	spawnSync("powershell.exe", [
+		"-NoProfile",
+		"-NonInteractive",
+		"-Command",
+		"Get-CimInstance Win32_Process -Filter \"ProcessId = $PID\" | Out-Null; & taskkill.exe /PID $PID /F *> $null",
+	], { stdio: "ignore", timeout: 60_000, windowsHide: true });
+});
 
 afterEach(() => {
 	for (const directory of tempDirs.splice(0)) {

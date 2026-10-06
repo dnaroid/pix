@@ -5,6 +5,10 @@ import os from "node:os";
 import path from "node:path";
 import { prepareMacosHelper } from "../../src/async-subagents/agents/ui-qa/drivers/macos/helper-cache.mjs";
 
+// The macOS helper cache enforces POSIX-only invariants (owned private real
+// directories via mode bits, symlink rejection, codesign/xcrun artifacts);
+// Windows cannot express them, so this storage suite is skipped on win32.
+
 const artifacts = path.resolve(import.meta.dir, "../../../../.pi/artifacts");
 fs.mkdirSync(artifacts, { recursive: true });
 function fixture() {
@@ -42,7 +46,7 @@ function legacy(f: ReturnType<typeof fixture>, content = "legacy") {
 	return binary;
 }
 
-test("default installation follows OS-account home, not isolated HOME or agent configuration", async () => {
+test.skipIf(process.platform === "win32")("default installation follows OS-account home, not isolated HOME or agent configuration", async () => {
 	const f = fixture();
 	const userInfo = os.userInfo;
 	const oldHome = process.env.HOME;
@@ -62,7 +66,7 @@ test("default installation follows OS-account home, not isolated HOME or agent c
 	}
 });
 
-test("one installation across projects and project .pi deletion; only changed source/signer rebuilds", async () => {
+test.skipIf(process.platform === "win32")("one installation across projects and project .pi deletion; only changed source/signer rebuilds", async () => {
 	const f = fixture();
 	try {
 		expect(await prepareMacosHelper(f.options)).toBe(f.binary);
@@ -80,7 +84,7 @@ test("one installation across projects and project .pi deletion; only changed so
 	} finally { f.cleanup(); }
 });
 
-test("concurrent cold requests serialize across projects", async () => {
+test.skipIf(process.platform === "win32")("concurrent cold requests serialize across projects", async () => {
 	const f = fixture();
 	try {
 		const results = await Promise.all([prepareMacosHelper(f.options), prepareMacosHelper({ ...f.options, projectRoot: f.otherProject })]);
@@ -91,7 +95,7 @@ test("concurrent cold requests serialize across projects", async () => {
 });
 
 for (const unsafe of [false, true]) {
-	test(`concurrent hierarchy creation revalidates EEXIST (${unsafe ? "unsafe" : "private"} directory)`, async () => {
+	test.skipIf(process.platform === "win32")(`concurrent hierarchy creation revalidates EEXIST (${unsafe ? "unsafe" : "private"} directory)`, async () => {
 		const f = fixture();
 		const mkdir = fs.mkdirSync;
 		let injected = false;
@@ -111,7 +115,7 @@ for (const unsafe of [false, true]) {
 	});
 }
 
-test("unchanged private legacy helper is copied and verified without compile/sign", async () => {
+test.skipIf(process.platform === "win32")("unchanged private legacy helper is copied and verified without compile/sign", async () => {
 	const f = fixture();
 	try {
 		const old = legacy(f);
@@ -128,7 +132,7 @@ test("unchanged private legacy helper is copied and verified without compile/sig
 });
 
 for (const invalid of ["changed source", "public binary", "symlink binary", "invalid signature"]) {
-	test(`legacy ${invalid} safely falls back to bundled source`, async () => {
+	test.skipIf(process.platform === "win32")(`legacy ${invalid} safely falls back to bundled source`, async () => {
 		const f = fixture();
 		try {
 			const old = legacy(f);
@@ -150,7 +154,7 @@ for (const invalid of ["changed source", "public binary", "symlink binary", "inv
 }
 
 for (const failure of ["xcrun", "codesign", "verify", "publication"]) {
-	test(`${failure} failure preserves prior binary/stamp and releases lock`, async () => {
+	test.skipIf(process.platform === "win32")(`${failure} failure preserves prior binary/stamp and releases lock`, async () => {
 		const f = fixture();
 		const rename = fs.renameSync;
 		try {
@@ -174,7 +178,7 @@ for (const failure of ["xcrun", "codesign", "verify", "publication"]) {
 	});
 }
 
-test("cache reuse verifies signature and fails closed without rebuilding", async () => {
+test.skipIf(process.platform === "win32")("cache reuse verifies signature and fails closed without rebuilding", async () => {
 	const f = fixture();
 	try {
 		await prepareMacosHelper(f.options);
@@ -186,7 +190,7 @@ test("cache reuse verifies signature and fails closed without rebuilding", async
 });
 
 for (const unsafe of ["home symlink", "Library symlink", "Pix public", "binary symlink", "stamp symlink", "binary public", "stamp public", "lock symlink", "lock public", "pid symlink"]) {
-	test(`rejects unsafe ${unsafe}`, async () => {
+	test.skipIf(process.platform === "win32")(`rejects unsafe ${unsafe}`, async () => {
 		const f = fixture();
 		try {
 			await prepareMacosHelper(f.options);
@@ -211,7 +215,7 @@ for (const unsafe of ["home symlink", "Library symlink", "Pix public", "binary s
 	});
 }
 
-test("existing shared Library permissions are untouched, product directories are private", async () => {
+test.skipIf(process.platform === "win32")("existing shared Library permissions are untouched, product directories are private", async () => {
 	const f = fixture();
 	try {
 		const support = path.join(f.homeDirectory, "Library/Application Support");
@@ -225,7 +229,7 @@ test("existing shared Library permissions are untouched, product directories are
 });
 
 for (const owner of ["dead", "live", "recent empty", "stale empty", "invalid"]) {
-	test(`${owner} lock is reclaimed only if safely abandoned`, async () => {
+	test.skipIf(process.platform === "win32")(`${owner} lock is reclaimed only if safely abandoned`, async () => {
 		const f = fixture();
 		try {
 			await prepareMacosHelper(f.options);
