@@ -78,6 +78,17 @@ export interface RequestMetrics {
   exitCode?: number | null;
   exitSignal?: NodeJS.Signals | null;
   terminationExpected: boolean;
+  /** Content-free launch budgets; original caller value precedes recovery reductions. */
+  timeouts?: {
+    callerTotalMs?: number;
+    configuredTotalMs: number;
+    totalSource: "environment" | "default";
+    requestBudgetMs: number;
+    effectiveTotalMs: number;
+    effectiveIdleMs: number;
+    effectiveReadyMs: number;
+    recoveryAttempt: boolean;
+  };
 }
 
 export interface SearchMetrics {

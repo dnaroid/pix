@@ -105,6 +105,10 @@
     clearDrag: dragController.clear,
   });
   const treeState = treeController.state;
+  export async function revealPath(path: string): Promise<void> {
+    searchQuery = "";
+    await treeController.revealPath(path);
+  }
   onMount(() => createProjectFilesRefresh(() => treeController.refreshVisibleDirectories()).dispose);
   const rootEntries = $derived(treeController.rootEntries);
   const rows = $derived(treeController.rows);

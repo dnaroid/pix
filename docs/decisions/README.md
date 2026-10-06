@@ -7,10 +7,25 @@ No new database, document kind, or automatic enforcement is introduced.
 
 ## When to write
 
-Record significant architecture, dependency/model choices, consequential
-trade-offs, accepted risks, or rejection of a plausible alternative. Do not
-create records for routine edits, formatting or mechanical renames. Link an
-existing applicable record instead of duplicating it.
+Default to no new record. Specs describe what and how; the decision log preserves
+why a consequential path was chosen, not a changelog of features or completed tasks.
+Write a record when the user explicitly requests one, or when both apply:
+
+- The choice involves materially different plausible alternatives, a consequential
+  accepted risk, or a costly-to-reverse commitment.
+- Its rationale will help a future maintainer avoid repeating a dispute or mistake
+  and is not already captured by an applicable record.
+
+Ask: “Will this rationale still be useful in six months?” Architecture,
+dependency/model choices and rejected alternatives are candidates, not automatic
+triggers. Feature size or a changed spec alone does not justify a record. Routine
+UX changes, bug fixes, implementation details, formatting and mechanical renames
+normally belong only in the current spec when behavior changes. They need a record
+only if they independently meet the threshold above. Do not invent alternatives
+to fill the template; link an existing applicable record instead of duplicating it.
+
+Apply this threshold to future records. Do not prune or rewrite historical records
+merely because they would not meet it today.
 
 The parent writes the rationale while the evidence and user discussion are
 available, not after context is lost. Use [TEMPLATE.md](TEMPLATE.md), one file per
@@ -52,6 +67,10 @@ errors, not invent or approve decisions.
 
 ## Records
 
+- [0061 — Scoped AST and public web tools for subagents](0061-subagent-scoped-ast-web-tools.md)
+- [0060 — Read-only repository queries for every subagent](0060-subagent-read-only-repo-tools.md)
+- [0059 — Private todos for every subagent role](0059-subagent-private-todos.md)
+- [0058 — Reverse navigation into Files](0058-reverse-file-navigation.md)
 - [0001 — Subagent coding roles](0001-subagent-coding-roles.md)
 - [0002 — Agent-owned decision history](0002-agent-owned-decision-history.md)
 - [0003 — Reveal Desktop after the initial document loads](0003-desktop-startup-reveal.md)
@@ -82,5 +101,13 @@ errors, not invent or approve decisions.
 - [0047 — Remove the Desktop Session inspector](0047-remove-session-inspector.md)
 - [0048 — Status-bar click popups](0048-status-bar-click-popups.md)
 - [0049 — Nonmodal model picker](0049-nonmodal-model-picker.md)
+- [0050 — Bounded global AI knowledge cleanup](0050-bounded-global-knowledge-cleanup.md)
+- [0051 — Read-only Claude reset grants](0051-claude-reset-grants.md)
+- [0052 — Owned LSP control in Desktop and TUI](0052-owned-lsp-control.md)
+- [0053 — Repository-only commit author in Source Control](0053-repository-commit-author.md)
+- [0054 — Project-shared LSP ownership](0054-project-shared-lsp.md)
+- [0055 — Temporary, isolated BTW side chat](0055-temporary-btw-side-chat.md)
+- [0056 — Monitoring-only LSP panels](0056-lsp-monitoring.md)
+- [0057 — Canonical LSP reuse and bounded idle retention](0057-lsp-reuse-idle-cleanup.md)
 
 Workflow contract: [repository knowledge workflow](../../specs/repo-knowledge-agent-workflow.md).

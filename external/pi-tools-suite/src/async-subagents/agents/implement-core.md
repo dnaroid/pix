@@ -3,6 +3,7 @@ description: Implement complex core changes or investigate and fix ambiguous bug
 icon: code
 models: [openai-codex/gpt-6.1-sol]
 thinking: high
+tools: [read, grep, find, ls, bash, edit, write, ast_grep]
 ---
 
 # Core implementation

@@ -8,13 +8,15 @@ Pix + ACP runtime, so installing the TUI is optional.
 ## Install
 
 Use the native package for the current OS/CPU from
-[GitHub Releases](https://github.com/dnaroid/pix/releases):
+[GitHub Releases](https://github.com/dnaroid/pix/releases). Pix Desktop is
+currently supported on macOS only; Windows/Linux Desktop packages are legacy
+tooling, not a supported product:
 
 | Platform | Package |
 | --- | --- |
-| Windows x64 | NSIS `-setup.exe` |
+| Windows x64 | Legacy tooling only; unsupported |
 | macOS Apple Silicon | `.dmg` |
-| Linux x64 | `.AppImage` and `.deb` |
+| Linux x64 | Legacy tooling only; unsupported |
 
 Release packages contain their own Node.js/Pix/ACP runtime. See
 [Installing Pix](installation.md) for checksum verification, upgrade and legacy
@@ -105,6 +107,35 @@ review/commit-message model preferences. TUI-only renderer/theme settings stay
 in `pix.jsonc`.
 
 See [Configuration and accounts](configuration.md) for provider and voice setup.
+
+## BTW side questions
+
+Open **⋯ → Side question (BTW)** in the composer to ask about the current task
+in a resizable pane on the right. `/btw` also opens it; `/btw question` sends a
+question there. Both work while the main agent is running or paused. Opening the
+pane alone does not call a model or move the main draft and attachments.
+
+BTW supports follow-up questions and Markdown/code answers. Its model/effort
+button opens the same **Model + Thinking** selector as the statusbar, using your
+Desktop visible-model list rather than showing every model. **Manage** edits
+that shared list. Choose a model and its supported thinking level, then Apply;
+the selection affects only the next BTW question, never the main agent.
+**Same as main session** inherits both the parent's resolved model and effort;
+**Use main** restores this mode. Applied effort choices are remembered per model
+only while the side chat exists; they do not change the main model defaults.
+**Add selected text** explicitly includes a selected transcript/file
+excerpt. BTW has no tools: it cannot independently read files, search or run tests.
+Each question uses current completed parent context; shortened context is labelled.
+
+**Stop** stops only the side response. Hiding the pane keeps its temporary
+history, draft and reading position; reopening restores them. Each parent session
+has its own side conversation. **New conversation** clears it. Closing/replacing
+the parent runtime, reconnecting or exiting discards the temporary conversation;
+it is not saved into the main chat or restored after restart.
+
+Use **Copy** or **Insert** on an answer to reuse it. Insert requires an empty main
+composer with no attachments and only writes a draft; it never sends it. Model
+usage still counts towards the original session. See the [BTW contract](../specs/desktop-btw.md).
 
 ## Observer (experimental)
 

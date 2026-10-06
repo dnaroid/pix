@@ -23,19 +23,31 @@ function source(name: keyof typeof sources): string {
 }
 
 describe("Status bar click surfaces", () => {
+  it("keeps Observer diagnostics behind an accessible disclosure, reset on opening", () => {
+    expect(observerStatus).toContain('let showDiagnostics = $state(false)');
+    expect(observerStatus).toContain('aria-expanded={showDiagnostics} aria-controls={diagnosticsId}');
+    expect(observerStatus).toContain('onclick={() => showDiagnostics = !showDiagnostics}');
+    expect(observerStatus).toContain('Technical details');
+    const detailsStart = observerStatus.indexOf('{#if showDiagnostics}');
+    expect(detailsStart).toBeGreaterThan(observerStatus.indexOf('What it found'));
+    for (const label of ['Check duration', 'Runtime reason', 'New turns', 'Recorded tokens', 'Local feedback']) {
+      expect(observerStatus.indexOf(label)).toBeGreaterThan(detailsStart);
+    }
+    expect(observerStatus.slice(observerStatus.indexOf('function openPopup()'), observerStatus.indexOf('function closePopup('))).toContain('showDiagnostics = false;');
+  });
   it("layers opaque runtime popovers above positioned composer content", () => {
     expect(source("StatusBar")).toMatch(/<footer class="relative z-20 /);
     expect(source("RuntimeStatusBarItems").match(/\bbg-popover\b/g)).toHaveLength(2);
     expect(source("RuntimeStatusBarItems")).not.toContain("bg-popover/");
   });
 
-  it("places Usage left and Observer before right-hand activity, with a distinct binoculars", () => {
+  it("places Usage left and Observer before right-hand activity, with a distinct telescope", () => {
     const status = source("StatusBar");
     expect(status.indexOf("<RuntimeStatusBarItems")).toBeLessThan(status.indexOf("<ObserverStatus"));
     expect(status.indexOf("<SessionBrainstormStatus")).toBeLessThan(status.indexOf("<ObserverStatus"));
     expect(status.indexOf("<ObserverStatus")).toBeLessThan(status.indexOf("<SessionActivityStatusHud"));
     expect(status).toContain("leadingSeparator={!!observer}");
-    expect(source("ObserverStatus")).toContain('@lucide/svelte/icons/binoculars');
+    expect(source("ObserverStatus")).toContain('@lucide/svelte/icons/telescope');
     expect(source("ObserverStatus")).not.toContain('@lucide/svelte/icons/eye');
     expect(source("ObserverStatus")).toContain('"h-4 w-4", status.kind');
     expect(status).toContain('class="flex shrink-0 items-center gap-0.5" data-status-right');
@@ -88,8 +100,11 @@ describe("Status bar click surfaces", () => {
     expect(statusBar.match(/\{#key observer\?\.sessionId\}/g)).toHaveLength(2);
   });
 
-  it("replaces quota prose with a separately labelled reset calendar", () => {
+  it("adds a Session limit bar and a per-model token donut around the existing weekly calendar", () => {
+    expect(source("RuntimeStatusBarItems")).toContain("<UsageLimitBars windows={popupLimitWindows}");
     expect(source("RuntimeStatusBarItems")).toContain("<QuotaResetCalendar window={modelUsage.weekly}");
+    expect(source("RuntimeStatusBarItems")).toContain('=> item.label === "H"');
+    expect(source("RuntimeStatusBarItems")).toContain("<ModelUsageDonut models={donutModels}");
     expect(source("RuntimeStatusBarItems")).toContain("displayModelUsage(status, now)");
     expect(source("RuntimeStatusBarItems")).not.toContain('aria-label="Model quota"');
     expect(source("RuntimeStatusBarItems")).not.toContain("<p>Cached quota from the last successful refresh");
@@ -102,6 +117,32 @@ describe("Status bar click surfaces", () => {
     expect(runtime).toContain("<ResetCreditsSection credits={modelUsage.resetCredits ?? []} availableCount={modelUsage.resetCreditsAvailableCount} {now} />");
     expect(source("ResetCreditsSection")).toContain('aria-label="Available reset credits"');
     expect(source("ResetCreditsSection")).toContain("Expires in ${formatResetDuration(credit.expiresAt, now)}");
-    expect(runtime).toContain("max-h-[min(640px,calc(100vh-120px))]");
+    expect(runtime).toContain("min-h-0 overflow-y-auto overscroll-contain");
+    expect(runtime.indexOf("<QuotaResetCalendar")).toBeLessThan(runtime.indexOf("<ResetCreditsSection"));
+    expect(runtime.indexOf("<ResetCreditsSection")).toBeLessThan(runtime.indexOf("<ModelUsageDonut"));
+    expect(runtime.indexOf("<ModelUsageDonut")).toBeLessThan(runtime.indexOf("grid-cols-[1fr_auto_auto]"));
+  });
+
+  it("limits entire status popups, including headers, to content height minus 70px", () => {
+    const limit = "max-h-[max(0px,calc(100dvh-70px))]";
+    expect(popover).toContain(limit);
+    expect(popover).toContain("overflow-y-auto overscroll-contain");
+    expect(runtimeStatus.split(limit)).toHaveLength(3);
+    expect(runtimeStatus).not.toContain("640px");
+    expect(brainstormStatus).not.toContain("max-h-[60vh]");
+    expect(activityHud).not.toContain("max-h-[min(60vh,24rem)]");
+    expect(activityHud).not.toContain("max-h-[min(40vh,18rem)]");
+    expect(activityHud.split(limit)).toHaveLength(3);
+    expect(activityHud).toContain("mt-1 min-h-0 overflow-y-auto overscroll-contain");
+    expect(activityHud).toContain("mt-0.5 min-h-0 overflow-y-auto overscroll-contain");
+  });
+
+  it("announces Claude limits refresh once, inside its disabled refresh control", () => {
+    const runtime = source("RuntimeStatusBarItems");
+    expect(runtime).toContain("disabled={claudeLimitsRefreshing}");
+    expect(runtime).toContain('<span role="status" aria-live="polite">{claudeLimitsRefreshing ? "Refreshing…" : "Refresh limits"}</span>');
+    expect(runtime).not.toContain("Checking Claude Code login and limits…");
+    expect(runtime.match(/Refreshing…/g)).toHaveLength(1);
+    expect(runtime).toContain("Could not refresh Claude Code limits. Retry or check your Claude Code login.");
   });
 });

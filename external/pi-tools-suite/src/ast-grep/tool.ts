@@ -314,7 +314,7 @@ async function executeAstGrep(
 	};
 }
 
-export function registerAstGrepTool(pi: ExtensionAPI) {
+export function registerAstGrepTool(pi: ExtensionAPI, options: { readOnly?: boolean } = {}) {
 	const toolDescriptions = astGrepToolDescriptions(DEFAULT_MAX_LINES, formatSize(DEFAULT_MAX_BYTES));
 
 	pi.registerTool({
@@ -329,6 +329,8 @@ export function registerAstGrepTool(pi: ExtensionAPI) {
 		renderCall: renderAstGrepCall,
 		renderResult: renderAstGrepResult,
 	});
+
+	if (options.readOnly) return;
 
 	pi.registerTool({
 		...toolDescriptions.astApply,

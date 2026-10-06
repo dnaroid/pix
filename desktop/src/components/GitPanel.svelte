@@ -18,6 +18,7 @@
   import GitChangesSection from "./GitChangesSection.svelte";
   import GitCommitComposer from "./GitCommitComposer.svelte";
   import GitRepositoryTools from "./GitRepositoryTools.svelte";
+  import GitIdentitySection from "./GitIdentitySection.svelte";
 
   let { workspace, snapshot, uninitialized, loading, error, actionId, llmActionId, gitAssistantReady, workflow, ci,
     onRefresh, onInitialize, onOpenDiff, onStage, onUnstage, onCommit, onPush, onSwitchBranch, onCreateBranch, onGenerateCommitMessage, onReview }: {
@@ -167,6 +168,7 @@
       {/if}
       {#if snapshot.head}<GitCiSection {ci} />{/if}
       {#key workspace}<GitRepositoryTools {snapshot} {busy} {workflow} {onCreateBranch} />{/key}
+      {#key workspace}<GitIdentitySection {workspace} {busy} onSave={workflow.onSaveIdentity} />{/key}
     {:else if uninitialized}
       <div class="px-3 py-8 text-center">
         <GitBranch class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" />

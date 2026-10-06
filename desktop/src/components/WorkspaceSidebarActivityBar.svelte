@@ -4,6 +4,7 @@
   import GitBranch from "@lucide/svelte/icons/git-branch";
   import ListTodo from "@lucide/svelte/icons/list-todo";
   import ScanSearch from "@lucide/svelte/icons/scan-search";
+  import CodeXml from "@lucide/svelte/icons/code-xml";
   import Settings from "@lucide/svelte/icons/settings";
   import SquareTerminal from "@lucide/svelte/icons/square-terminal";
   import { linearFocusIndex } from "../lib/keyboard-navigation";
@@ -22,6 +23,7 @@
     "registry",
     "scripts",
     "idx",
+    "lsp",
     "settings",
   ];
 
@@ -176,6 +178,16 @@
     <ScanSearch class="h-5 w-5" aria-hidden="true" />
     <SidebarIndicatorDot indicator={indicators.idx} />
   </button>
+  <button
+    class={["relative grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", selected("lsp") ? "border-l-primary bg-panel-selected text-foreground" : "border-l-transparent text-muted-foreground"]}
+    type="button" data-sidebar-tab tabindex={activeTab === "lsp" ? 0 : -1}
+    title={activityTitle("lsp", activeTab === "lsp" && !collapsed ? "Hide Language Servers" : "Language Servers")}
+    aria-label={activityLabel("lsp", "Language Servers")} aria-controls="workspace-lsp-panel"
+    aria-pressed={activeTab === "lsp" && !collapsed}
+    onkeydown={(event) => handleKeydown(event, "lsp")}
+    oncontextmenu={(event) => onIndicatorContext(event, "lsp")}
+    onclick={() => onSelect("lsp")}
+  ><CodeXml class="h-5 w-5" aria-hidden="true" /><SidebarIndicatorDot indicator={indicators.lsp} /></button>
   <button
     class={["relative mt-auto grid h-10 w-10 -translate-y-px place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", selected("settings") ? "border-l-primary bg-panel-selected text-foreground" : "border-l-transparent text-muted-foreground"]}
     type="button"

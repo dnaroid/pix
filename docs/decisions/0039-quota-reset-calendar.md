@@ -98,3 +98,12 @@ the user), omitting today (prior user requirement), or an arbitrarily long row
 (unreadable in compact popup chrome). Exact date/year and time below remain
 authoritative across month/year boundaries. Revisit if unusually distant resets
 need a more explicit visual gap marker.
+
+## Follow-up: preserve the calendar alongside usage visuals
+
+The user clarified that the weekly calendar is useful and must remain, selecting
+calendar + limit scales + model-token donut. This supersedes the attempted
+calendar replacement, not the existing reset-credit or refresh contracts.
+The short-window scale and model chart supplement the calendar; recorded model
+tokens remain distinct from account quota. Presentation details belong in the
+[quota spec](../../specs/desktop-quota-calendar.md).

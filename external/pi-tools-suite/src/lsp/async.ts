@@ -32,3 +32,15 @@ export async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, lab
     if (abort) signal?.removeEventListener("abort", abort);
   });
 }
+
+export async function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) throw new Error("aborted");
+  let abort!: () => void;
+  const cancelled = new Promise<never>((_resolve, reject) => {
+    abort = () => reject(new Error("aborted"));
+    signal.addEventListener("abort", abort, { once: true });
+  });
+  try { return await Promise.race([promise, cancelled]); }
+  finally { signal.removeEventListener("abort", abort); }
+}

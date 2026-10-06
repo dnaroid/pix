@@ -2,8 +2,14 @@
 
 Load this topic only when `selection.guide.topic` is `macos-accessibility`.
 
-In source/development runs, the trusted bundled driver is cached at the stable
-project path `.pi/ui-qa/helpers/macos-accessibility`. Installed macOS TUI and
+In source/development runs, the trusted driver is installed once per OS user at
+`~/Library/Application Support/Pix/ui-qa/helpers/macos-accessibility`.
+The account home comes from the OS, not an isolated QA app's temporary HOME.
+Projects share this signature-checked installation; project Registry Clean and
+scratch TTL cleanup cannot remove it. A matching private old project helper may
+be copied after signature verification, without recompiling or deleting it.
+Do not use the old `.pi/ui-qa/helpers/macos-accessibility` path for new requests.
+Installed macOS TUI and
 Desktop releases use their signed payload's `helpers/macos-accessibility`
 instead; a missing/invalid packaged helper requires reinstalling the complete
 release rather than compiling one into the project. The probe remediation
@@ -20,6 +26,17 @@ Screen Recording permission. The driver uses macOS Accessibility for semantic
 discovery and interaction, CGWindow for window correlation/capture support, and
 ScreenCaptureKit for exact-window recording when available. Do not invoke those
 APIs directly from the QA child.
+
+For missing permissions, hand off the exact helper path returned by the probe.
+The user/parent can explicitly run `"<helper path>" doctor --prompt` to request
+Accessibility and Screen Recording. The QA child must not request permission
+dialogs on its own. The request does not grant permission and may return
+`missing` before the user responds; after approval run `doctor` without
+`--prompt` in a fresh process. If no dialog appears, the user must add/enable
+that exact helper in System Settings > Privacy & Security > Accessibility and
+Screen Recording. Never reset TCC or grant permissions programmatically.
+Moving a helper or changing its signing identity can require fresh approval;
+a permanent path is not a promise of permanent TCC grants.
 
 `target.application` may identify one application by `pid`, `name`, `bundleId`,
 or a bounded runner-owned `launch` contract. Launch wrappers remain inside the

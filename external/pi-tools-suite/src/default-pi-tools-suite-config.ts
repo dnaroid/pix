@@ -532,9 +532,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
       //     "**/node_modules/**"
       //   ],
       //   "rootMarkers": [
-      //     ".git",
-      //     "package.json",
-      //     "README.md"
+      //     ".git"
       //   ],
       //   "bin": "vscode-markdown-language-server",
       //   "args": [

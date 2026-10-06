@@ -1,4 +1,5 @@
 import { tick, untrack } from "svelte";
+import { isWorkspaceProjectFilePath } from "../lib/project-files";
 import { isTypeaheadKey, linearFocusIndex, typeaheadFocusIndex } from "../lib/keyboard-navigation";
 import {
   projectTreeRowsWithRoot,
@@ -39,6 +40,9 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
   let pendingExpansionPersist: { workspace: string; paths: string[] } | null = null;
   let expansionPersistTail: Promise<void> = Promise.resolve();
   const directoryRequestVersions = new Map<string, number>();
+  const directoryLoads = new Map<string, Promise<void>>();
+  let revealVersion = 0;
+  let disposed = false;
 
   $effect(() => {
     const currentWorkspace = options.workspace();
@@ -50,6 +54,7 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
     if (!workspaceChanged && !refreshChanged) return;
 
     const nextGeneration = ++generation;
+    directoryLoads.clear();
     let restoreRevision: number | undefined;
     const refreshPaths = untrack(() => {
       if (workspaceChanged) {
@@ -92,8 +97,18 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
     );
   }
 
-  async function loadDirectory(path: string, requestGeneration = generation, force = false): Promise<void> {
-    if (!options.workspace() || (!force && state.loadingDirectories.includes(path))) return;
+  function loadDirectory(path: string, requestGeneration = generation, force = false): Promise<void> {
+    if (!force && directoryLoads.has(path)) return directoryLoads.get(path)!;
+    const request = performDirectoryLoad(path, requestGeneration);
+    directoryLoads.set(path, request);
+    void request.finally(() => {
+      if (directoryLoads.get(path) === request) directoryLoads.delete(path);
+    });
+    return request;
+  }
+
+  async function performDirectoryLoad(path: string, requestGeneration: number): Promise<void> {
+    if (!options.workspace() || disposed) return;
     const requestVersion = (directoryRequestVersions.get(path) ?? 0) + 1;
     directoryRequestVersions.set(path, requestVersion);
     if (!state.loadingDirectories.includes(path)) {
@@ -138,6 +153,7 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
   }
 
   function toggleDirectory(path: string): void {
+    revealVersion++;
     if (!path) {
       state.rootExpanded = !state.rootExpanded;
       if (!state.rootExpanded) state.focusedPath = "";
@@ -156,6 +172,7 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
   }
 
   function openFile(path: string): void {
+    revealVersion++;
     state.selectedPath = path;
     options.onOpenFile(path);
   }
@@ -173,9 +190,11 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
     if (!row) return;
     const requestGeneration = generation;
     const requestWorkspace = options.workspace();
+    const requestRevealVersion = revealVersion;
     state.focusedPath = row.entry.path;
     await tick();
-    if (requestGeneration !== generation || options.workspace() !== requestWorkspace || state.focusedPath !== row.entry.path) return;
+    if (requestGeneration !== generation || requestRevealVersion !== revealVersion
+      || options.workspace() !== requestWorkspace || state.focusedPath !== row.entry.path) return;
     const item = options.root()?.querySelector<HTMLButtonElement>(
       `[data-project-tree-path="${CSS.escape(row.entry.path)}"]`,
     );
@@ -186,6 +205,48 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
   async function focusPath(path: string): Promise<void> {
     const index = rows().findIndex((row) => row.entry.path === path);
     if (index >= 0) await focusRow(index);
+  }
+
+  /** Reveal an entry without opening it or replacing the workspace tree root. */
+  async function revealPath(rawPath: string): Promise<void> {
+    const path = rawPath.replaceAll("\\", "/").split("/").filter((part) => part && part !== ".").join("/");
+    if (!isWorkspaceProjectFilePath(rawPath) || !path || disposed) return;
+    const requestWorkspace = options.workspace();
+    const request = ++revealVersion;
+    // Let mount/workspace effects establish the directory generation first.
+    await tick();
+    if (disposed || request !== revealVersion || options.workspace() !== requestWorkspace) return;
+    const requestGeneration = generation;
+    const focusedBefore = state.focusedPath;
+    const isCurrent = () => !disposed && request === revealVersion && requestGeneration === generation
+      && options.workspace() === requestWorkspace && state.focusedPath === focusedBefore;
+    state.rootExpanded = true;
+    expansionRevision++;
+    let parent = "";
+    const parts = path.split("/");
+    for (let index = 0; index < parts.length; index++) {
+      if (!isCurrent()) return;
+      if (!state.entriesByDirectory[parent]) await loadDirectory(parent, requestGeneration);
+      if (!isCurrent()) return;
+      const childPath = parts.slice(0, index + 1).join("/");
+      let entry = state.entriesByDirectory[parent]?.find((entry) => entry.path === childPath);
+      // A file may have appeared since the last listing. Refresh only its parent.
+      if (!entry && !state.errorByDirectory[parent]) {
+        await loadDirectory(parent, requestGeneration, true);
+        if (!isCurrent()) return;
+        entry = state.entriesByDirectory[parent]?.find((entry) => entry.path === childPath);
+      }
+      if (!entry) return;
+      if (index < parts.length - 1 && entry.kind !== "directory") return;
+      if (entry.kind === "directory") ensureDirectoryExpanded(entry.path);
+      if (index === parts.length - 1 && entry.kind === "directory" && !state.entriesByDirectory[entry.path]) {
+        void loadDirectory(entry.path, requestGeneration);
+      }
+      parent = childPath;
+    }
+    if (!isCurrent()) return;
+    state.selectedPath = path;
+    await focusPath(path);
   }
 
   function invalidateDirectoryRequests(pathPrefix: string): void {
@@ -317,6 +378,9 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
   }
 
   function dispose(): void {
+    disposed = true;
+    revealVersion++;
+    directoryLoads.clear();
     flushExpandedDirectoriesPersist();
     generation += 1;
     options.onHealthChange(null);
@@ -425,6 +489,7 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
     refreshDirectory,
     refreshVisibleDirectories,
     focusPath,
+    revealPath,
     remapPath,
     focusFallbackAfterRemoval,
     removePath,

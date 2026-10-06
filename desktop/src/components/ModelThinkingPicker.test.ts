@@ -17,8 +17,8 @@ describe("ModelThinkingPicker staged selection", () => {
     expect(pickerSource).toContain("model.thinkingLevels");
   });
 
-  it("preserves the current row during initialization and empty search", () => {
-    expect(pickerSource).toContain("const initialModel = config.currentModel ?? config.models[0]");
+  it("preserves the current row and otherwise initializes from visible models only", () => {
+    expect(pickerSource).toContain("const initialModel = config.currentModel ?? filteredModels[0]");
     expect(pickerSource).toContain("selectedIndex = pickerModelIndex(filteredModels, selectedModelRef, query, visibilityMode)");
   });
 

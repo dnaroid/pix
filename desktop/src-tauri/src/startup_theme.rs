@@ -12,7 +12,15 @@ pub(crate) fn build(
 ) -> tauri::Result<WebviewWindow> {
     let visible = config.visible;
     let revealed = AtomicBool::new(false);
-    let window = WebviewWindowBuilder::from_config(manager, config)?
+    let builder = WebviewWindowBuilder::from_config(manager, config)?;
+    // WKWebView uses a non-persistent store, never the working app's store.
+    // Apply this to restored, fallback and subsequently opened windows alike.
+    let builder = if crate::qa_profile::isolated(manager) {
+        builder.incognito(true)
+    } else {
+        builder
+    };
+    let window = builder
         .visible(false)
         .on_page_load(move |window, payload| {
             if claim_initial_reveal(payload.event(), visible, &revealed) {

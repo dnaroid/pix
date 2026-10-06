@@ -132,6 +132,7 @@ test("Pix RPC clears todos through the handler, never a prompt, and acknowledges
 	const sentinel = "\u0000pix:clear-todos";
 	runInNewContext(patch, {
 		AgentSession: Session, PIX_CLEAR_TODOS_MESSAGE: sentinel,
+		PIX_BTW_RPC_PREFIX: "\u0000pix:btw:",
 		PIX_PAUSE_MESSAGE: "pause", PIX_CONTINUE_MESSAGE: "continue",
 		bindPause() { assert.fail("clear must not bind a model run"); },
 	});
@@ -155,6 +156,57 @@ test("Pix RPC clears todos through the handler, never a prompt, and acknowledges
 	assert.deepEqual(acknowledgements, ["handled"], "failed requests must never report success");
 });
 
+test("Pix RPC dispatches hidden LSP control and emits only a correlated status snapshot", async () => {
+	const source = await readFile(new URL("../src/pi/pix-rpc-entry.js", import.meta.url), "utf8");
+	const patch = source.slice(source.indexOf("const originalPrompt ="), source.indexOf("const { main }"));
+	const output: string[] = [];
+	let calls = 0;
+	let forwarded = 0;
+	let command: { handler(args: string, context: unknown): Promise<void> } | undefined = {
+		async handler(args, context) {
+			calls++;
+			assert.deepEqual(JSON.parse(args), { action: "start", id: "ts", root: "/workspace" });
+			const ctx = context as { ui: { setStatus(key: string, text?: string): void; notify(message: string): void } };
+			ctx.ui.notify("trust prompt remains available");
+			ctx.ui.setStatus("pix:lsp", JSON.stringify({ servers: [{ id: "ts", root: "/workspace", state: "running" }], warnings: [] }));
+		},
+	};
+	const context = { ui: { setStatus() {}, notify() { forwarded++; } } };
+	const originalSetStatus = context.ui.setStatus;
+	class Session {
+		extensionRunner = {
+			getCommand(name: string) { assert.equal(name, "lsp-control"); return command; },
+			createCommandContext() { return context; },
+		};
+		_emit(event: unknown) { output.push(JSON.stringify(event)); }
+		async prompt(_text: string, _options?: { preflightResult(disposition: string): void }) { assert.fail("must not dispatch a model prompt"); }
+	}
+	runInNewContext(patch, {
+		AgentSession: Session, PIX_LSP_CONTROL_PREFIX: "\u0000pix:lsp-control:",
+		PIX_BTW_RPC_PREFIX: "\u0000pix:btw:",
+		PIX_PAUSE_MESSAGE: "pause", PIX_CONTINUE_MESSAGE: "continue", PIX_CLEAR_TODOS_MESSAGE: "clear",
+		bindPause() { assert.fail("must not bind model run"); },
+		process: { stdout: { write() { assert.fail("RPC stdout is taken over by the SDK; emit via the session event stream"); } } },
+	});
+	const statuses: string[] = [];
+	const session = new Session();
+	await session.prompt("\u0000pix:lsp-control:{\"requestId\":\"req-1\",\"action\":\"start\",\"id\":\"ts\",\"root\":\"/workspace\"}", {
+		preflightResult(value: string) { statuses.push(value); },
+	});
+	assert.equal(calls, 1);
+	assert.equal(forwarded, 1, "non-LSP UI methods must retain their original behavior");
+	assert.equal(context.ui.setStatus, originalSetStatus, "snapshot capture must not mutate the shared SDK UI");
+	assert.deepEqual(statuses, ["handled"]);
+	assert.deepEqual(JSON.parse(output[0]!), { type: "pix_lsp_response", requestId: "req-1", snapshot: {
+		servers: [{ id: "ts", root: "/workspace", state: "running" }], warnings: [],
+	} });
+	command = undefined;
+	await assert.rejects(session.prompt("\u0000pix:lsp-control:{\"requestId\":\"req-2\",\"action\":\"status\"}", {
+		preflightResult(value: string) { statuses.push(value); },
+	}), /LSP control extension is unavailable/u);
+	assert.deepEqual(statuses, ["handled"]);
+});
+
 test("Pix RPC pause preflight reports SDK dispositions only on success", async () => {
 	const source = await readFile(new URL("../src/pi/pix-rpc-entry.js", import.meta.url), "utf8");
 	const patch = source.slice(source.indexOf("const originalPrompt ="), source.indexOf("const { main }"));
@@ -169,6 +221,7 @@ test("Pix RPC pause preflight reports SDK dispositions only on success", async (
 	const session = new Session();
 	runInNewContext(patch, {
 		AgentSession: Session, PIX_PAUSE_MESSAGE: "pause", PIX_CONTINUE_MESSAGE: "continue",
+		PIX_BTW_RPC_PREFIX: "\u0000pix:btw:",
 		PIX_CLEAR_TODOS_MESSAGE: "clear",
 		requestPause() { if (!streaming) throw new Error("Agent is not running"); },
 	});

@@ -39,6 +39,7 @@ export function nativeContextMenuItems(
   linux: boolean,
   reportError: (error: unknown) => void,
   isActive: () => boolean,
+  revealProjectEntry?: (path: string) => Promise<void>,
 ): ContextMenuItem[] {
   const items: ContextMenuItem[] = [];
   const run = (action: () => Promise<unknown>) => () => {
@@ -137,12 +138,18 @@ export function nativeContextMenuItems(
       items.push({ id: `desktop.file.${action}`, text, enabled: Boolean(path),
         action: run(() => path ? invoke("preview_file_action", { path, action }) : Promise.resolve()) });
     }
+    if (context.projectRevealPath && revealProjectEntry) {
+      const path = context.projectRevealPath;
+      items.push({ id: "desktop.file.explorer", text: "Show in Files",
+        action: run(() => revealProjectEntry(path)) });
+    }
   }
   return items;
 }
 
 export function createNativeContextMenuFactory(
   reportError: (error: unknown) => void,
+  revealProjectEntry?: (path: string) => Promise<void>,
 ): (context: DesktopContextTarget, isActive: () => boolean) => Promise<NativeContextMenu> {
   // Tauri's callback registry is app-wide, not per WebView. Each mounted owner
   // needs a namespace so secondary windows cannot overwrite each other's actions.
@@ -154,7 +161,7 @@ export function createNativeContextMenuFactory(
     // Keep native registration ordered as well as guarding JS completions: a
     // late obsolete creation must not overwrite a newer menu's stable callback ids.
     const result = pending.then(async () => {
-      const items = nativeContextMenuItems(context, linux, reportError, isActive)
+      const items = nativeContextMenuItems(context, linux, reportError, isActive, revealProjectEntry)
         .map((item) => "id" in item ? { ...item, id: `${namespace}:${item.id}` } : item);
       const menu = await Menu.new({ items });
       return {

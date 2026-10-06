@@ -9,6 +9,7 @@ export interface SlashCommandMatch {
 
 export type DesktopSlashCommand =
   | { readonly kind: "new" | "new_tab" | "reload" }
+  | { readonly kind: "btw"; readonly question: string }
   | { readonly kind: "enhance"; readonly draft: string }
   | { readonly kind: "import"; readonly path?: string }
   | { readonly kind: "queue"; readonly message: string }
@@ -21,6 +22,11 @@ export type DesktopSlashCommand =
 
 /** Commands implemented by Desktop chrome rather than the ACP session. */
 export const DESKTOP_SLASH_COMMANDS: readonly AvailableCommand[] = [
+  {
+    name: "btw",
+    description: "Open a temporary side chat without interrupting the main agent",
+    _meta: { "pix.commandSource": "desktop", "pix.inputHint": "[question]" },
+  },
   {
     name: "new",
     description: "Start a fresh conversation",
@@ -171,6 +177,7 @@ export function parseDesktopSlashCommand(text: string, hasAttachments: boolean):
   // slash commands remain attachment-free.
   if (name === "queue") return { kind: "queue", message: rest };
   if (hasAttachments) return undefined;
+  if (name === "btw") return { kind: "btw", question: rest };
   if (name === "new" && !rest) return { kind: "new" };
   if (name === "new_tab" && !rest) return { kind: "new_tab" };
   if (name === "reload" && !rest) return { kind: "reload" };

@@ -94,8 +94,14 @@ export function createClaudeStream(installation: ClaudeInstallation, dependencie
       })(model, context, options);
     }
     const timeoutMs = Math.min(options?.timeoutMs && options.timeoutMs > 0 ? options.timeoutMs : configured, configured);
+    const timeoutOrigin = {
+      callerTotalMs: Number.isFinite(options?.timeoutMs) ? options?.timeoutMs : undefined,
+      configuredTotalMs: configured,
+      totalSource: process.env.PI_CLAUDE_CODE_PROVIDER_TOTAL_TIMEOUT_MS?.trim() ? "environment" as const : "default" as const,
+      requestBudgetMs: timeoutMs,
+    };
     return recoverImageRead((attempt, remainingOptions) =>
-      createClaudeAttempt(installation, requestDependencies, attempt)(model, context, remainingOptions), { ...options, timeoutMs });
+      createClaudeAttempt(installation, requestDependencies, attempt, timeoutOrigin)(model, context, remainingOptions), { ...options, timeoutMs });
   };
 }
 
@@ -103,6 +109,7 @@ function createClaudeAttempt(
   installation: ClaudeInstallation,
   dependencies: ClaudeStreamDependencies = {},
   imageReadAttempt: ImageReadAttempt,
+  timeoutOrigin?: Pick<NonNullable<RequestMetrics["timeouts"]>, "callerTotalMs" | "configuredTotalMs" | "totalSource" | "requestBudgetMs">,
 ) {
   const cleanupDirectory = dependencies.cleanupDirectory ?? removeRuntimeDirectory;
   const claimLaunch = dependencies.claimLaunch ?? claimPaidTestLaunch;
@@ -333,6 +340,13 @@ function createClaudeAttempt(
           timeoutSetting("PI_CLAUDE_CODE_PROVIDER_MCP_READY_TIMEOUT_MS", DEFAULT_MCP_READY_TIMEOUT_MS),
           totalTimeoutMs,
         );
+        if (timeoutOrigin) metrics.timeouts = {
+          ...timeoutOrigin,
+          effectiveTotalMs: totalTimeoutMs,
+          effectiveIdleMs: idleTimeoutMs,
+          effectiveReadyMs: readyTimeoutMs,
+          recoveryAttempt: imageReadAttempt.correction,
+        };
         const { args, prompt } = providerArgs(prepared, model.id, effort, {
           // Pi asks for no cache write on its one-shot summaries, which are
           // unique per compaction, so the 1h entry this breakpoint writes would
@@ -378,7 +392,9 @@ function createClaudeAttempt(
             if (error instanceof ProcessTerminationError) errorCategory = "process_cleanup";
             else if (vanished) errorCategory = "working_directory";
             else errorCategory ??= error instanceof ClaudeCodeError ? error.code : "process";
-            mapper?.fail((vanished ?? error).message, options?.signal?.aborted === true);
+            const timeoutFailure = /^Claude Code (request exceeded|produced no protocol activity)/.test(error.message);
+            const budgetDetail = timeoutFailure && metrics.timeouts ? `; timeout budgets: ${JSON.stringify(metrics.timeouts)}` : "";
+            mapper?.fail((vanished ?? error).message + budgetDetail, options?.signal?.aborted === true);
           },
           onAbort() {
             terminationCause = "caller_abort";

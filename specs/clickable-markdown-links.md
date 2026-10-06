@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # Clickable wrapped markdown links
 
 <!-- markdownlint-disable MD013 -->
@@ -58,3 +63,11 @@ Keep assistant and user markdown links clickable even when their destinations ar
 - Confirmed by code: markdown anchors were rendered literally and wrapped before per-row link detection.
 - Confirmed by reproduction: the supplied long destinations split across 6–10 rows and produced zero detected links at widths 80, 120, and 180.
 - Confirmed by environment: direct `zed --existing path:line:column` opening succeeds.
+
+## Implementation
+
+- `src/markdown-format.ts`
+
+## Tests
+
+- `tests/markdown-format.test.ts`

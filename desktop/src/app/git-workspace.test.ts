@@ -28,6 +28,40 @@ beforeEach(() => { invoke.mockReset(); vi.stubGlobal("window", { confirm: vi.fn(
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Git commit transaction and lifecycle", () => {
+  it("saves repository identity under the shared mutation lock without staging or committing", async () => {
+    const { store } = fixture();
+    let finish!: () => void;
+    invoke.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const save = store.saveIdentity("dnaroid", "dnaroid@gmail.com");
+    expect(store.actionId).toBe("save-identity");
+    await expect(store.stage()).resolves.toBe(false);
+    await expect(store.saveIdentity("other", "other@example.invalid")).resolves.toBe(false);
+    expect(invoke).toHaveBeenCalledWith("git_save_identity", { workspace: "/one", name: "dnaroid", email: "dnaroid@gmail.com" });
+    finish();
+    await expect(save).resolves.toBe(true);
+    expect(store.actionId).toBeNull();
+    expect(store.notice).toContain("saved for this repository");
+    expect(invoke.mock.calls.map(([command]) => command)).toEqual(["git_save_identity", "git_status"]);
+  });
+
+  it("an old identity save cannot release the new A lifecycle mutation lock", async () => {
+    const { store, setWorkspace } = fixture();
+    let finishOld!: () => void;
+    invoke.mockImplementationOnce(() => new Promise<void>((resolve) => { finishOld = resolve; }));
+    const oldSave = store.saveIdentity("old", "old@example.invalid");
+    setWorkspace("/two"); setWorkspace("/one");
+    let finishNew!: () => void;
+    invoke.mockImplementationOnce(() => new Promise<void>((resolve) => { finishNew = resolve; }));
+    const newSave = store.saveIdentity("new", "new@example.invalid");
+    finishOld();
+    await expect(oldSave).resolves.toBe(false);
+    expect(store.actionId).toBe("save-identity");
+    expect(store.notice).toBeNull();
+    finishNew();
+    await expect(newSave).resolves.toBe(true);
+    expect(store.actionId).toBeNull();
+  });
+
   it("shares the transaction status read with a concurrent panel refresh", async () => {
     const { store, snapshot } = fixture();
     await store.refresh();

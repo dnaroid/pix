@@ -54,6 +54,7 @@ export interface LoadedConfig<TItem extends MatchableConfig> {
   items: TItem[];
   layers: ConfigLayer<TItem>[];
   warnings: string[];
+  trustRequired: boolean;
 }
 
 export interface PathPlaceholders {

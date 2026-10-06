@@ -28,12 +28,13 @@ const originalPiToolsSuiteDisabledModules = process.env.PI_TOOLS_SUITE_DISABLED_
 const originalPiToolsSuiteDisabled = process.env.PI_TOOLS_SUITE_DISABLED;
 
 function tempDir(): string {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lsp-test-"));
+	const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "lsp-test-")));
 	tempDirs.push(dir);
 	return dir;
 }
 
 afterEach(async () => {
+	await (await import("../src/lsp/shared-manager")).releaseSharedLsp();
 	await (globalThis as any).__piToolsSuiteLspManager?.shutdownAll?.();
 	if (originalPiAgentDir === undefined) delete process.env.PI_AGENT_DIR;
 	else process.env.PI_AGENT_DIR = originalPiAgentDir;
@@ -224,6 +225,412 @@ async function runMutationDiagnostics(ctx: any, changedFiles: string[]) {
 	return appendMutationDiagnostics("apply_patch", {}, { details: { changedFiles }, content: [{ type: "text", text: "ok" }] }, ctx);
 }
 
+// Tests that deliberately pause local manager internals remain local unit tests.
+// Production post-edit/control coverage above and below uses the shared broker.
+async function runLocalMutationDiagnostics(ctx: any, changedFiles: string[]) {
+	const { getGlobalLspManager } = await import("../src/lsp/manager");
+	const summaries = await Promise.all(changedFiles.map((file) => getGlobalLspManager().updateDiagnosticsForFile(ctx, path.resolve(ctx.cwd, file))));
+	return { content: [{ type: "text", text: "ok" }, ...summaries.filter((text) => text.trim()).map((text) => ({ type: "text", text }))] };
+}
+
+describe.serial("Markdown workspace reuse", () => {
+	test("bundled Markdown roots reuse one process across nested READMEs and packages", async () => {
+		const { DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC } = await import("../src/default-pi-tools-suite-config.js");
+		const example = DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC.split('//   "id": "markdown",')[1]!;
+		const markersText = example.match(/"rootMarkers": (\[[\s\S]*?\])/)![1]!.replace(/\/\//g, "");
+		const rootMarkers = JSON.parse(markersText) as string[];
+		expect(rootMarkers).toEqual([".git"]);
+		const cwd = tempDir();
+		const home = tempDir();
+		fs.mkdirSync(path.join(cwd, ".git"));
+		fs.mkdirSync(path.join(cwd, "desktop"), { recursive: true });
+		fs.mkdirSync(path.join(cwd, "docs", "decisions"), { recursive: true });
+		fs.writeFileSync(path.join(cwd, "desktop", "package.json"), "{}");
+		const files = ["README.md", "desktop/README.md", "docs/decisions/README.md"];
+		for (const file of files) fs.writeFileSync(path.join(cwd, file), "# Hello\n");
+		const pidLog = path.join(cwd, "pids.log");
+		writeGlobalLspConfig({ agentDir: home, cwd, serverScript: writeFakeLspServer(cwd), pidLog,
+			id: "markdown", include: ["*.md", "**/*.md"], rootMarkers });
+		const ctx = { cwd, hasUI: false } as any;
+		const { monitorLsp } = await import("../src/lsp/runtime-control.js");
+		for (const file of files) {
+			await runMutationDiagnostics(ctx, [file]);
+			const snapshot = await monitorLsp(ctx);
+			expect(snapshot.servers).toHaveLength(1);
+			expect(snapshot.servers[0]).toMatchObject({ id: "markdown", root: cwd, state: "running" });
+		}
+		expect(fs.readFileSync(pidLog, "utf8").trim().split("\n")).toHaveLength(1);
+	});
+});
+
+describe.serial("LSP runtime control", () => {
+	async function setup(mode: "basic" | "hangInitialize" | "crash" = "basic", local = false) {
+		const cwd = tempDir();
+		const agentDir = tempDir();
+		const pidLog = path.join(cwd, "control-pids.txt");
+		process.env.PI_AGENT_DIR = agentDir;
+		writeGlobalLspConfig({ agentDir, cwd, serverScript: writeFakeLspServer(cwd), pidLog, mode });
+		fs.writeFileSync(path.join(cwd, "a.ts"), "const a = 1;\n");
+		const controlLsp = local ? (await import("../src/lsp/local-runtime-control")).controlLocalLsp : (await import("../src/lsp/runtime-control")).controlLsp;
+		const ctx = { cwd, hasUI: false } as any;
+		return { cwd, pidLog, ctx, controlLsp };
+	}
+
+	test.serial("public monitoring lists only edit-started processes and never controls them", async () => {
+		const { cwd, pidLog, ctx } = await setup();
+		const { monitorLsp } = await import("../src/lsp/runtime-control");
+		const { default: register, shutdownGlobalLspManager } = await import("../src/lsp/index");
+		const commands = new Map<string, any>();
+		register({ registerCommand: (name: string, command: any) => commands.set(name, command), on() {} } as any);
+		for (const action of ["start", "stop", "restart", "trust"]) {
+			await expect(commands.get("lsp-control").handler(JSON.stringify({ action, id: "fake", root: cwd }), ctx)).rejects.toThrow("only supports status");
+		}
+		expect((await monitorLsp(ctx)).servers).toEqual([]);
+		expect(readPids(pidLog)).toEqual([]);
+		await runMutationDiagnostics(ctx, ["a.ts"]);
+		const [pid] = readPids(pidLog);
+		expect((await monitorLsp(ctx)).servers).toContainEqual({ id: "fake", root: cwd, state: "running", pid });
+		await runMutationDiagnostics(ctx, ["a.ts"]);
+		expect(readPids(pidLog)).toEqual([pid]);
+		await shutdownGlobalLspManager(ctx);
+		expect(await waitFor(() => !processExists(pid))).toBe(true);
+		expect((await monitorLsp(ctx)).servers).toEqual([]);
+	});
+
+	test.serial("failed startup is a monitoring warning, not an available process", async () => {
+		const { ctx, controlLsp } = await setup("crash");
+		await runMutationDiagnostics(ctx, ["a.ts"]);
+		const { monitorLsp } = await import("../src/lsp/runtime-control");
+		const status = await monitorLsp(ctx);
+		expect(status.servers).toEqual([]);
+		const failure = (await controlLsp(ctx, "status")).servers.find((server) => server.id === "fake")!;
+		expect(failure.state).toBe("failed");
+		expect(failure.error).toBeTruthy();
+		expect(status.warnings).toContain(`${failure.id} (${failure.root}): ${failure.error}`);
+	});
+
+	test.serial("local diagnostics keep idle processes for reuse without scheduling idle teardown", async () => {
+		const { pidLog, ctx } = await setup("basic", true);
+		const { getGlobalLspManager } = await import("../src/lsp/manager");
+		const setTimeoutOriginal = globalThis.setTimeout;
+		const idleCallbacks: Array<() => void> = [];
+		globalThis.setTimeout = ((callback: () => void, delay?: number, ...args: any[]) => {
+			if (delay === 30_000) idleCallbacks.push(callback);
+			return setTimeoutOriginal(callback, delay, ...args);
+		}) as typeof setTimeout;
+		try {
+			await runLocalMutationDiagnostics(ctx, ["a.ts"]);
+			for (const callback of idleCallbacks) callback();
+			expect(idleCallbacks).toHaveLength(0);
+			const [pid] = readPids(pidLog);
+			expect(processExists(pid)).toBe(true);
+			await runLocalMutationDiagnostics(ctx, ["a.ts"]);
+			expect(readPids(pidLog)).toEqual([pid]);
+			await getGlobalLspManager().shutdownAll();
+			expect(await waitFor(() => !processExists(pid))).toBe(true);
+		} finally {
+			globalThis.setTimeout = setTimeoutOriginal;
+		}
+	});
+
+	test.serial("status does not launch; start reuses diagnostics client, stop stays stopped, restart gets new PID", async () => {
+		const { cwd, pidLog, ctx, controlLsp } = await setup();
+    expect((await controlLsp(ctx, "status")).servers).toEqual([]);
+		expect(readPids(pidLog)).toHaveLength(0);
+		const started = await controlLsp(ctx, "start", "fake", cwd);
+		const pid = started.servers.find((server) => server.id === "fake")!.pid!;
+		expect(started.servers.find((server) => server.id === "fake")!.state).toBe("running");
+		await runMutationDiagnostics(ctx, ["a.ts"]);
+		expect(readPids(pidLog)).toEqual([pid]);
+		await controlLsp(ctx, "stop", "fake", cwd);
+		expect(await waitFor(() => !processExists(pid))).toBe(true);
+		await runMutationDiagnostics(ctx, ["a.ts"]);
+		expect(readPids(pidLog)).toEqual([pid]);
+		const restarted = await controlLsp(ctx, "restart", "fake", cwd);
+		expect(restarted.servers.find((server) => server.id === "fake")!.pid).not.toBe(pid);
+	});
+
+	for (const local of [false, true]) {
+		test.serial(`missing language roots are silent and do not block available servers (${local ? "local" : "shared"})`, async () => {
+			const { cwd, pidLog, ctx, controlLsp } = await setup("basic", local);
+			const configPath = path.join(process.env.HOME!, ".config/pi/pi-tools-suite.jsonc");
+			const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+			config.lsp.servers.push(
+				{ id: "typescript", bin: "must-not-spawn", rootMarkers: ["absent-typescript-root.json"] },
+				{ id: "svelte", bin: "must-not-spawn", rootMarkers: ["absent-svelte-root.js"] },
+			);
+			fs.writeFileSync(configPath, JSON.stringify(config));
+			const status = await controlLsp(ctx, "status");
+			expect(status.warnings).toEqual([]);
+			expect(status.trustRequired).toBe(false);
+      expect(status.servers).toEqual([]);
+			expect(readPids(pidLog)).toHaveLength(0);
+			const started = await controlLsp(ctx, "start", "fake", cwd);
+			expect(started.servers.find((server) => server.id === "fake")?.state).toBe("running");
+			expect(readPids(pidLog)).toHaveLength(1);
+		});
+	}
+
+	test.serial("a later Stop wins while Restart awaits shutdown", async () => {
+		const { cwd, pidLog, ctx, controlLsp } = await setup("basic", true);
+		const { getGlobalLspManager } = await import("../src/lsp/manager");
+		await controlLsp(ctx, "start", "fake", cwd);
+		const manager = getGlobalLspManager();
+		const originalStop = manager.stopServer.bind(manager);
+		let release!: () => void;
+		const paused = new Promise<void>((resolve) => { release = resolve; });
+		let waiting = false;
+		let calls = 0;
+		manager.stopServer = async (id, root) => {
+			const first = ++calls === 1;
+			await originalStop(id, root);
+			if (first) { waiting = true; await paused; }
+		};
+		const restarting = controlLsp(ctx, "restart", "fake", cwd).then(() => "started", () => "cancelled");
+		try {
+			expect(await waitFor(() => waiting)).toBe(true);
+			await controlLsp(ctx, "stop", "fake", cwd);
+			release();
+			expect(await restarting).toBe("cancelled");
+			expect((await controlLsp(ctx, "status")).servers.find((server) => server.id === "fake")!.state).toBe("stopped");
+			await runLocalMutationDiagnostics(ctx, ["a.ts"]);
+			expect(readPids(pidLog)).toHaveLength(1);
+			expect(await waitFor(() => readPids(pidLog).every((pid) => !processExists(pid)))).toBe(true);
+		} finally {
+			manager.stopServer = originalStop;
+			release();
+			await restarting;
+		}
+	});
+
+	test.serial("stop during initialize prevents late startup and leaves no process", async () => {
+		const { cwd, pidLog, ctx, controlLsp } = await setup("hangInitialize");
+		const start = controlLsp(ctx, "start", "fake", cwd).then(() => "started", () => "cancelled");
+		expect(await waitFor(() => readPids(pidLog).length === 1)).toBe(true);
+		await controlLsp(ctx, "stop", "fake", cwd);
+		expect(await start).toBe("cancelled");
+		expect((await controlLsp(ctx, "status")).servers.find((server) => server.id === "fake")!.state).toBe("stopped");
+		expect(await waitFor(() => readPids(pidLog).every((pid) => !processExists(pid)))).toBe(true);
+	});
+
+	test.serial("owner shutdown invalidates startup and later file discovery completions", async () => {
+		const { cwd, pidLog, ctx, controlLsp } = await setup("hangInitialize", true);
+		const { getGlobalLspManager } = await import("../src/lsp/manager");
+		const start = controlLsp(ctx, "start", "fake", cwd).then(() => "started", () => "cancelled");
+		expect(await waitFor(() => readPids(pidLog).length === 1)).toBe(true);
+		await getGlobalLspManager().shutdownAll();
+		expect(await start).toBe("cancelled");
+		expect(getGlobalLspManager().runtimeSnapshot()).toEqual([]);
+		expect(await waitFor(() => readPids(pidLog).every((pid) => !processExists(pid)))).toBe(true);
+		const discovery = getGlobalLspManager().ensureDocumentForTool(ctx, "a.ts");
+		await getGlobalLspManager().shutdownAll();
+		await expect(discovery).rejects.toThrow("owner stopped");
+		expect(readPids(pidLog)).toHaveLength(1);
+	});
+
+	test.serial("untrusted status never prompts; internal trust does not create process rows", async () => {
+		const { cwd, pidLog, ctx, controlLsp } = await setup();
+		fs.mkdirSync(path.join(cwd, ".pi"));
+		fs.writeFileSync(path.join(cwd, ".pi/pi-tools-suite.jsonc"), JSON.stringify({ lsp: { servers: [{ id: "project", bin: process.execPath, args: [writeFakeLspServer(cwd), pidLog] }] } }));
+		let prompts = 0;
+		ctx.hasUI = true;
+		ctx.ui = { select: async () => { prompts++; return "Trust once"; } };
+		const status = await controlLsp(ctx, "status");
+		expect(status.servers.some((server) => server.id === "project")).toBe(false);
+		expect(status.trustRequired).toBe(true);
+		expect(prompts).toBe(0);
+		const trusted = await controlLsp(ctx, "trust");
+		expect(trusted.servers.some((server) => server.id === "project")).toBe(false);
+		expect(trusted.trustRequired).toBe(false);
+		expect(prompts).toBe(1);
+		expect(readPids(pidLog)).toHaveLength(0);
+		await expect(controlLsp(ctx, "start", "project", path.dirname(cwd))).rejects.toThrow("trusted workspace");
+	});
+
+	test.serial("Stop wins over a delayed trust decision", async () => {
+		const { cwd, pidLog, ctx, controlLsp } = await setup();
+		fs.mkdirSync(path.join(cwd, ".pi"));
+		fs.writeFileSync(path.join(cwd, ".pi/pi-tools-suite.jsonc"), JSON.stringify({ lsp: { servers: [{ id: `delayed-${cwd}`, bin: process.execPath }] } }));
+		let release!: (value: string) => void;
+		let asking = false;
+		ctx.hasUI = true;
+		ctx.ui = { select: () => { asking = true; return new Promise((resolve) => { release = resolve; }); } };
+		const start = controlLsp(ctx, "start", `delayed-${cwd}`, cwd).then(() => "started", () => "cancelled");
+		expect(await waitFor(() => asking)).toBe(true);
+		await controlLsp(ctx, "stop", `delayed-${cwd}`, cwd);
+		release("Trust once");
+		expect(await start).toBe("cancelled");
+		expect(readPids(pidLog)).toHaveLength(0);
+	});
+
+	test.serial("same-project SDK session switch fences pending trust without releasing another session", async () => {
+		if (process.platform === "win32") return;
+		const { cwd, pidLog, ctx, controlLsp } = await setup();
+		const { default: registerLspExtension } = await import("../src/lsp/index");
+		const a = new FakePi(); const b = new FakePi();
+		registerLspExtension(a as any); registerLspExtension(b as any);
+		ctx.sessionManager = {};
+		const other = { cwd, hasUI: false, sessionManager: {} } as any;
+		await a.handlers.get("session_start")({}, ctx); await b.handlers.get("session_start")({}, other);
+		await controlLsp(other, "start", "fake", cwd);
+		const pid = readPids(pidLog)[0];
+		fs.mkdirSync(path.join(cwd, ".pi"));
+		fs.writeFileSync(path.join(cwd, ".pi/pi-tools-suite.jsonc"), JSON.stringify({ lsp: { servers: [{ id: "delayed-switch", bin: process.execPath }] } }));
+		let release!: (value: string) => void; let asking = false;
+		ctx.hasUI = true;
+		ctx.ui = { select: () => { asking = true; return new Promise((resolve) => { release = resolve; }); }, notify: () => {} };
+		const pending = controlLsp(ctx, "start", "delayed-switch", cwd).then(() => "started", (error) => String(error.message));
+		expect(await waitFor(() => asking)).toBe(true);
+		ctx.sessionManager = {};
+		await a.handlers.get("session_start")({}, ctx);
+		release("Trust once"); expect(await pending).toContain("owner stopped");
+		expect((await controlLsp(other, "status")).servers.find((server) => server.id === "fake")!.pid).toBe(pid);
+		await a.handlers.get("session_shutdown")({}, ctx);
+		expect(processExists(pid)).toBe(true);
+		await b.handlers.get("session_shutdown")({}, other);
+		expect(await waitFor(() => !processExists(pid))).toBe(true);
+		expect(readPids(pidLog)).toEqual([pid]);
+	});
+
+	test.serial("rebinding the same sole SDK session preserves its running project process", async () => {
+		const { ctx, pidLog } = await setup();
+		const { default: register } = await import("../src/lsp/index");
+		const pi = new FakePi();
+		register(pi as any);
+		ctx.sessionManager = {};
+		await pi.handlers.get("session_start")({}, ctx);
+		await runMutationDiagnostics(ctx, ["a.ts"]);
+		const [pid] = readPids(pidLog);
+		await pi.handlers.get("session_start")({}, ctx);
+		await runMutationDiagnostics(ctx, ["a.ts"]);
+		expect(readPids(pidLog)).toEqual([pid]);
+		expect(processExists(pid)).toBe(true);
+		await pi.handlers.get("session_shutdown")({}, ctx);
+		expect(await waitFor(() => !processExists(pid))).toBe(true);
+	});
+
+	test.serial("failed startup remains visible and Stop clears its error", async () => {
+		const { cwd, ctx, controlLsp } = await setup("crash");
+		await expect(controlLsp(ctx, "start", "fake", cwd)).rejects.toThrow();
+		const failed = (await controlLsp(ctx, "status")).servers.find((server) => server.id === "fake")!;
+		expect(failed.state).toBe("failed");
+		expect(failed.error).toBeTruthy();
+		expect((await controlLsp(ctx, "stop", "fake", cwd)).servers.find((server) => server.id === "fake")!.state).toBe("stopped");
+	});
+
+	test.serial("nested roots remain controllable after Stop and revalidate current root markers", async () => {
+		const { cwd, pidLog, ctx, controlLsp } = await setup();
+		const root = path.join(cwd, "packages", "app");
+		fs.mkdirSync(root, { recursive: true });
+		fs.writeFileSync(path.join(root, "package.json"), "{}");
+		fs.writeFileSync(path.join(root, "a.ts"), "const a = 1;\n");
+		writeGlobalLspConfig({ agentDir: process.env.HOME!, cwd, serverScript: writeFakeLspServer(cwd), pidLog, rootMarkers: ["package.json"] });
+		const unknownRoot = tempDir();
+		fs.writeFileSync(path.join(unknownRoot, "package.json"), "{}");
+		await controlLsp(ctx, "stop", "fake", unknownRoot);
+		await expect(controlLsp(ctx, "start", "fake", unknownRoot)).rejects.toThrow("trusted workspace");
+		expect((await controlLsp(ctx, "status")).servers.some((server) => server.root === unknownRoot)).toBe(false);
+		await runMutationDiagnostics(ctx, ["packages/app/a.ts"]);
+		const [firstPid] = readPids(pidLog);
+		expect((await controlLsp(ctx, "status")).warnings).toEqual([]);
+		await controlLsp(ctx, "stop", "fake", root);
+		expect((await controlLsp(ctx, "status")).servers).toContainEqual({ id: "fake", root, state: "stopped" });
+		await runMutationDiagnostics(ctx, ["packages/app/a.ts"]);
+		expect(readPids(pidLog)).toEqual([firstPid]);
+		expect((await controlLsp(ctx, "restart", "fake", root)).servers.find((server) => server.root === root)!.state).toBe("running");
+		expect(readPids(pidLog)).toHaveLength(2);
+		await controlLsp(ctx, "stop", "fake", root);
+		fs.unlinkSync(path.join(root, "package.json"));
+		await expect(controlLsp(ctx, "start", "fake", root)).rejects.toThrow("trusted workspace");
+		expect(readPids(pidLog)).toHaveLength(2);
+	});
+
+	test.serial("local owner shutdown clears Stop suppression while local idle cleanup preserves it", async () => {
+		const { cwd, pidLog, ctx, controlLsp } = await setup("basic", true);
+		const { getGlobalLspManager } = await import("../src/lsp/manager");
+		await controlLsp(ctx, "start", "fake", cwd);
+		await controlLsp(ctx, "stop", "fake", cwd);
+		await getGlobalLspManager().shutdownAll({ preserveControlState: true });
+		await runLocalMutationDiagnostics(ctx, ["a.ts"]);
+		expect(readPids(pidLog)).toHaveLength(1);
+		await getGlobalLspManager().shutdownAll();
+		expect(getGlobalLspManager().runtimeSnapshot()).toEqual([]);
+		await runLocalMutationDiagnostics(ctx, ["a.ts"]);
+		expect(readPids(pidLog)).toHaveLength(2);
+	});
+
+	test.serial("idle cleanup preserves a failed status without PID until explicit Stop", async () => {
+		const { cwd, ctx, controlLsp } = await setup("crash", true);
+		const { getGlobalLspManager } = await import("../src/lsp/manager");
+		await expect(controlLsp(ctx, "start", "fake", cwd)).rejects.toThrow();
+		const failed = (await controlLsp(ctx, "status")).servers.find((server) => server.id === "fake")!;
+		await getGlobalLspManager().shutdownAll({ preserveControlState: true });
+		const retained = (await controlLsp(ctx, "status")).servers.find((server) => server.id === "fake")!;
+		expect(retained.state).toBe("failed");
+		expect(retained.error).toBe(failed.error);
+		expect(retained.pid).toBeUndefined();
+		expect((await controlLsp(ctx, "stop", "fake", cwd)).servers).toContainEqual({ id: "fake", root: cwd, state: "stopped" });
+	});
+
+	test.serial("Stop of a failed client wins over overlapping idle cleanup", async () => {
+		const { cwd, ctx, controlLsp } = await setup("crash", true);
+		const { getGlobalLspManager } = await import("../src/lsp/manager");
+		await expect(controlLsp(ctx, "start", "fake", cwd)).rejects.toThrow();
+		const manager = getGlobalLspManager();
+		const client = (manager as any).clients.values().next().value;
+		const originalShutdown = client.shutdown.bind(client);
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => { release = resolve; });
+		client.shutdown = async () => { await gate; await originalShutdown(); };
+		const stopping = manager.stopServer("fake", cwd);
+		const idle = manager.shutdownAll({ preserveControlState: true });
+		try {
+			release();
+			await Promise.all([stopping, idle]);
+			expect((await controlLsp(ctx, "status")).servers).toContainEqual({ id: "fake", root: cwd, state: "stopped" });
+		} finally {
+			release();
+			await Promise.allSettled([stopping, idle]);
+			client.shutdown = originalShutdown;
+		}
+	});
+
+	test.serial("diagnostic registration waiters release on cancellation, timeout and shutdown", async () => {
+		const { cwd, ctx, controlLsp } = await setup("basic", true);
+		const { getGlobalLspManager } = await import("../src/lsp/manager");
+		await controlLsp(ctx, "start", "fake", cwd);
+		const client = (getGlobalLspManager() as any).clients.values().next().value;
+		const abort = new AbortController();
+		const pending = client.waitForPullDiagnosticsSupport(5_000, abort.signal);
+		expect(client.diagnosticProviderWaiters).toHaveLength(1);
+		abort.abort(); await pending;
+		expect(client.diagnosticProviderWaiters).toHaveLength(0);
+		await client.waitForPullDiagnosticsSupport(5);
+		expect(client.diagnosticProviderWaiters).toHaveLength(0);
+		const closing = client.waitForPullDiagnosticsSupport(5_000);
+		await client.shutdown(); await closing;
+		expect(client.diagnosticProviderWaiters).toHaveLength(0);
+	});
+
+	test.serial("terminates detached descendants after their leader has already exited", async () => {
+		if (process.platform === "win32") return;
+		const { spawn } = await import("node:child_process");
+		const { terminateChild } = await import("../src/lsp/child-process");
+		const cwd = tempDir();
+		const log = path.join(cwd, "orphan-pid.txt");
+		const worker = `process.on('SIGTERM',()=>{});require('node:fs').writeFileSync(${JSON.stringify(log)},String(process.pid));setInterval(()=>{},1000);`;
+		const leader = spawn(process.execPath, ["-e", `const c=require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(worker)}],{stdio:'ignore'});c.unref();`], { detached: true, stdio: ["pipe", "pipe", "pipe"] });
+		await new Promise<void>((resolve) => leader.once("exit", () => resolve()));
+		expect(await waitFor(() => fs.existsSync(log))).toBe(true);
+		const pid = Number(fs.readFileSync(log, "utf8"));
+		try {
+			expect(processExists(pid)).toBe(true);
+			await terminateChild(leader);
+			expect(await waitFor(() => !processExists(pid))).toBe(true);
+		} finally { try { process.kill(pid, "SIGKILL"); } catch {} }
+	});
+});
+
 describe.serial("LSP shared helpers", () => {
 	test.serial("formats diagnostics and resolves paths/commands", async () => {
 		const paths = await import("../src/lsp/_shared/paths.js");
@@ -354,6 +761,7 @@ describe.serial("LSP shared helpers", () => {
 			expect(loaded.warnings).toEqual([
 				`Failed to load global lsp config ${configPath}: Invalid JSONC (ValueExpected, CloseBraceExpected)`,
 			]);
+			expect(loaded.trustRequired).toBe(false);
 		} finally {
 			if (previousConfigDir === undefined) delete process.env.PI_CONFIG_DIR;
 			else process.env.PI_CONFIG_DIR = previousConfigDir;
@@ -384,6 +792,7 @@ describe.serial("LSP shared helpers", () => {
 			expect(loaded.warnings).toEqual([
 				"Failed to load project lsp config: Invalid JSONC (ValueExpected, CloseBraceExpected)",
 			]);
+			expect(loaded.trustRequired).toBe(false);
 			expect(prompts).toBe(0);
 		} finally {
 			if (previousConfigDir === undefined) delete process.env.PI_CONFIG_DIR;
@@ -430,9 +839,11 @@ describe.serial("LSP library post-edit diagnostics", () => {
 		registerLspExtension(pi as any);
 		expect([...pi.tools.keys()]).toEqual([]);
 		expect([...pi.renderers.keys()]).toEqual([]);
-		expect([...pi.handlers.keys()].sort()).toEqual(["session_shutdown", "tool_result"]);
+		expect([...pi.handlers.keys()].sort()).toEqual(["session_shutdown", "session_start", "tool_result"]);
 
 		const ctx = { cwd, signal: undefined };
+		await pi.handlers.get("session_start")({ type: "session_start" }, ctx);
+		expect(readPids(pidLog)).toEqual([]);
 		const resultPatch = await pi.handlers.get("tool_result")({
 			type: "tool_result",
 			toolCallId: "call-1",

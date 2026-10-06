@@ -63,6 +63,7 @@ export function createDesktopWorkbenchViewModelServices(
       lspOnboarding: options.lspOnboarding,
       quotaWait: options.quotaWait,
       headsUp: options.headsUp,
+      openBtw: options.openBtw,
     },
     editor: {
       workspace: options.workspace,

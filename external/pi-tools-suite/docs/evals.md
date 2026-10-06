@@ -64,6 +64,41 @@ wall-clock time are comparison metrics. A cheap failure is still a failure, and
 a correct solution that becomes dramatically more expensive should be visible
 in the report rather than hidden inside one aggregate score.
 
+### Decision-record threshold
+
+`decision-policy.ts` adds eight bounded live cases: ordinary bug fix, UX change,
+and reversible model substitution without a new record; a costly storage choice
+with durable rationale; linking an applicable existing record; an explicit user
+request for a routine record; and auditor acceptance/escalation controls.
+The parent cases append the current decision guidance from `tool-descriptions.ts`;
+the auditor cases append the current shipped `knowledge-auditor.md` role body.
+Expected actions live only in validators, not in the scenario's user prompt.
+
+The fixture represents already completed work. This isolates the recording
+threshold from coding, delegation, real indexing and full audit execution. It
+does **not** certify end-to-end subagent routing, full knowledge maintenance, or
+semantic truth of rationale. JSON action/path/rationale checks are combined with
+actual decision files, template sections/status, reciprocal spec links, unchanged
+historical records/template, and no unrelated file mutations. No LLM judge is
+used; rationale truth, invented alternatives and unsupported empirical claims
+still require inspection of retained output/records.
+
+Run the complete slice on the requested model from this package:
+
+```bash
+PI_TOOLS_SUITE_EVAL_MODELS=zai/glm-5-turbo \
+PI_TOOLS_SUITE_EVAL_CASES=decision.bugfix-no-record,decision.ux-no-record,decision.model-no-record,decision.costly-choice-record,decision.existing-record-link,decision.explicit-request-record,decision.auditor-accepts-no-record,decision.auditor-escalates-missing-record \
+PI_TOOLS_SUITE_EVAL_KEEP=1 npm run evals:report
+```
+
+Reports and isolated fixture projects use unique directories under the caller's
+project `.pi/artifacts/`. `PI_TOOLS_SUITE_EVAL_KEEP=1` retains generated records
+for inspection; otherwise fixture projects are removed after scoring. The
+deterministic contract command also checks the decision validator's failure
+controls (narration without files, unrequested records, historical pruning,
+wrong links/actions, malformed output and unrelated mutations). A single live
+run is a behavioral observation, not a statistical reliability guarantee.
+
 ## Framework layout
 
 ```text

@@ -1,3 +1,4 @@
+import { parseBtwCommand, type BtwCommand } from "../btw/contract.js";
 import {
 	RequestError,
 	type ContentBlock,
@@ -40,6 +41,8 @@ export const PIX_MODEL_ROUTING_STATUS_METHOD = "pix/model/routing_status";
 export const PIX_MODEL_ROUTE_METHOD = "pix/model/route";
 export const PIX_BASH_METHOD = "pix/session/bash";
 export const PIX_CLEAR_TODOS_METHOD = "pix/session/clear_todos";
+export const PIX_LSP_CONTROL_METHOD = "pix/session/lsp_control";
+export const BTW_METHOD = "pix/session/btw";
 
 export interface DesktopSessionRequest {
 	readonly sessionId: string;
@@ -97,6 +100,29 @@ export interface DesktopBashRequest extends DesktopSessionRequest {
 	readonly displayText: string;
 }
 
+export interface DesktopBtwRequest extends DesktopSessionRequest {
+	readonly command: BtwCommand;
+}
+
+export type DesktopLspControlAction = "status";
+export interface DesktopLspServerSnapshot {
+	readonly id: string;
+	readonly root: string;
+	readonly state: "stopped" | "starting" | "running" | "stopping" | "failed";
+	readonly pid?: number;
+	readonly error?: string;
+}
+export interface DesktopLspControlRequest extends DesktopSessionRequest {
+	readonly action: DesktopLspControlAction;
+	readonly id?: string;
+	readonly root?: string;
+}
+export interface DesktopLspControlResponse {
+	readonly servers: readonly DesktopLspServerSnapshot[];
+	readonly warnings: readonly string[];
+	readonly trustRequired?: boolean;
+}
+
 export type DesktopAgentControlAction = "state" | "pause" | "continue";
 export type DesktopAgentControlState = "idle" | "running" | "pause-requested" | "paused" | "resuming" | "continuable";
 
@@ -131,6 +157,7 @@ export interface DesktopModelUsageLimitWindow {
 
 export interface DesktopModelUsageResetCredit {
 	readonly title: string;
+	readonly count?: number;
 	readonly expiresAt?: number;
 }
 
@@ -141,7 +168,7 @@ export interface DesktopModelUsageStatus {
 	readonly accountEmail?: string;
 	readonly weekly?: DesktopModelUsageLimitWindow;
 	readonly hourly?: DesktopModelUsageLimitWindow;
-	/** Available account-level Codex reset credits; independent from quota-window resets. */
+	/** Banked account-level resets; independent from quota-window resets. */
 	readonly resetCredits?: readonly DesktopModelUsageResetCredit[];
 	readonly resetCreditsAvailableCount?: number;
 	/** Provider response-header windows (Anthropic RPM/TPM or OAuth unified quota). */
@@ -482,6 +509,30 @@ export function parseDesktopBashRequest(value: unknown): DesktopBashRequest {
 		excludeFromContext: value.excludeFromContext,
 		displayText: value.displayText,
 	};
+}
+
+export function parseDesktopBtwRequest(value: unknown): DesktopBtwRequest {
+	const session = parseDesktopSessionRequest(value);
+	if (!isRecord(value)) throw new RequestError(ERROR_INVALID_PARAMS, "BTW request requires command");
+	try {
+		return { ...session, command: parseBtwCommand(value.command) };
+	} catch (error) {
+		throw new RequestError(ERROR_INVALID_PARAMS, error instanceof Error ? error.message : "Invalid BTW request");
+	}
+}
+
+export function parseDesktopLspControlRequest(value: unknown): DesktopLspControlRequest {
+	const session = parseDesktopSessionRequest(value);
+  if (!isRecord(value) || value.action !== "status") {
+    throw new RequestError(ERROR_INVALID_PARAMS, "LSP monitoring only supports status");
+	}
+	if ((value.id !== undefined && (typeof value.id !== "string" || value.id.trim().length === 0))
+		|| (value.root !== undefined && (typeof value.root !== "string" || value.root.trim().length === 0))) {
+		throw new RequestError(ERROR_INVALID_PARAMS, "LSP control id and root must be non-empty strings when provided");
+	}
+	return { ...session, action: value.action as DesktopLspControlAction,
+		...(value.id === undefined ? {} : { id: value.id as string }),
+		...(value.root === undefined ? {} : { root: value.root as string }) };
 }
 
 export function parseDesktopRuntimeStatusRequest(value: unknown): DesktopRuntimeStatusRequest {

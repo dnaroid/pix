@@ -20,6 +20,7 @@ import type {
 	SessionInfo as PiSessionInfo,
 } from "@earendil-works/pi-coding-agent";
 import { PixAcpAgent } from "../src/acp/pix-acp-agent.js";
+import { BTW_METHOD, type BtwCommand, type BtwState } from "../src/btw/contract.js";
 import {
 	PIX_DEFER_MESSAGE_METHOD,
 	PIX_FORK_MESSAGE_METHOD,
@@ -28,6 +29,7 @@ import {
 	PIX_DRAFT_CONFIG_METHOD,
 	PIX_BASH_METHOD,
 	PIX_CLEAR_TODOS_METHOD,
+	PIX_LSP_CONTROL_METHOD,
 	PIX_AGENT_CONTROL_METHOD,
 	PIX_GIT_ASSIST_METHOD,
 	PIX_QUEUE_ACTION_METHOD,
@@ -114,6 +116,7 @@ class FakePiClient implements PiClient {
 	clearTodosCalls = 0;
 	clearTodosGate: Promise<void> | undefined;
 	clearTodosError: Error | undefined;
+	readonly lspControlCalls: Array<{ action: string; id?: string; root?: string }> = [];
 	readonly bashCalls: { command: string; excludeFromContext: boolean }[] = [];
 	readonly steerCalls: string[] = [];
 	readonly followUpCalls: string[] = [];
@@ -234,6 +237,11 @@ class FakePiClient implements PiClient {
 		this.clearTodosCalls++;
 		await this.clearTodosGate;
 		if (this.clearTodosError) throw this.clearTodosError;
+	}
+
+	async lspControl(action: "status" | "start" | "stop" | "restart" | "trust", id?: string, root?: string) {
+		this.lspControlCalls.push({ action, ...(id === undefined ? {} : { id }), ...(root === undefined ? {} : { root }) });
+		return { servers: [{ id: "ts", root: root ?? "/tmp", state: "running" as const }], warnings: [] };
 	}
 
 	async bash(command: string, excludeFromContext = false): Promise<PiBashResult> {
@@ -1485,6 +1493,45 @@ test("heads-up commands stay out-of-band while parent is idle, paused or running
 		await pending;
 	});
 	assert.ok(options[0]?.args?.includes("/test/heads-up.js"));
+});
+
+test("BTW controls and progress do not enter the parent run, queue or transcript; teardown resets memory", async () => {
+	const pi = new FakePiClient();
+	const calls: BtwCommand[] = [];
+	const states: Array<{ sessionId: string; channel: string; data: { phase: string; runtimeId: string; text: string } }> = [];
+	const updates: SessionNotification[] = [];
+	const state: BtwState = { runtimeId: "btw-runtime", contextKey: "context", busyRequestId: null };
+	const { adapter } = createTestAdapter({ createPiClient: () => Object.assign(pi, { btw: async (command: BtwCommand) => { calls.push(command); return state; } }) });
+	await connect(adapter, async (cx) => {
+		const session = await cx.buildSession("/tmp/btw-control").start();
+		const runtime = adapter.getSession(session.sessionId)!;
+		runtime.agentControlState = "paused";
+		assert.deepEqual(await cx.request(BTW_METHOD, { sessionId: session.sessionId, action: "state" }), state);
+		assert.equal(runtime.agentControlState, "paused");
+		const parent = session.prompt("parent work");
+		await waitFor(() => pi.promptCalls.length === 1);
+		pi.emit({ type: "agent_start" });
+		const activeRun = runtime.activeRun;
+		await cx.request(BTW_METHOD, { sessionId: session.sessionId, action: "ask", runtimeId: state.runtimeId, requestId: "q", question: "SIDE_ONLY", history: [], excerpts: [] });
+		pi.emit({ type: "pix_btw_event", data: { version: 1, runtimeId: state.runtimeId, requestId: "q", phase: "done", sequence: 1, text: "SIDE_ANSWER", busyRequestId: null } });
+		await waitFor(() => states.some((event) => event.channel === "btw"));
+		assert.equal(runtime.activeRun, activeRun);
+		assert.equal(runtime.builtinRunning, false);
+		assert.equal(pi.aborts, 0); assert.equal(pi.continues, 0);
+		assert.deepEqual(pi.promptCalls.map((call) => call.message), ["parent work"]);
+		assert.deepEqual(pi.steerCalls, []); assert.deepEqual(pi.followUpCalls, []);
+		assert.doesNotMatch(JSON.stringify(updates), /SIDE_ONLY|SIDE_ANSWER/);
+		assert.equal(runtime.activitySnapshots.has("btw"), false);
+		await assert.rejects(cx.request(BTW_METHOD, { sessionId: session.sessionId, action: "ask", question: "bad payload" }));
+		assert.equal(calls.length, 2);
+		pi.emit({ type: "agent_settled" }); await parent;
+		await cx.request("session/close", { sessionId: session.sessionId });
+		await waitFor(() => states.some((event) => event.channel === "btw" && event.data.phase === "reset"));
+	}, (app) => {
+		app.onNotification("session/update", (ctx) => { updates.push(ctx.params); });
+		(app as unknown as { onNotification(method: string, parser: (data: unknown) => typeof states[number], callback: (ctx: { params: typeof states[number] }) => void): void })
+			.onNotification(PIX_SESSION_STATE_METHOD, (data) => data as typeof states[number], (ctx) => { states.push(ctx.params); });
+	});
 });
 
 const preparedDcpMapFixture = { revision: 1, sessionEpoch: 0, generatedAt: 100,
@@ -3677,6 +3724,23 @@ test("Pix Desktop clears a session plan through the private action without a pro
 			assert.deepEqual(await pi.getMessages(), [], "todo clear must not create a user transcript entry");
 		},
 	);
+});
+
+test("Pix Desktop LSP control is session-scoped and allows status/stop while the agent runs", async () => {
+	const harness = createTestAdapter();
+	await connectAs(harness.adapter, "pix-desktop", async (cx) => {
+		const created = await cx.request("session/new", { cwd: "/tmp/lsp-control", mcpServers: [] }) as { sessionId: string };
+		const pi = harness.clients[0]!;
+		Object.assign(pi.state, { isStreaming: true });
+		const status = await cx.request(PIX_LSP_CONTROL_METHOD, { sessionId: created.sessionId, action: "status" }) as {
+			servers: Array<{ id: string; state: string }>;
+			warnings: string[];
+		};
+		assert.deepEqual(status, { servers: [{ id: "ts", root: "/tmp", state: "running" }], warnings: [] });
+		await assert.rejects(cx.request(PIX_LSP_CONTROL_METHOD, { sessionId: created.sessionId, action: "stop", id: "ts", root: "/workspace" }), /only supports status/);
+		assert.deepEqual(pi.lspControlCalls, [{ action: "status" }]);
+		assert.deepEqual(pi.promptCalls, [], "control must not create a user prompt");
+	});
 });
 
 test("Pix Desktop todo clear serializes duplicate requests and releases its idle guard after failure", async () => {

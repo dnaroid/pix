@@ -148,6 +148,14 @@ describe("tool descriptions", () => {
 		expect(text).toContain("evidence vs assumptions");
 		expect(text).toContain("never invent motives from code");
 		expect(text).toContain("Supersede old decisions explicitly");
+		expect(text).toContain("Default to no new decision record");
+		expect(text).toContain("only when explicitly requested by the user");
+		expect(text).toContain("costly reversal AND its durable rationale");
+		expect(text).toContain("useful in six months");
+		expect(text).toContain("changed specs alone are not triggers");
+		expect(text).toContain("Do not invent alternatives; link existing applicable records");
+		expect(text).toContain("missing rationale is an escalation only for qualifying choices");
+		expect(text).toContain("Do not prune or rewrite historical records");
 		expect(text).not.toContain("repo_ask");
 		expect(text).not.toMatch(/wiki|include-secondary|action=impact|receiptPath/);
 		for (const tool of [CLAUDE_ALIAS_TOOL_DESCRIPTIONS_WITH_REPO.Edit, CLAUDE_ALIAS_TOOL_DESCRIPTIONS_WITH_REPO.Write, codexAliasToolDescriptions(true).applyPatch]) {

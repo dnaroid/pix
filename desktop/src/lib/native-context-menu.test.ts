@@ -71,6 +71,19 @@ describe("native desktop context menu commands", () => {
     expect(vi.mocked(invoke).mock.calls).toEqual(["copy", "open", "reveal"].map(action => ["preview_file_action", { path: "/project/my video.mov", action }]));
     expect(writeText).not.toHaveBeenCalled();
   });
+
+  it("reveals a captured Preview tab path in Files only while the menu is current", async () => {
+    const reveal = vi.fn(async () => {});
+    for (const active of [true, false]) {
+      const commands = nativeContextMenuItems(context({ kind: "file", hasSelection: false,
+        filePath: "/project/a/file.ts", projectRevealPath: "a/file.ts" }), false, reportError, () => active, reveal);
+      const item = commands.find((item) => "id" in item && item.id === "desktop.file.explorer");
+      expect(item).toMatchObject({ text: "Show in Files" });
+      if (item && "action" in item) item.action?.("ignored");
+    }
+    await Promise.resolve();
+    expect(reveal).toHaveBeenCalledExactlyOnceWith("a/file.ts");
+  });
   it("disables file actions without a local path and never runs stale or detached actions", () => {
     const unavailable = items({ kind: "file", hasSelection: false });
     expect(unavailable).toHaveLength(3);

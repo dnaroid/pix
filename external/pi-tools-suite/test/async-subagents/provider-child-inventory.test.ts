@@ -8,18 +8,21 @@
 import { afterAll, expect, test } from "bun:test";
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnAgent } from "../../src/async-subagents/core/spawn.js";
 import { localClaudeProviderModule } from "../../src/async-subagents/core/provider-extensions.js";
 import { SUBAGENT_DENIED_TOOLS } from "../../src/async-subagents/core/tool-guard.js";
+import { SUBAGENT_COMMON_TOOLS } from "../../src/async-subagents/core/child-tools.js";
+import { REPO_DISCOVERY_TOOLS } from "../../src/tool-descriptions.js";
+import { installFakeIdxOnPath } from "../support/fake-idx.js";
 import type { OwnedLaunchBinaries } from "../../src/async-subagents/core/owned-launch/bootstrap.js";
 import { localProviderAvailable } from "./provider-offline-harness.ts";
 import { localNode } from "./provider-offline-rpc.ts";
 
 const offline = process.platform !== "darwin" || !localProviderAvailable() ? test.skip : test;
 const suite = fileURLToPath(new URL("../..", import.meta.url));
+const scratchRoot = resolve(suite, "../../.pi/artifacts/subagent-provider-inventory");
 const cli = join(resolve(suite, "../.."), "node_modules/@earendil-works/pi-coding-agent/dist/cli.js");
 const fakeCli = fileURLToPath(new URL("./fixtures/provider-offline-cli.mjs", import.meta.url));
 const FAKE_BINARIES: OwnedLaunchBinaries = { bridge: "/nonexistent/bridge", gate: "/nonexistent/gate", supervisor: "/nonexistent/supervisor" };
@@ -40,11 +43,16 @@ afterAll(async () => {
 	for (const work of works) rmSync(work, { recursive: true, force: true });
 });
 
-async function inventory(tools: string[] | undefined): Promise<{ tools: string[]; all: string[]; piArgs: string[] }> {
-	const work = mkdtempSync(join(tmpdir(), "pi-provider-t2-"));
+async function inventory(tools: string[] | undefined, indexed = false, extraArgs: string[] = []): Promise<{ tools: string[]; all: string[]; piArgs: string[] }> {
+	mkdirSync(scratchRoot, { recursive: true });
+	const work = mkdtempSync(join(scratchRoot, "run-"));
 	works.push(work);
 	const home = join(work, "home"), agent = join(work, "agent"), cwd = join(work, "cwd");
 	for (const dir of [home, agent, cwd]) mkdirSync(dir);
+	mkdirSync(join(cwd, ".git"));
+	if (indexed) mkdirSync(join(cwd, ".indexer-cli"));
+	const restorePath = installFakeIdxOnPath(work);
+	restorePath(); // Only the isolated child's PATH needs the fixture.
 	writeFileSync(join(home, "fake-exit-code"), "0");
 	writeFileSync(join(agent, "settings.json"), JSON.stringify({ retry: { enabled: false }, enableInstallTelemetry: false,
 		enableAnalytics: false, extensions: [], packages: [], skills: [], prompts: [], themes: [] }));
@@ -57,13 +65,14 @@ async function inventory(tools: string[] | undefined): Promise<{ tools: string[]
 	const previousPlatform = process.platform;
 	let child: ChildProcess | undefined;
 	const spawned = spawnAgent(runDir, { id: "child", task: "offline inventory probe", model: "pi-claude-code-provider/sonnet", ...(tools ? { tools } : {}) }, cwd,
-		["--offline", "--no-approve", "--no-prompt-templates", "--no-themes", "--no-context-files", "--extension", probe], undefined, undefined, {
+		["--offline", "--no-approve", "--no-prompt-templates", "--no-themes", "--no-context-files", "--extension", probe, ...extraArgs], undefined, undefined, {
 			ownedBinaries: FAKE_BINARIES,
 			ownedLaunchForTest: (request) => {
 				child = spawn(node, [cli, ...request.args], { cwd: request.cwd, stdio: ["pipe", "pipe", "pipe"], env: {
+					...request.env,
 					HOME: home, PI_CODING_AGENT_DIR: agent, PI_CODING_AGENT_SESSION_DIR: join(work, "sessions"),
 					PI_CLAUDE_CODE_PROVIDER_PATH: fakeCli, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0",
-					PATH: `${dirname(node)}:/usr/bin:/bin`, TMPDIR: work, LANG: "C", NO_COLOR: "1", T2_PROBE_LOG: probeLog } });
+					PATH: `${join(work, ".test-bin")}:${dirname(node)}:/usr/bin:/bin`, TMPDIR: work, LANG: "C", NO_COLOR: "1", T2_PROBE_LOG: probeLog } });
 				children.push(child);
 				return { pid: child.pid!, process: child, runDir: join(request.agentDir, "owned-launch", "t2"),
 					labelSupervisor: "t2-supervisor", labelWorker: "t2-worker", stop: () => child?.kill("SIGTERM") } as any;
@@ -80,9 +89,28 @@ async function inventory(tools: string[] | undefined): Promise<{ tools: string[]
 	return { ...record, piArgs: readFileSync(join(spawned.agentDir, "pi_args"), "utf8").split("\n") };
 }
 
-const SUITE_ONLY = /^(compress|dcp_|todo|plan_|async_subagents|subagents$|repo_knowledge|question$)/;
+offline("research work tools are read-only in the actual child provider inventory", async () => {
+	const { tools, all, piArgs } = await inventory(["read", "grep", "ast_grep", "web_search", "web_fetch"], true);
+	for (const name of ["read", "grep", "ast_grep", "web_search", "web_fetch", ...SUBAGENT_COMMON_TOOLS]) expect(tools).toContain(name);
+	expect(piArgs.some((arg) => arg.endsWith("async-subagents/work-tools.ts"))).toBe(true);
+	expect(all).not.toContain("ast_apply");
+	for (const name of tools) expect(["read", "grep", "ast_grep", "web_search", "web_fetch", ...SUBAGENT_COMMON_TOOLS]).toContain(name);
+}, 60_000);
 
-offline("default role: local provider entry injected once; provider web search and every denied/suite tool are absent after session_start", async () => {
+offline("coding tools gain only AST; CLI exclusions can remove optional capabilities", async () => {
+	const coding = await inventory(["read", "grep", "bash", "edit", "write", "ast_grep"], true);
+	expect(coding.tools).toContain("ast_grep");
+	expect(coding.tools).toContain("Bash");
+	for (const name of ["ast_apply", "web_search", "web_fetch"]) expect(coding.all).not.toContain(name);
+	const removed = await inventory(["read", "ast_grep", "web_search", "web_fetch"], true, ["-xt", "ast_grep,web_search,web_fetch"]);
+	expect(removed.piArgs.some((arg) => arg.endsWith("async-subagents/work-tools.ts"))).toBe(false);
+	for (const name of ["ast_grep", "web_search", "web_fetch"]) expect(removed.all).not.toContain(name);
+	for (const name of SUBAGENT_COMMON_TOOLS) expect(removed.tools).toContain(name);
+}, 60_000);
+
+const SUITE_ONLY = /^(compress|dcp_|plan_|async_subagents|subagents$|repo_knowledge|question$)/;
+
+offline("default role: private todo is active; provider web search and other suite tools are absent", async () => {
 	const { tools, all, piArgs } = await inventory(undefined);
 	// The production default path injected the vendored module's standalone entry.
 	const standalone = localClaudeProviderModule("pi-claude-code-provider/sonnet").standalone;
@@ -90,6 +118,7 @@ offline("default role: local provider entry injected once; provider web search a
 	expect(all).toContain(WEB_SEARCH); // registered by the provider...
 	expect(tools).not.toContain(WEB_SEARCH); // ...but never active in a child
 	expect(tools.length).toBeGreaterThan(0);
+	expect(tools).toContain("todo");
 	for (const name of tools) {
 		expect(SUBAGENT_DENIED_TOOLS.has(name)).toBe(false);
 		expect(SUITE_ONLY.test(name)).toBe(false);
@@ -102,11 +131,28 @@ offline("restricted role: only the selected tools, never the provider web search
 	const { tools } = await inventory(["read", "grep", WEB_SEARCH]);
 	expect(tools).not.toContain(WEB_SEARCH);
 	expect(tools.length).toBeGreaterThan(0);
-	for (const name of tools) expect(["read", "grep"]).toContain(name.toLowerCase());
+	expect(tools).toContain("todo");
+	for (const name of tools) expect(["read", "grep", "todo"]).toContain(name.toLowerCase());
 }, 60_000);
 
-offline("no-tools role: empty inventory even after the provider registers its tool", async () => {
+offline("no-work-tools role: only private todo is available", async () => {
 	const { tools, piArgs } = await inventory([]);
-	expect(piArgs).toContain("--no-tools");
-	expect(tools).toEqual([]);
+	expect(piArgs[piArgs.indexOf("--tools") + 1]).toBe(SUBAGENT_COMMON_TOOLS.join(","));
+	expect(tools).toEqual(["todo"]);
 }, 60_000);
+
+for (const selected of [undefined, ["read", "grep"], []]) {
+	offline(`indexed role exposes common queries with work tools=${JSON.stringify(selected)}`, async () => {
+		const { tools, all, piArgs } = await inventory(selected, true);
+		for (const name of SUBAGENT_COMMON_TOOLS) expect(tools).toContain(name);
+		expect(piArgs.some((arg) => arg.endsWith("repo-discovery/subagent.ts"))).toBe(true);
+		expect(tools).not.toContain(WEB_SEARCH);
+		for (const name of tools) expect(SUBAGENT_DENIED_TOOLS.has(name)).toBe(false);
+		expect(all).not.toContain("subagents");
+		if (selected) {
+			const allowed = [...selected, ...SUBAGENT_COMMON_TOOLS].map((name) => name.toLowerCase());
+			for (const name of tools) expect(allowed).toContain(name.toLowerCase());
+		}
+		expect(REPO_DISCOVERY_TOOLS).toHaveLength(8);
+	}, 60_000);
+}

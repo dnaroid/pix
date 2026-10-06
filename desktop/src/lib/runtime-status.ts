@@ -260,7 +260,7 @@ export function liveModelUsage(
   const hourly = status.hourly !== undefined && status.hourly.resetAt > now ? status.hourly : undefined;
   const weekly = status.weekly !== undefined && status.weekly.resetAt > now ? status.weekly : undefined;
   if (!hourly && !weekly) return undefined;
-  const { hourly: _oldHourly, weekly: _oldWeekly, ...withoutWindows } = status;
+  const { hourly: _oldHourly, weekly: _oldWeekly, resetCredits: _credits, resetCreditsAvailableCount: _count, ...withoutWindows } = status;
   return { ...withoutWindows, ...(hourly ? { hourly } : {}), ...(weekly ? { weekly } : {}) };
 }
 

@@ -1,9 +1,19 @@
 import fs from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import path from "node:path";
 import type { ServerCapabilities } from "vscode-languageserver-protocol";
 import { matchesAnyGlob } from "./_shared/glob";
 import { normalizeRelativePath } from "./_shared/paths";
 import type { LspServerConfig } from "./_shared/types";
+
+export function canonicalLspPath(file: string): string {
+  try { return realpathSync(file); }
+  catch (error) {
+    // Previously owned roots and diagnostic paths can survive file deletion.
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return path.resolve(file);
+    throw error;
+  }
+}
 
 export async function readTextFile(file: string): Promise<string> {
   return fs.readFile(file, "utf8");

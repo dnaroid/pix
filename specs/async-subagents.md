@@ -82,6 +82,34 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 3. **Pi args**: `--mode rpc`, `--session-dir <dir>` or `--no-session`, `--no-extensions`, `--extension <model-tools>`, the allowlisted provider dependencies of the final model (`--extension <antigravity-auth>` or the suite-local `claude-code-provider/index.ts` entrypoint), `--no-skills`, `--model <model>`, `--tools <list>` (or `--no-tools`), `--thinking <level>`, filtered extra user args, `--models <effective-model>`, then `--extension <tool-guard>`. The final model scope prevents persisted `enabledModels` or an extra `--models` value from resolving unrelated providers in the isolated child. Skill flags from `extraArgs` are stripped, so child agents never discover or receive skills. Before anything else, `-m value`, `--model=value` and `--provider=value` in extra args are normalized to `--model value` / `--provider value` (the installed Pi CLI documents the long, space-separated forms), so owned-launch selection, provider dependencies and the child all see the same final model. `[confirmed by code, spawn.ts, provider-extensions.ts; confirmed by tests, core.test.ts, provider-extensions.test.ts]`
 4. **Stdin RPC**: sends two JSONL messages — `{type:"get_state",id:"sub_get_state"}` then `{type:"prompt",id:"sub_prompt",message:<prompt>[,images:<base64[]>]}`. Stdin stays open; EOF = pi shutdown. `[confirmed by code]`
 5. **Extensions** loaded into children: `model-tools` (model-specific tool args) and `tool-guard` (strips parent-only tools: `question`, `subagents`, all `async_subagents_*`). Provider dependencies come from an explicit allowlist in `core/provider-extensions.ts`, recomputed on every attempt (retry and provider-changing fallback) from that attempt's final model:
+   - `todo/subagent.ts` is also loaded for **every role**, including project-local roles such as `frontier-review`, and automatically for future roles. It exposes regular `todo` actions with a private child-session/attempt list. This is a planning exception to work-tool restrictions: restricted/empty role tool selections and extra CLI tool flags retain `todo` while preserving restrictions on work tools. Children neither read nor write the parent's project `.pi/todo-plan.json`. Retries/new attempts start with a new list; optional child session history stores local snapshots, branch navigation replays only that branch, and compaction retains unfinished tasks with a fresh snapshot. The lean entrypoint does not load persistence commands, UI widgets, thinking overrides, auto-follow-up turns or the parent's knowledge-audit reminder. Recursive delegation and interactive user questions remain denied. Children use todos for non-trivial multi-step work and report unfinished work/blockers to the parent; trivial work needs no plan. See [decision 0059](../docs/decisions/0059-subagent-private-todos.md), with the common-capability exception expanded by [decision 0060](../docs/decisions/0060-subagent-read-only-repo-tools.md). `[confirmed by todo/subagent.ts, core/child-tools.ts; tests: test/async-subagents/todo.test.ts, provider-child-inventory.test.ts]`
+   - `repo-discovery/subagent.ts` is explicitly loaded at the same common boundary for **every role and attempt**, independent of role names, visibility or project-local replacements. It exposes the eight existing read-only queries (`repo_context`, `repo_audit`, `repo_architecture`, `repo_structure`, `repo_ast`, `repo_search`, `repo_explain`, `repo_deps`) only when the launch project is already indexed and `idx` is executable. It reuses normal adapters, project selection, output profile and cancellation, without setup/update commands or implicit installation/index initialization. Missing prerequisites leave ordinary role tools and private todo usable. Explicit CLI allowlists, empty/no-tools selections and exclusions retain these common capabilities but do not grant other work tools. Lifecycle activation adds only registered queries to the existing selection. Child audit guidance reports evidence/gaps to the parent rather than requesting nested delegation. Read-only refers to product-source mutation; idx cache/index refresh side effects are not an OS sandbox. Council children reuse this common repo entrypoint and keep their separate web/read-only call guard (with private todo allowed), avoiding duplicate tool registration. See [decision 0060](../docs/decisions/0060-subagent-read-only-repo-tools.md). `[confirmed by repo-discovery/subagent.ts, core/child-tools.ts, core/spawn.ts, brainstorm/research-extension.ts; tests: test/async-subagents/repo-tools.test.ts, provider-child-inventory.test.ts, test/brainstorm/research-extension.test.ts]`
+   - Optional work capabilities are tool-driven, not universal or granted by role
+     name. Bundled `research`, `implement`, `implement-core`, `mechanical` and
+     `frontier-review` opt into read-only `ast_grep`; only bundled `research`
+     adds `web_search`/`web_fetch`. Executors explicitly retain the existing
+     seven builtin work tools. Project-local full replacements do not inherit
+     these optional choices. Common launch preserves supported extension names
+     through model alias selection, derives capabilities from the final CLI
+     allowlist/exclusions and loads `async-subagents/work-tools.ts` only when an
+     optional tool survives. It registers only requested tools, no commands,
+     `ast_apply`, LSP or full suite. Empty/no-tools selections, later lists and
+     exclusions may remove optional tools; universal todo/repo is unchanged.
+     Every attempt overwrites `PI_SUBAGENT_WORK_TOOLS`, preventing inherited
+     capability contamination. Read-only optional selections retain canonical
+     builtins (not Codex's grep-to-shell alias), reselect only available permitted
+     tools on session/model/before-agent events and reject non-allowlisted calls.
+     Executing selections retain existing mutation authority without web by
+     default. Research uses web for public evidence, never secrets/private data
+     or local discovery, and reports access gaps rather than configuring keys.
+     Existing web adapters, credentials, cancellation and fallback are reused.
+     Council web registration shares this loader; its separate stricter guard
+     still excludes AST and all mutations. Inventory tests do not prove research
+     quality/live services; privacy guidance is not a network/filesystem sandbox.
+     See [decision 0061](../docs/decisions/0061-subagent-scoped-ast-web-tools.md).
+     `[confirmed by core/child-tools.ts, core/spawn.ts, work-tools.ts, agents/*.md;
+     tests: test/async-subagents/work-tools.test.ts, provider-child-inventory.test.ts,
+     test/brainstorm/research-extension.test.ts]`
    - `antigravity-auth` is restored after `--no-extensions` only when the effective explicit task/CLI model is `antigravity/<model>`; a model sourced only from `ASYNC_SUBAGENTS_MODEL` / `PI_SUBAGENTS_MODEL` does not opt it in. Later `--model`, `-m`, or `--model=...` extra args override the task model for this decision.
    - A final model on `pi-claude-code-provider` (including the environment model) injects exactly one trusted suite-relative `src/claude-code-provider/index.ts`. No user/project settings or npm package lookup participates. The local manifest retains the characterized `0.5.0` identity; standalone and declared entrypoints must stay inside the module's realpath root. Explicit `--extension`/`-e` entries are inspected against the child cwd: one local entry is reused, distinct local entry aliases or any external/npm copy of this provider are rejected before launch. Owned launch, dependency injection and the child share `selectsClaudeProvider` over the trimmed task/environment model and normalized final CLI model/provider/scope. The legacy locator injection remains only as a test seam, not a production discovery path.
    - A missing local module, invalid metadata or unsupported version raises `ProviderExtensionError` (`provider_not_installed` / `provider_metadata_invalid` / `provider_version_unsupported`, bounded message with model, package and an action hint) before any child artifact or process exists. The synchronous throw is permanent: no retry and no model fallback, the concurrency slot is released and the bounded launch-failure artifacts are written.
@@ -1120,6 +1148,22 @@ runtime is unchanged.
 - `external/pi-tools-suite/src/async-subagents/tools/wait.ts`
 - `external/pi-tools-suite/src/async-subagents/tools/subagents.ts`
 - `external/pi-tools-suite/src/async-subagents/core/spawn.ts`
+- `external/pi-tools-suite/src/async-subagents/core/child-tools.ts`
+- `external/pi-tools-suite/src/async-subagents/work-tools.ts`
+- `external/pi-tools-suite/src/ast-grep/tool.ts`
+- `external/pi-tools-suite/src/web-search/index.ts`
+- `external/pi-tools-suite/src/async-subagents/agents/research.md`
+- `external/pi-tools-suite/src/async-subagents/agents/implement.md`
+- `external/pi-tools-suite/src/async-subagents/agents/implement-core.md`
+- `external/pi-tools-suite/src/async-subagents/agents/mechanical.md`
+- `external/pi-tools-suite/src/async-subagents/agents/frontier-review.md`
+- `external/pi-tools-suite/src/todo/subagent.ts`
+- `external/pi-tools-suite/src/repo-discovery/subagent.ts`
+- `external/pi-tools-suite/src/repo-discovery/index.ts`
+- `external/pi-tools-suite/src/brainstorm/research-extension.ts`
+- `external/pi-tools-suite/src/todo/todo.ts`
+- `external/pi-tools-suite/src/todo/state/store.ts`
+- `external/pi-tools-suite/src/todo/state/replay.ts`
 - `external/pi-tools-suite/src/async-subagents/core/owned-launch/`
 - `external/pi-tools-suite/src/async-subagents/core/owned-launch-integration.ts`
 - `external/pi-tools-suite/src/async-subagents/core/owned-retirement.ts`
@@ -1147,6 +1191,21 @@ runtime is unchanged.
 
 ## Tests
 
+- `external/pi-tools-suite/test/async-subagents/work-tools.test.ts`: optional
+  policy, CLI removals, project replacements, read-only lifecycle/call guard,
+  AST preview-only execution and actual SDK inventories for Claude/Codex models.
+- `external/pi-tools-suite/test/ast-grep.test.ts`: existing search/apply behavior.
+- `external/pi-tools-suite/test/web-search.test.ts`: credential/provider,
+  fallback, timeout and cancellation behavior reused by child web tools.
+- `external/pi-tools-suite/test/async-subagents/todo.test.ts`: child-local state,
+  unchanged parent persistence, CLI restrictions, compaction and branch replay.
+- `external/pi-tools-suite/test/async-subagents/provider-child-inventory.test.ts`:
+  real offline child startup exposes todo and gated repo queries for default,
+  restricted and empty selections.
+- `external/pi-tools-suite/test/async-subagents/repo-tools.test.ts`: common repo
+  registration, no setup, prerequisite gates, lifecycle selection and adapters.
+- `external/pi-tools-suite/test/brainstorm/research-extension.test.ts`: common
+  repo/todo composition without duplicate registration or weakening council guards.
 - `tests/heads-up-delegated.test.ts`: cross-package report bridge, launch ownership,
   provenance labels, redaction and duplicate suppression.
 - `external/pi-tools-suite/test/async-subagents/completion-delivery.test.ts`:

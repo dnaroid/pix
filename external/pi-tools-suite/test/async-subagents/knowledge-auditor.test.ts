@@ -47,6 +47,13 @@ describe("built-in knowledge-auditor role", () => {
 		expect(decisionGuidance).toContain("Never invent motives from code");
 		expect(decisionGuidance).toContain("Do not create/accept/supersede decisions yourself");
 		expect(decisionGuidance).toContain("Trivial edits do not need a decision record");
+		expect(decisionGuidance).toContain("Default to no new record unless explicitly requested by the user");
+		expect(decisionGuidance).toContain("costly reversal AND has durable rationale");
+		expect(decisionGuidance).toContain("changed spec alone is not a trigger");
+		expect(decisionGuidance).toContain("A justified no-record handoff is valid");
+		expect(decisionGuidance).toContain("Missing rationale is an escalation only for qualifying choices");
+		expect(decisionGuidance).toContain("do not demand a record merely because behavior changed");
+		expect(decisionGuidance).toContain("Do not prune or rewrite historical records");
 		expect(decisionGuidance).toContain("uncovered dependencies as an ESCALATE");
 		expect(decisionGuidance).toContain("every declared Implementation/ Tests dependency");
 		expect(decisionGuidance).toContain("never all specs merely to clear");
@@ -57,6 +64,15 @@ describe("built-in knowledge-auditor role", () => {
 			model: role.models![0],
 			promptAppend: role.promptAppend,
 		})).toContain("small, unambiguous drift");
+	});
+
+	test("escalates a missing qualifying record even when the parent supplied rationale", () => {
+		const role = loadSubagentConfig(tempDir(), {}).types["knowledge-auditor"];
+		const prompt = role.promptAppend!.replace(/\s+/g, " ");
+		expect(prompt).toContain("a missing decision record requires ESCALATE even when the parent supplied complete rationale");
+		expect(prompt).toContain("Supplied rationale or a proposed record path is not an existing record");
+		expect(prompt).toContain("your audit outcome is `escalate`, never `create`");
+		expect(prompt).toContain("A justified no-record handoff is valid");
 	});
 
 	test("is hidden without .indexer-cli and becomes available from the project marker alone", async () => {

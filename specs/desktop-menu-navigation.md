@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # Desktop menu keyboard navigation
 
 <!-- markdownlint-disable MD013 -->
@@ -79,3 +84,11 @@ roles and lifecycle are defined in `specs/desktop-context-menus.md`.
 - `npm --prefix desktop test`
 - `npm --prefix desktop run check`
 - `npm --prefix desktop run build:web`
+
+## Implementation
+
+- `desktop/src/lib/keyboard-navigation.ts`
+
+## Tests
+
+- `desktop/src/lib/keyboard-navigation.test.ts`

@@ -5,6 +5,7 @@ import type {
   ModelUsageRefresh,
   ModelUsageResetCredit,
   ModelUsageStatus,
+  LspSnapshot,
   QueuedImage,
   QueuedUserMessage,
   QueueItem,
@@ -21,6 +22,32 @@ import { parseDcpContextMap } from "./dcp-context-map";
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function parseLspSnapshot(value: unknown): LspSnapshot {
+  const invalid = (): never => { throw new Error("pix/session/lsp_control returned an invalid response"); };
+  if (!isRecord(value)) invalid();
+  const response = value as Record<string, unknown>;
+  if (!Array.isArray(response.servers) || !Array.isArray(response.warnings)) invalid();
+  const servers = (response.servers as unknown[]).map((server: unknown) => {
+    if (!isRecord(server)) invalid();
+    const entry = server as Record<string, unknown>;
+    if (typeof entry.id !== "string"
+      || typeof entry.root !== "string"
+      || !["stopped", "starting", "running", "stopping", "failed"].includes(String(entry.state))
+      || (entry.pid !== undefined && (!Number.isSafeInteger(entry.pid) || Number(entry.pid) <= 0))
+      || (entry.error !== undefined && typeof entry.error !== "string")) invalid();
+    return {
+      id: entry.id as string,
+      root: entry.root as string,
+      state: entry.state as LspSnapshot["servers"][number]["state"],
+      ...(entry.pid === undefined ? {} : { pid: Number(entry.pid) }),
+      ...(entry.error === undefined ? {} : { error: entry.error as string }),
+    };
+  });
+  if (!(response.warnings as unknown[]).every((warning: unknown) => typeof warning === "string")) invalid();
+  if (response.trustRequired !== undefined && typeof response.trustRequired !== "boolean") invalid();
+  return { servers, warnings: response.warnings as string[], ...(response.trustRequired === undefined ? {} : { trustRequired: response.trustRequired as boolean }) };
 }
 
 export function parseRuntimeStatus(value: unknown): RuntimeStatus {
@@ -219,10 +246,18 @@ function parseModelUsageResetCredits(value: unknown): ModelUsageResetCredit[] | 
     ) throw new Error("invalid Pix model usage reset credit");
     return {
       title: credit.title,
+      ...(credit.count === undefined ? {} : { count: parseResetCreditQuantity(credit.count) }),
       ...(credit.expiresAt === undefined ? {} : { expiresAt: Number(credit.expiresAt) }),
     };
   });
   return credits.length > 0 ? credits : undefined;
+}
+
+function parseResetCreditQuantity(value: unknown): number {
+  if (!isFiniteNumber(value) || !Number.isSafeInteger(value) || value <= 0) {
+    throw new Error("invalid Pix model usage reset credit quantity");
+  }
+  return value;
 }
 
 function parseModelUsageLimitWindow(value: unknown): ModelUsageLimitWindow {

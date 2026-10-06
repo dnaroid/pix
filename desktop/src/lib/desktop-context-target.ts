@@ -12,6 +12,7 @@ export interface DesktopContextTarget {
   imagePath?: string;
   imageRelativePath?: string;
   filePath?: string;
+  projectRevealPath?: string;
   sourceReference?: string;
   hasSelection: boolean;
   readOnly: boolean;
@@ -61,6 +62,13 @@ export function relativeImagePath(path: string, workspace: string): string | und
   let common = 0;
   while (common < base.length && common < destination.length && base[common] === destination[common]) common++;
   return [...base.slice(common).map(() => ".."), ...destination.slice(common)].join("/") || ".";
+}
+
+/** The Files tree owns only entries strictly within the active workspace. */
+export function projectRevealPath(path: string | undefined, workspace: string): string | undefined {
+  const absolute = contextFilePath(path, workspace);
+  const relative = absolute ? relativeImagePath(absolute, workspace) : undefined;
+  return relative && relative !== "." && isWorkspaceProjectFilePath(relative) ? relative : undefined;
 }
 
 /** Source rows, including their generated line-number gutter, share one logical line. */
@@ -121,6 +129,8 @@ export function desktopContextTarget(target: EventTarget | null, workspace = "")
 
   const fileSurface = element.closest<HTMLElement>("[data-context-file-path]");
   const filePath = contextFilePath(fileSurface?.dataset.contextFilePath, workspace);
+  const revealPath = fileSurface?.hasAttribute("data-workbench-tab")
+    ? projectRevealPath(fileSurface.dataset.contextFilePath, workspace) : undefined;
 
   const href = element.closest("a[href]")?.getAttribute("href");
   const linkUrl = href ? normalizeExternalHref(href) : undefined;
@@ -130,7 +140,7 @@ export function desktopContextTarget(target: EventTarget | null, workspace = "")
     let kind: DesktopContextKind = fileSurface ? "file" : "readonly";
     if (linkUrl) kind = "link";
     if (hasSelection) kind = "selection";
-    return { kind, element, editor: null, linkUrl, sourceReference, filePath, hasSelection, readOnly: true };
+    return { kind, element, editor: null, linkUrl, sourceReference, filePath, projectRevealPath: revealPath, hasSelection, readOnly: true };
   }
   return null;
 }

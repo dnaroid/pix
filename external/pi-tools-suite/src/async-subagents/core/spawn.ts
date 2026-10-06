@@ -2,7 +2,6 @@ import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from "n
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { selectSuitableToolsForModel } from "../../lib/tool-args.js";
 import { BROWSER_QA_RUNNER_ENV, getBrowserQaRunnerPath, getUiQaRunnerPath, isUiQaType, UI_QA_RUNNER_ENV } from "./ui-qa.js";
 import { validateBasename } from "./paths.js";
 import { getPiInvocation } from "./pi-invocation.js";
@@ -13,6 +12,7 @@ import { getAgentState } from "./state.js";
 import { writeStructuredResult } from "./structured-result.js";
 import { createBoundedFileWriter, createDeferredFileWriter, resolveSubagentLogLimits } from "./log-limits.js";
 import { filterSubagentTools } from "./tool-guard.js";
+import { selectSubagentToolsForModel, subagentWorkTools, SUBAGENT_WORK_TOOLS_ENV, withSubagentCapabilities } from "./child-tools.js";
 import type { AgentCompletionHandler, AgentTask, RpcEventHandler, RpcEventRecord, SpawnedAgent } from "./types.js";
 import { isRecord, isoNow, serializeJsonLine } from "./utils.js";
 import { forgetOwnedHandle, launchPreparedOwnedAgent, ownedOutcomeSync, readOwnedMetadata, requestOwnedCancel, OWNED_METADATA, type OwnedLaunchBinaries, type OwnedLaunchHandle } from "./owned-launch-integration.js";
@@ -138,17 +138,19 @@ export function spawnAgent(
 	const persistSessions = shouldPersistSubagentSessions();
 	const sessionDir = persistSessions ? getAgentSessionDir(agentDir) : undefined;
 	if (sessionDir) fs.mkdirSync(sessionDir, { recursive: true });
-	const piArgs: string[] = ["--mode", "rpc"];
+	let piArgs: string[] = ["--mode", "rpc"];
 	if (sessionDir) piArgs.push("--session-dir", sessionDir);
 	else piArgs.push("--no-session");
 	piArgs.push("--no-extensions");
 	piArgs.push("--extension", getModelToolsExtensionPath());
+	piArgs.push("--extension", getSubagentTodoExtensionPath());
+	piArgs.push("--extension", getSubagentRepoExtensionPath());
 	// `--no-extensions` stays; only the allowlisted provider dependencies of
 	// the final selected model are added (see provider-extensions.ts).
 	for (const extension of providerExtensions) piArgs.push("--extension", extension);
 	piArgs.push("--no-skills");
 	if (configuredModel) piArgs.push("--model", configuredModel);
-	const selectedTools = task.tools ? filterSubagentTools(selectSuitableToolsForModel(selectedModel, task.tools)) : undefined;
+	const selectedTools = task.tools ? filterSubagentTools(selectSubagentToolsForModel(selectedModel, task.tools)) : undefined;
 	if (selectedTools) {
 		if (selectedTools.length > 0) piArgs.push("--tools", selectedTools.join(","));
 		else piArgs.push("--no-tools");
@@ -157,6 +159,11 @@ export function spawnAgent(
 
 	// User-supplied extra args (e.g. --thinking high)
 	piArgs.push(...forwardedExtraArgs);
+	piArgs = withSubagentCapabilities(piArgs);
+	const workTools = subagentWorkTools(piArgs);
+	if (workTools.optional.length) {
+		piArgs.push("--extension", path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "work-tools.ts"));
+	}
 	// The child always runs one explicitly selected model. Override persisted
 	// enabledModels (and any extra --models value) so isolated children do not
 	// resolve unrelated provider patterns before their limited extensions load.
@@ -192,6 +199,9 @@ export function spawnAgent(
 	};
 
 	const env = subagentEnvironment(process.env, isUiQaType(task.subagentType) ? agentDir : undefined);
+	// Always overwrite inherited state so retries/nested test processes cannot
+	// carry another child's capability selection into this attempt.
+	env[SUBAGENT_WORK_TOOLS_ENV] = JSON.stringify(workTools);
 	const ownedHandle = owned ? (options.ownedLaunchForTest ?? launchPreparedOwnedAgent)({ agentDir, command: invocation.command, args: invocation.args, cwd, env, binaries: options.ownedBinaries! }) : undefined;
 	// The prepared bridge guarantees three piped stdio streams, just as spawn() does.
 	const proc: ChildProcessWithoutNullStreams = (ownedHandle?.process as ChildProcessWithoutNullStreams | undefined) ?? spawn(invocation.command, invocation.args, {
@@ -643,6 +653,14 @@ function withoutSkillArgs(args: string[]): string[] {
 
 function getModelToolsExtensionPath(): string {
 	return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "model-tools", "index.ts");
+}
+
+function getSubagentTodoExtensionPath(): string {
+	return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "todo", "subagent.ts");
+}
+
+function getSubagentRepoExtensionPath(): string {
+	return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "repo-discovery", "subagent.ts");
 }
 
 function terminateChildProcessTree(proc: ChildProcess, signal: NodeJS.Signals): void {

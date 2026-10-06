@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # Desktop command palette and command registry
 
 <!-- markdownlint-disable MD013 -->
@@ -60,3 +65,11 @@ Give Pix Desktop one reusable command vocabulary for keyboard shortcuts, command
 - `npm --prefix desktop test`
 - `npm --prefix desktop run check`
 - `npm --prefix desktop run build:web`
+
+## Implementation
+
+- `desktop/src/lib/desktop-commands.ts`
+
+## Tests
+
+- `desktop/src/lib/desktop-commands.test.ts`

@@ -88,6 +88,66 @@ It runs `npm run watch:all` in the linked checkout using npm from `PATH`.
 Keep that terminal open; stop with `Ctrl+C`. This is not a background service.
 If you move the checkout, recreate the symlink.
 
+### Native QA without restarting your working Desktop
+
+Prepare/check the native automation helper independently of the watcher:
+
+```bash
+npm run qa:desktop -- doctor
+```
+
+Development installs the signature-checked helper at the permanent OS-account
+path `~/Library/Application Support/Pix/ui-qa/helpers/macos-accessibility`.
+This is user-global, not a system-wide/root install: all checkouts share it, and
+Registry Clean, `.pi/subagents` cleanup and temporary QA HOME do not remove or
+relocate it. A matching private old project helper is copied and verified without
+re-signing; the legacy copy is left for ordinary cleanup, not used by new runs.
+Source changes are built privately and published under the shared build lock.
+Installed releases still use their signed payload helper, not this dev install.
+
+To explicitly request permissions:
+
+```bash
+npm run qa:desktop -- doctor --prompt
+```
+
+This requests Accessibility and Screen Recording for the helper whose full path
+is printed; it does not launch/restart Desktop, start a watcher, grant permission
+or reset TCC. Approve that helper in **System Settings > Privacy & Security**,
+under **Accessibility** and **Screen Recording**. Pix Desktop's own permission
+does not imply permission for the helper. If no dialog appears, add/enable the
+exact printed executable manually. Rerun plain `doctor` after approval in a new
+process: exit 0 means both grants are present, 2 means at least one is missing,
+and 1 means setup/diagnosis failed. `--prompt` may return 2 before approval.
+
+Permanent storage prevents cleanup from deleting the helper, but does not
+guarantee permanent macOS grants. Moving the executable or changing its signing
+identity may require approval again. Ad-hoc source rebuilds change the
+code-hash-based identity; `PI_UI_QA_MACOS_CODESIGN_IDENTITY` can select an existing
+keychain signing certificate for a stable certificate-based requirement.
+Do not silently create certificates or change OS privacy settings from `ui-qa`.
+
+With the existing `watch:all` running, prepare an isolated test copy:
+
+```bash
+npm run qa:desktop -- prepare
+```
+
+Use its returned manifest path with
+`npm run qa:desktop -- launch --manifest <manifestPath>` for a manual launch.
+The `ui-qa` subagent instead gives the unified runner a direct project-script
+launch target; `.pi/skills/pix-desktop-qa/SKILL.md` contains that workflow.
+The test copy has its own HOME, agent sessions, application state, ephemeral
+WebView and disposable project; your working app stays on its current build.
+
+Preparation waits for the successful watcher artifact and never starts another
+watcher. Use `--state <desktop-watch-state.json>` to disambiguate watchers and
+`--timeout-ms <100..300000>` for a bounded wait. For authorized model-based tests,
+`--seed-config --seed-api-keys` explicitly copies allowlisted settings and literal
+API keys only; it does not copy OAuth tokens, sessions or an entire home. Do not
+export the private profile with screenshots. UI-only tests need no credentials.
+See `specs/desktop-qa-isolated-launch.md` for identity, cleanup and failure rules.
+
 ## Release builds
 
 Release construction and native verification are intentionally separate from

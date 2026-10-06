@@ -152,6 +152,28 @@ describe("desktop context menu lifecycle", () => {
     expect(stale.popup).not.toHaveBeenCalled();
     expect(stale.close).toHaveBeenCalledOnce();
   });
+
+  it("closes a pending menu after workspace replacement and invalidates opened callbacks", async () => {
+    let workspace = "/one";
+    const pending = deferred<NativeContextMenu>();
+    const native = menu();
+    let isActive!: () => boolean;
+    dispose = installDesktopContextMenu({ reportError, workspace: () => workspace,
+      createMenu: (_context, callback) => { isActive = callback; return pending.promise; } });
+    rightClick();
+    workspace = "/two";
+    pending.resolve(native);
+    await flush();
+    expect(native.popup).not.toHaveBeenCalled();
+    expect(native.close).toHaveBeenCalledOnce();
+    expect(isActive()).toBe(false);
+
+    rightClick();
+    await flush();
+    expect(isActive()).toBe(true);
+    workspace = "/three";
+    expect(isActive()).toBe(false);
+  });
   it("releases the previous native resource before replacement and invalidates its callbacks", async () => {
     const first = menu();
     const second = menu();

@@ -83,6 +83,7 @@ describe("slash command helpers", () => {
       ],
     );
     expect(merged.map((command) => command.name)).toEqual([
+      "btw",
       "new",
       "new_tab",
       "resume",

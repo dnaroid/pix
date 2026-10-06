@@ -50,7 +50,7 @@
 <div bind:this={root} class="relative shrink-0" role="group" aria-label={label} onfocusout={focusout}>
   {@render trigger({ open, toggle, id })}
   <div {id} hidden={!open} role="dialog" aria-label={label} tabindex="0"
-    class="absolute right-0 bottom-full z-40 w-80 max-w-[calc(100vw-16px)]">
+    class="absolute right-0 bottom-full z-40 max-h-[max(0px,calc(100dvh-70px))] w-80 max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain">
     {@render children()}
   </div>
 </div>

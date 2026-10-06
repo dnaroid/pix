@@ -10,8 +10,19 @@
   } = $props();
 
   const available = $derived(credits.filter((credit) => credit.expiresAt === undefined || credit.expiresAt > now));
-  const count = $derived(Math.max(0, (availableCount ?? credits.length) - (credits.length - available.length)));
-  const visible = $derived(available.slice(0, count));
+  function quantity(rows: readonly ModelUsageResetCredit[]): number {
+    return rows.reduce((total, credit) => total + (credit.count ?? 1), 0);
+  }
+  const count = $derived(Math.max(0, (availableCount ?? quantity(credits)) - (quantity(credits) - quantity(available))));
+  const visible = $derived.by(() => {
+    let remaining = count;
+    return available.flatMap((credit) => {
+      const size = Math.min(credit.count ?? 1, remaining);
+      remaining -= size;
+      return size > 0 ? [{ ...credit, ...(credit.count === undefined ? {} : { count: size }) }] : [];
+    });
+  });
+  const missing = $derived(count - quantity(visible));
 
   function expiryLabel(expiresAt: number | undefined): string {
     if (expiresAt === undefined) return "Expiry unavailable";
@@ -23,6 +34,14 @@
       minute: "2-digit",
       second: "2-digit",
     });
+  }
+
+  function countdownLabel(credit: ModelUsageResetCredit): string {
+    if (credit.expiresAt === undefined) return "Expiry unavailable";
+    const countdown = `Expires in ${formatResetDuration(credit.expiresAt, now)}`;
+    if (credit.count === undefined) return countdown;
+    const date = new Date(credit.expiresAt).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    return `${date} · ${countdown}`;
   }
 </script>
 
@@ -37,14 +56,14 @@
         {@const urgent = credit.expiresAt !== undefined && credit.expiresAt - now < 86_400_000}
         <div class="flex items-center gap-2 rounded-md bg-muted px-2.5 py-1">
           <RefreshCw class="h-3 w-3 shrink-0 text-primary" aria-hidden="true" />
-          <span class={["min-w-0 flex-1 truncate", urgent ? "text-tool-error" : "text-foreground"]}>{credit.title}</span>
+          <span class={["min-w-0 flex-1 truncate", urgent ? "text-tool-error" : "text-foreground"]}>{credit.title}{(credit.count ?? 1) > 1 ? ` ×${credit.count}` : ""}</span>
           <span class={["shrink-0", urgent ? "text-tool-error" : "text-muted-foreground"]}
-            aria-label={expiryLabel(credit.expiresAt)}>{credit.expiresAt !== undefined ? `Expires in ${formatResetDuration(credit.expiresAt, now)}` : "Expiry unavailable"}</span>
+            aria-label={expiryLabel(credit.expiresAt)}>{countdownLabel(credit)}</span>
         </div>
       {/each}
     </div>
-    {#if count > visible.length}
-      <div class="mt-2 text-muted-foreground">Expiry details unavailable for {count - visible.length} {count - visible.length === 1 ? "credit" : "credits"}</div>
+    {#if missing > 0}
+      <div class="mt-2 text-muted-foreground">Expiry details unavailable for {missing} {missing === 1 ? "credit" : "credits"}</div>
     {/if}
   </section>
 {/if}

@@ -53,6 +53,7 @@
     onAutocomplete,
     onDraftChange = () => {},
     onOpenHistory,
+    onOpenBtw,
     onEnhance,
     onSubmit,
     onDefer,
@@ -88,6 +89,7 @@
     onAutocomplete: (draft: string, signal: AbortSignal) => Promise<string>;
     onDraftChange?: () => void;
     onOpenHistory?: () => void | Promise<void>;
+    onOpenBtw?: () => void | Promise<void>;
     onEnhance?: () => void | Promise<void>;
     onSubmit: () => void | Promise<void>;
     onDefer: () => void | Promise<void>;
@@ -183,13 +185,14 @@
   const canChooseAttachments = $derived(!editorMode && !questionMode && hasConversationTarget && ready);
   const hasQueueableDraft = $derived(!questionMode && (promptText.trim().length > 0 || attachments.length > 0));
   const canFork = $derived(!editorMode && !!onFork && !!activeSessionId && ready && hasQueueableDraft);
+  const canOpenBtw = $derived(!editorMode && !questionMode && !!onOpenBtw && !!activeSessionId && ready);
   const canSubmitPrompt = $derived(
     !editorMode
       && !questionMode
       && ready
       && hasConversationTarget
       && hasQueueableDraft
-      && (!promptRunning || !promptText.trimStart().startsWith("/")),
+      && (!promptRunning || !promptText.trimStart().startsWith("/") || (canOpenBtw && /^\/btw(?:\s|$)/i.test(promptText.trimStart()))),
   );
   const canOpenPromptHistory = $derived(
     !editorMode
@@ -360,6 +363,11 @@
     composerMenuOpen = false;
     if (!canOpenPromptHistory || !onOpenHistory) return;
     await onOpenHistory();
+  }
+
+  function openBtwFromMenu(): void {
+    composerMenuOpen = false;
+    if (canOpenBtw) void onOpenBtw?.();
   }
 
   async function chooseAttachmentsFromMenu(): Promise<void> {
@@ -595,6 +603,8 @@
     scheduleContinuationLabel={scheduleContinuationCommand.label}
     canScheduleContinuation={canScheduleContinuation}
     onOpenHistory={() => void openPromptHistory()}
+    {canOpenBtw}
+    onOpenBtw={openBtwFromMenu}
     onEnhance={() => void enhanceWithVoiceStop()}
     onCreateTask={() => void createTaskWithVoiceStop()}
     onDefer={() => void deferWithVoiceStop()}
@@ -707,6 +717,7 @@
             <PromptComposerControls
               bind:menuTrigger={composerMenuTrigger}
               menuOpen={composerMenuOpen}
+              submitLabel={/^\/btw(?:\s|$)/i.test(promptText.trim()) ? "Ask in BTW" : undefined}
               voiceState={voiceController.state}
               voiceSupported={voiceController.supported}
               voiceCanStart={voiceController.canStart}

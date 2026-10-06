@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # TUI session tabs and UI-only draft conversations
 
 ## Purpose
@@ -172,3 +177,11 @@ user actually sends work to the agent.
   shared saved-session load is already in progress.
 - `npm run test:inner`
 - `npx tsc --noEmit`
+
+## Implementation
+
+- `src/app/session/tabs-controller.ts`
+
+## Tests
+
+- `tests/tabs-controller.test.ts`

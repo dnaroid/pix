@@ -10,6 +10,7 @@ export type SidebarIndicatorTab =
   | "registry"
   | "scripts"
   | "idx"
+  | "lsp"
   | "settings";
 
 export type SidebarIndicatorTone = "info" | "warning" | "error";

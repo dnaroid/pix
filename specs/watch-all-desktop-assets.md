@@ -96,6 +96,12 @@ Make the newest successfully built Vite bundle available to the Desktop process 
 
 ## Non-goals
 
+Ordinary native UI QA consumes a pinned successful watch artifact through
+`qa:desktop`, without restarting the working Desktop or changing this watcher's
+lifecycle. See `specs/desktop-qa-isolated-launch.md`. QA owns its copy/profile and
+cleanup; the watcher remains only the producer. Restart/recovery testing remains
+a separate explicitly requested scenario.
+
 - Running a development HTTP server from `watch:all`.
 - Rebuilding the web bundle twice per cycle.
 - Changing Cargo profiles or incremental compilation outside `watch:all`.

@@ -53,11 +53,17 @@ try {
   const trigger = page.locator("[data-observer-status] > button");
   assert.equal((await trigger.innerText()).trim(), "");
   assert.match(await trigger.getAttribute("class"), /text-muted-foreground/);
-  assert.equal(await trigger.locator("svg.lucide-binoculars").count(), 1);
+  assert.equal(await trigger.locator("svg.lucide-telescope").count(), 1);
   await trigger.click();
   const popup = page.getByRole("dialog", { name: "Observer status" });
   await popup.waitFor();
   assert.match(await popup.innerText(), /Not checked yet/);
+  assert.doesNotMatch(await popup.innerText(), /Recorded tokens|Local feedback|Input used/);
+  await popup.getByRole("button", { name: "Technical details", exact: true }).click();
+  assert.match(await popup.innerText(), /Recorded tokens|Input used/);
+  await page.screenshot({ path: join(output, "popup-technical-details.png") });
+  await popup.getByRole("button", { name: "Hide technical details", exact: true }).click();
+  assert.doesNotMatch(await popup.innerText(), /Recorded tokens|Input used/);
   assert.doesNotMatch(await popup.innerText(), /Model|Min\. interval|Input budget|required|\/ 12/);
   assert.equal(await popup.locator('input[type="checkbox"]').count(), 0);
   assert.equal(await popup.getByRole("switch", { name: "Observer for this session" }).evaluate((element) => element.tagName), "BUTTON");
@@ -72,7 +78,10 @@ try {
   await page.screenshot({ path: join(output, "popup-enabled.png") });
   await popup.getByRole("button", { name: "Check now", exact: true }).click();
   await page.waitForFunction(() => window.observerSmoke.snapshot().phase === "checking");
-  assert.equal(await trigger.locator("svg.lucide-binoculars.animate-pulse").count(), 1);
+  // Disabling the focused Check now button can move focus outside the popup.
+  // Reopen to inspect checking state without changing the inference state.
+  if (!await popup.isVisible()) await trigger.click();
+  assert.equal(await trigger.locator("svg.lucide-telescope.animate-pulse").count(), 1);
   await page.emulateMedia({ reducedMotion: "reduce" });
   assert.equal(await trigger.locator("svg").evaluate((element) => getComputedStyle(element).animationName), "none");
   await page.emulateMedia({ reducedMotion: "no-preference" });
@@ -83,16 +92,20 @@ try {
   await page.waitForFunction(() => !window.observerSmoke.snapshot().enabled);
   assert.equal(await trigger.locator(".animate-pulse").count(), 0);
   assert.match(await trigger.getAttribute("class"), /text-muted-foreground/);
-  assert.match(await popup.innerText(), /Cancelled/);
+  assert.match(await popup.innerText(), /Check cancelled/);
   assert.equal(await page.getByRole("textbox", { name: "Main draft" }).inputValue(), "Keep this draft");
   checks.push("open is read-only; toggle/check are explicit; Off remains available during checking; draft preserved");
-  checks.push("binoculars only; grey off/primary enabled; pulse only while checking with reduced-motion support; standard button switch; no static settings in popup");
+  checks.push("telescope only; grey off/primary enabled; pulse only while checking with reduced-motion support; standard button switch; diagnostics disclosure");
 
   await popup.focus();
   await page.keyboard.press("Shift+Tab");
   assert.equal(await page.evaluate(() => document.activeElement.textContent), "Observer settings");
   await page.keyboard.press("Tab");
-  assert.equal(await page.evaluate(() => document.activeElement.getAttribute("aria-label")), "Close Observer status");
+  assert.equal(await page.evaluate(() => document.activeElement.getAttribute("aria-label")), "Observer for this session");
+  await page.keyboard.press("Tab");
+  assert.equal(await page.evaluate(() => document.activeElement.textContent.trim()), "Technical details");
+  await page.keyboard.press("Enter");
+  assert.match(await popup.innerText(), /Recorded tokens/);
   await page.keyboard.press("Escape");
   assert.equal(await popup.count(), 0);
   assert(await trigger.evaluate((element) => element === document.activeElement));

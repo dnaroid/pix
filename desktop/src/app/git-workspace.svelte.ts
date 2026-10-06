@@ -143,7 +143,7 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
     try {
       const result = await invoke<unknown>(command, { workspace, ...payload });
       if (!current()) return false;
-      if (command !== "git_fetch" && command !== "git_push") invalidateReview();
+      if (command !== "git_fetch" && command !== "git_push" && command !== "git_save_identity") invalidateReview();
       if (mutationOptions.reloadProject) {
         closeDiff();
         await options.reloadProject(workspace);
@@ -447,6 +447,7 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
     showReview,
     loadDetails,
     repositoryAction,
+    saveIdentity: (name: string, email: string) => runMutation("save-identity", "git_save_identity", { name, email }, { success: "Commit author saved for this repository." }),
     setResolveRunning,
   };
 }

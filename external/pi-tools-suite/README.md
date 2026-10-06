@@ -93,7 +93,9 @@ model overrides and research CLI overrides are incompatible. Disable with
 `modules.brainstorm: false`. Reload/restart after installing the module.
 
 Participants in both modes can use `read`/`grep`, `web_search`/`web_fetch`, and
-read-only `repo_*` tools through an explicitly loaded, restricted child extension.
+read-only `repo_*` tools through the common tools-only child entrypoint. The
+council-specific extension adds web access and its strict call guard; private
+child `todo` is also allowed, without enabling mutations or nested delegation.
 Repo tools require an existing index and `idx`; web tools use existing credentials.
 No shell, edits, setup/credential commands or nested agents are enabled. Participants
 are instructed to research when useful, cite sources, report access gaps, and never
@@ -160,8 +162,18 @@ linked decisions and check status/superseding links. Historical rationale does
 not override the current spec. Plain Markdown already participates in retrieval
 subject to normal exclusions; no special idx kind or new storage is required.
 
-The parent records significant architecture, dependency/model, trade-off and
-accepted-risk choices while context is available: status, context, evidence
+Default to no new record. Record a decision only when explicitly requested by the
+user, or when a choice involves materially different plausible alternatives,
+consequential accepted risk or costly reversal AND its durable rationale will
+help avoid repeating a dispute or mistake not already captured by an existing
+record. Ask whether the rationale will still be useful in six months. A feature,
+UX change, bug fix, implementation detail, dependency/model change or changed spec
+alone is not a trigger. Keep ordinary behavior in specs; do not invent alternatives
+or duplicate existing records. Apply this threshold prospectively without pruning
+or rewriting history.
+
+For qualifying choices, the parent records rationale while context is available:
+status, context, evidence
 versus assumptions, decision/scope, alternatives, consequences and revisit
 triggers. Include approval evidence and recording date, and link the spec both
 ways. Attribute conversation-only reports and disclose missing artifacts rather
@@ -170,8 +182,10 @@ link to their predecessors and mark/link old records without erasing history.
 
 Include decision paths and rationale (or why no new record was needed) in the
 final knowledge handoff. The auditor checks completeness and consistency,
-escalates missing/ambiguous rationale and never authors or approves decisions
-from code alone. The parent performs the same check if the auditor is absent.
+escalates missing rationale only for qualifying choices, and never authors or
+approves decisions from code alone. A justified no-record handoff is valid;
+conflicting rationale still requires clarification. The parent performs the same
+check if the auditor is absent.
 This is a prompt/workflow contract, not automatic enforcement or measurement.
 
 Mechanical refactors, typo/formatting edits, exact renames, and other changes
@@ -1018,6 +1032,27 @@ retry structures and the separate role router continue to use the term
 `fallbackModels` for actual fallback-only lists, not agent candidates.
 
 Sub-agents run with `--no-session` by default to avoid writing duplicate Pi session JSONL files for fire-and-forget background work. Set `ASYNC_SUBAGENTS_ENABLE_SESSIONS=1` to restore persisted per-agent sessions under each agent's `sessions/` directory; this also registers the session-navigation slash commands (`/sub-open`, `/sub-back`, `/sub-where`) needed for switching and deeper post-mortem navigation.
+
+Every sub-agent role (including project-local and future roles) gets a private `todo` tool for non-trivial multi-step work. Each child attempt owns its list; it cannot read or overwrite the parent's project plan. `todo` remains available even with restricted or empty work-tool selections. Child todos do not enable persistence commands, thinking overrides or automatic follow-up turns; unfinished work and blockers belong in the report to the parent.
+
+Optional work tools follow the final tool selection: bundled `research`,
+`implement`, `implement-core`, `mechanical` and `frontier-review` request read-only
+`ast_grep`; only bundled `research` adds `web_search`/`web_fetch`. The tools-only
+loader preserves these extension names without loading `ast_apply`, LSP or
+credential/setup commands. Unlike universal todo/repo, optional tools can be
+removed by CLI lists/exclusions or project-local full replacements. Read-only
+research keeps canonical read/grep, never Codex's shell alias. Web uses existing
+credentials/fallback and is for public evidence only, never secrets/private repo
+data; missing prerequisites are reported to the parent. Council shares web
+registration but retains its stricter guard and does not gain AST.
+
+Every role also gets the eight read-only `repo_*` queries when its launch project
+is already indexed and `idx` is executable. Common spawn loads only the query
+entrypoint, never setup/update commands or the full suite. Restricted/empty tool
+lists and exclusions retain private todo and these queries, not other work tools.
+Without an index or `idx`, ordinary role tools and todo remain usable; no setup is
+attempted. Existing output profiles, project selection and cancellation apply.
+Child `repo_audit` guidance reports findings to the parent rather than delegating.
 
 Sub-agent runs are stored in the current project's `.pi/subagents/` directory and survive main-session shutdown. Each spawn updates `.pi/subagents/registry.json` with the latest run and `agentId -> runDir` mappings. Because of that, `subagents({ action: "status" })`, `wait`, and `stop` can omit `runDir` to target the latest run, and `subagents({ action: "result", agentId: "..." })` can resolve the run from the registry even if the exact `runDir` was lost during compaction or the session closed. Result reads always return a summary-first response with artifact paths; raw `result.md` and `stderr.log` are not inlined, which avoids IPC/socket buffer overflows. Include `runDir` when you need an older or non-latest run, and use `cleanup` with `delete=true` to remove collected old runs. On normal main-session shutdown, Pi stops that session's sub-agents but preserves run files, reports, attachments and registry pointers; reload and fork shutdowns also skip stopping. Desktop's separate 72-hour background TTL and immediate manual Clean remain unchanged. The draft macOS owned launcher prevents explicit cleanup while containment or either UUID launchd service's retirement is uncertain; stopping the bridge alone never authorizes deletion. This candidate remains gated on G1/T3 acceptance (see `specs/async-subagents.md` in the Pix repository).
 

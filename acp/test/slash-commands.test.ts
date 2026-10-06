@@ -54,6 +54,8 @@ test("recognizes Pix commands that require renderer UI", () => {
 	assert.equal(rendererCommandName("/changelog"), undefined);
 	assert.equal(rendererCommandName("/update --check"), undefined);
 	assert.equal(rendererCommandName("/enhance"), "enhance");
+	assert.equal(rendererCommandName("/btw why?"), "btw");
+	assert.equal(rendererCommandName("/BTW"), "btw");
 	assert.equal(rendererCommandName("/queue later"), "queue");
 	assert.equal(rendererCommandName("/resume /tmp/session.jsonl"), "resume");
 	assert.equal(rendererCommandName("/trust"), undefined);

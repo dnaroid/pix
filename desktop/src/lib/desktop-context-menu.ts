@@ -4,15 +4,16 @@ import { createNativeContextMenuFactory, type ContextMenuPosition, type NativeCo
 
 interface ContextMenuOptions {
   workspace?: () => string;
+  revealProjectEntry?: (path: string) => Promise<void>;
   reportError: (error: unknown) => void;
   createMenu?: (context: DesktopContextTarget, isActive: () => boolean) => Promise<NativeContextMenu>;
 }
 
 /** Installed once per App mount, including secondary project windows. */
-export function installDesktopContextMenu({ reportError, createMenu, workspace }: ContextMenuOptions): () => void {
+export function installDesktopContextMenu({ reportError, createMenu, workspace, revealProjectEntry }: ContextMenuOptions): () => void {
   // A plain Vite browser preview is still a browser, not a privileged desktop host.
   if (!createMenu && !isTauri()) return () => {};
-  const create = createMenu ?? createNativeContextMenuFactory(reportError);
+  const create = createMenu ?? createNativeContextMenuFactory(reportError, revealProjectEntry);
   let generation = 0;
   let disposed = false;
   let active: { menu: NativeContextMenu; valid: boolean } | null = null;
@@ -50,18 +51,19 @@ export function installDesktopContextMenu({ reportError, createMenu, workspace }
   }
 
   async function show(context: DesktopContextTarget, position: ContextMenuPosition): Promise<void> {
+    const requestWorkspace = workspace?.();
     focusContextTarget(context);
     const request = ++generation;
     const previous = active;
     active = null;
     if (previous) { previous.valid = false; await close(previous.menu); }
-    if (disposed || request !== generation) return;
+    if (disposed || request !== generation || workspace?.() !== requestWorkspace) return;
 
     let owned: { menu: NativeContextMenu; valid: boolean } | null = null;
     try {
-      const menu = await create(context, () => !disposed && Boolean(owned?.valid));
+      const menu = await create(context, () => !disposed && Boolean(owned?.valid) && workspace?.() === requestWorkspace);
       owned = { menu, valid: false };
-      if (disposed || request !== generation || !context.element.isConnected) {
+      if (disposed || request !== generation || workspace?.() !== requestWorkspace || !context.element.isConnected) {
         await close(menu);
         return;
       }

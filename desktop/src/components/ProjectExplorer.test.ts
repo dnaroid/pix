@@ -21,7 +21,7 @@ describe("ProjectExplorer keyboard tree", () => {
     expect(explorerSource).toContain("onMount(() => createProjectFilesRefresh(() => treeController.refreshVisibleDirectories()).dispose)");
     expect(treeControllerSource).toContain("async function refreshVisibleDirectories(): Promise<void>");
     expect(treeControllerSource).toContain('["", ...visibleExpandedDirectories()].map((path) => loadDirectory(path, requestGeneration))');
-    expect(treeControllerSource).toContain("(!force && state.loadingDirectories.includes(path))");
+    expect(treeControllerSource).toContain("if (!force && directoryLoads.has(path)) return directoryLoads.get(path)!");
   });
   it("exposes a default-expanded workspace root without persisting or mutating it", () => {
     expect(treeControllerSource).toContain("rootExpanded: true");

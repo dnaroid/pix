@@ -153,6 +153,8 @@ export interface ModelUsageLimitWindow {
 
 export interface ModelUsageResetCredit {
   readonly title: string;
+  /** Resets in a banked grant; omitted for single-use Codex credits. */
+  readonly count?: number;
   /** Unix milliseconds. Missing only when the provider omitted/invalidated the expiry. */
   readonly expiresAt?: number;
 }
@@ -164,7 +166,7 @@ export interface ModelUsageStatus {
   readonly accountEmail?: string;
   readonly hourly?: ModelUsageLimitWindow;
   readonly weekly?: ModelUsageLimitWindow;
-  /** Available account-level Codex reset credits; independent from quota-window resets. */
+  /** Banked account-level resets; independent from quota-window resets. */
   readonly resetCredits?: readonly ModelUsageResetCredit[];
   readonly resetCreditsAvailableCount?: number;
   /** Provider response-header rate-limit windows (Anthropic RPM/TPM). */
@@ -256,4 +258,18 @@ export interface ClaudeQuotaRefreshStatus {
   readonly modelUsage?: ModelUsageStatus;
   /** See `RuntimeStatus.modelUsageCredentialPending`. */
   readonly modelUsageCredentialPending?: true;
+}
+
+export type LspAction = "status";
+export type LspServerState = "stopped" | "starting" | "running" | "stopping" | "failed";
+export interface LspSnapshot {
+  readonly servers: readonly {
+    readonly id: string;
+    readonly root: string;
+    readonly state: LspServerState;
+    readonly pid?: number;
+    readonly error?: string;
+  }[];
+  readonly warnings: readonly string[];
+  readonly trustRequired?: boolean;
 }

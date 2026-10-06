@@ -4,6 +4,7 @@
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import type { ModelUsageLimitWindow, RuntimeStatus, SessionUsageReport } from "../lib/acp-client";
   import { parseDcpContextMap } from "../lib/dcp-context-map";
@@ -33,8 +34,10 @@
   import { openExternalHref } from "../lib/external-links";
   import { modelDisplayToneClass, modelProviderBrand, modelRefTone } from "../lib/model-display";
   import ModelProviderIcon from "./ModelProviderIcon.svelte";
+  import ModelUsageDonut from "./ModelUsageDonut.svelte";
   import QuotaResetCalendar from "./QuotaResetCalendar.svelte";
   import ResetCreditsSection from "./ResetCreditsSection.svelte";
+  import UsageLimitBars from "./UsageLimitBars.svelte";
 
   let {
     status,
@@ -46,6 +49,7 @@
     claudeCodeRoute = false,
     claudeLimitsRefreshing = false,
     claudeLimitsFailed = false,
+    quotaWaitIndicator = null,
     onOpenSessionUsage,
     onRefreshClaudeLimits = () => {},
   }: {
@@ -59,6 +63,7 @@
     claudeCodeRoute?: boolean;
     claudeLimitsRefreshing?: boolean;
     claudeLimitsFailed?: boolean;
+    quotaWaitIndicator?: { label: string; onReopen: () => void } | null;
     onOpenSessionUsage: () => void;
     onRefreshClaudeLimits?: () => void;
   } = $props();
@@ -70,6 +75,7 @@
   let usageLinkFailed = $state(false);
   let usageLinkRequest = 0;
   const WEEKLY_DAY_SEGMENTS = 7;
+  const savedTokensFormatter = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 0 });
   const contextPercent = $derived(status?.context?.percent);
   const contextTone = $derived(contextPercent === null || contextPercent === undefined ? undefined : contextUsageTone(contextPercent));
   const contextMap = $derived(dcpContextMap(status?.context, parseDcpContextMap(status?.dcpContextMap)));
@@ -80,6 +86,19 @@
   const modelUsage = $derived(displayModelUsage(status, now));
   const usageAccountLabel = $derived(shortModelUsageAccountLabel(modelUsage?.accountEmail));
   const usageWindowItems = $derived(usageWindows());
+  // The popup keeps the existing weekly QuotaResetCalendar below. The new
+  // Limits section only adds the short Session(5h) window, which the
+  // calendar cannot represent; it excludes Weekly (already the calendar) and
+  // the header-derived rate window (a request-level observation, not an
+  // account quota scale).
+  const popupLimitWindows = $derived(
+    usageWindowItems.filter((item): item is { key: string; label: "H"; window: ModelUsageLimitWindow } => item.label === "H"),
+  );
+  const donutModels = $derived(
+    (sessionUsage?.providers ?? []).flatMap((provider) =>
+      provider.models.map((model) => ({ provider: provider.provider, model: model.model, totalTokens: model.totals.totalTokens })),
+    ),
+  );
 
   onMount(() => {
     const timer = window.setInterval(() => now = Date.now(), 60_000);
@@ -150,12 +169,12 @@
     }
   });
 
-  function contextTitle(): string {
+  function contextTitle(includeSavings = true): string {
     const context = status?.context;
     const saved = status?.dcpTokensSaved;
-    const savings = saved === undefined
+    const savings = saved === undefined || !includeSavings
       ? ""
-      : ` · DCP saved ~${Math.round(saved).toLocaleString("en-US")} tokens`;
+      : ` · DCP saved ~${savedTokensFormatter.format(saved)} tokens`;
     if (!context) return `Context usage unavailable${savings}`;
     if (context.tokens === null || context.percent === null) return `Context usage unknown · window ${formatCompactTokens(context.contextWindow)}${savings}`;
     return `Context ${formatCompactTokens(context.tokens)} / ${formatCompactTokens(context.contextWindow)} tokens${savings}`;
@@ -174,6 +193,32 @@
     if (kind === "protected") return "bg-tool-info";
     if (kind === "compressed") return "bg-tool-success";
     return "bg-muted";
+  }
+
+  function contextStrokeClass(kind: DcpContextMapCellKind): string {
+    if (kind === "free") return "stroke-border";
+    if (kind === "retained" || kind === "occupied") return "stroke-muted-foreground/45";
+    if (kind === "candidate") return "stroke-primary";
+    if (kind === "protected") return "stroke-tool-info";
+    if (kind === "compressed") return "stroke-tool-success";
+    return "stroke-muted";
+  }
+
+  /** Ring segments as a share (0-100) of the context window, in legend order. The unfilled
+   *  remainder renders as the base ring, so "free" is intentionally not a drawn segment. */
+  function ringSegments(): Array<{ kind: DcpContextMapCellKind; pct: number }> {
+    const total = status?.context?.contextWindow;
+    if (!total || contextMap.occupiedPercent === undefined) return [];
+    const categories = contextMap.categoryTokens;
+    if (categories) {
+      return [
+        { kind: "retained", pct: (categories.retained / total) * 100 },
+        { kind: "candidate", pct: (categories.candidate / total) * 100 },
+        { kind: "protected", pct: (categories.protected / total) * 100 },
+        { kind: "compressed", pct: (categories.compressed / total) * 100 },
+      ];
+    }
+    return [{ kind: "occupied", pct: ((contextMap.occupiedTokens ?? 0) / total) * 100 }];
   }
 
   function contextLegendItems(): Array<{ kind: DcpContextMapCellKind; label: string; value?: string }> {
@@ -220,7 +265,8 @@
     const reset = label === "R" && window.resetAt <= now
       ? ""
       : ` · resets ${formatResetDuration(window.resetAt, now)}`;
-    return `${name} limit · ${Math.round(window.remainingPercent)}% remaining${reset}${weeklySlices}`;
+    const cached = modelUsage?.stale ? "Cached quota · " : "";
+    return `${cached}${name} limit · ${Math.round(window.remainingPercent)}% remaining${reset}${weeklySlices}`;
   }
 
   function usageWindows(): Array<{ key: string; label: "H" | "W" | "R"; window: ModelUsageLimitWindow }> {
@@ -236,12 +282,10 @@
 
 </script>
 
-{#snippet contextScale(size: "compact" | "expanded")}
+{#snippet contextScale()}
   <span
-    class={size === "compact"
-      ? "flex h-1.5 w-16 overflow-hidden rounded-sm bg-border"
-      : "flex h-4 w-full overflow-hidden rounded-sm bg-border"}
-    data-context-scale={size}
+    class="flex h-1.5 w-16 overflow-hidden rounded-sm bg-border"
+    data-context-scale="compact"
     aria-hidden="true"
   >
     {#each contextMap.cells as cell}
@@ -257,12 +301,39 @@
   </span>
 {/snippet}
 
+{#snippet contextRing()}
+  {@const segments = ringSegments()}
+  <div class="relative h-[88px] w-[88px] shrink-0" data-context-ring aria-hidden="true">
+    <svg viewBox="0 0 36 36" class="h-[88px] w-[88px] -rotate-90">
+      <circle cx="18" cy="18" r="15.915" fill="none" class="stroke-border" stroke-width="3.5"></circle>
+      {#each segments as segment, index}
+        {@const offset = segments.slice(0, index).reduce((sum, s) => sum + s.pct, 0)}
+        <circle
+          cx="18" cy="18" r="15.915" fill="none"
+          class={contextStrokeClass(segment.kind)}
+          stroke-width="3.5"
+          stroke-dasharray={`${segment.pct} ${100 - segment.pct}`}
+          stroke-dashoffset={-offset}
+        ></circle>
+      {/each}
+    </svg>
+    <div class="absolute inset-0 grid place-items-center">
+      <span class={["font-mono text-sm font-semibold", contextTone ? toneTextClass(contextTone) : "text-foreground"]}>
+        {contextPercent === null || contextPercent === undefined ? "?%" : `${Math.round(contextPercent)}%`}
+      </span>
+    </div>
+  </div>
+{/snippet}
+
 {#snippet contextScaleLegend()}
-  <div class="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground" aria-label="Context color legend">
+  <div class="flex min-w-0 flex-1 flex-col gap-1 text-xs text-muted-foreground" aria-label="Context color legend">
     {#each contextLegend as item}
-      <span class="inline-flex items-center gap-1">
-        <i class={["h-2 w-2 shrink-0 rounded-[1px]", contextCellClass(item.kind)]} aria-hidden="true"></i>
-        <span>{item.label}{item.value ? ` ${item.value}` : ""}</span>
+      <span class="inline-flex items-center justify-between gap-2">
+        <span class="inline-flex min-w-0 items-center gap-1">
+          <i class={["h-2 w-2 shrink-0 rounded-[1px]", contextCellClass(item.kind)]} aria-hidden="true"></i>
+          <span class="truncate">{item.label}</span>
+        </span>
+        {#if item.value}<span class="shrink-0 tabular-nums">{item.value}</span>{/if}
       </span>
     {/each}
   </div>
@@ -270,10 +341,24 @@
 
 <svelte:window onpointerdown={closeOutside} onkeydown={handleKeydown} />
 
-{#if status || showSkeletons}
+{#snippet retryIndicator()}
+  {#if quotaWaitIndicator}
+    <button
+      class="relative z-10 flex h-6 w-2.5 shrink-0 items-center justify-center rounded-sm text-tool-warning hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+      type="button"
+      aria-label={quotaWaitIndicator.label}
+      data-quota-wait-indicator
+      onclick={() => quotaWaitIndicator?.onReopen()}
+    >
+      <RotateCw class="h-3 w-3 shrink-0" aria-hidden="true" />
+    </button>
+  {/if}
+{/snippet}
+
+{#if status || showSkeletons || quotaWaitIndicator}
   <div
     bind:this={root}
-    class="@container/runtime-status flex min-w-0 flex-1 items-center justify-between gap-1"
+    class="runtime-status-layout grid min-w-0 items-center gap-1"
     data-runtime-status
   >
     {#if status?.context || status?.dcpTokensSaved !== undefined}
@@ -282,7 +367,7 @@
         onfocusout={(event) => leaveDetails(event, "context")}
       >
         <button
-          class="flex h-6 max-w-full items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-sm px-1.5 font-mono text-xs tabular-nums hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring [&>span]:shrink-0"
+          class="context-status-slots grid h-6 w-full items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-sm px-1.5 font-mono text-xs tabular-nums hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring text-left"
           type="button"
           aria-label={contextTitle()}
           aria-haspopup="dialog"
@@ -291,32 +376,41 @@
           onclick={toggleContext}
         >
           <span class="font-sans text-xs text-muted-foreground">ctx</span>
-          <span class={contextTone ? toneTextClass(contextTone) : "text-muted-foreground"}>{contextPercent === null || contextPercent === undefined ? "?%" : `${Math.round(contextPercent)}%`}</span>
-          {@render contextScale("compact")}
+          <span class={["truncate text-right", contextTone ? toneTextClass(contextTone) : "text-muted-foreground"]}>{contextPercent === null || contextPercent === undefined ? "?%" : `${Math.round(contextPercent)}%`}</span>
+          {@render contextScale()}
           {#if status?.dcpTokensSaved !== undefined}
-            <span class="text-muted-foreground">saved ~{formatCompactTokens(status.dcpTokensSaved)}</span>
+            <span class="truncate text-muted-foreground">saved {savedTokensFormatter.format(status.dcpTokensSaved)}</span>
           {/if}
         </button>
 
         {#if contextOpen}
           <div
             id="runtime-context-popover"
-            class="absolute bottom-full left-0 z-50 w-max max-w-[min(360px,calc(100vw-16px))]"
+            class="absolute bottom-full left-0 z-50 max-h-[max(0px,calc(100dvh-70px))] w-max max-w-[min(360px,calc(100vw-16px))] overflow-y-auto overscroll-contain"
             role="dialog"
             aria-label="Context usage details"
             tabindex="0"
           >
-            <div class="rounded-md border border-border bg-popover px-2.5 py-2 text-popover-foreground shadow-md">
-              <div class="font-mono text-xs text-muted-foreground">{contextTitle()}</div>
-              <div class="mt-2">{@render contextScale("expanded")}</div>
-              {@render contextScaleLegend()}
+            <div class="w-72 rounded-md border border-border bg-popover px-3 py-2.5 text-popover-foreground shadow-md">
+              <div class="font-mono text-xs text-muted-foreground">{contextTitle(false)}</div>
+              {#if status?.dcpTokensSaved !== undefined}
+                <div class="mt-2 flex items-center justify-between gap-3 rounded-md border border-tool-success/30 bg-tool-success/10 px-2.5 py-1.5">
+                  <span class="text-xs text-tool-success">DCP saved you</span>
+                  <span class="font-mono text-xs font-semibold text-tool-success">~{savedTokensFormatter.format(status.dcpTokensSaved)} tokens</span>
+                </div>
+              {/if}
+              <div class="mt-2.5 flex items-center gap-3">
+                {@render contextRing()}
+                {@render contextScaleLegend()}
+              </div>
             </div>
           </div>
         {/if}
       </div>
-    {:else if showSkeletons}
+    {:else}
       <div
-        class="flex h-6 min-w-0 items-center gap-1.5 overflow-hidden px-1.5 [&>span]:shrink-0"
+        class="context-status-slots grid h-6 min-w-0 items-center gap-1.5 overflow-hidden px-1.5 font-mono text-xs"
+        class:invisible={!showSkeletons}
         data-runtime-context-skeleton
         aria-hidden="true"
       >
@@ -327,39 +421,31 @@
       </div>
     {/if}
 
-    {#if sessionUsageAvailable || status?.modelUsage || status?.headerUsage}
-      <div class="relative ml-auto min-w-0 shrink-0 max-w-full" role="group" aria-label="Usage"
+    {#if sessionUsageAvailable || status?.modelUsage || status?.headerUsage || quotaWaitIndicator}
+      <div class="relative min-w-0" role="group" aria-label="Usage"
         data-usage-region
         onfocusout={(event) => leaveDetails(event, "usage")}
       >
+        <div class="usage-status-slots grid relative h-6 w-full items-center gap-1.5 whitespace-nowrap rounded-sm px-1.5 font-mono text-xs tabular-nums text-left">
+        <!-- Separate sibling controls: retry must not nest inside the Usage button. -->
         <button
-          class="flex h-6 min-w-0 max-w-full items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-sm px-1.5 font-mono text-xs tabular-nums hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring [&>span]:shrink-0"
+          class="absolute inset-0 rounded-sm hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
           type="button"
           aria-label="Session usage and cost"
           aria-haspopup="dialog"
           aria-expanded={usageOpen}
           aria-controls="runtime-usage-popover"
           onclick={toggleUsage}
-        >
-          <span class="font-sans text-xs text-muted-foreground @max-[380px]/runtime-status:hidden">Usage</span>
-          {#if usageAccountLabel}
-            <span class="max-w-28 truncate text-muted-foreground @max-[600px]/runtime-status:hidden">{usageAccountLabel}</span>
-          {/if}
-          {#if modelUsage?.stale}
-            <span
-              class="flex items-center gap-0.5 text-muted-foreground"
-              aria-label="Cached quota from the last successful refresh; each window stays visible only until its own reset"
-            >
-              <Hourglass class="h-2.5 w-2.5" aria-hidden="true" />
-              <span>stale</span>
-            </span>
-          {/if}
+        ></button>
+          <span class="pointer-events-none relative font-sans text-xs text-muted-foreground">Usage</span>
           {#each usageWindowItems as { key, label, window } (key)}
               {@const tone = modelUsageTone(window.remainingPercent)}
               {@const exhaustsEarly = modelUsageWindowWillExhaustBeforeReset(window, now)}
-              <span class="flex items-center gap-1" aria-label={limitTitle(label, window)}>
+              <span class="quota-status-slots grid items-center gap-1" class:quota-short-track={label !== "W"} aria-label={limitTitle(label, window)}>
+                <span class="quota-values pointer-events-none relative col-span-3 grid items-center">
+                <span class="flex h-6 flex-col justify-center gap-0.5 overflow-hidden">
                 {#if label === "R"}
-                  <span class="text-muted-foreground">{modelUsageWindowLabel(label, window)}</span>
+                  <span class="truncate leading-3 text-muted-foreground">{modelUsageWindowLabel(label, window)}</span>
                 {/if}
                 <span
                   class={["relative h-1.5 overflow-hidden rounded-sm bg-border", label === "W" ? "w-14" : "w-8"]}
@@ -377,16 +463,25 @@
                     </span>
                   {/if}
                 </span>
-                <span class={toneTextClass(tone)}>{Math.round(window.remainingPercent)}%</span>
-                {#if exhaustsEarly}
-                  <TriangleAlert class="h-2.5 w-2.5 text-tool-warning" aria-label="Projected to exhaust before reset" />
-                {/if}
-                {#if label !== "R" || window.resetAt > now}
-                  <span class="text-muted-foreground @max-[480px]/runtime-status:hidden">{formatResetDuration(window.resetAt, now)}</span>
-                {/if}
+                </span>
+                <span class={["truncate text-right", toneTextClass(tone)]}>{Math.round(window.remainingPercent)}%</span>
+                <span class="truncate text-muted-foreground">{label !== "R" || window.resetAt > now ? formatResetDuration(window.resetAt, now) : ""}</span>
+                </span>
+                <span class="relative flex w-2.5 items-center">
+                  {#if quotaWaitIndicator && key === usageWindowItems[0]?.key}
+                    {@render retryIndicator()}
+                  {:else if exhaustsEarly}
+                    <TriangleAlert class="h-2.5 w-2.5 text-tool-warning" aria-label="Projected to exhaust before reset" />
+                  {:else if modelUsage?.stale}
+                    <Hourglass class="h-2.5 w-2.5 text-muted-foreground" aria-label="Cached quota from the last successful refresh" />
+                  {/if}
+                </span>
               </span>
           {/each}
-        </button>
+          {#if quotaWaitIndicator && usageWindowItems.length === 0}
+            {@render retryIndicator()}
+          {/if}
+        </div>
 
         {#if usageOpen}
           <div
@@ -395,30 +490,38 @@
             role="dialog"
             aria-label="Session usage and cost"
           >
-            <div class="overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-md">
-              <header class="border-b border-border px-3 py-2">
+            <div class="flex max-h-[max(0px,calc(100dvh-70px))] flex-col overflow-y-auto rounded-lg border border-border bg-popover text-popover-foreground shadow-md">
+              <header class="shrink-0 border-b border-border px-3 py-2">
                 <div class="text-xs font-medium text-foreground">Session usage</div>
-                <div class="mt-0.5 font-mono text-xs text-muted-foreground">
-                  {#if sessionUsage}
-                    {formatSessionUsageCost(sessionUsage.totals.cost)} · {formatSessionUsageTokens(sessionUsage.totals.totalTokens)} tokens
-                  {:else if loadingSessionUsage}
-                    Loading recorded usage…
-                  {:else if sessionUsageFailed}
-                    Could not load recorded usage.
-                  {:else if sessionUsageAvailable}
-                    Loading recorded usage…
-                  {:else}
-                    Session runtime is still loading.
-                  {/if}
-                </div>
+                {#if usageAccountLabel}
+                  <div class="truncate text-xs text-muted-foreground">{usageAccountLabel}</div>
+                {/if}
+                {#if modelUsage?.stale}
+                  <div class="text-xs text-muted-foreground">Cached quota from the last successful refresh; windows expire at their own reset.</div>
+                {/if}
+                {#if !sessionUsage}
+                  <div class="mt-0.5 font-mono text-xs text-muted-foreground">
+                    {#if loadingSessionUsage}
+                      Loading recorded usage…
+                    {:else if sessionUsageFailed}
+                      Could not load recorded usage.
+                    {:else if sessionUsageAvailable}
+                      Loading recorded usage…
+                    {:else}
+                      Session runtime is still loading.
+                    {/if}
+                  </div>
+                {/if}
               </header>
-              <div class="max-h-[min(640px,calc(100vh-120px))] overflow-y-auto px-3 py-2.5 text-xs">
+              <div class="min-h-0 overflow-y-auto overscroll-contain px-3 py-2.5 text-xs">
+                <UsageLimitBars windows={popupLimitWindows} {now} stale={modelUsage?.stale === true} />
                 {#if modelUsage?.weekly}
                   <QuotaResetCalendar window={modelUsage.weekly} {now} stale={modelUsage.stale === true} />
                 {/if}
                 {#if modelUsage?.resetCredits?.length || modelUsage?.resetCreditsAvailableCount}
                   <ResetCreditsSection credits={modelUsage.resetCredits ?? []} availableCount={modelUsage.resetCreditsAvailableCount} {now} />
                 {/if}
+                <ModelUsageDonut models={donutModels} />
                 {#if loadingSessionUsage && !sessionUsage}
                   <div class="flex items-center gap-1.5 text-muted-foreground" aria-live="polite">
                     <LoaderCircle class="h-3 w-3 animate-spin" aria-hidden="true" />
@@ -438,10 +541,15 @@
                     {#if sessionUsage.providers.length === 0 && !sessionUsageHasValue(sessionUsage.unattributed)}
                       <p class="text-muted-foreground">No billable usage has been recorded for this session yet.</p>
                     {:else}
-                      {#each sessionUsage.providers as provider (provider.provider)}
-                        {@const usageUrl = providerUsageUrl(provider.provider)}
-                        <div>
-                          <div class="mb-1 flex min-w-0 items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                      <div class="grid grid-cols-[1fr_auto_auto] items-center gap-x-3 gap-y-1 font-mono tabular-nums">
+                        <span class="col-span-3 grid grid-cols-subgrid pb-1 text-xs font-sans tracking-wide text-muted-foreground/70">
+                          <span></span>
+                          <span class="text-right uppercase">Tokens</span>
+                          <span class="text-right uppercase">Cost</span>
+                        </span>
+                        {#each sessionUsage.providers as provider (provider.provider)}
+                          {@const usageUrl = providerUsageUrl(provider.provider)}
+                          <div class="col-span-3 mt-1 flex min-w-0 items-center gap-1.5 text-xs font-sans font-medium text-muted-foreground first:mt-0">
                             {#if modelProviderBrand(provider.provider)}
                               <ModelProviderIcon provider={provider.provider} />
                             {/if}
@@ -455,25 +563,25 @@
                               ><ExternalLink class="h-3 w-3" aria-hidden="true" /></button>
                             {/if}
                           </div>
-                          <div class="space-y-1">
-                            {#each provider.models as model (`${provider.provider}/${model.model}`)}
-                              <div class="flex min-w-0 items-center justify-between gap-3 font-mono tabular-nums">
-                                <span
-                                  class={["min-w-0 truncate font-medium", modelDisplayToneClass(modelRefTone(`${provider.provider}/${model.model}`))]}
-                                  aria-label={`${provider.provider}/${model.model}`}
-                                >{model.model}</span>
-                                <span class="shrink-0 text-foreground" aria-label={model.totals.costEstimated ? "Estimated at original model API rates, not subscription charges" : undefined}>{formatSessionUsageTokens(model.totals.totalTokens)} · {formatSessionUsageCost(model.totals.cost)}</span>
-                              </div>
-                            {/each}
-                          </div>
-                        </div>
-                      {/each}
-                      {#if sessionUsageHasValue(sessionUsage.unattributed)}
-                        <div class="flex items-center justify-between gap-3 border-t border-border pt-2 text-muted-foreground">
-                          <span>Unattributed</span>
-                          <span class="font-mono tabular-nums">{formatSessionUsageTokens(sessionUsage.unattributed.totalTokens)} · {formatSessionUsageCost(sessionUsage.unattributed.cost)}</span>
-                        </div>
-                      {/if}
+                          {#each provider.models as model (`${provider.provider}/${model.model}`)}
+                            <span
+                              class={["min-w-0 truncate font-medium", modelDisplayToneClass(modelRefTone(`${provider.provider}/${model.model}`))]}
+                              aria-label={`${provider.provider}/${model.model}`}
+                            >{model.model}</span>
+                            <span class="text-right text-foreground">{formatSessionUsageTokens(model.totals.totalTokens)}</span>
+                            <span class="text-right text-foreground" aria-label={model.totals.costEstimated ? "Estimated at original model API rates, not subscription charges" : undefined}>{formatSessionUsageCost(model.totals.cost)}</span>
+                          {/each}
+                        {/each}
+                        {#if sessionUsageHasValue(sessionUsage.unattributed)}
+                          <span class="truncate text-muted-foreground">Unattributed</span>
+                          <span class="text-right text-muted-foreground">{formatSessionUsageTokens(sessionUsage.unattributed.totalTokens)}</span>
+                          <span class="text-right text-muted-foreground">{formatSessionUsageCost(sessionUsage.unattributed.cost)}</span>
+                        {/if}
+                        <span class="col-span-3 mt-1 border-t border-border"></span>
+                        <span class="font-sans font-semibold text-foreground">Total</span>
+                        <span class="text-right font-semibold text-foreground">{formatSessionUsageTokens(sessionUsage.totals.totalTokens)}</span>
+                        <span class="text-right font-semibold text-foreground">{formatSessionUsageCost(sessionUsage.totals.cost)}</span>
+                      </div>
                     {/if}
                   </section>
                 {/if}
@@ -497,13 +605,11 @@
                       {:else}
                         <RefreshCw class="h-3 w-3" aria-hidden="true" />
                       {/if}
-                      {claudeLimitsRefreshing ? "Refreshing…" : "Refresh limits"}
+                      <span role="status" aria-live="polite">{claudeLimitsRefreshing ? "Refreshing…" : "Refresh limits"}</span>
                     </button>
                   </div>
                   {#if claudeLimitsFailed}
                     <p class="mt-1 text-tool-warning" role="status">Could not refresh Claude Code limits. Retry or check your Claude Code login.</p>
-                  {:else if claudeLimitsRefreshing}
-                    <p class="mt-1 text-muted-foreground" role="status">Checking Claude Code login and limits…</p>
                   {/if}
                 </div>
               {/if}
@@ -511,17 +617,57 @@
           </div>
         {/if}
       </div>
-    {:else if showSkeletons}
+    {:else}
       <div
-        class="ml-auto flex h-6 min-w-0 max-w-full shrink-0 items-center gap-1.5 overflow-hidden px-1.5 font-mono text-xs [&>span]:shrink-0"
+        class="usage-status-slots grid h-6 min-w-0 items-center gap-1.5 overflow-hidden px-1.5 font-mono text-xs"
+        class:invisible={!showSkeletons}
         data-runtime-usage-skeleton
         aria-hidden="true"
       >
-        <span class="font-sans text-xs text-muted-foreground @max-[380px]/runtime-status:hidden">Usage</span>
-        <span class="h-1.5 w-8 rounded-sm bg-border"></span>
-        <span class="h-3 w-6 rounded-sm bg-muted-foreground/20"></span>
-        <span class="h-3 w-16 rounded-sm bg-muted-foreground/15 @max-[480px]/runtime-status:hidden"></span>
+        <span class="font-sans text-xs text-muted-foreground">Usage</span>
+          <span class="quota-status-slots grid items-center gap-1">
+            <span class="h-1.5 w-14 rounded-sm bg-border"></span>
+            <span class="h-3 w-6 rounded-sm bg-muted-foreground/20"></span>
+            <span class="h-3 w-12 rounded-sm bg-muted-foreground/15"></span>
+            <span></span>
+          </span>
       </div>
     {/if}
   </div>
 {/if}
+
+<style>
+  .runtime-status-layout {
+    /* Fit visible windows, not hypothetical quotas. Values retain fixed inner slots. */
+    width: max-content;
+    max-width: 100%;
+    flex: 0 1 auto;
+    grid-template-columns: minmax(0, max-content) minmax(0, max-content);
+  }
+
+  .context-status-slots {
+    /* saved (6ch including space), whole estimate (4ch), and 1ch headroom. */
+    grid-template-columns: 3ch 4ch 64px 11ch;
+    column-gap: 2px;
+  }
+
+  .usage-status-slots {
+    grid-template-columns: 36px;
+    column-gap: 2px;
+    grid-auto-columns: max-content;
+    grid-auto-flow: column;
+  }
+
+  .quota-status-slots {
+    grid-template-columns: 56px 4ch 5ch 10px;
+    column-gap: 6px;
+  }
+
+  .quota-short-track {
+    grid-template-columns: 32px 4ch 5ch 10px;
+  }
+
+  .quota-values {
+    grid-template-columns: subgrid;
+  }
+</style>

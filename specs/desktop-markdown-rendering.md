@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # Lightweight desktop Markdown rendering
 
 <!-- markdownlint-disable MD013 -->
@@ -49,6 +54,19 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
   HTML labels disabled. While rendering is pending, or if parsing/rendering
   fails, the escaped source remains readable.
 - Explicit Markdown links and bare URLs with `http`, `https`, or `mailto` schemes become links.
+- Relative project links may also name existing directories. Activation uses
+  Files reverse navigation instead of Preview or the OS opener: open the panel,
+  clear search, expand ancestors and the folder, select and scroll to it while
+  retaining the project tree root. Directory validation stays workspace-confined
+  and rejects symlinks. The same workspace-root-first resolution applies inside
+  Markdown Preview. See [workspace navigation](desktop-workspace-navigation.md)
+  and [decision 0058](../docs/decisions/0058-reverse-file-navigation.md).
+- Inline-code relative paths ending in `/` (or `\`) are directory-link
+  candidates even without a file extension or `./` prefix, including hidden
+  paths such as `.pi/artifacts/usage-popup-mockups/`. Preserve the displayed
+  code text, normalize the target, and make it clickable only after the existing
+  workspace-confined existence validation succeeds. Missing or rejected targets
+  remain ordinary inline code.
 - External Markdown links are marked with an external-link icon in both transcripts and the Preview editor.
 - Explicit Markdown links with relative destinations and inline-code values that look like relative file paths become project-file links. Explicit links preserve GitHub-style `#Lline` and `#Lstart-Lend` fragments as source line ranges; other fragments remain ordinary fragment-free project links. Inline-code references may carry `:line`, `:start-end`, or `:line:column` suffixes; the column is ignored and the line/range is preserved for preview navigation. Activating a project link reads the target only when its canonical path remains inside the active workspace, then activates the Preview editor with syntax highlighting and line numbers. A preserved line range opens the source view (including for Markdown files), highlights the requested lines, and reveals the first requested line on an otherwise fresh preview entry.
 - Explicit Markdown links and inline-code values beginning with `~/` become home-file links. Activating one expands `~` in the trusted Tauri backend, requires the canonical target to remain inside the user's home directory, and opens text or supported media in the existing Preview editor tab.
@@ -57,10 +75,16 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - Unsupported destinations render as plain labels and are never passed to the system opener.
 - In a Markdown file Preview editor, project links and local `file://` links use the same trusted preview/open handlers as transcript links. For a project path, the preview first tries the workspace-root interpretation commonly emitted by agents, then falls back to the Markdown document-relative interpretation. Following another preview target pushes/replaces the current Preview editor history entry according to the existing navigation mode.
 - In a Markdown file Preview editor, supported project and local images resolve through the existing confined Tauri media commands instead of remaining in a loading state.
-- Supported project and absolute `file://` image/video links in transcript
+- Supported project, raw absolute and absolute `file://` image/video links in transcript
   Markdown render bounded inline media previews with their label as a caption.
   Images lazy-load and open the media viewer when activated; videos expose native
   inline playback controls and their caption opens the viewer.
+- Inline-code absolute image/video paths (including `file://` destinations) also
+  produce the same lazy local previews, with the original code-formatted path as
+  caption. They use the existing trusted local-media resolver; missing files,
+  directories and unsupported formats do not gain direct WebView file access.
+  Ordinary absolute text/file paths remain validation candidates, and paths in
+  fenced code or Markdown link labels do not create nested previews.
 - Project/local Markdown images reserve their known intrinsic proportions through
   loading, errors, and streaming rerenders, bounded by the existing 28rem height
   cap and available width without cropping or upscaling. Unknown dimensions use
@@ -124,7 +148,7 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - Shared source/fenced-code highlighting skips tokenization for blocks larger than 32,768 UTF-16 code units and for unknown/plaintext languages. These blocks remain fully escaped, untruncated plaintext with the same per-line structure, preserving source line numbers and line-range navigation without generating token markup for the whole large input.
 - Markdown parsing uses a small local parser rather than a parser/sanitizer runtime dependency.
 
-## Related files
+## Implementation
 
 - `desktop/src/lib/markdown.ts`
 - `desktop/src/lib/markdown-blocks.ts`
@@ -134,38 +158,44 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - `desktop/src/lib/markdown-fences.ts`
 - `desktop/src/lib/markdown-inline.ts`
 - `desktop/src/lib/markdown-links.ts`
-- `desktop/src/lib/markdown.test.ts`
 - `desktop/src/lib/syntax-highlight.ts`
-- `desktop/src/lib/syntax-highlight.test.ts`
 - `desktop/src/lib/preview-history.ts`
-- `desktop/src/lib/preview-history.test.ts`
 - `desktop/src/lib/project-files.ts`
 - `desktop/src/lib/external-links.ts`
-- `desktop/src/lib/external-links.test.ts`
 - `desktop/src/components/MarkdownText.svelte`
-- `desktop/src/components/markdown-table-layout.test.ts`
 - `desktop/src/components/markdown-content-action.ts`
 - `desktop/src/components/markdown-code-copy-action.ts`
-- `desktop/src/components/markdown-code-copy-action.test.ts`
 - `desktop/src/components/markdown-link-action.ts`
 - `desktop/src/components/ToolResult.svelte`
 - `desktop/src/components/PreviewPane.svelte`
 - `desktop/src/components/preview-markdown-controller.svelte.ts`
 - `desktop/src/components/preview-scroll-controller.svelte.ts`
-- `desktop/src/components/preview-scroll-controller.test.ts`
 - `desktop/src/components/WorkbenchTabs.svelte`
 - `desktop/src/components/TranscriptPane.svelte`
 - `desktop/src/lib/mermaid.ts`
 - `desktop/src/app/preview.svelte.ts`
 - `desktop/src/app/preview-state.svelte.ts`
 - `desktop/src/app/preview-file-io.ts`
+- `desktop/src-tauri/src/project_directory_link.rs`
 - `desktop/src/app/preview-options.ts`
 - `desktop/src/app/desktop-project-services.ts`
-- `desktop/src/app/preview.test.ts`
 - `desktop/src-tauri/src/preview_file.rs`
 - `desktop/src-tauri/src/lib.rs`
 - `desktop/src-tauri/capabilities/default.json`
 - `desktop/src-tauri/tauri.conf.json`
+
+## Tests
+
+- `desktop/src/lib/markdown.test.ts`
+- `desktop/src/lib/syntax-highlight.test.ts`
+- `desktop/src/lib/preview-history.test.ts`
+- `desktop/src/lib/external-links.test.ts`
+- `desktop/src/components/markdown-table-layout.test.ts`
+- `desktop/src/components/markdown-code-copy-action.test.ts`
+- `desktop/src/components/preview-scroll-controller.test.ts`
+- `desktop/src/app/preview.test.ts`
+- `desktop/src-tauri/src/project_directory_link.rs`
+- `desktop/src-tauri/src/lib.rs`
 
 ## Verification
 

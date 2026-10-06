@@ -21,11 +21,14 @@ legacy Pix wrappers/package-manager installs after inspecting what they target.
 Do not remove a separate "pi" CLI or user configuration.
 
 Install from GitHub Releases and verify the selected asset against SHA256SUMS.
-Unless I explicitly requested only one frontend, install both the portable TUI
-and Pix Desktop when this OS/CPU has official release assets. Reuse existing
-user configuration rather than overwriting it. Run the documented health/version
-checks afterwards and report exactly what was installed, removed, preserved,
-and any manual authentication or OS permission step that remains.
+Pix Desktop is currently supported on macOS only; install it only on macOS and
+treat Windows/Linux Desktop assets as legacy tooling, not a supported product.
+Unless I explicitly requested only one frontend, install the portable TUI and
+(on macOS) Pix Desktop when this OS/CPU has official release assets. Reuse
+existing user configuration rather than overwriting it. Run the documented
+health/version checks afterwards and report exactly what was installed,
+removed, preserved, and any manual authentication or OS permission step that
+remains.
 ```
 
 ## Agent execution contract
@@ -91,9 +94,9 @@ Select assets by the **exact detected target**:
 
 | Target | TUI asset | Desktop asset |
 | --- | --- | --- |
-| Linux x64 | `pix-tui-*-linux-x64.tar.gz` | `pix-desktop-*-linux-x64.AppImage` and/or `.deb` |
+| Linux x64 | `pix-tui-*-linux-x64.tar.gz` | legacy tooling only; do not install |
 | macOS arm64 | `pix-tui-*-macos-arm64.tar.gz` | `pix-desktop-*-macos-arm64.dmg` |
-| Windows x64 | `pix-tui-*-windows-x64.zip` | the unique Windows x64 `-setup.exe` |
+| Windows x64 | `pix-tui-*-windows-x64.zip` | legacy tooling only; do not install |
 
 Also download `SHA256SUMS`.
 

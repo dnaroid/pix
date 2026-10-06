@@ -15,13 +15,18 @@ status: active
   Cancel/Close restore the trigger's focus; outside pointer interaction or focus
   leaving the trigger/panel region dismisses without stealing destination focus.
   Moving the pointer away alone does not dismiss it.
-- The popup is at most 520px wide and 600px high, clamped above the invoker and
-  within the window. Resize recalculates its position; the list and constrained
+- The popup is at most 520px wide; its full height is capped at the application
+  window content height minus 70px and the space on the roomier side of the invoker with an 8px
+  top inset (never below zero). Resize recalculates its position; the list and constrained
   panel can scroll. Auto allows forward Tab to leave search normally.
 - Existing staged selection, thinking navigation, visibility management and
   defaults are unchanged. Apply/Enter closes and restores composer focus on
   success (including unchanged confirmation); failed Apply keeps the error open.
   See [Desktop live model switching](desktop-live-model-switching.md).
+- [BTW](desktop-btw.md) reuses this popup with its own explicit invoker and local
+  selection callback. The header invoker opens it below when that side has more
+  room; the status-bar invoker opens it above. Its Apply changes only subsequent side questions; it
+  shares visibility management but does not expose parent default writes.
 
 ## Constraints and failure cases
 
@@ -30,6 +35,15 @@ status: active
   Dismissal does not cancel a configuration request already sent.
 - Teardown removes every owned pointer, key, focus and resize listener. Teardown
   by owner change does not restore focus to the old session's controls.
+- Focusout caused by removing a focused popup is deferred until teardown
+  completes; a disposed owner or restored focus inside cannot close another
+  popup or mutate reactive state during DOM removal.
+- Pointer-activated popup buttons explicitly retain focus inside the panel,
+  including WebKit's non-focusing button activation; deferred focus dismissal
+  must not remove Apply before its click reaches the selection callback. A
+  transient focus departure to the document body during an inside pointer
+  activation does not dismiss; real outside interaction and keyboard focus
+  departure still do.
 - This replaces only Model + Thinking's modal lifecycle. Other bounded dialogs
   retain [native modal behavior](desktop-modal-dialogs.md).
 - Decision: [0049 — Nonmodal model picker](../docs/decisions/0049-nonmodal-model-picker.md).

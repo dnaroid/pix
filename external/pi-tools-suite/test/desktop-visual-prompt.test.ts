@@ -48,6 +48,19 @@ describe("Desktop visual prompt", () => {
 		}
 	});
 
+	test("requires individual image links with resolvable destinations, not a directory and filenames", () => {
+		const input = event();
+		harness("desktop").run(input);
+		const hint = input.systemPromptOptions.sections.desktop_visual_guidance;
+		expect(hint).toContain("screenshots and QA evidence");
+		expect(hint).toContain("explicit Markdown link to each image");
+		expect(hint).toContain(`[Front view](${PROJECT_ARTIFACTS_DIR}/ui-qa/run/front.png)`);
+		expect(hint).toContain("inline previews that open on click");
+		expect(hint).toContain("directory link followed by bare filenames or inline-code filenames is not sufficient");
+		expect(hint).toContain("including .pi/subagents/");
+		expect(hint).toContain("absolute file:// Markdown destination");
+	});
+
 	test("is idempotent and never caches a workspace path between turns", () => {
 		const hook = harness("desktop");
 		const first = event();

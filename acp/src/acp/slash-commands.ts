@@ -98,6 +98,7 @@ const BUILTIN_CANONICAL_NAME = new Map(
 );
 
 export const PIX_RENDERER_COMMAND_NAMES = new Set([
+	"btw",
 	"enhance",
 	"import",
 	"queue",

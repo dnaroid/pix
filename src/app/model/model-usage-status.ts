@@ -6,11 +6,18 @@ import { getAgentDir, ModelRuntime, readStoredCredential } from "@earendil-works
 import { formatCompactProgressBar } from "../../context-progress-bar.js";
 import { APP_ICONS } from "../icons.js";
 import { readClaudeCodeUsageToken } from "./claude-code-usage-auth.js";
+import { anthropicResetCreditsFromResponse, openAIResetCreditsFromResponse } from "./model-usage-reset-credits.js";
 import type { SessionModel } from "../types.js";
+
+export { anthropicResetCreditsFromResponse, openAIResetCreditsFromResponse } from "./model-usage-reset-credits.js";
 
 const OPENAI_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 const OPENAI_RESET_CREDITS_URL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits";
 const ANTHROPIC_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
+const ANTHROPIC_RESET_CREDITS_URL = `${ANTHROPIC_USAGE_URL}?cedar_ember=1&skip_spend=1`;
+// Grants are CLI-surface gated. Keep the verified compatibility version and
+// identify Pix explicitly; ordinary usage retains its existing client identity.
+const ANTHROPIC_RESET_CREDITS_USER_AGENT = "claude-cli/2.1.283 (external, cli, client-app/pi-ui-extend)";
 const ANTHROPIC_OAUTH_BETA = "oauth-2025-04-20";
 const ZAI_QUOTA_URL = "https://api.z.ai/api/monitor/usage/quota/limit";
 const ZHIPU_QUOTA_URL = "https://bigmodel.cn/api/monitor/usage/quota/limit";
@@ -78,6 +85,8 @@ export type ModelUsageLimitWindow = {
 
 export type ModelUsageResetCredit = {
 	readonly title: string;
+	/** Resets remaining in a grant. Omitted for single-use Codex credit rows. */
+	readonly count?: number;
 	/** Exact local-displayable expiry instant in Unix milliseconds, when supplied by the backend. */
 	readonly expiresAt?: number;
 };
@@ -89,7 +98,7 @@ export type ModelUsageStatus = {
 	readonly accountEmail?: string;
 	readonly weekly?: ModelUsageLimitWindow;
 	readonly hourly?: ModelUsageLimitWindow;
-	/** Available account-level Codex reset credits, separate from ordinary quota-window resets. */
+	/** Banked account-level resets, separate from ordinary quota-window resets. */
 	readonly resetCredits?: readonly ModelUsageResetCredit[];
 	/** Backend total; detail rows may be capped or unavailable. */
 	readonly resetCreditsAvailableCount?: number;
@@ -205,6 +214,7 @@ type AnthropicUsageWindow = {
 };
 
 export type AnthropicUsageResponse = {
+	cedar_ember?: unknown;
 	five_hour?: AnthropicUsageWindow | null;
 	seven_day?: AnthropicUsageWindow | null;
 	seven_day_opus?: AnthropicUsageWindow | null;
@@ -363,7 +373,7 @@ export async function queryModelUsageStatus(descriptor: ModelUsageDescriptor, op
 		case "claude-code": {
 			const accessToken = await readClaudeCodeUsageToken();
 			if (!accessToken) return undefined;
-			return anthropicUsageStatusFromResponse(await fetchAnthropicUsage(accessToken), descriptor.modelKey);
+			return await queryAnthropicUsageStatus(accessToken, descriptor.modelKey);
 		}
 		case "google-antigravity":
 			return await queryGoogleAntigravityModelUsage(descriptor, options.freshOnly);
@@ -488,7 +498,9 @@ export function markModelUsageStale(status: ModelUsageStatus | undefined, now = 
 	const hourly = status.hourly !== undefined && status.hourly.resetAt > now ? status.hourly : undefined;
 	const weekly = status.weekly !== undefined && status.weekly.resetAt > now ? status.weekly : undefined;
 	if (!hourly && !weekly) return undefined;
-	const { hourly: _oldHourly, weekly: _oldWeekly, ...withoutWindows } = status;
+	// Banked credits can be spent externally; do not carry them as fresh data
+	// through credential absence, even while cached quota windows survive.
+	const { hourly: _oldHourly, weekly: _oldWeekly, resetCredits: _credits, resetCreditsAvailableCount: _count, ...withoutWindows } = status;
 	return {
 		...withoutWindows,
 		stale: true,
@@ -532,39 +544,6 @@ export function openAIUsageStatusFromResponse(
 		...(resetCredits.length > 0 ? { resetCredits } : {}),
 		...(resetCreditsAvailableCount === undefined ? {} : { resetCreditsAvailableCount }),
 	};
-}
-
-export function openAIResetCreditsFromResponse(
-	data: unknown,
-	now = Date.now(),
-): ModelUsageResetCredit[] {
-	if (!data || typeof data !== "object" || !("credits" in data) || !Array.isArray(data.credits)) return [];
-	const seenIds = new Set<string>();
-	return data.credits
-		.filter((credit) => credit && typeof credit === "object" && credit.status === "available")
-		.filter((credit) => {
-			if (typeof credit.id !== "string" || !credit.id) return true;
-			if (seenIds.has(credit.id)) return false;
-			seenIds.add(credit.id);
-			return true;
-		})
-		.map((credit): ModelUsageResetCredit => {
-			const title = typeof credit.title === "string" && credit.title.trim() ? credit.title.trim() : "Reset credit";
-			// Backend dates are RFC3339 instants, never local/ambiguous dates or
-			// app-server Unix seconds. Do not let Date.parse guess another format.
-			const expiresAt = typeof credit.expires_at === "string"
-				&& /^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/iu.test(credit.expires_at)
-				? Date.parse(credit.expires_at) : Number.NaN;
-			// Date.parse normalizes e.g. February 30 instead of rejecting it.
-			const validDate = Number.isFinite(expiresAt)
-				&& new Date(`${credit.expires_at.slice(0, 10)}T00:00:00Z`).toISOString().slice(0, 10) === credit.expires_at.slice(0, 10);
-			return {
-				title,
-				...(validDate ? { expiresAt } : {}),
-			};
-		})
-		.filter((credit) => credit.expiresAt === undefined || credit.expiresAt > now)
-		.sort((a, b) => (a.expiresAt ?? Number.POSITIVE_INFINITY) - (b.expiresAt ?? Number.POSITIVE_INFINITY));
 }
 
 function openAIResetCreditsCount(data: unknown): number | undefined {
@@ -733,12 +712,14 @@ export function anthropicUsageStatusFromResponse(
 	const weekly = [anthropicUsageWindow(data.seven_day, ANTHROPIC_SEVEN_DAY_SECONDS, now), anthropicUsageWindow(modelWeekly, ANTHROPIC_SEVEN_DAY_SECONDS, now)]
 		.filter((window): window is ModelUsageLimitWindow => window !== undefined)
 		.sort((a, b) => a.remainingPercent - b.remainingPercent)[0];
-	if (!weekly && !hourly) return undefined;
+	const resetCredits = anthropicResetCreditsFromResponse(data.cedar_ember, now);
+	if (!weekly && !hourly && !resetCredits.length) return undefined;
 
 	return {
 		modelKey,
 		provider: "anthropic",
 		updatedAt: now,
+		...(resetCredits.length ? { resetCredits, resetCreditsAvailableCount: resetCredits.reduce((total, credit) => total + (credit.count ?? 1), 0) } : {}),
 		...(weekly ? { weekly } : {}),
 		...(hourly ? { hourly } : {}),
 	};
@@ -771,7 +752,34 @@ async function queryAnthropicModelUsage(modelKey: string): Promise<ModelUsageSta
 	const accessToken = await readAnthropicAccessToken();
 	if (!accessToken) return undefined;
 
+	return await queryAnthropicUsageStatus(accessToken, modelKey);
+}
+
+async function queryAnthropicUsageStatus(accessToken: string, modelKey: string): Promise<ModelUsageStatus | undefined> {
 	const usage = await fetchAnthropicUsage(accessToken);
+	// Plain usage can return null even when the flagged variant has details.
+	// Keep the ordinary quota windows independent of that supplementary read.
+	if (usage.cedar_ember == null) {
+		const controller = new AbortController();
+		const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+		try {
+			const response = await fetch(ANTHROPIC_RESET_CREDITS_URL, {
+				method: "GET",
+				headers: { ...anthropicUsageHeaders(accessToken), "User-Agent": ANTHROPIC_RESET_CREDITS_USER_AGENT },
+				signal: controller.signal,
+			});
+			if (response.ok) {
+				const details: unknown = await response.json();
+				if (details && typeof details === "object" && "cedar_ember" in details) usage.cedar_ember = details.cedar_ember;
+			} else {
+				await response.body?.cancel();
+			}
+		} catch {
+			// Supplementary status failure must not hide normal quota or reuse old grants.
+		} finally {
+			clearTimeout(timeout);
+		}
+	}
 	return anthropicUsageStatusFromResponse(usage, modelKey);
 }
 
@@ -884,11 +892,7 @@ async function resolvePiAuthToken(provider: string, modelRuntime?: ModelRuntime)
 
 async function fetchAnthropicUsage(accessToken: string): Promise<AnthropicUsageResponse> {
 	const response = await fetchWithTimeout(ANTHROPIC_USAGE_URL, {
-		headers: {
-			Authorization: `Bearer ${accessToken}`,
-			"anthropic-beta": ANTHROPIC_OAUTH_BETA,
-			"User-Agent": "pi-ui-extend/0.1.0",
-		},
+		headers: anthropicUsageHeaders(accessToken),
 	});
 	if (!response.ok) {
 		const errorText = await response.text();
@@ -896,6 +900,14 @@ async function fetchAnthropicUsage(accessToken: string): Promise<AnthropicUsageR
 	}
 
 	return response.json() as Promise<AnthropicUsageResponse>;
+}
+
+function anthropicUsageHeaders(accessToken: string): Record<string, string> {
+	return {
+		Authorization: `Bearer ${accessToken}`,
+		"anthropic-beta": ANTHROPIC_OAUTH_BETA,
+		"User-Agent": "pi-ui-extend/0.1.0",
+	};
 }
 
 // ---------------------------------------------------------------------------

@@ -10,11 +10,15 @@ For an agent-driven installation, use the dedicated
 
 ## Release targets
 
+**Pix Desktop is currently supported on macOS only.** Windows/Linux Desktop
+packages remain in the release tooling but are not a supported product; TUI
+support on those platforms is unchanged.
+
 | Platform | TUI | Pix Desktop |
 | --- | --- | --- |
-| Windows x64 | ZIP containing `pix.cmd` | NSIS `-setup.exe` |
+| Windows x64 | ZIP containing `pix.cmd` | Legacy tooling only; unsupported |
 | macOS Apple Silicon | `.tar.gz` containing `pix` | `.dmg` |
-| Linux x64 | `.tar.gz` containing `pix` | `.AppImage` and `.deb` |
+| Linux x64 | `.tar.gz` containing `pix` | Legacy tooling only; unsupported |
 
 Download the latest stable release from
 [GitHub Releases](https://github.com/dnaroid/pix/releases). Stable releases also
@@ -122,9 +126,8 @@ the TUI is not required.
 
 - **macOS:** open the `.dmg` and copy Pix Desktop into Applications or
   `~/Applications`. Release packages require macOS 13.5 or newer.
-- **Windows:** run the NSIS `-setup.exe` installer.
-- **Linux:** prefer the `.deb` on Debian/Ubuntu systems when appropriate;
-  otherwise use the executable `.AppImage`.
+- **Windows/Linux:** not currently supported. Packaging assets exist only as
+  legacy tooling; do not install them for a supported Desktop setup.
 
 Desktop has a separate configuration profile:
 

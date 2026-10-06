@@ -51,6 +51,13 @@ and `/wait` (also `/quota-wait`) can reopen it. Cancelling disables automatic ch
 continuation, but keeps the task available for a manual probe. Desktop hides the
 status indicator after cancellation; `/wait` can still reopen the retained wait.
 
+Desktop renders the status indicator as a fixed-width retry icon in the first
+visible quota window's attention slot, immediately after its reset countdown
+(the short window when available). The countdown remains visible; the long wait
+reason is only the icon's accessible label and the reopened popup's content,
+never an inline status-bar string. If no quota window is available, the icon
+remains next to Usage. Activating it reopens the existing wait popup.
+
 At the deadline a fresh provider quota query precedes continuation. Both hourly
 and weekly windows must permit work; the later exhausted reset wins. Scheduled
 checks for a known exhausted reset run one minute after that reset, allowing
@@ -114,6 +121,8 @@ returns to waiting without losing the task or replaying completed tool calls.
 - `desktop/src/components/QuotaWaitPopup.svelte`
 - `desktop/src/components/QuotaWaitSchedulePopup.svelte`
 - `desktop/src/components/DesktopOverlays.svelte`
+- `desktop/src/components/StatusBar.svelte`
+- `desktop/src/components/RuntimeStatusBarItems.svelte`
 - `desktop/src/app/session-coordinator.ts`
 - `desktop/src/app/prompt-agent-control.svelte.ts`
 - `desktop/src/app/prompt-submit.ts`
@@ -121,6 +130,8 @@ returns to waiting without losing the task or replaying completed tool calls.
 
 ## Tests
 
+- `desktop/src/components/RuntimeStatusBarItems.test.ts`
+- `desktop/src/components/DesktopVisualRegressions.test.ts`
 - `desktop/src/lib/quota-wait.test.ts`
 - `tests/quota-wait.test.ts`
 - `tests/quota-wait-extension.test.ts`

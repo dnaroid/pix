@@ -89,6 +89,13 @@ browser preview retains browser behavior; this policy belongs to the Tauri host.
 - Embedded Markdown media uses its resolved attachment path, not the surrounding
   document's path. Pending/unavailable media blocks that enclosing-file fallback
   and disables local file actions until resolution succeeds.
+- Preview/editor tab headers additionally offer **Show in Files** for targets
+  inside the active workspace (including absolute local paths within it). The
+  command opens Files, clears its search, expands parents, selects and scrolls
+  to the file without reopening it or touching unsaved content. Outside-project
+  tabs omit it. The captured path and workspace are guarded against stale menu
+  callbacks. See [workspace navigation](desktop-workspace-navigation.md) and
+  [decision 0058](../docs/decisions/0058-reverse-file-navigation.md).
 - On macOS, Copy File places a native file URL on the pasteboard for Finder and
   other applications, not plain path text or Project Explorer's private
   cross-instance clipboard payload. Open uses the OS default application, not

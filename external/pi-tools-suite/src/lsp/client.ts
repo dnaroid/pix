@@ -1,6 +1,6 @@
 import path from "node:path";
 import fs from "node:fs/promises";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { MessageConnection } from "vscode-jsonrpc";
 import { createMessageConnection, StreamMessageReader, StreamMessageWriter } from "vscode-jsonrpc/node";
 import {
@@ -23,8 +23,9 @@ import {
   type InitializeResult,
   type ServerCapabilities,
 } from "vscode-languageserver-protocol";
-import { withTimeout } from "./async";
+import { withTimeout, withAbort } from "./async";
 import { bestEffortWriteJsonRpc, isChildRunning, killChild, terminateChild } from "./child-process";
+import { spawnOwnedLsp, ownedLspPid } from "./process-owner";
 import { DEFAULT_STARTUP_TIMEOUT_MS, REQUEST_TIMEOUT_MS } from "./constants";
 import { DocumentStore } from "./documents";
 import type { DiagnosticsStore } from "./diagnostics-store";
@@ -68,7 +69,11 @@ export class LspClient {
   private capabilities: ServerCapabilities | undefined;
   private readonly documents = new DocumentStore();
   private startPromise: Promise<void> | undefined;
+  private startupController: AbortController | undefined;
+  private startupWaiters = 0;
   private initialized = false;
+  private closing = false;
+  private shutdownPromise: Promise<void> | undefined;
   private unavailableReason: string | undefined;
   private stderrTail = "";
   private readonly dynamicDiagnosticProviders = new Map<string, string | undefined>();
@@ -79,25 +84,58 @@ export class LspClient {
     private readonly root: string,
     private readonly command: ResolvedCommand,
     private readonly diagnostics: DiagnosticsStore,
+    private readonly beginActivity?: () => () => void,
   ) {}
 
   get isUnavailable(): boolean {
-    return !!this.unavailableReason;
+    return this.closing || !!this.unavailableReason;
   }
 
   get reason(): string | undefined {
     return this.unavailableReason;
   }
 
+  get runtimeStatus() {
+    let state: "failed" | "stopping" | "stopped" | "running" | "starting" = "starting";
+    if (this.unavailableReason) state = "failed";
+    else if (this.closing) state = this.process ? "stopping" : "stopped";
+    else if (this.initialized) state = "running";
+    return {
+      id: this.server.id, root: this.root,
+      state,
+      ...(this.process && isChildRunning(this.process) && ownedLspPid(this.process) ? { pid: ownedLspPid(this.process) } : {}),
+      ...(this.unavailableReason ? { error: this.unavailableReason } : {}),
+    };
+  }
+
   async ensureStarted(signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) throw new Error("aborted");
+    if (this.closing) throw new Error(`${this.server.id}: LSP stopped`);
     if (this.initialized && this.connection && !this.unavailableReason) return;
     if (this.unavailableReason) throw new Error(this.unavailableReason);
-    this.startPromise ??= this.start(signal).catch(async (error) => {
-      this.startPromise = undefined;
-      await this.shutdown();
-      throw error;
-    });
-    await this.startPromise;
+    if (!this.startPromise) {
+      this.startupController = new AbortController();
+      const finishActivity = this.beginActivity?.();
+      this.startPromise = this.start(this.startupController.signal).catch(async (error) => {
+        if (!this.closing) this.unavailableReason = (error as Error).message;
+        this.startPromise = undefined;
+        await this.shutdown();
+        throw error;
+      }).finally(() => finishActivity?.());
+    }
+    this.startupWaiters += 1;
+    try { await withAbort(this.startPromise, signal); }
+    finally {
+      this.startupWaiters -= 1;
+      // One client's cancellation cannot tear down another client's startup.
+      if (this.startupWaiters === 0 && !this.initialized) this.startupController?.abort();
+    }
+  }
+
+  private async withActivity<T>(operation: () => Promise<T>): Promise<T> {
+    const finishActivity = this.beginActivity?.();
+    try { return await operation(); }
+    finally { finishActivity?.(); }
   }
 
   private async start(signal?: AbortSignal): Promise<void> {
@@ -106,13 +144,7 @@ export class LspClient {
       throw new Error(this.unavailableReason);
     }
 
-    const child = spawn(this.command.bin, this.command.args, {
-      cwd: this.command.cwd,
-      env: this.command.env ? { ...process.env, ...this.command.env } : process.env,
-      detached: process.platform !== "win32",
-      shell: false,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+    const child = spawnOwnedLsp(this.command);
 
     this.process = child;
     let failStartup: ((error: Error) => void) | undefined;
@@ -120,6 +152,10 @@ export class LspClient {
       failStartup = reject;
     });
     const markUnavailable = (reason: string) => {
+      if (this.closing) {
+        failStartup?.(new Error(`${this.server.id}: LSP stopped`));
+        return;
+      }
       this.unavailableReason = reason;
       this.initialized = false;
       this.startPromise = undefined;
@@ -149,6 +185,7 @@ export class LspClient {
       `${this.server.id} initialize`,
       signal,
     )) as InitializeResult;
+    if (this.closing || this.connection !== connection) throw new Error(`${this.server.id}: LSP stopped during startup`);
     this.capabilities = initializeResult.capabilities;
     failStartup = undefined;
 
@@ -157,7 +194,7 @@ export class LspClient {
       await connection.sendNotification(DidChangeConfigurationNotification.method, { settings: this.server.settings });
     }
 
-    if (signal?.aborted) throw new Error("aborted");
+    if (signal?.aborted || this.closing || this.connection !== connection) throw new Error("LSP startup cancelled");
     this.initialized = true;
   }
 
@@ -282,38 +319,42 @@ export class LspClient {
   }
 
   async openOrChange(file: string, languageId: string, text: string, signal?: AbortSignal): Promise<OpenDocument> {
-    await this.ensureStarted(signal);
-    if (!this.connection) throw new Error(`${this.server.id}: LSP connection unavailable`);
+    return this.withActivity(async () => {
+      await this.ensureStarted(signal);
+      if (!this.connection) throw new Error(`${this.server.id}: LSP connection unavailable`);
 
-    const existing = this.documents.get(file);
-    if (!existing) {
-      const doc = this.documents.open(file, languageId, text);
-      await this.connection.sendNotification(DidOpenTextDocumentNotification.method, {
-        textDocument: {
-          uri: doc.uri,
-          languageId: doc.languageId,
-          version: doc.version,
-          text: doc.text,
-        },
+      const existing = this.documents.get(file);
+      if (!existing) {
+        const doc = this.documents.open(file, languageId, text);
+        await this.connection.sendNotification(DidOpenTextDocumentNotification.method, {
+          textDocument: {
+            uri: doc.uri,
+            languageId: doc.languageId,
+            version: doc.version,
+            text: doc.text,
+          },
+        });
+        return doc;
+      }
+
+      const doc = this.documents.change(file, text);
+      await this.connection.sendNotification(DidChangeTextDocumentNotification.method, {
+        textDocument: { uri: doc.uri, version: doc.version },
+        contentChanges: [{ text: doc.text }],
       });
       return doc;
-    }
-
-    const doc = this.documents.change(file, text);
-    await this.connection.sendNotification(DidChangeTextDocumentNotification.method, {
-      textDocument: { uri: doc.uri, version: doc.version },
-      contentChanges: [{ text: doc.text }],
     });
-    return doc;
   }
 
   async didSave(file: string): Promise<void> {
-    if (!this.connection || !supportsSave(this.capabilities)) return;
-    const doc = this.documents.get(file);
-    if (!doc) return;
-    await this.connection.sendNotification(DidSaveTextDocumentNotification.method, {
-      textDocument: { uri: doc.uri },
-      text: doc.text,
+    return this.withActivity(async () => {
+      if (!this.connection || !supportsSave(this.capabilities)) return;
+      const doc = this.documents.get(file);
+      if (!doc) return;
+      await this.connection.sendNotification(DidSaveTextDocumentNotification.method, {
+        textDocument: { uri: doc.uri },
+        text: doc.text,
+      });
     });
   }
 
@@ -334,9 +375,13 @@ export class LspClient {
 
   private async waitForPullDiagnosticsSupport(timeoutMs: number, signal?: AbortSignal): Promise<void> {
     if (this.supportsPullDiagnostics() || timeoutMs <= 0) return;
-    await withTimeout(new Promise<void>((resolve) => {
-      this.diagnosticProviderWaiters.push(resolve);
-    }), timeoutMs, `${this.server.id} diagnostic registration`, signal).catch(() => undefined);
+    let waiter!: () => void;
+    const registered = new Promise<void>((resolve) => {
+      waiter = resolve;
+      this.diagnosticProviderWaiters.push(waiter);
+    });
+    try { await withTimeout(registered, timeoutMs, `${this.server.id} diagnostic registration`, signal).catch(() => undefined); }
+    finally { this.diagnosticProviderWaiters = this.diagnosticProviderWaiters.filter((pending) => pending !== waiter); }
   }
 
   private diagnosticProviderIdentifiers(): Array<string | undefined> {
@@ -366,129 +411,148 @@ export class LspClient {
   }
 
   async tsserverDiagnostics(file: string, text: string, timeoutMs: number, signal?: AbortSignal): Promise<Diagnostic[] | undefined> {
-    const connection = this.connection;
-    if (!connection || !this.supportsTsserverDiagnostics()) return undefined;
+    return this.withActivity(async () => {
+      const connection = this.connection;
+      if (!connection || !this.supportsTsserverDiagnostics()) return undefined;
 
-    const requests = [
-      { command: "syntacticDiagnosticsSync", executionTarget: 1 },
-      { command: "semanticDiagnosticsSync", executionTarget: 0 },
-      { command: "suggestionDiagnosticsSync", executionTarget: 0 },
-    ];
+      const requests = [
+        { command: "syntacticDiagnosticsSync", executionTarget: 1 },
+        { command: "semanticDiagnosticsSync", executionTarget: 0 },
+        { command: "suggestionDiagnosticsSync", executionTarget: 0 },
+      ];
 
-    const responses = await Promise.all(requests.map((request) => withTimeout(
-      connection.sendRequest(ExecuteCommandRequest.method, {
-        command: "typescript.tsserverRequest",
-        arguments: [
-          request.command,
-          { file, includeLinePosition: true },
-          {
-            executionTarget: request.executionTarget,
-            expectsResult: true,
-            isAsync: false,
-            lowPriority: false,
-          },
-        ],
-      }),
-      timeoutMs,
-      `${this.server.id} ${request.command}`,
-      signal,
-    )));
+      const responses = await Promise.all(requests.map((request) => withTimeout(
+        connection.sendRequest(ExecuteCommandRequest.method, {
+          command: "typescript.tsserverRequest",
+          arguments: [
+            request.command,
+            { file, includeLinePosition: true },
+            {
+              executionTarget: request.executionTarget,
+              expectsResult: true,
+              isAsync: false,
+              lowPriority: false,
+            },
+          ],
+        }),
+        timeoutMs,
+        `${this.server.id} ${request.command}`,
+        signal,
+      )));
 
-    return responses.flatMap((response) => tsserverDiagnosticsFromResponse(response).map((diagnostic) => tsserverDiagnosticToLsp(diagnostic, text)));
+      return responses.flatMap((response) => tsserverDiagnosticsFromResponse(response).map((diagnostic) => tsserverDiagnosticToLsp(diagnostic, text)));
+    });
   }
 
   async pullDiagnostics(file: string, timeoutMs: number, signal?: AbortSignal): Promise<Diagnostic[] | undefined> {
-    const connection = this.connection;
-    if (!connection) return undefined;
-    if (!this.supportsPullDiagnostics()) {
-      await this.waitForPullDiagnosticsSupport(this.server.id === "csharp" ? Math.min(timeoutMs, 5_000) : 250, signal);
-    }
-    if (!this.supportsPullDiagnostics()) return undefined;
-    const identifiers = this.diagnosticProviderIdentifiers();
-    if (identifiers.length === 0) return undefined;
+    return this.withActivity(async () => {
+      const connection = this.connection;
+      if (!connection) return undefined;
+      if (!this.supportsPullDiagnostics()) {
+        await this.waitForPullDiagnosticsSupport(this.server.id === "csharp" ? Math.min(timeoutMs, 5_000) : 250, signal);
+      }
+      if (!this.supportsPullDiagnostics()) return undefined;
+      const identifiers = this.diagnosticProviderIdentifiers();
+      if (identifiers.length === 0) return undefined;
 
-    const uri = filePathToUri(file);
-    const settled = await Promise.allSettled(identifiers.map(async (identifier) => {
-      const report = (await withTimeout(
-        connection.sendRequest(DocumentDiagnosticRequest.method, {
-          textDocument: { uri },
-          identifier,
-        }),
-        timeoutMs,
-        `${this.server.id} textDocument/diagnostic${identifier ? ` (${identifier})` : ""}`,
-        signal,
-      )) as DocumentDiagnosticReport | null;
-      return this.diagnosticsFromReport(report) ?? [];
-    }));
+      const uri = filePathToUri(file);
+      const settled = await Promise.allSettled(identifiers.map(async (identifier) => {
+        const report = (await withTimeout(
+          connection.sendRequest(DocumentDiagnosticRequest.method, {
+            textDocument: { uri },
+            identifier,
+          }),
+          timeoutMs,
+          `${this.server.id} textDocument/diagnostic${identifier ? ` (${identifier})` : ""}`,
+          signal,
+        )) as DocumentDiagnosticReport | null;
+        return this.diagnosticsFromReport(report) ?? [];
+      }));
 
-    const fulfilled = settled.filter((result): result is PromiseFulfilledResult<Diagnostic[]> => result.status === "fulfilled");
-    if (fulfilled.length === 0) {
-      const firstError = settled.find((result): result is PromiseRejectedResult => result.status === "rejected")?.reason;
-      throw firstError instanceof Error ? firstError : new Error(String(firstError ?? "pull diagnostics failed"));
-    }
+      const fulfilled = settled.filter((result): result is PromiseFulfilledResult<Diagnostic[]> => result.status === "fulfilled");
+      if (fulfilled.length === 0) {
+        const firstError = settled.find((result): result is PromiseRejectedResult => result.status === "rejected")?.reason;
+        throw firstError instanceof Error ? firstError : new Error(String(firstError ?? "pull diagnostics failed"));
+      }
 
-    const seen = new Set<string>();
-    return fulfilled.flatMap((result) => result.value).filter((diagnostic) => {
-      const key = JSON.stringify([diagnostic.range, diagnostic.severity, diagnostic.source, diagnostic.code, diagnostic.message]);
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
+      const seen = new Set<string>();
+      return fulfilled.flatMap((result) => result.value).filter((diagnostic) => {
+        const key = JSON.stringify([diagnostic.range, diagnostic.severity, diagnostic.source, diagnostic.code, diagnostic.message]);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
     });
   }
 
   async hover(file: string, line: number, character: number): Promise<unknown> {
-    if (!this.connection) throw new Error(`${this.server.id}: LSP connection unavailable`);
-    return withTimeout(
-      this.connection.sendRequest(HoverRequest.method, {
-        textDocument: { uri: filePathToUri(file) },
-        position: { line, character },
-      }),
-      REQUEST_TIMEOUT_MS,
-      `${this.server.id} hover`,
-    );
+    return this.withActivity(async () => {
+      if (!this.connection) throw new Error(`${this.server.id}: LSP connection unavailable`);
+      return withTimeout(
+        this.connection.sendRequest(HoverRequest.method, {
+          textDocument: { uri: filePathToUri(file) },
+          position: { line, character },
+        }),
+        REQUEST_TIMEOUT_MS,
+        `${this.server.id} hover`,
+      );
+    });
   }
 
   async definition(file: string, line: number, character: number): Promise<unknown> {
-    if (!this.connection) throw new Error(`${this.server.id}: LSP connection unavailable`);
-    return withTimeout(
-      this.connection.sendRequest(DefinitionRequest.method, {
-        textDocument: { uri: filePathToUri(file) },
-        position: { line, character },
-      }),
-      REQUEST_TIMEOUT_MS,
-      `${this.server.id} definition`,
-    );
+    return this.withActivity(async () => {
+      if (!this.connection) throw new Error(`${this.server.id}: LSP connection unavailable`);
+      return withTimeout(
+        this.connection.sendRequest(DefinitionRequest.method, {
+          textDocument: { uri: filePathToUri(file) },
+          position: { line, character },
+        }),
+        REQUEST_TIMEOUT_MS,
+        `${this.server.id} definition`,
+      );
+    });
   }
 
   async references(file: string, line: number, character: number, includeDeclaration: boolean): Promise<unknown> {
-    if (!this.connection) throw new Error(`${this.server.id}: LSP connection unavailable`);
-    return withTimeout(
-      this.connection.sendRequest(ReferencesRequest.method, {
-        textDocument: { uri: filePathToUri(file) },
-        position: { line, character },
-        context: { includeDeclaration },
-      }),
-      REQUEST_TIMEOUT_MS,
-      `${this.server.id} references`,
-    );
+    return this.withActivity(async () => {
+      if (!this.connection) throw new Error(`${this.server.id}: LSP connection unavailable`);
+      return withTimeout(
+        this.connection.sendRequest(ReferencesRequest.method, {
+          textDocument: { uri: filePathToUri(file) },
+          position: { line, character },
+          context: { includeDeclaration },
+        }),
+        REQUEST_TIMEOUT_MS,
+        `${this.server.id} references`,
+      );
+    });
   }
 
   async symbols(file: string): Promise<unknown> {
-    if (!this.connection) throw new Error(`${this.server.id}: LSP connection unavailable`);
-    return withTimeout(
-      this.connection.sendRequest(DocumentSymbolRequest.method, {
-        textDocument: { uri: filePathToUri(file) },
-      }),
-      REQUEST_TIMEOUT_MS,
-      `${this.server.id} document symbols`,
-    );
+    return this.withActivity(async () => {
+      if (!this.connection) throw new Error(`${this.server.id}: LSP connection unavailable`);
+      return withTimeout(
+        this.connection.sendRequest(DocumentSymbolRequest.method, {
+          textDocument: { uri: filePathToUri(file) },
+        }),
+        REQUEST_TIMEOUT_MS,
+        `${this.server.id} document symbols`,
+      );
+    });
   }
 
   async shutdown(): Promise<void> {
+    this.closing = true;
+    this.startupController?.abort();
+    this.resolveDiagnosticProviderWaiters();
+    this.shutdownPromise ??= this.performShutdown();
+    await this.shutdownPromise;
+  }
+
+  private async performShutdown(): Promise<void> {
     const connection = this.connection;
     const child = this.process;
     this.connection = undefined;
-    this.process = undefined;
     this.initialized = false;
     this.startPromise = undefined;
 
@@ -502,9 +566,13 @@ export class LspClient {
     if (child) {
       await terminateChild(child);
     }
+    if (this.process === child) this.process = undefined;
   }
 
   shutdownSync(): void {
+    this.closing = true;
+    this.startupController?.abort();
+    this.resolveDiagnosticProviderWaiters();
     const connection = this.connection;
     const child = this.process;
     this.connection = undefined;
@@ -514,6 +582,6 @@ export class LspClient {
 
     connection?.dispose();
 
-    if (child && isChildRunning(child)) killChild(child, "SIGKILL");
+    if (child) killChild(child, "SIGKILL");
   }
 }

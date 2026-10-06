@@ -255,12 +255,18 @@ provider effort handling and exact-model/no-fallback policies remain unchanged.
   are rejected, since they could defeat the exact roster or read-only tool set.
   Participants receive canonical `read`/`grep`, `web_search`/`web_fetch` and the
   eight read-only `repo_*` discovery tools (context, audit, architecture,
-  structure, ast, search, explain, deps). A dedicated explicit child extension
-  loads only web/repo capabilities; the full suite remains disabled. Its final
+  structure, ast, search, explain, deps), plus the common private `todo` tool.
+  Common spawn loads repo/todo and requested tools-only web capabilities; the
+  council-only extension owns the strict guard without registering repo or web
+  tools twice. Council does not request `ast_grep`.
+  The full suite remains disabled. Its final
   CLI allowlist preserves custom names and avoids model aliasing of grep into
   shell. Lifecycle selection and a tool-call guard prohibit shell, mutation,
   recursive council/subagent tools and provider-native web search.
   Setup/update/credential commands are not registered in council children.
+  Loader placement is updated by [decision 0060](../docs/decisions/0060-subagent-read-only-repo-tools.md)
+  and [decision 0061](../docs/decisions/0061-subagent-scoped-ast-web-tools.md);
+  all other council research restrictions remain unchanged.
   Repo tools require the existing indexed project and executable `idx`; normal
   index refresh/cache side effects remain possible, but no automatic setup or
   product-source edits are authorized. Web uses existing suite credentials and
@@ -323,6 +329,11 @@ Dependency: [async-subagents](async-subagents.md).
 - `external/pi-tools-suite/src/brainstorm/desktop-sessions.ts`
 - `external/pi-tools-suite/src/brainstorm/research-tools.ts`
 - `external/pi-tools-suite/src/brainstorm/research-extension.ts`
+- `external/pi-tools-suite/src/async-subagents/work-tools.ts`
+- `external/pi-tools-suite/src/async-subagents/core/child-tools.ts`
+- `external/pi-tools-suite/src/repo-discovery/subagent.ts`
+- `external/pi-tools-suite/src/async-subagents/core/child-tools.ts`
+- `external/pi-tools-suite/src/async-subagents/core/spawn.ts`
 - `external/pi-tools-suite/src/brainstorm/workflow.ts`
 - `external/pi-tools-suite/src/brainstorm/continuation.ts`
 - `external/pi-tools-suite/src/brainstorm/prompts.ts`

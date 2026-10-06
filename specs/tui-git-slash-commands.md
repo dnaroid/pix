@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # TUI Git assistant slash commands
 
 <!-- markdownlint-disable MD013 -->
@@ -65,3 +70,11 @@ Expose Pix's existing Git review and commit-message helper workflows directly in
 - Focused command tests cover registration, confirmed commit, staged-diff race refusal, all review input classes, and model fallback inheritance/replacement.
 - Slash-command parity treats `/code-review` and `/commit-message` as TUI commands with existing Desktop UI equivalents rather than requiring duplicate Desktop slash commands.
 - Generated Pix JSON schema must remain synchronized with `src/schemas/pix-schema.ts`.
+
+## Implementation
+
+- `src/app/commands/command-git-actions.ts`
+
+## Tests
+
+- `tests/command-git-actions.test.ts`

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contextFilePath, previewSourceReference, relativeImagePath } from "./desktop-context-target";
+import { contextFilePath, previewSourceReference, projectRevealPath, relativeImagePath } from "./desktop-context-target";
 import previewSource from "../components/PreviewPane.svelte?raw";
 
 describe("trusted preview file paths", () => {
@@ -22,6 +22,19 @@ describe("workspace-relative image paths", () => {
     expect(relativeImagePath("/tmp/chart.png", "/project/nested")).toBe("../../tmp/chart.png");
     expect(relativeImagePath("/tmp/chart.png", "")).toBeUndefined();
     expect(relativeImagePath("https://example.com/chart.png", "/project")).toBeUndefined();
+  });
+});
+
+describe("Preview tab paths owned by Files", () => {
+  it("accepts relative and absolute files within the project", () => {
+    expect(projectRevealPath("nested/my file.ts", "/project/")).toBe("nested/my file.ts");
+    expect(projectRevealPath("/project/nested/файл.md", "/project")).toBe("nested/файл.md");
+  });
+  it("omits reveal for outside-project tabs and unavailable paths", () => {
+    for (const path of [undefined, "", "../outside", "/tmp/file.ts", "/project-other/file.ts", "/project", "/project/../outside", "https://example.com/file.ts"]) {
+      expect(projectRevealPath(path, "/project")).toBeUndefined();
+    }
+    expect(projectRevealPath("/project/file.ts", "")).toBeUndefined();
   });
 });
 

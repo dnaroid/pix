@@ -48,6 +48,9 @@
   import { createLspOnboardingStore } from "./app/lsp-onboarding.svelte";
   import { createQuotaWaitStore } from "./app/quota-wait.svelte";
   import { createHeadsUpStore } from "./app/heads-up.svelte";
+  import { createBtwStore } from "./app/btw.svelte";
+  import { btwDiscussionDraft, canInsertBtwDraft } from "./app/btw-draft";
+  import BtwDock from "./components/BtwDock.svelte";
   import { createWorkbenchTerminalState } from "./app/workbench-terminal.svelte";
 
   const isMacOS = /Macintosh|Mac OS X/.test(navigator.userAgent);
@@ -80,6 +83,7 @@
     insertPaths: (paths: readonly string[]) => Promise<void>;
   } | null>(null);
   let workspaceSidebar = $state<{
+    revealProjectEntry: (path: string) => Promise<void>;
     openTasksPanel: (taskId?: string) => Promise<void>;
     openSettingsSection: (id: string) => Promise<void>;
     closeProjectSwitcher: () => void;
@@ -157,6 +161,37 @@
     commandAvailable: (sessionId) => sessionServices.metadata.slashCommandsBySession.get(sessionId)?.some((command) => command.name === "heads-up") ?? false,
     reportError,
   });
+
+  const btw = createBtwStore({
+    command: (sessionId, command) => {
+      if (!client) return Promise.reject(new Error("Desktop is disconnected"));
+      return client.btw(sessionId, command);
+    },
+    runtimeReady: (sessionId) => sessionServices.runtime.isReady(sessionId),
+  });
+  let btwDock = $state<{ focus: () => void } | null>(null);
+
+  async function openBtw(sessionId: string, question?: string): Promise<void> {
+    await btw.open(sessionId);
+    const snapshot = btw.state(sessionId);
+    if (!snapshot) throw new Error("Could not open BTW. Update or reconnect the Desktop runtime.");
+    if (question && snapshot.draft && snapshot.draft !== question) {
+      throw new Error("BTW has an unsent draft. Send or clear it before using /btw with another question.");
+    }
+    if (activeSessionId === sessionId) {
+      await tick();
+      if (activeSessionId === sessionId) btwDock?.focus();
+    }
+    if (question) { btw.setDraft(sessionId, question); await btw.send(sessionId); }
+  }
+
+  function insertBtwAnswer(sessionId: string, text: string): boolean {
+    if (!canInsertBtwDraft(sessionId, activeSessionId, activeSessionRuntimeReady,
+      sessionMutationRunning || !!activePendingElicitation, promptText, promptAttachments)) return false;
+    promptText = btwDiscussionDraft(text);
+    void promptComposer?.focus();
+    return true;
+  }
 
 
   const sessionTabsState = sessionServices.tabs;
@@ -257,6 +292,7 @@
   });
 
   const projectServices = createDesktopProjectServices({
+    revealProjectEntry: async (path) => { await workspaceSidebar?.revealProjectEntry(path); },
     client: () => client,
     workspace: () => workspace,
     operationRunning: () => operationRunning,
@@ -493,6 +529,7 @@
   const taskActionId = $derived(projectActions.actionId);
 
   const promptActionServices = createDesktopPromptActionServices({
+    openBtw,
     workspace: () => workspace,
     client: () => client,
     state: activeSessionState,
@@ -647,6 +684,7 @@
     lspOnboarding,
     quotaWait,
     headsUp,
+    btw,
     reportError,
   });
   const sessionCoordinator = sessionOrchestration.coordinator;
@@ -679,6 +717,7 @@
     markSessionTabViewed: sessionTabAttention.clear,
   });
   const viewModels = createDesktopViewModelServices({
+    openBtw: (sessionId) => openBtw(sessionId).catch(reportError),
     focusComposer: () => promptComposer?.focus(),
     platform: desktopShortcutPlatform,
     workspace: () => workspace,
@@ -723,9 +762,13 @@
   const overlaysViewModel = viewModels.overlays;
   const statusBarViewModel = viewModels.statusBar;
 
-  onMount(() => installDesktopContextMenu({ reportError, workspace: () => workspace }));
+  onMount(() => installDesktopContextMenu({
+    reportError, workspace: () => workspace,
+    revealProjectEntry: async (path) => { await workspaceSidebar?.revealProjectEntry(path); },
+  }));
   onMount(desktopLifecycle.start);
   onDestroy(headsUp.reset);
+  onDestroy(btw.reset);
   onMount(nativeNotifications.start);
   onMount(() => desktopUpdaterEnabled ? updater.start() : updater.dispose);
   onMount(desktopWatchRestart.start);
@@ -758,6 +801,7 @@
 
   <div class="flex min-h-0 min-w-0">
     <DesktopSidebar bind:instance={workspaceSidebar} props={sidebarViewModel.props} />
+    <div class="flex min-h-0 min-w-0 flex-1" data-btw-workspace>
     <DesktopWorkbenchSurface
       {...workbenchViewModel.props}
       bind:transcriptPane
@@ -767,6 +811,11 @@
       bind:previewPane
       bind:terminalPane={workbenchTerminalPane}
     />
+    <BtwDock bind:this={btwDock} store={btw} sessionId={activeSessionId}
+      preferences={modelServices.preferences} mainPickerOpen={modelConfig.pickerOpen} beforeModelOpen={modelConfig.closePicker}
+      {configOptions} ready={activeSessionRuntimeReady} onInsert={insertBtwAnswer}
+      onReturnFocus={() => void promptComposer?.focus()} />
+    </div>
   </div>
 
   <DesktopStatusBar props={statusBarViewModel.props} />

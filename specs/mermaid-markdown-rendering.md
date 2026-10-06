@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # Mermaid diagrams in chat Markdown
 
 <!-- markdownlint-disable MD013 -->
@@ -62,3 +67,11 @@ Render supported Mermaid fenced code blocks as readable Unicode diagrams in chat
 
 - Confirmed by code: all user and assistant chat Markdown passes through `renderMarkdownTextLines`.
 - Confirmed by dependency API: `grok-mermaid` returns Unicode rows, semantic spans, and an explicit display width, or `null` when it cannot render.
+
+## Implementation
+
+- `src/markdown-format.ts`
+
+## Tests
+
+- `tests/markdown-format.test.ts`

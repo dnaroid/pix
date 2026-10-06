@@ -5,6 +5,36 @@ import ResetCreditsSection from "./ResetCreditsSection.svelte";
 const now = new Date(2026, 9, 4, 22, 0, 0).getTime();
 
 describe("ResetCreditsSection", () => {
+  it("shows banked grant quantities and a visible expiration date without duplicate rows", () => {
+    const expiresAt = new Date(2026, 9, 22, 22, 32, 35).getTime();
+    const { body } = render(ResetCreditsSection, { props: { now, availableCount: 3, credits: [{ title: "Full reset", count: 3, expiresAt }] } });
+    expect(body).toContain("3 available");
+    expect(body).toContain("Full reset ×3");
+    expect(body).toContain(new Date(expiresAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }) + " · Expires in");
+    expect(body.match(/Full reset/g)).toHaveLength(1);
+    expect(body).not.toContain("Expiry details unavailable");
+    expect(body).not.toContain("<button");
+  });
+
+  it("expires every reset in a grant at once and counts missing details by resets", () => {
+    const credits = [{ title: "Early", count: 3, expiresAt: now + 1 }, { title: "Later", count: 2 }];
+    const before = render(ResetCreditsSection, { props: { now, credits, availableCount: 6 } }).body;
+    expect(before).toContain("6 available");
+    expect(before).toContain("Expiry details unavailable for 1 credit");
+    const after = render(ResetCreditsSection, { props: { now: now + 1, credits, availableCount: 6 } }).body;
+    expect(after).toContain("3 available");
+    expect(after).not.toContain("Early");
+    expect(after).toContain("Later ×2");
+    expect(after).toContain("Expiry details unavailable for 1 credit");
+  });
+
+  it("caps displayed grant quantities at the available total", () => {
+    const body = render(ResetCreditsSection, { props: { now, credits: [{ title: "Full reset", count: 5 }], availableCount: 2 } }).body;
+    expect(body).toContain("2 available");
+    expect(body).toContain("Full reset ×2");
+    expect(body).not.toContain("×5");
+    expect(body).not.toContain("Expiry details unavailable");
+  });
   it("uses plain compact rows and colors only credits expiring in less than 24 hours", () => {
     for (const [remaining, urgent] of [[1, true], [86_399_999, true], [86_400_000, false], [86_400_001, false]] as const) {
       const { body } = render(ResetCreditsSection, { props: { now, credits: [{ title: "Full reset", expiresAt: now + remaining }] } });

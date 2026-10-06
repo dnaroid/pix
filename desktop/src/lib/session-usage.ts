@@ -18,9 +18,9 @@ export function sessionUsageReportHasValue(report: SessionUsageReport | undefine
 }
 
 export function formatSessionUsageCost(value: number): string {
-  if (value <= 0) return "$0";
-  if (value < 0.0001) return "<$0.0001";
-  return `$${value.toFixed(value < 0.01 ? 4 : value < 1 ? 3 : 2)}`;
+  if (value <= 0) return "$0.00";
+  if (value < 0.005) return "<$0.01";
+  return `$${value.toFixed(2)}`;
 }
 
 export function formatSessionUsageTokens(value: number): string {

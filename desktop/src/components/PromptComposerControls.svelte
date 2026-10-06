@@ -13,6 +13,7 @@
     voiceCanStart,
     promptRunning,
     canSubmit,
+    submitLabel,
     onToggleMenu,
     onToggleVoice,
   }: {
@@ -23,6 +24,7 @@
     voiceCanStart: boolean;
     promptRunning: boolean;
     canSubmit: boolean;
+    submitLabel?: string;
     onToggleMenu: () => void;
     onToggleVoice: () => void;
   } = $props();
@@ -64,8 +66,8 @@
 <button
   class="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-35"
   type="submit"
-  aria-label={promptRunning ? "Queue message" : "Send message"}
-  title={promptRunning ? "Queue message · Enter" : "Send message · Enter"}
+  aria-label={submitLabel ?? (promptRunning ? "Queue message" : "Send message")}
+  title={`${submitLabel ?? (promptRunning ? "Queue message" : "Send message")} · Enter`}
   disabled={!canSubmit}
 >
   <ArrowUp class="h-4 w-4" aria-hidden="true" />

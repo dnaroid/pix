@@ -84,22 +84,33 @@ describe("model usage status", () => {
 		let requests = 0;
 		process.env.NODE_ENV = "test";
 		process.env.PI_TOOLS_SUITE_TEST_CLAUDE_AUTH_PATH = path;
-		globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+		globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
 			requests++;
 			assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer sk-ant-oat-claude-fixture");
-			return Response.json({ five_hour: { utilization: 20 }, seven_day: { utilization: 60 } });
+			if (String(input) === "https://api.anthropic.com/api/oauth/usage") {
+				assert.equal(new Headers(init?.headers).get("User-Agent"), "pi-ui-extend/0.1.0");
+				return Response.json({ five_hour: { utilization: 20 }, seven_day: { utilization: 60 }, cedar_ember: null });
+			}
+			assert.equal(String(input), "https://api.anthropic.com/api/oauth/usage?cedar_ember=1&skip_spend=1");
+			assert.equal(new Headers(init?.headers).get("User-Agent"), "claude-cli/2.1.283 (external, cli, client-app/pi-ui-extend)");
+			return Response.json({ five_hour: { utilization: 20 }, seven_day: { utilization: 60 }, cedar_ember: {
+				eligible: true, grants: [{ id: "fixture", label: "Full reset", resets_left: 2, ends_at: "2099-10-22T20:32:35Z" }],
+			} });
 		}) as typeof fetch;
 		try {
 			const descriptor = modelUsageDescriptor({ provider: "pi-claude-code-provider", id: "opus" } as SessionModel)!;
 			writeFileSync(path, JSON.stringify({ claudeAiOauth: { accessToken: "sk-ant-oat-claude-fixture", expiresAt: Date.now() + 60_000 } }));
 			await withPiAuthAsync({ anthropic: { type: "api_key", key: "sk-ant-api-fixture" } }, async () => {
-				assert.equal((await queryModelUsageStatus(descriptor))?.hourly?.remainingPercent, 80);
+				const status = await queryModelUsageStatus(descriptor);
+				assert.equal(status?.hourly?.remainingPercent, 80);
+				assert.equal(status?.resetCreditsAvailableCount, 2);
+				assert.deepEqual(status?.resetCredits, [{ title: "Full reset", count: 2, expiresAt: Date.parse("2099-10-22T20:32:35Z") }]);
 				assert.equal((await queryModelUsageStatus(descriptor))?.weekly?.remainingPercent, 40);
 			});
-			assert.equal(requests, 2);
+			assert.equal(requests, 4);
 			writeFileSync(path, JSON.stringify({ claudeAiOauth: { accessToken: "sk-ant-oat-claude-fixture", expiresAt: Date.now() - 1000 } }));
 			assert.equal(await queryModelUsageStatus(descriptor), undefined);
-			assert.equal(requests, 2);
+			assert.equal(requests, 4);
 		} finally {
 			globalThis.fetch = oldFetch;
 			if (previousPath === undefined) delete process.env.PI_TOOLS_SUITE_TEST_CLAUDE_AUTH_PATH;
@@ -107,6 +118,94 @@ describe("model usage status", () => {
 			if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
 			else process.env.NODE_ENV = previousNodeEnv;
 			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("reads supplementary Anthropic banked grants without replacing quota and tolerates detail failures", async () => {
+		const oldFetch = globalThis.fetch;
+		const requests: string[] = [];
+		let inline: unknown;
+		const validDetails = { cedar_ember: { eligible: true, grants: [{ id: "fixture", label: "Full reset", resets_left: 3, ends_at: "2099-10-22T20:32:35Z" }] }, five_hour: { utilization: 99 } };
+		let details: unknown = validDetails;
+		globalThis.fetch = (async (input, init) => {
+			const url = String(input);
+			requests.push(url);
+			assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer sk-ant-oat-fixture");
+			assert.equal(new Headers(init?.headers).get("anthropic-beta"), "oauth-2025-04-20");
+			assert.equal(init?.body, undefined);
+			if (url === "https://api.anthropic.com/api/oauth/usage") {
+				assert.equal(init?.method ?? "GET", "GET");
+				assert.equal(new Headers(init?.headers).get("User-Agent"), "pi-ui-extend/0.1.0");
+				return Response.json({ five_hour: { utilization: 20 }, cedar_ember: inline });
+			}
+			assert.equal(url, "https://api.anthropic.com/api/oauth/usage?cedar_ember=1&skip_spend=1");
+			assert.equal(init?.method, "GET");
+			assert.equal(new Headers(init?.headers).get("User-Agent"), "claude-cli/2.1.283 (external, cli, client-app/pi-ui-extend)");
+			if (details === "network") throw new Error("unavailable");
+			if (details === "json") return new Response("invalid JSON");
+			if (typeof details === "number") return new Response("unavailable", { status: details });
+			return Response.json(details);
+		}) as typeof fetch;
+		try {
+			await withPiAuthAsync({ anthropic: { type: "oauth", access: "sk-ant-oat-fixture", expires: Date.now() + 60_000 } }, async () => {
+				const query = () => queryModelUsageStatus({ kind: "anthropic", modelKey: "anthropic/opus" });
+				for (const missing of [undefined, null]) {
+					inline = missing;
+					details = validDetails;
+					const status = await query();
+					assert.equal(status?.hourly?.remainingPercent, 80);
+					assert.equal(status?.resetCreditsAvailableCount, 3);
+					assert.deepEqual(status?.resetCredits, [{ title: "Full reset", count: 3, expiresAt: Date.parse("2099-10-22T20:32:35Z") }]);
+					for (const failure of [401, 403, 404, 429, 500, "network", "json", null, {}, { cedar_ember: { eligible: true, grants: "bad" } }]) {
+						details = failure;
+						const fallback = await query();
+						assert.equal(fallback?.hourly?.remainingPercent, 80);
+						assert.equal(fallback?.resetCredits, undefined);
+						assert.equal(fallback?.resetCreditsAvailableCount, undefined);
+					}
+				}
+				assert.equal(requests.length, 44);
+				inline = validDetails.cedar_ember;
+				assert.equal((await query())?.resetCreditsAvailableCount, 3);
+				assert.equal(requests.length, 45);
+				inline = { eligible: false, grants: [] };
+				assert.equal((await query())?.resetCredits, undefined);
+				assert.equal(requests.length, 46);
+			});
+		} finally {
+			globalThis.fetch = oldFetch;
+		}
+	});
+
+	it("bounds the supplementary Anthropic grant response through body consumption", async (t) => {
+		t.mock.timers.enable({ apis: ["setTimeout"] });
+		const oldFetch = globalThis.fetch;
+		let body: ReadableStreamDefaultController<Uint8Array> | undefined;
+		let started!: () => void;
+		const detailsStarted = new Promise<void>((resolve) => { started = resolve; });
+		globalThis.fetch = (async (input, init) => {
+			if (String(input).endsWith("/usage")) return Response.json({ five_hour: { utilization: 20 } });
+			const stream = new ReadableStream<Uint8Array>({ start(controller) { body = controller; } });
+			init?.signal?.addEventListener("abort", () => body?.error(new Error("aborted")), { once: true });
+			started();
+			return new Response(stream);
+		}) as typeof fetch;
+		try {
+			await withPiAuthAsync({ anthropic: { type: "oauth", access: "sk-ant-oat-fixture", expires: Date.now() + 60_000 } }, async () => {
+				let settled = false;
+				const pending = queryModelUsageStatus({ kind: "anthropic", modelKey: "anthropic/opus" })
+					.then((status) => { settled = true; return status; });
+				await detailsStarted;
+				await new Promise<void>((resolve) => setImmediate(resolve));
+				t.mock.timers.tick(10_000);
+				await new Promise<void>((resolve) => setImmediate(resolve));
+				assert.equal(settled, true);
+				assert.equal((await pending)?.hourly?.remainingPercent, 80);
+			});
+		} finally {
+			body?.error(new Error("test cleanup"));
+			globalThis.fetch = oldFetch;
+			t.mock.timers.reset();
 		}
 	});
 
@@ -144,7 +243,7 @@ describe("model usage status", () => {
 			const headers = new Headers(init?.headers);
 			assert.equal(headers.get("Authorization"), "Bearer sk-ant-oat-test");
 			assert.equal(headers.get("anthropic-beta"), "oauth-2025-04-20");
-			return Response.json({ five_hour: { utilization: 40, resets_at: null }, seven_day: { utilization: 10, resets_at: null } });
+			return Response.json({ five_hour: { utilization: 40, resets_at: null }, seven_day: { utilization: 10, resets_at: null }, cedar_ember: { eligible: false, grants: [] } });
 		}) as typeof fetch;
 
 		try {

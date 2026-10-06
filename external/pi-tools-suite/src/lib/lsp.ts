@@ -2,7 +2,7 @@ import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-codin
 import { existsSync } from "node:fs";
 import { toAbsolutePath } from "../lsp/_shared/paths.js";
 import { LSP_DIAGNOSTIC_ICON } from "../lsp/_shared/output.js";
-import { getGlobalLspManager } from "../lsp/manager.js";
+import { sharedDiagnosticsForFile, releaseSharedLsp } from "../lsp/shared-manager.js";
 import { getEventPaths, isMutationToolResult } from "../lsp/mutation-events.js";
 import { publishMissingLspSuggestion } from "../lsp/onboarding.js";
 
@@ -36,9 +36,8 @@ export async function appendLspDiagnosticsToMutationResult<T extends LspEnrichab
     const files = [...new Set(getEventPaths(options.input, options.result.details).map((inputPath) => toAbsolutePath(inputPath, options.ctx.cwd)))].filter((file) => existsSync(file));
     if (files.length === 0) return options.result;
 
-    const manager = getGlobalLspManager();
     await Promise.all(files.map((file) => publishMissingLspSuggestion(options.ctx, file)));
-    const summaries = (await Promise.all(files.map((file) => manager.updateDiagnosticsForFile(options.ctx, file))))
+    const summaries = (await Promise.all(files.map((file) => sharedDiagnosticsForFile(options.ctx, file))))
       .filter((summary) => summary.trim());
 
     const summary = summaries.join("\n\n");
@@ -57,6 +56,6 @@ export async function appendLspDiagnosticsToMutationResult<T extends LspEnrichab
   }
 }
 
-export async function shutdownGlobalLspManager(): Promise<void> {
-  await getGlobalLspManager().shutdownAll();
+export async function shutdownGlobalLspManager(ctx?: Pick<ExtensionContext, "sessionManager">): Promise<void> {
+  await releaseSharedLsp(ctx);
 }

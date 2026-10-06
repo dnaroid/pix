@@ -70,6 +70,7 @@ not duplicate those; IDX document retrieval can find them independently.
 | [session-title-after-resource-command](./session-title-after-resource-command.md) | Session title after a leading resource command |
 | [session-quota-wait](./session-quota-wait.md) | Session quota wait with automatic/manual scheduled continuation |
 | [heads-up-observer](./heads-up-observer.md) | Experimental opt-in TUI/Desktop observer: bounded tool-less checks, evidence, feedback and session-attributed usage |
+| [desktop-btw](./desktop-btw.md) | Temporary tool-less side chat: composer menu, current parent context, independent cancellation and no transcript persistence |
 | [idx-startup-update](./idx-startup-update.md) | Keep `idx` current at pix startup |
 | [reload-context-inventory](./reload-context-inventory.md) | Reload/resource context inventory and tool-alias capability checks |
 | [clickable-markdown-links](./clickable-markdown-links.md) | Clickable wrapped markdown links |

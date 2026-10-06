@@ -8,7 +8,9 @@ process.emitWarning = () => {};
 const codingAgentIndex = import.meta.resolve("@earendil-works/pi-coding-agent");
 const { AgentSession, ModelRuntime } = await import("@earendil-works/pi-coding-agent");
 const { installContextInventoryHost } = await import("./context-inventory-host.js");
+const { installBtwHost, handleBtwPrompt } = await import("./btw-host.js");
 installContextInventoryHost(AgentSession);
+installBtwHost(AgentSession);
 const { installRpcQuestionRecovery } = await import("../../../dist/bundled-extensions/question/recovery.js");
 installRpcQuestionRecovery(AgentSession);
 
@@ -29,6 +31,8 @@ AgentSession.prototype._emit = function pixForkBoundaryEmit(event) {
 const PIX_PAUSE_MESSAGE = "\u0000pix:agent-control:pause";
 const PIX_CONTINUE_MESSAGE = "\u0000pix:agent-control:continue";
 const PIX_CLEAR_TODOS_MESSAGE = "\u0000pix:clear-todos";
+const PIX_LSP_CONTROL_PREFIX = "\u0000pix:lsp-control:";
+const PIX_BTW_RPC_PREFIX = "\u0000pix:btw:";
 const PIX_DCP_RUNTIME_STATS_SYMBOL = Symbol.for("pix.dcp.runtime-stats");
 
 // --- Anthropic API-key response-header usage capture -----------------------
@@ -469,6 +473,10 @@ async function handleQuotaControl(session, action, isCurrent) {
 
 const originalPrompt = AgentSession.prototype.prompt;
 AgentSession.prototype.prompt = async function pixPrompt(text, options) {
+	if (typeof text === "string" && text.startsWith(PIX_BTW_RPC_PREFIX)) {
+		handleBtwPrompt(this, text, options);
+		return;
+	}
 	if (text === PIX_PAUSE_MESSAGE) {
 		try {
 			requestPause(this);
@@ -499,6 +507,39 @@ AgentSession.prototype.prompt = async function pixPrompt(text, options) {
 		// The normal slash dispatcher reports handler errors as UI events and swallows
 		// them. Invoke the same handler directly so ACP receives a failed request.
 		await command.handler("", context);
+		options?.preflightResult?.("handled");
+		return;
+	}
+	if (text.startsWith(PIX_LSP_CONTROL_PREFIX)) {
+		const request = JSON.parse(text.slice(PIX_LSP_CONTROL_PREFIX.length));
+		if (!request || typeof request.requestId !== "string" || typeof request.action !== "string") {
+			throw new Error("Invalid LSP control request");
+		}
+		const runner = this.extensionRunner;
+		const command = runner?.getCommand("lsp-control");
+		if (!command) throw new Error("LSP control extension is unavailable in this session");
+		const baseContext = runner.createCommandContext();
+		let snapshot;
+		// SDK contexts share their UI object. Keep capture request-local and retain
+		// the SDK's lazy context getters and stale-instance checks.
+		const context = Object.defineProperties({}, {
+			...Object.getOwnPropertyDescriptors(baseContext),
+			ui: { enumerable: true, get: () => ({
+				...baseContext.ui,
+				setStatus(key, value) {
+					if (key === "pix:lsp" && typeof value === "string") {
+						try { snapshot = JSON.parse(value); } catch { snapshot = undefined; }
+						return;
+					}
+					return baseContext.ui.setStatus(key, value);
+				},
+			}) },
+		});
+		await command.handler(JSON.stringify({ action: request.action, ...(request.id === undefined ? {} : { id: request.id }), ...(request.root === undefined ? {} : { root: request.root }) }), context);
+		if (!snapshot || !Array.isArray(snapshot.servers) || !Array.isArray(snapshot.warnings)) {
+			throw new Error("LSP control command returned no snapshot");
+		}
+		this._emit({ type: "pix_lsp_response", requestId: request.requestId, snapshot });
 		options?.preflightResult?.("handled");
 		return;
 	}

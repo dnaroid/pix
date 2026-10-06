@@ -60,12 +60,10 @@ function waitForChildExit(child: ChildProcessWithoutNullStreams, timeoutMs: numb
 }
 
 export async function terminateChild(child: ChildProcessWithoutNullStreams): Promise<void> {
-  if (!isChildRunning(child)) return;
-
   if (!killChild(child, "SIGTERM")) return;
-  const exited = await waitForChildExit(child, SHUTDOWN_TERM_TIMEOUT_MS);
-  if (exited || !isChildRunning(child)) return;
-
+  // The detached group can survive its leader (wrappers, SIGTERM-resistant
+  // workers). Always sweep it after the grace period, even if the leader exits.
+  await waitForChildExit(child, SHUTDOWN_TERM_TIMEOUT_MS);
   killChild(child, "SIGKILL");
   await waitForChildExit(child, SHUTDOWN_KILL_TIMEOUT_MS);
 }

@@ -14,6 +14,7 @@ import { createRegistryStore } from "./registry.svelte";
 type DesktopProjectServicesOptions = {
   client: () => AcpClient | null;
   workspace: () => string;
+  revealProjectEntry?: (path: string) => Promise<void>;
   operationRunning: () => boolean;
   sessionWorkspace: (sessionId: string) => string | undefined;
   transcript: () => TranscriptState;
@@ -42,6 +43,7 @@ export function createDesktopProjectServices(options: DesktopProjectServicesOpti
   });
   const preview = createPreviewStore({
     workspace: options.workspace,
+    revealProjectEntry: options.revealProjectEntry,
     loadExternalEditor: async () => {
       await projectWorkspace.loadPreferences(options.workspace());
       return projectWorkspace.externalEditor;

@@ -10,6 +10,10 @@
 - Governing spec: [brainstorm](../../specs/brainstorm.md)
 - Replaces / replaced by: none; extends [0009](0009-five-round-brainstorm.md)
   and [0010](0010-audit-council-modes.md) without changing their lifecycle or modes.
+  Repo-loader placement is superseded by [0060](0060-subagent-read-only-repo-tools.md);
+  web-loader placement is superseded by [0061](0061-subagent-scoped-ast-web-tools.md);
+  other council research decisions remain in force. The original rationale below
+  is retained as history.
 
 ## Context
 

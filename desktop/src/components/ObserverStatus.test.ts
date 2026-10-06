@@ -8,10 +8,10 @@ describe("Observer icon", () => {
   function html(patch: Partial<HeadsUpSnapshot> = {}, runtimeReady = true) {
     return render(ObserverStatus, { props: { sessionId: "session", runtimeReady, snapshot: { ...snapshot, ...patch } } }).body;
   }
-  it("uses only binoculars, with accessible status but no visible text or badge", () => {
+  it("uses only a telescope, with accessible status but no visible text or badge", () => {
     const body = html();
     expect(body).toContain('aria-label="Observer waiting ·');
-    expect(body).toContain("lucide-binoculars");
+    expect(body).toContain("lucide-telescope");
     expect(body).not.toContain("<span");
     expect(body).toContain("text-primary");
     expect(body).not.toContain("animate-pulse");
@@ -21,7 +21,7 @@ describe("Observer icon", () => {
     expect(html({ enabled: false, phase: "off" })).toContain("text-muted-foreground/70");
     expect(html({}, false)).toContain("text-muted-foreground/70");
   });
-  it("shows a static amber binoculars and accessible limit detail without a native tooltip", () => {
+  it("shows a static amber telescope and accessible limit detail without a native tooltip", () => {
     const body = html({ phase: "limited" });
     expect(body).toContain("text-tool-warning");
     expect(body).toContain('aria-label="Достигнут лимит проверок ·');
@@ -32,9 +32,9 @@ describe("Observer icon", () => {
     expect(html({ phase: "limited", enabled: false })).toContain("text-muted-foreground/70");
     expect(html({ phase: "limited" }, false)).not.toContain("text-tool-warning");
   });
-  it("pulses the binoculars only during a real check, respecting reduced motion", () => {
+  it("pulses the telescope only during a real check, respecting reduced motion", () => {
     const body = html({ phase: "checking" });
-    expect(body).toContain("lucide-binoculars");
+    expect(body).toContain("lucide-telescope");
     expect(body).toContain("animate-pulse motion-reduce:animate-none");
     expect(body).not.toContain("animate-spin");
     expect(html({ phase: "checking", enabled: false })).not.toContain("animate-pulse");

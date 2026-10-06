@@ -1,4 +1,5 @@
 import type { ContentBlock, SessionConfigOption, SessionUpdate } from "@agentclientprotocol/sdk";
+import { BTW_METHOD, parseBtwCommand, parseBtwState, type BtwCommand, type BtwState } from "../../../acp/src/btw/contract";
 import { isAgentControlState, type AgentControlAction } from "./agent-control";
 import {
   parseRegistryDiff,
@@ -8,7 +9,7 @@ import {
   type RegistryResourceType,
   type RegistrySnapshot,
 } from "./registry";
-import { isRecord, parseClaudeQuotaRefresh, parseQueueState, parseQueuedUserMessage, parseRuntimeStatus, parseSessionUsageStatus } from "./acp-response-parsers";
+import { isRecord, parseClaudeQuotaRefresh, parseLspSnapshot, parseQueueState, parseQueuedUserMessage, parseRuntimeStatus, parseSessionUsageStatus } from "./acp-response-parsers";
 import type {
   AgentControlStatus,
   AutocompleteSettings,
@@ -18,6 +19,8 @@ import type {
   ForkMessage,
   LazySessionHistory,
   LazySessionImage,
+  LspAction,
+  LspSnapshot,
   PromptFileImage,
   QueuedUserMessage,
   QueueAction,
@@ -46,6 +49,10 @@ function isStopReason(value: unknown): value is NonNullable<AgentControlStatus["
 
 export class AcpPixExtensions {
   constructor(private readonly request: AcpRequest) {}
+
+  async btw(sessionId: string, command: BtwCommand): Promise<BtwState> {
+    return parseBtwState(await this.request<unknown>(BTW_METHOD, { ...parseBtwCommand(command), sessionId }));
+  }
 
   async draftConfig(
     cwd: string,
@@ -219,6 +226,20 @@ export class AcpPixExtensions {
    */
   async claudeQuotaRefresh(sessionId: string): Promise<ClaudeQuotaRefreshStatus> {
     return parseClaudeQuotaRefresh(await this.request<unknown>("pix/session/claude_quota_refresh", { sessionId }, 180_000));
+  }
+
+  async lspControl(
+    sessionId: string,
+    action: LspAction = "status",
+    id?: string,
+    root?: string,
+  ): Promise<LspSnapshot> {
+    return parseLspSnapshot(await this.request<unknown>("pix/session/lsp_control", {
+      sessionId,
+      action,
+      ...(id === undefined ? {} : { id }),
+      ...(root === undefined ? {} : { root }),
+    }, null));
   }
 
   async bash(

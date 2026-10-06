@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # Desktop IDX panel
 
 <!-- markdownlint-disable MD013 -->
@@ -32,6 +37,26 @@ Expose installed IDX v2 repository intelligence in Pix Desktop with typed querie
 - Context offers bounded budget and spec/code/test result counts. Advanced inspections are restricted to architecture, structure, ast, explain, deps with typed targets and limits; AST file targets must be safe project-relative paths.
 - The Knowledge tab requires at least one explicit project-relative changed path before running `idx_audit`. Blank, absolute and traversing paths are rejected in the UI, with backend validation authoritative. The request contract is `{ workspace, paths: string[] }` returning `IdxCommandResult`; audit output is shown through `IdxOutput`, which validates candidate links before activation. In-flight results are invalidated on workspace change or path-list edits; stale errors/results cannot overwrite the current workspace.
 - **AI review** starts a fresh Desktop session for project knowledge review. Its prompt checks `idx knowledge dirty` before and after review, compares monitored active specs with their declared implementation/tests, and explicitly runs `idx knowledge acknowledge <spec-paths...>` only for genuinely reviewed specs with no unresolved drift (including accurate unchanged specs). Unreviewed specs, unresolved drift, unavailable sources, unsupported commands and other failures must be reported, not hidden by acknowledgment. A clean result may be claimed only after a successful final dirty check returns `no`; indexing/audit alone do not establish review. The panel itself does not acknowledge specs. It is not an IDX wiki command.
+- Global **AI review** aims to restore the entire knowledge base to verified clean
+  state, not merely complete an individual task audit. It does not consume the
+  changed-path field used by **Audit paths**. Its cleanup todo succeeds only on a
+  final complete exit-0 `idx knowledge dirty` result of `no`; a separate task audit
+  may pass while global cleanup remains blocked.
+- The prompt allows at most two review passes total (initial plus one corrective
+  pass only for identified, safely actionable, unblocked gaps). Stop early on
+  verified `no`. Do not poll for cleanliness or bypass the limit with repeated
+  commands, delegated loops or replacement sessions. Concurrent edits to a
+  reviewed spec/dependency invalidate review; do not acknowledge unstable work
+  or overwrite other agents' changes.
+- Escalate immediately for unstable concurrent sources, missing required sources,
+  review-blocking command failures/unsupported commands or unresolved product
+  decisions. Also escalate if the pass limit ends with dirty `yes`/`unknown` or
+  no safe corrective pass is available. Report global cleanup `blocked`, observed
+  dirty state (`unknown` for incomplete/failed checks), blockers or explicitly
+  unclassified dirtiness, reviewed/acknowledged paths, command errors/exit codes
+  and the user action needed. Defer the global cleanup todo without claiming
+  success, end the turn and resume only on explicit user instruction. This is a
+  model-facing instruction budget, not a runtime-enforced watchdog.
 
 ## Contracts and limits
 
@@ -39,7 +64,7 @@ Expose installed IDX v2 repository intelligence in Pix Desktop with typed querie
 - Code search accepts at most 50 files, document search at most 20, and context uses 200–8000 tokens. Backend canonicalizes the workspace and rejects uninitialized projects for non-init commands.
 - No wiki status, discovery, catalog, impact, or metadata mutation actions are supported by this panel.
 
-## Related files
+## Implementation
 
 - `desktop/src/components/IdxPanel.svelte`
 - `desktop/src/components/idx-panel-runtime-controller.svelte.ts`
@@ -47,10 +72,13 @@ Expose installed IDX v2 repository intelligence in Pix Desktop with typed querie
 - `desktop/src/components/idx-panel-audit-controller.svelte.ts`
 - `desktop/src/components/IdxOutput.svelte`
 - `desktop/src/lib/idx.ts`
-- `desktop/src/lib/idx.test.ts`
 - `desktop/src/app/project-actions.svelte.ts`
-- `desktop/src/app/project-actions.test.ts`
 - `desktop/src-tauri/src/lib.rs`
+
+## Tests
+
+- `desktop/src/lib/idx.test.ts`
+- `desktop/src/app/project-actions.test.ts`
 
 ## Verification
 
@@ -60,3 +88,5 @@ Expose installed IDX v2 repository intelligence in Pix Desktop with typed querie
 ## Decision
 
 [Sparse read-only sidebar health](../docs/decisions/0025-sidebar-health-polling.md).
+
+[Bounded global AI knowledge cleanup](../docs/decisions/0050-bounded-global-knowledge-cleanup.md).

@@ -10,6 +10,7 @@ import {
   formatResetDuration,
   isLatestRuntimeStatusRefresh,
   limitingRateWindow,
+  liveModelUsage,
   mergePushedContextUsage,
   mergePushedDcpTokensSaved,
   mergePushedModelUsage,
@@ -53,6 +54,13 @@ const headerRateUsage: ModelUsageStatus = {
 };
 
 describe("desktop runtime status helpers", () => {
+  it("drops banked credits from stale quota instead of presenting old grants as available", () => {
+    const stale = liveModelUsage({ ...freshQuotaUsage, stale: true, resetCredits: [{ title: "Full reset", count: 3 }], resetCreditsAvailableCount: 3 }, updatedAt);
+    expect(stale?.hourly).toEqual(freshQuotaUsage.hourly);
+    expect(stale?.stale).toBe(true);
+    expect(stale?.resetCredits).toBeUndefined();
+    expect(stale?.resetCreditsAvailableCount).toBeUndefined();
+  });
   it("matches the TUI context and remaining-limit thresholds", () => {
     expect(contextUsageTone(30)).toBe("success");
     expect(contextUsageTone(31)).toBe("warning");

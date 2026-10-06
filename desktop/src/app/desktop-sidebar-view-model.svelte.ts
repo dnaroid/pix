@@ -1,6 +1,7 @@
 import type { ComponentProps } from "svelte";
 import type { SessionConfigOption } from "@agentclientprotocol/sdk";
 import DesktopSidebar from "../components/DesktopSidebar.svelte";
+import type { AcpClient } from "../lib/acp-client";
 import ProjectSwitcher from "../components/ProjectSwitcher.svelte";
 import type { createAttachmentDraftController } from "./attachment-drafts";
 import type { createGitAssist } from "./git-assist";
@@ -20,6 +21,8 @@ type ProjectSwitcherProps = Omit<ComponentProps<typeof ProjectSwitcher>, "varian
 
 export function createDesktopSidebarViewModel(options: {
   workspace: () => string;
+  client: () => AcpClient | null;
+  lspSessionId: () => string | null;
   configOptions: () => SessionConfigOption[];
   canUseSession: () => boolean;
   registryReady: () => boolean;
@@ -69,6 +72,8 @@ export function createDesktopSidebarViewModel(options: {
 
   const props = $derived.by<SidebarProps>(() => ({
     workspace: options.workspace(),
+    lspClient: options.client(),
+    lspSessionId: options.lspSessionId(),
     settingsConfigOptions: options.configOptions(),
     tasks: options.projectTasks.document.tasks,
     loading: options.projectTasks.loading,
@@ -126,6 +131,7 @@ export function createDesktopSidebarViewModel(options: {
       onResolve: () => void options.gitAssist.resolveReviewInNewSession(),
       onLoadDetails: () => void options.git.loadDetails(),
       onRepositoryAction: options.git.repositoryAction,
+      onSaveIdentity: options.git.saveIdentity,
     },
     projectDocuments: options.projectDocuments.snapshot,
     recentProjects: options.projectWorkspace.recentProjects,

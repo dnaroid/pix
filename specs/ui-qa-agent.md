@@ -153,7 +153,8 @@ invisible to accessibility automation or leaving it behind after QA. On macOS,
 `wait-window --pgid` services the AppKit run loop between polls so
 NSWorkspace can register a GUI descendant launched after waiting begins.
 In source/development runs, the bundled macOS driver is built into a
-project-stable, private `.pi/ui-qa/helpers/macos-accessibility` executable
+user-global, private
+`~/Library/Application Support/Pix/ui-qa/helpers/macos-accessibility` executable
 rather than the per-agent workspace. Its SHA-256 sidecar is checked under an
 exclusive build lock; changed
 source is compiled and signed in a private staging file, verified, then
@@ -166,6 +167,19 @@ designated requirement pins the code hash, so an updated build requires a new
 user TCC grant even though the executable path and signing identifier stay
 constant. Permissions belong to the helper identity; approval of Pix Desktop
 alone is not proof that the helper's doctor sees them.
+The home is resolved from the OS account rather than an overridden HOME.
+The installation and lock are shared across projects; project Registry cleanup
+does not reach them. A matching private legacy project binary may be copied and
+signature-verified unchanged, never moved or symlinked; otherwise the bundled
+source is compiled. A corrupt or unsafe global cache fails closed. No old cache
+or TCC record is removed automatically. This changes source/development storage,
+not release helper selection.
+Only an explicit user/parent permission setup invokes `doctor --prompt`; normal
+runner probes use plain `doctor`. Requests may return missing while approval is
+pending and do not grant permission. Recheck from a fresh process after approval;
+if a dialog does not appear, manually enable the exact reported helper path in
+System Settings. Stable storage does not guarantee TCC grants survive moving or
+re-signing the binary.
 An installed macOS release instead selects the signed
 `helpers/macos-accessibility` from its own payload, both in portable TUI and
 Desktop's `pix-runtime`. The release builds it before copying the TUI payload
@@ -176,8 +190,8 @@ does not compile a replacement in the current project or require Xcode tools.
 With a certificate-based designated requirement, the helper can retain its
 TCC identity across release updates; the ad-hoc release fallback has a
 code-hash requirement and may need renewed user approval after updates.
-Windows uses the owned launcher PID as a process-tree root: UI Automation resolves the
-actual GUI descendant before interaction, and cleanup stays scoped to the
+Windows uses the owned launcher PID as a process-tree root: UI Automation resolves
+the actual GUI descendant before interaction, and cleanup stays scoped to the
 launcher plus that correlated GUI root. Launch environments allow bounded
 `PI_UI_QA_*` bootstrap
 variables in addition to the generic environment allowlist; the runner always
@@ -213,6 +227,11 @@ replace the inherited body. Prompts are guidance, not immutable enforcement;
 origin/auth/path/evidence checks continue to be implemented by the runner.
 
 ## Preserved contracts
+
+- Pix Desktop's project workflow uses an isolated runner-owned launch of a
+  pinned successful `watch:all` artifact for ordinary UI QA. This is a
+  project-script contract, not a new generic backend or a reason to restart
+  the parent's working Desktop. See `specs/desktop-qa-isolated-launch.md`.
 
 - macOS window-wait failures retain the last application/window lookup error,
   including the matched application identity when available, rather than hiding
@@ -295,6 +314,7 @@ origin/auth/path/evidence checks continue to be implemented by the runner.
 - `external/pi-tools-suite/test/async-subagents/ui-qa-runner.test.ts`
 - `external/pi-tools-suite/test/async-subagents/ui-qa-tui-environment.test.ts`
 - `external/pi-tools-suite/test/async-subagents/ui-qa-macos-helper-cache.test.ts`
+- `external/pi-tools-suite/test/async-subagents/ui-qa-macos-helper-cache-storage.test.ts`
 - `external/pi-tools-suite/test/async-subagents/ui-qa-macos-release-helper.test.ts`
 - `external/pi-tools-suite/test/async-subagents/ui-qa-desktop.e2e.test.ts`
 

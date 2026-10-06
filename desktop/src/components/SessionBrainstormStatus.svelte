@@ -45,7 +45,7 @@
     {/snippet}
     {#snippet children()}
       <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard access to scrollable council details) -->
-      <div class="max-h-[60vh] overflow-auto rounded-md border border-border bg-popover p-2 text-popover-foreground shadow-md" tabindex="0" role="region" aria-label="Council details">
+      <div class="rounded-md border border-border bg-popover p-2 text-popover-foreground shadow-md" tabindex="0" role="region" aria-label="Council details">
       {#each runs as run (run.runId)}
         <section class="space-y-1 py-1" aria-label={run.topic}>
           <div class="break-words font-medium">{run.topic}</div>

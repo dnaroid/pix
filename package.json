@@ -60,6 +60,7 @@
     "link:pix": "npm link --silent",
     "watch:pix": "npm run link:pix --silent && node scripts/watch-pix.mjs",
     "watch:all": "node scripts/watch-all.mjs",
+    "qa:desktop": "node scripts/qa-desktop.mjs",
     "rebuild:all": "npm run build:desktop",
     "check": "npm run check:inner",
     "precheck:inner": "npm run generate-schemas --silent",

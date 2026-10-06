@@ -12,6 +12,7 @@ import type {
   SessionUpdate,
   SetSessionConfigOptionResponse,
 } from "@agentclientprotocol/sdk";
+import type { BtwCommand, BtwState } from "../../../acp/src/btw/contract";
 import {
   PIX_SESSION_STATE_METHOD,
   parseSessionStateNotification,
@@ -33,6 +34,8 @@ import type {
   ForkSessionResult,
   LazySessionHistory,
   LazySessionImage,
+  LspAction,
+  LspSnapshot,
   PromptFileImage,
   QueuedUserMessage,
   QueueAction,
@@ -61,6 +64,8 @@ export type {
   ForkSessionResult,
   LazySessionHistory,
   LazySessionImage,
+  LspAction,
+  LspSnapshot,
   ModelUsageLimitWindow,
   ModelUsageRefresh,
   ModelUsageResetCredit,
@@ -209,6 +214,10 @@ export class AcpClient {
     return this.pix.clearTodos(sessionId);
   }
 
+  btw(sessionId: string, command: BtwCommand): Promise<BtwState> {
+    return this.pix.btw(sessionId, command);
+  }
+
   userMessageAction(
     sessionId: string,
     entryId: string,
@@ -355,6 +364,10 @@ export class AcpClient {
 
   claudeQuotaRefresh(sessionId: string): Promise<ClaudeQuotaRefreshStatus> {
     return this.pix.claudeQuotaRefresh(sessionId);
+  }
+
+  lspControl(sessionId: string, action: LspAction = "status", id?: string, root?: string): Promise<LspSnapshot> {
+    return this.pix.lspControl(sessionId, action, id, root);
   }
 
   cancel(sessionId: string): Promise<void> {

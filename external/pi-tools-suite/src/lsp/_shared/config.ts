@@ -147,6 +147,7 @@ function binariesForLsp(items: LspServerConfig[]): string[] {
 
 export async function loadLspConfig(ctx: ExtensionContext): Promise<LoadedConfig<LspServerConfig>> {
   const warnings: string[] = [];
+  let trustRequired = false;
   const layers: ConfigLayer<LspServerConfig>[] = [];
   const piConfigDir = getPiConfigDir();
   const globalPaths = [
@@ -168,6 +169,7 @@ export async function loadLspConfig(ctx: ExtensionContext): Promise<LoadedConfig
     try {
       const projectLayer = await readJsoncLayer({ scope: "project", filePath: projectPath, selectConfig: extractLspConfig, parseItems: parseLspItems });
       if (projectLayer) {
+        trustRequired = true;
         const decision = await askProjectConfigTrust({
           ctx,
           kind: "lsp",
@@ -175,7 +177,10 @@ export async function loadLspConfig(ctx: ExtensionContext): Promise<LoadedConfig
           hash: projectLayer.hash,
           binaries: binariesForLsp(projectLayer.items),
         });
-        if (decision.trusted) layers.push(projectLayer);
+        if (decision.trusted) {
+          trustRequired = false;
+          layers.push(projectLayer);
+        }
         else warnings.push(`${projectLayer.path}: ${decision.reason ?? "project-local config rejected"}`);
       }
     } catch (error) {
@@ -183,5 +188,5 @@ export async function loadLspConfig(ctx: ExtensionContext): Promise<LoadedConfig
     }
   }
 
-  return { items: mergeLayers(layers), layers, warnings };
+  return { items: mergeLayers(layers), layers, warnings, trustRequired };
 }

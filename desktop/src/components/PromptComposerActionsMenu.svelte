@@ -1,6 +1,7 @@
 <script lang="ts">
   import CalendarClock from "@lucide/svelte/icons/calendar-clock";
   import History from "@lucide/svelte/icons/history";
+  import MessagesSquare from "@lucide/svelte/icons/messages-square";
   import GitFork from "@lucide/svelte/icons/git-fork";
   import ListTodo from "@lucide/svelte/icons/list-todo";
   import Pause from "@lucide/svelte/icons/pause";
@@ -23,6 +24,8 @@
     canFork,
     canScheduleContinuation,
     onOpenHistory,
+    canOpenBtw = false,
+    onOpenBtw,
     onEnhance,
     onCreateTask,
     onDefer,
@@ -45,6 +48,8 @@
     canFork: boolean;
     canScheduleContinuation: boolean;
     onOpenHistory: () => void;
+    canOpenBtw?: boolean;
+    onOpenBtw?: () => void;
     onEnhance: () => void;
     onCreateTask: () => void;
     onDefer: () => void;
@@ -63,6 +68,14 @@
   aria-label="Composer actions"
   onkeydown={onKeydown}
 >
+  <button
+    class="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-xs text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+    type="button" role="menuitem" tabindex="-1" disabled={!canOpenBtw}
+    onclick={onOpenBtw} data-composer-menu-btw
+  >
+    <MessagesSquare class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+    <span>Side question (BTW)</span>
+  </button>
   <button
     class="flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left text-xs text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
     type="button"

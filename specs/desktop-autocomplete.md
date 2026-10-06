@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # Desktop prompt autocomplete
 
 <!-- markdownlint-disable MD013 -->
@@ -79,3 +84,11 @@ Give Pix Desktop the same best-effort LLM prompt autocomplete behavior as the TU
 - Confirmed by desktop structure: the composer owns caret, selection, keyboard,
   resize, and scroll behavior; the autocomplete/session services provide the
   ACP request and active-session context through the composition root.
+
+## Implementation
+
+- `desktop/src/lib/autocomplete.ts`
+
+## Tests
+
+- `desktop/src/lib/autocomplete.test.ts`

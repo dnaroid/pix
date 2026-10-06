@@ -1,5 +1,5 @@
 <script lang="ts">
-  import Binoculars from "@lucide/svelte/icons/binoculars";
+  import Telescope from "@lucide/svelte/icons/telescope";
   import SettingsSwitch from "./settings/SettingsSwitch.svelte";
   import type { HeadsUpSnapshot } from "../lib/heads-up";
   import { observerDuration, observerPopoverPosition, observerResultLabel, observerStatus, observerTime } from "../lib/observer-status";
@@ -21,7 +21,9 @@
 
   const componentId = $props.id();
   const popupId = componentId + "-observer";
+  const diagnosticsId = componentId + "-observer-details";
   let open = $state(false);
+  let showDiagnostics = $state(false);
   let trigger = $state<HTMLButtonElement | null>(null);
   let popup = $state<HTMLDialogElement | null>(null);
   let owner = $state<{ sessionId: string | null; instanceId?: string } | null>(null);
@@ -62,6 +64,7 @@
     if (open) return;
     now = Date.now();
     owner = { sessionId, ...(snapshot ? { instanceId: snapshot.instanceId } : {}) };
+    showDiagnostics = false;
     open = true;
     reposition();
     if (sessionId && runtimeReady) onRequestSnapshot();
@@ -109,7 +112,7 @@
     aria-haspopup="dialog" aria-expanded={open} aria-controls={popupId} onclick={togglePopup} onkeydown={keydown}
     class={["grid h-6 w-6 place-items-center rounded-sm transition-colors hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-ring",
       iconColor]}>
-    <Binoculars class={["h-4 w-4", status.kind === "checking" && "animate-pulse motion-reduce:animate-none"]} aria-hidden="true" />
+    <Telescope class={["h-4 w-4", status.kind === "checking" && "animate-pulse motion-reduce:animate-none"]} aria-hidden="true" />
   </button>
 
   {#if open}
@@ -118,7 +121,7 @@
       class="fixed z-50 m-0 overflow-visible border-0 bg-transparent p-0 text-left text-popover-foreground focus:outline-none">
       <div class="overflow-y-auto rounded-md border border-border bg-popover shadow-lg" style:max-height={`${position.maxHeight}px`}>
       <div class="flex items-start gap-2 border-b border-border px-3 py-2.5">
-        <Binoculars class="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+        <Telescope class="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
         <div class="min-w-0 flex-1"><h2 class="text-sm font-medium">{status.label}</h2><p class="mt-0.5 text-xs leading-4 text-muted-foreground">{status.detail}</p></div>
       </div>
       <div class="space-y-3 px-3 py-3 text-xs">
@@ -129,7 +132,17 @@
         {#if snapshot}
           <dl class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 leading-4">
             <dt class="text-muted-foreground">Last check</dt><dd>{snapshot.details ? observerTime(snapshot.details.lastCheck?.finishedAt ?? snapshot.details.lastCheck?.startedAt ?? null) : "Unavailable in this runtime"}</dd>
-            <dt class="text-muted-foreground">Result</dt><dd>{snapshot.details ? observerResultLabel(snapshot.details.lastCheck) : "Unavailable in this runtime"}{snapshot.details?.lastCheck?.durationMs != null ? ` · ${observerDuration(snapshot.details.lastCheck.durationMs)}` : ""}</dd>
+            <dt class="text-muted-foreground">What it found</dt><dd>{snapshot.details ? observerResultLabel(snapshot.details.lastCheck) : "No check details available"}</dd>
+          </dl>
+          <button type="button" aria-expanded={showDiagnostics} aria-controls={diagnosticsId}
+            onclick={() => showDiagnostics = !showDiagnostics}
+            class="rounded-sm text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-ring">
+            {showDiagnostics ? "Hide technical details" : "Technical details"}
+          </button>
+          {#if showDiagnostics}
+          <dl id={diagnosticsId} class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 border-t border-border pt-3 leading-4">
+            {#if snapshot.reason}<dt class="text-muted-foreground">Runtime reason</dt><dd class="min-w-0 break-words">{snapshot.reason}</dd>{/if}
+            <dt class="text-muted-foreground">Check duration</dt><dd>{observerDuration(snapshot.details?.lastCheck?.durationMs ?? null)}</dd>
             <dt class="text-muted-foreground">New turns</dt><dd>{snapshot.details?.newTurns ?? "Unavailable"}</dd>
             <dt class="text-muted-foreground">Checks</dt><dd>{snapshot.details ? `${snapshot.details.checksInWindow} in the past hour · ` : ""}{snapshot.checks} total</dd>
             <dt class="text-muted-foreground">Input used</dt><dd>{snapshot.details ? `${snapshot.details.inputCharsInWindow.toLocaleString()} chars in the past hour` : "Unavailable"}</dd>
@@ -141,6 +154,7 @@
               <dt class="text-muted-foreground">New findings</dt><dd>{snapshot.details?.discoveryMultiplier}× interval after negative feedback. Existing-card reviews and Check now are not slowed.</dd>
             {/if}
           </dl>
+          {/if}
         {:else}
           <p class="leading-4 text-muted-foreground">{sessionId ? "No Observer status has been received. A new or reloaded session may be needed." : "Start a session to enable Observer. You can set defaults in Settings."}</p>
         {/if}

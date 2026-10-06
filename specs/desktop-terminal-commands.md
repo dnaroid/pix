@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # Desktop terminal commands (`!` / `!!`)
 
 <!-- markdownlint-disable MD013 -->
@@ -64,3 +69,11 @@ Bring the Pix TUI's two bang-command modes to Desktop using the matching Desktop
 - Importing the root renderer's terminal command controller into Desktop or ACP.
 - Treating `!` / `!!` as ordinary model prompts or ACP slash commands.
 - Reimplementing a second Desktop PTY/terminal stack specifically for `!!`.
+
+## Implementation
+
+- `desktop/src/lib/terminal-commands.ts`
+
+## Tests
+
+- `desktop/src/lib/terminal-commands.test.ts`

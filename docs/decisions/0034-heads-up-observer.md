@@ -91,6 +91,24 @@ model. Reconsider persistence and scheduling if resets or context omissions harm
 the experiment. A production rollout or any observer-driven action needs a new
 explicit decision; passing deterministic tests alone is not sufficient.
 
+## Desktop friendly presentation follow-up — 2026-10-05
+
+Status: accepted; the user requested friendlier Observer output after approving
+the Telescope icon (Eye is reserved for the agent; Radar was rejected).
+The [presentation spec](../../specs/heads-up-observer.md#presentation-and-feedback)
+governs the current popup.
+
+Decision: show plain-language status and last-check outcome first; move raw
+runtime reasons, resource counters, duration and feedback statistics behind a
+keyboard-reachable Technical details disclosure, collapsed on each opening.
+The screenshot provided in the conversation showed a dense diagnostics table;
+reduced scanning effort is the design intent, not a measured usability result.
+Keeping everything visible was rejected as overly technical; removing metrics
+entirely would hide useful diagnostics. This changes presentation only, not
+cadence, budgets, inference or controls. No-finding wording must not imply the
+work is correct, and waiting copy must not promise a scheduled check. Revisit if
+users need persistent diagnostics or localized UI copy.
+
 ## Desktop controls follow-up — 2026-10-04
 
 The user explicitly requested and approved a permanent statusbar indicator with

@@ -45,6 +45,7 @@ type PromptSubmitOptions = {
   reloadResources: (options?: { echo?: boolean }) => Promise<void>;
   forkConversation: (entryId?: string) => Promise<void>;
   openInteractiveTerminal: (command: string) => void | Promise<void>;
+  openBtw?: (sessionId: string, question?: string) => void | Promise<void>;
   closeProjectSelector: () => void;
   closeSessionSelector: () => void;
   applyModelSlashCommand: (value: string) => void | Promise<void>;
@@ -85,6 +86,10 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
     if (initialDraftKey !== options.attachmentDraftKey()) return;
     const text = options.promptText().trim();
     const attachments = options.promptAttachments();
+    if (/^\/btw(?:\s|$)/i.test(text) && attachments.length > 0) {
+      options.reportError(new Error("BTW accepts text excerpts in its own pane; the main attachments were kept."));
+      return;
+    }
     let sessionId = options.activeSessionId();
     let draftKey = options.attachmentDraftKey();
     let draftGeneration = options.attachmentGeneration();
@@ -122,6 +127,17 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
       && (options.sessionHistoryLoading() || !options.sessionRuntimeReady(sessionId))) return;
     if (desktopCommand) {
       switch (desktopCommand.kind) {
+        case "btw": {
+          if (!sessionId || !options.openBtw) { options.reportError(new Error("Open a conversation before using BTW.")); return; }
+          options.setPromptText("");
+          options.invalidateAttachmentDraft();
+          try { await options.openBtw(sessionId, desktopCommand.question || undefined); }
+          catch (error) {
+            if (options.activeSessionId() === sessionId && options.promptText() === "") options.setPromptText(text);
+            options.reportError(error);
+          }
+          return;
+        }
         case "new":
         case "new_tab":
           if (sessionId && options.promptRunning(sessionId)) return;

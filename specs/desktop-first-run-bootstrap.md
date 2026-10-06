@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # Desktop first-run bootstrap
 
 <!-- markdownlint-disable MD013 -->
@@ -63,3 +68,11 @@ Make a packaged Pix Desktop usable on a clean computer without requiring a syste
 - Rust tests verify managed IDX entry resolution/path confinement plus bundled/development runtime resolution.
 - Desktop typecheck and Vitest cover the surrounding frontend contracts; the full Desktop Rust suite remains the native gate.
 - Release packaging/smoke must continue to validate actual native artifacts on each supported target because bundled npm/native IDX dependencies are target-specific.
+
+## Implementation
+
+- `desktop/src-tauri/src/desktop_bootstrap.rs`
+
+## Tests
+
+- `desktop/src-tauri/src/desktop_bootstrap.rs`

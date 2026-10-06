@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # lsp trust & command execution (as-is spec)
 
 <!-- markdownlint-disable MD013 MD022 MD032 -->
@@ -32,16 +37,30 @@ trust decision; global config servers run with no gate. `[confirmed by code]`
 - Only the **project** layer is trust-gated, checked **after** the file is parsed but **before** its items are merged. `[confirmed by code: config.ts 156-168]`
 - The **entire raw file text** is hashed with SHA-256 (`sha256(raw)`). Hash covers the full file (comments, formatting, non-LSP keys all count). `[confirmed by code: config.ts 106-108]`
 - Decision outcomes: **Trust once** (in-process session memory only), **Trust always** (persisted to disk), **Reject**. `[confirmed by code: trust.ts 79-91]`
-- **Non-interactive mode** (`!ctx.hasUI`): project config is **silently rejected** — no prompt, no execution (a warning string is added). `[confirmed by code: trust.ts 65-67]`
+- **Non-interactive mode** (`!ctx.hasUI`): existing Trust once/Trust always decisions are honored; an untrusted hash is rejected without prompting (a warning string is added). `[confirmed by code: trust.ts askProjectConfigTrust]`
+- Config loading also returns `trustRequired` independently of warning text.
+  It is true for a project layer awaiting/rejected trust (including a failed
+  trust check), false when no trust gate applies or the layer is approved.
+  Runtime monitors use this flag for trust advice, not process controls.
+  They never prompt for trust; execution retains the normal trust gate.
+- With [project-shared runtime ownership](lsp-runtime-control.md), each requesting
+  Pi process performs this gate before sending an approved config snapshot to
+  the broker. Trust once does not propagate to another Pi process. A caller may
+  inspect or Stop an already-owned shared server without permission to Start it.
 
 ### Command resolution & execution
 - Each `LspServerConfig` `bin`/`args`/`cwd`/`env` is resolved via template substitution (`{root}`, `{file}`, `{relFile}`, …) and path expansion (`~` → `$HOME`, relative → absolute). `[confirmed by code: paths.ts resolveCommand, createPathPlaceholders]`
 - `bin`: absolute → as-is; contains `/` → relative to `root`; otherwise `$PATH` lookup. **No validation** that the binary is within the project or a safe location. `[confirmed by code: paths.ts resolveExecutable, resolveWorkingDirectory]`
-- Spawned via `child_process.spawn` with `shell:false`, `detached:true` (POSIX), `stdio:pipe`. `env` from config is **merged into** `process.env` (`{...process.env, ...command.env}`). `[confirmed by code: client.ts 88-93]`
+- Spawned with `shell:false`, `stdio:pipe`; on POSIX a detached supervisor owns the server/wrapper process group and sweeps it on owner-input EOF or server exit. `env` from config is **merged into** `process.env` (`{...process.env, ...command.env}`). See [runtime ownership and controls](lsp-runtime-control.md). `[confirmed by code: process-owner.ts]`
 - Execution is lazy, on first `ensureStarted()` (triggered by `openOrChange` / `ensureDocumentForTool`). `[confirmed by code: client.ts 45-52]`
 
 ### Entry point
-- `LspManager.matchingServers` → `loadLspConfig` → spawns as needed; called from `appendLspDiagnosticsToMutationResult` on `tool_result` for mutation tools (`apply_patch`, `ast_apply`, `Write`, `Edit`). `[confirmed by code: manager.ts 73; lib/lsp.ts 30-48]`
+- `appendLspDiagnosticsToMutationResult` runs on successful mutation `tool_result`
+  events (`apply_patch`, `ast_apply`, `Write`, `Edit`). The requesting process's
+  `sharedDiagnosticsForFile` loads trust-approved config, then sends it to the
+  project broker's `LspManager.matchingServers` and lazy diagnostics refresh.
+  Windows TUI retains local manager loading. `[confirmed by code: lib/lsp.ts;
+  shared-manager.ts; manager.ts]`
 
 ### Desktop missing-LSP onboarding
 - Successful mutation results also compare each changed file with the effective
@@ -87,27 +106,37 @@ trust decision; global config servers run with no gate. `[confirmed by code]`
 - **No project config**: no trust gate; only global servers used. `[confirmed by code]`
 
 ## Side effects
-- **Child processes spawned** by `LspClient.start()` (`detached:true`, `shell:false`); killed via SIGTERM→SIGKILL with process-group kill (`-child.pid`) on shutdown. `[confirmed by code: client.ts 88-93; child-process.ts 27-45]`
+- **Child processes spawned** by the shared project's `LspClient.start()` through the POSIX owned supervisor (`shell:false`); shutdown uses SIGTERM→SIGKILL and sweeps the process group even after its leader exits. The broker, not the originating tab, owns the supervisor input pipe. Broker death sweeps the group; tab departure releases a lease and only the last attached session tears down the shared runtime. Windows retains taskkill process-tree cleanup. See [project runtime contract](lsp-runtime-control.md).
 - **Trust file written** only on "Trust always" (`mkdir -p` parents). `[confirmed by code: trust.ts 88-90]`
 - **Commands executed** per config (full command line, cwd, env overlay). `[confirmed by code]`
 - **LSP server handlers** respond to `workspace/executeCommand`, `textDocument/diagnostic`, `workspace/configuration`, `client/registerCapability`, and `markdown/*` (parse, fs/readFile, fs/stat, fs/readDirectory). `[confirmed by code: client.ts registerHandlers]`
 - **Network**: none initiated by trust/config itself; LSP servers may use network. `[inferred]`
 
-## Related files
+## Implementation
 
 - `external/pi-tools-suite/src/lsp/_shared/trust.ts`
 - `external/pi-tools-suite/src/lsp/_shared/config.ts`
+- `external/pi-tools-suite/src/lsp/_shared/types.ts`
 - `external/pi-tools-suite/src/lsp/_shared/paths.ts`
 - `external/pi-tools-suite/src/lsp/_shared/runner.ts`
 - `external/pi-tools-suite/src/lsp/client.ts`
 - `external/pi-tools-suite/src/lsp/manager.ts`
 - `external/pi-tools-suite/src/lsp/child-process.ts`
+- `external/pi-tools-suite/src/lsp/process-owner.ts`
+- `external/pi-tools-suite/src/lsp/runtime-control.ts`
+- `external/pi-tools-suite/src/lsp/shared-manager.ts`
+- `external/pi-tools-suite/src/lsp/broker-server.ts`
 - `external/pi-tools-suite/src/lsp/index.ts`
 - `external/pi-tools-suite/src/lsp/onboarding.ts`
 - `external/pi-tools-suite/src/lib/lsp.ts`
 - `external/pi-tools-suite/src/config.ts`
+
+## Tests
+
 - `external/pi-tools-suite/test/lsp.test.ts`
 - `external/pi-tools-suite/test/lsp-onboarding.test.ts`
+- `external/pi-tools-suite/test/lsp-broker.test.ts`
+- `external/pi-tools-suite/test/lsp-process-owner.test.ts`
 
 ## Existing tests
 - `lsp.test.ts` `[confirmed by tests]`:
@@ -115,7 +144,8 @@ trust decision; global config servers run with no gate. `[confirmed by code]`
   - "persists Trust always decisions and does not cache rejects" — file persistence; rejects re-prompt every time.
   - "loads LSP servers from shared pi-tools-suite config" — global config read from `$HOME/.config/pi/pi-tools-suite.jsonc` (not `$PI_AGENT_DIR/lsp.json`).
   - Execution tests with a real fake LSP server script in temp, configured via **global** config: diagnostics, re-use, crash backoff, multi-root, tsserver/pull/dynamic diagnostics, stubborn-process kill, abort.
-  - **No test exercises the project-config trust gate with a real `<project>/.pi/pi-tools-suite.jsonc`** — all tests use `writeGlobalLspConfig`. `[confirmed by tests]`
+  - Runtime tests use real `<project>/.pi/pi-tools-suite.jsonc`: monitoring cannot prompt/spawn or expose mutation actions; execution and internal lifecycle tests preserve trust/shutdown races.
+- `lsp-process-owner.test.ts` exercises POSIX owner SIGKILL and stubborn descendant cleanup without relying on shutdown hooks.
 
 ## Gaps / risks
 ### Arbitrary command execution
@@ -138,16 +168,16 @@ trust decision; global config servers run with no gate. `[confirmed by code]`
 - Module-level `sessionTrustedHashes` is shared across all `loadLspConfig` calls in one process. `[confirmed by code]`
 
 ### Non-interactive silent rejection
-- Headless mode rejects project config with only a warning; the LLM gets no explanation of how to trust. `[confirmed by code]`
+- Headless mode rejects a not-yet-trusted project config with only a warning; previously cached or persisted trust is honored. `[confirmed by code]`
 
-### Detached processes
-- `detached:true` on POSIX → orphaned processes possible if the parent crashes without cleanup (exit/signal handlers mitigate normal termination only). `[confirmed by code]`
+### Owned processes
+- POSIX detached groups have a supervisor watching the project broker's LSP input pipe; broker death, server exit and supervisor failures sweep the group. Closing one tab cannot sweep another tab's shared server. Servers intentionally daemonizing into another group remain outside this guarantee. Windows normal shutdown uses taskkill; hard-kill ownership is not covered by the POSIX regression. See [runtime controls](lsp-runtime-control.md).
 
 ### `markdown/*` LSP requests
 - The client serves `markdown/fs/readFile|stat|readDirectory` from the server via `uriToFilePath` with **no path sandboxing** — an LSP server can read arbitrary files. `[confirmed by code]`
 
 ## Suggested verification
-1. Confirm no test exercises the project-local trust gate with a real project config file (only mocked `askProjectConfigTrust`). `[confirmed by tests]`
+1. Retain real project-local configuration coverage for read-only monitoring, execution trust and shutdown races. `[covered by runtime tests]`
 2. Add a test that `resolveExecutable` accepts absolute paths outside the project without restriction. `[confirmed by code]`
 3. Add a test that `markdown/fs/*` handlers have no path sandboxing. `[confirmed by code]`
 4. Determine whether `$PI_CONFIG_DIR` is attacker-controllable in the host (could redirect global config). `[unknown — depends on pi host]`

@@ -5,7 +5,7 @@
   import type { SessionConfigOption } from "@agentclientprotocol/sdk";
   import ModelProviderIcon from "./ModelProviderIcon.svelte";
   import { fuzzySearch } from "../lib/fuzzy";
-  import { activateModelPickerPopover } from "../lib/model-picker-popover";
+  import { activateModelPickerPopover, modelPickerPopoverPosition } from "../lib/model-picker-popover";
   import { pickerModelIndex, nextPickerThinking } from "../lib/model-picker-navigation";
   import { modelDisplayToneClass, thinkingLevelTone } from "../lib/model-display";
   import {
@@ -27,6 +27,8 @@
     onVisibleModelsChange,
     onClose,
     restoreFocus,
+    anchor,
+    selectionDescription = "Choose both, then apply them together to this session.",
   }: {
     configOptions: readonly SessionConfigOption[];
     visibleModelRefs?: readonly string[];
@@ -34,10 +36,12 @@
     defaultSelection?: ModelDefaultSelection;
     disabled?: boolean;
     onApply: (modelRef: string, thinkingLevel: string) => void | Promise<void>;
-    onSetDefault: (selection: ModelDefaultSelection) => void | Promise<void>;
+    onSetDefault?: (selection: ModelDefaultSelection) => void | Promise<void>;
     onVisibleModelsChange: (modelRefs: readonly string[]) => void | Promise<void>;
     onClose: () => void;
     restoreFocus?: () => void;
+    anchor?: HTMLButtonElement;
+    selectionDescription?: string;
   } = $props();
 
   const config = $derived(modelThinkingConfigState(configOptions));
@@ -57,7 +61,7 @@
   let initialized = false;
   let alive = false;
   let popover: ReturnType<typeof activateModelPickerPopover> | undefined;
-  let position = $state({ left: 8, bottom: 32, width: 520, maxHeight: 600 });
+  let position = $state<ReturnType<typeof modelPickerPopoverPosition>>({ left: 8, bottom: 32, width: 520, maxHeight: 600 });
   const thinkingByModel = new Map<string, string>();
 
   const pickerModels = $derived(visibilityMode
@@ -99,7 +103,7 @@
     for (const [modelRef, thinkingLevel] of Object.entries(rememberedThinkingByModel)) {
       thinkingByModel.set(modelRef, thinkingLevel);
     }
-    const initialModel = config.currentModel ?? config.models[0];
+    const initialModel = config.currentModel ?? filteredModels[0];
     if (initialModel) {
       selectedModelRef = initialModel.ref;
       selectedThinking = clampThinkingLevel(config.currentThinking, initialModel.thinkingLevels);
@@ -107,7 +111,7 @@
     }
     selectedIndex = pickerModelIndex(filteredModels, selectedModelRef, query, visibilityMode);
     initialized = true;
-    if (dialogElement) popover = activateModelPickerPopover(dialogElement, search, onClose, (next) => position = next);
+    if (dialogElement) popover = activateModelPickerPopover(dialogElement, search, onClose, (next) => position = next, anchor);
     return () => {
       alive = false;
       popover?.dispose();
@@ -314,7 +318,7 @@
   }
 
   async function setDefaultSelection(): Promise<void> {
-    if (!selectedModel || disabled || applying || savingDefault) return;
+    if (!onSetDefault || !selectedModel || disabled || applying || savingDefault) return;
     savingDefault = true;
     applyError = "";
     try {
@@ -334,7 +338,10 @@
   bind:this={dialogElement}
   open
   data-model-thinking-popover
-  style={`left:${position.left}px;bottom:${position.bottom}px;width:${position.width}px`}
+  style:left={`${position.left}px`}
+  style:top={position.top === undefined ? "auto" : `${position.top}px`}
+  style:bottom={position.top === undefined ? `${position.bottom}px` : "auto"}
+  style:width={`${position.width}px`}
   class="fixed z-50 m-0 max-w-none border-0 bg-transparent p-0 text-foreground"
   aria-labelledby="model-thinking-picker-title"
   onkeydown={handleKeydown}
@@ -350,7 +357,7 @@
           {visibilityMode ? "Manage visible models" : "Select model & thinking"}
         </h2>
         <p class="mt-0.5 text-xs text-muted-foreground">
-          {visibilityMode ? "Choose which models appear in both Pix model pickers." : "Choose both, then apply them together to this session."}
+          {visibilityMode ? "Choose which models appear in Desktop model pickers." : selectionDescription}
         </p>
       </div>
       <div class="flex shrink-0 items-center gap-1">
@@ -462,20 +469,12 @@
       </div>{/if}
     </div>{/if}
 
-    <footer class="flex min-w-0 items-center justify-between gap-3 border-t border-border/60 px-3.5 py-2.5">
-      <p class="min-w-0 truncate text-xs text-muted-foreground">
-        {#if visibilityMode}
+    <footer class="flex min-w-0 items-center justify-end gap-3 border-t border-border/60 px-3.5 py-2.5">
+      {#if visibilityMode}
+        <p class="mr-auto min-w-0 truncate text-xs text-muted-foreground">
           Changes save immediately · Shift+Tab returns to selection
-        {:else if selectedAuto}
-          <span class="text-tool-info">Auto</span>
-          <span class="px-1 text-muted-foreground/70">·</span>
-          <span>routes the first prompt</span>
-        {:else if selectedModel}
-          <span class={modelDisplayToneClass(selectedModel.tone)}>{selectedModel.name}</span>
-          <span class="px-1 text-muted-foreground/70">·</span>
-          <span class={modelDisplayToneClass(thinkingLevelTone(selectedThinking, selectedModel.thinkingLevels))}>{selectedThinking}</span>
-        {/if}
-      </p>
+        </p>
+      {/if}
       <div class="flex shrink-0 items-center gap-1.5">
         {#if visibilityMode}<button
           class="h-7 rounded-md px-2.5 text-xs text-destructive hover:bg-destructive/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
@@ -483,7 +482,7 @@
           disabled={disabled || applying || savingVisibility}
           onclick={() => void clearVisibleModels()}
         >Clear all</button>{/if}
-        {#if !visibilityMode}<button
+        {#if !visibilityMode && onSetDefault}<button
           class="h-7 rounded-md px-2.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
           type="button"
           disabled={disabled || applying || savingDefault || !selectedModel || selectedIsDefault}

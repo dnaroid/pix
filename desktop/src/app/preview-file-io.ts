@@ -72,7 +72,8 @@ export function createPreviewFileIo(options: PreviewStoreOptions, state: Preview
     if (!workspace) return false;
     const exists = await sharedFileValidation(
       `project\0${workspace}\0${path}`,
-      () => invoke<boolean>("project_file_exists", { workspace, path }),
+      async () => await invoke<boolean>("project_file_exists", { workspace, path })
+        || await invoke<boolean>("project_directory_exists", { workspace, path }),
     );
     return options.workspace() === workspace && exists;
   }
@@ -97,6 +98,14 @@ export function createPreviewFileIo(options: PreviewStoreOptions, state: Preview
     const isCurrent = () => state.fileLoadIsCurrent(generation) && options.workspace() === workspace;
     const mediaKind = attachmentKind(mimeTypeForName(path));
     try {
+      if (options.revealProjectEntry) {
+        const directory = await invoke<boolean>("project_directory_exists", { workspace, path });
+        if (!isCurrent()) return;
+        if (directory) {
+          await options.revealProjectEntry(path);
+          return;
+        }
+      }
       if (mediaKind !== "file") {
         const attachment = await resolveProjectMedia(path);
         if (!attachment || !isCurrent()) return;

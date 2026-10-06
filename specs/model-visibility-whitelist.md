@@ -19,6 +19,7 @@ Give Pix TUI and Desktop user-controlled model-picker whitelists while keeping t
 - `visibleModels` in TUI user `~/.config/pi/pix.jsonc` and Desktop user `~/.config/pi/pix-desktop.jsonc`.
 - The TUI combined model/thinking picker.
 - The Desktop combined model/thinking picker.
+- The temporary Desktop BTW side chat uses that same picker and preference.
 - Model-picker filtering only; session scope and model availability remain separate concepts.
 
 ## Behavior
@@ -31,6 +32,11 @@ Give Pix TUI and Desktop user-controlled model-picker whitelists while keeping t
 - Desktop exposes a `Manage` mode in the same model/thinking dialog. It shows the complete ACP model option catalog with visibility checkmarks, saves changes immediately to the Desktop profile's `visibleModels` key, and prevents hiding the current model. `Clear all` saves an empty whitelist; the current model remains visible only through the current-model safety rule. `Shift+Tab` also toggles the mode while focus is in model search.
 - Desktop visibility saves use a compare-and-swap user-config write and retry against the newest document when another Desktop config writer wins the race. The picker may be closed while a visibility save is in flight; reopening waits for that save before reading the whitelist so an older read cannot reopen stale picker state.
 - Normal model selection never removes entries from the runtime or ACP model catalog; the whitelist is a presentation filter only.
+- BTW shares the Desktop whitelist and Manage writes, but keeps its selected
+  model/effort in memory independently of the parent. Each picker preserves its
+  own current-model exception; an empty whitelist therefore shows the parent
+  model in the statusbar picker and the side model in BTW. Auto and parent
+  defaults are not exposed by BTW. See [the BTW contract](desktop-btw.md).
 
 ## Related files
 

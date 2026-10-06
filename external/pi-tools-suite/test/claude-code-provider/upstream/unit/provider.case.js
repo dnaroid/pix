@@ -704,6 +704,47 @@ process.stdin.on("end", () => {
     }
 });
 
+test("provider timeout diagnostics preserve caller and configured budgets", async () => {
+    const fake = await fakeClaude(`process.stdin.resume(); setInterval(() => process.stdout.write("\\n"), 20);`);
+    const totalKey = "PI_CLAUDE_CODE_PROVIDER_TOTAL_TIMEOUT_MS";
+    const idleKey = "PI_CLAUDE_CODE_PROVIDER_IDLE_TIMEOUT_MS";
+    const originalTotal = process.env[totalKey];
+    const originalIdle = process.env[idleKey];
+    process.env[idleKey] = "2000";
+    try {
+        for (const [configured, caller, source, budget] of [
+            [undefined, 200, "default", 200],
+            ["200", 1000, "environment", 200],
+            ["200", undefined, "environment", 200],
+        ]) {
+            if (configured === undefined) delete process.env[totalKey];
+            else process.env[totalKey] = configured;
+            const result = await createClaudeStream({ executable: fake.executable, version: "test", subscriptionType: "pro" })(model, context, { timeoutMs: caller }).result();
+            assert.equal(result.stopReason, "error");
+            // Idle is capped by the total budget; either timer may win for a silent child.
+            assert.match(result.errorMessage ?? "", /(?:request exceeded|produced no protocol activity).*; timeout budgets:/);
+            const metrics = await waitForRequestMetrics((entry) => entry.timeouts !== undefined);
+            const diagnostic = metrics.timeouts;
+            assert.equal(diagnostic.callerTotalMs, caller);
+            assert.equal(diagnostic.configuredTotalMs, configured === undefined ? 1800000 : Number(configured));
+            assert.equal(diagnostic.totalSource, source);
+            assert.equal(diagnostic.requestBudgetMs, budget);
+            assert.ok(diagnostic.effectiveTotalMs > 0 && diagnostic.effectiveTotalMs <= budget);
+            assert.equal(diagnostic.effectiveIdleMs, diagnostic.effectiveTotalMs);
+            assert.equal(diagnostic.effectiveReadyMs, diagnostic.effectiveTotalMs);
+            assert.equal(diagnostic.recoveryAttempt, false);
+            assert.ok(result.errorMessage.includes(JSON.stringify(diagnostic)));
+            assert.equal(metrics.cleanupComplete, true);
+            diagnostic.requestBudgetMs = -1;
+            assert.equal(getLastRequestMetrics().timeouts.requestBudgetMs, budget);
+        }
+    } finally {
+        if (originalTotal === undefined) delete process.env[totalKey]; else process.env[totalKey] = originalTotal;
+        if (originalIdle === undefined) delete process.env[idleKey]; else process.env[idleKey] = originalIdle;
+        await rm(fake.dir, { recursive: true, force: true });
+    }
+});
+
 test("provider aborts and returns an aborted terminal event", async () => {
     const fake = await fakeClaude(`
 process.stdin.resume();

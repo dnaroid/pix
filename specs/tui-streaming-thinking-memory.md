@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # TUI streaming-thinking memory growth
 
 Status: fixed and regression-covered.
@@ -120,3 +125,11 @@ Alternatively, the
 [external memory/freeze profiler](tui-external-memory-profiler.md) can collect
 RSS and macOS stack/map evidence independently. It is diagnostic instrumentation,
 not evidence that the streaming-thinking issue explains every TUI recurrence.
+
+## Implementation
+
+- `src/app/rendering/conversation-entry-renderer.ts`
+
+## Tests
+
+- `tests/session-event-controller.test.ts`

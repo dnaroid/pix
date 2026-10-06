@@ -175,9 +175,14 @@ current-session model availability.
   dependencies/permissions or unsupported platforms return `BLOCKED`. The agent
   must not install UI automation dependencies, change OS privacy/accessibility
   permissions, disable sandboxing, or operate unrelated user windows.
-- In source/development runs, the macOS helper lives at the stable per-project path
-  `.pi/ui-qa/helpers/macos-accessibility`, outside each agent's ephemeral
-  workspace. Repeated probes reuse a verified executable. Source changes build
+- In source/development runs, the macOS helper lives at the permanent OS-user path
+  `~/Library/Application Support/Pix/ui-qa/helpers/macos-accessibility`, outside
+  every project's `.pi` and outside isolated app HOME overrides. Projects share
+  the same installation and cross-project build lock. Registry Clean and scratch
+  TTL cleanup do not remove it. A matching private legacy project helper can be
+  copied, signature-verified and installed unchanged; the old helper is not
+  deleted or used through a symlink. Repeated probes reuse a verified executable.
+  Source changes build
   privately and replace it atomically; its code-signing identifier is fixed to
   `org.pix.ui-qa.macos-accessibility` rather than the staging filename. By
   default the helper is ad-hoc signed: unchanged builds retain their identity,
@@ -188,6 +193,13 @@ current-session model availability.
   own Accessibility/Screen Recording approvals transfer to this helper; check
   `doctor` in the active login session and grant permissions in System Settings
   for the helper if needed. The runner never grants TCC permissions itself.
+  On an explicit user request, the parent/user may invoke
+  `"<exact helper path>" doctor --prompt` to request both permissions. Requesting
+  is not approval: a prompt may return `missing` before the user responds, and
+  an already-denied request may require manual enabling in System Settings.
+  Recheck with plain `doctor` in a fresh process after approval. No `tccutil`
+  reset or TCC database edit is part of this workflow. Moving/re-signing the
+  helper may require renewed approval even though the global path is durable.
 - Installed macOS releases (portable TUI and Desktop) instead use the executable
   at `helpers/macos-accessibility` in their release payload. It is built during
   release preparation, signed with the release Apple signing identity and the

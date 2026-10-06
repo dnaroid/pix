@@ -9,7 +9,7 @@ let metricsLogGeneration = 0;
 let metricsWriteTail: Promise<void> = Promise.resolve();
 
 export function getLastRequestMetrics(): RequestMetrics | undefined {
-  return lastRequestMetrics ? { ...lastRequestMetrics } : undefined;
+  return lastRequestMetrics ? structuredClone(lastRequestMetrics) : undefined;
 }
 
 export function getLastSearchMetrics(): SearchMetrics | undefined {
@@ -21,14 +21,15 @@ export function getMetricsLogError(): string | undefined {
 }
 
 export function recordRequestMetrics(metrics: RequestMetrics): void {
-  lastRequestMetrics = { ...metrics };
+  lastRequestMetrics = structuredClone(metrics);
   const generation = ++metricsLogGeneration;
   const path = process.env.PI_CLAUDE_CODE_PROVIDER_METRICS_LOG?.trim();
   if (!path) {
     metricsLogError = undefined;
     return;
   }
-  queueMetricsWrite(generation, () => appendRequestMetrics(path, metrics));
+  const snapshot = lastRequestMetrics;
+  queueMetricsWrite(generation, () => appendRequestMetrics(path, snapshot));
 }
 
 export function recordSearchMetrics(metrics: SearchMetrics): void {

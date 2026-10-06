@@ -65,6 +65,12 @@ failures that return no usage cannot be reconstructed. Its model rows participat
 in the same provider/model breakdown; its own status additionally reports check
 and token counters without estimating subscription quota.
 
+The temporary [Desktop BTW chat](desktop-btw.md) records finalized side-response
+usage with the `btw` kind in its original parent session. It does not persist side
+questions/answers. Cancelled or discarded results still count when the provider
+returns usage; calls without usage cannot be reconstructed. An accounting failure
+blocks further BTW inference until reload rather than silently losing known spend.
+
 - In Pix TUI, clicking `Usage` opens session usage. Desktop opens it only on
   button activation (click, Enter or Space), not hover or mere focus. Neither
   forces a provider quota refresh. See [status-bar click popups](../docs/decisions/0048-status-bar-click-popups.md).
@@ -115,16 +121,24 @@ and token counters without estimating subscription quota.
   identify which concurrent session consumed those points.
 - The recorded-spend breakdown shows no quota percentages and no synthetic
   provider/session-share percentage. Desktop's shared Usage surface additionally
-  shows a separately labelled **Account quota · Weekly** reset calendar when
-  the active provider supplies a weekly window. This is account-wide telemetry,
-  never session-attributed usage. See [quota reset calendar](desktop-quota-calendar.md)
-  and [decision 0039](../docs/decisions/0039-quota-reset-calendar.md), which supersede
-  the former no-account-quota-block rule for this explicitly separated section.
+  preserves the weekly reset calendar and adds a separately labelled **Limits**
+  row for the short account quota window when supplied. Header-derived rate
+  windows remain status-bar-trigger-only. This is account-wide telemetry,
+  never session-attributed usage. See [usage limits and model
+  chart](desktop-quota-calendar.md) and [decision
+  0039](../docs/decisions/0039-quota-reset-calendar.md), which supersede the
+  former no-account-quota-block rule for this explicitly separated section.
   Session-attributed values are recorded token totals and recorded/estimated
   model costs, not an allocation of subscription quota or payment.
+- When the recorded-spend breakdown includes more than one model with nonzero
+  tokens (across any providers), the same Usage surface also shows a
+  provider-agnostic donut chart of token share by model, directly above the
+  existing provider/model table. With zero or one model with nonzero tokens it is omitted;
+  the existing table is unaffected either way.
 - Existing hourly/weekly account quota polling and status-bar indicators remain
   independent runtime chrome; opening the session-spend popup never refreshes
-  them. The weekly calendar uses the existing runtime snapshot, not a new request.
+  them. The Limits section and model donut use the existing runtime/session-usage
+  snapshots, not a new request.
 
 ## Lifecycle and concurrency
 

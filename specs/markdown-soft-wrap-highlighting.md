@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # Markdown soft-wrap highlighting
 
 <!-- markdownlint-disable MD013 -->
@@ -53,3 +58,11 @@ Keep syntax highlighting continuous when one logical Markdown or fenced-code lin
 - Confirmed by code: `renderMarkdownTextLines` wraps before `ScreenStyler` invokes line-local syntax highlighting.
 - Confirmed by tests: `tests/markdown-format.test.ts` directly covers inline-code/emphasis, headings, and fenced TypeScript string/comment highlighting across soft wraps.
 - Confirmed by user report: inline-code color is lost after a terminal-width wrap.
+
+## Implementation
+
+- `src/markdown-format.ts`
+
+## Tests
+
+- `tests/markdown-format.test.ts`

@@ -165,12 +165,12 @@
         {/snippet}
         {#snippet children()}
         <div
-          class="rounded-md border border-border bg-popover px-2 py-2 text-popover-foreground shadow-md"
+          class="flex max-h-[max(0px,calc(100dvh-70px))] flex-col overflow-y-auto rounded-md border border-border bg-popover px-2 py-2 text-popover-foreground shadow-md"
           data-session-subagent-tooltip
         >
-          <div class="min-w-0">
-            <div class="min-w-0 flex-1">
-              <div class="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1" data-session-subagent-header>
+          <div class="flex min-h-0 min-w-0 flex-col">
+            <div class="flex min-h-0 min-w-0 flex-col">
+              <div class="flex min-w-0 shrink-0 flex-wrap items-center gap-x-1.5 gap-y-1" data-session-subagent-header>
                 <span class={["grid h-4 w-4 shrink-0 place-items-center", subagentStatusTone(indicator.agent.status)]} data-session-subagent-header-icon>
                   <AgentIcon class="h-3.5 w-3.5" aria-hidden="true" />
                 </span>
@@ -184,12 +184,12 @@
                   {formatSessionSubagentElapsed(indicator.agent.startedAt, subagentSnapshot?.checkedAt ?? Date.now())}
                 </span>
               </div>
-              <div class="mt-0.5 truncate font-mono text-xs text-foreground" aria-label={`${indicator.agent.id} · ${indicator.runDir}`} data-session-subagent-name>
+              <div class="mt-0.5 shrink-0 truncate font-mono text-xs text-foreground" aria-label={`${indicator.agent.id} · ${indicator.runDir}`} data-session-subagent-name>
                 {indicator.agent.id}
               </div>
               <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard access to scrollable task details) -->
               <div
-                class="mt-0.5 max-h-[min(40vh,18rem)] overflow-y-auto overscroll-contain pr-1"
+                class="mt-0.5 min-h-0 overflow-y-auto overscroll-contain pr-1"
                 data-session-subagent-tooltip-body
                 tabindex="0"
                 role="region"
@@ -197,7 +197,7 @@
               >
                 <p class="mt-1 break-words text-xs leading-4 text-foreground/80">{task}</p>
               </div>
-              <div class="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 border-t border-border pt-1.5 text-xs font-semibold text-foreground" data-session-subagent-footer>
+              <div class="mt-1.5 flex min-w-0 shrink-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 border-t border-border pt-1.5 text-xs font-semibold text-foreground" data-session-subagent-footer>
                 <span class="inline-flex shrink-0 items-center gap-1.5 font-mono">
                   {#if modelProviderBrand(indicator.preview?.model ?? "")}
                     <ModelProviderIcon provider={indicator.preview?.model ?? ""} />
@@ -238,7 +238,7 @@
       {/snippet}
       {#snippet children()}
         <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard access to scrollable agent details) -->
-        <div class="max-h-[min(60vh,24rem)] overflow-y-auto rounded-md border border-border bg-popover px-2 py-2 text-popover-foreground shadow-md" tabindex="0" role="region" aria-label="Additional subagent details">
+        <div class="rounded-md border border-border bg-popover px-2 py-2 text-popover-foreground shadow-md" tabindex="0" role="region" aria-label="Additional subagent details">
           {#each indicators.slice(6) as indicator (indicator.runDir + "\0" + indicator.agent.id)}
             <article class="space-y-1 border-b border-border py-2 last:border-0" aria-label={`${indicator.agent.id} · ${indicator.runDir}`}>
               <div class="flex flex-wrap items-center justify-between gap-1 text-xs">
@@ -305,10 +305,10 @@
         {#snippet children()}
         {#if currentTodo}
           <div
-            class="rounded-md border border-border bg-popover px-2.5 py-2 text-popover-foreground shadow-md"
+            class="flex max-h-[max(0px,calc(100dvh-70px))] flex-col overflow-y-auto rounded-md border border-border bg-popover px-2.5 py-2 text-popover-foreground shadow-md"
             data-session-todo-tooltip
           >
-            <div class="flex items-center gap-2">
+            <div class="flex shrink-0 items-center gap-2">
               <span class="font-semibold text-foreground">Plan</span>
               <button
                 class="ml-auto grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-panel-hover hover:text-destructive focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
@@ -324,7 +324,7 @@
             <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard access to scrollable Plan tasks) -->
             <div
               bind:this={todoTooltipBody}
-              class="mt-1 max-h-[min(40vh,18rem)] overflow-y-auto overscroll-contain pr-1"
+              class="mt-1 min-h-0 overflow-y-auto overscroll-contain pr-1"
               data-session-todo-tooltip-body
               tabindex="0"
               role="region"

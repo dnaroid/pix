@@ -13,9 +13,11 @@ describe("session usage presentation", () => {
     expect(providerUsageUrl("unknown")).toBeUndefined();
   });
   it("formats compact billing values", () => {
-    expect(formatSessionUsageCost(0.034)).toBe("$0.034");
+    expect(formatSessionUsageCost(0.034)).toBe("$0.03");
+    expect(formatSessionUsageCost(0.547)).toBe("$0.55");
     expect(formatSessionUsageCost(1.234)).toBe("$1.23");
-    expect(formatSessionUsageCost(1.234)).toBe("$1.23");
+    expect(formatSessionUsageCost(0.001)).toBe("<$0.01");
+    expect(formatSessionUsageCost(0)).toBe("$0.00");
     expect(formatSessionUsageTokens(67_200)).toBe("67.2K");
   });
 });

@@ -42,7 +42,7 @@ describe("pinned composer activity wiring", () => {
     expect(activity).toContain("min-w-0 flex-1");
     expect(activity).not.toContain("<button");
     expect(controls).not.toMatch(/onPause|onCancel|onContinue|agentControlState/);
-    expect(controls).toContain('aria-label={promptRunning ? "Queue message" : "Send message"}');
+    expect(controls).toContain('aria-label={submitLabel ?? (promptRunning ? "Queue message" : "Send message")}');
   });
 
   it("announces changes neutrally and respects reduced motion", () => {

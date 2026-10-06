@@ -25,7 +25,8 @@ sha2 = "0.10"
 portable-pty = "0.9"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "rustls"] }
 tauri = { version = "2", features = ["protocol-asset", "image-png"] }
-tokio = { version = "1", features = ["sync"] }
+tokio = { version = "1", features = ["sync", "signal", "macros"] }
+uuid = { version = "1", features = ["v4"] }
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
@@ -39,7 +40,6 @@ mac-notification-sys = "0.6.15"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSPasteboard", "NSScreen", "NSWindow"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSGeometry", "NSDictionary", "NSString", "NSURL", "NSUserNotification"] }
-uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = "=2.0.2"

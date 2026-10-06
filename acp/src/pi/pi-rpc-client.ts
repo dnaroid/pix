@@ -8,6 +8,7 @@
 
 import type { Writable } from "node:stream";
 import type { ChildProcess } from "node:child_process";
+import { parseBtwState, type BtwCommand, type BtwEvent, type BtwState } from "../btw/contract.js";
 import {
 	RpcClient,
 	type JsonAgentSessionEvent,
@@ -18,6 +19,14 @@ import {
 
 const PIX_PAUSE_MESSAGE = "\u0000pix:agent-control:pause";
 const PIX_CONTINUE_MESSAGE = "\u0000pix:agent-control:continue";
+const PIX_LSP_CONTROL_PREFIX = "\u0000pix:lsp-control:";
+const PIX_BTW_RPC_PREFIX = "\u0000pix:btw:";
+
+export interface PiLspControlSnapshot {
+	readonly servers: Array<{ id: string; root: string; state: "stopped" | "starting" | "running" | "stopping" | "failed"; pid?: number; error?: string }>;
+	readonly warnings: string[];
+	readonly trustRequired?: boolean;
+}
 
 /**
  * Image attachment passed through to `pi` RPC prompt/steer/follow_up.
@@ -36,10 +45,10 @@ export interface PiImageContent {
  * Events a pi RPC process can emit: agent session events plus extension UI
  * requests (`ctx.ui.*` dialogs from extensions, delivered over stdout).
  */
-export type PiEvent = (JsonAgentSessionEvent | RpcExtensionUIRequest) & {
+export type PiEvent = ((JsonAgentSessionEvent | RpcExtensionUIRequest) & {
 	readonly pixForkLeafId?: string | null;
 	readonly pixForkSessionPath?: string;
-};
+}) | { readonly type: "pix_btw_event"; readonly data: BtwEvent };
 
 export type PiEventListener = (event: PiEvent) => void;
 
@@ -216,6 +225,10 @@ export interface PiClient {
 	prompt(message: string, images?: PiImageContent[]): Promise<void>;
 	/** Execute the supported todo clear extension command without creating a user message. */
 	clearTodos(): Promise<void>;
+	/** Run the LSP control extension command without adding a user message. */
+	lspControl?(action: "status", id?: string, root?: string): Promise<PiLspControlSnapshot>;
+	/** Desktop-only temporary, tool-less side chat; never enters the parent prompt queue. */
+	btw?(command: BtwCommand): Promise<BtwState>;
 	bash(command: string, excludeFromContext?: boolean): Promise<PiBashResult>;
 	/** Request a graceful stop at the next agent turn boundary. */
 	pause(): Promise<void>;
@@ -273,6 +286,8 @@ export interface PiClient {
 }
 
 export class PiRpcClient implements PiClient {
+	private lspRequestId = 0;
+	private btwRequestId = 0;
 	private client: RpcClient | undefined;
 	private readonly options: RpcClientOptions;
 	private readonly eventListeners = new Set<PiEventListener>();
@@ -295,6 +310,10 @@ export class PiRpcClient implements PiClient {
 		// Subscribe before spawning: extensions can emit session_start UI events
 		// during RpcClient.start(), before the ACP session/new response exists.
 		this.unsubscribeClientEvents = client.onEvent((event) => {
+			const type = (event as { type?: unknown }).type;
+			// Control responses are correlated by their caller and must not leak
+			// into ACP's general event-to-transcript translation.
+			if (type === "pix_lsp_response" || type === "pix_btw_response") return;
 			for (const listener of this.eventListeners) listener(event as PiEvent);
 		});
 		try {
@@ -368,6 +387,56 @@ export class PiRpcClient implements PiClient {
 		};
 		const response = await rawClient.send({ type: "prompt", message: "\u0000pix:clear-todos" });
 		rawClient.getData<Record<string, never>>(response);
+	}
+
+	async lspControl(action: "status", id?: string, root?: string): Promise<PiLspControlSnapshot> {
+		if (action !== "status") throw new Error("LSP monitoring only supports status");
+		const rawClient = this.requireClient() as unknown as {
+			send(command: { type: "prompt"; message: string }): Promise<unknown>;
+			getData<T>(response: unknown): T;
+			onEvent(listener: (event: unknown) => void): () => void;
+		};
+		const requestId = `${Date.now().toString(36)}-${(++this.lspRequestId).toString(36)}`;
+		let snapshot: PiLspControlSnapshot | undefined;
+		const unsubscribe = rawClient.onEvent((event) => {
+			if (!event || typeof event !== "object") return;
+			const value = event as { type?: unknown; requestId?: unknown; snapshot?: unknown };
+			if (value.type === "pix_lsp_response" && value.requestId === requestId && value.snapshot && typeof value.snapshot === "object") {
+				snapshot = value.snapshot as PiLspControlSnapshot;
+			}
+		});
+		try {
+			const response = await rawClient.send({ type: "prompt", message: `${PIX_LSP_CONTROL_PREFIX}${JSON.stringify({ requestId, action, ...(id === undefined ? {} : { id }), ...(root === undefined ? {} : { root }) })}` });
+			rawClient.getData<Record<string, never>>(response);
+			if (!snapshot) throw new Error("LSP control command returned no correlated snapshot");
+			return snapshot;
+		} finally {
+			unsubscribe();
+		}
+	}
+
+	async btw(command: BtwCommand): Promise<BtwState> {
+		const rawClient = this.requireClient() as unknown as {
+			send(command: { type: "prompt"; message: string }): Promise<unknown>;
+			getData<T>(response: unknown): T;
+			onEvent(listener: (event: unknown) => void): () => void;
+		};
+		const rpcId = `${Date.now().toString(36)}-${(++this.btwRequestId).toString(36)}`;
+		let state: BtwState | undefined;
+		const unsubscribe = rawClient.onEvent((event) => {
+			if (!event || typeof event !== "object") return;
+			const response = event as { type?: unknown; rpcId?: unknown; state?: unknown };
+			if (response.type !== "pix_btw_response" || response.rpcId !== rpcId) return;
+			try { state = parseBtwState(response.state); } catch { /* prompt response reports the malformed host result */ }
+		});
+		try {
+			const response = await rawClient.send({ type: "prompt", message: `${PIX_BTW_RPC_PREFIX}${JSON.stringify({ rpcId, command })}` });
+			rawClient.getData<Record<string, never>>(response);
+			if (!state) throw new Error("BTW control returned no correlated state");
+			return state;
+		} finally {
+			unsubscribe();
+		}
 	}
 
 	async bash(command: string, excludeFromContext = false): Promise<PiBashResult> {

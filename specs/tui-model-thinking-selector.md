@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # TUI combined model and thinking selector
 
 <!-- markdownlint-disable MD013 -->
@@ -77,3 +82,11 @@ Make choosing the model and reasoning effort one staged TUI interaction, includi
 - Draft menu/action/status tests cover listing and staging model/thinking values without a runtime and exposing model/thinking click targets before the first prompt.
 - Runtime tests cover extension-registered provider models in the UI-only draft catalogue.
 - Root TypeScript checks and the full Pix test suite must pass.
+
+## Implementation
+
+- `src/app/popup/popup-menu-controller.ts`
+
+## Tests
+
+- `tests/popup-menu-controller.test.ts`

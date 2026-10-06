@@ -3,6 +3,7 @@ description: Default coder for bounded changes to code, docs, tests, or UI with 
 icon: code
 models: [openai-codex/gpt-6-luna, openai-codex/gpt-6.1-sol]
 thinking: high
+tools: [read, grep, find, ls, bash, edit, write, ast_grep]
 ---
 
 # Implement

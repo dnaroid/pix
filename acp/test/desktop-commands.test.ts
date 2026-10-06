@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
 	PIX_GIT_ASSIST_METHOD,
+	PIX_LSP_CONTROL_METHOD,
 	PIX_CLEAR_TODOS_METHOD,
 	PIX_DRAFT_CONFIG_METHOD,
 	PIX_MODEL_ROUTING_STATUS_METHOD,
@@ -14,6 +15,7 @@ import {
 	parseDesktopModelRoutingStatusRequest,
 	parseDesktopModelRouteRequest,
 	parseDesktopGitAssistantRequest,
+	parseDesktopLspControlRequest,
 	parseDesktopRegistryActionRequest,
 	parseDesktopRegistryDiffRequest,
 	parseDesktopToolResultRequest,
@@ -92,6 +94,17 @@ test("desktop tool-result lazy route is session/tool-call scoped and drops arbit
 
 test("desktop todo clear is a private session-scoped command", () => {
 	assert.equal(PIX_CLEAR_TODOS_METHOD, "pix/session/clear_todos");
+});
+
+test("desktop LSP monitoring rejects process and trust controls", () => {
+	assert.equal(PIX_LSP_CONTROL_METHOD, "pix/session/lsp_control");
+	assert.deepEqual(parseDesktopLspControlRequest({ sessionId: "s1", action: "status" }), { sessionId: "s1", action: "status" });
+	for (const action of ["start", "stop", "restart", "trust"]) {
+		assert.throws(() => parseDesktopLspControlRequest({ sessionId: "s1", action, id: "ts", root: "/workspace" }), /only supports status/);
+	}
+	assert.throws(() => parseDesktopLspControlRequest({ sessionId: "s1", action: "launch" }));
+	assert.throws(() => parseDesktopLspControlRequest({ sessionId: "s1", action: "start", id: "" }));
+	assert.throws(() => parseDesktopLspControlRequest({ sessionId: "s1", action: "stop", root: " " }));
 });
 
 test("desktop registry actions are workspace-scoped and validate resource/project targets", () => {

@@ -273,6 +273,21 @@ describe("renderMarkdown", () => {
     expect(normalizeProjectFileDestination("file:///tmp/result.png")).toBeUndefined();
   });
 
+  it("renders raw absolute Markdown image and video destinations as local previews", () => {
+    const html = renderMarkdown([
+      "[Screenshot](/Volumes/128GBSSD/Projects/game-tactical/.pi/artifacts/ui-qa/run/front.png)",
+      "![Result](</tmp/qa shots/result.webp>)",
+      "[Demo](/tmp/qa-shots/demo%20run.mp4)",
+    ].join("\n\n"));
+
+    expect(html).toContain('data-local-media="image"');
+    expect(html).toContain('data-local-file="/Volumes/128GBSSD/Projects/game-tactical/.pi/artifacts/ui-qa/run/front.png"');
+    expect(html).toContain('data-local-file="/tmp/qa shots/result.webp"');
+    expect(html).toContain('data-local-media="video"');
+    expect(html).toContain('data-local-file="/tmp/qa-shots/demo run.mp4"');
+    expect(html).not.toContain("data-project-media");
+  });
+
   it("escapes media labels and does not preview unsupported project files", () => {
     const media = renderMarkdown('[A & "B"](artifacts/result.png)');
     const binary = renderMarkdown("[Archive](artifacts/result.zip)");
@@ -324,6 +339,55 @@ describe("renderMarkdown", () => {
     expect(html).toContain('data-local-file-candidate="/private/tmp/idx-compact-gate-qa/stdout.txt"');
     expect(html).toContain("<code>/private/tmp/idx-compact-gate-qa/stdout.txt</code>");
   });
+
+  it.each([
+    ["/Volumes/128GBSSD/Projects/game-tactical/.pi/artifacts/ui-qa/run/front.png", "image"],
+    ["/tmp/qa shots/result.webp", "image"],
+    ["/tmp/demo.mp4", "video"],
+    ["/tmp/demo.webm", "video"],
+    ["file:///tmp/result%20one.png", "image"],
+  ])("previews inline-code absolute media %s via the local resolver", (path, kind) => {
+    const html = renderMarkdown(`\`${path}\``);
+    expect(html).toContain(`data-local-media="${kind}"`);
+    expect(html).toContain(`data-local-file="${normalizeLocalFileDestination(path)}"`);
+    expect(html).toContain(`<code>${path}</code>`);
+    expect(html).toContain('class="markdown-media-caption"');
+    expect(html).toContain('class="markdown-media-frame"');
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("<video");
+    expect(html).not.toContain("data-project-media");
+  });
+
+  it("escapes inline-code media paths and keeps invalid or non-media paths out of previews", () => {
+    const media = renderMarkdown('`/tmp/A & "B".png`');
+    expect(media).toContain('data-local-file="/tmp/A &amp; &quot;B&quot;.png"');
+    expect(media).toContain('<code>/tmp/A &amp; &quot;B&quot;.png</code>');
+    for (const path of ["/tmp/report.zip", "/tmp/evidence/", "file:///tmp/%00result.png", "https://example.com/result.png"]) {
+      expect(renderMarkdown(`\`${path}\``)).not.toContain("data-local-media");
+    }
+    expect(renderMarkdown("[`/tmp/result.png`](https://example.com)")).not.toContain("data-local-media");
+    expect(renderMarkdown("```\n/tmp/result.png\n```")).not.toContain("data-local-media");
+  });
+
+  it.each([
+    [".pi/artifacts/usage-popup-mockups/", ".pi/artifacts/usage-popup-mockups"],
+    ["src/components/", "src/components"],
+    ["docs/", "docs"],
+    [".pi\\artifacts\\usage-popup-mockups\\", ".pi/artifacts/usage-popup-mockups"],
+  ])("recognizes inline-code directory %s as a validation candidate", (path, normalized) => {
+    const html = renderMarkdown(`Файлы сохранены в \`${path}\` (SVG + PNG обоих размеров).`);
+    expect(html).toContain(`data-project-file-candidate="${normalized}"`);
+    expect(html).toContain(`<code>${path}</code>`);
+    expect(html).not.toContain('href="#" data-project-file=');
+    expect(html).not.toContain("data-project-media");
+  });
+
+  it.each(["../private/", ".pi/../../private/", "%2e%2e/private/", "src/%00private/", "https://example.com/folder/"])(
+    "rejects unsafe inline-code directory %s",
+    (path) => {
+      expect(renderMarkdown(`\`${path}\``)).not.toContain("data-project-file");
+    },
+  );
 
   it("keeps ordinary inline code as code", () => {
     const html = renderMarkdown("Run `npm run check` and call `value.toString()`.");

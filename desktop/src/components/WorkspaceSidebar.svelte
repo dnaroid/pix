@@ -59,6 +59,8 @@
   import SidebarIndicatorMenu from "./SidebarIndicatorMenu.svelte";
   import RegistryPanel from "./RegistryPanel.svelte";
   import IdxPanel from "./IdxPanel.svelte";
+  import LspPanel from "./LspPanel.svelte";
+  import type { AcpClient } from "../lib/acp-client";
   import GitPanel from "./GitPanel.svelte";
   import ProjectExplorer from "./ProjectExplorer.svelte";
   import PackageScriptsPanel from "./PackageScriptsPanel.svelte";
@@ -93,10 +95,13 @@
     registry: "Registry",
     scripts: "Launch Commands",
     idx: "IDX",
+    lsp: "Language Servers",
     settings: "Settings",
   };
   let {
     workspace,
+    lspClient,
+    lspSessionId,
     settingsConfigOptions,
     tasks,
     loading,
@@ -180,6 +185,8 @@
     onRefreshKnowledge,
   }: {
     workspace: string;
+    lspClient: AcpClient | null;
+    lspSessionId: string | null;
     settingsConfigOptions: SessionConfigOption[];
     tasks: ProjectTask[];
     loading: boolean;
@@ -273,6 +280,8 @@
   let sidebarElement = $state<HTMLElement | null>(null);
   let packageScriptsPanel = $state<PackageScriptsPanelHandle | null>(null);
   let settingsPanel = $state<SettingsPanelHandle | null>(null);
+  let projectExplorer = $state<{ revealPath: (path: string) => Promise<void> } | null>(null);
+  let projectRevealVersion = 0;
   let projectSwitcher = $state<{ close: () => void } | null>(null);
   let activeTab = $state<SidebarTab>("tasks");
   const layoutController = createWorkspaceSidebarLayoutController({ activeTab: () => activeTab });
@@ -517,7 +526,7 @@
   });
 
   function isSidebarTab(value: string | null): value is SidebarTab {
-    return value === "project" || value === "tasks" || value === "git" || value === "registry" || value === "scripts" || value === "idx" || value === "settings";
+    return value === "project" || value === "tasks" || value === "git" || value === "registry" || value === "scripts" || value === "idx" || value === "lsp" || value === "settings";
   }
 
   function setActiveTab(tab: SidebarTab): void {
@@ -570,6 +579,19 @@
     const taskCard = [...(sidebarElement?.querySelectorAll<HTMLElement>("[data-task-card]") ?? [])]
       .find((card) => card.dataset.taskId === taskId);
     taskCard?.scrollIntoView({ block: "nearest" });
+  }
+
+  /** Reverse navigation from links and Preview tabs into the workspace tree. */
+  export async function revealProjectEntry(path: string): Promise<void> {
+    const requestWorkspace = workspace;
+    const request = ++projectRevealVersion;
+    statusMenuController.close();
+    planSelectorOpen = false;
+    revealIndicatorTab("project");
+    await tick();
+    if (request !== projectRevealVersion || workspace !== requestWorkspace
+      || activeTab !== "project" || layoutController.collapsed) return;
+    await projectExplorer?.revealPath(path);
   }
 
   /** Focus a named settings chapter from Desktop chrome without global DOM queries. */
@@ -811,6 +833,7 @@
               <div class="px-4 py-8 text-center"><Folder class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" /><p class="text-xs font-medium">Open a project to browse files</p><p class="mt-1 text-xs leading-4 text-muted-foreground">Project files, search, and local actions appear here.</p></div>
             {:else}
               <ProjectExplorer
+                bind:this={projectExplorer}
                 {workspace}
                 {gitSnapshot}
                 {onGitStatusRefresh}
@@ -892,6 +915,10 @@
               onOperationRunningChange={(sourceWorkspace, running) => indicatorService?.setIdxOperationRunning(sourceWorkspace, running)}
             />
           {/key}
+        </div>
+      {:else if activeTab === "lsp"}
+        <div id="workspace-lsp-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Language Servers">
+          <LspPanel client={lspClient} sessionId={lspSessionId} />
         </div>
       {:else}
         <div id="workspace-settings-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Settings">

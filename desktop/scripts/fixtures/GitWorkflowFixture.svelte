@@ -101,6 +101,7 @@
         stashes: [{ reference: "stash@{0}", subject: "Saved work" }] };
     },
     onRepositoryAction: async (action, target) => { calls.push(`${action}:${target ?? "all"}`); return true; },
+    onSaveIdentity: async (name, email) => { calls.push(`identity:${name}:${email}`); return true; },
   });
   const ci = $derived<GitCiPanelState>({
     snapshot: ciSnapshot, loading: false, error: null,

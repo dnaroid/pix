@@ -3,6 +3,7 @@
   import WorkspaceSidebar from "./WorkspaceSidebar.svelte";
 
   export type DesktopSidebarHandle = {
+    revealProjectEntry: (path: string) => Promise<void>;
     openTasksPanel: (taskId?: string) => Promise<void>;
     closeProjectSwitcher: () => void;
   };

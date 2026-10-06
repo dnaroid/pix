@@ -131,6 +131,29 @@ describe("ACP JSON-RPC client", () => {
     await client.dispose();
   });
 
+  it("requests read-only LSP snapshots through ACP", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+    const initial = client.lspControl("session-1", "status");
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    expect(requestAt(transport, 1)).toMatchObject({
+      method: "pix/session/lsp_control",
+      params: { sessionId: "session-1", action: "status" },
+    });
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 1).id, result: { servers: [], warnings: [] } });
+    await expect(initial).resolves.toEqual({ servers: [], warnings: [] });
+
+    const status = client.lspControl("session-1", "status");
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(3));
+    expect(requestAt(transport, 2)).toMatchObject({
+      method: "pix/session/lsp_control",
+      params: { sessionId: "session-1", action: "status" },
+    });
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 2).id, result: { servers: [], warnings: ["not trusted"] } });
+    await expect(status).resolves.toEqual({ servers: [], warnings: ["not trusted"] });
+    await client.dispose();
+  });
+
   it("requests Desktop new sessions with lazy runtime startup", async () => {
     const transport = new FakeTransport();
     const client = await startedClient(transport);

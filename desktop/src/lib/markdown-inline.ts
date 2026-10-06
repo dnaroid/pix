@@ -61,7 +61,10 @@ export function renderInline(
         if (homePath) {
           output += homeFileLink(homePath, codeLabel);
         } else if (localPath) {
-          output += localFileLink(localPath, codeLabel);
+          const kind = mediaKindForPath(localPath);
+          output += kind
+            ? localMedia(localPath, codeLabel, code, kind)
+            : localFileLink(localPath, codeLabel);
         } else if (projectReference) {
           output += projectFileLink(projectReference.path, codeLabel, projectReference.range);
         } else {

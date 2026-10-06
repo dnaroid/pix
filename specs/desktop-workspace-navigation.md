@@ -25,6 +25,15 @@ establish compatibility requirements.
 
 ## Project Explorer behavior
 
+- Reverse navigation opens Files without changing the workspace root: clicking
+  a validated relative directory link or choosing **Show in Files** on a Preview
+  editor tab clears the Files search, expands the root and ancestors, selects the
+  target, and scrolls/focuses its row. Directory targets also expand. This does
+  not open a file, change the active workbench tab, or save/discard an editor draft.
+  Only the required lazy branch is loaded; missing/unsafe targets are not invented.
+  Replacement reveals, workspace changes, teardown and changed tree-focus intent
+  cancel stale asynchronous completion. Paths outside the project have no tab
+  reveal action. See [decision 0058](../docs/decisions/0058-reverse-file-navigation.md).
 - The tree starts with an explicit workspace-root directory row named after the
   project folder. It is expanded on mount and workspace change; refresh and search
   preserve its current state. Its children are one level deeper. Click,
@@ -212,6 +221,13 @@ establish compatibility requirements.
 
 ## Implementation
 
+- `desktop/src/App.svelte`
+- `desktop/src/app/desktop-project-services.ts`
+- `desktop/src/app/preview-file-io.ts`
+- `desktop/src/components/DesktopSidebar.svelte`
+- `desktop/src/lib/desktop-context-target.ts`
+- `desktop/src/lib/native-context-menu.ts`
+- `desktop/src-tauri/src/project_directory_link.rs`
 - `desktop/src/components/ProjectExplorer.svelte`
 - `desktop/src/components/project-explorer-tree-controller.svelte.ts`
 - `desktop/src/components/project-explorer-operations.svelte.ts`
@@ -253,7 +269,13 @@ establish compatibility requirements.
   mutations during deferred deletion, ancestor/destination conflicts, partially
   copied output protection, out-of-order completion and workspace/teardown invalidation.
 - `desktop/src/components/project-explorer-tree-controller.test.ts` covers deferred
-  row focus after workspace replacement, teardown and changed focus intent.
+  row focus after workspace replacement, teardown and changed focus intent,
+  lazy reverse navigation, pending-list reuse, missing targets and newer reveals.
+- `desktop/src/app/preview.test.ts` covers directory-link routing without Preview
+  changes and stale classification cancellation.
+- `desktop/src/lib/native-context-menu.test.ts` covers captured tab reveal actions.
+- `desktop/src-tauri/src/project_directory_link.rs` tests directory confinement,
+  file/missing-path rejection and symbolic-link rejection.
 - `desktop/src/components/project-explorer-menu-controller.test.ts` covers
   measured browser-menu bounds, content growth, keyboard anchoring, stale focus
   work, observer teardown and native host routing/cancellation.

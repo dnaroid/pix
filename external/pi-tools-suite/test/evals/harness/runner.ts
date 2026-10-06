@@ -1,13 +1,13 @@
 import { spawn } from "node:child_process";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { withE2ERetry } from "../../e2e-retry.js";
 import { RECOVERY_PROBE_LOG, type RecoveryProbeConfig } from "../recovery-provenance.js";
 import { evaluateAssertions } from "./assertions.js";
 import { deriveMetrics } from "./metrics.js";
+import { resolveEvalOutputDir } from "./output-dir.js";
 import type { EvalCase, EvalEvent, EvalRunResult } from "./types.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -48,6 +48,7 @@ export async function runEvalCase(evalCase: EvalCase, model: string, options: Ru
 		const fakeBin = evalCase.fakeIdx ? writeFakeIdxBin(projectDir) : undefined;
 		const args = [
 			"--model", model,
+			...(evalCase.appendSystemPrompt ? ["--append-system-prompt", evalCase.appendSystemPrompt] : []),
 			"--extension", options.extensionEntrypoint ?? EXTENSION_ENTRYPOINT,
 			"--extension", recorder.extensionPath,
 			"--no-extensions",
@@ -152,7 +153,8 @@ function parseList(value: string | undefined): string[] {
 function makeFixtureProject(fixture: EvalCase["fixture"]): string {
 	const source = fixture === "demo" ? DEMO_FIXTURE : path.join(FIXTURE_ROOT, fixture);
 	if (!fs.existsSync(source)) throw new Error(`Eval fixture not found: ${source}`);
-	const target = fs.mkdtempSync(path.join(os.tmpdir(), `pi-tools-eval-${fixture}-`));
+	const target = resolveEvalOutputDir(`fixture-${fixture}`);
+	fs.mkdirSync(target, { recursive: true });
 	fs.cpSync(source, target, { recursive: true });
 	return target;
 }

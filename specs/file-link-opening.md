@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # File link opening
 
 <!-- markdownlint-disable MD013 -->
@@ -53,3 +58,11 @@ Open local links in the application appropriate to the current environment witho
 - Confirmed by tests: focused opener tests cover Zed text/media paths and
   platform fallbacks; file-link detection tests cover range anchors degrading
   to their first line before the Zed target is built.
+
+## Implementation
+
+- `src/app/screen/file-link-opener.ts`
+
+## Tests
+
+- `tests/file-links.test.ts`

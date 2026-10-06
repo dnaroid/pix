@@ -111,8 +111,9 @@ export function normalizeInlineProjectFileReference(
   const fileName = path.split("/").at(-1) ?? "";
   const hasFileExtension = /\.[A-Za-z\d_-]{1,16}$/.test(fileName);
   const hasExplicitRelativePrefix = candidate.startsWith("./") || candidate.startsWith(".\\");
+  const hasDirectorySuffix = /[\\/]$/u.test(candidate);
   const isConventionalFileName = /^(?:Dockerfile|Makefile|README|LICENSE|CHANGELOG|Gemfile|Rakefile)$/i.test(fileName);
-  if (!hasFileExtension && !hasExplicitRelativePrefix && !isConventionalFileName) return undefined;
+  if (!hasFileExtension && !hasExplicitRelativePrefix && !hasDirectorySuffix && !isConventionalFileName) return undefined;
 
   const startLine = suffix?.[2] ? Number(suffix[2]) : undefined;
   const explicitEnd = suffix?.[3] ? Number(suffix[3]) : undefined;

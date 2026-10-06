@@ -5,7 +5,7 @@ models: [openai-codex/gpt-6.1-sol]
 forParentTier: non-frontier
 notForParentModels: ["*gpt-6.1-sol*"]
 thinking: high
-tools: [read, grep, bash]
+tools: [read, grep, bash, ast_grep]
 ---
 
 # Independent code review

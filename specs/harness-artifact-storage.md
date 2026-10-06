@@ -24,6 +24,15 @@ This host guidance is independent of model-specific discipline and optional
 suite tools; it is not injected into TUI, standalone Pi or other ACP hosts.
 The hook preserves existing structured sections and earlier opaque prompt
 overrides, without duplicating its hint or caching absolute workspace paths.
+When showing or reporting images, including screenshots and QA evidence, the
+guidance requires an explicit Markdown link for each image with its full
+project-relative destination, not a directory link followed by bare or inline-code
+filenames. It includes an example and explains that supported local image links
+render as clickable inline previews in Desktop (see
+[Desktop Markdown rendering](desktop-markdown-rendering.md)). Existing evidence
+locations, including `.pi/subagents/`, are preserved; media outside the project
+use absolute paths or absolute `file://` Markdown destinations. Video links expose
+inline playback controls.
 
 The five eval report entrypoints share one resolver. It starts from cwd, uses
 the nearest ancestor containing `.pi` or `.git` (directory or Git worktree
@@ -43,6 +52,11 @@ Decision: [0015 — Canonical disposable harness output](../docs/decisions/0015-
 ## Constraints and failure cases
 
 - Harness-managed subagent/QA evidence stays under `.pi/subagents/`.
+- Installed UI-QA helper executables are infrastructure, not disposable evidence.
+  The macOS development helper lives under the OS user's
+  `~/Library/Application Support/Pix/ui-qa/helpers/`, outside project Registry
+  cleanup. Do not recreate `.pi/ui-qa/` as a persistent installation: it is a
+  non-canonical project directory and can be removed. See `specs/ui-qa-agent.md`.
 - Explicit release/build pipelines retain `.artifacts/` paths. User-requested
   durable deliverables go to the requested location, not disposable storage.
 - This is guidance plus eval defaults, not a filesystem sandbox. Explicit

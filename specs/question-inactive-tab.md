@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # question in an inactive tab
 
 <!-- markdownlint-disable MD013 -->
@@ -52,3 +57,11 @@ Allow the renderer-owned `question` tool to wait for input when its session tab 
 - Confirmed by code: inactive scopes previously caused `showCustomUi()` to return `undefined` immediately.
 - Confirmed by code: `question` previously recognized only `null` as cancellation and passed `undefined` into successful-result construction.
 - Confirmed by tests: `tests/extension-ui-controller.test.ts` covers scoped pending custom UI and activation.
+
+## Implementation
+
+- `src/app/extensions/extension-ui-controller.ts`
+
+## Tests
+
+- `tests/extension-ui-controller.test.ts`

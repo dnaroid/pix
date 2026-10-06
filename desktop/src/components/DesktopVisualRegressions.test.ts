@@ -62,20 +62,33 @@ describe("desktop visual regressions", () => {
     expect(transcriptSource).not.toContain('"border-t border-border pt-3"');
   });
   it("keeps compact context and quota controls from painting over one another", () => {
-    expect(runtimeStatusSource).toContain('class="@container/runtime-status flex min-w-0 flex-1 items-center justify-between gap-1"');
+    expect(runtimeStatusSource).toContain('class="runtime-status-layout grid min-w-0 items-center gap-1"');
     expect(runtimeStatusSource).not.toContain("grid-cols-[minmax(0,1fr)_minmax(0,1fr)]");
     expect(runtimeStatusSource).toContain('class="relative min-w-0" data-runtime-context');
     expect(runtimeStatusSource).toContain("overflow-hidden whitespace-nowrap");
-    expect(runtimeStatusSource).toContain('class="relative ml-auto min-w-0 shrink-0 max-w-full"');
+    expect(runtimeStatusSource).not.toContain("ml-auto");
+    expect(runtimeStatusSource).not.toContain("justify-between gap-1");
     expect(runtimeStatusSource.match(/>ctx<\/span>/g)).toHaveLength(2);
     expect(runtimeStatusSource).not.toContain(">resets {formatResetDuration");
   });
-  it("scales quota details with the available telemetry width instead of the viewport", () => {
-    expect(runtimeStatusSource).toContain("@container/runtime-status");
-    expect(runtimeStatusSource.match(/@max-\[380px\]\/runtime-status:hidden/g)).toHaveLength(2);
-    expect(runtimeStatusSource.match(/@max-\[480px\]\/runtime-status:hidden/g)).toHaveLength(2);
-    expect(runtimeStatusSource).toContain("@max-[600px]/runtime-status:hidden");
-    expect(runtimeStatusSource).not.toMatch(/(?<!@)max-\[(900|980|1100)px\]:hidden/);
+  it("reserves identical fixed slots for telemetry and loading without growing gaps", () => {
+    expect(runtimeStatusSource).toContain("grid-template-columns: minmax(0, max-content) minmax(0, max-content)");
+    expect(runtimeStatusSource).toContain("flex: 0 1 auto");
+    expect(runtimeStatusSource.match(/class="context-status-slots grid/g)).toHaveLength(2);
+    expect(runtimeStatusSource.match(/class="usage-status-slots grid/g)).toHaveLength(2);
+    expect(runtimeStatusSource).toContain("grid-template-columns: 3ch 4ch 64px 11ch");
+    expect(runtimeStatusSource).toContain('{contextTitle(false)}</div>');
+    expect(runtimeStatusSource).toContain('~{savedTokensFormatter.format(status.dcpTokensSaved)} tokens</span>');
+    expect(runtimeStatusSource).toContain("grid-auto-columns: max-content");
+    expect(runtimeStatusSource).toContain("grid-template-columns: 56px 4ch 5ch 10px");
+    expect(runtimeStatusSource).toContain("grid-template-columns: 32px 4ch 5ch 10px");
+    expect(runtimeStatusSource.match(/column-gap: 2px/g)).toHaveLength(2);
+    expect(runtimeStatusSource).toContain("column-gap: 6px");
+    expect(runtimeStatusSource).not.toContain("quotaColumn");
+    expect(runtimeStatusSource).not.toContain("/runtime-status:hidden");
+    expect(statusSource).toContain("{quotaWaitIndicator}");
+    expect(statusSource).not.toContain("data-quota-wait-indicator");
+    expect(runtimeStatusSource).toContain("data-quota-wait-indicator");
   });
   it("keeps the composer placeholder on one visual line", () => {
     expect(composerSource).toContain('"Ask Pix anything…"');
@@ -278,7 +291,8 @@ describe("desktop visual regressions", () => {
     expect(sessionActivityStatusHudSource).toContain('data-session-todo-tooltip');
     expect(sessionActivityStatusHudSource).toContain('data-session-subagent-tooltip-body');
     expect(sessionActivityStatusHudSource).toContain('data-session-todo-tooltip-body');
-    expect(sessionActivityStatusHudSource.match(/max-h-\[min\(40vh,18rem\)\] overflow-y-auto overscroll-contain/g)).toHaveLength(2);
+    expect(sessionActivityStatusHudSource).not.toContain("max-h-[min(40vh,18rem)]");
+    expect(sessionActivityStatusHudSource.match(/min-h-0 overflow-y-auto overscroll-contain/g)).toHaveLength(2);
     expect(statusBarPopoverSource).toContain("absolute right-0 bottom-full");
     expect(sessionActivityStatusHudSource).not.toContain("group-hover:block group-focus-within:block");
     expect(sessionActivityStatusHudSource).toContain("formatSessionSubagentElapsed");
@@ -388,7 +402,7 @@ describe("desktop visual regressions", () => {
     expect(runtimeStatusSource).not.toContain("workspaceName");
     expect(runtimeStatusSource).not.toContain("workspaceBranch");
     expect(runtimeStatusSource).not.toContain("workspacePath");
-    expect(runtimeStatusSource).toContain("{#if status || showSkeletons}");
+    expect(runtimeStatusSource).toContain("{#if status || showSkeletons || quotaWaitIndicator}");
   });
 
   it("keeps session activity independent from removed workspace status identity", () => {
@@ -440,7 +454,7 @@ describe("desktop visual regressions", () => {
 
   it("shows live DCP savings and a categorized context legend in status chrome", () => {
     expect(runtimeStatusSource).toContain("status?.dcpTokensSaved");
-    expect(runtimeStatusSource).toContain("saved ~{formatCompactTokens(status.dcpTokensSaved)}");
+    expect(runtimeStatusSource).toContain(">saved {savedTokensFormatter.format(status.dcpTokensSaved)}");
     expect(runtimeStatusSource).toContain("Context ${formatCompactTokens(context.tokens)} / ${formatCompactTokens(context.contextWindow)} tokens");
     expect(runtimeStatusSource).not.toContain("Context ${Math.round(context.percent)}%");
     expect(runtimeStatusSource).toContain('aria-label="Context color legend"');
@@ -464,13 +478,14 @@ describe("desktop visual regressions", () => {
     expect(runtimeStatusSource).not.toContain("bottom-[calc(100%+0.375rem)]");
     expect(runtimeStatusSource).toContain('event.key === "Escape"');
     expect(runtimeStatusSource).toContain('onpointerdown={closeOutside}');
-    expect(runtimeStatusSource).toContain('{#snippet contextScale(size: "compact" | "expanded")}');
-    expect(runtimeStatusSource).toContain('data-context-scale={size}');
+    expect(runtimeStatusSource).toContain('{#snippet contextScale()}');
+    expect(runtimeStatusSource).toContain('data-context-scale="compact"');
     expect(runtimeStatusSource).toContain('class={["h-full min-w-0", contextCellClass(segment.kind)]}');
     expect(runtimeStatusSource).toContain('style:flex-grow={segment.share}');
-    expect(runtimeStatusSource).toContain('"flex h-4 w-full overflow-hidden rounded-sm bg-border"');
-    expect(runtimeStatusSource).toContain('{@render contextScale("compact")}');
-    expect(runtimeStatusSource.match(/\{@render contextScale\("expanded"\)\}/g)).toHaveLength(1);
+    expect(runtimeStatusSource).toContain('{#snippet contextRing()}');
+    expect(runtimeStatusSource).toContain('data-context-ring');
+    expect(runtimeStatusSource).toContain('{@render contextScale()}');
+    expect(runtimeStatusSource.match(/\{@render contextRing\(\)\}/g)).toHaveLength(1);
     expect(runtimeStatusSource.match(/\{@render contextScaleLegend\(\)\}/g)).toHaveLength(1);
     expect(runtimeStatusSource).toContain('id="runtime-context-popover"');
     expect(runtimeStatusSource).toContain('aria-label="Context usage details"');
@@ -497,7 +512,7 @@ describe("desktop visual regressions", () => {
     expect(runtimeStatusSource).toContain('return "text-tool-error";');
     expect(runtimeStatusSource).toContain("contextCellClass(segment.kind)");
     expect(runtimeStatusSource).toContain("contextCellClass(item.kind)");
-    expect(runtimeStatusSource).toContain("class={toneTextClass(tone)}>{Math.round(window.remainingPercent)}%");
+    expect(runtimeStatusSource).toContain('class={["truncate text-right", toneTextClass(tone)]}>{Math.round(window.remainingPercent)}%');
     expect(runtimeStatusSource).toContain('TriangleAlert class="h-2.5 w-2.5 text-tool-warning"');
   });
 
@@ -513,7 +528,7 @@ describe("desktop visual regressions", () => {
     expect(runtimeStatusSource).toContain("displayModelUsage(status, now)");
     expect(runtimeStatusSource).toContain("limitingRateWindow(modelUsage)");
     expect(runtimeStatusSource).toContain('{#if label === "R"}');
-    expect(runtimeStatusSource).toContain('<span class="text-muted-foreground">{modelUsageWindowLabel(label, window)}</span>');
+    expect(runtimeStatusSource).toContain('<span class="truncate leading-3 text-muted-foreground">{modelUsageWindowLabel(label, window)}</span>');
   });
 
   it("keeps the model and thinking selector available while a prompt is running", () => {

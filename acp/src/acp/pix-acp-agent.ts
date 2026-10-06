@@ -18,6 +18,8 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
+import { BTW_METHOD, BTW_CHANNEL, parseBtwEvent, type BtwRequest, type BtwState } from "../btw/contract.js";
+import { parseDesktopBtwRequest } from "../btw/request.js";
 import { BrainstormHost, BRAINSTORM_CHANNEL, type BrainstormLink } from "./brainstorm-host.js";
 import { brainstormParticipantOptions, freshParticipantAnswer } from "./brainstorm-participant.js";
 import { spawn } from "node:child_process";
@@ -121,6 +123,7 @@ import {
 	PIX_MODEL_ROUTE_METHOD,
 	PIX_BASH_METHOD,
 	PIX_CLEAR_TODOS_METHOD,
+	PIX_LSP_CONTROL_METHOD,
 	PIX_FORK_MESSAGES_METHOD,
 	PIX_FORK_MESSAGE_METHOD,
 	PIX_FORK_READY_METHOD,
@@ -146,6 +149,7 @@ import {
 	parseDesktopModelRoutingStatusRequest,
 	parseDesktopModelRouteRequest,
 	parseDesktopBashRequest,
+	parseDesktopLspControlRequest,
 	parseDesktopAgentControlRequest,
 	parseDesktopSessionRequest,
 	parseDesktopGitAssistantRequest,
@@ -173,6 +177,8 @@ import {
 	type DesktopModelRouteRequest,
 	type DesktopModelRouteResponse,
 	type DesktopBashRequest,
+	type DesktopLspControlRequest,
+	type DesktopLspControlResponse,
 	type DesktopClaudeQuotaRefreshResponse,
 	type DesktopGitAssistantRequest,
 	type DesktopGitAssistantResponse,
@@ -466,6 +472,8 @@ export interface PixAcpAgentOptions {
 
 export class PixAcpAgent {
 	private readonly sessions = new Map<string, AgentSessionState>();
+	/** Only runtime identity is retained here, never side-chat content. */
+	private readonly btwOwners = new WeakMap<AgentSessionState, string>();
 	/** Desktop may reserve a tab id before its expensive pi runtime has finished starting. */
 	private readonly pendingDesktopNewSessions = new Map<string, PendingDesktopNewSession>();
 	/** Lazy Desktop tool bodies are cached independently of a live pi runtime. */
@@ -642,6 +650,9 @@ export class PixAcpAgent {
 			.onRequest(PIX_CLEAR_TODOS_METHOD, parseDesktopSessionRequest, (ctx) =>
 				this.desktopClearTodos(ctx.params),
 			)
+			.onRequest(PIX_LSP_CONTROL_METHOD, parseDesktopLspControlRequest, (ctx) =>
+				this.desktopLspControl(ctx.params),
+			)
 			.onRequest("pix/autocomplete", parseAutocompleteRequest, (ctx) =>
 				this.autocomplete(ctx.params, ctx.signal),
 			)
@@ -651,6 +662,7 @@ export class PixAcpAgent {
 			.onRequest(PIX_ENHANCE_PROMPT_METHOD, parseDesktopEnhancePromptRequest, (ctx) =>
 				this.desktopEnhancePrompt(ctx.params, ctx.signal),
 			)
+			.onRequest(BTW_METHOD, parseDesktopBtwRequest, (ctx) => this.desktopBtw(ctx.params))
 			.onRequest(PIX_GIT_ASSIST_METHOD, parseDesktopGitAssistantRequest, (ctx) =>
 				this.desktopGitAssist(ctx.params, ctx.signal),
 			)
@@ -766,6 +778,16 @@ export class PixAcpAgent {
 		const session = this.sessions.get(params.sessionId);
 		if (!session) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
 		return autocompleteSettings(this.loadAutocompleteConfig(session.cwd));
+	}
+
+	private async desktopBtw(params: BtwRequest): Promise<BtwState> {
+		const session = this.requireDesktopSession(params.sessionId);
+		if (!session.pi.btw) throw new RequestError(ERROR_SERVER, "BTW requires an updated Desktop runtime");
+		// Side controls never take the parent run lock or enter its prompt/queue path.
+		const state = await session.pi.btw(params);
+		if (this.sessions.get(params.sessionId) !== session) throw new RequestError(ERROR_SERVER, "BTW runtime was replaced");
+		this.btwOwners.set(session, state.runtimeId);
+		return state;
 	}
 
 	private async desktopEnhancePrompt(
@@ -980,6 +1002,17 @@ export class PixAcpAgent {
 			throw new RequestError(ERROR_SERVER, `session plan clear failed: ${stringifyUnknown(error)}`);
 		} finally {
 			session.builtinRunning = false;
+		}
+	}
+
+	private async desktopLspControl(params: DesktopLspControlRequest): Promise<DesktopLspControlResponse> {
+		if (params.action !== "status") await this.assertBrainstormWritable(params.sessionId);
+		const session = this.requireDesktopSession(params.sessionId);
+		try {
+			if (!session.pi.lspControl) throw new Error("LSP control is unavailable in this pi client");
+			return await session.pi.lspControl(params.action, params.id, params.root);
+		} catch (error) {
+			throw new RequestError(ERROR_SERVER, `LSP control failed: ${stringifyUnknown(error)}`);
 		}
 	}
 
@@ -2127,6 +2160,14 @@ export class PixAcpAgent {
 		// A replaced process may still flush events while it is stopping. Never
 		// route those events into the newer process registered under the same id.
 		if (this.sessions.get(session.acpSessionId) !== session) return;
+		if (event.type === "pix_btw_event") {
+			const data = parseBtwEvent(event.data);
+			if (data) this.btwOwners.set(session, data.runtimeId);
+			if (data) void session.client.notify(PIX_SESSION_STATE_METHOD, {
+				sessionId: session.acpSessionId, channel: BTW_CHANNEL, data,
+			}).catch(() => { /* Ephemeral progress must never leak through transcript/error logging. */ });
+			return;
+		}
 		if ((event.type === "turn_end" || event.type === "compaction_end" || event.type === "agent_settled")
 			&& typeof event.pixForkSessionPath === "string" && event.pixForkLeafId !== undefined) {
 			session.forks.boundary({ sessionPath: event.pixForkSessionPath, leafId: event.pixForkLeafId, cwd: session.cwd });
@@ -2319,6 +2360,7 @@ export class PixAcpAgent {
 	 */
 	private onPiExit(session: AgentSessionState, error: Error): void {
 		if (this.sessions.get(session.acpSessionId) !== session) return;
+		this.resetBtw(session);
 		this.retireForkQueue(session);
 		void this.brainstormHost.participantLost(session.acpSessionId);
 		void this.brainstormHost.cancelParent(session.acpSessionId, true);
@@ -3577,6 +3619,7 @@ export class PixAcpAgent {
 	}
 
 	private async teardownSession(session: AgentSessionState): Promise<void> {
+		this.resetBtw(session);
 		this.retireForkQueue(session);
 		if (this.sessions.get(session.acpSessionId) === session) {
 			this.sessions.delete(session.acpSessionId);
@@ -3607,6 +3650,17 @@ export class PixAcpAgent {
 		if (!unsubscribe) return;
 		session.unsubscribeEvents = undefined;
 		unsubscribe();
+	}
+
+	private resetBtw(session: AgentSessionState): void {
+		const runtimeId = this.btwOwners.get(session);
+		this.btwOwners.delete(session);
+		if (!runtimeId) return;
+		// Old process events are deliberately ignored once the session map changes;
+		// send the identity-only reset ourselves before retiring that runtime.
+		void session.client.notify(PIX_SESSION_STATE_METHOD, { sessionId: session.acpSessionId,
+			channel: BTW_CHANNEL, data: { version: 1, runtimeId, requestId: "runtime-reset", sequence: 0,
+				phase: "reset", text: "", busyRequestId: null } }).catch(() => {});
 	}
 
 	private resolveActiveRun(session: AgentSessionState, stopReason: StopReason): boolean {

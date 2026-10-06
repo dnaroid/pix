@@ -36,6 +36,10 @@ status: active
   arbitrary external processes or prevent forced termination/crashes. Activity
   IPC failures are reported through the ordinary Desktop error path.
 - This does not add unsent-composer or unsaved-document warnings, or change TUI.
+- An isolated QA process may finish without a consent dialog after its own
+  infrastructure SIGINT/SIGTERM/SIGHUP cancellation. This still runs the native
+  save/child-cleanup worker; it does not change working-app Quit/Restart or QA
+  user-interaction warnings. See `specs/desktop-qa-isolated-launch.md`.
 - Related contracts: [conversation tabs](desktop-session-tabs.md) and
   [window persistence](desktop-window-state.md).
 - Native ownership rationale: [0024](../docs/decisions/0024-desktop-close-warning.md).

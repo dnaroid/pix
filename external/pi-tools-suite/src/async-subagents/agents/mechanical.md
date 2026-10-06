@@ -3,6 +3,7 @@ description: Small prescribed behavior-preserving edits with an exact scope and 
 icon: code
 models: [zai/glm-5.3]
 thinking: medium
+tools: [read, grep, find, ls, bash, edit, write, ast_grep]
 ---
 
 # Mechanical edits

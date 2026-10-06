@@ -98,7 +98,9 @@ for the root cause, invariants, and regression coverage.
 
 ## Pix Desktop Linux AppImage opens a blank window
 
-If terminal stderr contains:
+Linux Desktop is legacy, unsupported tooling (macOS is the only supported
+Desktop platform). If you still run the legacy Linux AppImage and terminal
+stderr contains:
 
 ```text
 Could not create default EGL display: EGL_BAD_PARAMETER. Aborting...

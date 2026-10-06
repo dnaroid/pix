@@ -30,6 +30,11 @@ without treating generated answers or audit candidates as semantic proof.
 
 - Repo-aware tools are available only with indexed project state and an executable
   `idx`. Setup and indexing remain explicit operations.
+- All async child roles receive these eight query tools through a common,
+  tools-only entrypoint when the same prerequisites hold. It omits setup/update
+  commands and parent delegation instructions; role work-tool restrictions and
+  parent-only tool guards remain intact. Empty selections still allow private
+  todo and gated repo queries. See [decision 0060](../docs/decisions/0060-subagent-read-only-repo-tools.md).
 - Every `repo_*` tool accepts optional `projectPath`: an explicit project root
   (absolute, relative to the call's session cwd, or `~/`). Without it, current
   project discovery is unchanged. With it, `.indexer-cli` must exist directly in
@@ -129,11 +134,21 @@ Audit completion: [0046 — Task-scoped knowledge audit completion](../docs/deci
 - Before significant changes, read linked decisions and, when needed, search
   the decision directory. Check status and replacement links rather than
   treating historical reasoning as today's contract.
-- The parent records significant architecture, dependency/model, trade-off or
-  accepted-risk choices while context is available. Keep status, context,
+- Default to no new decision record: a feature, bug fix, UX change, implementation
+  detail, dependency/model change or changed spec alone is not a trigger. Record
+  an explicitly user-requested decision, or a choice that both involves materially
+  different plausible alternatives, consequential accepted risk or costly reversal,
+  and has durable rationale useful to avoid repeating a dispute or mistake that
+  an existing record does not already capture. Ask whether that rationale will
+  still be useful in six months. Do not invent alternatives to justify a record;
+  link an existing applicable record instead. This threshold is prospective, not
+  grounds for pruning or rewriting historical records.
+- For choices meeting that threshold, the parent records rationale while context
+  is available. Keep status, context,
   evidence versus assumptions, decision/scope, alternatives, consequences and
   revisit triggers; include owner/approval evidence and recording date. Specs
-  and decisions link both ways. Trivial edits need no record.
+  and decisions link both ways. Ordinary behavior changes belong in specs;
+  even material changes need no new decision record unless the threshold is met.
 - Attribute reported observations, cite durable sources when available and
   disclose missing evidence; never reconstruct motives from final code. The
   parent/user owns acceptance and supersession. New decisions explicitly replace
@@ -141,14 +156,23 @@ Audit completion: [0046 — Task-scoped knowledge audit completion](../docs/deci
 - The parent hands decision paths and rationale (or why no new decision was
   needed) to the auditor along with normal task scope. The auditor checks
   completeness, source/assumption distinctions, status, reciprocal links and
-  agreement with the current spec; missing or conflicting rationale is an
-  escalation. It may fix small proven links/typos, but never invent, accept or
+  agreement with the current spec; missing rationale is an escalation only for
+  a choice meeting the recording threshold. A justified no-record handoff is
+  valid, not missing documentation. Conflicting rationale remains an escalation.
+  A qualifying choice missing its record requires escalation even when rationale
+  is complete; supplied rationale or a proposed path does not replace a record.
+  Creating that record belongs to the parent/user, not the auditor: its outcome
+  is `escalate`, never `create`.
+  It may fix small proven links/typos, but never invent, accept or
   supersede decisions itself. Parent-owned fallback audits use the same checks.
 
 ## Implementation
 
 - `external/pi-tools-suite/src/tool-descriptions.ts`
 - `external/pi-tools-suite/src/repo-discovery/index.ts`
+- `external/pi-tools-suite/src/repo-discovery/subagent.ts`
+- `external/pi-tools-suite/src/async-subagents/core/child-tools.ts`
+- `external/pi-tools-suite/src/async-subagents/core/spawn.ts`
 - `external/pi-tools-suite/src/async-subagents/agents/knowledge-auditor.md`
 - `external/pi-tools-suite/src/async-subagents/core/config.ts`
 - `external/pi-tools-suite/src/async-subagents/core/agent-catalog.ts`
@@ -161,6 +185,15 @@ Audit completion: [0046 — Task-scoped knowledge audit completion](../docs/deci
 - `external/pi-tools-suite/test/async-subagents/knowledge-auditor.test.ts`
 - `external/pi-tools-suite/test/todo.test.ts`
 - `external/pi-tools-suite/test/repo-discovery.test.ts`
+- `external/pi-tools-suite/test/async-subagents/repo-tools.test.ts`
+- `external/pi-tools-suite/test/async-subagents/provider-child-inventory.test.ts`
+- `external/pi-tools-suite/test/evals/decision-policy.ts`
+- `external/pi-tools-suite/test/evals/decision-policy.test.ts`
+- `external/pi-tools-suite/test/evals/fixtures/decision-policy/`
+- `external/pi-tools-suite/test/evals/cases.ts`
+- `external/pi-tools-suite/test/evals/coverage-manifest.ts`
+- `external/pi-tools-suite/test/evals/harness/types.ts`
+- `external/pi-tools-suite/test/evals/harness/runner.ts`
 
 ## Verification
 
@@ -169,3 +202,10 @@ Audit completion: [0046 — Task-scoped knowledge audit completion](../docs/deci
 - `bun test test/tool-descriptions.test.ts test/repo-discovery.test.ts`
 - `npm --prefix external/pi-tools-suite run typecheck`
 - `git diff --check`
+- `npm --prefix external/pi-tools-suite run test:evals:contracts` checks the
+  decision-policy validators. The opt-in eight-case `decision.*` live slice
+  described in [eval docs](../external/pi-tools-suite/docs/evals.md) observes the
+  current parent/auditor recording threshold against completed-work fixtures.
+  It checks declared actions plus actual records, links, and historical
+  preservation; it is not full audit/subagent execution or an LLM judgment of
+  rationale truth. Inspect retained output for fabricated alternatives/claims.

@@ -32,13 +32,16 @@ mod desktop_context_menu;
 mod desktop_notification;
 mod git_ci;
 mod git_ignore;
+mod git_identity;
 mod git_operations;
 mod lsp_install;
 #[cfg(test)]
 mod native_lifecycle_tests;
 mod native_process;
 mod preview_file;
+mod project_directory_link;
 mod preview_file_action;
+mod qa_profile;
 #[cfg(feature = "bundled-runtime")]
 mod release_smoke;
 mod sidebar_registry_resource_hash;
@@ -10060,7 +10063,24 @@ fn ui_qa_workspace_url(current_url: &tauri::Url, workspace: &Path) -> Result<tau
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Validate explicit isolation before plugins, user storage or windows exist.
+    let qa_profile = qa_profile::QaProfile::from_environment()
+        .expect("invalid isolated Desktop QA profile");
+    // Register before any isolated handshake; failure must not advertise a
+    // runtime that the runner cannot shut down through the native exit worker.
+    #[cfg(unix)]
+    let qa_signal_bridge = std::sync::Arc::new(std::sync::Mutex::new(
+        qa_profile.as_ref().map(|_| qa_profile::SignalBridge::register()
+            .expect("failed to register isolated QA shutdown signals")),
+    ));
+    #[cfg(unix)]
+    let setup_signal_bridge = qa_signal_bridge.clone();
+    let mut context = tauri::generate_context!();
+    if let Some(profile) = &qa_profile {
+        profile.configure(context.config_mut());
+    }
     let builder = tauri::Builder::default()
+        .manage(qa_profile)
         .manage(AcpProcessState::default())
         .manage(close_guard::CloseGuardState::default())
         .manage(PackageTerminalState::default())
@@ -10070,7 +10090,11 @@ pub fn run() {
         .manage(IdxOperationState::default())
         .manage(git_ci::GitCiProcessState::default())
         .manage(window_restore::WindowRestoreState::default())
-        .setup(|app| {
+        .setup(move |app| {
+            #[cfg(unix)]
+            if let Some(bridge) = setup_signal_bridge.lock().unwrap().as_mut() {
+                bridge.start(app.handle().clone());
+            }
             desktop_notification::setup(app).map_err(std::io::Error::other)?;
             let restored_windows = window_restore::setup(app)?;
             window_tiling::setup(app)?;
@@ -10089,6 +10113,9 @@ pub fn run() {
                         ui_qa_workspace_url(&url, &workspace).map_err(std::io::Error::other)?;
                     main_window.navigate(url)?;
                 }
+            }
+            if let Some(profile) = app.state::<Option<qa_profile::QaProfile>>().as_ref() {
+                profile.publish()?;
             }
             Ok(())
         })
@@ -10139,6 +10166,7 @@ pub fn run() {
             write_project_file,
             write_project_workspace_config_if_unchanged,
             project_file_exists,
+            project_directory_link::project_directory_exists,
             list_project_directory,
             search_project_files,
             create_project_entry,
@@ -10163,6 +10191,8 @@ pub fn run() {
             git_operations::git_pull,
             git_operations::git_update,
             git_operations::git_history,
+            git_identity::git_identity,
+            git_identity::git_save_identity,
             git_operations::git_stash_list,
             git_operations::git_stash_save,
             git_operations::git_stash_apply,
@@ -10211,9 +10241,9 @@ pub fn run() {
             read_project_tasks,
             write_project_tasks,
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("failed to build Pix Desktop");
-    app.run(|handle, event| {
+    app.run(move |handle, event| {
         if let tauri::RunEvent::WindowEvent {
             label,
             event: tauri::WindowEvent::CloseRequested { api, .. },
@@ -10224,6 +10254,13 @@ pub fn run() {
             }
         }
         if matches!(&event, tauri::RunEvent::Exit) {
+            #[cfg(unix)]
+            if let Some(bridge) = qa_signal_bridge.lock().unwrap().as_mut() {
+                bridge.stop();
+            }
+            if let Some(profile) = handle.state::<Option<qa_profile::QaProfile>>().as_ref() {
+                profile.remove_runtime();
+            }
             desktop_notification::shutdown(handle);
         }
         if let tauri::RunEvent::WindowEvent {
@@ -10260,7 +10297,10 @@ pub fn run() {
         }
         if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
             let state = handle.state::<AcpProcessState>();
-            if !state.exiting.load(Ordering::Acquire) && close_guard::prevent(handle, None, code) {
+            if !state.exiting.load(Ordering::Acquire)
+                && !qa_profile::infrastructure_exit(handle, code)
+                && close_guard::prevent(handle, None, code)
+            {
                 api.prevent_exit();
                 return;
             }

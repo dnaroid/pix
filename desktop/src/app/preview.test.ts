@@ -16,10 +16,11 @@ const image: Attachment = {
   id: "image", kind: "image", name: "image.png", mimeType: "image/png", path: "/image.png",
 };
 
-function fixture() {
+function fixture(revealProjectEntry?: (path: string) => Promise<void>) {
   let workspace = "/one";
   const options = {
     workspace: () => workspace,
+    revealProjectEntry,
     loadExternalEditor: vi.fn(async (): Promise<string | undefined> => "zed"),
     activeWorkbenchTabId: () => null,
     activeConversationWorkbenchTabId: () => null,
@@ -46,6 +47,46 @@ describe("Preview async ownership", () => {
     await pending;
     expect(preview.active).toBeUndefined();
     expect(options.setActiveWorkbenchTabId).not.toHaveBeenCalled();
+  });
+
+  it.each(["nested/folder", ".pi/artifacts/usage-popup-mockups"])("validates directory %s and reveals it without changing Preview", async (path) => {
+    const reveal = vi.fn(async () => {});
+    const { preview, options } = fixture(reveal);
+    preview.show({ kind: "attachment", attachment: image }, "replace");
+    const before = preview.active;
+    options.setActiveWorkbenchTabId.mockClear();
+    tauri.invoke.mockImplementation(async (command: string) => command === "project_directory_exists");
+    expect(await preview.validateProjectFile(path)).toBe(true);
+    await preview.openProjectFile(path);
+    expect(reveal).toHaveBeenCalledExactlyOnceWith(path);
+    expect(preview.active).toBe(before);
+    expect(options.setActiveWorkbenchTabId).not.toHaveBeenCalled();
+    expect(tauri.invoke).not.toHaveBeenCalledWith("read_preview_file", expect.anything());
+  });
+
+  it.each(["workspace", "close", "newer"])("ignores delayed directory routing after %s", async (change) => {
+    const reveal = vi.fn(async () => {});
+    const { preview, setWorkspace } = fixture(reveal);
+    const classification = deferred<boolean>();
+    tauri.invoke.mockReturnValue(classification.promise);
+    const pending = preview.openProjectFile("folder");
+    if (change === "workspace") setWorkspace("/two");
+    else if (change === "close") preview.close();
+    else preview.show({ kind: "attachment", attachment: image }, "replace");
+    classification.resolve(true);
+    await pending;
+    expect(reveal).not.toHaveBeenCalled();
+  });
+
+  it("keeps ordinary file preview routing with the reveal callback installed", async () => {
+    const reveal = vi.fn(async () => {});
+    const { preview } = fixture(reveal);
+    const file = { path: "small.ts", content: "text" };
+    tauri.invoke.mockImplementation(async (command: string) => command === "project_directory_exists"
+      ? false : { kind: "text", file });
+    await preview.openProjectFile(file.path, "push", { startLine: 1, endLine: 1 });
+    expect(reveal).not.toHaveBeenCalled();
+    expect(preview.active).toMatchObject({ kind: "file", file, lineRange: { startLine: 1, endLine: 1 } });
   });
 
   it("does not let an older attachment replace a newer project file", async () => {

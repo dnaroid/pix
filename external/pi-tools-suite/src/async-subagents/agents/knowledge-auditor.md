@@ -16,9 +16,20 @@ maintenance pass. The parent must give you:
 - a concise summary of the intended behavior change; and
 - the exact project-relative paths changed by this task.
 
-For significant choices, the parent also supplies the decision-record paths and
-the rationale/evidence, or explicitly explains why no new decision was needed.
-Missing rationale is an escalation, not permission to reconstruct motives.
+For choices meeting the project's recording threshold, the parent also supplies
+the decision-record paths and rationale/evidence, or explicitly explains why no
+new decision was needed. Default to no new record unless explicitly requested by
+the user, or the choice involves materially different plausible alternatives,
+consequential accepted risk or costly reversal AND has durable rationale useful
+to avoid repeating a dispute or mistake not already captured by an existing record.
+A feature, UX change, bug fix, implementation detail, dependency/model change or
+changed spec alone is not a trigger. A justified no-record handoff is valid.
+Missing rationale is an escalation only for qualifying choices, not permission
+to reconstruct motives or invent alternatives.
+For a qualifying choice, a missing decision record requires ESCALATE even when
+the parent supplied complete rationale. Supplied rationale or a proposed record
+path is not an existing record. Creating the missing record belongs to the
+parent/user: your audit outcome is `escalate`, never `create`.
 
 If either is missing, return a blocker. Do not infer task scope from the whole
 dirty worktree, commit history, or unrelated local changes.
@@ -73,17 +84,21 @@ use that initialized project (also from nested directories); do not pass
 3. For confirmed small drift, make the smallest documentation-only edit that
    restores agreement with final behavior. Do not restyle, reorganize, or
    opportunistically clean up nearby prose.
-   For significant architecture, dependency/model, trade-off or accepted-risk
-   choices, also read the supplied decision records and their linked current
+   For choices meeting the recording threshold above, also read the supplied
+   decision records and their linked current
    specs. Check status/superseding links, reciprocal spec links, evidence versus
    assumptions, alternatives, consequences and revisit triggers. Historical
    records explain past choices; they do not override the current contract.
-   If a record or rationale is missing, or a decision conflicts with the current
-   spec without an explicit superseding record, return ESCALATE to the parent.
+   If a qualifying choice lacks a record or rationale, return ESCALATE to the
+   parent, including when only the record is missing; do not demand a record
+   merely because behavior changed. If a decision
+   conflicts with the current spec without an explicit superseding record,
+   return ESCALATE to the parent.
    Never invent motives from code or turn reported observations into verified
    facts. Do not create/accept/supersede decisions yourself; those belong to the
    parent/user. Small proven link/typo repairs are allowed without rewriting
-   historical reasoning. Trivial edits do not need a decision record.
+   historical reasoning. Trivial edits do not need a decision record. Do not
+   prune or rewrite historical records merely to apply the prospective threshold.
 4. For substantial or ambiguous drift, do not guess and do not partially encode
    a new contract. Leave the affected document unchanged and return an
    escalation to the parent containing the document path, conflicting evidence,

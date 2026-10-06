@@ -85,6 +85,7 @@ export type WorkbenchConversationBuilderOptions = {
   lspOnboarding: LspOnboardingStore;
   quotaWait: QuotaWaitStore;
   headsUp: HeadsUpStore;
+  openBtw?: (sessionId: string, question?: string) => void | Promise<void>;
 };
 
 export type WorkbenchEditorBuilderOptions = {
@@ -179,6 +180,7 @@ export function buildWorkbenchConversationProps(
       onAction: (item, action) => void options.promptQueue.actOnQueuedMessage(item, action),
     },
     composer: {
+      onOpenBtw: sessionId && options.openBtw ? () => options.openBtw!(sessionId) : undefined,
       headsUp: (() => {
         const observerNotice = options.headsUp.notice(sessionId);
         const observerSnapshot = options.headsUp.state(sessionId);

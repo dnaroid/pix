@@ -3,7 +3,7 @@ import type { AcpClient } from "../lib/acp-client";
 import { createProjectActions } from "./project-actions.svelte";
 
 describe("IDX AI knowledge review in new session", () => {
-  it("submits task-scoped CLI v2 discovery and audit guidance in the new session", async () => {
+  it("submits global cleanup with bounded escalation and task-scoped CLI v2 audit guidance", async () => {
     const client = {
       newSession: vi.fn().mockResolvedValue({ sessionId: "session-1" }),
     } as unknown as AcpClient;
@@ -63,6 +63,23 @@ describe("IDX AI knowledge review in new session", () => {
     expect(prompt).toContain("Finally, run idx knowledge dirty again");
     expect(prompt).toContain("unless the command succeeds and returns no");
     expect(prompt).toContain("if review is incomplete or the command is unsupported, report that limitation");
+    expect(prompt).toContain("Restore the entire project knowledge base to a verified clean state");
+    expect(prompt).toContain("scope is not limited to paths entered in the panel");
+    expect(prompt).toContain("Completing one task's audit does not establish that this global cleanup succeeded");
+    expect(prompt).toContain("Concurrent changes to a reviewed spec or any declared implementation/test dependency invalidate that review");
+    expect(prompt).toContain("do not acknowledge work that is still being edited by another agent");
+    expect(prompt).toContain("at most two review passes total");
+    expect(prompt).toContain("one corrective pass");
+    expect(prompt).toContain("Do not poll for cleanliness");
+    expect(prompt).toContain("delegate repeated cleanup loops to bypass this limit");
+    expect(prompt).toContain("Escalate to the user and stop autonomous cleanup immediately");
+    expect(prompt).toContain("still yes or unknown after the pass limit");
+    expect(prompt).toContain("explicitly unclassified remaining dirtiness");
+    expect(prompt).toContain("command errors/exit codes");
+    expect(prompt).toContain("Leave the global cleanup todo blocked/deferred rather than completed");
+    expect(prompt).toContain("resume only on explicit user instruction");
+    expect(prompt).toContain("complete the global cleanup todo only when the final complete exit-0 dirty check returns no");
+    expect(prompt).toContain("task-scoped audit success must be reported independently");
     expect(prompt).not.toMatch(/wiki|knowledge status|unverified\s*=|needs review\s*=|whole worktree/i);
     expect(runPrompt).toHaveBeenCalledWith(client, "session-1", [{ type: "text", text: prompt }], [], "message-1");
   });

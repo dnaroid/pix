@@ -20,6 +20,7 @@ export interface GitPanelWorkflow {
   onResolve: () => void;
   onLoadDetails: () => void;
   onRepositoryAction: (action: GitRepositoryAction, target?: string) => Promise<boolean>;
+  onSaveIdentity: (name: string, email: string) => Promise<boolean>;
 }
 
 export function sameGitDiff(a: GitDiff | null | undefined, b: GitDiff | null | undefined): boolean {

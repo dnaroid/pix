@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # Desktop Source Control workflows
 
 <!-- markdownlint-disable MD013 -->
@@ -80,6 +85,34 @@ LLM results and Git mutation completions are bound to their originating workspac
 
 ## Secondary repository tools
 
+### Repository commit author
+
+Source Control includes a separate, keyboard-operable **Commit author** disclosure,
+collapsed by default. It loads the current Git `user.name` and `user.email`
+configuration on first opening, labels each value as a repository override or
+inherited Git setting, and provides Name, Email, **Save for repository** and
+Reload controls. This is commit metadata, not authentication or a change of the
+account used to push. Environment author/committer overrides are not displayed.
+
+Save trims and validates both nonempty fields, rejecting control characters,
+angle brackets and values over 320 UTF-8 bytes without imposing public-email
+syntax. Both keys are replaced together in the repository's common Git config
+under Git's exclusive `config.lock`, preserving other config and its permissions.
+Global/system/included config and existing commits are not modified. Linked
+worktrees share this common config; separate worktree config, when enabled, can
+still override it. The editor reloads effective Git configuration after saving
+rather than assuming the new common-config values take precedence.
+
+Saving shares the existing Git mutation lock, so commits/staging and author
+updates cannot overlap through Pix. Loading, disabled, success and error states
+are explicit. Failed writes leave the existing config unchanged and never delete
+another process's lock. Draft/read/save completions are panel-lifecycle guarded:
+switching workspaces or unmounting cannot populate a new panel, and stale mutation
+completion cannot release a later lifecycle's lock. A successful save does not
+invalidate an existing diff review. Native reads/writes use `run_blocking` and the
+noninteractive argument-vector helpers. See
+[decision 0053](../docs/decisions/0053-repository-commit-author.md).
+
 Repository tools is a keyboard-operable, collapsed-by-default disclosure inside the sidebar scroller. It provides:
 
 - Fetch all configured remotes without changing local files; Pull is **fast-forward only**, requires a clean working tree and an upstream, disables autostash/rebase, and refuses divergence rather than merging, rebasing or resetting.
@@ -91,9 +124,31 @@ Tracked, non-conflicted working-tree rows additionally expose Discard with an ex
 
 All new Git commands use the existing noninteractive argument-vector process helpers through Tauri `run_blocking`, off the UI thread. Repository-detail responses are bounded and generation-guarded. Operations which reload the project respect the existing unsaved-Preview confirmation.
 
+## Implementation
+
+Repository commit-author dependencies (the broader workflow ownership map follows):
+
+- `desktop/src/components/GitPanel.svelte`
+- `desktop/src/components/GitIdentitySection.svelte`
+- `desktop/src/lib/git-identity-editor.svelte.ts`
+- `desktop/src/lib/git-workflow.ts`
+- `desktop/src/app/git-workspace.svelte.ts`
+- `desktop/src/app/desktop-sidebar-view-model.svelte.ts`
+- `desktop/src-tauri/src/git_identity.rs`
+- `desktop/src-tauri/src/lib.rs`
+
+## Tests
+
+- `desktop/src/lib/git-identity-editor.test.ts`
+- `desktop/src/app/git-workspace.test.ts`
+- `desktop/src-tauri/src/git_identity.rs`
+- `desktop/scripts/fixtures/GitWorkflowFixture.svelte`
+
 ## Implementation ownership
 
 - `desktop/src/components/GitPanel.svelte`: branch/status, review checkpoint, panel composition.
+- `desktop/src/components/GitIdentitySection.svelte` and `desktop/src/lib/git-identity-editor.svelte.ts`: repository-author disclosure, draft and lifecycle handling.
+- `desktop/src-tauri/src/git_identity.rs`: effective/local configuration reads and locked, repository-only two-key saves.
 - `desktop/src/components/GitCiSection.svelte`, `desktop/src/app/git-ci.svelte.ts` and `desktop/src/lib/git-ci.ts`: current-HEAD CI presentation, polling/lazy jobs and normalized provider state.
 - `desktop/src/components/GitCommitComposer.svelte`: editable draft, preparation buttons and explicit commit choice.
 - `desktop/src/components/GitChangesSection.svelte` and `GitRepositoryTools.svelte`: file operations and secondary tools.
@@ -106,6 +161,16 @@ All new Git commands use the existing noninteractive argument-vector process hel
 - `desktop/src-tauri/src/git_operations.rs`: secondary commands and temporary-repository tests; `desktop/src-tauri/src/git_ci.rs`: bounded/cancellable `gh`/`glab` queries and provider normalization; `desktop/src-tauri/src/lib.rs`: repository detection/initialization, command registration and window/app teardown.
 
 ## Verification
+
+Repository-author regression coverage is in
+`desktop/src/lib/git-identity-editor.test.ts` (inherited values, errors/retry,
+read/edit races, serialized saves and disposal),
+`desktop/src/app/git-workspace.test.ts` (shared mutation lock and A → B → A
+completion), and `desktop/src-tauri/src/git_identity.rs` (real temporary Git
+repositories, local-only save, included defaults, unchanged config on invalid
+input/lock contention or staged-write failure, linked-worktree precedence,
+permissions/history preservation, and exact-root confinement). Run the native subset with
+`cargo test --manifest-path desktop/src-tauri/Cargo.toml git_identity`.
 
 The sparse closed-panel lane follows [sidebar indicators](desktop-sidebar-indicators.md) and [decision 0025](../docs/decisions/0025-sidebar-health-polling.md).
 

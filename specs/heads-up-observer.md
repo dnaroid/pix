@@ -268,14 +268,14 @@ Shown counts accepted new cards, not navigation impressions or retained-card rev
 `/heads-up explain` expands existing evidence in TUI. Desktop has an evidence
 expander and feedback actions; expansion never makes another model request.
 Desktop management lives in a persistent statusbar Observer item, not in the
-composer actions menu. The trigger contains only 16px binoculars: grey when off/unready,
+composer actions menu. The trigger contains only a 16px telescope: grey when off/unready,
 primary when enabled (including waiting and error states), except a static amber
-binoculars while budget-limited. Limited status takes precedence over an existing finding
+telescope while budget-limited. Limited status takes precedence over an existing finding
 in the trigger/popup; the finding card remains separate. The limit label is
 «Достигнут лимит проверок»; accessible label and popup include the earliest known reservation
 expiry (or explicitly unknown), not a promised check time or full reset. Input
 budget exhaustion is distinguished in the detail. A runtime update clearing the
-limit restores primary; wall-clock expiry alone does not claim recovery. The same binoculars
+limit restores primary; wall-clock expiry alone does not claim recovery. The same telescope
 pulses only during a real checking phase, respecting reduced motion; no spinner,
 visible status label or notice badge is shown. Accessible label and popup
 distinguish off, waiting, checking, finding, unavailable/error and limited states. A draft
@@ -285,8 +285,14 @@ idle; the existing evidence/feedback card stays above the composer.
 
 The statusbar popup contains the standard SettingsSwitch for the current session,
 explicit Check now and an Observer settings deep link. It shows dynamic state and
-wait/error reasons, last check time/result/duration, new completed turns, actual
-rolling/total checks, used input characters and recorded input/cache/output tokens.
+wait/error reasons in plain language, with last check time and its outcome visible
+by default. A no-finding outcome means nothing new to flag, not a guarantee that
+the work is correct. A keyboard-reachable Technical details disclosure holds
+duration, raw runtime reason, new completed turns, actual rolling/total checks,
+used input characters, recorded input/cache/output tokens, feedback counts and
+discovery slowdown. Details start collapsed on each opening; toggling them is
+presentation-only and never requests inference. Waiting copy explains remaining
+agent replies and interval gates without promising a timed check.
 It toggles on button activation (click, Enter or Space), never pointer hover or
 mere focus. Pointer departure leaves it open; repeat activation, outside click,
 Escape or focus leaving the trigger/popup dismisses it. Opening does not steal

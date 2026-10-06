@@ -43,6 +43,48 @@ export function modelDisplayToneClass(tone: ModelDisplayTone | undefined): strin
   }
 }
 
+/** Same palette as {@link modelDisplayToneClass}, as an SVG `fill`/`stroke` color via `bg-*` Tailwind class. */
+export function modelDisplayBgClass(tone: ModelDisplayTone | undefined): string {
+  switch (tone) {
+    case "accent": return "bg-tool-accent";
+    case "info": return "bg-tool-info";
+    case "search": return "bg-tool-search";
+    case "mutation": return "bg-tool-mutation";
+    case "success": return "bg-tool-success";
+    case "warning": return "bg-tool-warning";
+    case "error": return "bg-tool-error";
+    case "model-anthropic": return "bg-model-anthropic";
+    case "model-openai": return "bg-model-openai";
+    case "model-zai": return "bg-model-zai";
+    case "thinking-low": return "bg-thinking-low";
+    case "thinking-xhigh": return "bg-thinking-xhigh";
+    case "thinking-max": return "bg-thinking-max";
+    case "muted": return "bg-muted-foreground";
+    default: return "bg-foreground";
+  }
+}
+
+/** Same palette as {@link modelDisplayToneClass}, for SVG `stroke` on donut/ring segments. */
+export function modelDisplayStrokeClass(tone: ModelDisplayTone | undefined): string {
+  switch (tone) {
+    case "accent": return "stroke-tool-accent";
+    case "info": return "stroke-tool-info";
+    case "search": return "stroke-tool-search";
+    case "mutation": return "stroke-tool-mutation";
+    case "success": return "stroke-tool-success";
+    case "warning": return "stroke-tool-warning";
+    case "error": return "stroke-tool-error";
+    case "model-anthropic": return "stroke-model-anthropic";
+    case "model-openai": return "stroke-model-openai";
+    case "model-zai": return "stroke-model-zai";
+    case "thinking-low": return "stroke-thinking-low";
+    case "thinking-xhigh": return "stroke-thinking-xhigh";
+    case "thinking-max": return "stroke-thinking-max";
+    case "muted": return "stroke-muted-foreground";
+    default: return "stroke-foreground";
+  }
+}
+
 const DEFAULT_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const MODEL_PROVIDER_PALETTE: readonly ModelDisplayTone[] = [
   "accent",

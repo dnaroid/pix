@@ -8,29 +8,36 @@ status: active
 ## Behavior
 
 Decision: [0039 — Compact quota reset calendar](../docs/decisions/0039-quota-reset-calendar.md).
+Claude banked grants: [0051 — Read-only Claude reset grants](../docs/decisions/0051-claude-reset-grants.md).
 
-Desktop Usage renders a compact weekly reset calendar above the
-recorded-spend breakdown only when the current displayed provider snapshot has
-a weekly quota window. It does not duplicate the account-wide remaining percentage,
-quota heading or aggregate track already represented by the status trigger.
-The Usage scroll area allows up to `min(640px, 100vh - 120px)` of content,
-retaining room for the popup header and status bar on smaller windows.
+Desktop Usage preserves the weekly reset calendar: seven local civil dates
+starting today, plus the actual reported reset date as an eighth cell when
+outside that range. The grid stays on one row, highlights today and the reset,
+and colors weekends with the theme's muted red. Exact local reset date/year
+and minute-level time remain visible below it, without predicted future resets.
+Date cells are compact (24px high) with subtle today/reset borders; the exact
+reset time is an unboxed line, not a separate filled card.
 
-The calendar shows seven consecutive local civil dates starting today, so today's
-outlined date is always visible. It always includes and highlights the provider's
-reported valid reset date: when outside that week, add that actual date as an
-eighth cell in chronological order, without manufacturing intervening dates or
-future resets. All seven or eight cells share one horizontal row with equal-width
-columns, never wrapping to a second week. Saturday/Sunday labels and dates use the
-theme's muted red (`text-tool-error`), preserving today's outline and the
-reset background. No explanatory
-today/reset legend is shown. The reset detail always shows the actual date/year,
-exact minute-level local time without a timezone suffix or duplicate countdown, even
-when the reset falls outside the seven-date base range. It does not predict
-subsequent resets
-or infer past daily consumption. The selected compact-week concept supersedes
-the former no-quota-block policy in [session usage](session-usage.md); other
-[runtime status](desktop-runtime-status.md) hover, refresh and billing rules stay.
+A provider-agnostic **Limits** section adds the short account quota window
+(`hourly`) above the calendar when available. It shows a neutral progress track,
+remaining percentage, reset countdown and projected-exhaustion warning.
+Weekly reset timing remains in the calendar; header-derived rate windows are
+excluded from this section. Stale windows remain visibly marked as cached.
+The complete popup is bounded by the application viewport height minus 70px,
+with internal scrolling and no extra timers or refresh-on-open requests.
+
+After the calendar and any reset credits, directly before the spend table,
+**Token usage by model** adds a donut only when more than
+one provider/model entry has nonzero recorded tokens. Its center shows the sum
+of attributed model tokens; its legend identifies the models and token counts.
+Chart entries use successive semantic palette colors independently of provider,
+so models sharing a provider remain distinguishable. Each legend dot matches its
+segment; the palette repeats after eight entries. Table model colors are unchanged.
+Thin popup-background separators mark segment boundaries without changing token shares.
+Unattributed usage remains in the unchanged table, not assigned to a model.
+The existing reset-credit section, provider/model/tokens/cost table and explicit
+Claude limits refresh remain intact. These additions apply across providers,
+not only Claude.
 
 For OpenAI Codex OAuth quota snapshots, Desktop also renders a separate
 **Reset credits** section when the account has available rate-limit reset
@@ -49,6 +56,17 @@ capped detail list. If only the total is known, the section shows that total and
 an explicit details-unavailable message, without fabricated credit rows. Credits
 remain visible without weekly/hourly windows and precede recorded session usage.
 
+Anthropic subscription OAuth and the Claude Code provider use the same section
+for **banked reset grants** returned in `cedar_ember`. Each grant is one row,
+with its backend label (fallback **Full reset**), remaining quantity (`×N` when
+greater than one), visible local expiration date and relative countdown. The
+accessible expiry retains the exact date/year/time through seconds. The section
+total is the sum of valid grants' `resets_left`, not the number of grants or
+`resets_total`. Quantities are not expanded into duplicate rows. “Available” here
+means banked, not redeemable right now: `usable_now`, limit-exhaustion and cooldown
+are not permission to spend a reset and do not hide banked grants. No redemption
+request or control is implemented.
+
 ## Constraints and failure cases
 
 - Missing, nonfinite, nonpositive or invalid reset timestamps show **Reset time
@@ -66,7 +84,7 @@ remain visible without weekly/hourly windows and precede recorded session usage.
   count from the usage summary remains usable; failed details are not cached as
   current rows. [Codex credentials](openai-codex-usage-refresh.md) are shared with
   the quota request, including after OAuth rotation.
-- Only credits whose backend status is **available** are exposed. Known expired
+- Only Codex credits whose backend status is **available** are exposed. Known expired
   credits are filtered immediately and again by the mounted minute tick. When
   an available credit has no valid expiry, it remains visible as **Expiry
   unavailable** rather than inventing a date. Backend expiry is an RFC3339
@@ -75,6 +93,26 @@ remain visible without weekly/hourly windows and precede recorded session usage.
   distinct credits with identical titles/dates remain distinct. Known expirations
   decrement the snapshot total; unknown expirations cannot be inferred. Countdowns
   round up to minutes while the exact local expiry retains seconds.
+- Claude grants use the existing route's OAuth credential, never a different
+  application's login for that route. If the ordinary usage response omits
+  `cedar_ember` or returns it as null, make a best-effort read-only GET to
+  `/api/oauth/usage?cedar_ember=1&skip_spend=1` during the existing quota refresh.
+  Only this flagged lookup uses the verified CLI-surface compatibility
+  User-Agent `claude-cli/2.1.283 (external, cli, client-app/pi-ui-extend)`; it
+  explicitly identifies Pix. The ordinary quota request retains its existing
+  User-Agent. No CLI launch or credential refresh is needed for that header.
+  This supplementary request, including body consumption, is bounded by ten
+  seconds; failures or malformed details preserve ordinary quota and do not
+  retain previous grant rows. A non-null inline block (including an ineligible
+  object) does not cause an extra lookup. Regular API keys make no grant request.
+- Claude exposes only eligible, unpaused grants with valid distinct backend IDs
+  and positive safe-integer `resets_left`; unsafe aggregate counts are rejected.
+  Known future starts, malformed non-null start times, and known expirations
+  (including exactly now) are excluded. A missing/invalid `ends_at` keeps a banked
+  grant with **Expiry unavailable** rather than inventing a deadline. Both dates
+  accept explicit RFC3339 instants only. Known grant expirations remove the whole
+  quantity, including on the owned minute tick. Claude credential-pending stale
+  quota retains only quota windows, not grant rows/counts that may have been spent.
 - Date construction uses local civil-day arithmetic, not fixed 24-hour steps,
   so DST and month/year boundaries preserve seven unique consecutive base dates
   and, when needed, one distinct reported reset date.
@@ -88,10 +126,15 @@ remain visible without weekly/hourly windows and precede recorded session usage.
 ## Implementation
 
 - `desktop/src/components/QuotaResetCalendar.svelte`
+
+- `desktop/src/components/UsageLimitBars.svelte`
+- `desktop/src/components/ModelUsageDonut.svelte`
 - `desktop/src/components/ResetCreditsSection.svelte`
 - `desktop/src/components/RuntimeStatusBarItems.svelte`
 - `src/app/model/model-usage-status.ts`
+- `src/app/model/model-usage-reset-credits.ts`
 - `acp/src/acp/desktop-commands.ts`
+- `desktop/src/lib/acp-client-types.ts`
 - `desktop/src/lib/acp-response-parsers.ts`
 - `desktop/src/lib/quota-calendar.ts`
 - `desktop/src/lib/runtime-status.ts`
@@ -99,6 +142,9 @@ remain visible without weekly/hourly windows and precede recorded session usage.
 ## Tests
 
 - `desktop/src/components/QuotaResetCalendar.test.ts`
+
+- `desktop/src/components/UsageLimitBars.test.ts`
+- `desktop/src/components/ModelUsageDonut.test.ts`
 - `desktop/src/components/ResetCreditsSection.test.ts`
 - `desktop/src/lib/quota-calendar.test.ts`
 - `desktop/src/lib/acp-response-parsers.test.ts`
@@ -107,6 +153,7 @@ remain visible without weekly/hourly windows and precede recorded session usage.
 - `desktop/src/lib/runtime-status.test.ts`
 - `desktop/src/app/session-runtime-status.test.ts`
 - `tests/model-usage-status.test.ts`
+- `tests/anthropic-reset-credits.test.ts`
 
 ## Verification
 

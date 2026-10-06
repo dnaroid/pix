@@ -42,6 +42,19 @@ An existing explicit whitelist does not automatically include the provider's
 in the picker's management mode or explicitly add those refs to the corresponding
 user config; migration itself preserves visibility preferences.
 
+### Timeout diagnostics
+
+Content-free request metrics and the doctor's last-request report record the
+original finite caller `timeoutMs` (when supplied), configured total limit and
+its environment/default source, shared request budget, effective launch total,
+idle and MCP-ready limits, and whether this is an image-recovery attempt.
+Total and idle timeout errors also include these budgets so persisted session
+errors retain the evidence without enabling a metrics log. No prompt, tool
+content, arbitrary environment values or paths are added. Existing deadline
+selection and recovery-budget subtraction are unchanged. The optional
+`PI_CLAUDE_CODE_PROVIDER_METRICS_LOG` persists finalized per-attempt metrics;
+diagnostics do not add a new always-on log or startup write.
+
 ### Native image transport
 
 Images are delivered as native `image` blocks (`source.type: base64`,

@@ -22,12 +22,12 @@
       <span class="font-medium">{new Date(now).toLocaleDateString(undefined, { month: "long", year: "numeric" })}</span>
       <span class="text-muted-foreground">Next reset</span>
     </div>
-    <div class="mt-2 grid gap-1" style:grid-template-columns={`repeat(${days.length}, minmax(0, 1fr))`} aria-label="Today’s week and reset date">
+    <div class="mt-1.5 grid gap-1" style:grid-template-columns={`repeat(${days.length}, minmax(0, 1fr))`} aria-label="Today’s week and reset date">
       {#each days as day (day.key)}
         <div class="min-w-0 text-center">
           <div class={["truncate text-xs", day.weekend ? "text-tool-error" : "text-muted-foreground"]}>{day.weekday}</div>
           <span
-            class={["mt-1 flex h-8 items-center justify-center rounded-md border font-mono tabular-nums", day.reset ? "border-primary bg-primary/10" : day.today ? "border-muted-foreground bg-muted" : "border-transparent", day.weekend ? "text-tool-error" : day.reset ? "text-primary" : day.today ? "text-foreground" : "text-muted-foreground"]}
+            class={["mt-0.5 flex h-6 items-center justify-center rounded-sm border font-mono tabular-nums", day.reset ? "border-primary/40 bg-primary/10" : day.today ? "border-muted-foreground/40 bg-muted/40" : "border-transparent", day.weekend ? "text-tool-error" : day.reset ? "text-primary" : day.today ? "text-foreground" : "text-muted-foreground"]}
             aria-label={`${day.fullDate}${day.reset ? ", quota reset" : ""}${day.today ? ", today" : ""}`}
             aria-current={day.today ? "date" : undefined}
           >{day.day}</span>
@@ -35,10 +35,10 @@
       {/each}
     </div>
   {/if}
-  <div class="mt-2 flex items-start gap-2 rounded-md bg-muted px-2.5 py-2">
+  <div class="mt-2 flex items-start gap-1.5 text-muted-foreground" data-quota-reset-detail>
     <RefreshCw class="mt-0.5 h-3 w-3 shrink-0 text-primary" aria-hidden="true" />
     <div>
-      <div class="font-medium">{resetLabel}</div>
+      <div class="tabular-nums">{resetLabel}</div>
       {#if days.length && window.resetAt <= now}
         <div class="mt-0.5 text-muted-foreground">
           Reset time reached · Awaiting quota refresh

@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # Fenced code blocks in chat Markdown
 
 <!-- markdownlint-disable MD013 -->
@@ -54,3 +59,11 @@ Show fenced code as a visually distinct code block without exposing Markdown fen
 
 - Terminal applications cannot select a different font family, so visual separation uses theme colors.
 - Fence markers intentionally remain part of the stored source even though they are absent from rendered/copy-selected output.
+
+## Implementation
+
+- `src/markdown-format.ts`
+
+## Tests
+
+- `tests/markdown-format.test.ts`
