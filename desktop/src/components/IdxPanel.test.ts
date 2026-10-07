@@ -38,6 +38,29 @@ describe("IdxPanel managed installation", () => {
 });
 
 describe("IDX v2 panel contract", () => {
+  it("shows knowledge health first and groups query and diagnostics on the second tab", () => {
+    expect(panelSource).toContain('type PanelTab = "overview" | "tools"');
+    expect(panelSource).toContain('let activeTab = $state<PanelTab>("overview")');
+    expect(panelSource).toContain('["tools", "Query & diagnostics"]');
+    expect(panelSource).not.toContain('["knowledge", "Knowledge"]');
+    const overviewStart = panelSource.indexOf('{:else if activeTab === "overview"}');
+    const toolsStart = panelSource.indexOf('aria-label="Index diagnostics"');
+    const overviewContent = panelSource.slice(overviewStart, toolsStart);
+    expect(overviewContent).toContain('aria-label="Knowledge base status"');
+    expect(overviewContent).toContain('"Dirty" : overview?.knowledgeDirty === false ? "Clean" : "Unknown"');
+    expect(overviewContent).toContain('onclick={onRefreshKnowledge}');
+    expect(overviewContent).toContain('overview?.indexStale === true');
+    expect(overviewContent).not.toContain('startOperation("doctor"');
+    expect(overviewContent).not.toContain('startOperation("dry-run"');
+    const toolsContent = panelSource.slice(toolsStart);
+    expect(toolsContent).toContain('startOperation("doctor", { openrouterEmbeddings })');
+    expect(toolsContent).toContain('startOperation("dry-run")');
+    expect(toolsContent).toContain('aria-label="Task-scoped knowledge audit"');
+    expect(toolsContent).toContain('aria-label="Semantic query"');
+    expect(toolsContent).toContain('{#if activeTab === "tools"}');
+    expect(toolsContent).toContain('aria-label="Stop IDX operation"');
+  });
+
   it("offers document search, context and an explicit read-only task audit without removed ask/wiki controls", () => {
     expect(panelSource).toContain('["knowledge", "Documents"]');
     expect(panelSource).toContain('["context", "Context"]');

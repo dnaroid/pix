@@ -49,7 +49,7 @@
     onOperationRunningChange?: (workspace: string, running: boolean) => void;
   } = $props();
 
-  type PanelTab = "overview" | "knowledge" | "query";
+  type PanelTab = "overview" | "tools";
   let activeTab = $state<PanelTab>("overview");
   let openrouterEmbeddingsState = $state<IdxOpenrouterEmbeddingsState>(resetIdxOpenrouterEmbeddings());
   const openrouterEmbeddings = $derived(openrouterEmbeddingsState.checked);
@@ -163,12 +163,7 @@
 </script>
 
 <section
-  class={[
-    "relative grid min-h-0 min-w-0 overflow-hidden bg-sidebar text-sidebar-foreground",
-    visibleOperation && activeTab === "overview"
-      ? "grid-rows-[auto_auto_auto_minmax(120px,1fr)]"
-      : "grid-rows-[auto_auto_minmax(0,1fr)_auto]",
-  ]}
+  class="relative grid min-h-0 min-w-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden bg-sidebar text-sidebar-foreground"
   aria-label="IDX repository intelligence"
 >
   <div class="flex h-8 min-w-0 items-center gap-2 border-b border-sidebar-border bg-panel px-2.5">
@@ -193,8 +188,7 @@
   <div class="flex h-8 items-stretch border-b border-sidebar-border bg-chrome px-1.5" role="tablist" aria-label="IDX views">
     {#each [
       ["overview", "Overview"],
-      ["knowledge", "Knowledge"],
-      ["query", "Query"],
+      ["tools", "Query & diagnostics"],
     ] as item}
       {@const tab = item[0] as PanelTab}
       <button
@@ -248,6 +242,19 @@
       </div>
     {:else if activeTab === "overview"}
       <div class="divide-y divide-sidebar-border">
+        <section class="bg-panel" aria-label="Knowledge base status">
+          <div class="flex h-8 items-center gap-2 px-2.5">
+            <ScanSearch class="h-3.5 w-3.5 text-tool-search" aria-hidden="true" />
+            <h3 class="text-xs font-semibold text-foreground">Knowledge base</h3>
+            <span class={["ml-auto text-xs font-medium", overview?.knowledgeDirty === true ? "text-tool-warning" : overview?.knowledgeDirty === false ? "text-tool-success" : "text-muted-foreground"]}>
+              {overview?.knowledgeDirty === true ? "Dirty" : overview?.knowledgeDirty === false ? "Clean" : "Unknown"}
+            </span>
+          </div>
+          <div class="space-y-2 border-t border-sidebar-border/70 bg-sidebar px-2.5 py-2">
+            <p class="text-xs leading-4 text-muted-foreground">{overview?.knowledgeDirty === true ? "Changes need knowledge review. Updating the index does not clear this state." : overview?.knowledgeDirty === false ? "No pending knowledge review detected." : "Knowledge dirtiness is unavailable; a clean state cannot be confirmed."}</p>
+            <button class="h-7 rounded-md border border-border bg-panel-strong px-2 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" title="Start a new AI session to review documentation and acknowledge only verified specs" disabled={!sessionReady || Boolean(runningOperation)} onclick={onRefreshKnowledge}>AI review</button>
+          </div>
+        </section>
         <section class="bg-panel" aria-label="Code index status">
           <div class="flex h-8 items-center gap-2 px-2.5">
             <Activity class="h-3.5 w-3.5 text-tool-info" aria-hidden="true" />
@@ -261,24 +268,32 @@
             <div class="bg-sidebar px-2.5 py-2"><dt class="text-xs text-muted-foreground">Deps</dt><dd class="mt-0.5 font-mono text-sm text-foreground">{numberValue(idxNumericField(overview?.indexStatus, "dependencies"))}</dd></div>
           </dl>
           <div class="space-y-1 px-2.5 py-2 font-mono text-xs leading-4 text-muted-foreground">
+            <div class={overview?.indexStale === true ? "text-tool-warning" : "text-muted-foreground"}>{overview?.indexStale === true ? "Indexed revision differs from HEAD" : overview?.indexStale === false ? "Indexed revision matches HEAD; uncommitted changes may not be indexed" : "Indexed revision freshness unknown"}</div>
             {#if idxField(overview?.indexStatus, "gitRef")}<div><span class="text-muted-foreground/65">git</span> {idxField(overview?.indexStatus, "gitRef")}</div>{/if}
             {#if idxField(overview?.indexStatus, "languages")}<div class="break-words"><span class="text-muted-foreground/65">languages</span> {idxField(overview?.indexStatus, "languages")}</div>{/if}
           </div>
           <div class="grid grid-cols-2 gap-1 border-t border-sidebar-border/70 px-2 py-2">
             <button class="h-7 rounded-md border border-border bg-panel-strong px-2 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={Boolean(runningOperation)} onclick={() => void startOperation("index")}>Update index</button>
             <button class="h-7 rounded-md border border-border bg-panel-strong px-2 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={Boolean(runningOperation)} onclick={() => void startOperation("full-index")}>Full reindex</button>
-            <button class="h-7 rounded-md border border-border bg-panel-strong px-2 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={Boolean(runningOperation)} onclick={() => void startOperation("dry-run")}>Dry run</button>
-            <button class="h-7 rounded-md border border-border bg-panel-strong px-2 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={Boolean(runningOperation)} onclick={() => void startOperation("doctor", { openrouterEmbeddings })}><span class="inline-flex items-center gap-1"><Wrench class="h-3 w-3" aria-hidden="true" />Doctor</span></button>
           </div>
-          <label class="flex items-center gap-1.5 border-t border-sidebar-border/70 px-2.5 py-2 text-xs text-muted-foreground">
-            <input type="checkbox" checked={openrouterEmbeddings} onchange={(event) => toggleOpenrouterEmbeddings(event.currentTarget.checked)} disabled={Boolean(runningOperation)} />
-            <span>Use <span class="font-mono">--embedding openrouter</span> when reinitializing</span>
-          </label>
         </section>
 
 
       </div>
-    {:else if activeTab === "knowledge"}
+    {:else}
+      <section class="border-b border-sidebar-border bg-panel" aria-label="Index diagnostics">
+        <h3 class="px-2.5 py-2 text-xs font-semibold text-foreground">Index diagnostics</h3>
+        <div class="grid grid-cols-2 gap-1 border-t border-sidebar-border/70 px-2 py-2">
+          <button class="h-7 rounded-md border border-border bg-panel-strong px-2 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={Boolean(runningOperation)} onclick={() => void startOperation("dry-run")}>Dry run</button>
+          <button class="h-7 rounded-md border border-border bg-panel-strong px-2 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={Boolean(runningOperation)} onclick={() => void startOperation("doctor", { openrouterEmbeddings })}><span class="inline-flex items-center gap-1"><Wrench class="h-3 w-3" aria-hidden="true" />Doctor</span></button>
+        </div>
+        <label class="flex items-center gap-1.5 border-t border-sidebar-border/70 px-2.5 py-2 text-xs text-muted-foreground">
+          <input type="checkbox" checked={openrouterEmbeddings} onchange={(event) => toggleOpenrouterEmbeddings(event.currentTarget.checked)} disabled={Boolean(runningOperation)} />
+          <span>Use <span class="font-mono">--embedding openrouter</span> when reinitializing</span>
+        </label>
+      </section>
+      <details class="border-b border-sidebar-border">
+        <summary class="px-2.5 py-2 text-xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">Task-scoped knowledge audit</summary>
       <section class="bg-panel" aria-label="Task-scoped knowledge audit">
         <div class="flex h-8 items-center gap-2 px-2.5">
           <h3 class="text-xs font-semibold text-foreground">Task-scoped audit</h3>
@@ -289,7 +304,6 @@
           <textarea id="idx-audit-paths" class="h-24 w-full resize-none rounded-md border border-input bg-panel-strong p-2 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/70" placeholder="src/feature.ts, specs/feature.md" value={auditState.pathsInput} oninput={(event) => auditController.setPathsInput(event.currentTarget.value)} spellcheck="false"></textarea>
           <div class="flex flex-wrap items-center gap-1.5">
             <button class="inline-flex h-7 items-center gap-1 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" disabled={!indexReady || !auditController.pathsValid || auditState.running || Boolean(runningOperation)} onclick={() => void runAudit()}>{#if auditState.running}<RefreshCw class="h-3 w-3 animate-spin" aria-hidden="true" />{:else}<Search class="h-3 w-3" aria-hidden="true" />{/if}Audit paths</button>
-            <button class="h-7 rounded-md border border-border bg-panel-strong px-2 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" title="Start a new AI session to review documentation and acknowledge only verified specs" disabled={!sessionReady || Boolean(runningOperation)} onclick={onRefreshKnowledge}>AI review</button>
           </div>
         </div>
         {#if auditState.running && !auditOutput}
@@ -301,7 +315,7 @@
           {#if auditController.activeResult?.truncated}<div class="px-2.5 py-1 text-xs text-tool-warning">output truncated</div>{/if}
         {/if}
       </section>
-    {:else}
+      </details>
       <div class="grid min-h-full grid-rows-[auto_minmax(180px,1fr)]">
         <section class="border-b border-sidebar-border bg-panel p-2.5" aria-label="Semantic query">
           <div class="flex h-7 items-stretch border-b border-sidebar-border/70" role="tablist" aria-label="Query source">
@@ -365,23 +379,21 @@
   </div>
 
   {#if visibleOperation}
-    <div class={[
-      "grid min-h-0 grid-rows-[28px_minmax(0,1fr)] border-t border-code-border bg-code",
-      activeTab === "overview" ? "h-full" : "",
-    ]}>
+    <div class="grid min-h-0 grid-rows-[28px_minmax(0,1fr)] border-t border-code-border bg-code">
       <div class="flex h-7 min-w-0 items-center gap-1.5 border-b border-code-border bg-chrome px-2">
         {#if visibleOperation.status === "running"}<RefreshCw class="h-3 w-3 animate-spin text-tool-info" aria-hidden="true" />{:else}<Activity class={`h-3 w-3 ${operationTone(visibleOperation)}`} aria-hidden="true" />{/if}
         <span class="truncate text-xs font-medium text-foreground">{idxOperationLabel(visibleOperation.kind)}</span>
         <span class="truncate font-mono text-xs text-muted-foreground">{visibleOperation.command}</span>
         <span class={`ml-auto shrink-0 font-mono text-xs ${operationTone(visibleOperation)}`}>{idxOperationStatusLabel(visibleOperation)}</span>
+        {#if activeTab === "overview"}
+          <button class="shrink-0 px-1 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" type="button" onclick={() => activeTab = "tools"}>Output</button>
+        {/if}
         {#if visibleOperation.status === "running"}
           <button class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-tool-error/10 hover:text-tool-error focus-visible:outline-2 focus-visible:outline-ring" type="button" title="Stop IDX operation" aria-label="Stop IDX operation" onclick={() => void stopOperation(visibleOperation)}><Square class="h-3 w-3 fill-current" aria-hidden="true" /></button>
         {/if}
       </div>
-      <div class={[
-        "min-h-20 overflow-hidden bg-code p-1.5",
-        activeTab === "overview" ? "h-full" : "h-32",
-      ]}>
+      {#if activeTab === "tools"}
+      <div class="h-32 min-h-20 overflow-hidden bg-code p-1.5">
         {#key visibleOperation.id}
           <TerminalView
             content={visibleOperation.output || "Waiting for output…"}
@@ -393,6 +405,7 @@
           />
         {/key}
       </div>
+      {/if}
     </div>
   {/if}
 
