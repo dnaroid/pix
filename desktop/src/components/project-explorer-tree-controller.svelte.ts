@@ -156,11 +156,16 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
     revealVersion++;
     if (!path) {
       state.rootExpanded = !state.rootExpanded;
-      if (!state.rootExpanded) state.focusedPath = "";
+      if (!state.rootExpanded) {
+        state.focusedPath = "";
+        state.expandedDirectories = [];
+        expansionRevision += 1;
+        schedulePersistExpandedDirectories();
+      } else void refreshVisibleDirectories();
       return;
     }
     if (state.expandedDirectories.includes(path)) {
-      state.expandedDirectories = state.expandedDirectories.filter((candidate) => candidate !== path);
+      state.expandedDirectories = state.expandedDirectories.filter((candidate) => !sameOrDescendantPath(candidate, path));
       expansionRevision += 1;
       schedulePersistExpandedDirectories();
       return;
@@ -168,7 +173,12 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
     state.expandedDirectories = [...state.expandedDirectories, path];
     expansionRevision += 1;
     schedulePersistExpandedDirectories();
-    if (!state.entriesByDirectory[path]) void loadDirectory(path);
+    // Collapsed directories are not polled, so cached children may be stale.
+    // Keep them visible while rereading just the newly exposed branch.
+    void loadDirectory(path);
+    for (const directory of visibleExpandedDirectories()) {
+      if (directory.startsWith(`${path}/`)) void loadDirectory(directory);
+    }
   }
 
   function openFile(path: string): void {

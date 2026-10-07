@@ -108,7 +108,7 @@ offline("coding tools gain only AST; CLI exclusions can remove optional capabili
 	for (const name of SUBAGENT_COMMON_TOOLS) expect(removed.tools).toContain(name);
 }, 60_000);
 
-const SUITE_ONLY = /^(compress|dcp_|plan_|async_subagents|subagents$|repo_knowledge|question$)/;
+const SUITE_ONLY = /^(dcp_|plan_|async_subagents|subagents$|repo_knowledge|question$)/;
 
 offline("default role: private todo is active; provider web search and other suite tools are absent", async () => {
 	const { tools, all, piArgs } = await inventory(undefined);
@@ -119,6 +119,9 @@ offline("default role: private todo is active; provider web search and other sui
 	expect(tools).not.toContain(WEB_SEARCH); // ...but never active in a child
 	expect(tools.length).toBeGreaterThan(0);
 	expect(tools).toContain("todo");
+	expect(tools).toContain("compress");
+	expect(piArgs).toContain("--no-session");
+	expect(piArgs.some((arg) => arg.endsWith("dcp/subagent.ts"))).toBe(true);
 	for (const name of tools) {
 		expect(SUBAGENT_DENIED_TOOLS.has(name)).toBe(false);
 		expect(SUITE_ONLY.test(name)).toBe(false);
@@ -132,13 +135,13 @@ offline("restricted role: only the selected tools, never the provider web search
 	expect(tools).not.toContain(WEB_SEARCH);
 	expect(tools.length).toBeGreaterThan(0);
 	expect(tools).toContain("todo");
-	for (const name of tools) expect(["read", "grep", "todo"]).toContain(name.toLowerCase());
+	for (const name of tools) expect(["read", "grep", "todo", "compress"]).toContain(name.toLowerCase());
 }, 60_000);
 
-offline("no-work-tools role: only private todo is available", async () => {
+offline("no-work-tools role: private todo and DCP are available", async () => {
 	const { tools, piArgs } = await inventory([]);
 	expect(piArgs[piArgs.indexOf("--tools") + 1]).toBe(SUBAGENT_COMMON_TOOLS.join(","));
-	expect(tools).toEqual(["todo"]);
+	expect(tools.sort()).toEqual(["compress", "todo"]);
 }, 60_000);
 
 for (const selected of [undefined, ["read", "grep"], []]) {

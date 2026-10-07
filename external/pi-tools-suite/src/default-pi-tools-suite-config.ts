@@ -26,21 +26,6 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
     "sessionHygiene": true,
     "notify": true
   },
-  // Context Gateway is off by default. observe is passive telemetry; enforce
-  // compacts recognised complete simple test/build output and over-budget
-  // structured web_search/web_fetch results whose raw details remain recoverable
-  // from the append-only session. Reads/repo and unsupported result shapes stay
-  // producer-owned passthrough/native-compact.
-  "contextGateway": {
-    "mode": "off",
-    "budgets": {
-      "maxInlineBytes": 8192,
-      "maxResultBytes": 8192,
-      "maxExactReadBytes": 32768,
-      "maxSearchBytes": 8192,
-      "maxSearchMatches": 12
-    }
-  },
   // Baseline preserves the historical repo_* argv/defaults. Native Compact is
   // an explicit experimental arm with bounded native flags/cursors/output.
   "repoDiscovery": {

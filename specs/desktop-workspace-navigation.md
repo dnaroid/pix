@@ -38,8 +38,12 @@ establish compatibility requirements.
   project folder. It is expanded on mount and workspace change; refresh and search
   preserve its current state. Its children are one level deeper. Click,
   Enter/Space and Left/Right toggle/navigate it like other directories. Collapsing
-  the root keeps descendant expansion preferences and selected files intact;
+  the root clears all descendant expansion preferences but keeps selected files intact;
   the root participates in the same single roving Tab stop.
+- Collapsing any directory clears its own and all descendant expanded-directory
+  paths, including hidden descendants, and persists the reduced list. Reopening
+  shows its immediate children collapsed; sibling branches, cached listings and
+  selected files remain unchanged.
 - Right-click or Context Menu / `Shift+F10` on the root offers New File/New Folder
   and Paste in the project root, plus external-editor and file-manager commands,
   without requiring empty space below the file list. The root cannot be renamed,
@@ -195,6 +199,11 @@ establish compatibility requirements.
   already loading, and uses the tree's generation/request guards against stale
   workspace or mutation completions. Background/hidden windows stop scheduling;
   closing Files removes timers and activity listeners. Search results are not polled.
+- Expanding a previously loaded directory rereads it and its visible expanded
+  descendants, retaining cached rows until completion. Reopening the workspace
+  root rereads the root and visible expanded directories. This exposes folders
+  created by agents or external tools while a branch was collapsed, without
+  waiting for the next poll or scanning unopened branches; in-flight reads coalesce.
 - The Files panel keeps a compact project-search field above the lazy tree. Typing a query runs a bounded background search over project-relative file paths and UTF-8 file contents without expanding tree nodes; `Ctrl+Shift+F` / `Cmd+Shift+F` focuses that field while the Files panel is active.
 - Project search does not follow symbolic links and skips dependency/generated directories such as `.git`, `node_modules`, `target`, `dist`, `build`, `coverage`, `.next`, and `.svelte-kit`. Individual content reads are bounded to 2 MB, scanning stops after 20,000 files, and at most 500 path/content matches are returned so searching cannot turn the renderer into an unbounded filesystem walk.
 - Search results show the relative path, source line/column when the hit came from file contents, and a compact line preview. Activating a content hit opens Preview at that exact source line; activating a path-only hit opens the file normally. Clearing the query returns to the existing lazy tree with its expansion/selection state intact.
@@ -270,7 +279,8 @@ establish compatibility requirements.
   copied output protection, out-of-order completion and workspace/teardown invalidation.
 - `desktop/src/components/project-explorer-tree-controller.test.ts` covers deferred
   row focus after workspace replacement, teardown and changed focus intent,
-  lazy reverse navigation, pending-list reuse, missing targets and newer reveals.
+  lazy reverse navigation, pending-list reuse, missing targets and newer reveals,
+  descendant expansion reset on parent/root collapse, persistence and sibling preservation.
 - `desktop/src/app/preview.test.ts` covers directory-link routing without Preview
   changes and stale classification cancellation.
 - `desktop/src/lib/native-context-menu.test.ts` covers captured tab reveal actions.

@@ -1,16 +1,39 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 import { evaluateAssertions } from "./harness/assertions.js";
 import { deriveMetrics } from "./harness/metrics.js";
 import { renderEvalReportMarkdown } from "./harness/report.js";
 import { writeRecorder } from "./harness/runner.js";
 import type { EvalCase, EvalEvent, EvalReport } from "./harness/types.js";
-import { readRecoveryProbeEvents } from "./recovery-provenance.js";
 
 describe("eval harness", () => {
+	test("generated recorder logs calls, native results and usage without extra modules", async () => {
+		const artifactRoot = path.resolve(import.meta.dir, "../../../../.pi/artifacts");
+		fs.mkdirSync(artifactRoot, { recursive: true });
+		const projectDir = fs.mkdtempSync(path.join(artifactRoot, "eval-recorder-"));
+		try {
+			const { extensionPath, logPath } = writeRecorder(projectDir, ["apply_patch"]);
+			const handlers = new Map<string, (event: Record<string, unknown>) => Promise<unknown>>();
+			const { default: recorder } = await import(extensionPath);
+			recorder({ on: (name: string, handler: (event: Record<string, unknown>) => Promise<unknown>) => handlers.set(name, handler) });
+			expect(await handlers.get("tool_call")!({ toolCallId: "c1", toolName: "apply_patch", input: {} })).toMatchObject({ block: true });
+			await handlers.get("tool_result")!({
+				toolCallId: "c2", toolName: "repo_search", content: [{ type: "text", text: "result" }],
+				details: { nativePolicy: { version: 1, profile: "native-compact", refused: false, outputMode: "full" } },
+			});
+			await handlers.get("agent_end")!({ messages: [{ role: "assistant", usage: { input: 10, output: 2, totalTokens: 12, cost: { total: 0.01 } } }] });
+			const events = fs.readFileSync(logPath, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+			expect(events.map((event) => event.type)).toEqual(["tool_call", "tool_result", "agent_end"]);
+			expect(events[1].nativePolicy).toEqual({ refused: false, outputMode: "full" });
+			expect(events[1].textBytes).toBe(6);
+			expect(events[2].usage).toMatchObject({ totalTokens: 12, cost: 0.01 });
+		} finally {
+			fs.rmSync(projectDir, { recursive: true, force: true });
+		}
+	});
+
 	test("derives mutation and behavioral verification metrics from tool events", () => {
 		const events: EvalEvent[] = [
 			{ type: "tool_call", toolName: "shell", input: { command: "npm test" } },
@@ -23,52 +46,7 @@ describe("eval harness", () => {
 			{ type: "tool_result", toolCallId: "r1", toolName: "repo_search", isError: true, contentBytes: 60, textBytes: 50, nativePolicy: { refused: true, outputMode: "compact", reason: "compact-limit-exceeded" } },
 			{ type: "tool_call", toolCallId: "r2", toolName: "repo_search", input: { target: "fixture", outputMode: "full" } },
 			{ type: "tool_result", toolCallId: "r2", toolName: "repo_search", isError: false, contentBytes: 70, textBytes: 60, nativePolicy: { refused: false, outputMode: "full" } },
-			{
-				type: "agent_end",
-				usage: { input: 80, output: 20, cacheRead: 5, cacheWrite: 0, totalTokens: 105, cost: 0.01 },
-				contextGatewayTelemetry: {
-					mode: "observe",
-					maxResultBytes: 8192,
-					budgets: {
-						maxInlineBytes: 8192,
-						maxResultBytes: 8192,
-						maxExactReadBytes: 32768,
-						maxSearchBytes: 8192,
-						maxSearchMatches: 12,
-					},
-					snapshot: {
-						version: 1,
-						results: 2,
-						errors: 0,
-						contentBytes: 12_000,
-						deliveredContentBytes: 12_000,
-						textBytes: 11_000,
-						imageBytes: 0,
-						detailsBytes: 100,
-						upstreamTruncatedResults: 1,
-						overBudgetResults: 1,
-						potentialBytesOverBudget: 3_808,
-						enforcedResults: 0,
-						actualBytesSaved: 0,
-						pendingCalls: 0,
-						unboundResults: 0,
-						repeatCandidateCount: 0,
-						sameSourceDifferentRangeCount: 0,
-						retrievalCalls: 0,
-						nativePolicy: { results: 0, refusals: 0, fullOverrides: 0, byReason: {} },
-						testOutput: {
-							parserVersion: 1,
-							results: 0,
-							scanLimitedResults: 0,
-							compactCandidates: 0,
-							passthroughRecommended: 0,
-							byClassification: { recognised: 0, partial: 0, unrecognised: 0 },
-							byFormat: { "bun-test": 0, tap: 0, typescript: 0, mixed: 0, unknown: 0 },
-						},
-						byClass: {},
-					},
-				},
-			},
+			{ type: "agent_end", usage: { input: 80, output: 20, cacheRead: 5, cacheWrite: 0, totalTokens: 105, cost: 0.01 } },
 		];
 		const metrics = deriveMetrics({ events, elapsedMs: 1234, changedFiles: ["src/a.ts"], projectDir: "/missing", sessionDir: "/missing" });
 		expect(metrics.toolCallCount).toBe(5);
@@ -85,120 +63,6 @@ describe("eval harness", () => {
 		expect(metrics.changedFiles).toEqual(["src/a.ts"]);
 		expect(metrics.parentUsage.totalTokens).toBe(105);
 		expect(metrics.parentUsage.cost).toBe(0.01);
-		expect(metrics.contextGateway?.mode).toBe("observe");
-		expect(metrics.contextGateway?.snapshot.upstreamTruncatedResults).toBe(1);
-		expect(metrics.contextGateway?.snapshot.potentialBytesOverBudget).toBe(3_808);
-	});
-
-	test("generated recorder uses shared Context Gateway telemetry without copying raw bodies or args into its snapshot", async () => {
-		const root = mkdtempSync(join(tmpdir(), "context-gateway-eval-recorder-"));
-		const previousCwd = process.cwd();
-		const previousMode = process.env.PI_CONTEXT_GATEWAY_MODE;
-		const previousHome = process.env.HOME;
-		const previousConfigDir = process.env.PI_CONFIG_DIR;
-		try {
-			process.chdir(root);
-			process.env.HOME = root;
-			process.env.PI_CONFIG_DIR = join(root, "config");
-			process.env.PI_CONTEXT_GATEWAY_MODE = "observe";
-			const recorder = writeRecorder(root, []);
-			const module = await import(`${recorder.extensionPath}?test=${Date.now()}`);
-			const handlers = new Map<string, any[]>();
-			module.default({
-				on(name: string, handler: any) {
-					handlers.set(name, [...(handlers.get(name) ?? []), handler]);
-				},
-			});
-
-			await handlers.get("tool_call")![0]({
-				toolCallId: "read-observe",
-				toolName: "Read",
-				input: { path: "PRIVATE_RECORDER_ARG.ts" },
-			});
-			await handlers.get("tool_result")![0]({
-				toolCallId: "read-observe",
-				toolName: "Read",
-				content: [{ type: "text", text: `PRIVATE_RECORDER_BODY_${"x".repeat(9_000)}` }],
-				details: { truncation: { truncated: true }, privatePath: "PRIVATE_RECORDER_ARG.ts" },
-				isError: false,
-			});
-			await handlers.get("agent_end")![0]({ messages: [] });
-
-			const events = readFileSync(recorder.logPath, "utf8")
-				.trim()
-				.split("\n")
-				.map((line) => JSON.parse(line));
-			const snapshot = events.at(-1)?.contextGatewayTelemetry?.snapshot;
-			const budgets = events.at(-1)?.contextGatewayTelemetry?.budgets;
-			expect(snapshot?.results).toBe(1);
-			expect(snapshot?.upstreamTruncatedResults).toBe(1);
-			expect(snapshot?.overBudgetResults).toBe(0);
-			expect(snapshot?.lastObservation?.budgetBytes).toBe(32_768);
-			expect(budgets?.maxExactReadBytes).toBe(32_768);
-			expect(snapshot?.byClass?.["code-read"]?.results).toBe(1);
-			const serializedSnapshot = JSON.stringify(snapshot);
-			expect(serializedSnapshot).not.toContain("PRIVATE_RECORDER_ARG.ts");
-			expect(serializedSnapshot).not.toContain("PRIVATE_RECORDER_BODY");
-		} finally {
-			process.chdir(previousCwd);
-			if (previousMode === undefined) delete process.env.PI_CONTEXT_GATEWAY_MODE;
-			else process.env.PI_CONTEXT_GATEWAY_MODE = previousMode;
-			if (previousHome === undefined) delete process.env.HOME;
-			else process.env.HOME = previousHome;
-			if (previousConfigDir === undefined) delete process.env.PI_CONFIG_DIR;
-			else process.env.PI_CONFIG_DIR = previousConfigDir;
-			rmSync(root, { recursive: true, force: true });
-		}
-	});
-
-	test("generated recorder can remove only declared in-project fixture files after a tool result", async () => {
-		const root = mkdtempSync(join(tmpdir(), "eval-recorder-cleanup-"));
-		const fixture = join(root, "fixture.txt");
-		const nativeFullOutput = join(root, ".pi", "native-full.log");
-		writeFileSync(fixture, "fixture", "utf8");
-		try {
-			const expectedFact = "RECOVERY_PROBE_FACT=opaque-value";
-			mkdirSync(join(root, ".pi"), { recursive: true });
-			writeFileSync(nativeFullOutput, `${expectedFact}\nrest\n`, "utf8");
-			const recorder = writeRecorder(root, [], { bash: ["fixture.txt"] }, {
-				expectedFact,
-				producerToolNames: ["Bash"],
-			});
-			const module = await import(`${recorder.extensionPath}?cleanup=${Date.now()}`);
-			const handlers = new Map<string, any[]>();
-			module.default({
-				on(name: string, handler: any) {
-					handlers.set(name, [...(handlers.get(name) ?? []), handler]);
-				},
-			});
-			expect(existsSync(fixture)).toBe(true);
-			await handlers.get("tool_result")![0]({
-				toolCallId: "cleanup",
-				toolName: "Bash",
-				content: [{ type: "text", text: "bounded tail" }],
-				details: { fullOutputPath: nativeFullOutput },
-				isError: false,
-			});
-			expect(existsSync(fixture)).toBe(false);
-			const probes = readRecoveryProbeEvents(root);
-			expect(probes).toHaveLength(1);
-			expect(probes[0]).toMatchObject({
-				toolCallId: "cleanup",
-				toolName: "Bash",
-				fullOutputPath: nativeFullOutput,
-				fullOutputFactStatus: "match",
-				cleanupExpectedCount: 1,
-				cleanupExistingBeforeCount: 1,
-				cleanupDeletedCount: 1,
-				cleanupMissingAfterCount: 1,
-			});
-			const ordinaryLog = readFileSync(recorder.logPath, "utf8");
-			expect(ordinaryLog).not.toContain(nativeFullOutput);
-			expect(ordinaryLog).not.toContain(expectedFact);
-			expect(() => writeRecorder(root, [], { bash: ["../escape.txt"] })).toThrow("escapes project root");
-		} finally {
-			rmSync(root, { recursive: true, force: true });
-		}
 	});
 
 	test("enforces reproduce-before-edit and verify-after-edit workflow assertions", () => {

@@ -238,28 +238,6 @@ const CommentCheckerConfig = Type.Object(
 	{ description: "Settings for the comment-checker module." },
 );
 
-const ContextGatewayBudgetsConfig = Type.Object(
-	{
-		maxInlineBytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 67108864, description: "Maximum inline size for a proven compact representation. Default 8192." })),
-		maxResultBytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 67108864, description: "Budget for shell/other result classes. Selective enforce currently compacts only recognised complete simple test/build output. Default 8192." })),
-		maxExactReadBytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 67108864, description: "Read-class observation budget. Reads remain passthrough because snapshot-safe recovery is not available. Default 32768." })),
-		maxSearchBytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 67108864, description: "Repo-search/AST/structure observation budget. Gateway does not post-hoc truncate producer output. Default 8192." })),
-		maxSearchMatches: Type.Optional(Type.Integer({ minimum: 1, maximum: 1000, description: "Reserved search-match policy budget. Default 12." })),
-	},
-	{ description: "Context Gateway class-specific observation and selective-enforcement budgets." },
-);
-
-const ContextGatewayConfig = Type.Object(
-	{
-		mode: Type.Optional(Type.Union(
-			[Type.Literal("off"), Type.Literal("observe"), Type.Literal("enforce")],
-			{ description: "Context Gateway mode. observe is passive; enforce only compacts proven complete simple test/build output and otherwise passes results through." },
-		)),
-		budgets: Type.Optional(ContextGatewayBudgetsConfig),
-	},
-	{ description: "Context Gateway configuration. Default mode is off." },
-);
-
 const RepoDiscoveryConfig = Type.Object(
 	{
 		profile: Type.Optional(Type.Union(
@@ -354,7 +332,6 @@ export const PiToolsSuiteConfigSchema = Type.Object(
 		toolRenderer: Type.Optional(ToolRendererConfig),
 		promptCommands: Type.Optional(PromptCommandsConfig),
 		secretFirewall: Type.Optional(SecretFirewallConfig),
-		contextGateway: Type.Optional(ContextGatewayConfig),
 		repoDiscovery: Type.Optional(RepoDiscoveryConfig),
 		resourceRegistry: Type.Optional(ResourceRegistryConfig),
 		lsp: Type.Optional(LspConfig),

@@ -58,6 +58,15 @@ sidecar importer, legacy state reader, dual-write mode, `decompress`, or
 Plain `custom` entries are not provider messages. `dcp-journal` must never be
 stored as `custom_message` or copied into a model-facing tool result.
 
+Async-subagent common spawn explicitly loads `dcp/subagent.ts` for every role
+and attempt, without interactive `/dcp` commands or the full suite. The normal
+DCP configuration and model overrides still apply. Enabled `compress` survives
+restricted/empty work-tool lists, CLI exclusions and model selection; read-only
+child/council guards allow this context-only operation. Default `--no-session`
+children keep decisions in memory only: no session file or journal writes, no raw
+history mutation, and no DCP recovery across attempts/process restart. Persisted
+children use the normal journal. See [subagent spawn](async-subagents.md#spawn-corespawnts).
+
 Full-branch reads fail closed on errors, partial cursors and real session/branch
 changes; they do not fall back to a lazy presentation tail. A bounded retry is
 allowed when an async lazy-history read races only with descendant appends on
@@ -219,7 +228,7 @@ The calibration is discarded on session/model/compaction ownership changes and
 restart, and is replaced by the next correlated measured response. Missing,
 ambiguous or mismatched usage falls back to the conservative estimate. Strong
 pressure, input capacity and emergency recovery continue to use the unadjusted
-provider-native floor. No Context Gateway runtime or recovery service is needed.
+provider-native floor. No external recovery service is needed.
 Request diagnostics expose `routineProjectedTokens` and
 `routineUsageAdjustmentTokens` separately from raw/projected history counts.
 
@@ -478,12 +487,18 @@ undo configuration.
 ## Implementation
 
 - `external/pi-tools-suite/src/dcp/index.ts`
+- `external/pi-tools-suite/src/dcp/subagent.ts`
 - `external/pi-tools-suite/src/dcp/context-usage.ts`
+- `external/pi-tools-suite/src/dcp/protected-continuity.ts`
+- `external/pi-tools-suite/src/dcp/test-output-parser.ts`
 - `external/pi-tools-suite/src/dcp/provider-tool-results.ts`
 
 ## Tests
 
+- `external/pi-tools-suite/test/async-subagents/dcp.test.ts`
+- `external/pi-tools-suite/test/async-subagents/provider-child-inventory.test.ts`
 - `external/pi-tools-suite/test/dcp-context-usage.test.ts`
+- `external/pi-tools-suite/test/dcp-test-output-parser.test.ts`
 - `tests/dcp-usage-fallback.integration.test.ts`
 - `tests/dcp-provider-evidence.integration.test.ts`
 

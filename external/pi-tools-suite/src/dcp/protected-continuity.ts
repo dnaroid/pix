@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { planProspectiveTestOutputDelivery, parseTestBuildOutput } from "../context-gateway/test-output-parser.js";
+import { planProspectiveTestOutputDelivery, parseTestBuildOutput } from "./test-output-parser.js";
 import { classifyShellCommand, shellCommandText } from "../shell-command-policy.js";
 import type { DcpConfig } from "./config.js";
 import {
@@ -183,16 +183,6 @@ function preferSmallerReceipt(
 	return { mode: "receipt", reason, text: receipt, ...sourceMetadata(record) };
 }
 
-function gatewayCompactRepresentation(record: ToolRecord): string | undefined {
-	const details = record.outputDetails;
-	if (!details || typeof details !== "object" || Array.isArray(details)) return undefined;
-	const marker = (details as Record<string, unknown>).contextGateway;
-	if (!marker || typeof marker !== "object" || Array.isArray(marker)) return undefined;
-	const value = marker as Record<string, unknown>;
-	if (value.version !== 1 || value.representation !== "test-build-compact") return undefined;
-	return record.outputText?.trim() || undefined;
-}
-
 /**
  * Decide how much of a pruning-protected tool result must survive a compression
  * roll-up. Pruning safety and continuity retention are deliberately separate:
@@ -223,16 +213,6 @@ export function toolRecordContinuity(record: ToolRecord, config: DcpConfig): Too
 			...sourceMetadata(record),
 		};
 	}
-	const gatewayCompact = gatewayCompactRepresentation(record);
-	if (gatewayCompact) {
-		return {
-			mode: "verbatim",
-			reason: "gateway-compacted",
-			text: `### Tool: ${record.toolName}\n${gatewayCompact}`,
-			...sourceMetadata(record),
-		};
-	}
-
 	const classification = classifyShellCommand(record.inputArgs);
 	if (classification.kind === "inspection") {
 		return preferSmallerDigest(record, "read-only-inspection", shellDigest(record, "inspection"));
@@ -290,4 +270,3 @@ export function repeatableObservationKey(record: ToolRecord, config: DcpConfig):
 	if (kind !== "inspection" && kind !== "test-build") return undefined;
 	return record.inputFingerprint;
 }
-

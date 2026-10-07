@@ -1634,6 +1634,7 @@ setTimeout(() => {}, 1000);
 		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).toContain(path.join("model-tools", "index.ts"));
 		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).toContain(path.join("todo", "subagent.ts"));
 		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).toContain(path.join("repo-discovery", "subagent.ts"));
+		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).toContain(path.join("dcp", "subagent.ts"));
 		// Environment fallback models do not opt provider extensions back in.
 		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).not.toContain(path.join("antigravity-auth", "index.ts"));
 		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).toContain("--model\nzai/glm-5-turbo");

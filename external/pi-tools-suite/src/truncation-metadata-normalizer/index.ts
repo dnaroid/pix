@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-import { normalizeRedundantTruncationMetadata } from "../context-gateway/metadata-normalization.js";
+import { normalizeRedundantTruncationMetadata } from "./metadata-normalization.js";
 
 /**
  * Optional non-store optimization for SDK tool results.

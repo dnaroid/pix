@@ -84,8 +84,6 @@ Decision: [0015 — Canonical disposable harness output](../docs/decisions/0015-
 - `external/pi-tools-suite/test/evals/run-p01n-paired.ts`
 - `external/pi-tools-suite/test/evals/run-todo-paired.ts`
 - `external/pi-tools-suite/test/evals/todo-prompt-snapshots.ts`
-- `external/pi-tools-suite/test/evals/run-context-gateway-observe.ts`
-- `external/pi-tools-suite/test/evals/run-context-gateway-recovery.ts`
 - `external/pi-tools-suite/test/evals/delivery-review/live.test.ts`
 
 ## Tests

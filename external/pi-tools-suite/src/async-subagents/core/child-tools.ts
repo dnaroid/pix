@@ -1,7 +1,7 @@
 import { REPO_DISCOVERY_TOOLS } from "../../tool-descriptions.js";
 import { selectSuitableToolsForModel } from "../../lib/tool-args.js";
 
-export const SUBAGENT_COMMON_TOOLS = ["todo", ...REPO_DISCOVERY_TOOLS.map((tool) => tool.name)];
+export const SUBAGENT_COMMON_TOOLS = ["todo", "compress", ...REPO_DISCOVERY_TOOLS.map((tool) => tool.name)];
 const commonTools = new Set(SUBAGENT_COMMON_TOOLS);
 
 export const SUBAGENT_OPTIONAL_TOOLS = ["ast_grep", "web_search", "web_fetch"] as const;
@@ -31,7 +31,7 @@ export function subagentWorkTools(args: readonly string[]): SubagentWorkTools {
 	return { optional, ...(optional.length && tools.every((name) => readOnlyTools.has(name)) ? { readOnlySelection: tools } : {}) };
 }
 
-/** Keep work-tool restrictions, with universal planning and read-only queries. */
+/** Keep work-tool restrictions, with universal planning, DCP and read-only queries. */
 export function withSubagentCapabilities(args: readonly string[]): string[] {
 	const result: string[] = [];
 	let tools: string[] | undefined;

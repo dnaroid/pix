@@ -2963,6 +2963,8 @@ version = "2.0.18"
 dependencies = [
  "base64 0.22.1",
  "chrono",
+ "core-foundation 0.10.1",
+ "core-graphics",
  "libc",
  "mac-notification-sys",
  "objc2",

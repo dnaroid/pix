@@ -149,7 +149,7 @@ Pix ships with a bundled suite of repository and agent-workflow extensions.
 | Repository intelligence | IDX architecture/structure/semantic/symbol/dependency tools |
 | Structural changes | AST search/rewrite, LSP diagnostics, comment checks |
 | Durable work | hierarchical todos, session recovery, project resource Registry |
-| Context control | DCP compression/pruning and context-gateway tooling |
+| Context control | DCP compression/pruning |
 | Providers/integrations | usage, Antigravity, OpenCode import, web access |
 
 Modules remain independently configurable; optional integrations activate only

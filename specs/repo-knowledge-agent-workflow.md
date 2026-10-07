@@ -103,6 +103,16 @@ without treating generated answers or audit candidates as semantic proof.
   parent-owned after integrated, stable coverage. Default task-audit behavior
   remains unchanged; incompatible project-local replacements require fallback
   to the parent, not a tool override that bypasses role instructions.
+- In both auditor modes, explicit knowledge/index lock contention is temporary:
+  another agent in a parallel session may be writing to the same knowledge base.
+  Wait 5 seconds and retry the same command, with at most 60 seconds of total
+  waiting per blocked operation; resume immediately on success. A lock-related
+  skip, including `idx index --skip-if-locked` exiting 0, is not completion and
+  requires the same bounded retry. Do not retry unrelated errors, delete or
+  force-release locks, kill owners, or bypass locking. On budget exhaustion,
+  return a blocker with the command, diagnostic, elapsed waiting and last exit
+  code. Lock release does not waive concurrent-content rechecks or mode-specific
+  acknowledgment restrictions.
 - When `knowledge-auditor` is effective, the final audit responsibility is
   delegated to it instead of spending the parent model on routine drift cleanup.
   The parent retains decisions and handles escalations. If the role is disabled

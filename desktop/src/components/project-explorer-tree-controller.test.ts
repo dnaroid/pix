@@ -16,6 +16,7 @@ function fixture(onListDirectory: (path: string) => Promise<ProjectTreeEntry[]> 
   const scrollIntoView = vi.fn();
   const root = { querySelector: vi.fn(() => ({ focus, scrollIntoView })) };
   const onOpenFile = vi.fn();
+  const onPersistExpandedDirectories = vi.fn(async (_workspace: string, _paths: readonly string[]) => {});
   const controller = createProjectExplorerTreeController({
     workspace: () => workspace,
     refreshKey: () => 0,
@@ -25,15 +26,136 @@ function fixture(onListDirectory: (path: string) => Promise<ProjectTreeEntry[]> 
     onOpenExternal: vi.fn(),
     onHealthChange: vi.fn(),
     onLoadExpandedDirectories: async () => [],
-    onPersistExpandedDirectories: async () => {},
+    onPersistExpandedDirectories,
     clearDrag: vi.fn(),
   });
   vi.stubGlobal("CSS", { escape: (value: string) => value });
   vi.stubGlobal("window", { setTimeout, clearTimeout });
-  return { controller, root, focus, scrollIntoView, onOpenFile, release, replaceWorkspace: () => { workspace = "/second"; } };
+  return { controller, root, focus, scrollIntoView, onOpenFile, onPersistExpandedDirectories, release, replaceWorkspace: () => { workspace = "/second"; } };
 }
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe("Project Explorer external directory changes", () => {
+  const directory = (path: string): ProjectTreeEntry => ({ path, name: path.split("/").at(-1)!, kind: "directory" });
+
+  it("reloads a cached directory on expansion so externally created folders appear immediately", async () => {
+    let entries: ProjectTreeEntry[] = [];
+    const list = vi.fn(async () => entries);
+    const f = fixture(list);
+    await f.controller.refreshDirectory("a");
+    entries = [directory("a/new-folder")];
+    f.controller.toggleDirectory("a");
+    await Promise.resolve();
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(f.controller.state.entriesByDirectory.a).toEqual(entries);
+    f.controller.dispose();
+  });
+
+  it("reloads cached root children when reopening a collapsed workspace root", async () => {
+    let rootEntries = [directory("a")];
+    let childEntries: ProjectTreeEntry[] = [];
+    const list = vi.fn(async (path: string) => path ? childEntries : rootEntries);
+    const f = fixture(list);
+    await f.controller.refreshDirectory("");
+    await f.controller.refreshDirectory("a");
+    f.controller.state.expandedDirectories = ["a"];
+    f.controller.toggleDirectory("");
+    rootEntries = [directory("a"), directory("new-root-folder")];
+    childEntries = [directory("a/new-child-folder")];
+    list.mockClear();
+    f.controller.toggleDirectory("");
+    await Promise.resolve();
+    expect(list.mock.calls.map(([path]) => path)).toEqual([""]);
+    expect(f.controller.state.entriesByDirectory[""]).toEqual(rootEntries);
+    expect(f.controller.state.expandedDirectories).toEqual([]);
+    f.controller.toggleDirectory("a");
+    await Promise.resolve();
+    expect(f.controller.state.entriesByDirectory.a).toEqual(childEntries);
+    f.controller.dispose();
+  });
+
+  it("polls only root and visible expanded directories and preserves navigation state", async () => {
+    const list = vi.fn(async (path: string) => path
+      ? [directory(`${path}/new-folder`)]
+      : [directory("a"), directory("closed")]);
+    const f = fixture(list);
+    f.controller.state.entriesByDirectory = {
+      "": [directory("a"), directory("closed")],
+      a: [],
+      closed: [directory("closed/deep")],
+    };
+    f.controller.state.expandedDirectories = ["a", "closed/deep"];
+    f.controller.state.selectedPath = "a";
+    f.controller.state.focusedPath = "a";
+    await f.controller.refreshVisibleDirectories();
+    expect(list.mock.calls.map(([path]) => path)).toEqual(["", "a"]);
+    expect(f.controller.rows.map((row) => row.entry.path)).toContain("a/new-folder");
+    expect(f.controller.state.selectedPath).toBe("a");
+    expect(f.controller.state.focusedPath).toBe("a");
+    expect(f.controller.state.expandedDirectories).toEqual(["a", "closed/deep"]);
+    f.controller.dispose();
+  });
+
+  it("refreshes only the reopened branch, keeping cached rows and coalescing a slow read", async () => {
+    const completions = new Map<string, (entries: ProjectTreeEntry[]) => void>();
+    const list = vi.fn((path: string) => new Promise<ProjectTreeEntry[]>((resolve) => { completions.set(path, resolve); }));
+    const f = fixture(list);
+    const cached = [directory("a/deep")];
+    f.controller.state.entriesByDirectory = {
+      "": [directory("a"), directory("other")],
+      a: cached,
+      "a/deep": [],
+      other: [],
+    };
+    f.controller.state.expandedDirectories = ["a/deep", "other"];
+    f.controller.toggleDirectory("a");
+    expect(list.mock.calls.map(([path]) => path)).toEqual(["a", "a/deep"]);
+    expect(f.controller.state.entriesByDirectory.a).toEqual(cached);
+    f.controller.toggleDirectory("a");
+    f.controller.toggleDirectory("a");
+    expect(list).toHaveBeenCalledTimes(2);
+    f.controller.dispose();
+    for (const [path, finish] of completions) finish([directory(`${path}/new-folder`)]);
+    await Promise.resolve();
+    expect(f.controller.state.entriesByDirectory["a/deep"]).toEqual([]);
+  });
+});
+
+describe("Project Explorer collapse state", () => {
+  it("clears all descendant preferences but preserves siblings, selection and cached entries", async () => {
+    const f = fixture();
+    f.controller.state.expandedDirectories = ["a", "a/deep", "a/deep/nested", "ab", "ab/deep", "other"];
+    const cached: ProjectTreeEntry[] = [{ path: "a/deep", name: "deep", kind: "directory" }];
+    f.controller.state.entriesByDirectory.a = cached;
+    f.controller.state.selectedPath = "a/deep/file.ts";
+    f.controller.toggleDirectory("a");
+    expect(f.controller.state.expandedDirectories).toEqual(["ab", "ab/deep", "other"]);
+    expect(f.controller.state.selectedPath).toBe("a/deep/file.ts");
+    expect(f.controller.state.entriesByDirectory.a).toEqual(cached);
+    f.controller.toggleDirectory("a");
+    expect(f.controller.state.expandedDirectories).toEqual(["ab", "ab/deep", "other", "a"]);
+    f.controller.toggleDirectory("a");
+    f.controller.dispose();
+    await vi.waitFor(() => expect(f.onPersistExpandedDirectories).toHaveBeenCalledWith("/first", ["ab", "ab/deep", "other"]));
+  });
+
+  it("clears and persists all descendant preferences when collapsing the workspace root", async () => {
+    const f = fixture();
+    f.controller.state.expandedDirectories = ["a", "a/deep", "other"];
+    f.controller.state.selectedPath = "a/deep/file.ts";
+    f.controller.toggleDirectory("");
+    expect(f.controller.state.rootExpanded).toBe(false);
+    expect(f.controller.state.expandedDirectories).toEqual([]);
+    expect(f.controller.state.focusedPath).toBe("");
+    expect(f.controller.state.selectedPath).toBe("a/deep/file.ts");
+    f.controller.toggleDirectory("");
+    expect(f.controller.state.rootExpanded).toBe(true);
+    expect(f.controller.state.expandedDirectories).toEqual([]);
+    f.controller.dispose();
+    await vi.waitFor(() => expect(f.onPersistExpandedDirectories).toHaveBeenCalledWith("/first", []));
+  });
+});
 
 describe("Project Explorer deferred focus", () => {
   it("does not focus a matching row in a replacement workspace after tick", async () => {

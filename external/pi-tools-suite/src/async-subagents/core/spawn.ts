@@ -145,6 +145,7 @@ export function spawnAgent(
 	piArgs.push("--extension", getModelToolsExtensionPath());
 	piArgs.push("--extension", getSubagentTodoExtensionPath());
 	piArgs.push("--extension", getSubagentRepoExtensionPath());
+	piArgs.push("--extension", getSubagentDcpExtensionPath());
 	// `--no-extensions` stays; only the allowlisted provider dependencies of
 	// the final selected model are added (see provider-extensions.ts).
 	for (const extension of providerExtensions) piArgs.push("--extension", extension);
@@ -661,6 +662,10 @@ function getSubagentTodoExtensionPath(): string {
 
 function getSubagentRepoExtensionPath(): string {
 	return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "repo-discovery", "subagent.ts");
+}
+
+function getSubagentDcpExtensionPath(): string {
+	return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "dcp", "subagent.ts");
 }
 
 function terminateChildProcessTree(proc: ChildProcess, signal: NodeJS.Signals): void {

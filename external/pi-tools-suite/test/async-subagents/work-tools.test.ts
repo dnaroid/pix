@@ -50,7 +50,7 @@ test("facade registers only requested tools, no commands, and guards read-only l
 		registerCommand: (name: string) => commands.push(name),
 		registerTool: (tool: any) => tools.push(tool),
 		on: (event: string, handler: Function) => handlers.set(event, handler),
-		getAllTools: () => [...tools, { name: "read" }, { name: "grep" }, { name: "shell" }, { name: "todo" }],
+		getAllTools: () => [...tools, { name: "read" }, { name: "grep" }, { name: "shell" }, { name: "todo" }, { name: "compress" }],
 		setActiveTools: (names: string[]) => { active = names; },
 		exec: async (_bin: string, args: string[]) => { execCalls.push(args); return { stdout: "match", stderr: "", code: 0 }; },
 	} as any);
@@ -59,7 +59,7 @@ test("facade registers only requested tools, no commands, and guards read-only l
 	for (const event of ["session_start", "model_select", "before_agent_start"]) {
 		active = ["shell", "ast_apply"];
 		await handlers.get(event)!();
-		expect(active).toEqual(["read", "grep", "ast_grep", "web_search", "todo"]);
+		expect(active).toEqual(["read", "grep", "ast_grep", "web_search", "todo", "compress"]);
 	}
 	for (const toolName of ["shell", "bash", "write", "Edit", "ast_apply", "web_fetch", "subagents", "question"]) expect(handlers.get("tool_call")!({ toolName }).block).toBe(true);
 	for (const toolName of active) expect(handlers.get("tool_call")!({ toolName })).toBeUndefined();
@@ -104,7 +104,7 @@ for (const modelId of ["gpt-work-offline", "claude-work-offline"]) test(`actual 
 	const settingsManager = SettingsManager.inMemory({ enableInstallTelemetry: false });
 	const loader = new DefaultResourceLoader({ cwd: root, agentDir, settingsManager,
 		noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true,
-		additionalExtensionPaths: ["../../src/model-tools/index.ts", "../../src/todo/subagent.ts", "../../src/async-subagents/work-tools.ts", "../../src/async-subagents/core/tool-guard.ts"].map((path) => fileURLToPath(new URL(path, import.meta.url))),
+		additionalExtensionPaths: ["../../src/model-tools/index.ts", "../../src/todo/subagent.ts", "../../src/dcp/subagent.ts", "../../src/async-subagents/work-tools.ts", "../../src/async-subagents/core/tool-guard.ts"].map((path) => fileURLToPath(new URL(path, import.meta.url))),
 	});
 	await loader.reload();
 	expect(loader.getExtensions().errors).toEqual([]);
@@ -117,7 +117,7 @@ for (const modelId of ["gpt-work-offline", "claude-work-offline"]) test(`actual 
 		const errors: unknown[] = [];
 		await session.bindExtensions({ onError: (error) => errors.push(error) });
 		expect(errors).toEqual([]);
-		expect(session.getActiveToolNames().sort()).toEqual(["read", "grep", "ast_grep", "web_search", "web_fetch", "todo"].sort());
+		expect(session.getActiveToolNames().sort()).toEqual(["read", "grep", "ast_grep", "web_search", "web_fetch", "todo", "compress"].sort());
 		expect(session.getAllTools().map((tool) => tool.name)).not.toContain("ast_apply");
 	} finally { session.dispose(); }
 });

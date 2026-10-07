@@ -68,6 +68,7 @@ type VoiceControllerTestDeps = {
 	spawn: typeof spawn;
 	savePixDictationLanguage: typeof savePixDictationLanguage;
 	delay: typeof delay;
+	playReadySound: () => void;
 };
 
 const defaultVoiceControllerDeps: VoiceControllerTestDeps = {
@@ -78,6 +79,9 @@ const defaultVoiceControllerDeps: VoiceControllerTestDeps = {
 	spawn,
 	savePixDictationLanguage,
 	delay,
+	playReadySound: () => {
+		if (process.stdout.isTTY) process.stdout.write("\x07");
+	},
 };
 
 let voiceControllerDeps = defaultVoiceControllerDeps;
@@ -343,14 +347,26 @@ export class AppVoiceController {
 		scope: string | undefined,
 	): void {
 		let stderr = "";
+		let readySignalled = false;
 
 		audioProcess.stdout.on("data", (chunk: Buffer) => {
 			if (!this.isCurrentAudioProcess(audioProcess, socket, generation, scope)) return;
 			try {
-				if (socket.readyState === DEEPGRAM_SOCKET_OPEN) socket.send(chunk);
+				if (socket.readyState !== DEEPGRAM_SOCKET_OPEN) return;
+				socket.send(chunk);
 			} catch (error) {
 				this.host.showToast(`Voice recognition failed: ${errorMessage(error)}`, "error");
 				void this.stopRecording();
+				return;
+			}
+			// A spawned process is not proof that the microphone is capturing yet.
+			if (!readySignalled && chunk.length > 0 && this.state === "listening" && !this.stopPromise) {
+				readySignalled = true;
+				try {
+					voiceControllerDeps.playReadySound();
+				} catch {
+					// An unavailable sound output must not interrupt dictation.
+				}
 			}
 		});
 

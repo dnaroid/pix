@@ -1,3 +1,5 @@
+import { createDictationReadyCue, type DictationReadyCue } from "./dictation-ready-cue";
+
 export type DeepgramDictationState = "idle" | "starting" | "listening";
 
 export type DeepgramToken = {
@@ -25,6 +27,7 @@ type DeepgramDictationDeps = {
   createSocket: (url: string, protocols: string[]) => WebSocket;
   createRecorder: (stream: MediaStream, mimeType?: string) => MediaRecorder;
   delay: (ms: number) => Promise<void>;
+  createReadyCue: () => DictationReadyCue;
 };
 
 const RECORDER_TIMESLICE_MS = 250;
@@ -89,6 +92,7 @@ export class DeepgramDictationController {
   private generation = 0;
   private stopPromise: Promise<void> | undefined;
   private disposed = false;
+  private readyCue: DictationReadyCue | undefined;
 
   constructor(
     private readonly callbacks: DeepgramDictationCallbacks,
@@ -109,6 +113,7 @@ export class DeepgramDictationController {
         ? new MediaRecorder(stream, { mimeType })
         : new MediaRecorder(stream),
       delay,
+      createReadyCue: createDictationReadyCue,
       ...overrides,
     };
   }
@@ -137,6 +142,11 @@ export class DeepgramDictationController {
     let stream: MediaStream | undefined;
     let socket: WebSocket | undefined;
     try {
+      try {
+        this.readyCue = this.deps.createReadyCue();
+      } catch {
+        // Sound is best-effort and must not prevent microphone startup.
+      }
       const token = await this.deps.requestToken();
       if (!this.isCurrent(generation)) return;
       stream = await this.deps.getUserMedia();
@@ -162,12 +172,21 @@ export class DeepgramDictationController {
       this.recorder = recorder;
       this.bindSocket(socket, generation);
       this.bindRecorder(recorder, socket, generation);
+      recorder.addEventListener("start", () => {
+        if (!this.isCurrent(generation) || this.recorder !== recorder || this.stopPromise) return;
+        this.setState("listening");
+        try {
+          this.readyCue?.play();
+        } catch {
+          // Dictation remains usable when sound output is unavailable.
+        }
+      }, { once: true });
       recorder.start(RECORDER_TIMESLICE_MS);
-      this.setState("listening");
     } catch (error) {
       if (socket) safeCloseSocket(socket);
       if (stream) stopStream(stream);
       if (!this.isCurrent(generation)) return;
+      this.disposeReadyCue();
       this.generation += 1;
       this.stream = undefined;
       this.socket = undefined;
@@ -194,6 +213,7 @@ export class DeepgramDictationController {
     if (this.disposed) return;
     this.disposed = true;
     this.generation += 1;
+    this.disposeReadyCue();
     const stream = this.stream;
     const recorder = this.recorder;
     const socket = this.socket;
@@ -216,6 +236,7 @@ export class DeepgramDictationController {
   private async stopNow(): Promise<void> {
     if (this.disposed) return;
     if (this.state === "idle" && !this.stream && !this.socket && !this.recorder) return;
+    this.disposeReadyCue();
     const generation = this.generation;
     const stream = this.stream;
     const socket = this.socket;
@@ -275,6 +296,16 @@ export class DeepgramDictationController {
       this.callbacks.onError(`Deepgram connection closed${details}`);
       void this.stop();
     });
+  }
+
+  private disposeReadyCue(): void {
+    const cue = this.readyCue;
+    this.readyCue = undefined;
+    try {
+      cue?.dispose();
+    } catch {
+      // Sound teardown must not block recording teardown.
+    }
   }
 
   private bindRecorder(recorder: MediaRecorder, socket: WebSocket, generation: number): void {

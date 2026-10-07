@@ -58,7 +58,7 @@ function boundedScanInput(text: string, maxScanChars: number): { text: string; l
 	if (text.length <= maxScanChars) return { text, limited: false };
 	const half = Math.max(1, Math.floor(maxScanChars / 2));
 	return {
-		text: `${text.slice(0, half)}\n[context-gateway parser scan gap]\n${text.slice(-half)}`,
+		text: `${text.slice(0, half)}\n[test/build parser scan gap]\n${text.slice(-half)}`,
 		limited: true,
 	};
 }

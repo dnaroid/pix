@@ -1,8 +1,5 @@
 import { readFileSync } from "node:fs";
 
-import { DEFAULT_CONTEXT_GATEWAY_BUDGETS } from "../../src/context-gateway/config.js";
-import { contextGatewayReadIdentity, ContextGatewayTelemetry } from "../../src/context-gateway/telemetry.js";
-import type { ContextGatewayTelemetrySnapshot } from "../../src/context-gateway/types.js";
 import { COMPRESS_TOOL_PARAMETERS } from "../../src/dcp/compress-tool.js";
 import type { DcpConfig } from "../../src/dcp/config.js";
 import { loadConfig } from "../../src/dcp/config.js";
@@ -101,9 +98,7 @@ export interface SessionTokenEfficiencyReport {
 		};
 		carrierProjection?: DcpCarrierMeasurement;
 	};
-	contextGateway: ContextGatewayTelemetrySnapshot;
 	accounting: {
-		ingressAvoidedBytes: number;
 		historyCompressionGainTokens: number;
 		recoveryTax: {
 			exactRepeatReadsAfterContextReduction: number;
@@ -160,17 +155,35 @@ function optionalFiniteNumber(value: unknown): number | undefined {
 	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-function gatewayCompactionMarker(details: unknown): {
-	sourceContentBytes: number;
-	deliveredContentBytes: number;
-} | undefined {
-	if (!isRecord(details) || !isRecord(details.contextGateway)) return undefined;
-	const marker = details.contextGateway;
-	if (marker.version !== 1 || marker.representation !== "test-build-compact") return undefined;
-	const sourceContentBytes = optionalFiniteNumber(marker.sourceContentBytes);
-	const deliveredContentBytes = optionalFiniteNumber(marker.deliveredContentBytes);
-	if (sourceContentBytes === undefined || deliveredContentBytes === undefined) return undefined;
-	return { sourceContentBytes, deliveredContentBytes };
+function readIdentity(input: Record<string, unknown>): { exact?: string; source?: string } {
+	const rawPath = input.path ?? input.file ?? input.filePath;
+	if (typeof rawPath !== "string" || !rawPath.trim()) return {};
+	const raw = rawPath.trim().replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+	const prefix = raw.startsWith("/") ? "/" : /^[A-Za-z]:\//.test(raw) ? raw.slice(0, 3).toLowerCase() : "";
+	const body = prefix === "/" ? raw.slice(1) : prefix ? raw.slice(3) : raw;
+	const parts: string[] = [];
+	for (const part of body.split("/")) {
+		if (!part || part === ".") continue;
+		if (part === ".." && parts.length > 0 && parts.at(-1) !== "..") parts.pop();
+		else if (part === ".." && !prefix) parts.push(part);
+		else if (part !== "..") parts.push(part);
+	}
+	const path = `${prefix}${parts.join("/")}` || prefix || ".";
+	const rangeValue = (value: unknown): number | undefined => {
+		if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return value;
+		if (typeof value === "string" && /^\d+$/.test(value.trim())) {
+			const parsed = Number(value);
+			if (Number.isSafeInteger(parsed)) return parsed;
+		}
+		return undefined;
+	};
+	const source = JSON.stringify({ path });
+	const exact = JSON.stringify({
+		path,
+		offset: rangeValue(input.offset ?? input.start ?? input.line),
+		limit: rangeValue(input.limit ?? input.lines ?? input.count),
+	});
+	return { source, exact };
 }
 
 function countByName(target: Record<string, number>, name: unknown): void {
@@ -340,14 +353,12 @@ export function analyzeSessionJsonlText(
 	let toolErrors = 0;
 	const blocksById = new Map<number, UnknownRecord>();
 	const compressResults: SessionCompressMetrics[] = [];
-	const gateway = new ContextGatewayTelemetry();
 	const preCompressionMessages: unknown[] = [];
 	let firstCompressSeen = false;
 	const calls = new Map<string, { toolName: string; input: Record<string, unknown>; entryIndex: number }>();
 	const records = new Map<string, ToolRecord>();
 	const readCalls: Array<{ entryIndex: number; exact?: string; source?: string }> = [];
 	const contextReductionIndexes: number[] = [];
-	let ingressAvoidedBytes = 0;
 	const manualSummaryDelegation = {
 		compressCalls: 0,
 		compressAssistantCalls: 0,
@@ -432,14 +443,9 @@ export function analyzeSessionJsonlText(
 					}
 					calls.set(toolCallId, { toolName, input: rawInput, entryIndex });
 					if (toolName.trim().toLowerCase() === "read") {
-						const identity = contextGatewayReadIdentity(rawInput);
+						const identity = readIdentity(rawInput);
 						readCalls.push({ entryIndex, ...identity });
 					}
-					gateway.recordToolCall({
-						toolCallId,
-						toolName,
-						input: rawInput,
-					});
 				}
 			}
 			continue;
@@ -464,21 +470,6 @@ export function analyzeSessionJsonlText(
 			outputText,
 			outputDetails: message.details,
 		});
-		gateway.recordToolResult({
-			toolCallId,
-			toolName: typeof message.toolName === "string" ? message.toolName : "unknown",
-			content: message.content,
-			details: message.details,
-			isError: message.isError === true,
-		}, DEFAULT_CONTEXT_GATEWAY_BUDGETS);
-		const gatewayMarker = gatewayCompactionMarker(message.details);
-		if (gatewayMarker) {
-			contextReductionIndexes.push(entryIndex);
-			ingressAvoidedBytes += Math.max(
-				0,
-				gatewayMarker.sourceContentBytes - gatewayMarker.deliveredContentBytes,
-			);
-		}
 
 		if (message.toolName === "compress" && isRecord(message.details)) {
 			const compressResult: SessionCompressMetrics = {
@@ -639,9 +630,7 @@ export function analyzeSessionJsonlText(
 				? { carrierProjection: measureDcpCarrierOverhead(preCompressionMessages) }
 				: {}),
 		},
-		contextGateway: gateway.snapshot(),
 		accounting: {
-			ingressAvoidedBytes,
 			historyCompressionGainTokens,
 			recoveryTax: {
 				exactRepeatReadsAfterContextReduction,
@@ -678,8 +667,7 @@ export function renderSessionEfficiencySummary(report: SessionTokenEfficiencyRep
 		] : []),
 		`manualSummaryOpportunity calls=${report.dcp.manualSummaryDelegation.compressCalls} parentOutput=${report.dcp.manualSummaryDelegation.compressAssistantOutputTokens} summaryChars=${report.dcp.manualSummaryDelegation.summaryArgumentChars} summaryTokens=${report.dcp.manualSummaryDelegation.summaryArgumentEstimatedTokens} argumentReduction=${report.dcp.manualSummaryDelegation.estimatedArgumentTokenReduction}`,
 		`compressGain=${latestCompress?.netGain ?? 0} projectedBefore=${latestCompress?.projectedBeforeTokens ?? 0} projectedAfter=${latestCompress?.projectedAfterTokens ?? 0}`,
-		`gatewayResults=${report.contextGateway.results} gatewayOverBudget=${report.contextGateway.overBudgetResults} gatewayPotentialBytes=${report.contextGateway.potentialBytesOverBudget} repeatedReads=${report.contextGateway.repeatCandidateCount}`,
-		`accounting ingressAvoidedBytes=${report.accounting.ingressAvoidedBytes} historyCompressionGainTokens=${report.accounting.historyCompressionGainTokens} recoveryCandidates=${report.accounting.recoveryTax.unattributedCandidates} likelyRecoveryTaxReads=${report.accounting.recoveryTax.likelyRecoveryTaxReads}`,
+		`accounting historyCompressionGainTokens=${report.accounting.historyCompressionGainTokens} recoveryCandidates=${report.accounting.recoveryTax.unattributedCandidates} likelyRecoveryTaxReads=${report.accounting.recoveryTax.likelyRecoveryTaxReads}`,
 	].join("\n");
 }
 

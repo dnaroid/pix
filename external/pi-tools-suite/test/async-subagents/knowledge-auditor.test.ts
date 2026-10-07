@@ -66,6 +66,29 @@ describe("built-in knowledge-auditor role", () => {
 		})).toContain("small, unambiguous drift");
 	});
 
+	test("retries knowledge lock contention in both modes without bypassing locks", () => {
+		const role = loadSubagentConfig(tempDir(), {}).types["knowledge-auditor"];
+		const prompt = generatePrompt({
+			id: "lock-audit",
+			task: "Audit the final knowledge drift",
+			subagentType: "knowledge-auditor",
+			model: role.models![0],
+			promptAppend: role.promptAppend,
+		}).replace(/\s+/g, " ");
+		expect(prompt).toContain("Knowledge lock contention (both modes)");
+		expect(prompt).toContain("another agent in a parallel session may be writing");
+		expect(prompt).toContain("Wait 5 seconds and retry the same command");
+		expect(prompt).toContain("at most 60 seconds per blocked operation");
+		expect(prompt).toContain("Stop retrying as soon as the command succeeds");
+		expect(prompt).toContain("even if it exits 0; retry it within the same budget");
+		expect(prompt).toContain("Retry only explicit lock contention, not unrelated command errors");
+		expect(prompt).toContain("Never delete or force-release another session's lock");
+		expect(prompt).toContain("kill its owner, or bypass locking");
+		expect(prompt).toContain("return a blocker with the command, lock diagnostic, elapsed waiting time and last exit code");
+		expect(prompt).toContain("recheck reviewed specs/dependencies for concurrent changes before acknowledgment");
+		expect(prompt).toContain("Spec-review mode still must not acknowledge specs independently");
+	});
+
 	test("escalates a missing qualifying record even when the parent supplied rationale", () => {
 		const role = loadSubagentConfig(tempDir(), {}).types["knowledge-auditor"];
 		const prompt = role.promptAppend!.replace(/\s+/g, " ");

@@ -27,7 +27,7 @@ describe("ProjectExplorer keyboard tree", () => {
     expect(treeControllerSource).toContain("rootExpanded: true");
     expect(treeControllerSource).toContain("state.rootExpanded = true;");
     expect(treeControllerSource).toContain('if (!path) {');
-    expect(treeControllerSource).toContain('if (!state.rootExpanded) state.focusedPath = ""');
+    expect(treeControllerSource).toContain('state.focusedPath = "";');
     expect(treeControllerSource).toContain('state.focusedPath !== null && visiblePaths.has(state.focusedPath)');
     expect(explorerSource).toContain('$derived(projectTreeRootEntry(workspace))');
     expect(explorerSource).toContain('treeController.isDirectoryExpanded(entry.path)');

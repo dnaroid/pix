@@ -48,9 +48,6 @@ describe("session token-efficiency analysis", () => {
 			output: 33,
 		});
 		expect(report.tools).toMatchObject({ calls: 2, results: 3, errors: 0 });
-		expect(report.contextGateway.repeatCandidateCount).toBe(1);
-		expect(report.contextGateway.overBudgetResults).toBe(0);
-		expect(report.contextGateway.lastObservation?.budgetBytes).toBe(32768);
 		expect(report.dcp.blocks[0]).toMatchObject({
 			id: 1,
 			summaryChars: 7,
@@ -164,7 +161,7 @@ describe("session token-efficiency analysis", () => {
 			.toBeLessThan(report.dcp.manualSummaryDelegation.argumentEstimatedTokensBefore);
 	});
 
-	test("separates ingress savings, DCP history gain, and unattributed post-reduction read candidates", () => {
+	test("preserves repeated-read recovery-tax identities after DCP history reduction", () => {
 		const fixture = [
 			line({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "r1", name: "read", arguments: { path: "./src/../src/a.ts", offset: 1, limit: 10 } }] } }),
 			line({ type: "message", message: { role: "toolResult", toolCallId: "r1", toolName: "read", content: [{ type: "text", text: "before" }], details: {}, isError: false } }),
@@ -172,14 +169,14 @@ describe("session token-efficiency analysis", () => {
 			line({ type: "message", message: { role: "toolResult", toolCallId: "c1", toolName: "compress", content: [{ type: "text", text: "{}" }], details: { committed: true, netGain: 100 }, isError: false } }),
 			line({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "r2", name: "Read", arguments: { path: "src/a.ts", offset: "1", limit: "10" } }] } }),
 			line({ type: "message", message: { role: "toolResult", toolCallId: "r2", toolName: "Read", content: [{ type: "text", text: "after" }], details: {}, isError: false } }),
-			line({ type: "message", message: { role: "toolResult", toolCallId: "gateway", toolName: "Bash", content: [{ type: "text", text: "compact" }], details: { contextGateway: { version: 1, representation: "test-build-compact", sourceContentBytes: 1000, deliveredContentBytes: 100 } }, isError: false } }),
+			line({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "c2", name: "compress", arguments: { topic: "fixture continuation" } }] } }),
+			line({ type: "message", message: { role: "toolResult", toolCallId: "c2", toolName: "compress", content: [{ type: "text", text: "{}" }], details: { committed: true, netGain: 50 }, isError: false } }),
 			line({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "r3", name: "read", arguments: { path: "src/a.ts", offset: 11, limit: 10 } }] } }),
 			line({ type: "message", message: { role: "toolResult", toolCallId: "r3", toolName: "read", content: [{ type: "text", text: "later range" }], details: {}, isError: false } }),
 		].join("\n");
 
 		const report = analyzeSessionJsonlText(fixture);
-		expect(report.accounting.ingressAvoidedBytes).toBe(900);
-		expect(report.accounting.historyCompressionGainTokens).toBe(100);
+		expect(report.accounting.historyCompressionGainTokens).toBe(150);
 		expect(report.accounting.recoveryTax).toEqual({
 			exactRepeatReadsAfterContextReduction: 1,
 			sameSourceDifferentRangeReadsAfterContextReduction: 1,

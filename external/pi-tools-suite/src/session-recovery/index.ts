@@ -193,14 +193,6 @@ function toolResultFrom(entry: EntryLike): UnknownRecord | undefined {
 	return message?.role === "toolResult" ? message : undefined;
 }
 
-function recoverableGatewayDetails(message: UnknownRecord): UnknownRecord | undefined {
-	const toolName = typeof message.toolName === "string" ? message.toolName.toLowerCase() : "";
-	if (toolName !== "web_search" && toolName !== "web_fetch") return undefined;
-	if (!isRecord(message.details) || !isRecord(message.details.contextGateway)) return undefined;
-	if (message.details.contextGateway.representation !== "web-recoverable-compact") return undefined;
-	return message.details;
-}
-
 function summaryFrom(entry: EntryLike): string {
 	if ((entry.type === "compaction" || entry.type === "branch_summary") && typeof entry.summary === "string") {
 		return entry.summary;
@@ -421,10 +413,6 @@ function renderEntryFull(entry: EntryLike): string {
 			const toolName = typeof message.toolName === "string" ? message.toolName : "unknown";
 			const callId = typeof message.toolCallId === "string" ? message.toolCallId : "unknown";
 			lines.push(`tool_result ${toolName}#${callId}${message.isError === true ? " error" : ""}`);
-			const recoverableDetails = recoverableGatewayDetails(message);
-			if (recoverableDetails) {
-				lines.push("recoverable_raw_details:", serializeJson(recoverableDetails));
-			}
 		}
 	} else if (entry.type === "compaction") {
 		lines.push(summaryFrom(entry));

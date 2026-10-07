@@ -1,16 +1,4 @@
-import type {
-	ContextGatewayBudgets,
-	ContextGatewayTelemetrySnapshot,
-} from "../../../src/context-gateway/types.js";
-
 export type EvalCategory = "tool-selection" | "coding-quality" | "orchestration" | "negative";
-
-export type EvalContextGatewayTelemetry = {
-	mode: "observe";
-	maxResultBytes: number;
-	budgets: ContextGatewayBudgets;
-	snapshot: ContextGatewayTelemetrySnapshot;
-};
 
 export type EvalEvent = {
 	type: "tool_call" | "tool_result" | "agent_end";
@@ -25,7 +13,6 @@ export type EvalEvent = {
 		outputMode?: "compact" | "full";
 		reason?: string;
 	};
-	contextGatewayTelemetry?: EvalContextGatewayTelemetry;
 	usage?: EvalUsage;
 };
 
@@ -50,7 +37,6 @@ export type EvalMetrics = {
 	nativePolicyRefusals: number;
 	nativePolicyFullOverrides: number;
 	retryAfterNativeRefusalCount: number;
-	contextGateway?: EvalContextGatewayTelemetry;
 	mutationCount: number;
 	verificationCount: number;
 	changedFiles: string[];

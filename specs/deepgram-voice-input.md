@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # Deepgram voice input
 
 ## Status
@@ -14,6 +19,12 @@ The permanent key must stay outside UI/browser runtime code.
 
 ### Terminal UI
 
+- When the first non-empty PCM chunk is successfully forwarded to the open
+  Deepgram socket, the owning recording emits one short terminal bell (BEL)
+  to signal that the microphone is ready and the user can speak. Terminal
+  sound/mute preferences control whether BEL is audible; non-TTY output is silent.
+  Errors, stale scopes, cancelled starts and stop-time buffered audio do not
+  produce a readiness cue. Sound failure never interrupts dictation.
 - `Ctrl+G` and the status microphone toggle one recording owned by the active
   input scope.
 - Audio capture continues to use the first available local recorder
@@ -47,9 +58,39 @@ The permanent key must stay outside UI/browser runtime code.
 
 ### Desktop composer
 
+- After the connected recorder emits its `start` event, emit one quiet 100 ms
+  readiness tone to signal that the user can speak. Web Audio is prepared during
+  the microphone action; unavailable/blocked audio is best-effort and never
+  delays or fails dictation. Failed/cancelled starts do not beep. Stop/disposal
+  releases the cue's audio context and nodes, with no delayed playback.
 - The normal message composer exposes a microphone action when browser media
   APIs are available. Editor mode and questionnaire/custom-answer mode do not
   expose voice input.
+- On macOS, the microphone-position F5 key toggles the same recording in the
+  active Pix window, including when a text input has focus. This uses a HID
+  head-insert event tap with Accessibility permission, not a WebView keydown
+  handler; see [the permission decision](../docs/decisions/0062-macos-dictation-key.md).
+  Only a ready normal composer with a registered listener can opt its window
+  in. Editor/question modes and other apps/windows are not targets; frontend
+  delivery rechecks focus, composer eligibility and modal-dialog exclusion.
+- The native shortcut is enabled only when Desktop credential resolution finds
+  a non-empty `dictation.apiKey` or the `DEEPGRAM_API_KEY` fallback. This is a
+  presence check, not validation of the key against Deepgram. Config reads run
+  on the blocking pool, with latest-request-wins application on the main thread;
+  they refresh on listener activation, Pix window activation and Settings saves.
+  External file edits take effect on the next Pix window activation.
+- With no configured key, no eligible composer, or missing Accessibility
+  permission, no event tap is installed for that window and macOS dictation
+  remains available. Only configured voice input can trigger the permission
+  prompt, at most once per process; granting permission is retried on returning
+  to Pix. The on-screen microphone does not require Accessibility.
+- The tap suppresses an accepted F5 down/up pair and held-key repeats, emitting
+  one window-targeted event per press. Shift/Control/Option/Command combinations
+  and other keys pass through. Disposal disables the window in order even if
+  native registration is still in flight; destroying the last eligible window,
+  removing credentials, or exiting releases the event tap/run-loop source.
+  Native registration is owned by a per-mount token so an old composer's late
+  teardown cannot disable its replacement in the same window.
 - Starting voice input requests a short-lived Deepgram access token from the
   Tauri backend, then requests microphone access and opens the Deepgram
   WebSocket from the WebView.
@@ -121,11 +162,21 @@ download Vosk models or load/install Vosk bindings.
 
 - `tests/voice-controller.test.ts` covers terminal URL/auth transport, PCM
   forwarding, interim/final parsing, finalize/last-interim behavior, errors,
-  and stale-scope rejection.
+  stale-scope rejection, one readiness cue per capture and silent cancellation.
 - `tests/config.test.ts` covers the user-config API key, project-secret rejection,
   and Deepgram defaults.
 - `desktop/src/lib/deepgram.test.ts` covers desktop recorder format choice,
-  configured Nova-3 language/model transport, finalization, and Results parsing.
+  configured Nova-3 language/model transport, finalization, Results parsing,
+  recorder-start readiness and cancelled/failed start silence.
+- `desktop/src/lib/dictation-ready-cue.test.ts` covers short-tone scheduling,
+  one-shot playback, audio resource cleanup, blocked audio and late resume.
+- `desktop/src/lib/dictation-shortcut.test.ts` covers listener ownership,
+  eligibility at delivery, late registration, errors and serialized native
+  enable/disable teardown. `desktop/src-tauri/src/dictation_shortcut.rs` unit
+  tests cover key filtering, pass-through without eligibility and one toggle per
+  held press, including release after focus changes. Native key-window routing,
+  macOS permission prompts and hardware microphone routing require macOS QA;
+  unit tests do not establish that a physical microphone key reaches the tap.
 - `npm run check:desktop`/desktop tests cover Svelte integration and the composer
   surface. Rust unit coverage includes user-config key resolution and environment
   fallback; compilation validates it when a Rust toolchain is available.
@@ -136,3 +187,25 @@ download Vosk models or load/install Vosk bindings.
 - Persisting or replaying microphone audio.
 - Exposing the permanent Deepgram API key to the desktop WebView.
 - Voice input in the desktop editor or questionnaire modes.
+
+## Implementation
+
+- `src/app/input/voice-controller.ts`
+- `desktop/src/lib/deepgram.ts`
+- `desktop/src/lib/dictation-ready-cue.ts`
+- `desktop/src/lib/dictation-shortcut.ts`
+- `desktop/src/components/prompt-composer-voice-controller.svelte.ts`
+- `desktop/src-tauri/src/dictation_shortcut.rs`
+- `desktop/src-tauri/src/lib.rs`
+- `desktop/src-tauri/Cargo.toml`
+- `desktop/src-tauri/Cargo.lock`
+
+## Tests
+
+- `tests/voice-controller.test.ts`
+- `tests/config.test.ts`
+- `desktop/src/lib/deepgram.test.ts`
+- `desktop/src/lib/dictation-ready-cue.test.ts`
+- `desktop/src/lib/dictation-shortcut.test.ts`
+- `desktop/src-tauri/src/dictation_shortcut.rs`
+- `desktop/src-tauri/src/lib.rs`

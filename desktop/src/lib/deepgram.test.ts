@@ -47,6 +47,8 @@ describe("deepgram dictation helpers", () => {
     const events: string[] = [];
     const socket = new FakeSocket();
     const recorder = new FakeRecorder();
+    let readySounds = 0;
+    let cueDisposals = 0;
     const track = { stopped: false, stop() { this.stopped = true; } };
     const stream = { getTracks: () => [track] } as unknown as MediaStream;
     let requestedToken = 0;
@@ -77,6 +79,10 @@ describe("deepgram dictation helpers", () => {
         }),
         createRecorder: (() => recorder as unknown as MediaRecorder),
         delay: async () => {},
+        createReadyCue: () => ({
+          play: () => { expect(recorder.state).toBe("recording"); readySounds += 1; },
+          dispose: () => { cueDisposals += 1; },
+        }),
       },
     );
 
@@ -85,6 +91,7 @@ describe("deepgram dictation helpers", () => {
     expect(socketProtocols).toEqual(["bearer", "temporary.jwt"]);
     expect(recorder.startedWith).toBe(250);
     expect(controller.currentState()).toBe("listening");
+    expect(readySounds).toBe(1);
 
     const chunk = new Blob(["audio"]);
     recorder.emit("dataavailable", { data: chunk });
@@ -104,6 +111,8 @@ describe("deepgram dictation helpers", () => {
     expect(recorder.state).toBe("inactive");
     expect(track.stopped).toBe(true);
     expect(controller.currentState()).toBe("idle");
+    expect(readySounds).toBe(1);
+    expect(cueDisposals).toBe(1);
   });
 
   it("cancels a recording while the Deepgram socket is still connecting", async () => {
@@ -111,6 +120,8 @@ describe("deepgram dictation helpers", () => {
     const track = { stopped: false, stop() { this.stopped = true; } };
     const stream = { getTracks: () => [track] } as unknown as MediaStream;
     let recorderCreations = 0;
+    let readySounds = 0;
+    let cueDisposals = 0;
     const controller = new DeepgramDictationController(
       {
         onState: () => {},
@@ -127,6 +138,7 @@ describe("deepgram dictation helpers", () => {
           return new FakeRecorder() as unknown as MediaRecorder;
         }),
         delay: async () => {},
+        createReadyCue: () => ({ play: () => { readySounds += 1; }, dispose: () => { cueDisposals += 1; } }),
       },
     );
 
@@ -139,6 +151,8 @@ describe("deepgram dictation helpers", () => {
     expect(socket.closed).toBe(true);
     expect(track.stopped).toBe(true);
     expect(recorderCreations).toBe(0);
+    expect(readySounds).toBe(0);
+    expect(cueDisposals).toBe(1);
     expect(controller.currentState()).toBe("idle");
   });
 
@@ -169,6 +183,72 @@ describe("deepgram dictation helpers", () => {
 
     expect(mediaRequests).toBe(0);
     expect(controller.currentState()).toBe("idle");
+  });
+
+  for (const outcome of ["start", "stop", "dispose", "error"] as const) {
+    it(`waits for actual recorder readiness and handles ${outcome} without a late cue`, async () => {
+      const recorder = new FakeRecorder();
+      recorder.autoStartEvent = false;
+      const socket = new FakeSocket();
+      let readySounds = 0;
+      let cueDisposals = 0;
+      const controller = new DeepgramDictationController(
+        { onState: () => {}, onFinal: () => {}, onInterim: () => {}, onError: () => {} },
+        async () => ({ accessToken: "temporary.jwt", expiresIn: 60 }),
+        {
+          getUserMedia: async () => ({ getTracks: () => [] }) as unknown as MediaStream,
+          createSocket: () => socket as unknown as WebSocket,
+          createRecorder: () => recorder as unknown as MediaRecorder,
+          delay: async () => {},
+          createReadyCue: () => ({ play: () => { readySounds += 1; }, dispose: () => { cueDisposals += 1; } }),
+        },
+      );
+      await controller.start();
+      expect(controller.currentState()).toBe("starting");
+      expect(readySounds).toBe(0);
+      if (outcome === "stop") await controller.stop();
+      else if (outcome === "dispose") await controller.dispose();
+      else if (outcome === "error") recorder.emit("error", { error: new Error("failed") });
+      recorder.emit("start", {});
+      expect(readySounds).toBe(outcome === "start" ? 1 : 0);
+      await controller.dispose();
+      expect(cueDisposals).toBe(1);
+    });
+  }
+
+  for (const failure of ["prepare", "play"] as const) {
+    it(`does not fail dictation when cue ${failure} fails`, async () => {
+      const controller = new DeepgramDictationController(
+        { onState: () => {}, onFinal: () => {}, onInterim: () => {}, onError: () => {} },
+        async () => ({ accessToken: "temporary.jwt", expiresIn: 60 }),
+        {
+          getUserMedia: async () => ({ getTracks: () => [] }) as unknown as MediaStream,
+          createSocket: () => new FakeSocket() as unknown as WebSocket,
+          createRecorder: () => new FakeRecorder() as unknown as MediaRecorder,
+          createReadyCue: () => {
+            if (failure === "prepare") throw new Error("unavailable");
+            return { play: () => { throw new Error("unavailable"); }, dispose: () => {} };
+          },
+        },
+      );
+      await controller.start();
+      expect(controller.currentState()).toBe("listening");
+      await controller.dispose();
+    });
+  }
+
+  it("releases the cue without playing on token failure", async () => {
+    let readySounds = 0;
+    let cueDisposals = 0;
+    const controller = new DeepgramDictationController(
+      { onState: () => {}, onFinal: () => {}, onInterim: () => {}, onError: () => {} },
+      async () => { throw new Error("token failed"); },
+      { createReadyCue: () => ({ play: () => { readySounds += 1; }, dispose: () => { cueDisposals += 1; } }) },
+    );
+    await controller.start();
+    expect(controller.currentState()).toBe("idle");
+    expect(readySounds).toBe(0);
+    expect(cueDisposals).toBe(1);
   });
 
   it("does not restart when toggle is pressed during stop finalization", async () => {
@@ -279,12 +359,14 @@ class FakeSocket {
 
 class FakeRecorder {
   state: RecordingState = "inactive";
+  autoStartEvent = true;
   startedWith: number | undefined;
   private readonly listeners = new Map<string, Set<(event: any) => void>>();
 
   start(timeslice?: number): void {
     this.state = "recording";
     this.startedWith = timeslice;
+    if (this.autoStartEvent) this.emit("start", {});
   }
 
   stop(): void {

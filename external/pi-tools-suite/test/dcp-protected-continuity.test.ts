@@ -207,23 +207,4 @@ describe("DCP protected continuity", () => {
 		expect(continuity.text).toBe("### Tool: shell\nclean");
 	});
 
-	test("recognises an already compact Gateway representation without reconstructing raw continuity", () => {
-		const config = loadConfig({ homeDir: "/__dcp_protected_continuity__" });
-		const compact = "Execution outcome: SUCCESS\nRecognised format: bun-test\nTerminal summary: 25 passed, 0 failed, 25 tests, 1 files";
-		const continuity = toolRecordContinuity(record({
-			inputArgs: { command: "bun test test/a.test.ts" },
-			outputText: compact,
-			outputDetails: {
-				contextGateway: {
-					version: 1,
-					representation: "test-build-compact",
-					sourceContentBytes: 30_000,
-					deliveredContentBytes: 160,
-				},
-			},
-		}), config);
-		expect(continuity).toMatchObject({ mode: "verbatim", reason: "gateway-compacted" });
-		expect(continuity.text).toContain(compact);
-		expect(continuity.text!.length).toBeLessThan(300);
-	});
 });

@@ -77,13 +77,6 @@ limits. Long entry bodies and multi-entry pages return an opaque `nextCursor`;
 passing that cursor continues at the exact entry/body offset and must use the
 same scope.
 
-When Context Gateway has delivered a `web-recoverable-compact` result,
-`session action=search` can locate its raw tool-result entry by `toolCallId`, and
-`session action=read` exposes the retained structured `toolResult.details`
-under `recoverable_raw_details`. The compact provider view is therefore not the
-only copy of the web result: recovery reads the original structured data from
-the append-only session and never refetches the URL.
-
 `session action=search` is case-insensitive by default and searches message text, tool
 arguments/results, custom-message content, and compaction or branch summaries.
 It returns entry and section IDs plus bounded snippets. Search pages use an
@@ -112,7 +105,7 @@ tools are not guessed to be mutations.
 - Action is required. The dispatcher rejects unknown actions, wrong types,
   out-of-schema bounds, unknown fields and fields belonging to another action
   before touching the session. `search` requires a nonblank query.
-- DCP regret and Context Gateway retrieval tax recognize only `session` history
+- DCP regret recognizes only `session` history
   actions (`overview`, `read`, `search`, `recovery`). Title reads and renames
   (`name`) are excluded; old tool names are not classified.
 
@@ -138,7 +131,6 @@ tools are not guessed to be mutations.
 - `external/pi-tools-suite/src/module-catalog.ts`
 - `external/pi-tools-suite/src/tool-descriptions.ts`
 - `external/pi-tools-suite/src/dcp/regret-signals.ts`
-- `external/pi-tools-suite/src/context-gateway/efficiency.ts`
 
 ## Tests
 
@@ -148,7 +140,6 @@ tools are not guessed to be mutations.
 - `external/pi-tools-suite/test/config.test.ts`
 - `external/pi-tools-suite/test/codemode-sdk.test.ts`
 - `external/pi-tools-suite/test/dcp-session-sim-e2e.test.ts`
-- `external/pi-tools-suite/test/context-gateway/accounting.test.ts`
 - `external/pi-tools-suite/test/tool-descriptions.test.ts`
 - `external/pi-tools-suite/test/evals/extension-contracts.test.ts`
 - `external/pi-tools-suite/test/evals/session-cases.ts`

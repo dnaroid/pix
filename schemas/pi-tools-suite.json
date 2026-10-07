@@ -1277,65 +1277,6 @@
       },
       "description": "Settings for the opt-in credential-firewall module."
     },
-    "contextGateway": {
-      "type": "object",
-      "properties": {
-        "mode": {
-          "anyOf": [
-            {
-              "type": "string",
-              "const": "off"
-            },
-            {
-              "type": "string",
-              "const": "observe"
-            },
-            {
-              "type": "string",
-              "const": "enforce"
-            }
-          ],
-          "description": "Context Gateway mode. observe is passive; enforce only compacts proven complete simple test/build output and otherwise passes results through."
-        },
-        "budgets": {
-          "type": "object",
-          "properties": {
-            "maxInlineBytes": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 67108864,
-              "description": "Maximum inline size for a proven compact representation. Default 8192."
-            },
-            "maxResultBytes": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 67108864,
-              "description": "Budget for shell/other result classes. Selective enforce currently compacts only recognised complete simple test/build output. Default 8192."
-            },
-            "maxExactReadBytes": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 67108864,
-              "description": "Read-class observation budget. Reads remain passthrough because snapshot-safe recovery is not available. Default 32768."
-            },
-            "maxSearchBytes": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 67108864,
-              "description": "Repo-search/AST/structure observation budget. Gateway does not post-hoc truncate producer output. Default 8192."
-            },
-            "maxSearchMatches": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 1000,
-              "description": "Reserved search-match policy budget. Default 12."
-            }
-          },
-          "description": "Context Gateway class-specific observation and selective-enforcement budgets."
-        }
-      },
-      "description": "Context Gateway configuration. Default mode is off."
-    },
     "repoDiscovery": {
       "type": "object",
       "properties": {

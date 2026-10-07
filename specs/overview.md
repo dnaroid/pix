@@ -57,7 +57,6 @@ not duplicate those; IDX document retrieval can find them independently.
 | [parent-first-subagent-routing](./parent-first-subagent-routing.md) | Parent-first sub-agent role selection |
 | [ui-qa-agent](./ui-qa-agent.md) | Self-contained browser/TUI/desktop UI QA agent |
 | [model-selector-fallbacks](./model-selector-fallbacks.md) | Ordered fallback arrays for singular model selectors |
-| [context-gateway](./context-gateway.md) | Context Gateway (observe-only result chain) |
 | [repo-knowledge-agent-workflow](./repo-knowledge-agent-workflow.md) | Agent workflow for indexed retrieval and task-scoped documentation audits |
 | [todo-repo-knowledge-finalization](./todo-repo-knowledge-finalization.md) | Todo repo knowledge finalization reminder |
 

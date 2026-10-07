@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { parseTestBuildOutput, planProspectiveTestOutputDelivery } from "../../src/context-gateway/test-output-parser.js";
+import { parseTestBuildOutput, planProspectiveTestOutputDelivery } from "../src/dcp/test-output-parser.js";
 
 const BUN_SUCCESS = `bun test v1.3.14 (0d9b296a)
 (pass) src/a.test.ts > alpha [1.00ms]
@@ -40,7 +40,7 @@ src/cart.ts(4,1): warning TS6133: 'unused' is declared but its value is never re
 Found 1 error in 1 file.
 Command exited with code 2`;
 
-describe("P01-R R-D pure test/build parser", () => {
+describe("DCP test/build output parser", () => {
 	test("recognises a complete Bun success terminal summary without inventing diagnostics", () => {
 		const parsed = parseTestBuildOutput({ text: BUN_SUCCESS, hostOutcome: "success" });
 		expect(parsed).toMatchObject({

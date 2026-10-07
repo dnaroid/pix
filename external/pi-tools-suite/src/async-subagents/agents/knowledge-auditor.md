@@ -82,6 +82,24 @@ unrelated local changes.
   make a broad rewrite across multiple documents. Also escalate whenever the
   intended truth is ambiguous from the supplied summary plus final code/tests.
 
+## Knowledge lock contention (both modes)
+
+If an `idx` command reports that the knowledge/index lock is held, treat it as
+temporary contention: another agent in a parallel session may be writing to the
+same knowledge base. Do not report an immediate failure. Wait 5 seconds and
+retry the same command, with a total waiting budget of at most 60 seconds per
+blocked operation. Stop retrying as soon as the command succeeds and continue
+the selected workflow. A lock-related skip (including `idx index --skip-if-locked`)
+is not a completed operation, even if it exits 0; retry it within the same budget.
+
+Retry only explicit lock contention, not unrelated command errors. Never delete
+or force-release another session's lock, kill its owner, or bypass locking. If
+the lock remains after the waiting budget, return a blocker with the command,
+lock diagnostic, elapsed waiting time and last exit code; do not claim success.
+Lock release does not prove reviewed content stayed stable: recheck reviewed
+specs/dependencies for concurrent changes before acknowledgment. Spec-review
+mode still must not acknowledge specs independently.
+
 ## Spec-review workflow
 
 Use this workflow only for an explicitly assigned spec-review slice:

@@ -2,9 +2,8 @@ import { spawn } from "node:child_process";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { withE2ERetry } from "../../e2e-retry.js";
-import { RECOVERY_PROBE_LOG, type RecoveryProbeConfig } from "../recovery-provenance.js";
 import { evaluateAssertions } from "./assertions.js";
 import { deriveMetrics } from "./metrics.js";
 import { resolveEvalOutputDir } from "./output-dir.js";
@@ -25,10 +24,6 @@ export type RunEvalOptions = {
 	extensionEntrypoint?: string;
 	env?: Record<string, string | undefined>;
 	prepareProject?: (projectDir: string) => void;
-	/** Test-only guard: delete fixture files after a named tool result so recovery cannot fall back to the original source. */
-	deleteProjectFilesAfterToolResult?: Record<string, string[]>;
-	/** Test-only provenance probe. Raw paths stay in the disposable fixture project and are never part of normal eval events. */
-	recoveryProbe?: RecoveryProbeConfig;
 };
 
 export async function runEvalCase(evalCase: EvalCase, model: string, options: RunEvalOptions = {}): Promise<EvalRunResult> {
@@ -42,8 +37,6 @@ export async function runEvalCase(evalCase: EvalCase, model: string, options: Ru
 		const recorder = writeRecorder(
 			projectDir,
 			evalCase.blockTools ?? [],
-			options.deleteProjectFilesAfterToolResult,
-			options.recoveryProbe,
 		);
 		const fakeBin = evalCase.fakeIdx ? writeFakeIdxBin(projectDir) : undefined;
 		const args = [
@@ -162,42 +155,14 @@ function makeFixtureProject(fixture: EvalCase["fixture"]): string {
 export function writeRecorder(
 	projectDir: string,
 	blockTools: string[],
-	deleteProjectFilesAfterToolResult: Record<string, string[]> = {},
-	recoveryProbe?: RecoveryProbeConfig,
 ): { extensionPath: string; logPath: string } {
 	const extensionPath = path.join(projectDir, ".pi", "eval-recorder.ts");
 	const logPath = path.join(projectDir, ".pi", "eval-events.jsonl");
-	const recoveryLogPath = path.join(projectDir, RECOVERY_PROBE_LOG);
-	const gatewayTelemetryUrl = pathToFileURL(path.join(PACKAGE_ROOT, "src", "context-gateway", "telemetry.ts")).href;
-	const gatewayConfigUrl = pathToFileURL(path.join(PACKAGE_ROOT, "src", "context-gateway", "config.ts")).href;
-	const projectRoot = path.resolve(projectDir);
-	const cleanupByTool: Record<string, string[]> = {};
-	for (const [toolName, relativePaths] of Object.entries(deleteProjectFilesAfterToolResult)) {
-		const normalizedToolName = toolName.trim().toLowerCase();
-		if (!normalizedToolName) continue;
-		cleanupByTool[normalizedToolName] = relativePaths.map((relativePath) => {
-			const absolutePath = path.resolve(projectRoot, relativePath);
-			if (absolutePath === projectRoot || !absolutePath.startsWith(`${projectRoot}${path.sep}`)) {
-				throw new Error(`Eval cleanup path escapes project root: ${relativePath}`);
-			}
-			return absolutePath;
-		});
-	}
 	fs.mkdirSync(path.dirname(extensionPath), { recursive: true });
 	fs.writeFileSync(extensionPath, `
-import * as fs from "node:fs";
-import { ContextGatewayTelemetry } from ${JSON.stringify(gatewayTelemetryUrl)};
-import { loadContextGatewayConfig } from ${JSON.stringify(gatewayConfigUrl)};
+import fs from "node:fs";
 const LOG_PATH = ${JSON.stringify(logPath)};
-const RECOVERY_LOG_PATH = ${JSON.stringify(recoveryProbe ? recoveryLogPath : "")};
 const BLOCKED = new Set(${JSON.stringify(blockTools)});
-const CLEANUP_BY_TOOL = ${JSON.stringify(cleanupByTool)};
-const RECOVERY_PROBE = ${JSON.stringify(recoveryProbe ?? null)};
-const RECOVERY_PRODUCERS = new Set((RECOVERY_PROBE?.producerToolNames || []).map((name) => String(name).toLowerCase()));
-const RECOVERY_MAX_FILE_BYTES = Number(RECOVERY_PROBE?.maxFullOutputProbeBytes || 8388608);
-const GATEWAY_CONFIG = loadContextGatewayConfig(process.cwd(), process.env);
-const GATEWAY_OBSERVE = GATEWAY_CONFIG.mode === "observe";
-const GATEWAY_TELEMETRY = new ContextGatewayTelemetry();
 function safe(value) { try { JSON.stringify(value); return value ?? null; } catch { return String(value); } }
 function jsonBytes(value) {
   try { const text = JSON.stringify(value); return text === undefined ? 0 : Buffer.byteLength(text, "utf8"); }
@@ -209,34 +174,6 @@ function textBytes(content) {
   let total = 0;
   for (const part of content) if (part && part.type === "text" && typeof part.text === "string") total += Buffer.byteLength(part.text, "utf8");
   return total;
-}
-function contentText(content) {
-  if (!Array.isArray(content)) return "";
-  let text = "";
-  for (const part of content) if (part && part.type === "text" && typeof part.text === "string") text += part.text;
-  return text;
-}
-function continuationOffset(content) {
-  const match = contentText(content).match(/Use offset=(\d+) to continue/);
-  if (!match) return undefined;
-  const value = Number(match[1]);
-  return Number.isSafeInteger(value) && value > 0 ? value : undefined;
-}
-function fullOutputFactStatus(filePath) {
-  if (!RECOVERY_PROBE || typeof filePath !== "string" || !filePath) return "not-provided";
-  try {
-    const stat = fs.statSync(filePath);
-    if (!stat.isFile()) return "not-file";
-    if (stat.size > RECOVERY_MAX_FILE_BYTES) return "too-large";
-    return fs.readFileSync(filePath, "utf8").includes(RECOVERY_PROBE.expectedFact) ? "match" : "no-match";
-  } catch (error) {
-    if (error && typeof error === "object" && error.code === "ENOENT") return "missing";
-    return "read-error";
-  }
-}
-function appendRecoveryProbe(value) {
-  if (!RECOVERY_LOG_PATH) return;
-  fs.appendFileSync(RECOVERY_LOG_PATH, JSON.stringify(value) + "\\n", "utf8");
 }
 const NATIVE_REASONS = new Set(["invalid-wrapper-budget", "unknown-flag", "missing-flag-value", "duplicate-flag", "invalid-flag-value", "conflicting-flags", "compact-limit-exceeded", "full-limit-exceeded"]);
 function nativePolicy(toolName, details) {
@@ -250,30 +187,10 @@ function nativePolicy(toolName, details) {
 function append(value) { fs.appendFileSync(LOG_PATH, JSON.stringify(value) + "\\n", "utf8"); }
 export default function recorder(pi) {
   pi.on("tool_call", async (event) => {
-    if (GATEWAY_OBSERVE) GATEWAY_TELEMETRY.recordToolCall(event);
     append({ type: "tool_call", toolCallId: event.toolCallId, toolName: event.toolName, input: safe(event.input) });
     if (BLOCKED.has(event.toolName)) return { block: true, reason: event.toolName + " execution blocked by eval recorder after selection was captured; do not retry it" };
   });
   pi.on("tool_result", async (event) => {
-    if (GATEWAY_OBSERVE) GATEWAY_TELEMETRY.recordToolResult(event, GATEWAY_CONFIG.budgets, {
-      maxInlineBytes: GATEWAY_CONFIG.budgets.maxInlineBytes,
-    });
-    const normalizedTool = String(event.toolName || "").toLowerCase();
-    const cleanup = CLEANUP_BY_TOOL[normalizedTool] || [];
-    const cleanupExistingBeforeCount = cleanup.filter((filePath) => fs.existsSync(filePath)).length;
-    const fullOutputPath = RECOVERY_PRODUCERS.has(normalizedTool)
-      && event.details && typeof event.details === "object" && !Array.isArray(event.details)
-      && typeof event.details.fullOutputPath === "string"
-      ? event.details.fullOutputPath
-      : undefined;
-    const fullOutputStatus = fullOutputFactStatus(fullOutputPath);
-    let cleanupDeletedCount = 0;
-    for (const filePath of cleanup) {
-      const existed = fs.existsSync(filePath);
-      fs.rmSync(filePath, { force: true });
-      if (existed && !fs.existsSync(filePath)) cleanupDeletedCount += 1;
-    }
-    const cleanupMissingAfterCount = cleanup.filter((filePath) => !fs.existsSync(filePath)).length;
     append({
       type: "tool_result",
       toolCallId: event.toolCallId,
@@ -282,20 +199,6 @@ export default function recorder(pi) {
       contentBytes: jsonBytes(event.content),
       textBytes: textBytes(event.content),
       nativePolicy: nativePolicy(event.toolName, event.details),
-    });
-    if (RECOVERY_PROBE) appendRecoveryProbe({
-      type: "tool_result_probe",
-      toolCallId: String(event.toolCallId || ""),
-      toolName: String(event.toolName || ""),
-      isError: event.isError === true,
-      contentContainsExpectedFact: contentText(event.content).includes(RECOVERY_PROBE.expectedFact),
-      nativeContinuationOffset: continuationOffset(event.content),
-      ...(fullOutputPath ? { fullOutputPath } : {}),
-      fullOutputFactStatus: fullOutputStatus,
-      cleanupExpectedCount: cleanup.length,
-      cleanupExistingBeforeCount,
-      cleanupDeletedCount,
-      cleanupMissingAfterCount,
     });
   });
   pi.on("agent_end", async (event) => {
@@ -312,14 +215,6 @@ export default function recorder(pi) {
     append({
       type: "agent_end",
       usage,
-      ...(GATEWAY_OBSERVE ? {
-        contextGatewayTelemetry: {
-          mode: "observe",
-          maxResultBytes: GATEWAY_CONFIG.budgets.maxResultBytes,
-          budgets: GATEWAY_CONFIG.budgets,
-          snapshot: GATEWAY_TELEMETRY.snapshot(),
-        },
-      } : {}),
     });
   });
 }

@@ -141,8 +141,6 @@ Under `node_modules/@earendil-works/pi-ai/dist/` (inspection only; never patch):
 
 - `external/pi-tools-suite/test/codex-reasoning-fix.test.ts`
 - `external/pi-tools-suite/test/codex-reasoning-sdk-replay.test.ts`
-- `external/pi-tools-suite/test/context-gateway/observe.test.ts`
-- `external/pi-tools-suite/test/context-gateway/sdk-pipeline.test.ts`
 
 ## Verification
 
@@ -151,7 +149,7 @@ suite; commands after `cd ../..` run from the root):
 
 ```sh
 cd external/pi-tools-suite
-bun test test/codex-reasoning-fix.test.ts test/codex-reasoning-sdk-replay.test.ts test/context-gateway/observe.test.ts test/context-gateway/sdk-pipeline.test.ts
+bun test test/codex-reasoning-fix.test.ts test/codex-reasoning-sdk-replay.test.ts
 npm run typecheck
 env -u PIX_CONFIG_PROFILE -u PIX_ACP_SESSION_STATE_BRIDGE -u PIX_QUESTION_RPC_BRIDGE npm test
 env -u PIX_CONFIG_PROFILE -u PIX_ACP_SESSION_STATE_BRIDGE -u PIX_QUESTION_RPC_BRIDGE npm run smoke

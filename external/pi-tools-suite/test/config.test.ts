@@ -224,7 +224,7 @@ describe("pi-tools-suite config", () => {
 		expect(content).toContain('"credential-firewall": false');
 		expect(content).toContain('"truncation-metadata-normalizer": true');
 		expect(content).toContain('"secretFirewall"');
-		expect(content).toContain('"contextGateway"');
+		expect(content).not.toContain('"contextGateway"');
 		expect(content).toContain('"repoDiscovery"');
 		expect(content).toContain('"profile": "baseline"');
 		expect(content).toContain('"resourceRegistry"');

@@ -51,11 +51,6 @@
     { value: "soft", label: "Soft" },
     { value: "strong", label: "Strong" },
   ];
-  const CONTEXT_GATEWAY_MODE = [
-    { value: "off", label: "Off" },
-    { value: "observe", label: "Observe" },
-    { value: "enforce", label: "Enforce" },
-  ];
   const REPO_DISCOVERY_PROFILE = [
     { value: "baseline", label: "Baseline" },
     { value: "native-compact", label: "Native compact" },
@@ -415,27 +410,9 @@
 {:else if section === "context"}
   <div class="px-2.5 py-2.5">
     <h2 class="text-sm font-semibold text-foreground">Context & repository</h2>
-    <p class="mt-0.5 text-xs leading-4 text-muted-foreground">Observation budgets, repository discovery policy, and reusable resource registry.</p>
+    <p class="mt-0.5 text-xs leading-4 text-muted-foreground">Repository discovery policy and reusable resource registry.</p>
   </div>
   <div class="border-y border-sidebar-border/70 bg-panel">
-    <SettingsFieldRow label="Context Gateway mode" description="Observe is passive telemetry; enforce compacts only supported recoverable result shapes." explicit={has(["contextGateway", "mode"])} defaultLabel={defaultLabel(["contextGateway", "mode"])} onReset={() => reset(["contextGateway", "mode"])}>
-      <SettingsSelect value={text(["contextGateway", "mode"])} options={CONTEXT_GATEWAY_MODE} onChange={(value) => set(["contextGateway", "mode"], value)} />
-    </SettingsFieldRow>
-    <SettingsFieldRow label="Maximum inline bytes" explicit={has(["contextGateway", "budgets", "maxInlineBytes"])} defaultLabel={defaultLabel(["contextGateway", "budgets", "maxInlineBytes"])} onReset={() => reset(["contextGateway", "budgets", "maxInlineBytes"])}>
-      <SettingsNumberInput value={number(["contextGateway", "budgets", "maxInlineBytes"])} min={1} max={67108864} step={1} onChange={(value) => updateNumber(["contextGateway", "budgets", "maxInlineBytes"], value)} />
-    </SettingsFieldRow>
-    <SettingsFieldRow label="Maximum result bytes" explicit={has(["contextGateway", "budgets", "maxResultBytes"])} defaultLabel={defaultLabel(["contextGateway", "budgets", "maxResultBytes"])} onReset={() => reset(["contextGateway", "budgets", "maxResultBytes"])}>
-      <SettingsNumberInput value={number(["contextGateway", "budgets", "maxResultBytes"])} min={1} max={67108864} step={1} onChange={(value) => updateNumber(["contextGateway", "budgets", "maxResultBytes"], value)} />
-    </SettingsFieldRow>
-    <SettingsFieldRow label="Maximum exact-read bytes" explicit={has(["contextGateway", "budgets", "maxExactReadBytes"])} defaultLabel={defaultLabel(["contextGateway", "budgets", "maxExactReadBytes"])} onReset={() => reset(["contextGateway", "budgets", "maxExactReadBytes"])}>
-      <SettingsNumberInput value={number(["contextGateway", "budgets", "maxExactReadBytes"])} min={1} max={67108864} step={1} onChange={(value) => updateNumber(["contextGateway", "budgets", "maxExactReadBytes"], value)} />
-    </SettingsFieldRow>
-    <SettingsFieldRow label="Maximum search bytes" explicit={has(["contextGateway", "budgets", "maxSearchBytes"])} defaultLabel={defaultLabel(["contextGateway", "budgets", "maxSearchBytes"])} onReset={() => reset(["contextGateway", "budgets", "maxSearchBytes"])}>
-      <SettingsNumberInput value={number(["contextGateway", "budgets", "maxSearchBytes"])} min={1} max={67108864} step={1} onChange={(value) => updateNumber(["contextGateway", "budgets", "maxSearchBytes"], value)} />
-    </SettingsFieldRow>
-    <SettingsFieldRow label="Maximum search matches" explicit={has(["contextGateway", "budgets", "maxSearchMatches"])} defaultLabel={defaultLabel(["contextGateway", "budgets", "maxSearchMatches"])} onReset={() => reset(["contextGateway", "budgets", "maxSearchMatches"])}>
-      <SettingsNumberInput value={number(["contextGateway", "budgets", "maxSearchMatches"])} min={1} max={1000} step={1} onChange={(value) => updateNumber(["contextGateway", "budgets", "maxSearchMatches"], value)} />
-    </SettingsFieldRow>
     <SettingsFieldRow label="Repository discovery profile" description="Baseline keeps historical behavior; Native compact enables bounded native flags/cursors/output." explicit={has(["repoDiscovery", "profile"])} defaultLabel={defaultLabel(["repoDiscovery", "profile"])} onReset={() => reset(["repoDiscovery", "profile"])}>
       <SettingsSelect value={text(["repoDiscovery", "profile"])} options={REPO_DISCOVERY_PROFILE} onChange={(value) => set(["repoDiscovery", "profile"], value)} />
     </SettingsFieldRow>

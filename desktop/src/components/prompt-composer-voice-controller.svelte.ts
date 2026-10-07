@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { onMount, tick } from "svelte";
+import { attachDictationShortcut, DICTATION_SHORTCUT_EVENT } from "../lib/dictation-shortcut";
 import {
   browserDeepgramSupported,
   DeepgramDictationController,
@@ -23,6 +25,8 @@ export function createPromptComposerVoiceController(options: PromptComposerVoice
   let error = $state("");
   let supported = $state(false);
   let sessionId = $state<string | undefined>();
+  let shortcut: ReturnType<typeof attachDictationShortcut> | undefined;
+  let shortcutMounted = $state(false);
 
   onMount(() => {
     supported = browserDeepgramSupported();
@@ -38,13 +42,32 @@ export function createPromptComposerVoiceController(options: PromptComposerVoice
       },
       async () => await invoke<DeepgramToken>("deepgram_token"),
     );
+    const shortcutOwner = crypto.randomUUID();
+    shortcut = attachDictationShortcut({
+      listen: (handler) => getCurrentWebviewWindow().listen(DICTATION_SHORTCUT_EVENT, handler),
+      setNativeEnabled: (enabled) => invoke("desktop_set_dictation_shortcut", { enabled, owner: shortcutOwner }),
+      canToggle: () => document.hasFocus()
+        && !document.querySelector('[role="dialog"], dialog[open]')
+        && (canStart() || state !== "idle"),
+      toggle,
+      onError: (reason) => { error = String(reason); },
+    });
+    shortcutMounted = true;
     return () => {
+      shortcutMounted = false;
+      shortcut?.dispose();
+      shortcut = undefined;
       const activeController = controller;
       sessionId = undefined;
       interim = undefined;
       controller = undefined;
       if (activeController) void activeController.dispose();
     };
+  });
+
+  $effect(() => {
+    const enabled = canStart() || state !== "idle";
+    if (shortcutMounted) shortcut?.setEnabled(enabled);
   });
 
   $effect(() => {

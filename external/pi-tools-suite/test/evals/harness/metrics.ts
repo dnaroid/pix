@@ -42,9 +42,6 @@ export function deriveMetrics(options: {
 	const toolCalls = options.events.filter((event) => event.type === "tool_call").map((event) => event.toolName ?? "unknown");
 	const toolResults = options.events.filter((event) => event.type === "tool_result");
 	const nativePolicyResults = toolResults.filter((event) => event.nativePolicy !== undefined);
-	const contextGateway = [...options.events].reverse()
-		.find((event) => event.type === "agent_end" && event.contextGatewayTelemetry !== undefined)
-		?.contextGatewayTelemetry;
 	const eventUsage = emptyUsage();
 	for (const event of options.events) if (event.type === "agent_end") addUsage(eventUsage, event.usage);
 	const parentUsage = eventUsage.totalTokens > 0 || eventUsage.cost > 0 ? eventUsage : readUsageFromTree(options.sessionDir);
@@ -63,7 +60,6 @@ export function deriveMetrics(options: {
 		nativePolicyRefusals: nativePolicyResults.filter((event) => event.nativePolicy?.refused === true).length,
 		nativePolicyFullOverrides: nativePolicyResults.filter((event) => event.nativePolicy?.outputMode === "full").length,
 		retryAfterNativeRefusalCount: retryAfterNativeRefusalCount(options.events),
-		...(contextGateway ? { contextGateway } : {}),
 		mutationCount: options.events.filter((event) => event.type === "tool_call" && isMutationTool(event.toolName)).length,
 		verificationCount: options.events.filter(isVerificationCall).length,
 		changedFiles: options.changedFiles,

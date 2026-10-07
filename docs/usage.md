@@ -117,7 +117,7 @@ Major capabilities include:
 | Structural edits | `ast-grep` |
 | Feedback | LSP diagnostics and comment checks |
 | Planning | hierarchical durable todos |
-| Context | DCP compression/pruning and context gateway tools |
+| Context | DCP compression/pruning |
 | Web | local/cloud web-search integrations |
 | Providers | usage, Antigravity auth, OpenCode credential import |
 | Reusable resources | prompt commands, Git-backed Registry, session naming |

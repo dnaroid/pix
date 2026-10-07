@@ -84,6 +84,7 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 5. **Extensions** loaded into children: `model-tools` (model-specific tool args) and `tool-guard` (strips parent-only tools: `question`, `subagents`, all `async_subagents_*`). Provider dependencies come from an explicit allowlist in `core/provider-extensions.ts`, recomputed on every attempt (retry and provider-changing fallback) from that attempt's final model:
    - `todo/subagent.ts` is also loaded for **every role**, including project-local roles such as `frontier-review`, and automatically for future roles. It exposes regular `todo` actions with a private child-session/attempt list. This is a planning exception to work-tool restrictions: restricted/empty role tool selections and extra CLI tool flags retain `todo` while preserving restrictions on work tools. Children neither read nor write the parent's project `.pi/todo-plan.json`. Retries/new attempts start with a new list; optional child session history stores local snapshots, branch navigation replays only that branch, and compaction retains unfinished tasks with a fresh snapshot. The lean entrypoint does not load persistence commands, UI widgets, thinking overrides, auto-follow-up turns or the parent's knowledge-audit reminder. Recursive delegation and interactive user questions remain denied. Children use todos for non-trivial multi-step work and report unfinished work/blockers to the parent; trivial work needs no plan. See [decision 0059](../docs/decisions/0059-subagent-private-todos.md), with the common-capability exception expanded by [decision 0060](../docs/decisions/0060-subagent-read-only-repo-tools.md). `[confirmed by todo/subagent.ts, core/child-tools.ts; tests: test/async-subagents/todo.test.ts, provider-child-inventory.test.ts]`
    - `repo-discovery/subagent.ts` is explicitly loaded at the same common boundary for **every role and attempt**, independent of role names, visibility or project-local replacements. It exposes the eight existing read-only queries (`repo_context`, `repo_audit`, `repo_architecture`, `repo_structure`, `repo_ast`, `repo_search`, `repo_explain`, `repo_deps`) only when the launch project is already indexed and `idx` is executable. It reuses normal adapters, project selection, output profile and cancellation, without setup/update commands or implicit installation/index initialization. Missing prerequisites leave ordinary role tools and private todo usable. Explicit CLI allowlists, empty/no-tools selections and exclusions retain these common capabilities but do not grant other work tools. Lifecycle activation adds only registered queries to the existing selection. Child audit guidance reports evidence/gaps to the parent rather than requesting nested delegation. Read-only refers to product-source mutation; idx cache/index refresh side effects are not an OS sandbox. Council children reuse this common repo entrypoint and keep their separate web/read-only call guard (with private todo allowed), avoiding duplicate tool registration. See [decision 0060](../docs/decisions/0060-subagent-read-only-repo-tools.md). `[confirmed by repo-discovery/subagent.ts, core/child-tools.ts, core/spawn.ts, brainstorm/research-extension.ts; tests: test/async-subagents/repo-tools.test.ts, provider-child-inventory.test.ts, test/brainstorm/research-extension.test.ts]`
+   - `dcp/subagent.ts` loads DCP for **every role and attempt**, including project-local replacements and read-only council participants. It uses normal DCP configuration/model overrides, prompts, compression and lifecycle hooks but registers no interactive `/dcp` commands. `compress` is a common capability alongside private todo and gated repo queries: empty/restricted tool lists, CLI exclusions and model changes cannot remove it when DCP is enabled. Read-only guards permit context compression, not product-source mutation. Disabled DCP configuration still suppresses registration. Default `--no-session` children keep DCP decisions only in memory, preserving raw history without session files or journal writes; each retry/new attempt starts fresh. Opted-in persisted child sessions use the normal journal contract. This does not enable session persistence or load the whole suite. See [DCP lifecycle](dcp.md#lifecycle-and-persistence). `[confirmed by dcp/subagent.ts, core/child-tools.ts, core/spawn.ts, brainstorm/research-extension.ts; tests: test/async-subagents/dcp.test.ts, provider-child-inventory.test.ts, work-tools.test.ts, test/brainstorm/research-extension.test.ts]`
    - Optional work capabilities are tool-driven, not universal or granted by role
      name. Bundled `research`, `implement`, `implement-core`, `mechanical` and
      `frontier-review` opt into read-only `ast_grep`; only bundled `research`
@@ -94,7 +95,7 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
      allowlist/exclusions and loads `async-subagents/work-tools.ts` only when an
      optional tool survives. It registers only requested tools, no commands,
      `ast_apply`, LSP or full suite. Empty/no-tools selections, later lists and
-     exclusions may remove optional tools; universal todo/repo is unchanged.
+     exclusions may remove optional tools; universal todo/DCP/repo is unchanged.
      Every attempt overwrites `PI_SUBAGENT_WORK_TOOLS`, preventing inherited
      capability contamination. Read-only optional selections retain canonical
      builtins (not Codex's grep-to-shell alias), reselect only available permitted
@@ -1158,6 +1159,7 @@ runtime is unchanged.
 - `external/pi-tools-suite/src/async-subagents/tools/subagents.ts`
 - `external/pi-tools-suite/src/async-subagents/core/spawn.ts`
 - `external/pi-tools-suite/src/async-subagents/core/child-tools.ts`
+- `external/pi-tools-suite/src/dcp/subagent.ts`
 - `external/pi-tools-suite/src/async-subagents/work-tools.ts`
 - `external/pi-tools-suite/src/ast-grep/tool.ts`
 - `external/pi-tools-suite/src/web-search/index.ts`
@@ -1200,6 +1202,8 @@ runtime is unchanged.
 - `external/pi-tools-suite/src/async-subagents/agents/ui-qa.md`
 
 ## Tests
+
+- `external/pi-tools-suite/test/async-subagents/dcp.test.ts`: command-free child DCP, lifecycle activation, disabled configuration and actual in-memory compression without journal/session writes or raw-history mutation.
 
 - `external/pi-tools-suite/test/async-subagents/work-tools.test.ts`: optional
   policy, CLI removals, project replacements, read-only lifecycle/call guard,

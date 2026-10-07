@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { COUNCIL_RESEARCH_TOOLS } from "./research-tools.js";
-const allowed = new Set([...COUNCIL_RESEARCH_TOOLS, "Read", "Grep", "todo"]);
+const allowed = new Set([...COUNCIL_RESEARCH_TOOLS, "Read", "Grep", "todo", "compress"]);
 
 /** Explicitly loaded in council children, never the whole suite. */
 export default function councilResearch(pi: ExtensionAPI): void {
@@ -9,7 +9,7 @@ export default function councilResearch(pi: ExtensionAPI): void {
 
 	const select = () => {
 		const available = new Set(pi.getAllTools().map((tool) => tool.name));
-		pi.setActiveTools([...COUNCIL_RESEARCH_TOOLS, "todo"].filter((name) => available.has(name)));
+		pi.setActiveTools([...COUNCIL_RESEARCH_TOOLS, "todo", "compress"].filter((name) => available.has(name)));
 	};
 	// Model aliases can map grep to an unrestricted shell for Codex. Restore
 	// canonical read-only builtins after model-tools selection, never that alias.

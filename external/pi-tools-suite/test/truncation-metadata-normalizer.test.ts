@@ -11,12 +11,12 @@ import {
 	initTheme,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import { registerAstGrepTool } from "../../src/ast-grep/tool.js";
-import dcpModule from "../../src/dcp/index.js";
-import { loadConfig as loadDcpConfig } from "../../src/dcp/config.js";
-import { createState as createDcpState } from "../../src/dcp/state.js";
-import { normalizeRedundantTruncationMetadata } from "../../src/context-gateway/metadata-normalization.js";
-import truncationMetadataNormalizer from "../../src/truncation-metadata-normalizer/index.js";
+import { registerAstGrepTool } from "../src/ast-grep/tool.js";
+import dcpModule from "../src/dcp/index.js";
+import { loadConfig as loadDcpConfig } from "../src/dcp/config.js";
+import { createState as createDcpState } from "../src/dcp/state.js";
+import { normalizeRedundantTruncationMetadata } from "../src/truncation-metadata-normalizer/metadata-normalization.js";
+import truncationMetadataNormalizer from "../src/truncation-metadata-normalizer/index.js";
 
 const ZERO_USAGE = {
 	input: 0,
@@ -122,7 +122,7 @@ async function captureProviderPayload(details: unknown): Promise<unknown> {
 	return capturedPayload;
 }
 
-describe("context gateway non-store experiment: truncation metadata normalization", () => {
+describe("truncation metadata normalization", () => {
 	test("module returns only a details patch for a proven duplicate", async () => {
 		const handlers = new Map<string, any[]>();
 		truncationMetadataNormalizer({
@@ -273,8 +273,8 @@ describe("context gateway non-store experiment: truncation metadata normalizatio
 	test("removing only details.truncation.content substantially reduces persisted JSONL duplication", () => {
 		const details = rawDetails();
 		const normalized = withoutTruncationContent(details);
-		const rawRoot = mkdtempSync(join(tmpdir(), "context-gateway-metadata-raw-"));
-		const normalizedRoot = mkdtempSync(join(tmpdir(), "context-gateway-metadata-normalized-"));
+		const rawRoot = mkdtempSync(join(tmpdir(), "truncation-metadata-raw-"));
+		const normalizedRoot = mkdtempSync(join(tmpdir(), "truncation-metadata-normalized-"));
 		const rawManager = SessionManager.create(rawRoot, join(rawRoot, "sessions"));
 		const normalizedManager = SessionManager.create(normalizedRoot, join(normalizedRoot, "sessions"));
 
@@ -304,7 +304,7 @@ describe("context gateway non-store experiment: truncation metadata normalizatio
 	});
 
 	test("DCP observes the same delivered text and normalized structural details", async () => {
-		const config = loadDcpConfig({ homeDir: "/__context_gateway_metadata_dcp__" });
+		const config = loadDcpConfig({ homeDir: "/__truncation_metadata_dcp__" });
 		config.enabled = true;
 		config.debug = false;
 		const state = createDcpState();

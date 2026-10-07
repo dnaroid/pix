@@ -81,6 +81,8 @@ does not invoke a summarizer model.
 
 ## Implementation
 
+- `external/pi-tools-suite/src/dcp/test-output-parser.ts`
+
 - `external/pi-tools-suite/src/dcp/protected-continuity.ts`
 - `external/pi-tools-suite/src/dcp/compression-blocks.ts`
 - `external/pi-tools-suite/src/dcp/pruner-candidates.ts`
@@ -93,6 +95,8 @@ does not invoke a summarizer model.
 - `external/pi-tools-suite/src/dcp/defaults.ts`
 
 ## Tests
+
+- `external/pi-tools-suite/test/dcp-test-output-parser.test.ts`
 
 - `external/pi-tools-suite/test/dcp-protected-continuity.test.ts`
 - `external/pi-tools-suite/test/dcp-protected-continuity-marathon.test.ts`

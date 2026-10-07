@@ -255,8 +255,9 @@ provider effort handling and exact-model/no-fallback policies remain unchanged.
   are rejected, since they could defeat the exact roster or read-only tool set.
   Participants receive canonical `read`/`grep`, `web_search`/`web_fetch` and the
   eight read-only `repo_*` discovery tools (context, audit, architecture,
-  structure, ast, search, explain, deps), plus the common private `todo` tool.
-  Common spawn loads repo/todo and requested tools-only web capabilities; the
+  structure, ast, search, explain, deps), plus common private `todo` and DCP
+  `compress` (subject to normal DCP configuration).
+  Common spawn loads repo/todo/DCP and requested tools-only web capabilities; the
   council-only extension owns the strict guard without registering repo or web
   tools twice. Council does not request `ast_grep`.
   The full suite remains disabled. Its final

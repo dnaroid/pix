@@ -49,6 +49,10 @@ describe("pi-tools-suite config schema", () => {
 		assert.equal("telegramConnector" in PiToolsSuiteConfigSchema.properties, false);
 	});
 
+	it("does not advertise the removed result-shaping configuration", () => {
+		assert.equal("contextGateway" in PiToolsSuiteConfigSchema.properties, false);
+	});
+
 	it("accepts the shipped full default template", () => {
 		const template = parse(DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC) as Record<string, unknown>;
 		assert.equal(Value.Check(PiToolsSuiteConfigSchema, template), true);

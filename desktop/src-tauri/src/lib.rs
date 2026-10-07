@@ -30,6 +30,7 @@ mod close_guard;
 mod desktop_bootstrap;
 mod desktop_context_menu;
 mod desktop_notification;
+mod dictation_shortcut;
 mod git_ci;
 mod git_identity;
 mod git_ignore;
@@ -1840,7 +1841,8 @@ async fn write_user_config(
         .path()
         .home_dir()
         .map_err(|error| format!("failed to resolve the home directory: {error}"))?;
-    run_blocking(move || {
+    let shortcut_app = app.clone();
+    let result = run_blocking(move || {
         let state = app.state::<UserConfigState>();
         let _guard = state
             .lock
@@ -1848,7 +1850,11 @@ async fn write_user_config(
             .map_err(|_| "user config state is poisoned".to_owned())?;
         write_user_config_from(&home, kind, &content)
     })
-    .await
+    .await?;
+    if let Err(error) = dictation_shortcut::refresh(&shortcut_app).await {
+        eprintln!("dictation shortcut: {error}");
+    }
+    Ok(result)
 }
 
 #[tauri::command]
@@ -1868,7 +1874,8 @@ async fn write_user_config_if_unchanged(
         .path()
         .home_dir()
         .map_err(|error| format!("failed to resolve the home directory: {error}"))?;
-    run_blocking(move || {
+    let shortcut_app = app.clone();
+    let result = run_blocking(move || {
         let state = app.state::<UserConfigState>();
         let _guard = state
             .lock
@@ -1876,7 +1883,11 @@ async fn write_user_config_if_unchanged(
             .map_err(|_| "user config state is poisoned".to_owned())?;
         write_user_config_if_unchanged_from(&home, kind, &expected_content, &content)
     })
-    .await
+    .await?;
+    if let Err(error) = dictation_shortcut::refresh(&shortcut_app).await {
+        eprintln!("dictation shortcut: {error}");
+    }
+    Ok(result)
 }
 
 #[tauri::command]
@@ -10141,6 +10152,7 @@ pub fn run() {
     let app = builder
         .invoke_handler(tauri::generate_handler![
             close_guard::desktop_set_running_activity,
+            dictation_shortcut::desktop_set_dictation_shortcut,
             window_restore::desktop_window_workspace,
             window_restore::desktop_open_project_window,
             desktop_context_menu::desktop_edit,
@@ -10248,6 +10260,20 @@ pub fn run() {
         .build(context)
         .expect("failed to build Pix Desktop");
     app.run(move |handle, event| {
+        if matches!(
+            &event,
+            tauri::RunEvent::WindowEvent {
+                event: tauri::WindowEvent::Focused(true),
+                ..
+            }
+        ) {
+            let handle = handle.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(error) = dictation_shortcut::refresh(&handle).await {
+                    eprintln!("dictation shortcut: {error}");
+                }
+            });
+        }
         if let tauri::RunEvent::WindowEvent {
             label,
             event: tauri::WindowEvent::CloseRequested { api, .. },
@@ -10266,6 +10292,7 @@ pub fn run() {
                 profile.remove_runtime();
             }
             desktop_notification::shutdown(handle);
+            dictation_shortcut::shutdown();
         }
         if let tauri::RunEvent::WindowEvent {
             label,
@@ -10275,6 +10302,7 @@ pub fn run() {
         {
             desktop_notification::destroyed(handle, label);
             close_guard::destroyed(handle, label);
+            dictation_shortcut::destroyed(label);
             window_restore::destroyed(handle, label);
             handle
                 .state::<git_ci::GitCiProcessState>()

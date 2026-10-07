@@ -97,6 +97,7 @@ describe("AppVoiceController", () => {
 		const socket = new FakeSocket();
 		const sockets: Array<{ url: string; protocols: string[] }> = [];
 		const spawned: Array<{ command: string; args: string[] }> = [];
+		let readySounds = 0;
 		const controller = new AppVoiceController(host, dictationConfig({
 			language: "ru",
 			model: "nova-3",
@@ -105,6 +106,7 @@ describe("AppVoiceController", () => {
 
 		setVoiceControllerTestDeps({
 			deepgramApiKey: () => "dg-env-fallback-key",
+			playReadySound: () => { readySounds += 1; },
 			selectRecorderCommand: async () => ({ command: "rec", args: ["--mock"], description: "mock recorder" }),
 			createDeepgramSocket: ((url: string, protocols: string[]) => {
 				sockets.push({ url, protocols });
@@ -121,6 +123,7 @@ describe("AppVoiceController", () => {
 			await controller.toggleRecording();
 
 			assert.equal(controller.statusWidgetActive(), true);
+			assert.equal(readySounds, 0);
 			assert.deepEqual(spawned, [{ command: "rec", args: ["--mock"] }]);
 			assert.deepEqual(sockets[0]?.protocols, ["token", "dg-config-key"]);
 			const socketUrl = new URL(sockets[0]?.url ?? "");
@@ -128,6 +131,8 @@ describe("AppVoiceController", () => {
 			assert.equal(socketUrl.searchParams.get("model"), "nova-3");
 
 			audioProcess.stdout.emit("data", Buffer.from("pcm"));
+			audioProcess.stdout.emit("data", Buffer.from("more-pcm"));
+			assert.equal(readySounds, 1);
 			assert.ok(Buffer.isBuffer(socket.sent[0]));
 			socket.emitMessage(deepgramResult("interim draft", false));
 			await new Promise((resolve) => setTimeout(resolve, 130));
@@ -146,6 +151,7 @@ describe("AppVoiceController", () => {
 			assert.deepEqual(host.transcripts, ["final transcript", "tail words"]);
 			assert.equal(socket.closed, true);
 			assert.equal(controller.statusWidgetActive(), false);
+			assert.equal(readySounds, 1);
 		} finally {
 			setVoiceControllerTestDeps();
 		}
@@ -155,9 +161,11 @@ describe("AppVoiceController", () => {
 		const host = fakeHost();
 		const controller = new AppVoiceController(host, dictationConfig());
 		let recorderSelections = 0;
+		let readySounds = 0;
 
 		setVoiceControllerTestDeps({
 			deepgramApiKey: () => undefined,
+			playReadySound: () => { readySounds += 1; },
 			selectRecorderCommand: async () => {
 				recorderSelections += 1;
 				return { command: "rec", args: [], description: "mock" };
@@ -167,6 +175,7 @@ describe("AppVoiceController", () => {
 			await controller.toggleRecording();
 
 			assert.equal(recorderSelections, 0);
+			assert.equal(readySounds, 0);
 			assert.equal(controller.statusWidgetActive(), false);
 			assert.ok(host.systemMessages.some((message) => message.includes("set dictation.apiKey in ~/.config/pi/pix.jsonc or DEEPGRAM_API_KEY")));
 			assert.ok(host.toasts.some((toast) => toast.includes("set dictation.apiKey in ~/.config/pi/pix.jsonc or DEEPGRAM_API_KEY")));
@@ -181,9 +190,11 @@ describe("AppVoiceController", () => {
 		const socket = new FakeSocket();
 		socket.sendError = new Error("socket send boom");
 		const controller = new AppVoiceController(host, dictationConfig());
+		let readySounds = 0;
 
 		setVoiceControllerTestDeps({
 			deepgramApiKey: () => "dg-test-key",
+			playReadySound: () => { readySounds += 1; },
 			selectRecorderCommand: async () => ({ command: "rec", args: [], description: "mock" }),
 			createDeepgramSocket: (() => socket) as never,
 			waitForSocketOpen: async () => {},
@@ -196,6 +207,7 @@ describe("AppVoiceController", () => {
 			await Promise.resolve();
 
 			assert.ok(host.toasts.some((toast) => toast.includes("Voice recognition failed: socket send boom")));
+			assert.equal(readySounds, 0);
 			await controller.stopRecording();
 			assert.equal(controller.statusWidgetActive(), false);
 		} finally {
@@ -230,6 +242,62 @@ describe("AppVoiceController", () => {
 			assert.deepEqual(host.transcripts, []);
 			assert.deepEqual(host.partials, []);
 		} finally {
+			setVoiceControllerTestDeps();
+		}
+	});
+
+	for (const cancellation of ["stop", "dispose", "scope", "recorder-error"] as const) {
+		it(`does not signal readiness for PCM after ${cancellation}`, async () => {
+			const host = fakeHost();
+			const audioProcess = fakeAudioProcess();
+			const socket = new FakeSocket();
+			const controller = new AppVoiceController(host, dictationConfig());
+			let readySounds = 0;
+			setVoiceControllerTestDeps({
+				deepgramApiKey: () => "dg-test-key",
+				selectRecorderCommand: async () => ({ command: "rec", args: [], description: "mock" }),
+				createDeepgramSocket: (() => socket) as never,
+				waitForSocketOpen: async () => {},
+				spawn: (() => audioProcess) as never,
+				delay: async () => {},
+				playReadySound: () => { readySounds += 1; },
+			});
+			try {
+				await controller.toggleRecording();
+				audioProcess.stdout.emit("data", Buffer.alloc(0));
+				assert.equal(readySounds, 0);
+				if (cancellation === "dispose") await controller.dispose();
+				else if (cancellation === "scope") host.activeScope.value = "other-tab";
+				else if (cancellation === "recorder-error") audioProcess.emit("error", new Error("recorder failed"));
+				else void controller.stopRecording();
+				audioProcess.stdout.emit("data", Buffer.from("late-pcm"));
+				assert.equal(readySounds, 0);
+			} finally {
+				await controller.dispose();
+				setVoiceControllerTestDeps();
+			}
+		});
+	}
+
+	it("keeps streaming when the readiness sound fails", async () => {
+		const audioProcess = fakeAudioProcess();
+		const socket = new FakeSocket();
+		const controller = new AppVoiceController(fakeHost(), dictationConfig());
+		setVoiceControllerTestDeps({
+			deepgramApiKey: () => "dg-test-key",
+			selectRecorderCommand: async () => ({ command: "rec", args: [], description: "mock" }),
+			createDeepgramSocket: (() => socket) as never,
+			waitForSocketOpen: async () => {},
+			spawn: (() => audioProcess) as never,
+			playReadySound: () => { throw new Error("sound unavailable"); },
+		});
+		try {
+			await controller.toggleRecording();
+			audioProcess.stdout.emit("data", Buffer.from("pcm"));
+			assert.equal(controller.statusWidgetActive(), true);
+			assert.equal(socket.sent.length, 1);
+		} finally {
+			await controller.dispose();
 			setVoiceControllerTestDeps();
 		}
 	});
