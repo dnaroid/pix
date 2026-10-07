@@ -353,8 +353,11 @@ describe("desktop visual regressions", () => {
     expect(composerSource).not.toContain("activeWorking");
     expect(composerSource).not.toContain("composer-working");
     expect(composerSource).not.toContain("border-pulse");
-    // Ordinary input focus semantics stay intact without a working border.
-    expect(composerSource).toContain("focus-within:border-ring focus-within:ring-1 focus-within:ring-ring/25");
+    // Ordinary input focus stays native: the text-entry surface itself is
+    // ring-free per DESIGN.md, while keyboard focus remains visible on the
+    // composer's interactive controls.
+    expect(composerSource).not.toContain("focus-within:");
+    expect(composerSource).toContain("focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring");
     expect(composerSource).toContain("dragActive || projectPathDragActive ? \"border-ring ring-1 ring-ring/40\" : \"border-input\"");
 
     expect(transcriptSource).not.toContain('aria-label="Pix is working"');
