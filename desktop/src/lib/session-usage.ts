@@ -3,7 +3,7 @@ import type { SessionUsageReport, SessionUsageTotals } from "./acp-client-types"
 export function providerUsageUrl(provider: string): string | undefined {
   switch (provider) {
     case "pi-claude-code-provider": return "https://claude.ai/code#settings/usage";
-    case "openai-codex": return "https://chatgpt.com/codex/cloud/settings/analytics#usage";
+    case "openai-codex": return "https://chatgpt.com/settings/usage?tab=overview";
     case "zai": return "https://z.ai/manage-apikey/coding-plan/personal/usage";
     default: return undefined;
   }

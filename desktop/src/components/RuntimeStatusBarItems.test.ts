@@ -110,6 +110,8 @@ describe("runtime status fixed telemetry slots", () => {
     expect(both.match(/class="quota-status-slots/g)).toHaveLength(2);
     expect(both).toContain("100%");
     expect(both).toContain("9%");
+    // Full quota must not use ellipsis even at fractional WebKit glyph widths.
+    expect(both).toMatch(/class="whitespace-nowrap text-right [^"]*">100%<\/span>/);
   });
 
   it("keeps rate identity and unknown reset in their reserved quota slot", () => {

@@ -82,8 +82,8 @@ describe("desktop visual regressions", () => {
     expect(runtimeStatusSource).toContain('{contextTitle(false)}</div>');
     expect(runtimeStatusSource).toContain('~{savedTokensFormatter.format(status.dcpTokensSaved)} tokens</span>');
     expect(runtimeStatusSource).toContain("grid-auto-columns: max-content");
-    expect(runtimeStatusSource).toContain("grid-template-columns: 4ch 56px 5ch 10px");
-    expect(runtimeStatusSource).toContain("grid-template-columns: 4ch 32px 5ch 10px");
+    expect(runtimeStatusSource).toContain("grid-template-columns: 5ch 56px 5ch 10px");
+    expect(runtimeStatusSource).toContain("grid-template-columns: 5ch 32px 5ch 10px");
     expect(runtimeStatusSource).toContain("column-gap: 8px");
     expect(runtimeStatusSource).toContain("column-gap: 6px");
     expect(runtimeStatusSource).not.toContain("quotaColumn");
@@ -524,7 +524,7 @@ describe("desktop visual regressions", () => {
     expect(runtimeStatusSource).toContain('return "text-tool-error";');
     expect(runtimeStatusSource).toContain("contextCellClass(segment.kind)");
     expect(runtimeStatusSource).toContain("contextCellClass(item.kind)");
-    expect(runtimeStatusSource).toContain('class={["truncate text-right", toneTextClass(tone)]}>{Math.round(window.remainingPercent)}%');
+    expect(runtimeStatusSource).toContain('class={["whitespace-nowrap text-right", toneTextClass(tone)]}>{Math.round(window.remainingPercent)}%');
     expect(runtimeStatusSource).toContain('TriangleAlert class="h-2.5 w-2.5 text-tool-warning"');
   });
 

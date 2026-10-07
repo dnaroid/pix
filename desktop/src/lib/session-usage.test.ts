@@ -8,7 +8,7 @@ import {
 describe("session usage presentation", () => {
   it("links known subscription providers to usage pages without guessing unknown URLs", () => {
     expect(providerUsageUrl("pi-claude-code-provider")).toBe("https://claude.ai/code#settings/usage");
-    expect(providerUsageUrl("openai-codex")).toBe("https://chatgpt.com/codex/cloud/settings/analytics#usage");
+    expect(providerUsageUrl("openai-codex")).toBe("https://chatgpt.com/settings/usage?tab=overview");
     expect(providerUsageUrl("zai")).toBe("https://z.ai/manage-apikey/coding-plan/personal/usage");
     expect(providerUsageUrl("unknown")).toBeUndefined();
   });

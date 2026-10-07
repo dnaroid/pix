@@ -93,7 +93,7 @@ blocks further BTW inference until reload rather than silently losing known spen
   and session totals through ACP.
   Known subscription provider headings offer an accessible external-link icon:
   Claude Code opens `https://claude.ai/code#settings/usage`; OpenAI Codex opens
-  `https://chatgpt.com/codex/cloud/settings/analytics#usage`; z.ai (`zai`) opens
+  `https://chatgpt.com/settings/usage?tab=overview`; z.ai (`zai`) opens
   `https://z.ai/manage-apikey/coding-plan/personal/usage`. Unknown providers get no guessed URL.
   The native external opener launches the page in the system browser, without
   refreshing quota or making a model call. Failed opening shows a retryable error.

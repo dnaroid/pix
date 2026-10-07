@@ -456,7 +456,7 @@
               {@const exhaustsEarly = modelUsageWindowWillExhaustBeforeReset(window, now)}
               <span class="quota-status-slots grid items-center gap-1" class:quota-short-track={label !== "W"} aria-label={limitTitle(label, window)}>
                 <span class="quota-values pointer-events-none relative col-span-3 grid items-center">
-                <span class={["truncate text-right", toneTextClass(tone)]}>{Math.round(window.remainingPercent)}%</span>
+                  <span class={["whitespace-nowrap text-right", toneTextClass(tone)]}>{Math.round(window.remainingPercent)}%</span>
                 <span class="flex h-6 flex-col justify-center gap-0.5 overflow-hidden">
                 {#if label === "R"}
                   <span class="truncate leading-3 text-muted-foreground">{modelUsageWindowLabel(label, window)}</span>
@@ -676,12 +676,13 @@
   }
 
   .quota-status-slots {
-    grid-template-columns: 4ch 56px 5ch 10px;
+    /* Leave a full glyph of slack: exact 4ch tracks can ellipsize 100% in WebKit. */
+    grid-template-columns: 5ch 56px 5ch 10px;
     column-gap: 6px;
   }
 
   .quota-short-track {
-    grid-template-columns: 4ch 32px 5ch 10px;
+    grid-template-columns: 5ch 32px 5ch 10px;
   }
 
   .quota-values {
