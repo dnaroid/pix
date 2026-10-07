@@ -31,7 +31,8 @@ Present conversations, file/media Preview, Source Control Git Diff, interactive 
 - Local `.glb` files route through approved media resolution rather than text
   reads and open in Preview's shared interactive model viewer. Project, absolute,
   home-relative paths and prepared file attachments are supported. The viewer
-  provides orbit/zoom/reset and the same 64 MiB embedded-only GLB 2.0 policy and
+  provides free rotation, middle-button panning, zoom, and camera reset with
+  the same 64 MiB embedded-only GLB 2.0 policy and
   lifecycle ownership as [Markdown model previews](./desktop-markdown-rendering.md).
 - Conversation, Preview, and Git Diff remain mounted while merely hidden by another workbench tab so composer/transcript state, Preview edit draft/history/scroll, media state, and Git review output do not reset on ordinary tab switching.
 - Switching to a different conversation selects that session's workbench tab but does not discard workspace-scoped Preview or Git Diff tabs. Their state remains available until explicitly closed or the workspace lifecycle invalidates it.
