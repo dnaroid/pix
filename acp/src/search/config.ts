@@ -3,8 +3,36 @@ import { readFile, mkdir, writeFile, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import { applyEdits, modify, parse, type ParseError } from "jsonc-parser";
 import { lock } from "proper-lockfile";
+
+const transientContention = (error: unknown): boolean => {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  return code === "EPERM" || code === "EACCES" || code === "EBUSY";
+};
+
+/**
+ * Publish `from` over `to` atomically, tolerating brief cross-process readers.
+ * Windows cannot replace a destination any reader still has open (handles lack
+ * FILE_SHARE_DELETE) and reports EPERM/EACCES, with EBUSY under scanners; an
+ * in-flight consent check re-reading the JSONC must not fail a consent update
+ * there. POSIX renames succeed over open handles, so retries only fire under
+ * real short-lived contention, bounded to the ~1s lock-contention budget.
+ */
+export async function publishAtomically(
+  from: string,
+  to: string,
+  replace: (from: string, to: string) => Promise<void> = rename,
+): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try { await replace(from, to); return; }
+    catch (error) {
+      if (!transientContention(error) || attempt >= 20) throw error;
+      await delay(50);
+    }
+  }
+}
 
 export interface SearchAuth {
   available(signal: AbortSignal): Promise<boolean>;
@@ -82,7 +110,7 @@ export class SearchPreferences {
       this.validate(source);
       const next = applyEdits(source, modify(source, ["search", flag], enabled, { formattingOptions: { insertSpaces: true, tabSize: 2 } }));
       await writeFile(temporary, next, { mode: 0o600 });
-      await rename(temporary, this.path);
+      await publishAtomically(temporary, this.path);
     } catch { throw new Error("Search preferences could not be saved"); }
     finally { await rm(temporary, { force: true }).catch(() => {}); await release(); }
   }

@@ -72,7 +72,7 @@ describe("UsageLimitBars", () => {
       props: { windows: [{ key: "W", label: "W" as const, window: { ...weekly, resetAt: now + Number(daysRemaining) * 86_400_000 } }], now },
     });
     expect(body).toContain("data-weekly-now-marker");
-    expect(body).toContain(`left: clamp(0px, ${position}%, calc(100% - 2px))`);
+    expect(body).toContain(`left: clamp(1px, ${position}%, calc(100% - 1px))`);
     expect(body).toContain(`Now: ${position}% of window time remaining (start right, reset left)`);
     expect(body).toContain("width: 32%");
   });
@@ -81,8 +81,8 @@ describe("UsageLimitBars", () => {
     const windows = [{ key: "W", label: "W" as const, window: { ...weekly, resetAt: now + 7 * 86_400_000 } }];
     const start = render(UsageLimitBars, { props: { windows, now } }).body;
     const later = render(UsageLimitBars, { props: { windows, now: now + 3.5 * 86_400_000 } }).body;
-    expect(start).toContain("left: clamp(0px, 100%, calc(100% - 2px))");
-    expect(later).toContain("left: clamp(0px, 50%, calc(100% - 2px))");
+    expect(start).toContain("left: clamp(1px, 100%, calc(100% - 1px))");
+    expect(later).toContain("left: clamp(1px, 50%, calc(100% - 1px))");
     expect(later).toContain("width: 32%");
   });
 

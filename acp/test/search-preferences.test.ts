@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { mkdir, mkdtemp, readFile, rename, rm, rmdir, stat, symlink, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, open, readFile, rename, rm, rmdir, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "jsonc-parser";
-import { SearchPreferences } from "../src/search/config.js";
+import { publishAtomically, SearchPreferences } from "../src/search/config.js";
 
 async function fixture(t: TestContext) {
   const artifacts = fileURLToPath(new URL("../../.pi/artifacts/search-preferences-tests/", import.meta.url));
@@ -97,4 +97,30 @@ test("a missing config and symlinked parent share the same native lock namespace
   await rmdir(`${path}.search.lock`);
   await preferences.setEnabled(true);
   assert.equal(parse(await readFile(path, "utf8")).search.semanticEnabled, true);
+});
+
+test("atomic publish retries transient rename contention and fails on real errors", async () => {
+  const contention = (code: string) => Object.assign(new Error(`operation failed: ${code}`), { code });
+  let calls = 0;
+  await publishAtomically("from", "to", async () => { if (++calls < 3) throw contention("EPERM"); });
+  assert.equal(calls, 3);
+  await assert.rejects(publishAtomically("from", "to", async () => { throw contention("ENOENT"); }), /ENOENT/);
+  let persistent = 0;
+  await assert.rejects(publishAtomically("from", "to", async () => { persistent++; throw contention("EACCES"); }), /EACCES/);
+  assert.equal(persistent, 21);
+});
+
+test("consent updates tolerate a concurrent reader holding the config open", async t => {
+  const { path, preferences } = await fixture(t);
+  await mkdir(dirname(path));
+  await writeFile(path, '{ "search": { "semanticEnabled": true } }\n');
+  // Mirrors an in-flight consent check re-reading the document while a config
+  // update publishes: on Windows the open handle blocks rename until released.
+  const held = await open(path, "r");
+  try {
+    await preferences.setEnabled(false);
+    assert.equal(await preferences.enabled(), false);
+  } finally { await held.close(); }
+  assert.deepEqual(parse(await readFile(path, "utf8")), { search: { semanticEnabled: false } });
+  await assert.rejects(stat(`${path}.search.lock`), { code: "ENOENT" });
 });

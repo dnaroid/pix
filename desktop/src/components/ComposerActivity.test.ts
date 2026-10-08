@@ -37,7 +37,8 @@ describe("pinned composer activity wiring", () => {
     expect(activityRow).toContain("onclick={onPause}");
     expect(activityRow).toContain("onclick={onCancel}");
     expect(activityRow).toContain("onclick={onContinue}");
-    expect(activityRow).toContain('disabled={agentControlState === "pause-requested" || agentControlState === "resuming"}');
+    expect(activityRow).toContain('disabled={agentControlState === "resuming"}');
+    expect(activityRow).toContain('aria-pressed={agentControlState === "pause-requested"}');
     expect(composer).toContain("showControls={!questionMode}");
     expect(activity).toContain("min-w-0 flex-1");
     expect(activity).not.toContain("<button");
