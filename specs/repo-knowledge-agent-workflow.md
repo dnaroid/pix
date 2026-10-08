@@ -30,6 +30,24 @@ without treating generated answers or audit candidates as semantic proof.
 
 - Repo-aware tools are available only with indexed project state and an executable
   `idx`. Setup and indexing remain explicit operations.
+- `/idx-init` defaults to OpenRouter `perplexity/pplx-embed-v1-0.6b` embeddings
+  at 1024 dimensions for code and documents, requiring `OPENROUTER_API_KEY` or
+  `~/.config/idx/.env`. Agent-facing initialization guidance discloses that
+  chunks and queries leave the machine and offers `/idx-init --embedding local`
+  as an explicit alternative: local Ollama `jina-8k` for code and
+  `nomic-embed-text-v2-moe` for documents at 768 dimensions. Local embedding
+  requests do not require a key. Index storage stays local in both modes;
+  in OpenRouter mode code/document chunks and search queries are sent externally.
+  `/idx-init` accepts only the strict optional
+  `--embedding local|openrouter` form; it does not switch an already-indexed
+  project's saved provider implicitly. Running `idx init` without an override
+  preserves saved provider settings and does not migrate them. npm installation
+  of `indexer-cli` needs no key; upstream setup defaults to cloud, requires a
+  cloud key, and skips Ollama setup. `idx doctor` defaults to saved providers (both
+  prerequisites for a mixed set of selected projects), or cloud when no projects exist.
+  Explicit `--embedding local|openrouter` checks prerequisites before deleting
+  and reinitializing; provider switches rebuild the index. Agents must not read
+  credentials, initialize implicitly, or silently migrate saved providers.
 - All async child roles receive these eight query tools through a common,
   tools-only entrypoint when the same prerequisites hold. It omits setup/update
   commands and parent delegation instructions; role work-tool restrictions and
@@ -192,6 +210,7 @@ Audit completion: [0046 — Task-scoped knowledge audit completion](../docs/deci
 
 - `external/pi-tools-suite/src/tool-descriptions.ts`
 - `external/pi-tools-suite/src/repo-discovery/index.ts`
+- `external/pi-tools-suite/test/fixtures/hard-to-find-project/benchmark/run-locate-benchmark.mjs`
 - `external/pi-tools-suite/src/repo-discovery/subagent.ts`
 - `external/pi-tools-suite/src/async-subagents/core/child-tools.ts`
 - `external/pi-tools-suite/src/async-subagents/core/spawn.ts`
@@ -207,6 +226,8 @@ Audit completion: [0046 — Task-scoped knowledge audit completion](../docs/deci
 - `external/pi-tools-suite/test/async-subagents/knowledge-auditor.test.ts`
 - `external/pi-tools-suite/test/todo.test.ts`
 - `external/pi-tools-suite/test/repo-discovery.test.ts`
+- `external/pi-tools-suite/test/fixtures/hard-to-find-project/README.md`
+- `external/pi-tools-suite/README.md`
 - `external/pi-tools-suite/test/async-subagents/repo-tools.test.ts`
 - `external/pi-tools-suite/test/async-subagents/provider-child-inventory.test.ts`
 - `external/pi-tools-suite/test/evals/decision-policy.ts`

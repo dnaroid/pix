@@ -35,6 +35,24 @@ function fixture(revealProjectEntry?: (path: string) => Promise<void>) {
 }
 
 describe("Preview async ownership", () => {
+  it.each(["track.mp3", "clip.mp4"])("requests one Files playback for %s, not history or ordinary opens", async (name) => {
+    const { preview } = fixture();
+    tauri.invoke.mockResolvedValue({ name, path: `/one/${name}` });
+    await preview.openProjectFile(name, "replace", undefined, true);
+    expect(preview.active).toMatchObject({ autoplay: true });
+    const id = preview.active!.id;
+    preview.consumeAutoplay(id + 1);
+    expect(preview.active).toMatchObject({ autoplay: true });
+    preview.consumeAutoplay(id);
+    expect(preview.active).toMatchObject({ autoplay: false });
+    await preview.openProjectFile(name, "push");
+    expect(preview.active).toMatchObject({ autoplay: false });
+    preview.move(-1);
+    expect(preview.active).toMatchObject({ autoplay: false });
+    await preview.openProjectFile(name, "replace", undefined, true);
+    preview.move(1);
+    expect(preview.active).toMatchObject({ autoplay: false });
+  });
   it("routes project GLB through approved media resolution, never through text reading", async () => {
     const { preview } = fixture();
     tauri.invoke.mockImplementation(async (command: string) => command === "project_directory_exists"
@@ -45,6 +63,38 @@ describe("Preview async ownership", () => {
     } });
     expect(tauri.invoke).toHaveBeenCalledWith("resolve_project_media", { workspace: "/one", path: "chair.glb" });
     expect(tauri.invoke).not.toHaveBeenCalledWith("read_preview_file", expect.anything());
+  });
+
+  it("routes project audio through approved media resolution rather than UTF-8 reading", async () => {
+    tauri.invoke.mockResolvedValue({ name: "track.mp3", path: "/one/track.mp3", mimeType: "audio/mpeg" });
+    const { preview } = fixture();
+    await preview.openProjectFile("track.mp3");
+    expect(preview.active).toMatchObject({ kind: "attachment", attachment: { kind: "file", mimeType: "audio/mpeg" } });
+    expect(tauri.invoke).toHaveBeenCalledWith("resolve_project_media", { workspace: "/one", path: "track.mp3" });
+    expect(tauri.invoke).not.toHaveBeenCalledWith("read_preview_file", expect.anything());
+  });
+
+  it("opens home, absolute and prompt-file audio in Preview", async () => {
+    tauri.invoke.mockResolvedValue({ name: "track.wav", path: "/home/Music/track.wav", mimeType: "audio/wav" });
+    const { preview } = fixture();
+    await preview.openLocalFile("~/Music/track.wav");
+    expect(tauri.invoke).toHaveBeenCalledWith("resolve_home_media", { path: "~/Music/track.wav" });
+    await preview.openLocalFile("/home/Music/track.wav");
+    expect(tauri.invoke).toHaveBeenCalledWith("resolve_local_media", { path: "/home/Music/track.wav" });
+    await preview.activateAttachment({ id: "audio", name: "track.wav", kind: "file", mimeType: "audio/wav", path: "/home/Music/track.wav" });
+    expect(preview.active).toMatchObject({ kind: "attachment", attachment: { id: "audio" } });
+    expect(tauri.invoke).not.toHaveBeenCalledWith("open_attachment", expect.anything());
+  });
+
+  it("does not reopen closed Preview when audio resolution completes late", async () => {
+    const pending = deferred<{ name: string; path: string; mimeType: string }>();
+    tauri.invoke.mockImplementation(() => pending.promise);
+    const { preview } = fixture();
+    const opening = preview.openProjectFile("track.mp3");
+    preview.close();
+    pending.resolve({ name: "track.mp3", path: "/one/track.mp3", mimeType: "audio/mpeg" });
+    await opening;
+    expect(preview.active).toBeUndefined();
   });
 
   it("routes absolute and home GLB to media Preview and resolves inline models", async () => {

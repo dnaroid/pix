@@ -30,6 +30,8 @@ mod close_guard;
 mod desktop_bootstrap;
 mod desktop_context_menu;
 mod desktop_notification;
+mod idx_knowledge;
+mod idx_snapshot_search;
 mod dictation_shortcut;
 mod git_ci;
 mod git_identity;
@@ -41,6 +43,7 @@ mod native_lifecycle_tests;
 mod native_process;
 mod preview_file;
 mod preview_file_action;
+mod project_browser;
 mod project_directory_link;
 mod qa_profile;
 #[cfg(feature = "bundled-runtime")]
@@ -111,6 +114,7 @@ const PROJECT_PI_CANONICAL_DIRECTORIES: &[&str] = &[
     "agents",
     "artifacts",
     "plans",
+    "search",
     "skills",
     "subagents",
     "task-attachments",
@@ -455,6 +459,8 @@ struct IdxOperationExitEvent {
 struct IdxQueryRequest {
     workspace: String,
     query: IdxQuery,
+    #[serde(default)]
+    snapshot_only: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -476,6 +482,8 @@ enum IdxQuery {
         query: String,
         limit: u32,
         path_prefix: Option<String>,
+        #[serde(default)]
+        include_content: bool,
     },
     Context {
         query: String,
@@ -1935,6 +1943,11 @@ async fn idx_query(app: AppHandle, request: IdxQueryRequest) -> Result<IdxComman
         }
         let launcher = idx_launcher(&app)?;
         let args = idx_query_args(&request.query)?;
+        let args = if request.snapshot_only {
+            idx_snapshot_search::snapshot_args(args)?
+        } else {
+            args
+        };
         run_idx_command(
             &launcher,
             &root,
@@ -2190,7 +2203,7 @@ async fn resolve_home_media(app: AppHandle, path: String) -> Result<AttachmentFi
         let (_, file_path) = resolve_home_file_path(&home, Path::new(&path))?;
         if !is_supported_project_media(&file_path) {
             return Err(format!(
-                "{path} is not a supported image, video or GLB model"
+                "{path} is not a supported image, video, audio or GLB model"
             ));
         }
         let file = attachment_file(&file_path)?;
@@ -2230,7 +2243,7 @@ fn resolve_project_media_from(
     let (_, file_path) = resolve_project_file_path(workspace, relative_path)?;
     if !is_supported_project_media(&file_path) {
         return Err(format!(
-            "{} is not a supported image, video or GLB model",
+            "{} is not a supported image, video, audio or GLB model",
             relative_path.display()
         ));
     }
@@ -2241,7 +2254,7 @@ fn resolve_local_media_from(path: &Path) -> Result<AttachmentFile, String> {
     let file_path = resolve_local_file_path(path)?;
     if !is_supported_project_media(&file_path) {
         return Err(format!(
-            "{} is not a supported image, video or GLB model",
+            "{} is not a supported image, video, audio or GLB model",
             path.display()
         ));
     }
@@ -4388,11 +4401,59 @@ fn read_user_config_from(home: &Path, kind: UserConfigKind) -> Result<UserConfig
     })
 }
 
-fn write_user_config_from(
-    home: &Path,
-    kind: UserConfigKind,
-    content: &str,
-) -> Result<UserConfigDocument, String> {
+// Same protocol as ACP SearchPreferences/proper-lockfile: an atomic mkdir at
+// <config>.search.lock owns read/compare AND write. No age-based reclamation:
+// a paused process can still own an old directory. Crash leftovers fail closed.
+// These functions are called on the blocking pool, never the UI thread.
+struct UserConfigFileLock(PathBuf);
+
+impl UserConfigFileLock {
+    fn acquire(path: &Path) -> Result<Self, String> {
+        let parent = path
+            .parent()
+            .ok_or_else(|| format!("{} has no parent directory", path.display()))?;
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+        // ACP realpaths the parent target, not the config (which may not exist).
+        let parent = fs::canonicalize(parent)
+            .map_err(|error| format!("failed to resolve {}: {error}", parent.display()))?;
+        let mut name = path
+            .file_name()
+            .ok_or_else(|| format!("{} has no file name", path.display()))?
+            .to_os_string();
+        name.push(".search.lock");
+        let lock_path = parent.join(name);
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            match fs::create_dir(&lock_path) {
+                Ok(()) => return Ok(Self(lock_path)),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    if Instant::now() >= deadline {
+                        return Err(
+                            "user config is busy; retry after the current writer finishes".to_owned(),
+                        );
+                    }
+                    thread::sleep(Duration::from_millis(20));
+                }
+                Err(error) => {
+                    return Err(format!("failed to lock {}: {error}", path.display()));
+                }
+            }
+        }
+    }
+}
+
+impl Drop for UserConfigFileLock {
+    fn drop(&mut self) {
+        // Only remove the empty directory we own, never recursively delete it
+        // or unlink a contending writer's lock.
+        if let Err(error) = fs::remove_dir(&self.0) {
+            eprintln!("failed to release user config lock: {error}");
+        }
+    }
+}
+
+fn normalize_user_config_content(content: &str) -> Result<String, String> {
     let normalized = if content.ends_with('\n') {
         content.to_owned()
     } else {
@@ -4404,12 +4465,27 @@ fn write_user_config_from(
             MAX_USER_CONFIG_BYTES / (1024 * 1024)
         ));
     }
+    Ok(normalized)
+}
+
+fn write_user_config_from(
+    home: &Path,
+    kind: UserConfigKind,
+    content: &str,
+) -> Result<UserConfigDocument, String> {
+    // Preserve rejection before any filesystem change, including mkdir.
+    let normalized = normalize_user_config_content(content)?;
+    let ownership = UserConfigFileLock::acquire(&user_config_path(home, kind))?;
+    write_user_config_owned(home, kind, &normalized, &ownership)
+}
+
+fn write_user_config_owned(
+    home: &Path,
+    kind: UserConfigKind,
+    normalized: &str,
+    _ownership: &UserConfigFileLock,
+) -> Result<UserConfigDocument, String> {
     let path = user_config_path(home, kind);
-    let parent = path
-        .parent()
-        .ok_or_else(|| format!("{} has no parent directory", path.display()))?;
-    fs::create_dir_all(parent)
-        .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
     if path.exists() {
         let metadata = fs::metadata(&path)
             .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
@@ -4417,8 +4493,35 @@ fn write_user_config_from(
             return Err(format!("{} is not a file", path.display()));
         }
     }
-    fs::write(&path, normalized)
-        .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+    // Atomic replacement also protects ACP readers, which do not take the
+    // process-local RwLock, from seeing a truncated document.
+    let temporary = path.with_file_name(format!(
+        ".{}.{}.tmp",
+        path.file_name().expect("config file name").to_string_lossy(),
+        uuid::Uuid::new_v4(),
+    ));
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(&temporary)
+        .map_err(|error| format!("failed to create config temporary file: {error}"))?;
+    let result = (|| {
+        file.write_all(normalized.as_bytes())
+            .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+        file.sync_all()
+            .map_err(|error| format!("failed to flush {}: {error}", path.display()))?;
+        fs::rename(&temporary, &path)
+            .map_err(|error| format!("failed to replace {}: {error}", path.display()))
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result?;
     read_user_config_from(home, kind)
 }
 
@@ -4428,6 +4531,8 @@ fn write_user_config_if_unchanged_from(
     expected_content: &str,
     content: &str,
 ) -> Result<ConditionalUserConfigWrite, String> {
+    let normalized = normalize_user_config_content(content)?;
+    let ownership = UserConfigFileLock::acquire(&user_config_path(home, kind))?;
     let current = read_user_config_from(home, kind)?;
     if current.content != expected_content {
         return Ok(ConditionalUserConfigWrite {
@@ -4437,7 +4542,7 @@ fn write_user_config_if_unchanged_from(
     }
     Ok(ConditionalUserConfigWrite {
         written: true,
-        document: write_user_config_from(home, kind, content)?,
+        document: write_user_config_owned(home, kind, &normalized, &ownership)?,
     })
 }
 
@@ -6360,6 +6465,7 @@ fn idx_query_args(query: &IdxQuery) -> Result<Vec<String>, String> {
             query,
             limit,
             path_prefix,
+            include_content,
         } => {
             let query = non_empty_idx_argument(query, "query", 4_000)?;
             let mut args = vec![
@@ -6369,9 +6475,14 @@ fn idx_query_args(query: &IdxQuery) -> Result<Vec<String>, String> {
                 "document".to_owned(),
                 "--max-files".to_owned(),
                 (*limit).clamp(1, 20).to_string(),
+                "--mode".to_owned(),
+                "hybrid".to_owned(),
             ];
             if let Some(prefix) = optional_idx_argument(path_prefix, "path prefix", 1_024)? {
                 args.extend(["--path-prefix".to_owned(), prefix]);
+            }
+            if *include_content {
+                args.push("--include-content".to_owned());
             }
             Ok(args)
         }
@@ -8032,6 +8143,16 @@ fn is_supported_project_media(path: &Path) -> bool {
             | "ogv"
             | "webm"
             | "glb"
+            | "aac"
+            | "aif"
+            | "aiff"
+            | "flac"
+            | "m4a"
+            | "mp3"
+            | "oga"
+            | "ogg"
+            | "opus"
+            | "wav"
     )
 }
 
@@ -10176,6 +10297,7 @@ pub fn run() {
             open_attachment,
             open_local_file,
             preview_file_action::preview_file_action,
+            project_browser::open_project_html_in_browser,
             preview_file::read_preview_file,
             preview_file::open_preview_file_in_editor,
             read_project_file,
@@ -10207,6 +10329,8 @@ pub fn run() {
             git_operations::git_pull,
             git_operations::git_update,
             git_operations::git_history,
+            git_operations::git_search_history,
+            git_operations::git_commit_diff,
             git_identity::git_identity,
             git_identity::git_save_identity,
             git_operations::git_stash_list,
@@ -10236,6 +10360,7 @@ pub fn run() {
             idx_query,
             idx_inspect,
             idx_audit,
+            idx_knowledge::idx_knowledge_status,
             idx_operation_list,
             idx_operation_start,
             idx_operation_stop,
@@ -10978,6 +11103,33 @@ mod tests {
     }
 
     #[test]
+    fn idx_embedding_override_does_not_force_local_or_migrate_saved_providers() {
+        assert_eq!(idx_operation_args(IdxMaintenanceKind::Init, false), ["init"]);
+        assert_eq!(
+            idx_operation_args(IdxMaintenanceKind::Doctor, false),
+            ["doctor", "--force", "."]
+        );
+        assert_eq!(
+            idx_operation_args(IdxMaintenanceKind::Init, true),
+            ["init", "--embedding", "openrouter"]
+        );
+        assert_eq!(
+            idx_operation_args(IdxMaintenanceKind::Doctor, true),
+            ["doctor", "--force", "--embedding", "openrouter", "."]
+        );
+        for kind in [
+            IdxMaintenanceKind::Index,
+            IdxMaintenanceKind::FullIndex,
+            IdxMaintenanceKind::DryRun,
+        ] {
+            assert_eq!(
+                idx_operation_args(kind, true),
+                idx_operation_args(kind, false)
+            );
+        }
+    }
+
+    #[test]
     fn builds_typed_idx_query_arguments() {
         let args = idx_query_args(&IdxQuery::Code {
             query: "workspace sidebar".to_owned(),
@@ -11007,6 +11159,7 @@ mod tests {
             query: "workspace guide".to_owned(),
             limit: 100,
             path_prefix: Some("specs".to_owned()),
+            include_content: true,
         })
         .expect("document query args");
         assert_eq!(
@@ -11018,8 +11171,11 @@ mod tests {
                 "document",
                 "--max-files",
                 "20",
+                "--mode",
+                "hybrid",
                 "--path-prefix",
-                "specs"
+                "specs",
+                "--include-content"
             ]
         );
 
@@ -11059,6 +11215,9 @@ mod tests {
             }
         }))
         .expect("camelCase query request");
+        assert!(!decoded.snapshot_only);
+        let hybrid = idx_query_args(&decoded.query).expect("hybrid code args");
+        assert!(hybrid.windows(2).any(|pair| pair == ["--mode", "hybrid"]));
         assert!(matches!(decoded.query, IdxQuery::Code { max_files: 5, .. }));
     }
 
@@ -12412,6 +12571,130 @@ mod tests {
         fs::remove_dir_all(home).expect("remove temporary home");
     }
 
+    fn user_config_lock_test_home() -> PathBuf {
+        let home = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.pi/artifacts/config-lock-tests")
+            .join(uuid::Uuid::new_v4().to_string());
+        fs::create_dir_all(&home).expect("create isolated config lock test home");
+        home
+    }
+
+    #[test]
+    fn user_settings_shared_mkdir_lock_covers_compare_and_preserves_revoked_consent() {
+        let home = user_config_lock_test_home();
+        let path = user_config_path(&home, UserConfigKind::Desktop);
+        let original = "{\n // Keep JSONC.\n \"search\": { \"semanticEnabled\": true }\n}\n";
+        write_user_config_from(&home, UserConfigKind::Desktop, original).expect("initial config");
+        let lock_path = path.with_file_name("pix-desktop.jsonc.search.lock");
+        // The exact proper-lockfile operation/path, including for a missing
+        // config. Old mtime never proves that an ACP owner is no longer alive.
+        fs::create_dir(&lock_path).expect("external consent writer owns lock");
+        fs::File::open(&lock_path)
+            .expect("open lock directory")
+            .set_modified(UNIX_EPOCH)
+            .expect("simulate paused owner");
+        let revoked = "{\n // Keep JSONC.\n \"theme\": \"dark\", \"search\": { \"semanticEnabled\": false }\n}\n";
+        fs::write(&path, revoked).expect("external owner publishes consent revocation");
+
+        // Even a mismatched CAS must wait for ownership before reading and
+        // comparing, not return a snapshot from another writer's transaction.
+        let error =
+            write_user_config_if_unchanged_from(&home, UserConfigKind::Desktop, original, original)
+                .expect_err("CAS cannot compare while consent writer owns the lock");
+        assert!(error.contains("user config is busy"));
+        assert!(lock_path.is_dir());
+        assert_eq!(
+            fs::metadata(&lock_path).unwrap().modified().unwrap(),
+            UNIX_EPOCH
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), revoked);
+        fs::remove_dir(&lock_path).expect("external owner releases lock");
+
+        let stale =
+            write_user_config_if_unchanged_from(&home, UserConfigKind::Desktop, original, original)
+                .expect("reject restoring old consent");
+        assert!(!stale.written);
+        assert_eq!(stale.document.content, revoked);
+        assert!(!lock_path.exists());
+        assert_eq!(fs::read_to_string(&path).unwrap(), revoked);
+        let fresh_source = revoked.replace("\"dark\"", "\"light\"");
+        let fresh = write_user_config_if_unchanged_from(
+            &home,
+            UserConfigKind::Desktop,
+            revoked,
+            &fresh_source,
+        )
+        .expect("save fresh baseline without restoring consent");
+        assert!(fresh.written);
+        assert_eq!(fresh.document.content, fresh_source);
+        assert!(!lock_path.exists());
+        fs::remove_dir_all(home).expect("remove temporary home");
+    }
+
+    #[test]
+    fn user_settings_unconditional_writes_share_ownership_and_release_after_failure() {
+        let home = user_config_lock_test_home();
+        let path = user_config_path(&home, UserConfigKind::Desktop);
+        // Native normalizes/rejects oversize before creating either parent or lock.
+        assert!(write_user_config_from(
+            &home,
+            UserConfigKind::Desktop,
+            &"x".repeat(MAX_USER_CONFIG_BYTES as usize),
+        )
+        .is_err());
+        assert!(!path.parent().unwrap().exists());
+
+        let ownership = UserConfigFileLock::acquire(&path).expect("own missing config");
+        let lock_path = ownership.0.clone();
+        let error = write_user_config_from(&home, UserConfigKind::Desktop, "{}")
+            .expect_err("unconditional write also respects shared ownership");
+        assert!(error.contains("user config is busy"));
+        assert!(!path.exists());
+        assert!(lock_path.is_dir());
+        drop(ownership);
+        assert!(!lock_path.exists());
+
+        fs::create_dir(&path).expect("non-file config triggers failure after acquisition");
+        assert!(write_user_config_from(&home, UserConfigKind::Desktop, "{}").is_err());
+        assert!(!lock_path.exists());
+        fs::remove_dir(&path).expect("remove non-file config");
+        let saved = write_user_config_from(&home, UserConfigKind::Desktop, "{}")
+            .expect("write can acquire after failure");
+        assert_eq!(saved.content, "{}\n");
+        assert!(!lock_path.exists());
+        let oversized = "x".repeat(MAX_USER_CONFIG_BYTES as usize);
+        // Valid stale drafts remain CAS conflicts; oversized drafts are rejected
+        // before filesystem ownership is acquired, regardless of their baseline.
+        let stale = write_user_config_if_unchanged_from(
+            &home,
+            UserConfigKind::Desktop,
+            "stale",
+            "{}",
+        )
+        .expect("stale draft remains a CAS conflict");
+        assert!(!stale.written);
+        assert_eq!(stale.document.content, saved.content);
+        let error = write_user_config_if_unchanged_from(
+            &home,
+            UserConfigKind::Desktop,
+            "stale",
+            &oversized,
+        )
+        .expect_err("oversized stale draft is rejected before ownership");
+        assert!(error.contains("config is too large to save"));
+        assert!(write_user_config_if_unchanged_from(
+            &home,
+            UserConfigKind::Desktop,
+            &saved.content,
+            &oversized,
+        )
+        .is_err());
+        assert!(!lock_path.exists());
+        assert_eq!(fs::read_to_string(&path).unwrap(), saved.content);
+        assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
+        fs::remove_dir_all(home).expect("remove temporary home");
+    }
+
     #[test]
     fn resolves_deepgram_runtime_config_from_user_pix_config_with_env_fallback() {
         let home = temporary_workspace("deepgram-user-config");
@@ -12526,6 +12809,25 @@ mod tests {
             fs::read_to_string(&path).expect("read unchanged config"),
             "{}\n"
         );
+        let error = write_user_config_if_unchanged_from(
+            &home,
+            UserConfigKind::Desktop,
+            "{}\n",
+            &content,
+        )
+        .expect_err("reject normalized oversized conditional config");
+        assert!(error.contains("config is too large to save"));
+        assert_eq!(fs::read_to_string(&path).expect("read unchanged config"), "{}\n");
+        let missing_home = home.join("missing");
+        let error = write_user_config_if_unchanged_from(
+            &missing_home,
+            UserConfigKind::Desktop,
+            "",
+            &content,
+        )
+        .expect_err("reject before creating the config or lock parent");
+        assert!(error.contains("config is too large to save"));
+        assert!(!missing_home.exists());
         fs::remove_dir_all(home).expect("remove temporary home");
     }
 
@@ -12663,6 +12965,26 @@ mod tests {
         assert!(resolve_project_media_from(&workspace, Path::new("outside.png")).is_err());
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
         fs::remove_dir_all(outside).expect("remove outside directory");
+    }
+
+    #[test]
+    fn resolves_audio_with_the_same_media_boundaries() {
+        let workspace = temporary_workspace("audio-media");
+        for extension in ["aac", "aif", "aiff", "flac", "m4a", "mp3", "oga", "ogg", "opus", "wav"] {
+            let name = format!("track.{}", extension.to_uppercase());
+            let file = workspace.join(&name);
+            fs::write(&file, b"audio fixture").expect("write audio");
+            assert!(is_supported_project_media(&file));
+            assert!(resolve_project_media_from(&workspace, Path::new(&name)).is_ok());
+            assert!(resolve_local_media_from(&file).is_ok());
+            assert!(resolve_local_media_from(Path::new(&name)).is_err());
+            assert!(resolve_project_media_from(&workspace, Path::new(&format!("../{name}"))).is_err());
+        }
+        assert!(!is_supported_project_media(Path::new("track.mid")));
+        assert!(resolve_project_media_from(&workspace, Path::new("missing.mp3")).is_err());
+        fs::create_dir(workspace.join("directory.wav")).expect("create directory");
+        assert!(resolve_project_media_from(&workspace, Path::new("directory.wav")).is_err());
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }
 
     fn sample_task_document() -> ProjectTaskDocument {
@@ -12896,6 +13218,37 @@ mod tests {
                 .cleanup_available
         );
 
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn project_pi_cleanup_preserves_durable_search_database_and_sidecars() {
+        let workspace = temporary_workspace("project-pi-durable-search");
+        initialize_project_pi_from(&workspace).expect("initialize project .pi");
+        let search = workspace.join(".pi/search");
+        fs::create_dir(&search).expect("create search directory");
+        let old = SystemTime::now()
+            .checked_sub(PROJECT_PI_AUTO_CLEAN_TTL + Duration::from_secs(60))
+            .expect("old search timestamp");
+        for name in ["index.sqlite", "index.sqlite-wal", "index.sqlite-shm"] {
+            let file = search.join(name);
+            fs::write(&file, b"durable-search-data").expect("write search data");
+            fs::File::open(file).unwrap()
+                .set_times(fs::FileTimes::new().set_modified(old)).unwrap();
+        }
+        fs::File::open(&search).unwrap()
+            .set_times(fs::FileTimes::new().set_modified(old)).unwrap();
+        for automatic in [true, false] {
+            if automatic {
+                auto_clean_project_pi_from(&workspace).expect("TTL cleanup");
+            } else {
+                clean_project_pi_from(&workspace).expect("manual cleanup");
+            }
+            for name in ["index.sqlite", "index.sqlite-wal", "index.sqlite-shm"] {
+                assert_eq!(fs::read(search.join(name)).unwrap(), b"durable-search-data");
+            }
+            assert_eq!(project_pi_storage_from(&workspace).unwrap().cleanup_bytes, 0);
+        }
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }
 

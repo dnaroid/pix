@@ -1,5 +1,6 @@
 import { render as renderMermaid, type Cls as MermaidSpanClass, type MermaidArt } from "grok-mermaid";
 import { displayGraphemes, expandTabs, stringDisplayWidth } from "./terminal-width.js";
+import { renderTerminalMath, terminalInlineMathAt, terminalMathBlockAt } from "./terminal-math.js";
 import {
 	syntaxHighlightLanguageForMarkdownFence,
 	type SyntaxLineHighlight,
@@ -107,6 +108,12 @@ export function formatMarkdownTables(text: string, maxWidth?: number): string {
 		skipBlankAfterHiddenReference = false;
 
 		if (!fence) {
+			const math = terminalMathBlockAt(lines, index);
+			if (math) {
+				formatted.push(...lines.slice(index, index + math.lineCount));
+				index += math.lineCount;
+				continue;
+			}
 			const table = parseMarkdownTableBlock(lines, index);
 			if (table) {
 				formatted.push(...formatMarkdownTableBlock(table, maxWidth));
@@ -141,12 +148,26 @@ export function renderMarkdownLine(text: string, start = 0): RenderedMarkdownLin
 			index += 1;
 			continue;
 		}
+		if (!inCode && char === "\\" && text[index + 1] === "$" && !isEscaped(text, index)) {
+			rendered += "$";
+			index += 2;
+			continue;
+		}
+
+		if (!inCode) {
+			const math = renderedInlineMathAt(text, index);
+			if (math) {
+				rendered += math.text;
+				index = math.end;
+				continue;
+			}
+		}
 
 		if (!inCode && text.startsWith("**", index) && !isEscaped(text, index)) {
 			const end = findMarkdownStrongEnd(text, index + 2);
 			if (end > index + 2) {
 				const segmentStart = rendered.length;
-				rendered += text.slice(index + 2, end);
+				rendered += renderMathWithinStrong(text.slice(index + 2, end));
 				segments.push({ start: segmentStart, end: rendered.length, bold: true });
 				index = end + 2;
 				continue;
@@ -171,6 +192,33 @@ export function renderMarkdownLine(text: string, start = 0): RenderedMarkdownLin
 	return { text: rendered, segments, ...(links.length > 0 ? { links } : {}), ...(isHeading ? { heading: true } : {}) };
 }
 
+function renderedInlineMathAt(text: string, start: number): { text: string; end: number } | undefined {
+	if (isEscaped(text, start)) return undefined;
+	const char = text[start];
+	if (char !== "$" && !(char === "\\" && (text[start + 1] === "(" || text[start + 1] === "["))) return undefined;
+	const math = terminalInlineMathAt(text, start);
+	if (!math) return undefined;
+	const rendered = renderTerminalMath(math.source, false)?.[0];
+	return rendered === undefined ? undefined : { text: rendered, end: math.end };
+}
+
+function renderMathWithinStrong(source: string): string {
+	let text = "";
+	let inCode = false;
+	for (let index = 0; index < source.length;) {
+		if (source[index] === "`" && !isEscaped(source, index)) inCode = !inCode;
+		const math = !inCode ? renderedInlineMathAt(source, index) : undefined;
+		if (math) {
+			text += math.text;
+			index = math.end;
+		} else {
+			text += source[index];
+			index += 1;
+		}
+	}
+	return text;
+}
+
 export function renderMarkdownTextLines(text: string, width: number, start = 0, options: RenderMarkdownTextLinesOptions = {}): RenderedMarkdownTextLine[] {
 	const lines: RenderedMarkdownTextLine[] = [];
 	let fence: ActiveMarkdownFence | undefined;
@@ -182,6 +230,24 @@ export function renderMarkdownTextLines(text: string, width: number, start = 0, 
 	for (let lineIndex = 0; lineIndex < rawLines.length;) {
 		const rawLine = rawLines[lineIndex] ?? "";
 		const nextFence = markdownFence(rawLine);
+		if (!fence && !nextFence) {
+			const math = terminalMathBlockAt(rawLines, lineIndex);
+			if (math) {
+				const visual = math.complete ? renderTerminalMath(math.source, true, width) : undefined;
+				for (const visualLine of visual ?? math.raw.split("\n")) {
+					for (const wrapped of wrapRenderedMarkdownLine({ text: visualLine, segments: [], links: [] }, width, options)) {
+						lines.push({
+							text: wrapped.text,
+							...(wrapped.copyText === undefined ? {} : { copyText: wrapped.copyText }),
+							...(wrapped.continuesOnNextLine ? { continuesOnNextLine: true } : {}),
+							...(visual ? {} : { codeBlock: true }),
+						});
+					}
+				}
+				lineIndex += math.lineCount;
+				continue;
+			}
+		}
 		if (!fence && nextFence && isMermaidFence(nextFence)) {
 			const diagram = renderMermaidBlock(rawLines, lineIndex, nextFence, width);
 			if (diagram) {

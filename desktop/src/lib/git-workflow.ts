@@ -4,6 +4,7 @@ export type GitRepositoryAction = "update" | "fetch" | "pull" | "stash-save" | "
 /** Native result of the one-click "Update project" (fetch + fast-forward). */
 export interface GitUpdateResult { incoming: number; stashed: boolean }
 export interface GitHistoryEntry { hash: string; shortHash: string; subject: string; author: string; date: string }
+export interface GitCommitDiff { commit: GitHistoryEntry; content: string; truncated: boolean }
 export interface GitStashEntry { reference: string; subject: string }
 export interface GitRepositoryDetails { history: GitHistoryEntry[]; stashes: GitStashEntry[] }
 export interface GitReviewResult { diff: GitDiff; text: string; stale: boolean }
@@ -16,6 +17,9 @@ export interface GitPanelWorkflow {
   notice: string | null;
   details: GitRepositoryDetails | null;
   detailsLoading: boolean;
+  selectedCommit: GitHistoryEntry | null;
+  onShowCommitDiff: () => void;
+  onOpenCommit: (hash: string) => void;
   onShowReview: () => void;
   onResolve: () => void;
   onLoadDetails: () => void;
@@ -25,7 +29,7 @@ export interface GitPanelWorkflow {
 
 export function sameGitDiff(a: GitDiff | null | undefined, b: GitDiff | null | undefined): boolean {
   return Boolean(a && b && a.path === b.path && a.scope === b.scope
-    && a.content === b.content && a.truncated === b.truncated);
+    && a.content === b.content && a.truncated === b.truncated && a.commit?.hash === b.commit?.hash);
 }
 
 export function gitPushBlockedReason(snapshot: GitSnapshot | undefined): string | null {

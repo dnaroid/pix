@@ -1,5 +1,6 @@
 <script lang="ts">
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
+  import Search from "@lucide/svelte/icons/search";
   import Clock from "@lucide/svelte/icons/clock";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
@@ -16,6 +17,7 @@
     restartPending = false,
     buildStatus = "idle",
     onRestart,
+    onSearch,
     projectSwitcher,
     workbench,
     selector,
@@ -25,6 +27,7 @@
     restartPending?: boolean;
     buildStatus?: DesktopBuildStatus;
     onRestart?: () => void;
+    onSearch?: () => void;
     projectSwitcher: Omit<ComponentProps<typeof ProjectSwitcher>, "variant"> | null;
     workbench: ComponentProps<typeof WorkbenchTabs>;
     selector: ComponentProps<typeof SessionSelector> | null;
@@ -69,6 +72,12 @@
     {/if}
   </div>
 
+  {#if onSearch}
+    <button type="button" onclick={onSearch} aria-label="Search current project" title="Search current project (⌘⇧F)"
+      class="my-auto mr-2 grid h-7 w-7 shrink-0 place-items-center rounded text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">
+      <Search class="h-4 w-4" aria-hidden="true" />
+    </button>
+  {/if}
   {#if restartAvailable || buildStatus !== "idle"}
     <div class="flex shrink-0 items-center gap-1 px-2">
       {#if buildStatus !== "idle"}

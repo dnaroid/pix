@@ -150,6 +150,28 @@ describe("session workbench model", () => {
     });
   });
 
+  it("labels a historical Git Diff tab by its selected commit instead of All Changes", () => {
+    const hash = "0123456789abcdef0123456789abcdef01234567";
+    const tabs = buildDesktopWorkbenchTabs({
+      sessionTabs: [],
+      previewDirty: false,
+      previewAnchorId: null,
+      previewOpenedOrder: 0,
+      gitDiff: { scope: "all", commit: { hash, shortHash: "01234567", subject: "Repair merge" } },
+      gitReviewLoading: false,
+      gitResolveRunning: false,
+      gitAnchorId: null,
+      gitOpenedOrder: 3,
+    });
+    expect(tabs[0]).toMatchObject({
+      kind: "diff",
+      id: "git-diff",
+      label: "Commit 01234567",
+      title: `${hash} · Repair merge`,
+      closable: true,
+    });
+  });
+
   it("inserts a closable Terminal tab beside the workbench surface that opened it", () => {
     const [session] = build([{ sessionId: "session-1", cwd: "/tmp/project", title: "Session" }]);
     const tabs = buildDesktopWorkbenchTabs({

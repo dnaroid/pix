@@ -34,7 +34,16 @@ export function createSessionHistory(options: SessionHistoryOptions) {
   const loadingOlderSessionIds = new Map<string, HistoryRequestOwner>();
   const hydrationBySessionId = new Map<string, { promise: Promise<void>; generation: number }>();
   const retainedHydrationBySessionId = new Map<string, number>();
+  const incompleteHydrationSessionIds = new Set<string>();
   const backgroundOwners = new Map<string, object>();
+
+  function needsHydration(sessionId: string): boolean {
+    // A cache may contain only the loading placeholder or live updates.
+    // Do not replace hydration retained by an accepted send on tab re-entry.
+    const pending = hydrationBySessionId.get(sessionId);
+    const retained = pending && retainedHydrationBySessionId.get(sessionId) === pending.generation;
+    return incompleteHydrationSessionIds.has(sessionId) && !retained;
+  }
 
   function begin(): number {
     loading = true;
@@ -66,6 +75,7 @@ export function createSessionHistory(options: SessionHistoryOptions) {
     requestWorkspace: string,
     requestGeneration: number,
   ): Promise<void> {
+    incompleteHydrationSessionIds.add(sessionId);
     retainedHydrationBySessionId.delete(sessionId);
     const pending = hydrateRequest(requestClient, sessionId, requestWorkspace, requestGeneration)
       .finally(() => {
@@ -119,6 +129,7 @@ export function createSessionHistory(options: SessionHistoryOptions) {
         ? loadedTranscript
         : { items: [...loadedTranscript.items, ...currentItems] };
       options.state.setTranscriptFor(sessionId, nextTranscript);
+      incompleteHydrationSessionIds.delete(sessionId);
       if (options.state.sessionId === sessionId) options.scheduleScrollToLatest();
     } catch (error) {
       if (!isCurrent(requestClient, sessionId, requestWorkspace, requestGeneration)) return;
@@ -130,6 +141,7 @@ export function createSessionHistory(options: SessionHistoryOptions) {
           // Input accepted during startup is not history and must survive an
           // empty/unavailable persisted history response.
           options.state.setSessionTranscript(sessionId, options.state.transcript);
+          incompleteHydrationSessionIds.delete(sessionId);
           loading = false;
           return;
         }
@@ -157,6 +169,7 @@ export function createSessionHistory(options: SessionHistoryOptions) {
         transcript = markDeferredToolResults(transcript, history.deferredToolCallIds);
         if (history.cursor) olderCursorBySessionId.set(sessionId, history.cursor);
         options.state.setSessionTranscript(sessionId, transcript);
+        incompleteHydrationSessionIds.delete(sessionId);
       }
       return true;
     } finally {
@@ -245,10 +258,23 @@ export function createSessionHistory(options: SessionHistoryOptions) {
   }
 
   function markFullyLoaded(sessionId = options.state.sessionId): void {
-    if (sessionId) olderCursorBySessionId.delete(sessionId);
+    if (sessionId) {
+      olderCursorBySessionId.delete(sessionId);
+      incompleteHydrationSessionIds.delete(sessionId);
+    }
+  }
+
+  function captureRollback(sessionId: string): () => void {
+    const incomplete = incompleteHydrationSessionIds.has(sessionId);
+    const cursor = olderCursorBySessionId.get(sessionId);
+    return () => {
+      if (incomplete) incompleteHydrationSessionIds.add(sessionId);
+      if (cursor) olderCursorBySessionId.set(sessionId, cursor);
+    };
   }
 
   function forget(sessionId: string): void {
+    incompleteHydrationSessionIds.delete(sessionId);
     backgroundOwners.delete(sessionId);
     retainedHydrationBySessionId.delete(sessionId);
     olderCursorBySessionId.delete(sessionId);
@@ -262,6 +288,7 @@ export function createSessionHistory(options: SessionHistoryOptions) {
   }
 
   function reset(): void {
+    incompleteHydrationSessionIds.clear();
     backgroundOwners.clear();
     cancel();
     retainedHydrationBySessionId.clear();
@@ -276,12 +303,14 @@ export function createSessionHistory(options: SessionHistoryOptions) {
     begin,
     cancel,
     isCurrent,
+    needsHydration,
     hydrate,
     primeBackground,
     waitForHydration,
     loadOlder,
     loadDeferredToolResult,
     markFullyLoaded,
+    captureRollback,
     forget,
     reset,
   };

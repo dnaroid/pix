@@ -190,7 +190,8 @@ function stopReasonMessage(reason: Exclude<StopReason, "end_turn" | "cancelled">
     case "max_turn_requests":
       return "Agent stopped after reaching the turn/request limit.";
     case "refusal":
-      return "Agent stopped because the model refused the request.";
+      // ACP 1.4 also uses refusal for provider/transport errors; don't misattribute those to the model.
+      return "Agent stopped before completing the request. Check the conversation for details.";
   }
 }
 

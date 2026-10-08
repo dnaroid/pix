@@ -30,9 +30,11 @@ export function createSessionActivityStore(options: SessionActivityStoreOptions 
   let summaries = $state<Map<string, SessionActivitySummary>>(new Map());
   let brainstorms = $state<Map<string, SessionBrainstormSnapshot>>(new Map());
   const owners = new Map<string, string>();
+  const forgottenSessionIds = new Set<string>();
   const pending = new Map<string, Map<string, SessionStateNotification>>();
 
   function open(sessionId: string): string {
+    forgottenSessionIds.delete(sessionId);
     let owner = owners.get(sessionId);
     if (!owner) {
       owner = crypto.randomUUID();
@@ -47,6 +49,7 @@ export function createSessionActivityStore(options: SessionActivityStoreOptions 
     const snapshots = pending.get(owner);
     if (!snapshots) return; // reset/cancellation invalidated this request
     pending.delete(owner);
+    forgottenSessionIds.delete(sessionId);
     owners.set(sessionId, owner);
     for (const notification of snapshots.values()) handle(notification);
   }
@@ -100,6 +103,7 @@ export function createSessionActivityStore(options: SessionActivityStoreOptions 
   }
 
   function markForgotten(sessionId: string): void {
+    forgottenSessionIds.add(sessionId);
     owners.delete(sessionId);
     // Abandoned new/fork requests may forget without the tab-close clear path.
     // Snapshots and their ordering timestamps belong to the attachment too.
@@ -146,6 +150,7 @@ export function createSessionActivityStore(options: SessionActivityStoreOptions 
     brainstorms = new Map();
     summaries = new Map();
     owners.clear();
+    forgottenSessionIds.clear();
     pending.clear();
   }
 
@@ -162,6 +167,7 @@ export function createSessionActivityStore(options: SessionActivityStoreOptions 
     cancelRequest,
     completeRequest,
     markForgotten,
+    isForgotten: (sessionId: string) => forgottenSessionIds.has(sessionId),
     clear,
     reset,
   };

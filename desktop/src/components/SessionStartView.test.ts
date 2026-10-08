@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { render } from "svelte/server";
+import type { SessionInfo } from "@agentclientprotocol/sdk";
+import SessionStartView from "./SessionStartView.svelte";
 import appSource from "../App.svelte?raw";
 import presentationStateSource from "../app/desktop-presentation-state.svelte.ts?raw";
 import draftSource from "../app/draft-session.svelte.ts?raw";
@@ -28,6 +31,28 @@ describe("SessionStartView", () => {
     expect(source).toContain("min-h-0 overflow-y-auto");
     expect(source).toContain("grid h-7 w-full grid-cols-[minmax(0,1fr)_auto]");
     expect(source).toContain("shrink-0 font-mono text-xs");
+  });
+
+  it("renders only 30 saved sessions on first paint and keeps an accessible load-more control", () => {
+    const sessions: SessionInfo[] = Array.from({ length: 87 }, (_, index) => ({
+      sessionId: `id-${index}`,
+      cwd: "/project",
+      title: `Conversation ${index}`,
+      updatedAt: new Date(Date.UTC(2026, 0, 1) + index * 60_000).toISOString(),
+    }));
+    const html = render(SessionStartView, {
+      props: { sessions, workspace: "/project", onSelect: () => {} },
+    }).body;
+    expect(html.match(/data-saved-session-row/g)).toHaveLength(30);
+    expect(html).toContain("Showing 30 of 87 conversations");
+    expect(html).toContain("Show 15 more");
+    expect(html).toContain("Conversation 86");
+    expect(html).not.toContain("Conversation 0");
+    expect(source).toContain('bind:this={scrollContainer}');
+    expect(source).toContain("new IntersectionObserver");
+    expect(source).toContain("{ root, rootMargin:");
+    expect(source).toContain("observer.disconnect()");
+    expect(source).toContain("oninput={resetPages}");
   });
 
   it("is shown only for the UI-only draft tab and excludes sessions already represented by tabs", () => {

@@ -1,3 +1,8 @@
+---
+kind: spec
+status: active
+---
+
 # Desktop conversation-tab interaction
 
 <!-- markdownlint-disable MD013 -->
@@ -31,12 +36,21 @@ Preserve Pix conversation/session membership and lazy draft semantics after conv
 - The unified workbench tablist owns Left/Right, Home/End, Delete, and middle-click behavior across every visible tab. Arrow/Home/End move focus only; Enter/Space activate through native button behavior.
 - Closing a running conversation from the close button, Delete, or middle-click requires explicit confirmation. Confirming removes the conversation tab from the visible Desktop tab membership synchronously, before awaiting the ACP `session/close` teardown response, so titlebar feedback is immediate. If that ACP close fails, Desktop restores the optimistically hidden tab and reports the error; cancelling confirmation leaves the tab and run untouched.
   Desktop uses the native asynchronous warning dialog; duplicate requests are guarded and stale consent after workspace/client replacement is ignored. See [active-run close warning](desktop-close-warning.md) for tab/window/Quit behavior and the view-only council participant exception.
-- Session close still chooses/loads a valid fallback conversation runtime when the active session is removed. The visible workbench focus fallback may be a neighboring UI-only tab; in that case Pix keeps the fallback conversation runtime active underneath that surface.
+- Session close chooses/loads a valid fallback conversation runtime immediately when the active session is removed, without waiting for ACP teardown or acquiring the Desktop-global operation lock. Closing the last real session immediately opens the UI-only draft. Close/focus callers finish while teardown continues in the background; only the closing session remains action-locked, including saved-session reopen, until teardown settles. Runtime/history/update ownership is invalidated on optimistic removal, preventing stale sends and updates. Transcript and composer snapshots are retained until success; a failed close restores the tab and reports its error without overwriting a later selection or another tab's composer. Stale completion after workspace/client replacement cannot mutate the replacement state. The visible workbench focus fallback may be a neighboring UI-only tab; in that case Pix keeps the fallback conversation runtime active underneath that surface. Consent/completion cannot overwrite workbench navigation made while a close was pending.
 - The pointer close affordance is outside the normal Tab sequence because Delete provides keyboard close within the workbench tab composite.
 - New Conversation is the only trailing titlebar action outside the tablist and stays immediately after the last visible workbench tab. Unused titlebar space to its right remains the window-drag region.
 - Activating New Conversation opens/reuses a **UI-only draft conversation tab**. Opening or restoring that draft must not call ACP `session/new`, allocate a Pi runtime, create a session-map record, persist a session id, or render the session-scoped Session inspector. While untouched, its central workspace shows a searchable saved-session selector above the normal composer.
 - A UI-only draft also exposes the same combined model/thinking selector as a real conversation. Desktop obtains draft config options through a read-only, workspace-scoped ACP request that does not create a session-map record or Pi RPC session. The request loads provider registrations from that workspace's extensions and the bundled pi-tools-suite, including Antigravity, without leaking one workspace's providers into another. Changing model/thinking in the draft updates only draft-local UI state and does not call `session/set_config_option` or `session/new`.
 - The embedded selector fills the available transcript height down to the composer. Its heading/search area remains fixed while only the saved-session list scrolls, and each saved conversation occupies one dense row with title and timestamp on the same line.
+- The embedded saved-conversation selector initially renders at most 30 rows,
+  then reveals another 15 when a scroll-container-local intersection sentinel
+  approaches the viewport. A visible keyboard-accessible Show more control
+  remains as a fallback when intersection observation is unavailable. Pagination
+  resets with a new search query or project, but does not discard already shown
+  rows for an ordinary catalog refresh. Search matches the full project catalog,
+  and the fork tree is sorted and built before slicing so incremental pages
+  never break ancestry connectors. This is incremental Desktop rendering of
+  the already available ACP session catalog, not a new provider or JSONL fetch.
 - The embedded selector omits sessions already represented by open conversation tabs. Preview/Diff are irrelevant to this filter because they are not sessions.
 - Saved-session selection surfaces mark sessions carrying Pix fork metadata with the same branch/fork affordance used by conversation tabs, so forks stay visually distinguishable both in the titlebar picker and in the draft's embedded selector.
 - With no search text, both saved-session selectors present TUI-style fork hierarchy: descending-`updatedAt` roots/siblings, parent-adjacent descendants, and monospaced `├─`/`└─`/`│` nesting. Searching intentionally switches to flat ranked results but keeps the fork affordance.
@@ -50,9 +64,12 @@ Preserve Pix conversation/session membership and lazy draft semantics after conv
 - Repeated New Conversation actions reuse the existing draft tab instead of creating multiple empty chooser tabs.
 - Starting a project task while the UI-only draft is active creates and foregrounds the task's real conversation session. The draft tab is deactivated rather than discarded, so its unsent composer text/attachments remain owned by the draft and can be restored later; the task prompt and subsequent runtime state belong only to the new real session.
 - A sole UI-only draft tab is not closable. Its close affordance is omitted, and Delete or middle-click are ignored. Closing the last real session still transitions to one draft conversation tab, which remains the minimum session surface even if Preview/Diff are also open.
-- A successful active-session close clears transient errors from requests racing ACP teardown before showing the fallback session or draft; a failed close still restores its tab and displays the close error.
+- Active-session close clears the old conversation error before showing the fallback session or draft. Background teardown success does not clear errors belonging to newer work; a failed close still restores its tab and displays the close error.
 - A UI-only draft is never persisted as the active project session, so restarting Pix cannot attempt `session/history` for it. Compatibility recovery for older mapped empty sessions remains unchanged and generation-guarded.
 - The New Conversation action uses the shared `session.new` command metadata for its platform shortcut hint; the Command Palette New/Open Conversation actions use the same UI-only draft surface.
+
+- A cached transcript is not proof that persisted history finished loading. If tab navigation interrupted hydration, or hydration failed, selecting that session again retries history loading even when an empty placeholder or partial live updates were cached. Successful hydration, including a genuinely empty history, makes the cache reusable. Submit-owned pending hydration is retained rather than restarted on re-entry, and closing/resetting a session clears its incomplete-history state.
+  A failed optimistic close restores incomplete-history and older-page cursor metadata along with tab membership, but never restores retired request ownership. Late updates for the retired attachment cannot recreate a deleted transcript before a fresh attachment opens.
 
 ## Accessibility and focus invariants
 
@@ -62,7 +79,7 @@ Preserve Pix conversation/session membership and lazy draft semantics after conv
 - The workbench tablist does not require every tab to be reachable by repeated Tab presses; arrow navigation owns movement inside the composite.
 - New Conversation remains a separate control outside the roving-focus sequence.
 
-## Related files
+## Implementation
 
 - `desktop/src/components/StatusBar.svelte`
 - `desktop/src/components/TranscriptPane.svelte`
@@ -79,17 +96,50 @@ Preserve Pix conversation/session membership and lazy draft semantics after conv
 - `desktop/src/app/attachment-draft-ownership.ts`
 - `desktop/src/app/session-tab-controller.ts`
 - `desktop/src/app/session-tab-selection.ts`
+- `desktop/src/app/session-history.svelte.ts`
 - `desktop/src/app/session-tab-closure.ts`
+- `desktop/src/app/workbench-controller.ts`
+- `desktop/src/app/desktop-root-effects.svelte.ts`
+- `desktop/src/app/session-coordinator.ts`
+- `desktop/src/app/session-activity.svelte.ts`
 - `desktop/src/app/desktop-presentation-state.svelte.ts`
 - `acp/src/acp/desktop-commands.ts`
 - `acp/src/acp/draft-model-runtime.ts`
 - `acp/src/acp/pix-acp-agent.ts`
+
+## Related specifications
+
 - `specs/desktop-workbench-tabs.md`
 - `specs/desktop-session-parity.md`
 - `specs/desktop-project-titlebar.md`
 
+## Tests
+
+- `desktop/src/app/session-tab-history.test.ts`
+- `desktop/src/app/attachment-draft-ownership.test.ts`
+- `desktop/src/components/DesktopVisualRegressions.test.ts`
+- `desktop/src/components/ComposerActivity.test.ts`
+- `desktop/src/lib/composer-activity.test.ts`
+- `desktop/src/lib/composer-activity-hold.test.ts`
+- `desktop/src/lib/session-tabs.test.ts`
+- `desktop/src/app/session-tabs-state.test.ts`
+- `desktop/src/lib/workbench-tabs.test.ts`
+- `desktop/src/app/workbench-model.test.ts`
+- `desktop/src/components/WorkbenchTabs.test.ts`
+- `desktop/src/app/session-tab-closure.test.ts`
+- `desktop/src/app/workbench-controller.test.ts`
+- `desktop/src/app/session-history.test.ts`
+- `desktop/src/app/session-coordinator.test.ts`
+- `desktop/src/app/prompt-submit.test.ts`
+- `desktop/src/app/draft-tab-selection.test.ts`
+- `desktop/src/app/prompt-submit-opening.test.ts`
+- `desktop/src/app/desktop-workbench-prop-builders.test.ts`
+- `desktop/src/app/session-runtime-loading.test.ts`
+- `desktop/src/app/desktop-project-action-services.test.ts`
+
 ## Verification
 
+- `desktop/src/app/session-tab-history.test.ts` uses deferred history responses to verify retry after interrupted/failed hydration, partial live-cache preservation, retained submit-owned hydration on tab re-entry, and reuse of successfully loaded empty history.
 - `desktop/src/app/attachment-draft-ownership.test.ts` verifies image drafts across real/draft tab switches and deferred ownership reconciliation, stale async attachment rejection, workspace clearing, and first-submit ownership retargeting.
 - `desktop/src/components/DesktopVisualRegressions.test.ts` verifies ordinary composer borders and no transcript-bottom spinner.
 - `desktop/src/components/ComposerActivity.test.ts` verifies composer-dock placement, neutral announcements, and reduced-motion markup; `desktop/src/lib/composer-activity.test.ts` covers current-turn selection, concurrent actions, history/draft/runtime gating, settlement, and pending input; `desktop/src/lib/composer-activity-hold.test.ts` covers the one-second latest-wins hold (immediate first display, coalescing, immediate hide, session reset, dispose).
@@ -98,7 +148,7 @@ Preserve Pix conversation/session membership and lazy draft semantics after conv
 - `desktop/src/lib/workbench-tabs.test.ts` covers mixed workbench ordering without changing session identity.
 - `desktop/src/app/workbench-model.test.ts` covers fork metadata propagation into workbench session tabs.
 - `desktop/src/components/WorkbenchTabs.test.ts` covers unified roving tab semantics and kind-specific close dispatch.
-- `desktop/src/app/session-tab-closure.test.ts` controls ACP close completion to verify immediate optimistic tab removal, fallback loading after teardown, stale session-error clearing before the sole-tab draft, and rollback on close failure.
+- `desktop/src/app/session-tab-closure.test.ts` controls ACP close completion to verify immediate optimistic removal and fallback/draft navigation before teardown, no global operation lock, per-session duplicate guarding, retained rollback snapshots, and stale-completion isolation. `desktop/src/app/workbench-controller.test.ts` verifies that delayed close consent cannot overwrite later workbench navigation and that conversation-change selection policy preserves auxiliary fallbacks. `desktop/src/app/session-history.test.ts` covers rollback hydration/cursor metadata; `desktop/src/app/session-coordinator.test.ts` covers late-update exclusion and fresh attachment.
 - Desktop draft/concurrency and ACP-client coverage verifies that draft config is loaded without `session/new`, a staged model selection is kept local, and the override is carried only when first-prompt materialization happens.
 - `desktop/src/app/prompt-submit.test.ts` verifies that the first draft user message renders and clears the composer before materialization resolves and is still sent to the materialized session after another conversation is selected; `desktop/src/app/draft-tab-selection.test.ts` verifies that background materialization does not steal active-session state or discard the created session.
 - `desktop/src/app/prompt-submit-opening.test.ts`, `desktop/src/app/desktop-workbench-prop-builders.test.ts`, `desktop/src/app/session-history.test.ts`, and `desktop/src/app/session-runtime-loading.test.ts` cover immediate existing-session editing/optimistic send, captured target and attachments, duplicate-submit rejection without consuming fresh input, invalidated ownership, and history merge/empty-history preservation.

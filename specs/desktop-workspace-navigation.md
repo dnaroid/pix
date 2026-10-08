@@ -102,6 +102,13 @@ establish compatibility requirements.
   Both path commands apply to files and folders below the workspace root and copy
   plain filesystem text without quoting or URI escaping. Absolute paths include
   the active workspace root; relative paths retain the existing project-relative form.
+- HTML files (`.html` and `.htm`, case-insensitive) additionally offer **Open in
+  Browser** in both menu surfaces. On macOS this opens the saved file in the
+  default HTTPS browser, regardless of the HTML file's editor association, without
+  saving drafts or starting a web server. Other files, folders and the root omit
+  the action. The backend rejects missing, non-HTML, symlink and escaped targets;
+  failures use the Files error surface and stale failures cannot affect a replaced
+  workspace or disposed panel.
 - In the Tauri Desktop host, Project Explorer uses an OS-native context menu.
   On supported macOS Desktop it may extend beyond the application window; the
   OS owns placement, screen-edge clamping and keyboard traversal. Pointer menus
@@ -230,6 +237,9 @@ establish compatibility requirements.
 
 ## Implementation
 
+- `desktop/src-tauri/src/project_browser.rs`
+- `desktop/src-tauri/Cargo.toml`
+
 - `desktop/src/App.svelte`
 - `desktop/src/app/desktop-project-services.ts`
 - `desktop/src/app/preview-file-io.ts`
@@ -260,6 +270,8 @@ establish compatibility requirements.
 - `desktop/src-tauri/src/git_ignore.rs`
 
 ## Tests
+
+- `desktop/src-tauri/src/project_browser.rs`: HTML eligibility and workspace validation.
 
 - `desktop/src/lib/project-files-refresh.test.ts` covers foreground-only polling,
   focus/visibility resumption, serialized reads, failure retries and teardown during

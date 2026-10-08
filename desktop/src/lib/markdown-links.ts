@@ -1,15 +1,10 @@
-import {
-  attachmentKind,
-  filePathFromUri,
-  mimeTypeForName,
-  type AttachmentKind,
-} from "./attachments";
+import { filePathFromUri } from "./attachments";
 import type { ProjectFileLineRange } from "./project-files";
 import type { MarkdownRenderContext } from "./markdown-context";
 import { escapeAttribute } from "./markdown-escape";
-import { isGlbPath } from "./glb";
+import { previewMediaKindForPath, type PreviewMediaKind } from "./media";
 
-type MarkdownMediaKind = Exclude<AttachmentKind, "file"> | "model";
+type MarkdownMediaKind = PreviewMediaKind;
 
 const SAFE_LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
 
@@ -66,9 +61,7 @@ export function homeFileLink(path: string, label: string): string {
 }
 
 export function mediaKindForPath(path: string): MarkdownMediaKind | undefined {
-  if (isGlbPath(path)) return "model";
-  const kind = attachmentKind(mimeTypeForName(path));
-  return kind === "file" ? undefined : kind;
+  return previewMediaKindForPath(path);
 }
 
 export function projectMedia(
@@ -141,8 +134,9 @@ export function normalizeInlineHomeFilePath(code: string): string | undefined {
 export function normalizeRemoteImageHref(destination: string): string | undefined {
   const href = normalizeExternalHref(destination);
   if (!href) return undefined;
-  const protocol = new URL(href).protocol;
-  return protocol === "http:" || protocol === "https:" ? href : undefined;
+  const url = new URL(href);
+  if (previewMediaKindForPath(url.pathname) === "audio") return undefined;
+  return url.protocol === "http:" || url.protocol === "https:" ? href : undefined;
 }
 
 export function normalizeHeadingAnchor(destination: string): string | undefined {

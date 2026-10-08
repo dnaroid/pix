@@ -21,7 +21,7 @@
     limitingRateWindow,
     modelUsageTone,
     modelUsageWindowLabel,
-    modelUsageWindowWillExhaustBeforeReset,
+    modelUsageWindowExceedsDailyBudget,
     shortModelUsageAccountLabel,
     type UsageTone,
   } from "../lib/runtime-status";
@@ -453,7 +453,7 @@
           <span class="pointer-events-none relative font-sans text-xs text-muted-foreground">Usage</span>
           {#each usageWindowItems as { key, label, window } (key)}
               {@const tone = modelUsageTone(window.remainingPercent)}
-              {@const exhaustsEarly = modelUsageWindowWillExhaustBeforeReset(window, now)}
+              {@const exceedsDailyBudget = modelUsageWindowExceedsDailyBudget(window, now)}
               <span class="quota-status-slots grid items-center gap-1" class:quota-short-track={label !== "W"} aria-label={limitTitle(label, window)}>
                 <span class="quota-values pointer-events-none relative col-span-3 grid items-center">
                   <span class={["whitespace-nowrap text-right", toneTextClass(tone)]}>{Math.round(window.remainingPercent)}%</span>
@@ -483,8 +483,8 @@
                 <span class="relative flex w-2.5 items-center">
                   {#if quotaWaitIndicator && key === usageWindowItems[0]?.key}
                     {@render retryIndicator()}
-                  {:else if exhaustsEarly}
-                    <TriangleAlert class="h-2.5 w-2.5 text-tool-warning" aria-label="Projected to exhaust before reset" />
+                  {:else if exceedsDailyBudget}
+                    <TriangleAlert class="h-2.5 w-2.5 text-tool-warning" aria-label="Cumulative daily quota budget exceeded" />
                   {:else if modelUsage?.stale}
                     <Hourglass class="h-2.5 w-2.5 text-muted-foreground" aria-label="Cached quota from the last successful refresh" />
                   {/if}

@@ -18,6 +18,10 @@ class Element {
   naturalWidth = 0;
   naturalHeight = 0;
   src = "";
+  controls = false;
+  preload = "";
+  pause = vi.fn();
+  load = vi.fn();
   textContent = "";
   get outerHTML() { return JSON.stringify(this.dataset); }
   append(child: Element) { this.children.push(child); child.parent = this; }
@@ -96,6 +100,77 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Markdown natural image reservation", () => {
+  it("retains distinct audio players through streaming and stops removed or destroyed players", async () => {
+    const audioFile: Attachment = { id: "audio", name: "track.mp3", kind: "file", mimeType: "audio/mpeg", path: "/track.mp3" };
+    const { root, first, action, resolver } = setup(vi.fn(async () => audioFile));
+    first.dataset.projectMedia = "audio";
+    first.dataset.projectFile = "track.mp3";
+    const second = preview("project", "track.mp3", "audio");
+    root.append(second);
+    await flush();
+    intersect(first);
+    intersect(second);
+    await flush();
+    const players = [first.children[0]!.children[0]!, second.children[0]!.children[0]!];
+    expect(players[0]).not.toBe(players[1]);
+    expect(players[0]).toMatchObject({ src: "asset:/track.mp3", controls: true, preload: "metadata" });
+    root.children = [];
+    root.append(preview("project", "track.mp3", "audio"));
+    root.append(preview("project", "track.mp3", "audio"));
+    action.update("streaming audio");
+    await flush();
+    expect(root.children).toEqual([first, second]);
+    expect(first.children[0]!.children[0]).toBe(players[0]);
+    expect(players[0]!.pause).not.toHaveBeenCalled();
+    expect(resolver).toHaveBeenCalledOnce();
+    root.children = [first];
+    action.update("removed duplicate");
+    await flush();
+    expect(players[1]!.pause).toHaveBeenCalledOnce();
+    expect(players[1]!.load).toHaveBeenCalledOnce();
+    expect(players[0]!.pause).not.toHaveBeenCalled();
+    action.destroy();
+    expect(players[0]!.pause).toHaveBeenCalledOnce();
+    expect(players[0]!.load).toHaveBeenCalledOnce();
+  });
+
+  it.each(["remove", "destroy"])("ignores pending audio resolution after %s", async (operation) => {
+    let complete!: (value: Attachment) => void;
+    const { root, first, action } = setup(vi.fn(() => new Promise<Attachment>((resolve) => { complete = resolve; })));
+    first.dataset.projectMedia = "audio";
+    first.dataset.projectFile = "track.mp3";
+    await flush();
+    intersect(first);
+    if (operation === "remove") { root.children = []; action.update("removed audio"); await flush(); }
+    else action.destroy();
+    complete({ id: "audio", name: "track.mp3", kind: "file", mimeType: "audio/mpeg", path: "/track.mp3" });
+    await flush();
+    expect(first.children[0]!.children).toHaveLength(0);
+    action.destroy();
+  });
+
+  it("keeps a readable audio error through streaming without reloading", async () => {
+    const audioFile: Attachment = { id: "audio", name: "track.mp3", kind: "file", mimeType: "audio/mpeg", path: "/track.mp3" };
+    const { root, first, action } = setup(vi.fn(async () => audioFile));
+    first.dataset.projectMedia = "audio";
+    first.dataset.projectFile = "track.mp3";
+    await flush();
+    intersect(first);
+    await flush();
+    const player = first.children[0]!.children[0]!;
+    player.listeners.get("error")!();
+    expect(first.dataset.mediaState).toBe("error");
+    expect(player.pause).toHaveBeenCalledOnce();
+    root.replaceChildren(preview("project", "track.mp3", "audio"));
+    action.update("more streaming");
+    await flush();
+    intersect(first);
+    await flush();
+    expect(first.children[0]!.children[0]!.textContent).toBe("Preview unavailable");
+    action.destroy();
+    expect(player.pause).toHaveBeenCalledOnce();
+  });
+
   it("retains GLB viewers and camera ownership across streaming, releasing removed occurrences", async () => {
     const model: Attachment = { id: "model", name: "chair.glb", kind: "file", mimeType: "model/gltf-binary", path: "/chair.glb" };
     const { root, first, action, resolver } = setup(vi.fn(async () => model));

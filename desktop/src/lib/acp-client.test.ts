@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { AcpClient, type AcpExit, type AcpTransport, type AcpTransportHandlers } from "./acp-client";
 import { PIX_SESSION_STATE_METHOD } from "./session-state";
+import { PIX_SESSION_CATALOG_CHANGED_METHOD } from "../../../acp/src/acp/session-catalog-contract";
 import { createSessionActivityStore } from "../app/session-activity.svelte";
 import { TODO_STATE_CHANNEL } from "./session-todos";
 import { parseQueueState } from "./acp-response-parsers";
@@ -46,6 +47,60 @@ async function startedClient(transport: FakeTransport, overrides: Record<string,
 }
 
 describe("ACP JSON-RPC client", () => {
+  it("routes only valid native session catalog change notifications", async () => {
+    const transport = new FakeTransport();
+    const onSessionCatalogChanged = vi.fn();
+    const client = await startedClient(transport, { onSessionCatalogChanged });
+    transport.message({ jsonrpc: "2.0", method: PIX_SESSION_CATALOG_CHANGED_METHOD, params: { cwd: "/workspace" } });
+    transport.message({ jsonrpc: "2.0", method: PIX_SESSION_CATALOG_CHANGED_METHOD, params: { cwd: "" } });
+    transport.message({ jsonrpc: "2.0", method: PIX_SESSION_CATALOG_CHANGED_METHOD, params: { cwd: 55 } });
+    expect(onSessionCatalogChanged).toHaveBeenCalledExactlyOnceWith("/workspace");
+    await client.dispose();
+  });
+  it("keeps commit indexing requests alive beyond the ordinary RPC deadline", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+    vi.useFakeTimers();
+    try {
+      let settled = false;
+      const response = { results: [], notices: [] };
+      const completion = client.searchCommits({ cwd: "/workspace", query: "ownership", limit: 20 }).then(
+        value => { settled = true; return { value }; },
+        error => { settled = true; return { error }; },
+      );
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(settled).toBe(false);
+      expect(transport.sent).toHaveLength(2);
+      transport.message({ jsonrpc: "2.0", id: requestAt(transport, 1).id, result: response });
+      await expect(completion).resolves.toEqual({ value: response });
+    } finally {
+      await client.dispose();
+      vi.useRealTimers();
+    }
+  });
+  it("routes hybrid commit search without a session and cancels stale replies", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+    const params = { cwd: "/workspace", query: "recover ownership", limit: 20 };
+    const response = { results: [], notices: [] };
+    const first = client.searchCommits(params);
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    expect(requestAt(transport, 1)).toMatchObject({ method: "pix/search/commits", params });
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 1).id, result: response });
+    await expect(first).resolves.toEqual(response);
+
+    const abort = new AbortController();
+    const next = client.searchCommits(params, abort.signal);
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(3));
+    const requestId = requestAt(transport, 2).id;
+    abort.abort();
+    await expect(next).rejects.toMatchObject({ name: "AbortError" });
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(4));
+    expect(requestAt(transport, 3)).toEqual({ jsonrpc: "2.0", method: "$/cancel_request", params: { requestId } });
+    transport.message({ jsonrpc: "2.0", id: requestId, result: response });
+    await client.dispose();
+  });
+
   it("retains fork queue identity, editable payload and failure diagnostics", () => {
     const item = { id: "fork:1", source: "fork", mode: "fork", index: 0, text: "branch", error: "snapshot failed",
       message: { id: "1", promptText: "branch", displayText: "branch", images: [] } };

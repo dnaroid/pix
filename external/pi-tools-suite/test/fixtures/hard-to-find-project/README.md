@@ -51,11 +51,15 @@ unrestricted suite. Set
 `PI_LOCATE_BENCH_MODES=direct-read-grep,semantic-repo-search,subagent-search` to
 run a subset. Set `PI_LOCATE_BENCH_FAKE_IDX=1` when you want deterministic
 repo-search output for E2E validation instead of a real local idx index.
-When fake idx is disabled, each indexed mode first runs `idx init` inside that
-mode's temporary fixture copy so semantic `repo_search` uses a real index. This
-is a separate preparation step before the agent process starts; it is reported
-under `preparation` and is not included in the agent elapsed time or rough
-tool-IO token metric.
+When fake idx is disabled, each indexed mode first runs
+`idx init --embedding local` inside that mode's temporary fixture copy so
+semantic `repo_search` uses a real index without paid OpenRouter embedding
+requests. This is a separate preparation step before the agent process starts;
+it is reported under `preparation` and is not included in the agent elapsed time
+or rough tool-IO token metric. Index storage stays local, and local embeddings
+avoid OpenRouter embedding requests. The benchmark's agent model is separate:
+running that model-driven benchmark can still send tool output to its configured
+provider and incur model charges; it is not an offline verification command.
 
 Progress is printed to stderr as each mode starts and finishes, including the
 temporary working directory used for that run. Set `PI_LOCATE_BENCH_KEEP=1` to

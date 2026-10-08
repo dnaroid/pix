@@ -5,17 +5,28 @@
   import type { SessionInfo } from "@agentclientprotocol/sdk";
   import { fuzzySearch } from "../lib/fuzzy";
   import { buildSessionTree, sessionIsFork } from "../lib/session-tabs";
+  import {
+    SAVED_SESSION_INITIAL_ROWS,
+    SAVED_SESSION_NEXT_ROWS,
+    nextSavedSessionRowCount,
+    visibleSavedSessionRows,
+  } from "../lib/saved-session-pagination";
 
   let {
     sessions,
+    workspace,
     onSelect,
   }: {
     sessions: readonly SessionInfo[];
+    workspace: string;
     onSelect: (sessionId: string) => void;
   } = $props();
 
   let query = $state("");
   let searchInput = $state<HTMLInputElement | null>(null);
+  let scrollContainer = $state<HTMLDivElement | null>(null);
+  let loadMoreTrigger = $state<HTMLButtonElement | null>(null);
+  let visibleCount = $state(SAVED_SESSION_INITIAL_ROWS);
   const displayedSessions = $derived(query.trim()
     ? fuzzySearch(
       sessions.map((session) => ({
@@ -27,6 +38,45 @@
       query,
     ).map((match) => ({ session: match.value, treePrefix: "" }))
     : buildSessionTree(sessions));
+  const visibleSessions = $derived(visibleSavedSessionRows(displayedSessions, visibleCount));
+  const hasMore = $derived(visibleCount < displayedSessions.length);
+
+  function resetPages(): void {
+    visibleCount = SAVED_SESSION_INITIAL_ROWS;
+    if (scrollContainer) scrollContainer.scrollTop = 0;
+  }
+
+  let previousWorkspace: string | undefined;
+  $effect(() => {
+    const currentWorkspace = workspace;
+    if (previousWorkspace === undefined) {
+      previousWorkspace = currentWorkspace;
+      return;
+    }
+    if (previousWorkspace === currentWorkspace) return;
+    previousWorkspace = currentWorkspace;
+    query = "";
+    resetPages();
+  });
+
+  function loadNextPage(): void {
+    if (!hasMore) return;
+    visibleCount = nextSavedSessionRowCount(visibleCount, displayedSessions.length);
+  }
+
+  // The sentinel moves downward after each page. Observe only the scrollable
+  // results pane; changing query/workspace or unmounting disconnects the observer.
+  $effect(() => {
+    const root = scrollContainer;
+    const trigger = loadMoreTrigger;
+    if (!root || !trigger || !hasMore || typeof IntersectionObserver === "undefined") return;
+    let disconnected = false;
+    const observer = new IntersectionObserver((entries) => {
+      if (!disconnected && entries.some((entry) => entry.isIntersecting)) loadNextPage();
+    }, { root, rootMargin: "0px 0px 96px 0px" });
+    observer.observe(trigger);
+    return () => { disconnected = true; observer.disconnect(); };
+  });
 
   function displayDate(value: string | null | undefined): string {
     if (!value) return "";
@@ -53,15 +103,17 @@
           class="h-7 w-full rounded-md border border-input bg-panel-strong pr-2 pl-7 text-xs text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/25"
           bind:this={searchInput}
           bind:value={query}
+          oninput={resetPages}
           type="search"
           placeholder="Search saved conversations…"
         />
       </label>
     </header>
 
-    <div class="min-h-0 overflow-y-auto border-t border-border/70" aria-label="Saved conversations">
-      {#each displayedSessions as row (row.session.sessionId)}
+    <div bind:this={scrollContainer} class="min-h-0 overflow-y-auto border-t border-border/70" aria-label="Saved conversations">
+      {#each visibleSessions as row (row.session.sessionId)}
         <button
+          data-saved-session-row
           class="grid h-7 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border/50 px-2.5 text-left transition-colors last:border-b-0 hover:bg-panel-hover focus-visible:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
           type="button"
           onclick={() => onSelect(row.session.sessionId)}
@@ -78,10 +130,21 @@
           <small class="shrink-0 font-mono text-xs text-muted-foreground">{displayDate(row.session.updatedAt) || row.session.sessionId.slice(0, 8)}</small>
         </button>
       {:else}
-        <p class="px-3 py-6 text-center text-xs text-muted-foreground">
-          {query ? "No matching saved conversations" : "No saved conversations outside the open tabs"}
-        </p>
+        {#if displayedSessions.length === 0}
+          <p class="px-3 py-6 text-center text-xs text-muted-foreground">
+            {query ? "No matching saved conversations" : "No saved conversations outside the open tabs"}
+          </p>
+        {/if}
       {/each}
+      {#if hasMore}
+        <div class="flex flex-col items-center gap-1 px-3 py-2 text-xs text-muted-foreground">
+          <span aria-live="polite">Showing {visibleSessions.length} of {displayedSessions.length} conversations</span>
+          <button bind:this={loadMoreTrigger} type="button" onclick={loadNextPage}
+            class="rounded-sm px-2 py-1 text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring">
+            Show {Math.min(SAVED_SESSION_NEXT_ROWS, displayedSessions.length - visibleCount)} more
+          </button>
+        </div>
+      {/if}
     </div>
   </div>
 </section>

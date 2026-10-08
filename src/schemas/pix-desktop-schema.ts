@@ -160,6 +160,13 @@ export const PixDesktopConfigSchema = Type.Object(
 		promptEnhancer: Type.Optional(PromptEnhancerConfig),
 		autocomplete: Type.Optional(AutocompleteConfig),
 		sessionTitle: Type.Optional(SessionTitleConfig),
+		search: Type.Optional(Type.Object(
+			{
+				semanticEnabled: Type.Optional(Type.Boolean({ default: false, description: "Explicit user-global opt-in to OpenRouter semantic settings search. Sends authored settings metadata and settings queries to perplexity/pplx-embed-v1-0.6b. This does not authorize session names; they require separate sessionTitlesEnabled consent. Conversation history always stays local; shared OpenRouter credentials are never stored here." })),
+				sessionTitlesEnabled: Type.Optional(Type.Boolean({ default: false, description: "Separate user-global opt-in for embedding explicitly saved session names with OpenRouter. Never sends first-user-message fallback titles, conversation history, attachments, or transcript contents; local title search is available without consent. May incur provider costs." })),
+			},
+			{ description: "Desktop universal search: explicit user-global semantic-search consent." },
+		)),
 		dictation: Type.Optional(DictationConfig),
 		headsUp: Type.Optional(HeadsUpConfig),
 		desktop: Type.Optional(DesktopAppConfig),

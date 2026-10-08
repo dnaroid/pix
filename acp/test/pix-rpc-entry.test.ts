@@ -133,7 +133,7 @@ test("Pix RPC clears todos through the handler, never a prompt, and acknowledges
 	runInNewContext(patch, {
 		AgentSession: Session, PIX_CLEAR_TODOS_MESSAGE: sentinel,
 		PIX_BTW_RPC_PREFIX: "\u0000pix:btw:",
-		PIX_PAUSE_MESSAGE: "pause", PIX_CONTINUE_MESSAGE: "continue",
+		PIX_PAUSE_MESSAGE: "pause", PIX_CANCEL_PAUSE_MESSAGE: "cancel-pause", PIX_CONTINUE_MESSAGE: "continue",
 		bindPause() { assert.fail("clear must not bind a model run"); },
 	});
 	const acknowledgements: string[] = [];
@@ -184,7 +184,7 @@ test("Pix RPC dispatches hidden LSP control and emits only a correlated status s
 	runInNewContext(patch, {
 		AgentSession: Session, PIX_LSP_CONTROL_PREFIX: "\u0000pix:lsp-control:",
 		PIX_BTW_RPC_PREFIX: "\u0000pix:btw:",
-		PIX_PAUSE_MESSAGE: "pause", PIX_CONTINUE_MESSAGE: "continue", PIX_CLEAR_TODOS_MESSAGE: "clear",
+		PIX_PAUSE_MESSAGE: "pause", PIX_CANCEL_PAUSE_MESSAGE: "cancel-pause", PIX_CONTINUE_MESSAGE: "continue", PIX_CLEAR_TODOS_MESSAGE: "clear",
 		bindPause() { assert.fail("must not bind model run"); },
 		process: { stdout: { write() { assert.fail("RPC stdout is taken over by the SDK; emit via the session event stream"); } } },
 	});
@@ -220,7 +220,7 @@ test("Pix RPC pause preflight reports SDK dispositions only on success", async (
 	}
 	const session = new Session();
 	runInNewContext(patch, {
-		AgentSession: Session, PIX_PAUSE_MESSAGE: "pause", PIX_CONTINUE_MESSAGE: "continue",
+		AgentSession: Session, PIX_PAUSE_MESSAGE: "pause", PIX_CANCEL_PAUSE_MESSAGE: "cancel-pause", PIX_CONTINUE_MESSAGE: "continue",
 		PIX_BTW_RPC_PREFIX: "\u0000pix:btw:",
 		PIX_CLEAR_TODOS_MESSAGE: "clear",
 		requestPause() { if (!streaming) throw new Error("Agent is not running"); },
@@ -244,7 +244,10 @@ test("Pix RPC exposes live DCP token savings through session stats", async () =>
 test("Pix RPC forwards only bounded prepared-map metadata and preserves legacy stats", async () => {
 	const source = await readFile(new URL("../src/pi/pix-rpc-entry.js", import.meta.url), "utf8");
 	const patch = source.slice(source.indexOf("const PIX_DCP_RUNTIME_STATS_SYMBOL"), source.indexOf("/** @type {WeakMap"));
-	class Session { getSessionStats(): Record<string, unknown> { return { messageCount: 3 }; } }
+	class Session {
+		sessionManager = { getLeafId: () => "persisted-leaf", getSessionFile: () => "/workspace/session.jsonl" };
+		getSessionStats(): Record<string, unknown> { return { messageCount: 3 }; }
+	}
 	let contextMap: unknown = {
 		revision: 1, sessionEpoch: 0, generatedAt: 1000, body: "private",
 		tokenEstimates: { candidate: 100, protected: 20, compressed: 30, retained: 50, arguments: "private" },
@@ -255,7 +258,8 @@ test("Pix RPC forwards only bounded prepared-map metadata and preserves legacy s
 	};
 	runInNewContext(patch, sandbox);
 	const stats = () => JSON.parse(JSON.stringify(new Session().getSessionStats()));
-	assert.deepEqual(stats(), { messageCount: 3, pixDcpTokensSaved: 12, pixDcpContextMap: {
+	const identity = { pixSearchLeafId: "persisted-leaf", pixSearchSessionPath: "/workspace/session.jsonl" };
+	assert.deepEqual(stats(), { messageCount: 3, ...identity, pixDcpTokensSaved: 12, pixDcpContextMap: {
 		revision: 1, sessionEpoch: 0, generatedAt: 1000,
 		tokenEstimates: { candidate: 100, protected: 20, compressed: 30, retained: 50 },
 	} });
@@ -264,7 +268,7 @@ test("Pix RPC forwards only bounded prepared-map metadata and preserves legacy s
 		{ ...(contextMap as object), tokenEstimates: { candidate: 0, protected: 0, compressed: 0, retained: 0 } },
 		{ ...(contextMap as object), tokenEstimates: { candidate: Number.MAX_SAFE_INTEGER, protected: 1, compressed: 0, retained: 0 } }]) {
 		contextMap = invalid;
-		assert.deepEqual(stats(), { messageCount: 3, pixDcpTokensSaved: 12 });
+		assert.deepEqual(stats(), { messageCount: 3, ...identity, pixDcpTokensSaved: 12 });
 	}
 });
 
@@ -296,6 +300,7 @@ async function loadAnthropicUsageCapture() {
 		}
 	}
 	class Session {
+		sessionManager = { getLeafId: () => "usage-leaf", getSessionFile: () => "/workspace/usage.jsonl" };
 		constructor(sessionId: string, model: unknown) {
 			this.sessionId = sessionId;
 			this.agent = { state: { model } };
@@ -455,6 +460,7 @@ test("Pix RPC keeps Anthropic usage alongside the DCP session-stats patch", asyn
 			this.agent = { state: { model } };
 		}
 		getSessionStats(): Record<string, unknown> { return { sessionId: this.sessionId }; }
+		sessionManager = { getLeafId: () => "usage-leaf", getSessionFile: () => "/workspace/usage.jsonl" };
 		private readonly sessionId: string;
 		readonly agent: { state: { model: unknown } };
 	}

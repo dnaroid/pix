@@ -38,7 +38,7 @@ describe("built-in knowledge-auditor role", () => {
 		expect(role.models).toEqual(["openai-codex/gpt-6-luna", "zai/glm-5.3-flash"]);
 		expect(role.thinking).toBe("low");
 		expect(role.tools).toEqual(["read", "grep", "bash", "edit", "write"]);
-		expect(role.timeoutMs).toBe(300_000);
+		expect(role.timeoutMs).toBe(1_200_000);
 		expect(role.promptAppend).toContain("Run `idx audit`");
 		expect(role.promptAppend).toContain("ESCALATE");
 		const decisionGuidance = role.promptAppend!.replace(/\s+/g, " ");

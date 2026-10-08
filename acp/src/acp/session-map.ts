@@ -36,6 +36,8 @@ export interface SessionMapRecord {
 	/** Path to the parent Pi session when this session is a fork. */
 	parentSessionPath?: string | undefined;
 	title?: string | undefined;
+	/** Actual session name from session_info / explicit name, never a first-message fallback. */
+	namedTitle?: string | undefined;
 	/** Explicit council linkage; session display names are not identities. */
 	brainstorm?: BrainstormLink;
 	/** ISO 8601 timestamp of the last activity. */
@@ -86,7 +88,7 @@ export class SessionMapStore {
 	 * Merge sessions discovered from Pi's native JSONL store in one locked write.
 	 * Existing ACP ids win when a Pi session path is already known.
 	 */
-	async mergeByPiSessionPath(records: readonly SessionMapRecord[]): Promise<void> {
+  async mergeByPiSessionPath(records: readonly SessionMapRecord[], options: { requireExistingFiles?: boolean; keepNewerTitles?: boolean } = {}): Promise<void> {
 		if (records.length === 0) return;
 		await this.mutate(async () => {
 			const map = this.requireCache();
@@ -97,8 +99,10 @@ export class SessionMapStore {
 			}
 			let changed = false;
 
-			for (const candidate of records) {
-				const piSessionPath = resolve(candidate.piSessionPath);
+      for (const candidate of records) {
+        const piSessionPath = resolve(candidate.piSessionPath);
+        // Check under the map mutation lock: a captured listing may predate completed deletion.
+        if (options.requireExistingFiles && !await fileExists(piSessionPath)) continue;
 				const matches = byPath.get(piSessionPath) ?? [];
 				const existing = matches.find((record) => record.sessionId !== candidate.sessionId) ?? matches[0];
 				for (const duplicate of matches) {
@@ -108,13 +112,23 @@ export class SessionMapStore {
 					}
 				}
 				const sessionId = existing?.sessionId ?? availableSessionId(candidate.sessionId, piSessionPath, map);
-				const next: SessionMapRecord = {
+        const next: SessionMapRecord = {
 					...candidate,
 					sessionId,
 					piSessionPath,
-					...(candidate.title === undefined && existing?.title !== undefined ? { title: existing.title } : {}),
-					...(existing?.brainstorm ? { brainstorm: existing.brainstorm } : {}),
-				};
+					...(candidate.title === undefined && existing?.title !== undefined
+						? { title: existing.title, ...(existing.namedTitle ? { namedTitle: existing.namedTitle } : {}) }
+						: {}),
+          ...(existing?.brainstorm ? { brainstorm: existing.brainstorm } : {}),
+        };
+        if (options.keepNewerTitles && existing && existing.updatedAt > candidate.updatedAt) {
+          next.updatedAt = existing.updatedAt;
+			  if (existing.title !== undefined) {
+			    next.title = existing.title;
+			    if (existing.namedTitle) next.namedTitle = existing.namedTitle;
+			    else delete next.namedTitle;
+			  }
+        }
 				if (!existing || !sameRecord(existing, next)) {
 					map.set(sessionId, next);
 					changed = true;
@@ -140,7 +154,7 @@ export class SessionMapStore {
 			const record = map.get(sessionId);
 			if (!record) return;
 			const next: SessionMapRecord = { ...record, updatedAt: new Date().toISOString() };
-			if (title !== undefined) next.title = title;
+			if (title !== undefined) { next.title = title; next.namedTitle = title.trim(); }
 			map.set(sessionId, next);
 			await this.persist();
 		});
@@ -250,6 +264,7 @@ function sameRecord(left: SessionMapRecord, right: SessionMapRecord): boolean {
 		&& left.cwd === right.cwd
 		&& left.parentSessionPath === right.parentSessionPath
 		&& left.title === right.title
+		&& left.namedTitle === right.namedTitle
 		&& JSON.stringify(left.brainstorm) === JSON.stringify(right.brainstorm)
 		&& left.updatedAt === right.updatedAt;
 }

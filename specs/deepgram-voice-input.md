@@ -141,6 +141,24 @@ The permanent key must stay outside UI/browser runtime code.
   `wss://api.deepgram.com` and does not permit exposing the permanent key.
 
 ## Configuration compatibility
+### Desktop search input
+
+Universal Search exposes an on-screen microphone when WebView capture is
+supported. It reuses the same native token grant, configured language/model,
+capture/transport and finalization as the composer; no permanent key enters the
+WebView. Interim text is separate from the query. Final transcripts replace the
+current input selection with spacing and the search query's 2048-character
+limit. Stopping only edits the query; explicit Search/Enter waits for the final
+transcript before searching. Manual edits, filters, workspace/client replacement
+and dialog close invalidate ownership before teardown, so late callbacks cannot
+edit, refocus or submit into a later scope. The dialog keeps errors visible and
+discloses Deepgram audio transmission in Search details. It does not register
+the native F5 shortcut; the accepted composer-only scope remains unchanged.
+The surrounding Universal Search dialog separately fences transcript, focus,
+caret and submission callbacks across edits, filter changes, scope/client
+replacement and close/unmount.
+
+### Existing settings
 
 `dictation.apiKey` is the preferred Deepgram credential and is intended only for
 the relevant frontend's user config (`pix.jsonc` for TUI, `pix-desktop.jsonc`
@@ -192,6 +210,8 @@ download Vosk models or load/install Vosk bindings.
 
 - `src/app/input/voice-controller.ts`
 - `desktop/src/lib/deepgram.ts`
+- `desktop/src/lib/search-voice-controller.ts`
+- `desktop/src/components/UniversalSearch.svelte`
 - `desktop/src/lib/dictation-ready-cue.ts`
 - `desktop/src/lib/dictation-shortcut.ts`
 - `desktop/src/components/prompt-composer-voice-controller.svelte.ts`
@@ -205,6 +225,8 @@ download Vosk models or load/install Vosk bindings.
 - `tests/voice-controller.test.ts`
 - `tests/config.test.ts`
 - `desktop/src/lib/deepgram.test.ts`
+- `desktop/src/lib/search-voice-controller.test.ts`
+- `desktop/src/components/UniversalSearch.test.ts`
 - `desktop/src/lib/dictation-ready-cue.test.ts`
 - `desktop/src/lib/dictation-shortcut.test.ts`
 - `desktop/src-tauri/src/dictation_shortcut.rs`

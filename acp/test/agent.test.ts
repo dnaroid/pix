@@ -9,6 +9,7 @@ import {
 	client,
 	methods,
 	PROTOCOL_VERSION,
+	RequestError,
 	type ActiveSessionMessage,
 	type CreateElicitationRequest,
 	type CreateElicitationResponse,
@@ -20,6 +21,10 @@ import type {
 	SessionInfo as PiSessionInfo,
 } from "@earendil-works/pi-coding-agent";
 import { PixAcpAgent } from "../src/acp/pix-acp-agent.js";
+import { DesktopSearchService } from "../src/search/service.js";
+import { SearchPreferences } from "../src/search/config.js";
+import { SEARCH_QUERY_METHOD, SEARCH_CONFIG_METHOD, type SearchQueryResponse } from "../src/search/contract.js";
+import { SEARCH_COMMITS_METHOD, type CommitSearchRequest } from "../src/search/commit-contract.js";
 import { BTW_METHOD, type BtwCommand, type BtwState } from "../src/btw/contract.js";
 import {
 	PIX_DEFER_MESSAGE_METHOD,
@@ -77,6 +82,7 @@ import type {
 	AutocompleteResponse,
 } from "../src/acp/autocomplete.js";
 import { SessionMapStore } from "../src/acp/session-map.js";
+import { PIX_SESSION_CATALOG_CHANGED_METHOD } from "../src/acp/session-catalog-contract.js";
 import type { PersistedDesktopQueues } from "../src/acp/queue-store.js";
 import type { DesktopForkSnapshot, DesktopForkChild } from "../src/acp/desktop-fork-snapshot.js";
 import type { Logger } from "../src/logging.js";
@@ -154,6 +160,7 @@ class FakePiClient implements PiClient {
 	stateError: Error | undefined;
 	aborts = 0;
 	pauses = 0;
+	cancelPauses = 0;
 	continues = 0;
 	abortSettles = false;
 	started = false;
@@ -169,6 +176,7 @@ class FakePiClient implements PiClient {
 		truncated: false,
 	};
 	pauseHook: (() => void | Promise<void>) | undefined;
+	cancelPauseHook: (() => void | Promise<void>) | undefined;
 	continueHook: (() => void | Promise<void>) | undefined;
 	entriesState: { entries: PiSessionEntry[]; leafId: string | null } = { entries: [], leafId: null };
 	state: PiSessionState;
@@ -253,6 +261,11 @@ class FakePiClient implements PiClient {
 	async pause(): Promise<void> {
 		this.pauses += 1;
 		await this.pauseHook?.();
+	}
+
+	async cancelPause(): Promise<void> {
+		this.cancelPauses += 1;
+		await this.cancelPauseHook?.();
 	}
 
 	async continue(): Promise<void> {
@@ -1265,6 +1278,32 @@ test("session/list reconciles native Pi sessions and reports ordered TUI tabs", 
 	assert.deepEqual(harness.clients[harness.clients.length - 1]?.switchSessions, [secondPath]);
 });
 
+test("native discovery records actual session names but excludes first-prompt fallback from embedding provenance", async () => {
+	const privatePrompt = "PRIVATE first user request — no embedding";
+	let sessions = [
+		nativeSession("named", { name: "Concise project design", firstMessage: privatePrompt }),
+		nativeSession("fallback", { name: privatePrompt, firstMessage: privatePrompt }),
+		nativeSession("truncated", { name: "PRIVATE first user...", firstMessage: privatePrompt }),
+		nativeSession("unnamed", { name: undefined, firstMessage: "Another confidential first message" }),
+	];
+	const harness = createTestAdapter({ listPiSessions: async () => sessions });
+	const map = new SessionMapStore(harness.sessionMapPath, TEST_LOGGER);
+	await connect(harness.adapter, cx => cx.request("session/list", { cwd: "/tmp/proj" }));
+	assert.equal((await map.get("named"))?.namedTitle, "Concise project design");
+	assert.equal((await map.get("fallback"))?.title, privatePrompt, "fallback still supports local lexical lookup");
+	assert.equal((await map.get("fallback"))?.namedTitle, undefined, "fallback is not eligible for embeddings");
+	assert.equal((await map.get("truncated"))?.namedTitle, undefined, "truncated first-message fallback is not eligible either");
+	assert.equal((await map.get("unnamed"))?.namedTitle, undefined);
+
+	sessions = [
+		nativeSession("named", { name: "New saved name", firstMessage: privatePrompt }),
+		nativeSession("fallback", { name: "Renamed explicitly", firstMessage: privatePrompt }),
+	];
+	await connect(harness.adapter, cx => cx.request("session/list", { cwd: "/tmp/proj" }));
+	assert.equal((await map.get("named"))?.namedTitle, "New saved name");
+	assert.equal((await map.get("fallback"))?.namedTitle, "Renamed explicitly");
+});
+
 test("session/list falls back to mapped sessions when native discovery fails", async () => {
 	const harness = createTestAdapter({
 		listPiSessions: async () => {
@@ -1283,6 +1322,72 @@ test("session/list falls back to mapped sessions when native discovery fails", a
 	const listed = await connect(harness.adapter, (cx) => cx.request("session/list", { cwd: "/tmp/proj" }));
 	assert.deepEqual(listed.sessions.map((session) => session.sessionId), ["mapped"]);
 	assert.deepEqual(listed._meta?.["pix.tabs"], { sessionIds: [] });
+});
+
+test("Pix Desktop session/list returns its persisted map without awaiting a slow native scan", async (t) => {
+  const root = resolve(".pi/artifacts/session-list-fast");
+  await mkdir(root, { recursive: true });
+  const cwd = mkdtempSync(join(root, "test-"));
+  const path = join(cwd, "new-session.jsonl");
+  await writeFile(path, '{"type":"session"}\n');
+  let started!: () => void;
+  const scanning = new Promise<void>(resolve => { started = resolve; });
+  let release!: () => void;
+  const waiting = new Promise<void>(resolve => { release = resolve; });
+  let scans = 0;
+  const harness = createTestAdapter({
+    listPiSessions: async (requested, signal) => {
+      assert.equal(requested, cwd);
+      scans += 1;
+      started();
+      await waiting;
+      signal?.throwIfAborted();
+      return [nativeSession("fresh-native", { cwd, path, name: "Discovered conversation" })];
+    },
+    nativeSessionRevision: async () => "stable-revision",
+    loadTuiTabs: async () => ({ sessionPaths: [] }),
+  });
+  t.after(async () => {
+    release();
+    await harness.adapter.dispose();
+    await rm(cwd, { recursive: true, force: true });
+  });
+  const store = new SessionMapStore(harness.sessionMapPath, TEST_LOGGER);
+  await store.put({
+    sessionId: "stored-id", piSessionId: "stored-native", piSessionPath: path,
+    cwd, title: "Saved conversation", updatedAt: "2025-01-01T00:00:00.000Z",
+  });
+  let completed!: () => void;
+  const notified = new Promise<void>(resolve => { completed = resolve; });
+  const events: string[] = [];
+  await connectAs(harness.adapter, "pix-desktop", async cx => {
+    await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, clientInfo: { name: "pix-desktop", version: "test" } });
+    const initial = await Promise.race([
+      cx.request("session/list", { cwd }) as Promise<{ sessions: Array<{ sessionId: string }> }>,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("session/list waited for the native scan")), 1_000)),
+    ]);
+    assert.deepEqual(initial.sessions.map(s => s.sessionId), ["stored-id"]);
+    await scanning;
+    assert.deepEqual(events, [], "native scan has not finished");
+    release();
+    await notified;
+    assert.deepEqual(events, [cwd]);
+    const updated = await cx.request("session/list", { cwd }) as { sessions: Array<{ sessionId: string; title?: string }> };
+    assert.deepEqual(updated.sessions.map(s => s.sessionId), ["stored-id"]);
+    assert.equal(updated.sessions[0]?.title, "Discovered conversation");
+    assert.equal(scans, 1, "a matching filesystem revision must not start another full scan");
+  }, app => {
+    const custom = app as unknown as {
+      onNotification(
+        method: string,
+        parser: (params: unknown) => { cwd: string },
+        handler: (context: { params: { cwd: string } }) => void,
+      ): void;
+    };
+    custom.onNotification(PIX_SESSION_CATALOG_CHANGED_METHOD,
+      params => params as { cwd: string },
+      ({ params }) => { events.push(params.cwd); completed(); });
+  });
 });
 
 test("session/new failure to start pi returns a protocol error and registers nothing", async () => {
@@ -2431,6 +2536,60 @@ test("a recovered-question extension run publishes pause-ready running state", a
 });
 
 for (const origin of ["prompt", "extension"] as const) {
+	for (const outcome of ["cancel", "boundary", "settled-during-cancel"] as const) {
+		test(`${origin} pending pause ${outcome} retains ownership without implicit continuation`, async () => {
+			const { adapter, clients } = createTestAdapter();
+			await connect(adapter, async (cx) => {
+				const session = await cx.buildSession("/tmp/cancel-pending-pause").start();
+				const pi = clients[0]!;
+				const pending = origin === "prompt" ? session.prompt("work") : undefined;
+				if (pending) await waitFor(() => pi.promptCalls.length === 1);
+				pi.emit({ type: "agent_start" });
+				const owner = adapter.getSession(session.sessionId)!.activeRun;
+				const request = (action: "pause" | "cancel-pause") => cx.request(PIX_AGENT_CONTROL_METHOD, {
+					sessionId: session.sessionId, action,
+				}) as Promise<DesktopAgentControlResponse>;
+				await request("pause");
+				assert.equal(adapter.getSession(session.sessionId)!.agentControlState, "pause-requested");
+				FakePiClient.sessionFiles.set(pi.state.sessionFile!, [{ role: "toolResult", content: [] }]);
+				if (outcome === "boundary") {
+					pi.cancelPauseHook = () => { throw new Error("Agent has already reached the pause boundary"); };
+					await assert.rejects(request("cancel-pause"), /pause boundary/);
+					assert.equal(adapter.getSession(session.sessionId)!.agentControlState, "pause-requested");
+				} else if (outcome === "settled-during-cancel") {
+					let release!: () => void;
+					const gate = new Promise<void>((resolve) => { release = resolve; });
+					pi.cancelPauseHook = () => gate;
+					const undo = request("cancel-pause");
+					await waitFor(() => pi.cancelPauses === 1);
+					pi.emit({ type: "agent_settled" });
+					await waitFor(() => adapter.getSession(session.sessionId)?.activeRun === undefined);
+					release();
+					assert.equal((await undo).state, "paused", "late cancel must not publish running after settlement");
+				} else {
+					assert.equal((await request("cancel-pause")).state, "running");
+					assert.equal(adapter.getSession(session.sessionId)!.activeRun, owner);
+					assert.equal(pi.cancelPauses, 1);
+					assert.equal((await request("cancel-pause")).state, "running");
+					assert.equal(pi.cancelPauses, 1, "duplicate withdrawal outside pending state is a no-op");
+				}
+				assert.equal(pi.continues, 0);
+				assert.equal(pi.aborts, 0);
+				assert.equal(pi.promptCalls.length, origin === "prompt" ? 1 : 0);
+				if (outcome !== "settled-during-cancel") {
+					assert.equal(adapter.getSession(session.sessionId)!.activeRun, owner);
+					pi.emit({ type: "agent_settled" });
+					await waitFor(() => adapter.getSession(session.sessionId)?.activeRun === undefined);
+				}
+				if (pending) await pending;
+				const settled = outcome === "cancel" ? "continuable" : "paused";
+				assert.equal(adapter.getSession(session.sessionId)!.agentControlState, settled);
+				assert.equal((await request("cancel-pause")).state, settled);
+				assert.equal(pi.cancelPauses, 1, "withdrawal must never resume a settled pause");
+			});
+		});
+	}
+
 	test(`an extension restart during ${origin} settlement keeps run ownership`, async () => {
 		const { adapter, clients } = createTestAdapter();
 		await connect(adapter, async (cx) => {
@@ -2945,6 +3104,145 @@ test("session/load switches the pi session and replays history as chunk updates"
 		{ type: "content", content: { type: "image", data: "dG9vbA==", mimeType: "image/png" } },
 	]);
 	assert.equal(harness.adapter.getSession(sessionId) !== undefined, true, "loaded session is live");
+});
+
+test("Pix Desktop search query/config use the exact private contract without spawning Pi and reject other clients", async t => {
+	const artifacts = resolve(".pi/artifacts/search-backend-locked/agent");
+	await mkdir(artifacts, { recursive: true });
+	const cwd = mkdtempSync(join(artifacts, "run-"));
+	const searchService = new DesktopSearchService({ discover: async () => [], preferences: new SearchPreferences(join(cwd, "preferences.jsonc")),
+		auth: { available: async () => false, key: async () => undefined, save: async () => {} },
+		embed: async () => { throw new Error("No paid requests allowed"); } });
+	const harness = createTestAdapter({ searchService, createPiClient: () => { throw new Error("Search must not create Pi"); } });
+	t.after(async () => { await harness.adapter.dispose(); await rm(cwd, { recursive: true, force: true }); });
+	const request = { cwd, query: "appearance", types: ["settings", "sessions"], limit: 10,
+		settings: [{ id: "theme", section: "Appearance", label: "Theme", description: "Select appearance", synonyms: [], value: "SECRET VALUE" }] };
+	await connectAs(harness.adapter, "pix-desktop", async cx => {
+		await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, clientInfo: { name: "pix-desktop", version: "test" } });
+		const response = await cx.request(SEARCH_QUERY_METHOD, request) as SearchQueryResponse;
+		assert.equal(response.results[0]?.id, "settings:theme");
+		assert.equal(response.status.enabled, false);
+		assert.doesNotMatch(JSON.stringify(response), /SECRET VALUE/);
+		const config = await cx.request(SEARCH_CONFIG_METHOD, { cwd, enabled: false }) as SearchQueryResponse["status"];
+		assert.equal(config.enabled, false);
+		assert.equal(config.keyAvailable, false);
+		assert.equal(typeof config.indexing, "boolean");
+		await assert.rejects(cx.request(SEARCH_CONFIG_METHOD, { cwd, messageFilterEnabled: true }), /Invalid Desktop search request/);
+		await assert.rejects(cx.request(SEARCH_CONFIG_METHOD, { cwd, messageFilterEnabled: false }), /Invalid Desktop search request/);
+		await assert.rejects(cx.request(SEARCH_CONFIG_METHOD, { cwd, messageFilterEnabled: "true" }), /Invalid Desktop search request/);
+		await assert.rejects(cx.request(SEARCH_QUERY_METHOD, { ...request, cwd: "relative" }));
+	});
+	await connect(harness.adapter, async cx => {
+		await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION });
+		await assert.rejects(cx.request(SEARCH_QUERY_METHOD, request), /Desktop search unavailable/);
+		await assert.rejects(cx.request(SEARCH_CONFIG_METHOD, { cwd }), /Desktop search unavailable/);
+	});
+	assert.equal(harness.adapter.sessionCount, 0);
+});
+
+test("Pix Desktop commit search uses a separate private contract without starting Pi or leaking backend errors", async t => {
+	const requests: CommitSearchRequest[] = [];
+	let fail = false;
+	let disposed = false;
+	const harness = createTestAdapter({
+		commitSearchService: {
+			query: async (request, signal) => {
+				assert.ok(signal instanceof AbortSignal);
+				requests.push(request);
+				if (fail) throw new Error("Bearer PRIVATE_PROVIDER_ERROR");
+				return { results: [], notices: ["local fallback"] };
+			},
+			dispose: async () => { disposed = true; },
+		},
+		createPiClient: () => { throw new Error("Commit search must not create Pi"); },
+	});
+	t.after(async () => { await harness.adapter.dispose(); });
+	const request = { cwd: resolve("."), query: "recover backups", limit: 20 };
+	await connectAs(harness.adapter, "pix-desktop", async cx => {
+		await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, clientInfo: { name: "pix-desktop", version: "test" } });
+		assert.deepEqual(await cx.request(SEARCH_COMMITS_METHOD, request), { results: [], notices: ["local fallback"] });
+		assert.deepEqual(requests, [request]);
+		await assert.rejects(cx.request(SEARCH_COMMITS_METHOD, { ...request, cwd: "relative" }));
+		await assert.rejects(cx.request(SEARCH_COMMITS_METHOD, { ...request, query: "x".repeat(2049) }));
+		await assert.rejects(cx.request(SEARCH_COMMITS_METHOD, { ...request, limit: 0 }));
+		assert.equal(requests.length, 1);
+		fail = true;
+		await assert.rejects(cx.request(SEARCH_COMMITS_METHOD, request), error => {
+			assert.ok(error instanceof RequestError);
+			assert.equal(error.code, -32000);
+			assert.equal(error.message, "Commit search unavailable");
+			assert.doesNotMatch(JSON.stringify(error), /PRIVATE|Bearer/);
+			return true;
+		});
+	});
+	await connect(harness.adapter, async cx => {
+		await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION });
+		await assert.rejects(cx.request(SEARCH_COMMITS_METHOD, request), /Desktop search unavailable/);
+	});
+	assert.equal(harness.adapter.sessionCount, 0);
+	await harness.adapter.dispose();
+	assert.equal(disposed, true);
+});
+
+test("Pix Desktop search preserves controlled source errors across ACP without leaking underlying failures", async t => {
+	const artifacts = resolve(".pi/artifacts/search-backend-locked/agent");
+	await mkdir(artifacts, { recursive: true });
+	const cwd = mkdtempSync(join(artifacts, "run-"));
+	let failing = true;
+	const sourceSignals: AbortSignal[] = [];
+	const harness = createTestAdapter({
+		listPiSessions: async (_cwd, signal) => {
+			assert.ok(signal, "search forwards its deadline signal to native discovery");
+			sourceSignals.push(signal);
+			if (failing) throw new Error("private corpus content Bearer SECRET");
+			return [];
+		},
+		createPiClient: () => { throw new Error("Search must not create Pi"); },
+	});
+	t.after(async () => { await harness.adapter.dispose(); await rm(cwd, { recursive: true, force: true }); });
+	await connectAs(harness.adapter, "pix-desktop", async cx => {
+		await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, clientInfo: { name: "pix-desktop", version: "test" } });
+		const request = { cwd, query: "target", types: ["sessions"], settings: [], limit: 10 };
+		await assert.rejects(cx.request(SEARCH_QUERY_METHOD, request), error => {
+			assert.ok(error instanceof RequestError);
+			assert.equal(error.code, -32000);
+			assert.equal(error.message, "Session title discovery timed out or failed");
+			assert.doesNotMatch(JSON.stringify(error), /SECRET|private corpus/);
+			return true;
+		});
+		assert.equal(sourceSignals.length, 1);
+		failing = false;
+		const response = await cx.request(SEARCH_QUERY_METHOD, request) as SearchQueryResponse;
+		assert.deepEqual(response.results, []);
+	});
+});
+
+test("Pix Desktop title discovery does not resurrect a session deleted while native listing was in flight", async t => {
+  const root = resolve(".pi/artifacts/session-title-search/agent-race");
+  await mkdir(root, { recursive: true });
+  const cwd = mkdtempSync(join(root, "run-"));
+  const path = join(cwd, "session.jsonl");
+  await writeFile(path, "session body never read by title search");
+  let start!: () => void, finish!: () => void;
+  const started = new Promise<void>(resolve => { start = resolve; });
+  const released = new Promise<void>(resolve => { finish = resolve; });
+  const harness = createTestAdapter({
+    listPiSessions: async () => { start(); await released; return [nativeSession("native", { path, cwd, name: "target title" })]; },
+    createPiClient: () => { throw new Error("Search must not spawn Pi"); },
+  });
+  t.after(async () => { finish(); await harness.adapter.dispose(); await rm(cwd, { recursive: true, force: true }); });
+  const map = new SessionMapStore(harness.sessionMapPath, TEST_LOGGER);
+  await map.put({ sessionId: "stable", piSessionId: "native", piSessionPath: path, cwd, title: "target title", updatedAt: "2025-01-01T00:00:00.000Z" });
+  await connectAs(harness.adapter, "pix-desktop", async cx => {
+    await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, clientInfo: { name: "pix-desktop", version: "test" } });
+    const pending = cx.request(SEARCH_QUERY_METHOD, { cwd, query: "target", types: ["sessions"], settings: [], limit: 10 });
+    await started;
+    await cx.request("session/delete", { sessionId: "stable" });
+    finish();
+    assert.deepEqual((await pending as SearchQueryResponse).results, []);
+    assert.equal(await map.get("stable"), undefined);
+    assert.equal(await map.get("native"), undefined);
+  });
 });
 
 test("Pix Desktop registry actions call the direct service without a Pi runtime or conversation", async () => {

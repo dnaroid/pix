@@ -29,8 +29,28 @@ describe("composer activity row rendering", () => {
     expect(html).not.toContain('aria-label="Continue response"');
   });
 
-  it.each(["pause-requested", "resuming"] as const)("disables Pause during %s but retains Stop", (state) => {
-    const html = renderRow(state, true);
+  it("keeps pending Pause pressed and clickable to withdraw the request", () => {
+    const html = renderRow("pause-requested", true);
+    const buttons = html.match(/<button\b[^>]*>/g) ?? [];
+    expect(buttons).toHaveLength(2);
+    expect(buttons[0]).toContain('aria-label="Cancel pending pause"');
+    expect(buttons[0]).toContain('aria-pressed="true"');
+    expect(buttons[0]).toContain("bg-primary/15");
+    expect(buttons[0]).toContain("text-primary");
+    expect(buttons[0]).toContain("ring-primary/60");
+    for (const button of buttons) expect(button).not.toMatch(/\sdisabled(?:[=\s>])/);
+  });
+
+  it("keeps unrequested Pause neutral and visually distinct from pending Pause", () => {
+    const button = renderRow("running", true).match(/<button\b[^>]*>/)?.[0] ?? "";
+    expect(button).toContain('aria-pressed="false"');
+    expect(button).toContain("bg-panel");
+    expect(button).not.toContain("bg-primary/15");
+    expect(button).not.toContain("ring-primary/60");
+  });
+
+  it("disables Pause during resuming but retains Stop", () => {
+    const html = renderRow("resuming", true);
     const buttons = html.match(/<button\b[^>]*>/g) ?? [];
     expect(buttons).toHaveLength(2);
     expect(buttons[0]).toMatch(/\sdisabled(?:[=\s>])/);

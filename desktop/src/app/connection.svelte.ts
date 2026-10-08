@@ -13,6 +13,7 @@ export type ConnectionStatus = "starting" | "ready" | "error" | "stopped";
 type ConnectionStoreOptions = {
   workspace: () => string;
   onSessionUpdate: (notification: SessionNotification) => void;
+  onSessionCatalogChanged?: (cwd: string) => void;
   onSessionState: (notification: SessionStateNotification) => void;
   onOpenActivity?: (sessionId: string) => string;
   onBeginActivityRequest?: (owner: string) => void;
@@ -60,6 +61,9 @@ export function createConnectionStore(options: ConnectionStoreOptions) {
     const next: AcpClient = new AcpClient(transport, {
       onSessionUpdate: (notification) => {
         if (client === next) options.onSessionUpdate(notification);
+      },
+      onSessionCatalogChanged: (cwd) => {
+        if (client === next && cwd === options.workspace()) options.onSessionCatalogChanged?.(cwd);
       },
       onSessionState: (notification) => {
         if (client === next) options.onSessionState(notification);

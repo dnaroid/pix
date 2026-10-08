@@ -21,17 +21,22 @@
   import { modelThinkingConfigState } from "../../lib/model-thinking";
   import DesktopSettingsEditor, { type DesktopSettingsSection } from "./DesktopSettingsEditor.svelte";
   import ToolsSuiteSettingsEditor, { type ToolsSuiteSettingsSection } from "./ToolsSuiteSettingsEditor.svelte";
+  import SettingsSearchPreferences from "./SettingsSearchPreferences.svelte";
 
   let {
     configOptions,
     kind,
     onOpenUserConfig,
     onIndicatorChange,
+    workspace = "",
+    searchClient,
   }: {
     configOptions: readonly SessionConfigOption[];
     kind: SettingsConfigKind;
     onOpenUserConfig: (kind: SettingsConfigKind) => void;
     onIndicatorChange?: (error: string | null) => void;
+    workspace?: string;
+    searchClient?: { searchConfig: (cwd: string, changes?: { enabled?: boolean; apiKey?: string }, signal?: AbortSignal) => Promise<import("../../../../acp/src/search/contract").SearchStatus> };
   } = $props();
 
   const initialCache = settingsEditorCache();
@@ -208,6 +213,7 @@
         {:else if parsed.errors.length === 0}
           {#if activeKind === "desktop"}
             <DesktopSettingsEditor source={active.source} schema={active.schemaObject} models={settingsModels} section={chapter.id as DesktopSettingsSection} onChange={updateSource} />
+            {#if chapter.id === "assistant"}<SettingsSearchPreferences cwd={workspace} client={searchClient} />{/if}
           {:else}
             <ToolsSuiteSettingsEditor source={active.source} schema={active.schemaObject} models={settingsModels} section={chapter.id as ToolsSuiteSettingsSection} onChange={updateSource} />
           {/if}

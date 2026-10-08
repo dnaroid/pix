@@ -65,6 +65,21 @@ selection and recovery-budget subtraction are unchanged. The optional
 `PI_CLAUDE_CODE_PROVIDER_METRICS_LOG` persists finalized per-attempt metrics;
 diagnostics do not add a new always-on log or startup write.
 
+### Unknown tool name diagnostics
+
+Pi tool names are exposed to Claude Code only as qualified MCP names
+(`mcp__pi__Edit` for Pi's `Edit`). The provider continues to fail closed on a
+tool proposal that does not exactly match the request's catalog. When that
+occurs, the existing per-request metrics / optional metrics log / doctor's
+last-request report additionally retain: the safely constrained proposed name,
+whether it matches an active but unqualified Pi tool, its expected qualified
+name when available, catalog count and sorted-name fingerprint, validated
+initialization status, and `pi-tools-suite-vendored` adapter provenance.
+Never record tool arguments, request payloads, private paths, the complete
+catalog, or arbitrary unvalidated tool-name strings in these diagnostics.
+The absence of a persisted metrics log does not turn this into raw protocol
+tracing. No name-rewriting compatibility fallback is enabled.
+
 ### Native image transport
 
 Images are delivered as native `image` blocks (`source.type: base64`,

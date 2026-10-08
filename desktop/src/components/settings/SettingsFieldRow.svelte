@@ -1,6 +1,7 @@
 <script lang="ts">
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import type { Snippet } from "svelte";
+  import { settingsFieldId } from "../../lib/settings-search-catalog";
 
   let {
     label,
@@ -19,7 +20,7 @@
   } = $props();
 </script>
 
-<div data-settings-field={`${label} ${description ?? ""}`} class="group border-b border-sidebar-border/50 px-2.5 py-2.5 last:border-b-0">
+<div data-settings-field-id={settingsFieldId(label)} data-settings-field={`${label} ${description ?? ""}`} class="group border-b border-sidebar-border/50 px-2.5 py-2.5 last:border-b-0">
   <div class="flex min-w-0 items-start gap-2">
     <div class="min-w-0 flex-1">
       <div class="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">

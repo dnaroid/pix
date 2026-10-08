@@ -9,6 +9,10 @@ import sidebarViewModelSource from "../app/desktop-sidebar-view-model.svelte.ts?
 import navigationViewModelSource from "../app/desktop-navigation-view-model-services.ts?raw";
 
 describe("WorkspaceSidebar project sizing", () => {
+  it("rechecks task navigation ownership after rendering before scrolling", () => {
+    expect(sidebarSource).toContain("isCurrent: () => boolean = () => true");
+    expect(sidebarSource).toMatch(/await tick\(\);\s*if \(!isCurrent\(\) \|\| workspace !== requestWorkspace\) return;\s*const taskCard/);
+  });
   it("creates tasks from group headers with the selected type instead of the toolbar", () => {
     expect(sidebarSource).toContain("function openCreate(type: ProjectTaskType): void");
     expect(sidebarSource).toContain("if (!workspace || busy) return;");

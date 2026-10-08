@@ -518,7 +518,7 @@ function initializeIdxProject(projectDir, options) {
 
   logProgress(`Running idx init in ${projectDir}`);
   const startedAt = Date.now();
-  const result = spawnSync(idxBin, ["init"], {
+  const result = spawnSync(idxBin, ["init", "--embedding", "local"], {
     cwd: projectDir,
     env: { ...process.env, NO_COLOR: "1", CI: "1" },
     encoding: "utf-8",

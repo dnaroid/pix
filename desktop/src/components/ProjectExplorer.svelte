@@ -28,7 +28,7 @@
   import X from "@lucide/svelte/icons/x";
   import { onDestroy, onMount, tick, untrack } from "svelte";
   import type { MenuNavigationItem } from "../lib/keyboard-navigation";
-  import { projectExplorerMenuActions, type ProjectExplorerMenuAction } from "../lib/project-explorer-native-menu";
+  import { canOpenProjectEntryInBrowser, projectExplorerMenuActions, type ProjectExplorerMenuAction } from "../lib/project-explorer-native-menu";
   import type { GitSnapshot } from "../lib/git";
   import { projectGitDecorations } from "../lib/project-git-decorations";
   import { createProjectGitRefresh } from "../lib/project-git-refresh";
@@ -363,6 +363,7 @@
     const items: MenuNavigationItem[] = [];
     if (entry.path) items.push({ label: entry.kind === "directory" ? "Toggle Folder" : "Open" });
     items.push({ label: entry.path ? `Open in ${externalEditorLabel}` : `Open Project in ${externalEditorLabel}` });
+    if (canOpenProjectEntryInBrowser(entry)) items.push({ label: "Open in Browser" });
     items.push({ label: revealLabel });
     if (entry.kind === "directory") {
       items.push({ label: "New File…", disabled: !canCreateIn(entry) }, { label: "New Folder…", disabled: !canCreateIn(entry) });
@@ -386,6 +387,7 @@
     const commands: Record<string, () => void | Promise<void>> = {
       "Toggle Folder": () => runMenuOpen(entry),
       "Open": () => runMenuOpen(entry),
+      "Open in Browser": () => openEntryInBrowser(entry),
       "New File…": () => openNameDialog("new-file", entry),
       "New Folder…": () => openNameDialog("new-directory", entry),
       "Copy": () => copyEntry(entry),
@@ -723,6 +725,18 @@
     else treeController.openFile(entry.path);
   }
 
+  async function openEntryInBrowser(entry: ProjectTreeEntry): Promise<void> {
+    menuController.close();
+    if (!canOpenProjectEntryInBrowser(entry)) return;
+    const requestWorkspace = workspace;
+    const generation = operationGeneration;
+    try {
+      await invoke("open_project_html_in_browser", { workspace: requestWorkspace, path: entry.path });
+    } catch (error) {
+      if (generation === operationGeneration && workspace === requestWorkspace) operationError = errorMessage(error);
+    }
+  }
+
   function handleWindowKeydown(event: KeyboardEvent): void {
     const primary = isMacOS ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
     if (
@@ -975,6 +989,12 @@
         <span>{menuEntry.path ? `Open in ${externalEditorLabel}` : `Open Project in ${externalEditorLabel}`}</span>
         {#if menuEntry.path}<span class="ml-auto font-mono text-xs text-muted-foreground">⇧Enter</span>{/if}
       </button>
+      {#if canOpenProjectEntryInBrowser(menuEntry)}
+        <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" onclick={() => void openEntryInBrowser(menuEntry)}>
+          <ExternalLink class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span>Open in Browser</span>
+        </button>
+      {/if}
       <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" onclick={() => void revealEntry(menuEntry)}>
         <FolderSearch class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
         <span>{revealLabel}</span>

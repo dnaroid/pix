@@ -226,11 +226,15 @@ Those portable markers are not written to the local project task file.
   starts a new inspection instead of leaving `Checking…` indefinitely.
 - Registry cleanup is allowlist-based and never resets project state. The
   canonical top-level project directories are `agents/`, `artifacts/`,
-  `plans/`, `skills/`, `subagents/`, and `task-attachments/`.
-- Cleanup preserves the canonical `agents/`, `plans/`, `skills/`, and
+  `plans/`, `search/`, `skills/`, `subagents/`, and `task-attachments/`.
+- Cleanup preserves the canonical `agents/`, `plans/`, `search/`, `skills/`, and
   `task-attachments/` trees, but removes every entry recursively inside
   `.pi/artifacts/` and `.pi/subagents/` while leaving those two container
   directories in place.
+- `.pi/search/index.sqlite` is durable universal-search state, not disposable
+  output. Manual Clean and TTL cleanup preserve the complete `search/` tree,
+  including SQLite WAL/SHM sidecars. Session deletion prunes index rows; it does
+  not delete the database. See [Desktop universal search](desktop-universal-search.md).
 - Any other regular top-level directory directly under `.pi/` is non-canonical
   and is removed recursively. Top-level regular files are allowlist-based too:
   `TODO.md`, `pi-tools-suite.jsonc`, `pix-desktop.jsonc`, `pix.jsonc`,

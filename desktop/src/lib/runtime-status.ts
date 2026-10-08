@@ -4,8 +4,6 @@ import { newerDcpContextMap } from "./dcp-context-map";
 export type UsageTone = "success" | "warning" | "error";
 
 const DAY_SECONDS = 86_400;
-const WARNING_MIN_USED_PERCENT = 5;
-const WARNING_MIN_ELAPSED_SECONDS = 6 * 3_600;
 
 export function clampUsagePercent(percent: number): number {
   return Math.max(0, Math.min(100, Number.isFinite(percent) ? percent : 0));
@@ -41,18 +39,17 @@ export function formatCompactTokens(value: number): string {
   return Math.round(value).toLocaleString();
 }
 
-export function modelUsageWindowWillExhaustBeforeReset(
+export function modelUsageWindowExceedsDailyBudget(
   window: ModelUsageLimitWindow,
   now = Date.now(),
 ): boolean {
   if (!window.hasKnownWindowDuration || window.windowSeconds <= DAY_SECONDS || window.remainingPercent <= 0) return false;
-  const timeUntilResetSeconds = Math.max(0, (window.resetAt - now) / 1000);
-  const elapsedSeconds = Math.max(0, window.windowSeconds - timeUntilResetSeconds);
-  if (elapsedSeconds < WARNING_MIN_ELAPSED_SECONDS) return false;
-  const used = 100 - window.remainingPercent;
-  if (used < WARNING_MIN_USED_PERCENT) return false;
-  const averageRate = used / elapsedSeconds;
-  return window.remainingPercent / averageRate < timeUntilResetSeconds;
+  const startsAt = window.resetAt - window.windowSeconds * 1000;
+  if (now < startsAt || now >= window.resetAt) return false;
+  // Allocate the whole current day up front; unused allowance carries forward.
+  const day = Math.floor((now - startsAt) / (DAY_SECONDS * 1000)) + 1;
+  const budgetPercent = Math.min(100, day * DAY_SECONDS / window.windowSeconds * 100);
+  return 100 - window.remainingPercent > budgetPercent;
 }
 
 export function dcpStatsBody(text: string | undefined): string | undefined {

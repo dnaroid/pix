@@ -209,6 +209,25 @@ test("desktop history preserves thinking blocks and assistant/tool ordering", ()
 	);
 });
 
+test("provider errors survive deferred history and replay without becoming assistant text", async () => {
+	const messages = [
+		{ role: "user", content: "Change the marker" },
+		{ role: "assistant", timestamp: 12_345, stopReason: "error", errorMessage: "Claude proposed an unknown tool: Edit", content: [{ type: "thinking", thinking: "hmm" }] },
+		{ role: "user", content: "завис?" },
+	] as unknown as PiAgentMessage[];
+	const context = { sessionId: "s-error", cwd: "/repo" };
+	const history = deferredSessionHistoryFromMessages(messages, context);
+	const failures = history.updates.filter((update) => update.sessionUpdate === "agent_message_chunk");
+	assert.deepEqual(failures, [{
+		sessionUpdate: "agent_message_chunk",
+		messageId: "pix-system:error:12345",
+		content: { type: "text", text: "Claude proposed an unknown tool: Edit" },
+	}]);
+	const liveReplay: import("@agentclientprotocol/sdk").SessionNotification[] = [];
+	await replaySessionHistory({ getMessages: async () => messages } as unknown as PiClient, context, async (notification) => { liveReplay.push(notification); });
+	assert.deepEqual(liveReplay.filter((notification) => notification.update.sessionUpdate === "agent_message_chunk").map((notification) => notification.update), failures);
+});
+
 test("desktop replay carries persisted activity timing for one thinking block and tool execution", () => {
 	const messages = [
 		{

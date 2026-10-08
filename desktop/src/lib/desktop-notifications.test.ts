@@ -239,6 +239,24 @@ describe("desktop agent notification coordinator", () => {
     });
   });
 
+  it("does not mislabel a provider failure as a model refusal in background notifications", async () => {
+    const { api, service } = notificationHarness(false);
+    const coordinator = createDesktopAgentNotificationCoordinator({
+      notifications: service,
+      sessionTitle: () => "Design session",
+      agentState: () => "idle",
+      isPromptRunning: () => false,
+      activeSubagents: () => 0,
+    });
+    coordinator.promptSettled("session-error", "refusal");
+    await vi.waitFor(() => expect(api.sendNotification).toHaveBeenCalledTimes(1));
+    expect(api.sendNotification).toHaveBeenCalledWith({
+      title: "Pix — Error",
+      body: "Design session: Agent stopped before completing the request. Check the conversation for details.",
+      sessionId: "session-error",
+    });
+  });
+
   it("drops a deferred completion when new work starts", async () => {
     const { api, service } = notificationHarness(false);
     let activeSubagents = 1;

@@ -134,6 +134,17 @@
   <div class="min-h-0 flex-1 overflow-y-auto">
     {#if error}<div class="border-b border-tool-error/25 bg-tool-error/5 px-3 py-2 text-xs leading-4 text-tool-error break-words" role="alert">{error}</div>{/if}
     {#if workflow.notice && !error}<div class="border-b border-sidebar-border px-3 py-2 text-xs leading-4 text-tool-success" role="status">{workflow.notice}</div>{/if}
+    {#if workflow.selectedCommit}
+      <section class="space-y-1.5 border-b border-sidebar-border bg-panel px-3 py-2.5" aria-label="Selected Git commit">
+        <div class="flex items-center gap-2 text-xs">
+          <strong class="min-w-0 flex-1 truncate font-medium text-foreground" title={workflow.selectedCommit.subject}>{workflow.selectedCommit.subject}</strong>
+          <button class="shrink-0 rounded-sm px-1.5 py-1 text-xs font-medium text-primary hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring"
+            type="button" onclick={workflow.onShowCommitDiff}>View diff</button>
+        </div>
+        <p class="break-all font-mono text-xs text-muted-foreground" title={workflow.selectedCommit.hash}>{workflow.selectedCommit.hash}</p>
+        <p class="text-xs text-muted-foreground">{workflow.selectedCommit.author} · {workflow.selectedCommit.date}</p>
+      </section>
+    {/if}
     {#if actionId}<p class="flex items-center gap-1.5 px-3 py-2 text-xs text-muted-foreground" role="status"><RefreshCw class="h-3 w-3 animate-spin" aria-hidden="true" />{progressLabel}</p>{/if}
     {#if snapshot}
       {#if diverged}<p class="border-b border-tool-warning/20 bg-tool-warning/5 px-3 py-2 text-xs leading-4 text-tool-warning">Branch has diverged: {snapshot.ahead} outgoing, {snapshot.behind} incoming. Update only fast-forwards; merge or rebase in a terminal before pushing.</p>

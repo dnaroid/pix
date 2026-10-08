@@ -27,7 +27,7 @@ function fixture(overrides: Partial<SessionTabControllerOptions> = {}) {
     tabs: { closeSelector: vi.fn(), show: vi.fn(), rememberActive: vi.fn() },
     setErrorMessage: vi.fn(),
     switchComposerDraft: vi.fn(),
-    history: { cancel: vi.fn() },
+    history: { cancel: vi.fn(), needsHydration: vi.fn(() => false) },
     runtime: {
       getConfigOptions: vi.fn(() => []),
       isReady: vi.fn(() => true),

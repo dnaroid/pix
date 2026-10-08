@@ -20,6 +20,9 @@ export function createPromptAgentControl(options: PromptAgentControlOptions) {
   let agentControlStates = $state<Map<string, AgentControlState>>(new Map());
   /** Sessions with a locally initiated pause/continue request in flight. */
   const localControlRequests = new Set<string>();
+  /** Serialize rapid Pause clicks, including undo before the first RPC replies. */
+  const pauseToggleQueues = new Map<string, { tail?: Promise<void> }>();
+  const stateRevisions = new Map<string, number>();
   /** Run generations adopted from extension-initiated continuations. */
   const extensionRunGenerations = new Map<string, number>();
 
@@ -32,6 +35,7 @@ export function createPromptAgentControl(options: PromptAgentControlOptions) {
     const next = new Map(agentControlStates);
     next.set(sessionId, state);
     agentControlStates = next;
+    stateRevisions.set(sessionId, (stateRevisions.get(sessionId) ?? 0) + 1);
     if (previous !== undefined && previous !== "paused" && state === "paused") {
       try {
         options.onAgentPaused?.(sessionId);
@@ -77,24 +81,42 @@ export function createPromptAgentControl(options: PromptAgentControlOptions) {
     const requestClient = options.client();
     const sessionId = options.activeSessionId();
     if (!requestClient || !sessionId || !options.runtimeReady(sessionId) || !options.runs.isRunning(sessionId)) return;
-    const state = agentState(sessionId);
-    if (state === "pause-requested" || state === "resuming") return;
+    const runGeneration = options.runs.generation(sessionId);
+    const queue = pauseToggleQueues.get(sessionId) ?? {};
+    pauseToggleQueues.set(sessionId, queue);
+    const isCurrent = () => pauseToggleQueues.get(sessionId) === queue
+      && requestClient === options.client() && options.runtimeReady(sessionId)
+      && options.runs.generation(sessionId) === runGeneration;
 
-    options.setErrorMessage(null);
-    setAgentState(sessionId, "pause-requested");
-    localControlRequests.add(sessionId);
-    try {
-      const next = await requestClient.agentControl(sessionId, "pause");
-      if (requestClient === options.client() && options.runtimeReady(sessionId)) setAgentState(sessionId, next.state);
-    } catch (error) {
-      if (requestClient === options.client() && options.runtimeReady(sessionId)) {
-        const next = await requestClient.agentControl(sessionId, "state").catch(() => undefined);
-        setAgentState(sessionId, next?.state ?? "idle");
-        if (sessionId === options.activeSessionId()) options.reportError(error);
+    const toggle = async (): Promise<void> => {
+      if (!isCurrent() || !options.runs.isRunning(sessionId)) return;
+      const state = agentState(sessionId);
+      if (state === "resuming" || state === "paused" || state === "continuable") return;
+      const action = state === "pause-requested" ? "cancel-pause" : "pause";
+      options.setErrorMessage(null);
+      if (action === "pause") setAgentState(sessionId, "pause-requested");
+      const revision = stateRevisions.get(sessionId);
+      localControlRequests.add(sessionId);
+      try {
+        const next = await requestClient.agentControl(sessionId, action);
+        // A newer push (especially paused/settled) outranks an older RPC reply.
+        if (isCurrent() && stateRevisions.get(sessionId) === revision) setAgentState(sessionId, next.state);
+      } catch (error) {
+        if (isCurrent()) {
+          const queryRevision = stateRevisions.get(sessionId);
+          const next = await requestClient.agentControl(sessionId, "state").catch(() => undefined);
+          if (isCurrent() && stateRevisions.get(sessionId) === queryRevision && next) setAgentState(sessionId, next.state);
+          if (isCurrent() && sessionId === options.activeSessionId()) options.reportError(error);
+        }
+      } finally {
+        if (pauseToggleQueues.get(sessionId) === queue) localControlRequests.delete(sessionId);
       }
-    } finally {
-      localControlRequests.delete(sessionId);
-    }
+    };
+
+    const task = queue.tail ? queue.tail.then(toggle) : toggle();
+    queue.tail = task;
+    await task;
+    if (pauseToggleQueues.get(sessionId) === queue && queue.tail === task) pauseToggleQueues.delete(sessionId);
   }
 
   async function continueActiveAgent(): Promise<void> {
@@ -135,6 +157,8 @@ export function createPromptAgentControl(options: PromptAgentControlOptions) {
   }
 
   function clearSession(sessionId: string): void {
+    pauseToggleQueues.delete(sessionId);
+    stateRevisions.delete(sessionId);
     if (!agentControlStates.has(sessionId)) return;
     const next = new Map(agentControlStates);
     next.delete(sessionId);
@@ -146,6 +170,8 @@ export function createPromptAgentControl(options: PromptAgentControlOptions) {
   function reset(): void {
     agentControlStates = new Map();
     localControlRequests.clear();
+    pauseToggleQueues.clear();
+    stateRevisions.clear();
     extensionRunGenerations.clear();
   }
 

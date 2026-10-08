@@ -22,7 +22,7 @@ export type PreviewTarget =
       lineRange?: ProjectFileLineRange;
       userConfigKind?: SettingsConfigKind;
     }
-  | { kind: "attachment"; attachment: Attachment };
+  | { kind: "attachment"; attachment: Attachment; autoplay?: boolean };
 
 export type PreviewEntry = PreviewTarget & {
   id: number;
@@ -78,8 +78,15 @@ export function createPreviewState(options: PreviewStoreOptions) {
   }
 
   function move(offset: -1 | 1): void {
+    consumeAutoplay();
     filePreviewGeneration += 1;
     history = movePreviewHistory(history, offset);
+  }
+
+  function consumeAutoplay(id?: number): void {
+    const entry = currentPreview(history);
+    if (entry?.kind !== "attachment" || !entry.autoplay || (id !== undefined && entry.id !== id)) return;
+    history = replaceCurrentPreview(history, { ...entry, autoplay: false });
   }
 
   function invalidateFileLoads(): void {
@@ -120,6 +127,7 @@ export function createPreviewState(options: PreviewStoreOptions) {
     rememberScroll,
     close,
     move,
+    consumeAutoplay,
     invalidateFileLoads,
     beginFileLoad,
     fileLoadIsCurrent,

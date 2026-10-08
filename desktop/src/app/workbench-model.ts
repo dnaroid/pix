@@ -83,6 +83,7 @@ type PreviewLike =
 type GitDiffLike = {
   path?: string | null;
   scope: string;
+  commit?: { hash: string; shortHash: string; subject: string };
 };
 
 export function buildDesktopWorkbenchTabs(options: {
@@ -130,11 +131,12 @@ export function buildDesktopWorkbenchTabs(options: {
     });
   }
   if (options.gitDiff) {
+    const commit = options.gitDiff.commit;
     const target = options.gitDiff.path ?? "All changes";
     const diffTab: WorkbenchDiffTab = {
       id: "git-diff",
-      label: options.gitDiff.path ? `${workbenchTabLabel(target)} · Diff` : "All Changes · Diff",
-      title: `${target} · ${options.gitDiff.scope}`,
+      label: commit ? `Commit ${commit.shortHash}` : options.gitDiff.path ? `${workbenchTabLabel(target)} · Diff` : "All Changes · Diff",
+      title: commit ? `${commit.hash} · ${commit.subject}` : `${target} · ${options.gitDiff.scope}`,
       panelId: "workbench-panel-git-diff",
       kind: "diff",
       closable: true,

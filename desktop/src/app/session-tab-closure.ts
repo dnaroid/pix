@@ -59,6 +59,7 @@ export function createSessionTabClosure(
   async function closeSessionTab(
     sessionId: string,
     preferredNextSessionId?: string,
+    onClosing?: () => void,
   ): Promise<boolean> {
     options.tabs.closeSelector();
     if (options.sessionMutationRunning() || sessionActions.isBusy(sessionId)) return false;
@@ -66,6 +67,7 @@ export function createSessionTabClosure(
     if (sessionId === DRAFT_SESSION_TAB_ID) {
       if (!options.draft.open || tabSessionIds.length === 0) return false;
       const wasActive = options.draft.active;
+      onClosing?.();
       options.draft.close();
       if (!wasActive) return true;
       options.clearPrompt();
@@ -85,6 +87,7 @@ export function createSessionTabClosure(
     // A participant tab is only a view of a council-owned runtime. Never send
     // session/close (or clear its runtime/activity) when dismissing that view.
     if (options.isBrainstormParticipant?.(sessionId)) {
+      onClosing?.();
       options.tabs.markClosed(sessionId);
       if (sessionId !== options.state.sessionId) {
         options.retargetWorkbenchAnchors(sessionId, options.state.sessionId ?? undefined);
@@ -125,61 +128,56 @@ export function createSessionTabClosure(
     const requestClient = options.client();
     const requestWorkspace = options.workspace();
     const current = () => requestClient === options.client() && requestWorkspace === options.workspace();
-    if (sessionId !== options.state.sessionId) {
-      if (!sessionActions.begin(sessionId)) return false;
-      options.setErrorMessage(null);
-      options.tabs.markClosed(sessionId);
+    if (!sessionActions.begin(sessionId)) return false;
+    const restoreHistory = options.history.captureRollback(sessionId);
+    const wasActive = sessionId === options.state.sessionId;
+    // Consent may have yielded while other tabs were closed or opened.
+    const remainingSessionIds = options.tabSessionIds().filter((id) => (
+      id !== sessionId && !sessionActions.isBusy(id)
+    ));
+    let nextSessionId = options.state.sessionId ?? undefined;
+    if (wasActive) {
+      nextSessionId = preferredNextSessionId && remainingSessionIds.includes(preferredNextSessionId)
+        ? preferredNextSessionId
+        : remainingSessionIds[0];
+    }
+    options.setErrorMessage(null);
+    onClosing?.();
+    options.tabs.markClosed(sessionId);
+    // Retire ownership now, not on completion: pending sends, history and late
+    // updates must not revive the closed view while ACP is stopping its runtime.
+    // Keep transcript/composer snapshots until success so failure can restore it.
+    options.forgetRuntime(sessionId);
+    options.clearSessionActivity(sessionId);
+    options.retargetWorkbenchAnchors(sessionId, nextSessionId);
+    let navigation: Promise<void> | undefined;
+    if (wasActive) {
+      options.history.cancel();
+      if (nextSessionId) navigation = loadSession(nextSessionId);
+      else {
+        options.tabs.forgetActive(requestWorkspace);
+        navigation = options.draft.openStartTab();
+      }
+    }
+
+    // Only this session stays busy. Close/focus callers complete without waiting
+    // for ACP teardown; a late failure restores membership, never navigation.
+    void (async () => {
       try {
         await requestClient?.closeSession(sessionId);
-        if (!current()) return true;
-        options.forgetRuntime(sessionId);
-        options.clearSessionActivity(sessionId);
+        if (!current()) return;
         options.state.deleteSessionTranscript(sessionId);
         options.forgetComposerDraft(sessionId);
-        options.retargetWorkbenchAnchors(sessionId, options.state.sessionId ?? undefined);
       } catch (error) {
-        if (!current()) return false;
+        if (!current()) return;
+        restoreHistory();
         options.tabs.show(sessionId);
         options.reportError(error);
-        return false;
       } finally {
         sessionActions.end(sessionId);
       }
-      return true;
-    }
-
-    const nextSessionId = preferredNextSessionId && tabSessionIds.includes(preferredNextSessionId)
-      ? preferredNextSessionId
-      : tabSessionIds.find((id) => id !== sessionId);
-    let closed = false;
-    options.setOperationRunning(true);
-    options.setErrorMessage(null);
-    options.tabs.markClosed(sessionId);
-    try {
-      await requestClient?.closeSession(sessionId);
-      options.forgetRuntime(sessionId);
-      options.clearSessionActivity(sessionId);
-      options.state.deleteSessionTranscript(sessionId);
-      options.forgetComposerDraft(sessionId);
-      options.history.cancel();
-      options.state.clearActiveSession();
-      options.retargetWorkbenchAnchors(sessionId, nextSessionId);
-      // Requests made while the closing session was still active can fail during
-      // ACP teardown. Do not carry their transient error into the fallback tab.
-      options.setErrorMessage(null);
-      closed = true;
-    } catch (error) {
-      options.tabs.show(sessionId);
-      options.reportError(error);
-    } finally {
-      options.setOperationRunning(false);
-    }
-    if (!closed) return false;
-    if (nextSessionId) await loadSession(nextSessionId);
-    else {
-      options.tabs.forgetActive(options.workspace());
-      await options.draft.openStartTab();
-    }
+    })();
+    await navigation;
     return true;
   }
 

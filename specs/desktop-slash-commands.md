@@ -77,6 +77,28 @@ Make Pi/Pix slash commands discoverable and keyboard-first in Pix Desktop while 
 - The composer popup opens only for a slash command name at the end of the current draft, supports fuzzy ranking and keyboard navigation, keeps textarea focus, and exposes listbox semantics.
 - Enter executes commands with no required input. Optional hints still add a trailing space on Tab completion, while argument-free interactive commands open their picker. Commands with required input remain in the composer unless Desktop supplies a matching picker.
 
+### Prompt enhancement
+
+Prompt enhancement (`/enhance` or the composer menu) disables the active
+composer's input, attachments, voice, menu and submission while the model
+request is pending. The send control shows an animated spinner with an
+accessible “Improving prompt” status. Success and failure release the lock;
+other sessions remain usable, and stale completions cannot unlock a newer
+request or overwrite another context's draft.
+
+## Implementation
+
+- `desktop/src/app/conversation-session-actions.ts`
+- `desktop/src/app/desktop-workbench-prop-builders.ts`
+- `desktop/src/components/PromptComposer.svelte`
+- `desktop/src/components/PromptComposerControls.svelte`
+
+## Tests
+
+- `desktop/src/app/conversation-session-actions.test.ts`
+- `desktop/src/app/desktop-workbench-prop-builders.test.ts`
+- `desktop/src/components/PromptComposerControls.test.ts`
+
 ## Related files
 
 - `acp/src/acp/slash-commands.ts`

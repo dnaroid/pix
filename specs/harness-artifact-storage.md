@@ -63,6 +63,9 @@ Decision: [0015 — Canonical disposable harness output](../docs/decisions/0015-
 - This is guidance plus eval defaults, not a filesystem sandbox. Explicit
   output overrides can point elsewhere and are not cleaned by this policy.
 - Existing artifacts are not moved or deleted. Prior provenance may be unknown.
+- `.pi/search/` is canonical durable project state, not scratch output. Both
+  Desktop cleanup paths preserve its SQLite database and sidecars; see
+  [Desktop universal search](desktop-universal-search.md).
 - No new cleanup mechanism is introduced. The
   [Registry storage contract](resource-registry-project-state.md) cleans
   initialized-project `.pi/artifacts/` and `.pi/subagents/` in Desktop after a
@@ -74,6 +77,7 @@ Decision: [0015 — Canonical disposable harness output](../docs/decisions/0015-
 ## Implementation
 
 - `AGENTS.md`
+- `desktop/src-tauri/src/lib.rs`
 - `external/pi-tools-suite/src/artifact-paths.ts`
 - `external/pi-tools-suite/src/desktop-visual-prompt.ts`
 - `external/pi-tools-suite/src/index.ts`
@@ -88,6 +92,7 @@ Decision: [0015 — Canonical disposable harness output](../docs/decisions/0015-
 
 ## Tests
 
+- `desktop/src-tauri/src/lib.rs` (project cleanup tests, including durable search database/sidecar preservation)
 - `external/pi-tools-suite/test/tool-descriptions.test.ts`
 - `external/pi-tools-suite/test/async-subagents/core.test.ts`
 - `external/pi-tools-suite/test/evals/output-dir.test.ts`
@@ -95,6 +100,9 @@ Decision: [0015 — Canonical disposable harness output](../docs/decisions/0015-
 - `external/pi-tools-suite/test/desktop-visual-prompt.test.ts`
 
 ## Verification
+
+Run the native project cleanup tests to confirm both manual Clean and automatic
+TTL cleanup preserve the durable search database and sidecars.
 
 Run the five focused Bun test files above and suite source typecheck.
 Assertions cover log guidance on shell/Bash aliases, generic child prompts,

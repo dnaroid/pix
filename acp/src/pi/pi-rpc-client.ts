@@ -18,6 +18,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 const PIX_PAUSE_MESSAGE = "\u0000pix:agent-control:pause";
+const PIX_CANCEL_PAUSE_MESSAGE = "\u0000pix:agent-control:cancel-pause";
 const PIX_CONTINUE_MESSAGE = "\u0000pix:agent-control:continue";
 const PIX_LSP_CONTROL_PREFIX = "\u0000pix:lsp-control:";
 const PIX_BTW_RPC_PREFIX = "\u0000pix:btw:";
@@ -132,6 +133,9 @@ export type PiSessionEntry = Record<string, unknown> & {
 
 /** Session statistics exposed by pi's public RPC client. */
 export type PiSessionStats = Awaited<ReturnType<RpcClient["getSessionStats"]>> & {
+	/** Proven current tree identity; injected by Pix's bridge, never a message offset. */
+	readonly pixSearchLeafId?: string | null;
+	readonly pixSearchSessionPath?: string;
 	/** Live DCP estimate injected by Pix's RPC entry when the DCP extension is active. */
 	readonly pixDcpTokensSaved?: number | undefined;
 	/** Live DCP context-map snapshot injected by Pix's RPC entry. */
@@ -232,6 +236,8 @@ export interface PiClient {
 	bash(command: string, excludeFromContext?: boolean): Promise<PiBashResult>;
 	/** Request a graceful stop at the next agent turn boundary. */
 	pause(): Promise<void>;
+	/** Withdraw a pending pause; never resume a boundary that has already stopped. */
+	cancelPause(): Promise<void>;
 	/** Continue an idle agent whose transcript ends at a resumable boundary. */
 	continue(): Promise<void>;
 	steer(message: string, images?: PiImageContent[]): Promise<void>;
@@ -456,6 +462,10 @@ export class PiRpcClient implements PiClient {
 
 	async pause(): Promise<void> {
 		await this.requireClient().prompt(PIX_PAUSE_MESSAGE);
+	}
+
+	async cancelPause(): Promise<void> {
+		await this.requireClient().prompt(PIX_CANCEL_PAUSE_MESSAGE);
 	}
 
 	async continue(): Promise<void> {

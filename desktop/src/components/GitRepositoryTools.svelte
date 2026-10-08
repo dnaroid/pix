@@ -70,10 +70,14 @@
   <section class="px-2 pb-3" aria-label="Recent commits">
     <ol>
       {#each workflow.details?.history ?? [] as entry (entry.hash)}
-        <li class="flex h-6 min-w-0 items-center gap-2 text-xs" title={`${entry.hash}\n${entry.subject}\n${entry.author} · ${entry.date}`}>
-          <span class="shrink-0 font-mono text-muted-foreground">{entry.shortHash}</span>
-          <span class="min-w-0 flex-1 truncate text-foreground">{entry.subject}</span>
-          <span class="shrink-0 text-muted-foreground tabular-nums">{entry.date.slice(0, 10)}</span>
+        <li class="min-w-0" title={`${entry.hash}\n${entry.subject}\n${entry.author} · ${entry.date}`}>
+          <button class="flex h-6 w-full min-w-0 items-center gap-2 rounded-sm text-left text-xs hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring"
+            type="button" aria-label={`View diff for commit ${entry.shortHash}: ${entry.subject}`}
+            onclick={() => workflow.onOpenCommit(entry.hash)}>
+            <span class="shrink-0 font-mono text-muted-foreground">{entry.shortHash}</span>
+            <span class="min-w-0 flex-1 truncate text-foreground">{entry.subject}</span>
+            <span class="shrink-0 text-muted-foreground tabular-nums">{entry.date.slice(0, 10)}</span>
+          </button>
         </li>
       {:else}<li class="text-xs text-muted-foreground">{workflow.detailsLoading ? "Loading…" : "No commits yet."}</li>{/each}
     </ol>

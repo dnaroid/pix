@@ -19,6 +19,15 @@ Preparation waits for idle successful state; queued/building states wait within
 the deadline, and failed state rejects even if an older target is still present.
 The default deadline is 120 seconds; `--timeout-ms` accepts 100..300000.
 
+An automatic discovery limit is not evidence that the watcher is absent.
+QA recovery inspects direct `pix-watch-all-*` children of the canonical Node
+system temp root (on macOS, not necessarily `/tmp`), identifies the exact live
+owner for the checkout, and retries with `--state`. It does not raise safety
+limits, recursively scan temporary files, or start another watcher. First-run
+onboarding in the disposable QA profile is ordinary setup: QA may continue
+through the enabled Continue action and skip optional integrations without
+asking the user to prepare the instance.
+
 Preparation copies the published `.app`, not mutable Cargo output, into a new
 private run under `.pi/subagents/`. An explicit new `--run-dir` may be inside
 `.pi/subagents/` or `.pi/artifacts/` in the checkout. It rereads watcher state

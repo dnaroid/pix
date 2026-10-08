@@ -29,7 +29,7 @@ function conversationOptions(sessionId: string | null, quotaWait = createQuotaWa
     activeSlashCommands: () => [],
     pendingElicitation: () => null,
     questionImageAdding: () => false,
-    transcriptScroll: { followsLatest: true, handleScroll: vi.fn(), jumpToLatest: vi.fn() },
+    transcriptScroll: { followsLatest: true, restoring: false, handleScroll: vi.fn(), jumpToLatest: vi.fn() },
     workspaceController: {},
     preview: { active: undefined, canGoBack: false, canGoForward: false, move: vi.fn() },
     transcriptAttachments: { prepare: vi.fn() },
@@ -58,6 +58,25 @@ function conversationOptions(sessionId: string | null, quotaWait = createQuotaWa
 }
 
 describe("workbench composer props", () => {
+  it("forwards scroll restoration readiness separately from reader follow mode", () => {
+    const options = conversationOptions("session-1");
+    options.transcriptScroll.restoring = true;
+    options.transcriptScroll.followsLatest = false;
+    const props = buildWorkbenchConversationProps(options).transcript;
+    expect(props.scrollRestoring).toBe(true);
+    expect(props.showScrollToBottom).toBe(true);
+  });
+  it("locks the composer only while the current prompt is being enhanced", () => {
+    const options = conversationOptions("session-1");
+    options.conversationActions.promptEnhancing = true;
+    const pending = buildWorkbenchConversationProps(options).composer;
+    expect(pending.ready).toBe(false);
+    expect(pending.promptEnhancing).toBe(true);
+    options.conversationActions.promptEnhancing = false;
+    const finished = buildWorkbenchConversationProps(options).composer;
+    expect(finished.ready).toBe(true);
+    expect(finished.promptEnhancing).toBe(false);
+  });
   it("makes owned participant read-only and returns to its explicit orchestrator ID", () => {
     const options = conversationOptions("participant");
     options.brainstormLink = () => ({ runId: "r", slot: 2, parentSessionId: "parent", owned: true });

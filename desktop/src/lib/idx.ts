@@ -193,13 +193,13 @@ export function idxOperationTone(status: IdxOperationStatus): "success" | "error
   return "info";
 }
 
-/** State of the opt-in OpenRouter embeddings checkbox for `init` and doctor reinitialization. */
+/** Explicit OpenRouter override for `init` and doctor; unchecked omits the flag, not local mode. */
 export interface IdxOpenrouterEmbeddingsState {
   readonly checked: boolean;
   readonly manual: boolean;
 }
 
-/** The checkbox defaults checked only when the workspace IDX config names the openrouter embedding provider. */
+/** Reflect saved OpenRouter config; otherwise defer provider selection/preservation to IDX. */
 export function idxOpenrouterEmbeddingsDefault(overview: IdxOverview | undefined): boolean {
   return overview?.embeddingProvider === "openrouter";
 }

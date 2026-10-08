@@ -82,7 +82,7 @@ describe("session activity attachment ownership", () => {
     expect(store.open("replacement-id")).toBe("replacement");
   });
 
-  it("retains metadata for only live sessions and bounded pending requests", () => {
+  it("retains activity snapshots and owners only for live sessions and bounded pending requests", () => {
     const store = createSessionActivityStore();
     store.open("background");
     for (let i = 0; i < 500; i++) {
@@ -95,8 +95,13 @@ describe("session activity attachment ownership", () => {
     expect(store.ownedSessionCount).toBe(1);
     expect(store.pendingRequestCount).toBe(0);
     expect(store.todos.size).toBe(0);
+    expect(store.isForgotten("closed-0")).toBe(true);
+    store.open("closed-0");
+    expect(store.isForgotten("closed-0")).toBe(false);
+    store.markForgotten("closed-0");
     store.reset();
     expect(store.ownedSessionCount).toBe(0);
+    expect(store.isForgotten("closed-0")).toBe(false);
   });
 
   it("stages brainstorm snapshots under activity ownership and clears them on detach", () => {

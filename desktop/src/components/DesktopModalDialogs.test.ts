@@ -3,10 +3,11 @@ import commandSource from "./CommandPicker.svelte?raw";
 import elicitationSource from "./ElicitationDialog.svelte?raw";
 import modelSource from "./ModelThinkingPicker.svelte?raw";
 import settingsSource from "./ProjectSettingsDialog.svelte?raw";
+import searchSource from "./UniversalSearch.svelte?raw";
 
 describe("desktop modal dialog lifecycle", () => {
   it("uses native modal dialogs with shared focus lifecycle", () => {
-    for (const source of [commandSource, elicitationSource, settingsSource]) {
+    for (const source of [commandSource, elicitationSource, settingsSource, searchSource]) {
       expect(source).toContain("<dialog");
       expect(source).toContain("activateModalDialog");
     }

@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
 import markdownTextSource from "./MarkdownText.svelte?raw";
 
+describe("MarkdownText video theme", () => {
+  it("themes both the video surface and WebKit's native player backdrop", () => {
+    expect(markdownTextSource).toMatch(
+      /:global\(video\.markdown-media-content\)\s*\{[^}]*background: var\(--background\);[^}]*color-scheme: light dark;/,
+    );
+    expect(markdownTextSource).toMatch(
+      /:global\(video\.markdown-media-content::-webkit-media-controls-panel\)\s*\{[^}]*background-color: var\(--background\);/,
+    );
+  });
+});
+
 describe("MarkdownText fenced code layout", () => {
   it("keeps the copy button square with centered icon and out-of-flow feedback", () => {
     expect(markdownTextSource).toMatch(

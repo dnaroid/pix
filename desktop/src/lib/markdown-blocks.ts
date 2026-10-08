@@ -3,6 +3,7 @@ import type { MarkdownRenderContext } from "./markdown-context";
 import { escapeAttribute, escapeHtml } from "./markdown-escape";
 import { isClosingFence, parseFence } from "./markdown-fences";
 import { renderInline } from "./markdown-inline";
+import { displayMathBlockAt, renderDisplayMath } from "./markdown-math";
 
 const MAX_BLOCK_DEPTH = 4;
 
@@ -16,6 +17,13 @@ export function renderBlocks(lines: readonly string[], depth: number, context: M
     const line = lines[index] ?? "";
     if (!line.trim()) {
       index += 1;
+      continue;
+    }
+
+    const math = displayMathBlockAt(lines, index);
+    if (math) {
+      output.push(renderDisplayMath(math));
+      index += math.lineCount;
       continue;
     }
 
@@ -235,6 +243,7 @@ function isBlockStart(lines: readonly string[], index: number): boolean {
   const line = lines[index] ?? "";
   return Boolean(
     parseFence(line)
+    || displayMathBlockAt(lines, index)
     || /^ {0,3}(?:#{1,6}[ \t]+|>|(?:[-+*]|\d{1,9}[.)])[ \t]+)/.test(line)
     || /^ {0,3}(?:-{3,}|_{3,}|\*{3,})\s*$/.test(line)
     || parseTable(lines, index),

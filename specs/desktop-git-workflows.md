@@ -120,7 +120,27 @@ noninteractive argument-vector helpers. See
 - Fetch all configured remotes without changing local files; Pull is **fast-forward only**, requires a clean working tree and an upstream, disables autostash/rebase, and refuses divergence rather than merging, rebasing or resetting.
 - Create a branch and switch via the header selector. The inline branch-name input receives focus; Escape closes it and returns focus to the trigger.
 - Stash all staged/unstaged/untracked files; list the latest 30 stashes; restore a selected stash including its index state only into a clean working tree. Restore **keeps the saved stash**, including on failure/conflict; there is no implicit pop/drop.
-- Read-only recent history: latest 30 commits with subject, short hash, author and date. An unborn branch has an empty history. This is not a full history graph or commit-diff browser.
+- Read-only recent history: latest 30 commits with subject, short hash, author
+  and date. An unborn branch has an empty history. Clicking a Log entry opens
+  that exact commit's patch in the existing workbench Git Diff tab, with a
+  Source Control sidebar summary showing its subject, full hash, author and
+  date, and a View diff action to return to it. The tab label includes the
+  short hash. The Log remains capped to 30 entries, without a full history
+  graph; universal search can open older HEAD ancestors not shown in the Log.
+- Historical patches use a dedicated read-only `git_commit_diff` command.
+  It requires an unambiguous full hexadecimal commit hash and verifies
+  reachability from current HEAD; arbitrary refspecs and command options
+  cannot be passed. Git runs off the UI thread without optional index locks
+  and returns a bounded/truncated first-parent patch for normal, root and
+  merge commits. No checkout, staging, rebase, reset, temporary worktree or
+  file mutation is performed. Selection, close, and workspace lifecycle
+  invalidate pending previews so older completions cannot overwrite a newer
+  editor view. Historical patches are read-only inspection and do not
+  expose the working-tree-only code review or mutation actions.
+- [Universal search](desktop-universal-search.md) uses a separate read-only metadata
+  command over all current HEAD ancestors; its candidate cap does not change this
+  panel's 30-entry history. Optional hybrid commit indexing is a separate ACP
+  search source, not a Source Control history refresh or Git mutation.
 
 Tracked, non-conflicted working-tree rows additionally expose Discard with an explicit irreversible-action confirmation. It restores only the selected file's unstaged changes **from the index**, preserving staged hunks. Untracked files, directory/pattern targets and submodules are not discarded by this command. Literal pathspecs and repository-root confinement are enforced in the backend. There is no clean/reset/force action.
 

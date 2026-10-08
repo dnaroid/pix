@@ -82,6 +82,35 @@ test("maps text, thinking, tool arguments, usage, and tool termination", async (
         "done",
     ]);
 });
+
+test("rejects unqualified Edit with safe catalog diagnostics; another request can execute qualified Edit", () => {
+    const offered = new Set(["mcp__pi__Edit"]);
+    const names = new Map([["mcp__pi__Edit", "Edit"]]);
+    const rejectedOutput = createOutput(model);
+    const mapper = makeMapper(createAssistantMessageEventStream(), rejectedOutput, offered, names, () => {});
+    mapper.accept(initRecord([...offered], [{ name: "pi", status: "connected" }]));
+    mapper.accept({ type: "stream_event", event: { type: "message_start", message: { id: "msg_bad", model: "claude-sonnet-5", usage: {} } } });
+    assert.throws(() => mapper.accept({ type: "stream_event", event: { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "toolu_bad", name: "Edit", input: {} } } }), /unknown tool: Edit/);
+    assert.deepEqual(rejectedOutput.content.filter((part) => part.type === "toolCall"), []);
+    assert.deepEqual(mapper.toolNameMismatch, {
+        proposedName: "Edit",
+        classification: "unqualified_active",
+        expectedTransportName: "mcp__pi__Edit",
+        catalogSize: 1,
+        catalogFingerprint: mapper.toolNameMismatch.catalogFingerprint,
+        initializationValidated: true,
+    });
+    assert.match(mapper.toolNameMismatch.catalogFingerprint, /^[a-f0-9]{16}$/);
+
+    const output = createOutput(model);
+    const next = makeMapper(createAssistantMessageEventStream(), output, offered, names, () => {});
+    next.accept(initRecord([...offered], [{ name: "pi", status: "connected" }]));
+    next.accept({ type: "stream_event", event: { type: "message_start", message: { id: "msg_good", model: "claude-sonnet-5", usage: {} } } });
+    next.accept({ type: "stream_event", event: { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "toolu_good", name: "mcp__pi__Edit", input: {} } } });
+    assert.equal(output.content[0]?.type, "toolCall");
+    assert.equal(output.content[0]?.name, "Edit");
+    assert.equal(next.toolNameMismatch, undefined);
+});
 test("preserves mixed content and multiple tool calls by Pi content index", async () => {
     const stream = createAssistantMessageEventStream();
     const output = createOutput(model);

@@ -167,6 +167,8 @@ async function importCodexApiKey() {
 }
 
 async function installIdx() {
+  // npm installation needs neither OpenRouter credentials nor Ollama. Keep
+  // setup/init/doctor separate: they select providers and may transmit project data.
   const existing = await managedIdx();
   if (existing.installed) return { status: "already-installed", ...existing };
   const configuredNpmCli = process.env.PIX_BUNDLED_NPM_CLI?.trim();

@@ -32,7 +32,7 @@ Let Pix Desktop users view and edit its independent JSONC application profile (`
 
 ## Non-goals
 
-- Editing arbitrary files or project-local settings.
+- Editing arbitrary files or general project-local settings.
 - Applying saved config changes to already-running components; consumers re-read config on their own schedule.
 - Authoring or versioning the JSON schemas themselves.
 - Persisting unsaved drafts across application restarts (drafts live only in the in-memory editor cache).
@@ -48,6 +48,20 @@ Let Pix Desktop users view and edit its independent JSONC application profile (`
 - Field edits and resets apply through JSONC-aware path modification so comments elsewhere in the file survive. Booleans use switches; bounded enums use selects; numbers use constrained number inputs; secrets use password inputs. Desktop model fields and fallback lists consume the same ACP session model catalog as the existing Model & Thinking picker instead of requiring `provider/model` text entry. Existing configured refs that are absent from the current catalog remain representable and are never rewritten merely because the catalog changed. The Git section includes a **CI fix model** selector for `desktop.git.ciFixModelRef`; leaving it unset intentionally means “use the normal default model” rather than introducing a second hard-coded default.
 - `visibleModels` is edited as an explicit “limit model picker” switch plus a model checklist; omitting the key means every catalog model is visible. Internal `thinkingByModel` memory is not exposed in the normal settings UI because Desktop maintains it automatically; it remains visible/editable only through the full JSONC editor launched from `Advanced`.
 - Assistant features includes **Knowledge review model**, a catalog-backed model/optional-thinking selector for `desktop.knowledge.reviewModelRef`. Reset/empty selection removes the override so knowledge-base AI review uses the normal new-session default; saved changes apply to the next review, not existing sessions. Project-local Desktop config can override the global value. This setting is separate from the `knowledge-auditor` role; see [Desktop IDX panel](desktop-idx-panel.md).
+- Assistant features includes explicit-opt-in **Semantic search**, plus a masked,
+  write-only shared OpenRouter key input when credentials are missing. The key
+  is never stored in the Desktop JSONC document. The control discloses sending
+  authored settings metadata and settings-search queries to the fixed embedding
+  model. Session-title lookup is local lexical search; titles and conversation
+  history are never sent to the provider. Local search works without semantic
+  consent. There is no message-noise-filter control or message-body index;
+  legacy `search.messageFilterEnabled` config keys are ignored.
+  Preferences loads are workspace/client scoped and canceled on teardown; see
+  [Desktop universal search](desktop-universal-search.md).
+- Universal search uses a separate authored settings catalogue with stable
+  field IDs. Its deep link opens Settings, clears local filtering, scrolls to
+  the exact row and focuses its control after the editor mounts. No configured
+  values or secrets are searchable.
 - Pi Tools Suite fields that are semantically model references (lookup model/fallbacks and DCP summarizer/fallbacks) reuse the same catalog-backed model selectors; free-form model-pattern maps such as todo/DCP overrides remain structured JSON because wildcard keys are part of their contract.
 - Pi Tools Suite `disabledBuiltinAgents` is edited as a curated checklist of the
   bundled async-subagent catalog. Desktop discovers the top-level bundled
@@ -86,7 +100,7 @@ Let Pix Desktop users view and edit its independent JSONC application profile (`
 - `Open in editor` is disabled while the current Settings sidebar draft is dirty; the sidebar draft must be saved or reloaded first so the editor tab starts from the disk baseline.
 - Saving is blocked while the source has issues: JSONC parse errors, a non-object root, or schema validation problems (bounded to the first 20 issues).
 - Save uses `write_user_config_if_unchanged(kind, expectedContent, content)` with the draft's last saved source as the compare-and-swap baseline. If the file changed after the draft was loaded/saved, Desktop refuses the stale write and asks the user to reload instead of overwriting the newer file.
-- Write normalizes the content first (append a trailing newline when missing) and enforces the 2 MiB limit on the normalized bytes; an oversized draft is rejected with a clear error before any filesystem change, so a failed save never creates, truncates, or replaces the config file.
+- Write normalizes the content first (append a trailing newline when missing) and enforces the 2 MiB limit on the normalized bytes before filesystem ownership or the compare-and-swap baseline check; even a stale oversized draft is rejected with a clear size error before any filesystem change, so a failed save never creates, truncates, or replaces the config file.
 - A successful save writes the normalized content (creating `~/.config/pi` and the file when needed), then returns the freshly read document; the editor replaces its draft with the returned content so server-side normalization (trailing newline) is visible.
 - Desktop launches its ACP backend with `PIX_CONFIG_PROFILE=desktop`. ACP user/project reads therefore resolve to `pix-desktop.jsonc` / `$WORKSPACE/.pi/pix-desktop.jsonc`; the default profile remains `pix.jsonc` / `$WORKSPACE/.pi/pix.jsonc` for TUI-compatible ACP use.
 - Reload with unsaved changes requires explicit discard confirmation; loading or saving failures surface as an error message while keeping the draft intact.
@@ -99,12 +113,14 @@ Let Pix Desktop users view and edit its independent JSONC application profile (`
 - The write path validates before mutating: normalization → size check → directory/file checks → write → re-read.
 - The size check on write covers the normalized content, not the raw input, so an input exactly at the limit without a trailing newline is rejected instead of writing a file one byte over the limit.
 - Writes preserve JSONC comments and formatting outside edited values; the only mandatory mutation is the trailing newline.
-- Desktop serializes config saves against sidebar health reads with a backend read/write lock, so the live Settings indicator cannot observe the intermediate truncate/write window of `fs::write`.
-- Conditional writes compare the current file content and write the replacement while holding one backend write lock. This prevents two Desktop read/modify/write flows from losing each other's updates between separate read and write commands.
+- Desktop serializes config saves against sidebar health reads with a backend read/write lock. Native writes publish normalized content through a private same-directory temporary file and atomic rename, so readers do not observe a truncated document.
+- Native unconditional/conditional config saves and ACP semantic-consent updates additionally share a filesystem directory lock at `<config-path>.search.lock`, including when the config does not yet exist. Conditional saves acquire ownership before reading/comparing the baseline and retain it through publication; ACP edits read the current JSONC under the same ownership. This prevents cross-process saves from losing unrelated keys or restoring revoked consent. Native blocking work remains on the blocking pool.
+- Contention is bounded to approximately one second and reported as a busy error without writing. Writers release ownership on success/failure and never steal a lock because its mtime is old: a paused live writer must remain protected. A crash-leftover lock fails closed; manual recovery may remove it only after confirming all owners have exited. No automatic stale-lock cleanup is performed.
 
 ## Implementation
 
 - `desktop/src-tauri/src/lib.rs`
+- `acp/src/search/config.ts`
 - `desktop/src/components/SettingsPanel.svelte`
 - `desktop/src/components/settings/SettingsConfigEditor.svelte`
 - `desktop/src/components/settings/SettingsSectionNav.svelte`
@@ -113,6 +129,8 @@ Let Pix Desktop users view and edit its independent JSONC application profile (`
 - `desktop/src/components/settings/SettingsBuiltinAgentVisibility.svelte`
 - `desktop/src/components/settings/SettingsModuleVisibility.svelte`
 - `desktop/src/components/settings/SettingsFieldRow.svelte`
+- `desktop/src/components/settings/SettingsSearchPreferences.svelte`
+- `desktop/src/lib/settings-search-catalog.ts`
 - `desktop/src/lib/settings.ts`
 - `desktop/src/lib/settings-navigation.ts`
 - `desktop/src/lib/settings-viewport.ts`
@@ -133,10 +151,15 @@ Let Pix Desktop users view and edit its independent JSONC application profile (`
 
 ## Tests
 
+- `acp/test/search-preferences.test.ts`
+
+- `tests/pix-desktop-search-schema.test.ts`
+
 - `desktop/src-tauri/src/lib.rs` (`user_settings` module)
 - `desktop/src/lib/desktop-config.test.ts`
 - `desktop/src/lib/settings.test.ts`
 - `desktop/src/lib/settings-navigation.test.ts`
+- `desktop/src/lib/settings-search-catalog.test.ts`
 - `desktop/src/lib/settings-viewport.test.ts`
 - `desktop/src/app/desktop-workbench-prop-builders.test.ts`
 - `desktop/src/components/DesktopVisualRegressions.test.ts`
@@ -183,7 +206,7 @@ Let Pix Desktop users view and edit its independent JSONC application profile (`
 
 ## Evidence
 
-- Confirmed by code: `write_user_config_from` computes `normalized` and checks `MAX_USER_CONFIG_BYTES` before `fs::write`; `read_user_config_from` returns default content for missing files and errors for oversized or non-file paths.
+- Confirmed by code: both native write paths normalize and check `MAX_USER_CONFIG_BYTES` before shared filesystem ownership and atomic publication; `read_user_config_from` returns default content for missing files and errors for oversized or non-file paths.
 - Confirmed by tests: `user_settings_configs_resolve_under_the_platform_home_and_round_trip`, `desktop_user_settings_ignore_tui_pix_config`, and `user_settings_reject_normalized_content_over_the_size_limit_before_writing` (oversized input leaves the existing config byte-identical).
 - Confirmed by code: `SettingsConfigEditor.svelte` blocks save while `settingsSourceIssues` reports problems, generation-guards async loads, rejects stale compare-and-swap saves, reconciles a successful save response against the latest draft rather than clobbering edits typed during the write, renders all authored chapters of `DesktopSettingsEditor` / `ToolsSuiteSettingsEditor`, and makes `Advanced` a launcher instead of an inline source textarea. `SettingsPanel.svelte` owns the shared search/index and aggregates errors from both files; `settings-viewport.ts` filters authored row metadata and tracks visible chapters with frame-coalesced scroll work, disposing observers/listeners on teardown. Preview state marks user-config targets; preview file I/O reads and saves them through the dedicated user-config commands; the workbench builder makes only those marked local previews editable while ordinary home/absolute local previews stay read-only.
 - Confirmed by tests: `desktop-workbench-prop-builders.test.ts` verifies user-config previews are editable and save through `saveUserConfig` while generic local previews remain read-only; `DesktopVisualRegressions.test.ts` verifies the inline Advanced JSONC textarea is absent and the editor launcher remains present.

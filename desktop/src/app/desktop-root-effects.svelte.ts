@@ -1,4 +1,5 @@
 import type { SessionConfigOption } from "@agentclientprotocol/sdk";
+import { untrack } from "svelte";
 import { modelThinkingConfigState } from "../lib/model-thinking";
 import { createAttachmentDraftOwnership } from "./attachment-draft-ownership";
 import { createRegistryStartupLoader, type RegistryStartupState } from "./registry-startup";
@@ -29,6 +30,10 @@ type DesktopRootEffectsOptions = {
   workbenchTabs: () => readonly WorkbenchTab[];
   markSessionTabViewed: (sessionId: string) => void;
 };
+
+export function shouldActivateConversationTab(activeTab: WorkbenchTab | undefined): boolean {
+  return !activeTab || activeTab.kind === "session";
+}
 
 export function createDesktopRootEffects(options: DesktopRootEffectsOptions) {
   const registryStartup = createRegistryStartupLoader({
@@ -76,7 +81,13 @@ export function createDesktopRootEffects(options: DesktopRootEffectsOptions) {
   $effect(() => {
     const conversationTabId = options.activeConversationWorkbenchTabId();
     if (conversationTabId !== previousConversationWorkbenchTabId) {
-      if (conversationTabId) options.setActiveWorkbenchTabId(conversationTabId);
+      const activeTab = untrack(() => options.workbenchTabs().find(
+        (tab) => tab.id === options.activeWorkbenchTabId(),
+      ));
+      // An auxiliary surface can own focus while close changes the conversation.
+      if (conversationTabId && shouldActivateConversationTab(activeTab)) {
+        options.setActiveWorkbenchTabId(conversationTabId);
+      }
       previousConversationWorkbenchTabId = conversationTabId;
     }
   });

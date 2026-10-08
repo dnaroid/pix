@@ -86,7 +86,7 @@
 
   type SidebarTab = SidebarIndicatorTab;
   type PackageScriptsPanelHandle = { refresh: () => void };
-  type SettingsPanelHandle = { openSection: (id: string) => Promise<void> };
+  type SettingsPanelHandle = { openSection: (id: string) => Promise<void>; openField: (section: string, fieldId: string) => Promise<void> };
   const SIDEBAR_LABELS: Record<SidebarTab, string> = {
     tasks: "Tasks",
     project: "Project",
@@ -151,6 +151,7 @@
     onListProjectDirectory,
     onValidateProjectFile,
     onOpenProjectFile,
+    onOpenFilesFile,
     onOpenUserConfig,
     onOpenExternalEditor,
     onProjectSwitcherOpen,
@@ -241,6 +242,7 @@
     onListProjectDirectory: (path: string) => Promise<ProjectTreeEntry[]>;
     onValidateProjectFile: (path: string) => Promise<boolean>;
     onOpenProjectFile: (path: string, range?: ProjectFileLineRange) => void;
+    onOpenFilesFile?: (path: string) => void;
     onOpenUserConfig: (kind: SettingsConfigKind) => void;
     onOpenExternalEditor: (path?: string) => void;
     onProjectSwitcherOpen: () => void;
@@ -564,7 +566,9 @@
   }
 
   /** Open the project Tasks view for actions initiated outside the sidebar. */
-  export async function openTasksPanel(taskId?: string): Promise<void> {
+  export async function openTasksPanel(taskId?: string, isCurrent: () => boolean = () => true): Promise<void> {
+    if (!isCurrent()) return;
+    const requestWorkspace = workspace;
     statusMenuController.close();
     planSelectorOpen = false;
     planSelectorQuery = "";
@@ -575,9 +579,21 @@
     revealedTaskId = taskId ?? null;
     if (!taskId) return;
     await tick();
+    if (!isCurrent() || workspace !== requestWorkspace) return;
     const taskCard = [...(sidebarElement?.querySelectorAll<HTMLElement>("[data-task-card]") ?? [])]
       .find((card) => card.dataset.taskId === taskId);
     taskCard?.scrollIntoView({ block: "nearest" });
+  }
+
+  /** Reveal Source Control without toggling it closed when already active. */
+  export function openGitPanel(isCurrent: () => boolean = () => true): void {
+    if (!isCurrent()) return;
+    statusMenuController.close();
+    indicatorMenuController.close();
+    editorOpen = false;
+    deleteTaskId = null;
+    setActiveTab("git");
+    if (layoutController.collapsed) layoutController.setCollapsed(false);
   }
 
   /** Reverse navigation from links and Preview tabs into the workspace tree. */
@@ -601,6 +617,16 @@
     await tick();
     if (activeTab !== "settings" || layoutController.collapsed) return;
     await settingsPanel?.openSection(id);
+  }
+
+  /** Open Settings and focus one specific authored field control. */
+  export async function openSettingsField(section: string, fieldId: string): Promise<void> {
+    statusMenuController.close();
+    setActiveTab("settings");
+    if (layoutController.collapsed) layoutController.setCollapsed(false);
+    await tick();
+    if (activeTab !== "settings" || layoutController.collapsed) return;
+    await settingsPanel?.openField(section, fieldId);
   }
 
   /** Close the project picker when another top-level interaction takes focus. */
@@ -833,7 +859,7 @@
                 {externalEditorLabel}
                 refreshKey={projectTreeRefreshKey}
                 onListDirectory={onListProjectDirectory}
-                onOpenFile={onOpenProjectFile}
+                onOpenFile={onOpenFilesFile ?? onOpenProjectFile}
                 onOpenExternal={(path) => onOpenExternalEditor(path)}
                 onHealthChange={(error) => projectPanelError = error}
               />
@@ -915,7 +941,7 @@
         </div>
       {:else}
         <div id="workspace-settings-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Settings">
-          <SettingsPanel bind:this={settingsPanel} configOptions={settingsConfigOptions} {onOpenUserConfig} onIndicatorChange={(error) => settingsPanelError = error} />
+          <SettingsPanel bind:this={settingsPanel} configOptions={settingsConfigOptions} {workspace} searchClient={lspClient ?? undefined} {onOpenUserConfig} onIndicatorChange={(error) => settingsPanelError = error} />
         </div>
       {/if}
     </div>

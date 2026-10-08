@@ -69,6 +69,16 @@ Pix Desktop has a dedicated IDX panel. When `idx` is unavailable, the panel can
 install a managed copy into Pix's private tools directory. Project index
 initialization remains a separate explicit action.
 
+For a new project, `/idx-init` / `idx init` defaults to OpenRouter, not Ollama.
+Supply `OPENROUTER_API_KEY` in the environment or `~/.config/idx/.env`, or
+explicitly select local mode with `idx init --embedding local` (Ollama required,
+no key). Installing the CLI itself needs neither. Existing projects retain
+their saved provider without an override; do not use a mode switch as an
+unapproved repair. `idx doctor` checks saved providers, and failed prerequisites
+must stop before index deletion. See
+[IDX embedding providers](configuration.md#idx-embedding-providers), including
+the external-data disclosure and mixed-project doctor behavior.
+
 ## TUI memory grows rapidly during model thinking
 
 If the `pix`/Pi TUI process grows into multiple gigabytes while a model is

@@ -1,8 +1,8 @@
-// Keep hydrated image/model subtrees alive across Svelte's {@html} replacements.
+// Keep hydrated image/model/audio subtrees alive across Svelte's {@html} replacements.
 // Identity includes the original caption/attributes, not just the file path;
 // duplicate occurrences each own a distinct DOM node.
 export class MarkdownImageRetention {
-  constructor(private readonly kind: "image" | "model" = "image") {}
+  constructor(private readonly kind: "image" | "model" | "audio" = "image") {}
   private originals = new WeakMap<HTMLElement, string>();
   private previous = new Map<string, HTMLElement[]>();
 

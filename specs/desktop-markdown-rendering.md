@@ -17,18 +17,21 @@ Implemented; this is the current Desktop Markdown contract.
 
 ## Goal
 
-Render Markdown in Desktop transcripts and the workspace Preview editor without adding a large parser or sanitizer dependency.
+Render Markdown in Desktop transcripts and the workspace Preview editor without adding a general-purpose Markdown parser or sanitizer dependency.
 
 ## Scope
 
 - The Pix Desktop transcript and rendered `.md` file Preview editor.
 - Headings, paragraphs, line breaks, emphasis, inline code, safe links, lists, task lists, blockquotes, horizontal rules, fenced code, and simple tables.
+- Inline and display LaTeX formulas via the dedicated [math Markdown spec](math-markdown-rendering.md).
 - Complete and still-streaming ACP message chunks.
 - Preview-editor navigation, embedded media, remote images, and table fitting behavior.
 - Markdown content returned by `read` tools when the read target is Markdown.
-- Inline previews for supported project/local image, video and GLB links in transcript
+- Inline previews for supported project/local image, video, audio and GLB links in transcript
   Markdown. Supported image extensions are AVIF, BMP, GIF, JPEG, PNG, SVG, and
   WebP; supported video extensions are M4V, MOV, MP4, OGV, and WebM. Models use `.glb`.
+  Audio extensions are AAC, AIF/AIFF, FLAC, M4A, MP3, OGA/OGG, Opus and WAV;
+  playback depends on the macOS WebView's codec support.
 
 ## Non-goals
 
@@ -47,12 +50,18 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - Markdown `read` tool results use the same renderer in a dense tool-result
   presentation; other tool results keep their dedicated plain/code/diff views.
 - Raw HTML is always escaped; Markdown never injects executable markup.
+- Underscores inside words, identifiers and filenames remain literal, including
+  Markdown link labels and media captions (`01_M_Supertonic_M1.mp3`). Standalone
+  `_emphasis_`, `__strong__` and `___both___` use whitespace/punctuation-aware
+  opening and closing boundaries; escaped or unclosed underscores stay readable.
 - Markdown headings use the semantic warning accent mixed with the foreground so
   their hierarchy stays prominent with a restrained warm tone in both themes.
 - Inline code uses the Desktop semantic accent rather than ordinary prose color.
 - Fenced `mermaid` blocks render as diagrams using Mermaid strict security and
   HTML labels disabled. While rendering is pending, or if parsing/rendering
   fails, the escaped source remains readable.
+- Recognized LaTeX math delimiters use KaTeX with bundled fonts; code spans and
+  fences remain literal, and malformed/streaming formulas retain escaped source.
 - Explicit Markdown links and bare URLs with `http`, `https`, or `mailto` schemes become links.
 - Relative project links may also name existing directories. Activation uses
   Files reverse navigation instead of Preview or the OS opener: open the panel,
@@ -79,6 +88,30 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
   Markdown render bounded inline media previews with their label as a caption.
   Images lazy-load and open the media viewer when activated; videos expose native
   inline playback controls and their caption opens the viewer.
+- Inline video backgrounds, including WebKit's native paused-player backdrop,
+  use the semantic Desktop background in both light and dark themes.
+- Local audio links in both `[label](track.mp3)` and `![label](track.mp3)` syntax
+  embed a compact native audio player with accessible label, playback/seek controls
+  and an actionable caption that opens the same audio in the existing Preview tab.
+  Project, raw absolute, absolute `file://`, and `~/` destinations use the existing
+  trusted media resolvers. Audio files opened from Files or file attachments also
+  show a player in Preview rather than a UTF-8 editor or OS-opener fallback.
+  Inline players load metadata without autoplay and expose native controls.
+  Opening audio or video from the Files panel requests immediate playback once
+  the resolved Preview player mounts. Other entry points and Preview history do
+  not autoplay; rejected playback leaves native controls available. Preview audio
+  and video pause when hidden, never auto-resume on return, and release their
+  source on navigation/close, including late playback completions.
+  Audio remains a plain `file` attachment for model/provider prompt handling.
+- Unchanged inline audio players retain their actual DOM and playback position
+  through streaming updates, including pending resolution and error state, using
+  the same original-markup/occurrence identity policy as local images. Duplicate
+  occurrences own separate players. Removal, source changes and teardown pause
+  audio and release its source; stale resolver completions cannot attach a player.
+  Preview audio pauses when switching away from its tab, does not resume
+  automatically on return, and releases its source on navigation or close.
+  Unsupported codecs or damaged audio show a readable local error. Remote audio
+  is not embedded or fetched, including with Preview's remote-image opt-in.
 - Inline-code absolute image/video paths (including `file://` destinations) also
   produce the same lazy local previews, with the original code-formatted path as
   caption. They use the existing trusted local-media resolver; missing files,
@@ -100,7 +133,7 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
   See [image retention decision](../docs/decisions/0016-streaming-image-dom-retention.md).
 - `file://` media is accepted only after decoding to an absolute existing regular
   file. The backend canonicalizes it and grants scoped asset access only for a
-  supported image/video/GLB extension. Existing bounded UTF-8 non-media files from
+  supported image/video/audio/GLB extension. Existing bounded UTF-8 non-media files from
   `file://`, raw absolute Markdown destinations, or inline-code absolute paths
   open read-only in the Desktop Preview. Absolute directories and small
   binary/non-UTF-8 files retain the OS-opener fallback after user action.
@@ -188,13 +221,18 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - `desktop/src/lib/markdown-escape.ts`
 - `desktop/src/lib/markdown-fences.ts`
 - `desktop/src/lib/markdown-inline.ts`
+- `desktop/src/lib/markdown-math.ts`
 - `desktop/src/lib/markdown-links.ts`
+- `desktop/src/lib/media.ts`
+- `desktop/src/lib/attachments.ts`
 - `desktop/src/lib/syntax-highlight.ts`
 - `desktop/src/lib/preview-history.ts`
 - `desktop/src/lib/project-files.ts`
 - `desktop/src/lib/external-links.ts`
 - `desktop/src/components/MarkdownText.svelte`
 - `desktop/src/components/markdown-content-action.ts`
+- `desktop/src/components/markdown-image-retention.ts`
+- `desktop/src/components/audio-playback-action.ts`
 - `desktop/src/components/markdown-code-copy-action.ts`
 - `desktop/src/components/markdown-link-action.ts`
 - `desktop/src/components/ToolResult.svelte`
@@ -207,6 +245,9 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - `desktop/src/app/preview.svelte.ts`
 - `desktop/src/app/preview-state.svelte.ts`
 - `desktop/src/app/preview-file-io.ts`
+- `desktop/src/app/desktop-sidebar-view-model.svelte.ts`
+- `desktop/src/app/desktop-workbench-prop-builders.ts`
+- `desktop/src/components/WorkspaceSidebar.svelte`
 - `desktop/src-tauri/src/project_directory_link.rs`
 - `desktop/src/app/preview-options.ts`
 - `desktop/src/app/desktop-project-services.ts`
@@ -225,7 +266,10 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 
 ## Tests
 
+- `desktop/src/components/MarkdownText.test.ts`
 - `desktop/src/lib/markdown.test.ts`
+- `desktop/src/lib/media.test.ts`
+- `desktop/src/components/audio-playback-action.test.ts`
 - `desktop/src/lib/glb.test.ts`
 - `desktop/src/lib/glb-scene.test.ts`
 - `desktop/src/lib/glb-controls.test.ts`
@@ -239,6 +283,7 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - `desktop/src/components/markdown-code-copy-action.test.ts`
 - `desktop/src/components/preview-scroll-controller.test.ts`
 - `desktop/src/app/preview.test.ts`
+- `desktop/src/app/desktop-workbench-prop-builders.test.ts`
 - `desktop/src-tauri/src/project_directory_link.rs`
 - `desktop/src-tauri/src/lib.rs`
 
@@ -249,6 +294,10 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
   unsafe input, DCP control-block stripping/fail-open streaming behavior,
   Mermaid fallback/security, and incomplete fences.
 - Rust tests cover workspace/home confinement and preview size/UTF-8 validation.
+- Audio tests cover both Markdown syntaxes/path scopes, MIME/Preview classification,
+  confined backend resolution, player retention/duplicates, stale completions,
+  removal/teardown, inactive-tab pausing and readable media errors. Unit tests do
+  not establish actual macOS codec availability or audible playback.
 - Interactive-preview Rust tests cover byte/line boundaries, sparse oversize
   files, bounded growth classification, small text, and project/home/absolute
   targets. Preview-store tests cover configured-editor routing, missing/failed
@@ -269,6 +318,8 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - Deliberately unsupported CommonMark edge cases remain literal or degrade to plain text.
 - Bare domains without an explicit supported scheme remain plain text.
 - Previewing Markdown with remote images can make network requests to hosts named by the document; transcript Markdown remains non-fetching by default.
+- Audio extension recognition does not guarantee that each encoding is playable
+  on every supported macOS WebView; unavailable codecs keep a readable fallback.
 
 ## Evidence
 

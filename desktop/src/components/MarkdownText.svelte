@@ -81,6 +81,21 @@
   .markdown-text > :global(:last-child),
   .markdown-text.compact > :global(:last-child) { margin-bottom: 0; }
   .markdown-text :global(p) { margin: 0 0 0.75rem; }
+  .markdown-text :global(.markdown-math-inline) { white-space: nowrap; }
+  .markdown-text :global(.markdown-math-display) {
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    margin: 0.6rem 0 0.85rem;
+    padding: 0.35rem 0;
+  }
+  .markdown-text :global(.markdown-math-display .katex-display) { margin: 0; }
+  .markdown-text :global(.markdown-math-fallback) {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-family: "Geist Mono", ui-monospace, monospace;
+    font-size: max(0.92em, 0.75rem);
+  }
   .markdown-text.compact :global(p) { margin-bottom: 0.35rem; }
   .markdown-text :global(strong) { font-weight: 600; }
   .markdown-text :global(em) {
@@ -258,6 +273,20 @@
   .markdown-text :global(video.markdown-media-content) {
     width: auto;
     background: var(--background);
+    color-scheme: light dark;
+  }
+  /* WebKit's native paused-player panel can cover the video background. */
+  .markdown-text :global(video.markdown-media-content::-webkit-media-controls-panel) {
+    background-color: var(--background);
+  }
+  .markdown-text :global(.markdown-media[data-project-media="audio"] .markdown-media-frame),
+  .markdown-text :global(.markdown-media[data-local-media="audio"] .markdown-media-frame) {
+    width: min(100%, 32rem);
+    background: var(--background);
+  }
+  .markdown-text :global(audio.markdown-media-content) {
+    width: 100%;
+    color-scheme: light dark;
   }
   .markdown-text :global(.markdown-media-status) {
     padding: 1rem;

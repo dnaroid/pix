@@ -29,6 +29,7 @@ function fixture() {
   const options = {
     workspace: () => "/workspace",
     onSessionUpdate: vi.fn(),
+    onSessionCatalogChanged: vi.fn(),
     onSessionState: vi.fn(),
     onQueueState: vi.fn(),
     onQueueConsumed: vi.fn(),
@@ -45,6 +46,21 @@ describe("Desktop connection ownership", () => {
   beforeEach(() => {
     rpc.clients.length = 0;
     rpc.start.mockReset().mockResolvedValue({});
+  });
+
+  it("ignores native catalog notifications from old clients and other workspaces", async () => {
+    const { store, options } = fixture();
+    await store.connect();
+    rpc.clients[0]!.handlers.onSessionCatalogChanged?.("/elsewhere");
+    expect(options.onSessionCatalogChanged).not.toHaveBeenCalled();
+    rpc.clients[0]!.handlers.onSessionCatalogChanged?.("/workspace");
+    expect(options.onSessionCatalogChanged).toHaveBeenCalledExactlyOnceWith("/workspace");
+    await store.reconnect();
+    rpc.clients[0]!.handlers.onSessionCatalogChanged?.("/workspace");
+    expect(options.onSessionCatalogChanged).toHaveBeenCalledTimes(1);
+    rpc.clients[1]!.handlers.onSessionCatalogChanged?.("/workspace");
+    expect(options.onSessionCatalogChanged).toHaveBeenCalledTimes(2);
+    await store.dispose();
   });
 
   it("shares initialization and does not replace an already-ready client", async () => {

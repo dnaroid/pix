@@ -14,6 +14,7 @@ import { toolKind, toolLocations, toolTitle, type TranslateContext } from "./eve
 import type { PiAgentMessage, PiClient, PiMessagePart } from "../pi/pi-rpc-client.js";
 import { DEFERRED_PERSISTED_IMAGE_PREFIX } from "./session-history-file.js";
 import { replayBashExecutionUpdates } from "./bash-execution.js";
+import { assistantFailureUpdate } from "./assistant-failure-update.js";
 
 export const DEFERRED_IMAGE_URI_PREFIX = "pix-deferred-image:";
 const PIX_ACTIVITY_TIMING_META_KEY = "pix.activityTiming";
@@ -79,6 +80,8 @@ export async function replaySessionHistory(
 			)) {
 				await notify(notification);
 			}
+			const failure = assistantFailureUpdate(message, messageId);
+			if (failure) await notify({ sessionId: context.sessionId, update: failure });
 		} else if (message.role === "toolResult") {
 			const notification = toolResultNotification(context, message);
 			if (notification) await notify(notification);
@@ -159,6 +162,8 @@ export function deferredSessionHistoryFromMessages(
 					}
 				}
 			}
+			const failure = assistantFailureUpdate(message, messageId);
+			if (failure) updates.push(failure);
 		} else if (message.role === "toolResult") {
 			const record = message as { toolCallId?: unknown; isError?: unknown };
 			if (typeof record.toolCallId !== "string") continue;

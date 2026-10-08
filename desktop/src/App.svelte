@@ -6,6 +6,10 @@
   import type { DesktopShortcutPlatform } from "./lib/desktop-commands";
   import type { Attachment } from "./lib/attachments";
   import DesktopTitlebar from "./components/DesktopTitlebar.svelte";
+  import UniversalSearch from "./components/UniversalSearch.svelte";
+  import { createSearchNavigation } from "./app/search-navigation";
+  import { SearchDialogMemory } from "./lib/search-dialog-memory";
+  import { parseTaskDocument } from "./lib/project-tasks";
   import DesktopSidebar from "./components/DesktopSidebar.svelte";
   import DesktopWorkbenchSurface from "./components/DesktopWorkbenchSurface.svelte";
   import DesktopOverlays from "./components/DesktopOverlays.svelte";
@@ -58,6 +62,8 @@
   const desktopUpdaterEnabled = import.meta.env.VITE_PIX_DESKTOP_UPDATER === "1";
 
   let workspace = $state("");
+  let searchOpen = $state(false);
+  const searchMemory = new SearchDialogMemory();
   const activeSessionState = createActiveSessionState();
   const activeSessionId = $derived(activeSessionState.sessionId);
   const transcript = $derived(activeSessionState.transcript);
@@ -84,8 +90,10 @@
   } | null>(null);
   let workspaceSidebar = $state<{
     revealProjectEntry: (path: string) => Promise<void>;
-    openTasksPanel: (taskId?: string) => Promise<void>;
+    openTasksPanel: (taskId?: string, isCurrent?: () => boolean) => Promise<void>;
     openSettingsSection: (id: string) => Promise<void>;
+    openSettingsField: (section: string, fieldId: string) => Promise<void>;
+    openGitPanel: (isCurrent?: () => boolean) => void;
     closeProjectSwitcher: () => void;
   } | null>(null);
   let localMessageId = 0;
@@ -108,6 +116,7 @@
 
   const connection = createDesktopConnectionServices({
     workspace: () => workspace,
+    onSessionCatalogChanged: (cwd) => sessionServices.catalog.nativeCatalogChanged(cwd),
     sessionCoordinator: () => sessionCoordinator,
     promptRuntime: () => promptRuntime,
     workspaceSessionStartup: () => workspaceSessionStartup,
@@ -606,6 +615,52 @@
     activeWorkbenchTabId = workbenchSessionTabId(sessionId);
   });
 
+  const searchNavigation = createSearchNavigation({
+    workspace: () => workspace,
+    connection: () => client,
+    activeSession: () => activeSessionId,
+    openSetting: async (section, fieldId) => {
+      if (!workspaceSidebar) throw new Error("Settings are unavailable.");
+      await workspaceSidebar.openSettingsField(section, fieldId);
+    },
+    taskExists: async (taskId) => {
+      if (projectTasks.saving) throw new Error("Tasks are being saved. Try again shortly.");
+      const document = parseTaskDocument(await invoke<unknown>("read_project_tasks", { workspace }));
+      return document.tasks.some(task => task.id === taskId);
+    },
+    openTask: async (taskId, isCurrent) => {
+      if (!workspaceSidebar) throw new Error("Tasks are unavailable.");
+      if (!projectTasks.document.tasks.some(task => task.id === taskId)) throw new Error("Refresh the Tasks panel and try again.");
+      await workspaceSidebar.openTasksPanel(taskId, isCurrent);
+    },
+    loadSession: sessionTabController.loadSession,
+    activateSession: (id) => { activeWorkbenchTabId = workbenchSessionTabId(id); },
+    hydrate: sessionHistory.waitForHydration,
+    fileExists: previewStore.validateProjectFile,
+    openFile: (path, range) => previewStore.openProjectFile(path, "push", range),
+    openCommit: async (hit, isCurrent) => {
+      if (!workspaceSidebar) throw new Error("Source Control is unavailable.");
+      if (await gitWorkspace.openCommitDiff(hit.hash, isCurrent) && isCurrent()) {
+        workspaceSidebar.openGitPanel(isCurrent);
+      }
+    },
+  });
+  function closeSearch() { searchNavigation.cancel(); searchOpen = false; }
+  function handleWindowKeydown(event: KeyboardEvent) {
+    if (!event.defaultPrevented && !event.isComposing && (isMacOS ? event.metaKey : event.ctrlKey)
+      && event.shiftKey && !event.altKey && event.key.toLowerCase() === "f" && workspace) {
+      event.preventDefault();
+      searchOpen = true;
+      return;
+    }
+    desktopCommands.handleKeydown(event);
+  }
+  $effect(() => {
+    workspace; client;
+    untrack(() => { searchMemory.resetFor(workspace, client); closeSearch(); });
+  });
+  onDestroy(searchNavigation.cancel);
+
   const elicitationStore = interactionServices.elicitation;
   const cancelAllPendingElicitations = elicitationStore.cancelAll;
   const requestElicitation = elicitationStore.request;
@@ -785,7 +840,7 @@
 
 </script>
 
-<svelte:window onkeydown={desktopCommands.handleKeydown} />
+<svelte:window onkeydown={handleWindowKeydown} />
 <svelte:head><title>Pix Desktop</title></svelte:head>
 
 <div class="grid h-full grid-rows-[36px_minmax(0,1fr)_28px] bg-background text-foreground">
@@ -795,6 +850,7 @@
     restartPending={desktopWatchRestart.restarting}
     buildStatus={desktopWatchRestart.buildStatus}
     onRestart={desktopWatchRestart.restart}
+    onSearch={workspace ? () => { searchOpen = true; } : undefined}
     projectSwitcher={sidebarViewModel.projectSwitcher}
     workbench={titlebarViewModel.workbench}
     selector={titlebarViewModel.selector}
@@ -823,5 +879,12 @@
 </div>
 
 <DesktopOverlays {...overlaysViewModel.props} />
+{#if searchOpen}
+  <UniversalSearch {workspace} {client} memory={searchMemory} onSelect={searchNavigation.open} onClose={closeSearch}
+    onPreferences={() => {
+      closeSearch();
+      void workspaceSidebar?.openSettingsField("desktop-assistant", "semantic-search").catch(reportError);
+    }} />
+{/if}
 <DesktopBootstrapDialog onCredentialsChanged={reconnect} />
 <DesktopUpdateBanner {updater} />

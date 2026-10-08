@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { GitDiff, GitDiffScope, GitSnapshot } from "../lib/git";
-import { sameGitDiff, gitPushBlockedReason, gitStageGenerateCommitPushBlockedReason, gitUpdateNotice, type GitUpdateResult, type GitRepositoryAction, type GitRepositoryDetails, type GitHistoryEntry, type GitStashEntry, type GitReviewResult } from "../lib/git-workflow";
+import { sameGitDiff, gitPushBlockedReason, gitStageGenerateCommitPushBlockedReason, gitUpdateNotice, type GitUpdateResult, type GitRepositoryAction, type GitRepositoryDetails, type GitHistoryEntry, type GitCommitDiff, type GitStashEntry, type GitReviewResult } from "../lib/git-workflow";
 import type { WorkbenchTabId } from "../lib/workbench-tabs";
 
 type GitWorkspaceStoreOptions = {
@@ -34,6 +34,7 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
   let detailsLoading = $state(false);
   let detailsGeneration = 0;
   let generation = 0;
+  let diffSelectionVersion = 0;
   let workbenchAnchorId = $state<WorkbenchTabId | null>(null);
   let workbenchOpenedOrder = $state(0);
   let loadGeneration = 0;
@@ -304,20 +305,45 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
 
   async function openDiff(path: string | undefined, scope: GitDiffScope): Promise<void> {
     if (actionId !== null) return;
+    const selectionVersion = ++diffSelectionVersion;
     const nextActionId = `diff:${scope}:${path ?? "all"}`;
     const requestGeneration = generation;
     actionId = nextActionId;
     error = null;
     try {
       const diff = await requestDiff(path, scope);
-      if (!diff) return;
+      if (!diff || selectionVersion !== diffSelectionVersion || generation !== requestGeneration) return;
       showDiff(diff);
     } finally {
       if (generation === requestGeneration && actionId === nextActionId) actionId = null;
     }
   }
 
+  /** Open an exact, immutable commit patch without refreshing or altering HEAD. */
+  async function openCommitDiff(hash: string, isCurrent: () => boolean = () => true): Promise<boolean> {
+    const workspace = options.workspace();
+    if (!workspace) throw new Error("Open a Git project to view this commit.");
+    const requestGeneration = generation;
+    const selectionVersion = ++diffSelectionVersion;
+    const current = () => isCurrent() && generation === requestGeneration
+      && options.workspace() === workspace && diffSelectionVersion === selectionVersion;
+    try {
+      const result = await invoke<GitCommitDiff>("git_commit_diff", { workspace, hash });
+      if (!current()) return false;
+      showDiff({
+        scope: "all", content: result.content, truncated: result.truncated, commit: result.commit,
+      });
+      return true;
+    } catch (reason) {
+      if (!current()) return false;
+      throw new Error(reason instanceof Error ? reason.message : String(reason));
+    }
+  }
+
   function showDiff(diff: GitDiff): void {
+    // A manually selected working-tree/review diff supersedes any still
+    // pending historical commit request from search or the Git Log.
+    diffSelectionVersion++;
     if (!diffPreview) {
       workbenchAnchorId = options.activeWorkbenchTabId() ?? options.activeConversationWorkbenchTabId();
       workbenchOpenedOrder = options.nextWorkbenchAuxOrder();
@@ -327,6 +353,7 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
   }
 
   function closeDiff(): void {
+    diffSelectionVersion += 1;
     diffPreview = null;
     workbenchAnchorId = null;
     workbenchOpenedOrder = 0;
@@ -436,6 +463,7 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
     createBranch,
     requestDiff,
     openDiff,
+    openCommitDiff,
     showDiff,
     closeDiff,
     retargetAnchor,

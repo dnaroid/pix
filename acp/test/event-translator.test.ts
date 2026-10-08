@@ -101,6 +101,34 @@ test("non-delta message events produce nothing", () => {
 	assert.deepEqual(one(messageUpdate("done", "")), []);
 });
 
+test("failed provider message becomes a distinct system error row, not an assistant reply", () => {
+	const [update] = one({
+		type: "message_end",
+		message: {
+			role: "assistant",
+			timestamp: 1234,
+			stopReason: "error",
+			errorMessage: "Claude proposed an unknown tool: Edit",
+			content: [{ type: "thinking", thinking: "" }],
+		},
+	} as unknown as JsonAgentSessionEvent);
+	assert.deepEqual(update, {
+		sessionUpdate: "agent_message_chunk",
+		messageId: "pix-system:error:1234",
+		content: { type: "text", text: "Claude proposed an unknown tool: Edit" },
+	});
+	assert.deepEqual(one({ type: "message_end", message: { role: "assistant", stopReason: "stop", errorMessage: "not an error" } } as unknown as JsonAgentSessionEvent), []);
+	assert.deepEqual(one({ type: "message_end", message: { role: "toolResult", stopReason: "error", errorMessage: "tool failed" } } as unknown as JsonAgentSessionEvent), []);
+});
+
+test("provider error rows are bounded and safe for empty or oversized details", () => {
+	const [empty] = one({ type: "message_end", message: { role: "assistant", stopReason: "error" } } as unknown as JsonAgentSessionEvent);
+	assert.equal(empty.sessionUpdate, "agent_message_chunk");
+	if (empty.sessionUpdate === "agent_message_chunk" && empty.content.type === "text") assert.match(empty.content.text, /without reporting a reason/);
+	const [large] = one({ type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: "x".repeat(8_000) } } as unknown as JsonAgentSessionEvent);
+	if (large.sessionUpdate === "agent_message_chunk" && large.content.type === "text") assert.equal(large.content.text.length, 2_048);
+});
+
 test("tool_execution_start maps metadata, kind, and absolute locations", () => {
 	const update = asToolCall(one({
 		type: "tool_execution_start",
@@ -228,7 +256,7 @@ test("tool_execution_update without content is dropped", () => {
 
 test("lifecycle and unmapped events produce nothing", () => {
 	assert.deepEqual(one({ type: "agent_start" }), []);
-	assert.deepEqual(one({ type: "agent_settled" }), []);
+	assert.deepEqual(one({ type: "agent_settled", aborted: false }), []);
 	assert.deepEqual(one({ type: "queue_update", steering: [], followUp: [] }), []);
 	assert.deepEqual(one({ type: "bash_execution_update", delta: "out" }), []);
 });

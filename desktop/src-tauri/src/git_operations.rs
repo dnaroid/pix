@@ -2,11 +2,15 @@
 //! implicit merges and dropping user stashes (Update only drops its own
 //! auto-stash after it re-applied cleanly); all work runs off the UI thread.
 use super::{
-    git_has_head, git_output, git_repository_root, git_status_from, run_blocking,
-    validate_git_relative_path,
+    git_command, git_has_head, git_output, git_output_raw, git_repository_root, git_status_from,
+    run_blocking, truncate_git_diff, validate_git_relative_path, MAX_GIT_DIFF_BYTES,
 };
 use serde::Serialize;
-use std::path::Path;
+use std::{
+    io::{BufRead, BufReader, Read},
+    path::Path,
+    process::{Command, Stdio},
+};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -16,6 +20,15 @@ pub(crate) struct GitHistoryEntry {
     subject: String,
     author: String,
     date: String,
+}
+
+/// Bounded read-only patch and verified metadata for one HEAD-reachable commit.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct GitCommitDiff {
+    commit: GitHistoryEntry,
+    content: String,
+    truncated: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -52,6 +65,102 @@ pub(crate) async fn git_update(workspace: String) -> Result<GitUpdateResult, Str
 #[tauri::command]
 pub(crate) async fn git_history(workspace: String) -> Result<Vec<GitHistoryEntry>, String> {
     run_blocking(move || history_from(Path::new(&workspace))).await
+}
+
+#[tauri::command]
+pub(crate) async fn git_search_history(
+    workspace: String,
+    query: String,
+) -> Result<Vec<GitHistoryEntry>, String> {
+    run_blocking(move || search_history_from(Path::new(&workspace), &query)).await
+}
+
+#[tauri::command]
+pub(crate) async fn git_commit_diff(
+    workspace: String,
+    hash: String,
+) -> Result<GitCommitDiff, String> {
+    run_blocking(move || commit_diff_from(Path::new(&workspace), &hash)).await
+}
+
+fn commit_diff_from(workspace: &Path, hash: &str) -> Result<GitCommitDiff, String> {
+    // The global search returns the full object id. Do not accept revspecs,
+    // symbolic refs, option strings, pathspecs or ambiguous abbreviated hashes.
+    if !matches!(hash.len(), 40 | 64) || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("Invalid commit hash".to_owned());
+    }
+    let root = git_repository_root(workspace)?;
+    let ancestor = git_output_raw(&root, &["merge-base", "--is-ancestor", hash, "HEAD"])?;
+    if !ancestor.status.success() {
+        return Err("This commit is no longer reachable from HEAD".to_owned());
+    }
+
+    let metadata = git_output(
+        &root,
+        &[
+            "log",
+            "-1",
+            "--no-show-signature",
+            "--format=%H%x00%h%x00%s%x00%an%x00%aI",
+            hash,
+        ],
+    )?;
+    let line = String::from_utf8_lossy(&metadata.stdout);
+    let fields = line.trim_end().split('\0').collect::<Vec<_>>();
+    if fields.len() != 5 || !fields[0].eq_ignore_ascii_case(hash) {
+        return Err("The selected commit could not be read".to_owned());
+    }
+    let commit = GitHistoryEntry {
+        hash: fields[0].to_owned(),
+        short_hash: fields[1].to_owned(),
+        subject: fields[2].to_owned(),
+        author: fields[3].to_owned(),
+        date: fields[4].to_owned(),
+    };
+
+    // Show the selected commit against its first parent (including initial
+    // commits and merges). A streaming byte cap prevents large/binary history
+    // from filling the UI or process memory before response truncation.
+    let mut child = git_command(
+        &root,
+        &[
+            "show",
+            "--format=",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-color",
+            "--root",
+            "--first-parent",
+            "--find-renames",
+            hash,
+            "--",
+        ],
+    )
+    .stdout(Stdio::piped())
+    .stderr(Stdio::null())
+    .spawn()
+    .map_err(|_| "Could not read the selected commit diff".to_owned())?;
+    let mut bytes = Vec::new();
+    let read = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Could not capture the selected commit diff".to_owned())?
+        .take((MAX_GIT_DIFF_BYTES + 1) as u64)
+        .read_to_end(&mut bytes);
+    let exceeded = bytes.len() > MAX_GIT_DIFF_BYTES;
+    if exceeded || read.is_err() {
+        let _ = child.kill();
+    }
+    let status = child.wait();
+    if read.is_err() || status.is_err() || (!exceeded && !status.unwrap().success()) {
+        return Err("Could not read the selected commit diff".to_owned());
+    }
+    let (content, truncated) = truncate_git_diff(String::from_utf8_lossy(&bytes).into_owned());
+    Ok(GitCommitDiff {
+        commit,
+        content,
+        truncated: exceeded || truncated,
+    })
 }
 
 #[tauri::command]
@@ -239,6 +348,129 @@ fn history_from(workspace: &Path) -> Result<Vec<GitHistoryEntry>, String> {
         .collect())
 }
 
+fn search_history_from(workspace: &Path, query: &str) -> Result<Vec<GitHistoryEntry>, String> {
+    let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+    if words.is_empty() {
+        return Ok(Vec::new());
+    }
+    let root = git_repository_root(workspace)?;
+    if !git_has_head(&root)? {
+        return Ok(Vec::new());
+    }
+
+    // Stream all commits reachable from HEAD. Keep only the best twenty rows;
+    // unlike `git_history`, this deliberately has no history-depth limit.
+    let mut child = Command::new("git")
+        .arg("-C")
+        .arg(&root)
+        .args([
+            "-c",
+            "color.ui=false",
+            "-c",
+            "core.quotepath=false",
+            "-c",
+            "core.pager=cat",
+        ])
+        .args([
+            "log",
+            "--no-show-signature",
+            "--format=%H%x00%h%x00%s%x00%an%x00%aI%x00",
+        ])
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GCM_INTERACTIVE", "Never")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| format!("failed to run git log for history search: {error}"))?;
+    let stdout = match child.stdout.take() {
+        Some(stdout) => stdout,
+        None => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("failed to capture Git history search output".to_owned());
+        }
+    };
+    let mut reader = BufReader::new(stdout);
+    let mut field = Vec::new();
+    let mut best: Vec<(usize, usize, GitHistoryEntry)> = Vec::with_capacity(20);
+    let mut newest_order = 0usize;
+    let read_result = (|| -> std::io::Result<()> {
+        loop {
+            let mut fields: Vec<String> = Vec::with_capacity(5);
+            for _ in 0..5 {
+                field.clear();
+                if reader.read_until(0, &mut field)? == 0 {
+                    return if fields.is_empty()
+                        || (fields.len() == 1 && fields[0].trim().is_empty())
+                    {
+                        Ok(())
+                    } else {
+                        Err(std::io::Error::new(
+                            std::io::ErrorKind::UnexpectedEof,
+                            "incomplete Git history record",
+                        ))
+                    };
+                }
+                if field.last() == Some(&0) {
+                    field.pop();
+                }
+                fields.push(String::from_utf8_lossy(&field).into_owned());
+            }
+            fields[0] = fields[0].trim_start_matches(['\n', '\r']).to_owned();
+            if fields[0].is_empty() {
+                break;
+            }
+            let entry = GitHistoryEntry {
+                hash: fields[0].clone(),
+                short_hash: fields[1].clone(),
+                subject: fields[2].clone(),
+                author: fields[3].clone(),
+                date: fields[4].clone(),
+            };
+            let subject = entry.subject.to_lowercase();
+            let metadata = format!("{} {}", entry.hash, entry.author).to_lowercase();
+            let score: usize = words
+                .iter()
+                .map(|word| {
+                    if subject.contains(word) {
+                        2
+                    } else if metadata.contains(word) {
+                        1
+                    } else {
+                        0
+                    }
+                })
+                .sum();
+            if score > 0 {
+                best.push((score, newest_order, entry));
+                best.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
+                best.truncate(20);
+            }
+            newest_order = newest_order.saturating_add(1);
+        }
+        Ok(())
+    })();
+    if let Err(error) = read_result {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(format!("failed to read Git history search output: {error}"));
+    }
+    let status = match child.wait() {
+        Ok(status) => status,
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!("failed to wait for Git history search: {error}"));
+        }
+    };
+    if !status.success() {
+        return Err("Git history search failed".to_owned());
+    }
+    Ok(best.into_iter().map(|(_, _, entry)| entry).collect())
+}
+
 fn stash_list_from(workspace: &Path) -> Result<Vec<GitStashEntry>, String> {
     let root = git_repository_root(workspace)?;
     let output = git_output(&root, &["stash", "list", "-30", "--format=%gd%x00%gs"])?;
@@ -375,6 +607,7 @@ mod tests {
     fn git_secondary_history_handles_unborn_and_limits_results() {
         let repo = Repository::new();
         assert!(history_from(&repo.0).unwrap().is_empty());
+        assert!(search_history_from(&repo.0, "change").unwrap().is_empty());
         for index in 0..32 {
             repo.commit(&format!("change {index}"));
         }
@@ -382,6 +615,154 @@ mod tests {
         assert_eq!(history.len(), 30);
         assert_eq!(history[0].subject, "change 31");
         assert_eq!(history[0].author, "Pix Test");
+    }
+
+    #[test]
+    fn git_history_search_scans_all_head_ancestors_and_matches_metadata() {
+        let repo = Repository::new();
+        repo.commit("oldest needle commit");
+        let oldest_hash = git_stdout_line(&repo.0, &["rev-parse", "HEAD"]).unwrap();
+        for index in 1..36 {
+            repo.commit(&format!("ordinary change {index}"));
+        }
+
+        let by_subject = search_history_from(&repo.0, "needle").unwrap();
+        assert_eq!(by_subject.len(), 1);
+        assert_eq!(by_subject[0].hash, oldest_hash);
+        assert_eq!(by_subject[0].subject, "oldest needle commit");
+        let by_author = search_history_from(&repo.0, "pix test").unwrap();
+        assert_eq!(by_author.len(), 20);
+        assert_eq!(
+            by_author[0].hash,
+            git_stdout_line(&repo.0, &["rev-parse", "HEAD"]).unwrap()
+        );
+        assert_eq!(
+            search_history_from(&repo.0, &oldest_hash[..8]).unwrap()[0].hash,
+            oldest_hash
+        );
+        assert!(search_history_from(&repo.0, "  ").unwrap().is_empty());
+    }
+
+    #[test]
+    fn git_history_search_rejects_non_repositories() {
+        let directory = std::env::temp_dir().join(format!(
+            "pix-not-git-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        assert!(search_history_from(&directory, "needle").is_err());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn git_commit_diff_opens_old_and_root_commit_patches_without_touching_worktree() {
+        let repo = Repository::new();
+        repo.commit("initial payload");
+        let oldest = git_stdout_line(&repo.0, &["rev-parse", "HEAD"]).unwrap();
+        for index in 0..35 {
+            repo.commit(&format!("later revision {index}"));
+        }
+        assert!(history_from(&repo.0)
+            .unwrap()
+            .iter()
+            .all(|entry| entry.hash != oldest));
+
+        fs::write(repo.0.join("tracked.txt"), "uncommitted local changes\n").unwrap();
+        let head_before = git_stdout_line(&repo.0, &["rev-parse", "HEAD"]).unwrap();
+        let status_before = git_output(&repo.0, &["status", "--porcelain"])
+            .unwrap()
+            .stdout;
+        let diff = commit_diff_from(&repo.0, &oldest).unwrap();
+        assert_eq!(diff.commit.hash, oldest);
+        assert_eq!(diff.commit.subject, "initial payload");
+        assert!(!diff.truncated);
+        assert!(diff
+            .content
+            .contains("diff --git a/tracked.txt b/tracked.txt"));
+        assert!(diff.content.contains("+initial payload"));
+        assert!(!diff.content.contains("uncommitted local changes"));
+        assert_eq!(
+            git_stdout_line(&repo.0, &["rev-parse", "HEAD"]).unwrap(),
+            head_before,
+        );
+        assert_eq!(
+            git_output(&repo.0, &["status", "--porcelain"])
+                .unwrap()
+                .stdout,
+            status_before,
+        );
+        assert_eq!(
+            fs::read_to_string(repo.0.join("tracked.txt")).unwrap(),
+            "uncommitted local changes\n",
+        );
+    }
+
+    #[test]
+    fn git_commit_diff_of_merge_is_against_first_parent() {
+        let repo = Repository::new();
+        repo.commit("base");
+        git_output(&repo.0, &["switch", "-c", "feature"]).unwrap();
+        fs::write(repo.0.join("feature.txt"), "from feature\n").unwrap();
+        git_output(&repo.0, &["add", "feature.txt"]).unwrap();
+        git_output(&repo.0, &["commit", "-m", "feature change"]).unwrap();
+        git_output(&repo.0, &["switch", "main"]).unwrap();
+        fs::write(repo.0.join("main.txt"), "from main\n").unwrap();
+        git_output(&repo.0, &["add", "main.txt"]).unwrap();
+        git_output(&repo.0, &["commit", "-m", "main change"]).unwrap();
+        git_output(&repo.0, &["merge", "--no-ff", "--no-edit", "feature"]).unwrap();
+        let merge_hash = git_stdout_line(&repo.0, &["rev-parse", "HEAD"]).unwrap();
+        let diff = commit_diff_from(&repo.0, &merge_hash).unwrap();
+        assert!(diff
+            .content
+            .contains("diff --git a/feature.txt b/feature.txt"));
+        assert!(!diff.content.contains("diff --git a/main.txt b/main.txt"));
+        assert_eq!(diff.commit.subject, "Merge branch 'feature'");
+    }
+
+    #[test]
+    fn git_commit_diff_rejects_injected_rev_specs_and_unreachable_commits() {
+        let repo = Repository::new();
+        repo.commit("main change");
+        let first = git_stdout_line(&repo.0, &["rev-parse", "HEAD"]).unwrap();
+        for invalid in [
+            "", "HEAD", "HEAD~1", "--help", "deadbeef", "../", "abc\0def",
+        ] {
+            assert!(commit_diff_from(&repo.0, invalid).is_err(), "{invalid:?}");
+        }
+        let absent = "f".repeat(40);
+        assert!(commit_diff_from(&repo.0, &absent).is_err());
+        let other = git_output(
+            &repo.0,
+            &[
+                "commit-tree",
+                &git_stdout_line(&repo.0, &["mktree"]).unwrap(),
+                "-m",
+                "orphan",
+            ],
+        )
+        .unwrap();
+        let other_hash = String::from_utf8_lossy(&other.stdout).trim().to_owned();
+        assert_ne!(other_hash, first);
+        assert!(
+            commit_diff_from(&repo.0, &other_hash).is_err(),
+            "unreachable objects must not be previewed"
+        );
+    }
+
+    #[test]
+    fn git_commit_diff_bounded_output_marks_large_patches_as_truncated() {
+        let repo = Repository::new();
+        repo.commit("base");
+        let large = "many changes\n".repeat(MAX_GIT_DIFF_BYTES / 10);
+        fs::write(repo.0.join("tracked.txt"), large).unwrap();
+        git_output(&repo.0, &["add", "tracked.txt"]).unwrap();
+        git_output(&repo.0, &["commit", "-m", "large patch"]).unwrap();
+        let hash = git_stdout_line(&repo.0, &["rev-parse", "HEAD"]).unwrap();
+        let diff = commit_diff_from(&repo.0, &hash).unwrap();
+        assert!(diff.truncated);
+        assert!(diff.content.contains("[Diff truncated by Pix Desktop]"));
+        assert!(diff.content.len() <= MAX_GIT_DIFF_BYTES + 100);
     }
 
     #[test]

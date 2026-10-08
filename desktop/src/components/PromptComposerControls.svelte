@@ -12,6 +12,7 @@
     voiceSupported,
     voiceCanStart,
     promptRunning,
+    promptEnhancing = false,
     canSubmit,
     submitLabel,
     onToggleMenu,
@@ -23,6 +24,7 @@
     voiceSupported: boolean;
     voiceCanStart: boolean;
     promptRunning: boolean;
+    promptEnhancing?: boolean;
     canSubmit: boolean;
     submitLabel?: string;
     onToggleMenu: () => void;
@@ -40,6 +42,7 @@
     aria-haspopup="menu"
     aria-expanded={menuOpen}
     onclick={onToggleMenu}
+    disabled={promptEnhancing}
   >
     <EllipsisVertical class="h-4 w-4" aria-hidden="true" />
   </button>
@@ -54,7 +57,7 @@
   type="button"
   aria-label={voiceState === "listening" ? "Stop voice input" : voiceState === "starting" ? "Connecting voice input" : "Start voice input"}
   title={voiceState === "listening" ? "Stop voice input" : voiceState === "starting" ? "Connecting to Deepgram…" : voiceSupported ? "Voice input" : "Voice input is unavailable in this WebView"}
-  disabled={voiceState === "idle" && !voiceCanStart}
+  disabled={promptEnhancing || (voiceState === "idle" && !voiceCanStart)}
   onclick={onToggleVoice}
 >
   {#if voiceState === "starting"}
@@ -66,9 +69,13 @@
 <button
   class="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-35"
   type="submit"
-  aria-label={submitLabel ?? (promptRunning ? "Queue message" : "Send message")}
-  title={`${submitLabel ?? (promptRunning ? "Queue message" : "Send message")} · Enter`}
-  disabled={!canSubmit}
+  aria-label={promptEnhancing ? "Improving prompt" : submitLabel ?? (promptRunning ? "Queue message" : "Send message")}
+  title={promptEnhancing ? "Improving prompt…" : `${submitLabel ?? (promptRunning ? "Queue message" : "Send message")} · Enter`}
+  disabled={promptEnhancing || !canSubmit}
 >
-  <ArrowUp class="h-4 w-4" aria-hidden="true" />
+  {#if promptEnhancing}
+    <LoaderCircle class="h-4 w-4 animate-spin" aria-hidden="true" />
+  {:else}
+    <ArrowUp class="h-4 w-4" aria-hidden="true" />
+  {/if}
 </button>

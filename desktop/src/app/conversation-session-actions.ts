@@ -1,4 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
+import { SvelteMap } from "svelte/reactivity";
 import type { SessionConfigOption } from "@agentclientprotocol/sdk";
 import type { AcpClient } from "../lib/acp-client";
 import {
@@ -39,7 +40,7 @@ type ConversationSessionActionsOptions = {
 };
 
 export function createConversationSessionActions(options: ConversationSessionActionsOptions) {
-  const enhancementOwners = new Map<string, {
+  const enhancementOwners = new SvelteMap<string, {
     client: AcpClient;
     workspace: string;
   }>();
@@ -244,6 +245,11 @@ export function createConversationSessionActions(options: ConversationSessionAct
   }
 
   return {
+    get promptEnhancing(): boolean {
+      const sessionId = options.state.sessionId;
+      const owner = sessionId ? enhancementOwners.get(sessionId) : undefined;
+      return !!owner && owner.client === options.client() && owner.workspace === options.workspace();
+    },
     enhancePromptDraft,
     chooseImportSession,
     importConversationPath,

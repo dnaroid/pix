@@ -127,6 +127,16 @@ export function createDesktopSidebarViewModel(options: {
       notice: options.git.notice,
       details: options.git.details,
       detailsLoading: options.git.detailsLoading,
+      selectedCommit: options.git.diffPreview?.commit ?? null,
+      onShowCommitDiff: () => {
+        const diff = options.git.diffPreview;
+        if (diff?.commit) options.git.showDiff(diff);
+      },
+      onOpenCommit: (hash) => {
+        void options.git.openCommitDiff(hash).catch((error: unknown) => {
+          options.git.setError(error instanceof Error ? error.message : String(error));
+        });
+      },
       onShowReview: options.git.showReview,
       onResolve: () => void options.gitAssist.resolveReviewInNewSession(),
       onLoadDetails: () => void options.git.loadDetails(),
@@ -152,6 +162,7 @@ export function createDesktopSidebarViewModel(options: {
     onListProjectDirectory: options.projectWorkspace.listDirectory,
     onValidateProjectFile: options.preview.validateProjectFile,
     onOpenProjectFile: (path, range) => void options.preview.openProjectFile(path, "replace", range),
+    onOpenFilesFile: (path) => void options.preview.openProjectFile(path, "replace", undefined, true),
     onOpenUserConfig: (kind) => void options.preview.openUserConfig(kind, "replace"),
     onOpenExternalEditor: (path) => void options.projectWorkspace.openInEditor(path),
     onProjectSwitcherOpen,

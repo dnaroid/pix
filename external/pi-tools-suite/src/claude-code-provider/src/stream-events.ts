@@ -2,6 +2,7 @@ import { parseStreamingJson } from "@earendil-works/pi-ai";
 import type { AssistantMessageEventStream, ToolCall } from "@earendil-works/pi-ai";
 import { TRANSCRIPT_BREAKPOINT_ENV } from "./claude-args.ts";
 import { ClaudeCodeError } from "./errors.ts";
+import { diagnoseToolNameMismatch } from "./tool-name-diagnostics.ts";
 import {
   isCacheBreakpointLimit,
   parseRateLimitNotice,
@@ -12,7 +13,7 @@ import {
   validateClaudeInitialization,
   type RateLimitNoticeSink,
 } from "./claude-protocol.ts";
-import type { MutableOutput } from "./types.ts";
+import type { MutableOutput, ToolNameMismatch } from "./types.ts";
 
 interface StreamEventEnvelope {
   type?: string;
@@ -92,6 +93,7 @@ export class ClaudeEventMapper {
   private readonly onRateLimitNotice: RateLimitNoticeSink;
   private readonly onResponseAnnouncement: ResponseAnnouncementSink;
   private assistantDiagnostic: string | undefined;
+  private rejectedToolName: ToolNameMismatch | undefined;
   private readonly privatePaths: readonly string[];
 
   constructor(options: ClaudeEventMapperOptions) {
@@ -108,6 +110,10 @@ export class ClaudeEventMapper {
 
   get isTerminal(): boolean {
     return this.terminal;
+  }
+
+  get toolNameMismatch(): ToolNameMismatch | undefined {
+    return this.rejectedToolName;
   }
 
   get hasSuccessfulResult(): boolean {
@@ -356,7 +362,10 @@ export class ClaudeEventMapper {
     } else if (source.type === "tool_use") {
       const qualifiedName = typeof source.name === "string" ? source.name : "";
       const name = this.toolNames.get(qualifiedName);
-      if (!name) throw new ClaudeCodeError("tool_unknown", `Claude proposed an unknown tool: ${qualifiedName}`);
+      if (!name) {
+        this.rejectedToolName = diagnoseToolNameMismatch(qualifiedName, this.toolNames);
+        throw new ClaudeCodeError("tool_unknown", `Claude proposed an unknown tool: ${qualifiedName}`);
+      }
       if (typeof source.id !== "string" || source.id.length === 0) throw new ClaudeCodeError("tool_id", "Claude emitted a tool without an ID");
       const initial = source.input && typeof source.input === "object" && !Array.isArray(source.input)
         ? source.input as ToolCall["arguments"]

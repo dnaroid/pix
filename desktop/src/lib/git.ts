@@ -1,3 +1,5 @@
+import type { GitHistoryEntry } from "./git-workflow";
+
 export type GitDiffScope = "staged" | "unstaged" | "all";
 
 export interface GitFileChange {
@@ -38,6 +40,8 @@ export interface GitDiff {
   readonly scope: GitDiffScope;
   readonly content: string;
   readonly truncated: boolean;
+  /** Immutable patch of a historical commit, never staged or working-tree state. */
+  readonly commit?: GitHistoryEntry;
 }
 
 export interface GitCommitDraftStorage {

@@ -4,7 +4,10 @@
 
   export type DesktopSidebarHandle = {
     revealProjectEntry: (path: string) => Promise<void>;
-    openTasksPanel: (taskId?: string) => Promise<void>;
+    openTasksPanel: (taskId?: string, isCurrent?: () => boolean) => Promise<void>;
+    openSettingsSection: (id: string) => Promise<void>;
+    openSettingsField: (section: string, fieldId: string) => Promise<void>;
+    openGitPanel: (isCurrent?: () => boolean) => void;
     closeProjectSwitcher: () => void;
   };
 

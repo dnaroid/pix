@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Menu } from "@tauri-apps/api/menu";
-import { createProjectExplorerNativeMenu, projectExplorerMenuActions, type ProjectExplorerMenuAction } from "./project-explorer-native-menu";
+import { canOpenProjectEntryInBrowser, createProjectExplorerNativeMenu, projectExplorerMenuActions, type ProjectExplorerMenuAction } from "./project-explorer-native-menu";
 import type { ProjectTreeEntry } from "./project-tree";
 
 vi.mock("@tauri-apps/api/menu", () => ({ Menu: { new: vi.fn() } }));
@@ -32,6 +32,27 @@ function commands(call = 0) {
 beforeEach(() => vi.resetAllMocks());
 
 describe("native Project Explorer context menu", () => {
+  it("offers browser opening only for HTML files, case-insensitively", () => {
+    for (const path of ["page.html", "nested/page.HTM", "page.HTML"]) {
+      expect(canOpenProjectEntryInBrowser({ name: path, path, kind: "file" })).toBe(true);
+    }
+    for (const path of ["", "page.txt", "page.html.txt"]) {
+      expect(canOpenProjectEntryInBrowser({ name: path, path, kind: "file" })).toBe(false);
+    }
+    expect(canOpenProjectEntryInBrowser({ name: "folder.html", path: "folder.html", kind: "directory" })).toBe(false);
+  });
+  it("keeps browser and external editor callback ids distinct", () => {
+    const browser = vi.fn();
+    const editor = vi.fn();
+    const actions = projectExplorerMenuActions(
+      [{ label: "Open in Browser" }, { label: "Open in Editor" }],
+      { "Open in Browser": browser, "Open in Editor": editor }, "Reveal in Finder", false,
+    );
+    expect(actions.map(({ id }) => id)).toEqual(["browser", "external"]);
+    actions[0]!.action();
+    expect(browser).toHaveBeenCalledOnce();
+    expect(editor).not.toHaveBeenCalled();
+  });
   it("preserves shared command policy, groups and stable ids for dynamic labels", () => {
     const action = vi.fn();
     const result = projectExplorerMenuActions([

@@ -74,6 +74,7 @@ export function createSessionCoordinator(options: SessionCoordinatorOptions) {
   }
 
   function handleUpdate(notification: SessionNotification): void {
+    if (options.activity.isForgotten(notification.sessionId)) return;
     if (options.metadata.handle(notification)) return;
     options.updates.enqueue(notification);
   }

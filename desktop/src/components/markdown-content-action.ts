@@ -5,6 +5,8 @@ import { renderMermaidDiagram } from "../lib/mermaid";
 import { MarkdownImageRetention } from "./markdown-image-retention";
 import { mountGlbViewer } from "./glb-viewer-action";
 import { isGlbPath } from "../lib/glb";
+import { previewMediaKindForPath } from "../lib/media";
+import { audioPlayback } from "./audio-playback-action";
 import "../styles/glb-viewer.css";
 import {
   FileLinkValidationCache,
@@ -44,7 +46,9 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
     const fileLinkValidationCache = new FileLinkValidationCache();
     const retainedImages = new MarkdownImageRetention();
     const retainedModels = new MarkdownImageRetention("model");
+    const retainedAudio = new MarkdownImageRetention("audio");
     const modelViewers = new Map<HTMLElement, () => void>();
+    const audioPlayers = new Map<HTMLElement, () => void>();
     let mediaObserver: IntersectionObserver | undefined;
     let diagramObserver: IntersectionObserver | undefined;
     let fileLinkObserver: IntersectionObserver | undefined;
@@ -57,8 +61,12 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
         if (scheduledGeneration !== generation) return;
         retainedImages.restore(node);
         retainedModels.restore(node);
+        retainedAudio.restore(node);
         for (const [preview, dispose] of modelViewers) {
           if (!node.contains(preview)) { dispose(); modelViewers.delete(preview); }
+        }
+        for (const [preview, dispose] of audioPlayers) {
+          if (!node.contains(preview)) { dispose(); audioPlayers.delete(preview); }
         }
         decorateExternalLinks(node);
         observeFileLinks(scheduledGeneration);
@@ -168,7 +176,7 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
       const render = (preview: HTMLElement) => {
         if (preview.dataset.mediaState === "loading" || preview.dataset.mediaState === "ready") return;
         const kind = preview.dataset.projectMedia ?? preview.dataset.localMedia;
-        if (kind === "image" && preview.dataset.mediaState === "error") return;
+        if ((kind === "image" || kind === "audio") && preview.dataset.mediaState === "error") return;
         void renderMediaPreview(preview, scheduledGeneration);
       };
       if (typeof IntersectionObserver === "undefined") {
@@ -191,13 +199,13 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
       const path = projectPath ?? localPath;
       const scope = projectPath ? "project" : "local";
       const kind = projectPath ? preview.dataset.projectMedia : preview.dataset.localMedia;
-      // Retained images may span render generations. Containment is their
+      // Retained media may span render generations. Containment is their
       // lifecycle guard; videos still use the existing generation guard.
       const isCurrent = () => !destroyed && node.contains(preview)
-        && (kind === "image" || kind === "model" || scheduledGeneration === generation);
+        && (kind === "image" || kind === "model" || kind === "audio" || scheduledGeneration === generation);
       const resolver = projectPath ? options.onResolveProjectMedia() : options.onResolveLocalMedia();
       const frame = preview.querySelector<HTMLElement>(".markdown-media-frame");
-      if (!path || !resolver || (kind !== "image" && kind !== "video" && kind !== "model") || !frame) return;
+      if (!path || !resolver || (kind !== "image" && kind !== "video" && kind !== "model" && kind !== "audio") || !frame) return;
       const label = projectPath
         ? preview.dataset.projectMediaLabel || path
         : preview.dataset.localMediaLabel || path;
@@ -213,7 +221,10 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
         }
         const attachment = await request;
         if (!isCurrent()) return;
-        if (!attachment?.path || (kind === "model" ? !isGlbPath(attachment.path) : attachment.kind !== kind)) {
+        let matchesKind = attachment?.kind === kind;
+        if (kind === "model") matchesKind = isGlbPath(attachment?.path ?? "");
+        if (kind === "audio") matchesKind = previewMediaKindForPath(attachment?.path ?? "") === "audio";
+        if (!attachment?.path || !matchesKind) {
           showMediaError(frame, preview);
           return;
         }
@@ -226,7 +237,7 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
           return;
         }
 
-        let media: HTMLImageElement | HTMLVideoElement;
+        let media: HTMLImageElement | HTMLVideoElement | HTMLAudioElement;
         if (kind === "image") {
           const image = document.createElement("img");
           image.alt = label;
@@ -242,6 +253,13 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
             if (currentFrame && style) currentFrame.setAttribute("style", style);
           }, { once: true });
           media = image;
+        } else if (kind === "audio") {
+          const audio = document.createElement("audio");
+          audio.controls = true;
+          audio.preload = "metadata";
+          audio.setAttribute("aria-label", label);
+          audioPlayers.set(preview, audioPlayback(audio).destroy);
+          media = audio;
         } else {
           const video = document.createElement("video");
           video.controls = true;
@@ -257,6 +275,8 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
           "error",
           () => {
             if (!isCurrent()) return;
+            audioPlayers.get(preview)?.();
+            audioPlayers.delete(preview);
             const currentFrame = preview.querySelector<HTMLElement>(".markdown-media-frame");
             if (node.contains(preview) && currentFrame) showMediaError(currentFrame, preview);
           },
@@ -355,8 +375,11 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
         mediaDimensions.clear();
         retainedImages.clear();
         retainedModels.clear();
+        retainedAudio.clear();
         for (const dispose of modelViewers.values()) dispose();
         modelViewers.clear();
+        for (const dispose of audioPlayers.values()) dispose();
+        audioPlayers.clear();
         fileLinkObserver?.disconnect();
         mediaObserver?.disconnect();
         diagramObserver?.disconnect();

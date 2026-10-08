@@ -29,6 +29,7 @@ AgentSession.prototype._emit = function pixForkBoundaryEmit(event) {
 };
 
 const PIX_PAUSE_MESSAGE = "\u0000pix:agent-control:pause";
+const PIX_CANCEL_PAUSE_MESSAGE = "\u0000pix:agent-control:cancel-pause";
 const PIX_CONTINUE_MESSAGE = "\u0000pix:agent-control:continue";
 const PIX_CLEAR_TODOS_MESSAGE = "\u0000pix:clear-todos";
 const PIX_LSP_CONTROL_PREFIX = "\u0000pix:lsp-control:";
@@ -161,7 +162,10 @@ installAnthropicUsageCapture();
 
 const originalGetSessionStats = AgentSession.prototype.getSessionStats;
 AgentSession.prototype.getSessionStats = function pixGetSessionStats() {
-	const stats = originalGetSessionStats.call(this);
+	const stats = { ...originalGetSessionStats.call(this),
+		pixSearchLeafId: this.sessionManager.getLeafId(),
+		pixSearchSessionPath: this.sessionManager.getSessionFile(),
+	};
 	try {
 		const getter = globalThis[PIX_DCP_RUNTIME_STATS_SYMBOL];
 		if (typeof getter !== "function") return stats;
@@ -242,6 +246,7 @@ function bindPause(session) {
 	session.subscribe((event) => {
 		if (event.type === "agent_start" && (record.state === "paused" || record.state === "resuming")) {
 			record.state = "idle";
+			record.pauseBoundaryReached = false;
 		}
 	});
 
@@ -289,7 +294,8 @@ function bindPause(session) {
 			return false;
 		}
 		if (pauseBoundaryReached || record.state === "pause-requested") {
-			record.pauseBoundaryReached = false;
+			// Keep the irreversible decision locked through before-settle awaits.
+			record.pauseBoundaryReached = true;
 			if (shouldContinue) {
 				pause(record);
 				return false;
@@ -314,9 +320,8 @@ function bindPause(session) {
 			clearPauseRequest(record);
 			return false;
 		}
-		record.pauseBoundaryReached = false;
 		if (shouldContinue || canContinue(session)) pause(record);
-		else record.state = "idle";
+		else clearPauseRequest(record);
 		return false;
 	};
 
@@ -350,6 +355,17 @@ function requestPause(session) {
 		throw new Error("Agent is not running");
 	}
 	record.state = "pause-requested";
+}
+
+/** @param {AgentSession} session */
+function cancelPause(session) {
+	const record = bindPause(session);
+	// finishTurn's end decision is irreversible for this run. Never pretend
+	// cancellation succeeded or implicitly resume once that boundary wins.
+	if (record.pauseBoundaryReached || record.state === "paused") {
+		throw new Error("Agent has already reached the pause boundary");
+	}
+	if (record.state === "pause-requested") record.state = "idle";
 }
 
 /** @param {AgentSession} session */
@@ -485,6 +501,11 @@ AgentSession.prototype.prompt = async function pixPrompt(text, options) {
 		} catch (error) {
 			throw error;
 		}
+	}
+	if (text === PIX_CANCEL_PAUSE_MESSAGE) {
+		cancelPause(this);
+		options?.preflightResult?.("handled");
+		return;
 	}
 	if (text === PIX_CONTINUE_MESSAGE) {
 		try {

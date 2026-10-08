@@ -30,7 +30,20 @@ Show the same project sessions in Pix Desktop that Pix TUI discovers while keepi
 
 ## Behavior
 
-- A project-scoped `session/list` includes native sessions created by either TUI or Desktop.
+- Pix Desktop's project-scoped `session/list` returns the persisted ACP session
+  map immediately instead of synchronously parsing every native JSONL transcript
+  (large projects can contain hundreds of megabytes of saved conversations).
+  Native TUI/Desktop discovery reconciles in the background. A successful
+  changed-directory scan emits `pix/session/catalog_changed` with the owning
+  project cwd; Desktop then reloads the list and includes the new sessions.
+  The first response may temporarily precede discovery, but never blocks on it.
+  Other ACP clients retain synchronous, fully reconciled `session/list`.
+- Native background scans are single-flight per cwd and compare file names,
+  sizes, mtimes and inode numbers before rereading unchanged JSONL bodies.
+  Failures retain mapped conversations and allow retries. A running scan is
+  canceled during adapter teardown, and stale connection/workspace notifications
+  cannot modify an unrelated Desktop catalog. Notifications received during an
+  in-flight initial list or refresh are replayed after that request settles.
 - A discovered native session is persisted in the ACP map so `session/load` can open it later.
 - Reconciliation deduplicates by resolved Pi session path and retains an existing ACP ID when present.
 - Reconciliation persists the native parent-session path internally when present. `session/list` exposes a boolean `pix.isFork` and, when the parent is already mapped, its safe ACP id as `pix.parentSessionId` in that session's namespaced metadata; Desktop never receives a parent path.
@@ -70,6 +83,9 @@ Show the same project sessions in Pix Desktop that Pix TUI discovers while keepi
 ## Verification
 
 - ACP tests cover native discovery, stable mapping, cwd filtering, fallback, and safe fork-parent/tab metadata.
+- Async-catalog tests verify a fast persisted snapshot while a native scan is
+  blocked, change notification, unchanged-directory suppression, error retry,
+  cancellation, and safe project/connection ownership.
 - Session-map tests cover bulk path reconciliation and ID collisions.
 - Desktop unit tests cover metadata parsing, Desktop tab-snapshot persistence/restart precedence, stale TUI suppression, explicit-empty restore, tab ordering, fork-tree ordering/nesting, malformed ancestry, and flat search presentation.
 - ACP and Desktop checks pass.

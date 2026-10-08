@@ -24,6 +24,7 @@
   import AttachmentGrid from "./AttachmentGrid.svelte";
   import MarkdownText from "./MarkdownText.svelte";
   import TranscriptActivityGroup from "./TranscriptActivityGroup.svelte";
+  import { createTranscriptHistoryPager } from "./transcript-history-pager";
   import {
     createTranscriptUserMessageMenuController,
     userMessageMenuCommands,
@@ -41,6 +42,7 @@
     pane = $bindable(null),
     content = $bindable(null),
     showScrollToBottom,
+    scrollRestoring = false,
     onScroll,
     onScrollToBottom,
     onLoadOlderHistory,
@@ -69,6 +71,7 @@
     pane?: HTMLDivElement | null;
     content?: HTMLDivElement | null;
     showScrollToBottom: boolean;
+    scrollRestoring?: boolean;
     onScroll: () => void;
     onScrollToBottom: () => void;
     onLoadOlderHistory: () => Promise<boolean>;
@@ -184,70 +187,28 @@
   const handlePaneScroll = userMessageMenuController.handlePaneScroll;
   const runUserMessageAction = userMessageMenuController.runAction;
 
-  const OLDER_HISTORY_THRESHOLD_PX = 96;
-  let olderHistoryLoadPending = false;
-
-  function viewportAnchor(): { id: string; top: number } | null {
-    if (!pane) return null;
-    const paneTop = pane.getBoundingClientRect().top;
-    for (const entry of pane.querySelectorAll<HTMLElement>("[data-transcript-entry-id]")) {
-      const rect = entry.getBoundingClientRect();
-      if (rect.bottom < paneTop) continue;
-      const id = entry.dataset.transcriptEntryId;
-      if (id) return { id, top: rect.top };
-    }
-    return null;
-  }
-
-  async function loadOlderHistoryAtTop(): Promise<void> {
-    if (!pane || olderHistoryLoadPending || pane.scrollTop > OLDER_HISTORY_THRESHOLD_PX) return;
-    const requestSessionId = activeSessionId;
-    if (!requestSessionId) return;
-
-    olderHistoryLoadPending = true;
-    const anchor = viewportAnchor();
-    const previousScrollHeight = pane.scrollHeight;
-    const previousScrollTop = pane.scrollTop;
-    let loadedOlderHistory = false;
-    try {
-      const loaded = await onLoadOlderHistory();
-      if (!loaded || requestSessionId !== activeSessionId) return;
-      loadedOlderHistory = true;
-      await tick();
-      if (!pane || requestSessionId !== activeSessionId) return;
-
-      const anchorTarget = anchor
-        ? pane.querySelector<HTMLElement>(`[data-transcript-entry-id="${CSS.escape(anchor.id)}"]`)
-        : null;
-      if (anchorTarget && anchor) {
-        pane.scrollTop += anchorTarget.getBoundingClientRect().top - anchor.top;
-      } else {
-        pane.scrollTop = previousScrollTop + Math.max(0, pane.scrollHeight - previousScrollHeight);
-      }
-    } finally {
-      olderHistoryLoadPending = false;
-      if (
-        loadedOlderHistory
-        && pane
-        && requestSessionId === activeSessionId
-        && pane.scrollTop <= OLDER_HISTORY_THRESHOLD_PX
-      ) {
-        void tick().then(() => loadOlderHistoryAtTop());
-      }
-    }
-  }
+  const historyPager = createTranscriptHistoryPager({
+    pane: () => pane,
+    activeSessionId: () => activeSessionId,
+    followsLatest: () => !showScrollToBottom,
+    restoring: () => scrollRestoring,
+    loadOlder: () => onLoadOlderHistory(),
+    afterRender: tick,
+  });
+  onDestroy(historyPager.dispose);
 
   function handleTranscriptPaneScroll(): void {
     handlePaneScroll();
-    void loadOlderHistoryAtTop();
+    void historyPager.loadAtTop();
   }
 
   $effect(() => {
     const sessionId = activeSessionId;
     const itemCount = transcript.items.length;
     const loading = historyLoading;
+    if (scrollRestoring) return;
     if (!sessionId || loading || itemCount === 0) return;
-    void tick().then(() => loadOlderHistoryAtTop());
+    void tick().then(() => historyPager.loadAtTop());
   });
 </script>
 
@@ -323,10 +284,20 @@
               </button>
             </div>
           {:else if item.role === "system"}
-            <article class={["transcript-entry w-full min-w-0 font-mono text-xs text-muted-foreground", gapClass]} data-transcript-entry-id={item.id}>
-              <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
-              {#if item.text}<MarkdownText text={item.text} compact dense fitTables {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
-            </article>
+            {#if item.messageId?.startsWith("pix-system:error:")}
+              <article class={["transcript-entry flex min-w-0 gap-2.5 rounded-sm border-l-[3px] border-tool-error bg-panel-strong px-3 py-2 text-xs", gapClass]} data-transcript-entry-id={item.id} role="alert">
+                <TriangleAlert class="mt-0.5 h-4 w-4 shrink-0 text-tool-error" aria-hidden="true" />
+                <div class="min-w-0 flex-1">
+                  <div class="font-semibold text-foreground">Agent stopped with an error</div>
+                  <p class="mt-1 whitespace-pre-wrap break-words font-mono text-muted-foreground">{item.text}</p>
+                </div>
+              </article>
+            {:else}
+              <article class={["transcript-entry w-full min-w-0 font-mono text-xs text-muted-foreground", gapClass]} data-transcript-entry-id={item.id}>
+                <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
+                {#if item.text}<MarkdownText text={item.text} compact dense fitTables {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
+              </article>
+            {/if}
           {:else}
             <article
               class={["transcript-entry w-full min-w-0 text-foreground", gapClass]}

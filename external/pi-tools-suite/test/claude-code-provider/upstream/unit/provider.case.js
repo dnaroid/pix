@@ -236,6 +236,37 @@ process.stdin.on("end", () => {
         await rm(fake.dir, { recursive: true, force: true });
     }
 });
+
+test("provider records a safe unqualified Edit mismatch from a fake Claude stream", async () => {
+    const editTool = { name: "Edit", description: "replace text", parameters: { type: "object", properties: { file_path: { type: "string" } } } };
+    const editInit = { ...toolInit, tools: ["mcp__pi__Edit"] };
+    const fake = await fakeClaude(`
+process.stdin.resume();
+process.stdin.on("end", () => {
+  process.stdout.write(JSON.stringify(${JSON.stringify(editInit)}) + "\\n");
+  process.stdout.write(JSON.stringify({type:"stream_event",event:{type:"message_start",message:{id:"msg_unqualified",model:"claude-sonnet-5",usage:{}}}}) + "\\n");
+  process.stdout.write(JSON.stringify({type:"stream_event",event:{type:"content_block_start",index:0,content_block:{type:"tool_use",id:"toolu_unqualified",name:"Edit",input:{file_path:"hidden"}}}}) + "\\n");
+  setInterval(() => {}, 1000);
+});`);
+    try {
+        const stream = createClaudeStream({ executable: fake.executable, version: CAPTURED_CLAUDE_VERSION, subscriptionType: "pro" })(
+            model, providerContext({ tools: [editTool] }), { reasoning: "medium" },
+        );
+        const result = await stream.result();
+        assert.equal(result.stopReason, "error");
+        assert.match(result.errorMessage ?? "", /unknown tool: Edit/);
+        assert.ok(!result.content.some((block) => block.type === "toolCall"));
+        const metrics = await waitForRequestMetrics((entry) => entry.errorCategory === "tool_unknown");
+        assert.equal(metrics.adapterSource, "pi-tools-suite-vendored");
+        assert.equal(metrics.toolNameMismatch?.proposedName, "Edit");
+        assert.equal(metrics.toolNameMismatch?.classification, "unqualified_active");
+        assert.equal(metrics.toolNameMismatch?.expectedTransportName, "mcp__pi__Edit");
+        assert.equal(metrics.toolNameMismatch?.initializationValidated, true);
+        assert.doesNotMatch(JSON.stringify(metrics), /file_path|hidden/);
+    } finally {
+        await rm(fake.dir, { recursive: true, force: true });
+    }
+});
 test("provider rejects a non-string successful result with exactly one terminal error", async () => {
     const fake = await fakeClaude(`
 process.stdin.resume();

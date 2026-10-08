@@ -4,6 +4,7 @@ import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { deferredSessionHistoryFromMessages } from "../src/acp/session-replay.js";
 import {
 	DEFERRED_PERSISTED_IMAGE_PREFIX,
 	readPersistedHistoryBefore,
@@ -64,6 +65,31 @@ test("persisted history tail defers large tool-result JSON until requested", asy
 	const hydrated = await readPersistedToolResult(ref);
 	assert.equal((hydrated as { content?: Array<{ text?: string }> } | undefined)?.content?.[0]?.text, hugeOutput);
 	assert.deepEqual((hydrated as { details?: unknown } | undefined)?.details, { bytes: hugeOutput.length });
+});
+
+test("persisted Pi provider errors retain the original reason through lazy Desktop history", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pix-history-error-"));
+  const sessionPath = join(dir, "session.jsonl");
+  const lines = [
+    { type: "session", version: 3, id: "s1", timestamp: "2026-10-08T12:56:00.000Z", cwd: "/repo" },
+    { type: "message", id: "u1", parentId: null, timestamp: "2026-10-08T12:56:39.000Z", message: { role: "user", content: "Fix the marker" } },
+    { type: "message", id: "a1", parentId: "u1", timestamp: "2026-10-08T12:57:05.000Z", message: {
+      role: "assistant", stopReason: "error", errorMessage: "Claude proposed an unknown tool: Edit",
+      timestamp: Date.parse("2026-10-08T12:57:05.000Z"), content: [{ type: "thinking", thinking: "" }],
+    } },
+    { type: "message", id: "u2", parentId: "a1", timestamp: "2026-10-08T13:00:43.000Z", message: { role: "user", content: "завис?" } },
+  ];
+  await writeFile(sessionPath, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`, "utf8");
+  const tail = await readPersistedHistoryTail(sessionPath);
+  assert.ok(tail);
+  const deferred = deferredSessionHistoryFromMessages(tail.messages, { sessionId: "s1", cwd: "/repo" }, tail.replayKeys);
+  const errors = deferred.updates.filter((update) => update.sessionUpdate === "agent_message_chunk");
+  assert.deepEqual(errors, [{
+    sessionUpdate: "agent_message_chunk",
+    messageId: `pix-system:error:${Date.parse("2026-10-08T12:57:05.000Z")}`,
+    content: { type: "text", text: "Claude proposed an unknown tool: Edit" },
+  }]);
+  assert.ok(deferred.updates.some((update) => update.sessionUpdate === "user_message_chunk" && update.content.type === "text" && update.content.text === "завис?"));
 });
 
 test("persisted history tail defers user image bodies until requested", async () => {

@@ -29,6 +29,7 @@ type WorkspaceSessionStartupBridge = {
 
 type DesktopConnectionServicesOptions = {
   workspace: () => string;
+  onSessionCatalogChanged?: (cwd: string) => void;
   sessionCoordinator: () => SessionCoordinatorBridge;
   promptRuntime: () => PromptRuntimeBridge;
   workspaceSessionStartup: () => WorkspaceSessionStartupBridge;
@@ -41,6 +42,7 @@ type DesktopConnectionServicesOptions = {
 export function createDesktopConnectionServices(options: DesktopConnectionServicesOptions) {
   return createConnectionStore({
     workspace: options.workspace,
+    onSessionCatalogChanged: options.onSessionCatalogChanged,
     onSessionUpdate: (notification) => options.sessionCoordinator().handleUpdate(notification),
     onSessionState: (notification) => options.sessionCoordinator().handleState(notification),
     onOpenActivity: (sessionId) => options.sessionCoordinator().openActivity(sessionId),

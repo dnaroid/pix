@@ -26,6 +26,7 @@ import type {
 	ToolCallLocation,
 	ToolKind,
 } from "@agentclientprotocol/sdk";
+import { assistantFailureUpdate } from "./assistant-failure-update.js";
 
 /** The JSON wire shape of a pi `message_update` event. */
 type JsonMessageUpdateEvent = Extract<JsonAgentSessionEvent, { type: "message_update" }>;
@@ -58,6 +59,10 @@ export class EventTranslator {
 		switch (event.type) {
 			case "message_update":
 				return this.messageUpdateToUpdates(event.assistantMessageEvent);
+			case "message_end": {
+				const error = assistantFailureUpdate(event.message);
+				return error ? [error] : [];
+			}
 			case "tool_execution_start":
 				return [this.toolExecutionStartToUpdate(event)];
 			case "tool_execution_update":

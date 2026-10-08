@@ -170,6 +170,7 @@ function createClaudeAttempt(
         architecture: process.arch,
         nodeVersion: process.version,
         claudeVersion: installation.version,
+        adapterSource: "pi-tools-suite-vendored",
         requestedModel: model.id,
         effort: effort ?? "default",
         messageCount: requestContext.messages.length,
@@ -418,6 +419,9 @@ function createClaudeAttempt(
         const failProtocol = (error: unknown): void => {
           if (mapper?.isTerminal) return;
           errorCategory ??= error instanceof ClaudeCodeError ? error.code : "protocol";
+          if (error instanceof ClaudeCodeError && error.code === "tool_unknown") {
+            metrics.toolNameMismatch = mapper?.toolNameMismatch;
+          }
           mapper?.fail(errorText(error));
           running.terminateInBackground();
         };

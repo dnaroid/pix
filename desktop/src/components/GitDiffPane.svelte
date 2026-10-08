@@ -41,8 +41,8 @@
     onResolve: () => void;
   } = $props();
 
-  const title = $derived(diff.path ?? "All changes");
-  const scopeLabel = $derived(diff.scope === "staged" ? "Staged" : diff.scope === "unstaged" ? "Working Tree" : "All Changes");
+  const title = $derived(diff.commit ? `${diff.commit.shortHash} · ${diff.commit.subject}` : diff.path ?? "All changes");
+  const scopeLabel = $derived(diff.commit ? "Commit" : diff.scope === "staged" ? "Staged" : diff.scope === "unstaged" ? "Working Tree" : "All Changes");
   const lines = $derived(diff.content.split("\n"));
   const hasReviewFindings = $derived(gitReviewHasFindings(review));
   const copyPromptDisabled = $derived(!canResolve || reviewLoading || resolveLoading || reviewStale);
@@ -97,6 +97,7 @@
           <button class={["h-6 rounded-sm px-2 text-xs focus-visible:outline-2 focus-visible:outline-ring", view === "diff" ? "bg-panel-selected text-foreground" : "text-muted-foreground hover:bg-panel-hover"]} type="button" aria-pressed={view === "diff"} onclick={() => view = "diff"}>Diff</button>
         </div>
       {/if}
+      {#if !diff.commit}
       <button
         class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-primary hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
         type="button"
@@ -107,6 +108,7 @@
         {#if reviewLoading}<RefreshCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />{:else}<Sparkles class="h-3.5 w-3.5" aria-hidden="true" />{/if}
         {reviewLoading ? "Reviewing…" : review ? "Run again" : "Code review"}
       </button>
+      {/if}
     </header>
 
     {#if (review || reviewLoading) && view === "review"}

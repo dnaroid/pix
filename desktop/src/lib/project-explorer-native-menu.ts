@@ -10,6 +10,10 @@ export interface ProjectExplorerMenuAction extends MenuNavigationItem {
   separatorBefore?: boolean;
 }
 
+export function canOpenProjectEntryInBrowser(entry: ProjectTreeEntry): boolean {
+  return entry.kind === "file" && /\.html?$/i.test(entry.path);
+}
+
 /** Adapt the shared command policy without duplicating enablement or ordering. */
 export function projectExplorerMenuActions(
   items: readonly MenuNavigationItem[],
@@ -22,6 +26,7 @@ export function projectExplorerMenuActions(
     if (!action) throw new Error(`Unknown Project Explorer command: ${item.label}`);
     let id = item.label;
     if (item.label === revealLabel) id = "reveal";
+    else if (item.label === "Open in Browser") id = "browser";
     else if (item.label.startsWith("Open ")) id = "external";
     return {
       ...item, id, action,

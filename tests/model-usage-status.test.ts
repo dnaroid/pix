@@ -9,6 +9,7 @@ import {
 	type AnthropicUsageResponse,
 	formatAccountUsageReport,
 	formatModelUsageStatusLabel,
+	modelUsageWindowExceedsDailyBudget,
 	googleAntigravityUsageStatusFromResponse,
 	modelUsageDescriptor,
 	modelUsageRemainingPercent,
@@ -403,7 +404,7 @@ describe("model usage status", () => {
 		assert.equal(formatModelUsageStatusLabel(status, now), `88% ████▍ ${formatExpectedResetDuration(now + 14 * 60 * 60 * 1000, now)}`);
 	});
 
-	it("warns when a multi-day status-bar limit will exhaust before reset at the current pace", () => {
+	it("warns when a multi-day status-bar limit exceeds its cumulative daily budget", () => {
 		const now = Date.UTC(2026, 0, 3, 0, 0, 0);
 		const response: OpenAIUsageResponse = {
 			plan_type: "plus",
@@ -421,6 +422,27 @@ describe("model usage status", () => {
 		const status = openAIUsageStatusFromResponse(response, "openai-codex/gpt-5.5", now);
 
 		assert.equal(formatModelUsageStatusLabel(status, now), `40% ██    ${APP_ICONS.alert} ${formatExpectedResetDuration(now + 5 * 24 * 60 * 60 * 1000, now)}`);
+	});
+
+	it("allocates cumulative quota in whole days anchored to the provider window", () => {
+		const start = Date.UTC(2026, 0, 1, 15, 30);
+		const day = 86_400_000;
+		const window = { remainingPercent: 80, resetAt: start + 7 * day, windowSeconds: 7 * 86_400, hasKnownWindowDuration: true };
+		assert.equal(modelUsageWindowExceedsDailyBudget(window, start), true);
+		assert.equal(modelUsageWindowExceedsDailyBudget(window, start + day - 1), true);
+		assert.equal(modelUsageWindowExceedsDailyBudget(window, start + day), false);
+		assert.equal(modelUsageWindowExceedsDailyBudget({ ...window, remainingPercent: 70 }, start + day), true);
+		assert.equal(modelUsageWindowExceedsDailyBudget({ ...window, remainingPercent: 1 }, start + 6 * day), false);
+		assert.equal(modelUsageWindowExceedsDailyBudget(window, start - 1), false);
+		assert.equal(modelUsageWindowExceedsDailyBudget(window, window.resetAt), false);
+		assert.equal(modelUsageWindowExceedsDailyBudget({ ...window, remainingPercent: 0 }, start), false);
+		assert.equal(modelUsageWindowExceedsDailyBudget({ ...window, hasKnownWindowDuration: false }, start), false);
+		assert.equal(modelUsageWindowExceedsDailyBudget({ ...window, windowSeconds: 86_400 }, window.resetAt - day), false);
+		const tenDays = { ...window, resetAt: start + 10 * day, windowSeconds: 10 * 86_400, remainingPercent: 90 };
+		assert.equal(modelUsageWindowExceedsDailyBudget(tenDays, start), false);
+		assert.equal(modelUsageWindowExceedsDailyBudget({ ...tenDays, remainingPercent: 89.9 }, start), true);
+		const partialDay = { ...window, resetAt: start + 2.5 * day, windowSeconds: 2.5 * 86_400, remainingPercent: 1 };
+		assert.equal(modelUsageWindowExceedsDailyBudget(partialDay, start + 2 * day), false);
 	});
 
 	it("does not warn from tiny early-window usage spikes", () => {

@@ -62,6 +62,15 @@ IDX installation is separate from project indexing. Installing the CLI never
 creates `.indexer-cli` for a project automatically; initialize an individual
 project from the IDX panel when needed.
 
+New-project initialization defaults to OpenRouter and requires
+`OPENROUTER_API_KEY` (environment or `~/.config/idx/.env`), not Ollama. Code and
+document chunks and search queries leave the machine; the index itself stays
+local. Existing project providers are preserved unless explicitly overridden.
+For local Ollama initialization use `idx init --embedding local` in the CLI;
+an unchecked OpenRouter override in the panel is not a local-mode selector.
+See [IDX embedding providers](configuration.md#idx-embedding-providers) for
+models, setup and safe repair prerequisites.
+
 ## Project initialization states
 
 Desktop exposes explicit setup actions instead of failing with generic empty

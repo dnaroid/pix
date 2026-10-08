@@ -17,7 +17,7 @@ import {
   mergeRuntimeStatusResponse,
   modelUsageTone,
   modelUsageWindowLabel,
-  modelUsageWindowWillExhaustBeforeReset,
+  modelUsageWindowExceedsDailyBudget,
   shortModelUsageAccountLabel,
 } from "./runtime-status";
 
@@ -78,20 +78,41 @@ describe("desktop runtime status helpers", () => {
     expect(formatResetDuration(now - 1, now)).toBe("reset");
   });
 
-  it("keeps the TUI long-window exhaustion warning heuristic", () => {
+  it("warns on cumulative daily budget overrun, matching the TUI", () => {
     const now = Date.UTC(2026, 8, 11, 12, 0, 0);
-    expect(modelUsageWindowWillExhaustBeforeReset({
+    expect(modelUsageWindowExceedsDailyBudget({
       remainingPercent: 20,
       resetAt: now + 5 * 24 * 60 * 60_000,
       windowSeconds: 7 * 24 * 60 * 60,
       hasKnownWindowDuration: true,
     }, now)).toBe(true);
-    expect(modelUsageWindowWillExhaustBeforeReset({
+    expect(modelUsageWindowExceedsDailyBudget({
       remainingPercent: 90,
       resetAt: now + 5 * 24 * 60 * 60_000,
       windowSeconds: 7 * 24 * 60 * 60,
       hasKnownWindowDuration: true,
     }, now)).toBe(false);
+  });
+
+  it("allocates whole days from the window start and carries unused budget forward", () => {
+    const start = Date.UTC(2026, 8, 11, 15, 30);
+    const day = 86_400_000;
+    const window = { remainingPercent: 80, resetAt: start + 7 * day, windowSeconds: 7 * 86_400, hasKnownWindowDuration: true };
+    expect(modelUsageWindowExceedsDailyBudget(window, start)).toBe(true);
+    expect(modelUsageWindowExceedsDailyBudget(window, start + day - 1)).toBe(true);
+    expect(modelUsageWindowExceedsDailyBudget(window, start + day)).toBe(false);
+    expect(modelUsageWindowExceedsDailyBudget({ ...window, remainingPercent: 70 }, start + day)).toBe(true);
+    expect(modelUsageWindowExceedsDailyBudget({ ...window, remainingPercent: 1 }, start + 6 * day)).toBe(false);
+    expect(modelUsageWindowExceedsDailyBudget(window, start - 1)).toBe(false);
+    expect(modelUsageWindowExceedsDailyBudget(window, window.resetAt)).toBe(false);
+    expect(modelUsageWindowExceedsDailyBudget({ ...window, remainingPercent: 0 }, start)).toBe(false);
+    expect(modelUsageWindowExceedsDailyBudget({ ...window, hasKnownWindowDuration: false }, start)).toBe(false);
+    expect(modelUsageWindowExceedsDailyBudget({ ...window, windowSeconds: 86_400 }, window.resetAt - day)).toBe(false);
+    const tenDays = { ...window, resetAt: start + 10 * day, windowSeconds: 10 * 86_400, remainingPercent: 90 };
+    expect(modelUsageWindowExceedsDailyBudget(tenDays, start)).toBe(false);
+    expect(modelUsageWindowExceedsDailyBudget({ ...tenDays, remainingPercent: 89.9 }, start)).toBe(true);
+    const partialDay = { ...window, resetAt: start + 2.5 * day, windowSeconds: 2.5 * 86_400, remainingPercent: 1 };
+    expect(modelUsageWindowExceedsDailyBudget(partialDay, start + 2 * day)).toBe(false);
   });
 
   it("removes the TUI dialog heading before rendering the desktop popover body", () => {

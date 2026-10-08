@@ -37,6 +37,35 @@ This package keeps shared Pi tools as ordinary source folders under `src/` and r
 
 Registration order is preserved by the ordered catalog in `src/module-catalog.ts`: coding-discipline, ast-grep, async-subagents, lsp, comment-checker, session, repo-discovery command/tool gate, antigravity-auth provider, local claude-code-provider, OpenCode import, clean-Pi-only question, todo, model-tools, usage, web-search, truncation-metadata-normalizer, dcp, prompt-commands, resource-registry, credential-firewall, then codex-reasoning-fix. Tool metadata and active model-specific tool sets have two modes: standard and repo-aware. Repo-aware mode requires both project `.indexer-cli` state and an executable `idx`; when enabled, `repo_*` tools stay active ahead of overlapping lower-level aliases. If `idx` is unavailable, the suite falls back to ordinary Read/Grep/LSP/sub-agent guidance and does **not** implicitly install, initialize, or create index state. `/idx-init` is the explicit setup/repair path and should be run only with user permission. Independently of the catalog, `src/index.ts` registers an unconditional guard (see [provider-web-search-policy](../../specs/provider-web-search-policy.md)) that removes and blocks the Claude provider's metered `pi_claude_code_provider_web_search` tool in parent sessions while keeping the provider itself and the suite's own `web_search` available. Sub-agents exclude that tool through their separate tool guard.
 
+### IDX embedding setup and privacy
+
+`/idx-init` with no argument invokes `idx init` and uses the upstream default:
+OpenRouter `perplexity/pplx-embed-v1-0.6b` embeddings at 1024 dimensions for
+both code and document domains. It requires `OPENROUTER_API_KEY` in the
+environment or `~/.config/idx/.env`; chunks and queries are sent to OpenRouter
+and leave the machine. Tell the user about the provider, key requirement, and
+privacy boundary before requesting permission to initialize, and offer
+`/idx-init --embedding local` as the explicit no-key embedding alternative.
+That mode configures Ollama `jina-8k` for code and `nomic-embed-text-v2-moe`
+for documents at 768 dimensions. Index storage remains local in both modes;
+local mode uses Ollama instead of sending embedding requests to OpenRouter.
+
+`/idx-init --embedding openrouter` explicitly selects the default cloud provider.
+Only these exact optional arguments are supported; invalid input is rejected
+before installation or initialization. An already-indexed project is never
+implicitly switched by `/idx-init`; its saved provider remains in force unless
+the user explicitly runs the corresponding upstream doctor/reinitialization
+workflow. Reinitializing without an embedding override preserves the saved
+provider and does not migrate it. The setup command's default is cloud,
+requires a cloud key, and skips Ollama setup; installing `indexer-cli` with npm
+requires no key.
+`idx doctor` defaults to saved providers of the selected projects (a mixed set
+requires both Ollama and an OpenRouter key); with no projects it defaults to cloud. Its explicit
+`--embedding local|openrouter` mode checks prerequisites before deleting data
+and reinitializing; a provider switch rebuilds the index. Agents must not run
+doctor/setup/indexing automatically or read credentials. These upstream actions
+are separate from ordinary `repo_*` queries.
+
 The [Codex reasoning replay spec](../../specs/codex-reasoning-fix.md) owns the
 last suite hook's narrow wire-only contract, evidence, and known cached
 WebSocket continuation limitation.

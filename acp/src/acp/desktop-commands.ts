@@ -123,7 +123,7 @@ export interface DesktopLspControlResponse {
 	readonly trustRequired?: boolean;
 }
 
-export type DesktopAgentControlAction = "state" | "pause" | "continue";
+export type DesktopAgentControlAction = "state" | "pause" | "cancel-pause" | "continue";
 export type DesktopAgentControlState = "idle" | "running" | "pause-requested" | "paused" | "resuming" | "continuable";
 
 export interface DesktopAgentControlRequest extends DesktopSessionRequest {
@@ -482,8 +482,8 @@ export function parseDesktopSessionRequest(value: unknown): DesktopSessionReques
 
 export function parseDesktopAgentControlRequest(value: unknown): DesktopAgentControlRequest {
 	const session = parseDesktopSessionRequest(value);
-	if (!isRecord(value) || (value.action !== "state" && value.action !== "pause" && value.action !== "continue")) {
-		throw new RequestError(ERROR_INVALID_PARAMS, "agent control request requires action state, pause, or continue");
+	if (!isRecord(value) || (value.action !== "state" && value.action !== "pause" && value.action !== "cancel-pause" && value.action !== "continue")) {
+		throw new RequestError(ERROR_INVALID_PARAMS, "agent control request requires action state, pause, cancel-pause, or continue");
 	}
 	return { ...session, action: value.action };
 }

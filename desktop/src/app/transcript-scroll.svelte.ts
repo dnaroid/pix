@@ -32,7 +32,7 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
   let followsLatest = $state(true);
   let frame = 0;
   let visible = true;
-  let restorePending = false;
+  let restorePending = $state(false);
   let savedScrollTop = 0;
   let activatedSessionId: string | null | undefined;
   let scrollRevision = 0;
@@ -122,6 +122,17 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
     scheduleScrollToLatest();
   }
 
+  function applyScrollPosition(pane: HTMLDivElement): void {
+    pane.scrollTop = followsLatest ? pane.scrollHeight : savedScrollTop;
+    lastScroll = snapshotScroll();
+    restorePending = false;
+    // content-visibility and media layout can expose taller content during
+    // the write itself. Do not assume the estimated bottom was the live edge:
+    // keep a follow frame pending so its queued, stationary scroll event cannot
+    // disable following before ResizeObserver has a chance to catch up.
+    if (followsLatest && !isNearBottom()) scheduleScrollToLatest();
+  }
+
   function scheduleScrollToLatest(): void {
     // Coalesce stream/resize notifications without moving a pending scroll to
     // the next frame. Otherwise continuous updates can starve the live edge.
@@ -134,9 +145,7 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
       const pane = options.pane();
       // A show frame can run before layout is usable; ResizeObserver retries.
       if (!pane?.clientHeight) return;
-      pane.scrollTop = followsLatest ? pane.scrollHeight : savedScrollTop;
-      lastScroll = snapshotScroll();
-      restorePending = false;
+      applyScrollPosition(pane);
     });
   }
 
@@ -153,9 +162,7 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
     if (revision !== scrollRevision || sessionId !== options.activeSessionId()) return;
     const pane = options.pane();
     if (visible && pane?.clientHeight) {
-      pane.scrollTop = pane.scrollHeight;
-      lastScroll = snapshotScroll();
-      restorePending = false;
+      applyScrollPosition(pane);
     }
   }
 
@@ -208,6 +215,7 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
 
   return {
     get followsLatest() { return followsLatest; },
+    get restoring() { return restorePending; },
     activateSession,
     setVisible,
     handleScroll,

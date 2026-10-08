@@ -314,6 +314,44 @@ microphone permission.
 - **IDX:** Desktop can install managed IDX from the IDX panel; TUI repository
   discovery requires `idx` plus a project `.indexer-cli` index.
 
+### IDX embedding providers
+
+Installing `indexer-cli` with npm (including Desktop's managed install) requires
+neither an API key nor Ollama; installation does not run setup or initialize a
+project.
+
+For a **new** project, `idx init` defaults to OpenRouter:
+`perplexity/pplx-embed-v1-0.6b` for both code and documents, with 1024 dimensions.
+Set `OPENROUTER_API_KEY` in the environment or `~/.config/idx/.env`; Ollama is not
+needed. `idx setup` also defaults to OpenRouter, requires that key and skips
+Ollama. Never commit real keys.
+
+For local embeddings, explicitly use `idx setup --embedding local` and
+`idx init --embedding local`. This mode requires Ollama with `jina-8k` for code
+and `nomic-embed-text-v2-moe` for documents (768 dimensions), but no API key.
+Tests/benchmarks that initialize a real local index must pass `--embedding local`
+instead of relying on a default; mocked CLI tests need no embedding service.
+
+Re-running `idx init` **without** `--embedding` preserves the existing project's
+configuration, including older local configurations. There is no automatic
+OpenRouter migration. In Desktop, an unchecked OpenRouter override means no
+flag, **not** local mode. For explicit local initialization use the CLI.
+
+`idx doctor` without an override checks dependencies of the saved providers in
+the selected projects. A mixed local/OpenRouter set needs both Ollama and the
+OpenRouter key; with no projects it defaults to OpenRouter prerequisites.
+`idx doctor --embedding local|openrouter` explicitly selects the provider for
+dependency checks and full reinitialization. A missing key or any prerequisite
+failure must stop repair **before deleting the index**. An explicit provider
+change rebuilds the derived index; vectors from different modes must not mix.
+Do not switch an existing project without separate user approval.
+
+Index storage stays local in both modes. In OpenRouter mode, however, code and
+document chunks **and search queries are sent to an external service**. Agents
+must disclose this before initialization and avoid paid indexing/semantic
+queries merely to verify setup. Ollama-based web search is a separate integration
+and is not an IDX OpenRouter prerequisite.
+
 ## Ignoring legacy context files
 
 To override an unwanted `AGENTS.md` / `CLAUDE.md` in one directory, create:

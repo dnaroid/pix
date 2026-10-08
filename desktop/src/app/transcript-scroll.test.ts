@@ -21,6 +21,7 @@ describe("transcript scroll scheduling", () => {
     if (clampScroll) {
       let scrollTop = pane.scrollTop;
       Object.defineProperty(pane, "scrollTop", {
+        configurable: true,
         get: () => scrollTop,
         set: (value: number) => {
           scrollTop = Math.max(0, Math.min(value, pane.scrollHeight - pane.clientHeight));
@@ -65,6 +66,19 @@ describe("transcript scroll scheduling", () => {
     controller.scheduleScrollToLatest();
     runFrame();
     expect(pane.scrollTop).toBe(1000);
+  });
+
+  it("exposes pending restoration until the activated pane has usable layout", () => {
+    const { controller, pane, activateSession, runFrame } = setup();
+    activateSession("session-2");
+    expect(controller.restoring).toBe(true);
+    pane.clientHeight = 0;
+    runFrame();
+    expect(controller.restoring).toBe(true);
+    pane.clientHeight = 300;
+    controller.scheduleScrollToLatest();
+    runFrame();
+    expect(controller.restoring).toBe(false);
   });
 
   it("cancels passive following when the user scrolls up and resumes at the bottom", () => {
@@ -186,6 +200,55 @@ describe("transcript scroll scheduling", () => {
     runFrame();
     expect(pane.scrollTop).toBe(1400);
   });
+
+  it.each(["conversation", "auxiliary", "explicit latest"])(
+    "settles the live edge when a %s restore materializes taller media entries",
+    async (activation) => {
+      const { controller, pane, callbacks, runFrame, activateSession } = setup({ clampScroll: true });
+      activateSession("session-1");
+      runFrame();
+      if (activation === "conversation") {
+        activateSession("session-2");
+        runFrame();
+        activateSession("session-1");
+      } else if (activation === "auxiliary") {
+        controller.setVisible(false);
+        controller.setVisible(true);
+      }
+
+      // Reading scrollHeight yields estimated content-visibility geometry.
+      // Moving the viewport then materializes a media-rich entry: the write
+      // reaches the old bottom, but subsequent metrics expose a taller pane.
+      let offset = pane.scrollTop;
+      let materializations = 2;
+      Object.defineProperty(pane, "scrollTop", {
+        get: () => offset,
+        set: (value: number) => {
+          offset = Math.max(0, Math.min(value, pane.scrollHeight - pane.clientHeight));
+          if (materializations-- > 0) pane.scrollHeight += 600;
+        },
+      });
+
+      if (activation === "explicit latest") await controller.scrollToLatest();
+      else runFrame();
+      expect(pane.scrollTop).toBe(300);
+      controller.handleScroll(); // queued scroll before ResizeObserver fires
+      expect(controller.followsLatest).toBe(true);
+      expect(callbacks.size).toBe(1);
+      runFrame();
+      controller.handleScroll();
+      expect(controller.followsLatest).toBe(true);
+      runFrame();
+      controller.handleScroll();
+      expect(pane.scrollTop).toBe(pane.scrollHeight - pane.clientHeight);
+      expect(controller.followsLatest).toBe(true);
+      expect(callbacks.size).toBe(0);
+
+      pane.scrollTop -= 100; // actual reader input must still stop following
+      controller.handleScroll();
+      expect(controller.followsLatest).toBe(false);
+    },
+  );
 
   it("restores a scrolled-up reader without enabling follow mode", () => {
     const { controller, pane, runFrame } = setup();

@@ -87,7 +87,6 @@ Affected operations:
 
 - fork and foreground the forked conversation;
 - replace the current tab with another session;
-- close the active session and select a fallback;
 - delete the active session and select a fallback.
 
 These are real atomic active-session transitions and should not simply become
@@ -95,7 +94,10 @@ unlocked. They should, however, move to the same owned
 `active-session-transition` scope so unrelated panes are not disabled and a
 late completion cannot release another transition's lock.
 
-Background close/delete are already per-session and are not part of this debt.
+Session close (active or background) and background delete are now per-session
+and are not part of this debt. Close selects its fallback/draft optimistically,
+then runs ACP teardown independently; failure restores membership without
+stealing newer navigation. See `specs/desktop-session-tabs.md`.
 
 ### P1 — undo combines active-session and workspace mutation
 

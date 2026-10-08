@@ -30,8 +30,6 @@ const GOOGLE_ANTIGRAVITY_CLI_CHANGE_LIST = "974782877";
 const REQUEST_TIMEOUT_MS = 10_000;
 const DAY_SECONDS = 86_400;
 const HOUR_SECONDS = 3_600;
-const MODEL_USAGE_WARNING_MIN_USED_PERCENT = 5;
-const MODEL_USAGE_WARNING_MIN_ELAPSED_SECONDS = 6 * HOUR_SECONDS;
 const DEFAULT_ANTIGRAVITY_PROJECT_ID = "rising-fact-p41fc";
 
 function normalizeGoogleAntigravityPlatform(platform = process.platform): string {
@@ -1917,7 +1915,7 @@ function maskCredential(value: string): string {
 }
 
 function formatUsageWindow(window: ModelUsageLimitWindow, now: number): string {
-	const warning = modelUsageWindowWillExhaustBeforeReset(window, now) ? ` ${APP_ICONS.alert}` : "";
+	const warning = modelUsageWindowExceedsDailyBudget(window, now) ? ` ${APP_ICONS.alert}` : "";
 	// A header-derived window without reset metadata reports a live snapshot;
 	// claiming an immediate "reset" countdown would be wrong, so it is omitted.
 	const countdown = window.resetAt > now || window.hasKnownWindowDuration === true
@@ -1926,21 +1924,15 @@ function formatUsageWindow(window: ModelUsageLimitWindow, now: number): string {
 	return `${window.label ? `${window.label} ` : ""}${window.remainingPercent}% ${formatCompactProgressBar(window.remainingPercent)}${warning}${countdown}`;
 }
 
-function modelUsageWindowWillExhaustBeforeReset(window: ModelUsageLimitWindow, now: number): boolean {
+export function modelUsageWindowExceedsDailyBudget(window: ModelUsageLimitWindow, now: number): boolean {
 	if (!window.hasKnownWindowDuration) return false;
 	if (window.windowSeconds <= DAY_SECONDS) return false;
 	if (window.remainingPercent <= 0) return false;
 
-	const timeUntilResetSeconds = Math.max(0, (window.resetAt - now) / 1000);
-	const elapsedSeconds = Math.max(0, window.windowSeconds - timeUntilResetSeconds);
-	if (elapsedSeconds < MODEL_USAGE_WARNING_MIN_ELAPSED_SECONDS) return false;
-
-	const total = 100;
-	const used = total - window.remainingPercent;
-	if (used < MODEL_USAGE_WARNING_MIN_USED_PERCENT) return false;
-
-	const remaining = total - used;
-	const averageRate = used / elapsedSeconds;
-	const projectedSecondsUntilExhaustion = remaining / averageRate;
-	return projectedSecondsUntilExhaustion < timeUntilResetSeconds;
+	const startsAt = window.resetAt - window.windowSeconds * 1000;
+	if (now < startsAt || now >= window.resetAt) return false;
+	// Allocate the whole current day up front; unused allowance carries forward.
+	const day = Math.floor((now - startsAt) / (DAY_SECONDS * 1000)) + 1;
+	const budgetPercent = Math.min(100, day * DAY_SECONDS / window.windowSeconds * 100);
+	return 100 - window.remainingPercent > budgetPercent;
 }

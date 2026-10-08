@@ -31,7 +31,7 @@ Bundled built-in roles use the same Markdown definition format and parser under
 
 1. From the spawn cwd, walk up towards the filesystem root; the **first**
    `.pi/agents` directory found wins (same walk-up semantics as
-   `findProjectPiToolsSuiteConfig` for `<project>/.pi/pi-tools-suite.jsonc`).
+   `findProjectConfig` for `<project>/.pi/pi-tools-suite.jsonc`).
 2. Only top-level `*.md` files (non-recursive) are loaded, dotfiles excluded,
    sorted by filename for deterministic merge order.
 3. Type name = filename without the `.md` extension. Valid names:

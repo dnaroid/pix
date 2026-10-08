@@ -41,6 +41,52 @@ describe("renderMarkdown", () => {
     expect(html).not.toContain('class="selection-ink"');
   });
 
+  it("typesets inline math and display fractions with Cyrillic labels", () => {
+    const result = renderMarkdown([
+      "DER: \\(x^2 + \\alpha\\) and $a+b$.",
+      "",
+      "\\[",
+      "DER=\\frac{\\text{пропущенная речь}+\\text{лишняя речь}}{\\text{эталонное время}}\\times100\\%",
+      "\\]",
+      "",
+      "$$JER=1-\\frac{|A\\cap B|}{|A\\cup B|}$$",
+    ].join("\n"));
+
+    expect(result).toContain('class="markdown-math-inline"');
+    expect(result).toContain('class="markdown-math-display"');
+    expect(result).toContain('class="katex-display"');
+    expect(result).toContain("пропущенная речь");
+    expect(result).toContain("JER");
+    expect(result).toContain('class="katex-mathml"');
+  });
+
+  it("keeps math in code literal and escapes unsafe or invalid math", () => {
+    const code = renderMarkdown("`$x^2$`\n\n```tex\n\\frac{a}{b}\n```");
+    expect(code).not.toContain('class="katex"');
+    expect(code).toContain("$x^2$");
+
+    const escaped = renderMarkdown("The price is \\$5, not $x$. Use \\$literal and `$y$`.");
+    expect((escaped.match(/markdown-math-inline/g) ?? [])).toHaveLength(1);
+    expect(escaped).toContain("$5");
+
+    const invalid = renderMarkdown("\\[\\notacommand{<img src=x>}\\]");
+    expect(invalid).toContain("markdown-math-fallback");
+    expect(invalid).toContain("&lt;img src=x&gt;");
+    expect(invalid).not.toContain("<img");
+  });
+
+  it("shows the original text of an incomplete display formula while streaming", () => {
+    const partial = renderMarkdown("Before\n\n\\[\n\\frac{a}{");
+    expect(partial).toContain("Before");
+    expect(partial).toContain("markdown-math-fallback");
+    expect(partial).toContain("\\frac{a}{");
+    expect(partial).toContain("\\[");
+    expect(renderMarkdown("\\[\\frac{a}{b}\\]")).toContain('class="katex-display"');
+    const prose = renderMarkdown("\\(x\\) and then text.");
+    expect(prose).toContain("markdown-math-inline");
+    expect(renderMarkdown("\\[a+b\\] and prose")).toContain("and prose");
+  });
+
   it("renders complete and streaming fenced code without interpreting its contents", () => {
     const complete = renderMarkdown("```ts\nconst tag = '<script>';\n```");
     const streaming = renderMarkdown("```ts\nconst tag = '<script>';\n");
@@ -213,6 +259,25 @@ describe("renderMarkdown", () => {
     expect(local).toContain('data-project-media="image"');
     expect(local).toContain('data-project-media-label="Result"');
     expect(remote).toBe("<p>Remote</p>");
+    expect(remote).not.toContain("<img");
+  });
+
+  it("embeds audio for both link syntaxes with safe captions and local resolvers", () => {
+    for (const extension of ["aac", "aif", "aiff", "flac", "m4a", "mp3", "oga", "ogg", "opus", "wav"]) {
+      for (const prefix of ["", "!"]) {
+        const project = renderMarkdown(`${prefix}[Track](music/track.${extension.toUpperCase()})`);
+        expect(project).toContain('data-project-media="audio"');
+        expect(project).toContain(`data-project-file="music/track.${extension.toUpperCase()}"`);
+        for (const path of ["/Music/track", "file:///Music/track", "~/Music/track"]) {
+          expect(renderMarkdown(`${prefix}[Track](${path}.${extension})`)).toContain('data-local-media="audio"');
+        }
+      }
+    }
+    expect(renderMarkdown('[<script>](music/track.mp3)')).not.toContain("<script>");
+    expect(renderMarkdown('[Track](../track.mp3)')).not.toContain('data-project-media="audio"');
+    expect(renderMarkdown('[Track](https://example.com/track.mp3)')).not.toContain('data-local-media="audio"');
+    const remote = renderMarkdown('![Track](https://example.com/track.mp3?download=1)', { remoteImages: true });
+    expect(remote).not.toContain("<audio");
     expect(remote).not.toContain("<img");
   });
 
@@ -405,6 +470,40 @@ describe("renderMarkdown", () => {
     expect(html).not.toContain("data-project-file");
     expect(html).toContain("<code>npm run check</code>");
     expect(html).toContain("<code>value.toString()</code>");
+  });
+
+  it.each([
+    "exports/voice_auditions/player/01_M_Supertonic_M1.mp3",
+    "01_M_Supertonic_M1.lrc",
+    "repo_architecture, repo_search",
+    "foo__bar__baz foo___bar___baz",
+    "имя_файла_1.txt",
+  ])("preserves intraword underscores in %s", (text) => {
+    expect(renderMarkdown(text)).toBe(`<p>${text}</p>`);
+  });
+
+  it("preserves filename underscores in file links and audio captions", () => {
+    for (const extension of ["mp3", "lrc"]) {
+      const name = `01_M_Supertonic_M1.${extension}`;
+      const html = renderMarkdown(`[${name}](exports/voice_auditions/player/${name})`);
+      expect(html).toContain(`>${name}</span>`);
+      expect(html).toContain(`exports/voice_auditions/player/${name}`);
+      expect(html).not.toContain("<em>");
+    }
+  });
+
+  it("renders standalone underscore emphasis without consuming identifier underscores", () => {
+    expect(renderMarkdown("_italic_ __bold__ ___both___")).toBe(
+      "<p><em>italic</em> <strong>bold</strong> <strong><em>both</em></strong></p>",
+    );
+    expect(renderMarkdown("(_курсив_) _foo_bar_ __foo__bar__")).toBe(
+      "<p>(<em>курсив</em>) <em>foo_bar</em> <strong>foo__bar</strong></p>",
+    );
+    for (const text of ["_ leading_", "_trailing _", "word_italic_", "_italic_word"]) {
+      expect(renderMarkdown(text)).toBe(`<p>${text}</p>`);
+    }
+    expect(renderMarkdown("_still_streaming")).toBe("<p>_still_streaming</p>");
+    expect(renderMarkdown("_escaped\\_underscore_")).toBe("<p><em>escaped_underscore</em></p>");
   });
 
   it("renders escaped underscores in inventory identifiers literally", () => {

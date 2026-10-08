@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
@@ -7,6 +7,27 @@ import { SessionMapStore, type SessionMapRecord } from "../src/acp/session-map.j
 import type { Logger } from "../src/logging.js";
 
 const LOGGER: Logger = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} };
+
+test("guarded title discovery cannot resurrect deleted files or overwrite a newer rename", async t => {
+  const artifacts = resolve(".pi/artifacts/session-title-search");
+  await mkdir(artifacts, { recursive: true });
+  const root = await mkdtemp(join(artifacts, "map-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, "session.jsonl");
+  await writeFile(path, "unchanged session data");
+  const store = new SessionMapStore(join(root, "sessions.json"), LOGGER);
+  const captured = record("native", { piSessionPath: path, title: "old title" });
+  await store.put({ ...captured, sessionId: "stable" });
+  await store.touch("stable", "new title");
+  const options = { requireExistingFiles: true, keepNewerTitles: true };
+  await store.mergeByPiSessionPath([captured], options);
+  assert.equal((await store.get("stable"))?.title, "new title");
+  assert.equal(await readFile(path, "utf8"), "unchanged session data");
+  await rm(path);
+  await store.delete("stable");
+  await store.mergeByPiSessionPath([captured], options);
+  assert.deepEqual(await store.list(), []);
+});
 
 async function tempMapPath(): Promise<string> {
 	return join(await mkdtemp(join(tmpdir(), "pix-acp-map-")), "sessions.json");

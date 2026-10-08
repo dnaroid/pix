@@ -72,6 +72,10 @@ describe("repo discovery output truncation", () => {
 						if (projectPath === "unindexed") {
 							expect(result.details?.projectRoot).toBe(path.join(root, "unindexed"));
 							expect(result.content[0].text).toContain("Do not run /idx-init");
+							expect(result.content[0].text).toContain("OPENROUTER_API_KEY");
+							expect(result.content[0].text).toContain("/idx-init --embedding local");
+							expect(result.content[0].text).toContain("index storage remains local");
+							expect(result.content[0].text).not.toContain("even local embeddings");
 						}
 					}
 					expect(calls).toHaveLength(count);
@@ -277,6 +281,10 @@ describe("repo discovery output truncation", () => {
 			]);
 			expect(messages[0].content).toContain("idx was not available; installed with npm install -g indexer-cli@latest");
 			expect(messages[0].content).toContain("idx init completed");
+			expect(messages[0].content).toContain("perplexity/pplx-embed-v1-0.6b");
+			expect(messages[0].content).toContain("OPENROUTER_API_KEY");
+			expect(messages[0].content).toContain("leave this machine");
+			expect(messages[0].content).toContain("/idx-init --embedding local");
 		} finally {
 			rmSync(projectRoot, { recursive: true, force: true });
 		}
@@ -327,6 +335,46 @@ describe("repo discovery output truncation", () => {
 			await commands.get("idx-init")!.handler("", { cwd: projectRoot, hasUI: false, ui: { notify: () => undefined } });
 
 			expect(calls.map((call) => call.command)).toEqual(["sh", "idx"]);
+		} finally {
+			rmSync(projectRoot, { recursive: true, force: true });
+		}
+	});
+
+	test("/idx-init accepts only explicit local or OpenRouter embeddings and never switches an indexed project", async () => {
+		const projectRoot = mkdtempSync(path.join(tmpdir(), "repo-discovery-init-embedding-test-"));
+		const commands = new Map<string, RegisteredCommand>();
+		const calls: Array<{ command: string; args: string[] }> = [];
+		const messages: Array<{ content: string }> = [];
+		try {
+			repoDiscoveryExtension({
+				registerCommand: (name: string, command: RegisteredCommand) => commands.set(name, command),
+				registerTool: () => undefined,
+				sendMessage: (message: { content: string }) => messages.push(message),
+				exec: async (command: string, args: string[]) => {
+					calls.push({ command, args });
+					if (command === "sh") return { stdout: "/usr/local/bin/idx", stderr: "", code: 0 };
+					if (command === "idx" && args[0] === "init") return { stdout: "initialized project", stderr: "", code: 0 };
+					return { stdout: "", stderr: "unexpected", code: 1 };
+				},
+			} as never, { profile: "baseline" });
+			const init = commands.get("idx-init")!;
+			await init.handler("--embedding local", { cwd: projectRoot, hasUI: false, ui: { notify: () => undefined } });
+			expect(calls.at(-1)).toEqual({ command: "idx", args: ["init", "--embedding", "local"] });
+			expect(messages.at(-1)?.content).toContain("local Ollama");
+			expect(messages.at(-1)?.content).toContain("nomic-embed-text-v2-moe");
+			await init.handler("--embedding openrouter", { cwd: projectRoot, hasUI: false, ui: { notify: () => undefined } });
+			expect(calls.at(-1)).toEqual({ command: "idx", args: ["init", "--embedding", "openrouter"] });
+
+			const callCount = calls.length;
+			await init.handler("--embedding cloud", { cwd: projectRoot, hasUI: false, ui: { notify: () => undefined } });
+			await init.handler("--embedding local extra", { cwd: projectRoot, hasUI: false, ui: { notify: () => undefined } });
+			expect(calls).toHaveLength(callCount);
+			expect(messages.at(-1)?.content).toContain("No other arguments are supported");
+
+			mkdirSync(path.join(projectRoot, ".indexer-cli"));
+			await init.handler("--embedding openrouter", { cwd: projectRoot, hasUI: false, ui: { notify: () => undefined } });
+			expect(calls).toHaveLength(callCount + 1);
+			expect(messages.at(-1)?.content).toContain("does not change the saved embedding provider");
 		} finally {
 			rmSync(projectRoot, { recursive: true, force: true });
 		}

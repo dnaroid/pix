@@ -187,7 +187,7 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
     initialize anything. The bundled `knowledge-auditor` uses this gate.
     `[confirmed by code, config.ts/agent-catalog.ts/routing.ts]`
     `knowledge-auditor` is a low-thinking economical docs-only finalization
-    role: the parent supplies a behavior/result summary and exact task-changed
+    role with a 20-minute default role timeout: the parent supplies a behavior/result summary and exact task-changed
     paths; the child runs task-scoped `idx audit`, fixes only small confirmed
     documentation drift, and escalates substantial or ambiguous drift rather
     than inventing a contract.

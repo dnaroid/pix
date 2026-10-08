@@ -1,4 +1,5 @@
 /* Scan frontend sources only, not native build caches or generated artifacts. */
+@import "katex/dist/katex.min.css";
 @import "tailwindcss" source(none);
 @source "./";
 @source "../index.html";

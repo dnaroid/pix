@@ -15,6 +15,7 @@ export function createDesktopWorkbenchViewModelServices(
         : undefined,
     },
     shell: {
+      workspace: options.workspace,
       errorMessage: () => options.errors.message,
       statusError: () => options.status() === "error",
       reconnect: options.reconnect,

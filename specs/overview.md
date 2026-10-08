@@ -75,6 +75,7 @@ not duplicate those; IDX document retrieval can find them independently.
 | [clickable-markdown-links](./clickable-markdown-links.md) | Clickable wrapped markdown links |
 | [markdown-soft-wrap-highlighting](./markdown-soft-wrap-highlighting.md) | Syntax highlighting across soft wraps |
 | [mermaid-markdown-rendering](./mermaid-markdown-rendering.md) | Mermaid diagrams in chat Markdown |
+| [math-markdown-rendering](./math-markdown-rendering.md) | LaTeX formulas in Desktop and terminal Markdown |
 | [question-inactive-tab](./question-inactive-tab.md) | question tool UI in an inactive tab |
 | [fenced-code-block-rendering](./fenced-code-block-rendering.md) | Fenced code blocks in chat Markdown |
 | [model-scope-fallback](./model-scope-fallback.md) | Model scope fallback to the available snapshot |

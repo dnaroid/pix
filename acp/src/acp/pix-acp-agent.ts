@@ -20,10 +20,17 @@
 import { createHash, randomUUID } from "node:crypto";
 import { BTW_METHOD, BTW_CHANNEL, parseBtwEvent, type BtwRequest, type BtwState } from "../btw/contract.js";
 import { parseDesktopBtwRequest } from "../btw/request.js";
+import { SEARCH_QUERY_METHOD, SEARCH_CONFIG_METHOD, SEARCH_COMMITS_METHOD } from "../search/contract.js";
+import { parseSearchQueryRequest, parseSearchConfigRequest } from "../search/request.js";
+import { DesktopSearchService, SearchUnavailableError } from "../search/service.js";
+import { parseCommitSearchRequest } from "../search/commit-contract.js";
+import { DesktopCommitSearchService } from "../search/commit-service.js";
 import { BrainstormHost, BRAINSTORM_CHANNEL, type BrainstormLink } from "./brainstorm-host.js";
+import { NativeSessionCatalog } from "./native-session-catalog.js";
+import { PIX_SESSION_CATALOG_CHANGED_METHOD } from "./session-catalog-contract.js";
 import { brainstormParticipantOptions, freshParticipantAnswer } from "./brainstorm-participant.js";
 import { spawn } from "node:child_process";
-import { copyFile, mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, parse, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setText as copyTextToClipboard } from "@mariozechner/clipboard";
@@ -301,6 +308,7 @@ import {
 /** Minimal shape of the handler `client` context used for notifications and elicitations. */
 type ClientCaller = {
 	notify(method: "session/update", params: SessionNotification): Promise<void>;
+	notify(method: typeof PIX_SESSION_CATALOG_CHANGED_METHOD, params: { cwd: string }): Promise<void>;
 	notify(method: typeof PIX_SESSION_STATE_METHOD, params: PixSessionStateNotification): Promise<void>;
 	notify(method: typeof PIX_QUEUE_STATE_METHOD, params: DesktopQueueStateResponse): Promise<void>;
 	notify(method: typeof PIX_QUEUE_CONSUMED_METHOD, params: DesktopQueueConsumedNotification): Promise<void>;
@@ -431,7 +439,12 @@ export interface PixAcpAgentOptions {
 	/** Path of the persistent ACP↔pi session map file. */
 	readonly sessionMapPath: string;
 	/** Native Pi-session discovery (overridable for hermetic tests). */
-	readonly listPiSessions?: (cwd?: string) => Promise<readonly PiSessionInfo[]>;
+	readonly listPiSessions?: (cwd?: string, signal?: AbortSignal) => Promise<readonly PiSessionInfo[]>;
+	/** Filesystem catalog revision (injected only by isolated tests). */
+	readonly nativeSessionRevision?: (cwd: string) => Promise<string>;
+	/** Hermetic Desktop search backend override. */
+	readonly searchService?: DesktopSearchService;
+	readonly commitSearchService?: Pick<DesktopCommitSearchService, "query" | "dispose">;
 	/** Reader for the TUI's project tab snapshot (overridable for tests). */
 	readonly loadTuiTabs?: (cwd: string) => Promise<TuiTabSnapshot>;
 	/** Private prompt-completion backend (overridable for hermetic tests). */
@@ -494,8 +507,11 @@ export class PixAcpAgent {
 	private readonly app: AgentApp;
 	private readonly options: PixAcpAgentOptions;
 	private readonly sessionMap: SessionMapStore;
+	private readonly nativeSessionCatalog: NativeSessionCatalog;
+	private readonly searchService: DesktopSearchService;
+	private readonly commitSearchService: Pick<DesktopCommitSearchService, "query" | "dispose">;
 	private readonly brainstormHost: BrainstormHost;
-	private readonly listPiSessions: (cwd?: string) => Promise<readonly PiSessionInfo[]>;
+	private readonly listPiSessions: (cwd?: string, signal?: AbortSignal) => Promise<readonly PiSessionInfo[]>;
 	private readonly loadTuiTabs: (cwd: string) => Promise<TuiTabSnapshot>;
 	private readonly completeAutocomplete: AutocompleteCompleter;
 	private readonly enhancePrompt: PromptEnhancer;
@@ -519,7 +535,37 @@ export class PixAcpAgent {
 
 	constructor(options: PixAcpAgentOptions) {
 		this.options = options;
+		this.commitSearchService = options.commitSearchService ?? new DesktopCommitSearchService();
 		this.sessionMap = new SessionMapStore(options.sessionMapPath, options.logger);
+		this.nativeSessionCatalog = new NativeSessionCatalog(
+			async (cwd, signal) => {
+				const native = await this.listPiSessions(cwd, signal);
+				signal.throwIfAborted();
+				await this.sessionMap.mergeByPiSessionPath(native.flatMap((info) => {
+					const record = nativeSessionRecord(info, cwd);
+					return record ? [record] : [];
+				}), { requireExistingFiles: true, keepNewerTitles: true });
+			},
+			(error) => this.options.logger.warn(`native session discovery failed: ${stringifyUnknown(error)}`),
+			options.nativeSessionRevision,
+		);
+		this.searchService = options.searchService ?? new DesktopSearchService({
+			discover: async (cwd, signal) => {
+				const native = await this.listPiSessions(cwd, signal);
+				signal.throwIfAborted();
+				await this.sessionMap.mergeByPiSessionPath(native.flatMap(info => {
+					const record = nativeSessionRecord(info, cwd);
+					return record ? [record] : [];
+        }), { requireExistingFiles: true, keepNewerTitles: true });
+        signal.throwIfAborted();
+        const records = await this.sessionMap.list(cwd);
+        const present = await Promise.all(records.map(async record => {
+          try { await access(record.piSessionPath); return record; } catch { return undefined; }
+        }));
+        signal.throwIfAborted();
+        return present.filter((record): record is SessionMapRecord => record !== undefined);
+			},
+		});
 		this.brainstormHost = new BrainstormHost({
 			create: async (parent, participant, link, signal) => {
 				const owner = this.sessions.get(parent);
@@ -561,7 +607,7 @@ export class PixAcpAgent {
 			},
 		});
 		this.listPiSessions = options.listPiSessions
-			?? ((cwd) => cwd ? SessionManager.list(cwd) : SessionManager.listAll());
+			?? ((cwd, signal) => cwd ? SessionManager.list(cwd, undefined, undefined, signal) : SessionManager.listAll(undefined, signal));
 		this.loadTuiTabs = options.loadTuiTabs ?? ((cwd) => loadTuiTabSnapshot(cwd));
 		this.loadAutocompleteConfig = options.loadAutocompleteConfig ?? loadAutocompleteConfig;
 		this.loadDefaultModel = options.loadDefaultModel ?? loadPixDefaultModel;
@@ -603,6 +649,30 @@ export class PixAcpAgent {
 				};
 			})
 			.onRequest("authenticate", () => ({}))
+			.onRequest(SEARCH_COMMITS_METHOD, parseCommitSearchRequest, async (ctx) => {
+				if (this.clientName !== "pix-desktop") throw new RequestError(ERROR_SERVER, "Desktop search unavailable");
+				try { return await this.commitSearchService.query(ctx.params, ctx.signal); }
+				catch (error) {
+					if (ctx.signal.aborted) throw error;
+					throw new RequestError(ERROR_SERVER, "Commit search unavailable");
+				}
+			})
+			.onRequest(SEARCH_QUERY_METHOD, parseSearchQueryRequest, async (ctx) => {
+				if (this.clientName !== "pix-desktop") throw new RequestError(ERROR_SERVER, "Desktop search unavailable");
+				try { return await this.searchService.query(ctx.params, ctx.signal); }
+				catch (error) {
+					if (error instanceof SearchUnavailableError) throw new RequestError(ERROR_SERVER, error.message);
+					throw error;
+				}
+			})
+			.onRequest(SEARCH_CONFIG_METHOD, parseSearchConfigRequest, async (ctx) => {
+				if (this.clientName !== "pix-desktop") throw new RequestError(ERROR_SERVER, "Desktop search unavailable");
+				try { return await this.searchService.config(ctx.params, ctx.signal); }
+				catch (error) {
+					if (error instanceof SearchUnavailableError) throw new RequestError(ERROR_SERVER, error.message);
+					throw error;
+				}
+			})
 			.onRequest("session/new", (ctx) => this.newSession(ctx.params, ctx.client))
 			.onRequest("session/load", (ctx) =>
 				this.withSessionLifecycle(ctx.params.sessionId, () => this.loadSession(ctx.params, ctx.client)),
@@ -610,7 +680,7 @@ export class PixAcpAgent {
 			.onRequest("session/resume", (ctx) =>
 				this.withSessionLifecycle(ctx.params.sessionId, () => this.resumeSession(ctx.params, ctx.client)),
 			)
-			.onRequest("session/list", (ctx) => this.listSessions(ctx.params))
+			.onRequest("session/list", (ctx) => this.listSessions(ctx.params, ctx.client))
 			.onRequest("session/delete", (ctx) =>
 				this.withSessionLifecycle(ctx.params.sessionId, () => this.deleteSession(ctx.params.sessionId)),
 			)
@@ -741,6 +811,8 @@ export class PixAcpAgent {
 	 */
 	async dispose(): Promise<void> {
 		this.disposed = true;
+		await this.nativeSessionCatalog.dispose();
+		await Promise.all([this.searchService.dispose(), this.commitSearchService.dispose()]);
 		await this.brainstormHost.dispose();
 		this.claudeCodeQuotaCache.clear();
 		this.claudeQuotaRefreshes.clear();
@@ -1760,16 +1832,26 @@ export class PixAcpAgent {
 		return { ...(configOptions ? { configOptions } : {}), ...(record.brainstorm ? { _meta: { "pix.brainstorm": record.brainstorm } } : {}) };
 	}
 
-	private async listSessions(params: ListSessionsRequest): Promise<ListSessionsResponse> {
-		try {
-			const nativeSessions = await this.listPiSessions(params.cwd ?? undefined);
-			const discovered = nativeSessions.flatMap((session) => {
-				const record = nativeSessionRecord(session, params.cwd ?? undefined);
-				return record ? [record] : [];
+	private async listSessions(params: ListSessionsRequest, client: ClientCaller): Promise<ListSessionsResponse> {
+		if (params.cwd && this.clientName === "pix-desktop") {
+			// SessionManager.list() reads every JSONL body. Return the persisted map
+			// immediately and notify Desktop once the slow native reconciliation settles.
+			this.nativeSessionCatalog.refresh(params.cwd, () => {
+				if (this.disposed) return;
+				void client.notify(PIX_SESSION_CATALOG_CHANGED_METHOD, { cwd: params.cwd! }).catch(() => {});
 			});
-			await this.sessionMap.mergeByPiSessionPath(discovered);
-		} catch (error) {
-			this.options.logger.warn(`native session discovery failed: ${stringifyUnknown(error)}`);
+		} else {
+			// Other ACP clients retain the synchronous, fully reconciled list contract.
+			try {
+				const nativeSessions = await this.listPiSessions(params.cwd ?? undefined);
+				const discovered = nativeSessions.flatMap((session) => {
+					const record = nativeSessionRecord(session, params.cwd ?? undefined);
+					return record ? [record] : [];
+				});
+				await this.sessionMap.mergeByPiSessionPath(discovered);
+			} catch (error) {
+				this.options.logger.warn(`native session discovery failed: ${stringifyUnknown(error)}`);
+			}
 		}
 
 		const records = await this.sessionMap.list(params.cwd ?? undefined);
@@ -1830,6 +1912,7 @@ export class PixAcpAgent {
 			});
 		}
 		await this.sessionMap.delete(sessionId);
+		if (record) this.searchService.changed(record.cwd);
 		this.options.logger.info(`session/delete: ${sessionId}`);
 	}
 
@@ -2053,6 +2136,7 @@ export class PixAcpAgent {
 				...(brainstorm ? { brainstorm } : {}),
 				updatedAt: new Date().toISOString(),
 			});
+			this.searchService.changed(cwd);
 		} catch (error) {
 			this.options.logger.warn(`failed to persist session map entry for ${sessionId}: ${stringifyUnknown(error)}`);
 			if (brainstorm) throw error;
@@ -2078,9 +2162,13 @@ export class PixAcpAgent {
 			const state = await session.pi.getState();
 			const piSessionPath = state.sessionFile ?? record.piSessionPath;
 			const nextTitle = title ?? state.sessionName ?? record.title;
+			// Live sessionName can be the bundled first-prompt fallback. Only the
+			// native session_info + firstMessage comparison may authorize embedding.
+			const nextNamedTitle = record.namedTitle === nextTitle ? record.namedTitle : undefined;
 			const titleChanged = nextTitle !== record.title;
-			if (piSessionPath === record.piSessionPath && nextTitle === record.title) {
+			if (piSessionPath === record.piSessionPath && nextTitle === record.title && nextNamedTitle === record.namedTitle) {
 				await this.sessionMap.touch(session.acpSessionId);
+				this.searchService.changed(session.cwd);
 				return { titleChanged: false, title: nextTitle };
 			}
 			if (piSessionPath !== record.piSessionPath) {
@@ -2093,8 +2181,10 @@ export class PixAcpAgent {
 				piSessionPath,
 				piSessionId: state.sessionId,
 				title: nextTitle,
+				...(nextNamedTitle ? { namedTitle: nextNamedTitle } : { namedTitle: undefined }),
 				updatedAt: new Date().toISOString(),
 			});
+			this.searchService.changed(session.cwd);
 			return { titleChanged, title: nextTitle };
 		} catch (error) {
 			this.options.logger.warn(
@@ -2171,6 +2261,9 @@ export class PixAcpAgent {
 		if ((event.type === "turn_end" || event.type === "compaction_end" || event.type === "agent_settled")
 			&& typeof event.pixForkSessionPath === "string" && event.pixForkLeafId !== undefined) {
 			session.forks.boundary({ sessionPath: event.pixForkSessionPath, leafId: event.pixForkLeafId, cwd: session.cwd });
+		}
+		if (event.type === "turn_end" || event.type === "compaction_end" || event.type === "agent_settled") {
+			this.searchService.changed(session.cwd);
 		}
 
 		if (isExtensionUiRequest(event)) {
@@ -2625,6 +2718,27 @@ export class PixAcpAgent {
 					await this.setAgentControlState(session, session.activeRun.extensionInitiated ? "running" : "idle");
 				}
 				throw new RequestError(ERROR_SERVER, `pi pause failed: ${stringifyUnknown(error)}`);
+			}
+			return { sessionId: session.acpSessionId, state: session.agentControlState };
+		}
+
+		if (params.action === "cancel-pause") {
+			const run = session.activeRun;
+			// A terminal boundary must settle normally, not be resumed by undoing
+			// the button. Pi independently guards the earlier finishTurn boundary.
+			if (!run || run.cancelled || run.settlement || session.agentControlState !== "pause-requested") {
+				return { sessionId: session.acpSessionId, state: session.agentControlState };
+			}
+			try {
+				await session.pi.cancelPause();
+			} catch (error) {
+				throw new RequestError(ERROR_SERVER, `pi cancel pause failed: ${stringifyUnknown(error)}`);
+			}
+			if (this.sessions.get(session.acpSessionId) === session && session.activeRun === run
+				&& !run.cancelled && !run.settlement && session.agentControlState === "pause-requested") {
+				// idle is a terminal signal for adopted runs; cancellation keeps the
+				// same busy owner and must not drain Desktop's queued prompts.
+				await this.setAgentControlState(session, "running");
 			}
 			return { sessionId: session.acpSessionId, state: session.agentControlState };
 		}
@@ -3807,6 +3921,15 @@ function nativeSessionRecord(session: PiSessionInfo, requestedCwd?: string): Ses
 		updatedAt: session.modified.toISOString(),
 	};
 	if (title) record.title = title;
+	// The bundled first-prompt naming hook can save the user's first message
+	// as session_info.name. Such a fallback remains lexical-only even though
+	// native name is populated. Never send it as an embedding input.
+	const nativeName = session.name?.trim();
+	const originalPrompt = session.firstMessage.trim();
+	const nameWithoutEllipsis = nativeName?.replace(/(?:\.\.\.|…)+$/u, "").trim();
+	if (nativeName && nameWithoutEllipsis && !originalPrompt.startsWith(nameWithoutEllipsis)) {
+		record.namedTitle = nativeName;
+	}
 	return record;
 }
 

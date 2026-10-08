@@ -330,6 +330,19 @@ test("aliases tool names Claude Code would rename, so its initialization matches
     }
 });
 
+test("advertises Edit only under its MCP-qualified transport name", async () => {
+    const prepared = await prepareRequest({
+        messages: [],
+        tools: [{ name: "Edit", description: "Replace text", parameters: Type.Object({ file_path: Type.String() }) }],
+    });
+    try {
+        assert.deepEqual([...prepared.toolNames], [["mcp__pi__Edit", "Edit"]]);
+        assert.equal(prepared.toolNames.has("Edit"), false);
+    } finally {
+        await rm(prepared.directory, { recursive: true, force: true });
+    }
+});
+
 const pixels = (text) => ({ type: "image", data: Buffer.from(text).toString("base64"), mimeType: "image/png" });
 const imageName = (text) => `image-${createHash("sha256").update(text).digest("hex")}.png`;
 function assistantMessage(content, stopReason = "stop") {

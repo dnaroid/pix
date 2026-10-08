@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createGitWorkspaceStore } from "./git-workspace.svelte";
 import type { GitSnapshot } from "../lib/git";
+import { sameGitDiff, type GitCommitDiff } from "../lib/git-workflow";
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
@@ -16,13 +17,24 @@ function fixture() {
     if (command === "git_diff") return { scope: "staged", content: "+new", truncated: false };
     if (command === "git_history" || command === "git_stash_list") return [];
   });
+  const setActiveWorkbenchTabId = vi.fn();
   const store = createGitWorkspaceStore({
     workspace: () => workspace, previewDirty: () => false, reloadProject: vi.fn(async () => {}),
     activeWorkbenchTabId: () => null, activeConversationWorkbenchTabId: () => null,
-    setActiveWorkbenchTabId: vi.fn(), nextWorkbenchAuxOrder: () => 1,
+    setActiveWorkbenchTabId, nextWorkbenchAuxOrder: () => 1,
   });
-  return { store, snapshot, setWorkspace(value: string) { workspace = value; store.reset(); } };
+  return { store, snapshot, setActiveWorkbenchTabId, setWorkspace(value: string) { workspace = value; store.reset(); } };
 }
+
+const historicalHash = "0123456789abcdef0123456789abcdef01234567";
+const historicalCommit: GitCommitDiff = {
+  commit: {
+    hash: historicalHash, shortHash: "01234567", subject: "Historical change",
+    author: "Git Contributor", date: "2026-10-08T16:00:00Z",
+  },
+  content: "diff --git a/file.ts b/file.ts\n+previous version",
+  truncated: false,
+};
 
 beforeEach(() => { invoke.mockReset(); vi.stubGlobal("window", { confirm: vi.fn(() => true) }); });
 afterEach(() => vi.unstubAllGlobals());
@@ -385,6 +397,72 @@ describe("Git commit transaction and lifecycle", () => {
 });
 
 describe("Git review checkpoints and secondary operations", () => {
+  it("opens an exact historical patch in Git Diff without staging, checking out, or touching the active runtime", async () => {
+    const { store, setActiveWorkbenchTabId } = fixture();
+    invoke.mockImplementation(async command => {
+      if (command === "git_commit_diff") return historicalCommit;
+    });
+    expect(await store.openCommitDiff(historicalHash)).toBe(true);
+    expect(invoke).toHaveBeenCalledExactlyOnceWith("git_commit_diff", { workspace: "/one", hash: historicalHash });
+    expect(store.diffPreview).toEqual({
+      scope: "all", content: historicalCommit.content, truncated: false,
+      commit: historicalCommit.commit,
+    });
+    expect(setActiveWorkbenchTabId).toHaveBeenCalledExactlyOnceWith("git-diff");
+    expect(store.actionId).toBeNull();
+    expect(store.reviewResult).toBeNull();
+    expect(store.snapshot).toBeUndefined();
+  });
+
+  it("drops a late historical patch when workspace/client navigation expires or another diff is selected", async () => {
+    for (const mode of ["reset", "newer", "cancel", "close", "worktree", "showDiff"] as const) {
+      const { store, setWorkspace, setActiveWorkbenchTabId } = fixture();
+      let release!: (value: GitCommitDiff) => void;
+      const pendingResult = new Promise<GitCommitDiff>(resolve => { release = resolve; });
+      invoke.mockImplementation((command: string) => {
+        if (command === "git_commit_diff") return pendingResult;
+        if (command === "git_diff") return { scope: "staged", content: "current changes", truncated: false };
+      });
+      let stillCurrent = true;
+      const opening = store.openCommitDiff(historicalHash, () => stillCurrent);
+      if (mode === "reset") setWorkspace("/two");
+      else if (mode === "newer") {
+        const newer = store.openCommitDiff("f".repeat(40));
+        release({ ...historicalCommit, commit: { ...historicalCommit.commit, hash: "f".repeat(40) } });
+        expect(await newer).toBe(true);
+      } else if (mode === "cancel") stillCurrent = false;
+      else if (mode === "close") store.closeDiff();
+      else if (mode === "showDiff") store.showDiff({ scope: "unstaged", content: "manual selection", truncated: false });
+      else await store.openDiff("file.ts", "staged");
+      release(historicalCommit);
+      expect(await opening, mode).toBe(false);
+      if (mode === "newer") {
+        expect(store.diffPreview?.commit?.hash).toBe("f".repeat(40));
+      } else if (mode === "worktree") {
+        expect(store.diffPreview?.content).toBe("current changes");
+      } else if (mode === "showDiff") {
+        expect(store.diffPreview?.content).toBe("manual selection");
+      } else {
+        expect(store.diffPreview).toBeNull();
+        expect(setActiveWorkbenchTabId).not.toHaveBeenCalled();
+      }
+    }
+  });
+
+  it("rejects missing historical commits and never creates a misleading empty preview", async () => {
+    const { store, setActiveWorkbenchTabId } = fixture();
+    invoke.mockRejectedValueOnce("This commit is no longer reachable from HEAD");
+    await expect(store.openCommitDiff(historicalHash)).rejects.toThrow("no longer reachable");
+    expect(store.diffPreview).toBeNull();
+    expect(setActiveWorkbenchTabId).not.toHaveBeenCalled();
+  });
+
+  it("distinguishes historical diff identity from an otherwise identical working tree diff", () => {
+    const ordinary = { scope: "all" as const, content: "+change", truncated: false };
+    const commitPatch = { ...ordinary, commit: historicalCommit.commit };
+    expect(sameGitDiff(commitPatch, ordinary)).toBe(false);
+    expect(sameGitDiff(commitPatch, { ...commitPatch, commit: { ...historicalCommit.commit, hash: "f".repeat(40) } })).toBe(false);
+  });
   it("fetches remotes before reporting current incoming commits", async () => {
     const { store, snapshot } = fixture();
     let fetched = false;

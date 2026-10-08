@@ -4,7 +4,7 @@ icon: book-open
 models: [openai-codex/gpt-6-luna, zai/glm-5.3-flash]
 thinking: low
 tools: [read, grep, bash, edit, write]
-timeoutMs: 300000
+timeoutMs: 1200000
 requiresIndexedProject: true
 ---
 

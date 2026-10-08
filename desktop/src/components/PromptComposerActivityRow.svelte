@@ -41,17 +41,18 @@
       <div class="ml-auto grid w-23 shrink-0 grid-cols-3 items-center gap-1" data-agent-controls>
         {#if promptRunning}
           <button
-            class="col-start-2 grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+            class="col-start-2 grid h-7 w-7 shrink-0 place-items-center rounded-md transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40 {agentControlState === 'pause-requested' ? 'bg-primary/15 text-primary ring-1 ring-inset ring-primary/60 hover:bg-primary/25' : 'bg-panel text-muted-foreground hover:bg-accent hover:text-accent-foreground'}"
             type="button"
-            aria-label={agentControlState === "pause-requested" ? "Pause requested" : "Pause after current turn"}
-            title={agentControlState === "pause-requested" ? "Pause requested" : "Pause after current turn"}
-            disabled={agentControlState === "pause-requested" || agentControlState === "resuming"}
+            aria-label={agentControlState === "pause-requested" ? "Cancel pending pause" : "Pause after current turn"}
+            aria-pressed={agentControlState === "pause-requested"}
+            title={agentControlState === "pause-requested" ? "Cancel pending pause" : "Pause after current turn"}
+            disabled={agentControlState === "resuming"}
             onclick={onPause}
           >
             <Pause class="h-3.5 w-3.5" aria-hidden="true" />
           </button>
           <button
-            class="col-start-3 grid h-7 w-7 shrink-0 place-items-center rounded-md text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            class="col-start-3 grid h-7 w-7 shrink-0 place-items-center rounded-md bg-panel text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             type="button"
             aria-label="Stop response"
             title="Stop response"
@@ -61,7 +62,7 @@
           </button>
         {:else if canContinue}
           <button
-            class="col-start-3 grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            class="col-start-3 grid h-7 w-7 shrink-0 place-items-center rounded-md bg-panel text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             type="button"
             aria-label="Continue response"
             title="Continue response"

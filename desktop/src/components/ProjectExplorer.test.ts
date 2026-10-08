@@ -4,6 +4,14 @@ import menuControllerSource from "./project-explorer-menu-controller.svelte.ts?r
 import treeControllerSource from "./project-explorer-tree-controller.svelte.ts?raw";
 
 describe("ProjectExplorer keyboard tree", () => {
+  it("wires both HTML browser menu surfaces to the guarded backend action", () => {
+    expect(explorerSource).toContain('if (canOpenProjectEntryInBrowser(entry)) items.push({ label: "Open in Browser" })');
+    expect(explorerSource).toContain('"Open in Browser": () => openEntryInBrowser(entry)');
+    expect(explorerSource).toContain('{#if canOpenProjectEntryInBrowser(menuEntry)}');
+    expect(explorerSource).toContain('onclick={() => void openEntryInBrowser(menuEntry)}');
+    expect(explorerSource).toContain('invoke("open_project_html_in_browser", { workspace: requestWorkspace, path: entry.path })');
+    expect(explorerSource).toContain('generation === operationGeneration && workspace === requestWorkspace');
+  });
   it("uses OS file menus in Desktop and retains DOM navigation only for browser preview", () => {
     expect(explorerSource).toContain("const nativeMenus = isTauri()");
     expect(explorerSource).toContain("native: nativeMenus ?");

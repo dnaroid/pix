@@ -33,7 +33,7 @@ export function createSessionTabSelection(
     options.state.setTranscript(cachedTranscript ?? emptyTranscript);
     options.state.setConfigOptions(options.runtime.getConfigOptions(sessionId) ?? []);
     options.state.setRuntimeReady(options.runtime.isReady(sessionId));
-    if (cachedTranscript) {
+    if (cachedTranscript && !options.history.needsHydration(sessionId)) {
       options.history.cancel();
     } else {
       const historyGeneration = options.history.begin();
@@ -110,7 +110,7 @@ export function createSessionTabSelection(
       options.state.setTranscript(cachedTranscript ?? emptyTranscript);
       options.state.setConfigOptions(options.runtime.getConfigOptions(sessionId) ?? []);
       options.state.setRuntimeReady(true);
-      if (!cachedTranscript) {
+      if (!cachedTranscript || options.history.needsHydration(sessionId)) {
         const historyGeneration = options.history.begin();
         void options.history.hydrate(requestClient, sessionId, requestWorkspace, historyGeneration);
       }

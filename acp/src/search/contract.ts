@@ -1,0 +1,86 @@
+/** Desktop-only search: authored settings metadata and local session titles. */
+export const SEARCH_QUERY_METHOD = "pix/search/query";
+export const SEARCH_CONFIG_METHOD = "pix/search/config";
+export const SEARCH_COMMITS_METHOD = "pix/search/commits";
+export const SEARCH_EMBEDDING_MODEL = "perplexity/pplx-embed-v1-0.6b";
+
+export interface CommitSearchRequest {
+  readonly cwd: string;
+  readonly query: string;
+  readonly limit: number;
+}
+export interface CommitMetadata {
+  readonly hash: string;
+  readonly shortHash: string;
+  readonly subject: string;
+  readonly author: string;
+  readonly date: string;
+}
+export interface CommitSearchHit {
+  readonly kind: "commits";
+  readonly id: string;
+  readonly title: string;
+  readonly snippet: string;
+  readonly score: number;
+  readonly hash: string;
+  readonly commit: CommitMetadata;
+  readonly semantic?: boolean;
+  /** Full-message lexical evidence may not appear in the metadata snippet. */
+  readonly contentMatch?: boolean;
+}
+export interface CommitSearchResponse {
+  readonly results: readonly CommitSearchHit[];
+  readonly notices: readonly string[];
+}
+
+export interface SearchSetting {
+  readonly id: string;
+  readonly section: string;
+  readonly label: string;
+  readonly description: string;
+  readonly synonyms: readonly string[];
+}
+export type LocalSearchKind = "settings" | "sessions";
+export interface SearchQueryRequest {
+  readonly cwd: string;
+  readonly query: string;
+  readonly types: readonly LocalSearchKind[];
+  readonly settings: readonly SearchSetting[];
+  readonly limit: number;
+}
+export interface SearchConfigRequest {
+  readonly cwd: string;
+  readonly enabled?: boolean;
+  /** Independent opt-in to send explicit session names (not first-message fallbacks) to OpenRouter. */
+  readonly sessionTitlesEnabled?: boolean;
+  /** Write-only; goes to the existing shared OpenRouter credential store. */
+  readonly apiKey?: string;
+}
+export interface SearchStatus {
+  readonly enabled: boolean;
+  readonly sessionTitlesEnabled?: boolean;
+  readonly keyAvailable: boolean;
+  readonly indexing: boolean;
+  readonly error?: string;
+  readonly warning?: string;
+}
+interface SearchHitBase {
+  readonly id: string;
+  readonly title: string;
+  readonly snippet: string;
+  readonly score: number;
+}
+export interface SettingsSearchHit extends SearchHitBase {
+  readonly kind: "settings";
+  readonly section: string;
+  readonly fieldId: string;
+}
+export interface SessionSearchHit extends SearchHitBase {
+  readonly kind: "sessions";
+  readonly sessionId: string;
+}
+export type LocalSearchHit = SettingsSearchHit | SessionSearchHit;
+export interface SearchQueryResponse {
+  readonly results: readonly LocalSearchHit[];
+  readonly status: SearchStatus;
+}

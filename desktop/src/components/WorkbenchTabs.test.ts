@@ -87,9 +87,9 @@ describe("WorkbenchTabs desktop interaction", () => {
 
   it("keeps session-only lifecycle semantics while auxiliary surfaces close locally", () => {
     expect(workbenchControllerSource).toContain('if (tab.kind === "session")');
-    expect(workbenchControllerSource).toContain("options.closeSessionTab(tab.sessionId, preferredNextSessionId)");
+    expect(workbenchControllerSource).toContain("options.closeSessionTab(tab.sessionId, preferredNextSessionId, () => {");
     expect(workbenchControllerSource).toContain("const wasSelected = options.activeTabId() === id");
-    expect(workbenchControllerSource).toContain("if (closed && wasSelected)");
+    expect(workbenchControllerSource).toContain("if (closed && wasSelected && options.activeTabId() === id)");
     expect(workbenchControllerSource).toContain("pane ? pane.requestClose() : (options.closePreview(), true)");
     expect(workbenchControllerSource).toContain("options.closeGitDiff();");
     expect(workbenchControllerSource).toContain("options.closeTerminal();");

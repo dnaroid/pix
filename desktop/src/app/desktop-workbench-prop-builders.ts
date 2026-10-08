@@ -36,6 +36,7 @@ export type DesktopWorkbenchSurfaceViewProps = Omit<
 type SessionStartProps = NonNullable<DesktopWorkbenchSurfaceViewProps["sessionStart"]>;
 
 export type WorkbenchShellBuilderOptions = {
+  workspace: () => string;
   errorMessage: () => string | null;
   statusError: () => boolean;
   reconnect: () => void | Promise<void>;
@@ -116,6 +117,7 @@ export function buildWorkbenchShellProps(
       onDismiss: options.errors.clear,
     } : null,
     sessionStart: options.sessionStartOpen() ? {
+      workspace: options.workspace(),
       sessions: options.sessionStartCandidates(),
       onSelect: (selectedSessionId) => void options.sessionTabs.selectSessionFromDraft(selectedSessionId),
     } : null,
@@ -156,6 +158,7 @@ export function buildWorkbenchConversationProps(
       operationRunning: options.operationRunning() || link?.owned === true,
       historyLoading: options.sessionHistoryLoading(),
       showScrollToBottom: !options.transcriptScroll.followsLatest,
+      scrollRestoring: options.transcriptScroll.restoring,
       onScroll: options.transcriptScroll.handleScroll,
       onScrollToBottom: options.transcriptScroll.jumpToLatest,
       onLoadOlderHistory: options.history.loadOlder,
@@ -224,10 +227,12 @@ export function buildWorkbenchConversationProps(
       activeSessionId: sessionId,
       draftSession: options.draft.active,
       ready: options.statusReady()
+        && !options.conversationActions.promptEnhancing
         && !link?.owned
         && !options.sessionMutationRunning()
         && (options.draft.active || sessionId !== null),
       promptRunning: options.promptRunning(),
+      promptEnhancing: options.conversationActions.promptEnhancing,
       agentControlState: options.activeAgentControlState(),
       dragActive: options.dragActive(),
       autocompleteEnabled: options.autocomplete.enabled,
@@ -279,6 +284,8 @@ export function buildWorkbenchEditorProps(
       file: activePreview.kind === "file" ? activePreview.file : undefined,
       lineRange: activePreview.kind === "file" ? activePreview.lineRange : undefined,
       attachment: activePreview.kind === "attachment" ? activePreview.attachment : undefined,
+      autoplay: activePreview.kind === "attachment" && activePreview.autoplay === true,
+      onAutoplayConsumed: () => options.preview.consumeAutoplay(activePreview.id),
       canGoBack: options.preview.canGoBack,
       canGoForward: options.preview.canGoForward,
       editable: activePreview.kind === "file"
@@ -311,7 +318,7 @@ export function buildWorkbenchEditorProps(
       reviewStale: options.git.reviewResult?.stale ?? false,
       reviewLoading: options.git.llmActionId?.startsWith("review:") === true,
       resolveLoading: options.git.resolveRunning,
-      canReview: Boolean(options.clientAvailable() && options.workspace() && options.statusReady() && !options.git.actionId && !options.git.llmActionId && !options.git.resolveRunning),
+      canReview: Boolean(!gitDiffPreview.commit && options.clientAvailable() && options.workspace() && options.statusReady() && !options.git.actionId && !options.git.llmActionId && !options.git.resolveRunning),
       canResolve: Boolean(options.clientAvailable() && options.workspace() && options.statusReady() && !options.operationRunning() && !options.git.actionId && !options.git.llmActionId && !options.git.reviewResult?.stale),
       onValidateProjectFile: options.preview.validateProjectFile,
       onValidateLocalFile: options.preview.validateLocalFile,

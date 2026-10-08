@@ -3,6 +3,7 @@ import {
   type MarkdownRenderContext,
 } from "./markdown-context";
 import { escapeHtml } from "./markdown-escape";
+import { inlineMathAt, renderInlineMath } from "./markdown-math";
 import {
   externalLink,
   homeFileLink,
@@ -38,7 +39,16 @@ export function renderInline(
     const char = text[index] ?? "";
     const next = text[index + 1] ?? "";
 
-    if (char === "\\" && next && /[\\`*_[\]{}()#+.!~|>-]/.test(next)) {
+    if (char === "$" || (char === "\\" && (next === "(" || next === "["))) {
+      const math = inlineMathAt(text, index);
+      if (math) {
+        output += renderInlineMath(math);
+        index = math.end;
+        continue;
+      }
+    }
+
+    if (char === "\\" && next && /[\\`*_[\]{}()#+.!~|>\-$]/.test(next)) {
       output += escapeHtml(next);
       index += 2;
       continue;
@@ -116,7 +126,7 @@ export function renderInline(
           output += localMedia(localPath, label, link.label, localKind);
         } else if (homePath) {
           const kind = mediaKindForPath(homePath);
-          output += kind === "model" ? localMedia(homePath, label, link.label, kind) : homeFileLink(homePath, label);
+          output += kind === "model" || kind === "audio" ? localMedia(homePath, label, link.label, kind) : homeFileLink(homePath, label);
         } else if (char === "!") {
           const source = context.remoteImages ? normalizeRemoteImageHref(link.destination) : undefined;
           output += source ? remoteImage(source, link.label) : label;
@@ -138,7 +148,9 @@ export function renderInline(
 
     const delimiter = inlineDelimiter(text, index);
     if (delimiter && depth < MAX_INLINE_DEPTH) {
-      const end = text.indexOf(delimiter, index + delimiter.length);
+      const end = delimiter.startsWith("_")
+        ? findUnderscoreClose(text, index, delimiter.length)
+        : text.indexOf(delimiter, index + delimiter.length);
       if (end > index + delimiter.length) {
         const content = renderInline(
           text.slice(index + delimiter.length, end),
@@ -166,7 +178,7 @@ export function renderInline(
     let end = index + 1;
     while (
       end < text.length
-      && !/[\\`!*_[\]~\n]/.test(text[end] ?? "")
+      && !/[\\`!*_[\]~$\n]/.test(text[end] ?? "")
       && !(allowLinks && hasAutomaticLinkPrefix(text, end))
     ) {
       end += 1;
@@ -227,15 +239,57 @@ function trimAutomaticLinkEnd(text: string, start: number, initialEnd: number): 
 }
 
 function inlineDelimiter(text: string, index: number): string {
-  if (text.startsWith("***", index) || text.startsWith("___", index)) {
+  if (text[index] === "_") {
+    if (text[index - 1] === "_") return "";
+    const length = countRun(text, index, "_");
+    return length <= 3 && underscoreFlanking(text, index, length).open
+      ? "_".repeat(length)
+      : "";
+  }
+  if (text.startsWith("***", index)) {
     return text.slice(index, index + 3);
   }
-  if (text.startsWith("**", index) || text.startsWith("__", index)) {
+  if (text.startsWith("**", index)) {
     return text.slice(index, index + 2);
   }
   if (text.startsWith("~~", index)) return "~~";
   const char = text[index];
-  return char === "*" || char === "_" ? char : "";
+  return char === "*" ? char : "";
+}
+
+// Underscore emphasis cannot open or close inside identifiers. Classify the
+// whole delimiter run so a rejected double/triple run cannot become a single.
+function underscoreFlanking(text: string, start: number, length: number): { open: boolean; close: boolean } {
+  const before = text[start - 1] ?? "";
+  const after = text[start + length] ?? "";
+  const beforeSpace = !before || /\s/u.test(before);
+  const afterSpace = !after || /\s/u.test(after);
+  const beforePunctuation = /[\p{P}\p{S}]/u.test(before);
+  const afterPunctuation = /[\p{P}\p{S}]/u.test(after);
+  const left = !afterSpace && (!afterPunctuation || beforeSpace || beforePunctuation);
+  const right = !beforeSpace && (!beforePunctuation || afterSpace || afterPunctuation);
+  return {
+    open: left && (!right || beforePunctuation),
+    close: right && (!left || afterPunctuation),
+  };
+}
+
+function findUnderscoreClose(text: string, start: number, length: number): number {
+  let index = start + length;
+  while (index < text.length) {
+    if (text[index] === "\\") {
+      index += 2;
+      continue;
+    }
+    if (text[index] !== "_") {
+      index += 1;
+      continue;
+    }
+    const runLength = countRun(text, index, "_");
+    if (runLength === length && underscoreFlanking(text, index, runLength).close) return index;
+    index += runLength;
+  }
+  return -1;
 }
 
 function parseLink(

@@ -43,6 +43,7 @@ Make a packaged Pix Desktop usable on a clean computer without requiring a syste
 ## Optional managed IDX
 
 - IDX installation is user-triggered. First-run never initializes a project's .indexer-cli state; project initialization remains an explicit workspace action.
+- npm installation needs neither OpenRouter credentials nor Ollama and must not invoke `idx setup`, `init` or `doctor`. New-project initialization defaults to OpenRouter (external chunks/queries), while existing project configurations are preserved without an override; see [IDX embedding providers](../docs/configuration.md#idx-embedding-providers). Installation must not perform embedding prerequisite checks or switch a provider.
 - If idx is already resolvable from the Desktop/login-shell environment, Desktop keeps using that system installation and does not install a managed copy.
 - Otherwise **Install** runs the bundled Node plus bundled npm to install indexer-cli@latest under ~/.pi/pix-desktop-tools. It does not use npm install -g, administrator privileges, or a system npm.
 - ACP/Pi child PATH includes the managed package bin directory. Native Desktop IDX commands resolve system idx first, then the managed indexer-cli package entry.
@@ -72,7 +73,9 @@ Make a packaged Pix Desktop usable on a clean computer without requiring a syste
 ## Implementation
 
 - `desktop/src-tauri/src/desktop_bootstrap.rs`
+- `scripts/release/bootstrap.mjs`
 
 ## Tests
 
 - `desktop/src-tauri/src/desktop_bootstrap.rs`
+- `scripts/release/test/bootstrap.test.mjs`

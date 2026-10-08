@@ -23,6 +23,16 @@ export interface AttachmentFile {
 }
 
 const MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
+  aac: "audio/aac",
+  aif: "audio/aiff",
+  aiff: "audio/aiff",
+  flac: "audio/flac",
+  m4a: "audio/mp4",
+  mp3: "audio/mpeg",
+  oga: "audio/ogg",
+  ogg: "audio/ogg",
+  opus: "audio/ogg",
+  wav: "audio/wav",
   glb: "model/gltf-binary",
   avif: "image/avif",
   bmp: "image/bmp",

@@ -1,5 +1,14 @@
 # Engineering guardrails
 
+- IDX embeddings: new-project `idx init` and default `idx setup` use OpenRouter,
+  not Ollama; disclose external code/document chunks and query transmission and
+  the `OPENROUTER_API_KEY` prerequisite before initialization. npm installation
+  needs neither key nor Ollama. Existing project providers must not be switched
+  without separate approval. Local-only real-index tests must explicitly pass
+  `--embedding local`; do not run paid requests just to verify changes. Read
+  `docs/configuration.md#idx-embedding-providers` for saved-provider/mixed-project
+  doctor checks and the prerequisite-before-deletion repair invariant.
+
 - Store disposable task output (test logs, scratch reports, mockups, captures)
   in unique run/task directories under the current project's `.pi/artifacts/`.
   Never create project-root `artifacts/` or use `.artifacts/` for agent scratch

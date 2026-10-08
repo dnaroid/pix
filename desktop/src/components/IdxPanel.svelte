@@ -26,6 +26,7 @@
   } from "../lib/idx";
   import type { ProjectFileLineRange } from "../lib/project-files";
   import IdxOutput from "./IdxOutput.svelte";
+  import IdxKnowledgeDetails from "./IdxKnowledgeDetails.svelte";
   import TerminalView from "./TerminalView.svelte";
   import { createIdxPanelRuntimeController } from "./idx-panel-runtime-controller.svelte";
   import { createIdxPanelQueryController } from "./idx-panel-query-controller.svelte";
@@ -226,11 +227,12 @@
       <div class="px-4 py-10 text-center">
         <ScanSearch class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" />
         <p class="text-xs font-medium text-foreground">Project is not indexed</p>
-        <p class="mx-auto mt-1 max-w-80 text-xs leading-4 text-muted-foreground">Initialize project-local IDX storage before using code and knowledge search.</p>
+        <p class="mx-auto mt-1 max-w-80 text-xs leading-4 text-muted-foreground">New projects default to OpenRouter: requires OPENROUTER_API_KEY in the environment or ~/.config/idx/.env, not Ollama. Index storage stays local; code/document chunks and search queries are sent externally.</p>
         <label class="mt-3 inline-flex items-center gap-1.5 text-xs text-muted-foreground">
           <input type="checkbox" checked={openrouterEmbeddings} onchange={(event) => toggleOpenrouterEmbeddings(event.currentTarget.checked)} disabled={Boolean(runningOperation)} />
-          <span>Use <span class="font-mono">--embedding openrouter</span></span>
+          <span>Explicit OpenRouter override (<span class="font-mono">--embedding openrouter</span>)</span>
         </label>
+        <p class="mx-auto mt-1 max-w-80 text-xs leading-4 text-muted-foreground">Unchecked preserves existing configuration or uses the new-project default; it does not select local mode. For local Ollama use <span class="font-mono">idx init --embedding local</span> in the CLI.</p>
         <div>
           <button
             class="mt-2 inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
@@ -245,15 +247,17 @@
         <section class="bg-panel" aria-label="Knowledge base status">
           <div class="flex h-8 items-center gap-2 px-2.5">
             <ScanSearch class="h-3.5 w-3.5 text-tool-search" aria-hidden="true" />
-            <h3 class="text-xs font-semibold text-foreground">Knowledge base</h3>
-            <span class={["ml-auto text-xs font-medium", overview?.knowledgeDirty === true ? "text-tool-warning" : overview?.knowledgeDirty === false ? "text-tool-success" : "text-muted-foreground"]}>
+            <h3 class="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">Knowledge base</h3>
+            <button class="h-6 shrink-0 rounded-md border border-border bg-panel-strong px-2 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" title="Start a new AI session to review documentation and acknowledge only verified specs" disabled={!sessionReady || Boolean(runningOperation)} onclick={onRefreshKnowledge}>AI review</button>
+            <span class={["shrink-0 text-xs font-medium", overview?.knowledgeDirty === true ? "text-tool-warning" : overview?.knowledgeDirty === false ? "text-tool-success" : "text-muted-foreground"]}>
               {overview?.knowledgeDirty === true ? "Dirty" : overview?.knowledgeDirty === false ? "Clean" : "Unknown"}
             </span>
           </div>
-          <div class="space-y-2 border-t border-sidebar-border/70 bg-sidebar px-2.5 py-2">
-            <p class="text-xs leading-4 text-muted-foreground">{overview?.knowledgeDirty === true ? "Changes need knowledge review. Updating the index does not clear this state." : overview?.knowledgeDirty === false ? "No pending knowledge review detected." : "Knowledge dirtiness is unavailable; a clean state cannot be confirmed."}</p>
-            <button class="h-7 rounded-md border border-border bg-panel-strong px-2 text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40" type="button" title="Start a new AI session to review documentation and acknowledge only verified specs" disabled={!sessionReady || Boolean(runningOperation)} onclick={onRefreshKnowledge}>AI review</button>
-          </div>
+          {#if overview?.knowledgeDirty !== false}
+            <div class="bg-sidebar px-2.5">
+              <IdxKnowledgeDetails {workspace} operationRunning={Boolean(runningOperation)} {onValidateProjectFile} {onOpenProjectFile} />
+            </div>
+          {/if}
         </section>
         <section class="bg-panel" aria-label="Code index status">
           <div class="flex h-8 items-center gap-2 px-2.5">
@@ -289,11 +293,12 @@
         </div>
         <label class="flex items-center gap-1.5 border-t border-sidebar-border/70 px-2.5 py-2 text-xs text-muted-foreground">
           <input type="checkbox" checked={openrouterEmbeddings} onchange={(event) => toggleOpenrouterEmbeddings(event.currentTarget.checked)} disabled={Boolean(runningOperation)} />
-          <span>Use <span class="font-mono">--embedding openrouter</span> when reinitializing</span>
+          <span>Explicit OpenRouter override (<span class="font-mono">--embedding openrouter</span>) when reinitializing</span>
         </label>
+        <p class="border-t border-sidebar-border/70 px-2.5 py-2 text-xs leading-4 text-muted-foreground">Unchecked checks saved providers; it does not select local mode. An override changes the provider and rebuilds the index. OpenRouter sends chunks and queries externally and requires OPENROUTER_API_KEY; failed prerequisites must stop before index deletion.</p>
       </section>
-      <details class="border-b border-sidebar-border">
-        <summary class="px-2.5 py-2 text-xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">Task-scoped knowledge audit</summary>
+      <details class="group/audit border-b border-sidebar-border">
+        <summary class="flex cursor-pointer list-none items-center gap-1.5 px-2.5 py-2 text-xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden"><ChevronDown class="h-3 w-3 shrink-0 -rotate-90 transition-transform group-open/audit:rotate-0" aria-hidden="true" />Task-scoped knowledge audit</summary>
       <section class="bg-panel" aria-label="Task-scoped knowledge audit">
         <div class="flex h-8 items-center gap-2 px-2.5">
           <h3 class="text-xs font-semibold text-foreground">Task-scoped audit</h3>
@@ -347,8 +352,8 @@
               <span>tests</span><input class="h-6 w-12 rounded-md border border-input bg-panel-strong px-1 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30" type="number" min="1" max="20" aria-label="Maximum context tests" bind:value={queryState.contextMaxTests} />
             </div>
           {/if}
-          <details class="mt-2 border-t border-sidebar-border/70 pt-1.5">
-            <summary class="select-none text-xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">Advanced index tools</summary>
+          <details class="group/advanced mt-2 border-t border-sidebar-border/70 pt-1.5">
+            <summary class="flex cursor-pointer list-none select-none items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden"><ChevronDown class="h-3 w-3 shrink-0 -rotate-90 transition-transform group-open/advanced:rotate-0" aria-hidden="true" />Advanced index tools</summary>
             <div class="mt-1.5 grid grid-cols-2 gap-1">
               <label class="relative"><span class="sr-only">IDX inspect command</span><select class="h-7 w-full appearance-none rounded-md border border-input bg-panel-strong pr-5 pl-1.5 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30" bind:value={queryState.inspectCommand}><option value="architecture">architecture</option><option value="structure">structure</option><option value="ast">ast</option><option value="explain">explain</option><option value="deps">deps</option></select><ChevronDown class="pointer-events-none absolute top-1/2 right-1.5 h-3 w-3 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /></label>
               <input class="h-7 min-w-0 rounded-md border border-input bg-panel-strong px-2 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30" aria-label="IDX inspect target" placeholder={queryState.inspectCommand === "explain" ? "symbol" : queryState.inspectCommand === "ast" || queryState.inspectCommand === "deps" ? "path / module" : "target not required"} bind:value={queryState.inspectTarget} disabled={queryState.inspectCommand === "architecture" || queryState.inspectCommand === "structure"} spellcheck="false" />

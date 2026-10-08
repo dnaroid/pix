@@ -32,6 +32,7 @@ export function createPreviewStore(options: PreviewStoreOptions) {
     validateProjectFile: files.validateProjectFile,
     validateLocalFile: files.validateLocalFile,
     openProjectFile: files.openProjectFile,
+    consumeAutoplay: state.consumeAutoplay,
     resolveProjectMedia: files.resolveProjectMedia,
     openLocalFile: files.openLocalFile,
     openUserConfig: files.openUserConfig,

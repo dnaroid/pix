@@ -1,4 +1,5 @@
 import { PROTOCOL_VERSION } from "@agentclientprotocol/sdk";
+import { PIX_SESSION_CATALOG_CHANGED_METHOD } from "../../../acp/src/acp/session-catalog-contract";
 import type {
   ContentBlock,
   CreateElicitationRequest,
@@ -22,6 +23,8 @@ import type { AgentControlAction } from "./agent-control";
 import { isRecord, parseQueueState, parseQueuedUserMessage } from "./acp-response-parsers";
 import { AcpIncomingRequestError, AcpJsonRpcConnection } from "./acp-json-rpc";
 import { AcpPixExtensions } from "./acp-pix-extensions";
+import { SEARCH_CONFIG_METHOD, SEARCH_QUERY_METHOD, SEARCH_COMMITS_METHOD, type SearchConfigRequest, type SearchStatus, type SearchQueryRequest, type SearchQueryResponse } from "../../../acp/src/search/contract";
+import type { CommitSearchRequest, CommitSearchResponse } from "../../../acp/src/search/contract";
 import type {
   AcpClientHandlers,
   AcpTransport,
@@ -358,6 +361,18 @@ export class AcpClient {
     return this.pix.autocompleteSettings(sessionId);
   }
 
+  searchCommits(request: CommitSearchRequest, signal?: AbortSignal): Promise<CommitSearchResponse> {
+    return this.request(SEARCH_COMMITS_METHOD, request, null, signal);
+  }
+
+  searchQuery(request: SearchQueryRequest, signal?: AbortSignal): Promise<SearchQueryResponse> {
+    return this.request(SEARCH_QUERY_METHOD, request, null, signal);
+  }
+
+  searchConfig(cwd: string, changes: Omit<SearchConfigRequest, "cwd"> = {}, signal?: AbortSignal): Promise<SearchStatus> {
+    return this.request(SEARCH_CONFIG_METHOD, { cwd, ...changes }, undefined, signal);
+  }
+
   sessionUsage(sessionId: string): Promise<SessionUsageStatus> {
     return this.pix.sessionUsage(sessionId);
   }
@@ -405,6 +420,10 @@ export class AcpClient {
   private handleNotification(method: string, params: unknown): void {
     if (method === "session/update" && isRecord(params)) {
       this.handlers.onSessionUpdate(params as SessionNotification);
+    } else if (method === PIX_SESSION_CATALOG_CHANGED_METHOD && isRecord(params)) {
+      if (typeof params.cwd === "string" && params.cwd.length > 0) {
+        this.handlers.onSessionCatalogChanged?.(params.cwd);
+      }
     } else if (method === PIX_SESSION_STATE_METHOD) {
       const notification = parseSessionStateNotification(params);
       if (notification) this.handlers.onSessionState?.(notification);

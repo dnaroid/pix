@@ -11,7 +11,11 @@ type WorkbenchControllerOptions = {
   activeConversationTabId: () => WorkbenchTabId | null;
   setActiveTabId: (id: WorkbenchTabId | null) => void;
   handleSessionTabClick: (sessionId: string) => void;
-  closeSessionTab: (sessionId: string, preferredNextSessionId?: string) => Promise<boolean>;
+  closeSessionTab: (
+    sessionId: string,
+    preferredNextSessionId?: string,
+    onClosing?: () => void,
+  ) => Promise<boolean>;
   previewPane: () => { requestClose: () => boolean } | null;
   closePreview: () => void;
   closeGitDiff: () => void;
@@ -44,7 +48,14 @@ export function createWorkbenchController(options: WorkbenchControllerOptions) {
     let closed = false;
     if (tab.kind === "session") {
       const preferredNextSessionId = workbenchSessionId(fallbackId) ?? undefined;
-      closed = await options.closeSessionTab(tab.sessionId, preferredNextSessionId);
+      closed = await options.closeSessionTab(tab.sessionId, preferredNextSessionId, () => {
+        // Commit visible fallback before removal triggers reactive normalization,
+        // but only after consent and only if navigation still belongs to this tab.
+        if (options.activeTabId() !== id) return;
+        const visibleFallback = options.tabs().some((candidate) => candidate.id === fallbackId)
+          ? fallbackId : null;
+        options.setActiveTabId(visibleFallback);
+      });
     } else if (tab.kind === "preview") {
       const pane = options.previewPane();
       closed = pane ? pane.requestClose() : (options.closePreview(), true);
@@ -59,7 +70,7 @@ export function createWorkbenchController(options: WorkbenchControllerOptions) {
       closed = true;
     }
 
-    if (closed && wasSelected) {
+    if (closed && wasSelected && options.activeTabId() === id) {
       options.setActiveTabId(fallbackId ?? options.activeConversationTabId());
     }
     return closed;

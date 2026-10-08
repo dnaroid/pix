@@ -43,6 +43,7 @@
     draftSession = false,
     ready,
     promptRunning,
+    promptEnhancing = false,
     activity,
     queuedMessages,
     agentControlState = "idle",
@@ -79,6 +80,7 @@
     draftSession?: boolean;
     ready: boolean;
     promptRunning: boolean;
+    promptEnhancing?: boolean;
     activity?: Activity;
     queuedMessages?: Snippet;
     agentControlState?: AgentControlState;
@@ -226,6 +228,7 @@
       && ready,
   );
   const promptAssistiveStatus = $derived.by(() => {
+    if (promptEnhancing) return "Improving prompt…";
     if (slashController.open) {
       return `${slashController.matches.length} slash commands available. Use arrow keys to navigate, then Tab or Enter to choose.`;
     }
@@ -312,6 +315,7 @@
 
   async function handleSubmit(event: SubmitEvent): Promise<void> {
     event.preventDefault();
+    if (promptEnhancing) return;
     if (!questionnaireController.handleSubmit()) {
       await voiceController.stop();
       await onSubmit();
@@ -628,6 +632,7 @@
     dragActive || projectPathDragActive ? "border-ring ring-1 ring-ring/40" : "border-input",
   ]}
   bind:this={composerForm}
+  aria-busy={promptEnhancing}
   data-pix-project-path-drop-target="true"
   onkeydowncapture={questionnaireController.handleKeydown}
   onsubmit={handleSubmit}
@@ -654,12 +659,14 @@
 
   <div class={questionMode ? "px-3 pt-2 pb-2" : editorMode ? "px-3 pt-2.5 pb-2" : "px-2 py-1.5"}>
     {#if !questionMode || questionnaireController.currentDraft?.customSelected}
-      <AttachmentGrid
-        attachments={questionnaireController.displayedAttachments}
-        variant="composer"
-        onOpen={questionnaireController.openDisplayedAttachment}
-        onRemove={questionnaireController.removeDisplayedAttachment}
-      />
+      <div inert={promptEnhancing}>
+        <AttachmentGrid
+          attachments={questionnaireController.displayedAttachments}
+          variant="composer"
+          onOpen={questionnaireController.openDisplayedAttachment}
+          onRemove={questionnaireController.removeDisplayedAttachment}
+        />
+      </div>
       <div class="flex min-w-0 items-end gap-1.5" data-prompt-composer-row>
         {#if editorMode || questionMode}
         <button
@@ -722,6 +729,7 @@
               voiceSupported={voiceController.supported}
               voiceCanStart={voiceController.canStart}
               {promptRunning}
+              {promptEnhancing}
               canSubmit={canSubmitPrompt}
               onToggleMenu={toggleComposerMenu}
               onToggleVoice={() => void voiceController.toggle()}

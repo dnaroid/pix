@@ -3,6 +3,7 @@ import panelSource from "./IdxPanel.svelte?raw";
 import runtimeSource from "./idx-panel-runtime-controller.svelte.ts?raw";
 import querySource from "./idx-panel-query-controller.svelte.ts?raw";
 import auditSource from "./idx-panel-audit-controller.svelte.ts?raw";
+import knowledgeSource from "./IdxKnowledgeDetails.svelte?raw";
 
 describe("IdxPanel managed installation", () => {
   it("offers managed IDX installation when IDX is unavailable", () => {
@@ -38,6 +39,31 @@ describe("IdxPanel managed installation", () => {
 });
 
 describe("IDX v2 panel contract", () => {
+  it("keeps AI review beside knowledge status without a separate explanatory panel", () => {
+    const start = panelSource.indexOf('aria-label="Knowledge base status"');
+    const end = panelSource.indexOf('</section>', start);
+    const knowledge = panelSource.slice(start, end);
+    const headerEnd = knowledge.indexOf('</div>');
+    expect(knowledge.slice(0, headerEnd)).toContain('onclick={onRefreshKnowledge}>AI review</button>');
+    expect(knowledge.slice(0, headerEnd)).toContain('"Dirty" : overview?.knowledgeDirty === false ? "Clean" : "Unknown"');
+    expect(knowledge).not.toContain('<p');
+    expect(knowledge).not.toContain('space-y-2');
+    expect(knowledge.match(/onclick=\{onRefreshKnowledge\}/g)).toHaveLength(1);
+    expect(knowledge).toContain('disabled={!sessionReady || Boolean(runningOperation)}');
+    expect(knowledge).toContain('<IdxKnowledgeDetails {workspace}');
+  });
+  it("offers lazy dirty-file details with reasons and explicit chevrons on every disclosure", () => {
+    expect(panelSource).toContain('overview?.knowledgeDirty !== false');
+    expect(panelSource).toContain('<IdxKnowledgeDetails {workspace}');
+    expect(knowledgeSource).toContain('ontoggle={toggle}');
+    expect(knowledgeSource).toContain('idxKnowledgeReason(reason)');
+    expect(knowledgeSource).toContain('row.changedPaths.join("\\n")');
+    expect(knowledgeSource).toContain('Check incomplete.');
+    expect(knowledgeSource).toContain('group-open/knowledge:rotate-0');
+    expect(panelSource).toContain('group-open/audit:rotate-0');
+    expect(panelSource).toContain('group-open/advanced:rotate-0');
+    expect(knowledgeSource).toContain('controller.dispose()');
+  });
   it("shows knowledge health first and groups query and diagnostics on the second tab", () => {
     expect(panelSource).toContain('type PanelTab = "overview" | "tools"');
     expect(panelSource).toContain('let activeTab = $state<PanelTab>("overview")');
@@ -80,6 +106,16 @@ describe("IDX v2 panel contract", () => {
     expect(panelSource).toContain('startOperation("init", { openrouterEmbeddings })');
     expect(panelSource).toContain('startOperation("doctor", { openrouterEmbeddings })');
     expect(runtimeSource).toContain("openrouterEmbeddings: operationOptions.openrouterEmbeddings === true");
+  });
+
+  it("discloses cloud defaults and distinguishes no override from explicit local mode", () => {
+    expect(panelSource).toContain("New projects default to OpenRouter");
+    expect(panelSource).toContain("OPENROUTER_API_KEY in the environment or ~/.config/idx/.env, not Ollama");
+    expect(panelSource).toContain("code/document chunks and search queries are sent externally");
+    expect(panelSource).toContain("it does not select local mode");
+    expect(panelSource).toContain("idx init --embedding local");
+    expect(panelSource).toContain("Unchecked checks saved providers");
+    expect(panelSource).toContain("failed prerequisites must stop before index deletion");
   });
 });
 

@@ -12,6 +12,7 @@ import {
 	PIX_REGISTRY_DIFF_METHOD,
 	PIX_TOOL_RESULT_METHOD,
 	parseDesktopDraftConfigRequest,
+	parseDesktopAgentControlRequest,
 	parseDesktopModelRoutingStatusRequest,
 	parseDesktopModelRouteRequest,
 	parseDesktopGitAssistantRequest,
@@ -20,6 +21,14 @@ import {
 	parseDesktopRegistryDiffRequest,
 	parseDesktopToolResultRequest,
 } from "../src/acp/desktop-commands.js";
+
+test("desktop agent control accepts explicit pending-pause withdrawal", () => {
+	assert.deepEqual(parseDesktopAgentControlRequest({ sessionId: "session-1", action: "cancel-pause" }), {
+		sessionId: "session-1", action: "cancel-pause",
+	});
+	assert.throws(() => parseDesktopAgentControlRequest({ sessionId: "session-1", action: "resume" }));
+	assert.throws(() => parseDesktopAgentControlRequest({ sessionId: "", action: "cancel-pause" }));
+});
 
 test("desktop draft config is workspace-scoped and does not require a session id", () => {
 	assert.equal(PIX_DRAFT_CONFIG_METHOD, "pix/session/draft_config");

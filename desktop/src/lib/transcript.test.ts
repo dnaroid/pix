@@ -43,6 +43,29 @@ describe("transcript reducer", () => {
     expect(state.items[1]).toMatchObject({ type: "message", role: "assistant", text: "Normal answer" });
   });
 
+  it("keeps a provider failure as a separate system row across live updates and replay", () => {
+    const error = {
+      sessionUpdate: "agent_message_chunk" as const,
+      messageId: "pix-system:error:12345",
+      content: { type: "text" as const, text: "Claude proposed an unknown tool: Edit" },
+    };
+    const updates = [
+      { sessionUpdate: "agent_thought_chunk" as const, messageId: "thought", content: { type: "text" as const, text: "Considering" } },
+      error,
+      { sessionUpdate: "user_message_chunk" as const, messageId: "next", content: { type: "text" as const, text: "завис?" } },
+    ];
+    const live = updates.reduce((state, update) => applySessionUpdate(state, update), emptyTranscript);
+    const replay = applySessionUpdates(emptyTranscript, updates);
+    expect(live.items).toEqual(replay.items);
+    expect(live.items[1]).toMatchObject({
+      type: "message",
+      role: "system",
+      text: "Claude proposed an unknown tool: Edit",
+      messageId: "pix-system:error:12345",
+    });
+    expect(groupTranscriptItems(replay.items).map((item) => item.type === "message" ? item.role : item.type)).toEqual(["activity-group", "system", "user"]);
+  });
+
   it("coalesces adjacent id-less chunks but starts a message after a tool", () => {
     let state = applySessionUpdate(emptyTranscript, {
       sessionUpdate: "agent_message_chunk",

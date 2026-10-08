@@ -50,6 +50,8 @@ export interface RequestMetrics {
   architecture: string;
   nodeVersion: string;
   claudeVersion: string;
+  /** Identifies this maintained adapter rather than a separately installed npm copy. */
+  adapterSource?: "pi-tools-suite-vendored";
   requestedModel: string;
   resolvedModel?: string;
   effort: string;
@@ -75,6 +77,8 @@ export interface RequestMetrics {
   cleanupComplete: boolean;
   stopReason?: string;
   errorCategory?: string;
+  /** Bounded, content-free detail for a rejected tool name. No arguments or paths. */
+  toolNameMismatch?: ToolNameMismatch;
   exitCode?: number | null;
   exitSignal?: NodeJS.Signals | null;
   terminationExpected: boolean;
@@ -89,6 +93,15 @@ export interface RequestMetrics {
     effectiveReadyMs: number;
     recoveryAttempt: boolean;
   };
+}
+
+export interface ToolNameMismatch {
+  proposedName: string;
+  classification: "unqualified_active" | "unknown_qualified" | "unrecognized";
+  expectedTransportName?: string;
+  catalogSize: number;
+  catalogFingerprint: string;
+  initializationValidated: boolean;
 }
 
 export interface SearchMetrics {

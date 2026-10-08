@@ -24,9 +24,19 @@ A provider-agnostic **Limits** section shows the account quota windows
 (`hourly`, then `weekly`) above the calendar when available, including weekly-only
 snapshots. Each shows a neutral progress track,
 remaining percentage explicitly labelled “remaining”, reset countdown and
-projected-exhaustion warning. Each window has a readable label/percentage row,
+cumulative daily-budget warning as defined in [runtime status](desktop-runtime-status.md). Each window has a readable label/percentage row,
 a full-width track and a separate “Resets in …” line. A passed reset explicitly
 says “Reset time reached · Awaiting quota refresh”, not just “reset”.
+The weekly track has seven equal day sectors, matching the compact status-bar
+track; separators overlay the aggregate remaining fill, not measured per-day
+usage. Short-window tracks remain continuous.
+The popup weekly track also overlays a thin primary-colored **now** marker:
+its position is `clamp((resetAt - now) / (windowSeconds * 1000) * 100, 0, 100)`
+percent from the left. The window starts at the right edge and time moves left
+toward reset, independently of the remaining-quota fill. The marker stays visible
+at both edges, is omitted for unknown/invalid timing, and its time-remaining meaning
+and orientation are included in the row's accessible label. It uses the existing
+minute tick, without another timer or request; compact footer tracks are unchanged.
 The weekly calendar also retains the exact reset date/time; header-derived rate windows are
 excluded from this section. Stale windows remain visibly marked as cached.
 The complete popup is bounded by the application viewport height minus 70px,

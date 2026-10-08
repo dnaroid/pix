@@ -19,6 +19,7 @@ const DEFAULT_MAX_BYTES = 50_000;
 const INIT_COMMAND_NAME = "idx-init";
 const UPDATE_COMMAND_NAME = "idx-update";
 const SYSTEM_CUSTOM_MESSAGE_TYPE = "pix-system";
+const INIT_PRIVACY_GUIDANCE = "For a new project, idx init defaults to OpenRouter perplexity/pplx-embed-v1-0.6b embeddings (1024 dimensions), requiring OPENROUTER_API_KEY in the environment or ~/.config/idx/.env; code/document chunks and search queries leave this machine, while index storage remains local. Before asking permission, disclose this and offer /idx-init --embedding local (local Ollama jina-8k code + nomic-embed-text-v2-moe documents, 768 dimensions, no API key). Do not read credentials.";
 
 const idxExecutionQueues = new Map<string, Promise<void>>();
 
@@ -141,7 +142,7 @@ function ensureIndexedProject(cwd: string, toolName: string, projectPath?: strin
 			error: [
 				`${toolName} is unavailable because idx is not on PATH.`,
 				"Do not initialize, install, or create project-local index state implicitly.",
-				"If the user wants indexed repository tools, ask for explicit permission to run /idx-init, then /reload.",
+				`If the user wants indexed repository tools, ask for explicit permission to run /idx-init, then /reload. ${INIT_PRIVACY_GUIDANCE}`,
 			].join("\n"),
 		};
 	}
@@ -154,13 +155,21 @@ function ensureIndexedProject(cwd: string, toolName: string, projectPath?: strin
 			`${toolName} is disabled because this project is not indexed: ${projectRoot}`,
 			"Missing .indexer-cli in the project root.",
 			projectPath === undefined
-				? "Ask the user for explicit permission to initialize and index this project with /idx-init, then run /reload."
-				: "Ask the user for explicit permission to run idx init in the specified project directory. Do not run /idx-init in the current session's project instead.",
+				? `Ask the user for explicit permission to initialize and index this project with /idx-init, then run /reload. ${INIT_PRIVACY_GUIDANCE}`
+				: `Ask the user for explicit permission to run idx init in the specified project directory. Do not run /idx-init in the current session's project instead. ${INIT_PRIVACY_GUIDANCE}`,
 		].join("\n"),
 	};
 }
 
-async function initializeIndexedProject(pi: ExtensionAPI, cwd: string, signal: AbortSignal | undefined) {
+function parseInitEmbedding(args: string): { embedding?: "local" | "openrouter"; error?: string } {
+	const trimmed = args.trim();
+	if (!trimmed) return {};
+	const match = /^--embedding\s+(local|openrouter)$/.exec(trimmed);
+	if (!match) return { error: "Usage: /idx-init [--embedding local|openrouter]. No other arguments are supported." };
+	return { embedding: match[1] as "local" | "openrouter" };
+}
+
+async function initializeIndexedProject(pi: ExtensionAPI, cwd: string, signal: AbortSignal | undefined, embedding?: "local" | "openrouter") {
 	const projectRoot = findProjectRoot(cwd);
 	const indexerDir = path.join(projectRoot, ".indexer-cli");
 
@@ -180,14 +189,16 @@ async function initializeIndexedProject(pi: ExtensionAPI, cwd: string, signal: A
 			projectRoot,
 			initialized: false,
 			alreadyIndexed: true,
-			output: idxCli.installed
+			output: embedding
+				? `Project is already indexed; /idx-init does not change the saved embedding provider. Run idx doctor --embedding ${embedding} only after reviewing its prerequisites and confirming you want to rebuild the index.`
+				: idxCli.installed
 				? `idx was installed and the project is already indexed: ${projectRoot}. Run /reload to expose repo_* tools.`
 				: "Project is already indexed.",
 			installedIdx: idxCli.installed,
 		};
 	}
 
-	const init = await pi.exec("idx", ["init"], { cwd: projectRoot, signal, timeout: 600_000 });
+	const init = await pi.exec("idx", ["init", ...(embedding ? ["--embedding", embedding] : [])], { cwd: projectRoot, signal, timeout: 600_000 });
 	const initOutput = [init.stdout, init.stderr].filter(Boolean).join(init.stdout && init.stderr ? "\n" : "").trim() || "No output";
 	const output = idxCli.installed
 		? [`idx was not available; installed with npm install -g indexer-cli@latest:`, idxCli.output, `idx init output:`, initOutput].join("\n\n")
@@ -556,11 +567,17 @@ export default function repoDiscoveryExtension(pi: ExtensionAPI, options: RepoDi
 	const profileConfig = options.profile ? { profile: options.profile, issues: [] } : loadRepoDiscoveryProfile(registrationCwd);
 	const profile = profileConfig.profile;
 	pi.registerCommand(INIT_COMMAND_NAME, {
-		description: "Initialize idx repository discovery for this project, then reload Pi to expose repo_* tools",
-		handler: async (_args: string, ctx: CommandContext) => {
+		description: "Initialize idx (default OpenRouter embeddings; use --embedding local to keep embedding requests local), then reload Pi",
+		handler: async (args: string, ctx: CommandContext) => {
 			try {
+				const parsed = parseInitEmbedding(args);
+				if (parsed.error) {
+					sendSystemMessage(pi, parsed.error, { command: INIT_COMMAND_NAME, cwd: ctx.cwd });
+					if (ctx.hasUI) ctx.ui.notify(parsed.error, "error");
+					return;
+				}
 				if (ctx.hasUI) ctx.ui.notify("Running idx init for this project...", "info");
-				const result = await initializeIndexedProject(pi, ctx.cwd, undefined);
+				const result = await initializeIndexedProject(pi, ctx.cwd, undefined, parsed.embedding);
 				if (result.alreadyIndexed) {
 					sendSystemMessage(pi, `${result.output}\n${result.projectRoot}`, {
 						command: INIT_COMMAND_NAME,
@@ -582,7 +599,10 @@ export default function repoDiscoveryExtension(pi: ExtensionAPI, options: RepoDi
 					return;
 				}
 
-				sendSystemMessage(pi, [`idx init completed in ${result.projectRoot}.`, output, "Run /reload to load repo_* discovery tools into this session."].join("\n\n"), {
+				const embeddingGuidance = parsed.embedding === "local"
+					? "Embeddings were explicitly set to local Ollama (jina-8k for code, nomic-embed-text-v2-moe for documents); this avoids an OpenRouter key for embedding."
+					: "New projects default to OpenRouter perplexity/pplx-embed-v1-0.6b embeddings (1024 dimensions) for both code and documents. This requires OPENROUTER_API_KEY in the environment or ~/.config/idx/.env; chunks and queries are sent to OpenRouter and leave this machine, while index storage remains local. For a new local project, use /idx-init --embedding local. Switching this indexed project instead requires separately confirmed idx doctor --embedding local and an index rebuild.";
+				sendSystemMessage(pi, [`idx init completed in ${result.projectRoot}.`, embeddingGuidance, output, "Run /reload to load repo_* discovery tools into this session."].join("\n\n"), {
 					command: INIT_COMMAND_NAME,
 					cwd: result.projectRoot,
 					exitCode: result.exitCode,

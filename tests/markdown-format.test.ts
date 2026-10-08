@@ -248,6 +248,54 @@ describe("formatMarkdownTables", () => {
 });
 
 describe("renderMarkdownTextLines", () => {
+	it("renders LaTeX display fractions as readable Unicode math", () => {
+		const lines = renderMarkdownTextLines([
+			"\\[",
+			"DER=\\frac{\\text{пропущенная речь}+\\text{лишняя речь}}{\\text{эталонное время}}\\times100\\%",
+			"\\]",
+			"$$JER=1-\\frac{|A\\cap B|}{|A\\cup B|}$$",
+		].join("\n"), 80);
+
+		assert(lines.some((line) => line.text.includes("пропущенная речь + лишняя речь")));
+		assert(lines.some((line) => line.text.includes("────────────────") && line.text.includes("DER =")));
+		assert(lines.some((line) => line.text.includes("эталонное время")));
+		assert(lines.some((line) => line.text.includes("JER = 1 −")));
+		assert(lines.some((line) => line.text.includes("∣A ∩ B∣")));
+		assert(lines.every((line) => !line.text.includes("\\frac") && !line.text.includes("$$")));
+		assert(lines.every((line) => stringDisplayWidth(line.text) <= 80));
+	});
+
+	it("supports inline math without changing fenced code, inline code, and escaped dollars", () => {
+		const inline = renderMarkdownLine("Inline \\(x^2 + \\alpha\\), $a+b$. Price \\$5 and $6.");
+		assert.equal(inline.text, "Inline x² + α, a + b. Price $5 and $6.");
+		assert.equal(renderMarkdownLine("`$x^2$` and **$y^2$**").text, "`$x^2$` and y²");
+		assert.equal(renderMarkdownTextLines("\\[x^2\\] and prose", 50)[0]?.text, "x² and prose");
+
+		const code = renderMarkdownTextLines("```tex\n\\frac{a}{b}\n$$x$$\n```", 40);
+		assert(code.every((line) => line.codeBlock));
+		assert(code.some((line) => line.text === "\\frac{a}{b}"));
+		assert(code.some((line) => line.text === "$$x$$"));
+	});
+
+	it("preserves unfinished or invalid math and falls back safely in narrow terminals", () => {
+		const unfinished = renderMarkdownTextLines("\\[\n\\frac{a}{", 40);
+		assert.deepEqual(unfinished.map((line) => line.text), ["\\[", "\\frac{a}{"]);
+		assert(unfinished.every((line) => line.codeBlock));
+		const invalid = renderMarkdownTextLines("$$\\undefinedcommand{secret}$$", 40);
+		assert.equal(invalid[0]?.text, "$$\\undefinedcommand{secret}$$");
+		assert(invalid[0]?.codeBlock);
+
+		const narrow = renderMarkdownTextLines("\\[\\frac{\\text{длинный текст}}{b}\\]", 12);
+		assert(narrow.some((line) => line.text.includes("длинный")));
+		assert(narrow.every((line) => stringDisplayWidth(line.text) <= 12));
+		assert(narrow.every((line) => !line.text.includes("\\frac")));
+	});
+
+	it("does not format Markdown tables or references within display math", () => {
+		const source = "\\[\n\\text{a|b}\n[note]: # literal\n\\]";
+		assert.equal(formatMarkdownTables(source), source);
+	});
+
 	it("renders completed Mermaid fences as Unicode diagrams", () => {
 		const lines = renderMarkdownTextLines([
 			"```mermaid",

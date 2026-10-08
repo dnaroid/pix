@@ -30,7 +30,8 @@ export interface AcpTransport {
 }
 
 export interface AcpClientHandlers {
-  readonly onSessionUpdate: (notification: SessionNotification) => void;
+	readonly onSessionUpdate: (notification: SessionNotification) => void;
+	readonly onSessionCatalogChanged?: (cwd: string) => void;
   readonly onSessionState?: (notification: SessionStateNotification) => void;
   readonly onOpenActivity?: (sessionId: string) => string;
   readonly onBeginActivityRequest?: (owner: string) => void;

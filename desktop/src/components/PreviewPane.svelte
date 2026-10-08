@@ -14,6 +14,8 @@
   import { onDestroy } from "svelte";
   import type { Attachment } from "../lib/attachments";
   import { isGlbPath } from "../lib/glb";
+  import { previewMediaKindForPath } from "../lib/media";
+  import { previewMediaPlayback } from "./audio-playback-action";
   import { glbViewer } from "./glb-viewer-action";
   import "../styles/glb-viewer.css";
   import type { PreviewScrollPosition } from "../lib/preview-history";
@@ -31,6 +33,8 @@
     lineRange,
     previewId,
     active = true,
+    autoplay = false,
+    onAutoplayConsumed = () => {},
     scrollPosition,
     canGoBack = false,
     canGoForward = false,
@@ -55,6 +59,8 @@
     lineRange?: ProjectFileLineRange;
     previewId: number;
     active?: boolean;
+    autoplay?: boolean;
+    onAutoplayConsumed?: () => void;
     scrollPosition: PreviewScrollPosition;
     canGoBack?: boolean;
     canGoForward?: boolean;
@@ -79,6 +85,9 @@
   let editorElement = $state<HTMLTextAreaElement | undefined>();
   let searchInputElement = $state<HTMLInputElement | undefined>();
   let wrapLines = $state(false);
+  let audioError = $state(false);
+
+  $effect(() => { source; audioError = false; });
 
   const title = $derived(file?.path ?? attachment?.name ?? "Preview");
   const source = $derived(
@@ -389,14 +398,36 @@
           <div class="glb-preview" use:glbViewer={source}></div>
         {:else if attachment.kind === "image"}
           <img class="max-h-full max-w-full object-contain" src={source} alt={attachment.name} data-image-path={attachment.path} />
+        {:else if previewMediaKindForPath(attachment.path ?? attachment.name) === "audio"}
+          {#key previewId}
+            <div class="flex w-full max-w-lg flex-col gap-3 text-sm text-muted-foreground">
+              <span class="break-words">{attachment.name}</span>
+              <audio
+                class="w-full [color-scheme:light_dark]"
+                data-context-file-path={attachment.path ?? ""}
+                aria-label={attachment.name}
+                src={source}
+                controls
+                preload="metadata"
+                use:previewMediaPlayback={{ active, autoplay, onAutoplayConsumed }}
+                onerror={() => { audioError = true; }}
+              ></audio>
+              {#if audioError}
+                <p role="status">Audio unavailable. The file may be damaged or its codec unsupported.</p>
+              {/if}
+            </div>
+          {/key}
         {:else}
+        {#key previewId}
         <!-- svelte-ignore a11y_media_has_caption User-selected videos do not necessarily include a captions track. -->
           <video
             class="max-h-full max-w-full"
             data-context-file-path={attachment.path ?? ""}
             src={source}
             controls
+            use:previewMediaPlayback={{ active, autoplay, onAutoplayConsumed }}
           ></video>
+        {/key}
         {/if}
       </div>
     {/if}
