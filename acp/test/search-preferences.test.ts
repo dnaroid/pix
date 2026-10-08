@@ -3,6 +3,7 @@ import { test, type TestContext } from "node:test";
 import { mkdir, mkdtemp, open, readFile, rename, rm, rmdir, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { setTimeout as delay } from "node:timers/promises";
 import { parse } from "jsonc-parser";
 import { publishAtomically, SearchPreferences } from "../src/search/config.js";
 
@@ -116,11 +117,13 @@ test("consent updates tolerate a concurrent reader holding the config open", asy
   await writeFile(path, '{ "search": { "semanticEnabled": true } }\n');
   // Mirrors an in-flight consent check re-reading the document while a config
   // update publishes: on Windows the open handle blocks rename until released.
+  // Real readers close within the bounded retry budget, so release promptly.
   const held = await open(path, "r");
+  const releasing = delay(100).then(() => held.close());
   try {
     await preferences.setEnabled(false);
     assert.equal(await preferences.enabled(), false);
-  } finally { await held.close(); }
+  } finally { await releasing.catch(() => {}); await held.close().catch(() => {}); }
   assert.deepEqual(parse(await readFile(path, "utf8")), { search: { semanticEnabled: false } });
   await assert.rejects(stat(`${path}.search.lock`), { code: "ENOENT" });
 });

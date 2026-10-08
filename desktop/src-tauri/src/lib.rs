@@ -30,13 +30,13 @@ mod close_guard;
 mod desktop_bootstrap;
 mod desktop_context_menu;
 mod desktop_notification;
-mod idx_knowledge;
-mod idx_snapshot_search;
 mod dictation_shortcut;
 mod git_ci;
 mod git_identity;
 mod git_ignore;
 mod git_operations;
+mod idx_knowledge;
+mod idx_snapshot_search;
 mod lsp_install;
 #[cfg(test)]
 mod native_lifecycle_tests;
@@ -4430,7 +4430,8 @@ impl UserConfigFileLock {
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
                     if Instant::now() >= deadline {
                         return Err(
-                            "user config is busy; retry after the current writer finishes".to_owned(),
+                            "user config is busy; retry after the current writer finishes"
+                                .to_owned(),
                         );
                     }
                     thread::sleep(Duration::from_millis(20));
@@ -4497,7 +4498,9 @@ fn write_user_config_owned(
     // process-local RwLock, from seeing a truncated document.
     let temporary = path.with_file_name(format!(
         ".{}.{}.tmp",
-        path.file_name().expect("config file name").to_string_lossy(),
+        path.file_name()
+            .expect("config file name")
+            .to_string_lossy(),
         uuid::Uuid::new_v4(),
     ));
     let mut options = fs::OpenOptions::new();
@@ -11104,7 +11107,10 @@ mod tests {
 
     #[test]
     fn idx_embedding_override_does_not_force_local_or_migrate_saved_providers() {
-        assert_eq!(idx_operation_args(IdxMaintenanceKind::Init, false), ["init"]);
+        assert_eq!(
+            idx_operation_args(IdxMaintenanceKind::Init, false),
+            ["init"]
+        );
         assert_eq!(
             idx_operation_args(IdxMaintenanceKind::Doctor, false),
             ["doctor", "--force", "."]
@@ -12665,13 +12671,9 @@ mod tests {
         let oversized = "x".repeat(MAX_USER_CONFIG_BYTES as usize);
         // Valid stale drafts remain CAS conflicts; oversized drafts are rejected
         // before filesystem ownership is acquired, regardless of their baseline.
-        let stale = write_user_config_if_unchanged_from(
-            &home,
-            UserConfigKind::Desktop,
-            "stale",
-            "{}",
-        )
-        .expect("stale draft remains a CAS conflict");
+        let stale =
+            write_user_config_if_unchanged_from(&home, UserConfigKind::Desktop, "stale", "{}")
+                .expect("stale draft remains a CAS conflict");
         assert!(!stale.written);
         assert_eq!(stale.document.content, saved.content);
         let error = write_user_config_if_unchanged_from(
@@ -12809,15 +12811,14 @@ mod tests {
             fs::read_to_string(&path).expect("read unchanged config"),
             "{}\n"
         );
-        let error = write_user_config_if_unchanged_from(
-            &home,
-            UserConfigKind::Desktop,
-            "{}\n",
-            &content,
-        )
-        .expect_err("reject normalized oversized conditional config");
+        let error =
+            write_user_config_if_unchanged_from(&home, UserConfigKind::Desktop, "{}\n", &content)
+                .expect_err("reject normalized oversized conditional config");
         assert!(error.contains("config is too large to save"));
-        assert_eq!(fs::read_to_string(&path).expect("read unchanged config"), "{}\n");
+        assert_eq!(
+            fs::read_to_string(&path).expect("read unchanged config"),
+            "{}\n"
+        );
         let missing_home = home.join("missing");
         let error = write_user_config_if_unchanged_from(
             &missing_home,
@@ -12970,7 +12971,9 @@ mod tests {
     #[test]
     fn resolves_audio_with_the_same_media_boundaries() {
         let workspace = temporary_workspace("audio-media");
-        for extension in ["aac", "aif", "aiff", "flac", "m4a", "mp3", "oga", "ogg", "opus", "wav"] {
+        for extension in [
+            "aac", "aif", "aiff", "flac", "m4a", "mp3", "oga", "ogg", "opus", "wav",
+        ] {
             let name = format!("track.{}", extension.to_uppercase());
             let file = workspace.join(&name);
             fs::write(&file, b"audio fixture").expect("write audio");
@@ -12978,7 +12981,9 @@ mod tests {
             assert!(resolve_project_media_from(&workspace, Path::new(&name)).is_ok());
             assert!(resolve_local_media_from(&file).is_ok());
             assert!(resolve_local_media_from(Path::new(&name)).is_err());
-            assert!(resolve_project_media_from(&workspace, Path::new(&format!("../{name}"))).is_err());
+            assert!(
+                resolve_project_media_from(&workspace, Path::new(&format!("../{name}"))).is_err()
+            );
         }
         assert!(!is_supported_project_media(Path::new("track.mid")));
         assert!(resolve_project_media_from(&workspace, Path::new("missing.mp3")).is_err());
@@ -13233,11 +13238,15 @@ mod tests {
         for name in ["index.sqlite", "index.sqlite-wal", "index.sqlite-shm"] {
             let file = search.join(name);
             fs::write(&file, b"durable-search-data").expect("write search data");
-            fs::File::open(file).unwrap()
-                .set_times(fs::FileTimes::new().set_modified(old)).unwrap();
+            fs::File::open(file)
+                .unwrap()
+                .set_times(fs::FileTimes::new().set_modified(old))
+                .unwrap();
         }
-        fs::File::open(&search).unwrap()
-            .set_times(fs::FileTimes::new().set_modified(old)).unwrap();
+        fs::File::open(&search)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(old))
+            .unwrap();
         for automatic in [true, false] {
             if automatic {
                 auto_clean_project_pi_from(&workspace).expect("TTL cleanup");
@@ -13247,7 +13256,10 @@ mod tests {
             for name in ["index.sqlite", "index.sqlite-wal", "index.sqlite-shm"] {
                 assert_eq!(fs::read(search.join(name)).unwrap(), b"durable-search-data");
             }
-            assert_eq!(project_pi_storage_from(&workspace).unwrap().cleanup_bytes, 0);
+            assert_eq!(
+                project_pi_storage_from(&workspace).unwrap().cleanup_bytes,
+                0
+            );
         }
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }
