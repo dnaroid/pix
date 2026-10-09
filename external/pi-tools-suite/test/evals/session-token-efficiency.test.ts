@@ -1,13 +1,8 @@
-import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import { resolve } from "node:path";
 import { describe, expect, test } from "bun:test";
-import { COMPRESS_TOOL_PARAMETERS } from "../../src/dcp/compress-tool.js";
 import { loadConfig } from "../../src/dcp/config.js";
 
 import {
 	analyzeSessionJsonlText,
-	canonicalJsonSchema,
 	measureDcpCarrierOverhead,
 	measureDcpControlPlane,
 } from "./session-token-efficiency.js";
@@ -115,26 +110,6 @@ describe("session token-efficiency analysis", () => {
 		// 1,348 estimated tokens (the repo_inspect consolidation refined the
 		// system-prompt and compress guidelines); keep that measured baseline
 		// as the hard ceiling and update it only deliberately.
-		// TEMP-DIAG v3 (CI repair): identify the TypeBox module the runtime
-		// resolved; remove once the Windows schema representation is explained.
-		{
-			let moduleIdentity: string;
-			try {
-				const require = createRequire(import.meta.url);
-				const resolved = require.resolve("typebox");
-				const pkg = JSON.parse(readFileSync(resolve(resolved, "../..", "package.json"), "utf8")) as { version?: string };
-				moduleIdentity = `${resolved}@${pkg.version ?? "unknown"}`;
-			} catch (error) {
-				moduleIdentity = `unresolved: ${error instanceof Error ? error.message : String(error)}`;
-			}
-			console.log("ENV-DIAG3", JSON.stringify({
-				platform: process.platform,
-				bun: process.versions.bun ?? "n/a",
-				moduleIdentity,
-				rawParamsChars: JSON.stringify(COMPRESS_TOOL_PARAMETERS).length,
-				canonicalParamsChars: JSON.stringify(canonicalJsonSchema(COMPRESS_TOOL_PARAMETERS)).length,
-			}));
-		}
 		expect(measured.staticSystemPlusToolEnvelope.estimatedTokens).toBeLessThanOrEqual(1348);
 		expect(measured.components.turnNudge.estimatedTokens).toBeLessThanOrEqual(205);
 		expect(measured.components.iterationNudge.estimatedTokens).toBeLessThanOrEqual(176);
