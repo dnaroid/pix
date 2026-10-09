@@ -60,11 +60,15 @@ function waitForChildExit(child: ChildProcessWithoutNullStreams, timeoutMs: numb
 }
 
 export async function terminateChild(child: ChildProcessWithoutNullStreams): Promise<void> {
-  if (!killChild(child, "SIGTERM")) return;
-  // The detached group can survive its leader (wrappers, SIGTERM-resistant
-  // workers). Always sweep it after the grace period, even if the leader exits.
-  await waitForChildExit(child, SHUTDOWN_TERM_TIMEOUT_MS);
-  killChild(child, "SIGKILL");
+  // A false kill means the child already exited or cannot be signaled, not that
+  // its exit event has been delivered; keep waiting either way so awaiting
+  // callers can rely on the OS process actually being gone.
+  if (killChild(child, "SIGTERM")) {
+    // The detached group can survive its leader (wrappers, SIGTERM-resistant
+    // workers). Always sweep it after the grace period, even if the leader exits.
+    await waitForChildExit(child, SHUTDOWN_TERM_TIMEOUT_MS);
+    killChild(child, "SIGKILL");
+  }
   await waitForChildExit(child, SHUTDOWN_KILL_TIMEOUT_MS);
 }
 
