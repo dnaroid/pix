@@ -300,6 +300,24 @@ describe("session recovery tools", () => {
 		expect(recovered.compactionCount).toBe(1);
 	});
 
+	test("recovers pending consolidated and historical repository calls", async () => {
+		const { pi } = await setup();
+		const entries = [
+			{ type: "message", id: "user", message: { role: "user", content: "Inspect source" } },
+			{ type: "message", id: "calls", parentId: "user", message: { role: "assistant", content: [
+				toolCall("new", "repo_inspect", { mode: "ast", target: "src/new.ts" }),
+				toolCall("old", "repo_ast", { target: "src/old.ts" }),
+			] } },
+		];
+		const result = await execute(pi.tools.get("session"), "recovery", "current", {}, {
+			sessionManager: new FakeSessionManager(entries, entries),
+		});
+		expect(jsonContent(result).pendingToolCalls).toEqual([
+			{ id: "new", name: "repo_inspect", entryId: "calls", sectionId: "section:user" },
+			{ id: "old", name: "repo_ast", entryId: "calls", sectionId: "section:user" },
+		]);
+	});
+
 	test("returns a clear normal result for an empty or unavailable session", async () => {
 		const { pi } = await setup();
 		const result = await execute(pi.tools.get("session"), "overview", "overview", {}, {});

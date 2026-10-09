@@ -52,7 +52,8 @@ without treating generated answers or audit candidates as semantic proof.
   Explicit `--embedding local|openrouter` checks prerequisites before deleting
   and reinitializing; provider switches rebuild the index. Agents must not read
   credentials, initialize implicitly, or silently migrate saved providers.
-- All async child roles receive seven `repo_*` query tools and a restricted
+- All async child roles receive exactly three `repo_*` query tools
+  (`repo_context`, `repo_inspect`, `repo_audit`) and a restricted
   `project_search` (Code/Knowledge only) through a common tools-only
   entrypoint when the same IDX prerequisites hold. It omits setup/update
   commands and parent delegation instructions; role work-tool restrictions and
@@ -75,6 +76,24 @@ without treating generated answers or audit candidates as semantic proof.
   retrieves bounded project behavior, documents, implementation and tests; the
   parent model reasons directly over that evidence rather than delegating to a
   second repository-answer model.
+  A focused code-path lookup or diagnosis of one implementation detail starts
+  with `project_search`, even when the owner is unknown; it does not need a
+  `repo_context` preflight. General orientation and authoritative contract
+  assembly remain `repo_context` tasks.
+- `repo_inspect` consolidates architecture, structure, AST, symbol explanation
+  and dependency views behind required `mode: architecture|structure|ast|explain|deps`
+  and typed options; it accepts no raw argument string. `target` is required for
+  AST, explain and deps. Project-relative `scope` is supported for architecture,
+  structure and explain. `limit` means max-files for structure, max-nodes for AST
+  and body-lines for explain; `depth` applies to structure, AST and deps, while
+  `cursor` applies to structure and AST. Structure additionally supports `kind`,
+  `includeInternal` and `tests: include|exclude|summary`; deps supports
+  `tests: include`, `relations: modules|module-imports|calls|call-graph`,
+  `direction: callers|callees|both` and `showEdges`. Explain is signature-only
+  unless `includeBody` is true. Compact defaults are structure `limit:20, depth:2`,
+  AST `limit:40, depth:3`, explanation body limit 20, and dependencies
+  `depth:1, direction:callers`. All tools retain `projectPath`, `maxLines` and
+  `maxBytes`; `outputMode` is native-only.
 - `project_search` replaces `repo_search` as the single focused search tool.
   Select `sources:["code","knowledge"]` for indexed code/documents, and use
   `indexMode` (hybrid/semantic/lexical/symbol), `pathPrefix`, chunk types,
@@ -88,7 +107,8 @@ without treating generated answers or audit candidates as semantic proof.
   retrieval does not establish the absence of a contract. Read authoritative
   primary documents and relevant code/tests rather than trusting summaries or
   rankings as semantic proof.
-- Start compact. For an unfamiliar area use architecture; for a directory inventory
+- Start compact. For a high-level map or cross-module onboarding overview, start
+  with architecture rather than structure; for a directory inventory
   use structure with at most 20 files/depth 2; for a known large file use a compact
   AST outline. Search behavior with at most 3 results and no inline content in
   the first pass using `project_search` with Code/Knowledge sources.
@@ -98,8 +118,11 @@ without treating generated answers or audit candidates as semantic proof.
   otherwise shell `rg`; path-only discovery uses available `Glob`/`find`, otherwise
   shell `rg --files`. Read known paths directly; never require an unavailable tool.
   These text-only fallbacks do not weaken AST-first routing for structural queries.
-- Before a material behavior change, find the governing document with context or
-  search. Keep its behavior/scenarios/constraints/interfaces aligned in
+- Being new to a repository alone does not request an architecture map: a
+  reading guide for a behavior starts with `repo_context`. Before creating a
+  spec or making a material behavior change, start contract discovery with
+  `repo_context`, then use focused search for remaining gaps. Keep the governing
+  document's behavior/scenarios/constraints/interfaces aligned in
   the same task; create a focused spec only if needed. New specs use the
   non-overwriting template installed by `idx init` at
   `.indexer-cli/spec-template.md`, with `kind: spec` and intended `status`, and
@@ -219,7 +242,10 @@ Audit completion: [0046 — Task-scoped knowledge audit completion](../docs/deci
 ## Implementation
 
 - `external/pi-tools-suite/src/tool-descriptions.ts`
+- `external/pi-tools-suite/src/project-search/index.ts`
 - `external/pi-tools-suite/src/repo-discovery/index.ts`
+- `external/pi-tools-suite/src/repo-discovery/inspect.ts`
+- `external/pi-tools-suite/src/repo-discovery/native-compact.ts`
 - `external/pi-tools-suite/test/fixtures/hard-to-find-project/benchmark/run-locate-benchmark.mjs`
 - `external/pi-tools-suite/src/repo-discovery/subagent.ts`
 - `external/pi-tools-suite/src/async-subagents/core/child-tools.ts`
@@ -233,9 +259,17 @@ Audit completion: [0046 — Task-scoped knowledge audit completion](../docs/deci
 ## Tests
 
 - `external/pi-tools-suite/test/tool-descriptions.test.ts`
+- `external/pi-tools-suite/test/tool-selection-e2e.test.ts`
+- `external/pi-tools-suite/test/tool-selection-fixture.test.ts`
+- `external/pi-tools-suite/test/tool-selection-fixture.ts`
+- `external/pi-tools-suite/test/tool-selection-process.ts`
+- `external/pi-tools-suite/test/fixtures/tool-selection-idx.mjs`
+- `external/pi-tools-suite/test/fixtures/tool-selection-spec-template.md`
+- `external/pi-tools-suite/test/fixtures/tool-selection-payment-retry.md`
 - `external/pi-tools-suite/test/async-subagents/knowledge-auditor.test.ts`
 - `external/pi-tools-suite/test/todo.test.ts`
 - `external/pi-tools-suite/test/repo-discovery.test.ts`
+- `external/pi-tools-suite/test/repo-native-compact.test.ts`
 - `external/pi-tools-suite/test/fixtures/hard-to-find-project/README.md`
 - `external/pi-tools-suite/README.md`
 - `external/pi-tools-suite/test/async-subagents/repo-tools.test.ts`
@@ -252,6 +286,10 @@ Audit completion: [0046 — Task-scoped knowledge audit completion](../docs/deci
 
 - Tests cover supported command routing, bounded defaults, input validation,
   removal of obsolete wiki actions/flags, and model-facing guidance.
+- The opt-in live tool-selection suite uses isolated fixtures and simulated IDX
+  responses with real model calls. It retains the focused-search, contract,
+  architecture, audit-fallback and session/compression assertions; deterministic
+  fixture tests cover root isolation, parser compatibility and child cleanup.
 - `bun test test/tool-descriptions.test.ts test/repo-discovery.test.ts`
 - `npm --prefix external/pi-tools-suite run typecheck`
 - `git diff --check`

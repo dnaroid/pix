@@ -2,9 +2,10 @@ import path from "node:path";
 import { homedir } from "node:os";
 import { REPO_DISCOVERY_TOOLS } from "../tool-descriptions";
 import { commandAvailable, directoryExists, findProjectRoot, hasAvailableIndexedProjectRoot } from "../lib/project.js";
+import { buildInspectRequest, inspectParameters } from "./inspect.js";
 import {
 	applyNativeCompactPolicy,
-	describeNativeCompactArgs,
+	INSPECT_NATIVE_GUIDANCE,
 	loadRepoDiscoveryProfile,
 	truncateNativeCompactOutput,
 	type NativePolicyOutcome,
@@ -33,8 +34,6 @@ type RepoDiscoveryParams = {
 	maxBytes?: number;
 	outputMode?: RepoDiscoveryOutputMode;
 };
-
-type RepoDiscoveryWrapperParams = Omit<RepoDiscoveryParams, "command">;
 
 type KnowledgeCommand = "context" | "audit";
 type KnowledgeParams = {
@@ -449,78 +448,37 @@ const NATIVE_COMPACT_REPO_TOOL_PROPERTIES = {
 	maxBytes: boundedIntegerSchema("Final delivered byte cap. compact default/max 12000; outputMode=full permits up to 50000.", 12_000, 50_000),
 };
 
-const IDX_ARG_DESCRIPTIONS: Record<IdxCommand, string> = {
-	architecture: "idx architecture flags: [--path-prefix <area>].",
-	structure:
-		"idx structure flags: [--path-prefix <area>] [--kind <kind>] [--max-depth <n>] [--max-files <n>] [--cursor <n>] [--include-internal] [--no-tests] [--include-tests-summary].",
-	ast: "idx ast flags: [--max-depth <n>] [--max-nodes <n>] [--cursor <n>] [--no-include-text].",
-	explain:
-		"idx explain flags: [--path-prefix <area>] [--include-body] [--body-lines <n>] [--signature-only].",
-	deps: "idx deps flags: [--mode modules|module-imports|calls|call-graph] [--direction callers|callees|both] [--depth <n>] [--show-edges] [--tests].",
-};
-
-function argsSchema(command: IdxCommand, profile: RepoDiscoveryProfile) {
-	const baseDescription = IDX_ARG_DESCRIPTIONS[command];
-	return {
-		type: "array",
-		items: profile === "native-compact"
-			? { type: "string", minLength: 1, description: "idx argv token; --flag=value is normalized and revalidated by Native Compact" }
-			: stringSchema("idx argv token; pass flags and values as separate items"),
-		description: profile === "native-compact"
-			? `${baseDescription} ${describeNativeCompactArgs(command)}`
-			: baseDescription,
-	};
-}
-
-function repoToolParameters(command: IdxCommand, targetDescription: string | undefined, profile: RepoDiscoveryProfile) {
+function repoInspectParameters(profile: RepoDiscoveryProfile) {
 	const outputProperties = profile === "native-compact"
 		? NATIVE_COMPACT_REPO_TOOL_PROPERTIES
 		: BASELINE_REPO_TOOL_PROPERTIES;
 	const properties = {
 		projectPath: PROJECT_PATH_SCHEMA,
-		args: argsSchema(command, profile),
 		...outputProperties,
 		...(profile === "native-compact" ? {
 			outputMode: {
 				type: "string",
 				enum: ["compact", "full"],
 				default: "compact",
-				description: "Native Compact delivery: compact by default. Use full only on this same tool call when broader output is intentional or its compact result was actually truncated; do not switch an unrelated repo tool to full after a policy refusal.",
+				description: INSPECT_NATIVE_GUIDANCE,
 			},
 		} : {}),
 	};
 
-	return {
-		type: "object",
-		properties: targetDescription ? { target: stringSchema(targetDescription), ...properties } : properties,
-		required: targetDescription ? ["target"] : [],
-		additionalProperties: false,
-	};
+	return inspectParameters(properties);
 }
 
-function registerRepoCommandTool(
-	pi: ExtensionAPI,
-	options: {
-		name: string;
-		label: string;
-		command: IdxCommand;
-		description: string;
-		promptSnippet: string;
-		promptGuidelines: string[];
-		targetDescription?: string;
-	},
-	profile: RepoDiscoveryProfile,
-) {
+function registerRepoInspect(pi: ExtensionAPI, profile: RepoDiscoveryProfile) {
+	const description = REPO_DISCOVERY_TOOLS.find((tool) => tool.name === "repo_inspect")!;
 	pi.registerTool({
-		name: options.name,
-		label: options.label,
-		description: options.description,
-		promptSnippet: options.promptSnippet,
-		promptGuidelines: options.promptGuidelines,
-		parameters: repoToolParameters(options.command, options.targetDescription, profile),
+		...description,
+		parameters: repoInspectParameters(profile),
 
-		async execute(_toolCallId: string, params: RepoDiscoveryWrapperParams, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: ToolContext) {
-			return executeRepoDiscovery(pi, { ...params, command: options.command }, signal, ctx, options.name, profile);
+		async execute(_toolCallId: string, params: unknown, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: ToolContext) {
+			if (signal?.aborted) return textResult("repo_inspect cancelled");
+			const request = buildInspectRequest(params, profile);
+			if (typeof request === "string") return textResult(request, true);
+			return executeRepoDiscovery(pi, request, signal, ctx, "repo_inspect", profile);
 		},
 	});
 }
@@ -649,7 +607,7 @@ export default function repoDiscoveryExtension(pi: ExtensionAPI, options: RepoDi
 
 	for (const tool of REPO_DISCOVERY_TOOLS) {
 		if (tool.command === "context" || tool.command === "audit") registerKnowledgeCommand(pi, tool.command, profile);
-		else registerRepoCommandTool(pi, { ...tool, command: tool.command }, profile);
+		else registerRepoInspect(pi, profile);
 	}
 
 }

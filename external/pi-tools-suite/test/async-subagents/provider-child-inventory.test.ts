@@ -156,6 +156,6 @@ for (const selected of [undefined, ["read", "grep"], []]) {
 			const allowed = [...selected, ...SUBAGENT_COMMON_TOOLS].map((name) => name.toLowerCase());
 			for (const name of tools) expect(allowed).toContain(name.toLowerCase());
 		}
-		expect(REPO_DISCOVERY_TOOLS).toHaveLength(8);
+		expect(REPO_DISCOVERY_TOOLS.map(tool => tool.name).sort()).toEqual(["repo_audit", "repo_context", "repo_inspect"]);
 	}, 60_000);
 }

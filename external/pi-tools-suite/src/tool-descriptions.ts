@@ -11,7 +11,7 @@ export type ToolDescription = {
 	promptGuidelines?: string[];
 };
 
-export type RepoDiscoveryCommand = "context" | "audit" | "architecture" | "structure" | "ast" | "explain" | "deps";
+export type RepoDiscoveryCommand = "context" | "audit" | "inspect";
 
 export type RepoDiscoveryToolDescription = ToolDescription & Required<Pick<ToolDescription, "promptSnippet" | "promptGuidelines">> & {
 	command: RepoDiscoveryCommand;
@@ -33,6 +33,7 @@ export const COMPRESS_TOOL_DESCRIPTION: ToolDescription = {
 	promptSnippet: "Compress only closed, high-yield stale context when pressure/reminders justify it; keep active or still-needed raw context. Write the summary yourself.",
 	promptGuidelines: [
 		"Prefer completed work and understood large tool/log output; low context alone is not a trigger.",
+		"Before submitting a summary, remove incidental log markers entirely, including sentences announcing their removal. Preserve actionable error identifiers, constraints, decisions and next steps instead.",
 	],
 };
 
@@ -84,7 +85,7 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 				"Results are compact with artifact links. Agents run isolated pi processes with extensions disabled to prevent recursive spawning; spawn/task timeoutSeconds can shorten the default 30m watchdog, project concurrency queues excess agents, and retry backoff/fallback models/Antigravity account rotation are config-driven.",
 			].join(" "),
 			promptSnippet:
-				"Delegation policy: see this tool's description. Real UI QA immediately uses ui-qa before preflight; preserve evidence links and credential boundaries. Choose a role from the effective catalog. Spawn returns after scheduling by default; continue independent work. Obtain the final knowledge-auditor result when available.",
+				"When the user requests independent investigation/review tracks, spawn scoped research agents before doing those tracks yourself; a serial parent checklist is not delegation. For other delegation see this tool's description. Real UI QA immediately uses ui-qa before preflight; preserve evidence links and credential boundaries. Choose a role from the effective catalog. Continue independent work after spawning. Obtain the final knowledge-auditor result when available.",
 			promptGuidelines: [
 				"Treat every real UI QA request as a mandatory delegation trigger and an explicit exception to the large/parallel threshold: immediately spawn with `subagentType: \"ui-qa\"` before checking prerequisites. The QA sub-agent owns target discovery, feasibility checks, UI automation, evidence, and blocked reports; the parent must not inspect the project first or substitute non-UI checks.",
 				"Keep the ui-qa task payload at the user-visible acceptance level: known target URL/app/command, actions to perform, expected observable outcome, and requested evidence. Do not turn it into a repository investigation plan, name internal files or commands, dictate setup, or invent a mock/synthetic target. Leave unknown prerequisites to the QA sub-agent.",
@@ -151,8 +152,8 @@ export const ASYNC_SUBAGENT_TOOL_DESCRIPTIONS_WITH_REPO = asyncSubagentToolDescr
 export const REPO_DISCOVERY_TOOLS: RepoDiscoveryToolDescription[] = [
 	{
 		name: "repo_context", label: "Repo Context", command: "context",
-		description: "First choice for general indexed behavior/task discovery: compact documents plus implementation and tests.",
-		promptSnippet: "Start general behavior/task discovery with repo_context; before a material behavior change, find the primary contract, scope narrowly, and read returned sources directly.",
+		description: "First choice for general task discovery or authoritative contracts: compact documents plus implementation and tests. For a high-level module map or architecture/onboarding overview, start with repo_inspect mode=architecture instead. For focused code-path lookup or diagnosis, start with project_search.",
+		promptSnippet: "Use repo_context for a general starting point or primary contract plus implementation/tests. A reading guide to understand a behavior is context discovery, not a cross-module architecture map. Start explicit cross-module architecture maps with repo_inspect mode=architecture. Use project_search first for a focused code-path lookup or diagnosis, even when the owner is unknown. Before creating a spec or making a material behavior change, use repo_context to find any existing primary contract and read returned sources directly.",
 		promptGuidelines: [
 			"For any repo_* tool, pass projectPath when the task targets another project; omit it for the current project. Use the same selected root for related calls and keep targets, scopes and audit paths relative to it. projectPath accepts absolute, session-cwd-relative or ~/ paths, requires .indexer-cli directly in that root, and does not change cwd; do not run setup implicitly. Resolve returned file paths against that root when using read. The parent model owns reasoning and synthesis from retrieved evidence; repo_context is retrieval, not a second answer-generating model.",
 			"Documents remain searchable even without frontmatter. Retrieval rankings are navigation, not authoritative contracts; an empty result does not prove no contract exists.",
@@ -170,57 +171,17 @@ export const REPO_DISCOVERY_TOOLS: RepoDiscoveryToolDescription[] = [
 		],
 	},
 	{
-		name: "repo_architecture",
-		label: "Repo Architecture",
-		command: "architecture",
-		description: "Indexed entrypoints, module boundaries, cycles and unresolved dependencies for broad, unfamiliar code.",
-		promptSnippet: "Map an unfamiliar area once; skip repo_architecture for known paths or exact lookups.",
+		name: "repo_inspect",
+		label: "Repo Inspect",
+		command: "inspect",
+		description: "Compact indexed architecture, structure, AST, symbol and dependency views. Select a mode; read exact returned source ranges when needed.",
+		promptSnippet: "For a high-level map or cross-module onboarding overview, start with mode architecture (not structure). Being new to a repository alone is not an architecture request: a behavior reading guide starts with repo_context. Use structure for a scoped file/symbol listing (limit 20, depth 2), ast (depth 3, limit 40), explain (signature by default), or deps (depth 1, direction callers/callees).",
 		promptGuidelines: [
-			"Scope with --path-prefix; then use repo_structure or project_search only for remaining gaps.",
+			"Optional scope is a project-relative path prefix for architecture, structure and explain. Structure supports kind, includeInternal and tests=include|exclude|summary; structure/AST support depth and cursor. AST always returns an outline without source text.",
+			"Explain a known symbol with target=file::symbol; set includeBody only for implementation details (body limit defaults to 20). Use project_search when the symbol is unknown.",
+			"Dependencies default to one level and callers; select modules, module-imports, calls or call-graph and a direction for the question. `tests: include` and showEdges are optional; add edges/tests or depth only for a named gap.",
 		],
-	},
-	{
-		name: "repo_structure",
-		label: "Repo Structure",
-		command: "structure",
-		description: "Indexed file tree and exported-symbol view for a directory/module. Use to choose files/ranges without dumping source.",
-		promptSnippet: "List one area with --max-files 20 --max-depth 2; continue with --cursor.",
-		promptGuidelines: [
-			"Narrow with --path-prefix/--kind. Add --include-internal or --include-tests-summary only for a named gap; page instead of listing hundreds of files.",
-		],
-	},
-	{
-		name: "repo_ast",
-		label: "Repo AST",
-		command: "ast",
-		description: "Indexed AST outline for one known large file; locate exact ranges before reading source.",
-		promptSnippet: "Start --max-depth 3 --max-nodes 40 --no-include-text; read needed ranges with offset/limit.",
-		promptGuidelines: [
-			"Continue with --cursor; include snippets only when the outline cannot answer the question.",
-		],
-		targetDescription: "File path to map, e.g. src/api/client.ts.",
-	},
-	{
-		name: "repo_explain",
-		label: "Repo Explain",
-		command: "explain",
-		description: "Indexed explanation for a known symbol. Prefer file::symbol when the name may be ambiguous.",
-		promptSnippet: "Use file::symbol; start --signature-only when signatures suffice.",
-		promptGuidelines: [
-			"Add --include-body --body-lines 20 only for implementation details; use project_search when the symbol is unknown.",
-		],
-		targetDescription: "Symbol or file-scoped symbol, e.g. createClient or src/api/client.ts::createClient.",
-	},
-	{
-		name: "repo_deps",
-		label: "Repo Deps",
-		command: "deps",
-		description: "Indexed import/call dependencies for a known path or file::symbol.",
-		promptSnippet: "Start --depth 1 and choose --direction callers or callees for the question.",
-		promptGuidelines: [
-			"Use --mode calls for call relationships. Add --show-edges/--tests or deeper traversal only for a named impact-analysis gap.",
-		],
-		targetDescription: "Path or file-scoped symbol, e.g. src/api/client.ts or src/api/client.ts::createClient.",
+		targetDescription: "Required for ast/explain/deps; a file path or file-scoped symbol, e.g. src/api/client.ts::createClient.",
 	},
 ];
 
@@ -234,7 +195,7 @@ export const TODO_TOOL_DESCRIPTION: ToolDescription = {
 	promptGuidelines: [
 		"Use `todo` for complex work with 3+ steps, explicit user task lists, or new non-trivial requirements. Skip single trivial tasks and purely conversational requests.",
 		"For create/update and batch items, keep subject and activeForm to short action phrases. Omit description when the subject suffices; otherwise use 1–2 short sentences for essential scope, acceptance criteria, or the current blocker/next action. Replace stale details rather than appending progress history. Change description only when scope, criteria, blocker or next action changes, or the user explicitly requests a brief checkpoint. For blocked work, retain acceptance criteria and replace obsolete details with the current blocker and next action. Do not store reports, test logs, path inventories, or context-recovery narratives in todos; put test results and detailed evidence in the final response or a linked artifact. Include a specific path or identifier only when needed to act on the task. On completion, update status without expanding the description; normally send only action, id and status (or id and status per batch item).",
-		"For multi-step implementation/debugging plans, include a final user-facing report todo in the initial plan with acceptance criteria for changed files/behavior, verification results, and remaining manual actions; close it immediately before the final response, never via compression.",
+		"For multi-step implementation/debugging plans, include a final user-facing report todo in the initial plan with acceptance criteria for changed files/behavior, verification results, and remaining manual actions; close it immediately before the final response, never via compression. If the requested plan already includes that report stage, put the criteria there rather than creating a duplicate task.",
 		"When create or batch_create already sets the intended status, do not issue a redundant update with the same status; continue the work instead. If the user asks to stop after creation, stop without cosmetic text updates or applying background results.",
 		"Resync before continuing when user/new findings change scope, requirements, safety, feasibility, approach, dependencies, or order. Before creating tasks, review pending/deferred todos; when work resumes, reactivate and reuse an equivalent deferred todo instead of duplicating it.",
 		"Update todos when starting, finishing, blocking, splitting, abandoning, or materially changing a step; before planned work mark exactly one in_progress with activeForm and complete it only after verification.",
@@ -294,7 +255,7 @@ export function claudeAliasToolDescriptions(options: ToolDescriptionSetOptions |
 			name: "Read",
 			label: "Read",
 			description: repoDiscovery
-				? "Read file contents when the exact path is known. Use Glob/Grep or project_search/repo_structure first when you still need to locate the file."
+				? "Read file contents when the exact path is known. Use Glob/Grep or project_search/repo_inspect (mode structure) first when you still need to locate the file."
 				: "Read file contents when the exact path is known. Use Glob/Grep first when you still need to locate the file.",
 		},
 		Edit: {

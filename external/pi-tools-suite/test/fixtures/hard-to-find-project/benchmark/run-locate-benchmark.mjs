@@ -54,7 +54,7 @@ const modes = [
   },
   {
     name: "repo-discovery",
-    tools: ["repo_architecture", "repo_structure", "project_search", "repo_ast", "repo_explain", "read"],
+    tools: ["repo_inspect", "project_search", "repo_context", "read"],
     indexed: true,
   },
   {

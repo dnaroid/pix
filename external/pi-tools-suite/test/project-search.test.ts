@@ -322,7 +322,7 @@ describe("project_search registration in Pix Desktop and TUI", () => {
       const toolNames = loaded.extensions.flatMap(extension => [...extension.tools.keys()]);
       expect(toolNames).toContain("project_search");
       expect(toolNames).toContain("repo_context");
-      expect(toolNames).toContain("repo_ast");
+      expect(toolNames).toContain("repo_inspect");
       expect(toolNames.filter(name => name === "project_search")).toHaveLength(1);
       expect(toolNames).not.toContain("repo_search");
       const tool = loaded.extensions[0]?.tools.get("project_search");

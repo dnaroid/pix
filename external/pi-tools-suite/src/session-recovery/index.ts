@@ -68,12 +68,16 @@ const READ_TOOL_NAMES = new Set([
 	"find",
 	"ls",
 	"ast_grep",
+	"repo_inspect",
+	// Persisted sessions can still contain pre-consolidation tool calls.
 	"repo_architecture",
 	"repo_structure",
 	"repo_ast",
-	"project_search",
 	"repo_explain",
 	"repo_deps",
+	"project_search",
+	"repo_context",
+	"repo_audit",
 ]);
 
 const MUTATING_TOOL_NAMES = new Set(["write", "edit", "apply_patch", "ast_apply"]);

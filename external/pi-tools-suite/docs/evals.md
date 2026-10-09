@@ -36,7 +36,7 @@ truth for these contracts.
 
 Live cases are used for questions such as:
 
-- should the model choose `repo_search` or a direct read?
+- should the model choose `project_search` or a direct read?
 - should a non-trivial task create a todo plan?
 - should an expensive Sol parent delegate substantial implementation work?
 - should Luna escalate a high-risk architecture decision?
@@ -253,9 +253,9 @@ passing merely because the answer was embedded in the prompt.
 ### Tool selection
 
 - `tool.semantic-repo-search`: an unknown behavior owner should select
-  `repo_search` before direct discovery.
+  `project_search` before direct discovery.
 - `tool.architecture-first`: a broad unfamiliar-repository overview should
-  select `repo_architecture`.
+  select `repo_inspect` with `mode: "architecture"`.
 - `tool.exact-literal-direct`: an exact literal lookup should avoid semantic
   and architecture-discovery overhead.
 - `tool.ast-structural`: a syntax-aware structural query should select
@@ -637,6 +637,23 @@ npm run test:prompt-evals:tool-selection
 npm run test:prompt-evals:async
 npm run test:prompt-evals:dcp
 ```
+
+The tool-selection suite uses real model calls with a simulated IDX CLI, not a
+real semantic index. Each fixture has its own project-root boundary, installed
+spec template, and source-backed search/context results. Its catalog omits
+`knowledge-auditor` explicitly to test direct `repo_audit` fallback; auditor
+delegation is covered separately. DCP history is persisted in a seed session so
+compression IDs remain valid when the tool reconstructs the transcript.
+
+Set `TOOL_SELECTION_E2E_MODEL` to select the provider/model and
+`TOOL_SELECTION_E2E_TIMEOUT_MS` for the per-process deadline (default 240000).
+The outer test deadline includes the configured infrastructure retry budget and
+child termination grace period; assertions are not retried. Slow providers can
+be run with lower Bun concurrency without changing the scenario assertions.
+With `TOOL_SELECTION_E2E_KEEP=1`, fixtures retain `.pi/case.json`, stdout/stderr,
+and tool/IDX event logs under the project `.pi/artifacts/` eval run directory.
+Timeouts terminate and reap the child before cleanup and remain failed/incomplete
+evidence, never successful selection results.
 
 Use the locate benchmark for deeper repository-discovery efficiency comparisons:
 

@@ -89,6 +89,10 @@ describe("tool descriptions", () => {
 		projectSearch({ registerTool: (tool: any) => { registered = tool; } } as never);
 		expect(registered.name).toBe("project_search");
 		expect(registered.promptSnippet).toContain("first pass maxFiles=3, no includeContent");
+		expect(registered.promptSnippet).toContain("Start focused code-path lookup or diagnosis with project_search");
+		expect(registered.promptSnippet).toContain("not as a preflight for focused search");
+		const context = REPO_DISCOVERY_TOOLS.find(tool => tool.name === "repo_context")!;
+		expect(context.promptSnippet.toLowerCase()).toContain("use project_search first for a focused code-path lookup or diagnosis");
 		const guidance = registered.promptGuidelines.join("\n");
 		expect(guidance).toContain("pathPrefix/dedupeFile");
 		expect(guidance).toContain("Exact identifiers: available Grep/grep or shell with rg");
@@ -99,34 +103,27 @@ describe("tool descriptions", () => {
 		expect(registered.parameters.properties.includeContent.default).toBe(false);
 	});
 
-	test("repo maps prefer scoped pages and exact reads over large trees or snippets", () => {
-		const architecture = REPO_DISCOVERY_TOOLS.find((entry) => entry.name === "repo_architecture")!;
-		expect(architecture.promptSnippet).toContain("skip repo_architecture for known paths or exact lookups");
-		expect(architecture.promptGuidelines.join("\n")).toContain("--path-prefix");
-		const structure = REPO_DISCOVERY_TOOLS.find((entry) => entry.name === "repo_structure")!;
-		expect(structure.promptSnippet).toContain("--max-files 20 --max-depth 2");
-		expect(structure.promptSnippet).toContain("--cursor");
-		expect(structure.promptGuidelines.join("\n")).toContain("--include-tests-summary only for a named gap");
-		const ast = REPO_DISCOVERY_TOOLS.find((entry) => entry.name === "repo_ast")!;
-		expect(ast.promptSnippet).toContain("--max-depth 3 --max-nodes 40 --no-include-text");
-		expect(ast.promptSnippet).toContain("offset/limit");
-		expect(ast.promptGuidelines.join("\n")).toContain("--cursor");
-	});
-
-	test("repo symbol and impact guidance allows scoped details without default expansion", () => {
-		const explain = REPO_DISCOVERY_TOOLS.find((entry) => entry.name === "repo_explain")!;
-		expect(explain.promptSnippet).toContain("--signature-only when signatures suffice");
-		expect(explain.promptGuidelines.join("\n")).toContain("--include-body --body-lines 20");
-		const deps = REPO_DISCOVERY_TOOLS.find((entry) => entry.name === "repo_deps")!;
-		expect(deps.promptSnippet).toContain("--depth 1");
-		expect(deps.promptSnippet).toContain("--direction callers or callees");
-		expect(deps.promptGuidelines.join("\n")).toContain("--mode calls");
-		expect(deps.promptGuidelines.join("\n")).toContain("--show-edges/--tests or deeper traversal only for a named impact-analysis gap");
+	test("repo_inspect exposes compact mode guidance without raw CLI arguments", () => {
+		const inspect = REPO_DISCOVERY_TOOLS.find((entry) => entry.name === "repo_inspect")!;
+		expect(inspect.command).toBe("inspect");
+		expect(inspect.promptSnippet).toContain("mode architecture");
+		expect(inspect.promptSnippet).toContain("start with mode architecture (not structure)");
+		expect(inspect.promptSnippet).toContain("a behavior reading guide starts with repo_context");
+		expect(inspect.promptSnippet).toContain("limit 20, depth 2");
+		expect(inspect.promptSnippet).toContain("depth 3, limit 40");
+		expect(inspect.promptSnippet).toContain("depth 1, direction callers/callees");
+		const guidance = inspect.promptGuidelines.join("\n");
+		expect(guidance).toContain("AST always returns an outline without source text");
+		expect(guidance).toContain("includeBody only");
+		expect(guidance).toContain("select modules, module-imports, calls or call-graph");
+		expect(inspect.targetDescription).toContain("Required for ast/explain/deps");
+		expect(guidance).not.toContain("--");
 	});
 
 	test("repo guidance fits within the pre-economy description budget", () => {
-		const existing = REPO_DISCOVERY_TOOLS.filter((tool) => !["context", "audit"].includes(tool.command));
-		expect(REPO_DISCOVERY_TOOLS).toHaveLength(7);
+		const existing = REPO_DISCOVERY_TOOLS.filter((tool) => tool.command === "inspect");
+		expect(REPO_DISCOVERY_TOOLS).toHaveLength(3);
+		expect(REPO_DISCOVERY_TOOLS.map((tool) => tool.name)).toEqual(["repo_context", "repo_audit", "repo_inspect"]);
 		const size = existing.reduce((total, tool) => total + [
 			tool.description, tool.promptSnippet, ...tool.promptGuidelines, tool.targetDescription ?? "",
 		].join("\n").length, 0);
@@ -138,7 +135,8 @@ describe("tool descriptions", () => {
 		const names = REPO_DISCOVERY_TOOLS.map((tool) => tool.name);
 		expect(names.slice(0, 2)).toEqual(["repo_context", "repo_audit"]);
 		const text = REPO_DISCOVERY_TOOLS.flatMap((tool) => [tool.description, tool.promptSnippet, ...tool.promptGuidelines]).join("\n");
-		expect(text).toContain("general indexed behavior/task discovery");
+		expect(text).toContain("general task discovery or authoritative contracts");
+		expect(text).toContain("start with repo_inspect mode=architecture instead");
 		expect(text).toContain("parent model");
 		expect(text).toContain("material behavior change");
 		expect(text).toContain("knowledge-auditor");
@@ -201,6 +199,7 @@ describe("tool descriptions", () => {
 			const tool = asyncSubagentToolDescriptions(repoAware).subagents;
 			expect(tool.description).toContain(SUBAGENT_TYPE_SELECTION_GUIDANCE);
 			expect(tool.promptSnippet).toContain("Choose a role from the effective catalog");
+			expect(tool.promptSnippet).toContain("a serial parent checklist is not delegation");
 			const text = [tool.description, tool.promptSnippet, ...tool.promptGuidelines].join("\n");
 			expect(text).not.toContain("Usually omit subagentType");
 			expect(text).not.toContain("omit subagentType unless user-named/deterministic");
@@ -244,6 +243,7 @@ describe("tool descriptions", () => {
 		].join("\n");
 
 		expect(promptText).toContain("closed stale context");
+		expect(promptText).toContain("without quoting their markers or narrating their removal");
 		expect(promptText).toContain("pressure/reminders justify it");
 		expect(promptText).toContain("low context alone is not a trigger");
 		expect(promptText).toContain("large tool/log output");
@@ -259,6 +259,7 @@ describe("tool descriptions", () => {
 		].join("\n");
 
 		expect(promptText).toContain("complex work with 3+ steps");
+		expect(promptText).toContain("rather than creating a duplicate task");
 		expect(promptText).toContain("Skip single trivial tasks");
 		expect(TODO_TOOL_DESCRIPTION.description).toContain("no progress journals");
 		expect(promptText).toContain("For create/update and batch items");

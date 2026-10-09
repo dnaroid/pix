@@ -112,22 +112,7 @@ const FULL_NATIVE_LIMITS: Partial<Record<RepoIdxCommand, Record<string, number>>
 	deps: { "--depth": 6 },
 };
 
-const NATIVE_COMPACT_ARG_GUIDANCE: Record<RepoIdxCommand, string> = {
-	architecture:
-		"Native Compact: keep outputMode=compact unless this same tool result is actually truncated; scope with --path-prefix before using full.",
-	structure:
-		"Native Compact: compact allows --max-files<=20 and --max-depth<=2; continue with --cursor. For an intentional broader structure call, set outputMode=full on that same call (full limits: --max-files<=300, --max-depth<=8). Do not retry a rejected compact value unchanged.",
-	ast:
-		"Native Compact: compact allows --max-nodes<=40 and --max-depth<=3 and defaults to --no-include-text; continue with --cursor. For an intentional broader AST call, set outputMode=full on that same call (full limits: --max-nodes<=500, --max-depth<=8). Do not retry a rejected compact value unchanged.",
-	explain:
-		"Native Compact: compact defaults to --signature-only; with --include-body use --body-lines<=20. For an intentional broader explanation, set outputMode=full on that same call (full limit: --body-lines<=200). Do not retry a rejected compact value unchanged.",
-	deps:
-		"Native Compact: compact allows --depth<=1. For an intentional deeper dependency traversal, set outputMode=full on that same call (full limit: --depth<=6). Do not retry a rejected compact value unchanged.",
-};
-
-export function describeNativeCompactArgs(command: RepoIdxCommand): string {
-	return NATIVE_COMPACT_ARG_GUIDANCE[command];
-}
+export const INSPECT_NATIVE_GUIDANCE = "Native Compact limits: structure limit<=20 depth<=2; ast limit<=40 depth<=3; explain body limit<=20; deps depth<=1. Prefer scope/cursor. For an intentionally broader call or truncated result, use outputMode=full on that same call: structure limit<=300 depth<=8; ast limit<=500 depth<=8; explain limit<=200; deps depth<=6. Do not repeat a rejected compact value unchanged.";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -311,10 +296,10 @@ export function applyNativeCompactPolicy(params: NativePolicyParams): NativePoli
 	const values = parsed.values;
 
 	if (params.command === "structure" && values.has("--no-tests") && values.has("--include-tests-summary")) {
-		return refusal(outputMode, maxLines, maxBytes, "conflicting-flags", "repo_structure cannot combine --no-tests with --include-tests-summary.");
+		return refusal(outputMode, maxLines, maxBytes, "conflicting-flags", "structure cannot combine --no-tests with --include-tests-summary.");
 	}
 	if (params.command === "explain" && values.has("--include-body") && values.has("--signature-only")) {
-		return refusal(outputMode, maxLines, maxBytes, "conflicting-flags", "repo_explain cannot combine --include-body with --signature-only.");
+		return refusal(outputMode, maxLines, maxBytes, "conflicting-flags", "explain cannot combine --include-body with --signature-only.");
 	}
 
 	if (outputMode === "compact") {

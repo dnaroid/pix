@@ -475,7 +475,7 @@ describe("renderMarkdown", () => {
   it.each([
     "exports/voice_auditions/player/01_M_Supertonic_M1.mp3",
     "01_M_Supertonic_M1.lrc",
-    "repo_architecture, repo_search",
+    "repo_inspect, repo_search",
     "foo__bar__baz foo___bar___baz",
     "имя_файла_1.txt",
   ])("preserves intraword underscores in %s", (text) => {
@@ -507,9 +507,9 @@ describe("renderMarkdown", () => {
   });
 
   it("renders escaped underscores in inventory identifiers literally", () => {
-    const html = renderMarkdown("Tools (active): repo\\_architecture, repo\\_search");
+    const html = renderMarkdown("Tools (active): repo\\_inspect, repo\\_search");
 
-    expect(html).toContain("repo_architecture, repo_search");
+    expect(html).toContain("repo_inspect, repo_search");
     expect(html).not.toContain("<em>");
   });
 

@@ -550,7 +550,7 @@ describe("config helpers", () => {
 
 		assert.deepEqual(resolveToolRule("read", config), { previewLines: 0, direction: "head", color: "success", defaultExpanded: false, hidden: false });
 		assert.deepEqual(resolveToolRule("repo_search_impl", config), { previewLines: 8, direction: "head", color: "warning", defaultExpanded: true, hidden: true });
-		assert.deepEqual(resolveToolRule("repo_deps", config), { previewLines: 2, direction: "tail", color: "muted", defaultExpanded: true, compactHidden: true, hidden: true });
+		assert.deepEqual(resolveToolRule("repo_inspect", config), { previewLines: 2, direction: "tail", color: "muted", defaultExpanded: true, compactHidden: true, hidden: true });
 		assert.deepEqual(resolveToolRule("other", config), { previewLines: 2, direction: "head", color: "muted", defaultExpanded: true, hidden: true });
 
 		assert.equal(resolveColor("accent", { accent: "#fff", muted: "#000" }), "#fff");

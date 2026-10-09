@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { spawn } from "node:child_process";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { withE2ERetry } from "./e2e-retry.js";
+import { e2eRetryConfigFromEnv, withE2ERetry } from "./e2e-retry.js";
+import { runSelectionProcess } from "./tool-selection-process.js";
+import { makeToolSelectionFixture, writeToolSelectionIdx } from "./tool-selection-fixture.js";
+import { resolveEvalOutputDir } from "./evals/harness/output-dir.js";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
+import type { Message } from "@earendil-works/pi-ai";
 
 // Live E2E tests are opt-in because they call a real model and spawn real pi
 // subprocesses. They verify prompt/tool metadata selection in both repo-aware
@@ -24,9 +27,12 @@ const E2E_MODEL = (
 	DEFAULT_MODEL
 ).trim();
 const E2E_TIMEOUT_MS = Number(process.env.TOOL_SELECTION_E2E_TIMEOUT_MS ?? 240_000);
+const retryConfig = e2eRetryConfigFromEnv();
+const E2E_TEST_TIMEOUT_MS = retryConfig.maxAttempts * (E2E_TIMEOUT_MS + 2_000)
+	+ (retryConfig.maxAttempts - 1) * retryConfig.delayMs + 10_000;
 const E2E_STREAM_IO = /^(1|true|yes)$/i.test(process.env.TOOL_SELECTION_E2E_STREAM_IO ?? "");
 const EXTENSION_ENTRYPOINT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "index.ts");
-const FIXTURE_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "demo-project");
+const RUN_DIR = RUN_E2E ? resolveEvalOutputDir("tool-selection") : "";
 const e2eTest = RUN_E2E ? test : test.skip;
 
 type ToolEvent = {
@@ -40,7 +46,7 @@ const INJECTED_DCP_REMINDER = `<dcp-system-reminder>
 ACTION REQUIRED: Context usage is high. Before any more exploration, compress the immediately preceding closed stale material using only currently injected valid boundary IDs. Use message mode for one stale message or range mode for a multi-message slice. Preserve only continuation-critical facts, do not infer missing details, and drop disposable repeated output.
 </dcp-system-reminder>`;
 
-const INJECTED_DCP_HISTORY = [
+const INJECTED_DCP_HISTORY: Message[] = [
 	{
 		role: "user",
 		content: [{ type: "text", text: "Investigate the duplicate checkout charge and finish the investigation before the next implementation phase." }],
@@ -54,7 +60,8 @@ CONSTRAINT_NO_SCHEMA_CHANGE: do not alter the database schema.
 DECISION_USE_IDEMPOTENCY_KEY: use the existing payment idempotency key.
 ERROR_E409_RETRY_LOOP: the focused retry test still fails with E409.
 NEXT_STEP_PATCH_PAYMENTS_TS: patch src/payments.ts, then rerun the focused test.
-Disposable output followed: DISPOSABLE_LOG_LINE_777 repeated many times. No additional implementation detail was established.` }],
+Disposable output followed (no additional implementation detail):
+${"DISPOSABLE_LOG_LINE_777 repeated output with no new evidence.\n".repeat(160)}` }],
 		timestamp: 2,
 		api: "openai-completions",
 		provider: "zai",
@@ -72,10 +79,7 @@ Disposable output followed: DISPOSABLE_LOG_LINE_777 repeated many times. No addi
 ];
 
 function makeFixtureProject(options: { indexed: boolean }): string {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tool-selection-e2e-project-"));
-	fs.cpSync(FIXTURE_DIR, dir, { recursive: true });
-	if (options.indexed) fs.mkdirSync(path.join(dir, ".indexer-cli"), { recursive: true });
-	return dir;
+	return makeToolSelectionFixture(RUN_DIR, options);
 }
 
 async function withFixtureProject<T>(options: { indexed: boolean }, fn: (projectDir: string) => Promise<T>): Promise<T> {
@@ -90,11 +94,8 @@ async function withFixtureProject<T>(options: { indexed: boolean }, fn: (project
 function writeToolRecorderExtension(
 	projectDir: string,
 	options: { injectDcpReminder?: boolean } = {},
-): { extensionPath: string; historyExtensionPath?: string; logPath: string } {
+): { extensionPath: string; logPath: string } {
 	const extensionPath = path.join(projectDir, ".pi", "tool-selection-recorder.ts");
-	const historyExtensionPath = options.injectDcpReminder
-		? path.join(projectDir, ".pi", "tool-selection-history-injector.ts")
-		: undefined;
 	const logPath = path.join(projectDir, ".pi", "tool-selection-events.jsonl");
 	fs.mkdirSync(path.dirname(extensionPath), { recursive: true });
 	fs.writeFileSync(extensionPath, `
@@ -133,62 +134,9 @@ export default function recorder(pi: any) {
   });
 }
 `, "utf-8");
-	if (historyExtensionPath) {
-		fs.writeFileSync(historyExtensionPath, `
-const DCP_HISTORY = ${JSON.stringify(INJECTED_DCP_HISTORY)};
-
-export default function historyInjector(pi: any) {
-  let historyInjected = false;
-  pi.on("context", async (event: any) => {
-    if (historyInjected) return undefined;
-    historyInjected = true;
-    return { messages: [...DCP_HISTORY, ...event.messages] };
-  });
-}
-`, "utf-8");
-	}
-	return { extensionPath, historyExtensionPath, logPath };
+	return { extensionPath, logPath };
 }
 
-function writeFakeIdxBin(projectDir: string): string {
-	const binDir = path.join(projectDir, ".pi", "fake-bin");
-	const idxPath = path.join(binDir, "idx");
-	const logPath = path.join(projectDir, ".pi", "idx-events.jsonl");
-	fs.mkdirSync(binDir, { recursive: true });
-	fs.writeFileSync(idxPath, `#!/usr/bin/env node
-import fs from "node:fs";
-const args = process.argv.slice(2);
-fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args }) + "\\n");
-const command = args[0] || "";
-const joined = args.join(" ").toLowerCase();
-if (command === "context" && joined.includes("shipment freeze")) {
-  console.log("CONTEXT query=shipment freeze behavior\\nWarnings:\\n! No primary knowledge matched the query.\\nRead next:\\n> src/payments.ts");
-} else if (command === "context") {
-  console.log("CONTEXT query=payment retry idempotency\\nPrimary knowledge:\\nS specs/payment-retry.md status=fresh lifecycle=active score=9.10\\nImplementation:\\nC src/payments.ts:19-33 reason=tracked+semantic\\nTests:\\nT test/payments.test.ts reason=explicit conf=high");
-} else if (command === "audit") {
-  if (joined.includes("src/audit.ts")) {
-    console.log("changed: 1 | known affected: 0 | uncovered: 1 | changed docs: 0 | semantic sweep: yes\\n  uncovered src/audit.ts\\n  candidates src/audit.ts: specs/payment-retry.md");
-  } else if (joined.includes("retry-contract.md")) {
-    console.log("changed: 2 | known affected: 0 | uncovered: 0 | changed docs: 1 | semantic sweep: yes\\n  missing specs/payment-retry.md\\n  doc specs/payments/retry-contract.md — unclassified — score=8 spec-candidate");
-  } else {
-    console.log("changed: 1 | known affected: 1 | uncovered: 0 | changed docs: 0 | semantic sweep: yes\\n  known specs/payment-retry.md — inputs-changed — src/payments.ts");
-  }
-} else if (command === "search") {
-  console.log("src/payments.ts:19-33 buildPaymentRequest creates the payment gateway request. The idempotencyKey is random (Date.now + Math.random), so retries can double-charge.");
-} else if (command === "architecture") {
-  console.log("Checkout fixture modules: cart, discounts, payments, audit. Payment request construction lives in src/payments.ts.");
-} else if (command === "structure") {
-  console.log("src/payments.ts — function buildPaymentRequest:19-33; src/cart.ts; src/discounts.ts; src/audit.ts");
-} else if (command === "explain" || command === "deps" || command === "ast") {
-  console.log("src/payments.ts::buildPaymentRequest handles cardToken, amountCents, and idempotencyKey.");
-} else {
-  console.error("unsupported fake idx command: " + command);
-  process.exitCode = 1;
-}
-`, "utf-8");
-	fs.chmodSync(idxPath, 0o755);
-	return binDir;
-}
 
 async function runPiToolSelectionE2E(
 	projectDir: string,
@@ -203,10 +151,14 @@ async function runPiToolSelectionE2E(
 		fs.mkdirSync(sessionDir, { recursive: true });
 		const recorder = writeToolRecorderExtension(projectDir, options);
 		fs.rmSync(recorder.logPath, { force: true });
-		const fakeBin = options.fakeIdx ? writeFakeIdxBin(projectDir) : undefined;
-		const extensionArgs = recorder.historyExtensionPath
-			? ["--extension", recorder.historyExtensionPath, "--extension", EXTENSION_ENTRYPOINT, "--extension", recorder.extensionPath]
-			: ["--extension", EXTENSION_ENTRYPOINT, "--extension", recorder.extensionPath];
+		const fakeBin = options.fakeIdx ? writeToolSelectionIdx(projectDir) : undefined;
+		const extensionArgs = ["--extension", EXTENSION_ENTRYPOINT, "--extension", recorder.extensionPath];
+		let sessionFile: string | undefined;
+		if (options.injectDcpReminder) {
+			const session = SessionManager.create(projectDir, sessionDir);
+			for (const message of INJECTED_DCP_HISTORY) session.appendMessage(message);
+			sessionFile = session.getSessionFile();
+		}
 		const args = [
 			"--model", E2E_MODEL,
 			...extensionArgs,
@@ -216,12 +168,14 @@ async function runPiToolSelectionE2E(
 			"--no-themes",
 			"--no-context-files",
 			"--session-dir", sessionDir,
-			"--no-session",
+			...(sessionFile ? ["--session", sessionFile] : ["--no-session"]),
 			"-p", prompt,
 		];
 
-		const child = spawn("pi", args, {
+		fs.writeFileSync(path.join(projectDir, ".pi", "case.json"), JSON.stringify({ label, model: E2E_MODEL, prompt, timeoutMs: E2E_TIMEOUT_MS }));
+		const { stdout, stderr, exitCode, timedOut } = await runSelectionProcess("pi", args, {
 			cwd: projectDir,
+			timeoutMs: E2E_TIMEOUT_MS,
 			env: {
 				...process.env,
 				PATH: fakeBin ? `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}` : process.env.PATH,
@@ -229,37 +183,12 @@ async function runPiToolSelectionE2E(
 				NO_COLOR: "1",
 				CI: "1",
 			},
-			stdio: ["ignore", "pipe", "pipe"],
+			onOutput: (stream, text) => {
+				fs.appendFileSync(path.join(projectDir, ".pi", `${stream}.log`), text);
+				if (E2E_STREAM_IO) console.error(`[tool-selection ${stream}:${label}] ${text.trimEnd()}`);
+			},
 		});
-
-		let stdout = "";
-		let stderr = "";
-		child.stdout.on("data", (chunk) => {
-			const text = chunk.toString("utf8");
-			stdout += text;
-			if (E2E_STREAM_IO) console.error(`[tool-selection stdout:${label}] ${text.trimEnd()}`);
-		});
-		child.stderr.on("data", (chunk) => {
-			const text = chunk.toString("utf8");
-			stderr += text;
-			if (E2E_STREAM_IO) console.error(`[tool-selection stderr:${label}] ${text.trimEnd()}`);
-		});
-
-		const exitCode = await new Promise<number | null>((resolve, reject) => {
-			const timeout = setTimeout(() => {
-				child.kill("SIGTERM");
-				reject(new Error(`pi tool-selection e2e timed out after ${E2E_TIMEOUT_MS}ms\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}`));
-			}, E2E_TIMEOUT_MS);
-			child.once("error", (error) => {
-				clearTimeout(timeout);
-				reject(error);
-			});
-			child.once("exit", (code) => {
-				clearTimeout(timeout);
-				resolve(code);
-			});
-		});
-
+		if (timedOut) throw new Error(`pi tool-selection e2e timed out after ${E2E_TIMEOUT_MS}ms; evidence: ${projectDir}`);
 		if (exitCode !== 0) {
 			throw new Error(`pi tool-selection e2e (${label}) exited with ${exitCode}\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}\nEVENTS:\n${readOptionalFile(recorder.logPath)}`);
 		}
@@ -430,7 +359,7 @@ describe("repo-aware tool-selection live e2e", () => {
 				expect(names.find((name) => name === "project_search" || ["read", "Read", "grep", "Grep", "find", "Glob"].includes(name))).toBe("project_search");
 				expect(result.stdout.toLowerCase() + result.stderr.toLowerCase()).toContain("src/payments.ts");
 			});
-		}, E2E_TIMEOUT_MS);
+		}, E2E_TEST_TIMEOUT_MS);
 	}
 
 	for (const variant of FOCUSED_PAYMENT_BEHAVIOR_PROMPTS) {
@@ -443,20 +372,21 @@ describe("repo-aware tool-selection live e2e", () => {
 				expect(names.some((name) => DIRECT_DISCOVERY_TOOLS.includes(name))).toBe(true);
 				expect(result.stdout.toLowerCase() + result.stderr.toLowerCase()).toContain("src/payments.ts");
 			});
-		}, E2E_TIMEOUT_MS);
+		}, E2E_TEST_TIMEOUT_MS);
 	}
 
 	for (const variant of ARCHITECTURE_OVERVIEW_PROMPTS) {
-		e2eTest(`uses repo_architecture before broad reads when repo_* tools are available (${variant.name})`, async () => {
+		e2eTest(`uses repo_inspect architecture mode before broad reads when repo_* tools are available (${variant.name})`, async () => {
 			await withFixtureProject({ indexed: true }, async (projectDir) => {
 				const result = await runPiToolSelectionE2E(projectDir, variant.prompt, `repo-architecture selection (${variant.name})`, { fakeIdx: true });
 				const names = toolCallNames(result.events);
-				expect(names).toContain("repo_architecture");
+				expect(names).toContain("repo_inspect");
 				expect(names).not.toContain("subagents");
-				expect(firstMatchingTool(names, ["repo_architecture", ...DIRECT_DISCOVERY_TOOLS])).toBe("repo_architecture");
+				expect(firstMatchingTool(names, ["repo_inspect", ...DIRECT_DISCOVERY_TOOLS])).toBe("repo_inspect");
+				expect(result.events.find((event) => event.type === "tool_call" && event.toolName === "repo_inspect")?.input).toMatchObject({ mode: "architecture" });
 				expect(result.stdout.toLowerCase() + result.stderr.toLowerCase()).toContain("checkout");
 			});
-		}, E2E_TIMEOUT_MS);
+		}, E2E_TEST_TIMEOUT_MS);
 	}
 
 	for (const variant of EXACT_LITERAL_SMALL_EDIT_PROMPTS) {
@@ -464,13 +394,13 @@ describe("repo-aware tool-selection live e2e", () => {
 			await withFixtureProject({ indexed: true }, async (projectDir) => {
 				const result = await runPiToolSelectionE2E(projectDir, variant.prompt, `repo-direct-exact-edit selection (${variant.name})`, { fakeIdx: true });
 				const names = toolCallNames(result.events);
-				expect(names).not.toContain("repo_architecture");
+				expect(names).not.toContain("repo_inspect");
 				expect(names).not.toContain("project_search");
 				for (const name of ["repo_context", "repo_audit"]) expect(names).not.toContain(name);
 				expect(names.some((name) => DIRECT_DISCOVERY_TOOLS.includes(name))).toBe(true);
-				expect(firstMatchingTool(names, ["repo_architecture", "project_search", ...DIRECT_DISCOVERY_TOOLS])).not.toMatch(/^(repo_|project_search$)/);
+				expect(firstMatchingTool(names, ["repo_inspect", "project_search", ...DIRECT_DISCOVERY_TOOLS])).not.toMatch(/^(repo_|project_search$)/);
 			});
-		}, E2E_TIMEOUT_MS);
+		}, E2E_TEST_TIMEOUT_MS);
 	}
 
 	e2eTest("starts general repository discovery with repo_context", async () => {
@@ -481,7 +411,7 @@ describe("repo-aware tool-selection live e2e", () => {
 			expect(calls[0]?.input).toMatchObject({ query: expect.any(String) });
 			expect(result.stdout.toLowerCase() + result.stderr.toLowerCase()).toContain("src/payments.ts");
 		});
-	}, E2E_TIMEOUT_MS);
+	}, E2E_TEST_TIMEOUT_MS);
 
 	e2eTest("uses repo_context for an authoritative behavior/contract question", async () => {
 		await withFixtureProject({ indexed: true }, async (projectDir) => {
@@ -491,7 +421,7 @@ describe("repo-aware tool-selection live e2e", () => {
 			expect(calls[0]?.input).toMatchObject({ query: expect.any(String) });
 			expect(result.stdout.toLowerCase() + result.stderr.toLowerCase()).toContain("specs/payment-retry.md");
 		});
-	}, E2E_TIMEOUT_MS);
+	}, E2E_TEST_TIMEOUT_MS);
 
 	e2eTest("uses task-scoped repo_audit after a material behavior change", async () => {
 		await withFixtureProject({ indexed: true }, async (projectDir) => {
@@ -500,7 +430,7 @@ describe("repo-aware tool-selection live e2e", () => {
 			expect(calls[0]?.toolName).toBe("repo_audit");
 			expect(calls[0]?.input).toMatchObject({ paths: ["src/payments.ts"] });
 		});
-	}, E2E_TIMEOUT_MS);
+	}, E2E_TEST_TIMEOUT_MS);
 
 	e2eTest("creates a new primary spec when no suitable contract exists", async () => {
 		await withFixtureProject({ indexed: true }, async (projectDir) => {
@@ -519,7 +449,7 @@ describe("repo-aware tool-selection live e2e", () => {
 			expect(specText).toContain("freeze");
 			expect(fs.readFileSync(paymentsPath, "utf8")).toBe(paymentsBefore);
 		});
-	}, E2E_TIMEOUT_MS);
+	}, E2E_TEST_TIMEOUT_MS);
 
 	e2eTest("updates an existing primary spec and verifies after intentional semantic drift", async () => {
 		await withFixtureProject({ indexed: true }, async (projectDir) => {
@@ -553,7 +483,7 @@ describe("repo-aware tool-selection live e2e", () => {
 			expect(updated).toMatch(/fresh|new|unique|per[- ]request|random/);
 			expect(fs.readFileSync(paymentsPath, "utf8")).toBe(paymentsBefore);
 		});
-	}, E2E_TIMEOUT_MS);
+	}, E2E_TEST_TIMEOUT_MS);
 
 	e2eTest("accepts reviewed no-impact without inventing a relation or spec mutation", async () => {
 		await withFixtureProject({ indexed: true }, async (projectDir) => {
@@ -572,7 +502,7 @@ describe("repo-aware tool-selection live e2e", () => {
 			expect(fs.readFileSync(specPath, "utf8")).toBe(beforeSpec);
 			expect(fs.readFileSync(path.join(projectDir, "src", "audit.ts"), "utf8")).toBe(beforeAudit);
 		});
-	}, E2E_TIMEOUT_MS);
+	}, E2E_TEST_TIMEOUT_MS);
 
 	e2eTest("audits a moved primary spec without rewriting its source", async () => {
 		await withFixtureProject({ indexed: true }, async (projectDir) => {
@@ -608,7 +538,7 @@ describe("repo-aware tool-selection live e2e", () => {
 			expect(fs.readFileSync(paymentsPath, "utf8")).toBe(paymentsBefore);
 			expect(fs.existsSync(oldPath)).toBe(false);
 		});
-	}, E2E_TIMEOUT_MS);
+	}, E2E_TEST_TIMEOUT_MS);
 
 	for (const variant of BROAD_NON_INDEXED_INVESTIGATION_PROMPTS) {
 		e2eTest(`uses subagents for broad independent discovery when repo_* tools are unavailable (${variant.name})`, async () => {
@@ -618,7 +548,7 @@ describe("repo-aware tool-selection live e2e", () => {
 				expect(names.some((name) => name.startsWith("repo_"))).toBe(false);
 				expect(names).toContain("subagents");
 			});
-		}, E2E_TIMEOUT_MS);
+		}, E2E_TEST_TIMEOUT_MS);
 	}
 
 	e2eTest("creates a synchronized todo plan for non-trivial multi-stage work", async () => {
@@ -645,7 +575,7 @@ describe("repo-aware tool-selection live e2e", () => {
 			expect(acceptance).toContain("verification results");
 			expect(acceptance).toContain("remaining manual actions");
 		});
-	}, E2E_TIMEOUT_MS);
+	}, E2E_TEST_TIMEOUT_MS);
 
 	e2eTest("compresses a high-pressure closed range with continuation-critical details", async () => {
 		await withFixtureProject({ indexed: false }, async (projectDir) => {
@@ -680,7 +610,7 @@ describe("repo-aware tool-selection live e2e", () => {
 			expect(summary).not.toContain("Date.now");
 			expect(summary).not.toContain("Math.random");
 		});
-	}, E2E_TIMEOUT_MS);
+	}, E2E_TEST_TIMEOUT_MS);
 
 	e2eTest("starts unknown-query context recovery with session action=overview", async () => {
 		await withFixtureProject({ indexed: false }, async (projectDir) => {
@@ -689,7 +619,7 @@ describe("repo-aware tool-selection live e2e", () => {
 			const call = result.events.find((event) => event.type === "tool_call");
 			expect((call?.input as { action?: string })?.action).toBe("overview");
 		});
-	}, E2E_TIMEOUT_MS);
+	}, E2E_TEST_TIMEOUT_MS);
 
 	e2eTest("does not create todos or compress for a trivial chat question", async () => {
 		await withFixtureProject({ indexed: false }, async (projectDir) => {
@@ -699,7 +629,7 @@ describe("repo-aware tool-selection live e2e", () => {
 			expect(names).not.toContain("compress");
 			expect(names).not.toContain("subagents");
 		});
-	}, E2E_TIMEOUT_MS);
+	}, E2E_TEST_TIMEOUT_MS);
 });
 
 function isRecord(value: unknown): value is Record<string, unknown> {

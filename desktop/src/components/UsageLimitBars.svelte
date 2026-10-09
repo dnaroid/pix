@@ -69,11 +69,12 @@
             </span>
             {#if timePosition !== null}
               <span
-                class="absolute top-[-3px] h-[calc(100%+6px)] w-px -translate-x-1/2 bg-primary"
-                style={`left: clamp(1px, ${timePosition}%, calc(100% - 1px))`}
+                class="absolute top-[-5px] z-10 h-[calc(100%+10px)] w-0"
+                style={`left: clamp(6px, ${timePosition}%, calc(100% - 6px))`}
                 data-weekly-now-marker
               >
-                <span class="absolute top-[-3px] left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-primary"></span>
+                <span class="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-primary ring-1 ring-popover"></span>
+                <span class="absolute -top-0.5 left-1/2 size-2.5 -translate-x-1/2 rounded-full border-2 border-popover bg-primary"></span>
               </span>
             {/if}
           </span>

@@ -6,7 +6,6 @@ import { describe, expect, test } from "bun:test";
 import repoDiscoveryExtension from "../src/repo-discovery/index.js";
 import {
 	applyNativeCompactPolicy,
-	describeNativeCompactArgs,
 	loadRepoDiscoveryProfile,
 	NATIVE_COMPACT_OUTPUT_LIMITS,
 	truncateNativeCompactOutput,
@@ -157,12 +156,6 @@ describe("repo discovery Native Compact argument policy", () => {
 		expect(applyNativeCompactPolicy({ command: "structure", args: ["--max-files", "301"], outputMode: "full" }).ok).toBe(false);
 	});
 
-	test("publishes compact/full native limits as model-facing argument guidance", () => {
-		expect(describeNativeCompactArgs("structure")).toContain("--max-files<=20");
-		expect(describeNativeCompactArgs("structure")).toContain("--max-files<=300");
-		expect(describeNativeCompactArgs("ast")).toContain("--max-nodes<=40");
-		expect(describeNativeCompactArgs("deps")).toContain("--depth<=1");
-	});
 });
 
 describe("repo discovery Native Compact final delivery budget", () => {
@@ -185,7 +178,7 @@ describe("repo discovery Native Compact final delivery budget", () => {
 });
 
 describe("repo discovery Native Compact wrapper integration", () => {
-	test("baseline keeps historical schema/default argv while native compact adds its explicit override", async () => {
+	test("both profiles use typed inspect defaults while native compact adds its explicit override", async () => {
 		const projectRoot = tempDir("repo-native-wrapper-");
 		mkdirSync(path.join(projectRoot, ".indexer-cli"));
 		const restorePath = installFakeIdxOnPath(projectRoot);
@@ -200,10 +193,10 @@ describe("repo discovery Native Compact wrapper integration", () => {
 					return { stdout: "baseline", stderr: "", code: 0 };
 				},
 			} as never, { profile: "baseline", cwd: projectRoot });
-			const baselineStructure = baselineTools.find((tool) => tool.name === "repo_structure")!;
+			const baselineStructure = baselineTools.find((tool) => tool.name === "repo_inspect")!;
 			expect(baselineStructure.parameters.properties.outputMode).toBeUndefined();
-			await baselineStructure.execute("baseline", {}, undefined, undefined, { cwd: projectRoot });
-			expect(baselineCalls).toEqual([["structure"]]);
+			await baselineStructure.execute("baseline", { mode: "structure" }, undefined, undefined, { cwd: projectRoot });
+			expect(baselineCalls).toEqual([["structure", "--max-files", "20", "--max-depth", "2"]]);
 
 			const nativeTools: RegisteredTool[] = [];
 			const nativeCalls: string[][] = [];
@@ -215,15 +208,16 @@ describe("repo discovery Native Compact wrapper integration", () => {
 					return { stdout: Array.from({ length: 1000 }, (_, i) => `file-${i}.ts`).join("\n"), stderr: "", code: 0 };
 				},
 			} as never, { profile: "native-compact", cwd: projectRoot });
-			const structure = nativeTools.find((tool) => tool.name === "repo_structure")!;
+			const structure = nativeTools.find((tool) => tool.name === "repo_inspect")!;
 			expect(structure.parameters.properties.outputMode).toMatchObject({ default: "compact", enum: ["compact", "full"] });
-			expect(structure.parameters.properties.outputMode.description).toContain("this same tool call");
+			expect(structure.parameters.properties.outputMode.description).toContain("structure limit<=20 depth<=2");
+			expect(structure.parameters.properties.outputMode.description).toContain("structure limit<=300 depth<=8");
+			expect(structure.parameters.properties.outputMode.description).toContain("on that same call");
 			expect(structure.parameters.properties.maxLines).toMatchObject({ type: "integer", minimum: 1, maximum: 2_000, default: 400 });
 			expect(structure.parameters.properties.maxBytes).toMatchObject({ type: "integer", minimum: 1, maximum: 50_000, default: 12_000 });
-			expect(structure.parameters.properties.args.items).toMatchObject({ type: "string", minLength: 1 });
-			expect(structure.parameters.properties.args.description).toContain("compact allows --max-files<=20");
-			expect(structure.parameters.properties.args.description).toContain("Do not retry a rejected compact value unchanged");
-			const result = await structure.execute("native", {}, undefined, undefined, { cwd: projectRoot });
+			expect(structure.parameters.properties.args).toBeUndefined();
+			expect(structure.parameters.properties.mode.enum).toEqual(["architecture", "structure", "ast", "explain", "deps"]);
+			const result = await structure.execute("native", { mode: "structure" }, undefined, undefined, { cwd: projectRoot });
 			expect(nativeCalls).toEqual([["structure", "--max-files", "20", "--max-depth", "2"]]);
 			expect(result.isError).toBe(false);
 			expect((result.details?.nativePolicy as any)).toMatchObject({ profile: "native-compact", outputMode: "compact", refused: false });
@@ -250,18 +244,21 @@ describe("repo discovery Native Compact wrapper integration", () => {
 					return { stdout: "must not execute", stderr: "", code: 0 };
 				},
 			} as never, { profile: "native-compact", cwd: projectRoot });
-			const structure = tools.find((tool) => tool.name === "repo_structure")!;
+			const structure = tools.find((tool) => tool.name === "repo_inspect")!;
 			const result = await structure.execute("bad", {
-				args: ["--max-files", "1", "--max-files=2"],
+				mode: "structure", limit: 21,
 			}, undefined, undefined, { cwd: projectRoot });
 
 			expect(calls).toEqual([]);
 			expect(result.isError).toBe(true);
-			expect(result.content[0]!.text).toContain("Duplicate structure flag");
-		const policyJson = JSON.stringify(result.details?.nativePolicy);
+			expect(result.content[0]!.text).toContain("exceeds Native Compact compact limit");
+			const policyJson = JSON.stringify(result.details?.nativePolicy);
 			expect(policyJson).not.toContain("PRIVATE_QUERY_SENTINEL");
 			expect(policyJson).not.toContain("max-files");
-			expect(result.details?.nativePolicy).toMatchObject({ refused: true, reason: "duplicate-flag" });
+			expect(result.details?.nativePolicy).toMatchObject({ refused: true, reason: "compact-limit-exceeded" });
+			const expanded = await structure.execute("full", { mode: "structure", limit: 21, outputMode: "full" }, undefined, undefined, { cwd: projectRoot });
+			expect(expanded.isError).toBe(false);
+			expect(calls).toEqual([["structure", "--max-files", "21", "--max-depth", "2"]]);
 		} finally {
 			restorePath();
 			rmSync(projectRoot, { recursive: true, force: true });

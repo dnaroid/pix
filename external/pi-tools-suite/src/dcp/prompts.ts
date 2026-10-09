@@ -67,6 +67,7 @@ errors that are still actionable, verification state, unresolved blockers, and
 next steps. If work remains unfinished include \`Active objective\` and \`Next
 step\`. Do not infer, invent, or add facts. Preserve uncertainty. Do not copy long
 raw code, JSON, diffs, logs, or tool output; use short literals only when needed.
+Drop incidental log lines without quoting their markers or narrating their removal.
 Write \`summary\` yourself unless the system prompt says a DCP summarizer is
 set; omitted, it becomes a coarse extractive record.
 

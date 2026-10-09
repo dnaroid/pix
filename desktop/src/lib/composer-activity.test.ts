@@ -15,6 +15,7 @@ const tool = (name: string, status: ToolItem["status"] = "in_progress"): ToolIte
 describe("composer activity", () => {
   it.each([
     ["repo_context", "Gathering project context"],
+    ["repo_inspect", "Inspecting project"],
     ["repo_architecture", "Exploring architecture"],
     ["repo_structure", "Inspecting project structure"],
     ["repo_ast", "Inspecting code structure"],
@@ -35,8 +36,8 @@ describe("composer activity", () => {
     const read = { ...tool("read"), path: "/private/project/composer-activity.ts",
       get rawInput(): unknown { throw new Error("payload access"); } };
     expect(composerActivity({ items: [user, read] }, live)?.action).toBe("Reading code · composer-activity.ts");
-    expect(composerActivity({ items: [user, read, tool("repo_deps")] }, live))
-      .toEqual({ action: "Reading code · composer-activity.ts • Checking dependencies", moreCount: 0 });
+    expect(composerActivity({ items: [user, read, tool("repo_inspect")] }, live))
+      .toEqual({ action: "Reading code · composer-activity.ts • Inspecting project", moreCount: 0 });
     expect(composerActivity({ items: [user, read, { ...tool("edit"), path: "C:\\project\\file.ts" }] }, live)?.action)
       .toBe("Reading code · composer-activity.ts • Making changes · file.ts");
     expect(composerActivity({ items: [user, { ...tool("read"), skillName: "pix-desktop-frontend" }] }, live)?.action)

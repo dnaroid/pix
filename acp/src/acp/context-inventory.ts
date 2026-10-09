@@ -122,7 +122,7 @@ function listOrNone(values: readonly string[]): string {
 
 /**
  * Inventory identifiers are rendered by Desktop through MarkdownText. Keep
- * underscores literal so names such as `repo_architecture` cannot be parsed
+ * underscores literal so names such as `repo_inspect` cannot be parsed
  * as emphasis spanning neighbouring comma-separated identifiers.
  */
 function escapeMarkdownIdentifier(value: string): string {

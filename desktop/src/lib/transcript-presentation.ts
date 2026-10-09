@@ -116,6 +116,8 @@ const ACTIVITY_THINKING_ACTION = "Thinking";
 
 const ACTIVITY_ACTIONS_BY_NAME: readonly (readonly [readonly string[], string])[] = [
   [["repo_context"], "Gathering project context"],
+  [["repo_inspect"], "Inspecting project"],
+  // Preserve labels in sessions recorded before repo_inspect consolidated these tools.
   [["repo_architecture"], "Exploring architecture"],
   [["repo_structure"], "Inspecting project structure"],
   [["repo_ast"], "Inspecting code structure"],

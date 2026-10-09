@@ -72,7 +72,7 @@ describe("UsageLimitBars", () => {
       props: { windows: [{ key: "W", label: "W" as const, window: { ...weekly, resetAt: now + Number(daysRemaining) * 86_400_000 } }], now },
     });
     expect(body).toContain("data-weekly-now-marker");
-    expect(body).toContain(`left: clamp(1px, ${position}%, calc(100% - 1px))`);
+    expect(body).toContain(`left: clamp(6px, ${position}%, calc(100% - 6px))`);
     expect(body).toContain(`Now: ${position}% of window time remaining (start right, reset left)`);
     expect(body).toContain("width: 32%");
   });
@@ -81,9 +81,17 @@ describe("UsageLimitBars", () => {
     const windows = [{ key: "W", label: "W" as const, window: { ...weekly, resetAt: now + 7 * 86_400_000 } }];
     const start = render(UsageLimitBars, { props: { windows, now } }).body;
     const later = render(UsageLimitBars, { props: { windows, now: now + 3.5 * 86_400_000 } }).body;
-    expect(start).toContain("left: clamp(1px, 100%, calc(100% - 1px))");
-    expect(later).toContain("left: clamp(1px, 50%, calc(100% - 1px))");
+    expect(start).toContain("left: clamp(6px, 100%, calc(100% - 6px))");
+    expect(later).toContain("left: clamp(6px, 50%, calc(100% - 6px))");
     expect(later).toContain("width: 32%");
+  });
+
+  it("keeps the now pin readable with a thicker stem and an outlined head", () => {
+    const { body } = render(UsageLimitBars, {
+      props: { windows: [{ key: "W", label: "W" as const, window: weekly }], now },
+    });
+    expect(body).toContain("w-0.5 -translate-x-1/2 rounded-full bg-primary ring-1 ring-popover");
+    expect(body).toContain("-top-0.5 left-1/2 size-2.5 -translate-x-1/2 rounded-full border-2 border-popover bg-primary");
   });
 
   it.each([

@@ -331,6 +331,10 @@ accumulating as permanently unknown evidence until capacity is exhausted.
 
 ## Summary quality and protected data
 
+Agent-authored summaries discard incidental log lines without quoting their
+markers or narrating their removal; actionable errors and continuity details
+remain preserved.
+
 Auto summary preparation uses a bounded source manifest containing visible
 continuation-relevant text and non-secret tool metadata. Credential/header-like
 fields and provider signatures are excluded/redacted. Tool groups are not split

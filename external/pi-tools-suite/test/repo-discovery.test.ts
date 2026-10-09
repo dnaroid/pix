@@ -13,7 +13,6 @@ type RegisteredTool = {
 	promptSnippet: string;
 	promptGuidelines: string[];
 	parameters: { properties: {
-		args: { description: string };
 		maxLines: { description: string; default: number };
 		maxBytes: { description: string; default: number };
 		outputMode?: { description: string; default: string; enum: string[] };
@@ -31,6 +30,59 @@ type RegisteredCommand = {
 };
 
 describe("repo discovery output truncation", () => {
+	for (const profile of ["baseline", "native-compact"] as const) {
+		test(`${profile}: inspect routes five modes and rejects invalid typed options before idx`, async () => {
+			const root = mkdtempSync(path.join(tmpdir(), "repo-inspect-"));
+			mkdirSync(path.join(root, ".indexer-cli"));
+			const restorePath = installFakeIdxOnPath(root);
+			const tools: RegisteredTool[] = [];
+			const calls: string[][] = [];
+			try {
+				repoDiscoveryExtension({
+					registerCommand: () => undefined,
+					registerTool: (tool: RegisteredTool) => tools.push(tool),
+					exec: async (_command: string, args: string[]) => { calls.push(args); return { stdout: "ok", stderr: "", code: 0 }; },
+				} as never, { profile, cwd: root });
+				const tool = tools.find(tool => tool.name === "repo_inspect")!;
+				expect(tool.parameters.properties).not.toHaveProperty("args");
+				const run = (params: unknown, signal?: AbortSignal) => tool.execute("call", params as Record<string, unknown>, signal, undefined, { cwd: root });
+				const examples: Array<[Record<string, unknown>, string[]]> = [
+					[{ mode: "architecture", scope: "src/api" }, ["architecture", "--path-prefix", "src/api"]],
+					[{ mode: "structure", scope: "src", limit: 10, depth: 1, cursor: 20, kind: "class", includeInternal: true, tests: "summary" }, ["structure", "--path-prefix", "src", "--max-files", "10", "--max-depth", "1", "--cursor", "20", "--kind", "class", "--include-internal", "--include-tests-summary"]],
+					[{ mode: "structure", tests: "exclude" }, ["structure", "--max-files", "20", "--max-depth", "2", "--no-tests"]],
+					[{ mode: "ast", target: "src/file.ts", cursor: 0 }, ["ast", "src/file.ts", "--max-depth", "3", "--max-nodes", "40", "--cursor", "0", "--no-include-text"]],
+					[{ mode: "explain", target: "src/file.ts::fn" }, ["explain", "src/file.ts::fn", "--signature-only"]],
+					[{ mode: "explain", target: "fn", scope: "src", includeBody: true, limit: 10 }, ["explain", "fn", "--path-prefix", "src", "--include-body", "--body-lines", "10"]],
+					[{ mode: "deps", target: "src/file.ts" }, ["deps", "src/file.ts", "--direction", "callers", "--depth", "1"]],
+					[{ mode: "deps", target: "src/file.ts::fn", relations: "calls", direction: "callees", depth: 1, tests: "include", showEdges: true }, ["deps", "src/file.ts::fn", "--mode", "calls", "--direction", "callees", "--depth", "1", "--show-edges", "--tests"]],
+				];
+				for (const [params, argv] of examples) {
+					expect((await run(params)).isError).toBe(false);
+					expect(calls.at(-1)).toEqual(argv);
+				}
+				const count = calls.length;
+				for (const input of [null, [], {}, { mode: "unknown" },
+					{ mode: "architecture", target: "src" }, { mode: "architecture", limit: 2 },
+					{ mode: "structure", args: ["--help"] }, { mode: "structure", limit: 0 },
+					{ mode: "structure", cursor: -1 }, { mode: "structure", depth: 1.5 },
+					{ mode: "structure", includeInternal: "true" }, { mode: "structure", kind: "--help" },
+					{ mode: "structure", scope: "../src" }, { mode: "structure", scope: "/src" },
+					{ mode: "structure", scope: "C:\\src" }, { mode: "structure", scope: "bad\0path" },
+					{ mode: "ast" }, { mode: "ast", target: 42 }, { mode: "ast", target: "--help" },
+					{ mode: "ast", target: "../file.ts" }, { mode: "ast", target: "/file.ts" },
+					{ mode: "explain", target: "fn", limit: 20 },
+					{ mode: "deps", target: "src", direction: "bad" }, { mode: "deps", target: "src", tests: "exclude" },
+					{ mode: "deps", target: "src", relations: "bad" }, { mode: "deps", target: "src", scope: "src" },
+					{ mode: "structure", maxLines: NaN }, { mode: "structure", maxBytes: 50001 },
+					{ mode: "structure", outputMode: "bad" },
+				]) expect((await run(input)).isError).toBe(true);
+				const abort = new AbortController(); abort.abort();
+				expect((await run({ mode: "architecture" }, abort.signal)).content[0].text).toContain("cancelled");
+				expect(calls).toHaveLength(count);
+			} finally { restorePath(); rmSync(root, { recursive: true, force: true }); }
+		});
+	}
+
 	for (const profile of ["baseline", "native-compact"] as const) {
 		test(`${profile}: every repo tool selects another indexed project without changing session cwd`, async () => {
 			const root = mkdtempSync(path.join(tmpdir(), "repo-project-path-"));
@@ -54,7 +106,7 @@ describe("repo discovery output truncation", () => {
 					expect(tool.parameters.properties).toHaveProperty("projectPath");
 					const params = tool.name === "repo_context" ? { query: "behavior", pathPrefix: "src" }
 						: tool.name === "repo_audit" ? { paths: ["src/file.ts"] }
-						: ["repo_ast", "repo_explain", "repo_deps"].includes(tool.name) ? { target: "src/file.ts" } : {};
+						: { mode: "ast", target: "src/file.ts" };
 					for (const projectPath of [other, "other project", undefined]) {
 						const result = await tool.execute("call", { ...params, projectPath }, undefined, undefined, ctx);
 						expect(result.isError).toBe(false);
@@ -102,6 +154,7 @@ describe("repo discovery output truncation", () => {
 				},
 			} as never, { profile: "baseline", cwd: projectRoot });
 			expect(tools).toHaveLength(REPO_DISCOVERY_TOOLS.length);
+			expect(tools.map(tool => tool.name).sort()).toEqual(["repo_audit", "repo_context", "repo_inspect"]);
 			for (const description of REPO_DISCOVERY_TOOLS) {
 				const tool = tools.find((entry) => entry.name === description.name)!;
 				expect(tool).toMatchObject({
@@ -229,10 +282,10 @@ describe("repo discovery output truncation", () => {
 				exec: async () => ({ stdout: "top\nmiddle\nbottom", stderr: "", code: 0 }),
 			} as never, { profile: "baseline", cwd: projectRoot });
 
-			const repoStructure = tools.find((tool) => tool.name === "repo_structure");
+			const repoStructure = tools.find((tool) => tool.name === "repo_inspect");
 			expect(repoStructure).toBeDefined();
 
-			const result = await repoStructure!.execute("call-1", { maxLines: 2 }, undefined, undefined, { cwd: projectRoot });
+			const result = await repoStructure!.execute("call-1", { mode: "structure", maxLines: 2 }, undefined, undefined, { cwd: projectRoot });
 			const text = result.content[0].text;
 
 			expect(text).toContain("top\nmiddle\n\n[Output truncated from the bottom:");
