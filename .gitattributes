@@ -1,0 +1,10 @@
+# Normalize line endings: the canonical working-tree form is LF on every
+# platform so token budgets, generators, and path-sensitive tests see the
+# same bytes that macOS/Linux checkouts produce (Windows runners default to
+# core.autocrlf=true, which would otherwise check out CRLF).
+* text=auto eol=lf
+
+# Windows-only script formats that require CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf

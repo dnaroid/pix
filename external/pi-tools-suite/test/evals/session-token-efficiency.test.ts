@@ -1,6 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { loadConfig } from "../../src/dcp/config.js";
 
 import {
@@ -112,33 +110,6 @@ describe("session token-efficiency analysis", () => {
 		// 1,348 estimated tokens (the repo_inspect consolidation refined the
 		// system-prompt and compress guidelines); keep that measured baseline
 		// as the hard ceiling and update it only deliberately.
-		// TEMP-DIAG (CI repair): identify the platform divergence behind the
-		// static envelope estimate; remove once the Windows value is explained.
-		{
-			let tokenizerState = "unresolved";
-			try {
-				const tokenizer = createRequire(import.meta.url)("@anthropic-ai/tokenizer");
-				const counter = (tokenizer as { countTokens?: unknown }).countTokens
-					?? (tokenizer as { default?: { countTokens?: unknown } }).default?.countTokens;
-				tokenizerState = typeof counter === "function" ? "callable" : "shape-missing";
-			} catch (error) {
-				tokenizerState = `missing: ${(error as Error).message.slice(0, 60)}`;
-			}
-			const promptsSource = readFileSync(new URL("../../src/dcp/prompts.ts", import.meta.url), "utf8");
-			console.log(
-				"ENV-DIAG",
-				JSON.stringify({
-					platform: process.platform,
-					bun: process.versions.bun ?? "n/a",
-					tokenizerState,
-					envelope: measured.staticSystemPlusToolEnvelope.estimatedTokens,
-					systemPrompt: measured.components.systemPrompt.estimatedTokens,
-					compressDescription: measured.components.compressDescription.estimatedTokens,
-					promptsSourceLen: promptsSource.length,
-					promptsSourceCR: (promptsSource.match(/\r/g) ?? []).length,
-				}),
-			);
-		}
 		expect(measured.staticSystemPlusToolEnvelope.estimatedTokens).toBeLessThanOrEqual(1348);
 		expect(measured.components.turnNudge.estimatedTokens).toBeLessThanOrEqual(205);
 		expect(measured.components.iterationNudge.estimatedTokens).toBeLessThanOrEqual(176);

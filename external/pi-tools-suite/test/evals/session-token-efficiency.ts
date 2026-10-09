@@ -192,10 +192,16 @@ function countByName(target: Record<string, number>, name: unknown): void {
 }
 
 function textMeasure(text: string): TextMeasurement {
+	// Control-plane text is canonically LF. Windows checkouts may hand us
+	// CRLF (core.autocrlf), and bun-on-Windows preserves CRLF inside module
+	// string literals, which would inflate every estimate without changing
+	// the shipped prompt. Measure the canonical form so the budget reflects
+	// real prompt content, not checkout line endings.
+	const canonical = text.replace(/\r\n?/g, "\n");
 	return {
-		chars: text.length,
-		bytes: Buffer.byteLength(text, "utf8"),
-		estimatedTokens: estimateTokens(text),
+		chars: canonical.length,
+		bytes: Buffer.byteLength(canonical, "utf8"),
+		estimatedTokens: estimateTokens(canonical),
 	};
 }
 
