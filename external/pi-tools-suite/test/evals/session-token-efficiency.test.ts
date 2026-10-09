@@ -136,6 +136,7 @@ describe("session token-efficiency analysis", () => {
 					paramsMod: digest(JSON.stringify(COMPRESS_TOOL_PARAMETERS)),
 					envelopeLen: measured.staticSystemPlusToolEnvelope.chars,
 					envelopeMd5: digest(`${SYSTEM_PROMPT}\n${JSON.stringify(members)}`),
+					paramsJson: JSON.stringify(COMPRESS_TOOL_PARAMETERS),
 					members: Object.fromEntries(
 						Object.entries(members).map(([key, value]) => [
 							key,
