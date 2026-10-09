@@ -1,12 +1,13 @@
-import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { resolve } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { COMPRESS_TOOL_PARAMETERS } from "../../src/dcp/compress-tool.js";
 import { loadConfig } from "../../src/dcp/config.js";
-import { SYSTEM_PROMPT } from "../../src/dcp/prompts.js";
-import { COMPRESS_TOOL_DESCRIPTION } from "../../src/tool-descriptions.js";
 
 import {
 	analyzeSessionJsonlText,
+	canonicalJsonSchema,
 	measureDcpCarrierOverhead,
 	measureDcpControlPlane,
 } from "./session-token-efficiency.js";
@@ -114,37 +115,25 @@ describe("session token-efficiency analysis", () => {
 		// 1,348 estimated tokens (the repo_inspect consolidation refined the
 		// system-prompt and compress guidelines); keep that measured baseline
 		// as the hard ceiling and update it only deliberately.
-		// TEMP-DIAG v2 (CI repair): isolate which envelope member diverges on
-		// Windows; remove once the Windows value is explained.
+		// TEMP-DIAG v3 (CI repair): identify the TypeBox module the runtime
+		// resolved; remove once the Windows schema representation is explained.
 		{
-			const members = {
-				name: COMPRESS_TOOL_DESCRIPTION.name,
-				label: COMPRESS_TOOL_DESCRIPTION.label,
-				description: COMPRESS_TOOL_DESCRIPTION.description,
-				promptSnippet: COMPRESS_TOOL_DESCRIPTION.promptSnippet ?? "",
-				promptGuidelines: (COMPRESS_TOOL_DESCRIPTION.promptGuidelines ?? []).join("\n"),
-				parameters: JSON.stringify(COMPRESS_TOOL_PARAMETERS),
-			};
-			const digest = (value: string) =>
-				createHash("md5").update(value).digest("hex").slice(0, 8);
-			console.log(
-				"ENV-DIAG2",
-				JSON.stringify({
-					platform: process.platform,
-					bun: process.versions.bun ?? "n/a",
-					promptsMod: digest(SYSTEM_PROMPT),
-					paramsMod: digest(JSON.stringify(COMPRESS_TOOL_PARAMETERS)),
-					envelopeLen: measured.staticSystemPlusToolEnvelope.chars,
-					envelopeMd5: digest(`${SYSTEM_PROMPT}\n${JSON.stringify(members)}`),
-					paramsJson: JSON.stringify(COMPRESS_TOOL_PARAMETERS),
-					members: Object.fromEntries(
-						Object.entries(members).map(([key, value]) => [
-							key,
-							{ chars: value.length, md5: digest(value), cr: (value.match(/\r/g) ?? []).length },
-						]),
-					),
-				}),
-			);
+			let moduleIdentity: string;
+			try {
+				const require = createRequire(import.meta.url);
+				const resolved = require.resolve("typebox");
+				const pkg = JSON.parse(readFileSync(resolve(resolved, "../..", "package.json"), "utf8")) as { version?: string };
+				moduleIdentity = `${resolved}@${pkg.version ?? "unknown"}`;
+			} catch (error) {
+				moduleIdentity = `unresolved: ${error instanceof Error ? error.message : String(error)}`;
+			}
+			console.log("ENV-DIAG3", JSON.stringify({
+				platform: process.platform,
+				bun: process.versions.bun ?? "n/a",
+				moduleIdentity,
+				rawParamsChars: JSON.stringify(COMPRESS_TOOL_PARAMETERS).length,
+				canonicalParamsChars: JSON.stringify(canonicalJsonSchema(COMPRESS_TOOL_PARAMETERS)).length,
+			}));
 		}
 		expect(measured.staticSystemPlusToolEnvelope.estimatedTokens).toBeLessThanOrEqual(1348);
 		expect(measured.components.turnNudge.estimatedTokens).toBeLessThanOrEqual(205);
