@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DefaultResourceLoader, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { installFakeIdxOnPath } from "./support/fake-idx.js";
 import projectSearchExtension from "../src/project-search/index.js";
 import {
   formatProjectSearch, indexSearchArgs, parseGitHistory, parseIdxHits, parseProjectSearchParams, readSessionBoundary,
@@ -132,10 +134,10 @@ describe("project_search shared store lookup", () => {
       query: "alternate project", sources: ["tasks"],
       projectPath: path.relative(sessionRoot, other),
     }, disabledIdx);
-    expect(response.projectRoot).toBe(realpathSync(other));
+    expect(response.projectRoot).toBe(await realpath(other));
     expect(response.hits.map(hit => hit.id)).toEqual(["tasks:NEW"]);
     const same = await searchProject(sessionRoot, { query: "existing client", sources: ["tasks"] }, disabledIdx);
-    expect(same.projectRoot).toBe(realpathSync(sessionRoot));
+    expect(same.projectRoot).toBe(await realpath(sessionRoot));
     expect(same.hits.map(hit => hit.id)).toEqual(["tasks:OLD"]);
   });
 
@@ -309,6 +311,14 @@ describe("project_search registration in Pix Desktop and TUI", () => {
     const root = fixture();
     const lookupPath = fileURLToPath(new URL("../src/project-search/index.ts", import.meta.url));
     const discoveryPath = fileURLToPath(new URL("../src/repo-discovery/index.ts", import.meta.url));
+    // Repo tools register only when the registering process runs inside an
+    // indexed project with idx on PATH; the path-based SDK loader passes no
+    // extension options, so that gate reads process.cwd(). Seed both
+    // conditions hermetically instead of relying on developer-machine state.
+    const gateMarker = path.join(process.cwd(), ".indexer-cli");
+    const gateMarkerExisted = existsSync(gateMarker);
+    mkdirSync(gateMarker, { recursive: true });
+    const restorePath = installFakeIdxOnPath(root);
     const loader = new DefaultResourceLoader({
       cwd: root, agentDir: path.join(root, "agent"),
       settingsManager: SettingsManager.inMemory({ enableInstallTelemetry: false }),
@@ -331,6 +341,8 @@ describe("project_search registration in Pix Desktop and TUI", () => {
       expect(parameters.properties.maxFiles.maximum).toBe(50);
     } finally {
       loader.getExtensions().runtime.invalidate();
+      restorePath();
+      if (!gateMarkerExisted) rmSync(gateMarker, { recursive: true, force: true });
     }
   });
 });
