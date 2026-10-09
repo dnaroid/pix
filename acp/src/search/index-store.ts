@@ -7,6 +7,10 @@ import { hashText, type SearchDocument } from "./documents.js";
 import { EMBEDDING_DIMENSIONS, validVector } from "./embeddings.js";
 import { canonicalSearchIndexPath } from "./canonical-index.js";
 import { createSessionIndexTransaction, loadSessionTitleVectors, type SessionIndexTransaction, type StoredSessionVector } from "./session-index.js";
+import { readSessionBoundaryState, reconcileSessionBoundaries, sessionBoundaryHits,
+  type SessionBoundaryRow, type SessionBoundaryState } from "./session-boundary-index.js";
+import type { SessionSearchHit } from "./contract.js";
+import { verifySessionBoundaryIndexPath } from "./session-boundary-paths.js";
 
 const VERSION = "2";
 export interface CachedIndex { vectors: Map<string, number[]>; hashes: Record<string, readonly string[]> }
@@ -43,6 +47,7 @@ export interface IndexTransaction {
   load(): Promise<CachedIndex>;
   save(documents: readonly SearchDocument[], vectors: ReadonlyMap<string, number[]>): Promise<void>;
   sessionTitles(): SessionIndexTransaction;
+  sessionBoundaries(live: readonly string[], updates: readonly SessionBoundaryRow[]): void;
 }
 /** Project-owned durable database. No reset, rename, unlink or cache-directory override. */
 export class SearchIndexStore {
@@ -76,6 +81,32 @@ export class SearchIndexStore {
     signal.throwIfAborted();
     const db = new DatabaseSync(path, { readOnly: true });
     try { return await loadSessionTitleVectors(db, signal); }
+    finally { db.close(); }
+  }
+
+  async readSessionBoundaryState(cwd: string, signal: AbortSignal): Promise<Map<string, SessionBoundaryState>> {
+    await verifySessionBoundaryIndexPath(cwd);
+    const path = this.path(cwd);
+    try { await stat(path); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return new Map();
+      throw error;
+    }
+    signal.throwIfAborted();
+    const db = new DatabaseSync(path, { readOnly: true });
+    try { return await readSessionBoundaryState(db, signal); }
+    finally { db.close(); }
+  }
+
+  async searchSessionBoundaries(cwd: string, query: string, signal: AbortSignal): Promise<SessionSearchHit[]> {
+    await verifySessionBoundaryIndexPath(cwd);
+    const path = this.path(cwd);
+    try { await stat(path); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
+    signal.throwIfAborted();
+    const db = new DatabaseSync(path, { readOnly: true });
+    try { return sessionBoundaryHits(db, query, signal); }
     finally { db.close(); }
   }
 
@@ -161,6 +192,7 @@ export class SearchIndexStore {
       const check = () => signal.throwIfAborted();
       const tx: IndexTransaction = {
         sessionTitles: () => createSessionIndexTransaction(connection, signal),
+        sessionBoundaries: (live, updates) => reconcileSessionBoundaries(connection, signal, live, updates),
         load: () => loadConnection(connection, signal),
         save: async (documents, vectors) => {
           const upsert = connection.prepare("INSERT INTO documents VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET text=excluded.text,hit=excluded.hit,hashes=excluded.hashes WHERE documents.text!=excluded.text OR documents.hit!=excluded.hit OR documents.hashes!=excluded.hashes");

@@ -28,8 +28,12 @@ without treating generated answers or audit candidates as semantic proof.
 
 ## Behavior
 
-- Repo-aware tools are available only with indexed project state and an executable
-  `idx`. Setup and indexing remain explicit operations.
+- IDX-backed `repo_*` tools are available only with indexed project state and
+  an executable `idx`. Setup and indexing remain explicit operations.
+  The separate read-only `project_search` tool is available even without IDX,
+  searching saved Sessions, Tasks and HEAD Git commits locally, with optional
+  IDX Code/Knowledge lookup when that index is already available.
+  See [Project-wide agent search](project-search-agent-tool.md).
 - `/idx-init` defaults to OpenRouter `perplexity/pplx-embed-v1-0.6b` embeddings
   at 1024 dimensions for code and documents, requiring `OPENROUTER_API_KEY` or
   `~/.config/idx/.env`. Agent-facing initialization guidance discloses that
@@ -48,8 +52,9 @@ without treating generated answers or audit candidates as semantic proof.
   Explicit `--embedding local|openrouter` checks prerequisites before deleting
   and reinitializing; provider switches rebuild the index. Agents must not read
   credentials, initialize implicitly, or silently migrate saved providers.
-- All async child roles receive these eight query tools through a common,
-  tools-only entrypoint when the same prerequisites hold. It omits setup/update
+- All async child roles receive seven `repo_*` query tools and a restricted
+  `project_search` (Code/Knowledge only) through a common tools-only
+  entrypoint when the same IDX prerequisites hold. It omits setup/update
   commands and parent delegation instructions; role work-tool restrictions and
   parent-only tool guards remain intact. Empty selections still allow private
   todo and gated repo queries. See [decision 0060](../docs/decisions/0060-subagent-read-only-repo-tools.md).
@@ -70,11 +75,15 @@ without treating generated answers or audit candidates as semantic proof.
   retrieves bounded project behavior, documents, implementation and tests; the
   parent model reasons directly over that evidence rather than delegating to a
   second repository-answer model.
-- `repo_search` finds documents alongside code and is the focused lookup path,
-  including lexical mode when semantic retrieval is unavailable. There is
-  no secondary document collection or `--include-secondary` option. All Markdown
-  documents are indexed subject to ignore/exclusion filters. Explicit frontmatter
-  kind/status takes precedence; inferred purpose is advisory.
+- `project_search` replaces `repo_search` as the single focused search tool.
+  Select `sources:["code","knowledge"]` for indexed code/documents, and use
+  `indexMode` (hybrid/semantic/lexical/symbol), `pathPrefix`, chunk types,
+  includeContent, deduplication, minScore, and test filters when needed.
+  Search works locally over sessions/tasks/commits even without IDX, while
+  IDX-only options require a preexisting index and IDX executable.
+  There is no second document collection or `--include-secondary` option.
+  Markdown documents are indexed subject to ignore/exclusion filters.
+  Explicit frontmatter kind/status takes precedence; inferred purpose is advisory.
 - Preserve visible warnings, truncation and continuation hints. Empty or degraded
   retrieval does not establish the absence of a contract. Read authoritative
   primary documents and relevant code/tests rather than trusting summaries or
@@ -82,7 +91,8 @@ without treating generated answers or audit candidates as semantic proof.
 - Start compact. For an unfamiliar area use architecture; for a directory inventory
   use structure with at most 20 files/depth 2; for a known large file use a compact
   AST outline. Search behavior with at most 3 results and no inline content in
-  the first pass. For a known symbol use file-scoped explain; for dependencies
+  the first pass using `project_search` with Code/Knowledge sources.
+  For a known symbol use file-scoped explain; for dependencies
   use one direction and depth 1. Read exact returned ranges directly; only
   expand for a named gap. Exact identifier/text lookup uses available `Grep`/`grep`,
   otherwise shell `rg`; path-only discovery uses available `Glob`/`find`, otherwise

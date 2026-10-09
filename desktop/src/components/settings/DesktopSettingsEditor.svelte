@@ -320,6 +320,37 @@
   </div>
   <div class="border-y border-sidebar-border/70 bg-panel">
     <SettingsFieldRow
+      label="RAG answer model"
+      description="The model that generates answers inside Universal Search. Independent of Jev and the main conversation. Empty uses the Desktop default model."
+      explicit={has(["search", "ragModelRef"])}
+      defaultLabel="Default Desktop model"
+      onReset={() => reset(["search", "ragModelRef"])}
+    >
+      <SettingsModelSelect
+        value={text(["search", "ragModelRef"])}
+        {models}
+        ariaLabel="RAG answer model"
+        emptyLabel="Default Desktop model"
+        onChange={(value) => value ? set(["search", "ragModelRef"], value) : reset(["search", "ragModelRef"])}
+      />
+    </SettingsFieldRow>
+    <SettingsFieldRow
+      label="RAG thinking effort"
+      description="Reasoning budget for RAG answer generation. Choose a level supported by the selected model; Off disables explicit reasoning."
+      explicit={has(["search", "ragThinking"])}
+      defaultLabel="Medium"
+      onReset={() => reset(["search", "ragThinking"])}
+    >
+      <SettingsSelect
+        value={text(["search", "ragThinking"]) || "medium"}
+        options={models.find(model => model.ref === text(["search", "ragModelRef"]))
+          ? THINKING_OPTIONS.filter(option => models.find(model => model.ref === text(["search", "ragModelRef"]))!.thinkingLevels.includes(option.value))
+          : THINKING_OPTIONS}
+        ariaLabel="RAG thinking effort"
+        onChange={(value) => set(["search", "ragThinking"], value)}
+      />
+    </SettingsFieldRow>
+    <SettingsFieldRow
       label="Knowledge review model"
       description="Model and optional thinking level for knowledge-base AI review. When omitted, the review session uses the normal default model. Does not change the knowledge-auditor sub-agent."
       explicit={has(["desktop", "knowledge", "reviewModelRef"])}

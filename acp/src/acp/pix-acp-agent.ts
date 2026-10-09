@@ -20,11 +20,15 @@
 import { createHash, randomUUID } from "node:crypto";
 import { BTW_METHOD, BTW_CHANNEL, parseBtwEvent, type BtwRequest, type BtwState } from "../btw/contract.js";
 import { parseDesktopBtwRequest } from "../btw/request.js";
-import { SEARCH_QUERY_METHOD, SEARCH_CONFIG_METHOD, SEARCH_COMMITS_METHOD } from "../search/contract.js";
+import { SEARCH_QUERY_METHOD, SEARCH_CONFIG_METHOD, SEARCH_COMMITS_METHOD, SEARCH_INTENT_METHOD } from "../search/contract.js";
 import { parseSearchQueryRequest, parseSearchConfigRequest } from "../search/request.js";
 import { DesktopSearchService, SearchUnavailableError } from "../search/service.js";
 import { parseCommitSearchRequest } from "../search/commit-contract.js";
 import { DesktopCommitSearchService } from "../search/commit-service.js";
+import { parseSearchIntentRequest, DesktopSearchIntentService } from "../search/intent.js";
+import { SEARCH_RAG_METHOD, SEARCH_RAG_DELTA_METHOD } from "../search/rag-contract.js";
+import { parseRagRequest } from "../search/rag-request.js";
+import { DesktopRagService } from "../search/rag-service.js";
 import { BrainstormHost, BRAINSTORM_CHANNEL, type BrainstormLink } from "./brainstorm-host.js";
 import { NativeSessionCatalog } from "./native-session-catalog.js";
 import { PIX_SESSION_CATALOG_CHANGED_METHOD } from "./session-catalog-contract.js";
@@ -445,6 +449,9 @@ export interface PixAcpAgentOptions {
 	/** Hermetic Desktop search backend override. */
 	readonly searchService?: DesktopSearchService;
 	readonly commitSearchService?: Pick<DesktopCommitSearchService, "query" | "dispose">;
+	/** Stateless search-intent classifier; no session or project-source access. */
+	readonly searchIntentService?: Pick<DesktopSearchIntentService, "classify">;
+	readonly ragService?: Pick<DesktopRagService, "generate">;
 	/** Reader for the TUI's project tab snapshot (overridable for tests). */
 	readonly loadTuiTabs?: (cwd: string) => Promise<TuiTabSnapshot>;
 	/** Private prompt-completion backend (overridable for hermetic tests). */
@@ -510,6 +517,8 @@ export class PixAcpAgent {
 	private readonly nativeSessionCatalog: NativeSessionCatalog;
 	private readonly searchService: DesktopSearchService;
 	private readonly commitSearchService: Pick<DesktopCommitSearchService, "query" | "dispose">;
+	private readonly searchIntentService: Pick<DesktopSearchIntentService, "classify">;
+	private readonly ragService: Pick<DesktopRagService, "generate">;
 	private readonly brainstormHost: BrainstormHost;
 	private readonly listPiSessions: (cwd?: string, signal?: AbortSignal) => Promise<readonly PiSessionInfo[]>;
 	private readonly loadTuiTabs: (cwd: string) => Promise<TuiTabSnapshot>;
@@ -536,6 +545,20 @@ export class PixAcpAgent {
 	constructor(options: PixAcpAgentOptions) {
 		this.options = options;
 		this.commitSearchService = options.commitSearchService ?? new DesktopCommitSearchService();
+		this.searchIntentService = options.searchIntentService ?? new DesktopSearchIntentService();
+		this.ragService = options.ragService ?? new DesktopRagService({
+			createRuntime: (cwd) => {
+				const extensionPath = desktopToolsSuiteExtensionPath({
+					...(options.agentDir ? { agentDir: options.agentDir } : {}),
+					...(options.toolsSuiteExtensionPath ? { bundledExtensionPath: options.toolsSuiteExtensionPath } : {}),
+				});
+				return createDesktopDraftModelRuntime({
+					cwd,
+					...(options.agentDir ? { agentDir: options.agentDir } : {}),
+					...(extensionPath ? { additionalExtensionPaths: [extensionPath] } : {}),
+				});
+			},
+		});
 		this.sessionMap = new SessionMapStore(options.sessionMapPath, options.logger);
 		this.nativeSessionCatalog = new NativeSessionCatalog(
 			async (cwd, signal) => {
@@ -655,6 +678,26 @@ export class PixAcpAgent {
 				catch (error) {
 					if (ctx.signal.aborted) throw error;
 					throw new RequestError(ERROR_SERVER, "Commit search unavailable");
+				}
+			})
+			.onRequest(SEARCH_INTENT_METHOD, parseSearchIntentRequest, async (ctx) => {
+				if (this.clientName !== "pix-desktop") throw new RequestError(ERROR_SERVER, "Desktop search unavailable");
+				try { return await this.searchIntentService.classify(ctx.params.query, ctx.signal); }
+				catch (error) {
+					if (ctx.signal.aborted) throw error;
+					return { intent: "search" as const, fallback: true };
+				}
+			})
+			.onRequest(SEARCH_RAG_METHOD, parseRagRequest, async (ctx) => {
+				if (this.clientName !== "pix-desktop") throw new RequestError(ERROR_SERVER, "Desktop search unavailable");
+				try {
+					return await this.ragService.generate(ctx.params, async update => {
+						ctx.signal.throwIfAborted();
+						await ctx.client.notify(SEARCH_RAG_DELTA_METHOD, { requestId: ctx.params.requestId, ...update });
+					}, ctx.signal);
+				} catch (error) {
+					if (ctx.signal.aborted) throw error;
+					throw new RequestError(ERROR_SERVER, "RAG generation unavailable. Check the selected model, credentials and source availability.");
 				}
 			})
 			.onRequest(SEARCH_QUERY_METHOD, parseSearchQueryRequest, async (ctx) => {

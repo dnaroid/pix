@@ -20,7 +20,7 @@ describe("eval harness", () => {
 			recorder({ on: (name: string, handler: (event: Record<string, unknown>) => Promise<unknown>) => handlers.set(name, handler) });
 			expect(await handlers.get("tool_call")!({ toolCallId: "c1", toolName: "apply_patch", input: {} })).toMatchObject({ block: true });
 			await handlers.get("tool_result")!({
-				toolCallId: "c2", toolName: "repo_search", content: [{ type: "text", text: "result" }],
+				toolCallId: "c2", toolName: "repo_structure", content: [{ type: "text", text: "result" }],
 				details: { nativePolicy: { version: 1, profile: "native-compact", refused: false, outputMode: "full" } },
 			});
 			await handlers.get("agent_end")!({ messages: [{ role: "assistant", usage: { input: 10, output: 2, totalTokens: 12, cost: { total: 0.01 } } }] });
@@ -42,10 +42,10 @@ describe("eval harness", () => {
 			{ type: "tool_result", toolName: "apply_patch", isError: false, contentBytes: 40, textBytes: 35 },
 			{ type: "tool_call", toolName: "shell", input: { command: "npm test" } },
 			{ type: "tool_result", toolName: "shell", isError: false, contentBytes: 50, textBytes: 45 },
-			{ type: "tool_call", toolCallId: "r1", toolName: "repo_search", input: { target: "fixture" } },
-			{ type: "tool_result", toolCallId: "r1", toolName: "repo_search", isError: true, contentBytes: 60, textBytes: 50, nativePolicy: { refused: true, outputMode: "compact", reason: "compact-limit-exceeded" } },
-			{ type: "tool_call", toolCallId: "r2", toolName: "repo_search", input: { target: "fixture", outputMode: "full" } },
-			{ type: "tool_result", toolCallId: "r2", toolName: "repo_search", isError: false, contentBytes: 70, textBytes: 60, nativePolicy: { refused: false, outputMode: "full" } },
+			{ type: "tool_call", toolCallId: "r1", toolName: "repo_structure", input: { target: "fixture" } },
+			{ type: "tool_result", toolCallId: "r1", toolName: "repo_structure", isError: true, contentBytes: 60, textBytes: 50, nativePolicy: { refused: true, outputMode: "compact", reason: "compact-limit-exceeded" } },
+			{ type: "tool_call", toolCallId: "r2", toolName: "repo_structure", input: { target: "fixture", outputMode: "full" } },
+			{ type: "tool_result", toolCallId: "r2", toolName: "repo_structure", isError: false, contentBytes: 70, textBytes: 60, nativePolicy: { refused: false, outputMode: "full" } },
 			{ type: "agent_end", usage: { input: 80, output: 20, cacheRead: 5, cacheWrite: 0, totalTokens: 105, cost: 0.01 } },
 		];
 		const metrics = deriveMetrics({ events, elapsedMs: 1234, changedFiles: ["src/a.ts"], projectDir: "/missing", sessionDir: "/missing" });
@@ -63,6 +63,15 @@ describe("eval harness", () => {
 		expect(metrics.changedFiles).toEqual(["src/a.ts"]);
 		expect(metrics.parentUsage.totalTokens).toBe(105);
 		expect(metrics.parentUsage.cost).toBe(0.01);
+	});
+
+	test("charges project_search results to repository retrieval metrics after repo_search retirement", () => {
+		const metrics = deriveMetrics({
+			events: [{ type: "tool_result", toolName: "project_search", contentBytes: 128, textBytes: 110 }],
+			elapsedMs: 2, changedFiles: [], projectDir: "/missing", sessionDir: "/missing",
+		});
+		expect(metrics.repoResultContentBytes).toBe(128);
+		expect(metrics.toolResultContentBytes).toBe(128);
 	});
 
 	test("enforces reproduce-before-edit and verify-after-edit workflow assertions", () => {
@@ -111,7 +120,7 @@ describe("eval harness", () => {
 				metrics: {
 					elapsedMs: 1000,
 					toolCallCount: 2,
-					toolCalls: ["repo_search", "read"],
+					toolCalls: ["repo_structure", "read"],
 					failedToolResults: 0,
 					toolResultContentBytes: 1200,
 					toolResultTextBytes: 1000,

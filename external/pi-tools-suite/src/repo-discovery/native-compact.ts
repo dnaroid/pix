@@ -8,7 +8,7 @@ import { getPiToolsSuiteUserConfigPath } from "../config.js";
 export const REPO_DISCOVERY_PROFILES = ["baseline", "native-compact"] as const;
 export type RepoDiscoveryProfile = (typeof REPO_DISCOVERY_PROFILES)[number];
 export type RepoDiscoveryOutputMode = "compact" | "full";
-export type RepoIdxCommand = "architecture" | "structure" | "ast" | "search" | "explain" | "deps";
+export type RepoIdxCommand = "architecture" | "structure" | "ast" | "explain" | "deps";
 
 export const NATIVE_COMPACT_OUTPUT_LIMITS = Object.freeze({
 	compact: { maxLines: 400, maxBytes: 12_000 },
@@ -83,20 +83,6 @@ const FLAG_SPECS: Record<RepoIdxCommand, Record<string, FlagSpec>> = {
 		"--cursor": { kind: "nonnegative-int" },
 		"--no-include-text": { kind: "boolean" },
 	},
-	search: {
-		"--max-files": { kind: "positive-int" },
-		"--path-prefix": { kind: "string" },
-		"--chunk-types": { kind: "string" },
-		"--mode": { kind: "string", values: ["hybrid", "semantic", "lexical", "symbol"] },
-		"--include-imports": { kind: "boolean" },
-		"--min-score": { kind: "number" },
-		"--include-content": { kind: "boolean" },
-		"--dedupe-file": { kind: "boolean" },
-		"--dedupe-symbol": { kind: "boolean" },
-		"--cluster": { kind: "boolean" },
-		"--exclude-tests": { kind: "boolean" },
-		"--include-tests": { kind: "boolean" },
-	},
 	explain: {
 		"--path-prefix": { kind: "string" },
 		"--include-body": { kind: "boolean" },
@@ -115,7 +101,6 @@ const FLAG_SPECS: Record<RepoIdxCommand, Record<string, FlagSpec>> = {
 const COMPACT_NATIVE_LIMITS: Partial<Record<RepoIdxCommand, Record<string, number>>> = {
 	structure: { "--max-depth": 2, "--max-files": 20 },
 	ast: { "--max-depth": 3, "--max-nodes": 40 },
-	search: { "--max-files": 3 },
 	explain: { "--body-lines": 20 },
 	deps: { "--depth": 1 },
 };
@@ -123,7 +108,6 @@ const COMPACT_NATIVE_LIMITS: Partial<Record<RepoIdxCommand, Record<string, numbe
 const FULL_NATIVE_LIMITS: Partial<Record<RepoIdxCommand, Record<string, number>>> = {
 	structure: { "--max-depth": 8, "--max-files": 300 },
 	ast: { "--max-depth": 8, "--max-nodes": 500 },
-	search: { "--max-files": 50 },
 	explain: { "--body-lines": 200 },
 	deps: { "--depth": 6 },
 };
@@ -135,8 +119,6 @@ const NATIVE_COMPACT_ARG_GUIDANCE: Record<RepoIdxCommand, string> = {
 		"Native Compact: compact allows --max-files<=20 and --max-depth<=2; continue with --cursor. For an intentional broader structure call, set outputMode=full on that same call (full limits: --max-files<=300, --max-depth<=8). Do not retry a rejected compact value unchanged.",
 	ast:
 		"Native Compact: compact allows --max-nodes<=40 and --max-depth<=3 and defaults to --no-include-text; continue with --cursor. For an intentional broader AST call, set outputMode=full on that same call (full limits: --max-nodes<=500, --max-depth<=8). Do not retry a rejected compact value unchanged.",
-	search:
-		"Native Compact: compact allows --max-files<=3; with --include-content use exactly --max-files 1. For an intentional broader search, set outputMode=full on that same call (full limit: --max-files<=50). Do not retry a rejected compact value unchanged.",
 	explain:
 		"Native Compact: compact defaults to --signature-only; with --include-body use --body-lines<=20. For an intentional broader explanation, set outputMode=full on that same call (full limit: --body-lines<=200). Do not retry a rejected compact value unchanged.",
 	deps:
@@ -328,9 +310,6 @@ export function applyNativeCompactPolicy(params: NativePolicyParams): NativePoli
 	const args = [...parsed.normalized];
 	const values = parsed.values;
 
-	if (params.command === "search" && values.has("--include-tests") && values.has("--exclude-tests")) {
-		return refusal(outputMode, maxLines, maxBytes, "conflicting-flags", "repo_search cannot combine --include-tests with --exclude-tests.");
-	}
 	if (params.command === "structure" && values.has("--no-tests") && values.has("--include-tests-summary")) {
 		return refusal(outputMode, maxLines, maxBytes, "conflicting-flags", "repo_structure cannot combine --no-tests with --include-tests-summary.");
 	}
@@ -347,9 +326,6 @@ export function applyNativeCompactPolicy(params: NativePolicyParams): NativePoli
 			appendValue(args, values, "--max-depth", "3");
 			appendValue(args, values, "--max-nodes", "40");
 			appendBoolean(args, values, "--no-include-text");
-		}
-		if (params.command === "search" && values.has("--include-content")) {
-			appendValue(args, values, "--max-files", "1");
 		}
 		if (params.command === "explain") {
 			if (values.has("--include-body")) appendValue(args, values, "--body-lines", "20");
@@ -375,18 +351,6 @@ export function applyNativeCompactPolicy(params: NativePolicyParams): NativePoli
 		}
 	}
 
-	if (params.command === "search" && outputMode === "compact" && values.has("--include-content")) {
-		const maxFiles = numericValue(values, "--max-files");
-		if (maxFiles !== 1) {
-			return refusal(
-				outputMode,
-				maxLines,
-				maxBytes,
-				"compact-limit-exceeded",
-				"--include-content in compact mode requires --max-files 1. Retry with --max-files 1, or set outputMode=full on this same search call when broad inline content is intentional; do not repeat the rejected compact value unchanged.",
-			);
-		}
-	}
 
 	return {
 		ok: true,

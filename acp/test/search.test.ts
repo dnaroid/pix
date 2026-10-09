@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { mkdir, mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile, readFile, rm, symlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
@@ -12,6 +12,7 @@ import { decodeEmbeddings, embedOpenRouter, EMBEDDING_DIMENSIONS, EMBEDDING_ENDP
 import { hashText, settingsDocuments } from "../src/search/documents.js";
 import { parseSearchQueryRequest, parseSearchConfigRequest } from "../src/search/request.js";
 import type { SessionMapRecord } from "../src/acp/session-map.js";
+import { synchronizeSessionBoundaries } from "../src/search/session-boundary-service.js";
 
 const signal = () => new AbortController().signal;
 const vector = () => Array.from({ length: EMBEDDING_DIMENSIONS }, (_, i) => i === 0 ? 1 : 0);
@@ -90,6 +91,61 @@ test("session queries search only Unicode titles once per session, never body fi
   assert.equal(rows(f.cwd, "documents").length, 0);
   assert.equal(rows(f.cwd, "vectors").length, 0);
   assert.equal(await readFile(f.path, "utf8"), body);
+});
+
+test("local session index uses first user and last completed assistant on active branch only", async t => {
+  const f = await fixture(t);
+  f.setRecords([{ ...f.record, title: "Проектный разговор" }]);
+  const entry = (id: string, parentId: string | null, role: string, text: string, stopReason?: string) =>
+    JSON.stringify({ type: "message", id, parentId, timestamp: "2026-01-01T00:00:00Z",
+      message: { role, content: [{ type: "text", text }], ...(stopReason ? { stopReason } : {}) } });
+  const content = [
+    JSON.stringify({ type: "session", version: 3, id: "pi1", cwd: f.cwd }),
+    entry("u1", null, "user", "первый запрос про апельсины"),
+    entry("a1", "u1", "assistant", "intermediate token should not appear", "toolUse"),
+    entry("a2", "a1", "assistant", "первый окончательный итог", "stop"),
+    entry("u2", "a2", "user", "вторая задача"),
+    entry("a3", "u2", "assistant", "obsoletebranchfinal", "stop"),
+    entry("u3", "u1", "user", "новая ветка"),
+    entry("a4", "u3", "assistant", "настоящийbranchfinal", "stop"),
+  ].join("\n") + "\n";
+  await writeFile(f.path, content);
+  const s = f.make();
+  for (const query of ["апельсины", "настоящийbranchfinal"]) {
+    const result = await s.query(f.request(query));
+    assert.deepEqual(result.results.map(hit => hit.id), ["sessions:s1"]);
+    assert.equal(result.results[0]?.kind, "sessions");
+    assert.equal(result.results[0]?.kind === "sessions" && result.results[0].boundaryMatch, true);
+  }
+  for (const query of ["obsoletebranchfinal", "intermediate", "первый окончательный"]) {
+    assert.deepEqual((await s.query(f.request(query))).results, [], query);
+  }
+  const indexed = rows(f.cwd, "sqlite_master").map(row => row.name);
+  assert.ok(indexed.includes("pix_session_boundary_fts"));
+  assert.deepEqual(f.calls, [], "local boundary FTS never sends messages or queries to a provider");
+  assert.equal(rows(f.cwd, "documents").length, 0, "settings-only legacy tables stay protected");
+
+  await writeFile(f.path, content.replace("настоящийbranchfinal", "исправленныйfinal"));
+  assert.deepEqual((await s.query(f.request("настоящийbranchfinal"))).results, []);
+  assert.equal((await s.query(f.request("исправленныйfinal"))).results.length, 1);
+  f.setRecords([]);
+  assert.deepEqual((await s.query(f.request("исправленныйfinal"))).results, []);
+  const db = new DatabaseSync(join(f.cwd, ".pi/search/index.sqlite"), { readOnly: true });
+  try { assert.equal(db.prepare("SELECT COUNT(*) AS n FROM pix_session_boundary_fts").get()?.n, 0); }
+  finally { db.close(); }
+});
+
+test("private session excerpts refuse redirected SQLite index directories", async t => {
+  const f = await fixture(t);
+  const target = await mkdtemp(join(f.cwd, "external-"));
+  await mkdir(join(f.cwd, ".pi"), { recursive: true });
+  await symlink(target, join(f.cwd, ".pi", "search"));
+  await writeFile(f.path, JSON.stringify({ type: "session", id: "pi1", cwd: f.cwd }) + "\n");
+  await assert.rejects(
+    synchronizeSessionBoundaries(new SearchIndexStore(), f.cwd, [f.record], signal()),
+    /index path is unsafe/,
+  );
+  assert.deepEqual(await (await import("node:fs/promises")).readdir(target), [], "no FTS data follows redirected paths");
 });
 
 test("explicit queries see title renames/deletions and missing body files without history scanning", async t => {

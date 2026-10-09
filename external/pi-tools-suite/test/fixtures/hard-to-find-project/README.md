@@ -45,15 +45,15 @@ the parent agent's tool I/O; sub-agent session tokens are reported separately fo
 context. The summary also reports `totalEstimatedTokens`, which adds parent and
 sub-agent token estimates for a fairer cross-mode comparison.
 
-Default modes cover direct read/grep, AST search, semantic `repo_search`, the
+Default modes cover direct read/grep, AST search, semantic `project_search`, the
 broader repo-discovery surface, one delegated `subagents` search, and the
 unrestricted suite. Set
-`PI_LOCATE_BENCH_MODES=direct-read-grep,semantic-repo-search,subagent-search` to
+`PI_LOCATE_BENCH_MODES=direct-read-grep,project-search-hybrid,subagent-search` to
 run a subset. Set `PI_LOCATE_BENCH_FAKE_IDX=1` when you want deterministic
 repo-search output for E2E validation instead of a real local idx index.
 When fake idx is disabled, each indexed mode first runs
 `idx init --embedding local` inside that mode's temporary fixture copy so
-semantic `repo_search` uses a real index without paid OpenRouter embedding
+semantic `project_search` uses a real index without paid OpenRouter embedding
 requests. This is a separate preparation step before the agent process starts;
 it is reported under `preparation` and is not included in the agent elapsed time
 or rough tool-IO token metric. Index storage stays local, and local embeddings

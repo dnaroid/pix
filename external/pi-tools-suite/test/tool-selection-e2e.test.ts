@@ -421,13 +421,13 @@ Audit the moved document paths and inspect the moved source against its existing
 
 describe("repo-aware tool-selection live e2e", () => {
 	for (const variant of FOCUSED_PAYMENT_BEHAVIOR_PROMPTS) {
-		e2eTest(`uses repo_search for a single semantic discovery when repo_* tools are available (${variant.name})`, async () => {
+		e2eTest(`uses project_search for a single semantic discovery when repo_* tools are available (${variant.name})`, async () => {
 			await withFixtureProject({ indexed: true }, async (projectDir) => {
-				const result = await runPiToolSelectionE2E(projectDir, variant.prompt, `repo-search selection (${variant.name})`, { fakeIdx: true });
+				const result = await runPiToolSelectionE2E(projectDir, variant.prompt, `project-search selection (${variant.name})`, { fakeIdx: true });
 				const names = toolCallNames(result.events);
-				expect(names).toContain("repo_search");
+				expect(names).toContain("project_search");
 				expect(names).not.toContain("subagents");
-				expect(names.find((name) => name === "repo_search" || ["read", "Read", "grep", "Grep", "find", "Glob"].includes(name))).toBe("repo_search");
+				expect(names.find((name) => name === "project_search" || ["read", "Read", "grep", "Grep", "find", "Glob"].includes(name))).toBe("project_search");
 				expect(result.stdout.toLowerCase() + result.stderr.toLowerCase()).toContain("src/payments.ts");
 			});
 		}, E2E_TIMEOUT_MS);
@@ -465,10 +465,10 @@ describe("repo-aware tool-selection live e2e", () => {
 				const result = await runPiToolSelectionE2E(projectDir, variant.prompt, `repo-direct-exact-edit selection (${variant.name})`, { fakeIdx: true });
 				const names = toolCallNames(result.events);
 				expect(names).not.toContain("repo_architecture");
-				expect(names).not.toContain("repo_search");
+				expect(names).not.toContain("project_search");
 				for (const name of ["repo_context", "repo_audit"]) expect(names).not.toContain(name);
 				expect(names.some((name) => DIRECT_DISCOVERY_TOOLS.includes(name))).toBe(true);
-				expect(firstMatchingTool(names, ["repo_architecture", "repo_search", ...DIRECT_DISCOVERY_TOOLS])).not.toMatch(/^repo_/);
+				expect(firstMatchingTool(names, ["repo_architecture", "project_search", ...DIRECT_DISCOVERY_TOOLS])).not.toMatch(/^(repo_|project_search$)/);
 			});
 		}, E2E_TIMEOUT_MS);
 	}

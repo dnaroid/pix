@@ -8,6 +8,7 @@ describe("window-owned search memory", () => {
     const memory = new SearchDialogMemory();
     const client = {};
     expect(memory.restore("/one", client).active).toBe(-1);
+    expect(memory.restore("/one", client).mode).toBe("auto");
     const draft = memory.restore("/one", client);
     draft.active = 2;
     memory.save("/one", client, draft);
@@ -21,6 +22,7 @@ describe("window-owned search memory", () => {
     draft.query = "renderer";
     draft.types = ["tasks"];
     draft.active = 1;
+    draft.mode = "auto";
     draft.view.submitted = true;
     draft.view.result.results = [{ kind: "tasks", id: "tasks:1", taskId: "1", title: "Renderer", snippet: "", score: 1 }];
     memory.save("/project", client, draft);

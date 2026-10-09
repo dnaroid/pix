@@ -11,17 +11,25 @@ import workbenchBuilderSource from "../app/desktop-workbench-prop-builders.ts?ra
 import workbenchSurfaceSource from "./DesktopWorkbenchSurface.svelte?raw";
 import composerSource from "./PromptComposer.svelte?raw";
 import source from "./SessionStartView.svelte?raw";
+import rowSource from "./SavedSessionRow.svelte?raw";
 import transcriptPaneSource from "./TranscriptPane.svelte?raw";
 
 describe("SessionStartView", () => {
+  it("resolves highlighted ancestry from current rows and keeps pointer/focus separate", () => {
+    expect(source).toContain("displayedSessions.find((row) => row.session.sessionId === (hoveredId ?? focusedId))");
+    expect(source).toContain('if (source === "pointer")');
+    expect(source).toContain("if (active || hoveredId === id)");
+    expect(source).toContain("else if (active || focusedId === id)");
+  });
   it("lists saved conversations without a redundant New conversation action", () => {
     expect(source).toContain("Search saved conversations…");
     expect(source).toContain("onSelect(row.session.sessionId)");
     expect(source).not.toContain(">New conversation<");
-    expect(source).toContain("!row.treePrefix && sessionIsFork(row.session)");
-    expect(source).toContain("GitFork");
+    expect(rowSource).toContain("row.depth === 0 && sessionIsFork(row.session)");
+    expect(rowSource).toContain("GitFork");
     expect(source).toContain("buildSessionTree(sessions)");
-    expect(source).toContain('treePrefix: ""');
+    expect(source).toContain("flatSessionRow(match.value)");
+    expect(source).toContain("expandedSessionRows(buildSessionTree(sessions), collapsed)");
   });
 
   it("fills the transcript height while keeping header/search fixed and session rows scrollable", () => {
@@ -29,8 +37,8 @@ describe("SessionStartView", () => {
     expect(source).not.toContain("max-h-[300px]");
     expect(source).toContain("grid-rows-[auto_minmax(0,1fr)]");
     expect(source).toContain("min-h-0 overflow-y-auto");
-    expect(source).toContain("grid h-7 w-full grid-cols-[minmax(0,1fr)_auto]");
-    expect(source).toContain("shrink-0 font-mono text-xs");
+    expect(rowSource).toContain("h-7 border-b");
+    expect(rowSource).toContain("shrink-0 font-mono text-xs");
   });
 
   it("renders only 30 saved sessions on first paint and keeps an accessible load-more control", () => {

@@ -880,10 +880,11 @@
 
 <DesktopOverlays {...overlaysViewModel.props} />
 {#if searchOpen}
-  <UniversalSearch {workspace} {client} memory={searchMemory} onSelect={searchNavigation.open} onClose={closeSearch}
+  <UniversalSearch {workspace} {client} memory={searchMemory} onSelect={searchNavigation.open}
+    onClose={closeSearch}
     onPreferences={() => {
       closeSearch();
-      void workspaceSidebar?.openSettingsField("desktop-assistant", "semantic-search").catch(reportError);
+      void workspaceSidebar?.openSettingsField("desktop-assistant", "rag-answer-model").catch(reportError);
     }} />
 {/if}
 <DesktopBootstrapDialog onCredentialsChanged={reconnect} />

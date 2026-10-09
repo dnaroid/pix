@@ -54,7 +54,7 @@ describe("repo discovery output truncation", () => {
 					expect(tool.parameters.properties).toHaveProperty("projectPath");
 					const params = tool.name === "repo_context" ? { query: "behavior", pathPrefix: "src" }
 						: tool.name === "repo_audit" ? { paths: ["src/file.ts"] }
-						: ["repo_ast", "repo_search", "repo_explain", "repo_deps"].includes(tool.name) ? { target: "src/file.ts" } : {};
+						: ["repo_ast", "repo_explain", "repo_deps"].includes(tool.name) ? { target: "src/file.ts" } : {};
 					for (const projectPath of [other, "other project", undefined]) {
 						const result = await tool.execute("call", { ...params, projectPath }, undefined, undefined, ctx);
 						expect(result.isError).toBe(false);
@@ -114,18 +114,9 @@ describe("repo discovery output truncation", () => {
 				expect(tool.parameters.properties.outputMode).toBeUndefined();
 				if (!["repo_context", "repo_audit"].includes(tool.name)) expect(tool.parameters.properties.maxLines.description).toContain("Prefer native limits/cursors");
 			}
-			const search = tools.find((tool) => tool.name === "repo_search")!;
+			expect(tools.map((tool) => tool.name)).not.toContain("repo_search");
 			expect(tools.map((tool) => tool.name)).not.toContain("repo_ask");
-			expect(search.parameters.properties.args.description).toContain("default 3 results without code");
-			expect(search.parameters.properties.args.description).toContain("--include-content only for narrow follow-up");
-			await search.execute("first-pass", { target: "session persistence" }, undefined, undefined, { cwd: projectRoot });
-			await search.execute("follow-up", {
-				target: "session persistence", args: ["--include-content", "--max-files", "1"],
-			}, undefined, undefined, { cwd: projectRoot });
-			expect(calls).toEqual([
-				{ command: "idx", args: ["search", "session persistence"] },
-				{ command: "idx", args: ["search", "session persistence", "--include-content", "--max-files", "1"] },
-			]);
+			expect(calls).toEqual([]);
 		} finally {
 			restorePath();
 			rmSync(projectRoot, { recursive: true, force: true });

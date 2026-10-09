@@ -48,7 +48,8 @@
       <div><dt class="inline text-muted-foreground">Embedding model: </dt><dd class="inline break-all font-mono text-foreground">{SEARCH_EMBEDDING_MODEL}</dd></div>
       <div><dt class="inline text-muted-foreground">Provider: </dt><dd class="inline text-foreground">OpenRouter</dd></div>
     </dl>
-    <p class="mt-2 text-xs leading-4 text-muted-foreground">Settings semantic search sends only authored settings labels/descriptions and settings queries to OpenRouter. Session titles require their own separate opt-in. Conversation history and attachments are never sent by this search.</p>
+    <p class="mt-2 text-xs leading-4 text-muted-foreground">Settings semantic search sends only authored settings labels/descriptions and settings queries to OpenRouter. Session titles require their own separate opt-in. Semantic indexing never uploads conversation history or attachments.</p>
+    <p class="mt-1 text-xs leading-4 text-muted-foreground">RAG is separate: when you explicitly ask for an answer, bounded retrieved source excerpts (which may include session excerpts) and the question are sent to the selected RAG model provider. Configure its model and thinking effort above.</p>
     <p class="mt-1 text-xs leading-4 text-muted-foreground">Both semantic options are off by default. Local session-title and settings search remains available without provider calls.</p>
     {#if client}
       <label class="mt-2 flex items-center gap-2 text-xs text-foreground">

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Search from "@lucide/svelte/icons/search";
   import type { ModelThinkingModel } from "../../lib/model-thinking";
   import { searchSettingsModelOptions, searchSettingsModels } from "../../lib/settings-model-search";
@@ -53,7 +54,10 @@
   {#if explicit}
     <details class="group rounded-md border border-border bg-panel-strong">
       <summary class="flex h-7 list-none items-center justify-between px-2 text-xs font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30 [&::-webkit-details-marker]:hidden">
-        <span>Choose visible models</span>
+        <span class="flex min-w-0 items-center gap-1.5">
+          <ChevronRight class="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
+          <span class="truncate">Choose visible models</span>
+        </span>
         <span class="text-muted-foreground">{value.length} selected</span>
       </summary>
       <div class="border-t border-border px-2 py-1.5">

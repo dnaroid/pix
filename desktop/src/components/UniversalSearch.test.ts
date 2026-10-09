@@ -7,7 +7,7 @@ describe("search category presentation", () => {
     expect(source).toContain("'No results.'");
     expect(source).toContain("!result.results.length && notices.length");
     expect(source).toContain("searching && !result.results.length");
-    expect(source).toContain("busy || !!result.pendingSources?.length");
+    expect(source).toContain("busy || intentBusy || ragActive || !!result.pendingSources?.length");
     expect(source).toContain("aria-busy={searching}");
     expect(source).toContain('"git_search_history", { workspace, query }');
     expect(source).toContain("all ancestors of current HEAD");
@@ -15,8 +15,9 @@ describe("search category presentation", () => {
     expect(source).toContain("No results. Check search details.");
   });
   it("keeps technical details collapsed and shows ongoing search beside partial results", () => {
-    expect(source).toContain('<details class="mt-1">');
+    expect(source).toContain('<details class="group/search-details mt-1">');
     expect(source).not.toContain("<details open");
+    expect(source).toContain('class="max-h-[48vh] shrink-0 overflow-y-auto border-t border-border');
     expect(source).toContain('role="status" aria-live="polite"');
     expect(source).toContain("{#if searching}<LoaderCircle");
     expect(source).toContain("Searching…");
@@ -34,12 +35,60 @@ describe("search category presentation", () => {
     expect(source).toContain("voice?.cancel()");
     expect(source).not.toContain("attachDictationShortcut");
   });
+  it("defaults to Auto, routes Jev to Search or in-place RAG, and cancels stale work", () => {
+    expect(source).toContain('let mode = $state<"search" | "auto" | "rag">("auto")');
+    expect(source).toContain('if (mode === "auto") {');
+    expect(source).toContain('requestClient.searchIntent({ cwd: requestWorkspace, query: query.trim() }, signal)');
+    expect(source).toContain("intentController.cancel()");
+    expect(source).toContain("Jev unavailable; using regular Search.");
+    expect(source).toContain('if (decision.intent === "ask") { void runRag(); return; }');
+    expect(source).toContain('if (mode === "rag") { void runRag(); return; }');
+    expect(source).toContain("ragController?.abort()");
+    expect(source).toContain("requestClient.searchRag(");
+    expect(source).toContain("handleRagCitationClick");
+    expect(source).toContain("use:attachRagCitationLinks");
+    expect(source).toContain("Sources ({ragReferences.length})");
+    expect(source).not.toContain("onAskProject");
+    expect(source).not.toContain("open an editable conversation draft");
+    expect(source).toContain("Submitted query sent to OpenRouter");
+  });
+  it("keeps only Auto/Search/RAG in the mode switcher and moves filters/settings into an accessible chevron disclosure", () => {
+    const detailsStart = source.indexOf('<details class="group/search-details mt-1">');
+    const detailsEnd = source.indexOf("</details>", detailsStart);
+    expect(detailsStart).toBeGreaterThan(-1);
+    expect(detailsEnd).toBeGreaterThan(detailsStart);
+    const beforeDetails = source.slice(source.indexOf("<dialog"), detailsStart);
+    const insideDetails = source.slice(detailsStart, detailsEnd);
+
+    expect(source).toContain('{ id: "auto", label: "Auto" }');
+    expect(source).toContain('{ id: "search", label: "Search" }');
+    expect(source).toContain('{ id: "rag", label: "RAG" }');
+    expect(source).not.toContain('label: "Auto · Jev"');
+    expect(source).not.toContain(">Current project</span>");
+
+    expect(beforeDetails).not.toContain("data-search-kind={kind}");
+    expect(beforeDetails).not.toContain("onclick={onPreferences}");
+    expect(insideDetails).toContain('role="group" aria-label="Result types"');
+    expect(insideDetails).toContain("data-search-kind={kind}");
+    expect(insideDetails).toContain("aria-pressed={types.includes(kind)}");
+    expect(insideDetails).toContain("onclick={() => toggle(kind)}");
+    expect(insideDetails).toContain("onclick={onPreferences}");
+    expect(insideDetails).toContain("Search settings");
+
+    expect(insideDetails).toContain('<summary class="flex w-fit list-none');
+    expect(insideDetails).toContain("[&::-webkit-details-marker]:hidden");
+    expect(insideDetails).toContain("<ChevronRight");
+    expect(insideDetails).toContain("group-open/search-details:rotate-90");
+    expect(insideDetails).toContain("motion-reduce:transition-none");
+    expect(insideDetails).toContain('aria-hidden="true"');
+    expect(source).toContain("Jev receives only the question");
+  });
   it("uses native hybrid queries and discloses their separate provider/index behavior", () => {
     expect(source).toContain('request: { workspace, query }');
     expect(source).not.toContain("snapshotOnly: true");
     expect(source).toContain("Local BM25");
     expect(source).toContain("IDX hybrid uses the project provider and may refresh the index");
-    expect(source).toContain("client.searchCommits({ cwd, query, limit: 20 }, signal)");
+    expect(source).toContain("requestClient.searchCommits({ cwd, query, limit: 20 }, signal)");
     expect(source).toContain("Commits: BM25 + optional semantic search");
     expect(source).toContain("The saved IDX provider may receive commit messages and queries.");
   });

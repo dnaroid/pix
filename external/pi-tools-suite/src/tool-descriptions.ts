@@ -11,7 +11,7 @@ export type ToolDescription = {
 	promptGuidelines?: string[];
 };
 
-export type RepoDiscoveryCommand = "context" | "audit" | "architecture" | "structure" | "ast" | "search" | "explain" | "deps";
+export type RepoDiscoveryCommand = "context" | "audit" | "architecture" | "structure" | "ast" | "explain" | "deps";
 
 export type RepoDiscoveryToolDescription = ToolDescription & Required<Pick<ToolDescription, "promptSnippet" | "promptGuidelines">> & {
 	command: RepoDiscoveryCommand;
@@ -92,7 +92,7 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 				"After ui-qa completes a test, preserve its clickable screenshot, terminal capture, video, trace, and other evidence links in the final user-facing response whenever those artifacts exist.",
 				"When `knowledge-auditor` is present in the effective role catalog, use it as the final repository-knowledge handoff: supply the concise final behavior/result and exact task-changed project-relative paths; accept small documentation repairs from the child and keep substantial/ambiguous decisions in the parent.",
 				repoDiscovery
-					? "For general discovery, start with repo_context; use repo_search for focused code lookup. Spawn for independent tracks/hypotheses/review axes, and do not let repo_* availability suppress delegation."
+					? "For general discovery, start with repo_context; use project_search for focused code/document lookup. Spawn for independent tracks/hypotheses/review axes, and do not let repo_* availability suppress delegation."
 					: "For one small discovery question, use direct read/grep; when repo_* tools are unavailable, delegate scoped research to keep broad search output outside the parent context.",
 				repoDiscovery
 					? "For incident triage, release readiness, or risk/test strategy with separate hypotheses/review tracks, prefer focused agents over serial parent-context work."
@@ -176,7 +176,7 @@ export const REPO_DISCOVERY_TOOLS: RepoDiscoveryToolDescription[] = [
 		description: "Indexed entrypoints, module boundaries, cycles and unresolved dependencies for broad, unfamiliar code.",
 		promptSnippet: "Map an unfamiliar area once; skip repo_architecture for known paths or exact lookups.",
 		promptGuidelines: [
-			"Scope with --path-prefix; then use repo_structure or repo_search only for remaining gaps.",
+			"Scope with --path-prefix; then use repo_structure or project_search only for remaining gaps.",
 		],
 	},
 	{
@@ -201,26 +201,13 @@ export const REPO_DISCOVERY_TOOLS: RepoDiscoveryToolDescription[] = [
 		targetDescription: "File path to map, e.g. src/api/client.ts.",
 	},
 	{
-		name: "repo_search",
-		label: "Repo Search",
-		command: "search",
-		description: "Indexed hybrid search across documents and code when the owner is unknown. First pass: at most 3 results, no --include-content.",
-		promptSnippet: "Search behavior, not synonyms; keep hybrid unless lexical matches mislead. Read best returned ranges with offset/limit, not whole files.",
-		promptGuidelines: [
-			"Scope with --path-prefix/--dedupe-file. Exact identifiers: available Grep/grep or shell with rg.",
-			"--include-content only for a narrow follow-up needing inline code, with --max-files 1; otherwise use read.",
-			"After finding the causal code, stop broad search; inspect callers, persistence or tests only for a named gap.",
-		],
-		targetDescription: "Natural-language behavior query, e.g. auth session token validation.",
-	},
-	{
 		name: "repo_explain",
 		label: "Repo Explain",
 		command: "explain",
 		description: "Indexed explanation for a known symbol. Prefer file::symbol when the name may be ambiguous.",
 		promptSnippet: "Use file::symbol; start --signature-only when signatures suffice.",
 		promptGuidelines: [
-			"Add --include-body --body-lines 20 only for implementation details; use repo_search when the symbol is unknown.",
+			"Add --include-body --body-lines 20 only for implementation details; use project_search when the symbol is unknown.",
 		],
 		targetDescription: "Symbol or file-scoped symbol, e.g. createClient or src/api/client.ts::createClient.",
 	},
@@ -307,7 +294,7 @@ export function claudeAliasToolDescriptions(options: ToolDescriptionSetOptions |
 			name: "Read",
 			label: "Read",
 			description: repoDiscovery
-				? "Read file contents when the exact path is known. Use Glob/Grep or repo_search/repo_structure first when you still need to locate the file."
+				? "Read file contents when the exact path is known. Use Glob/Grep or project_search/repo_structure first when you still need to locate the file."
 				: "Read file contents when the exact path is known. Use Glob/Grep first when you still need to locate the file.",
 		},
 		Edit: {
@@ -333,14 +320,14 @@ export function claudeAliasToolDescriptions(options: ToolDescriptionSetOptions |
 			name: "Grep",
 			label: "Grep",
 			description: repoDiscovery
-				? "Search file contents with ripgrep when you know the exact text or regex pattern. Narrow with path/glob/context/limit; use repo_search for semantic exploration and ast_grep for AST structure."
+				? "Search file contents with ripgrep when you know the exact text or regex pattern. Narrow with path/glob/context/limit; use project_search for semantic exploration and ast_grep for AST structure."
 				: "Search file contents with ripgrep when you know the exact text or regex pattern. Narrow with path/glob/context/limit; use ast_grep for AST structure.",
 		},
 		Glob: {
 			name: "Glob",
 			label: "Glob",
 			description: repoDiscovery
-				? "Find files by path/name glob pattern, such as **/*.ts. Use before Read when only filenames are needed; use Grep for content search and repo_search for semantic exploration."
+				? "Find files by path/name glob pattern, such as **/*.ts. Use before Read when only filenames are needed; use Grep for content search and project_search for semantic exploration."
 				: "Find files by path/name glob pattern, such as **/*.ts. Use before Read when only filenames are needed; use Grep for content search.",
 		},
 	} satisfies Record<string, ToolDescription>;

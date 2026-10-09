@@ -23,7 +23,8 @@ import type { AgentControlAction } from "./agent-control";
 import { isRecord, parseQueueState, parseQueuedUserMessage } from "./acp-response-parsers";
 import { AcpIncomingRequestError, AcpJsonRpcConnection } from "./acp-json-rpc";
 import { AcpPixExtensions } from "./acp-pix-extensions";
-import { SEARCH_CONFIG_METHOD, SEARCH_QUERY_METHOD, SEARCH_COMMITS_METHOD, type SearchConfigRequest, type SearchStatus, type SearchQueryRequest, type SearchQueryResponse } from "../../../acp/src/search/contract";
+import { SEARCH_CONFIG_METHOD, SEARCH_QUERY_METHOD, SEARCH_COMMITS_METHOD, SEARCH_INTENT_METHOD, type SearchIntentRequest, type SearchIntentResponse, type SearchConfigRequest, type SearchStatus, type SearchQueryRequest, type SearchQueryResponse } from "../../../acp/src/search/contract";
+import { SEARCH_RAG_METHOD, SEARCH_RAG_DELTA_METHOD, type RagRequest, type RagResponse, type RagProgress } from "../../../acp/src/search/rag-contract";
 import type { CommitSearchRequest, CommitSearchResponse } from "../../../acp/src/search/contract";
 import type {
   AcpClientHandlers,
@@ -92,6 +93,7 @@ export type {
 export class AcpClient {
   private readonly rpc: AcpJsonRpcConnection;
   private readonly pix: AcpPixExtensions;
+  private readonly ragUpdates = new Map<string, (update: RagProgress) => void>();
 
   constructor(
     transport: AcpTransport,
@@ -365,6 +367,31 @@ export class AcpClient {
     return this.request(SEARCH_COMMITS_METHOD, request, null, signal);
   }
 
+  async searchIntent(request: SearchIntentRequest, signal?: AbortSignal): Promise<SearchIntentResponse> {
+    const response = await this.request<unknown>(SEARCH_INTENT_METHOD, request, null, signal);
+    if (!response || typeof response !== "object" || !("intent" in response) || !("fallback" in response)
+      || (response.intent !== "search" && response.intent !== "ask") || typeof response.fallback !== "boolean"
+      || (response.fallback && response.intent !== "search")) {
+      throw new Error("Invalid search intent response");
+    }
+    return { intent: response.intent, fallback: response.fallback };
+  }
+
+  async searchRag(request: RagRequest, onUpdate: (update: RagProgress) => void, signal?: AbortSignal): Promise<RagResponse> {
+    if (this.ragUpdates.has(request.requestId)) throw new Error("Duplicate RAG request");
+    this.ragUpdates.set(request.requestId, onUpdate);
+    try {
+      const response = await this.request<unknown>(SEARCH_RAG_METHOD, request, null, signal);
+      if (!isRecord(response) || typeof response.answer !== "string" || typeof response.modelRef !== "string"
+        || !Array.isArray(response.sourceIds) || response.sourceIds.some(id => typeof id !== "string")) {
+        throw new Error("Invalid RAG response");
+      }
+      return { answer: response.answer, modelRef: response.modelRef, sourceIds: response.sourceIds as string[] };
+    } finally {
+      this.ragUpdates.delete(request.requestId);
+    }
+  }
+
   searchQuery(request: SearchQueryRequest, signal?: AbortSignal): Promise<SearchQueryResponse> {
     return this.request(SEARCH_QUERY_METHOD, request, null, signal);
   }
@@ -401,6 +428,7 @@ export class AcpClient {
   }
 
   async dispose(): Promise<void> {
+    this.ragUpdates.clear();
     await this.rpc.dispose();
   }
 
@@ -418,7 +446,13 @@ export class AcpClient {
   }
 
   private handleNotification(method: string, params: unknown): void {
-    if (method === "session/update" && isRecord(params)) {
+    if (method === SEARCH_RAG_DELTA_METHOD && isRecord(params)) {
+      const listener = typeof params.requestId === "string" ? this.ragUpdates.get(params.requestId) : undefined;
+      if (!listener) return;
+      if (typeof params.text === "string" && params.text.length <= 1500) listener({ text: params.text });
+      else if (Array.isArray(params.sourceIds) && params.sourceIds.length <= 12
+        && params.sourceIds.every(id => typeof id === "string" && id.length <= 512)) listener({ sourceIds: params.sourceIds as string[] });
+    } else if (method === "session/update" && isRecord(params)) {
       this.handlers.onSessionUpdate(params as SessionNotification);
     } else if (method === PIX_SESSION_CATALOG_CHANGED_METHOD && isRecord(params)) {
       if (typeof params.cwd === "string" && params.cwd.length > 0) {

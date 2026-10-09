@@ -54,7 +54,7 @@ export function deriveMetrics(options: {
 		toolResultContentBytes: toolResults.reduce((sum, event) => sum + finite(event.contentBytes), 0),
 		toolResultTextBytes: toolResults.reduce((sum, event) => sum + finite(event.textBytes), 0),
 		repoResultContentBytes: toolResults
-			.filter((event) => event.toolName?.startsWith("repo_"))
+			.filter((event) => event.toolName === "project_search" || event.toolName?.startsWith("repo_"))
 			.reduce((sum, event) => sum + finite(event.contentBytes), 0),
 		nativePolicyResults: nativePolicyResults.length,
 		nativePolicyRefusals: nativePolicyResults.filter((event) => event.nativePolicy?.refused === true).length,

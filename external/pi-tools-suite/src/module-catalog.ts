@@ -19,6 +19,7 @@ export const PI_TOOLS_SUITE_MODULE_CATALOG: readonly PiToolsSuiteModuleCatalogEn
 	{ name: "comment-checker", defaultEnabled: true, description: "Detects low-value generated comments in code changes and nudges the agent to remove them." },
 	{ name: "session", defaultEnabled: true, description: "Provides session naming and bounded history recovery through one action-based tool." },
 	{ name: "repo-discovery", defaultEnabled: true, description: "Adds idx-backed repository context, search, audit, structure, architecture, and setup commands when available." },
+	{ name: "project-search", defaultEnabled: true, description: "Searches project sessions, tasks and Git history locally plus Code/Knowledge via the existing IDX index, without a second LLM." },
 	{ name: "antigravity-auth", defaultEnabled: true, description: "Adds Google Antigravity authentication, account rotation, model registration, and provider streaming support." },
 	{ name: "claude-code-provider", defaultEnabled: true, description: "Provides Claude Code subscription models through the maintained local adapter." },
 	{ name: "opencode-import", defaultEnabled: true, description: "Imports supported OpenCode provider credentials into Pi without overwriting existing entries by default." },

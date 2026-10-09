@@ -31,8 +31,10 @@ describe("Todo thinking overrides settings UI", () => {
 
   it("separates two-line pairs and keeps add and hints out of the default layout", () => {
     expect(overridesSource).toContain('class="divide-y divide-sidebar-border/50"');
-    expect(overridesSource).toContain('<details class="min-w-0 flex-1">');
+    expect(overridesSource).toContain('<details class="group min-w-0 flex-1">');
     expect(overridesSource).toContain("<summary");
+    expect(overridesSource).toContain("<ChevronRight");
+    expect(overridesSource).toContain("group-open:rotate-90");
     expect(overridesSource).not.toContain("<details open");
     expect(overridesSource).toContain('title={row.inherited ? inheritedLabel(row) : undefined}');
     expect(overridesSource).toContain('aria-label="About todo thinking limits"');

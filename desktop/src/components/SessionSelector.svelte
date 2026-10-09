@@ -1,12 +1,12 @@
 <script lang="ts">
-  import Check from "@lucide/svelte/icons/check";
-  import GitFork from "@lucide/svelte/icons/git-fork";
   import Plus from "@lucide/svelte/icons/plus";
   import X from "@lucide/svelte/icons/x";
   import { onMount } from "svelte";
   import type { SessionInfo } from "@agentclientprotocol/sdk";
   import { fuzzySearch } from "../lib/fuzzy";
-  import { buildSessionTree, sessionIsFork } from "../lib/session-tabs";
+  import { buildSessionTree, type SessionTreeRow } from "../lib/session-tabs";
+  import { expandedSessionRows, flatSessionRow, sessionRowsRelated } from "../lib/saved-session-tree";
+  import SavedSessionRow from "./SavedSessionRow.svelte";
 
   let {
     sessions,
@@ -35,8 +35,11 @@
   let query = $state("");
   let selector = $state<HTMLElement | null>(null);
   let search = $state<HTMLInputElement | null>(null);
+  let collapsed = $state(new Set<string>());
+  let hoveredId = $state<string | null>(null);
+  let focusedId = $state<string | null>(null);
   const displayedSessions = $derived.by(() => {
-    if (!query.trim()) return buildSessionTree(sessions);
+    if (!query.trim()) return expandedSessionRows(buildSessionTree(sessions), collapsed);
     return fuzzySearch(
       sessions.map((session) => ({
         value: session,
@@ -45,14 +48,30 @@
         keywords: [displayDate(session.updatedAt)],
       })),
       query,
-    ).map((match) => ({ session: match.value, treePrefix: "" }));
+    ).map((match) => flatSessionRow(match.value));
   });
+  const activeRow = $derived(displayedSessions.find((row) => row.session.sessionId === (hoveredId ?? focusedId)) ?? null);
 
   $effect(() => {
     query = initialQuery;
   });
 
   onMount(() => search?.focus());
+
+  function toggleBranch(sessionId: string): void {
+    const next = new Set(collapsed);
+    if (!next.delete(sessionId)) next.add(sessionId);
+    collapsed = next;
+  }
+
+  function activateRow(row: SessionTreeRow, active: boolean, source: "pointer" | "focus"): void {
+    const id = row.session.sessionId;
+    if (source === "pointer") {
+      if (active || hoveredId === id) hoveredId = active ? id : null;
+    } else if (active || focusedId === id) {
+      focusedId = active ? id : null;
+    }
+  }
 
   function handleWindowPointerDown(event: PointerEvent): void {
     const target = event.target;
@@ -143,40 +162,13 @@
     {/if}
 
     {#each displayedSessions as row (row.session.sessionId)}
-      <button
-        class={[
-          "grid w-full grid-cols-[22px_minmax(0,1fr)] gap-2 rounded-md bg-transparent px-2 py-2 text-left text-popover-foreground hover:bg-accent focus-visible:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40",
-          row.session.sessionId === activeSessionId && mode === "open" && "bg-accent",
-          mode === "delete" && "hover:text-destructive focus-visible:text-destructive",
-        ]}
-        data-session-option
-        type="button"
-        aria-current={mode === "open" && row.session.sessionId === activeSessionId ? "true" : undefined}
-        onclick={() => onSelect(row.session.sessionId)}
-        {disabled}
-      >
-        {#if mode === "open" && row.session.sessionId === activeSessionId}
-          <Check class="h-4 w-4 text-primary" aria-hidden="true" />
-        {:else}
-          <span aria-hidden="true"></span>
-        {/if}
-        <span class="min-w-0">
-          <strong class="flex min-w-0 items-center gap-1 text-xs font-medium">
-            {#if row.treePrefix}
-              <span class="shrink-0 whitespace-pre font-mono text-muted-foreground" aria-hidden="true">{row.treePrefix}</span>
-            {/if}
-            {#if !row.treePrefix && sessionIsFork(row.session)}
-              <GitFork class="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
-            {/if}
-            <span class="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
-              {row.session.title || "Untitled conversation"}
-            </span>
-          </strong>
-          <small class="mt-0.5 block overflow-hidden text-ellipsis whitespace-nowrap text-xs text-muted-foreground">
-            {displayDate(row.session.updatedAt) || row.session.sessionId.slice(0, 8)}
-          </small>
-        </span>
-      </button>
+      <SavedSessionRow {row} {disabled} {mode} compact={false}
+        selected={mode === "open" && row.session.sessionId === activeSessionId}
+        collapsed={collapsed.has(row.session.sessionId)} related={sessionRowsRelated(row, activeRow)}
+        date={displayDate(row.session.updatedAt) || row.session.sessionId.slice(0, 8)}
+        onSelect={() => onSelect(row.session.sessionId)}
+        onToggle={() => toggleBranch(row.session.sessionId)}
+        onActivate={(active, source) => activateRow(row, active, source)} />
     {:else}
       <p class="mx-2.5 my-4 text-center text-xs text-muted-foreground">No matching conversations</p>
     {/each}

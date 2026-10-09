@@ -92,10 +92,6 @@ describe("repo discovery Native Compact argument policy", () => {
 		expect(ast.ok).toBe(true);
 		if (ast.ok) expect(ast.args).toEqual(["--max-depth", "3", "--max-nodes", "40", "--no-include-text"]);
 
-		const search = applyNativeCompactPolicy({ command: "search", args: ["--include-content"] });
-		expect(search.ok).toBe(true);
-		if (search.ok) expect(search.args).toEqual(["--include-content", "--max-files", "1"]);
-
 		const explain = applyNativeCompactPolicy({ command: "explain" });
 		expect(explain.ok).toBe(true);
 		if (explain.ok) expect(explain.args).toEqual(["--signature-only"]);
@@ -111,11 +107,10 @@ describe("repo discovery Native Compact argument policy", () => {
 
 	test("rejects duplicate, malformed, unknown, and conflicting flags before execution", () => {
 		const cases = [
-			applyNativeCompactPolicy({ command: "search", args: ["--max-files", "1", "--max-files=2"] }),
-			applyNativeCompactPolicy({ command: "search", args: ["--include-content=true"] }),
-			applyNativeCompactPolicy({ command: "search", args: ["--path-prefix", "--max-files", "1"] }),
-			applyNativeCompactPolicy({ command: "search", args: ["--made-up"] }),
-			applyNativeCompactPolicy({ command: "search", args: ["--include-tests", "--exclude-tests"] }),
+			applyNativeCompactPolicy({ command: "structure", args: ["--max-files", "1", "--max-files=2"] }),
+			applyNativeCompactPolicy({ command: "structure", args: ["--include-content=true"] }),
+			applyNativeCompactPolicy({ command: "structure", args: ["--path-prefix", "--max-files", "1"] }),
+			applyNativeCompactPolicy({ command: "structure", args: ["--made-up"] }),
 			applyNativeCompactPolicy({ command: "structure", args: ["--no-tests", "--include-tests-summary"] }),
 			applyNativeCompactPolicy({ command: "explain", args: ["--include-body", "--signature-only"] }),
 		];
@@ -132,7 +127,6 @@ describe("repo discovery Native Compact argument policy", () => {
 		const compactRefusals = [
 			applyNativeCompactPolicy({ command: "structure", args: ["--max-files", "21"] }),
 			applyNativeCompactPolicy({ command: "ast", args: ["--max-nodes=41"] }),
-			applyNativeCompactPolicy({ command: "search", args: ["--include-content", "--max-files", "2"] }),
 			applyNativeCompactPolicy({ command: "structure", maxLines: 401 }),
 			applyNativeCompactPolicy({ command: "structure", maxBytes: 12_001 }),
 		];
@@ -161,14 +155,12 @@ describe("repo discovery Native Compact argument policy", () => {
 		}
 
 		expect(applyNativeCompactPolicy({ command: "structure", args: ["--max-files", "301"], outputMode: "full" }).ok).toBe(false);
-		expect(applyNativeCompactPolicy({ command: "search", args: ["--max-files", "51"], outputMode: "full" }).ok).toBe(false);
 	});
 
 	test("publishes compact/full native limits as model-facing argument guidance", () => {
 		expect(describeNativeCompactArgs("structure")).toContain("--max-files<=20");
 		expect(describeNativeCompactArgs("structure")).toContain("--max-files<=300");
 		expect(describeNativeCompactArgs("ast")).toContain("--max-nodes<=40");
-		expect(describeNativeCompactArgs("search")).toContain("--include-content use exactly --max-files 1");
 		expect(describeNativeCompactArgs("deps")).toContain("--depth<=1");
 	});
 });
@@ -208,10 +200,10 @@ describe("repo discovery Native Compact wrapper integration", () => {
 					return { stdout: "baseline", stderr: "", code: 0 };
 				},
 			} as never, { profile: "baseline", cwd: projectRoot });
-			const baselineSearch = baselineTools.find((tool) => tool.name === "repo_search")!;
-			expect(baselineSearch.parameters.properties.outputMode).toBeUndefined();
-			await baselineSearch.execute("baseline", { target: "needle" }, undefined, undefined, { cwd: projectRoot });
-			expect(baselineCalls).toEqual([["search", "needle"]]);
+			const baselineStructure = baselineTools.find((tool) => tool.name === "repo_structure")!;
+			expect(baselineStructure.parameters.properties.outputMode).toBeUndefined();
+			await baselineStructure.execute("baseline", {}, undefined, undefined, { cwd: projectRoot });
+			expect(baselineCalls).toEqual([["structure"]]);
 
 			const nativeTools: RegisteredTool[] = [];
 			const nativeCalls: string[][] = [];
@@ -258,15 +250,14 @@ describe("repo discovery Native Compact wrapper integration", () => {
 					return { stdout: "must not execute", stderr: "", code: 0 };
 				},
 			} as never, { profile: "native-compact", cwd: projectRoot });
-			const search = tools.find((tool) => tool.name === "repo_search")!;
-			const result = await search.execute("bad", {
-				target: "PRIVATE_QUERY_SENTINEL",
+			const structure = tools.find((tool) => tool.name === "repo_structure")!;
+			const result = await structure.execute("bad", {
 				args: ["--max-files", "1", "--max-files=2"],
 			}, undefined, undefined, { cwd: projectRoot });
 
 			expect(calls).toEqual([]);
 			expect(result.isError).toBe(true);
-			expect(result.content[0]!.text).toContain("Duplicate search flag");
+			expect(result.content[0]!.text).toContain("Duplicate structure flag");
 		const policyJson = JSON.stringify(result.details?.nativePolicy);
 			expect(policyJson).not.toContain("PRIVATE_QUERY_SENTINEL");
 			expect(policyJson).not.toContain("max-files");

@@ -256,7 +256,7 @@ describe("coding discipline", () => {
 			{
 				systemPrompt: "You are an expert coding assistant.\n\nCurrent date: 2026-01-01",
 				systemPromptOptions: {
-					selectedTools: ["repo_search", "Read", "Bash"],
+					selectedTools: ["project_search", "Read", "Bash"],
 					skills: [
 						{
 							name: "skill-creator",

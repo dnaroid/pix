@@ -21,7 +21,7 @@ describe("context inventory", () => {
 	test("reports final active tools, skills readable in context, and parent-model-gated agents", () => {
 		const cwd = tempDir();
 		const state = createContextInventoryState({
-			getActiveTools: () => ["repo_search", "read", "subagents", "read"],
+			getActiveTools: () => ["project_search", "read", "subagents", "read"],
 			getCommands: () => [
 				{ name: "skill:frontier-model-rollover", source: "skill" },
 				{ name: "reload", source: "extension" },
@@ -30,7 +30,7 @@ describe("context inventory", () => {
 		} as any, context(cwd, "openai-codex", "gpt-6-luna"), "reload");
 
 		expect(state.reason).toBe("reload");
-		expect(state.tools).toEqual(["repo_search", "read", "subagents"]);
+		expect(state.tools).toEqual(["project_search", "read", "subagents"]);
 		expect(state.skills).toEqual(["frontier-model-rollover", "project-agent-creator"]);
 		expect(state.agents).toContain("frontier-review");
 		expect(state.model).toBe("openai-codex/gpt-6-luna");
@@ -65,7 +65,7 @@ describe("context inventory", () => {
 	test("does not claim loaded skills or agents when their access tools are inactive", () => {
 		const cwd = tempDir();
 		const state = createContextInventoryState({
-			getActiveTools: () => ["repo_search", "apply_patch"],
+			getActiveTools: () => ["project_search", "apply_patch"],
 			getCommands: () => [{ name: "skill:hidden", source: "skill" }] as any,
 		} as any, context(cwd, "openai-codex", "gpt-6-luna"));
 

@@ -555,6 +555,27 @@ Resizable panes need:
 At narrow widths, collapse or overlay secondary panes before crushing the primary
 workspace.
 
+### 12.3 Disclosures and accordions
+
+Every expandable/collapsible disclosure trigger **MUST** include an explicit,
+always-visible Lucide chevron. This applies to native `<details>/<summary>`
+and custom accordions in dialogs, settings, sidebars and the transcript.
+Use the established `ChevronRight` collapsed → 90° rotated expanded pattern,
+or `ChevronDown` with equivalent open-state rotation. The icon is functional
+state communication, **not optional decoration**.
+
+Do not rely on the browser's default disclosure triangle, a text label, a
+counter, a plus icon, hover styling, or a border as the only expand/collapse
+affordance. Hide native summary markers when drawing a custom chevron and
+keep the icon aligned with the label using compact semantic spacing and muted
+theme color. Preserve native summary Enter/Space behavior, keyboard focus and
+visible focus feedback; state change MUST rotate the chevron, with
+reduced-motion handling for animation.
+
+Before shipping a new or changed disclosure, verify both open and closed
+states and run the Desktop disclosure-chevron regression test. Do not add
+unmarked `<summary>` controls.
+
 ## 13. Dialogs, popovers, and menus
 
 Transient elevated UI SHOULD use `popover` semantics.

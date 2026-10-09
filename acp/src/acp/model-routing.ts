@@ -4,11 +4,11 @@ import { parse as parseJsonc } from "jsonc-parser";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { pixProjectConfigPath, pixUserConfigPath } from "./pix-config-paths.js";
 import type { PixThinkingLevel } from "./default-model.js";
+import { requestOpenRouterJevChoice, OPENROUTER_JEV_MODEL } from "./openrouter-jev.js";
 
 const ROUTER_TIMEOUT_MS = 10_000;
 const ROUTER_MAX_TOKENS = 96;
 const ROUTER_TOOL_NAME = "select_task_tier";
-const OPENROUTER_DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions";
 
 export interface ModelRoutingTier {
   readonly id: string;
@@ -41,7 +41,7 @@ export interface ModelRoutingDependencies {
 export const DEFAULT_MODEL_ROUTING: ModelRoutingConfig = {
   enabled: false,
   default: false,
-  modelRef: "openrouter/~typesafe/jev-latest",
+  modelRef: `openrouter/${OPENROUTER_JEV_MODEL}`,
   fallbackModels: [],
   defaultTier: "standard",
   tiers: [
@@ -184,39 +184,20 @@ async function requestOpenRouterJevDecision(
   const auth = await runtime.getAuth("openrouter", { signal });
   const apiKey = auth?.auth.apiKey?.trim();
   if (!apiKey) throw new Error("OpenRouter authentication is unavailable");
-  const response = await fetchImpl(OPENROUTER_DECISIONS_URL, {
-    method: "POST",
-    signal,
-    headers: {
-      ...normalizeHeaders(auth?.auth.headers),
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
+  return requestOpenRouterJevChoice({
+    model: modelId,
+    apiKey,
+    question: "tier",
+    state: {
+      request: prompt.trim().slice(0, 24_000),
+      attachment_count: Math.max(0, Math.floor(attachmentCount)),
     },
-    body: JSON.stringify({
-      model: modelId,
-      state: {
-        request: prompt.trim().slice(0, 24_000),
-        attachment_count: Math.max(0, Math.floor(attachmentCount)),
-      },
-      questions: {
-        tier: {
-          type: "choice",
-          instructions: "Choose exactly one semantic task-complexity tier for this coding-agent request based on scope, ambiguity, risk, and reasoning depth.",
-          criteria: Object.fromEntries(config.tiers.map((tier) => [tier.id, tier.description])),
-        },
-      },
-    }),
+    instructions: "Choose exactly one semantic task-complexity tier for this coding-agent request based on scope, ambiguity, risk, and reasoning depth.",
+    criteria: Object.fromEntries(config.tiers.map((tier) => [tier.id, tier.description])),
+    headers: normalizeHeaders(auth?.auth.headers),
+    signal,
+    fetch: fetchImpl,
   });
-  if (!response.ok) {
-    const details = (await response.text().catch(() => "")).trim().slice(0, 500);
-    throw new Error(`OpenRouter Decisions request failed (${response.status})${details ? `: ${details}` : ""}`);
-  }
-  const payload = await response.json() as unknown;
-  if (!isRecord(payload) || !isRecord(payload.answers) || !isRecord(payload.answers.tier)) return undefined;
-  const choice = payload.answers.tier.choice;
-  if (typeof choice !== "string") return undefined;
-  const normalized = choice.trim().toLowerCase();
-  return config.tiers.some((tier) => tier.id === normalized) ? normalized : undefined;
 }
 
 function normalizeHeaders(headers: unknown): Record<string, string> {

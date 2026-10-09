@@ -1,7 +1,7 @@
 import type { SearchSetting } from "../../../acp/src/search/contract";
 import type { SearchHit } from "./universal-search";
 import { scoreBm25 } from "./search-bm25";
-import { normalizeSearchConcepts } from "./search-query";
+import { normalizeSearchConcepts, patchSearchTerm } from "./search-query";
 
 const STOP_WORDS = new Set("a an the to of in on and for is в во на по с со и или ли как что для это работает".split(" "));
 
@@ -32,7 +32,7 @@ function coverage(words: readonly string[], text: readonly string[]): number {
 export function rankSearchHits(
   hits: readonly SearchHit[], query: string, settings: readonly SearchSetting[], semanticSettings: boolean,
 ): SearchHit[] {
-  const rawWords = tokens(query);
+  const rawWords = tokens(patchSearchTerm(query) ?? query);
   const meaningful = rawWords.filter(word => !STOP_WORDS.has(word));
   const words = [...new Set((meaningful.length ? meaningful : rawWords).map(stem))];
   if (!words.length) return [];
@@ -53,7 +53,7 @@ export function rankSearchHits(
       const field = fields.get(hit.fieldId);
       if (field) metadata = `${field.description} ${field.synonyms.join(" ")}`;
     } else if (hit.kind === "tasks") metadata += ` ${hit.taskId}`;
-    else if (hit.kind === "commits") metadata += ` ${hit.hash} ${hit.commit.author}`;
+    else if (hit.kind === "commits") metadata += ` ${hit.hash} ${hit.commit.author} ${hit.commit.changedPaths?.join(" ") ?? ""}`;
     else if (hit.kind === "code" || hit.kind === "knowledge") metadata = hit.content ?? metadata;
     const title = normalized(hit.title);
     const metadataWords = normalized(metadata);
@@ -61,6 +61,7 @@ export function rankSearchHits(
     const totalCoverage = coverage(words, [...title, ...metadataWords]);
     // IDX exposes paths/ranges, not matching content. Do not reject body-only hits.
     const opaque = hit.kind === "code" || hit.kind === "knowledge" || (hit.kind === "settings" && semanticSettings)
+      || (hit.kind === "sessions" && hit.boundaryMatch === true)
       || (hit.kind === "commits" && (("semantic" in hit && hit.semantic === true)
         || ("contentMatch" in hit && hit.contentMatch === true)));
     const exact = tokens(hit.title).join(" ") === rawWords.join(" ");

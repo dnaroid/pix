@@ -76,6 +76,8 @@ Pix can optionally expose an `Auto` model choice for a new, still-sessionless dr
 - `src/app/popup/popup-menu-controller.ts`
 - `src/app/rendering/popup-menu-renderer.ts`
 - `acp/src/acp/model-routing.ts`
+- `acp/src/acp/openrouter-jev.ts` (shared stateless Decisions transport;
+  also used by Universal Search intent classification)
 - `acp/src/acp/draft-model-runtime.ts`
 - `acp/src/acp/desktop-commands.ts`
 - `acp/src/acp/pix-acp-agent.ts`

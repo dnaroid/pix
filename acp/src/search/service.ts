@@ -8,6 +8,7 @@ import { cosine, embedOpenRouter, validVector, type Embedder } from "./embedding
 import { SearchIndexBusyError, SearchIndexStore, emptyIndex, type CachedIndex } from "./index-store.js";
 import { sessionTitleHits } from "./session-titles.js";
 import { namedSessionTitles, type NamedSessionTitle } from "./session-index.js";
+import { synchronizeSessionBoundaries } from "./session-boundary-service.js";
 
 const PROVIDER_WARNING = "Semantic settings search unavailable; local search remains available";
 const SESSION_PROVIDER_WARNING = "Semantic session-title search unavailable; local search remains available";
@@ -198,6 +199,16 @@ export class DesktopSearchService {
     this.scheduleSessions(w);
   }
 
+  private async refreshSessionBoundaries(w: Workspace, records: readonly SessionMapRecord[], signal: AbortSignal): Promise<void> {
+    try {
+      await synchronizeSessionBoundaries(this.store, w.cwd, records, signal);
+    } catch (error) {
+      signal.throwIfAborted();
+      if (this.current(w)) w.indexError = error instanceof SearchIndexBusyError
+        ? error.message : "Local session excerpt index unavailable; title search remains available";
+    }
+  }
+
   private scheduleSessions(w: Workspace): void {
     if (w.sessionWorker || !this.current(w) || !this.sessionTitlesEnabled || !this.keyAvailable || !w.namedSessions.length) return;
     const epoch = this.epoch;
@@ -290,7 +301,10 @@ export class DesktopSearchService {
     if (wantsSettings) { w.settings = settings; this.schedule(w); }
     const wantsSessions = request.types.includes("sessions");
     let records = wantsSessions ? await this.discover(w, signal) : [];
-    if (wantsSessions) await this.reconcileSessions(w, records, signal);
+    if (wantsSessions) {
+      await this.reconcileSessions(w, records, signal);
+      await this.refreshSessionBoundaries(w, records, signal);
+    }
     let queryVector: number[] | undefined;
     const query = request.query.trim();
     const semanticSettings = wantsSettings && w.settings.length > 0 && this.enabled;
@@ -316,12 +330,32 @@ export class DesktopSearchService {
       if (wantsSessions) {
         records = await this.discover(w, signal);
         await this.reconcileSessions(w, records, signal);
+        await this.refreshSessionBoundaries(w, records, signal);
       }
     }
     signal.throwIfAborted();
     if (!this.current(w)) throw new SearchUnavailableError("Search unavailable");
     if (!this.current(w, epoch)) queryVector = undefined;
     const results: LocalSearchHit[] = wantsSessions ? sessionTitleHits(records, w.cwd, query) : [];
+    if (wantsSessions && query) {
+      try {
+        const byId = new Map(records.filter(record => resolve(record.cwd) === w.cwd && record.title?.trim())
+          .map(record => [record.sessionId, record.title!.trim()]));
+        for (const hit of await this.store.searchSessionBoundaries(w.cwd, query, signal)) {
+          const title = byId.get(hit.sessionId);
+          if (!title) continue;
+          const position = results.findIndex(candidate => candidate.kind === "sessions" && candidate.sessionId === hit.sessionId);
+          if (position >= 0 && results[position]?.kind === "sessions") {
+            results[position] = { ...results[position] as SessionSearchHit, snippet: hit.snippet, boundaryMatch: true };
+          } else {
+            results.push({ ...hit, title });
+          }
+        }
+      } catch {
+        signal.throwIfAborted();
+        if (this.current(w)) w.indexError = "Local session excerpt search unavailable; title search remains available";
+      }
+    }
     if (wantsSessions && queryVector && this.sessionTitlesEnabled) {
       try {
         const embeddings = await this.store.readSessionTitles(w.cwd, signal);

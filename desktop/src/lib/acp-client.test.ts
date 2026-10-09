@@ -407,6 +407,57 @@ describe("ACP JSON-RPC client", () => {
     await client.dispose();
   });
 
+  it("validates the private stateless search-intent response", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+    const decision = client.searchIntent({ cwd: "/workspace", query: "почему изменили индекс?" });
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    expect(requestAt(transport, 1)).toMatchObject({
+      method: "pix/search/intent",
+      params: { cwd: "/workspace", query: "почему изменили индекс?" },
+    });
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 1).id,
+      result: { intent: "ask", fallback: false, secret: "discard" } });
+    await expect(decision).resolves.toEqual({ intent: "ask", fallback: false });
+    const invalid = client.searchIntent({ cwd: "/workspace", query: "anything" });
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(3));
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 2).id, result: { intent: "unknown", fallback: false } });
+    await expect(invalid).rejects.toThrow("Invalid search intent response");
+    const inconsistent = client.searchIntent({ cwd: "/workspace", query: "anything else" });
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(4));
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 3).id, result: { intent: "ask", fallback: true } });
+    await expect(inconsistent).rejects.toThrow("Invalid search intent response");
+    await client.dispose();
+  });
+
+  it("streams and validates per-request RAG sources and deltas; late/unrelated events never reach listeners", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+    const chunks: unknown[] = [];
+    const request = { requestId: "rag-client-123", cwd: "/workspace", query: "Explain search", sources: [
+      { kind: "tasks" as const, id: "tasks:1", title: "Task", snippet: "Implemented" },
+    ] };
+    const running = client.searchRag(request, update => chunks.push(update));
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    expect(requestAt(transport, 1)).toMatchObject({ method: "pix/search/rag", params: request });
+    transport.message({ jsonrpc: "2.0", method: "pix/search/rag_delta",
+      params: { requestId: request.requestId, sourceIds: ["tasks:1"] } });
+    transport.message({ jsonrpc: "2.0", method: "pix/search/rag_delta",
+      params: { requestId: "wrong-owner", text: "leaked" } });
+    transport.message({ jsonrpc: "2.0", method: "pix/search/rag_delta",
+      params: { requestId: request.requestId, text: "Implemented [1]." } });
+    await vi.waitFor(() => expect(chunks).toHaveLength(2));
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 1).id,
+      result: { answer: "Implemented [1].", modelRef: "openai/mock", sourceIds: ["tasks:1"] } });
+    await expect(running).resolves.toEqual({ answer: "Implemented [1].", modelRef: "openai/mock", sourceIds: ["tasks:1"] });
+    expect(chunks).toEqual([{ sourceIds: ["tasks:1"] }, { text: "Implemented [1]." }]);
+    transport.message({ jsonrpc: "2.0", method: "pix/search/rag_delta",
+      params: { requestId: request.requestId, text: "stale" } });
+    await Promise.resolve();
+    expect(chunks).toHaveLength(2);
+    await client.dispose();
+  });
+
   it("checks model-routing availability without loading a draft model catalogue", async () => {
     const transport = new FakeTransport();
     const client = await startedClient(transport);

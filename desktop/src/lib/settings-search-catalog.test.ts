@@ -15,10 +15,13 @@ describe("authored settings search catalogue", () => {
     expect(modelRow).toBeLessThan(searchPreferencesSource.indexOf("{#if client}"));
   });
 
-  it("requires a separate session-title opt-in and never uploads first-message fallbacks or history", () => {
+  it("separates semantic-index consent from explicitly disclosed RAG evidence transfer", () => {
     expect(searchPreferencesSource).toContain("Settings semantic search sends only authored settings labels/descriptions");
     expect(searchPreferencesSource).toContain("Session titles require their own separate opt-in");
-    expect(searchPreferencesSource).toContain("Conversation history and attachments are never sent");
+    expect(searchPreferencesSource).toContain("Semantic indexing never uploads conversation history or attachments");
+    expect(searchPreferencesSource).toContain("session excerpts) and the question are sent to the selected RAG model provider");
+    expect(desktopEditorSource).toContain('label="RAG answer model"');
+    expect(desktopEditorSource).toContain('label="RAG thinking effort"');
     expect(searchPreferencesSource).toContain("sessionTitlesEnabled");
     expect(searchPreferencesSource).toContain("Never sends first-message fallback titles");
     expect(searchPreferencesSource).not.toContain("SEARCH_FILTER_MODEL");

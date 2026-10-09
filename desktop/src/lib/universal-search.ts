@@ -5,7 +5,7 @@ import type { GitHistoryEntry } from "./git-workflow";
 import type { ProjectTaskDocument } from "./project-tasks";
 import { searchProjectTasks, searchRecentCommits, type TaskSearchHit, type CommitSearchHit } from "./project-search";
 import { rankSearchHits } from "./search-relevance";
-import { indexSearchQuery } from "./search-query";
+import { indexSearchQuery, patchSearchTerm } from "./search-query";
 import { pendingSearchNotice, runSearchSource } from "./search-source-deadline";
 import type { CommitSearchResponse, CommitSearchHit as HybridCommitHit } from "../../../acp/src/search/contract";
 
@@ -118,6 +118,9 @@ export async function queryUniversalSearch(
 ): Promise<UnifiedSearchResult> {
   const result: UnifiedSearchResult = { results: [], idxAvailable: false, notices: [] };
   if (!query.trim() || !types.length || signal.aborted) return result;
+  const patchOnly = patchSearchTerm(query) !== undefined;
+  if (patchOnly) types = types.filter(kind => kind === "commits");
+  if (!types.length) return result;
   const indexQuery = indexSearchQuery(query);
   const localTypes = types.filter((kind): kind is "settings" | "sessions" => kind === "settings" || kind === "sessions");
   const groups = new Map<string, SearchHit[]>();
@@ -158,7 +161,7 @@ export async function queryUniversalSearch(
       }
     }),
     bounded("Commits", async signal => {
-      if (!types.includes("commits") || !workspace) return;
+      if (!types.includes("commits") || !workspace || patchOnly) return;
       try {
         if (!sources.commits) throw new Error("Commit source unavailable");
         const commits = await sources.commits(workspace, query);
@@ -167,14 +170,22 @@ export async function queryUniversalSearch(
         if (!signal.aborted) result.notices.push(`Commits search failed: ${searchErrorDetail(error)}`);
       }
     }),
-    bounded("Semantic commits", async signal => {
-      if (!types.includes("commits") || !sources.commitHybrid || signal.aborted) return;
+    bounded(patchOnly ? "Git patches" : "Semantic commits", async signal => {
+      if (!types.includes("commits") || signal.aborted) return;
+      if (!sources.commitHybrid) {
+        if (patchOnly) result.notices.push("Git patch search requires a connected ACP backend.");
+        return;
+      }
       try {
         const response = await sources.commitHybrid(workspace, query, signal);
         if (signal.aborted) return;
         groups.set("commits-hybrid", [...response.results]);
         result.notices.push(...response.notices);
-      } catch { if (!signal.aborted) result.notices.push("Semantic commit search unavailable; local commit search remains available."); }
+      } catch {
+        if (!signal.aborted) result.notices.push(patchOnly
+          ? "Git patch search unavailable; try again."
+          : "Semantic commit search unavailable; local commit search remains available.");
+      }
     }),
     bounded(localTypes.map(kind => SEARCH_LABELS[kind]).join(" / "), async signal => {
       if (!localTypes.length) return;

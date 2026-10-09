@@ -49,9 +49,10 @@ function harness(root: string, indexed: boolean, idxAvailable = true) {
 	};
 }
 
-test("common repo facade exposes only eight queries, no setup or recursive orchestration", () => {
+test("common repo facade replaces repo_search with restricted project_search, no setup or orchestration", () => {
 	const child = harness(workspace(), true);
-	expect(child.registered.map((tool) => tool.name)).toEqual(REPO_DISCOVERY_TOOLS.map((tool) => tool.name));
+	expect(child.registered.map((tool) => tool.name)).toEqual([...REPO_DISCOVERY_TOOLS.map((tool) => tool.name), "project_search"]);
+	expect(child.registered.map((tool) => tool.name)).not.toContain("repo_search");
 	expect(child.commands).toEqual([]);
 	expect(child.calls).toEqual([]);
 	const audit = child.registered.find((tool) => tool.name === "repo_audit");
@@ -61,7 +62,7 @@ test("common repo facade exposes only eight queries, no setup or recursive orche
 		child.restrict(["read", "todo"]);
 		child.emit(event);
 		child.emit(event);
-		expect(child.active()).toEqual(["read", "todo", ...REPO_DISCOVERY_TOOLS.map((tool) => tool.name)]);
+		expect(child.active()).toEqual(["read", "todo", ...REPO_DISCOVERY_TOOLS.map((tool) => tool.name), "project_search"]);
 	}
 });
 
@@ -98,5 +99,29 @@ test("query adapters retain cancellation, explicit-root validation and read-only
 		expect(child.calls[0][2]).toMatchObject({ cwd: root, signal });
 		expect(child.calls[1][1]).toEqual(["audit", "src/example.ts", "--no-semantic"]);
 		expect(process.cwd()).not.toBe(root);
+	} finally { restorePath(); }
+});
+
+test("child project_search exposes indexed Code/Knowledge only, not private sessions/tasks/commits or patches", async () => {
+	const root = workspace();
+	const child = harness(root, true);
+	const search = child.registered.find((tool) => tool.name === "project_search");
+	expect(search).toBeDefined();
+	expect(search.parameters.properties.sources.items.enum).toEqual(["code", "knowledge"]);
+	for (const sources of [["sessions"], ["tasks"], ["commits"], ["code", "sessions"], []]) {
+		const denied = await child.execute("project_search", { query: "search history", sources });
+		expect(denied.isError).toBe(true);
+		expect(denied.details).toMatchObject({ restricted: true });
+	}
+	const deniedPatch = await child.execute("project_search", { query: "patch:secret" });
+	expect(deniedPatch.isError).toBe(true);
+	expect(child.calls).toEqual([]);
+
+	const restorePath = installFakeIdxOnPath(root);
+	try {
+		const allowed = await child.execute("project_search", { query: "worker", sources: ["code"], indexMode: "lexical" });
+		expect(allowed.isError).toBeUndefined();
+		expect(child.calls).toHaveLength(1);
+		expect(child.calls[0][1]).toEqual(["search", "worker", "--domain", "code", "--mode", "lexical", "--max-files", "3"]);
 	} finally { restorePath(); }
 });

@@ -46,15 +46,15 @@ const modes = [
     indexed: false,
   },
   {
-    name: "repo-search-hybrid",
-    aliases: ["semantic-repo-search"],
-    tools: ["repo_search", "read"],
+    name: "project-search-hybrid",
+    aliases: ["repo-search-hybrid", "semantic-repo-search"],
+    tools: ["project_search", "read"],
     indexed: true,
-    promptSuffix: "\n\nFor this benchmark run, use repo_search first with its default hybrid ranking unless a follow-up query specifically needs another --mode, then read only the cited code.",
+    promptSuffix: "\n\nFor this benchmark run, use project_search with sources=['code','knowledge'] first, default hybrid ranking, then read only the cited code. Use indexMode=lexical only for an explicit lexical follow-up.",
   },
   {
     name: "repo-discovery",
-    tools: ["repo_architecture", "repo_structure", "repo_search", "repo_ast", "repo_explain", "read"],
+    tools: ["repo_architecture", "repo_structure", "project_search", "repo_ast", "repo_explain", "read"],
     indexed: true,
   },
   {

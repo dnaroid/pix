@@ -9,7 +9,7 @@ import { DatabaseSync } from "node:sqlite";
 import { DesktopCommitSearchService, type CommitSearchOptions } from "../src/search/commit-service.js";
 import { parseCommitSearchRequest } from "../src/search/commit-contract.js";
 import { embedCommitHTTP, embeddingIdentity, loadCommitEmbeddingConfig, loadCommitEmbeddingKey, type CommitEmbeddingConfig, type CommitEmbedder } from "../src/search/commit-provider.js";
-import { rankCommits, readCommitCorpus, type CommitDocument } from "../src/search/commit-corpus.js";
+import { patchSearchTerm, rankCommits, readCommitCorpus, readPatchMatches, type CommitDocument } from "../src/search/commit-corpus.js";
 import { canonicalSearchIndexPath } from "../src/search/canonical-index.js";
 import { COMMIT_DOCUMENTS, COMMIT_META, COMMIT_VECTORS } from "../src/search/commit-storage.js";
 
@@ -50,6 +50,63 @@ function gate() {
 test("strict allowlisted request parsing", () => {
   assert.deepEqual(parseCommitSearchRequest({ cwd: "/tmp/project", query: "word", secret: "discard" }), { cwd: "/tmp/project", query: "word", limit: 20 });
   for (const value of [null, [], { cwd: "relative", query: "x" }, { cwd: "/tmp\0", query: "x" }, { cwd: "/tmp", query: "x".repeat(2049) }, { cwd: "/tmp", query: "x", limit: 0 }, { cwd: "/tmp", query: "x", limit: 1.5 }, { cwd: "/tmp", query: "x", limit: 101 }]) assert.throws(() => parseCommitSearchRequest(value), e => typeof e === "object" && e !== null && "code" in e && e.code === -32602);
+});
+test("changed file paths are searchable metadata without changing saved vector hashes", async t => {
+  const r = await repository(t);
+  await mkdir(join(r.cwd, "src"), { recursive: true });
+  await writeFile(join(r.cwd, "src", "widgetController.ts"), "export const widget = 1;\n");
+  await r.git("add", "src/widgetController.ts");
+  const tree = await r.git("write-tree");
+  const hash = await r.git("commit-tree", tree, "-m", "Neutral commit subject");
+  await r.git("update-ref", "HEAD", hash);
+  const [doc] = await readCommitCorpus(r.cwd, signal());
+  assert.deepEqual(doc?.commit.changedPaths, ["src/widgetController.ts"]);
+  const base = { hash: doc!.commit.hash, shortHash: doc!.commit.shortHash,
+    subject: doc!.commit.subject, author: doc!.commit.author, date: doc!.commit.date };
+  const { createHash } = await import("node:crypto");
+  assert.equal(doc!.contentHash, createHash("sha256").update(JSON.stringify([base, doc!.message])).digest("hex"));
+  let paidDocuments = 0;
+  const s = service(t, options(async inputs => {
+    if (!inputs[0]?.startsWith("Q:")) paidDocuments += inputs.length;
+    return inputs.map(() => [1, 0, 0]);
+  }));
+  assert.equal((await query(s, r.cwd, "widgetController")).results[0]?.hash, hash);
+  assert.equal(paidDocuments, 1);
+  const db = new DatabaseSync(canonicalSearchIndexPath(r.cwd));
+  try {
+    assert.deepEqual(JSON.parse(String(db.prepare("SELECT metadata FROM pix_commit_documents WHERE hash=?").get(hash)?.metadata)).changedPaths,
+      ["src/widgetController.ts"]);
+    db.prepare("UPDATE pix_commit_documents SET metadata=? WHERE hash=?").run(JSON.stringify(base), hash);
+  } finally { db.close(); }
+  await query(s, r.cwd, "widgetController");
+  const refreshed = new DatabaseSync(canonicalSearchIndexPath(r.cwd), { readOnly: true });
+  try {
+    assert.deepEqual(JSON.parse(String(refreshed.prepare("SELECT metadata FROM pix_commit_documents WHERE hash=?").get(hash)?.metadata)).changedPaths,
+      ["src/widgetController.ts"]);
+  } finally { refreshed.close(); }
+  assert.equal(paidDocuments, 1, "metadata backfill must not purchase another document embedding");
+});
+test("explicit patch: search uses Git pickaxe on demand, not providers or message metadata", async t => {
+  const r = await repository(t);
+  await writeFile(join(r.cwd, "src.txt"), "stable line\n");
+  await r.git("add", "src.txt");
+  const firstTree = await r.git("write-tree");
+  const first = await r.git("commit-tree", firstTree, "-m", "Initial neutral");
+  await r.git("update-ref", "HEAD", first);
+  await writeFile(join(r.cwd, "src.txt"), "stable line\nneedle (exact)+ chars\n");
+  await r.git("add", "src.txt");
+  const secondTree = await r.git("write-tree");
+  const second = await r.git("commit-tree", secondTree, "-p", first, "-m", "Another neutral");
+  await r.git("update-ref", "HEAD", second);
+  assert.equal(patchSearchTerm("patch:needle (exact)+ chars"), "needle (exact)+ chars");
+  assert.deepEqual(await readPatchMatches(r.cwd, "needle (exact)+ chars", signal()), [second]);
+  let embeds = 0;
+  const s = service(t, options(async inputs => { embeds += inputs.length; return inputs.map(() => [1, 0, 0]); }));
+  const matches = await query(s, r.cwd, "patch:needle (exact)+ chars");
+  assert.deepEqual(matches.results.map(result => result.hash), [second]);
+  assert.equal(matches.results[0]?.contentMatch, true);
+  assert.equal(embeds, 0);
+  assert.ok((await query(s, r.cwd, "missing-change")).results.length > 0, "ordinary queries retain semantic behavior");
 });
 test("enumerates beyond 30, full messages, authors and hash prefixes; excludes unrelated branches", async t => {
   const r = await repository(t); const first = await r.commit("ancient target\n\nveryoldbodytoken");

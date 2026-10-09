@@ -7,10 +7,12 @@ export interface SearchDialogDraft {
   types: SearchKind[];
   view: SearchDialogState;
   active: number;
+  mode?: "search" | "auto" | "rag";
+  intentNotice?: string;
 }
 
 function emptyDraft(): SearchDialogDraft {
-  return { query: "", types: [...SEARCH_KINDS], view: emptySearchDialogState(), active: -1 };
+  return { query: "", types: [...SEARCH_KINDS], view: emptySearchDialogState(), active: -1, mode: "auto" };
 }
 
 /** One window-owned context; nothing is persisted to disk or shared across clients. */

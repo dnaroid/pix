@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Plus from "@lucide/svelte/icons/plus";
   import Info from "@lucide/svelte/icons/info";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
@@ -167,8 +168,9 @@
   </div>
 
   <div class="flex items-start gap-1 border-t border-sidebar-border/50 pt-1.5">
-    <details class="min-w-0 flex-1">
-      <summary class="flex w-fit cursor-pointer list-none items-center gap-1 rounded-md px-1 py-1 text-xs text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">
+    <details class="group min-w-0 flex-1">
+      <summary class="flex w-fit list-none items-center gap-1 rounded-md px-1 py-1 text-xs text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+        <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
         <Plus class="h-3.5 w-3.5" aria-hidden="true" /> Add override
       </summary>
       <div class="pt-1.5">

@@ -3,7 +3,7 @@ import type { GitDiff, GitSnapshot } from "./git";
 export type GitRepositoryAction = "update" | "fetch" | "pull" | "stash-save" | "stash-apply" | "discard";
 /** Native result of the one-click "Update project" (fetch + fast-forward). */
 export interface GitUpdateResult { incoming: number; stashed: boolean }
-export interface GitHistoryEntry { hash: string; shortHash: string; subject: string; author: string; date: string }
+export interface GitHistoryEntry { hash: string; shortHash: string; subject: string; author: string; date: string; changedPaths?: readonly string[] }
 export interface GitCommitDiff { commit: GitHistoryEntry; content: string; truncated: boolean }
 export interface GitStashEntry { reference: string; subject: string }
 export interface GitRepositoryDetails { history: GitHistoryEntry[]; stashes: GitStashEntry[] }

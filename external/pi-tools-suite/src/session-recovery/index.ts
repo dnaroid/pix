@@ -71,7 +71,7 @@ const READ_TOOL_NAMES = new Set([
 	"repo_architecture",
 	"repo_structure",
 	"repo_ast",
-	"repo_search",
+	"project_search",
 	"repo_explain",
 	"repo_deps",
 ]);

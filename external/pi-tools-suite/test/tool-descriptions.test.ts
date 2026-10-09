@@ -11,6 +11,7 @@ import {
 	astGrepToolDescriptions,
 	codexAliasToolDescriptions,
 } from "../src/tool-descriptions.js";
+import projectSearch from "../src/project-search/index.js";
 import { COMPRESS_RANGE_DESCRIPTION } from "../src/dcp/prompts.js";
 import { TodoParamsSchema } from "../src/todo/tool/types.js";
 import { buildSubagentCatalogPrompt, SUBAGENT_TYPE_SELECTION_GUIDANCE } from "../src/async-subagents/core/agent-catalog.js";
@@ -82,18 +83,20 @@ describe("tool descriptions", () => {
 		expect(guidance).toContain("Resolve returned file paths against that root when using read");
 	});
 
-	test("repo search starts without code bodies and permits only a narrow inline follow-up", () => {
-		const tool = REPO_DISCOVERY_TOOLS.find((entry) => entry.name === "repo_search")!;
-		expect(tool.description).toContain("First pass: at most 3 results, no --include-content");
-		expect(tool.promptSnippet).toContain("keep hybrid unless lexical matches mislead");
-		expect(tool.promptSnippet).toContain("offset/limit, not whole files");
-		const guidance = tool.promptGuidelines.join("\n");
+	test("project_search replaces repo_search with the same focused IDX search guidance", () => {
+		expect(REPO_DISCOVERY_TOOLS.map(tool => tool.name)).not.toContain("repo_search");
+		let registered: any;
+		projectSearch({ registerTool: (tool: any) => { registered = tool; } } as never);
+		expect(registered.name).toBe("project_search");
+		expect(registered.promptSnippet).toContain("first pass maxFiles=3, no includeContent");
+		const guidance = registered.promptGuidelines.join("\n");
+		expect(guidance).toContain("pathPrefix/dedupeFile");
 		expect(guidance).toContain("Exact identifiers: available Grep/grep or shell with rg");
-		expect(guidance).toContain("--path-prefix/--dedupe-file");
-		expect(guidance).toContain("--include-content only for a narrow follow-up");
-		expect(guidance).toContain("--max-files 1");
-		expect(guidance).toContain("stop broad search");
-		expect(guidance).toContain("callers, persistence or tests only for a named gap");
+		expect(guidance).toContain("includeContent only for a narrow follow-up");
+		expect(guidance).toContain("maxFiles=1");
+		expect(guidance).toContain("Stop broad search");
+		expect(registered.parameters.properties.indexMode.enum).toEqual(["hybrid", "semantic", "lexical", "symbol"]);
+		expect(registered.parameters.properties.includeContent.default).toBe(false);
 	});
 
 	test("repo maps prefer scoped pages and exact reads over large trees or snippets", () => {
@@ -123,7 +126,7 @@ describe("tool descriptions", () => {
 
 	test("repo guidance fits within the pre-economy description budget", () => {
 		const existing = REPO_DISCOVERY_TOOLS.filter((tool) => !["context", "audit"].includes(tool.command));
-		expect(REPO_DISCOVERY_TOOLS).toHaveLength(8);
+		expect(REPO_DISCOVERY_TOOLS).toHaveLength(7);
 		const size = existing.reduce((total, tool) => total + [
 			tool.description, tool.promptSnippet, ...tool.promptGuidelines, tool.targetDescription ?? "",
 		].join("\n").length, 0);

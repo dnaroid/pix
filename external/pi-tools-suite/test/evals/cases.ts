@@ -6,7 +6,7 @@ import { TODO_CONCISENESS_CASES } from "./todo-conciseness.js";
 const DIRECT_TOOLS = ["read", "Read", "grep", "Grep", "find", "Glob", "bash", "Bash", "shell", "shell_command"];
 const MUTATION_TOOLS = ["edit", "Edit", "write", "Write", "apply_patch", "ast_apply"];
 const NO_ORCHESTRATION = ["subagents", "async_subagents_spawn"];
-const REPO_SEMANTIC_TOOLS = ["repo_architecture", "repo_search", "repo_context", "repo_audit"];
+const REPO_SEMANTIC_TOOLS = ["repo_architecture", "project_search", "repo_context", "repo_audit"];
 
 export const EVAL_CASES: EvalCase[] = [
 	...DECISION_POLICY_CASES,
@@ -20,7 +20,7 @@ export const EVAL_CASES: EvalCase[] = [
 		indexed: true,
 		fakeIdx: true,
 		prompt: "Users report duplicate charges after payment retry. Find the code path that creates the gateway payment request, identify the risky retry-key behavior, and cite the owning file. I do not know the file or symbol yet.",
-		assert: { requiredTools: ["repo_search"], forbiddenTools: NO_ORCHESTRATION, firstToolOneOf: ["repo_search", "todo"], stdoutIncludes: ["src/payments.ts"] },
+		assert: { requiredTools: ["project_search"], forbiddenTools: NO_ORCHESTRATION, firstToolOneOf: ["project_search", "todo"], stdoutIncludes: ["src/payments.ts"] },
 	},
 	{
 		id: "tool.architecture-first",
@@ -213,7 +213,7 @@ export const EVAL_CASES: EvalCase[] = [
 		description: "One known-file factual read should use the cheapest direct path.",
 		fixture: "demo",
 		prompt: "Read package.json and tell me only the package name. Do not change anything.",
-		assert: { forbiddenTools: ["todo", "repo_architecture", "repo_search", ...NO_ORCHESTRATION, ...MUTATION_TOOLS], firstToolOneOf: ["read", "Read", "shell", "Bash", "bash"] },
+		assert: { forbiddenTools: ["todo", "repo_architecture", "project_search", ...NO_ORCHESTRATION, ...MUTATION_TOOLS], firstToolOneOf: ["read", "Read", "shell", "Bash", "bash"] },
 	},
 	{
 		id: "negative.routine-local-failure-no-oracle",
@@ -229,7 +229,7 @@ export const EVAL_CASES: EvalCase[] = [
 		description: "Tiny known-file edit should not create todo or subagent overhead.",
 		fixture: "demo",
 		prompt: "In docs/lsp-diagnostics.md change `product polish` to `UI polish`. This is a tiny known-file wording edit; make only that replacement.",
-		assert: { forbiddenTools: ["todo", "repo_architecture", "repo_search", ...NO_ORCHESTRATION], maxFilesChanged: 1 },
+		assert: { forbiddenTools: ["todo", "repo_architecture", "project_search", ...NO_ORCHESTRATION], maxFilesChanged: 1 },
 	},
 ];
 

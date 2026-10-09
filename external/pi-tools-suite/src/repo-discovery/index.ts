@@ -12,8 +12,8 @@ import {
 	type RepoDiscoveryProfile,
 } from "./native-compact.js";
 
-const IDX_COMMANDS = ["architecture", "structure", "ast", "search", "explain", "deps"] as const;
-const TARGET_COMMANDS = new Set<string>(["ast", "search", "explain", "deps"]);
+const IDX_COMMANDS = ["architecture", "structure", "ast", "explain", "deps"] as const;
+const TARGET_COMMANDS = new Set<string>(["ast", "explain", "deps"]);
 const DEFAULT_MAX_LINES = 2000;
 const DEFAULT_MAX_BYTES = 50_000;
 const INIT_COMMAND_NAME = "idx-init";
@@ -454,8 +454,6 @@ const IDX_ARG_DESCRIPTIONS: Record<IdxCommand, string> = {
 	structure:
 		"idx structure flags: [--path-prefix <area>] [--kind <kind>] [--max-depth <n>] [--max-files <n>] [--cursor <n>] [--include-internal] [--no-tests] [--include-tests-summary].",
 	ast: "idx ast flags: [--max-depth <n>] [--max-nodes <n>] [--cursor <n>] [--no-include-text].",
-	search:
-		"idx search: default 3 results without code; --include-content only for narrow follow-up. Flags: [--max-files <n>] [--path-prefix <area>] [--chunk-types <types|api|impl|tests|imports>] [--mode hybrid|semantic|lexical|symbol] [--min-score <score>] [--include-content] [--include-imports] [--dedupe-file] [--dedupe-symbol] [--cluster] [--exclude-tests] [--include-tests].",
 	explain:
 		"idx explain flags: [--path-prefix <area>] [--include-body] [--body-lines <n>] [--signature-only].",
 	deps: "idx deps flags: [--mode modules|module-imports|calls|call-graph] [--direction callers|callees|both] [--depth <n>] [--show-edges] [--tests].",

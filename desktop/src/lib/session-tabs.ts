@@ -9,11 +9,16 @@ export function sessionIsFork(session: SessionInfo): boolean {
   return session._meta?.[PIX_IS_FORK_META_KEY] === true;
 }
 
-/** A saved-session row with its TUI-style ancestry connector, if applicable. */
+/** A saved-session row with textual and graphical ancestry information. */
 export interface SessionTreeRow {
   readonly session: SessionInfo;
   /** Monospaced `├─`/`└─` connector and ancestor continuation columns. */
   readonly treePrefix: string;
+  readonly depth: number;
+  readonly ancestorIds: readonly string[];
+  readonly ancestorContinues: readonly boolean[];
+  readonly isLast: boolean;
+  readonly hasChildren: boolean;
 }
 
 /**
@@ -50,17 +55,22 @@ export function buildSessionTree(sessions: readonly SessionInfo[]): SessionTreeR
     depth: number,
     ancestorContinues: readonly boolean[],
     isLast: boolean,
+    ancestorIds: readonly string[] = [],
   ): void {
     if (visited.has(session.sessionId)) return;
     visited.add(session.sessionId);
     const treePrefix = depth === 0
       ? ""
       : `${ancestorContinues.map((continues) => (continues ? "│  " : "   ")).join("")}${isLast ? "└─" : "├─"}`;
-    result.push({ session, treePrefix });
     const descendants = children.get(session.sessionId) ?? [];
+    result.push({ session, treePrefix, depth, ancestorIds,
+      ancestorContinues: ancestorContinues.slice(1), isLast,
+      hasChildren: descendants.some((child) => !visited.has(child.sessionId)),
+    });
     descendants.forEach((child, index) => {
       const last = index === descendants.length - 1;
-      append(child, depth + 1, [...ancestorContinues, depth > 0 && !isLast], last);
+      append(child, depth + 1, [...ancestorContinues, depth > 0 && !isLast], last,
+        [...ancestorIds, session.sessionId]);
     });
   }
 

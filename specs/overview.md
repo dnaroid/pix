@@ -58,6 +58,7 @@ not duplicate those; IDX document retrieval can find them independently.
 | [ui-qa-agent](./ui-qa-agent.md) | Self-contained browser/TUI/desktop UI QA agent |
 | [model-selector-fallbacks](./model-selector-fallbacks.md) | Ordered fallback arrays for singular model selectors |
 | [repo-knowledge-agent-workflow](./repo-knowledge-agent-workflow.md) | Agent workflow for indexed retrieval and task-scoped documentation audits |
+| [project-search-agent-tool](./project-search-agent-tool.md) | Read-only cross-source project history search in Desktop/TUI agent tools |
 | [todo-repo-knowledge-finalization](./todo-repo-knowledge-finalization.md) | Todo repo knowledge finalization reminder |
 
 **TUI renderer (`src/`)**

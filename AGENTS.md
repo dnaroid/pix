@@ -28,6 +28,11 @@
   ownership instead of continuing to append unrelated behavior.
 - For UI/event code, avoid blocking work and heavy synchronous work on the
   UI/main thread.
+- Desktop disclosure/accordion triggers MUST have a visible, state-rotating
+  Lucide chevron in both collapsed and expanded states. Native `<summary>`
+  alone is not a sufficient affordance, nor is a plus icon or counter.
+  Follow `DESIGN.md#123-disclosures-and-accordions` and keep the global
+  disclosure-chevron regression test green when changing Desktop UI.
 - For async/reactive/background code, check races, stale completion,
   cancellation, teardown, and shared mutable state. Release subscriptions,
   listeners, timers, and other owned resources; avoid memory leaks and unintended

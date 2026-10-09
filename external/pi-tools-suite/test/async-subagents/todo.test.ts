@@ -62,7 +62,7 @@ test("CLI restrictions retain allowed work tools plus common capabilities, inclu
 	expect(withSubagentCapabilities(["--tools", "read", "-t", "grep,todo"])).toEqual(["--tools", `grep,${common}`]);
 	expect(withSubagentCapabilities(["--tools", "read", "-nt"])).toEqual(["--tools", common]);
 	expect(withSubagentCapabilities(["--no-tools", "--tools", "read"])).toEqual(["--tools", common]);
-	expect(withSubagentCapabilities(["-xt", "todo,compress,repo_search,write"])).toEqual(["--exclude-tools", "write"]);
+	expect(withSubagentCapabilities(["-xt", "todo,compress,project_search,write"])).toEqual(["--exclude-tools", "write"]);
 	expect(withSubagentCapabilities(["-xt", "todo,write", "--exclude-tools", "todo,repo_context"])).toEqual([]);
 });
 

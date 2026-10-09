@@ -34,6 +34,8 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
   desktop("models", "Routing tiers", "Semantic task classes available to the router.", "task tiers"),
   desktop("models", "Visible models", "Choose which models appear in the Desktop model picker.", "model visibility"),
   desktop("assistant", "Knowledge review model", "Model for knowledge-base AI review sessions.", "knowledge base"),
+  desktop("assistant", "RAG answer model", "Language model used for streaming source-grounded answers in Universal Search.", "RAG", "global search", "answer"),
+  desktop("assistant", "RAG thinking effort", "Reasoning effort used by the RAG answer model.", "RAG", "reasoning"),
   desktop("assistant", "Prompt enhancer model", "Model used when Desktop improves a draft prompt.", "prompt improvement"),
   desktop("assistant", "Prompt enhancer fallbacks", "Ordered prompt-enhancer fallback models.", "prompt improvement"),
   desktop("assistant", "Autocomplete model", "Model used for inline prompt completions.", "inline completion", "автодополнение", "авто-пополнение", "автозавершение"),

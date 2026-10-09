@@ -173,6 +173,36 @@ Control review/commit-message/CI-repair models. Leaving the Source Control
 its new repair session. TUI renderer/theme/tool-row settings remain
 in `pix.jsonc`.
 
+### Desktop Universal Search: Auto intent
+
+The Universal Search dialog (`Cmd+Shift+F`) offers **Auto · Jev** (default),
+**Search**, and **RAG**. Search never makes an intent-router request. Auto
+uses OpenRouter Jev Latest Decisions to choose between finding results and
+generating a source-grounded answer. Classification happens only after the
+user submits a query, never as the user types.
+
+Auto requires the saved OpenRouter credential used by Pix. **Only the search
+query** is sent to OpenRouter for this decision; project files, history,
+indexed snippets and workspace paths are not uploaded by the classifier.
+Provider charges may apply. If the key or Jev is unavailable, Auto falls back
+to regular Search. This is separate from the `modelRouting` Auto model picker and
+from semantic settings/session-title consent preferences.
+
+RAG retrieves the selected sources from the existing search indexes, reads
+bounded original excerpts as needed and streams a Markdown answer **inside**
+Universal Search, with clickable [1], [2], ... references to the original
+file/line, commit diff, session, task or setting. It is a separate model call,
+not a Pi agent session. Retrieved code, documentation and session excerpts
+may be sent to your selected RAG model provider; the provider may charge for
+generation. No full-history or full-diff embedding index is created.
+
+Choose a **RAG answer model** and **RAG thinking effort** under
+Desktop Settings → Assistant. They are saved in the user Desktop profile as
+`search.ragModelRef` (empty means Desktop default model) and
+`search.ragThinking` (default `medium`). They are independent of the active
+conversation model and the Jev router. Search and the RAG answer view allow
+stopping/cancelling work without affecting existing conversations.
+
 See [Pix Desktop](desktop.md).
 
 ### Desktop Observer defaults

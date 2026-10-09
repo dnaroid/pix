@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import { agentIcon } from "../../lib/agent-icons";
   import type { BuiltinAgentCatalogEntry } from "../../lib/builtin-agent-catalog";
 
@@ -27,7 +28,10 @@
 
 <details class="group rounded-md border border-border bg-panel-strong">
   <summary class="flex min-h-7 list-none items-center justify-between gap-3 px-2 py-1 text-xs font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30 [&::-webkit-details-marker]:hidden">
-    <span>Choose enabled agents</span>
+    <span class="flex min-w-0 items-center gap-1.5">
+      <ChevronRight class="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
+      <span class="truncate">Choose enabled agents</span>
+    </span>
     <span class="shrink-0 text-muted-foreground">{enabledCount}/{agents.length} enabled</span>
   </summary>
   <div class="border-t border-border px-2 py-1.5">

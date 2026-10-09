@@ -26,7 +26,7 @@ const HARNESS_PATH = path.join(TEST_DIR, "fixtures", "hard-to-find-project", "be
 const DEFAULT_MODES = [
 	"direct-read-grep",
 	"ast-structural",
-	"repo-search-hybrid",
+	"project-search-hybrid",
 	"repo-discovery",
 	"subagent-search",
 	"unrestricted-suite",
@@ -134,10 +134,10 @@ describe("hard-to-find locate benchmark live e2e", () => {
 			expect(result.sessionArtifacts?.parent.sessionId, `${result.mode} should record parent session id`).toBeTruthy();
 		}
 
-		const hybridRepoSearch = report.results.find((result) => result.mode === "repo-search-hybrid");
+		const hybridRepoSearch = report.results.find((result) => result.mode === "project-search-hybrid");
 		if (hybridRepoSearch) {
-			expect(hybridRepoSearch.toolCalls).toContain("repo_search");
-			expect(hybridRepoSearch.firstCorrectEvidence?.found, "repo-search-hybrid should record first correct evidence").toBe(true);
+			expect(hybridRepoSearch.toolCalls).toContain("project_search");
+			expect(hybridRepoSearch.firstCorrectEvidence?.found, "project-search-hybrid should record first correct evidence").toBe(true);
 			if (report.fakeIdx) {
 				expect(hybridRepoSearch.idxCalls.some((args) => args[0] === "search")).toBe(true);
 				expect(hybridRepoSearch.preparation?.idxInit?.fake).toBe(true);

@@ -7,7 +7,7 @@ import {
   COMMIT_DOCUMENTS, COMMIT_META, COMMIT_VECTORS, createCommitTables, importLegacyCommitVectors,
 } from "./commit-storage.js";
 import { setTimeout as delay } from "node:timers/promises";
-import { rankCommits, readCommitCorpus } from "./commit-corpus.js";
+import { patchSearchTerm, rankCommits, readCommitCorpus, readPatchMatches } from "./commit-corpus.js";
 import { embeddingIdentity, SEMANTIC_NOTICE, validCommitVector, type CommitEmbeddingConfig } from "./commit-provider.js";
 import type { CommitSearchRequest } from "./commit-contract.js";
 
@@ -70,6 +70,21 @@ async function run() {
   let docs;
   try { docs = await readCommitCorpus(data.root, signal); }
   catch { signal.throwIfAborted(); return { results: [], notices: ["Commit history unavailable (repository may have no HEAD)."] }; }
+  const patchTerm = patchSearchTerm(data.request.query);
+  if (patchTerm) {
+    try {
+      const matches = new Set(await readPatchMatches(data.root, patchTerm, signal));
+      signal.throwIfAborted();
+      return { results: docs.filter(doc => matches.has(doc.commit.hash)).slice(0, data.request.limit).map(doc => ({
+        kind: "commits" as const, id: `commits:${doc.commit.hash}`, hash: doc.commit.hash,
+        title: doc.commit.subject, snippet: `Patch match · ${doc.commit.shortHash}${doc.commit.changedPaths?.length ? `\n${doc.commit.changedPaths.slice(0, 3).join(" · ")}` : ""}`,
+        score: 1, commit: doc.commit, contentMatch: true,
+      })), notices: [] };
+    } catch {
+      signal.throwIfAborted();
+      return { results: [], notices: ["Git patch search unavailable or exceeded its 8-second limit."] };
+    }
+  }
   const vectors = new Map<string, number[]>(); const notices: string[] = [];
   let queryVector: number[] | undefined;
   if (data.config && docs.length) {
@@ -108,7 +123,7 @@ async function run() {
             const d = missing[i]!; const v = embedded[i]!; vectors.set(d.contentHash, v);
             db.prepare(`INSERT OR REPLACE INTO ${COMMIT_VECTORS} VALUES (?,?)`).run(d.contentHash, JSON.stringify(v));
           }
-          for (const d of batch) db.prepare(`INSERT INTO ${COMMIT_DOCUMENTS} VALUES (?,?,?,?) ON CONFLICT(hash) DO UPDATE SET content_hash=excluded.content_hash, metadata=excluded.metadata, message=excluded.message WHERE ${COMMIT_DOCUMENTS}.content_hash!=excluded.content_hash`).run(d.commit.hash, d.contentHash, JSON.stringify(d.commit), d.message);
+          for (const d of batch) db.prepare(`INSERT INTO ${COMMIT_DOCUMENTS} VALUES (?,?,?,?) ON CONFLICT(hash) DO UPDATE SET content_hash=excluded.content_hash, metadata=excluded.metadata, message=excluded.message WHERE ${COMMIT_DOCUMENTS}.content_hash!=excluded.content_hash OR ${COMMIT_DOCUMENTS}.metadata!=excluded.metadata OR ${COMMIT_DOCUMENTS}.message!=excluded.message`).run(d.commit.hash, d.contentHash, JSON.stringify(d.commit), d.message);
           db.exec("COMMIT");
         } catch (e) { db.exec("ROLLBACK"); throw e; }
         await delay(0, undefined, { signal });

@@ -16,6 +16,7 @@ export const DEFAULT_DESKTOP_CONFIG_JSONC = String.raw`{
       { "id": "expert", "description": "Exceptionally difficult, ambiguous, or high-risk work requiring maximum reasoning depth.", "modelRef": "openrouter/~openai/gpt-astra-latest", "thinking": "xhigh" }
     ]
   },
+  "search": { "ragModelRef": "", "ragThinking": "medium" },
   "ignoreContextFiles": false,
   "headsUp": {
     "enabled": false,

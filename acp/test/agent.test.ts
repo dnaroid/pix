@@ -23,7 +23,8 @@ import type {
 import { PixAcpAgent } from "../src/acp/pix-acp-agent.js";
 import { DesktopSearchService } from "../src/search/service.js";
 import { SearchPreferences } from "../src/search/config.js";
-import { SEARCH_QUERY_METHOD, SEARCH_CONFIG_METHOD, type SearchQueryResponse } from "../src/search/contract.js";
+import { SEARCH_QUERY_METHOD, SEARCH_CONFIG_METHOD, SEARCH_INTENT_METHOD, type SearchQueryResponse } from "../src/search/contract.js";
+import { SEARCH_RAG_METHOD, SEARCH_RAG_DELTA_METHOD } from "../src/search/rag-contract.js";
 import { SEARCH_COMMITS_METHOD, type CommitSearchRequest } from "../src/search/commit-contract.js";
 import { BTW_METHOD, type BtwCommand, type BtwState } from "../src/btw/contract.js";
 import {
@@ -3137,6 +3138,82 @@ test("Pix Desktop search query/config use the exact private contract without spa
 		await assert.rejects(cx.request(SEARCH_QUERY_METHOD, request), /Desktop search unavailable/);
 		await assert.rejects(cx.request(SEARCH_CONFIG_METHOD, { cwd }), /Desktop search unavailable/);
 	});
+	assert.equal(harness.adapter.sessionCount, 0);
+});
+
+test("Pix Desktop Jev intent is an isolated, validated, Desktop-only request", async t => {
+  const requests: string[] = [];
+  const adapter = createTestAdapter({
+    searchIntentService: { classify: async (query, signal) => {
+      assert.ok(signal instanceof AbortSignal);
+      requests.push(query);
+      if (query === "failure") throw new Error("Bearer SECRET invalid provider response");
+      return { intent: "ask", fallback: false };
+    } },
+    createPiClient: () => { throw new Error("Intent routing must not create Pi"); },
+  });
+  t.after(() => adapter.adapter.dispose());
+  const request = { cwd: resolve("."), query: "explain the architecture" };
+  await connectAs(adapter.adapter, "pix-desktop", async cx => {
+    await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, clientInfo: { name: "pix-desktop", version: "test" } });
+    assert.deepEqual(await cx.request(SEARCH_INTENT_METHOD, { ...request, secret: "private" }), { intent: "ask", fallback: false });
+    assert.deepEqual(await cx.request(SEARCH_INTENT_METHOD, { ...request, query: "failure" }), { intent: "search", fallback: true });
+    for (const invalid of [{ ...request, cwd: "relative" }, { ...request, query: "" }, { ...request, query: "x".repeat(2049) }]) {
+      await assert.rejects(cx.request(SEARCH_INTENT_METHOD, invalid));
+    }
+  });
+  await connect(adapter.adapter, async cx => {
+    await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION });
+    await assert.rejects(cx.request(SEARCH_INTENT_METHOD, request), /Desktop search unavailable/);
+  });
+  assert.deepEqual(requests, ["explain the architecture", "failure"]);
+  assert.equal(adapter.adapter.sessionCount, 0);
+});
+
+test("Desktop RAG streams source identities and answer text without starting a Pi session", async t => {
+	const notifications: Array<{ requestId: string; sourceIds?: string[]; text?: string }> = [];
+	const runs: string[] = [];
+	const harness = createTestAdapter({
+		ragService: {
+			generate: async (request, progress, signal) => {
+				assert.ok(signal instanceof AbortSignal);
+				runs.push(request.query);
+				await progress({ sourceIds: ["tasks:1"] });
+				await progress({ text: "The task is complete [1]." });
+				return { answer: "The task is complete [1].", modelRef: "openai/mock", sourceIds: ["tasks:1"] };
+			},
+		},
+		createPiClient: () => { throw new Error("RAG cannot start Pi"); },
+	});
+	t.after(() => harness.adapter.dispose());
+	const request = { cwd: resolve("."), requestId: "rag-owner-123", query: "What was completed?",
+		sources: [{ id: "tasks:1", kind: "tasks", title: "Task one", snippet: "Completed" }] };
+	await connectAs(harness.adapter, "pix-desktop", async cx => {
+		await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, clientInfo: { name: "pix-desktop", version: "test" } });
+		assert.deepEqual(await cx.request(SEARCH_RAG_METHOD, request),
+			{ answer: "The task is complete [1].", modelRef: "openai/mock", sourceIds: ["tasks:1"] });
+		await waitFor(() => notifications.length === 2);
+		assert.deepEqual(notifications, [
+			{ requestId: "rag-owner-123", sourceIds: ["tasks:1"] },
+			{ requestId: "rag-owner-123", text: "The task is complete [1]." },
+		]);
+		for (const invalid of [
+			{ ...request, cwd: "relative" },
+			{ ...request, sources: [{ ...request.sources[0], path: "../secret" }] },
+			{ ...request, sources: Array(13).fill(request.sources[0]) },
+		]) await assert.rejects(cx.request(SEARCH_RAG_METHOD, invalid));
+	}, app => {
+		const custom = app as unknown as { onNotification(method: string,
+			parser: (params: unknown) => typeof notifications[number],
+			handler: (ctx: { params: typeof notifications[number] }) => void): void };
+		custom.onNotification(SEARCH_RAG_DELTA_METHOD, params => params as typeof notifications[number],
+			ctx => { notifications.push(ctx.params); });
+	});
+	await connect(harness.adapter, async cx => {
+		await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION });
+		await assert.rejects(cx.request(SEARCH_RAG_METHOD, request), /Desktop search unavailable/);
+	});
+	assert.deepEqual(runs, ["What was completed?"]);
 	assert.equal(harness.adapter.sessionCount, 0);
 });
 

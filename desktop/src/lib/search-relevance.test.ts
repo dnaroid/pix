@@ -43,6 +43,22 @@ describe("local search relevance", () => {
     expect(rankSearchHits([commit], "ABCDEFF", [], false)).toEqual([commit]);
     expect(rankSearchHits([commit], "Alice", [], false)).toEqual([commit]);
   });
+  it("matches changed Git paths and retains backend patch evidence without filename terms", () => {
+    const hash = "b".repeat(40);
+    const commit = { hash, shortHash: "bbbbbbb", subject: "Neutral cleanup", author: "Ada", date: "2026-01-01",
+      changedPaths: ["src/search/abortController.ts"] };
+    const hit: SearchHit = { kind: "commits", id: `commits:${hash}`, hash, title: commit.subject,
+      snippet: "Ada", score: 1, commit };
+    expect(rankSearchHits([hit], "abortController", [], false)).toHaveLength(1);
+    expect(rankSearchHits([hit], "sessionWorker", [], false)).toEqual([]);
+    const patch: SearchHit = { ...hit, contentMatch: true };
+    expect(rankSearchHits([patch], "patch:sessionWorker", [], false)).toEqual([patch]);
+  });
+  it("retains local first/final session excerpts when their matching terms are not visible in preview", () => {
+    const hit: SearchHit = { kind: "sessions", id: "sessions:1", sessionId: "1",
+      title: "Unrelated title", snippet: "First: small preview", boundaryMatch: true, score: 1 };
+    expect(rankSearchHits([hit], "hidden text from final", [], false)).toEqual([hit]);
+  });
   it("deduplicates, caps results and keeps ordering deterministic across asynchronous source completion", () => {
     const hits = Array.from({ length: 65 }, (_, i) => session(`session:${String(i).padStart(2, "0")}`, "Search", i));
     const result = rankSearchHits([...hits, hits[0]!], "search", [], false);

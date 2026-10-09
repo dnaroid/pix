@@ -2,6 +2,16 @@
 export const SEARCH_QUERY_METHOD = "pix/search/query";
 export const SEARCH_CONFIG_METHOD = "pix/search/config";
 export const SEARCH_COMMITS_METHOD = "pix/search/commits";
+export const SEARCH_INTENT_METHOD = "pix/search/intent";
+export interface SearchIntentRequest {
+  readonly cwd: string;
+  readonly query: string;
+}
+export interface SearchIntentResponse {
+  readonly intent: "search" | "ask";
+  /** Missing credential, provider failure or invalid Jev decision defaults to Search. */
+  readonly fallback: boolean;
+}
 export const SEARCH_EMBEDDING_MODEL = "perplexity/pplx-embed-v1-0.6b";
 
 export interface CommitSearchRequest {
@@ -15,6 +25,8 @@ export interface CommitMetadata {
   readonly subject: string;
   readonly author: string;
   readonly date: string;
+  /** Paths changed by this commit; metadata only, never patch contents. */
+  readonly changedPaths?: readonly string[];
 }
 export interface CommitSearchHit {
   readonly kind: "commits";
@@ -78,6 +90,8 @@ export interface SettingsSearchHit extends SearchHitBase {
 export interface SessionSearchHit extends SearchHitBase {
   readonly kind: "sessions";
   readonly sessionId: string;
+  /** Local FTS evidence from the session's first user / last completed assistant message. */
+  readonly boundaryMatch?: boolean;
 }
 export type LocalSearchHit = SettingsSearchHit | SessionSearchHit;
 export interface SearchQueryResponse {

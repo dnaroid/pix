@@ -13,7 +13,12 @@ test("Desktop search schema models optional explicit boolean consent without cre
 	const search = PixDesktopConfigSchema.properties.search;
 	assert.equal((search.properties.semanticEnabled as { default?: boolean }).default, false);
 	assert.equal((search.properties.sessionTitlesEnabled as { default?: boolean }).default, false);
-	assert.deepEqual(Object.keys(search.properties), ["semanticEnabled", "sessionTitlesEnabled"]);
+	assert.deepEqual(Object.keys(search.properties), ["semanticEnabled", "sessionTitlesEnabled", "ragModelRef", "ragThinking"]);
+	assert.equal(Value.Check(PixDesktopConfigSchema, { search: { ragModelRef: "openai-codex/gpt-6.1-sol", ragThinking: "high" } }), true);
+	assert.equal(Value.Check(PixDesktopConfigSchema, { search: { ragModelRef: "", ragThinking: "off" } }), true);
+	assert.equal(Value.Check(PixDesktopConfigSchema, { search: { ragThinking: "unlimited" } }), false);
+	assert.equal((search.properties.ragModelRef as { default?: string }).default, "");
+	assert.equal(Object.keys(search.properties).some(key => /key|credential|token/i.test(key)), false);
 	assert.equal(Value.Check(PixDesktopConfigSchema, { search: { messageFilterEnabled: true } }), true, "legacy unknown keys are ignored");
 });
 

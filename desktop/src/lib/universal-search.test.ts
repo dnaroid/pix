@@ -18,6 +18,29 @@ function sources(available = true): SearchSources {
 }
 
 describe("universal hybrid search", () => {
+  it("routes patch: queries exclusively to the read-only backend; never opens regular sources or IDX", async () => {
+    const api = sources();
+    api.tasks = vi.fn(async () => { throw new Error("tasks must not be queried"); });
+    api.commits = vi.fn(async () => { throw new Error("native git must not be queried"); });
+    const hash = "a".repeat(40);
+    const commit = { hash, shortHash: "aaaaaaa", subject: "Refactor worker", author: "Ada", date: "2026-01-01" };
+    api.commitHybrid = vi.fn(async () => ({ results: [{ kind: "commits" as const, id: `commits:${hash}`, hash,
+      title: commit.subject, snippet: "Patch match", score: 1, commit, contentMatch: true }], notices: [] }));
+    const query = "patch:sessionWorker";
+    const result = await queryUniversalSearch(api, "/project", query,
+      ["settings", "sessions", "tasks", "commits", "code", "knowledge"], settings, new AbortController().signal);
+    expect(result.results.map(hit => hit.id)).toEqual([`commits:${hash}`]);
+    expect(api.commitHybrid).toHaveBeenCalledWith("/project", query, expect.any(AbortSignal));
+    expect(api.tasks).not.toHaveBeenCalled();
+    expect(api.commits).not.toHaveBeenCalled();
+    expect(api.local).not.toHaveBeenCalled();
+    expect(api.overview).not.toHaveBeenCalled();
+    expect(api.index).not.toHaveBeenCalled();
+    const disconnected = sources();
+    const missing = await queryUniversalSearch(disconnected, "/project", query, ["commits"], settings, new AbortController().signal);
+    expect(missing.results).toEqual([]);
+    expect(missing.notices).toEqual(["Git patch search requires a connected ACP backend."]);
+  });
   it("finishes an empty successful search without failure notices", async () => {
     const api = sources();
     api.local = vi.fn(async () => ({ status, results: [] }));

@@ -1,10 +1,11 @@
 <script lang="ts">
-  import GitFork from "@lucide/svelte/icons/git-fork";
   import Search from "@lucide/svelte/icons/search";
   import { onMount } from "svelte";
   import type { SessionInfo } from "@agentclientprotocol/sdk";
   import { fuzzySearch } from "../lib/fuzzy";
-  import { buildSessionTree, sessionIsFork } from "../lib/session-tabs";
+  import { buildSessionTree, type SessionTreeRow } from "../lib/session-tabs";
+  import { expandedSessionRows, flatSessionRow, sessionRowsRelated } from "../lib/saved-session-tree";
+  import SavedSessionRow from "./SavedSessionRow.svelte";
   import {
     SAVED_SESSION_INITIAL_ROWS,
     SAVED_SESSION_NEXT_ROWS,
@@ -27,6 +28,9 @@
   let scrollContainer = $state<HTMLDivElement | null>(null);
   let loadMoreTrigger = $state<HTMLButtonElement | null>(null);
   let visibleCount = $state(SAVED_SESSION_INITIAL_ROWS);
+  let collapsed = $state(new Set<string>());
+  let hoveredId = $state<string | null>(null);
+  let focusedId = $state<string | null>(null);
   const displayedSessions = $derived(query.trim()
     ? fuzzySearch(
       sessions.map((session) => ({
@@ -36,10 +40,11 @@
         keywords: [displayDate(session.updatedAt)],
       })),
       query,
-    ).map((match) => ({ session: match.value, treePrefix: "" }))
-    : buildSessionTree(sessions));
+    ).map((match) => flatSessionRow(match.value))
+    : expandedSessionRows(buildSessionTree(sessions), collapsed));
   const visibleSessions = $derived(visibleSavedSessionRows(displayedSessions, visibleCount));
   const hasMore = $derived(visibleCount < displayedSessions.length);
+  const activeRow = $derived(displayedSessions.find((row) => row.session.sessionId === (hoveredId ?? focusedId)) ?? null);
 
   function resetPages(): void {
     visibleCount = SAVED_SESSION_INITIAL_ROWS;
@@ -56,12 +61,30 @@
     if (previousWorkspace === currentWorkspace) return;
     previousWorkspace = currentWorkspace;
     query = "";
+    collapsed = new Set();
+    hoveredId = null;
+    focusedId = null;
     resetPages();
   });
 
   function loadNextPage(): void {
     if (!hasMore) return;
     visibleCount = nextSavedSessionRowCount(visibleCount, displayedSessions.length);
+  }
+
+  function toggleBranch(sessionId: string): void {
+    const next = new Set(collapsed);
+    if (!next.delete(sessionId)) next.add(sessionId);
+    collapsed = next;
+  }
+
+  function activateRow(row: SessionTreeRow, active: boolean, source: "pointer" | "focus"): void {
+    const id = row.session.sessionId;
+    if (source === "pointer") {
+      if (active || hoveredId === id) hoveredId = active ? id : null;
+    } else if (active || focusedId === id) {
+      focusedId = active ? id : null;
+    }
   }
 
   // The sentinel moves downward after each page. Observe only the scrollable
@@ -112,23 +135,12 @@
 
     <div bind:this={scrollContainer} class="min-h-0 overflow-y-auto border-t border-border/70" aria-label="Saved conversations">
       {#each visibleSessions as row (row.session.sessionId)}
-        <button
-          data-saved-session-row
-          class="grid h-7 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border/50 px-2.5 text-left transition-colors last:border-b-0 hover:bg-panel-hover focus-visible:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
-          type="button"
-          onclick={() => onSelect(row.session.sessionId)}
-        >
-          <strong class="flex min-w-0 items-center gap-1 text-xs font-medium text-foreground">
-            {#if row.treePrefix}
-              <span class="shrink-0 whitespace-pre font-mono text-muted-foreground" aria-hidden="true">{row.treePrefix}</span>
-            {/if}
-            {#if !row.treePrefix && sessionIsFork(row.session)}
-              <GitFork class="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
-            {/if}
-            <span class="min-w-0 truncate">{row.session.title || "Untitled conversation"}</span>
-          </strong>
-          <small class="shrink-0 font-mono text-xs text-muted-foreground">{displayDate(row.session.updatedAt) || row.session.sessionId.slice(0, 8)}</small>
-        </button>
+        <SavedSessionRow {row} collapsed={collapsed.has(row.session.sessionId)}
+          related={sessionRowsRelated(row, activeRow)}
+          date={displayDate(row.session.updatedAt) || row.session.sessionId.slice(0, 8)}
+          onSelect={() => onSelect(row.session.sessionId)}
+          onToggle={() => toggleBranch(row.session.sessionId)}
+          onActivate={(active, source) => activateRow(row, active, source)} />
       {:else}
         {#if displayedSessions.length === 0}
           <p class="px-3 py-6 text-center text-xs text-muted-foreground">

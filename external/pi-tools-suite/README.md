@@ -21,7 +21,20 @@ This package keeps shared Pi tools as ordinary source folders under `src/` and r
 - `src/comment-checker` — AI-slop comment guard that listens to the `tool_result` event for `write` / `edit` / `apply_patch` mutations, extracts net-new code comment lines, classifies them (filler phrasing, restating code, decorative separators, generic paraphrasing, or — under aggressive strictness — any non-valuable comment), and appends a short nudge to the tool result so the agent removes unnecessary comments on its next turn; TODO/FIXME, license headers, docstrings, pragmas, linter directives, shebangs, and decorators are never flagged; language-agnostic across `//` / `/* */` / `#` / `--` / `<!-- -->` / triple-quote comment styles; per-session deduplication (at most one nudge per 30 s) prevents fix/remark loops; configured via the `commentChecker` section (`enabled`, `strictness`: `conservative` | `balanced` | `aggressive`, default `balanced`) or `PI_COMMENT_CHECKER_ENABLED` / `PI_COMMENT_CHECKER_STRICTNESS`
 - `src/session` — one `session` tool for naming and bounded raw-history recovery through `action: name | overview | read | search | recovery`; no old tool aliases
 - `src/truncation-metadata-normalizer` — default-on metadata cleanup for SDK-truncated `Read` / shell / `ast_grep` results; removes only a proven duplicate `details.truncation.content` copy while preserving visible content and structural truncation metadata; can be disabled through the normal module config
-- `src/repo-discovery` — `/idx-init`, `/idx-update`, and idx-backed `repo_context` / `repo_audit` / `repo_architecture` / `repo_structure` / `repo_ast` / `repo_search` / `repo_explain` / `repo_deps`; repo tools and repo-aware mutation guidance register only when the launch project has `.indexer-cli` **and** an executable `idx` is available on `PATH`
+- `src/repo-discovery` — `/idx-init`, `/idx-update`, and idx-backed `repo_context` / `repo_audit` / `repo_architecture` / `repo_structure` / `repo_ast` / `repo_explain` / `repo_deps`; repo tools and repo-aware mutation guidance register only when the launch project has `.indexer-cli` **and** an executable `idx` is available on `PATH`
+- `src/project-search` — always-registered read-only `project_search`.
+  Searches saved Sessions (first user/last completed assistant on the active
+  branch), Tasks, HEAD-reachable commits and changed paths, and Code/Knowledge
+  via the existing IDX index when available. `patch:<literal>` searches Git
+  changed lines only on demand. Available in both Pix Desktop and TUI without
+  a second LLM, another persistent index or implicit setup. Hits carry bounded
+  snippets plus source identities (file/line, commit, session path or task ID).
+  `indexMode: "lexical"` avoids IDX embedding calls; hybrid may contact the
+  project's saved embedding provider.
+
+The ordered module catalog places `project-search` immediately after
+`repo-discovery`. Unlike IDX-gated `repo_*` tools, `project_search`
+is available for local sources even when IDX is not configured.
 - `src/antigravity-auth` — `antigravity` custom provider with Google Antigravity OAuth login, startup account list, auth.json-only runtime account loading, `/antigravity-add-account` OAuth append into rotation, `/antigravity-account` status display, account rotation/failover, model registration with live route mapping (current Antigravity catalog: Gemini 3.5/3.6/3.7/3.8 Flash, Gemini 3.1 Pro, Claude Sonnet 4.6 Thinking, Claude Opus 4.6 Thinking, GPT-OSS 120B Medium, plus legacy Antigravity aliases and Gemini CLI mirrors), and streaming through the Cloud Code Assist unified gateway
 - `src/opencode-import` — `/opencode-import` for bounded migration of supported OpenCode OpenAI/Codex, GitHub Copilot, Z.ai, and Antigravity credentials into Pi; existing entries are preserved unless `--force` is passed
 - `src/question` — clean-Pi-only native `question` tool with the suite questionnaire contract, multi-select/custom-answer support, and a transient questionnaire widget kept immediately above the real Pi composer; Pix deliberately skips this module because Pix owns its bundled question renderer/Desktop bridge
@@ -35,7 +48,7 @@ This package keeps shared Pi tools as ordinary source folders under `src/` and r
 
 `index.ts` is intentionally only a thin auto-discovery shim that re-exports `src/index.ts`. There is no `pi.extensions` manifest here, so local Pi auto-discovery loads the suite once via `~/.pi/agent/extensions/pi-tools-suite/index.ts` and does not double-register tools. `src/module-catalog.ts` is the ordered single source of truth for bundled module names, defaults, descriptions, and host policy; runtime registration derives each conventional `src/<module-name>/index.ts` loader from that catalog, and Desktop Settings consumes the same metadata without importing runtime modules.
 
-Registration order is preserved by the ordered catalog in `src/module-catalog.ts`: coding-discipline, ast-grep, async-subagents, lsp, comment-checker, session, repo-discovery command/tool gate, antigravity-auth provider, local claude-code-provider, OpenCode import, clean-Pi-only question, todo, model-tools, usage, web-search, truncation-metadata-normalizer, dcp, prompt-commands, resource-registry, credential-firewall, then codex-reasoning-fix. Tool metadata and active model-specific tool sets have two modes: standard and repo-aware. Repo-aware mode requires both project `.indexer-cli` state and an executable `idx`; when enabled, `repo_*` tools stay active ahead of overlapping lower-level aliases. If `idx` is unavailable, the suite falls back to ordinary Read/Grep/LSP/sub-agent guidance and does **not** implicitly install, initialize, or create index state. `/idx-init` is the explicit setup/repair path and should be run only with user permission. Independently of the catalog, `src/index.ts` registers an unconditional guard (see [provider-web-search-policy](../../specs/provider-web-search-policy.md)) that removes and blocks the Claude provider's metered `pi_claude_code_provider_web_search` tool in parent sessions while keeping the provider itself and the suite's own `web_search` available. Sub-agents exclude that tool through their separate tool guard.
+Registration order is preserved by the ordered catalog in `src/module-catalog.ts`: coding-discipline, ast-grep, async-subagents, lsp, comment-checker, session, repo-discovery command/tool gate, project-search, antigravity-auth provider, local claude-code-provider, OpenCode import, clean-Pi-only question, todo, model-tools, usage, web-search, truncation-metadata-normalizer, dcp, prompt-commands, resource-registry, credential-firewall, then codex-reasoning-fix. Tool metadata and active model-specific tool sets have two modes: standard and repo-aware. Repo-aware mode requires both project `.indexer-cli` state and an executable `idx`; when enabled, `repo_*` tools stay active ahead of overlapping lower-level aliases. If `idx` is unavailable, the suite retains local `project_search` history and ordinary Read/Grep/LSP/sub-agent guidance and does **not** implicitly install, initialize, or create index state. `/idx-init` is the explicit setup/repair path and should be run only with user permission. Independently of the catalog, `src/index.ts` registers an unconditional guard (see [provider-web-search-policy](../../specs/provider-web-search-policy.md)) that removes and blocks the Claude provider's metered `pi_claude_code_provider_web_search` tool in parent sessions while keeping the provider itself and the suite's own `web_search` available. Sub-agents exclude that tool through their separate tool guard.
 
 ### IDX embedding setup and privacy
 
@@ -134,8 +147,10 @@ enforced; privacy and source-quality instructions are not a network/filesystem s
 When repo-aware mode is available, use `repo_context` for general behavior/task
 discovery: it returns a bounded view of project documents, implementation ranges,
 and tests. The parent model performs reasoning and synthesis from those primary
-retrieval results. Use `repo_search` for focused code/document lookup, including
-lexical mode when semantic retrieval is unavailable. All indexed Markdown documents are
+retrieval results. Use `project_search` with `sources: ["code", "knowledge"]`
+for focused IDX lookup; it replaces the old `repo_search` registration,
+including lexical, semantic and symbol modes plus the previous IDX filters.
+All indexed Markdown documents are
 searchable subject to ignore/exclusion filters; they are not split into primary
 and secondary collections. Follow truncation/degradation diagnostics and read
 the primary source itself before relying on a summary.
