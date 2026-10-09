@@ -226,58 +226,6 @@ function withoutCompressSummaries(input: Record<string, unknown>): {
 	return { value, summaryChars, summaryEstimatedTokens };
 }
 
-// The compress tool parameters come from the runtime's TypeBox module, and
-// different TypeBox generations serialize the same schema with different
-// key shapes (classic `type`/`required`/`properties` versus wrapper-era
-// `kind`/`options`/`schema`). The measurement must reflect the shipped
-// schema content, not which representation the local runtime happens to
-// produce, so project both representations onto one canonical shape.
-function isSchemaRecord(value: unknown): value is Record<string, unknown> {
-	return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-export function canonicalJsonSchema(value: unknown): unknown {
-	if (Array.isArray(value)) return value.map(canonicalJsonSchema);
-	if (!isSchemaRecord(value)) return value;
-	// Wrapper-era optionals wrap their inner schema; unwrap so both
-	// representations converge on the inner form.
-	if (value.kind === "optional" && "schema" in value) return canonicalJsonSchema(value.schema);
-	const kind = typeof value.type === "string" ? value.type : typeof value.kind === "string" ? value.kind : undefined;
-	const options = isSchemaRecord(value.options) ? value.options : {};
-	const canonical: Record<string, unknown> = {};
-	if (kind !== undefined) canonical.type = kind;
-	const properties = isSchemaRecord(value.properties) ? value.properties : undefined;
-	if (Array.isArray(value.required)) canonical.required = [...value.required];
-	else if (properties) {
-		const required = Object.keys(properties).filter((name) => {
-			const child = properties[name];
-			return !(isSchemaRecord(child) && child.kind === "optional");
-		});
-		if (required.length > 0) canonical.required = required;
-	}
-	if (properties) {
-		canonical.properties = Object.fromEntries(
-			Object.entries(properties).map(([name, child]) => [name, canonicalJsonSchema(child)]),
-		);
-	}
-	if ("items" in value) canonical.items = canonicalJsonSchema(value.items);
-	// Inline option metadata (descriptions, defaults, ...) after the
-	// structural keys, matching the classic TypeBox insertion order.
-	for (const [key, option] of Object.entries(options)) {
-		if (key in canonical) continue;
-		canonical[key] = canonicalJsonSchema(option);
-	}
-	for (const [key, entry] of Object.entries(value)) {
-		if (key === "kind" || key === "~kind" || key === "options" || key === "schema" || key in canonical) continue;
-		canonical[key] = entry;
-	}
-	return canonical;
-}
-
-function canonicalSchemaText(schema: Record<string, unknown>): string {
-	return JSON.stringify(canonicalJsonSchema(schema));
-}
-
 function toolEnvelopeText(): string {
 	return JSON.stringify({
 		name: COMPRESS_TOOL_DESCRIPTION.name,
@@ -285,13 +233,14 @@ function toolEnvelopeText(): string {
 		description: COMPRESS_TOOL_DESCRIPTION.description,
 		promptSnippet: COMPRESS_TOOL_DESCRIPTION.promptSnippet,
 		promptGuidelines: COMPRESS_TOOL_DESCRIPTION.promptGuidelines,
-		parameters: JSON.parse(canonicalSchemaText(COMPRESS_TOOL_PARAMETERS as unknown as Record<string, unknown>)),
+		parameters: COMPRESS_TOOL_PARAMETERS,
 	});
 }
 
 export function measureDcpControlPlane(): DcpControlPlaneMeasurement {
 	const guidelines = (COMPRESS_TOOL_DESCRIPTION.promptGuidelines ?? []).join("\n");
-	const schema = canonicalSchemaText(COMPRESS_TOOL_PARAMETERS as unknown as Record<string, unknown>);
+	// Measure the shipped runtime schema directly; never disguise module mocks.
+	const schema = JSON.stringify(COMPRESS_TOOL_PARAMETERS);
 	const envelope = toolEnvelopeText();
 	return {
 		version: 1,

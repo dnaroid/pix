@@ -1,10 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { createTypeboxMock } from "./support/typebox-mock.js";
-
-mock.module("typebox", () => createTypeboxMock());
-
-// Real pi-coding-agent is available in the suite node_modules; no pi-ai mock
-// needed because comment-checker only uses the tool_result event.
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 const originalHome = process.env.HOME;
 const originalConfigDir = process.env.PI_CONFIG_DIR;

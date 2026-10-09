@@ -51,6 +51,40 @@ npm ci --prefix external/pi-tools-suite
 
 This avoids reusing native addons built for a different Node ABI.
 
+## Verification before pushing
+
+`npm run check` is the quick **root-only** check, not the complete CI gate.
+Before pushing, run:
+
+```bash
+npm run check:ci -- --list  # inspect the native-host plan without running tests
+npm run check:ci
+```
+
+The same entrypoint runs in `check.yml`: root checks, ACP checks (including
+stdio smoke), and the tools-suite tests on all three supported TUI platforms;
+Desktop frontend checks/tests and Rust fmt/check/backend-runtime tests on macOS;
+browser mock-page E2E on Linux. A successful native gate does not prove the other
+OS matrix legs or release smoke. It does not install dependencies or act as a Git hook.
+
+Install the root and ACP dependencies first (`npm ci --ignore-scripts`,
+`npm ci --prefix acp --ignore-scripts`), plus Desktop dependencies on macOS
+(`npm ci --prefix desktop --ignore-scripts`). Bun must be on PATH, along with
+Rust/Tauri prerequisites on macOS. Linux browser E2E requires
+`npx playwright install --with-deps chromium` beforehand. These checks do not
+enable paid/live-model evals; leave their opt-in environment flags unset.
+
+The gate stops on the first failure and preserves its exit code. All checks
+clear inherited `PIX_CONFIG_PROFILE`, `PIX_BRAINSTORM_HOST_URL` and
+`PIX_BRAINSTORM_HOST_TOKEN` so Desktop-launched agents use CI defaults and cannot
+reach the live council host; tests can still explicitly choose a profile or
+supply their own fake host. Tools-suite
+tests receive an isolated HOME/config directory, without changing your shell's
+environment. Full per-step output and a machine-readable result (including
+steps not run) are written to a unique `.pi/artifacts/check-ci-*/` directory.
+CI uploads the logs and summary even on failure. Scratch evidence is disposable;
+export it if you need durable retention.
+
 ## TUI development
 
 ```bash
@@ -59,6 +93,11 @@ npm run check
 npm run test:tools-suite
 npm run build:pix
 ```
+
+The tools-suite's default Bun command uses `--isolate` to keep per-file module
+mocks from leaking into unrelated tests. Use a Bun version supporting that flag
+(the local regression was verified with 1.3.14). For multi-file focused Bun runs,
+also pass `--isolate`; restoring mocks alone cannot repair cached fake schemas.
 
 ## Desktop development
 

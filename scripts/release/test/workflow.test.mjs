@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import { test } from "node:test";
 import { root, targets } from "../common.mjs";
+import { ciPlan } from "../../check-ci.mjs";
 
 // The locked Pi SDK already depends on yaml; resolve it from that package without adding a build dependency.
 const require = createRequire(join(root, "node_modules/@earendil-works/pi-coding-agent/package.json"));
@@ -43,10 +44,18 @@ test("CI and release workflows do not duplicate npm/publication work", () => {
   assert.deepEqual(checkWorkflow.on.push.branches, ["master"]);
   assert.deepEqual(checkWorkflow.on.pull_request.branches, ["master"]);
   assert.ok(checkWorkflow.jobs["build-and-test"]);
-  const desktopCheck = checkWorkflow.jobs["build-and-test"].steps.find((step) => step.name === "Install and check desktop frontend");
-  assert.equal(desktopCheck.if, "runner.os == 'macOS'");
-  const browserInstall = checkWorkflow.jobs["build-and-test"].steps.find((step) => step.name === "Install Chromium for browser QA E2E");
-  assert.equal(browserInstall.if, "matrix.os == 'ubuntu-latest'");
+  const steps = checkWorkflow.jobs["build-and-test"].steps;
+  const desktopInstall = steps.find((step) => step.run?.includes("npm ci --prefix desktop"));
+  assert.equal(desktopInstall?.if, "runner.os == 'macOS'");
+  const browserInstall = steps.find((step) => step.run?.includes("playwright install --with-deps chromium"));
+  assert.equal(browserInstall?.if, "matrix.os == 'ubuntu-latest'");
+  const gate = steps.filter((step) => step.run === "npm run check:ci");
+  assert.equal(gate.length, 1);
+  assert.equal(gate[0].if, undefined);
+  assert.ok(ciPlan("darwin").some((step) => step.id === "desktop-check"));
+  for (const platform of ["linux", "win32"]) {
+    assert.equal(ciPlan(platform).some((step) => step.id.startsWith("desktop") || step.id.startsWith("rust")), false);
+  }
   for (const candidate of [workflow, checkWorkflow]) {
     const serialized = JSON.stringify(candidate);
     assert.equal(serialized.includes("actions/setup-node"), false);

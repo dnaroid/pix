@@ -63,6 +63,7 @@
     "qa:desktop": "node scripts/qa-desktop.mjs",
     "rebuild:all": "npm run build:desktop",
     "check": "npm run check:inner",
+    "check:ci": "node scripts/check-ci.mjs",
     "precheck:inner": "npm run generate-schemas --silent",
     "check:inner": "npm run sync:sdk-pin:check --silent && npm run release:version:check --silent && tsc --noEmit && npm run test:inner && npm run test:release",
     "test": "npm run test:inner",

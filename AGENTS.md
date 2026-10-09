@@ -1,5 +1,10 @@
 # Engineering guardrails
 
+- Before pushing implementation changes, run `npm run check:ci` after installing
+  the native-host prerequisites in `docs/development.md`. `npm run check` is only
+  the quick root check, not the full CI gate. A local pass does not prove other
+  operating-system matrix legs; report any blocked or incomplete checks.
+
 - IDX embeddings: new-project `idx init` and default `idx setup` use OpenRouter,
   not Ollama; disclose external code/document chunks and query transmission and
   the `OPENROUTER_API_KEY` prerequisite before initialization. npm installation

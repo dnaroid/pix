@@ -41,22 +41,24 @@ jobs:
         run: npm install -g bun@1.4.2
       - run: bun --version
       - run: npm ci --ignore-scripts
-      - run: npm run check
-      - name: Install and check ACP adapter
-        run: npm ci --prefix acp --ignore-scripts && npm run check:acp
-      - name: Install and check desktop frontend
+      - name: Install ACP adapter
+        run: npm ci --prefix acp --ignore-scripts
+      - name: Install desktop frontend
         if: runner.os == 'macOS'
-        run: npm ci --prefix desktop --ignore-scripts && npm run check:desktop && npm --prefix desktop test
-      - name: Check desktop Rust host
-        if: runner.os == 'macOS'
-        run: |
-          cargo fmt --manifest-path desktop/src-tauri/Cargo.toml --check
-          cargo check --manifest-path desktop/src-tauri/Cargo.toml
-          cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked --lib backend_runtime
-      - run: npm run test:tools-suite
+        run: npm ci --prefix desktop --ignore-scripts
       - name: Install Chromium for browser QA E2E
         if: matrix.os == 'ubuntu-latest'
         run: npx playwright install --with-deps chromium
-      - name: Run browser QA mock-page E2E
-        if: matrix.os == 'ubuntu-latest'
-        run: npm run test:browser-qa-e2e
+      - name: Run shared native CI gate
+        run: npm run check:ci
+      - name: Upload CI gate logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: check-ci-${{ matrix.os }}
+          # .pi is hidden; only these explicitly selected logs/summary are uploaded.
+          include-hidden-files: true
+          path: |
+            .pi/artifacts/check-ci-*/summary.json
+            .pi/artifacts/check-ci-*/*.log
+          if-no-files-found: ignore

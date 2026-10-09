@@ -60,17 +60,55 @@ remain true when CI or UI-QA tests change.
   because Git materialized CRLF line endings.
 - `tests/node-version.test.ts` guards the absence of project pins, manifest/lockfile/CI alignment, PATH-runtime behavior, and launcher boundaries. Update the contract and its tests together when changing supported versions.
 
+## Local CI gate
+
+- `npm run check` remains a root-only quick check. `npm run check:ci` is the
+  shared native-host verification entrypoint used locally and by `check.yml`.
+  `-- --list` prints the host plan without executing checks.
+- Every supported host runs root checks, ACP checks (including stdio smoke),
+  and tools-suite tests. macOS additionally runs Desktop frontend checks/tests
+  and Rust fmt/check/locked backend-runtime tests. Linux additionally runs
+  browser mock-page E2E. Windows/Linux Desktop is not a delivery requirement.
+- The gate uses installed dependencies and PATH tools; it does not install
+  prerequisites, enable live-model evals, run release packaging/smoke, install
+  Git hooks, change GitHub protection settings, or prove other OS matrix legs.
+- Tools-suite tests receive a fresh HOME/USERPROFILE, XDG config/cache/data
+  roots and Pi agent directory under the run's scratch directory. The parent
+  environment is not mutated. Ambient live-eval opt-ins must remain unset.
+- Every check clears inherited `PIX_CONFIG_PROFILE`, `PIX_BRAINSTORM_HOST_URL`
+  and `PIX_BRAINSTORM_HOST_TOKEN` from its child environment so launching the
+  gate from Desktop cannot redirect default-profile fixtures or reach the live
+  council host. Tests can still explicitly select a profile or fake host.
+- Checks execute sequentially and stop on first failure. Nonzero child exit
+  codes are preserved; launch failures fail closed. Signal termination and
+  gate cancellation are incomplete, never passing, and later checks do not run.
+  Cancellation terminates only the active gate-owned child tree and releases
+  signal listeners and escalation timers.
+- Each run retains full per-step logs and a JSON summary with status, exit code,
+  results and steps not run under a unique `.pi/artifacts/check-ci-*/` directory.
+  `check.yml` uploads logs/summaries even on failure, excluding isolated profiles.
+
 ## Deterministic test invariants
 
 - Tests must assert explicit bytes, counts, states, or observable ownership conditions instead of assuming a runner completes enough work during a short wall-clock interval.
 - Timers are appropriate only when timeout behavior itself is under test; elapsed time must not stand in for output volume, process progress, or cleanup completion.
 - Real Git/filesystem integration tests may use an explicit generous harness timeout for slow Windows runners; that timeout is only a deadlock safety ceiling, never a performance assertion.
-- Resource-registry scenarios that invoke real Git share a 30-second harness ceiling, including Desktop RPC snapshot tests. Pure unit tests and the command-timeout regression retain their own limits.
+- Resource-registry scenarios that invoke real Git share a 60-second harness ceiling, including Desktop RPC snapshot tests. Pure unit tests and the command-timeout regression retain their own limits.
 - Independent browser-QA rejection scenarios that launch separate Node runners are separate tests, with fresh fixtures and per-case time budgets; they must not consume a single aggregate timeout. Keep all rejection, redaction, and cleanup assertions when splitting cases.
 - Process-cleanup tests wait for an observable owned-process condition when teardown completion matters.
 - Process test doubles emit their terminal lifecycle events; they must not depend on unreferenced fallback timers keeping the test runner alive across Node versions.
 - Local reproduction of configuration-sensitive suite tests uses an isolated `HOME` so user Pix/pi-tools-suite configuration cannot change the tested defaults.
 - CRLF/LF differences are normalized unless line endings themselves are the behavior under test.
+- Tools-suite's default Bun test command uses `--isolate` so each file has a
+  fresh global/module-mock environment. `mock.module` in one file must not change
+  TypeBox, pi-ai, or pi-tui exports or import-time schema constants in another.
+  Restoring exports after a file does not repair already-cached fake schemas.
+  A test importing the real SDK must not replace TypeBox with a partial mock;
+  comment-checker tests use the real TypeBox exports.
+- Control-plane budget tests serialize the real runtime compress schema directly;
+  fake `kind`/`options`/`schema` wrappers are test mocks, not a supported TypeBox
+  representation to normalize. The schema regression guards its real JSON Schema
+  shape even when mock-owning files run earlier.
 
 ## Windows process invariants
 
@@ -83,7 +121,8 @@ remain true when CI or UI-QA tests change.
 ## Standalone release-smoke invariants
 
 - Source tests do not replace release smoke. Every native release job must execute
-  the extracted TUI archive and the installed/relocated Desktop application.
+  the extracted TUI archive; the macOS job additionally executes the
+  installed/relocated Desktop application.
 - TUI smoke proves bundled Node, native PTY, extensions and esbuild without ACP.
 - Desktop smoke additionally proves ACP initialize/new/close and native host
   startup from the actual installer/bundle path.
@@ -93,6 +132,9 @@ remain true when CI or UI-QA tests change.
 ## Implementation
 
 - `.github/workflows/check.yml`
+- `scripts/check-ci.mjs`
+- `external/pi-tools-suite/package.json`
+- `external/pi-tools-suite/test/evals/session-token-efficiency.ts`
 - `.github/workflows/publish.yml`
 - `scripts/release/smoke.mjs`
 - `scripts/release/smoke-desktop.mjs`
@@ -114,8 +156,24 @@ remain true when CI or UI-QA tests change.
 
 ## Verification
 
+- `node --import tsx --test tests/ci-gate.test.ts`
+- `npm run check:ci` (after installing native-host prerequisites)
 - `node --import tsx --test tests/node-version.test.ts`
 - `npm run check`
 - `npm run test:release`
 - `npm run test:tools-suite` with an isolated `HOME` when reproducing CI defaults locally
 - `git diff --check`
+
+## Tests
+
+- `scripts/release/test/workflow.test.mjs`
+- `tests/ci-gate.test.ts`
+- `external/pi-tools-suite/test/evals/compress-schema.test.ts`
+- `external/pi-tools-suite/test/comment-checker.test.ts`
+- `external/pi-tools-suite/test/evals/session-token-efficiency.test.ts`
+- `tests/node-version.test.ts`
+- `tests/voice-controller.test.ts`
+- `acp/test/git-assistant.test.ts`
+- `external/pi-tools-suite/test/async-subagents/ui-qa-runner.test.ts`
+- `external/pi-tools-suite/test/async-subagents/browser-qa-runner.test.ts`
+- `acp/test/registry.test.ts`
