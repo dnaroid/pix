@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile, link, unlink, lstat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, symlink, writeFile, link, lstat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import registerProjectTasks from "../src/project-tasks/index.js";
@@ -8,14 +8,13 @@ import { runProjectTasks, parseProjectTasksParams } from "../src/project-tasks/e
 import { attachTaskFile } from "../src/project-tasks/attachments.js";
 import { TASK_COMMAND_USAGE, parseTaskCommand } from "../src/project-tasks/commands.js";
 import { safeSqliteSidecarNlink, transaction, withTaskDatabase } from "../src/project-tasks/storage.js";
+import { removeDirsWithRetry, unlinkWithRetry } from "./support/fs-retry.js";
 import { MODULES } from "../src/index.js";
 import type { ProjectTask } from "../src/project-tasks/schema.js";
 
 const scratch = fileURLToPath(new URL("../../../.pi/artifacts/project-tasks-sqlite-tests/", import.meta.url));
 const roots: string[] = [];
-afterEach(async () => {
-  for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
-});
+afterEach(() => removeDirsWithRetry(roots));
 const task = (id = "A"): ProjectTask => ({
   id, title: `Task ${id}`, description: "A description", type: "feature",
   status: "todo", priority: "medium", sessionId: "session-1", links: ["specs/project.md"],
@@ -57,7 +56,7 @@ describe("project_tasks SQLite-only storage", () => {
       await link(sidecar, alias);
       try {
         await expect(withTaskDatabase(path.join(root, ".pi"), "read", db => db?.prepare("SELECT count(*) AS n FROM tasks").get())).rejects.toThrow("Unsafe task database sidecar");
-      } finally { await unlink(alias); await unlink(sidecar); }
+      } finally { await unlinkWithRetry(alias); await unlinkWithRetry(sidecar); }
     }
     // Deliberately forging SQLite sidecars may invalidate VFS state on APFS.
     // Do not reopen the same database after the malicious fixture; the tested

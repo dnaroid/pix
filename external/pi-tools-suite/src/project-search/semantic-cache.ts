@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { lstat, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { withTaskDatabase } from "../project-tasks/storage.js";
 import { SEARCH_VECTOR_DIMENSIONS, SEARCH_VECTOR_MODEL, validSearchVector,
@@ -93,7 +93,7 @@ export interface NamedSessionLink { sessionId: string; name: string }
 export async function sessionLinks(root: string, sessions: readonly CachedSessionCandidate[], options: SemanticSearchOptions,
   signal: AbortSignal): Promise<Map<string, NamedSessionLink>> {
   const override = process.env.PIX_ACP_SESSION_MAP;
-  const filename = options.sessionMapPath ?? (override?.startsWith("/") ? override : undefined)
+  const filename = options.sessionMapPath ?? (override !== undefined && isAbsolute(override) ? override : undefined)
     ?? join(homedir(), ".pi", "agent", "pix-acp", "sessions.json");
   if (!await regularFile(filename, 8 * 1024 * 1024)) return new Map();
   signal.throwIfAborted();
@@ -108,7 +108,7 @@ export async function sessionLinks(root: string, sessions: readonly CachedSessio
     if (!record || typeof record !== "object" || Array.isArray(record)) continue;
     const value = record as Record<string, unknown>;
     if (typeof value.cwd !== "string" || resolve(value.cwd) !== root
-      || typeof value.piSessionPath !== "string" || !value.piSessionPath.startsWith("/")
+      || typeof value.piSessionPath !== "string" || !isAbsolute(value.piSessionPath)
       || typeof value.sessionId !== "string" || !value.sessionId || value.sessionId.length > 256
       || typeof value.namedTitle !== "string" || !value.namedTitle.trim() || value.namedTitle.length > 2000
       || value.namedTitle !== value.title) continue;

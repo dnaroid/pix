@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Database } from "bun:sqlite";
@@ -11,10 +11,11 @@ import { embedSemanticQuery } from "../src/project-search/semantic-provider.js";
 import { commitIdentity, type CommitEmbeddingConfig } from "../src/project-search/semantic-commit-provider.js";
 import { SEARCH_EMBEDDING_MODEL } from "../../../acp/src/search/contract.js";
 import { EMBEDDING_DIMENSIONS } from "../../../acp/src/search/embeddings.js";
+import { removeDirsWithRetry, renameWithRetry } from "./support/fs-retry.js";
 
 const scratch = fileURLToPath(new URL("../../../.pi/artifacts/project-search-semantic-tests/", import.meta.url));
 const roots: string[] = [];
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(() => removeDirsWithRetry(roots));
 
 function fixture() {
   mkdirSync(scratch, { recursive: true });
@@ -425,8 +426,7 @@ describe("project_search shared semantic cache", () => {
     f.consent(true);
     const redirect = fixture();
     const existing = path.join(f.root, ".pi/search");
-    const { renameSync } = await import("node:fs");
-    renameSync(existing, path.join(f.root, ".pi/original-search"));
+        await renameWithRetry(existing, path.join(f.root, ".pi/original-search"));
     symlinkSync(path.join(redirect.root, ".pi/search"), existing);
     const deps = services(f);
     const result = await searchProject(f.root, { query: "conceptual redesign", sources: ["tasks"] }, deps);

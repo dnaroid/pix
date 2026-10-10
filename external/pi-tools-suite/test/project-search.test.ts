@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { Database } from "bun:sqlite";
 import { DefaultResourceLoader, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { installFakeIdxOnPath } from "./support/fake-idx.js";
+import { removeDirsWithRetry } from "./support/fs-retry.js";
 import projectSearchExtension from "../src/project-search/index.js";
 import {
   formatProjectSearch, indexSearchArgs, parseGitHistory, parseIdxHits, parseProjectSearchParams, readSessionBoundary,
@@ -15,9 +16,7 @@ import {
 } from "../src/project-search/engine.js";
 
 const directories: string[] = [];
-afterEach(() => {
-  for (const dir of directories.splice(0)) rmSync(dir, { recursive: true, force: true });
-});
+afterEach(() => removeDirsWithRetry(directories));
 const fixture = () => {
   const root = mkdtempSync(path.join(tmpdir(), "pix-project-search-"));
   directories.push(root);
