@@ -44,8 +44,8 @@ mod native_process;
 mod preview_file;
 mod preview_file_action;
 mod project_browser;
-mod project_tasks_sqlite;
 mod project_directory_link;
+mod project_tasks_sqlite;
 mod qa_profile;
 #[cfg(feature = "bundled-runtime")]
 mod release_smoke;
@@ -1514,7 +1514,9 @@ async fn persist_task_attachment(
         let bytes = read_project_state_bytes(&root, &source, MAX_ATTACHMENT_BYTES, false)?;
         let digest = format!("{:x}", Sha256::digest(&bytes));
         // Do not add another digest prefix when persisting an already-addressed file.
-        let name = source_file.name.strip_prefix(&format!("{digest}-"))
+        let name = source_file
+            .name
+            .strip_prefix(&format!("{digest}-"))
             .unwrap_or(&source_file.name);
         let target = persist_immutable_task_attachment(&directory, name, &bytes)?;
         let canonical = state.approve_cached(&app, &target)?;
@@ -4853,7 +4855,10 @@ fn sidebar_registry_surface_stamp(
         // SQLite creates/removes -wal and -shm entries on ordinary read
         // connections. Directory mtime is not a stable concurrent-read token;
         // task content is guarded by the logical before/after bundle hash.
-        sidebar_path_stamp(pi_dir)?.map(|_| SidebarFileStamp { len: 0, modified_ns: 0 }),
+        sidebar_path_stamp(pi_dir)?.map(|_| SidebarFileStamp {
+            len: 0,
+            modified_ns: 0,
+        }),
         sidebar_path_stamp(&pi_dir.join("skills"))?,
         sidebar_path_stamp(&pi_dir.join("agents"))?,
     ))
@@ -4866,21 +4871,48 @@ fn sidebar_registry_canonical_name(name: &str) -> bool {
         return false;
     }
     let lower = name.to_ascii_lowercase();
-    if ["node_modules", "__pycache__", "artifacts", "cache", "tmp", "temp", "coverage", "build", "dist", "out", "target", "venv", "thumbs.db", "desktop.ini"]
-        .contains(&lower.as_str())
+    if [
+        "node_modules",
+        "__pycache__",
+        "artifacts",
+        "cache",
+        "tmp",
+        "temp",
+        "coverage",
+        "build",
+        "dist",
+        "out",
+        "target",
+        "venv",
+        "thumbs.db",
+        "desktop.ini",
+    ]
+    .contains(&lower.as_str())
     {
         return false;
     }
-    if ["-wal", "-shm", "-journal"].iter().any(|suffix| lower.ends_with(suffix)) {
+    if ["-wal", "-shm", "-journal"]
+        .iter()
+        .any(|suffix| lower.ends_with(suffix))
+    {
         return false;
     }
-    ![".tmp", ".temp", ".bak", ".backup", ".lock", ".swp", ".swo", ".orig", ".log", ".pid", ".pyc", ".pyo"]
-        .iter().any(|suffix| lower.ends_with(suffix))
+    ![
+        ".tmp", ".temp", ".bak", ".backup", ".lock", ".swp", ".swo", ".orig", ".log", ".pid",
+        ".pyc", ".pyo",
+    ]
+    .iter()
+    .any(|suffix| lower.ends_with(suffix))
 }
 
 fn sidebar_registry_canonical_plan_file(path: &Path) -> bool {
-    path.file_name().and_then(|name| name.to_str()).is_some_and(sidebar_registry_canonical_name)
-        && path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(sidebar_registry_canonical_name)
+        && path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
 }
 
 fn sidebar_registry_local_resources(root: &Path) -> Result<HashMap<String, PathBuf>, String> {
@@ -4950,18 +4982,33 @@ fn sidebar_registry_local_resources(root: &Path) -> Result<HashMap<String, PathB
  */
 fn sidebar_registry_is_agent_definition(path: &Path, name: &str) -> bool {
     const MAX_AGENT_HEADER: u64 = 16 * 1024;
-    let Ok(file) = fs::File::open(path) else { return false; };
+    let Ok(file) = fs::File::open(path) else {
+        return false;
+    };
     let mut source = String::new();
-    if file.take(MAX_AGENT_HEADER).read_to_string(&mut source).is_err() { return false; }
+    if file
+        .take(MAX_AGENT_HEADER)
+        .read_to_string(&mut source)
+        .is_err()
+    {
+        return false;
+    }
     let mut lines = source.trim_start_matches('\u{feff}').lines();
-    if lines.next().is_none_or(|line| line.trim() != "---") { return false; }
+    if lines.next().is_none_or(|line| line.trim() != "---") {
+        return false;
+    }
     let mut terminated = false;
     for line in lines {
         let trimmed = line.trim();
-        if trimmed == "---" || trimmed == "..." { terminated = true; break; }
+        if trimmed == "---" || trimmed == "..." {
+            terminated = true;
+            break;
+        }
         if let Some(declared) = trimmed.strip_prefix("name:") {
             let declared = declared.trim().trim_matches(|ch| ch == '\'' || ch == '"');
-            if !declared.is_empty() && declared != name { return false; }
+            if !declared.is_empty() && declared != name {
+                return false;
+            }
         }
     }
     terminated
@@ -5021,11 +5068,18 @@ fn sidebar_registry_has_trackable_file(path: &Path, count: &mut usize) -> Result
     sidebar_registry_has_canonical_file(path, count, true)
 }
 
-fn sidebar_registry_has_canonical_resource_file(path: &Path, count: &mut usize) -> Result<bool, String> {
+fn sidebar_registry_has_canonical_resource_file(
+    path: &Path,
+    count: &mut usize,
+) -> Result<bool, String> {
     sidebar_registry_has_canonical_file(path, count, false)
 }
 
-fn sidebar_registry_has_canonical_file(path: &Path, count: &mut usize, plans_only: bool) -> Result<bool, String> {
+fn sidebar_registry_has_canonical_file(
+    path: &Path,
+    count: &mut usize,
+    plans_only: bool,
+) -> Result<bool, String> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
     if metadata.file_type().is_symlink() || metadata.is_file() {
@@ -5062,10 +5116,12 @@ fn sidebar_registry_cached_path_changed(
     hash_budget: &mut u64,
 ) -> Result<Option<bool>, String> {
     let plans_only = cache_key == "project:plans";
-    let fingerprint = || if plans_only {
-        sidebar_registry_tree_fingerprint_for(path, true)
-    } else {
-        sidebar_registry_resource_hash::fingerprint(path, include_agent_companion)
+    let fingerprint = || {
+        if plans_only {
+            sidebar_registry_tree_fingerprint_for(path, true)
+        } else {
+            sidebar_registry_resource_hash::fingerprint(path, include_agent_companion)
+        }
     };
     let (fingerprint_before, file_bytes) = fingerprint()?;
     let cached = state.registry_cache.lock().ok().and_then(|cache| {
@@ -5180,7 +5236,10 @@ fn sidebar_registry_tree_fingerprint(path: &Path) -> Result<(u64, u64), String> 
     sidebar_registry_tree_fingerprint_for(path, false)
 }
 
-fn sidebar_registry_tree_fingerprint_for(path: &Path, plans_only: bool) -> Result<(u64, u64), String> {
+fn sidebar_registry_tree_fingerprint_for(
+    path: &Path,
+    plans_only: bool,
+) -> Result<(u64, u64), String> {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     let mut count = 0usize;
     let mut bytes = 0u64;
@@ -5229,10 +5288,14 @@ fn sidebar_registry_fingerprint_visit(
     entries.sort_by_key(|entry| entry.file_name().to_string_lossy().into_owned());
     for entry in entries {
         let name = entry.file_name().to_string_lossy().into_owned();
-        let file_type = entry.file_type().map_err(|error| format!("failed to inspect {}: {error}", entry.path().display()))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("failed to inspect {}: {error}", entry.path().display()))?;
         if file_type.is_dir() {
             let mut count = 0;
-            if !sidebar_registry_has_canonical_file(&entry.path(), &mut count, plans_only)? { continue; }
+            if !sidebar_registry_has_canonical_file(&entry.path(), &mut count, plans_only)? {
+                continue;
+            }
         } else if plans_only && !sidebar_registry_canonical_plan_file(&entry.path()) {
             continue;
         }
@@ -5241,7 +5304,14 @@ fn sidebar_registry_fingerprint_visit(
         } else {
             format!("{relative}/{name}")
         };
-        sidebar_registry_fingerprint_visit(&entry.path(), &child_relative, count, bytes, hasher, plans_only)?;
+        sidebar_registry_fingerprint_visit(
+            &entry.path(),
+            &child_relative,
+            count,
+            bytes,
+            hasher,
+            plans_only,
+        )?;
     }
     Ok(())
 }
@@ -5317,10 +5387,14 @@ fn sidebar_registry_hash_visit(
     entries.sort_by_key(|entry| entry.file_name().to_string_lossy().into_owned());
     for entry in entries {
         let name = entry.file_name().to_string_lossy().into_owned();
-        let file_type = entry.file_type().map_err(|error| format!("failed to inspect {}: {error}", entry.path().display()))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("failed to inspect {}: {error}", entry.path().display()))?;
         if file_type.is_dir() {
             let mut count = 0;
-            if !sidebar_registry_has_canonical_file(&entry.path(), &mut count, plans_only)? { continue; }
+            if !sidebar_registry_has_canonical_file(&entry.path(), &mut count, plans_only)? {
+                continue;
+            }
         } else if plans_only && !sidebar_registry_canonical_plan_file(&entry.path()) {
             continue;
         }
@@ -5329,7 +5403,14 @@ fn sidebar_registry_hash_visit(
         } else {
             format!("{relative}/{name}")
         };
-        sidebar_registry_hash_visit(&entry.path(), &child_relative, count, bytes, hasher, plans_only)?;
+        sidebar_registry_hash_visit(
+            &entry.path(),
+            &child_relative,
+            count,
+            bytes,
+            hasher,
+            plans_only,
+        )?;
     }
     Ok(())
 }
@@ -8201,32 +8282,44 @@ async fn read_project_task_attachments(
         let directory = canonical_project_directory(&root, &root.join(".pi"))?;
         let references = project_tasks_sqlite::attachments_for_task(&directory, &id)?;
         let state = app.state::<AttachmentPathState>();
-        references.into_iter().map(|(path, name, size)| {
-            let approved = state.approve_cached(&app, &path)?;
-            let mut attachment = attachment_file(&approved)?;
-            if attachment.size != size { return Err("Task attachment changed during approval".into()); }
-            attachment.name = name;
-            Ok(attachment)
-        }).collect()
-    }).await
+        references
+            .into_iter()
+            .map(|(path, name, size)| {
+                let approved = state.approve_cached(&app, &path)?;
+                let mut attachment = attachment_file(&approved)?;
+                if attachment.size != size {
+                    return Err("Task attachment changed during approval".into());
+                }
+                attachment.name = name;
+                Ok(attachment)
+            })
+            .collect()
+    })
+    .await
 }
 
 #[tauri::command]
-async fn read_project_task_attachment_counts(workspace: String) -> Result<HashMap<String, i64>, String> {
+async fn read_project_task_attachment_counts(
+    workspace: String,
+) -> Result<HashMap<String, i64>, String> {
     run_blocking(move || {
         let root = canonical_workspace(Path::new(&workspace))?;
         let directory = canonical_project_directory(&root, &root.join(".pi"))?;
         project_tasks_sqlite::attachment_counts(&directory)
-    }).await
+    })
+    .await
 }
 
 #[tauri::command]
-async fn read_project_task_attachment_names(workspace: String) -> Result<HashMap<String, Vec<String>>, String> {
+async fn read_project_task_attachment_names(
+    workspace: String,
+) -> Result<HashMap<String, Vec<String>>, String> {
     run_blocking(move || {
         let root = canonical_workspace(Path::new(&workspace))?;
         let directory = canonical_project_directory(&root, &root.join(".pi"))?;
         project_tasks_sqlite::attachment_names(&directory)
-    }).await
+    })
+    .await
 }
 
 #[tauri::command]
@@ -8237,8 +8330,12 @@ async fn write_project_tasks(
     attachments: Option<Vec<AttachmentFile>>,
 ) -> Result<(), String> {
     run_blocking(move || {
-        write_project_tasks_checked_with_attachments(Path::new(&workspace), &document,
-            Some(&expected_document), attachments.as_deref())
+        write_project_tasks_checked_with_attachments(
+            Path::new(&workspace),
+            &document,
+            Some(&expected_document),
+            attachments.as_deref(),
+        )
     })
     .await
 }
@@ -8256,10 +8353,18 @@ async fn reorder_project_task(
     run_blocking(move || {
         let root = canonical_workspace(Path::new(&workspace))?;
         let directory = canonical_project_directory(&root, &root.join(".pi"))?;
-        project_tasks_sqlite::reorder(&directory, &task_id, &target_status,
-            target_task_id.as_deref(), &position, &expected_task, &updated_at)?;
+        project_tasks_sqlite::reorder(
+            &directory,
+            &task_id,
+            &target_status,
+            target_task_id.as_deref(),
+            &position,
+            &expected_task,
+            &updated_at,
+        )?;
         project_tasks_sqlite::read(&directory, MAX_TASK_DOCUMENT_BYTES)
-    }).await
+    })
+    .await
 }
 
 fn read_project_tasks_from(
@@ -8269,7 +8374,9 @@ fn read_project_tasks_from(
     let root = canonical_workspace(workspace)?;
     let directory = root.join(".pi");
     match fs::symlink_metadata(&directory) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(empty_task_document()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(empty_task_document())
+        }
         Err(error) => return Err(format!("failed to inspect .pi: {error}")),
         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
             return Err(".pi must be a project-owned directory".to_owned());
@@ -8289,7 +8396,10 @@ fn read_project_state_bytes(
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err(format!("{} must be a project-owned regular file", path.display()));
+        return Err(format!(
+            "{} must be a project-owned regular file",
+            path.display()
+        ));
     }
     let canonical = fs::canonicalize(path)
         .map_err(|error| format!("failed to resolve {}: {error}", path.display()))?;
@@ -8307,10 +8417,13 @@ fn read_project_state_bytes(
     let file = if project_owned {
         let project_directory = root.join(".pi");
         let mut directory = open_project_markdown_directory(&project_directory)?;
-        let relative = path.strip_prefix(&project_directory)
+        let relative = path
+            .strip_prefix(&project_directory)
             .map_err(|_| "project state path escapes .pi".to_owned())?;
         let mut components = relative.components().collect::<Vec<_>>();
-        let name = components.pop().ok_or_else(|| "project state path has no filename".to_owned())?;
+        let name = components
+            .pop()
+            .ok_or_else(|| "project state path has no filename".to_owned())?;
         for component in components {
             let Component::Normal(name) = component else {
                 return Err("project state path escapes .pi".to_owned());
@@ -8322,24 +8435,35 @@ fn read_project_state_bytes(
         };
         open_project_state_file_at(&directory, name)?
     } else {
-        options.open(path).map_err(|error| format!("failed to open {}: {error}", path.display()))?
+        options
+            .open(path)
+            .map_err(|error| format!("failed to open {}: {error}", path.display()))?
     };
     #[cfg(not(unix))]
-    let file = options.open(path)
+    let file = options
+        .open(path)
         .map_err(|error| format!("failed to open {}: {error}", path.display()))?;
-    let metadata = file.metadata()
+    let metadata = file
+        .metadata()
         .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
     if !metadata.is_file() {
         return Err(format!("{} is not a regular file", path.display()));
     }
     if metadata.len() > max_bytes {
-        return Err(format!("{} is too large (maximum {max_bytes} bytes)", path.display()));
+        return Err(format!(
+            "{} is too large (maximum {max_bytes} bytes)",
+            path.display()
+        ));
     }
     let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    file.take(max_bytes + 1).read_to_end(&mut bytes)
+    file.take(max_bytes + 1)
+        .read_to_end(&mut bytes)
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
     if bytes.len() as u64 > max_bytes {
-        return Err(format!("{} grew beyond the {max_bytes} byte limit", path.display()));
+        return Err(format!(
+            "{} grew beyond the {max_bytes} byte limit",
+            path.display()
+        ));
     }
     Ok(bytes)
 }
@@ -8354,21 +8478,33 @@ fn persist_immutable_task_attachment(
     }
     let hash = format!("{:x}", Sha256::digest(bytes));
     let target = directory.join(&hash);
-    let temporary = directory.join(format!(".task-attachment.{}.{}.tmp",
-        std::process::id(), ATTACHMENT_SEQUENCE.fetch_add(1, Ordering::Relaxed)));
+    let temporary = directory.join(format!(
+        ".task-attachment.{}.{}.tmp",
+        std::process::id(),
+        ATTACHMENT_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
     let result = (|| {
-        let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&temporary)
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
             .map_err(|error| format!("failed to create task attachment: {error}"))?;
-        file.write_all(bytes).map_err(|error| format!("failed to write task attachment: {error}"))?;
-        file.sync_all().map_err(|error| format!("failed to flush task attachment: {error}"))?;
+        file.write_all(bytes)
+            .map_err(|error| format!("failed to write task attachment: {error}"))?;
+        file.sync_all()
+            .map_err(|error| format!("failed to flush task attachment: {error}"))?;
         drop(file);
         // Exclusive publication, so an existing content-addressed file is never overwritten.
         match fs::hard_link(&temporary, &target) {
             Ok(()) => sync_directory(directory)?,
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                let existing = read_project_state_bytes(directory, &target, MAX_ATTACHMENT_BYTES, false)?;
+                let existing =
+                    read_project_state_bytes(directory, &target, MAX_ATTACHMENT_BYTES, false)?;
                 if existing != bytes {
-                    return Err("existing content-addressed task attachment does not match content".to_owned());
+                    return Err(
+                        "existing content-addressed task attachment does not match content"
+                            .to_owned(),
+                    );
                 }
             }
             Err(error) => return Err(format!("failed to publish task attachment: {error}")),
@@ -8517,23 +8653,51 @@ fn write_project_tasks_checked_with_attachments(
     let current = read_project_tasks_from(&root, MAX_TASK_DOCUMENT_BYTES)?;
     let expected = expected.unwrap_or(&current);
     validate_task_document(expected)?;
-    let before = expected.tasks.iter().map(|task| (task.id.as_str(), task))
+    let before = expected
+        .tasks
+        .iter()
+        .map(|task| (task.id.as_str(), task))
         .collect::<BTreeMap<_, _>>();
-    let after = document.tasks.iter().map(|task| (task.id.as_str(), task))
+    let after = document
+        .tasks
+        .iter()
+        .map(|task| (task.id.as_str(), task))
         .collect::<BTreeMap<_, _>>();
-    let ids = before.keys().chain(after.keys()).copied().collect::<HashSet<_>>();
-    let changed = ids.into_iter().filter(|id| before.get(id) != after.get(id)).collect::<Vec<_>>();
+    let ids = before
+        .keys()
+        .chain(after.keys())
+        .copied()
+        .collect::<HashSet<_>>();
+    let changed = ids
+        .into_iter()
+        .filter(|id| before.get(id) != after.get(id))
+        .collect::<Vec<_>>();
     // Arrays are a transport shape, not a bulk replacement API. Never persist view ordering.
-    let common_before = expected.tasks.iter().filter(|task| after.contains_key(task.id.as_str()))
-        .map(|task| &task.id).collect::<Vec<_>>();
-    let common_after = document.tasks.iter().filter(|task| before.contains_key(task.id.as_str()))
-        .map(|task| &task.id).collect::<Vec<_>>();
+    let common_before = expected
+        .tasks
+        .iter()
+        .filter(|task| after.contains_key(task.id.as_str()))
+        .map(|task| &task.id)
+        .collect::<Vec<_>>();
+    let common_after = document
+        .tasks
+        .iter()
+        .filter(|task| before.contains_key(task.id.as_str()))
+        .map(|task| &task.id)
+        .collect::<Vec<_>>();
     if common_before != common_after || changed.len() != 1 {
-        return Err("task save must mutate exactly one task; bulk edits and reordering are not supported".to_owned());
+        return Err(
+            "task save must mutate exactly one task; bulk edits and reordering are not supported"
+                .to_owned(),
+        );
     }
     let id = changed[0];
     project_tasks_sqlite::mutate_with_attachments(
-        &project_directory, id, before.get(id).copied(), after.get(id).copied(), attachments,
+        &project_directory,
+        id,
+        before.get(id).copied(),
+        after.get(id).copied(),
+        attachments,
     )
 }
 
@@ -9140,16 +9304,33 @@ fn open_project_markdown_subdirectory(
 }
 
 #[cfg(unix)]
-fn open_project_state_file_at(directory: &fs::File, name: &std::ffi::OsStr) -> Result<fs::File, String> {
-    use std::{ffi::CString, os::unix::{ffi::OsStrExt, io::{AsRawFd, FromRawFd}}};
+fn open_project_state_file_at(
+    directory: &fs::File,
+    name: &std::ffi::OsStr,
+) -> Result<fs::File, String> {
+    use std::{
+        ffi::CString,
+        os::unix::{
+            ffi::OsStrExt,
+            io::{AsRawFd, FromRawFd},
+        },
+    };
     let name = CString::new(name.as_bytes())
         .map_err(|_| "project state filename contains a NUL byte".to_owned())?;
     // Open relative to our verified no-follow directory descriptor, rather than
     // following a path that could have been replaced between validation and read.
-    let fd = unsafe { libc::openat(directory.as_raw_fd(), name.as_ptr(),
-        libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK) };
+    let fd = unsafe {
+        libc::openat(
+            directory.as_raw_fd(),
+            name.as_ptr(),
+            libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK,
+        )
+    };
     if fd < 0 {
-        return Err(format!("failed to open project state file: {}", std::io::Error::last_os_error()));
+        return Err(format!(
+            "failed to open project state file: {}",
+            std::io::Error::last_os_error()
+        ));
     }
     Ok(unsafe { fs::File::from_raw_fd(fd) })
 }
@@ -9359,21 +9540,35 @@ fn validate_task_document(document: &ProjectTaskDocument) -> Result<(), String> 
             return Err(format!("task {} has invalid links", task.id));
         }
         if task.related_task_ids.as_ref().is_some_and(|links| {
-            links.len() > 50 || links.iter().any(|id| id.is_empty() || id.chars().count() > 128)
+            links.len() > 50
+                || links
+                    .iter()
+                    .any(|id| id.is_empty() || id.chars().count() > 128)
                 || links.iter().collect::<HashSet<_>>().len() != links.len()
                 || links.iter().any(|id| id == &task.id)
         }) {
             return Err(format!("task {} has invalid related tasks", task.id));
         }
-        if task.parent_id.as_ref().is_some_and(|id| id.is_empty() || id.chars().count() > 128) {
+        if task
+            .parent_id
+            .as_ref()
+            .is_some_and(|id| id.is_empty() || id.chars().count() > 128)
+        {
             return Err(format!("task {} has an invalid parent id", task.id));
         }
         if task.epic == Some(true) && task.parent_id.is_some() {
-            return Err(format!("task {} cannot be both an epic and a subtask", task.id));
+            return Err(format!(
+                "task {} cannot be both an epic and a subtask",
+                task.id
+            ));
         }
         if task.model_ref.as_ref().is_some_and(|value| {
-            value.len() > 256 || value.trim() != value || value.chars().any(char::is_whitespace)
-                || value.split_once('/').is_none_or(|(provider, model)| provider.is_empty() || model.is_empty())
+            value.len() > 256
+                || value.trim() != value
+                || value.chars().any(char::is_whitespace)
+                || value
+                    .split_once('/')
+                    .is_none_or(|(provider, model)| provider.is_empty() || model.is_empty())
         }) {
             return Err(format!("task {} has an invalid model reference", task.id));
         }
@@ -9385,17 +9580,31 @@ fn validate_task_document(document: &ProjectTaskDocument) -> Result<(), String> 
             return Err(format!("task {} updatedAt precedes createdAt", task.id));
         }
     }
-    let parents = document.tasks.iter().map(|task| (task.id.as_str(), task.parent_id.as_deref()))
+    let parents = document
+        .tasks
+        .iter()
+        .map(|task| (task.id.as_str(), task.parent_id.as_deref()))
         .collect::<HashMap<_, _>>();
     for task in &document.tasks {
-        if task.related_task_ids.as_ref().is_some_and(|links| links.iter().any(|id| !parents.contains_key(id.as_str()))) {
-            return Err(format!("task {} references a missing related task", task.id));
+        if task
+            .related_task_ids
+            .as_ref()
+            .is_some_and(|links| links.iter().any(|id| !parents.contains_key(id.as_str())))
+        {
+            return Err(format!(
+                "task {} references a missing related task",
+                task.id
+            ));
         }
         let mut current = task.parent_id.as_deref();
         let mut visited = HashSet::from([task.id.as_str()]);
         while let Some(id) = current {
-            if !visited.insert(id) { return Err(format!("task {} has a cyclic parent relationship", task.id)); }
-            current = *parents.get(id).ok_or_else(|| format!("task {} references a missing parent {id}", task.id))?;
+            if !visited.insert(id) {
+                return Err(format!("task {} has a cyclic parent relationship", task.id));
+            }
+            current = *parents
+                .get(id)
+                .ok_or_else(|| format!("task {} references a missing parent {id}", task.id))?;
         }
     }
     Ok(())
@@ -12046,7 +12255,11 @@ mod tests {
     fn configure_registry_indicator_fixture(home: &Path) {
         let config = home.join(".config/pi/pi-tools-suite.jsonc");
         fs::create_dir_all(config.parent().unwrap()).unwrap();
-        fs::write(config, "{ \"resourceRegistry\": { \"remote\": \"git@example.invalid:registry.git\" } }\n").unwrap();
+        fs::write(
+            config,
+            "{ \"resourceRegistry\": { \"remote\": \"git@example.invalid:registry.git\" } }\n",
+        )
+        .unwrap();
     }
 
     #[test]
@@ -12064,7 +12277,10 @@ mod tests {
         let state = SidebarIndicatorState::default();
         let poll = || sidebar_registry_indicator_state(&state, &workspace, &home);
         let initial = poll();
-        assert!(initial.stable && !initial.local_changes && initial.error.is_none(), "{initial:?}");
+        assert!(
+            initial.stable && !initial.local_changes && initial.error.is_none(),
+            "{initial:?}"
+        );
 
         fs::create_dir_all(skill.join("artifacts")).unwrap();
         fs::create_dir_all(skill.join("node_modules/pkg")).unwrap();
@@ -12075,12 +12291,18 @@ mod tests {
         fs::create_dir_all(skill.join("scratchdir")).unwrap();
         fs::write(skill.join("scratchdir/trace.log"), "trace\n").unwrap();
         let clean = poll();
-        assert!(clean.stable && !clean.local_changes && clean.error.is_none(), "{clean:?}");
+        assert!(
+            clean.stable && !clean.local_changes && clean.error.is_none(),
+            "{clean:?}"
+        );
         assert_eq!(sidebar_registry_hash_path(&skill).unwrap(), hash);
 
         fs::write(skill.join("SKILL.md"), "# Updated skill\n").unwrap();
         let changed = poll();
-        assert!(changed.stable && changed.local_changes && changed.error.is_none(), "{changed:?}");
+        assert!(
+            changed.stable && changed.local_changes && changed.error.is_none(),
+            "{changed:?}"
+        );
         fs::remove_dir_all(workspace).unwrap();
         fs::remove_dir_all(home).unwrap();
     }
@@ -12100,7 +12322,10 @@ mod tests {
         let state = SidebarIndicatorState::default();
         let poll = || sidebar_registry_indicator_state(&state, &workspace, &home);
         let initial = poll();
-        assert!(initial.stable && !initial.local_changes && initial.error.is_none(), "{initial:?}");
+        assert!(
+            initial.stable && !initial.local_changes && initial.error.is_none(),
+            "{initial:?}"
+        );
 
         fs::write(plans.join("notes.txt"), "scratch\n").unwrap();
         fs::write(plans.join("roadmap.md.bak"), "backup\n").unwrap();
@@ -12110,12 +12335,18 @@ mod tests {
         fs::create_dir_all(plans.join("tmp")).unwrap();
         fs::write(plans.join("tmp/draft.md"), "scratch\n").unwrap();
         let clean = poll();
-        assert!(clean.stable && !clean.local_changes && clean.error.is_none(), "{clean:?}");
+        assert!(
+            clean.stable && !clean.local_changes && clean.error.is_none(),
+            "{clean:?}"
+        );
         assert_eq!(sidebar_registry_hash_path_for(&plans, true).unwrap(), hash);
 
         fs::write(plans.join("roadmap.md"), "# Changed\n").unwrap();
         let changed = poll();
-        assert!(changed.stable && changed.local_changes && changed.error.is_none(), "{changed:?}");
+        assert!(
+            changed.stable && changed.local_changes && changed.error.is_none(),
+            "{changed:?}"
+        );
         assert_eq!(changed.project_changes, vec!["plans".to_owned()]);
         fs::remove_dir_all(workspace).unwrap();
         fs::remove_dir_all(home).unwrap();
@@ -12133,11 +12364,21 @@ mod tests {
         configure_registry_indicator_fixture(&home);
         let state = SidebarIndicatorState::default();
         let clean = sidebar_registry_indicator_state(&state, &workspace, &home);
-        assert!(clean.stable && !clean.local_changes && clean.error.is_none(), "{clean:?}");
+        assert!(
+            clean.stable && !clean.local_changes && clean.error.is_none(),
+            "{clean:?}"
+        );
 
-        fs::write(workspace.join(".pi/agents/worker.md"), "---\nname: worker\n---\nWorker\n").unwrap();
+        fs::write(
+            workspace.join(".pi/agents/worker.md"),
+            "---\nname: worker\n---\nWorker\n",
+        )
+        .unwrap();
         let changed = sidebar_registry_indicator_state(&state, &workspace, &home);
-        assert!(changed.stable && changed.local_changes && changed.error.is_none(), "{changed:?}");
+        assert!(
+            changed.stable && changed.local_changes && changed.error.is_none(),
+            "{changed:?}"
+        );
         fs::remove_dir_all(workspace).unwrap();
         fs::remove_dir_all(home).unwrap();
     }
@@ -12218,12 +12459,16 @@ mod tests {
         let attachment = attachments.join(&blob_hash);
         fs::write(&attachment, b"image-v1").expect("write task attachment");
         let db = rusqlite::Connection::open(workspace.join(".pi/tasks.sqlite")).unwrap();
-        db.execute("INSERT INTO attachments(hash,name,size) VALUES(?1,'shot.png',8)",
-            [&blob_hash]).expect("register blob");
+        db.execute(
+            "INSERT INTO attachments(hash,name,size) VALUES(?1,'shot.png',8)",
+            [&blob_hash],
+        )
+        .expect("register blob");
         db.execute(
             "INSERT INTO task_attachments(task_id,hash,ordinal) VALUES(?1,?2,0)",
             rusqlite::params!["task-1", blob_hash],
-        ).expect("link blob to task");
+        )
+        .expect("link blob to task");
         drop(db);
         let counts = project_tasks_sqlite::attachment_counts(&workspace.join(".pi"))
             .expect("read card attachment counts");
@@ -12255,12 +12500,19 @@ mod tests {
 
         let replacement = b"image-v2-longer";
         let replacement_hash = format!("{:x}", Sha256::digest(replacement));
-        fs::write(attachments.join(&replacement_hash), replacement).expect("publish immutable replacement");
+        fs::write(attachments.join(&replacement_hash), replacement)
+            .expect("publish immutable replacement");
         let db = rusqlite::Connection::open(workspace.join(".pi/tasks.sqlite")).unwrap();
-        db.execute("INSERT INTO attachments(hash,name,size) VALUES(?1,'shot.png',?2)",
-            rusqlite::params![replacement_hash, replacement.len() as i64]).expect("register replacement");
-        db.execute("UPDATE task_attachments SET hash=?1 WHERE task_id='task-1'",
-            [replacement_hash]).expect("replace attachment reference");
+        db.execute(
+            "INSERT INTO attachments(hash,name,size) VALUES(?1,'shot.png',?2)",
+            rusqlite::params![replacement_hash, replacement.len() as i64],
+        )
+        .expect("register replacement");
+        db.execute(
+            "UPDATE task_attachments SET hash=?1 WHERE task_id='task-1'",
+            [replacement_hash],
+        )
+        .expect("replace attachment reference");
         drop(db);
         let changed = sidebar_registry_indicator_state(&state, &workspace, &home);
         assert!(changed.stable);
@@ -12284,23 +12536,37 @@ mod tests {
         let state = SidebarIndicatorState::default();
         let poll = || sidebar_registry_indicator_state(&state, &workspace, &home);
         let initial = poll();
-        assert!(initial.stable && !initial.local_changes && initial.error.is_none(), "{initial:?}");
+        assert!(
+            initial.stable && !initial.local_changes && initial.error.is_none(),
+            "{initial:?}"
+        );
 
-        fs::write(workspace.join(".pi/tasks.jsonc"), "ignored legacy task data\n").unwrap();
+        fs::write(
+            workspace.join(".pi/tasks.jsonc"),
+            "ignored legacy task data\n",
+        )
+        .unwrap();
         fs::write(workspace.join(".pi/tasks.sqlite.bak"), "snapshot backup\n").unwrap();
         fs::create_dir_all(workspace.join(".pi/artifacts")).unwrap();
         fs::write(workspace.join(".pi/artifacts/notes.md"), "temporary\n").unwrap();
         let clean = poll();
-        assert!(clean.stable && !clean.local_changes && clean.error.is_none(), "{clean:?}");
+        assert!(
+            clean.stable && !clean.local_changes && clean.error.is_none(),
+            "{clean:?}"
+        );
 
         // Keep another connection open so SQLite's WAL retains the committed
         // row change instead of checkpointing it on its final close.
         let db = rusqlite::Connection::open(workspace.join(".pi/tasks.sqlite")).unwrap();
         db.pragma_update(None, "journal_mode", "WAL").unwrap();
-        db.execute("UPDATE tasks SET revision=revision+1 WHERE id='task-1'", []).unwrap();
+        db.execute("UPDATE tasks SET revision=revision+1 WHERE id='task-1'", [])
+            .unwrap();
         assert!(workspace.join(".pi/tasks.sqlite-wal").exists());
         let changed = poll();
-        assert!(changed.stable && changed.local_changes && changed.error.is_none(), "{changed:?}");
+        assert!(
+            changed.stable && changed.local_changes && changed.error.is_none(),
+            "{changed:?}"
+        );
         assert_eq!(changed.project_changes, vec!["tasks".to_owned()]);
         drop(db);
         fs::remove_dir_all(workspace).unwrap();
@@ -13211,15 +13477,21 @@ mod tests {
             fs::hard_link(&sidecar, &alias).unwrap();
             let linked = fs::symlink_metadata(&sidecar).unwrap();
             assert_eq!(linked.nlink(), 2);
-            assert!(project_tasks_sqlite::validate_sidecar_metadata(&name, &linked)
-                .unwrap_err().contains("must not be hard-linked"));
+            assert!(
+                project_tasks_sqlite::validate_sidecar_metadata(&name, &linked)
+                    .unwrap_err()
+                    .contains("must not be hard-linked")
+            );
             fs::remove_file(&alias).unwrap();
             fs::remove_file(&sidecar).unwrap();
 
             symlink("missing-target", &sidecar).unwrap();
             let redirected = fs::symlink_metadata(&sidecar).unwrap();
-            assert!(project_tasks_sqlite::validate_sidecar_metadata(&name, &redirected)
-                .unwrap_err().contains("regular file"));
+            assert!(
+                project_tasks_sqlite::validate_sidecar_metadata(&name, &redirected)
+                    .unwrap_err()
+                    .contains("regular file")
+            );
             fs::remove_file(&sidecar).unwrap();
         }
 
@@ -13228,7 +13500,8 @@ mod tests {
         let database = directory.join("tasks.sqlite");
         let alias = workspace.join("tasks-db-hardlink-alias");
         fs::hard_link(&database, &alias).unwrap();
-        assert!(project_tasks_sqlite::exists(&directory).unwrap_err()
+        assert!(project_tasks_sqlite::exists(&directory)
+            .unwrap_err()
             .contains("tasks.sqlite must not be hard-linked"));
         fs::remove_file(alias).unwrap();
         assert!(project_tasks_sqlite::exists(&directory).unwrap());
@@ -13265,11 +13538,14 @@ mod tests {
         initialize_project_pi_from(&workspace).expect("initialize project state");
         write_project_tasks_to(&workspace, &expected).expect("write failed task");
         let connection = rusqlite::Connection::open(workspace.join(".pi/tasks.sqlite")).unwrap();
-        let saved_payload: String = connection.query_row(
-            "SELECT payload FROM tasks WHERE id=?1", ["task-1"], |row| row.get(0),
-        ).unwrap();
+        let saved_payload: String = connection
+            .query_row("SELECT payload FROM tasks WHERE id=?1", ["task-1"], |row| {
+                row.get(0)
+            })
+            .unwrap();
         assert!(saved_payload.contains("\"failed\""));
-        let actual = read_project_tasks_from(&workspace, MAX_TASK_DOCUMENT_BYTES).expect("read tasks");
+        let actual =
+            read_project_tasks_from(&workspace, MAX_TASK_DOCUMENT_BYTES).expect("read tasks");
         assert_eq!(actual.version, 1);
         assert_eq!(actual, expected);
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
@@ -13285,33 +13561,72 @@ mod tests {
         let blob = directory.join("task-attachments").join(&hash);
         fs::write(&blob, data).expect("publish immutable attachment");
         let file = AttachmentFile {
-            path: fs::canonicalize(&blob).unwrap().to_string_lossy().into_owned(),
+            path: fs::canonicalize(&blob)
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
             name: "drawing.png".to_owned(),
             size: data.len() as u64,
         };
         let original = sample_task_document();
         write_project_tasks_checked_with_attachments(
-            &workspace, &original, None, Some(&[file.clone()])
-        ).expect("create task and its attachment in one SQL transaction");
+            &workspace,
+            &original,
+            None,
+            Some(&[file.clone()]),
+        )
+        .expect("create task and its attachment in one SQL transaction");
         let linked = project_tasks_sqlite::attachments_for_task(&directory, "task-1").unwrap();
         assert_eq!(linked.len(), 1);
         assert_eq!(linked[0].1, "drawing.png");
         assert_eq!(linked[0].0, blob);
-        assert!(!original.tasks[0].description.as_deref().unwrap().contains("Pix attachment"));
+        assert!(!original.tasks[0]
+            .description
+            .as_deref()
+            .unwrap()
+            .contains("Pix attachment"));
 
         let mut updated = original.clone();
         updated.tasks[0].title = "New description".into();
-        let forged = AttachmentFile { path: workspace.join("outside.png").to_string_lossy().into_owned(), ..file.clone() };
+        let forged = AttachmentFile {
+            path: workspace.join("outside.png").to_string_lossy().into_owned(),
+            ..file.clone()
+        };
         assert!(write_project_tasks_checked_with_attachments(
-            &workspace, &updated, Some(&original), Some(&[forged])
-        ).expect_err("webview cannot attach an arbitrary file").contains("project-owned SHA-256 blob"));
-        assert_eq!(read_project_tasks_from(&workspace, MAX_TASK_DOCUMENT_BYTES).unwrap(), original);
-        assert_eq!(project_tasks_sqlite::attachments_for_task(&directory, "task-1").unwrap().len(), 1);
+            &workspace,
+            &updated,
+            Some(&original),
+            Some(&[forged])
+        )
+        .expect_err("webview cannot attach an arbitrary file")
+        .contains("project-owned SHA-256 blob"));
+        assert_eq!(
+            read_project_tasks_from(&workspace, MAX_TASK_DOCUMENT_BYTES).unwrap(),
+            original
+        );
+        assert_eq!(
+            project_tasks_sqlite::attachments_for_task(&directory, "task-1")
+                .unwrap()
+                .len(),
+            1
+        );
 
-        write_project_tasks_checked_with_attachments(&workspace, &updated, Some(&original), Some(&[]))
-            .expect("update content and unlink attachment");
-        assert!(project_tasks_sqlite::attachments_for_task(&directory, "task-1").unwrap().is_empty());
-        assert!(blob.is_file(), "removing a task association never destroys a shared immutable blob");
+        write_project_tasks_checked_with_attachments(
+            &workspace,
+            &updated,
+            Some(&original),
+            Some(&[]),
+        )
+        .expect("update content and unlink attachment");
+        assert!(
+            project_tasks_sqlite::attachments_for_task(&directory, "task-1")
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            blob.is_file(),
+            "removing a task association never destroys a shared immutable blob"
+        );
         fs::remove_dir_all(workspace).expect("cleanup");
     }
 
@@ -13335,27 +13650,66 @@ mod tests {
         second.description = Some("Changed by another process".into());
         next = first.clone();
         next.tasks[1] = second.clone();
-        write_project_tasks_checked(&workspace, &next, Some(&first)).expect("external independent update");
-        let other_revision_before: i64 = rusqlite::Connection::open(directory.join("tasks.sqlite")).unwrap()
-            .query_row("SELECT revision FROM tasks WHERE id='task-2'", [], |row| row.get(0)).unwrap();
+        write_project_tasks_checked(&workspace, &next, Some(&first))
+            .expect("external independent update");
+        let other_revision_before: i64 = rusqlite::Connection::open(directory.join("tasks.sqlite"))
+            .unwrap()
+            .query_row("SELECT revision FROM tasks WHERE id='task-2'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
 
-        project_tasks_sqlite::reorder(&directory, "task-1", &ProjectTaskStatus::Todo,
-            Some("task-2"), "after", &first.tasks[0], "2026-10-10T12:00:00Z")
-            .expect("reorder one task while preserving external task contents");
+        project_tasks_sqlite::reorder(
+            &directory,
+            "task-1",
+            &ProjectTaskStatus::Todo,
+            Some("task-2"),
+            "after",
+            &first.tasks[0],
+            "2026-10-10T12:00:00Z",
+        )
+        .expect("reorder one task while preserving external task contents");
         let reordered = read_project_tasks_from(&workspace, MAX_TASK_DOCUMENT_BYTES).unwrap();
-        assert_eq!(reordered.tasks.iter().map(|task| task.id.as_str()).collect::<Vec<_>>(), ["task-2", "task-1"]);
+        assert_eq!(
+            reordered
+                .tasks
+                .iter()
+                .map(|task| task.id.as_str())
+                .collect::<Vec<_>>(),
+            ["task-2", "task-1"]
+        );
         assert_eq!(reordered.tasks[0], second);
         let db = rusqlite::Connection::open(directory.join("tasks.sqlite")).unwrap();
-        let other_revision_after: i64 = db.query_row(
-            "SELECT revision FROM tasks WHERE id='task-2'", [], |row| row.get(0)).unwrap();
-        assert_eq!(other_revision_before, other_revision_after,
-            "a drag must not invalidate concurrent edits to an unrelated task");
-        assert!(project_tasks_sqlite::reorder(&directory, "task-1",
-            &ProjectTaskStatus::Done, None, "after", &first.tasks[0],
-            "2026-10-10T12:01:00Z").unwrap_err().contains("conflict"));
-        project_tasks_sqlite::reorder(&directory, "task-1", &ProjectTaskStatus::Done,
-            None, "after", &reordered.tasks[1], "2026-10-10T12:01:00Z")
-            .expect("move task to a different status");
+        let other_revision_after: i64 = db
+            .query_row("SELECT revision FROM tasks WHERE id='task-2'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            other_revision_before, other_revision_after,
+            "a drag must not invalidate concurrent edits to an unrelated task"
+        );
+        assert!(project_tasks_sqlite::reorder(
+            &directory,
+            "task-1",
+            &ProjectTaskStatus::Done,
+            None,
+            "after",
+            &first.tasks[0],
+            "2026-10-10T12:01:00Z"
+        )
+        .unwrap_err()
+        .contains("conflict"));
+        project_tasks_sqlite::reorder(
+            &directory,
+            "task-1",
+            &ProjectTaskStatus::Done,
+            None,
+            "after",
+            &reordered.tasks[1],
+            "2026-10-10T12:01:00Z",
+        )
+        .expect("move task to a different status");
         let final_tasks = read_project_tasks_from(&workspace, MAX_TASK_DOCUMENT_BYTES).unwrap();
         assert_eq!(final_tasks.tasks[0], second);
         assert_eq!(final_tasks.tasks[1].status, ProjectTaskStatus::Done);
@@ -13409,8 +13763,7 @@ mod tests {
         let mut expected = sample_task_document();
         expected.schema = Some("https://example.invalid/tasks.json".to_owned());
         let path = workspace.join(".pi/tasks.jsonc");
-        fs::write(&path, "{ invalid legacy data")
-            .expect("create ignored legacy task file");
+        fs::write(&path, "{ invalid legacy data").expect("create ignored legacy task file");
         write_project_tasks_to(&workspace, &expected).expect("insert new task");
         let loaded = read_project_tasks_from(&workspace, MAX_TASK_DOCUMENT_BYTES).expect("load");
         let mut next = loaded.clone();
@@ -13422,9 +13775,11 @@ mod tests {
         assert_eq!(actual.tasks, next.tasks);
         assert_eq!(fs::read_to_string(&path).unwrap(), "{ invalid legacy data");
         let db = rusqlite::Connection::open(workspace.join(".pi/tasks.sqlite")).unwrap();
-        let revision: i64 = db.query_row(
-            "SELECT revision FROM tasks WHERE id='task-1'", [], |row| row.get(0)
-        ).unwrap();
+        let revision: i64 = db
+            .query_row("SELECT revision FROM tasks WHERE id='task-1'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
         assert_eq!(revision, 2);
         fs::remove_dir_all(workspace).expect("cleanup");
     }
@@ -13907,9 +14262,8 @@ mod tests {
                 let start = Arc::clone(&start);
                 std::thread::spawn(move || {
                     start.wait();
-                    initialize_project_pi_from(&workspace).and_then(|()| {
-                        read_project_tasks_from(&workspace, MAX_TASK_DOCUMENT_BYTES)
-                    })
+                    initialize_project_pi_from(&workspace)
+                        .and_then(|()| read_project_tasks_from(&workspace, MAX_TASK_DOCUMENT_BYTES))
                 })
             })
             .collect::<Vec<_>>();
@@ -13921,7 +14275,8 @@ mod tests {
                 .expect("initializer thread did not panic")
                 .expect("concurrent initializer must succeed");
             assert_eq!(
-                content, empty_task_document(),
+                content,
+                empty_task_document(),
                 "every successful initializer must observe the complete published skeleton"
             );
         }
@@ -13992,28 +14347,46 @@ mod tests {
         second.title = "Second task".to_owned();
         let mut next = document.clone();
         next.tasks.push(second);
-        write_project_tasks_checked(&workspace, &next, Some(&document)).expect("create another task");
+        write_project_tasks_checked(&workspace, &next, Some(&document))
+            .expect("create another task");
         let hash = format!("{:x}", Sha256::digest(b"shared"));
         let blob = workspace.join(".pi/task-attachments").join(&hash);
         fs::write(&blob, b"shared").expect("publish immutable blob");
         let db = rusqlite::Connection::open(workspace.join(".pi/tasks.sqlite")).unwrap();
-        db.execute("INSERT INTO attachments(hash,name,size) VALUES(?1,'shared.png',6)",
-            [&hash]).expect("register shared blob");
+        db.execute(
+            "INSERT INTO attachments(hash,name,size) VALUES(?1,'shared.png',6)",
+            [&hash],
+        )
+        .expect("register shared blob");
         for id in ["task-1", "task-2"] {
-            db.execute("INSERT INTO task_attachments(task_id,hash,ordinal) VALUES(?1,?2,0)",
-                rusqlite::params![id, hash]).expect("link shared blob");
+            db.execute(
+                "INSERT INTO task_attachments(task_id,hash,ordinal) VALUES(?1,?2,0)",
+                rusqlite::params![id, hash],
+            )
+            .expect("link shared blob");
         }
         drop(db);
         document = next.clone();
         next.tasks.remove(0);
         write_project_tasks_checked(&workspace, &next, Some(&document)).expect("delete first task");
         assert!(blob.is_file());
-        assert_eq!(project_tasks_sqlite::attachments_for_task(&workspace.join(".pi"), "task-2").unwrap().len(), 1);
+        assert_eq!(
+            project_tasks_sqlite::attachments_for_task(&workspace.join(".pi"), "task-2")
+                .unwrap()
+                .len(),
+            1
+        );
         document = next.clone();
         next.tasks.clear();
         write_project_tasks_checked(&workspace, &next, Some(&document)).expect("delete last task");
-        assert!(blob.is_file(), "unreferenced immutable blobs remain until an explicit GC");
-        assert!(read_project_tasks_from(&workspace, MAX_TASK_DOCUMENT_BYTES).unwrap().tasks.is_empty());
+        assert!(
+            blob.is_file(),
+            "unreferenced immutable blobs remain until an explicit GC"
+        );
+        assert!(read_project_tasks_from(&workspace, MAX_TASK_DOCUMENT_BYTES)
+            .unwrap()
+            .tasks
+            .is_empty());
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }
 
@@ -14047,24 +14420,38 @@ mod tests {
         let before = document.clone();
         document.tasks.push(child.clone());
         write_project_tasks_checked(&workspace, &document, Some(&before)).unwrap();
-        assert_eq!(read_project_tasks_from(&workspace, MAX_TASK_DOCUMENT_BYTES).unwrap(), document);
+        assert_eq!(
+            read_project_tasks_from(&workspace, MAX_TASK_DOCUMENT_BYTES).unwrap(),
+            document
+        );
 
         // Save is one-row-only. Refuse deleting a referenced parent, including
         // when called directly through SQLite under the writer transaction.
         let directory = workspace.join(".pi");
         let rejected = project_tasks_sqlite::mutate_with_attachments(
-            &directory, "task-1", Some(&document.tasks[0]), None, None,
+            &directory,
+            "task-1",
+            Some(&document.tasks[0]),
+            None,
+            None,
         );
         assert!(rejected.is_err());
-        assert_eq!(read_project_tasks_from(&workspace, MAX_TASK_DOCUMENT_BYTES).unwrap(), document);
+        assert_eq!(
+            read_project_tasks_from(&workspace, MAX_TASK_DOCUMENT_BYTES).unwrap(),
+            document
+        );
 
         let mut cyclic = document.clone();
         cyclic.tasks[0].parent_id = Some("child".into());
         cyclic.tasks[0].epic = None;
-        assert!(validate_task_document(&cyclic).unwrap_err().contains("cyclic"));
+        assert!(validate_task_document(&cyclic)
+            .unwrap_err()
+            .contains("cyclic"));
         let mut missing = document.clone();
         missing.tasks[1].related_task_ids = Some(vec!["missing".into()]);
-        assert!(validate_task_document(&missing).unwrap_err().contains("missing related"));
+        assert!(validate_task_document(&missing)
+            .unwrap_err()
+            .contains("missing related"));
 
         // Unlink and unparent child first; then deletion is permitted.
         let previous = document.clone();
@@ -14074,9 +14461,14 @@ mod tests {
         let mut after = document.clone();
         after.tasks.remove(0);
         write_project_tasks_checked(&workspace, &after, Some(&document)).unwrap();
-        assert_eq!(read_project_tasks_from(&workspace, MAX_TASK_DOCUMENT_BYTES).unwrap(), after);
+        assert_eq!(
+            read_project_tasks_from(&workspace, MAX_TASK_DOCUMENT_BYTES).unwrap(),
+            after
+        );
 
-        assert!(project_tasks_sqlite::attachment_counts(&directory).unwrap().is_empty());
+        assert!(project_tasks_sqlite::attachment_counts(&directory)
+            .unwrap()
+            .is_empty());
         fs::remove_dir_all(workspace).unwrap();
     }
 
@@ -14085,7 +14477,8 @@ mod tests {
         let workspace = temporary_workspace("invalid-tasks");
         initialize_project_pi_from(&workspace).expect("initialize SQLite");
         let db = rusqlite::Connection::open(workspace.join(".pi/tasks.sqlite")).unwrap();
-        db.execute("INSERT INTO tasks(id,payload) VALUES('bad','{')", []).unwrap();
+        db.execute("INSERT INTO tasks(id,payload) VALUES('bad','{')", [])
+            .unwrap();
         assert!(read_project_tasks_from(&workspace, 1024).is_err());
 
         let mut duplicate = sample_task_document();
@@ -14114,12 +14507,19 @@ mod tests {
           ],
         }"#;
         fs::write(workspace.join(".pi/tasks.jsonc"), source).expect("write jsonc task document");
-        let document = read_project_tasks_from(&workspace, 1024 * 1024).expect("read SQLite-only tasks");
+        let document =
+            read_project_tasks_from(&workspace, 1024 * 1024).expect("read SQLite-only tasks");
         assert_eq!(document.tasks.len(), 0);
         assert_eq!(document.schema.as_deref(), Some(PROJECT_TASKS_SCHEMA_URL));
         initialize_project_pi_from(&workspace).expect("initialize SQLite beside legacy");
         assert!(workspace.join(".pi/tasks.jsonc").is_file());
-        assert_eq!(read_project_tasks_from(&workspace, MAX_TASK_DOCUMENT_BYTES).unwrap().tasks.len(), 0);
+        assert_eq!(
+            read_project_tasks_from(&workspace, MAX_TASK_DOCUMENT_BYTES)
+                .unwrap()
+                .tasks
+                .len(),
+            0
+        );
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }
 

@@ -72,7 +72,9 @@ test("resource packages ignore transient output but include authored scripts and
 	const destination = path.join(root, "published");
 	await copyTree(skill, destination);
 	assert.equal(await hashPath(destination), baseline);
-	assert.deepEqual(fs.readdirSync(destination), ["SKILL.md", "assets", "scripts"]);
+	// readdir order is filesystem-dependent (NTFS sorts case-insensitively);
+	// compare the copied package entries in sorted order instead.
+	assert.deepEqual(fs.readdirSync(destination).sort(), ["SKILL.md", "assets", "scripts"]);
 	put(skill, "scripts/run.js", "console.log('changed')\n");
 	assert.notEqual(await hashPath(skill), baseline);
 });

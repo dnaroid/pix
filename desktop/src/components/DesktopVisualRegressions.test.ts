@@ -17,6 +17,7 @@ import idxSource from "./IdxPanel.svelte?raw";
 import lspInstallPaneSource from "./LspInstallPane.svelte?raw";
 import packageScriptsSource from "./PackageScriptsPanel.svelte?raw";
 import runtimeStatusSource from "./RuntimeStatusBarItems.svelte?raw";
+import usageLimitBarsSource from "./UsageLimitBars.svelte?raw";
 import sessionActivityStatusHudSource from "./SessionActivityStatusHud.svelte?raw";
 import statusBarPopoverSource from "./StatusBarPopover.svelte?raw";
 import settingsSource from "./SettingsPanel.svelte?raw";
@@ -78,14 +79,15 @@ describe("desktop visual regressions", () => {
     expect(runtimeStatusSource).toContain("flex: 0 1 auto");
     expect(runtimeStatusSource.match(/class="context-status-slots grid/g)).toHaveLength(1);
     expect(runtimeStatusSource.match(/class="usage-status-slots grid/g)).toHaveLength(1);
-    expect(runtimeStatusSource).toContain("grid-template-columns: 3ch 4ch 64px 11ch");
-    expect(runtimeStatusSource).toContain("grid-template-columns: 3ch 4ch 64px;");
+    expect(runtimeStatusSource).toContain("grid-template-columns: max-content 64px 11ch");
+    expect(runtimeStatusSource).toContain("grid-template-columns: max-content 64px;");
     expect(runtimeStatusSource).toContain("class:with-savings={showSavings}");
     expect(runtimeStatusSource).toContain('{contextTitle(false)}</div>');
     expect(runtimeStatusSource).toContain('<DcpSavingsSummary tokensSaved={status.dcpTokensSaved} />');
     expect(runtimeStatusSource).toContain("grid-auto-columns: max-content");
-    expect(runtimeStatusSource).toContain("grid-template-columns: 5ch 56px 5ch 10px");
-    expect(runtimeStatusSource).toContain("grid-template-columns: 5ch 32px 5ch 10px");
+    expect(runtimeStatusSource).toContain("grid-template-columns: 36px;");
+    expect(runtimeStatusSource).toContain("grid-template-columns: 56px 5ch 10px");
+    expect(runtimeStatusSource).toContain("grid-template-columns: 32px 5ch 10px");
     expect(runtimeStatusSource).toContain("column-gap: 8px");
     expect(runtimeStatusSource).toContain("column-gap: 6px");
     expect(runtimeStatusSource).not.toContain("quotaColumn");
@@ -522,14 +524,18 @@ describe("desktop visual regressions", () => {
 
   it("uses neutral light-gray normal percentage text while preserving warning/error tones and original tracks", () => {
     expect(runtimeStatusSource).toContain('class={["relative h-1.5 overflow-hidden rounded-sm bg-border"');
-    expect(runtimeStatusSource).toContain('class="absolute inset-y-0 left-0 bg-muted-foreground/50"');
+    expect(runtimeStatusSource).toContain('class="absolute inset-y-0 right-0 bg-muted-foreground/50"');
     expect(runtimeStatusSource).not.toContain("toneFillClass");
     expect(runtimeStatusSource).toContain('return "text-muted-foreground";');
     expect(runtimeStatusSource).toContain('return "text-tool-warning";');
     expect(runtimeStatusSource).toContain('return "text-tool-error";');
     expect(runtimeStatusSource).toContain("contextCellClass(segment.kind)");
     expect(runtimeStatusSource).toContain("contextCellClass(item.kind)");
-    expect(runtimeStatusSource).toContain('class={["whitespace-nowrap text-right", toneTextClass(tone)]}>{Math.round(window.remainingPercent)}%');
+    // Toned percentage text lives in the usage popup bars; the collapsed bar
+    // row stays neutral and shows only the reset countdown beside the track.
+    expect(runtimeStatusSource).not.toContain('class={["whitespace-nowrap text-right", toneTextClass(tone)]}');
+    expect(usageLimitBarsSource).toContain('class={["font-semibold tabular-nums", toneTextClass(tone)]}>{Math.round(window.remainingPercent)}%');
+    expect(usageLimitBarsSource).toContain('<span class="text-xs font-normal text-muted-foreground">remaining</span>');
     expect(runtimeStatusSource).toContain('TriangleAlert class="h-2.5 w-2.5 text-tool-warning"');
   });
 

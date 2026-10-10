@@ -140,10 +140,20 @@ mod tests {
             "http://127.0.0.1:11111/leak",
             "https://tauri.localhost",
         ] {
-            assert!(!allow_workbench_navigation(&Url::parse(denied).unwrap()), "{denied}");
+            assert!(
+                !allow_workbench_navigation(&Url::parse(denied).unwrap()),
+                "{denied}"
+            );
         }
-        for allowed in ["about:blank", "about:srcdoc", "tauri://localhost/index.html"] {
-            assert!(allow_workbench_navigation(&Url::parse(allowed).unwrap()), "{allowed}");
+        for allowed in [
+            "about:blank",
+            "about:srcdoc",
+            "tauri://localhost/index.html",
+        ] {
+            assert!(
+                allow_workbench_navigation(&Url::parse(allowed).unwrap()),
+                "{allowed}"
+            );
         }
         assert_eq!(
             allow_workbench_navigation(&Url::parse("http://127.0.0.1:1420/index.html").unwrap()),
