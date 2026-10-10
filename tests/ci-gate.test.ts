@@ -23,7 +23,7 @@ test("workflow and npm entrypoint use the shared gate", () => {
   const pkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
   assert.equal(pkg.scripts["check:ci"], "node scripts/check-ci.mjs");
   const suite = JSON.parse(readFileSync(join(repoRoot, "external/pi-tools-suite/package.json"), "utf8"));
-  assert.ok(suite.scripts.test.startsWith("bun test --isolate test &&"));
+  assert.ok(suite.scripts.test.startsWith("bun test --isolate --timeout 20000 test &&"));
   const workflow = readFileSync(join(repoRoot, ".github/workflows/check.yml"), "utf8");
   assert.match(workflow, /run: npm run check:ci/);
   assert.match(workflow, /include-hidden-files: true/);
