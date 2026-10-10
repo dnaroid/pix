@@ -1,227 +1,151 @@
-import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
-import { ProjectArtifact, REGISTRY_TASK_ATTACHMENT_SCHEME, RegistryRuntime } from "./model.js";
-import { pathExists, projectArtifactLocalPath, projectArtifactRegistryPath, projectTaskAttachmentsLocalPath, projectTaskAttachmentsRegistryPath } from "./paths.js";
-import { promises as fs } from "node:fs";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { createHash } from "node:crypto";
+import { constants, promises as fs } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
+import { backup, type DatabaseSync } from "node:sqlite";
+import type { ProjectArtifact, RegistryRuntime } from "./model.js";
+import { projectArtifactLocalPath, projectArtifactRegistryPath, projectTaskAttachmentsLocalPath, projectTaskAttachmentsRegistryPath } from "./paths.js";
 import { hashPath } from "./resource-files.js";
+import { assertTaskDirectory, assertTaskFile, importTaskRows, openTaskDatabase, readTaskRows, type TaskRows } from "./task-database.js";
 
-export type TaskBundle = {
-	source: string;
-	attachments: Map<string, string>;
-};
+export type TaskBundle = TaskRows & { attachmentsRoot: string };
 
 export function pathIsWithin(parent: string, child: string): boolean {
 	const rel = relative(parent, child);
 	return rel === "" || (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`));
 }
 
-export function registryTaskAttachmentMarker(name: string): string {
-	return `[Pix attachment: ${REGISTRY_TASK_ATTACHMENT_SCHEME}${encodeURIComponent(name)}]`;
-}
-
-export function registryTaskAttachmentName(encoded: string): string {
-	let name: string;
+async function readBundle(path: string, attachmentsRoot: string): Promise<TaskBundle> {
+	const db = await openTaskDatabase(path);
 	try {
-		name = decodeURIComponent(encoded);
-	} catch {
-		throw new Error(`Invalid registry task attachment name: ${encoded}`);
-	}
-	if (!name || name === "." || name === ".." || name.includes("/") || name.includes("\\") || basename(name) !== name) {
-		throw new Error(`Invalid registry task attachment name: ${encoded}`);
-	}
-	return name;
+		db.exec("BEGIN");
+		const bundle = { ...readTaskRows(db), attachmentsRoot };
+		db.exec("COMMIT");
+		return bundle;
+	} finally { db.close(); }
 }
 
 export async function readLocalTaskBundle(cwd: string): Promise<TaskBundle> {
-	const tasksPath = projectArtifactLocalPath(cwd, "tasks");
-	const source = await fs.readFile(tasksPath, "utf8");
-	const attachmentsRoot = projectTaskAttachmentsLocalPath(cwd);
-	const attachments = new Map<string, string>();
-	const replacements = new Map<string, string>();
-	const rootExists = await pathExists(attachmentsRoot);
-	let canonicalRoot: string | undefined;
-	if (rootExists) {
-		const rootStat = await fs.lstat(attachmentsRoot);
-		if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
-			throw new Error(`Project task attachment storage must be a regular directory: ${attachmentsRoot}`);
-		}
-		const [canonicalCwd, resolvedRoot] = await Promise.all([
-			fs.realpath(cwd),
-			fs.realpath(attachmentsRoot),
-		]);
-		if (!pathIsWithin(canonicalCwd, resolvedRoot)) {
-			throw new Error(`Project task attachment storage resolves outside the project: ${attachmentsRoot}`);
-		}
-		canonicalRoot = resolvedRoot;
-	}
-
-	for (const match of source.matchAll(/\[Pix attachment: (file:\/\/[^\]]+)\]/g)) {
-		const marker = match[0];
-		const uri = match[1];
-		if (!uri || replacements.has(marker)) continue;
-		let candidate: string;
-		try {
-			candidate = fileURLToPath(uri);
-		} catch {
-			continue;
-		}
-		if (!canonicalRoot) continue;
-		const lexicalProjectAttachment = pathIsWithin(attachmentsRoot, candidate);
-
-		let canonicalFile: string;
-		try {
-			canonicalFile = await fs.realpath(candidate);
-		} catch (error) {
-			if (lexicalProjectAttachment) {
-				throw new Error(`Task attachment is missing: ${candidate}. ${error instanceof Error ? error.message : String(error)}`);
-			}
-			continue;
-		}
-		if (!pathIsWithin(canonicalRoot, canonicalFile)) {
-			if (lexicalProjectAttachment) throw new Error(`Task attachment resolves outside project task storage: ${candidate}`);
-			continue;
-		}
-		const stat = await fs.lstat(candidate);
-		if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`Task attachment is not a regular file: ${candidate}`);
-		const name = basename(canonicalFile);
-		const previous = attachments.get(name);
-		if (previous && previous !== canonicalFile) {
-			throw new Error(`Task attachments contain duplicate file name "${name}".`);
-		}
-		attachments.set(name, canonicalFile);
-		replacements.set(marker, registryTaskAttachmentMarker(name));
-	}
-
-	let normalizedSource = source;
-	for (const [marker, portableMarker] of replacements) {
-		normalizedSource = normalizedSource.split(marker).join(portableMarker);
-	}
-	return { source: normalizedSource, attachments };
+	return readBundle(projectArtifactLocalPath(cwd, "tasks"), projectTaskAttachmentsLocalPath(cwd));
 }
 
 export async function readRemoteTaskBundle(runtime: RegistryRuntime, projectKey: string): Promise<TaskBundle> {
-	const tasksPath = projectArtifactRegistryPath(runtime.cacheDir, projectKey, "tasks");
-	const source = await fs.readFile(tasksPath, "utf8");
-	const attachmentsRoot = projectTaskAttachmentsRegistryPath(runtime.cacheDir, projectKey);
-	const attachments = new Map<string, string>();
-	for (const match of source.matchAll(/\[Pix attachment: pix-task-attachment:([^\]]+)\]/g)) {
-		const encoded = match[1];
-		if (!encoded) continue;
-		const name = registryTaskAttachmentName(encoded);
-		if (attachments.has(name)) continue;
-		const filePath = join(attachmentsRoot, name);
-		let stat: import("node:fs").Stats;
-		try {
-			stat = await fs.lstat(filePath);
-		} catch (error) {
-			throw new Error(`Registry task attachment is missing: ${name}. ${error instanceof Error ? error.message : String(error)}`);
-		}
-		if (stat.isSymbolicLink() || !stat.isFile()) {
-			throw new Error(`Registry task attachment is not a regular file: ${name}`);
-		}
-		attachments.set(name, filePath);
-	}
-	return { source, attachments };
+	return readBundle(projectArtifactRegistryPath(runtime.cacheDir, projectKey, "tasks"), projectTaskAttachmentsRegistryPath(runtime.cacheDir, projectKey));
+}
+
+function canonical(value: unknown): unknown {
+	if (Array.isArray(value)) return value.map(canonical);
+	if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, item]) => [key, canonical(item)]));
+	return value;
+}
+
+/** Read via O_NOFOLLOW and validate the opened inode, not just the pathname. */
+async function blob(bundle: TaskBundle, row: TaskRows["attachments"][number]): Promise<Buffer> {
+	await assertTaskDirectory(dirname(bundle.attachmentsRoot));
+	await assertTaskDirectory(bundle.attachmentsRoot);
+	const path = join(bundle.attachmentsRoot, row.hash);
+	await assertTaskFile(path);
+	const handle = await fs.open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+	try {
+		const stat = await handle.stat();
+		if (!stat.isFile() || stat.nlink !== 1 || stat.size !== row.size) throw new Error(`Invalid task attachment size: ${row.hash}`);
+		const bytes = await handle.readFile();
+		if (createHash("sha256").update(bytes).digest("hex") !== row.hash) throw new Error(`Task attachment hash mismatch: ${row.hash}`);
+		return bytes;
+	} finally { await handle.close(); }
 }
 
 export async function hashTaskBundle(bundle: TaskBundle): Promise<string> {
 	const hash = createHash("sha256");
-	hash.update("tasks-bundle\0");
-	hash.update(bundle.source);
-	for (const name of [...bundle.attachments.keys()].sort()) {
-		hash.update(`\0attachment\0${name}\0`);
-		hash.update(await fs.readFile(bundle.attachments.get(name)!));
-	}
+	hash.update("tasks-sqlite-v1\0");
+	hash.update(JSON.stringify(canonical({ tasks: bundle.tasks.map((row) => ({ ...row, payload: JSON.parse(row.payload) })), attachments: bundle.attachments, taskAttachments: bundle.taskAttachments })));
+	for (const row of bundle.attachments) { hash.update(`\0${row.hash}\0`); hash.update(await blob(bundle, row)); }
 	return hash.digest("hex");
 }
 
 export async function hashProjectArtifactLocal(cwd: string, artifact: ProjectArtifact): Promise<string> {
-	return artifact === "tasks"
-		? hashTaskBundle(await readLocalTaskBundle(cwd))
-		: hashPath(projectArtifactLocalPath(cwd, artifact));
+	return artifact === "tasks" ? hashTaskBundle(await readLocalTaskBundle(cwd)) : hashPath(projectArtifactLocalPath(cwd, artifact), artifact === "plans" ? "plans" : "resource");
 }
 
-export async function hashProjectArtifactRemote(
-	runtime: RegistryRuntime,
-	projectKey: string,
-	artifact: ProjectArtifact,
-): Promise<string> {
-	return artifact === "tasks"
-		? hashTaskBundle(await readRemoteTaskBundle(runtime, projectKey))
-		: hashPath(projectArtifactRegistryPath(runtime.cacheDir, projectKey, artifact));
+export async function hashProjectArtifactRemote(runtime: RegistryRuntime, projectKey: string, artifact: ProjectArtifact): Promise<string> {
+	return artifact === "tasks" ? hashTaskBundle(await readRemoteTaskBundle(runtime, projectKey)) : hashPath(projectArtifactRegistryPath(runtime.cacheDir, projectKey, artifact), artifact === "plans" ? "plans" : "resource");
 }
 
-export async function replaceRemoteTaskBundle(cwd: string, runtime: RegistryRuntime, projectKey: string): Promise<void> {
-	const bundle = await readLocalTaskBundle(cwd);
-	const tasksPath = projectArtifactRegistryPath(runtime.cacheDir, projectKey, "tasks");
-	const attachmentsPath = projectTaskAttachmentsRegistryPath(runtime.cacheDir, projectKey);
-	await fs.rm(tasksPath, { recursive: true, force: true });
-	await fs.rm(attachmentsPath, { recursive: true, force: true });
-	await fs.mkdir(dirname(tasksPath), { recursive: true });
-	await fs.writeFile(tasksPath, bundle.source, "utf8");
-	if (bundle.attachments.size === 0) return;
-	await fs.mkdir(attachmentsPath, { recursive: true });
-	for (const name of [...bundle.attachments.keys()].sort()) {
-		await fs.copyFile(bundle.attachments.get(name)!, join(attachmentsPath, name));
-	}
-}
-
-export async function replaceLocalTaskBundle(cwd: string, runtime: RegistryRuntime, projectKey: string): Promise<void> {
-	const bundle = await readRemoteTaskBundle(runtime, projectKey);
-	const tasksPath = projectArtifactLocalPath(cwd, "tasks");
-	const attachmentsPath = projectTaskAttachmentsLocalPath(cwd);
-	await fs.mkdir(dirname(tasksPath), { recursive: true });
-
-	let materializedSource = bundle.source;
-	for (const name of bundle.attachments.keys()) {
-		materializedSource = materializedSource
-			.split(registryTaskAttachmentMarker(name))
-			.join(`[Pix attachment: ${pathToFileURL(join(attachmentsPath, name)).href}]`);
-	}
-
-	const stamp = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-	const stagedTasks = join(dirname(tasksPath), `.tasks.registry-${stamp}.tmp`);
-	const stagedAttachments = join(dirname(tasksPath), `.task-attachments.registry-${stamp}.tmp`);
-	const backupTasks = join(dirname(tasksPath), `.tasks.registry-${stamp}.bak`);
-	const backupAttachments = join(dirname(tasksPath), `.task-attachments.registry-${stamp}.bak`);
-	let tasksBackedUp = false;
-	let attachmentsBackedUp = false;
-	let tasksInstalled = false;
-	let attachmentsInstalled = false;
-	try {
-		await fs.writeFile(stagedTasks, materializedSource, "utf8");
-		if (bundle.attachments.size > 0) {
-			await fs.mkdir(stagedAttachments, { recursive: true });
-			for (const name of [...bundle.attachments.keys()].sort()) {
-				await fs.copyFile(bundle.attachments.get(name)!, join(stagedAttachments, name));
+/** Immutable content-addressed installs. Never remove local bytes on pull/rollback. */
+async function copyBlobs(bundle: TaskBundle, destination: string): Promise<void> {
+	if (!bundle.attachments.length) return;
+	await assertTaskDirectory(dirname(destination));
+	await fs.mkdir(destination, { recursive: true });
+	await assertTaskDirectory(destination);
+	for (const row of bundle.attachments) {
+		const bytes = await blob(bundle, row);
+		const target = join(destination, row.hash);
+		const staged = join(destination, `.registry-${randomUUID()}.tmp`);
+		try {
+			await fs.writeFile(staged, bytes, { flag: "wx", mode: 0o600 });
+			// link is atomic and does not replace an existing file; drop the staging link
+			// before validating single-link storage.
+			try { await fs.link(staged, target); } catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
 			}
-		}
-
-		if (await pathExists(tasksPath)) {
-			await fs.rename(tasksPath, backupTasks);
-			tasksBackedUp = true;
-		}
-		if (await pathExists(attachmentsPath)) {
-			await fs.rename(attachmentsPath, backupAttachments);
-			attachmentsBackedUp = true;
-		}
-		if (bundle.attachments.size > 0) {
-			await fs.rename(stagedAttachments, attachmentsPath);
-			attachmentsInstalled = true;
-		}
-		await fs.rename(stagedTasks, tasksPath);
-		tasksInstalled = true;
-	} catch (error) {
-		if (tasksInstalled) await fs.rm(tasksPath, { recursive: true, force: true }).catch(() => undefined);
-		if (attachmentsInstalled) await fs.rm(attachmentsPath, { recursive: true, force: true }).catch(() => undefined);
-		if (tasksBackedUp) await fs.rename(backupTasks, tasksPath).catch(() => undefined);
-		if (attachmentsBackedUp) await fs.rename(backupAttachments, attachmentsPath).catch(() => undefined);
-		throw error;
-	} finally {
-		await fs.rm(stagedTasks, { recursive: true, force: true }).catch(() => undefined);
-		await fs.rm(stagedAttachments, { recursive: true, force: true }).catch(() => undefined);
+		} finally { await fs.rm(staged, { force: true }); }
+		await blob({ ...bundle, attachmentsRoot: destination }, row);
 	}
-	await fs.rm(backupTasks, { recursive: true, force: true }).catch(() => undefined);
-	await fs.rm(backupAttachments, { recursive: true, force: true }).catch(() => undefined);
+}
+
+/** SQLite online backup captures committed WAL state; never copy a live DB file. */
+export async function replaceRemoteTaskBundle(cwd: string, runtime: RegistryRuntime, projectKey: string, expectedHash?: string): Promise<void> {
+	const target = projectArtifactRegistryPath(runtime.cacheDir, projectKey, "tasks");
+	await fs.mkdir(dirname(target), { recursive: true });
+	await assertTaskDirectory(dirname(dirname(target)));
+	await assertTaskDirectory(dirname(target));
+	await assertTaskFile(target, true);
+	for (const suffix of ["-wal", "-shm", "-journal"]) {
+		if (await assertTaskFile(`${target}${suffix}`, true, true)) throw new Error("Registry task snapshot has live SQLite sidecars");
+	}
+	const staged = join(dirname(target), `.tasks-${randomUUID()}.sqlite`);
+	const source = await openTaskDatabase(projectArtifactLocalPath(cwd, "tasks"));
+	let snapshot: DatabaseSync | undefined;
+	try {
+		await backup(source, staged);
+		snapshot = await openTaskDatabase(staged, true);
+		snapshot.exec("BEGIN IMMEDIATE; DELETE FROM attachments WHERE hash NOT IN (SELECT hash FROM task_attachments); COMMIT;");
+		const bundle = { ...readTaskRows(snapshot), attachmentsRoot: projectTaskAttachmentsLocalPath(cwd) };
+		const actual = await hashTaskBundle(bundle);
+		if (expectedHash !== undefined && actual !== expectedHash) throw new Error("Project tasks changed during registry push; retry");
+		const attachmentsRoot = projectTaskAttachmentsRegistryPath(runtime.cacheDir, projectKey);
+		await copyBlobs(bundle, attachmentsRoot);
+		snapshot.exec("PRAGMA wal_checkpoint(TRUNCATE);");
+		snapshot.close(); snapshot = undefined;
+		await fs.rename(staged, target);
+		// The remote checkout is serialized by the registry cache lock.
+		try {
+			await assertTaskDirectory(attachmentsRoot);
+			const referenced = new Set(bundle.attachments.map((row) => row.hash));
+			for (const name of await fs.readdir(attachmentsRoot)) if (!referenced.has(name)) {
+				await assertTaskFile(join(attachmentsRoot, name));
+				await fs.unlink(join(attachmentsRoot, name));
+			}
+		} catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+	} finally {
+		snapshot?.close(); source.close();
+		for (const suffix of ["", "-wal", "-shm", "-journal"]) await fs.rm(`${staged}${suffix}`, { force: true });
+	}
+}
+
+/** Replace rows under the writer lock, retaining the DB inode and all local blobs. */
+export async function replaceLocalTaskBundle(cwd: string, runtime: RegistryRuntime, projectKey: string, expectedLocalHash?: string, expectedRemoteHash?: string): Promise<void> {
+	const bundle = await readRemoteTaskBundle(runtime, projectKey);
+	if (expectedRemoteHash !== undefined && await hashTaskBundle(bundle) !== expectedRemoteHash) throw new Error("Registry tasks changed during pull; retry");
+	const target = projectArtifactLocalPath(cwd, "tasks");
+	await fs.mkdir(dirname(target), { recursive: true });
+	await assertTaskDirectory(dirname(target));
+	await copyBlobs(bundle, projectTaskAttachmentsLocalPath(cwd));
+	const db = await openTaskDatabase(target, true);
+	try {
+		db.exec("BEGIN IMMEDIATE");
+		if (expectedLocalHash !== undefined && await hashTaskBundle({ ...readTaskRows(db), attachmentsRoot: projectTaskAttachmentsLocalPath(cwd) }) !== expectedLocalHash) throw new Error("Project tasks changed during registry pull; retry");
+		importTaskRows(db, bundle);
+		db.exec("COMMIT");
+	} catch (error) { if (db.isTransaction) db.exec("ROLLBACK"); throw error; }
+	finally { db.close(); }
 }

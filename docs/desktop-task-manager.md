@@ -3,228 +3,200 @@ kind: spec
 status: active
 ---
 
-# Spec: Desktop Project Task Manager
-
-## Type
-
-As-is
-
-## Lifecycle
-
-Active current contract.
+# Pix Desktop project Tasks — SQLite-only
 
 ## Goal
 
-Provide a project-scoped task list in Pix Desktop and let a saved task start or
-reopen work in a Desktop session without conflating project tasks with the
-agent's session-local todo list.
+Provide a fully interactive, project-scoped Tasks sidebar: Quick Add, editor,
+attachments, status, priority, drag-and-drop, deletion, and task/session launch.
+User slash commands and the restricted agent `project_tasks` API are additional
+entry points, **not replacements for the UI**. Project tasks are distinct from
+session-local todos.
 
-## Scope
+## Persistent source
 
-- A collapsible, resizable left activity sidebar whose project-scoped views
-  include `Tasks` and `Project` alongside other workspace views.
-- Create, edit, delete, manual status changes, drag reordering, and moving tasks
-  between type groups.
-- Create an untitled task directly from the normal message composer through its
-  overflow menu, carrying the current draft text and attachments without
-  sending a prompt.
-- Task type (`bug`, `feature`, `improvement`) and status (`backlog`, `todo`,
-  `in-progress`, `done`).
-- Persisted priority (`low`, `medium`, `high`, `urgent`). New tasks currently
-  receive `medium`; priority is not exposed by the current task editor or rows.
-- Project-local persistence in `.pi/tasks.jsonc` with a versioned schema.
-- Starting an unlinked task in a new ACP session and reopening an already-linked
-  session instead of creating a duplicate.
-- Task descriptions can contain attachment markers; those attachments are
-  resolved when the task prompt is built.
+- Only `<project>/.pi/tasks.sqlite` is authoritative, using SQLite schema v1
+  (see [agent/storage contract](../specs/project-tasks-agent-tool.md)).
+- `PRAGMA journal_mode=WAL`, `foreign_keys=ON`, and five-second
+  `busy_timeout` use SQLite's own transaction/lock management.
+- No homemade lock files, advisory leases, Koffi/flock bridge or bulk task
+  JSON document replacement.
+- A nonexistent database reads as zero tasks; a corrupt/unsupported database
+  produces an actionable storage error, never an automatic reset.
+- **No legacy support or migration.** `tasks.jsonc`, `tasks.json`,
+  `tasks.d/`, and old attachment markers are not authoritative and cannot
+  supply tasks. Existing ignored files are not deleted.
+- New Registry initialization creates `.pi/tasks.sqlite`, `.pi/plans/` and
+  `.pi/task-attachments/`, all project-owned regular entries.
 
-## Non-goals
+## Tasks sidebar behavior
 
-- Kanban columns, subtasks, dependencies, assignees, due dates, comments, or
-  task history.
-- Task filtering controls in the current sidebar UI.
-- Editing or displaying priority in the current sidebar UI.
-- Automatic transition to `done` when an agent turn finishes.
-- Synchronizing `.pi/tasks.jsonc` with the agent's session-local todo list.
-- Concurrent multi-window file merging.
+- The initial activity view is Tasks, with per-workspace remembered view,
+  width, and collapsed layout. Groups are fixed in this order:
+  **In progress, Todo, Backlog, Done, Failed**.
+- Group headers display total counts regardless of filters and expose a
+  keyboard-accessible button with `aria-expanded`, `aria-controls`, and
+  **visible rotating Lucide chevron** in both states. Done starts collapsed;
+  the others start expanded. Collapse state is workspace-local UI preference,
+  never persisted in SQLite.
+- Compact one-line task cards show type icon/tone, title (or description
+  preview for untitled tasks), and compact, labeled indicators for real SQLite
+  attachments, related files/tasks, a parent/subtask branch, optional assigned
+  model and an epic crown. A linked-files icon replaces the ambiguous bare
+  numeric link badge. High/urgent/low priority badges are conditional; medium
+  is hidden. Status belongs to the task group. Filters do not change totals.
+- Clicking or keyboard-activating a card opens its full editor; the separate
+  pencil action was removed. A pointer gesture becomes a drag only once its
+  movement exceeds the drag threshold, with click suppression after a real
+  drag. Action buttons and menus remain independent of card activation.
+- Hover/focus of a subtask highlights its parent with a stronger emphasis and
+  fades sibling subtasks. Other tasks remain unaffected. The relationship is
+  derived from persisted `parentId`, not inferred from descriptions or titles.
+- The task editor displays a parent selector, the top-level Epic flag, linked
+  subtasks and general related tasks (including reciprocal backlinks), linked
+  project files/artifacts and http(s) URLs, attachment count, and an optional
+  `provider/model[:thinking]` assignment. Model selection **reuses** the Desktop
+  model/thinking picker, its preferred/visible models, full-catalog `Manage`
+  mode, search, remembered effort and per-model effort capabilities. Choosing
+  a model and effort writes only the task draft, never the current session's
+  configuration; `Apply` must work even when it matches the current session.
+  Clearing the task model restores "Use session default". Task Type, Parent,
+  Related task, and sidebar type/priority filters use designed Pix dropdowns
+  with visible chevrons, search where useful, keyboard navigation, Escape and
+  outside dismissal, rather than native OS select menus. The project file-link
+  input also uses a Pix-owned searchable suggestion popup instead of a native
+  datalist, while continuing to accept manually entered paths and URLs.
+  Clicking related tasks navigates to
+  their editor; editing links is one-row-only. Linked project paths open in
+  the trusted workbench Preview; external links use the safe URL opener.
+  Navigating away from changed task fields requires discard confirmation.
+- A visible Quick Add composer classifies short tasks through the existing
+  `pix/tasks/classify_type` ACP request. The status group **Add** action opens
+  the full editor with that status; Composer also has **Create task**.
+- Row actions include **Run** for unlinked tasks or **Open session** for linked
+  tasks, status/priority controls, and **Delete** with confirmation.
+  An unavailable ACP session disables Run/Open without disabling editing.
+- Drag-and-drop supports both moving between status groups and ordering
+  within a group. The view shows drop placeholders and preserves per-status
+  group and filter presentation while dragging.
+- An expanded visible panel reloads from native SQLite initially and every
+  two seconds. Hidden/collapsed/unmounted panels stop polling. Late reads,
+  workspace switches, and teardown use generation guards; failures retain
+  the current visible data and surface a retry/error message.
+- Each regular UI task save (including session launch) may mutate exactly
+  **one** row with revision-based optimistic conflict checking, never replace
+  all rows. A dedicated native SQLite drag/reorder transaction recomputes
+  positions from committed state and changes only the moved task's content;
+  other tasks' order positions may be rebalanced without overwriting payloads
+  or invalidating their content revisions.
 
-## Behavior
+## Running a saved task
 
-1. On first use the sidebar starts on `Tasks`; afterward it restores the last
-   active sidebar view. It remembers its width/collapsed state locally and keeps
-   a compact activity rail available while collapsed.
-2. Tasks are grouped by type. Dragging a task reorders it; dropping it into a
-   different group also changes its type and updates `updatedAt`.
-   Each group header (`Bug`, `Feature`, `Improve`) has an inline `+` button
-   beside its count, opening the task editor with that group's type selected.
-   The buttons replace the panel-toolbar Add action; all three groups remain
-   visible even when the project has no tasks so the first task can be created.
-3. Task rows show the title when present. Untitled tasks use the first line of
-   description as their display label, or `Untitled task` when they contain only
-   attachments. Rows also show status, session/run action, edit, and delete
-   controls. Status uses icon, text, and color rather than color alone.
-4. Manual creation through the task editor still requires a non-empty title.
-   Tasks start with status `todo` and priority `medium`, and may include
-   description text and attachments. Newly selected/pasted task attachments are
-   persisted into `.pi/task-attachments` so the task owns its files. Existing
-   untitled composer-captured tasks may be edited without inventing a title as
-   long as description content or attachments remain.
-5. Editing changes title, description, and type. Status is changed separately.
-   Existing persisted priority is preserved.
-6. `.pi/tasks.jsonc` is authoritative. Missing `.pi`/task storage produces an
-   empty version-1 document. JSONC comments and trailing commas are accepted.
-7. Only `.pi/tasks.jsonc` is recognized as task storage. Other sibling task
-   files are ignored; Pix does not import, migrate, delete, or interpret them.
-8. Starting an unlinked task creates/selects a new ACP session, persists its
-   session id, changes any non-`done` task to `in-progress`, preserves `done`,
-   appends the generated task prompt, and sends it immediately. If the UI-only
-   New Conversation draft was active, Pix foregrounds the created real session
-   and deactivates rather than discards the draft, preserving that draft's
-   unsent composer text/attachments for later restoration.
-9. Starting a linked task opens that session. A stale/missing linked session is
-   a recoverable error and does not silently create another session.
-10. Task completion remains manual.
-11. The normal message composer's vertical-ellipsis menu exposes `Create task`
-    whenever the current draft has text, attachments, or active voice input.
-    Voice input is finalized first. The resulting task has an empty persisted
-    title, type `feature`, status `todo`, priority `medium`, and stores the
-    composer text plus attachment markers in its description. The prompt is not
-    sent to the agent. Composer attachments are persisted into
-    `.pi/task-attachments` before those markers are written; path-backed files
-    are copied there and pathless images are materialized from their bytes.
-12. After composer task persistence succeeds, Pix expands/selects the Tasks
-    sidebar view, scrolls the newly created task into view, highlights it, and
-    clears the composer only if the draft is still the exact draft that was
-    captured for task creation. A failed save or edits made while the save is in
-    flight preserve the composer.
-13. After a task-document write succeeds, Pix prunes regular files from
-    `.pi/task-attachments` that are no longer referenced by any remaining task.
-    Shared attachments stay on disk until the last task reference is removed.
-14. Every successful task-document write also marks the Registry `tasks` project
-    artifact dirty for background synchronization. Rapid task mutations are
-    debounced/coalesced; a failed local write never enters the remote sync queue.
-    If the Registry session is busy, the dirty task state remains pending until
-    an idle sync window is available.
-15. The full-panel `Loading tasks…` state is used only until a valid task
-    document has been loaded for the current workspace. Subsequent reads keep
-    the existing list (including an empty list) visible until replacement data
-    arrives, without flashing a loading screen. Conflicting controls remain
-    disabled during the read; read failures still show the storage error.
-    Temporary save/read locking does not dim every task's controls: row and
-    group-add controls keep stable opacity while disabled for this transient
-    work, avoiding list-wide flashes during post-save synchronization. An
-    unavailable session still dims the Run/Open session action.
+1. If a linked session exists, open it without creating another session or
+   emitting another prompt; a stale session is an actionable error.
+2. For an unlinked task, create a new ACP session and save only that task's
+   `sessionId` and `in-progress` status (unless it is already `done`).
+   Start the generated prompt immediately. Preserve an independent unsent
+   conversation draft when switching sessions. An optional task `modelRef`
+   configures the new session's model and thinking level via the existing ACP
+   `newSession` override; when absent, normal session defaults apply. An
+   already-linked session opens unchanged and is never silently reconfigured.
+3. The launch prompt identifies the task id and explicitly authorizes its
+   final `done` (completed and verified) or `failed` (could not complete)
+   status via `project_tasks update` without asking a second time. Transient
+   retry errors are not terminal failure. Other task/status modifications
+   still require explicit user authorization.
+4. Query `read_project_task_attachments` from SQLite for that **same task id**.
+   Resolve the row's immutable SHA-256 blob with native safe-file validation
+   and the attachment permission gate, then submit it through the normal
+   transcript attachment pipeline. Descriptions remain plain text; attachment
+   paths are not embedded in SQLite task description strings.
+5. Errors in saving a final status must be reported; interrupted turns do not
+   automatically mark a task failed.
 
-## Contracts
+## Attachment semantics
 
-- Project file: `.pi/tasks.jsonc`.
-- Document shape: optional `$schema`, `version: 1`, and `tasks`.
-- Each task has a unique id, string title, type, status, priority, `createdAt`,
-  and `updatedAt`; description and `sessionId` are optional. The title may be an
-  empty string only when description content is present.
-- Unknown fields, duplicate ids, unsupported enum values, completely empty task
-  content, malformed timestamps, unsupported versions, and oversized documents
-  are rejected.
-- The Tauri backend confines task paths to the active workspace, rejects escape
-  through `.pi` symlinks, and caps the document at 1 MB.
-- Writes validate the complete document, write a same-directory temporary file,
-  and replace the target to avoid partial JSONC files.
+- User command `/task attach <id> <project-relative-file>` copies a verified
+  regular file (maximum 25 MiB, no symlink/path escape) into
+  `.pi/task-attachments/<sha256>` and records hash, display name, byte count
+  and task id association in SQLite. Equal content deduplicates naturally.
+- The UI editor's picker/paste pipeline first materializes content-addressed
+  blobs, loads current associations by task id, and commits updated task
+  fields and attachment associations in **one SQL transaction**. Failed
+  association loading disables Save; stale completion cannot clear links.
+- Card attachment badges query task association counts in bulk without opening
+  or approving the blobs. The full editor still validates and resolves the
+  actual files through `read_project_task_attachments` before saving.
+- Composer **Create task** attaches selected saved blobs to the new task and
+  only clears the draft after the successful task-and-attachment commit.
+- References are relational, with foreign keys and `ON DELETE CASCADE`.
+  Physical blobs are immutable and not pruned during a save. A future GC
+  could remove unreferenced blobs explicitly after proving no references.
+- Unsubmitted composer/draft attachments remain separate from saved tasks;
+  only an explicit user action attaches them to a newly saved task.
 
-## Invariants
+## Task relationships
 
-- Failed validation never replaces the task file.
-- Failed persistence restores the previous in-memory task document.
-- Composer task creation never clears a newer draft that changed while task
-  persistence was in flight.
-- Task attachments are persisted through the same task-description marker
-  format used by the task editor, and newly attached files are owned by the
-  project's `.pi/task-attachments` storage so running the task restores them
-  without depending on the expiring chat cache or original source path.
-- Attachment cleanup runs only after the replacement `tasks.jsonc` has been
-  committed successfully. Cleanup is reference-based across the complete task
-  document and never deletes paths outside `.pi/task-attachments`.
-- Create/edit/delete/status/reorder/session-link task mutations all flow through
-  the same save method, so they share the same background Registry scheduling
-  semantics.
-- A task is linked to at most one session.
-- Starting an unlinked task never leaves the UI-only draft selected after the
-  real task session has been created; composer ownership moves to the task
-  session while any draft composer snapshot remains isolated under the draft.
-- Running/reordering/editing is disabled while conflicting task/session work is
-  active.
-- Dragging between groups changes only ordering/type; other task fields survive.
+- The SQLite payload schema v1 remains the same; optional `parentId`, `epic`,
+  `relatedTaskIds` and `modelRef` fields extend it without changing the SQL
+  table layout. Existing tasks without these fields remain top-level ordinary
+  tasks and use the default session model.
+- `parentId` references exactly one existing task. Parents must be present,
+  and cycles, self-links, dangling task references, duplicate related-task
+  IDs and a simultaneous `epic=true` plus `parentId` are rejected.
+- `relatedTaskIds` are directional stored links, with reverse relationships
+  derived for display so creating a relation never rewrites another task row.
+  Deleting a referenced task requires unlinking/reparenting dependents first.
+  Validation runs under the SQLite write transaction, not only in the UI;
+  agent and slash updates preserve optional fields and reject invalid deletes.
+- `links` store project-relative file/artifact paths or regular web URLs;
+  unsafe local paths are rejected by the editor. Existing `links` are presented
+  as named, clickable rows, not anonymous counts. Attachments remain a separate
+  SQLite association table rather than embedded paths in a description.
 
-## Edge cases
+## Registry interaction and storage safety
 
-- Switching workspaces discards the previous in-memory task view and loads the
-  new project's task document.
-- Missing storage means no tasks; malformed or empty `.pi/tasks.jsonc` is an error.
-- Unsupported sibling task files do not participate in task loading.
-- Save, session creation, attachment preparation, and prompt failures remain
-  visible and retryable.
+- Each successful Desktop task save marks the Registry `tasks` artifact
+  dirty for debounced background sync; failures do not schedule a push.
+  Agent/slash updates are observed by panel polling and Registry local
+  hashing independently of Desktop callbacks.
+- Registry exports a committed consistent SQLite snapshot (SQLite online
+  backup, including WAL contents), plus referenced content-addressed blobs.
+  It hashes canonical task rows/relationships and verified attachment
+  bytes, not the physical DB file or temporary WAL/SHM bytes.
+- Registry imports into the existing local database **inside a transaction**,
+  with provenance/expected-hash conflict checks and without replacing its
+  inode. Pull is a deliberate bulk action outside the restricted task API.
+- Cleanup preserves `tasks.sqlite`, `tasks.sqlite-wal`,
+  `tasks.sqlite-shm`, `task-attachments/`, and durable project state.
+  It does not clear live journal sidecars or follow symlinks.
+- Reject redirected SQLite files/sidecars, nonregular files, unsupported
+  schema versions, invalid task payloads, unsafe blobs and invalid hashes.
+  Read errors never authorize data deletion or recreation.
+- On macOS/APFS, concurrent SQLite last-close cleanup can expose `-wal` or
+  `-shm` metadata with `nlink=0` just after its inode was unlinked. That is
+  a normal ephemeral state, **not** a hard link, and must not block Tasks.
+  `nlink>1` on a sidecar still rejects an actual hard-link alias, as do
+  symlinks and nonregular files. The canonical `.pi/tasks.sqlite` and
+  immutable attachment blobs continue to require exactly one link.
 
-## Implementation
+## Implementation and verification
 
-- `desktop/src/app/project-actions.svelte.ts`
-- `desktop/src/app/project-tasks.svelte.ts`
-- `desktop/src/app/desktop-project-action-services.ts`
-- `desktop/src/components/PromptComposerActionsMenu.svelte`
-- `desktop/src/components/WorkspaceSidebar.svelte`
-- `desktop/src/components/workspace-sidebar-layout-controller.svelte.ts`
-- `desktop/src/components/workspace-sidebar-task-drag-controller.svelte.ts`
 - `desktop/src/components/WorkspaceSidebarTasksPanel.svelte`
-- `desktop/src/components/WorkspaceSidebarTaskEditor.svelte`
-- `desktop/src/lib/attachments.ts`
-- `desktop/src/lib/project-tasks.ts`
+- `desktop/src/components/TaskFieldSelect.svelte`
+- `desktop/src/components/TaskProjectLinkInput.svelte`
+- `desktop/src/components/WorkspaceSidebarTaskModelControl.svelte`
+- `desktop/src/components/ModelThinkingPicker.svelte`
+- `desktop/src/components/WorkspaceSidebar.svelte`
+- `desktop/src/app/project-tasks.svelte.ts`
+- `desktop/src/app/project-actions.svelte.ts`
+- `desktop/src-tauri/src/project_tasks_sqlite.rs`
 - `desktop/src-tauri/src/lib.rs`
-- `src/schemas/tasks-schema.ts`
-
-## Tests
-
-- `desktop/src/app/project-tasks-store.test.ts`
-- `desktop/src/components/WorkspaceSidebar.test.ts`
 - `desktop/src/components/WorkspaceSidebarTasksPanel.test.ts`
-- `desktop/src/lib/project-tasks.test.ts`
-- `desktop/src/lib/attachments.test.ts`
-- `desktop/src/app/desktop-project-action-services.test.ts`
-- `desktop/src-tauri/src/lib.rs`
+- `desktop/src/components/WorkspaceSidebar.test.ts`
+- `desktop/src/app/project-actions.test.ts`
+- `desktop/src-tauri/src/lib.rs` native SQLite/revision/blob/Registry tests
 
-## Verification
-
-- `desktop/src/app/project-tasks-store.test.ts` covers initial versus repeat
-  loading, empty snapshots, workspace switches, reset, and stale read completion.
-- `desktop/src/components/WorkspaceSidebarTasksPanel.test.ts` covers group-add
-  controls including empty projects, stable task-row styles during transient
-  locking, and initial loading/error states. Sidebar wiring tests cover passing
-  the selected group type into the task editor.
-- `desktop/src/lib/project-tasks.test.ts` covers untitled composer task creation,
-  parsing, prompt generation, and drag/reorder semantics.
-- `desktop/src/lib/attachments.test.ts` covers data-URL decoding used when a
-  pathless composer image is persisted into project task storage.
-- `desktop/src/app/desktop-project-action-services.test.ts` covers project-task
-  launch from the active UI-only draft and verifies that the created real
-  session becomes active without discarding the draft composer snapshot.
-- Rust tests in `desktop/src-tauri/src/lib.rs` cover missing/read/write/malformed
-  JSONC, validation, workspace confinement, and ignoring unsupported task files.
-- Run `npm --prefix desktop test`, `npm --prefix desktop run check`, and
-  `cargo test --manifest-path desktop/src-tauri/Cargo.toml`.
-
-## Risks / unknowns
-
-- Whole-document writes assume one active writer per project; multi-window merge
-  semantics remain out of scope.
-- A linked session can be removed outside Pix Desktop and remains linked until
-  the user repairs or edits the task.
-- Priority remains part of the persisted schema although the current UI does not
-  expose priority editing.
-
-## Evidence
-
-- Confirmed by code: `desktop/src/app/project-actions.svelte.ts`,
-  `desktop/src/app/desktop-project-action-services.ts`, the extracted composer/
-  sidebar task surfaces, and `desktop/src/lib/project-tasks.ts` implement the
-  current task lifecycle and composer capture action.
-- Confirmed by code: `desktop/src-tauri/src/lib.rs` owns JSONC persistence,
-  validation, confinement, atomic replacement, and ignores unsupported sibling
-  task-storage formats.
-- Confirmed by tests: project-task unit tests and Tauri task persistence tests.
+The API restriction does **not** sandbox all OS file tools: independently
+privileged code could still open `.pi/tasks.sqlite` directly. The sanctioned
+agent interface never grants arbitrary SQL or all-task replacement.

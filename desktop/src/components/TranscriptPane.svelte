@@ -57,6 +57,7 @@
     onResolveLocalMedia,
     onLoadToolResult,
     onUserMessageAction,
+    onHtmlSandboxSubmit,
     lspSuggestion,
     onInstallLsp,
     onDismissLsp,
@@ -86,6 +87,7 @@
     onResolveLocalMedia: (path: string) => Promise<Attachment | undefined>;
     onLoadToolResult: (toolCallId: string) => void;
     onUserMessageAction: (message: MessageItem, action: UserMessageAction) => void | Promise<void>;
+    onHtmlSandboxSubmit?: (messageId: string, payload: unknown) => Promise<"sent" | "queued">;
     lspSuggestion?: LspMissingSuggestion;
     onInstallLsp?: () => void;
     onDismissLsp?: () => void;
@@ -304,7 +306,7 @@
               data-transcript-entry-id={item.id}
             >
               <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
-              {#if item.text}<MarkdownText text={item.text} dense fitTables {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
+              {#if item.text}<MarkdownText text={item.text} dense fitTables enableHtmlSandbox={!!onHtmlSandboxSubmit} onHtmlSandboxSubmit={onHtmlSandboxSubmit ? (payload) => onHtmlSandboxSubmit(item.id, payload) : undefined} {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
             </article>
           {/if}
         {:else}

@@ -398,6 +398,7 @@
 
   function composerMenuNavigationItems(): MenuNavigationItem[] {
     return [
+      { label: "Side question (BTW)", disabled: !canOpenBtw },
       { label: "Attach files", disabled: !canChooseAttachments },
       { label: historyCommand.label, disabled: !canOpenPromptHistory },
       { label: enhanceCommand.label, disabled: !canEnhancePrompt },

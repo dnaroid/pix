@@ -1,10 +1,11 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { Database } from "bun:sqlite";
 import { DefaultResourceLoader, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { installFakeIdxOnPath } from "./support/fake-idx.js";
 import projectSearchExtension from "../src/project-search/index.js";
@@ -28,6 +29,19 @@ const disabledIdx: ProjectSearchServices = {
   indexed: () => false,
   listSessions: async () => [],
 };
+function writeSearchTasks(root: string, records: Array<Record<string, unknown>>): void {
+  const folder = path.join(root, ".pi");
+  mkdirSync(folder, { recursive: true });
+  const db = new Database(path.join(folder, "tasks.sqlite"), { create: true });
+  try {
+    db.exec("PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY,payload TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 1,position INTEGER NOT NULL DEFAULT 0); CREATE TABLE IF NOT EXISTS attachments(hash TEXT PRIMARY KEY,name TEXT NOT NULL,size INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS task_attachments(task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, hash TEXT NOT NULL REFERENCES attachments(hash), ordinal INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(task_id,hash)); PRAGMA user_version=1");
+    const insert = db.prepare("INSERT INTO tasks(id,payload,position) VALUES(?,?,?)");
+    for (const [index, record] of records.entries()) {
+      const task = { createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z", ...record };
+      insert.run(task.id, JSON.stringify(task), index);
+    }
+  } finally { db.close(); }
+}
 
 describe("project_search shared store lookup", () => {
   test("native JSONL lookup follows the active branch and ignores tool-use outputs and abandoned answers", async () => {
@@ -83,16 +97,12 @@ describe("project_search shared store lookup", () => {
   test("searches saved project tasks and session first/final excerpts, never tool bodies", async () => {
     const root = fixture();
     mkdirSync(path.join(root, ".pi"));
-    writeFileSync(path.join(root, ".pi", "tasks.jsonc"), `{
-      // Same storage as Desktop Tasks
-      "version": 1,
-      "tasks": [
-        { "id": "TASK-42", "title": "Resolve semaphore race", "description": "Cancel pending requests",
-          "status": "done", "type": "bug", "priority": "high" },
-        { "id": "TASK-43", "title": "Unrelated documentation", "description": "Write a README",
-          "status": "todo", "type": "feature", "priority": "low" },
-      ],
-    }`);
+    writeSearchTasks(root, [
+      { id: "TASK-42", title: "Resolve semaphore race", description: "Cancel pending requests",
+        status: "done", type: "bug", priority: "high" },
+      { id: "TASK-43", title: "Unrelated documentation", description: "Write a README",
+        status: "todo", type: "feature", priority: "low" },
+    ]);
     const sessions: SessionRecord[] = [
       { id: "session-1", cwd: root, path: "/sessions/native-1.jsonl", name: "Architecture review", firstMessage: "question" },
       { id: "session-other", cwd: "/other/project", path: "/sessions/other.jsonl", firstMessage: "race" },
@@ -119,17 +129,40 @@ describe("project_search shared store lookup", () => {
     expect(formatProjectSearch(result)).toContain("Source ID:");
   });
 
+  test("reads task hierarchy as a whole and searches linked artifacts, related titles, session and model", async () => {
+    const root = fixture();
+    writeSearchTasks(root, [
+      { id: "EPIC-1", title: "Magic overhaul", status: "todo", type: "feature", priority: "high", epic: true },
+      { id: "CHILD-2", title: "Elemental spells", description: "Balance combat spells", status: "todo", type: "idea", priority: "medium",
+        parentId: "EPIC-1", relatedTaskIds: ["EPIC-1"], links: ["docs/elemental-design.md"], sessionId: "session-local-42", modelRef: "provider/smart-model:high" },
+    ]);
+    const db = new Database(path.join(root, ".pi", "tasks.sqlite"));
+    try {
+      db.exec("PRAGMA foreign_keys=ON");
+      db.prepare("INSERT INTO attachments(hash,name,size) VALUES(?,?,?)").run("a".repeat(64), "analysis-metadata.png", 10);
+      db.prepare("INSERT INTO task_attachments(task_id,hash,ordinal) VALUES(?,?,?)").run("CHILD-2", "a".repeat(64), 0);
+    } finally { db.close(); }
+    for (const [query, expected] of [
+      ["overhaul", ["EPIC-1", "CHILD-2"]],
+      ["elemental-design.md", ["EPIC-1", "CHILD-2"]],
+      ["analysis-metadata.png", ["CHILD-2"]],
+      ["session-local-42", ["CHILD-2"]],
+      ["smart-model", ["CHILD-2"]],
+      ["эпик", ["EPIC-1"]],
+    ] as const) {
+      const result = await searchProject(root, { query, sources: ["tasks"] }, disabledIdx);
+      expect(result.notices).toEqual([]);
+      expect(result.hits.map(hit => hit.taskId).sort()).toEqual([...expected].sort());
+    }
+  });
+
   test("an explicitly selected alternate project changes scope but never the session cwd", async () => {
     const sessionRoot = fixture();
     const other = fixture();
     mkdirSync(path.join(sessionRoot, ".pi"));
     mkdirSync(path.join(other, ".pi"));
-    writeFileSync(path.join(sessionRoot, ".pi", "tasks.jsonc"), JSON.stringify({
-      version: 1, tasks: [{ id: "OLD", title: "Existing client", type: "feature", status: "done", priority: "low" }],
-    }));
-    writeFileSync(path.join(other, ".pi", "tasks.jsonc"), JSON.stringify({
-      version: 1, tasks: [{ id: "NEW", title: "Alternate project target", type: "bug", status: "todo", priority: "high" }],
-    }));
+    writeSearchTasks(sessionRoot, [{ id: "OLD", title: "Existing client", type: "feature", status: "done", priority: "low" }]);
+    writeSearchTasks(other, [{ id: "NEW", title: "Alternate project target", type: "bug", status: "todo", priority: "high" }]);
     const response = await searchProject(sessionRoot, {
       query: "alternate project", sources: ["tasks"],
       projectPath: path.relative(sessionRoot, other),
@@ -144,9 +177,7 @@ describe("project_search shared store lookup", () => {
   test("rejects redirected task storage and continues searching other sources without reading it", async () => {
     const root = fixture(), external = fixture();
     mkdirSync(path.join(external, ".pi"));
-    writeFileSync(path.join(external, ".pi", "tasks.jsonc"), JSON.stringify({
-      version: 1, tasks: [{ id: "secret", title: "Secret Access", status: "todo" }],
-    }));
+    writeSearchTasks(external, [{ id: "secret", title: "Secret Access", status: "todo", type: "feature", priority: "medium" }]);
     const { symlinkSync } = await import("node:fs");
     symlinkSync(path.join(external, ".pi"), path.join(root, ".pi"));
     const response = await searchProject(root, { query: "secret", sources: ["tasks", "sessions"] },
@@ -157,9 +188,7 @@ describe("project_search shared store lookup", () => {
   test("isolates missing IDX from local sources without automatically creating an index", async () => {
     const root = fixture();
     mkdirSync(path.join(root, ".pi"));
-    writeFileSync(path.join(root, ".pi", "tasks.jsonc"), JSON.stringify({
-      version: 1, tasks: [{ id: "ID-1", title: "Fix signal timeout", status: "done", type: "bug", priority: "high" }],
-    }));
+    writeSearchTasks(root, [{ id: "ID-1", title: "Fix signal timeout", status: "done", type: "bug", priority: "high" }]);
     const result = await searchProject(root, { query: "signal timeout", sources: ["tasks", "code", "knowledge"] }, disabledIdx);
     expect(result.hits.map(hit => hit.id)).toEqual(["tasks:ID-1"]);
     expect(result.notices.join(" ")).toContain("No initialization was performed");
@@ -174,8 +203,9 @@ describe("project_search shared store lookup", () => {
     const result = await searchProject(root, { query: "abort", sources: ["code", "knowledge"], indexMode: "lexical" }, {
       ...disabledIdx,
       indexed: () => true,
-      exec: async (command, args) => {
+      exec: async (command, args, options) => {
         expect(command).toBe("idx");
+        expect(options.timeout).toBe(60_000);
         calls.push(args);
         return { stdout: args.includes("code") ? code : docs, stderr: "", code: 0 };
       },
@@ -243,6 +273,27 @@ describe("project_search shared store lookup", () => {
     expect(JSON.stringify(result)).not.toContain("SECRET-CREDENTIAL");
   });
 
+  test("the 60-second deadline settles even when a source ignores cancellation", async () => {
+    const root = fixture();
+    let expire!: () => void;
+    const nativeSetTimeout = globalThis.setTimeout;
+    const timer = spyOn(globalThis, "setTimeout").mockImplementation(((callback: () => void, ms: number) => {
+      expect(ms).toBe(60_000);
+      expire = callback;
+      return nativeSetTimeout(callback, ms);
+    }) as typeof setTimeout);
+    try {
+      const result = await searchProject(root, { query: "unused", sources: ["sessions"] }, {
+        ...disabledIdx,
+        listSessions: async () => { expire(); return new Promise(() => {}); },
+      });
+      expect(result.notices).toContain("Some sources exceeded the 60-second search deadline.");
+      expect(result.hits).toEqual([]);
+    } finally {
+      timer.mockRestore();
+    }
+  });
+
   test("cancellation settles even when an injected source ignores its AbortSignal", async () => {
     const root = fixture();
     let entered!: () => void;
@@ -281,15 +332,50 @@ describe("project_search shared store lookup", () => {
     expect(patch.notices.join(" ")).toContain("other sources were skipped");
     expect(parseGitHistory("PIX-PROJECT-COMMIT:bad\0")).toEqual([]);
   });
+
+  test("inspects a substantially larger but explicitly bounded session history", async () => {
+    const root = fixture();
+    const sessions: SessionRecord[] = Array.from({ length: 1002 }, (_, i) => ({
+      id: `session-${i}`, cwd: root, path: path.join(root, `${i}.jsonl`),
+      firstMessage: `First question number ${i}`, name: `Session ${i}`,
+    }));
+    const result = await searchProject(root, { query: "uniquelate999", sources: ["sessions"] }, {
+      ...disabledIdx,
+      listSessions: async () => sessions,
+      readSession: async filename => ({ firstText: filename.endsWith("/999.jsonl") ? "uniquelate999" : "ordinary", finalText: "" }),
+    });
+    expect(result.hits.map(hit => hit.sessionId)).toEqual(["session-999"]);
+    expect(result.notices.join(" ")).toContain("1,000 most recent sessions");
+  });
+
+  test("Git search reaches beyond the old 1,000 commit cutoff and maintains bounded arguments", async () => {
+    const root = fixture();
+    const history = Array.from({ length: 1201 }, (_, i) => {
+      const hash = i.toString(16).padStart(40, "0");
+      return [
+        `PIX-PROJECT-COMMIT:${hash}`, hash.slice(0, 7), i === 1150 ? "UniqueHistoricalMark" : `Older changes ${i}`,
+        "Test author", "2026-10-10T00:00:00+00:00", "Recorded project change",
+      ].join("\0") + "\0";
+    }).join("");
+    const result = await searchProject(root, { query: "UniqueHistoricalMark", sources: ["commits"] }, {
+      ...disabledIdx,
+      git: async (_cwd, argv) => {
+        expect(argv).toContain("--max-count=5000");
+        expect(argv).not.toContain("--max-count=1000");
+        return history;
+      },
+    });
+    expect(result.hits).toHaveLength(1);
+    expect(result.hits[0]?.title).toBe("UniqueHistoricalMark");
+    expect(result.notices).toEqual([]);
+  });
 });
 
 describe("project_search registration in Pix Desktop and TUI", () => {
   test("registers unconditionally, returns safe text + structured source references, and validates parameters", async () => {
     const root = fixture();
     mkdirSync(path.join(root, ".pi"));
-    writeFileSync(path.join(root, ".pi", "tasks.jsonc"), JSON.stringify({
-      version: 1, tasks: [{ id: "T-1", title: "Fix scheduler", type: "bug", status: "done", priority: "high" }],
-    }));
+    writeSearchTasks(root, [{ id: "T-1", title: "Fix scheduler", type: "bug", status: "done", priority: "high" }]);
     const registered: Array<{ name: string; execute: Function; promptSnippet: string; parameters: Record<string, unknown> }> = [];
     projectSearchExtension({
       registerTool: (tool: typeof registered[number]) => registered.push(tool),

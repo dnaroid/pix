@@ -18,6 +18,45 @@ function sources(available = true): SearchSources {
 }
 
 describe("universal hybrid search", () => {
+  it("merges semantic-only task hits with lexical metadata and no duplicates", async () => {
+    const api = sources();
+    api.tasks = vi.fn(async () => ({ version: 1 as const, tasks: [
+      { id: "linked", title: "Magic balance", description: "Adjust fireball", type: "feature" as const, status: "todo" as const, priority: "medium" as const,
+        createdAt: "2026-10-10T00:00:00Z", updatedAt: "2026-10-10T00:00:00Z" },
+      { id: "other", title: "Shield system", description: "Tactical defense", type: "feature" as const, status: "backlog" as const, priority: "high" as const,
+        createdAt: "2026-10-10T00:00:00Z", updatedAt: "2026-10-10T00:00:00Z" },
+    ] }));
+    api.taskAttachmentNames = vi.fn(async () => ({ linked: ["screenshot-combat.png"] }));
+    api.taskSemantic = vi.fn(async () => ({ results: [
+      { kind: "tasks" as const, id: "tasks:linked", taskId: "linked", title: "Magic balance", snippet: "semantic snippet", score: 0.9, semantic: true as const },
+      { kind: "tasks" as const, id: "tasks:other", taskId: "other", title: "Shield system", snippet: "Tactical defense", score: 0.85, semantic: true as const },
+    ], pendingIndex: false }));
+    const result = await queryUniversalSearch(api, "/project", "screenshot-combat.png", ["tasks"], settings, new AbortController().signal);
+    expect(result.results.map(hit => hit.id).sort()).toEqual(["tasks:linked", "tasks:other"]);
+    const linked = result.results.find(hit => hit.id === "tasks:linked");
+    expect(linked).toMatchObject({ kind: "tasks", semantic: true });
+    expect(linked?.snippet).toContain("screenshot-combat.png");
+    expect(api.taskSemantic).toHaveBeenCalledWith("/project", "screenshot-combat.png", expect.any(AbortSignal));
+    expect(api.overview).not.toHaveBeenCalled();
+    expect(api.index).not.toHaveBeenCalled();
+    expect(result.notices).toEqual([]);
+  });
+
+  it("preserves local tasks when the optional semantic backend fails or is still indexing", async () => {
+    const api = sources();
+    api.tasks = vi.fn(async () => ({ version: 1 as const, tasks: [
+      { id: "task-one", title: "Magic optimization", type: "feature" as const, status: "todo" as const,
+        priority: "medium" as const, createdAt: "2026-10-10T00:00:00Z", updatedAt: "2026-10-10T00:00:00Z" },
+    ] }));
+    api.taskSemantic = vi.fn(async () => ({ results: [], pendingIndex: true }));
+    let result = await queryUniversalSearch(api, "/project", "magic", ["tasks"], settings, new AbortController().signal);
+    expect(result.results.map(hit => hit.id)).toEqual(["tasks:task-one"]);
+    expect(result.notices).toEqual([expect.stringContaining("indexing is incomplete")]);
+    api.taskSemantic = vi.fn(async () => { throw new Error("Offline"); });
+    result = await queryUniversalSearch(api, "/project", "magic", ["tasks"], settings, new AbortController().signal);
+    expect(result.results.map(hit => hit.id)).toEqual(["tasks:task-one"]);
+    expect(result.notices).toEqual([expect.stringContaining("Semantic Tasks search failed")]);
+  });
   it("routes patch: queries exclusively to the read-only backend; never opens regular sources or IDX", async () => {
     const api = sources();
     api.tasks = vi.fn(async () => { throw new Error("tasks must not be queried"); });
@@ -50,9 +89,9 @@ describe("universal hybrid search", () => {
   });
   it("publishes fast hits immediately and appends both late IDX domains after initial waiting ends", async () => {
     vi.useFakeTimers();
-    let finish!: (value: Awaited<ReturnType<SearchSources["index"]>>) => void;
+    let finish!: (value: Awaited<ReturnType<NonNullable<SearchSources["index"]>>>) => void;
     const api = sources();
-    api.index = vi.fn(() => new Promise<Awaited<ReturnType<SearchSources["index"]>>>(resolve => { finish = resolve; }));
+    api.index = vi.fn(() => new Promise<Awaited<ReturnType<NonNullable<SearchSources["index"]>>>>(resolve => { finish = resolve; }));
     let view = emptySearchDialogState();
     const controller = new SearchDialogController(
       (query, types, signal, update) => queryUniversalSearch(api, "/hung-idx", query, types, settings, signal, update),

@@ -67,6 +67,8 @@ errors, not invent or approve decisions.
 
 ## Records
 
+- [0064 — SQLite project tasks without legacy storage](0064-sqlite-project-tasks.md)
+- [0063 — Kernel-owned task-file exclusion](0063-task-file-kernel-lock.md)
 - [0061 — Scoped AST and public web tools for subagents](0061-subagent-scoped-ast-web-tools.md)
 - [0060 — Read-only repository queries for every subagent](0060-subagent-read-only-repo-tools.md)
 - [0059 — Private todos for every subagent role](0059-subagent-private-todos.md)

@@ -59,4 +59,4 @@ or paths; `Low` for unverified important behavior or unresolved material risks.
 An unresolved material blocker requires `Low`, even when its cause is obvious.
 For Medium/Low, state what would raise confidence. This role assesses delivery
 readiness and evidence when requested; it does not replace or waive any
-independent code-review gate (including `frontier-review`) that applies.
+independent code-review gate (including `oracle`) that applies.

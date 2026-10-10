@@ -29,7 +29,13 @@ describe("ModelThinkingPicker staged selection", () => {
     expect(pickerSource).toContain("activateModelPickerPopover(dialogElement, search, onClose");
     expect(pickerSource).not.toContain("{:else if model.ref === selectedModelRef}");
     expect(pickerSource).not.toContain("!dirty || disabled");
-    expect(pickerSource).toContain("if (!dirty) {\n      confirmSelection();");
+    expect(pickerSource).toContain("if (!dirty) {\n      if (!applyUnchanged) {\n        confirmSelection();");
+    expect(pickerSource).toContain("await onApply(selectedModel.ref, selectedThinking)");
+  });
+
+  it("can assign a matching current model without changing a live session", () => {
+    expect(pickerSource).toContain("applyUnchanged = false");
+    expect(pickerSource).toContain("if (!applyUnchanged)");
   });
 
   it("uses a bounded nonmodal dialog and guards stale apply completion", () => {

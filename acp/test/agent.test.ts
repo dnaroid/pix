@@ -23,7 +23,8 @@ import type {
 import { PixAcpAgent } from "../src/acp/pix-acp-agent.js";
 import { DesktopSearchService } from "../src/search/service.js";
 import { SearchPreferences } from "../src/search/config.js";
-import { SEARCH_QUERY_METHOD, SEARCH_CONFIG_METHOD, SEARCH_INTENT_METHOD, type SearchQueryResponse } from "../src/search/contract.js";
+import { SEARCH_QUERY_METHOD, SEARCH_CONFIG_METHOD, SEARCH_INTENT_METHOD, SEARCH_TASKS_METHOD, type SearchQueryResponse, type SemanticTasksResponse } from "../src/search/contract.js";
+import { TASK_TYPE_CLASSIFY_METHOD } from "../src/tasks/type-classification-contract.js";
 import { SEARCH_RAG_METHOD, SEARCH_RAG_DELTA_METHOD } from "../src/search/rag-contract.js";
 import { SEARCH_COMMITS_METHOD, type CommitSearchRequest } from "../src/search/commit-contract.js";
 import { BTW_METHOD, type BtwCommand, type BtwState } from "../src/btw/contract.js";
@@ -768,6 +769,39 @@ test("session/new forwards structured extension state emitted during pi startup"
 	}]);
 });
 
+test("startup and idle extension warnings/errors reach system rows without a prompt", async () => {
+	const notifications: SessionNotification[] = [];
+	let pi!: FakePiClient;
+	const harness = createTestAdapter({
+		createPiClient: () => {
+			pi = new FakePiClient();
+			pi.eventsOnStart.push({ type: "extension_ui_request", id: "auth-startup", method: "notify",
+				message: "Claude Code provider is unavailable: Run `claude auth login`, then /reload", notifyType: "error" });
+			return pi;
+		},
+	});
+	let sessionId = "";
+	await connect(harness.adapter, async (cx) => {
+		sessionId = (await cx.buildSession("/tmp/startup-notice").start()).sessionId;
+		await waitFor(() => notifications.some((item) => item.update.sessionUpdate === "agent_message_chunk"));
+		pi.emit({ type: "extension_ui_request", id: "idle-warning", method: "notify", message: "Idle warning", notifyType: "warning" });
+		pi.emit({ type: "extension_ui_request", id: "idle-info", method: "notify", message: "Background info", notifyType: "info" });
+		await waitFor(() => notifications.filter((item) => item.update.sessionUpdate === "agent_message_chunk").length === 2);
+	}, (app) => {
+		app.onNotification("session/update", (ctx) => { notifications.push(ctx.params); });
+	});
+	const feedback = notifications.filter((item) => item.update.sessionUpdate === "agent_message_chunk");
+	assert.equal(feedback.length, 2);
+	for (const item of feedback) {
+		assert.equal(item.sessionId, sessionId);
+		assert.match((item.update as { messageId: string }).messageId, /^pix-system:/);
+	}
+	assert.deepEqual(feedback.map((item) => (item.update as { content: { text: string } }).content.text), [
+		"Claude Code provider is unavailable: Run `claude auth login`, then /reload", "Idle warning",
+	]);
+	assert.deepEqual(pi.uiResponses, []);
+});
+
 test("desktop activity attachment rebinds a reused lazy runtime and replays its cached snapshot", async () => {
 	const notifications: Array<{ sessionId: string; channel: string; data: unknown; activityOwner?: string }> = [];
 	const harness = createTestAdapter({
@@ -884,6 +918,31 @@ test("Desktop sessions explicitly load all bundled extensions", async (t) => {
 			"high",
 		],
 	});
+});
+
+test("interactive HTML capability extension is loaded only for Pix Desktop, never other ACP clients", async (t) => {
+	const agentDir = mkdtempSync(join(tmpdir(), "pix-acp-html-extension-"));
+	t.after(() => rm(agentDir, { recursive: true, force: true }));
+	const path = "/opt/pix/html-sandbox/index.js";
+	const desktop = createTestAdapter({
+		agentDir,
+		htmlSandboxExtensionPath: path,
+	});
+	await connectAs(desktop.adapter, "pix-desktop", async (cx) => {
+		await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, clientCapabilities: {}, clientInfo: { name: "pix-desktop", version: "test" } });
+		await cx.buildSession("/tmp/pix-html-desktop").start();
+	});
+	assert.deepEqual(desktop.options[0]?.args, ["--extension", path]);
+
+	const other = createTestAdapter({
+		agentDir,
+		htmlSandboxExtensionPath: path,
+	});
+	await connectAs(other.adapter, "zed", async (cx) => {
+		await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, clientCapabilities: {}, clientInfo: { name: "zed", version: "test" } });
+		await cx.buildSession("/tmp/pix-html-zed").start();
+	});
+	assert.equal(other.options[0]?.args?.includes(path) ?? false, false);
 });
 
 function draftProviderExtensionSource(provider: string, model: string): string {
@@ -3128,6 +3187,19 @@ test("Pix Desktop search query/config use the exact private contract without spa
 		assert.equal(config.enabled, false);
 		assert.equal(config.keyAvailable, false);
 		assert.equal(typeof config.indexing, "boolean");
+		assert.equal(config.tasksSemanticEnabled, false);
+		const semanticTaskRequest = { cwd, query: "unfinished work", limit: 20 };
+		assert.deepEqual(await cx.request(SEARCH_TASKS_METHOD, semanticTaskRequest), {
+			results: [], pendingIndex: false,
+		} satisfies SemanticTasksResponse);
+		const consent = await cx.request(SEARCH_CONFIG_METHOD, { cwd, tasksSemanticEnabled: true }) as SearchQueryResponse["status"];
+		assert.equal(consent.tasksSemanticEnabled, true);
+		assert.deepEqual(await cx.request(SEARCH_TASKS_METHOD, semanticTaskRequest), { results: [], pendingIndex: false },
+			"consent without a stored provider credential cannot send embeddings");
+		for (const bad of [
+			{ ...semanticTaskRequest, cwd: "relative" }, { ...semanticTaskRequest, query: "" },
+			{ ...semanticTaskRequest, limit: 0 }, { ...semanticTaskRequest, unexpected: true },
+		]) await assert.rejects(cx.request(SEARCH_TASKS_METHOD, bad), /Invalid Desktop search request/);
 		await assert.rejects(cx.request(SEARCH_CONFIG_METHOD, { cwd, messageFilterEnabled: true }), /Invalid Desktop search request/);
 		await assert.rejects(cx.request(SEARCH_CONFIG_METHOD, { cwd, messageFilterEnabled: false }), /Invalid Desktop search request/);
 		await assert.rejects(cx.request(SEARCH_CONFIG_METHOD, { cwd, messageFilterEnabled: "true" }), /Invalid Desktop search request/);
@@ -3137,6 +3209,7 @@ test("Pix Desktop search query/config use the exact private contract without spa
 		await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION });
 		await assert.rejects(cx.request(SEARCH_QUERY_METHOD, request), /Desktop search unavailable/);
 		await assert.rejects(cx.request(SEARCH_CONFIG_METHOD, { cwd }), /Desktop search unavailable/);
+		await assert.rejects(cx.request(SEARCH_TASKS_METHOD, { cwd, query: "tasks", limit: 10 }), /Desktop search unavailable/);
 	});
 	assert.equal(harness.adapter.sessionCount, 0);
 });
@@ -3168,6 +3241,35 @@ test("Pix Desktop Jev intent is an isolated, validated, Desktop-only request", a
   });
   assert.deepEqual(requests, ["explain the architecture", "failure"]);
   assert.equal(adapter.adapter.sessionCount, 0);
+});
+
+test("Pix Desktop task type Jev request is Desktop-only, validated and does not start sessions", async t => {
+  const received: string[] = [];
+  const harness = createTestAdapter({
+    taskTypeClassifier: { classify: async (taskText, signal) => {
+      assert.ok(signal instanceof AbortSignal);
+      received.push(taskText);
+      if (taskText === "unavailable") throw new Error("Bearer SECRET provider error");
+      return { type: "idea", fallback: false };
+    } },
+    createPiClient: () => { throw new Error("Task classification must never create Pi"); },
+  });
+  t.after(() => harness.adapter.dispose());
+  const request = { cwd: resolve("."), text: "Explore alternative UI" };
+  await connectAs(harness.adapter, "pix-desktop", async cx => {
+    await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, clientInfo: { name: "pix-desktop", version: "test" } });
+    assert.deepEqual(await cx.request(TASK_TYPE_CLASSIFY_METHOD, { ...request, secret: "not-forwarded" }), { type: "idea", fallback: false });
+    assert.deepEqual(await cx.request(TASK_TYPE_CLASSIFY_METHOD, { ...request, text: "unavailable" }), { type: "feature", fallback: true });
+    for (const invalid of [{ ...request, cwd: "relative" }, { ...request, text: "" }, { ...request, text: "x".repeat(2049) }]) {
+      await assert.rejects(cx.request(TASK_TYPE_CLASSIFY_METHOD, invalid));
+    }
+  });
+  await connect(harness.adapter, async cx => {
+    await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION });
+    await assert.rejects(cx.request(TASK_TYPE_CLASSIFY_METHOD, request), /Desktop task classification unavailable/);
+  });
+  assert.deepEqual(received, ["Explore alternative UI", "unavailable"]);
+  assert.equal(harness.adapter.sessionCount, 0);
 });
 
 test("Desktop RAG streams source identities and answer text without starting a Pi session", async t => {

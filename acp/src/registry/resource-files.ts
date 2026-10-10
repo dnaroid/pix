@@ -1,8 +1,8 @@
 import { basename, dirname, join } from "node:path";
 import { promises as fs } from "node:fs";
 import { parseAgentMarkdown } from "./agent-markdown.js";
-import { PROJECT_AGENTS_DIR, PROJECT_DIR, PROJECT_SKILLS_DIR, REGISTRY_AGENTS_DIR, REGISTRY_SKILLS_DIR, RegistryRuntime, ResourceEntry, ResourceType, SAFE_NAME, SKILL_FILE, SKIP_NAMES } from "./model.js";
-import { ProjectContext, pathExists, projectCwd, registryResourceRelativePath, registryResourceNamespace } from "./paths.js";
+import { PROJECT_AGENTS_DIR, PROJECT_DIR, PROJECT_SKILLS_DIR, REGISTRY_AGENTS_DIR, REGISTRY_SKILLS_DIR, RegistryRuntime, ResourceEntry, ResourceType, SAFE_NAME, SKILL_FILE, canonicalPlanFileName, canonicalRegistryEntryName } from "./model.js";
+import { ProjectContext, hasTrackableFiles, pathExists, projectCwd, registryResourceRelativePath, registryResourceNamespace } from "./paths.js";
 import { assertPublicationDirectories } from "./publication-location.js";
 import { readResourceTagsFile } from "./metadata.js";
 import { createHash } from "node:crypto";
@@ -73,7 +73,7 @@ export async function scanSkills(dir: string): Promise<ResourceEntry[]> {
 	}
 	const resources: ResourceEntry[] = [];
 	for (const entry of entries) {
-		if (!entry.isDirectory() || entry.isSymbolicLink() || SKIP_NAMES.has(entry.name)) continue;
+		if (!entry.isDirectory() || entry.isSymbolicLink() || !canonicalRegistryEntryName(entry.name)) continue;
 		if (!SAFE_NAME.test(entry.name) || entry.name.includes("..")) continue;
 		const skillPath = join(dir, entry.name);
 		const skillFile = join(skillPath, SKILL_FILE);
@@ -93,7 +93,7 @@ export async function scanAgents(dir: string): Promise<ResourceEntry[]> {
 	}
 	const resources: ResourceEntry[] = [];
 	for (const entry of entries) {
-		if (!entry.isFile() || entry.isSymbolicLink() || !entry.name.endsWith(".md") || entry.name.startsWith(".")) continue;
+		if (!entry.isFile() || entry.isSymbolicLink() || !entry.name.endsWith(".md") || !canonicalRegistryEntryName(entry.name)) continue;
 		const name = basename(entry.name, ".md");
 		if (!SAFE_NAME.test(name) || name.includes("..")) continue;
 		const filePath = join(dir, entry.name);
@@ -131,28 +131,85 @@ export async function scanProject(project: ProjectContext): Promise<ResourceEntr
 	];
 }
 
-export async function copyTree(source: string, destination: string, relativePath = ""): Promise<void> {
+/** Empty/generated-only resource folders do not affect the Registry hash.
+ * Keep directory decisions consistent across hashing, copying and native polls.
+ */
+export async function hasCanonicalResourceFiles(path: string): Promise<boolean> {
+	const stat = await fs.lstat(path);
+	if (!stat.isDirectory() || stat.isSymbolicLink()) return true;
+	for (const entry of await fs.readdir(path, { withFileTypes: true })) {
+		if (!canonicalRegistryEntryName(entry.name)) continue;
+		if (!entry.isDirectory() || entry.isSymbolicLink() || await hasCanonicalResourceFiles(join(path, entry.name))) return true;
+	}
+	return false;
+}
+
+export async function copyTree(source: string, destination: string, relativePath = "", mode: "resource" | "plans" = "resource"): Promise<void> {
 	const stat = await fs.lstat(source);
 	if (stat.isSymbolicLink()) throw new Error(`Registry resources cannot contain symbolic links: ${relativePath || source}`);
 	if (stat.isFile()) {
 		await fs.mkdir(dirname(destination), { recursive: true });
+		if (mode === "plans" && await pathExists(destination)) {
+			const current = await fs.lstat(destination);
+			if (!current.isFile() || current.isSymbolicLink()) throw new Error(`Plan destination must be a regular file: ${destination}`);
+		}
 		await fs.copyFile(source, destination);
 		return;
 	}
 	if (!stat.isDirectory()) throw new Error(`Unsupported registry resource entry: ${relativePath || source}`);
 	await fs.mkdir(destination, { recursive: true });
+	if (mode === "plans") {
+		const actual = await fs.lstat(destination);
+		if (!actual.isDirectory() || actual.isSymbolicLink()) throw new Error(`Plan destination must be a real directory: ${destination}`);
+	}
 	const entries = (await fs.readdir(source, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name));
 	for (const entry of entries) {
-		if (SKIP_NAMES.has(entry.name)) continue;
+		if (!canonicalRegistryEntryName(entry.name)) continue;
+		if (mode === "resource" && entry.isDirectory() && !(await hasCanonicalResourceFiles(join(source, entry.name)))) continue;
+		if (mode === "plans") {
+			if (entry.isFile() && !canonicalPlanFileName(entry.name)) continue;
+			if (entry.isDirectory() && !(await hasTrackableFiles(join(source, entry.name)))) continue;
+			if (entry.isSymbolicLink() && !canonicalPlanFileName(entry.name)) continue;
+		}
 		const childRel = relativePath ? `${relativePath}/${entry.name}` : entry.name;
 		if (entry.isSymbolicLink()) throw new Error(`Registry resources cannot contain symbolic links: ${childRel}`);
-		await copyTree(join(source, entry.name), join(destination, entry.name), childRel);
+		await copyTree(join(source, entry.name), join(destination, entry.name), childRel, mode);
 	}
 }
 
-export async function replaceResource(source: string, destination: string): Promise<void> {
+export async function replaceResource(source: string, destination: string, mode: "resource" | "plans" = "resource"): Promise<void> {
 	await fs.rm(destination, { recursive: true, force: true });
-	await copyTree(source, destination);
+	await copyTree(source, destination, "", mode);
+}
+
+/** A plan pull replaces only managed Markdown, retaining local scratch output.
+ * In particular, syncing Registry must never delete an untracked backup or
+ * tool-owned file merely because it shares the .pi/plans directory.
+ */
+export async function replaceLocalPlans(source: string, destination: string): Promise<void> {
+	async function removePublishedMarkdown(directory: string): Promise<void> {
+		let stat: import("node:fs").Stats;
+		try { stat = await fs.lstat(directory); }
+		catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+			throw error;
+		}
+		if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`Plan directory must be a real directory: ${directory}`);
+		for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+			if (!canonicalRegistryEntryName(entry.name)) continue;
+			const child = join(directory, entry.name);
+			if (entry.isDirectory()) await removePublishedMarkdown(child);
+			else if (canonicalPlanFileName(entry.name)) {
+				if (!entry.isFile() || entry.isSymbolicLink()) throw new Error(`Plan Markdown must be a regular file: ${child}`);
+				await fs.unlink(child);
+			}
+		}
+	}
+	// Validate all published paths before removing any local plan. A remote
+	// symlink or unreadable canonical file must not cause partial local deletion.
+	await hashPath(source, "plans");
+	await removePublishedMarkdown(destination);
+	await copyTree(source, destination, "", "plans");
 }
 
 export function agentCompanion(file: string): string {
@@ -163,7 +220,7 @@ export async function agentCompanionStat(file: string): Promise<Awaited<ReturnTy
 	try {
 		const stat = await fs.lstat(agentCompanion(file));
 		if (!stat.isDirectory()) throw new Error(`Agent companion must be a regular directory: ${agentCompanion(file)}`);
-		return stat;
+		return await hasCanonicalResourceFiles(agentCompanion(file)) ? stat : undefined;
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
 		throw error;
@@ -195,7 +252,7 @@ export async function agentGitPaths(executor: RegistryExecutor, runtime: Registr
 	return (await pathExists(join(runtime.cacheDir, dir))) || tracked.stdout.trim() ? [file, dir] : [file];
 }
 
-export async function hashPath(path: string): Promise<string> {
+export async function hashPath(path: string, mode: "resource" | "plans" = "resource"): Promise<string> {
 	const hash = createHash("sha256");
 	async function visit(current: string, rel: string): Promise<void> {
 		const stat = await fs.lstat(current);
@@ -207,8 +264,20 @@ export async function hashPath(path: string): Promise<string> {
 		}
 		if (!stat.isDirectory()) throw new Error(`Unsupported resource entry: ${rel || current}`);
 		hash.update(`dir\0${rel}\0`);
-		const names = (await fs.readdir(current)).filter((name) => !SKIP_NAMES.has(name)).sort();
-		for (const name of names) await visit(join(current, name), rel ? `${rel}/${name}` : name);
+		const names = (await fs.readdir(current)).filter(canonicalRegistryEntryName).sort();
+		for (const name of names) {
+			const child = join(current, name);
+			if (mode === "resource") {
+				const childStat = await fs.lstat(child);
+				if (childStat.isDirectory() && !(await hasCanonicalResourceFiles(child))) continue;
+			}
+			if (mode === "plans") {
+				const childStat = await fs.lstat(child);
+				if (childStat.isDirectory() && !(await hasTrackableFiles(child))) continue;
+				if (!childStat.isDirectory() && !canonicalPlanFileName(name)) continue;
+			}
+			await visit(child, rel ? `${rel}/${name}` : name);
+		}
 	}
 	await visit(path, "");
 	return hash.digest("hex");

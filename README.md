@@ -80,6 +80,15 @@ ecosystem.
 
 Pix Desktop turns the same Pi/Pix runtime into an IDE-like native workbench.
 
+Assistant messages can include opt-in `pix-html` blocks: click **Run** to
+preview self-contained HTML/JavaScript prototypes or Canvas games in a
+sandboxed iframe. Native form Submit and `window.pix.submit(json)` return
+data to the current ACP conversation without overwriting your draft.
+The iframe auto-fits the game's content up to a bounded height, uses the
+native Pix scrollbar styling, and gives the agent the available inline width
+when you request an interactive prototype.
+See [HTML Sandbox](specs/desktop-html-sandbox.md) for the syntax and limits.
+
 **Platform support:** Pix Desktop currently supports **macOS on Apple Silicon
 only**. Windows and Linux Desktop packages are not currently published or
 platform-validated in CI. The Pix TUI remains supported on the release targets
@@ -87,8 +96,10 @@ listed below.
 
 The Activity Bar provides:
 
-- **Tasks** — project-local tasks in `.pi/tasks.jsonc`, attachments and linked
-  sessions;
+- **Tasks** — full interactive Desktop manager over project-local
+  `.pi/tasks.sqlite` (Quick Add, edit, priority/status, drag-and-drop,
+  attachments and linked sessions); `/task` slash commands and restricted
+  `project_tasks` agent tool provide additional access;
 - **Project** — keyboard-friendly file tree, Preview and external-editor actions;
 - **Source Control** — initialize Git, stage/unstage, diff, review, commit,
   publish/push and safe repository tools;

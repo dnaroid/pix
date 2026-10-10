@@ -46,6 +46,23 @@ test("session title consent is an independent, opt-in JSONC flag", async t => {
   await assert.rejects(stat(`${path}.search.lock`), { code: "ENOENT" });
 });
 
+test("task-semantic consent is a third independent flag and preserves unrelated configuration", async t => {
+  const { path, preferences } = await fixture(t);
+  assert.equal(await preferences.tasksSemanticEnabled(), false);
+  await mkdir(dirname(path));
+  await writeFile(path, '{\n  // Keep visible choices.\n  "visibleModels": ["owner/model"],\n  "search": { "semanticEnabled": true, "sessionTitlesEnabled": false }\n}\n');
+  await preferences.setTasksSemanticEnabled(true);
+  assert.equal(await preferences.tasksSemanticEnabled(), true);
+  assert.equal(await preferences.enabled(), true);
+  assert.equal(await preferences.sessionTitlesEnabled(), false);
+  assert.match(await readFile(path, "utf8"), /Keep visible choices/);
+  await preferences.setTasksSemanticEnabled(false);
+  assert.deepEqual(parse(await readFile(path, "utf8")), {
+    visibleModels: ["owner/model"], search: { semanticEnabled: true, sessionTitlesEnabled: false, tasksSemanticEnabled: false },
+  });
+  await assert.rejects(stat(`${path}.search.lock`), { code: "ENOENT" });
+});
+
 test("native mkdir ownership is respected even with an old mtime; consent rereads after release", async t => {
   const { path, preferences } = await fixture(t);
   await mkdir(dirname(path));

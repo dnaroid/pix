@@ -43,6 +43,10 @@ export function createDesktopSessionServices(options: DesktopSessionServicesOpti
     refreshQueueState: options.refreshQueueState,
     reportError: options.reportError,
     onOpen: activity.open,
+    onConfigOptions: (sessionId, configOptions) => {
+      const workspace = options.workspace();
+      if (workspace) tabs.models.remember(workspace, sessionId, configOptions);
+    },
     onLoadFailed: (sessionId) => {
       activity.markForgotten(sessionId);
       activity.clear(sessionId);

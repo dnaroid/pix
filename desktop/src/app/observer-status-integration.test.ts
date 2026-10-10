@@ -3,6 +3,7 @@ import type { AcpClient } from "../lib/acp-client";
 import type { HeadsUpSnapshot } from "../lib/heads-up";
 import { createHeadsUpStore } from "./heads-up.svelte";
 import { createDesktopStatusBarViewModel } from "./desktop-status-bar-view-model.svelte";
+import { createSessionTabsState } from "./session-tabs-state.svelte";
 
 function snapshot(instanceId: string): HeadsUpSnapshot {
   return { version: 1, instanceId, revision: 1, enabled: false, model: "provider/model", phase: "off", checks: 0, inputTokens: 0, outputTokens: 0, notice: null };
@@ -31,6 +32,7 @@ describe("Observer statusbar ownership", () => {
     store.handleSessionState({ sessionId: "b", channel: "heads-up", data: snapshot("r2") });
     const view = createDesktopStatusBarViewModel({
       status: () => "ready", displayedConfigOptions: () => [], changingConfig: () => null,
+      workspace: () => "/workspace", tabs: createSessionTabsState(),
       promptRunning: () => false, canUseSession: () => true, sessionHistoryLoading: () => false,
       draftSessionTabActive: () => draft, draftConfigAvailable: () => false, activeSessionRuntimeReady: () => ready,
       activeSessionId: () => id, sessionActivity: () => ({}), sessionSubagentSnapshot: () => undefined, sessionTodoSnapshot: () => undefined,

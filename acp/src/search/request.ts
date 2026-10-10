@@ -1,6 +1,6 @@
 import { RequestError } from "@agentclientprotocol/sdk";
 import { isAbsolute } from "node:path";
-import type { SearchConfigRequest, SearchQueryRequest, SearchSetting } from "./contract.js";
+import type { SearchConfigRequest, SearchQueryRequest, SearchSetting, SemanticTasksRequest } from "./contract.js";
 
 const invalid = (): never => { throw new RequestError(-32602, "Invalid Desktop search request"); };
 const record = (value: unknown): Record<string, unknown> => {
@@ -20,10 +20,19 @@ export function parseSearchConfigRequest(value: unknown): SearchConfigRequest {
   const p = record(value);
   if (p.enabled !== undefined && typeof p.enabled !== "boolean") return invalid();
   if (p.sessionTitlesEnabled !== undefined && typeof p.sessionTitlesEnabled !== "boolean") return invalid();
+  if (p.tasksSemanticEnabled !== undefined && typeof p.tasksSemanticEnabled !== "boolean") return invalid();
   if (p.messageFilterEnabled !== undefined) return invalid();
   return { cwd: cwd(p.cwd), ...(p.enabled === undefined ? {} : { enabled: p.enabled as boolean }),
     ...(p.sessionTitlesEnabled === undefined ? {} : { sessionTitlesEnabled: p.sessionTitlesEnabled as boolean }),
+    ...(p.tasksSemanticEnabled === undefined ? {} : { tasksSemanticEnabled: p.tasksSemanticEnabled as boolean }),
     ...(p.apiKey === undefined ? {} : { apiKey: text(p.apiKey, 4096).trim() }) };
+}
+export function parseSemanticTasksRequest(value: unknown): SemanticTasksRequest {
+  const p = record(value);
+  if (Object.keys(p).some(key => !["cwd", "query", "limit"].includes(key))) return invalid();
+  const query = text(p.query, 2048).trim();
+  if (!query || !Number.isSafeInteger(p.limit) || Number(p.limit) < 1 || Number(p.limit) > 30) return invalid();
+  return { cwd: cwd(p.cwd), query, limit: Number(p.limit) };
 }
 export function parseSearchQueryRequest(value: unknown): SearchQueryRequest {
   const p = record(value);

@@ -65,12 +65,17 @@ Show image and video attachments in the desktop composer and transcript, while k
   content for Pi while retaining the resource link in the persisted prompt
   surface.
 - Resource links are persisted in Pi text as Pix attachment markers containing a file URI.
-- Project-task capture uses the same marker encoding. The Tauri
-  `cache_task_attachment` command persists pathless image bytes and
-  `persist_task_attachment` copies already-approved path-backed files into the
-  workspace-confined task storage before the task document is written.
-- Task attachment garbage collection is workspace-confined to regular files in
-  `.pi/task-attachments` and runs only after `tasks.jsonc` replacement succeeds.
+- Saved task attachments are not reconstructed from chat transcript markers.
+  The explicit user command `/task attach <id> <project-relative-file>`
+  checks the file and associates its content hash with a task in SQLite.
+  `read_project_task_attachments` resolves only linked task blobs at launch.
+  The UI task editor and Composer **Create task** likewise materialize selected
+  files under their SHA-256 hashes and save task fields plus linked blob hashes
+  in one SQLite transaction. Unsubmitted Composer drafts remain separate from
+  saved task attachments.
+- Saved task blobs in `.pi/task-attachments/<sha256>` are immutable and shared
+  by content hash. No blob deletion or garbage collection is triggered by
+  a task write; an explicit reference-aware GC can be introduced separately.
 - The Tauri shell exposes bounded attachment inspection/read/cache commands and an approved-path opener command.
 - Dialog and drop selections are admitted through Tauri's dynamic asset scope, then persisted in Pix's approved attachment registry for session replay.
 
@@ -126,8 +131,8 @@ Show image and video attachments in the desktop composer and transcript, while k
 - Confirmed by code: `desktop/src/app/prompt-payload.ts::buildPromptPayload`
   distinguishes path-backed images from pathless clipboard images; ACP
   materializes the private file-image metadata before prompting Pi.
-- Confirmed by code: composer-to-task capture materializes pathless images
-  through `cache_task_attachment` and copies path-backed files through
-  `persist_task_attachment` before writing task attachment markers.
+- Confirmed by code: `/task attach` stores a content-addressed project-local
+  blob and creates the `task_attachments` association. The Desktop launch
+  resolves that association through the native SQLite attachment query.
 - Confirmed by docs: ACP resource links are baseline prompt content; Tauri's asset protocol serves local media and the opener plugin opens paths with the default application.
 - Confirmed by user: files should be added by picker, drag-and-drop, and paste; non-image files should be passed to the agent by local path.

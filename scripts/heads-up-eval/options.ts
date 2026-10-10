@@ -20,7 +20,7 @@ Options:
   --model provider/id    Repeat to compare up to 3 exact model refs; no fallback
   --case id             Repeat to select scenarios; unknown IDs are errors
   --repeat N            1..5 independent passes (default 1)
-  --max-calls N         Explicit upper bound for the whole matrix, 1..120 (default 31)
+  --max-calls N         Explicit upper bound for the whole matrix, 1..120 (default 34)
   --timeout-ms N        1000..120000 (default production timeout ${DEFAULT_HEADS_UP_CONFIG.timeoutMs})
   --help                Show this help
 
@@ -30,7 +30,7 @@ PI_OFFLINE forbids live runs. Repeats/case labels/expected answers are not sent 
 `;
 
 export function parseOptions(args: readonly string[]): EvalOptions {
-	const options: EvalOptions = { live: false, help: false, models: [], caseIds: [], repeat: 1, maxCalls: 31, timeoutMs: DEFAULT_HEADS_UP_CONFIG.timeoutMs };
+	const options: EvalOptions = { live: false, help: false, models: [], caseIds: [], repeat: 1, maxCalls: 34, timeoutMs: DEFAULT_HEADS_UP_CONFIG.timeoutMs };
 	const seen = new Set<string>();
 	for (let i = 0; i < args.length; i++) {
 		const flag = args[i]!;

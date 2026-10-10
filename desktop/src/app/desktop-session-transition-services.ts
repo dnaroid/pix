@@ -96,7 +96,7 @@ export function createDesktopSessionTransitionServices(
     retargetWorkbenchAnchors: (sourceSessionId, targetSessionId) =>
       options.workbenchController().retargetSessionAnchors(sourceSessionId, targetSessionId),
     retargetAttachmentDraftKey: options.retargetAttachmentDraftKey,
-    adoptMaterializedTranscript: options.state.setSessionTranscript,
+    adoptMaterializedTranscript: options.state.adoptDraftTranscript,
     setConfigOptions: options.state.setConfigOptions,
     markRuntimeReady: options.sessions.runtime.markReady,
     rememberActiveSession: options.sessions.tabs.rememberActive,

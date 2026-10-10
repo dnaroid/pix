@@ -27,12 +27,12 @@ npm run eval:heads-up -- --live
 # A small smoke run, or rerun one failure:
 npm run eval:heads-up -- --live --case api-break --case api-approved
 
-# Check variability across three independent passes (31 x 3 = 93 requests):
-npm run eval:heads-up -- --live --repeat 3 --max-calls 93
+# Check variability across three independent passes (34 x 3 = 102 requests):
+npm run eval:heads-up -- --live --repeat 3 --max-calls 102
 
 # Compare explicitly selected providers/models, with a total-request budget:
 npm run eval:heads-up -- --live --model provider-a/model-a \
-  --model provider-b/model-b --max-calls 62
+  --model provider-b/model-b --max-calls 68
 ```
 
 Without `--model`, the evaluator imports the feature's initial model reference
@@ -51,7 +51,7 @@ and credential refresh can still perform their normal initialization. No active
 conversation or its usage ledger is modified. Keep debug logging disabled when
 testing providers that log requests themselves.
 
-`PI_OFFLINE` forbids live runs even with `--live`. The default matrix cap is 31
+`PI_OFFLINE` forbids live runs even with `--live`. The default matrix cap is 34
 inference calls (the full current corpus), checked before model setup. Repetitions are 1..5; the largest
 explicit cap is 120 calls. Requests run sequentially with production prompt,
 context builder, parser, 900 output-token budget, low reasoning, no tools, no
@@ -66,8 +66,8 @@ passes. Invalid JSON is a quality failure; it is never treated as correct silenc
 
 ## Corpus and scoring
 
-The development corpus contains 31 hand-authored synthetic cases: thirteen
-positive and eighteen negative controls. Positives cover public API compatibility,
+The development corpus contains 34 hand-authored synthetic cases: fourteen
+positive and twenty negative controls. Positives cover public API compatibility,
 cross-tenant caching, migration data loss, duplicate billing, old config loading,
 prohibited logging, preservation of requirements in a long conversation, the
 opposite-direction async API contract, and two-/three-problem cases. Mutation-state
@@ -88,6 +88,15 @@ break and retests also stays silent. The parent context is identical in all thre
 This tests reported-claim reasoning, not actual file mutation or test provenance.
 Deterministic bridge/extension/controller tests cover ownership and delivery near
 parent completion independently of inference quality.
+
+Three additional research-child controls separate actor, scope and execution
+time: parent execution passes after child-only research; parent execution evidence
+is absent (unknown, not a failure); and an explicit parent run failure conflicts
+with its success summary. The last rubric requires both the failed result and
+the parent's claim, not the child's non-execution. Delegated reports remain
+appended after parent records, matching production assembly; array position alone
+does not establish cross-actor event chronology. Fixture/oracle tests validate
+input and scoring, not whether a real model follows these distinctions.
 
 ## Delegated increment observation (2026-10-04)
 

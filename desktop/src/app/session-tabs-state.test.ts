@@ -3,6 +3,7 @@ import { parseSessionTabIds } from "../lib/session-tabs";
 import { windowLayoutKey } from "../lib/window-layout-storage";
 import { createSessionTabsState } from "./session-tabs-state.svelte";
 import { restoreProjectWorkspace } from "./project-workspace.svelte";
+import { sessionTabModelDisplayOptions } from "../lib/session-tab-model";
 
 const nativeWindow = vi.hoisted(() => ({ label: "main" }));
 vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => true, invoke: vi.fn() }));
@@ -126,5 +127,58 @@ describe("session tabs state persistence", () => {
     const restored = restoreProjectWorkspace("http://localhost/?workspace=%2Fproject", localStorage);
     expect(restored.sessionTabIds.size).toBe(0);
     expect(restored.activeSessionIds.size).toBe(0);
+  });
+
+  it("restores model and thinking beside each window/project tab snapshot and prunes closed tabs", () => {
+    const model = { modelRef: "provider/model", modelName: "Model", thinking: "high" };
+    const first = createSessionTabsState();
+    first.mergeRestored("/one", null, ["a", "b"]);
+    first.show("a");
+    first.show("b");
+    first.rememberActive("/one", "a");
+    first.models.remember("/one", "a", sessionTabModelDisplayOptions(model));
+    first.models.remember("/one", "b", sessionTabModelDisplayOptions({ ...model, thinking: "low" }));
+    first.resetTabs();
+    first.mergeRestored("/two", null, ["a"]);
+    first.show("a");
+    first.models.remember("/two", "a", sessionTabModelDisplayOptions({ ...model, modelName: "Other" }));
+
+    nativeWindow.label = "second";
+    const second = createSessionTabsState();
+    second.mergeRestored("/one", null, ["a"]);
+    second.show("a");
+    second.models.remember("/one", "a", sessionTabModelDisplayOptions({ ...model, thinking: "off" }));
+    expect(restoreProjectWorkspace("http://localhost/", localStorage).sessionTabModels.get("/one")?.get("a")?.thinking)
+      .toBe("off");
+
+    // First window writes still belong to first, despite the changed mock window.
+    first.models.remember("/one", "a", sessionTabModelDisplayOptions({ ...model, thinking: "max" }));
+    nativeWindow.label = "main";
+    const restored = restoreProjectWorkspace("http://localhost/", localStorage);
+    const restarted = createSessionTabsState();
+    restarted.setSessionTabIds(restored.sessionTabIds);
+    restarted.setActiveSessionIds(restored.activeSessionIds);
+    restarted.models.restore(restored.sessionTabModels);
+    restarted.mergeRestored("/one", null, ["a", "b"]);
+    expect(restarted.models.get("/one", "a")?.thinking).toBe("max");
+    expect(restarted.models.get("/two", "a")?.modelName).toBe("Other");
+    restarted.markClosed("b");
+    expect(restarted.models.get("/one", "b")).toBeUndefined();
+    restarted.models.remember("/one", "a", []);
+    expect(restarted.models.get("/one", "a")).toBeUndefined();
+    expect(restoreProjectWorkspace("http://localhost/", localStorage).sessionTabModels.has("/one")).toBe(false);
+  });
+
+  it("keeps tab restoration independent of corrupt model metadata and unavailable writes", () => {
+    values.set(windowLayoutKey("sessionTabs"), JSON.stringify({ "/project": ["a"] }));
+    values.set(windowLayoutKey("sessionTabModels"), "{");
+    const restored = restoreProjectWorkspace("http://localhost/", localStorage);
+    expect(restored.sessionTabIds.get("/project")).toEqual(["a"]);
+    expect(restored.sessionTabModels.size).toBe(0);
+    vi.stubGlobal("localStorage", { setItem: () => { throw new Error("quota"); } });
+    const tabs = createSessionTabsState();
+    const model = { modelRef: "provider/model", modelName: "Model", thinking: "off" };
+    expect(() => tabs.models.remember("/project", "a", sessionTabModelDisplayOptions(model))).not.toThrow();
+    expect(tabs.models.get("/project", "a")).toEqual(model);
   });
 });

@@ -20,6 +20,24 @@ describe("local project search metadata", () => {
       expect(hits[0]).toMatchObject({ kind: "tasks", taskId: "stable-123", id: "tasks:stable-123" });
     }
   });
+
+  it("searches hierarchy, references, artifact links, session/model and real attachment names", () => {
+    const tasks = document([
+      task("epic", { title: "Arcane overhaul", epic: true }),
+      task("child", { title: "Magic balance", description: "Tune fireball", parentId: "epic", relatedTaskIds: ["epic"], links: ["docs/magic-plan.md"],
+        sessionId: "execution-123", modelRef: "provider/smart-model:high" }),
+    ]);
+    const names = { child: ["research-shot.png"] };
+    for (const [query, ids] of [
+      ["overhaul", ["epic", "child"]],
+      ["magic-plan.md", ["child"]],
+      ["research-shot.png", ["child"]],
+      ["execution-123", ["child"]],
+      ["smart-model", ["child"]],
+      ["эпик", ["epic"]],
+    ] as const) expect(searchProjectTasks(tasks, query, names).map(hit => hit.taskId).sort()).toEqual([...ids].sort());
+    expect(searchProjectTasks(tasks, "research-shot.png")).toEqual([]);
+  });
   it("uses the panel's description-only label and ranks title matches first", () => {
     const hits = searchProjectTasks(document([
       task("description", { title: "", description: "Renderer work\nSecond line" }),

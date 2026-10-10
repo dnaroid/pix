@@ -11,6 +11,7 @@ import type { createPreviewStore } from "./preview.svelte";
 import type { createProjectActions } from "./project-actions.svelte";
 import type { createProjectDocumentsStore } from "./project-documents.svelte";
 import type { createProjectTasksStore } from "./project-tasks.svelte";
+import type { createModelPreferencesStore } from "./model-preferences.svelte";
 import type { createProjectWorkspaceStore } from "./project-workspace.svelte";
 import type { createRegistryStore } from "./registry.svelte";
 import type { createSessionTabController } from "./session-tab-controller";
@@ -24,6 +25,7 @@ export function createDesktopSidebarViewModel(options: {
   client: () => AcpClient | null;
   lspSessionId: () => string | null;
   configOptions: () => SessionConfigOption[];
+  modelPreferences: ReturnType<typeof createModelPreferencesStore>;
   canUseSession: () => boolean;
   registryReady: () => boolean;
   contextCommands?: () => readonly import("@agentclientprotocol/sdk").AvailableCommand[];
@@ -75,6 +77,9 @@ export function createDesktopSidebarViewModel(options: {
     lspClient: options.client(),
     lspSessionId: options.lspSessionId(),
     settingsConfigOptions: options.configOptions(),
+    visibleModelRefs: options.modelPreferences.visibleModelRefs,
+    rememberedThinkingByModel: options.modelPreferences.rememberedThinkingByModel,
+    onVisibleModelsChange: options.modelPreferences.saveVisibleModelRefs,
     tasks: options.projectTasks.document.tasks,
     loading: options.projectTasks.loading,
     initialLoading: options.projectTasks.initialLoading,
@@ -150,6 +155,8 @@ export function createDesktopSidebarViewModel(options: {
     externalEditorLabel: options.externalEditorLabel(),
     onCreate: options.projectTasks.create,
     onUpdate: options.projectTasks.update,
+    onPriorityChange: options.projectTasks.updatePriority,
+    onObserveTasks: options.projectTasks.observe,
     onStatusChange: options.projectTasks.updateStatus,
     onChooseTaskAttachments: options.attachments.chooseTaskAttachments,
     onPasteTaskAttachments: options.attachments.pasteTaskAttachments,

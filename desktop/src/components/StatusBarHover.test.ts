@@ -7,6 +7,7 @@ import activityHud from "./SessionActivityStatusHud.svelte?raw";
 import providerIcon from "./ModelProviderIcon.svelte?raw";
 import resetCredits from "./ResetCreditsSection.svelte?raw";
 import popover from "./StatusBarPopover.svelte?raw";
+import usageLimits from "./UsageLimitBars.svelte?raw";
 
 const sources = {
   StatusBar: statusBar,
@@ -16,6 +17,7 @@ const sources = {
   SessionActivityStatusHud: activityHud,
   ModelProviderIcon: providerIcon,
   ResetCreditsSection: resetCredits,
+  UsageLimitBars: usageLimits,
 };
 
 function source(name: keyof typeof sources): string {
@@ -105,9 +107,10 @@ describe("Status bar click surfaces", () => {
     expect(statusBar.match(/\{#key observer\?\.sessionId\}/g)).toHaveLength(2);
   });
 
-  it("adds hourly and weekly limit bars and a per-model token donut around the existing weekly calendar", () => {
+  it("integrates weekly dates into Limits without a duplicate calendar before the model donut", () => {
     expect(source("RuntimeStatusBarItems")).toContain("<UsageLimitBars windows={popupLimitWindows}");
-    expect(source("RuntimeStatusBarItems")).toContain("<QuotaResetCalendar window={modelUsage.weekly}");
+    expect(source("RuntimeStatusBarItems")).not.toContain("<QuotaResetCalendar");
+    expect(source("UsageLimitBars")).toContain("<QuotaResetCalendar {window} {now}");
     expect(source("RuntimeStatusBarItems")).toContain('=> item.label === "H" || item.label === "W"');
     expect(source("RuntimeStatusBarItems")).toContain("<ModelUsageDonut models={donutModels}");
     expect(source("RuntimeStatusBarItems")).toContain("displayModelUsage(status, now)");
@@ -123,7 +126,7 @@ describe("Status bar click surfaces", () => {
     expect(source("ResetCreditsSection")).toContain('aria-label="Available reset credits"');
     expect(source("ResetCreditsSection")).toContain("Expires in ${formatResetDuration(credit.expiresAt, now)}");
     expect(runtime).toContain("min-h-0 overflow-y-auto overscroll-contain");
-    expect(runtime.indexOf("<QuotaResetCalendar")).toBeLessThan(runtime.indexOf("<ResetCreditsSection"));
+    expect(runtime.indexOf("<UsageLimitBars")).toBeLessThan(runtime.indexOf("<ResetCreditsSection"));
     expect(runtime.indexOf("<ResetCreditsSection")).toBeLessThan(runtime.indexOf("<ModelUsageDonut"));
     expect(runtime.indexOf("<ModelUsageDonut")).toBeLessThan(runtime.indexOf("grid-cols-[1fr_auto_auto]"));
   });

@@ -19,13 +19,13 @@ policy, not a price oracle.
 - `verify`: run checks and interpret logs, without fixing source or tests.
 - `ui-qa`: isolated real-UI workflow for browsers, terminal/TUI apps, and
   desktop GUIs with deterministic assertions and inspectable evidence.
-- `frontier-review`: independent post-implementation code review on Sol; the
-  historical role name and parent visibility gates are retained.
 - `delivery-review`: explicitly requested, read-only delivery readiness and
   evidence review, available to any parent; does not perform real UI QA or
   assume release authority.
-- `oracle`: a deliberate cross-vendor frontier second opinion, not automatic
-  worker escalation.
+- `oracle`: a deliberate cross-vendor frontier second opinion and independent
+  post-implementation review for complex architectural tasks only, not automatic
+  worker escalation. Every parent requires another vendor, including fallbacks.
+  The duplicate bundled `frontier-review` role has been removed.
 - `knowledge-auditor`: economical docs-only finalization role that runs the
   task-scoped repository-knowledge audit after implementation.
 
@@ -52,7 +52,7 @@ or `needs attention`, and end with `High`, `Medium`, or `Low` confidence plus
 what would raise lower confidence. The role must not recommend readiness with
 unresolved material blockers, unresolved high-impact risks, or missing essential
 verification, assume release authority, or waive a required independent
-`frontier-review` gate.
+`oracle` architectural review gate.
 
 ## Role-owned model candidates
 
@@ -143,8 +143,7 @@ The bundled roles use it as follows:
 
 | Role | Selection | Result with the default list |
 |---|---|---|
-| `oracle` | `require-other-if-frontier` | GLM-5.3 parent → Astra, Opus; Astra parent → GLM-5.3, Opus; Opus parent → Astra, GLM-5.3; non-frontier parent → every frontier, other vendors first |
-| `frontier-review` | own `models`, `forParentTier: non-frontier` | Sol only; hidden for frontier parents and explicitly excluded for `*gpt-6.1-sol*` parents (Sol is not frontier) |
+| `oracle` | `modelSelection: frontier`, `require-other` | Other-vendor frontier candidates only for every parent; hidden when parent identity is missing or no cross-vendor candidate exists |
 | `delivery-review` | own `models` | Sol only; available to all parents |
 
 `economy: true` (or `PI_TOOLS_SUITE_ECONOMY=1`) excludes `expensive` frontier
@@ -243,5 +242,9 @@ Give workers a scope, acceptance criteria and the evidence needed to start.
 Read compact results first and inspect raw artifacts selectively. One noisy
 sequential investigation can justify a worker; a command whose exit status is
 sufficient usually only needs a saved log, not another LLM. Independent review
-of substantive code changes uses `frontier-review` when it is present in the
-current parent catalog; use `research` for focused evidence/review questions.
+uses `oracle` for review only for complex architectural tasks when present in the
+current parent catalog: consequential subsystem boundaries, core interfaces, or
+cross-module lifecycle/persistence invariants. Routine features, local bug fixes,
+mechanical edits, large diffs alone, and role availability do not trigger this
+gate. The parent classifies scope; there is no runtime complexity classifier.
+Use `research` for focused evidence/review questions.

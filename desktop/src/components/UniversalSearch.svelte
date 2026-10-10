@@ -111,6 +111,9 @@
         overview: workspace => invoke<IdxOverview>("idx_overview", { workspace }),
         index: (workspace, query) => invoke<IdxCommandResult>("idx_query", { request: { workspace, query } }),
         tasks: async workspace => parseTaskDocument(await invoke<unknown>("read_project_tasks", { workspace })),
+        taskAttachmentNames: workspace => invoke<Record<string, string[]>>("read_project_task_attachment_names", { workspace }),
+        ...(requestClient ? { taskSemantic: (cwd: string, query: string, signal: AbortSignal) =>
+          requestClient.searchSemanticTasks({ cwd, query, limit: 30 }, signal) } : {}),
         commits: (workspace, query) => invoke<GitHistoryEntry[]>("git_search_history", { workspace, query }),
         ...(requestClient ? { commitHybrid: (cwd: string, query: string, signal: AbortSignal) => requestClient.searchCommits({ cwd, query, limit: 20 }, signal) } : {}),
       };

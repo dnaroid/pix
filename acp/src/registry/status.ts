@@ -8,6 +8,7 @@ import { hashProjectArtifactLocal } from "./task-bundle.js";
 import { loadRegistryConfig } from "./config-reader.js";
 import { loadRuntimeConfig } from "./config.js";
 import { resolvePublicationProjectKey, samePublication } from "./publication-location.js";
+import { localTasksExist } from "./task-database.js";
 
 export async function collectStatuses(executor: RegistryExecutor, project: ProjectContext, runtime: RegistryRuntime): Promise<RegistryStatus[]> {
 	const projectKey = await resolvePublicationProjectKey(executor, project);
@@ -94,12 +95,14 @@ export async function collectProjectStatuses(
 	for (const artifact of ["tasks", "plans", "todo", "workspace"] as const) {
 		const localPath = projectArtifactLocalPath(cwd, artifact);
 		const remotePath = projectArtifactRegistryPath(runtime.cacheDir, projectKey, artifact);
-		const [localPathExists, remoteExists] = await Promise.all([pathExists(localPath), pathExists(remotePath)]);
+		const [localPathExists, remoteExists] = await Promise.all([
+			artifact === "tasks" ? localTasksExist(cwd) : pathExists(localPath),
+			pathExists(remotePath),
+		]);
 		const tracked = provenance.projectResources[artifact];
 		const localExists = localPathExists && (
 			artifact !== "plans"
 			|| await hasTrackableFiles(localPath)
-			|| remoteExists
 			|| Boolean(tracked)
 		);
 		if (!localExists && !remoteExists && !tracked) continue;

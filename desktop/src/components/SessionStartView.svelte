@@ -1,8 +1,11 @@
 <script lang="ts">
   import Search from "@lucide/svelte/icons/search";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import { onMount } from "svelte";
   import type { SessionInfo } from "@agentclientprotocol/sdk";
-  import { fuzzySearch } from "../lib/fuzzy";
+  import { previewInlineSearch, queryInlineSearch, type InlineSearchClient } from "../lib/inline-search";
+  import { pendingSearchNotice } from "../lib/search-source-deadline";
+  import type { SessionSearchHit } from "../../../acp/src/search/contract";
   import { buildSessionTree, type SessionTreeRow } from "../lib/session-tabs";
   import { expandedSessionRows, flatSessionRow, sessionRowsRelated } from "../lib/saved-session-tree";
   import SavedSessionRow from "./SavedSessionRow.svelte";
@@ -16,10 +19,12 @@
   let {
     sessions,
     workspace,
+    searchClient = null,
     onSelect,
   }: {
     sessions: readonly SessionInfo[];
     workspace: string;
+    searchClient?: InlineSearchClient | null;
     onSelect: (sessionId: string) => void;
   } = $props();
 
@@ -31,20 +36,61 @@
   let collapsed = $state(new Set<string>());
   let hoveredId = $state<string | null>(null);
   let focusedId = $state<string | null>(null);
-  const displayedSessions = $derived(query.trim()
-    ? fuzzySearch(
-      sessions.map((session) => ({
-        value: session,
-        label: session.title ?? "Untitled conversation",
-        aliases: [session.sessionId],
-        keywords: [displayDate(session.updatedAt)],
-      })),
-      query,
-    ).map((match) => flatSessionRow(match.value))
-    : expandedSessionRows(buildSessionTree(sessions), collapsed));
+  let submittedHits = $state<SessionSearchHit[] | null>(null);
+  let searching = $state(false);
+  let searchNotice = $state("");
+  let searchRequest: AbortController | null = null;
+  const displayedSessions = $derived.by(() => {
+    if (!query.trim()) return expandedSessionRows(buildSessionTree(sessions), collapsed);
+    const byId = new Map(sessions.map(session => [session.sessionId, session]));
+    return (submittedHits ?? previewInlineSearch("sessions", query, sessions)).flatMap(hit => {
+      const session = byId.get(hit.sessionId);
+      return session ? [flatSessionRow(session)] : [];
+    });
+  });
   const visibleSessions = $derived(visibleSavedSessionRows(displayedSessions, visibleCount));
   const hasMore = $derived(visibleCount < displayedSessions.length);
   const activeRow = $derived(displayedSessions.find((row) => row.session.sessionId === (hoveredId ?? focusedId)) ?? null);
+
+  function cancelSearch() {
+    searchRequest?.abort();
+    searchRequest = null;
+    submittedHits = null;
+    searching = false;
+    searchNotice = "";
+  }
+
+  async function submitSearch() {
+    const submitted = query.trim();
+    if (!submitted) return;
+    cancelSearch();
+    if (!searchClient || !workspace) {
+      searchNotice = "Offline: showing local session titles";
+      return;
+    }
+    const request = new AbortController();
+    searchRequest = request;
+    searching = true;
+    const publish = (result: Awaited<ReturnType<typeof queryInlineSearch>>) => {
+      if (searchRequest !== request || request.signal.aborted || query.trim() !== submitted) return;
+      if (!result.status && !result.results.length && !result.notices.length && !result.pendingSources?.length) return;
+      // The global source has no session fallback on backend failure; preserve
+      // the already-visible local preview rather than replacing it with empty rows.
+      const failed = result.notices.some(notice => notice.startsWith("Sessions search failed:") || notice.startsWith("Session title search is unavailable:"));
+      submittedHits = failed || (result.pendingSources?.length && !result.results.length) ? null
+        : result.results.filter((hit): hit is SessionSearchHit => hit.kind === "sessions");
+      searching = Boolean(result.pendingSources?.length);
+      searchNotice = result.notices.find(notice => !(result.pendingSources ?? []).some(source => notice === pendingSearchNotice(source)))
+        ?? result.status?.warning ?? result.status?.error ?? "";
+    };
+    try { publish(await queryInlineSearch("sessions", searchClient, workspace, submitted, request.signal, publish)); }
+    catch {
+      if (searchRequest === request && !request.signal.aborted) {
+        searching = false;
+        searchNotice = "Indexed search unavailable; showing local titles";
+      }
+    }
+  }
 
   function resetPages(): void {
     visibleCount = SAVED_SESSION_INITIAL_ROWS;
@@ -65,6 +111,13 @@
     hoveredId = null;
     focusedId = null;
     resetPages();
+  });
+
+  $effect(() => {
+    const ownerWorkspace = workspace;
+    const ownerClient = searchClient;
+    void ownerWorkspace; void ownerClient;
+    return cancelSearch;
   });
 
   function loadNextPage(): void {
@@ -119,18 +172,27 @@
         <h2 class="text-xs font-semibold text-foreground">Open a conversation</h2>
         <span class="text-xs text-muted-foreground">or start typing below</span>
       </div>
-      <label class="relative mt-2 block">
-        <span class="sr-only">Search saved conversations</span>
+      <div class="relative mt-2">
+        <label for="saved-session-search" class="sr-only">Search saved conversations</label>
         <Search class="pointer-events-none absolute top-1/2 left-2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
         <input
-          class="h-7 w-full rounded-md border border-input bg-panel-strong pr-2 pl-7 text-xs text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/25"
+          id="saved-session-search"
+          class="h-7 w-full rounded-md border border-input bg-panel-strong pr-24 pl-7 text-xs text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/25"
           bind:this={searchInput}
           bind:value={query}
-          oninput={resetPages}
+          oninput={() => { resetPages(); cancelSearch(); }}
+          onkeydown={(event) => { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); void submitSearch(); } }}
           type="search"
           placeholder="Search saved conversations…"
         />
-      </label>
+        <button type="button" onclick={() => void submitSearch()} disabled={!query.trim() || searching}
+          aria-label={searching ? "Searching saved conversations" : "Search saved conversations"}
+          title="Search session titles and indexed first/final messages (Enter)"
+          class="absolute top-0.5 right-6 flex h-6 items-center gap-1 rounded px-2 text-xs text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-60">
+          {#if searching}<LoaderCircle class="h-3 w-3 animate-spin" aria-hidden="true" />{:else}Search{/if}
+        </button>
+      </div>
+      {#if searching}<p role="status" class="mt-1 text-xs text-muted-foreground">Searching…</p>{:else if searchNotice}<p role="status" class="mt-1 text-xs text-muted-foreground">{searchNotice}</p>{/if}
     </header>
 
     <div bind:this={scrollContainer} class="min-h-0 overflow-y-auto border-t border-border/70" aria-label="Saved conversations">

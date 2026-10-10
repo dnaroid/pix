@@ -195,6 +195,14 @@ corrections/retests in order, rather than extracting old risk fragments. Verifie
 per-child changed-file or test-command/outcome provenance is not implemented:
 current compact child artifacts do not provide it. Children never run an observer.
 
+Verification contradictions must match actor, assigned scope, run/check and time.
+A research-only child's “I did not run it” is not evidence against a later parent
+run. Consult retained parent tool results and corrections; delegated reports are
+appended after projected parent records, not a global chronological event stream.
+Missing or clipped run evidence means unknown, not failed/not run; default to
+silence without a concrete supported conflict. Conversely, an explicit failure
+for the same run/check is not overridden by an unsupported parent success claim.
+
 Common credential patterns, private-key blocks and control sequences are
 filtered. This is best-effort redaction, not proof that arbitrary project text
 contains no secrets or personal data. Enabling an observer sends the selected

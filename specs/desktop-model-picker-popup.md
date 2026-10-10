@@ -7,6 +7,14 @@ status: active
 
 ## Behavior
 
+- Frontier models have a compact Lucide crown beside their name in the shared
+  picker (including Manage mode) and beside the current model in the status bar.
+  Classification uses saved Tools Suite `frontierModels`, with runtime default
+  fallback for an omitted list, normalized model IDs and configured aliases.
+  Disabled entries and Auto have no crown; economy and role restrictions do not
+  change classification. Saved settings changes update both surfaces; unsaved
+  drafts do not. Failed reads retain the last known state, initially unmarked.
+
 - Model + Thinking uses a nonmodal popup directly above its status-bar button,
   following the other status-bar detail surfaces. Click, Enter or Space toggle it;
   hover does not open it. Repeating activation while opening cancels that request.
@@ -33,6 +41,13 @@ status: active
   selection callback. The header invoker opens it below when that side has more
   room; the status-bar invoker opens it above. Its Apply changes only subsequent side questions; it
   shares visibility management but does not expose parent default writes.
+- The Tasks editor is a third user of the same picker, anchored to the task's
+  Assigned model control. It stages an optional `provider/model:effort` pair
+  without changing the active ACP session. It shares Desktop visibility
+  management, available-model search, effort availability and remembered
+  thinking preferences. Unlike live-session selection, Tasks must call Apply
+  even when the staged selection equals the current model; that confirmation
+  assigns a previously unset task. Clearing the field restores session default.
 
 ## Constraints and failure cases
 
@@ -56,6 +71,11 @@ status: active
 
 ## Implementation
 
+- `desktop/src/components/FrontierModelBadge.svelte`
+- `desktop/src/lib/frontier-model-badges.ts`
+- `desktop/src/lib/settings.ts`
+- `desktop/src/app/preview-file-io.ts`
+
 - `desktop/src/components/ModelThinkingPicker.svelte`
 - `desktop/src/components/StatusBar.svelte`
 - `desktop/src/app/model-picker-state.svelte.ts`
@@ -65,6 +85,8 @@ status: active
 - `desktop/src/lib/model-picker-popover.ts`
 
 ## Tests
+
+- `desktop/src/lib/frontier-model-badges.test.ts`
 
 - `desktop/src/components/ModelThinkingPicker.test.ts`
 - `desktop/src/components/DesktopModalDialogs.test.ts`

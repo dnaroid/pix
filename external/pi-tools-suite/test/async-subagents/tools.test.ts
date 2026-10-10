@@ -361,6 +361,7 @@ process.stdin.on("data", (data) => {
 		await sessionStartHandlers[0]({}, {
 			cwd,
 			mode: "rpc",
+			model: { provider: "openai-codex", id: "gpt-6-luna" },
 			sessionManager: { getSessionFile: () => parentSession },
 			ui: { setWidget: (key: string, lines: string[] | undefined) => widgets.push({ key, lines }) },
 		});
@@ -370,7 +371,7 @@ process.stdin.on("data", (data) => {
 		expect(widgets[0]?.lines?.[0]).toBe("pi-tools-suite:async-subagents:catalog");
 		expect(JSON.parse(widgets[0]?.lines?.[1] ?? "null")).toMatchObject({
 			version: 1,
-			types: expect.arrayContaining(["frontier-review", "research"]),
+			types: expect.arrayContaining(["oracle", "research"]),
 		});
 		expect(widgets[1]?.key).toBe("pix.session-state");
 		expect(widgets[1]?.lines?.[0]).toBe("pi-tools-suite:async-subagents:live-state");

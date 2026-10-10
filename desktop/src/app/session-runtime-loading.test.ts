@@ -26,6 +26,7 @@ function setup() {
   let activeReady = false;
   let activeOptions: unknown;
   const reportError = vi.fn();
+  const onConfigOptions = vi.fn();
   const onLoadFailed = vi.fn((sessionId: string) => {
     activity.markForgotten(sessionId);
     activity.clear(sessionId);
@@ -38,6 +39,7 @@ function setup() {
     setActiveConfigOptions: (options) => { activeOptions = options; },
     refreshQueueState: vi.fn(),
     reportError,
+    onConfigOptions,
     onOpen: activity.open,
     onLoadFailed,
   });
@@ -48,7 +50,7 @@ function setup() {
   } });
   const succeed = (index: number) => requests[index]!.resolve({ configOptions: [{ id: `option-${index}` }] } as LoadResponse);
   return {
-    store, activity, requests, client, onLoadFailed, reportError, snapshot, succeed,
+    store, activity, requests, client, onLoadFailed, onConfigOptions, reportError, snapshot, succeed,
     get activeReady() { return activeReady; },
     get activeOptions() { return activeOptions; },
     get currentClient() { return currentClient; },
@@ -91,6 +93,7 @@ describe("runtime loading ownership", () => {
         if (outcome === "success") state.succeed(0);
         else state.requests[0]!.reject(new Error("obsolete failure"));
         await old;
+        expect(state.onConfigOptions).not.toHaveBeenCalled();
         expect(state.store.isLoading("a")).toBe(true);
         expect(state.store.isReady("a")).toBe(false);
         expect(state.activity.summaries.get("a")?.openTodos).toBe(1);
@@ -99,6 +102,7 @@ describe("runtime loading ownership", () => {
 
         state.succeed(1);
         await current;
+        expect(state.onConfigOptions).toHaveBeenCalledExactlyOnceWith("a", [{ id: "option-1" }]);
         expect(state.store.isReady("a")).toBe(true);
         expect(state.activeReady).toBe(true);
         expect(state.activeOptions).toEqual([{ id: "option-1" }]);
@@ -124,6 +128,21 @@ describe("runtime loading ownership", () => {
     expect(state.onLoadFailed).toHaveBeenCalledTimes(1);
     expect(state.reportError).toHaveBeenCalledTimes(1);
     expect(state.store.pendingLoadCount).toBe(0);
+  });
+
+  it("publishes accepted config updates but not an obsolete workspace completion", async () => {
+    const state = setup();
+    const pending = state.store.ensure(state.client, "a", "/workspace");
+    state.setWorkspace("/other");
+    state.succeed(0);
+    await pending;
+    expect(state.onConfigOptions).not.toHaveBeenCalled();
+    state.store.markReady("a", []);
+    expect(state.onConfigOptions).toHaveBeenLastCalledWith("a", []);
+    state.store.setConfigOptions("a", []);
+    expect(state.onConfigOptions).toHaveBeenCalledTimes(2);
+    state.store.reset();
+    expect(state.onConfigOptions).toHaveBeenCalledTimes(2);
   });
 
   it("does not revoke activity for an old client after reconnect", async () => {

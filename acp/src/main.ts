@@ -28,6 +28,7 @@ async function main(): Promise<void> {
 		...(config.toolsSuiteExtensionPath ? { toolsSuiteExtensionPath: config.toolsSuiteExtensionPath } : {}),
 		...(config.quotaWaitExtensionPath ? { quotaWaitExtensionPath: config.quotaWaitExtensionPath } : {}),
 		...(config.headsUpExtensionPath ? { headsUpExtensionPath: config.headsUpExtensionPath } : {}),
+		...(config.htmlSandboxExtensionPath ? { htmlSandboxExtensionPath: config.htmlSandboxExtensionPath } : {}),
 	});
 
 	const stream = ndJsonStream(

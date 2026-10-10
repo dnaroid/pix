@@ -8,6 +8,8 @@ export interface TaskSearchHit {
   title: string;
   snippet: string;
   score: number;
+  /** Semantic relevance can be valid without visible lexical query terms. */
+  semantic?: boolean;
 }
 
 export interface CommitSearchHit {
@@ -27,12 +29,27 @@ function matchScore(query: string, title: string, text: string): number {
   return words.length ? words.reduce((sum, word) => sum + (label.includes(word) ? 2 : content.includes(word) ? 1 : 0), 0) / (2 * words.length) : 0;
 }
 
-export function searchProjectTasks(document: ProjectTaskDocument, query: string): TaskSearchHit[] {
+export function searchProjectTasks(document: ProjectTaskDocument, query: string, attachmentNames: Readonly<Record<string, readonly string[]>> = {}): TaskSearchHit[] {
+  const byId = new Map(document.tasks.map(task => [task.id, task]));
+  const backlinks = new Map<string, typeof document.tasks>();
+  for (const task of document.tasks) for (const id of task.relatedTaskIds ?? []) {
+    const related = backlinks.get(id) ?? [];
+    related.push(task);
+    backlinks.set(id, related);
+  }
   return document.tasks.flatMap(task => {
     const title = projectTaskDisplayLabel(task);
-    const score = matchScore(query, title, `${task.id} ${task.description ?? ""} ${task.type} ${task.status} ${task.priority}`);
+    const references = [
+      ...(task.links ?? []),
+      ...(task.parentId ? [task.parentId, byId.get(task.parentId)?.title ?? ""] : []),
+      ...(task.relatedTaskIds ?? []).flatMap(id => [id, byId.get(id)?.title ?? ""]),
+      ...(backlinks.get(task.id) ?? []).flatMap(other => [other.id, other.title]),
+      ...(attachmentNames[task.id] ?? []),
+      task.sessionId ?? "", task.modelRef ?? "", task.epic ? "epic эпик" : "",
+    ].join(" ");
+    const score = matchScore(query, title, `${task.id} ${task.description ?? ""} ${task.type} ${task.status} ${task.priority} ${references}`);
     return score ? [{ kind: "tasks" as const, id: `tasks:${task.id}`, taskId: task.id, title, score,
-      snippet: `${task.status} · ${task.type} · ${task.priority}${task.description ? `\n${task.description.slice(0, 500)}` : ""}` }] : [];
+      snippet: `${task.status} · ${task.type} · ${task.priority}${task.description ? `\n${task.description.slice(0, 500)}` : ""}${references ? `\n${references.slice(0, 350)}` : ""}` }] : [];
   }).sort((a, b) => b.score - a.score).slice(0, 20);
 }
 

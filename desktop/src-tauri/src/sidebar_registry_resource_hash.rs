@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    sidebar_registry_fingerprint_visit, sidebar_registry_hash_path,
+    sidebar_registry_fingerprint_visit, sidebar_registry_hash_path, sidebar_registry_has_canonical_resource_file,
     sidebar_registry_tree_fingerprint,
 };
 
@@ -14,7 +14,8 @@ fn companion(path: &Path) -> Result<Option<PathBuf>, String> {
     let companion = path.with_extension("");
     match fs::symlink_metadata(&companion) {
         Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
-            Ok(Some(companion))
+            let mut count = 0;
+            Ok(sidebar_registry_has_canonical_resource_file(&companion, &mut count)?.then_some(companion))
         }
         Ok(_) => Err(format!(
             "Agent companion must be a regular directory: {}",
@@ -38,11 +39,11 @@ pub(super) fn fingerprint(
     let mut hasher = DefaultHasher::new();
     let mut count = 0;
     let mut bytes = 0;
-    sidebar_registry_fingerprint_visit(path, "", &mut count, &mut bytes, &mut hasher)?;
+    sidebar_registry_fingerprint_visit(path, "", &mut count, &mut bytes, &mut hasher, false)?;
     let companion = companion(path)?;
     companion.is_some().hash(&mut hasher);
     if let Some(companion) = companion {
-        sidebar_registry_fingerprint_visit(&companion, "", &mut count, &mut bytes, &mut hasher)?;
+        sidebar_registry_fingerprint_visit(&companion, "", &mut count, &mut bytes, &mut hasher, false)?;
     }
     Ok((hasher.finish(), bytes))
 }
@@ -190,6 +191,19 @@ mod tests {
             .unwrap(),
             Some(false)
         );
+    }
+
+    #[test]
+    fn agent_companion_with_only_service_files_does_not_change_resource_hash() {
+        let fixture = Fixture::new();
+        fs::remove_dir_all(fixture.0.join(".pi/agents/demo")).unwrap();
+        let without_companion = hash(&fixture.agent(), true).unwrap();
+        fs::create_dir_all(fixture.0.join(".pi/agents/demo/scratch")).unwrap();
+        fs::write(fixture.0.join(".pi/agents/demo/scratch/trace.log"), "trace\n").unwrap();
+        assert_eq!(hash(&fixture.agent(), true).unwrap(), without_companion);
+        fs::create_dir_all(fixture.0.join(".pi/agents/demo/scripts")).unwrap();
+        fs::write(fixture.0.join(".pi/agents/demo/scripts/tool.js"), "export const x=1\n").unwrap();
+        assert_ne!(hash(&fixture.agent(), true).unwrap(), without_companion);
     }
 
     #[cfg(unix)]

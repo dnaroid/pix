@@ -11,6 +11,7 @@ import { readSessionBoundaryState, reconcileSessionBoundaries, sessionBoundaryHi
   type SessionBoundaryRow, type SessionBoundaryState } from "./session-boundary-index.js";
 import type { SessionSearchHit } from "./contract.js";
 import { verifySessionBoundaryIndexPath } from "./session-boundary-paths.js";
+import { readTaskVectors, taskIndexTransaction, type TaskIndexTransaction } from "./task-index.js";
 
 const VERSION = "2";
 export interface CachedIndex { vectors: Map<string, number[]>; hashes: Record<string, readonly string[]> }
@@ -48,6 +49,7 @@ export interface IndexTransaction {
   save(documents: readonly SearchDocument[], vectors: ReadonlyMap<string, number[]>): Promise<void>;
   sessionTitles(): SessionIndexTransaction;
   sessionBoundaries(live: readonly string[], updates: readonly SessionBoundaryRow[]): void;
+  tasks(): TaskIndexTransaction;
 }
 /** Project-owned durable database. No reset, rename, unlink or cache-directory override. */
 export class SearchIndexStore {
@@ -81,6 +83,20 @@ export class SearchIndexStore {
     signal.throwIfAborted();
     const db = new DatabaseSync(path, { readOnly: true });
     try { return await loadSessionTitleVectors(db, signal); }
+    finally { db.close(); }
+  }
+
+  /** Task vectors occupy their own namespace in the shared SQLite index.
+   * Returning no vectors when absent does not create the namespace. */
+  async readTaskVectors(cwd: string, signal: AbortSignal): Promise<Map<string, number[]>> {
+    const filename = this.path(cwd);
+    try { await stat(filename); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return new Map();
+      throw error;
+    }
+    signal.throwIfAborted();
+    const db = new DatabaseSync(filename, { readOnly: true });
+    try { return await readTaskVectors(db, signal); }
     finally { db.close(); }
   }
 
@@ -193,6 +209,7 @@ export class SearchIndexStore {
       const tx: IndexTransaction = {
         sessionTitles: () => createSessionIndexTransaction(connection, signal),
         sessionBoundaries: (live, updates) => reconcileSessionBoundaries(connection, signal, live, updates),
+        tasks: () => taskIndexTransaction(connection),
         load: () => loadConnection(connection, signal),
         save: async (documents, vectors) => {
           const upsert = connection.prepare("INSERT INTO documents VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET text=excluded.text,hit=excluded.hit,hashes=excluded.hashes WHERE documents.text!=excluded.text OR documents.hit!=excluded.hit OR documents.hashes!=excluded.hashes");

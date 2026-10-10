@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import { constants as fsConstants } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
+import { canonicalRegistryEntryName } from "./model.js";
 
 /** Structured Desktop channel carrying on-demand Registry resource diffs. */
 
@@ -14,7 +15,6 @@ const MAX_TOTAL_BYTES = 2_000_000;
 const MAX_RENDER_FILE_BYTES = 128_000;
 const MAX_RENDER_LINES = 2_000;
 const MAX_TOTAL_RENDER_LINES = 5_000;
-const SKIP_NAMES = new Set([".DS_Store"]);
 
 function lineCountThrough(text: string, limit: number): number {
 	let count = 1;
@@ -85,7 +85,7 @@ async function collectFilePaths(base: string, rel: string, out: Set<string>): Pr
 	const entries = (await fs.readdir(join(base, rel), { withFileTypes: true }))
 		.sort((left, right) => left.name.localeCompare(right.name));
 	for (const entry of entries) {
-		if (SKIP_NAMES.has(entry.name)) continue;
+		if (!canonicalRegistryEntryName(entry.name)) continue;
 		await collectFilePaths(base, rel === "" ? entry.name : `${rel}/${entry.name}`, out);
 	}
 }

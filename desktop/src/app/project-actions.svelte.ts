@@ -1,5 +1,6 @@
 import type { AcpClient } from "../lib/acp-client";
-import type { Attachment } from "../lib/attachments";
+import { invoke } from "@tauri-apps/api/core";
+import { attachmentFromFile, type Attachment, type AttachmentFile } from "../lib/attachments";
 import {
   projectTaskFromComposerDraft,
   projectTaskPromptDraft,
@@ -29,7 +30,7 @@ type ProjectActionsOptions = {
   tasksSaving: () => boolean;
   taskLoadFailed: () => boolean;
   taskDocument: () => ProjectTaskDocument;
-  saveProjectTasks: (document: ProjectTaskDocument) => Promise<boolean>;
+  saveProjectTasks: (document: ProjectTaskDocument, attachments?: readonly Attachment[]) => Promise<boolean>;
   newProjectTaskId: () => string;
   attachmentDraftKey: () => string;
   attachmentGeneration: () => number;
@@ -49,6 +50,7 @@ type ProjectActionsOptions = {
   forgetRuntime: (sessionId: string) => void;
   activateSession: (sessionId: string, workspace: string, runtimeReady: boolean) => void;
   prepareTranscriptAttachment: (attachment: Attachment) => Promise<void>;
+  taskAttachments?: (workspace: string, taskId: string) => Promise<AttachmentFile[]>;
   imagePromptSupported: () => boolean;
   appendUserMessage: (sessionId: string, text: string, attachments: readonly Attachment[]) => string;
   runPrompt: (
@@ -107,7 +109,7 @@ export function createProjectActions(options: ProjectActionsOptions) {
     const saved = await options.saveProjectTasks({
       ...options.taskDocument(),
       tasks: [task, ...options.taskDocument().tasks],
-    });
+    }, storedAttachments);
     if (!saved || options.workspace() !== requestWorkspace) return;
     await options.openTasksPanel(task.id);
 
@@ -209,11 +211,29 @@ export function createProjectActions(options: ProjectActionsOptions) {
     actionId = task.id;
     options.setErrorMessage(null);
     try {
-      const taskPrompt = projectTaskPromptDraft(task);
+      const basePrompt = projectTaskPromptDraft(task);
+      const taskFiles = await (options.taskAttachments
+        ? options.taskAttachments(requestWorkspace, task.id)
+        : invoke<AttachmentFile[]>("read_project_task_attachments", { workspace: requestWorkspace, id: task.id }));
+      if (requestClient !== options.client() || requestWorkspace !== options.workspace()) return;
+      const taskPrompt = {
+        ...basePrompt,
+        attachments: [
+          ...basePrompt.attachments,
+          ...taskFiles.map((file, index) => attachmentFromFile(file, `task:${task.id}:sqlite:${index}`)),
+        ],
+      };
       await Promise.all(taskPrompt.attachments.map((attachment) => options.prepareTranscriptAttachment(attachment)));
       const payload = buildPromptPayload(taskPrompt.text, taskPrompt.attachments, options.imagePromptSupported());
       if (options.client() !== requestClient || options.workspace() !== requestWorkspace) return;
-      const response = await requestClient.newSession(requestWorkspace);
+      const chosenModel = task.modelRef ? parseDesktopModelRef(task.modelRef) : undefined;
+      if (task.modelRef && !chosenModel) throw new Error("Assigned task model must use provider/model[:thinking] format.");
+      const response = chosenModel
+        ? await requestClient.newSession(requestWorkspace, {
+            modelRef: chosenModel.modelRef,
+            ...(chosenModel.thinking ? { thinkingLevel: chosenModel.thinking } : {}),
+          })
+        : await requestClient.newSession(requestWorkspace);
       if (options.client() !== requestClient || options.workspace() !== requestWorkspace) {
         options.forgetRuntime(response.sessionId);
         void requestClient.closeSession(response.sessionId).catch(() => undefined);

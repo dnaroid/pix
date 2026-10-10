@@ -67,7 +67,7 @@ function sessionContext(cwd, ui) {
     return { cwd, ui, sessionManager: { getSessionId: () => sessionId } };
 }
 
-async function createFakeClaude(searchResult = "ok", { searchDelayMs = 0, rateLimitInfo, reportCwd = false, providerTools = [], holdProviderUntilInput = false, authStatus = ELIGIBLE_CLAUDE_AUTH } = {}) {
+async function createFakeClaude(searchResult = "ok", { searchDelayMs = 0, rateLimitInfo, reportCwd = false, providerTools = [], holdProviderUntilInput = false, authStatus = ELIGIBLE_CLAUDE_AUTH, authExitCode = 0 } = {}) {
     const directory = await mkdtemp(join(tmpdir(), "pi-claude-code-provider-extension-"));
     const executable = join(directory, process.platform === "win32" ? "claude.cjs" : "claude");
     const rateLimitEvents = Array.isArray(rateLimitInfo) ? rateLimitInfo : rateLimitInfo ? [rateLimitInfo] : [];
@@ -80,7 +80,7 @@ async function createFakeClaude(searchResult = "ok", { searchDelayMs = 0, rateLi
     // Keep fake Claude JSONL visible in sandboxes that lose buffered Node child stdout.
     await writeFile(executable, nodeFixtureSource(`
 if (process.argv.includes("--version")) process.stdout.write(${JSON.stringify(`${VERIFIED_VERSIONS.claudeCode}\n`)});
-else if (process.argv[2] === "auth" && process.argv[3] === "status") process.stdout.write(JSON.stringify(${JSON.stringify(authStatus)}));
+else if (process.argv[2] === "auth" && process.argv[3] === "status") { require("node:fs").writeSync(1, JSON.stringify(${JSON.stringify(authStatus)})); process.exit(${authExitCode}); }
 else if (process.argv.includes("--help")) process.stdout.write(require("node:fs").readFileSync(${JSON.stringify(CAPTURED_CLAUDE_HELP_PATH)}, "utf8"));
 else {
   const mcpIndex = process.argv.indexOf("--mcp-config");
@@ -436,8 +436,11 @@ test("absent optional Claude CLI is quiet at startup but the doctor still explai
     }
 });
 
-test("installed Claude with invalid authentication still reports a startup error", async () => {
-    const { directory, executable } = await createFakeClaude("ok", { authStatus: { loggedIn: false } });
+test("logged-out Claude exit 1 reports actionable startup feedback once per session", async () => {
+    const { directory, executable } = await createFakeClaude("ok", {
+        authStatus: { loggedIn: false, authMethod: "none", apiProvider: "firstParty", email: "private@example.test" },
+        authExitCode: 1,
+    });
     const original = process.env.PI_CLAUDE_CODE_PROVIDER_PATH;
     process.env.PI_CLAUDE_CODE_PROVIDER_PATH = executable;
     try {
@@ -448,9 +451,15 @@ test("installed Claude with invalid authentication still reports a startup error
         const notices = [];
         const ctx = sessionContext(tmpdir(), { notify(message, level) { notices.push({ message, level }); } });
         for (const handler of pi.handlers.get("session_start") ?? []) await handler({}, ctx);
+        for (const handler of pi.handlers.get("session_start") ?? []) await handler({}, ctx);
         assert.equal(notices.length, 1);
         assert.equal(notices[0].level, "error");
         assert.match(notices[0].message, /unavailable.*first-party claude.ai subscription/);
+        assert.match(notices[0].message, /claude auth login.*\/reload/);
+        assert.equal(notices[0].message.includes("private@example.test"), false);
+        const nextCtx = sessionContext(tmpdir(), ctx.ui);
+        for (const handler of pi.handlers.get("session_start") ?? []) await handler({}, nextCtx);
+        assert.equal(notices.length, 2);
     } finally {
         if (original === undefined) delete process.env.PI_CLAUDE_CODE_PROVIDER_PATH;
         else process.env.PI_CLAUDE_CODE_PROVIDER_PATH = original;

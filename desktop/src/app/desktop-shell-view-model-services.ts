@@ -28,6 +28,8 @@ export function createDesktopShellViewModelServices(
 
   const statusBar = createDesktopStatusBarViewModel({
     status: options.status,
+    workspace: options.workspace,
+    tabs: options.sessions.tabs,
     displayedConfigOptions: options.displayedConfigOptions,
     changingConfig: options.changingConfig,
     promptRunning: () => options.presentation.promptRunning,

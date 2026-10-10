@@ -10,12 +10,16 @@ import {
   quotaWaitStatusLabel,
 } from "../lib/quota-wait";
 import { modelThinkingConfigState } from "../lib/model-thinking";
+import { sessionTabModelDisplayOptions } from "../lib/session-tab-model";
+import type { createSessionTabsState } from "./session-tabs-state.svelte";
 
 type StatusBarProps = ComponentProps<typeof DesktopStatusBar>["props"];
 
 export function createDesktopStatusBarViewModel(options: {
   status: () => StatusBarConnectionStatus;
   displayedConfigOptions: () => StatusBarProps["configOptions"];
+  workspace: () => string;
+  tabs: ReturnType<typeof createSessionTabsState>;
   changingConfig: () => string | null;
   promptRunning: () => boolean;
   canUseSession: () => boolean;
@@ -45,6 +49,20 @@ export function createDesktopStatusBarViewModel(options: {
     const runtimeReady = options.activeSessionRuntimeReady();
     const historyLoading = options.sessionHistoryLoading();
     const changingConfig = options.changingConfig();
+    const liveConfigOptions = options.displayedConfigOptions();
+    const workspace = options.workspace();
+    const savedTabs = options.tabs.sessionTabsForProject(workspace) ?? [];
+    const remembered = options.tabs.activeForProject(workspace);
+    const displaySessionId = sessionId ?? (remembered && savedTabs.includes(remembered) ? remembered : savedTabs[0]);
+    const savedModel = !draft && !runtimeReady && displaySessionId
+      ? options.tabs.models.get(workspace, displaySessionId) : undefined;
+    const hasLiveModel = !!modelThinkingConfigState(liveConfigOptions).currentModel;
+    const cachedDisplay = !hasLiveModel && savedModel;
+    const draftDisplay = draft && !hasLiveModel
+      ? options.modelConfig.draftDisplayConfigOptions ?? [] : [];
+    let displayConfigOptions = liveConfigOptions;
+    if (cachedDisplay) displayConfigOptions = sessionTabModelDisplayOptions(cachedDisplay);
+    else if (draftDisplay.length) displayConfigOptions = draftDisplay;
     const promptRunning = options.promptRunning();
     let runtimeStatus: StatusBarProps["runtimeStatus"];
     if (draft) {
@@ -72,7 +90,7 @@ export function createDesktopStatusBarViewModel(options: {
 
     return {
       showSkeletons,
-      configOptions: options.displayedConfigOptions(),
+      configOptions: displayConfigOptions,
       changingConfig,
       promptRunning,
       quotaWaitIndicator: sessionId && waitState?.autoResume ? {
@@ -94,20 +112,20 @@ export function createDesktopStatusBarViewModel(options: {
         onRequestSnapshot: () => { if (sessionId && observerOwnerCurrent()) void options.headsUp.requestSnapshot(sessionId); },
         onOpenSettings: options.openObserverSettings,
       },
-      canConfigure: options.canUseSession()
+      canConfigure: !cachedDisplay && !draftDisplay.length && options.canUseSession()
         && !historyLoading
         && (draft ? options.draftConfigAvailable() : runtimeReady),
       modelThinkingOpen: options.modelConfig.pickerOpen,
       runtimeStatus,
-      sessionUsage: sessionId ? options.runtime.sessionUsageBySession.get(sessionId) : undefined,
-      sessionUsageRefreshing: sessionId ? options.runtime.sessionUsageRefreshing.has(sessionId) : false,
-      sessionUsageFailed: sessionId ? options.runtime.sessionUsageFailed.has(sessionId) : false,
-      sessionUsageAvailable: !!sessionId && runtimeReady,
+      sessionUsage: !draft && sessionId ? options.runtime.sessionUsageBySession.get(sessionId) : undefined,
+      sessionUsageRefreshing: !draft && sessionId ? options.runtime.sessionUsageRefreshing.has(sessionId) : false,
+      sessionUsageFailed: !draft && sessionId ? options.runtime.sessionUsageFailed.has(sessionId) : false,
+      sessionUsageAvailable: !draft && !!sessionId && runtimeReady,
       // The manual Claude Code limit refresh exists only for a live (non-draft)
       // session whose active model routes through pi-claude-code-provider.
       claudeCodeRoute: !!sessionId
         && !draft
-        && modelThinkingConfigState(options.displayedConfigOptions()).currentModel?.provider === "pi-claude-code-provider",
+        && modelThinkingConfigState(liveConfigOptions).currentModel?.provider === "pi-claude-code-provider",
       claudeLimitsRefreshing: sessionId ? options.runtime.claudeLimitsRefreshing.has(sessionId) : false,
       claudeLimitsFailed: sessionId ? options.runtime.claudeLimitsFailed.has(sessionId) : false,
       sessionActivity,

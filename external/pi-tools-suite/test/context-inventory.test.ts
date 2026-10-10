@@ -32,18 +32,18 @@ describe("context inventory", () => {
 		expect(state.reason).toBe("reload");
 		expect(state.tools).toEqual(["project_search", "read", "subagents"]);
 		expect(state.skills).toEqual(["frontier-model-rollover", "project-agent-creator"]);
-		expect(state.agents).toContain("frontier-review");
+		expect(state.agents).toContain("oracle");
 		expect(state.model).toBe("openai-codex/gpt-6-luna");
 	});
 
-	test("hides frontier-review for a frontier parent", () => {
+	test("exposes merged oracle for a frontier parent", () => {
 		const cwd = tempDir();
 		const state = createContextInventoryState({
 			getActiveTools: () => ["read", "subagents"],
 			getCommands: () => [] as any,
-		} as any, context(cwd, "openai-codex", "gpt-6.1-sol"));
+		} as any, context(cwd, "openai-codex", "gpt-6-astra"));
 
-		expect(state.agents).not.toContain("frontier-review");
+		expect(state.agents).toContain("oracle");
 		expect(state.agents).toContain("research");
 	});
 

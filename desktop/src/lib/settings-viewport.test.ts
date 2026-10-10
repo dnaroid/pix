@@ -17,8 +17,8 @@ function harness() {
     observe() {}
     disconnect = disconnect;
   });
-  const notifications = { closest: () => null, hidden: false, dataset: { settingsField: "System notifications Send native notifications" } };
-  const ignoreContext = { closest: () => null, hidden: false, dataset: { settingsField: "Ignore context files Do not discover AGENTS.md" } };
+  const notifications = { closest: () => null, hidden: false, dataset: { settingsField: "System notifications Send native notifications", settingsFieldId: "system-notifications" } };
+  const ignoreContext = { closest: () => null, hidden: false, dataset: { settingsField: "Ignore context files Do not discover AGENTS.md", settingsFieldId: "ignore-context-files" } };
   const voice = { closest: () => null, hidden: false, dataset: { settingsField: "API key Speech service authentication" }, value: "secret-needle" };
   function section(id: string, title: string, rows: unknown[], top: number) {
     return { hidden: false, dataset: { settingsSection: id, settingsTitle: title }, querySelectorAll: () => rows, getBoundingClientRect: () => ({ top }) };
@@ -80,5 +80,19 @@ describe("settings viewport lifecycle", () => {
     h.flush();
     expect(h.disconnect).toHaveBeenCalledTimes(2);
     expect(h.onChange).toHaveBeenCalledTimes(calls);
+  });
+
+  it("uses authored search field identities for semantic hits without reading rendered values", () => {
+    const h = harness();
+    h.flush();
+    h.action.update({ query: "автодополнение", matches: new Set(["general/ignore-context-files"]), onChange: h.onChange });
+    h.flush();
+    expect(h.ignoreContext.hidden).toBe(false);
+    expect(h.notifications.hidden).toBe(true);
+    expect(h.voice.hidden).toBe(true);
+    h.action.update({ query: "secret-needle", matches: new Set<string>(), onChange: h.onChange });
+    h.flush();
+    expect(h.config.hidden).toBe(true);
+    h.action.destroy();
   });
 });

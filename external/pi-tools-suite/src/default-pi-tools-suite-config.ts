@@ -54,9 +54,8 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   "lookupModel": "zai/glm-5.3-flash",
   "lookupFallbackModels": [],
   // Frontier models used by frontier-selecting sub-agent roles, in preference
-  // order: oracle takes a frontier model from another vendor than a frontier
-  // parent (any frontier for other parents, other vendors first), and
-  // frontier-review/delivery-review take the first usable entry. A new
+  // order: oracle requires another vendor for every parent, including fallback;
+  // delivery-review owns a separate model list. A new
   // frontier release is just a new entry here. Per entry: "vendor" (inferred
   // from the model id when omitted), "expensive", "enabled": false to stop
   // selecting it, "aliases" (globs recognizing the same model under other

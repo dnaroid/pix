@@ -14,6 +14,7 @@
  *   PIX_ACP_TOOLS_SUITE_EXTENSION  bundled pi-tools-suite extension path
  *   PIX_ACP_QUOTA_WAIT_EXTENSION  bundled quota-wait extension path
  *   PIX_ACP_HEADS_UP_EXTENSION  bundled opt-in heads-up observer path
+ *   PIX_ACP_HTML_SANDBOX_EXTENSION  Desktop-only interactive UI capability extension
  */
 
 import { homedir } from "node:os";
@@ -39,6 +40,7 @@ export interface AdapterConfig {
 	readonly toolsSuiteExtensionPath?: string;
 	readonly quotaWaitExtensionPath?: string;
 	readonly headsUpExtensionPath?: string;
+	readonly htmlSandboxExtensionPath?: string;
 }
 
 export interface AdapterConfigInput {
@@ -51,6 +53,7 @@ export interface AdapterConfigInput {
 	readonly toolsSuiteExtensionPath?: string | undefined;
 	readonly quotaWaitExtensionPath?: string | undefined;
 	readonly headsUpExtensionPath?: string | undefined;
+	readonly htmlSandboxExtensionPath?: string | undefined;
 }
 
 export function resolveAdapterConfig(input: AdapterConfigInput = {}): AdapterConfig {
@@ -60,6 +63,7 @@ export function resolveAdapterConfig(input: AdapterConfigInput = {}): AdapterCon
 	const toolsSuiteExtensionPath = input.toolsSuiteExtensionPath?.trim();
 	const quotaWaitExtensionPath = input.quotaWaitExtensionPath?.trim();
 	const headsUpExtensionPath = input.headsUpExtensionPath?.trim();
+	const htmlSandboxExtensionPath = input.htmlSandboxExtensionPath?.trim();
 	return {
 		piEntry: input.piEntry?.trim() ? input.piEntry.trim() : defaultPiEntryPath(),
 		logLevel: parseLogLevel(input.logLevel),
@@ -70,6 +74,7 @@ export function resolveAdapterConfig(input: AdapterConfigInput = {}): AdapterCon
 		...(toolsSuiteExtensionPath ? { toolsSuiteExtensionPath } : {}),
 		...(quotaWaitExtensionPath ? { quotaWaitExtensionPath } : {}),
 		...(headsUpExtensionPath ? { headsUpExtensionPath } : {}),
+		...(htmlSandboxExtensionPath ? { htmlSandboxExtensionPath } : {}),
 	};
 }
 
@@ -84,5 +89,6 @@ export function adapterConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Adap
 		toolsSuiteExtensionPath: env["PIX_ACP_TOOLS_SUITE_EXTENSION"],
 		quotaWaitExtensionPath: env["PIX_ACP_QUOTA_WAIT_EXTENSION"],
 		headsUpExtensionPath: env["PIX_ACP_HEADS_UP_EXTENSION"],
+		htmlSandboxExtensionPath: env["PIX_ACP_HTML_SANDBOX_EXTENSION"],
 	});
 }

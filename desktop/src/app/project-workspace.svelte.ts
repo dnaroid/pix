@@ -4,6 +4,7 @@ import {
   parseSessionTabIds,
 } from "../lib/session-tabs";
 import { windowLayoutKey } from "../lib/window-layout-storage";
+import { parseSessionTabModels, type SessionTabModels } from "../lib/session-tab-model";
 import {
   buildRecentProjects,
   isAbsoluteProjectPath,
@@ -32,6 +33,7 @@ type WorkspaceRestore = {
   recentProjects: string[];
   activeSessionIds: Map<string, string>;
   sessionTabIds: Map<string, string[]>;
+  sessionTabModels: SessionTabModels;
 };
 
 export function restoreProjectWorkspace(
@@ -53,6 +55,7 @@ export function restoreProjectWorkspace(
       ),
       activeSessionIds: parseActiveSessionIds(storage.getItem(windowLayoutKey("activeSessions"))),
       sessionTabIds: parseSessionTabIds(storage.getItem(windowLayoutKey("sessionTabs"))),
+      sessionTabModels: parseSessionTabModels(storage.getItem(windowLayoutKey("sessionTabModels"))),
     };
   } catch {
     // The URL is independent of localStorage and must retain its startup precedence.
@@ -61,6 +64,7 @@ export function restoreProjectWorkspace(
       recentProjects: buildRecentProjects([], windowWorkspace),
       activeSessionIds: new Map(),
       sessionTabIds: new Map(),
+      sessionTabModels: new Map(),
     };
   }
 }
@@ -89,6 +93,7 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
     workspace: string;
     activeSessionIds: Map<string, string>;
     sessionTabIds: Map<string, string[]>;
+    sessionTabModels: SessionTabModels;
   } {
     const restored = restoreProjectWorkspace(window.location.href, localStorage);
     void invoke("desktop_window_workspace", { workspace: restored.workspace }).catch(options.reportError);

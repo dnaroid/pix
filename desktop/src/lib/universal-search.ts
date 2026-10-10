@@ -1,4 +1,4 @@
-import type { LocalSearchHit, SearchQueryRequest, SearchQueryResponse, SearchSetting, SearchStatus } from "../../../acp/src/search/contract";
+import type { LocalSearchHit, SearchQueryRequest, SearchQueryResponse, SearchSetting, SearchStatus, SemanticTasksResponse } from "../../../acp/src/search/contract";
 import type { IdxCommandResult, IdxOverview } from "./idx";
 import { querySnapshot, snapshotLockBusy } from "./snapshot-search-queue";
 import type { GitHistoryEntry } from "./git-workflow";
@@ -31,9 +31,11 @@ export interface IndexSearchHit {
 export type SearchHit = LocalSearchHit | IndexSearchHit | TaskSearchHit | CommitSearchHit | HybridCommitHit;
 export interface SearchSources {
   local?: (request: SearchQueryRequest, signal: AbortSignal) => Promise<SearchQueryResponse>;
-  overview: (workspace: string) => Promise<IdxOverview>;
-  index: (workspace: string, query: SearchIndexQuery) => Promise<IdxCommandResult>;
+  overview?: (workspace: string) => Promise<IdxOverview>;
+  index?: (workspace: string, query: SearchIndexQuery) => Promise<IdxCommandResult>;
   tasks?: (workspace: string) => Promise<ProjectTaskDocument>;
+  taskAttachmentNames?: (workspace: string) => Promise<Readonly<Record<string, readonly string[]>>>;
+  taskSemantic?: (workspace: string, query: string, signal: AbortSignal) => Promise<SemanticTasksResponse>;
   commits?: (workspace: string, query: string) => Promise<GitHistoryEntry[]>;
   commitHybrid?: (workspace: string, query: string, signal: AbortSignal) => Promise<CommitSearchResponse>;
 }
@@ -154,10 +156,23 @@ export async function queryUniversalSearch(
       if (!types.includes("tasks") || !workspace) return;
       try {
         if (!sources.tasks) throw new Error("Task source unavailable");
+        const metadata = sources.taskAttachmentNames?.(workspace).catch(() => ({}));
         const tasks = await sources.tasks(workspace);
-        if (!signal.aborted) groups.set("tasks", searchProjectTasks(tasks, query));
+        const attachmentNames = metadata ? await metadata : {};
+        if (!signal.aborted) groups.set("tasks", searchProjectTasks(tasks, query, attachmentNames));
       } catch (error) {
         if (!signal.aborted) result.notices.push(`Tasks search failed: ${searchErrorDetail(error)}`);
+      }
+    }),
+    bounded("Semantic Tasks", async signal => {
+      if (!types.includes("tasks") || !workspace || !sources.taskSemantic) return;
+      try {
+        const response = await sources.taskSemantic(workspace, query, signal);
+        if (signal.aborted) return;
+        groups.set("task-semantic", [...response.results]);
+        if (response.pendingIndex) result.notices.push("Semantic Tasks: first-use indexing is incomplete; search again to index more tasks.");
+      } catch (error) {
+        if (!signal.aborted) result.notices.push(`Semantic Tasks search failed: ${searchErrorDetail(error)}. Local task matches remain available.`);
       }
     }),
     bounded("Commits", async signal => {
@@ -208,8 +223,14 @@ export async function queryUniversalSearch(
     bounded("Code / Knowledge (IDX)", async signal => {
       const indexTypes = types.filter((kind): kind is "code" | "knowledge" => kind === "code" || kind === "knowledge");
       if (!indexTypes.length || !workspace) return;
+      const overviewSource = sources.overview;
+      const indexSource = sources.index;
+      if (!overviewSource || !indexSource) {
+        result.notices.push("IDX search source is unavailable.");
+        return;
+      }
       try {
-        const overview = await sources.overview(workspace);
+        const overview = await overviewSource(workspace);
         if (signal.aborted) return;
         result.idxAvailable = overview.available && overview.initialized;
         if (!result.idxAvailable) {
@@ -222,7 +243,7 @@ export async function queryUniversalSearch(
           try {
             const response = await querySnapshot(workspace, kind === "code"
               ? { kind, query: indexQuery, mode: "hybrid", maxFiles: 15, includeContent: true }
-              : { kind, query: indexQuery, limit: 15, includeContent: true }, signal, sources.index);
+              : { kind, query: indexQuery, limit: 15, includeContent: true }, signal, indexSource);
             if (signal.aborted) return;
             if (response.exitCode !== 0) {
               const exit = response.exitCode === undefined ? "without an exit code" : `with exit code ${response.exitCode}`;

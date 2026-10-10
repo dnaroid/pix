@@ -1,4 +1,4 @@
-import { PROJECT_AGENTS_DIR, PROJECT_DIR, PROJECT_PLANS_DIR, PROJECT_SKILLS_DIR, PROJECT_TASKS_FILE, PROJECT_TASK_ATTACHMENTS_DIR, PROJECT_TODO_FILE, PROJECT_WORKSPACE_FILE, ProjectArtifact, ProjectScope, REGISTRY_AGENTS_DIR, REGISTRY_PROJECTS_DIR, REGISTRY_SKILLS_DIR, RegistryRuntime, ResourceScope, ResourceType, SAFE_BRANCH, SAFE_NAME, SKIP_NAMES } from "./model.js";
+import { PROJECT_AGENTS_DIR, PROJECT_DIR, PROJECT_PLANS_DIR, PROJECT_SKILLS_DIR, PROJECT_TASKS_FILE, PROJECT_TASK_ATTACHMENTS_DIR, PROJECT_TODO_FILE, PROJECT_WORKSPACE_FILE, ProjectArtifact, ProjectScope, REGISTRY_AGENTS_DIR, REGISTRY_PROJECTS_DIR, REGISTRY_SKILLS_DIR, RegistryRuntime, ResourceScope, ResourceType, SAFE_BRANCH, SAFE_NAME, canonicalPlanFileName, canonicalRegistryEntryName } from "./model.js";
 import { RegistryContext } from "./context.js";
 import { basename, join } from "node:path";
 import { createHash } from "node:crypto";
@@ -186,11 +186,11 @@ export async function pathExists(path: string): Promise<boolean> {
 
 export async function hasTrackableFiles(path: string): Promise<boolean> {
 	const stat = await fs.lstat(path);
-	if (stat.isFile()) return true;
-	if (!stat.isDirectory()) return true;
+	if (stat.isFile() || stat.isSymbolicLink()) return canonicalPlanFileName(basename(path));
+	if (!stat.isDirectory()) return false;
 	for (const entry of await fs.readdir(path, { withFileTypes: true })) {
-		if (SKIP_NAMES.has(entry.name)) continue;
-		if (entry.isFile() || entry.isSymbolicLink()) return true;
+		if (!canonicalRegistryEntryName(entry.name)) continue;
+		if ((entry.isFile() || entry.isSymbolicLink()) && canonicalPlanFileName(entry.name)) return true;
 		if (entry.isDirectory() && await hasTrackableFiles(join(path, entry.name))) return true;
 	}
 	return false;

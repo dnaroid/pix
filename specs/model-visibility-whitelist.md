@@ -37,6 +37,14 @@ Give Pix TUI and Desktop user-controlled model-picker whitelists while keeping t
   own current-model exception; an empty whitelist therefore shows the parent
   model in the statusbar picker and the side model in BTW. Auto and parent
   defaults are not exposed by BTW. See [the BTW contract](desktop-btw.md).
+- The project Tasks editor reuses the same Desktop combined model/thinking
+  picker and its `visibleModels` preference for an **optional per-task**
+  model/effort override. It can show the full ACP catalog in Manage mode and
+  keeps the currently assigned task model visible even when outside the
+  whitelist. Applying a selection only updates the task editor draft; it
+  never mutates a live ACP session or Desktop-wide model defaults. A matching
+  staged model+effort still writes the task override instead of treating Apply
+  as a no-op; clearing the selection restores normal session defaults.
 
 ## Related files
 
@@ -53,6 +61,7 @@ Give Pix TUI and Desktop user-controlled model-picker whitelists while keeping t
 - `desktop/src/app/model-preferences.svelte.ts`
 - `desktop/src/app/desktop-overlays-view-model.svelte.ts`
 - `desktop/src/components/ModelThinkingPicker.svelte`
+- `desktop/src/components/WorkspaceSidebarTaskModelControl.svelte`
 - `desktop/src/lib/model-visibility.ts`
 
 ## Verification

@@ -49,6 +49,15 @@ export function createActiveSessionState() {
     if (targetSessionId === sessionId) transcript = next;
   }
 
+  function adoptDraftTranscript(targetSessionId: string, draft: TranscriptState): void {
+    // Runtime startup may emit notices before the draft learns its real id.
+    const early = transcriptsBySessionId.get(targetSessionId);
+    const draftIds = new Set(draft.items.map((item) => item.id));
+    setTranscriptFor(targetSessionId, early?.items.length ? {
+      items: [...draft.items, ...early.items.filter((item) => !draftIds.has(item.id))],
+    } : draft);
+  }
+
   function setActiveTranscriptForSession(targetSessionId: string, next: TranscriptState): void {
     transcript = next;
     transcriptsBySessionId.set(targetSessionId, next);
@@ -113,6 +122,7 @@ export function createActiveSessionState() {
     clearSessionTranscripts,
     transcriptFor,
     setTranscriptFor,
+    adoptDraftTranscript,
     setActiveTranscriptForSession,
     saveActiveTranscript,
     resetConversation,

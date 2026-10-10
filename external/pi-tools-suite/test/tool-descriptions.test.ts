@@ -218,7 +218,7 @@ describe("tool descriptions", () => {
 				agentStrategyPrompt({ env }), buildSubagentCatalogPrompt({ types: { research: {} } }),
 			].join("\n");
 			expect(assembled.split(SUBAGENT_DELEGATION_GUIDANCE)).toHaveLength(2);
-			expect(assembled).toContain("When frontier-review is present in the current role catalog");
+			expect(assembled).toContain("When oracle is present in the current role catalog");
 			expect(assembled).toContain("before checking prerequisites");
 			expect(assembled).toContain("knowledge-auditor");
 		}

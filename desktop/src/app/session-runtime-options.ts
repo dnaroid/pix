@@ -11,4 +11,5 @@ export type SessionRuntimeStoreOptions = {
   reportError: (error: unknown) => void;
   onOpen?: (sessionId: string) => void;
   onLoadFailed?: (sessionId: string) => void;
+  onConfigOptions?: (sessionId: string, configOptions: readonly SessionConfigOption[]) => void;
 };

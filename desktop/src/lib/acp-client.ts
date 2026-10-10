@@ -23,8 +23,9 @@ import type { AgentControlAction } from "./agent-control";
 import { isRecord, parseQueueState, parseQueuedUserMessage } from "./acp-response-parsers";
 import { AcpIncomingRequestError, AcpJsonRpcConnection } from "./acp-json-rpc";
 import { AcpPixExtensions } from "./acp-pix-extensions";
-import { SEARCH_CONFIG_METHOD, SEARCH_QUERY_METHOD, SEARCH_COMMITS_METHOD, SEARCH_INTENT_METHOD, type SearchIntentRequest, type SearchIntentResponse, type SearchConfigRequest, type SearchStatus, type SearchQueryRequest, type SearchQueryResponse } from "../../../acp/src/search/contract";
+import { SEARCH_CONFIG_METHOD, SEARCH_QUERY_METHOD, SEARCH_COMMITS_METHOD, SEARCH_INTENT_METHOD, SEARCH_TASKS_METHOD, type SearchIntentRequest, type SearchIntentResponse, type SearchConfigRequest, type SearchStatus, type SearchQueryRequest, type SearchQueryResponse, type SemanticTasksRequest, type SemanticTasksResponse } from "../../../acp/src/search/contract";
 import { SEARCH_RAG_METHOD, SEARCH_RAG_DELTA_METHOD, type RagRequest, type RagResponse, type RagProgress } from "../../../acp/src/search/rag-contract";
+import { TASK_TYPE_CLASSIFY_METHOD, isClassifiedTaskType, type TaskTypeClassifyRequest, type TaskTypeClassifyResponse } from "../../../acp/src/tasks/type-classification-contract";
 import type { CommitSearchRequest, CommitSearchResponse } from "../../../acp/src/search/contract";
 import type {
   AcpClientHandlers,
@@ -377,6 +378,16 @@ export class AcpClient {
     return { intent: response.intent, fallback: response.fallback };
   }
 
+  async classifyTaskType(request: TaskTypeClassifyRequest, signal?: AbortSignal): Promise<TaskTypeClassifyResponse> {
+    const response = await this.request<unknown>(TASK_TYPE_CLASSIFY_METHOD, request, null, signal);
+    if (!response || typeof response !== "object" || !("type" in response) || !("fallback" in response)
+      || !isClassifiedTaskType(response.type) || typeof response.fallback !== "boolean"
+      || (response.fallback && response.type !== "feature")) {
+      throw new Error("Invalid task classification response");
+    }
+    return { type: response.type, fallback: response.fallback };
+  }
+
   async searchRag(request: RagRequest, onUpdate: (update: RagProgress) => void, signal?: AbortSignal): Promise<RagResponse> {
     if (this.ragUpdates.has(request.requestId)) throw new Error("Duplicate RAG request");
     this.ragUpdates.set(request.requestId, onUpdate);
@@ -394,6 +405,10 @@ export class AcpClient {
 
   searchQuery(request: SearchQueryRequest, signal?: AbortSignal): Promise<SearchQueryResponse> {
     return this.request(SEARCH_QUERY_METHOD, request, null, signal);
+  }
+
+  searchSemanticTasks(request: SemanticTasksRequest, signal?: AbortSignal): Promise<SemanticTasksResponse> {
+    return this.request(SEARCH_TASKS_METHOD, request, null, signal);
   }
 
   searchConfig(cwd: string, changes: Omit<SearchConfigRequest, "cwd"> = {}, signal?: AbortSignal): Promise<SearchStatus> {

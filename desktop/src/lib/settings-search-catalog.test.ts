@@ -17,7 +17,9 @@ describe("authored settings search catalogue", () => {
 
   it("separates semantic-index consent from explicitly disclosed RAG evidence transfer", () => {
     expect(searchPreferencesSource).toContain("Settings semantic search sends only authored settings labels/descriptions");
-    expect(searchPreferencesSource).toContain("Session titles require their own separate opt-in");
+    expect(searchPreferencesSource).toContain("Session titles and task descriptions each require their own separate opt-in");
+    expect(searchPreferencesSource).toContain("tasksSemanticEnabled");
+    expect(searchPreferencesSource).toContain("Enable semantic project-task search");
     expect(searchPreferencesSource).toContain("Semantic indexing never uploads conversation history or attachments");
     expect(searchPreferencesSource).toContain("session excerpts) and the question are sent to the selected RAG model provider");
     expect(desktopEditorSource).toContain('label="RAG answer model"');

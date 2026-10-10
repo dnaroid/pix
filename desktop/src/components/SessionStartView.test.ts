@@ -28,7 +28,9 @@ describe("SessionStartView", () => {
     expect(rowSource).toContain("row.depth === 0 && sessionIsFork(row.session)");
     expect(rowSource).toContain("GitFork");
     expect(source).toContain("buildSessionTree(sessions)");
-    expect(source).toContain("flatSessionRow(match.value)");
+    expect(source).toContain("flatSessionRow(session)");
+    expect(source).toContain('previewInlineSearch("sessions", query, sessions)');
+    expect(source).toContain('queryInlineSearch("sessions", searchClient, workspace, submitted, request.signal, publish)');
     expect(source).toContain("expandedSessionRows(buildSessionTree(sessions), collapsed)");
   });
 
@@ -60,7 +62,7 @@ describe("SessionStartView", () => {
     expect(source).toContain("new IntersectionObserver");
     expect(source).toContain("{ root, rootMargin:");
     expect(source).toContain("observer.disconnect()");
-    expect(source).toContain("oninput={resetPages}");
+    expect(source).toContain("resetPages(); cancelSearch();");
   });
 
   it("is shown only for the UI-only draft tab and excludes sessions already represented by tabs", () => {

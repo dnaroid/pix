@@ -1,6 +1,7 @@
 <script lang="ts">
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import Hourglass from "@lucide/svelte/icons/hourglass";
+  import QuotaResetCalendar from "./QuotaResetCalendar.svelte";
   import type { ModelUsageLimitWindow } from "../lib/acp-client";
   import {
     clampUsagePercent,
@@ -27,14 +28,6 @@
     if (tone === "warning") return "text-tool-warning";
     return "text-tool-success";
   }
-
-  function weeklyTimePosition(window: ModelUsageLimitWindow): number | null {
-    const durationMs = window.windowSeconds * 1000;
-    if (!window.hasKnownWindowDuration || !Number.isFinite(durationMs) || durationMs <= 0
-      || !Number.isFinite(window.resetAt) || window.resetAt <= 0 || !Number.isFinite(now)) return null;
-    // Time remaining, not quota remaining: start on the right, reset on the left.
-    return clampUsagePercent((window.resetAt - now) / durationMs * 100);
-  }
 </script>
 
 {#if windows.length}
@@ -47,43 +40,34 @@
       {#each windows as { key, label, window } (key)}
         {@const tone = modelUsageTone(window.remainingPercent)}
         {@const exceedsDailyBudget = modelUsageWindowExceedsDailyBudget(window, now)}
-        {@const timePosition = label === "W" ? weeklyTimePosition(window) : null}
-        <div class="flex flex-col gap-1.5" aria-label={`${modelUsageWindowLabel(label, window)} ${Math.round(window.remainingPercent)}% remaining, ${formatResetDuration(window.resetAt, now)}${timePosition === null ? "" : `, Now: ${Math.round(timePosition)}% of window time remaining (start right, reset left)`}`}>
+        <div class="flex flex-col gap-1.5" aria-label={`${modelUsageWindowLabel(label, window)} ${Math.round(window.remainingPercent)}% remaining, ${formatResetDuration(window.resetAt, now)}`}>
           <div class="flex items-baseline justify-between gap-2 text-sm">
             <span class="font-medium text-foreground">{modelUsageWindowLabel(label, window)}</span>
-            <span class={["font-semibold tabular-nums", toneTextClass(tone)]}>{Math.round(window.remainingPercent)}% <span class="text-xs font-normal text-muted-foreground">remaining</span></span>
-          </div>
-          <span class="relative h-2 w-full" aria-hidden="true">
-            <span class="absolute inset-0 overflow-hidden rounded-sm bg-border">
-              <span
-                class="absolute inset-y-0 left-0 bg-muted-foreground"
-                style={`width: ${clampUsagePercent(window.remainingPercent)}%`}
-              ></span>
-              {#if label === "W"}
-                <span class="absolute inset-0 grid grid-cols-7" data-weekly-day-sectors>
-                  {#each Array.from({ length: 7 }) as _, index}
-                    <i class={index === 0 ? "" : "border-l border-background/80"} data-day-sector></i>
-                  {/each}
-                </span>
+            <span class="inline-flex items-center gap-1.5">
+              {#if label === "W" && exceedsDailyBudget}
+                <TriangleAlert class="h-3 w-3 shrink-0 text-tool-warning" aria-label="Cumulative daily quota budget exceeded" />
               {/if}
+              <span class={["font-semibold tabular-nums", toneTextClass(tone)]}>{Math.round(window.remainingPercent)}% <span class="text-xs font-normal text-muted-foreground">remaining</span></span>
             </span>
-            {#if timePosition !== null}
-              <span
-                class="absolute top-[-5px] z-10 h-[calc(100%+10px)] w-0"
-                style={`left: clamp(6px, ${timePosition}%, calc(100% - 6px))`}
-                data-weekly-now-marker
-              >
-                <span class="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-primary ring-1 ring-popover"></span>
-                <span class="absolute -top-0.5 left-1/2 size-2.5 -translate-x-1/2 rounded-full border-2 border-popover bg-primary"></span>
-              </span>
-            {/if}
-          </span>
-          <div class="flex items-center justify-between gap-2">
-            <span class="text-foreground tabular-nums">{window.resetAt <= now ? "Reset time reached · Awaiting quota refresh" : `Resets in ${formatResetDuration(window.resetAt, now)}`}</span>
-            {#if exceedsDailyBudget}
-              <TriangleAlert class="h-3 w-3 shrink-0 text-tool-warning" aria-label="Cumulative daily quota budget exceeded" />
-            {/if}
           </div>
+          {#if label === "W"}
+            <QuotaResetCalendar {window} {now} />
+          {:else}
+            <span class="relative h-2 w-full" aria-hidden="true">
+              <span class="absolute inset-0 overflow-hidden rounded-sm bg-border">
+                <span
+                  class="absolute inset-y-0 right-0 bg-muted-foreground"
+                  style={`width: ${clampUsagePercent(window.remainingPercent)}%`}
+                ></span>
+              </span>
+            </span>
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-foreground tabular-nums">{window.resetAt <= now ? "Reset time reached · Awaiting quota refresh" : `Resets in ${formatResetDuration(window.resetAt, now)}`}</span>
+              {#if exceedsDailyBudget}
+                <TriangleAlert class="h-3 w-3 shrink-0 text-tool-warning" aria-label="Cumulative daily quota budget exceeded" />
+              {/if}
+            </div>
+          {/if}
         </div>
       {/each}
     </div>

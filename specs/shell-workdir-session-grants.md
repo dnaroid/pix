@@ -9,7 +9,7 @@ status: active
 
 The model-tools `shell` alias accepts a `workdir` inside the current workspace by default. A user may run `/shell-workdir allow <path>` to grant one additional existing directory to this session's shell alias. The grant covers that directory and its descendants. `/shell-workdir list` shows canonical granted paths; `/shell-workdir revoke <path>` removes an individual grant. Commands report the canonical path and that grants last **only for the current session**, and are cleared on session replacement, reload, or exit. Paths containing spaces are accepted as the entire argument after the action. A revoked directory is denied again unless covered by another explicit grant or the workspace. The workspace remains allowed without an explicit grant.
 
-In Pix Desktop, submit the slash command from the composer. Its `ctx.ui.notify` result appears in the conversation as command feedback (including the empty-list message); the ACP bridge forwards notifications from active slash prompts rather than discarding them. Other extension UI notifications outside slash prompts are not turned into conversation messages.
+In Pix Desktop, submit the slash command from the composer. Its `ctx.ui.notify` result appears in the conversation as command feedback (including the empty-list message); the ACP bridge forwards notifications from active slash prompts rather than discarding them. Outside commands, extension warning/error notifications (including startup failures) also become live system rows; informational notifications stay quiet.
 
 ## Constraints and failure cases
 

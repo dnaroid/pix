@@ -537,16 +537,15 @@ describe.serial("subagent type config", () => {
 		expect(config.routing).toMatchObject({ maxRetries: 1, timeoutMs: 12_000 });
 		expect(isBlindModelRef("zai/glm-5.3", config)).toBe(true);
 		expect(isBlindModelRef("zai/glm-5.3-flash", config)).toBe(false);
-		expect(Object.keys(config.types).sort()).toEqual(["delivery-review", "frontier-review", "implement", "implement-core", "knowledge-auditor", "mechanical", "oracle", "research", "ui-qa", "verify"]);
+		expect(Object.keys(config.types).sort()).toEqual(["delivery-review", "implement", "implement-core", "knowledge-auditor", "mechanical", "oracle", "research", "ui-qa", "verify"]);
 		expect(config.types.research.description).toContain("review");
-		expect(config.types["frontier-review"].models).toEqual(["openai-codex/gpt-6.1-sol"]);
 		expect(config.types.oracle.modelSelection).toBe("frontier");
-		expect(config.types.oracle.parentProviderPolicy).toBe("require-other-if-frontier");
-		expect(config.types["frontier-review"].forParentTier).toBe("non-frontier");
-		expect(buildSubagentCatalogPrompt(config, "openai-codex/gpt-6-astra")).not.toContain("- frontier-review:");
-		expect(buildSubagentCatalogPrompt(config, "openai-codex/gpt-6-luna")).toContain("- frontier-review:");
-		expect(buildSubagentCatalogPrompt(config, "openai-codex/gpt-6.1-sol")).not.toContain("- frontier-review:");
-		expect(buildSubagentCatalogPrompt(config, "zai/glm-5.3")).not.toContain("- frontier-review:");
+		expect(config.types.oracle.parentProviderPolicy).toBe("require-other");
+		expect(config.types["oracle"].forParentTier).toBeUndefined();
+		expect(buildSubagentCatalogPrompt(config, "openai-codex/gpt-6-astra")).toContain("- oracle:");
+		expect(buildSubagentCatalogPrompt(config, "openai-codex/gpt-6-luna")).toContain("- oracle:");
+		expect(buildSubagentCatalogPrompt(config, "openai-codex/gpt-6.1-sol")).toContain("- oracle:");
+		expect(buildSubagentCatalogPrompt(config, "zai/glm-5.3")).toContain("- oracle:");
 		expect(selectSubagentType({ id: "s", task: "vulnerability secret token" }, config)).toBe("research");
 	});
 
@@ -589,9 +588,9 @@ Research only this project.
 		expect(isSubagentTypeAvailableForParent({ notForParentModels: ["zai/glm-5.3"] }, undefined)).toBe(true);
 
 		const config = loadSubagentConfig(tempDir(), {});
-		expect(filterSubagentConfigForParentModel(config, "openai-codex/gpt-6-luna").types["frontier-review"]).toBeDefined();
-		expect(filterSubagentConfigForParentModel(config, "openai-codex/gpt-6.1-sol").types["frontier-review"]).toBeUndefined();
-		expect(filterSubagentConfigForParentModel(config, "zai/glm-5.3").types["frontier-review"]).toBeUndefined();
+		expect(filterSubagentConfigForParentModel(config, "openai-codex/gpt-6-luna").types["oracle"]).toBeDefined();
+		expect(filterSubagentConfigForParentModel(config, "openai-codex/gpt-6.1-sol").types["oracle"]).toBeDefined();
+		expect(filterSubagentConfigForParentModel(config, "zai/glm-5.3").types["oracle"]).toBeDefined();
 	});
 
 	test.serial("resolves the built-in balanced role models and UI QA profile", () => {
@@ -677,7 +676,6 @@ Research only this project.
 
 		expect(Object.keys(definitions).sort()).toEqual([
 			"delivery-review",
-			"frontier-review",
 			"implement",
 			"implement-core",
 			"knowledge-auditor",
@@ -688,7 +686,7 @@ Research only this project.
 			"verify",
 		]);
 		expect(definitions.implement?.raw.description).toContain("code, docs, tests, or UI");
-		expect(definitions["frontier-review"]?.raw.forParentTier).toBe("non-frontier");
+		expect(definitions["oracle"]?.raw.forParentTier).toBeUndefined();
 		expect(definitions["delivery-review"]?.raw.tools).toEqual(["read", "grep", "bash"]);
 		expect(definitions["knowledge-auditor"]?.raw.requiresIndexedProject).toBe(true);
 		expect(definitions["knowledge-auditor"]?.raw.tools).toEqual(["read", "grep", "bash", "edit", "write"]);
@@ -1004,7 +1002,6 @@ Advise only.
 			expect(builtin.types.implement?.icon).toBe("code");
 			expect(builtin.types.verify?.icon).toBe("flask");
 			expect(builtin.types["ui-qa"]?.icon).toBe("bug");
-			expect(builtin.types["frontier-review"]?.icon).toBe("eye");
 			expect(builtin.types["knowledge-auditor"]?.icon).toBe("book-open");
 			expect(builtin.types.oracle?.icon).toBe("sparkles");
 		});

@@ -150,3 +150,53 @@ describe("IDX AI knowledge review in new session", () => {
     expect(runPrompt).not.toHaveBeenCalled();
   });
 });
+
+describe("SQLite project task launch", () => {
+  it.each([
+    [undefined, null],
+    ["provider/smart-model", { modelRef: "provider/smart-model" }],
+    ["provider/smart-model:high", { modelRef: "provider/smart-model", thinkingLevel: "high" }],
+  ] as const)("respects optional assigned model %s only for newly launched task sessions", async (ref, config) => {
+    const { client, options } = reviewHarness();
+    const task = {
+      id: "task-1", title: "Run assigned task", type: "feature" as const,
+      status: "todo" as const, priority: "medium" as const,
+      ...(ref ? { modelRef: ref } : {}),
+      createdAt: "2026-10-10T00:00:00Z", updatedAt: "2026-10-10T00:00:00Z",
+    };
+    options.taskDocument = () => ({ version: 1, tasks: [task] });
+    options.taskAttachments = async () => [];
+    await createProjectActions(options).runTask(task);
+    if (config) expect(client.newSession).toHaveBeenCalledExactlyOnceWith("/project", config);
+    else expect(client.newSession).toHaveBeenCalledExactlyOnceWith("/project");
+  });
+
+  it("resolves only task-linked content-addressed attachments via the native query", async () => {
+    const { options, appendUserMessage, runPrompt } = reviewHarness();
+    const task = {
+      id: "task-1", title: "Inspect artifact", type: "feature" as const,
+      status: "todo" as const, priority: "medium" as const,
+      createdAt: "2026-10-10T00:00:00Z", updatedAt: "2026-10-10T00:00:00Z",
+    };
+    const files = [{ path: "/project/.pi/task-attachments/abcdef", name: "results.txt", size: 12 }];
+    const taskAttachments = vi.fn().mockResolvedValue(files);
+    const prepareTranscriptAttachment = vi.fn().mockResolvedValue(undefined);
+    const saveProjectTasks = vi.fn().mockResolvedValue(true);
+    options.taskDocument = () => ({ version: 1, tasks: [task] });
+    options.taskAttachments = taskAttachments;
+    options.prepareTranscriptAttachment = prepareTranscriptAttachment;
+    options.saveProjectTasks = saveProjectTasks;
+    await createProjectActions(options).runTask(task);
+    expect(taskAttachments).toHaveBeenCalledWith("/project", "task-1");
+    expect(prepareTranscriptAttachment).toHaveBeenCalledWith(expect.objectContaining({
+      name: "results.txt", path: files[0]!.path,
+    }));
+    expect(appendUserMessage).toHaveBeenCalledWith("session-1", expect.stringContaining("Task id: task-1"), [
+      expect.objectContaining({ name: "results.txt", path: files[0]!.path }),
+    ]);
+    expect(saveProjectTasks).toHaveBeenCalledWith(expect.objectContaining({
+      tasks: [expect.objectContaining({ id: "task-1", sessionId: "session-1", status: "in-progress" })],
+    }));
+    expect(runPrompt).toHaveBeenCalledOnce();
+  });
+});

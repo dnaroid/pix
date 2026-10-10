@@ -3,8 +3,10 @@ import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { pathToFileURL } from "node:url";
+import { createHash } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, test } from "node:test";
+import { TASK_SCHEMA } from "../src/registry/task-database.js";
 
 import type { RegistryContext, RegistryExecutor } from "../src/registry/context.js";
 import { registryExecutor } from "../src/registry/executor.js";
@@ -112,6 +114,48 @@ function isolate(root: string): { home: string; cache: string } {
 	process.env.GIT_COMMITTER_NAME = "Registry Test";
 	process.env.GIT_COMMITTER_EMAIL = "registry@example.test";
 	return { home, cache };
+}
+
+function savedTask(id: string, description?: string) {
+	return { id, title: id, ...(description ? { description } : {}), type: "feature", status: "todo", priority: "medium", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" };
+}
+
+/** Create/edit the current SQLite format directly; no legacy task import. */
+function writeTasksSqlite(folder: string, tasks: ReturnType<typeof savedTask>[]): string {
+  fs.mkdirSync(folder, { recursive: true });
+  const filename = path.join(folder, "tasks.sqlite");
+  const db = new DatabaseSync(filename);
+  try {
+    db.exec("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;");
+    if (db.prepare("PRAGMA user_version").get()?.user_version === 0) db.exec(TASK_SCHEMA);
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec("DELETE FROM task_attachments; DELETE FROM tasks; DELETE FROM attachments;");
+      const insert = db.prepare("INSERT INTO tasks(id,payload,position) VALUES(?,?,?)");
+      for (const [index, task] of tasks.entries()) insert.run(task.id, JSON.stringify(task), index);
+      db.exec("COMMIT");
+    } catch (error) { db.exec("ROLLBACK"); throw error; }
+  } finally { db.close(); }
+  return filename;
+}
+function sqliteTaskIds(filename: string): string[] {
+  const db = new DatabaseSync(filename, { readOnly: true });
+  try { return db.prepare("SELECT id FROM tasks ORDER BY position,id").all().map(row => String(row.id)); }
+  finally { db.close(); }
+}
+function linkTaskAttachment(folder: string, taskId: string, name: string, bytes: Buffer): string {
+  const hash = createHash("sha256").update(bytes).digest("hex");
+  const attachments = path.join(folder, "task-attachments");
+  fs.mkdirSync(attachments, { recursive: true });
+  fs.writeFileSync(path.join(attachments, hash), bytes);
+  const db = new DatabaseSync(path.join(folder, "tasks.sqlite"));
+  try {
+    db.exec("PRAGMA foreign_keys=ON; BEGIN IMMEDIATE;");
+    db.prepare("INSERT INTO attachments(hash,name,size) VALUES(?,?,?)").run(hash, name, bytes.length);
+    db.prepare("INSERT INTO task_attachments(task_id,hash,ordinal) VALUES(?,?,0)").run(taskId, hash);
+    db.exec("COMMIT");
+  } finally { db.close(); }
+  return hash;
 }
 
 type Notice = { message: string; type?: string };
@@ -381,7 +425,7 @@ test("background project sync silently saves Local-only skills/agents under the 
 	fs.mkdirSync(path.join(project, ".pi", "plans"), { recursive: true });
 	fs.mkdirSync(path.join(project, ".pi", "skills", "draft"), { recursive: true });
 	fs.mkdirSync(path.join(project, ".pi", "agents"), { recursive: true });
-	fs.writeFileSync(path.join(project, ".pi", "tasks.jsonc"), '{"version":1,"tasks":[]}\n');
+	writeTasksSqlite(path.join(project, ".pi"), []);
 	fs.writeFileSync(path.join(project, ".pi", "workspace.jsonc"), '{"version":1}\n');
 	fs.writeFileSync(path.join(project, ".pi", "TODO.md"), "Task list\n");
 	fs.writeFileSync(path.join(project, ".pi", "plans", "plan.md"), "Plan\n");
@@ -397,7 +441,7 @@ test("background project sync silently saves Local-only skills/agents under the 
 	assert.equal(snapshot.error, undefined);
 	assert.ok(snapshot.items.filter((entry) => entry.type === "project").every((entry) => entry.status === "up-to-date"));
 	const files = git(root, ["--git-dir", remote, "ls-tree", "-r", "--name-only", "main"]);
-	for (const file of ["tasks.jsonc", "workspace.jsonc", "TODO.md", "plans/plan.md"]) {
+	for (const file of ["tasks.sqlite", "workspace.jsonc", "TODO.md", "plans/plan.md"]) {
 		assert.ok(files.includes(`projects/background-project/${file}`), `registry tracks ${file}`);
 	}
 	assert.ok(files.includes("projects/background-project/skills/draft/SKILL.md"));
@@ -422,6 +466,76 @@ test("background project sync silently saves Local-only skills/agents under the 
 	assert.deepEqual(second.notices, []);
 	assert.equal(second.confirmations.length, 0);
 	assert.equal(git(root, ["--git-dir", remote, "show", "main:projects/background-project/TODO.md"]), "Task list");
+});
+
+test("project auto-sync publishes canonical files only and does not react to service-file churn", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
+	const { root, project, remote, h } = await scopeFixture();
+	const plans = path.join(project, ".pi", "plans");
+	const skill = path.join(project, ".pi", "skills", "draft");
+	const agents = path.join(project, ".pi", "agents");
+	fs.mkdirSync(plans, { recursive: true });
+	fs.mkdirSync(skill, { recursive: true });
+	fs.mkdirSync(agents, { recursive: true });
+	fs.writeFileSync(path.join(plans, "roadmap.md"), "# Roadmap\n");
+	fs.writeFileSync(path.join(plans, "roadmap.md.bak"), "old roadmap\n");
+	fs.writeFileSync(path.join(plans, "session.log"), "generated\n");
+	fs.mkdirSync(path.join(plans, "artifacts"));
+	fs.writeFileSync(path.join(plans, "artifacts", "report.md"), "generated report\n");
+	fs.writeFileSync(path.join(skill, "SKILL.md"), "---\ndescription: Draft skill\n---\nAuthored\n");
+	fs.mkdirSync(path.join(skill, "node_modules"));
+	fs.writeFileSync(path.join(skill, "node_modules", "generated.js"), "dependency\n");
+	fs.writeFileSync(path.join(skill, "SKILL.md.bak"), "old skill\n");
+	fs.writeFileSync(path.join(agents, "README.md"), "# This is not an agent\n");
+	fs.writeFileSync(path.join(agents, "draft.md"), "---\nname: draft\n---\nAgent\n");
+
+	const initial = await act(project, { action: "sync-project", scope: "project" }, h.ctx);
+	assert.equal(initial.error, undefined);
+	assert.equal(item(initial, "project:plans").status, "up-to-date");
+	assert.equal(item(initial, "skill:draft").status, "up-to-date");
+	assert.equal(item(initial, "agent:draft").status, "up-to-date");
+	assert.equal(initial.items.some((entry) => entry.id === "agent:README"), false);
+	const published = git(root, ["--git-dir", remote, "ls-tree", "-r", "--name-only", "main"]).split("\n");
+	assert.ok(published.includes("projects/alpha/plans/roadmap.md"));
+	assert.ok(published.includes("projects/alpha/skills/draft/SKILL.md"));
+	assert.ok(published.includes("projects/alpha/agents/draft.md"));
+	assert.equal(published.some((name) => name.includes("roadmap.md.bak") || name.includes("session.log")
+		|| name.includes("artifacts/") || name.includes("node_modules/") || name.includes("SKILL.md.bak")
+		|| name.includes("agents/README.md")), false);
+
+	const revision = git(root, ["--git-dir", remote, "rev-parse", "main"]);
+	fs.writeFileSync(path.join(plans, "roadmap.md.bak"), "another backup\n");
+	fs.writeFileSync(path.join(skill, "node_modules", "generated.js"), "updated dependency\n");
+	fs.writeFileSync(path.join(plans, "artifacts", "report.md"), "another generated report\n");
+	const refreshed = await act(project, { action: "refresh" }, h.ctx);
+	assert.equal(refreshed.error, undefined);
+	assert.equal(item(refreshed, "project:plans").status, "up-to-date");
+	assert.equal(item(refreshed, "skill:draft").status, "up-to-date");
+	assert.equal(item(refreshed, "agent:draft").status, "up-to-date");
+	const repeated = await act(project, { action: "sync-project", scope: "project" }, h.ctx);
+	assert.equal(repeated.error, undefined);
+	assert.equal(git(root, ["--git-dir", remote, "rev-parse", "main"]), revision);
+
+	const pull = await act(project, { action: "pull-project", scope: "plans" }, h.ctx);
+	assert.equal(pull.error, undefined);
+	assert.equal(fs.readFileSync(path.join(plans, "roadmap.md.bak"), "utf8"), "another backup\n");
+	assert.equal(fs.readFileSync(path.join(plans, "artifacts", "report.md"), "utf8"), "another generated report\n");
+	assert.equal(fs.readFileSync(path.join(plans, "roadmap.md"), "utf8"), "# Roadmap\n");
+
+	fs.writeFileSync(path.join(plans, "roadmap.md"), "# Updated roadmap\n");
+	const canonicalEdit = await act(project, { action: "refresh" }, h.ctx);
+	assert.equal(item(canonicalEdit, "project:plans").status, "local-changes");
+
+	const scratchOnlyProject = path.join(root, "scratch-only-project");
+	const scratchPlans = path.join(scratchOnlyProject, ".pi", "plans");
+	fs.mkdirSync(scratchPlans, { recursive: true });
+	fs.writeFileSync(path.join(scratchPlans, "backup.md.bak"), "not a plan\n");
+	const scratchHarness = harness(scratchOnlyProject);
+	const scratchSnapshot = await act(scratchOnlyProject, { action: "refresh" }, scratchHarness.ctx);
+	assert.equal(item(scratchSnapshot, "project:plans").status, "not-installed");
+	const noOp = await act(scratchOnlyProject, { action: "sync-project", scope: "project" }, scratchHarness.ctx);
+	assert.equal(noOp.error, undefined);
+	assert.equal(git(root, ["--git-dir", remote, "rev-parse", "main"]), revision);
+	assert.equal(git(root, ["--git-dir", remote, "show", "main:projects/alpha/plans/roadmap.md"]), "# Roadmap");
 });
 
 test("resource background saving preserves companions, private edits, scope toggle, explicit removal and concurrent calls", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
@@ -1145,20 +1259,23 @@ test("pushes, reports, and pulls project-scoped tasks, plans, TODO, and workspac
 	await act(project, { action: "configure" }, h.ctx);
 	h.setInput(async () => "project-alpha");
 	await act(project, { action: "project-key" }, h.ctx);
-	fs.writeFileSync(path.join(project, ".pi", "tasks.jsonc"), '// keep this comment\n{"tasks":["local-v1"],}\n');
+	writeTasksSqlite(path.join(project, ".pi"), [savedTask("local-v1")]);
+	const ignoredLegacy = path.join(project, ".pi", "tasks.jsonc");
+	fs.writeFileSync(ignoredLegacy, "ignored legacy task data (not imported)\n");
 	fs.writeFileSync(path.join(project, ".pi", "plans", "roadmap.md"), "local plan v1\n");
 	fs.writeFileSync(path.join(project, ".pi", "TODO.md"), "# TODO\n\n- local todo v1\n");
 	fs.writeFileSync(path.join(project, ".pi", "workspace.jsonc"), '{"workspace":"local-v1"}\n');
 
 	await act(project, { action: "push-project", scope: "project" }, h.ctx);
 	git(seed, ["pull", "--ff-only", "origin", "main"]);
-	assert.match(fs.readFileSync(path.join(seed, "projects", "project-alpha", "tasks.jsonc"), "utf8"), /keep this comment/);
+	assert.deepEqual(sqliteTaskIds(path.join(seed, "projects", "project-alpha", "tasks.sqlite")), ["local-v1"]);
+	assert.equal(fs.readFileSync(ignoredLegacy, "utf8"), "ignored legacy task data (not imported)\n");
 	assert.match(fs.readFileSync(path.join(seed, "projects", "project-alpha", "plans", "roadmap.md"), "utf8"), /local plan v1/);
 	assert.match(fs.readFileSync(path.join(seed, "projects", "project-alpha", "TODO.md"), "utf8"), /local todo v1/);
 	assert.match(fs.readFileSync(path.join(seed, "projects", "project-alpha", "workspace.jsonc"), "utf8"), /local-v1/);
 	assert.equal(fs.existsSync(path.join(seed, "skills", "demo", "SKILL.md")), true);
 
-	fs.writeFileSync(path.join(seed, "projects", "project-alpha", "tasks.jsonc"), '{"tasks":["remote-v2"]}\n');
+	writeTasksSqlite(path.join(seed, "projects", "project-alpha"), [savedTask("remote-v2")]);
 	fs.writeFileSync(path.join(seed, "projects", "project-alpha", "plans", "roadmap.md"), "remote plan v2\n");
 	fs.writeFileSync(path.join(seed, "projects", "project-alpha", "TODO.md"), "# TODO\n\n- remote todo v2\n");
 	fs.writeFileSync(path.join(seed, "projects", "project-alpha", "workspace.jsonc"), '{"workspace":"remote-v2"}\n');
@@ -1172,7 +1289,8 @@ test("pushes, reports, and pulls project-scoped tasks, plans, TODO, and workspac
 	}
 
 	await act(project, { action: "pull-project", scope: "project" }, h.ctx);
-	assert.match(fs.readFileSync(path.join(project, ".pi", "tasks.jsonc"), "utf8"), /remote-v2/);
+	assert.deepEqual(sqliteTaskIds(path.join(project, ".pi", "tasks.sqlite")), ["remote-v2"]);
+	assert.equal(fs.readFileSync(ignoredLegacy, "utf8"), "ignored legacy task data (not imported)\n");
 	assert.match(fs.readFileSync(path.join(project, ".pi", "plans", "roadmap.md"), "utf8"), /remote plan v2/);
 	assert.match(fs.readFileSync(path.join(project, ".pi", "TODO.md"), "utf8"), /remote todo v2/);
 	assert.match(fs.readFileSync(path.join(project, ".pi", "workspace.jsonc"), "utf8"), /remote-v2/);
@@ -1196,15 +1314,15 @@ test("pushes, reports, and pulls project-scoped tasks, plans, TODO, and workspac
 	assert.match(pullConflict.error ?? "", /has local changes/);
 	assert.equal(fs.readFileSync(localWorkspace, "utf8"), localBeforeConflictActions);
 
-	fs.appendFileSync(path.join(project, ".pi", "tasks.jsonc"), "local change\n");
-	fs.writeFileSync(path.join(seed, "projects", "project-alpha", "tasks.jsonc"), '{"tasks":["remote-v3"]}\n');
-	git(seed, ["add", "projects/project-alpha/tasks.jsonc"]);
+	writeTasksSqlite(path.join(project, ".pi"), [savedTask("local change")]);
+	writeTasksSqlite(path.join(seed, "projects", "project-alpha"), [savedTask("remote-v3")]);
+	git(seed, ["add", "projects/project-alpha/tasks.sqlite"]);
 	git(seed, ["commit", "-m", "Update tasks again"]);
 	git(seed, ["push", "origin", "main"]);
 
 	const tasksConflict = await act(project, { action: "pull-project", scope: "tasks" }, h.ctx);
 	assert.match(tasksConflict.error ?? "", /has local changes/);
-	assert.match(fs.readFileSync(path.join(project, ".pi", "tasks.jsonc"), "utf8"), /local change/);
+	assert.deepEqual(sqliteTaskIds(path.join(project, ".pi", "tasks.sqlite")), ["local change"]);
 });
 
 test("syncs task attachments as a portable project bundle and tracks attachment changes", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
@@ -1219,45 +1337,36 @@ test("syncs task attachments as a portable project bundle and tracks attachment 
 	await act(project, { action: "configure" }, h.ctx);
 	h.setInput(async () => "task-assets");
 	await act(project, { action: "project-key" }, h.ctx);
-	const attachmentName = "100-1-shot.png";
-	const attachment = path.join(attachments, attachmentName);
-	fs.writeFileSync(attachment, Buffer.from([1, 2, 3, 4]));
-	const marker = `[Pix attachment: ${pathToFileURL(attachment).href}]`;
-	fs.writeFileSync(
-		path.join(project, ".pi", "tasks.jsonc"),
-		`// portable task bundle\n${JSON.stringify({ version: 1, tasks: [{ id: "task-1", description: marker }] }, null, 2)}\n`,
-	);
+	writeTasksSqlite(path.join(project, ".pi"), [savedTask("task-1")]);
+	const attachmentName = "shot.png";
+	const bytes = Buffer.from([1, 2, 3, 4]);
+	const hash = linkTaskAttachment(path.join(project, ".pi"), "task-1", attachmentName, bytes);
 
 	await act(project, { action: "push-project", scope: "tasks" }, h.ctx);
 	git(seed, ["pull", "--ff-only", "origin", "main"]);
-	const remoteTasks = fs.readFileSync(path.join(seed, "projects", "task-assets", "tasks.jsonc"), "utf8");
-	assert.match(remoteTasks, /\[Pix attachment: pix-task-attachment:100-1-shot\.png\]/);
-	assert.equal(remoteTasks.includes(project), false);
+	const remoteDb = path.join(seed, "projects", "task-assets", "tasks.sqlite");
+	assert.deepEqual(sqliteTaskIds(remoteDb), ["task-1"]);
 	assert.deepEqual(
-		fs.readFileSync(path.join(seed, "projects", "task-assets", "task-attachments", attachmentName)),
-		Buffer.from([1, 2, 3, 4]),
+		fs.readFileSync(path.join(seed, "projects", "task-assets", "task-attachments", hash)),
+		bytes,
 	);
 
-	fs.rmSync(path.join(project, ".pi", "tasks.jsonc"));
+	fs.rmSync(path.join(project, ".pi", "tasks.sqlite"));
 	fs.rmSync(attachments, { recursive: true, force: true });
 	await act(project, { action: "pull-project", scope: "tasks" }, h.ctx);
-	const pulledAttachment = path.join(project, ".pi", "task-attachments", attachmentName);
-	const pulledTasks = fs.readFileSync(path.join(project, ".pi", "tasks.jsonc"), "utf8");
-	assert.deepEqual(fs.readFileSync(pulledAttachment), Buffer.from([1, 2, 3, 4]));
-	assert.match(pulledTasks, new RegExp(`\\[Pix attachment: ${pathToFileURL(pulledAttachment).href.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]`));
-	assert.equal(pulledTasks.includes("pix-task-attachment:"), false);
+	const pulledAttachment = path.join(project, ".pi", "task-attachments", hash);
+	assert.deepEqual(sqliteTaskIds(path.join(project, ".pi", "tasks.sqlite")), ["task-1"]);
+	assert.deepEqual(fs.readFileSync(pulledAttachment), bytes);
 
-	fs.writeFileSync(pulledAttachment, Buffer.from([9, 8, 7]));
+	writeTasksSqlite(path.join(project, ".pi"), [savedTask("local-v2")]);
 	const changed = await act(project, { action: "refresh" }, h.ctx);
 	assert.equal(item(changed, "project:tasks").status, "local-changes");
 
-	fs.writeFileSync(
-		path.join(project, ".pi", "tasks.jsonc"),
-		`${JSON.stringify({ version: 1, tasks: [{ id: "task-1", description: "No attachment" }] }, null, 2)}\n`,
-	);
 	await act(project, { action: "push-project", scope: "tasks" }, h.ctx);
 	git(seed, ["pull", "--ff-only", "origin", "main"]);
-	assert.equal(fs.existsSync(path.join(seed, "projects", "task-assets", "task-attachments")), false);
+	assert.deepEqual(sqliteTaskIds(path.join(seed, "projects", "task-assets", "tasks.sqlite")), ["local-v2"]);
+	const remoteAttachments = path.join(seed, "projects", "task-assets", "task-attachments");
+	assert.equal(fs.existsSync(remoteAttachments) ? fs.readdirSync(remoteAttachments).length : 0, 0);
 });
 
 test("treats an empty plans directory as removal of registry plans", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
@@ -1265,7 +1374,7 @@ test("treats an empty plans directory as removal of registry plans", { timeout: 
 	isolate(root);
 	const project = path.join(root, "project");
 	fs.mkdirSync(path.join(project, ".pi", "plans"), { recursive: true });
-	fs.writeFileSync(path.join(project, ".pi", "tasks.jsonc"), '{"tasks":["only"]}\n');
+	writeTasksSqlite(path.join(project, ".pi"), [savedTask("only")]);
 	const { remote, seed } = createRegistry(root);
 	const h = harness(project);
 	h.setInput(async (title) => (title === "Registry Git remote" ? remote : "main"));
@@ -1274,7 +1383,7 @@ test("treats an empty plans directory as removal of registry plans", { timeout: 
 	await act(project, { action: "project-key" }, h.ctx);
 	await act(project, { action: "push-project", scope: "project" }, h.ctx);
 	git(seed, ["pull", "--ff-only", "origin", "main"]);
-	assert.equal(fs.existsSync(path.join(seed, "projects", "empty-plans", "tasks.jsonc")), true);
+	assert.equal(fs.existsSync(path.join(seed, "projects", "empty-plans", "tasks.sqlite")), true);
 	assert.equal(fs.existsSync(path.join(seed, "projects", "empty-plans", "plans")), false);
 
 	h.notices.length = 0;

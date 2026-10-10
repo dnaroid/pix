@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { frontierBadges } from "../lib/frontier-model-badges";
 import {
   attachmentFromFile,
   type Attachment,
@@ -210,6 +211,7 @@ export function createPreviewFileIo(options: PreviewStoreOptions, state: Preview
         return false;
       }
       const current = state.active;
+      if (kind === "pi-tools-suite") frontierBadges.publish(result.document.content);
       if (current?.kind !== "file" || current.userConfigKind !== kind || current.file.path !== path) return false;
       state.replaceCurrentFile({ path: result.document.path, content: result.document.content });
       return true;

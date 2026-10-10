@@ -295,6 +295,11 @@
           "default": false,
           "description": "Separate user-global opt-in for embedding explicitly saved session names with OpenRouter. Never sends first-user-message fallback titles, conversation history, attachments, or transcript contents; local title search is available without consent. May incur provider costs."
         },
+        "tasksSemanticEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Separate user-global opt-in for embedding the titles and descriptions of project tasks when an explicit Tasks search is submitted. Sends at most 2,000 characters per task plus the query to OpenRouter; never uploads task metadata, session IDs or attachments as separate fields. May incur provider costs. Local task search is available without consent."
+        },
         "ragModelRef": {
           "type": "string",
           "default": "",

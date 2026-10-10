@@ -19,7 +19,6 @@
     formatCompactTokens,
     formatResetDuration,
     limitingRateWindow,
-    modelUsageTone,
     modelUsageWindowLabel,
     modelUsageWindowExceedsDailyBudget,
     shortModelUsageAccountLabel,
@@ -35,13 +34,12 @@
   import { modelDisplayToneClass, modelProviderBrand, modelRefTone } from "../lib/model-display";
   import ModelProviderIcon from "./ModelProviderIcon.svelte";
   import ModelUsageDonut from "./ModelUsageDonut.svelte";
-  import QuotaResetCalendar from "./QuotaResetCalendar.svelte";
+  import DcpSavingsSummary from "./DcpSavingsSummary.svelte";
   import ResetCreditsSection from "./ResetCreditsSection.svelte";
   import UsageLimitBars from "./UsageLimitBars.svelte";
 
   let {
     status,
-    showSkeletons = false,
     sessionUsage,
     loadingSessionUsage = false,
     sessionUsageFailed = false,
@@ -54,7 +52,6 @@
     onRefreshClaudeLimits = () => {},
   }: {
     status?: RuntimeStatus;
-    showSkeletons?: boolean;
     sessionUsage?: SessionUsageReport;
     loadingSessionUsage?: boolean;
     sessionUsageFailed?: boolean;
@@ -76,10 +73,19 @@
   let usageLinkRequest = 0;
   const WEEKLY_DAY_SEGMENTS = 7;
   const savedTokensFormatter = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 0 });
-  const contextPercent = $derived(status?.context?.percent);
+  // Missing startup telemetry displays an empty context; explicit null remains unknown.
+  const contextPercent = $derived(status?.context ? status.context.percent : 0);
   const showSavings = $derived((status?.dcpTokensSaved ?? 0) > 0);
   const contextTone = $derived(contextPercent === null || contextPercent === undefined ? undefined : contextUsageTone(contextPercent));
-  const contextMap = $derived(dcpContextMap(status?.context, parseDcpContextMap(status?.dcpContextMap)));
+  const contextMap = $derived.by(() => {
+    const map = dcpContextMap(status?.context, parseDcpContextMap(status?.dcpContextMap));
+    if (status?.context) return map;
+    return {
+      ...map,
+      occupiedPercent: 0,
+      cells: map.cells.map(() => ({ segments: [{ kind: "free" as const, share: 1 }] })),
+    };
+  });
   const contextLegend = $derived(contextLegendItems());
   // Quota usage wins while the provider quota is the freshest observation;
   // an API-key header snapshot pushed after a mid-session auth switch (or a
@@ -87,8 +93,8 @@
   const modelUsage = $derived(displayModelUsage(status, now));
   const usageAccountLabel = $derived(shortModelUsageAccountLabel(modelUsage?.accountEmail));
   const usageWindowItems = $derived(usageWindows());
-  // Account quota bars show both remaining balances; the calendar below
-  // keeps the exact weekly reset date. Header-derived rate windows remain
+  // Account quota rows show remaining balances; the weekly row integrates
+  // the cycle's dates and time marker. Header-derived rate windows remain
   // trigger-only because they are request-level observations.
   const popupLimitWindows = $derived(
     usageWindowItems.filter((item): item is { key: string; label: "H" | "W"; window: ModelUsageLimitWindow } => item.label === "H" || item.label === "W"),
@@ -174,7 +180,7 @@
     const savings = saved === undefined || !includeSavings
       ? ""
       : ` · DCP saved ~${savedTokensFormatter.format(saved)} tokens`;
-    if (!context) return `Context usage unavailable${savings}`;
+    if (!context) return `Context 0%${savings}`;
     if (context.tokens === null || context.percent === null) return `Context usage unknown · window ${formatCompactTokens(context.contextWindow)}${savings}`;
     return `Context ${formatCompactTokens(context.tokens)} / ${formatCompactTokens(context.contextWindow)} tokens${savings}`;
   }
@@ -221,6 +227,7 @@
   }
 
   function contextLegendItems(): Array<{ kind: DcpContextMapCellKind; label: string; value?: string }> {
+    if (!status?.context) return [{ kind: "free", label: "Free" }];
     const categories = contextMap.categoryTokens;
     if (categories) {
       return [
@@ -368,13 +375,11 @@
   {/if}
 {/snippet}
 
-{#if status || showSkeletons || quotaWaitIndicator}
   <div
     bind:this={root}
     class="runtime-status-layout grid min-w-0 items-center gap-3"
     data-runtime-status
   >
-    {#if status?.context || status?.dcpTokensSaved !== undefined}
       <div class="relative min-w-0" data-runtime-context role="group" aria-label="Context"
         data-context-region
         onfocusout={(event) => leaveDetails(event, "context")}
@@ -389,8 +394,7 @@
           aria-controls="runtime-context-popover"
           onclick={toggleContext}
         >
-          <span class="font-sans text-xs text-muted-foreground">ctx</span>
-          <span class={["truncate text-right", contextTone ? toneTextClass(contextTone) : "text-muted-foreground"]}>{contextPercent === null || contextPercent === undefined ? "?%" : `${Math.round(contextPercent)}%`}</span>
+          <span class="font-sans text-xs text-muted-foreground">Context</span>
           {@render contextScale()}
           {#if showSavings && status?.dcpTokensSaved !== undefined}
             <span class="truncate text-muted-foreground">saved {savedTokensFormatter.format(status.dcpTokensSaved)}</span>
@@ -408,10 +412,7 @@
             <div class="w-72 rounded-md border border-border bg-popover px-3 py-2.5 text-popover-foreground shadow-md">
               <div class="font-mono text-xs text-muted-foreground">{contextTitle(false)}</div>
               {#if status?.dcpTokensSaved !== undefined}
-                <div class="mt-2 flex items-center justify-between gap-3 rounded-md border border-tool-success/30 bg-tool-success/10 px-2.5 py-1.5">
-                  <span class="text-xs text-tool-success">DCP saved you</span>
-                  <span class="font-mono text-xs font-semibold text-tool-success">~{savedTokensFormatter.format(status.dcpTokensSaved)} tokens</span>
-                </div>
+                <DcpSavingsSummary tokensSaved={status.dcpTokensSaved} />
               {/if}
               <div class="mt-2.5 flex items-center gap-3">
                 {@render contextRing()}
@@ -421,20 +422,8 @@
           </div>
         {/if}
       </div>
-    {:else}
-      <div
-        class="context-status-slots grid h-6 min-w-0 items-center gap-1.5 overflow-hidden px-1.5 font-mono text-xs"
-        class:invisible={!showSkeletons}
-        data-runtime-context-skeleton
-        aria-hidden="true"
-      >
-        <span class="font-sans text-xs text-muted-foreground">ctx</span>
-        <span class="h-3 w-6 rounded-sm bg-muted-foreground/20"></span>
-        <span class="h-1.5 w-16 rounded-sm bg-border"></span>
-      </div>
-    {/if}
 
-    {#if sessionUsageAvailable || status?.modelUsage || status?.headerUsage || quotaWaitIndicator}
+    {#if sessionUsageAvailable || sessionUsage || modelUsage || quotaWaitIndicator}
       <div class="relative min-w-0" role="group" aria-label="Usage"
         data-usage-region
         onfocusout={(event) => leaveDetails(event, "usage")}
@@ -452,11 +441,9 @@
         ></button>
           <span class="pointer-events-none relative font-sans text-xs text-muted-foreground">Usage</span>
           {#each usageWindowItems as { key, label, window } (key)}
-              {@const tone = modelUsageTone(window.remainingPercent)}
               {@const exceedsDailyBudget = modelUsageWindowExceedsDailyBudget(window, now)}
               <span class="quota-status-slots grid items-center gap-1" class:quota-short-track={label !== "W"} aria-label={limitTitle(label, window)}>
-                <span class="quota-values pointer-events-none relative col-span-3 grid items-center">
-                  <span class={["whitespace-nowrap text-right", toneTextClass(tone)]}>{Math.round(window.remainingPercent)}%</span>
+                <span class="quota-values pointer-events-none relative col-span-2 grid items-center">
                 <span class="flex h-6 flex-col justify-center gap-0.5 overflow-hidden">
                 {#if label === "R"}
                   <span class="truncate leading-3 text-muted-foreground">{modelUsageWindowLabel(label, window)}</span>
@@ -466,7 +453,7 @@
                   aria-hidden="true"
                 >
                   <span
-                    class="absolute inset-y-0 left-0 bg-muted-foreground/50"
+                    class="absolute inset-y-0 right-0 bg-muted-foreground/50"
                     style={`width: ${clampUsagePercent(window.remainingPercent)}%`}
                   ></span>
                   {#if label === "W"}
@@ -528,9 +515,6 @@
               </header>
               <div class="min-h-0 overflow-y-auto overscroll-contain px-3 py-2.5 text-xs">
                 <UsageLimitBars windows={popupLimitWindows} {now} stale={modelUsage?.stale === true} />
-                {#if modelUsage?.weekly}
-                  <QuotaResetCalendar window={modelUsage.weekly} {now} stale={modelUsage.stale === true} />
-                {/if}
                 {#if modelUsage?.resetCredits?.length || modelUsage?.resetCreditsAvailableCount}
                   <ResetCreditsSection credits={modelUsage.resetCredits ?? []} availableCount={modelUsage.resetCreditsAvailableCount} {now} />
                 {/if}
@@ -630,24 +614,8 @@
           </div>
         {/if}
       </div>
-    {:else}
-      <div
-        class="usage-status-slots grid h-6 min-w-0 items-center gap-1.5 overflow-hidden px-1.5 font-mono text-xs"
-        class:invisible={!showSkeletons}
-        data-runtime-usage-skeleton
-        aria-hidden="true"
-      >
-        <span class="font-sans text-xs text-muted-foreground">Usage</span>
-          <span class="quota-status-slots grid items-center gap-1">
-            <span class="h-3 w-6 rounded-sm bg-muted-foreground/20"></span>
-            <span class="h-1.5 w-14 rounded-sm bg-border"></span>
-            <span class="h-3 w-12 rounded-sm bg-muted-foreground/15"></span>
-            <span></span>
-          </span>
-      </div>
     {/if}
   </div>
-{/if}
 
 <style>
   .runtime-status-layout {
@@ -655,17 +623,18 @@
     width: max-content;
     max-width: 100%;
     flex: 0 1 auto;
-    grid-template-columns: minmax(0, max-content) minmax(0, max-content);
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, max-content);
   }
 
   .context-status-slots {
-    grid-template-columns: 3ch 4ch 64px;
+    grid-template-columns: max-content 64px;
     column-gap: 6px;
   }
 
   .context-status-slots.with-savings {
     /* Reserve a bounded estimate only when there are actual savings. */
-    grid-template-columns: 3ch 4ch 64px 11ch;
+    grid-template-columns: max-content 64px 11ch;
   }
 
   .usage-status-slots {
@@ -676,13 +645,12 @@
   }
 
   .quota-status-slots {
-    /* Leave a full glyph of slack: exact 4ch tracks can ellipsize 100% in WebKit. */
-    grid-template-columns: 5ch 56px 5ch 10px;
+    grid-template-columns: 56px 5ch 10px;
     column-gap: 6px;
   }
 
   .quota-short-track {
-    grid-template-columns: 5ch 32px 5ch 10px;
+    grid-template-columns: 32px 5ch 10px;
   }
 
   .quota-values {

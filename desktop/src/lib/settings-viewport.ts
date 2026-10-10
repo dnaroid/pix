@@ -1,6 +1,10 @@
 import { currentSettingsSection, settingsSearchMatches } from "./settings-navigation";
 
-type ViewportOptions = { query: string; onChange: (visible: string[], active: string) => void };
+type ViewportOptions = {
+  query: string;
+  matches?: ReadonlySet<string> | null;
+  onChange: (visible: string[], active: string) => void;
+};
 
 // Filter only authored labels/descriptions, never control values (including secrets).
 // Keep controls mounted so filtering cannot discard local editor state.
@@ -29,7 +33,13 @@ export function settingsViewport(node: HTMLElement, initial: ViewportOptions) {
     for (const section of node.querySelectorAll<HTMLElement>("[data-settings-section]")) {
       let matches = 0;
       for (const row of section.querySelectorAll<HTMLElement>("[data-settings-field]")) {
-        row.hidden = !settingsSearchMatches(options.query, `${section.dataset.settingsTitle} ${row.dataset.settingsField}`);
+        const fieldId = row.dataset.settingsFieldId;
+        const key = fieldId ? `${section.dataset.settingsSection}/${fieldId}` : "";
+        // Authored catalog matches, not form values. Preserve the existing
+        // section-label fallback for non-catalog rows (e.g. Advanced JSONC).
+        row.hidden = Boolean(options.query.trim()) && !(key && options.matches
+          ? options.matches.has(key)
+          : settingsSearchMatches(options.query, `${section.dataset.settingsTitle} ${row.dataset.settingsField}`));
         // Advanced groups keep fields mounted, so search can reveal a matching setting.
         if (!row.hidden && options.query.trim()) {
           const details = row.closest("details");

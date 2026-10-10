@@ -3,9 +3,9 @@ import { render } from "svelte/server";
 import type { RuntimeStatus } from "../lib/acp-client";
 import RuntimeStatusBarItems from "./RuntimeStatusBarItems.svelte";
 
-function markup(status?: RuntimeStatus, showSkeletons = false): string {
+function markup(status?: RuntimeStatus): string {
   return render(RuntimeStatusBarItems, {
-    props: { status, showSkeletons, onOpenSessionUsage: () => {} },
+    props: { status, onOpenSessionUsage: () => {} },
   }).body;
 }
 
@@ -23,6 +23,28 @@ const base: RuntimeStatus = { sessionId: "test", modelUsageRefresh: "ready" };
 
 describe("runtime status fixed telemetry slots", () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it("anchors all compact quota fills to the right without reversing context", () => {
+    const quota = { resetAt: Date.now() + 86_400_000, windowSeconds: 604800 };
+    const status = { ...base, context: { tokens: 250, contextWindow: 1000, percent: 25 } };
+    const html = markup({ ...status, modelUsage: {
+      modelKey: "test", provider: "anthropic", updatedAt: Date.now(),
+      hourly: { ...quota, windowSeconds: 18000, remainingPercent: 62 },
+      weekly: { ...quota, remainingPercent: 78 },
+    } });
+    expect(html.match(/class="absolute inset-y-0 right-0 bg-muted-foreground\/50"/g)).toHaveLength(2);
+    expect(html).toContain('width: 62%');
+    expect(html).toContain('width: 78%');
+    const contextPart = (value: string) => value.match(/data-context-region[\s\S]*?<\/button>/)?.[0];
+    expect(contextPart(html)).toContain('data-context-scale="compact"');
+    expect(contextPart(html)).toBe(contextPart(markup(status)));
+    const rate = markup({ ...base, headerUsage: {
+      modelKey: "test", provider: "anthropic", updatedAt: Date.now(),
+      rateWindows: [{ ...quota, remainingPercent: 42, label: "TPM" }],
+    } });
+    expect(rate).toContain('class="absolute inset-y-0 right-0 bg-muted-foreground/50"');
+    expect(rate).toContain('width: 42%');
+  });
 
   it("puts a single icon after the short-window countdown without rendering the wait reason inline", () => {
     const resetAt = Date.now() + 72 * 60_000;
@@ -67,36 +89,39 @@ describe("runtime status fixed telemetry slots", () => {
     expect(markup({ ...base, dcpTokensSaved: 100 })).toContain("with-savings");
   });
 
-  it("shows remaining percent before the track and countdown without bullets, preserving danger colors", () => {
+  it("shows only the track and countdown, without inline percentages or bullets", () => {
     vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
     const html = markup({ ...base, modelUsage: {
       modelKey: "test", provider: "anthropic", updatedAt: Date.now(),
       hourly: { remainingPercent: 0, resetAt: Date.now() + 72 * 60_000, windowSeconds: 18000 },
     } });
-    const percent = html.indexOf("0%</span>");
-    const track = html.indexOf('relative h-1.5 overflow-hidden rounded-sm bg-border', percent);
-    expect(percent).toBeGreaterThan(-1);
-    expect(track).toBeGreaterThan(percent);
+    const track = html.indexOf('relative h-1.5 overflow-hidden rounded-sm bg-border');
+    expect(track).toBeGreaterThan(-1);
     expect(track).toBeLessThan(html.indexOf("1h12m</span>"));
     expect(html).not.toMatch(/>\s*[·•]\s*<\/span>/);
-    expect(markup(undefined, true)).not.toMatch(/>\s*[·•]\s*<\/span>/);
-    expect(html).toMatch(/text-tool-error[^>]*>0%<\/span>/);
+    expect(markup()).not.toMatch(/>\s*[·•]\s*<\/span>/);
+    expect(html).not.toMatch(/>[^<]*%<\/span>/);
+    expect(markup()).not.toContain("h-3 w-6");
   });
 
-  it("retains both slot layouts during loading, missing data and value changes", () => {
+  it("starts context at zero without skeletons or empty usage slots", () => {
     for (const html of [
-      markup(undefined, true),
+      markup(),
       markup(base),
       markup({ ...base, context: { tokens: 100, contextWindow: 1000, percent: 10 }, dcpTokensSaved: 0 }),
       markup({ ...base, context: { tokens: 999, contextWindow: 1000, percent: 100 }, dcpTokensSaved: 1_000_000 }),
     ]) {
       expect(html).toContain("runtime-status-layout");
       expect(html.match(/context-status-slots/g)).toHaveLength(1);
-      expect(html.match(/usage-status-slots/g)).toHaveLength(1);
+      expect(html).not.toContain("usage-status-slots");
+      expect(html).not.toContain("skeleton");
       expect(html).not.toContain("ml-auto");
+      expect(html).not.toMatch(/>[^<]*%<\/span>/);
     }
-    expect(markup(base).match(/\binvisible\b/g)).toHaveLength(2);
-    expect(markup(undefined, true)).not.toContain('<button');
+    expect(markup()).toContain('aria-label="Context 0%"');
+    expect(markup()).toContain('data-context-scale="compact"');
+    expect(markup()).not.toContain("bg-muted-foreground/25");
+    expect(markup({ ...base, context: { tokens: null, contextWindow: 1000, percent: null } })).toContain("Context usage unknown");
   });
 
   it("renders weekly-only usage without reserving an absent short-window slot", () => {
@@ -111,7 +136,7 @@ describe("runtime status fixed telemetry slots", () => {
     expect(both).toContain("100%");
     expect(both).toContain("9%");
     // Full quota must not use ellipsis even at fractional WebKit glyph widths.
-    expect(both).toMatch(/class="whitespace-nowrap text-right [^"]*">100%<\/span>/);
+    expect(both).not.toMatch(/>[^<]*%<\/span>/);
   });
 
   it("keeps rate identity and unknown reset in their reserved quota slot", () => {

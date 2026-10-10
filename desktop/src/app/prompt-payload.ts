@@ -1,5 +1,6 @@
 import type { ContentBlock } from "@agentclientprotocol/sdk";
 import type { PromptFileImage } from "../lib/acp-client";
+import { sandboxViewportHint, type HtmlSandboxViewport } from "../lib/html-sandbox-layout";
 import {
   MAX_EMBEDDED_ATTACHMENT_BYTES,
   MAX_EMBEDDED_PROMPT_BYTES,
@@ -11,6 +12,7 @@ export function buildPromptPayload(
   text: string,
   attachments: readonly Attachment[],
   imagePromptSupported: boolean,
+  htmlSandboxViewport?: HtmlSandboxViewport,
 ): { blocks: ContentBlock[]; fileImages: PromptFileImage[] } {
   const blocks: ContentBlock[] = [];
   const fileImages: PromptFileImage[] = [];
@@ -66,5 +68,9 @@ export function buildPromptPayload(
       ...(attachment.size ? { size: attachment.size } : {}),
     });
   }
+  // Keep the user-visible draft untouched. The measured layout is transient
+  // agent context, only for prompts likely to generate an HTML/game prototype.
+  const hint = sandboxViewportHint(text, htmlSandboxViewport);
+  if (hint) blocks.push({ type: "text", text: hint });
   return { blocks, fileImages };
 }

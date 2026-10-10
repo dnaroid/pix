@@ -23,6 +23,7 @@ export function createSessionRuntimeLoading(options: SessionRuntimeStoreOptions)
 
   function setConfigOptions(sessionId: string, value: SessionConfigOption[]): void {
     configOptionsBySessionId.set(sessionId, value);
+    options.onConfigOptions?.(sessionId, value);
     if (sessionId === options.activeSessionId()) options.setActiveConfigOptions(value);
   }
 
@@ -51,10 +52,9 @@ export function createSessionRuntimeLoading(options: SessionRuntimeStoreOptions)
         ) return;
         const configOptions = response.configOptions ?? [];
         readySessionIds.add(sessionId);
-        configOptionsBySessionId.set(sessionId, configOptions);
+        setConfigOptions(sessionId, configOptions);
         void options.refreshQueueState(sessionId);
         if (sessionId === options.activeSessionId()) {
-          options.setActiveConfigOptions(configOptions);
           options.setActiveReady(true);
         }
       })
@@ -85,6 +85,7 @@ export function createSessionRuntimeLoading(options: SessionRuntimeStoreOptions)
     options.onOpen?.(sessionId);
     readySessionIds.add(sessionId);
     configOptionsBySessionId.set(sessionId, configOptions);
+    options.onConfigOptions?.(sessionId, configOptions);
     void options.refreshQueueState(sessionId);
     if (sessionId === options.activeSessionId()) options.setActiveReady(true);
   }

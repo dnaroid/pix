@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AcpClient } from "../lib/acp-client";
 import type { ModelConfigOptions } from "./model-config-options";
 import { createModelDraftConfig } from "./model-draft-config.svelte";
+import { modelThinkingConfigState } from "../lib/model-thinking";
 
 const claudeModel = "pi-claude-code-provider/claude-opus-5-5";
 const readyUsage = {
@@ -30,6 +31,119 @@ function draftOptions(responses: Array<Record<string, unknown>>) {
   } as unknown as ModelConfigOptions;
   return { options, draftConfigCalls };
 }
+
+describe("immediate draft model display", () => {
+  const defaults = {
+    configOptions: [{ id: "model", type: "select", name: "Model", currentValue: claudeModel,
+      options: [{ value: claudeModel, name: "Claude" }, { value: "other/model", name: "Other" }] }],
+    modelRoutingEnabled: true, modelRoutingDefault: false,
+  };
+
+  it("shows the configured default before any draft config request, including after reset", () => {
+    const { options, draftConfigCalls } = draftOptions([]);
+    options.preferences = { defaultSelection: { kind: "model", modelRef: claudeModel, thinking: "high" } } as ModelConfigOptions["preferences"];
+    const config = createModelDraftConfig(options);
+    expect(modelThinkingConfigState(config.displayConfigOptions).currentModel?.ref).toBe(claudeModel);
+    expect(modelThinkingConfigState(config.displayConfigOptions).currentThinking).toBe("high");
+    expect(draftConfigCalls).toEqual([]);
+    expect(config.runtimeStatus).toBeUndefined();
+    expect(config.configOptions).toEqual([]);
+    expect(config.modelOverride).toBeNull();
+    config.reset();
+    expect(modelThinkingConfigState(config.displayConfigOptions).currentModel?.ref).toBe(claudeModel);
+  });
+
+  it("warms resolved defaults without an open draft and displays them after reset, without making them selectable", async () => {
+    try {
+      const { options, draftConfigCalls } = draftOptions([defaults]);
+      options.draftSessionTabOpen = () => false;
+      const config = createModelDraftConfig(options);
+      await config.refresh();
+      expect(draftConfigCalls).toHaveLength(1); // no quota request or session allocation
+      expect(config.configOptions).toEqual([]);
+      expect(config.runtimeStatus).toBeUndefined();
+      config.reset();
+      expect(modelThinkingConfigState(config.displayConfigOptions).currentModel?.ref).toBe(claudeModel);
+      expect(modelThinkingConfigState(config.displayConfigOptions).currentModel?.name).toBe("Claude");
+      expect(config.configOptions).toEqual([]);
+      expect(config.modelOverride).toBeNull();
+      options.workspace = () => "/other";
+      expect(config.displayConfigOptions).toEqual([]);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it("retains the default Auto choice, not an unsent draft override", async () => {
+    try {
+      const { options } = draftOptions([{ ...defaults, modelRoutingDefault: true }]);
+      const config = createModelDraftConfig(options);
+      await config.refresh();
+      options.draftSessionTabOpen = () => false; // avoid provider polling for the staged choice
+      config.applySelection("other/model", "off");
+      expect(config.modelOverride?.modelRef).toBe("other/model");
+      config.reset();
+      expect(modelThinkingConfigState(config.displayConfigOptions).currentModel?.ref).toBe("pix:auto");
+      expect(config.modelOverride).toBeNull();
+      expect(config.configOptions).toEqual([]);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it.each(["reset", "workspace", "client"])("ignores a late defaults reply after %s", async (change) => {
+    try {
+      const { options } = draftOptions([]);
+      let resolve!: (value: typeof defaults) => void;
+      const response = new Promise<typeof defaults>((done) => { resolve = done; });
+      options.client = () => ({ draftConfig: () => response }) as unknown as AcpClient;
+      const client = options.client();
+      options.client = () => client;
+      const config = createModelDraftConfig(options);
+      const pending = config.refresh();
+      if (change === "reset") config.reset();
+      if (change === "workspace") options.workspace = () => "/other";
+      if (change === "client") options.client = () => null;
+      resolve(defaults);
+      await pending;
+      expect(config.configOptions).toEqual([]);
+      expect(config.displayConfigOptions).toEqual([]);
+      config.reset();
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it("does not overwrite a newer staged selection with a pending defaults reply", async () => {
+    try {
+      const { options } = draftOptions([defaults]);
+      options.draftSessionTabOpen = () => false;
+      const config = createModelDraftConfig(options);
+      options.draftSessionTabOpen = () => true;
+      // Auto initial selection avoids starting a quota timer.
+      const initial = { ...defaults, modelRoutingDefault: true };
+      options.client = () => client;
+      let resolve!: (value: typeof initial) => void;
+      const response = new Promise<typeof initial>((done) => { resolve = done; });
+      const client = { draftConfig: vi.fn().mockResolvedValueOnce(initial).mockReturnValue(response) } as unknown as AcpClient;
+      await config.refresh();
+      const pending = config.refresh();
+      options.draftSessionTabOpen = () => false;
+      config.applySelection("other/model", "off");
+      resolve(initial);
+      await pending;
+      expect(modelThinkingConfigState(config.configOptions).currentModel?.ref).toBe("other/model");
+      expect(config.modelOverride?.modelRef).toBe("other/model");
+      config.reset();
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it("reflects changes to configured defaults, including Auto, without an ACP request", () => {
+    const { options, draftConfigCalls } = draftOptions([]);
+    options.preferences = { defaultSelection: { kind: "auto" } } as ModelConfigOptions["preferences"];
+    const config = createModelDraftConfig(options);
+    expect(modelThinkingConfigState(config.displayConfigOptions).currentModel?.ref).toBe("pix:auto");
+    options.preferences = { defaultSelection: { kind: "model", modelRef: "other/model", thinking: "medium" } } as ModelConfigOptions["preferences"];
+    expect(modelThinkingConfigState(config.displayConfigOptions).currentModel?.ref).toBe("other/model");
+    expect(modelThinkingConfigState(config.displayConfigOptions).currentThinking).toBe("medium");
+    expect(draftConfigCalls).toEqual([]);
+    config.reset();
+  });
+});
 
 describe("model draft config credential retry", () => {
   it("retries pending credentials faster, then returns to the regular cadence", async () => {

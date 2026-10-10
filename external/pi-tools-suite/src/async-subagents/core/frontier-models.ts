@@ -2,7 +2,7 @@
  * Frontier model catalog shared by sub-agent roles.
  *
  * The suite config (`frontierModels`, `economy`) names the strongest models
- * once, so roles such as oracle and frontier-review do not hard-code them and
+ * once, so frontier-selecting roles such as oracle do not hard-code them and
  * a new frontier release is a config edit. Model identity is compared by
  * vendor and normalized model id rather than by provider string: the same
  * model reached through `openai`, `openai-codex`, `github-copilot` or
@@ -160,11 +160,11 @@ export function applyVendorPolicy(
 /**
  * The configured oracle chain for a parent before runtime availability
  * checks: frontier candidates for `role`, minus economy-blocked models, with
- * another vendor required for a frontier parent and preferred otherwise.
+ * another vendor required for every parent, including all fallbacks.
  */
 export function frontierOracleCandidates(parentRef: string, frontier: FrontierConfig, role = "oracle"): string[] {
 	const candidates = frontierCandidatesForRole(role, frontier).filter((ref) => !economyBlockReason(ref, frontier));
-	return applyVendorPolicy(candidates, isFrontierModel(parentRef, frontier) ? "require-other" : "prefer-other", parentRef, frontier);
+	return applyVendorPolicy(candidates, "require-other", parentRef, frontier);
 }
 
 /**

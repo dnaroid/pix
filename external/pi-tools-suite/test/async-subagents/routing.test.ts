@@ -106,32 +106,31 @@ describe("parent-first sub-agent routing", () => {
 		expect(result.routes).toEqual({ auto: "deep" });
 	});
 
-	test("frontier-review routes for ordinary parents but rejects frontier and any-provider Sol parents", async () => {
-		const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "subagent-frontier-review-test-"));
+	test("oracle routes architectural review for ordinary and frontier parents", async () => {
+		const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "subagent-oracle-test-"));
 		tempDirs.push(cwd);
 		const cfg = loadSubagentConfig(cwd, {});
 		cfg.routing = config().routing;
 
 		const nonFrontier = context(async (_model, prompt) => {
-			expect(JSON.stringify(prompt.messages)).toContain("frontier-review:");
-			return response('{"routes":[{"id":"review","subagentType":"frontier-review"}]}');
+			expect(JSON.stringify(prompt.messages)).toContain("oracle:");
+			return response('{"routes":[{"id":"review","subagentType":"oracle"}]}');
 		});
 		nonFrontier.ctx.model = { provider: "openai-codex", id: "gpt-6-luna" };
-		const routed = await routeSubagentTasks([{ id: "review", task: "Review the implementation" }], cfg, nonFrontier.ctx);
-		expect(routed.tasks[0]?.subagentType).toBe("frontier-review");
+		const routed = await routeSubagentTasks([{ id: "review", task: "Review the complex architectural interface migration" }], cfg, nonFrontier.ctx);
+		expect(routed.tasks[0]?.subagentType).toBe("oracle");
 
 		for (const model of [
 			{ provider: "zai", id: "glm-5.3" },
-			{ provider: "openai-codex", id: "gpt-6.1-sol" },
-			{ provider: "openai", id: "gpt-6.1-sol" },
-			{ provider: "openrouter", id: "openai/gpt-6.1-sol" },
+			{ provider: "openai-codex", id: "gpt-6-astra" },
 		]) {
-			const blocked = context(async () => { throw new Error("must not call the router"); });
-			blocked.ctx.model = model;
-			await expect(routeSubagentTasks([
-				{ id: "review", task: "Review the implementation", subagentType: "frontier-review" },
-			], cfg, blocked.ctx)).rejects.toThrow(/subagentType unavailable for parent model/);
-			expect(blocked.complete).not.toHaveBeenCalled();
+			const explicit = context(async () => { throw new Error("explicit role must not call the router"); });
+			explicit.ctx.model = model;
+			const result = await routeSubagentTasks([
+				{ id: "review", task: "Review the complex architectural interface migration", subagentType: "oracle" },
+			], cfg, explicit.ctx);
+			expect(result.tasks[0]?.subagentType).toBe("oracle");
+			expect(explicit.complete).not.toHaveBeenCalled();
 		}
 	});
 

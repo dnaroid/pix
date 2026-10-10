@@ -6,28 +6,31 @@ import {
   serializeSessionTabIds,
 } from "../lib/session-tabs";
 import { windowLayoutKey } from "../lib/window-layout-storage";
+import { SvelteMap } from "svelte/reactivity";
+import { createSessionTabModelState } from "./session-tab-model-state.svelte";
 
 export type SessionSelectorMode = "open" | "delete";
 
 export function createSessionTabsState() {
   const activeStorageKey = windowLayoutKey("activeSessions");
   const tabsStorageKey = windowLayoutKey("sessionTabs");
+  const models = createSessionTabModelState();
   let restoredIds = $state<string[] | null>(null);
   let locallyOpenedIds = $state<string[]>([]);
   let closedIds = $state<string[]>([]);
   let selectorOpen = $state(false);
   let selectorQuery = $state("");
   let selectorMode = $state<SessionSelectorMode>("open");
-  let activeSessionIds = new Map<string, string>();
-  let persistedSessionTabIds = new Map<string, string[]>();
+  let activeSessionIds = $state.raw(new SvelteMap<string, string>());
+  let persistedSessionTabIds = $state.raw(new SvelteMap<string, string[]>());
   let restoredWorkspace: string | null = null;
 
   function setActiveSessionIds(value: ReadonlyMap<string, string>): void {
-    activeSessionIds = new Map(value);
+    activeSessionIds = new SvelteMap(value);
   }
 
   function setSessionTabIds(value: ReadonlyMap<string, readonly string[]>): void {
-    persistedSessionTabIds = new Map(
+    persistedSessionTabIds = new SvelteMap(
       [...value].map(([workspace, ids]) => [workspace, [...ids]]),
     );
   }
@@ -85,6 +88,7 @@ export function createSessionTabsState() {
     const current = currentVisibleIds();
     if (current === null) return;
     persistedSessionTabIds.set(restoredWorkspace, current);
+    models.retain(restoredWorkspace, current);
     persistSessionTabIds();
   }
 
@@ -181,6 +185,7 @@ export function createSessionTabsState() {
   }
 
   return {
+    models,
     get restoredIds() { return restoredIds; },
     get locallyOpenedIds() { return locallyOpenedIds; },
     get closedIds() { return closedIds; },

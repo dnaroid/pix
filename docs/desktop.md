@@ -29,8 +29,9 @@ inside a window.
 
 The left Activity Bar exposes:
 
-- **Tasks** — project-local tasks stored in `.pi/tasks.jsonc`, including
-  attachments and session links;
+- **Tasks** — project-local SQLite tasks (`.pi/tasks.sqlite`) with full UI
+  management, Quick Add, drag-and-drop, linked sessions and SHA-256 attachments;
+  slash commands and the agent task tool supplement the UI;
 - **Project** — file explorer with keyboard navigation, project settings and
   external-editor actions;
 - **Source Control** — branch/status, diffs, stage/unstage, commit/push, code
@@ -80,8 +81,8 @@ panels:
   repository. Pix refuses to create a nested repository when the workspace is
   already inside another Git root.
 - Registry shows **Initialize project Registry** when `.pi` is absent. It
-  creates the project-owned task/plans/attachment skeleton without overwriting an
-  existing `.pi/tasks.jsonc`.
+  initializes the project-owned SQLite task/plans/attachment scaffold without
+  importing, reading or removing old JSONC task files.
 - IDX shows **Install IDX** when neither a system/login-shell `idx` nor Pix's
   managed copy is available. After installation the panel refreshes
   automatically.

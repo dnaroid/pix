@@ -7,133 +7,64 @@ const hourly = { remainingPercent: 62, resetAt: now + 2 * 3_600_000, windowSecon
 const weekly = { remainingPercent: 32, resetAt: now + 2 * 86_400_000, windowSeconds: 604_800, hasKnownWindowDuration: true };
 
 describe("UsageLimitBars", () => {
-  it("renders one neutral-track row per account quota window with tone-colored percent and countdown", () => {
+  it("integrates the weekly timeline while leaving the hourly remaining track and countdown intact", () => {
     const { body } = render(UsageLimitBars, {
-      props: { windows: [{ key: "H", label: "H" as const, window: hourly }, { key: "W", label: "W" as const, window: weekly }], now },
+      props: { windows: [{ key: "H", label: "H", window: hourly }, { key: "W", label: "W", window: weekly }], now },
     });
     expect(body).toContain('aria-label="Account usage limits"');
     expect(body).toContain("Hourly");
     expect(body).toContain("Weekly");
     expect(body).toContain("62%");
     expect(body).toContain("32%");
+    expect(body).toContain("width: 62%");
+    expect(body).toContain('class="absolute inset-y-0 right-0 bg-muted-foreground"');
+    expect(body).toContain("width: 32%");
     expect(body).toContain("bg-muted-foreground");
-    expect(body).not.toContain("bg-muted-foreground/50");
+    expect(body).toContain("bg-foreground");
     expect(body).toContain("remaining</span>");
     expect(body).toContain("Resets in 2h0m");
-    expect(body).toContain("h-2 w-full");
-    expect(body).not.toContain("Rate");
+    expect(body.match(/data-quota-calendar/g)).toHaveLength(1);
+    expect(body.match(/data-weekly-remaining-fill/g)).toHaveLength(1);
+    expect(body).not.toContain("Resets in 2d0h");
     expect(body).not.toContain("Cached");
   });
 
-  it("shows a weekly balance and countdown even without an hourly window", () => {
-    const { body } = render(UsageLimitBars, {
-      props: { windows: [{ key: "W", label: "W" as const, window: weekly }], now },
-    });
+  it("shows the same unified scale with weekly-only snapshots", () => {
+    const { body } = render(UsageLimitBars, { props: { windows: [{ key: "W", label: "W", window: weekly }], now } });
     expect(body).toContain("Weekly");
     expect(body).toContain("32%");
-    expect(body).toContain("width: 32%");
-    expect(body).toContain("Resets in 2d0h");
+    expect(body).toContain("data-quota-cycle-dates");
     expect(body).not.toContain("Hourly");
+    expect(body).not.toContain("Resets in");
   });
 
-  it("renders nothing when there are no account quota windows", () => {
+  it("renders nothing without quota windows", () => {
     const { body } = render(UsageLimitBars, { props: { windows: [], now } });
     expect(body).not.toContain("data-usage-limit-bars");
-    expect(body).not.toContain("Limits");
-  });
-
-  it("divides the weekly track into seven day sectors without splitting the aggregate balance", () => {
-    const { body } = render(UsageLimitBars, {
-      props: { windows: [{ key: "W", label: "W" as const, window: weekly }], now },
-    });
-    expect(body).toContain("data-weekly-day-sectors");
-    expect(body.match(/data-day-sector/g)).toHaveLength(7);
-    expect(body.match(/border-l border-background\/80/g)).toHaveLength(6);
-    expect(body).toContain("width: 32%");
   });
 
   it("keeps short-window tracks continuous", () => {
-    const { body } = render(UsageLimitBars, {
-      props: { windows: [{ key: "H", label: "H" as const, window: hourly }], now },
-    });
+    const { body } = render(UsageLimitBars, { props: { windows: [{ key: "H", label: "H", window: hourly }], now } });
     expect(body).not.toContain("data-day-sector");
     expect(body).not.toContain("data-weekly-now-marker");
     expect(body).toContain("width: 62%");
   });
 
-  it.each([
-    ["before start", 8, 100],
-    ["start", 7, 100],
-    ["midpoint", 3.5, 50],
-    ["reset", 0, 0],
-    ["after reset", -1, 0],
-  ])("positions now at %s independently of quota remaining", (_label, daysRemaining, position) => {
-    const { body } = render(UsageLimitBars, {
-      props: { windows: [{ key: "W", label: "W" as const, window: { ...weekly, resetAt: now + Number(daysRemaining) * 86_400_000 } }], now },
-    });
-    expect(body).toContain("data-weekly-now-marker");
-    expect(body).toContain(`left: clamp(6px, ${position}%, calc(100% - 6px))`);
-    expect(body).toContain(`Now: ${position}% of window time remaining (start right, reset left)`);
-    expect(body).toContain("width: 32%");
-  });
-
-  it("moves the marker with now without changing the quota fill", () => {
-    const windows = [{ key: "W", label: "W" as const, window: { ...weekly, resetAt: now + 7 * 86_400_000 } }];
-    const start = render(UsageLimitBars, { props: { windows, now } }).body;
-    const later = render(UsageLimitBars, { props: { windows, now: now + 3.5 * 86_400_000 } }).body;
-    expect(start).toContain("left: clamp(6px, 100%, calc(100% - 6px))");
-    expect(later).toContain("left: clamp(6px, 50%, calc(100% - 6px))");
-    expect(later).toContain("width: 32%");
-  });
-
-  it("keeps the now pin readable with a thicker stem and an outlined head", () => {
-    const { body } = render(UsageLimitBars, {
-      props: { windows: [{ key: "W", label: "W" as const, window: weekly }], now },
-    });
-    expect(body).toContain("w-0.5 -translate-x-1/2 rounded-full bg-primary ring-1 ring-popover");
-    expect(body).toContain("-top-0.5 left-1/2 size-2.5 -translate-x-1/2 rounded-full border-2 border-popover bg-primary");
-  });
-
-  it.each([
-    { hasKnownWindowDuration: false },
-    { windowSeconds: 0 },
-    { windowSeconds: -1 },
-    { windowSeconds: Number.NaN },
-    { windowSeconds: Number.POSITIVE_INFINITY },
-    { resetAt: Number.NaN },
-    { resetAt: 0 },
-    { resetAt: Number.POSITIVE_INFINITY },
-  ])("omits the time marker for unknown or invalid timing %o", (invalid) => {
-    const { body } = render(UsageLimitBars, {
-      props: { windows: [{ key: "W", label: "W" as const, window: { ...weekly, ...invalid } }], now },
-    });
-    expect(body).not.toContain("data-weekly-now-marker");
-    expect(body).toContain("width: 32%");
-  });
-
   it("marks stale snapshots as cached", () => {
-    const { body } = render(UsageLimitBars, {
-      props: { windows: [{ key: "H", label: "H" as const, window: hourly }], now, stale: true },
-    });
+    const { body } = render(UsageLimitBars, { props: { windows: [{ key: "W", label: "W", window: weekly }], now, stale: true } });
     expect(body).toContain("Cached");
   });
 
-  it("explains an exhausted, passed window without claiming replenishment", () => {
-    const { body } = render(UsageLimitBars, {
-      props: { windows: [{ key: "H", label: "H" as const, window: { ...hourly, remainingPercent: 0, resetAt: now } }], now },
-    });
-    expect(body).toContain("0%");
-    expect(body).toContain("remaining</span>");
+  it("explains an exhausted passed hourly window without claiming replenishment", () => {
+    const { body } = render(UsageLimitBars, { props: { windows: [{ key: "H", label: "H", window: { ...hourly, remainingPercent: 0, resetAt: now } }], now } });
     expect(body).toContain("width: 0%");
     expect(body).toContain("Reset time reached · Awaiting quota refresh");
     expect(body).not.toContain("Resets in");
   });
 
-  it("flags a window exceeding its cumulative daily budget", () => {
-    const longWeekly = { remainingPercent: 5, resetAt: now + 6 * 86_400_000, windowSeconds: 604_800, hasKnownWindowDuration: true };
-    const { body } = render(UsageLimitBars, {
-      props: { windows: [{ key: "W", label: "W" as const, window: longWeekly }], now },
-    });
+  it("retains the cumulative daily-budget warning in the weekly header", () => {
+    const { body } = render(UsageLimitBars, { props: { windows: [{ key: "W", label: "W", window: { ...weekly, remainingPercent: 5, resetAt: now + 6 * 86_400_000 } }], now } });
     expect(body).toContain("Cumulative daily quota budget exceeded");
+    expect(body).not.toContain("Resets in");
   });
 });

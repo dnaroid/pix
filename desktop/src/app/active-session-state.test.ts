@@ -1,8 +1,60 @@
 import { describe, expect, it } from "vitest";
-import { emptyTranscript, appendLocalSystemMessage } from "../lib/transcript";
+import { emptyTranscript, appendLocalSystemMessage, appendLocalUserMessage } from "../lib/transcript";
 import { createActiveSessionState } from "./active-session-state.svelte";
 
 describe("active session state", () => {
+  it("retains startup notices when an optimistic draft adopts its real session id", () => {
+    const state = createActiveSessionState();
+    const draft = appendLocalUserMessage(emptyTranscript, "hello", "local:user");
+    const early = appendLocalSystemMessage(emptyTranscript, "Run claude auth login", "pix-system:startup");
+    state.setSessionTranscript("created", early);
+    state.setTranscript(draft);
+    state.setSessionId("created");
+
+    state.adoptDraftTranscript("created", draft);
+
+    expect(state.transcript.items.map((item) => item.id)).toEqual([
+      "local:user", "pix-system:startup",
+    ]);
+    expect(state.sessionTranscript("created")).toEqual(state.transcript);
+    // A second adoption cannot duplicate the optimistic user row.
+    state.adoptDraftTranscript("created", draft);
+    expect(state.transcript.items).toHaveLength(2);
+  });
+
+  it("retains background startup notices without replacing the selected conversation", () => {
+    const state = createActiveSessionState();
+    state.setSessionId("selected");
+    const selected = appendLocalSystemMessage(emptyTranscript, "selected", "local:selected");
+    state.setTranscript(selected);
+    const draft = appendLocalUserMessage(emptyTranscript, "hello", "local:user");
+    const early = appendLocalSystemMessage(emptyTranscript, "Run claude auth login", "pix-system:startup");
+    state.setSessionTranscript("created", early);
+
+    state.adoptDraftTranscript("created", draft);
+
+    expect(state.transcript).toBe(selected);
+    expect(state.sessionId).toBe("selected");
+    expect(state.sessionTranscript("created")?.items.map((item) => item.id)).toEqual([
+      "local:user", "pix-system:startup",
+    ]);
+  });
+
+  it("accepts notices arriving after draft adoption into the same transcript", () => {
+    const state = createActiveSessionState();
+    state.setSessionId("created");
+    const draft = appendLocalUserMessage(emptyTranscript, "hello", "local:user");
+    state.adoptDraftTranscript("created", draft);
+
+    state.setTranscriptFor("created", appendLocalSystemMessage(
+      state.transcriptFor("created")!, "Run claude auth login", "pix-system:startup",
+    ));
+
+    expect(state.transcript.items).toHaveLength(2);
+    expect(state.transcript.items[0]?.id).toBe("local:user");
+    expect(state.sessionTranscript("created")).toEqual(state.transcript);
+  });
+
   it("keeps active transcript and per-session cache synchronized when requested", () => {
     const state = createActiveSessionState();
     state.setSessionId("session-a");

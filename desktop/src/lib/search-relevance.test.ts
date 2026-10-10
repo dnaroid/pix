@@ -10,6 +10,14 @@ const setting: SearchHit = { kind: "settings", id: "settings:theme", fieldId: "t
 const file: SearchHit = { kind: "code", id: "code:src/a.ts:1", path: "src/a.ts", startLine: 1, endLine: 2, title: "src/a.ts", snippet: "Lines 1–2", score: 999 };
 
 describe("local search relevance", () => {
+  it("accepts semantic-only task evidence without lexical coverage and keeps lexical task snippets after fusion", () => {
+    const semantic: SearchHit = { kind: "tasks", id: "tasks:semantic", taskId: "semantic", title: "Arcane combat", snippet: "Improve spells", score: 0.82, semantic: true };
+    const lexical: SearchHit = { kind: "tasks", id: "tasks:semantic", taskId: "semantic", title: "Arcane combat", snippet: "Linked: docs/battle.md", score: 0.5 };
+    const result = rankSearchHits([semantic, lexical], "battle", [], false);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ id: "tasks:semantic", semantic: true, snippet: "Linked: docs/battle.md" });
+    expect(rankSearchHits([semantic], "unrelated concept", [], false)).toEqual([semantic]);
+  });
   it("puts the screenshot's pi SDK session above unrelated settings and removes weak metadata hits", () => {
     const hits = [setting, session("good", "Обновление pi SDK", 0.1), session("noise", "pi quota", 900), session("substring", "Pix assistant sdk", 100), file];
     expect(rankSearchHits(hits, "обновилась pi sdk", [field], false).map(hit => hit.id)).toEqual(["good", "code:src/a.ts:1"]);
@@ -58,6 +66,13 @@ describe("local search relevance", () => {
     const hit: SearchHit = { kind: "sessions", id: "sessions:1", sessionId: "1",
       title: "Unrelated title", snippet: "First: small preview", boundaryMatch: true, score: 1 };
     expect(rankSearchHits([hit], "hidden text from final", [], false)).toEqual([hit]);
+  });
+  it("keeps semantic named-session matches and supports prefix previews without changing submitted ranking", () => {
+    const semantic: SearchHit = { kind: "sessions", id: "named", sessionId: "named", title: "Release notes", snippet: "", score: 0.6, semantic: true };
+    expect(rankSearchHits([semantic], "собеседование", [], false)).toEqual([semantic]);
+    const candidate = session("prefixed", "Обновление поиска");
+    expect(rankSearchHits([candidate], "обно", [], false)).toEqual([]);
+    expect(rankSearchHits([candidate], "обно", [], false, true)).toEqual([candidate]);
   });
   it("deduplicates, caps results and keeps ordering deterministic across asynchronous source completion", () => {
     const hits = Array.from({ length: 65 }, (_, i) => session(`session:${String(i).padStart(2, "0")}`, "Search", i));

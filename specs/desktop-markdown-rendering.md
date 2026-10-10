@@ -37,6 +37,9 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 
 - Full CommonMark or GFM compatibility.
 - Rendering raw HTML.
+- Executing raw HTML inside the Markdown renderer. Explicit assistant-only
+  `pix-html` fences use a separate opt-in iframe sandbox instead; see
+  [interactive HTML sandbox](desktop-html-sandbox.md).
 - Treating arbitrary tool output as Markdown; only Markdown `read` results use the
   Markdown renderer.
 - Fetching remote images in regular transcript Markdown.

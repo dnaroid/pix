@@ -86,6 +86,14 @@ export class SearchPreferences {
     const search = value.search as Record<string, unknown> | undefined;
     return search?.sessionTitlesEnabled === true;
   }
+  async tasksSemanticEnabled(): Promise<boolean> {
+    const value = this.validate(await this.source());
+    const search = value.search as Record<string, unknown> | undefined;
+    return search?.tasksSemanticEnabled === true;
+  }
+  async setTasksSemanticEnabled(enabled: boolean): Promise<void> {
+    await this.setFlag("tasksSemanticEnabled", enabled);
+  }
   async setSessionTitlesEnabled(enabled: boolean): Promise<void> {
     await this.setFlag("sessionTitlesEnabled", enabled);
   }

@@ -20,12 +20,14 @@
 import { createHash, randomUUID } from "node:crypto";
 import { BTW_METHOD, BTW_CHANNEL, parseBtwEvent, type BtwRequest, type BtwState } from "../btw/contract.js";
 import { parseDesktopBtwRequest } from "../btw/request.js";
-import { SEARCH_QUERY_METHOD, SEARCH_CONFIG_METHOD, SEARCH_COMMITS_METHOD, SEARCH_INTENT_METHOD } from "../search/contract.js";
-import { parseSearchQueryRequest, parseSearchConfigRequest } from "../search/request.js";
+import { SEARCH_QUERY_METHOD, SEARCH_CONFIG_METHOD, SEARCH_COMMITS_METHOD, SEARCH_INTENT_METHOD, SEARCH_TASKS_METHOD } from "../search/contract.js";
+import { parseSearchQueryRequest, parseSearchConfigRequest, parseSemanticTasksRequest } from "../search/request.js";
 import { DesktopSearchService, SearchUnavailableError } from "../search/service.js";
 import { parseCommitSearchRequest } from "../search/commit-contract.js";
 import { DesktopCommitSearchService } from "../search/commit-service.js";
 import { parseSearchIntentRequest, DesktopSearchIntentService } from "../search/intent.js";
+import { TASK_TYPE_CLASSIFY_METHOD } from "../tasks/type-classification-contract.js";
+import { DesktopTaskTypeClassifier, parseTaskTypeClassifyRequest } from "../tasks/type-classifier.js";
 import { SEARCH_RAG_METHOD, SEARCH_RAG_DELTA_METHOD } from "../search/rag-contract.js";
 import { parseRagRequest } from "../search/rag-request.js";
 import { DesktopRagService } from "../search/rag-service.js";
@@ -437,6 +439,8 @@ export interface PixAcpAgentOptions {
 	/** Bundled quota-wait extension providing scheduled continuation. */
 	readonly quotaWaitExtensionPath?: string;
 	readonly headsUpExtensionPath?: string;
+	/** Desktop-only extension: advertises inline HTML UI and serves a help tool. */
+	readonly htmlSandboxExtensionPath?: string;
 	/** Agent resource directory override for hermetic draft-catalog tests. */
 	readonly agentDir?: string;
 	readonly logger: Logger;
@@ -451,6 +455,8 @@ export interface PixAcpAgentOptions {
 	readonly commitSearchService?: Pick<DesktopCommitSearchService, "query" | "dispose">;
 	/** Stateless search-intent classifier; no session or project-source access. */
 	readonly searchIntentService?: Pick<DesktopSearchIntentService, "classify">;
+	/** Stateless Quick Add type classifier; never reads the task document. */
+	readonly taskTypeClassifier?: Pick<DesktopTaskTypeClassifier, "classify">;
 	readonly ragService?: Pick<DesktopRagService, "generate">;
 	/** Reader for the TUI's project tab snapshot (overridable for tests). */
 	readonly loadTuiTabs?: (cwd: string) => Promise<TuiTabSnapshot>;
@@ -518,6 +524,7 @@ export class PixAcpAgent {
 	private readonly searchService: DesktopSearchService;
 	private readonly commitSearchService: Pick<DesktopCommitSearchService, "query" | "dispose">;
 	private readonly searchIntentService: Pick<DesktopSearchIntentService, "classify">;
+	private readonly taskTypeClassifier: Pick<DesktopTaskTypeClassifier, "classify">;
 	private readonly ragService: Pick<DesktopRagService, "generate">;
 	private readonly brainstormHost: BrainstormHost;
 	private readonly listPiSessions: (cwd?: string, signal?: AbortSignal) => Promise<readonly PiSessionInfo[]>;
@@ -546,6 +553,7 @@ export class PixAcpAgent {
 		this.options = options;
 		this.commitSearchService = options.commitSearchService ?? new DesktopCommitSearchService();
 		this.searchIntentService = options.searchIntentService ?? new DesktopSearchIntentService();
+		this.taskTypeClassifier = options.taskTypeClassifier ?? new DesktopTaskTypeClassifier();
 		this.ragService = options.ragService ?? new DesktopRagService({
 			createRuntime: (cwd) => {
 				const extensionPath = desktopToolsSuiteExtensionPath({
@@ -688,6 +696,14 @@ export class PixAcpAgent {
 					return { intent: "search" as const, fallback: true };
 				}
 			})
+			.onRequest(TASK_TYPE_CLASSIFY_METHOD, parseTaskTypeClassifyRequest, async (ctx) => {
+				if (this.clientName !== "pix-desktop") throw new RequestError(ERROR_SERVER, "Desktop task classification unavailable");
+				try { return await this.taskTypeClassifier.classify(ctx.params.text, ctx.signal); }
+				catch (error) {
+					if (ctx.signal.aborted) throw error;
+					return { type: "feature" as const, fallback: true };
+				}
+			})
 			.onRequest(SEARCH_RAG_METHOD, parseRagRequest, async (ctx) => {
 				if (this.clientName !== "pix-desktop") throw new RequestError(ERROR_SERVER, "Desktop search unavailable");
 				try {
@@ -706,6 +722,14 @@ export class PixAcpAgent {
 				catch (error) {
 					if (error instanceof SearchUnavailableError) throw new RequestError(ERROR_SERVER, error.message);
 					throw error;
+				}
+			})
+			.onRequest(SEARCH_TASKS_METHOD, parseSemanticTasksRequest, async (ctx) => {
+				if (this.clientName !== "pix-desktop") throw new RequestError(ERROR_SERVER, "Desktop search unavailable");
+				try { return await this.searchService.queryTasks(ctx.params, ctx.signal); }
+				catch (error) {
+					if (ctx.signal.aborted) throw error;
+					throw new RequestError(ERROR_SERVER, "Semantic task search unavailable; local task search remains available");
 				}
 			})
 			.onRequest(SEARCH_CONFIG_METHOD, parseSearchConfigRequest, async (ctx) => {
@@ -2081,6 +2105,7 @@ export class PixAcpAgent {
 			this.options.quotaWaitExtensionPath,
 			this.loadIgnoreContextFiles(cwd),
 			this.options.headsUpExtensionPath,
+			this.clientName === "pix-desktop" ? this.options.htmlSandboxExtensionPath : undefined,
 		);
 		const hostEnv = !startupOverride && this.clientName === "pix-desktop" ? await this.brainstormHost.environment(acpSessionId) : {};
 		const pi = this.options.createPiClient({ ...startup, env: { ...startup.env, ...hostEnv } });
@@ -2558,10 +2583,11 @@ export class PixAcpAgent {
 			await this.syncLiveSessionRecord(session);
 			return;
 		}
-		if (request.method === "notify" && (session.activeRun?.slashPrompt || session.extensionCommandRunning)) {
-			// Pi RPC sends extension command feedback as a fire-and-forget UI
-			// notification. ACP has no equivalent, so put it in the command's
-			// visible transcript instead of silently dropping the result.
+		if (request.method === "notify" && (session.activeRun?.slashPrompt || session.extensionCommandRunning
+			|| request.notifyType === "warning" || request.notifyType === "error")) {
+			// ACP has no toast equivalent. Keep command feedback and background
+			// warnings/errors (including startup preflight failures) visible as
+			// system rows, even when no prompt is running.
 			await this.notifyAgentMessage(session, request.message);
 			return;
 		}
@@ -3919,6 +3945,7 @@ function piClientOptions(
 	quotaWaitExtensionPath?: string,
 	ignoreContextFiles = false,
 	headsUpExtensionPath?: string,
+	htmlSandboxExtensionPath?: string,
 ): PiRpcClientOptions {
 	const args = [
 		...(questionExtensionPath ? ["--extension", questionExtensionPath] : []),
@@ -3927,6 +3954,7 @@ function piClientOptions(
 		...(toolsSuiteExtensionPath ? ["--extension", toolsSuiteExtensionPath] : []),
 		...(quotaWaitExtensionPath ? ["--extension", quotaWaitExtensionPath] : []),
 		...(headsUpExtensionPath ? ["--extension", headsUpExtensionPath] : []),
+		...(htmlSandboxExtensionPath ? ["--extension", htmlSandboxExtensionPath] : []),
 		...(ignoreContextFiles ? ["--no-context-files"] : []),
 	];
 	const base = {

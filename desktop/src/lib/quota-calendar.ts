@@ -1,41 +1,38 @@
-export interface QuotaCalendarDay {
-  key: string;
-  weekday: string;
-  weekend: boolean;
-  day: number;
+import type { ModelUsageLimitWindow } from "./acp-client";
+import { clampUsagePercent } from "./runtime-status";
+
+export interface QuotaCycleTick {
+  at: number;
+  position: number;
+  label: string;
   fullDate: string;
-  today: boolean;
-  reset: boolean;
 }
 
-/** A civil week plus the reported reset, bounded to eight dates even for distant resets. */
-export function quotaCalendarDays(resetAt: number, now: number): QuotaCalendarDay[] {
-  const reset = new Date(resetAt);
-  if (!Number.isFinite(resetAt) || resetAt <= 0 || !Number.isFinite(reset.getTime())) return [];
-  const start = new Date(now);
-  if (!Number.isFinite(start.getTime())) return [];
-  start.setHours(12, 0, 0, 0);
-  const today = new Date(now).toDateString();
-  const dates = Array.from({ length: 7 }, (_, index) => {
-    const date = new Date(start);
-    date.setDate(start.getDate() + index);
-    return date;
-  });
-  if (!dates.some(date => date.toDateString() === reset.toDateString())) {
-    const resetDay = new Date(reset);
-    resetDay.setHours(12, 0, 0, 0);
-    dates.push(resetDay);
-    dates.sort((a, b) => a.getTime() - b.getTime());
-  }
-  return dates.map(date => {
+/** One reported window, left-to-right. Never predict the next reset. */
+export function quotaCycleTimeline(window: ModelUsageLimitWindow, now: number): {
+  ticks: QuotaCycleTick[];
+  timePosition: number;
+} | null {
+  const duration = window.windowSeconds * 1000;
+  const start = window.resetAt - duration;
+  if (!window.hasKnownWindowDuration || !Number.isFinite(duration) || duration <= 0
+    || window.resetAt <= 0 || !Number.isFinite(new Date(window.resetAt).getTime())
+    || !Number.isFinite(new Date(start).getTime()) || !Number.isFinite(now)) return null;
+
+  const ticks = Array.from({ length: 8 }, (_, index) => {
+    const at = start + duration * index / 7;
+    const date = new Date(at);
+    const previous = new Date(start + duration * (index - 1) / 7);
+    const showMonth = index === 0 || date.getMonth() !== previous.getMonth()
+      || date.getFullYear() !== previous.getFullYear();
     return {
-      key: `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`,
-      weekday: date.toLocaleDateString(undefined, { weekday: "short" }),
-      weekend: date.getDay() === 0 || date.getDay() === 6,
-      day: date.getDate(),
-      fullDate: date.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" }),
-      today: date.toDateString() === today,
-      reset: date.toDateString() === reset.toDateString(),
+      at,
+      position: index * 100 / 7,
+      label: date.toLocaleDateString(undefined, { day: "numeric", ...(showMonth ? { month: "short" } : {}) }),
+      fullDate: date.toLocaleString(undefined, {
+        year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit",
+      }),
     };
   });
+  return { ticks, timePosition: clampUsagePercent((now - start) / duration * 100) };
 }

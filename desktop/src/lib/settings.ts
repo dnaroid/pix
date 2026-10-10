@@ -6,6 +6,7 @@ import {
   DEFAULT_DCP_DEBUG_LOG_MAX_BYTES,
 } from "../../../external/pi-tools-suite/src/dcp/defaults.js";
 import { DEFAULT_DESKTOP_CONFIG_JSONC } from "./default-desktop-config";
+import { frontierBadges } from "./frontier-model-badges";
 
 export type SettingsConfigKind = "desktop" | "pi-tools-suite";
 
@@ -58,6 +59,9 @@ export function updateSettingsEditorCache(next: SettingsEditorCache): void {
 
 /** Update one file without overwriting another concurrently mounted editor. */
 export function cacheSettingsDraft(kind: SettingsConfigKind, draft: SettingsDraftDocument): void {
+  if (kind === "pi-tools-suite" && editorCache.drafts[kind]?.savedSource !== draft.savedSource) {
+    frontierBadges.publish(draft.savedSource);
+  }
   editorCache = { ...editorCache, drafts: { ...editorCache.drafts, [kind]: draft } };
 }
 

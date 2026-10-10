@@ -8,6 +8,7 @@
   import type { SessionSubagentSnapshot } from "../lib/session-subagents";
   import type { SessionTodoSnapshot } from "../lib/session-todos";
   import ModelProviderIcon from "./ModelProviderIcon.svelte";
+  import FrontierModelBadge from "./FrontierModelBadge.svelte";
   import RuntimeStatusBarItems from "./RuntimeStatusBarItems.svelte";
   import ObserverStatus from "./ObserverStatus.svelte";
   import type { HeadsUpSnapshot } from "../lib/heads-up";
@@ -125,6 +126,7 @@
           <ModelProviderIcon provider={modelThinking.currentModel.provider} />
         {/if}
         <span class="max-w-[220px] truncate font-medium text-foreground">{modelThinking.currentModel.name}</span>
+        <FrontierModelBadge modelRef={modelThinking.currentModel.ref} />
         {#if modelThinking.currentModel.ref !== AUTO_MODEL_REF}
           <span class="text-muted-foreground/50">·</span>
           <span class="text-muted-foreground">{modelThinking.currentThinking}</span>
@@ -146,7 +148,6 @@
     {#key observer?.sessionId}
     <RuntimeStatusBarItems
       status={runtimeStatus}
-      {showSkeletons}
       {sessionUsage}
       loadingSessionUsage={sessionUsageRefreshing}
       {sessionUsageFailed}

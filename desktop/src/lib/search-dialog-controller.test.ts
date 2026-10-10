@@ -33,6 +33,10 @@ describe("explicit search dialog requests", () => {
       .toBe("Semantic session-title search enabled · conversation history stays local");
     expect(searchStatusLabel({ ...status, enabled: true, sessionTitlesEnabled: true }))
       .toBe("Semantic settings + session-title search enabled · history stays local");
+    expect(searchStatusLabel({ ...status, tasksSemanticEnabled: true }))
+      .toBe("Semantic task search enabled · task titles/descriptions require separate consent");
+    expect(searchStatusLabel({ ...status, tasksSemanticEnabled: true, keyAvailable: false }))
+      .toContain("key unavailable");
   });
 
   it("opening, editing and polling status never submit search", async () => {

@@ -68,19 +68,21 @@ describe("desktop visual regressions", () => {
     expect(runtimeStatusSource).toContain("overflow-hidden whitespace-nowrap");
     expect(runtimeStatusSource).not.toContain("ml-auto");
     expect(runtimeStatusSource).not.toContain("justify-between gap-1");
-    expect(runtimeStatusSource.match(/>ctx<\/span>/g)).toHaveLength(2);
+    expect(runtimeStatusSource.match(/>Context<\/span>/g)).toHaveLength(1);
+    expect(runtimeStatusSource).toContain("grid-template-columns: max-content 64px;");
+    expect(runtimeStatusSource).toContain("grid-template-columns: max-content 64px 11ch;");
     expect(runtimeStatusSource).not.toContain(">resets {formatResetDuration");
   });
   it("keeps fixed telemetry slots and only reserves inline savings when positive", () => {
-    expect(runtimeStatusSource).toContain("grid-template-columns: minmax(0, max-content) minmax(0, max-content)");
+    expect(runtimeStatusSource).toContain("grid-auto-columns: minmax(0, max-content)");
     expect(runtimeStatusSource).toContain("flex: 0 1 auto");
-    expect(runtimeStatusSource.match(/class="context-status-slots grid/g)).toHaveLength(2);
-    expect(runtimeStatusSource.match(/class="usage-status-slots grid/g)).toHaveLength(2);
+    expect(runtimeStatusSource.match(/class="context-status-slots grid/g)).toHaveLength(1);
+    expect(runtimeStatusSource.match(/class="usage-status-slots grid/g)).toHaveLength(1);
     expect(runtimeStatusSource).toContain("grid-template-columns: 3ch 4ch 64px 11ch");
     expect(runtimeStatusSource).toContain("grid-template-columns: 3ch 4ch 64px;");
     expect(runtimeStatusSource).toContain("class:with-savings={showSavings}");
     expect(runtimeStatusSource).toContain('{contextTitle(false)}</div>');
-    expect(runtimeStatusSource).toContain('~{savedTokensFormatter.format(status.dcpTokensSaved)} tokens</span>');
+    expect(runtimeStatusSource).toContain('<DcpSavingsSummary tokensSaved={status.dcpTokensSaved} />');
     expect(runtimeStatusSource).toContain("grid-auto-columns: max-content");
     expect(runtimeStatusSource).toContain("grid-template-columns: 5ch 56px 5ch 10px");
     expect(runtimeStatusSource).toContain("grid-template-columns: 5ch 32px 5ch 10px");
@@ -407,7 +409,7 @@ describe("desktop visual regressions", () => {
     expect(runtimeStatusSource).not.toContain("workspaceName");
     expect(runtimeStatusSource).not.toContain("workspaceBranch");
     expect(runtimeStatusSource).not.toContain("workspacePath");
-    expect(runtimeStatusSource).toContain("{#if status || showSkeletons || quotaWaitIndicator}");
+    expect(runtimeStatusSource).toContain("data-runtime-status");
   });
 
   it("keeps session activity independent from removed workspace status identity", () => {
@@ -417,13 +419,13 @@ describe("desktop visual regressions", () => {
     expect(sessionActivityStatusHudSource).toContain('class="flex shrink-0 items-center gap-0.5"');
   });
 
-  it("keeps the remaining status-bar slots present as skeletons while draft/start/session state resolves", () => {
+  it("keeps only model placeholders while context and usage resolve without skeletons", () => {
     expect(statusSource).toContain('data-status-bar-skeleton="model"');
-    expect(statusSource).toContain("{showSkeletons}");
-    expect(runtimeStatusSource).toContain("data-runtime-context-skeleton");
+    expect(runtimeStatusSource).not.toContain("showSkeletons");
+    expect(runtimeStatusSource).not.toContain("data-runtime-context-skeleton");
     expect(runtimeStatusSource).not.toContain("data-runtime-workspace-skeleton");
     expect(runtimeStatusSource).not.toContain("data-runtime-workspace-branch-skeleton");
-    expect(runtimeStatusSource).toContain("data-runtime-usage-skeleton");
+    expect(runtimeStatusSource).not.toContain("data-runtime-usage-skeleton");
     expect(statusBarViewModelSource).toContain("shouldShowStatusBarSkeletons");
     expect(statusBarViewModelSource).toContain("runtimeStatusAvailable: runtimeStatus !== undefined");
   });
@@ -445,7 +447,7 @@ describe("desktop visual regressions", () => {
     expect(runtimeStatusSource).toContain(">Retry</button>");
     expect(runtimeStatusSource).not.toContain("Usage has not been loaded yet.");
     expect(statusBarViewModelSource).toContain("refreshActiveSessionUsage");
-    expect(statusBarViewModelSource).toContain("sessionUsageAvailable: !!sessionId && runtimeReady");
+    expect(statusBarViewModelSource).toContain("sessionUsageAvailable: !draft && !!sessionId && runtimeReady");
     expect(statusBarViewModelSource).not.toContain("refreshDraftModelUsage");
   });
 

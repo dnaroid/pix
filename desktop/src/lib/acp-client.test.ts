@@ -430,6 +430,29 @@ describe("ACP JSON-RPC client", () => {
     await client.dispose();
   });
 
+  it("validates the Desktop-only Jev quick-task classifier and rejects invented types", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+    const request = { cwd: "/workspace", text: "Fix broken login" };
+    const classify = client.classifyTaskType(request);
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    expect(requestAt(transport, 1)).toMatchObject({ method: "pix/tasks/classify_type", params: request });
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 1).id,
+      result: { type: "bug", fallback: false, extra: "discard" } });
+    await expect(classify).resolves.toEqual({ type: "bug", fallback: false });
+    const invalid = client.classifyTaskType(request);
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(3));
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 2).id,
+      result: { type: "epic", fallback: false } });
+    await expect(invalid).rejects.toThrow("Invalid task classification response");
+    const mismatched = client.classifyTaskType(request);
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(4));
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 3).id,
+      result: { type: "bug", fallback: true } });
+    await expect(mismatched).rejects.toThrow("Invalid task classification response");
+    await client.dispose();
+  });
+
   it("streams and validates per-request RAG sources and deltas; late/unrelated events never reach listeners", async () => {
     const transport = new FakeTransport();
     const client = await startedClient(transport);

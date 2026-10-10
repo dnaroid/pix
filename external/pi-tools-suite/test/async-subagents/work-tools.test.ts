@@ -72,7 +72,7 @@ test("facade registers only requested tools, no commands, and guards read-only l
 
 test("coding defaults opt into AST and research alone opts into public web", () => {
 	const profiles = loadSubagentConfig(workspace(), {}).types;
-	for (const name of ["implement", "implement-core", "mechanical", "frontier-review", "research"]) expect(profiles[name].tools).toContain("ast_grep");
+	for (const name of ["implement", "implement-core", "mechanical", "oracle", "research"]) expect(profiles[name].tools).toContain("ast_grep");
 	for (const [name, profile] of Object.entries(profiles)) {
 		if (name === "research") {
 			expect(profile.tools).toContain("web_search");

@@ -48,9 +48,9 @@
       <div><dt class="inline text-muted-foreground">Embedding model: </dt><dd class="inline break-all font-mono text-foreground">{SEARCH_EMBEDDING_MODEL}</dd></div>
       <div><dt class="inline text-muted-foreground">Provider: </dt><dd class="inline text-foreground">OpenRouter</dd></div>
     </dl>
-    <p class="mt-2 text-xs leading-4 text-muted-foreground">Settings semantic search sends only authored settings labels/descriptions and settings queries to OpenRouter. Session titles require their own separate opt-in. Semantic indexing never uploads conversation history or attachments.</p>
+    <p class="mt-2 text-xs leading-4 text-muted-foreground">Settings semantic search sends only authored settings labels/descriptions and settings queries to OpenRouter. Session titles and task descriptions each require their own separate opt-in. Semantic indexing never uploads conversation history or attachments.</p>
     <p class="mt-1 text-xs leading-4 text-muted-foreground">RAG is separate: when you explicitly ask for an answer, bounded retrieved source excerpts (which may include session excerpts) and the question are sent to the selected RAG model provider. Configure its model and thinking effort above.</p>
-    <p class="mt-1 text-xs leading-4 text-muted-foreground">Both semantic options are off by default. Local session-title and settings search remains available without provider calls.</p>
+    <p class="mt-1 text-xs leading-4 text-muted-foreground">All three semantic options are off by default. Local search remains available without provider calls.</p>
     {#if client}
       <label class="mt-2 flex items-center gap-2 text-xs text-foreground">
         <input type="checkbox" checked={status?.enabled ?? false} disabled={!status || busy} onchange={(event) => void update({ enabled: event.currentTarget.checked })} />
@@ -61,6 +61,13 @@
           onchange={(event) => void update({ sessionTitlesEnabled: event.currentTarget.checked })} />
         <span>Enable semantic session-title search
           <span class="mt-1 block leading-4 text-muted-foreground">Sends explicitly saved session names and session-search queries to OpenRouter for embeddings; may incur charges. Never sends first-message fallback titles or conversation contents.</span>
+        </span>
+      </label>
+      <label class="mt-2 flex items-start gap-2 text-xs text-foreground">
+        <input type="checkbox" class="mt-0.5" checked={status?.tasksSemanticEnabled ?? false} disabled={!status || busy}
+          onchange={(event) => void update({ tasksSemanticEnabled: event.currentTarget.checked })} />
+        <span>Enable semantic project-task search
+          <span class="mt-1 block leading-4 text-muted-foreground">When you explicitly search Tasks, sends task titles, descriptions (up to 2,000 characters per task) and the task-search query to OpenRouter for embeddings. May incur charges. Indexes up to 64 new tasks per search in a project-local cache; repeat searches to finish large backlogs. Task IDs, status, priority, links, session/model references and attachment metadata/bytes are never sent for task embeddings. Disabling keeps previously purchased vectors locally but stops new uploads.</span>
         </span>
       </label>
       {#if status}

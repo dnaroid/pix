@@ -1,67 +1,66 @@
 import { describe, expect, it } from "vitest";
-import { quotaCalendarDays } from "./quota-calendar";
+import { quotaCycleTimeline } from "./quota-calendar";
 
-describe("quota reset calendar", () => {
-  it("shows seven civil dates starting today and the actual reported reset", () => {
-    const reset = new Date(2026, 9, 17, 23).getTime();
-    const days = quotaCalendarDays(reset, new Date(2026, 9, 12, 18).getTime());
-    expect(days.map(day => day.day)).toEqual([12, 13, 14, 15, 16, 17, 18]);
-    expect(days.filter(day => day.today).map(day => day.day)).toEqual([12]);
-    expect(days.filter(day => day.reset).map(day => day.day)).toEqual([17]);
-    expect(days.filter(day => day.weekend).map(day => day.day)).toEqual([17, 18]);
+const resetAt = new Date(2026, 9, 14, 10, 12).getTime();
+const window = { remainingPercent: 57, resetAt, windowSeconds: 604_800, hasKnownWindowDuration: true };
+const day = 86_400_000;
+
+describe("quota cycle timeline", () => {
+  it("anchors eight ticks to the actual start and reset, not today", () => {
+    const timeline = quotaCycleTimeline(window, resetAt - 4 * day)!;
+    expect(timeline.ticks.map(tick => new Date(tick.at).getDate())).toEqual([7, 8, 9, 10, 11, 12, 13, 14]);
+    expect(timeline.ticks[0]!.at).toBe(resetAt - 7 * day);
+    expect(timeline.ticks[7]).toMatchObject({ at: resetAt, position: 100 });
+    expect(quotaCycleTimeline(window, resetAt - 3 * day)?.ticks).toEqual(timeline.ticks);
   });
-  it("crosses month/year boundaries without assuming future resets", () => {
-    const days = quotaCalendarDays(new Date(2027, 0, 1, 1).getTime(), new Date(2026, 11, 31).getTime());
-    expect(days.map(day => day.day)).toEqual([31, 1, 2, 3, 4, 5, 6]);
-    expect(new Set(days.map(day => day.key)).size).toBe(7);
-    expect(days.filter(day => day.reset)).toHaveLength(1);
+
+  it.each([[8, 0], [7, 0], [3.5, 50], [0, 100], [-1, 100]])(
+    "clamps now with %s days left to %s percent elapsed", (daysLeft, position) => {
+      expect(quotaCycleTimeline(window, resetAt - daysLeft * day)?.timePosition).toBe(position);
+    },
+  );
+
+  it("uses the supplied duration, independently of remaining quota", () => {
+    const other = { ...window, windowSeconds: 14 * 86_400, remainingPercent: 2 };
+    const timeline = quotaCycleTimeline(other, resetAt - 7 * day)!;
+    expect(timeline.timePosition).toBe(50);
+    expect(timeline.ticks[0]!.at).toBe(resetAt - 14 * day);
+    expect(timeline.ticks).toHaveLength(8);
   });
-  it("keeps a full civil week across daylight-saving boundaries", () => {
-    const days = quotaCalendarDays(new Date(2026, 2, 8, 23).getTime(), new Date(2026, 2, 8, 1).getTime());
-    expect(days.map(day => day.day)).toEqual([8, 9, 10, 11, 12, 13, 14]);
-    expect(days[0]).toMatchObject({ today: true, reset: true });
+
+  it("labels a month/year crossing and preserves exact endpoint dates", () => {
+    const reset = new Date(2027, 0, 4, 10).getTime();
+    const ticks = quotaCycleTimeline({ ...window, resetAt: reset }, reset - day)!.ticks;
+    expect(ticks.map(tick => new Date(tick.at).getDate())).toEqual([28, 29, 30, 31, 1, 2, 3, 4]);
+    expect(ticks[4]!.label).toBe(new Date(ticks[4]!.at).toLocaleDateString(undefined, { month: "short", day: "numeric" }));
+    expect(ticks[0]!.fullDate).toContain("2026");
+    expect(ticks[7]!.fullDate).toContain("2027");
   });
-  it("does not manufacture dates for missing or invalid timestamps", () => {
-    for (const reset of [0, -1, NaN, Infinity, 1e20]) expect(quotaCalendarDays(reset, Date.now())).toEqual([]);
+
+  it.each([new Date(2026, 2, 11, 12), new Date(2026, 10, 4, 12)])(
+    "keeps absolute-time positioning through DST around %s", reset => {
+      const end = reset.getTime();
+      const timeline = quotaCycleTimeline({ ...window, resetAt: end }, end - 3.5 * day)!;
+      expect(timeline.timePosition).toBe(50);
+      expect(timeline.ticks[0]!.at).toBe(end - 7 * day);
+      expect(timeline.ticks[7]!.at).toBe(end);
+      expect(new Set(timeline.ticks.map(tick => tick.at)).size).toBe(8);
+      for (const tick of timeline.ticks) {
+        expect(tick.fullDate).toBe(new Date(tick.at).toLocaleString(undefined, {
+          year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit",
+        }));
+      }
+    },
+  );
+
+  it.each([
+    { hasKnownWindowDuration: false }, { windowSeconds: 0 }, { windowSeconds: -1 },
+    { windowSeconds: NaN }, { windowSeconds: Infinity }, { windowSeconds: 1e20 },
+    { resetAt: 0 }, { resetAt: -1 }, { resetAt: NaN }, { resetAt: Infinity }, { resetAt: 1e20 },
+  ])("rejects unknown or invalid timing %o", invalid => {
+    expect(quotaCycleTimeline({ ...window, ...invalid }, resetAt - day)).toBeNull();
   });
-  it("includes Sunday today when the reset is in the next Monday-first week", () => {
-    const days = quotaCalendarDays(new Date(2026, 9, 10, 1, 57).getTime(), new Date(2026, 9, 4, 21).getTime());
-    expect(days.map(day => day.day)).toEqual([4, 5, 6, 7, 8, 9, 10]);
-    expect(days[0]).toMatchObject({ today: true, reset: false });
-    expect(days[6]).toMatchObject({ today: false, reset: true });
-  });
-  it("adds a distant reported reset without manufacturing intervening dates", () => {
-    const days = quotaCalendarDays(new Date(2026, 10, 17).getTime(), new Date(2026, 9, 12).getTime());
-    expect(days.filter(day => day.today)).toHaveLength(1);
-    expect(days).toHaveLength(8);
-    expect(days.slice(0, 7).map(day => day.day)).toEqual([12, 13, 14, 15, 16, 17, 18]);
-    expect(days[7]).toMatchObject({ key: "2026-11-17", reset: true });
-  });
-  it("includes the eighth-day reset in the same bounded range", () => {
-    const days = quotaCalendarDays(new Date(2026, 9, 12, 10, 23).getTime(), new Date(2026, 9, 5).getTime());
-    expect(days.map(day => day.day)).toEqual([5, 6, 7, 8, 9, 10, 11, 12]);
-    expect(days[0]?.today).toBe(true);
-    expect(days[7]?.reset).toBe(true);
-  });
-  it("includes a passed reset once without predicting its successor", () => {
-    const days = quotaCalendarDays(new Date(2026, 9, 4, 10).getTime(), new Date(2026, 9, 5).getTime());
-    expect(days.map(day => day.day)).toEqual([4, 5, 6, 7, 8, 9, 10, 11]);
-    expect(days.filter(day => day.reset)).toHaveLength(1);
-    expect(days[0]).toMatchObject({ today: false, reset: true });
-    expect(days[1]?.today).toBe(true);
-  });
-  it("adds a reset outside the week across a year boundary", () => {
-    const days = quotaCalendarDays(new Date(2027, 0, 5).getTime(), new Date(2026, 11, 29).getTime());
-    expect(days.map(day => day.day)).toEqual([29, 30, 31, 1, 2, 3, 4, 5]);
-    expect(new Set(days.map(day => day.key)).size).toBe(8);
-    expect(days[7]).toMatchObject({ key: "2027-1-5", reset: true });
-  });
-  it("advances the range after local midnight", () => {
-    const reset = new Date(2026, 9, 10).getTime();
-    expect(quotaCalendarDays(reset, new Date(2026, 9, 4, 23, 59).getTime())[0]?.day).toBe(4);
-    expect(quotaCalendarDays(reset, new Date(2026, 9, 5).getTime())[0]?.day).toBe(5);
-  });
-  it("rejects invalid current timestamps", () => {
-    expect(quotaCalendarDays(Date.now(), NaN)).toEqual([]);
+  it("rejects an invalid current time", () => {
+    expect(quotaCycleTimeline(window, NaN)).toBeNull();
   });
 });

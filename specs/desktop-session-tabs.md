@@ -25,6 +25,7 @@ Preserve Pix conversation/session membership and lazy draft semantics after conv
 - Desktop persists its own ordered visible conversation-tab membership per workspace **within each stable native window label**. Active-session pointers use the same window scope. Two windows, including windows on the same project, cannot overwrite each other's snapshots. Switching projects retains each project's snapshot within that window. Browser preview uses its own namespace. On restart, only the Desktop snapshot determines which real session tabs are restored, including an explicit empty list; stale TUI `pix.tabs` metadata must not resurrect sessions that Desktop had closed. Sessions opened only in Desktop are restored as well. A missing Desktop snapshot is treated as an empty snapshot, so startup opens the UI-only draft rather than falling back to TUI tab state. Ordinary TUI changes may still reconcile into the live Desktop tab list after startup.
 - Session snapshots use `pix.desktop.windowLayout.<encoded-window-label>.sessionTabs` and `.activeSessions`. Legacy origin-wide `pix.desktop.sessionTabs` / `pix.desktop.activeSessions` are not imported because their owning window is unknowable; existing windows start with a draft once and remember subsequent tab choices. Saved sessions remain available in the chooser.
 - The persisted Desktop active-session id is valid at startup only when it is still a member of the persisted Desktop tab snapshot. If that active id is stale, Desktop falls back to the first still-available persisted tab; if the persisted tab list is empty, startup opens the UI-only draft instead of an old TUI session. Closing the last real Desktop tab clears the persisted active-session pointer.
+- Alongside these window/project tab snapshots, Desktop keeps each real session's last-known model reference, display name and thinking level. Startup can display the saved active tab's selection before the session/runtime is attached (or the first persisted tab when the active pointer is stale). This is display-only: the Model control stays disabled until runtime readiness; saved selections never populate pickers, submit parameters, model-routing decisions or quota requests. Accepted runtime configuration replaces the snapshot, including removing it when no model is supplied. Closed/removed tabs prune their display metadata; project switching preserves other project snapshots. Missing, malformed or old metadata leaves ordinary tab restoration intact; storage writes are best effort. Draft selections are not persisted here.
 - A persisted fork session is identified from Pi's native parent-session metadata. ACP exposes `pix.isFork` and, when available from its existing map records, the safe ACP-only `pix.parentSessionId` session-list metadata value to Desktop; no parent path is exposed. Workbench tabs render a branch icon beside fork titles.
 - Conversation tabs are `kind: "session"` members of `WorkbenchTabs`. Preview, Git Diff, Terminal, and LSP installer tabs may appear between them visually, but those UI-only tabs never enter the session id arrays used by `buildTabSessions`, restore metadata, saved-session selection, or ACP/TUI synchronization.
 - The active conversation runtime and the selected workbench surface are distinct concepts. While an auxiliary workbench tab is selected, the current session remains the underlying active runtime and keeps its activity/status state. Selecting a conversation tab activates/loads that session and selects the shared `conversation-workspace` panel.
@@ -62,6 +63,7 @@ Preserve Pix conversation/session membership and lazy draft semantics after conv
 - Pending attachment inspection/caching settles before submit snapshots the composer draft, so pressing Enter immediately after paste/attach cannot race the first prompt and silently omit the file.
 - Choosing a saved conversation from the embedded selector closes the UI-only draft and loads that saved session directly; no throwaway ACP session is created or closed. Workbench-only Preview/Diff tabs remain excluded from that saved-session selector.
 - Repeated New Conversation actions reuse the existing draft tab instead of creating multiple empty chooser tabs.
+- New Conversation displays the configured default model/thinking (or Auto) from local preferences immediately while its authoritative draft configuration loads, and starts Context at an empty 0% track. Local defaults are read at Desktop startup; no separately persisted draft-display cache or session allocation is needed. Sessionless defaults warmed on client/workspace readiness provide an in-memory, workspace-scoped fallback when no explicit local default is configured. Resetting a draft clears staged overrides and quota, not the configured default display. Display-only values cannot configure or materialize a session, and never copy a real tab's model/context/usage. Live draft configuration replaces them; without any known default the Model placeholder remains until configuration arrives. See [runtime status](desktop-runtime-status.md).
 - Starting a project task while the UI-only draft is active creates and foregrounds the task's real conversation session. The draft tab is deactivated rather than discarded, so its unsent composer text/attachments remain owned by the draft and can be restored later; the task prompt and subsequent runtime state belong only to the new real session.
 - A sole UI-only draft tab is not closable. Its close affordance is omitted, and Delete or middle-click are ignored. Closing the last real session still transitions to one draft conversation tab, which remains the minimum session surface even if Preview/Diff are also open.
 - Active-session close clears the old conversation error before showing the fallback session or draft. Background teardown success does not clear errors belonging to newer work; a failed close still restores its tab and displays the close error.
@@ -80,6 +82,20 @@ Preserve Pix conversation/session membership and lazy draft semantics after conv
 - New Conversation remains a separate control outside the roving-focus sequence.
 
 ## Implementation
+
+- `desktop/src/app/draft-model-display.svelte.ts`
+- `desktop/src/app/model-draft-config.svelte.ts`
+- `desktop/src/app/model-config.svelte.ts`
+
+- `desktop/src/lib/session-tab-model.ts`
+- `desktop/src/app/session-tab-model-state.svelte.ts`
+- `desktop/src/app/project-workspace.svelte.ts`
+- `desktop/src/app/session-tabs-state.svelte.ts`
+- `desktop/src/app/desktop-lifecycle-services.ts`
+- `desktop/src/app/desktop-status-bar-view-model.svelte.ts`
+- `desktop/src/app/desktop-shell-view-model-services.ts`
+- `desktop/src/app/session-runtime-loading.ts`
+- `desktop/src/app/session-runtime-options.ts`
 
 - `desktop/src/components/StatusBar.svelte`
 - `desktop/src/components/TranscriptPane.svelte`
@@ -118,6 +134,13 @@ Preserve Pix conversation/session membership and lazy draft semantics after conv
 
 ## Tests
 
+- `desktop/src/app/model-draft-config.test.ts`
+- `desktop/src/app/model-config.test.ts`
+
+- `desktop/src/lib/session-tab-model.test.ts`
+- `desktop/src/app/status-bar-model-restore.test.ts`
+- `desktop/src/app/project-workspace.test.ts`
+
 - `desktop/src/components/SessionStartView.test.ts`
 - `desktop/src/components/SessionSelector.test.ts`
 - `desktop/src/components/SavedSessionRow.test.ts`
@@ -151,7 +174,8 @@ Preserve Pix conversation/session membership and lazy draft semantics after conv
 - `desktop/src/components/DesktopVisualRegressions.test.ts` verifies ordinary composer borders and no transcript-bottom spinner.
 - `desktop/src/components/ComposerActivity.test.ts` verifies composer-dock placement, neutral announcements, and reduced-motion markup; `desktop/src/lib/composer-activity.test.ts` covers current-turn selection, concurrent actions, history/draft/runtime gating, settlement, and pending input; `desktop/src/lib/composer-activity-hold.test.ts` covers the one-second latest-wins hold (immediate first display, coalescing, immediate hide, session reset, dispose).
 - `desktop/src/lib/session-tabs.test.ts` covers session membership/restoration/replacement, Desktop-owned tab snapshot parsing/serialization, stale TUI rejection, explicit-empty restore, active-session fallback, plus deterministic fork-tree sibling, nested, malformed/orphan, and flat-search row behavior independently of UI-only workbench tabs.
-- `desktop/src/app/session-tabs-state.test.ts` covers persistence after open/close mutations, independent two-window ordered tabs/active pointers across restart, captured write ownership, per-window project switching, rejection of ambiguous legacy snapshots, and explicit empty Desktop snapshots suppressing stale TUI tabs across restart.
+- `desktop/src/app/session-tabs-state.test.ts` covers persistence after open/close mutations, independent two-window ordered tabs/active pointers and model/thinking display metadata across restart, captured write ownership, per-window project switching, closed-tab metadata pruning, corrupt metadata/storage-write fallback, rejection of ambiguous legacy snapshots, and explicit empty Desktop snapshots suppressing stale TUI tabs across restart.
+- Model display tests cover validated scalar snapshots without a catalog, immediate disabled startup display, saved active-pointer membership, session/project/draft isolation, live-config precedence and authoritative empty-config removal. Runtime-loading tests verify accepted configuration publication and rejection of stale owners before persistence.
 - `desktop/src/lib/workbench-tabs.test.ts` covers mixed workbench ordering without changing session identity.
 - `desktop/src/app/workbench-model.test.ts` covers fork metadata propagation into workbench session tabs.
 - `desktop/src/components/WorkbenchTabs.test.ts` covers unified roving tab semantics and kind-specific close dispatch.

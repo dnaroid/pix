@@ -18,8 +18,8 @@ absolute paths.
 
 - Desktop Registry push/pull/sync for tasks, plans, TODO, workspace and project.
 - Project provenance in `.pi/registry.json`.
-- Portable synchronization of `.pi/tasks.jsonc` together with the regular files
-  referenced from `.pi/task-attachments`.
+- Portable synchronization of SQLite task rows and SHA-256 content-addressed
+  attachments from `.pi/tasks.sqlite` and `.pi/task-attachments`.
 - Pix Desktop local project-state initialization for workspaces that do not yet
   have a `.pi` directory.
 
@@ -27,17 +27,18 @@ absolute paths.
 
 For project key `<key>`, the registry stores:
 
-- `projects/<key>/tasks.jsonc`
-- `projects/<key>/task-attachments/<file>` for task attachments referenced by
-  the synchronized task document
+- `projects/<key>/tasks.sqlite` (transaction-consistent online backup)
+- `projects/<key>/task-attachments/<sha256>` for blobs referenced by the
+  synchronized SQLite attachment association table
 - `projects/<key>/plans/`
 - `projects/<key>/TODO.md`
 - `projects/<key>/workspace.jsonc`
 
-The registry copy of `tasks.jsonc` is transport data. Project-owned attachment
-markers are rebased from local `file://` URIs to
-`pix-task-attachment:<encoded-name>` markers before the file is committed.
-Those portable markers are not written to the local project task file.
+The Registry SQLite copy is a consistent transport snapshot: neither side
+copies a live database's raw bytes without its WAL. Task descriptions contain
+plain text, and attachments are related by hash and task id inside SQLite,
+not by embedded `file://` or portable text markers. There is no legacy
+JSONC/task overlay import or fallback.
 
 ## Behavior
 
@@ -48,38 +49,59 @@ Those portable markers are not written to the local project task file.
   teardown cancel pending timers; reconnect schedules a new load. In-flight
   responses retain the Registry store's workspace/lifecycle stale-response guards.
 
-1. `push tasks` reads `.pi/tasks.jsonc`, identifies attachment markers whose
-   files resolve inside `.pi/task-attachments`, and normalizes those markers to
-   the registry-only portable form.
-2. Only task attachments referenced by the task document are copied to the
-   registry. Re-pushing tasks replaces the remote task-attachment set, so files
-   no longer referenced by tasks are removed remotely in the same commit.
-3. `pull tasks` validates every portable attachment marker and its corresponding
-   regular file, copies the remote attachment set into `.pi/task-attachments`,
-   and rewrites the markers to `file://` URIs for the destination workspace.
-4. Pull prepares the replacement files before swapping the local task file and
-   attachment directory. Existing local state is backed up during the swap and
-   restored if replacement fails.
-5. The logical hash for the `tasks` project artifact includes the normalized
-   task source and the bytes of every referenced bundled attachment. Changing an
-   attachment therefore makes Registry status report local changes even when
-   `tasks.jsonc` itself did not change.
+1. `push tasks` validates the local SQLite v1 schema, task payloads, rows and
+   attachment association integrity, then uses SQLite online backup to capture
+   a transactionally consistent snapshot (including committed WAL content).
+2. Only blob hashes referenced from `task_attachments` participate in the
+   Registry artifact. Each referenced blob is verified for safe regular-file
+   containment, size and SHA-256; removed references are omitted remotely.
+3. `pull tasks` checks remote SQLite schema, rows and blobs; imports rows into
+   the existing local database within `BEGIN IMMEDIATE` and copies blobs as
+   immutable content-addressed files. It does not rename the live DB inode.
+4. Push and pull enforce the project provenance/observed hash for the
+   transaction boundary. A concurrent task write cannot silently be turned
+   into an all-task Registry replacement; it must be reviewed/retried.
+5. The task artifact hash is canonical JSON of sorted task rows (including
+   revision/position), attachment metadata and associations plus every linked
+   immutable blob's bytes. WAL/SHM file bytes, free pages and SQLite packing
+   are excluded. Editing a linked blob produces a checksum error.
 6. The remote revision for `tasks` follows both
-   `projects/<key>/tasks.jsonc` and `projects/<key>/task-attachments/`, so a
+   `projects/<key>/tasks.sqlite` and `projects/<key>/task-attachments/`, so a
    remote attachment-only change participates in update/conflict detection.
 7. The registry Git commit stages the current project's directory in the
    disposable clone. Other project keys and reusable skills/agents are not
    included.
 8. Pix Desktop owns one background project-state sync coordinator. A successful
-   task-document write marks `tasks` dirty; saving `.pi/TODO.md` marks `todo`
-   dirty; saving a file under `.pi/plans/` marks `plans` dirty; successful
+   per-row SQLite task write marks `tasks` dirty; saving `.pi/TODO.md` marks `todo`
+   dirty; saving a canonical Markdown plan (`.pi/plans/**/*.md`, excluding
+   generated/temporary paths) marks `plans` dirty; successful
    Desktop saves of `.pi/workspace.jsonc` mark `workspace` dirty. The fast sidebar
    Registry poll also reports project artifacts that changed outside those
    Desktop save paths, so agent/external edits enter the same coordinator. Those
    external-change signals also refresh the corresponding local Desktop store
-   before sync: `tasks` reloads the task document, while `plans` and `todo`
+   before sync: `tasks` reloads the SQLite task view, while `plans` and `todo`
    reload the project-document snapshot. A queued signal is discarded if the
    workspace changed before it is applied.
+   Canonical changes are determined by the Registry payload, **not directory
+   timestamps or SQLite sidecar activity**. The native poll and ACP use the same
+   filtering contract: only non-service Markdown files under `.pi/plans/` are
+   plan data; skill and agent packages include their authored scripts/assets
+   but skip hidden, temporary, backup, lock, log, cache, build and generated
+   paths. Examples excluded from Registry dirty detection and publication are
+   `.DS_Store`, `*.tmp`, `*.bak`, `*.lock`, `*.log`, `*~`, `.cache/`,
+   `node_modules/`, `__pycache__/`, `artifacts/`, `build/`, `dist/`,
+   SQLite `-wal`/`-shm`/`-journal` and unrelated `.pi` files. Agent notes with
+   no valid agent definition are not standalone Registry resources. The
+   unchanged backup-only plan scaffold is not a local Registry plan artifact.
+   SQLite task comparison remains a transaction-consistent **logical** hash of
+   rows, revisions, ordering and referenced blob content, capturing committed
+   WAL changes without hashing sidecar bytes. Unlinked task-attachment blobs
+   do not trigger sync. A canonical change is still detected by periodic
+   polling even when it originates from an agent or external editor.
+   Publishing a plan sends only canonical Markdown; pulling it updates the
+   canonical Markdown while preserving local backup/scratch files. A
+   scratch-only local plans folder without provenance must never delete a
+   different project state's remote plans.
 9. Dirty project-state writes are debounced for approximately 900 ms. Repeated
    writes to one artifact collapse into one push, while more than one dirty
    artifact collapses into one project operation. The automatic request is
@@ -117,7 +139,7 @@ Those portable markers are not written to the local project task file.
 14. Pix Desktop checks local `.pi` initialization independently from remote
     Registry configuration and ACP session readiness. When `.pi` is absent, the
     Registry panel offers **Initialize project Registry**. The local action
-    creates `.pi/tasks.jsonc` as an empty version-one task document plus
+    creates `.pi/tasks.sqlite` with schema v1 and WAL plus
     `.pi/plans/` and `.pi/task-attachments/`, then reloads project tasks and
     documents. Remote Registry setup remains a separate action.
 15. Saving a TODO or plan never creates a missing `.pi` directory. Those
@@ -182,23 +204,24 @@ Those portable markers are not written to the local project task file.
 
 ## Compatibility
 
-- Existing registry task files without `pix-task-attachment:` markers continue
-  to synchronize as legacy task files.
-- Legacy `file://` markers outside the local project's `.pi/task-attachments`
-  are preserved as-is and are not bundled. New Desktop-created task attachments
-  are project-owned, so normal new task state uses the portable bundle path.
-- JSONC comments/formatting are preserved except for attachment-marker rebasing.
+- There is no legacy `.pi/tasks.jsonc` or `.pi/tasks.d/` import, migration or
+  fallback during ordinary Registry operations. Such files and local migration
+  backups are ignored for dirty detection and not published; users retain
+  control of their original files.
+- SQLite schema v1 and canonical task attachments are the only supported
+  Registry task representation. Task descriptions remain plain text; no legacy
+  `file://` marker resolution or rebasing occurs.
 
 ## Invariants
 
 - Registry attachment names cannot escape the task-attachment directory.
-- Registry task attachments must be regular files; symbolic links are rejected.
-- Portable registry markers never become the persisted local task-marker form.
-- Attachment content participates in provenance hashing.
-- A tasks push removes stale remote bundled attachments atomically with the Git
-  commit that updates the task document.
+- Registry task attachments must be immutable SHA-256-named regular files;
+  symbolic links, hard links and mismatched hashes are rejected.
+- Task attachment references exist only in SQLite relations, not in text markers.
+- Referenced attachment content participates in provenance hashing. A task push
+  removes no-longer-referenced blobs from the remote Git artifact.
 - Every successful Desktop task mutation reaches the background sync coordinator
-  through the centralized task-document save path; failed local persistence never
+  through the SQLite task save path; failed local persistence never
   schedules a remote push.
 - Background project sync is coalesced to one in-flight Registry action. It does
   not force-push through provenance conflicts.
@@ -206,13 +229,14 @@ Those portable markers are not written to the local project task file.
   as Registry provenance, including referenced attachment bytes, so a completed
   background push can converge back to a clean local indicator.
 - Desktop project-state initialization is explicit and idempotent. Its marker is
-  the complete scaffold: a regular `.pi/tasks.jsonc` plus project-owned regular
+  the complete scaffold: a regular `.pi/tasks.sqlite` plus project-owned regular
   `.pi/plans/` and `.pi/task-attachments/` directories. A bare `.pi` directory
   or unrelated `.pi/pix.jsonc` is not initialized state. Existing task content
   is never overwritten, and `.pi` plus scaffold subdirectories must be regular
   project-owned directories rather than symbolic links escaping the workspace.
-- Initialization inspects an already-existing `tasks.jsonc` before accepting a
-  concurrent publish race: it must be a regular file canonically inside `.pi`.
+- Initialization inspects an already-existing `tasks.sqlite` before accepting a
+  concurrent publication race: it must be a regular file canonically inside `.pi`,
+  and its schema version must be compatible.
   An existing symbolic link, directory, or escaping target is an error, never
   an idempotent-success result.
 - The Registry panel reports the logical byte size of the current project-owned
@@ -226,9 +250,10 @@ Those portable markers are not written to the local project task file.
   starts a new inspection instead of leaving `Checking…` indefinitely.
 - Registry cleanup is allowlist-based and never resets project state. The
   canonical top-level project directories are `agents/`, `artifacts/`,
-  `plans/`, `search/`, `skills/`, `subagents/`, and `task-attachments/`.
+  `plans/`, `search/`, `skills/`, `subagents/`, `task-attachments/`,
+  plus ignored legacy `tasks.d/` (preserved but never read).
 - Cleanup preserves the canonical `agents/`, `plans/`, `search/`, `skills/`, and
-  `task-attachments/` trees, but removes every entry recursively inside
+  `task-attachments/` and ignored `tasks.d/` trees, but removes every entry recursively inside
   `.pi/artifacts/` and `.pi/subagents/` while leaving those two container
   directories in place.
 - `.pi/search/index.sqlite` is durable universal-search state, not disposable
@@ -238,8 +263,10 @@ Those portable markers are not written to the local project task file.
 - Any other regular top-level directory directly under `.pi/` is non-canonical
   and is removed recursively. Top-level regular files are allowlist-based too:
   `TODO.md`, `pi-tools-suite.jsonc`, `pix-desktop.jsonc`, `pix.jsonc`,
-  `qa_auth.jsonc`, `registry.json`, `tasks.jsonc`, `todo-plan.json`, and
-  `workspace.jsonc` are preserved; other ordinary top-level files (for example
+  `qa_auth.jsonc`, `registry.json`, `tasks.sqlite`, `tasks.sqlite-wal`,
+  `tasks.sqlite-shm`, `tasks.sqlite-journal`, `todo-plan.json`,
+  `workspace.jsonc`, and ignored legacy `tasks.jsonc` are preserved;
+  other ordinary top-level files (for example
   temporary receipt JSONs) are reclaimable. The existing cleanup of `.DS_Store`
   and stale Pix temporary files still applies, while fresh Pix temp files keep
   their stale-age protection.
@@ -261,15 +288,15 @@ Those portable markers are not written to the local project task file.
   TTL.
 - Desktop TODO and plan saves never bootstrap a missing `.pi`; explicit
   initialization is the only Desktop project-document path that creates it.
-  Task-document and task-attachment saves likewise require the complete
-  explicit-initialization scaffold.
+  The Desktop saved-task adapter requires a valid existing SQLite database;
+  user `/task add` can create one explicitly without bootstrapping Registry.
+  Task attachments require an existing task id and immutable blob store.
 - Markdown saves write and flush a temporary file through no-follow directory
   handles, then atomically replace the destination entry. A destination symlink
   installed before or during the save is replaced rather than followed.
-- Concurrent Desktop initializers use create-or-inspect directory operations and
-  publish the task skeleton only after it is fully written and flushed. A
-  competing initializer preserves the already-published task document; it never
-  observes or accepts a partially written final file.
+- Concurrent Desktop initializers use create-or-inspect directories and SQLite
+  transactions. A competing initializer preserves the existing database and
+  never replaces task rows.
 
 ## Related files
 

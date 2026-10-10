@@ -23,8 +23,8 @@ function result(testCase: EvalCase, response: AssistantMessage): CaseResult {
 
 test("corpus has positive/negative controls and every oracle satisfies its own visible-source rubric", () => {
 	validateCases(HEADS_UP_CASES);
-	assert.equal(HEADS_UP_CASES.length, 31);
-	assert.equal(HEADS_UP_CASES.filter((item) => item.expected.kind === "heads_up").length, 13);
+	assert.equal(HEADS_UP_CASES.length, 34);
+	assert.equal(HEADS_UP_CASES.filter((item) => item.expected.kind === "heads_up").length, 14);
 	for (const item of HEADS_UP_CASES) {
 		const scored = assess(item, reference(item));
 		assert.equal(scored.outcome, item.expected.kind === "none" ? "tn" : "tp", `${item.id}: ${scored.issues.join(", ")}`);
@@ -50,17 +50,36 @@ test("input uses production redaction/budget and never includes grading labels, 
 	assert.ok(JSON.parse(long.body).omitted > 0);
 });
 
+test("research-child controls preserve parent results and require both sides of a real verification conflict", () => {
+	for (const suffix of ["pass", "unknown", "failed"]) {
+		const item = HEADS_UP_CASES.find((entry) => entry.id === `research-child-parent-eval-${suffix}`)!;
+		const input = buildCaseInput(item);
+		const child = input.records.find((entry) => entry.kind === "delegated");
+		assert.ok(child); assert.match(child.text, /Research-only.*I did not run/s);
+		assert.equal(input.records.some((entry) => entry.id === "parent-run" && entry.kind === "tool"), suffix !== "unknown");
+		assert.ok(input.records.some((entry) => entry.id === "parent-summary" && entry.kind === "assistant"));
+		assert.equal(item.expected.kind, suffix === "failed" ? "heads_up" : "none");
+		if (suffix === "failed") {
+			assert.equal(assess(item, message({ kind: "none" })).outcome, "fn");
+			if (item.expected.kind !== "heads_up") throw new Error("Expected verification conflict");
+			for (const evidenceIds of [[child.id], ["parent-run"], ["parent-summary"]]) {
+				assert.equal(assess(item, message({ kind: "heads_up", notices: item.expected.reference.notices.map((card) => ({ ...card, evidenceIds })) })).outcome, "wrong_notice");
+			}
+		}
+	}
+});
+
 test("always-none cannot pass the eval and undefined precision is not reported as 100 percent", () => {
 	const summary = summarize(HEADS_UP_CASES.map((item) => result(item, message({ kind: "none" }))));
-	assert.equal(summary.counts.fn, 13); assert.equal(summary.counts.tn, 18);
+	assert.equal(summary.counts.fn, 14); assert.equal(summary.counts.tn, 20);
 	assert.equal(summary.recall, 0); assert.equal(summary.precisionProxy, null);
-	assert.equal(summary.passed, 18); assert.equal(summary.complete, true);
+	assert.equal(summary.passed, 20); assert.equal(summary.complete, true);
 });
 
 test("always-warning gets false positives; a wrong topic with real IDs is not a positive hit", () => {
 	const results = HEADS_UP_CASES.map((item) => result(item, message({ kind: "heads_up", notices: [{ id: null, title: "Add more tests", consequence: "It might be useful.", evidenceIds: [buildCaseInput(item).records[0]!.id] }] })));
 	const summary = summarize(results);
-	assert.equal(summary.counts.wrong_notice, 13); assert.equal(summary.counts.fp, 18);
+	assert.equal(summary.counts.wrong_notice, 14); assert.equal(summary.counts.fp, 20);
 	assert.equal(summary.precisionProxy, 0); assert.equal(summary.falsePositiveRate, 1);
 });
 

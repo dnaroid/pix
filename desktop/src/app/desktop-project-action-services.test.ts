@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+const native = vi.hoisted(() => ({ invoke: vi.fn().mockResolvedValue([]) }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: native.invoke }));
 import type { AcpClient } from "../lib/acp-client";
 import { emptyTranscript } from "../lib/transcript";
 import { createDesktopProjectActionServices } from "./desktop-project-action-services";
@@ -88,6 +90,9 @@ describe("desktop project task session activation", () => {
     });
 
     await services.actions.runTask(task);
+    expect(native.invoke).toHaveBeenCalledWith("read_project_task_attachments", {
+      workspace: "/project", id: "task-1",
+    });
 
     expect(draft.deactivate).toHaveBeenCalledOnce();
     expect(draft.open).toBe(true);

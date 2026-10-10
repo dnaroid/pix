@@ -5,6 +5,8 @@ import type { Attachment } from "../lib/attachments";
 import { commandPickerState, type CommandPickerState } from "../lib/command-interactions";
 import { parseDesktopSlashCommand } from "../lib/slash-commands";
 import { parseDesktopTerminalCommand } from "../lib/terminal-commands";
+import { sandboxSubmissionPrompt } from "../lib/html-sandbox";
+import type { HtmlSandboxViewport } from "../lib/html-sandbox-layout";
 import { buildPromptPayload } from "./prompt-payload";
 import type { createPromptRuntime } from "./prompt-runtime.svelte";
 
@@ -61,6 +63,7 @@ type PromptSubmitOptions = {
     draftGeneration: number,
   ) => Promise<void>;
   imagePromptSupported: () => boolean;
+  htmlSandboxViewport?: () => HtmlSandboxViewport | undefined;
   invalidateAttachmentDraft: () => void;
   nextLocalMessageId: () => string;
   appendUserMessage: (text: string, id: string, attachments: readonly Attachment[]) => () => void;
@@ -74,10 +77,53 @@ type PromptSubmitOptions = {
 
 export function createPromptSubmit(options: PromptSubmitOptions) {
   const pendingSessionSubmits = new Set<string>();
+  const pendingSandboxSubmits = new Set<string>();
   type PreparedPrompt = ReturnType<typeof buildPromptPayload> & {
     transcriptMessageId: string;
     rollback?: () => void;
   };
+
+  /**
+   * An explicit user action inside a running HTML sandbox can send data back to
+   * the same session. Never touch the composer draft or its attachments.
+   */
+  async function submitHtmlSandbox(
+    sessionId: string,
+    messageId: string,
+    payload: unknown,
+  ): Promise<"sent" | "queued"> {
+    const requestClient = options.client();
+    if (!requestClient || sessionId !== options.activeSessionId()
+      || options.sessionMutationRunning() || options.sessionHistoryLoading()
+      || !options.sessionRuntimeReady(sessionId)
+      || pendingSessionSubmits.has(sessionId) || pendingSandboxSubmits.has(sessionId)) {
+      throw new Error("This conversation is not ready for a prototype submission.");
+    }
+    const text = sandboxSubmissionPrompt(messageId, payload);
+    const blocks = [{ type: "text" as const, text }];
+    pendingSandboxSubmits.add(sessionId);
+    try {
+      if (options.promptRunning(sessionId) || options.prompts.hasPromptRun(sessionId)) {
+        await requestClient.queueMessage(sessionId, blocks, text);
+        if (requestClient !== options.client() || sessionId !== options.activeSessionId()) {
+          throw new Error("The conversation changed while queueing the submission.");
+        }
+        void options.prompts.refreshQueueState(sessionId);
+        return "queued";
+      }
+      // No await between the state check and runPromptRequest: that runtime
+      // claims the session synchronously, preventing competing new prompt runs.
+      const transcriptMessageId = options.nextLocalMessageId();
+      options.appendUserMessage(text, transcriptMessageId, []);
+      void options.scrollToLatest();
+      void options.prompts.runPromptRequest(requestClient, sessionId, blocks, [], transcriptMessageId)
+        .catch(options.reportError);
+      void options.refreshSessions();
+      return "sent";
+    } finally {
+      pendingSandboxSubmits.delete(sessionId);
+    }
+  }
 
   async function submit(): Promise<void> {
     if (options.sessionMutationRunning()) return;
@@ -229,7 +275,7 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
       if (!options.draftSessionTabActive()) return;
       if (!terminalCommand) {
         try {
-          const payload = buildPromptPayload(text, attachments, options.imagePromptSupported());
+          const payload = buildPromptPayload(text, attachments, options.imagePromptSupported(), options.htmlSandboxViewport?.());
           if (!options.beginOptimisticDraftSubmit(text, attachments)) return;
           options.setErrorMessage(null);
           options.setPromptText("");
@@ -265,7 +311,7 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
         pendingSessionSubmits.delete(sessionId);
       };
       try {
-        const payload = buildPromptPayload(text, attachments, options.imagePromptSupported());
+        const payload = buildPromptPayload(text, attachments, options.imagePromptSupported(), options.htmlSandboxViewport?.());
         pendingSessionSubmits.add(sessionId);
         pendingStartup = true;
         options.setErrorMessage(null);
@@ -345,7 +391,7 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
     options.setErrorMessage(null);
     try {
       if (!preparedPrompt) {
-        const payload = buildPromptPayload(text, attachments, options.imagePromptSupported());
+        const payload = buildPromptPayload(text, attachments, options.imagePromptSupported(), options.htmlSandboxViewport?.());
         if (
           sessionId !== options.activeSessionId()
           || draftKey !== options.attachmentDraftKey()
@@ -377,5 +423,5 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
     if (reloadAfterSlash && sessionId === options.activeSessionId()) await options.reloadResources({ echo: false });
   }
 
-  return { submit };
+  return { submit, submitHtmlSandbox };
 }

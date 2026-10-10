@@ -33,6 +33,14 @@ test("rejects API and malformed auth", () => {
     assert.throws(() => parseAuthStatus(JSON.stringify({ loggedIn: true, authMethod: "apiKey" })), /subscription/);
     assert.throws(() => parseAuthStatus(JSON.stringify({ loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty", subscriptionType: "free" })), /Unsupported/);
     assert.throws(() => parseAuthStatus("not json"), /invalid/);
+    assert.throws(() => parseAuthStatus("null"), /invalid/);
+    assert.throws(() => parseAuthStatus(JSON.stringify({ ...ELIGIBLE_CLAUDE_AUTH, subscriptionType: 42 })), /subscription/);
+    assert.throws(() => parseAuthStatus(JSON.stringify({ loggedIn: false, email: "private@example.test" })), (error) => {
+        assert.equal(error.code, "auth_required");
+        assert.match(error.message, /claude auth login.*first-party claude.ai subscription.*\/reload/);
+        assert.equal(error.message.includes("private@example.test"), false);
+        return true;
+    });
 });
 test("builds an allowlisted Claude environment", () => {
     const forbidden = ["ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "AWS_ACCESS_KEY_ID", "CLAUDE_CODE_OAUTH_TOKEN"];
@@ -206,6 +214,38 @@ else process.stdout.write(${JSON.stringify(CLAUDE_HEADLESS_HELP)});
     }
     finally {
         if (originalClaude === undefined) delete process.env.PI_CLAUDE_CODE_PROVIDER_PATH; else process.env.PI_CLAUDE_CODE_PROVIDER_PATH = originalClaude;
+        await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+});
+
+test("preflight recognizes only explicit logged-out status on auth exit 1", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "pi-claude-code-provider-auth-exit-"));
+    const claude = join(directory, process.platform === "win32" ? "claude.cjs" : "claude");
+    const original = process.env.PI_CLAUDE_CODE_PROVIDER_PATH;
+    process.env.PI_CLAUDE_CODE_PROVIDER_PATH = claude;
+    try {
+        for (const [output, exitCode, expectedCode] of [
+            [JSON.stringify({ loggedIn: false, authMethod: "none", apiProvider: "firstParty", email: "private@example.test" }), 1, "auth_required"],
+            ["not json", 1, "preflight_failed"],
+            ["null", 1, "preflight_failed"],
+            [ELIGIBLE_CLAUDE_AUTH_JSON, 1, "preflight_failed"],
+            [JSON.stringify({ loggedIn: false }), 2, "preflight_failed"],
+        ]) {
+            await writeFile(claude, nodeFixtureSource(`
+if (process.argv.includes("--version")) process.stdout.write(${JSON.stringify(`${FIXTURE_CLAUDE_VERSION}\n`)});
+else if (process.argv[2] === "auth") { require("node:fs").writeSync(1, ${JSON.stringify(output)}); process.exit(${exitCode}); }
+else process.stdout.write(${JSON.stringify(CLAUDE_HEADLESS_HELP)});
+`), { mode: 0o700 });
+            await assert.rejects(inspectClaudeInstallation(), (error) => {
+                assert.equal(error.code, expectedCode);
+                assert.equal(error.message.includes("private@example.test"), false);
+                if (expectedCode === "auth_required") assert.match(error.message, /claude auth login.*\/reload/);
+                return true;
+            });
+        }
+    } finally {
+        if (original === undefined) delete process.env.PI_CLAUDE_CODE_PROVIDER_PATH;
+        else process.env.PI_CLAUDE_CODE_PROVIDER_PATH = original;
         await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
 });

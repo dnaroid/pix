@@ -186,7 +186,46 @@ query** is sent to OpenRouter for this decision; project files, history,
 indexed snippets and workspace paths are not uploaded by the classifier.
 Provider charges may apply. If the key or Jev is unavailable, Auto falls back
 to regular Search. This is separate from the `modelRouting` Auto model picker and
-from semantic settings/session-title consent preferences.
+from semantic settings/session-title/task consent preferences.
+
+### Desktop Universal Search: task embeddings
+
+Task search is always available locally from `.pi/tasks.sqlite`, including
+task titles, descriptions, parent/related tasks, file and artifact paths,
+attachment names, status, priority, linked session and assigned model.
+Neither a saved OpenRouter key nor an IDX index is required for those matches.
+
+Under Desktop Settings → Search, `search.tasksSemanticEnabled` is a separate,
+**off-by-default** opt-in. When enabled, an explicit Tasks search can send
+project-task **titles and descriptions** (up to 2,000 characters per task) and
+the query to OpenRouter for semantic embeddings, which may incur charges.
+Other task fields, filenames and attachment contents are excluded from task
+embedding inputs. The first search indexes up to 64 new task texts; later
+searches continue the index. The durable cache is kept under
+`.pi/search/index.sqlite`, not in the authoritative task database. Task status,
+priority, links and model changes do not trigger re-embedding when the title
+and description remain unchanged. Disabling stops future uploads but does not
+delete previously paid local vectors. RAG source/model calls have their own
+separate disclosure and consent.
+
+The agent/TUI `project_search` also honors these same user-global opt-ins:
+it can **create missing task-title/description and explicitly saved session-name
+vectors on demand** inside `.pi/search/index.sqlite`, the same cache Desktop
+uses. An opted-in agent search sends those selected texts (bounded task input
+to 2,000 characters) and the query to the pinned OpenRouter model, which may
+incur costs; it never embeds conversation transcript bodies, task attachments,
+task links, session identifiers or files independently. Batches are reused
+across Desktop and agents under SQLite writer transactions. Changing a task's
+status or model alone never triggers a new task vector, and deleting the last
+task cleans the corresponding index only on an explicit opted-in Tasks search.
+Selecting Commits with `hybrid` or `semantic` similarly fills missing current
+`HEAD` commit vectors using the project's configured IDX embedding model and
+provider; **commit titles, authors and messages may be transmitted**. Each
+source has an upper bound of 256 new vectors per request and a 40-second
+indexing budget; repeat searches continue when a large corpus remains. The
+full federated search waits up to 60 seconds and returns one merged answer.
+Use `indexMode: "lexical"` to prevent all embedding and index writes even when
+the consent flags or IDX embedding configuration are present.
 
 RAG retrieves the selected sources from the existing search indexes, reads
 bounded original excerpts as needed and streams a Markdown answer **inside**

@@ -368,7 +368,12 @@ function formatRateLimitNotice(notice: RateLimitNotice): string {
 }
 
 function registerUnavailableNotice(pi: ExtensionAPI, reason: string): void {
+  let notifiedSessionId: string | undefined;
   pi.on("session_start", (_event, ctx) => {
+    // RPC can bind extensions twice for the same session.
+    const sessionId = ctx.sessionManager.getSessionId();
+    if (notifiedSessionId === sessionId) return;
+    notifiedSessionId = sessionId;
     ctx.ui.notify(
       `${NOTICE_PREFIX} Claude Code provider is unavailable: ${reason}. Run /pi-claude-code-provider-doctor, then /reload after correcting the problem.`,
       "error",

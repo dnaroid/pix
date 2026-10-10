@@ -7,7 +7,8 @@ import { clearProjectProvenanceEntries, readProvenance, recordProjectProvenance 
 import { hasTrackableFiles, pathExists, projectArtifactDisplayName, projectArtifactLocalPath, projectArtifactRegistryPath } from "./paths.js";
 import { hashProjectArtifactLocal, hashProjectArtifactRemote, replaceLocalTaskBundle, replaceRemoteTaskBundle } from "./task-bundle.js";
 import { promises as fs } from "node:fs";
-import { replaceResource } from "./resource-files.js";
+import { replaceLocalPlans, replaceResource } from "./resource-files.js";
+import { localTasksExist } from "./task-database.js";
 
 export async function pushProjectState(executor: RegistryExecutor, ctx: RegistryContext, scope: ProjectScope, silent = false): Promise<void> {
 	const runtime = loadRuntimeConfig(ctx.cwd);
@@ -19,13 +20,16 @@ export async function pushProjectState(executor: RegistryExecutor, ctx: Registry
 	const alreadyAbsent: ProjectArtifact[] = [];
 	for (const artifact of requested) {
 		const localPath = projectArtifactLocalPath(ctx.cwd, artifact);
-		if (await pathExists(localPath)) {
+		if (artifact === "tasks" ? await localTasksExist(ctx.cwd) : await pathExists(localPath)) {
 			if (artifact === "plans" && !(await hasTrackableFiles(localPath))) {
 				const tracked = provenance.projectResources[artifact];
 				if (tracked && (tracked.remote !== runtime.remote || tracked.branch !== runtime.branch || tracked.projectKey !== projectKey)) {
 					throw new Error(`${artifact} state is tracked under another registry/branch/project key. Check Registry before pushing.`);
 				}
-				if (await pathExists(projectArtifactRegistryPath(runtime.cacheDir, projectKey, artifact))) {
+				// Only a previously tracked plan set can be deleted by an empty
+				// canonical plan directory. A scratch-only scaffold must not
+				// delete an unrelated remote publication on background sync.
+				if (tracked && await pathExists(projectArtifactRegistryPath(runtime.cacheDir, projectKey, artifact))) {
 					targets.push({ artifact, deleteRemote: true });
 				} else {
 					alreadyAbsent.push(artifact);
@@ -85,8 +89,8 @@ export async function pushProjectState(executor: RegistryExecutor, ctx: Registry
 		const localPath = projectArtifactLocalPath(ctx.cwd, artifact);
 		const remotePath = projectArtifactRegistryPath(runtime.cacheDir, projectKey, artifact);
 		if (deleteRemote) await fs.rm(remotePath, { recursive: true, force: true });
-		else if (artifact === "tasks") await replaceRemoteTaskBundle(ctx.cwd, runtime, projectKey);
-		else await replaceResource(localPath, remotePath);
+		else if (artifact === "tasks") await replaceRemoteTaskBundle(ctx.cwd, runtime, projectKey, localHashes.get(artifact));
+		else await replaceResource(localPath, remotePath, artifact === "plans" ? "plans" : "resource");
 	}
 	const projectRel = `${REGISTRY_PROJECTS_DIR}/${projectKey}`;
 	await runGit(executor, runtime.cacheDir, ["add", "-A", "--", projectRel]);
@@ -132,6 +136,7 @@ export async function pullProjectState(executor: RegistryExecutor, ctx: Registry
 
 	const provenance = await readProvenance(ctx);
 	const metadata = new Map<ProjectArtifact, { remoteRevision: string; remoteHash: string }>();
+	const observedLocalHashes = new Map<ProjectArtifact, string>();
 	const overwriteConflicts: ProjectArtifact[] = [];
 	for (const artifact of targets) {
 		const localPath = projectArtifactLocalPath(ctx.cwd, artifact);
@@ -142,8 +147,9 @@ export async function pullProjectState(executor: RegistryExecutor, ctx: Registry
 		const remoteRevision = await projectArtifactRevision(executor, runtime, projectKey, artifact);
 		if (!remoteRevision) throw new Error(`Cannot determine registry revision for project ${artifact} state.`);
 		const remoteHash = await hashProjectArtifactRemote(runtime, projectKey, artifact);
-		if (await pathExists(localPath)) {
+		if (artifact === "tasks" ? await localTasksExist(ctx.cwd) : await pathExists(localPath)) {
 			const localHash = await hashProjectArtifactLocal(ctx.cwd, artifact);
+			observedLocalHashes.set(artifact, localHash);
 			if (tracked && localHash !== tracked.hash) {
 				throw new Error(`Project ${artifact} state has local changes. Push or resolve them before pulling.`);
 			}
@@ -165,7 +171,9 @@ export async function pullProjectState(executor: RegistryExecutor, ctx: Registry
 	for (const artifact of targets) {
 		const localPath = projectArtifactLocalPath(ctx.cwd, artifact);
 		const remotePath = projectArtifactRegistryPath(runtime.cacheDir, projectKey, artifact);
-		if (artifact === "tasks") await replaceLocalTaskBundle(ctx.cwd, runtime, projectKey);
+		if (artifact === "tasks") await replaceLocalTaskBundle(ctx.cwd, runtime, projectKey,
+			observedLocalHashes.get(artifact), metadata.get(artifact)?.remoteHash);
+		else if (artifact === "plans") await replaceLocalPlans(remotePath, localPath);
 		else await replaceResource(remotePath, localPath);
 		const item = metadata.get(artifact)!;
 		const localHash = await hashProjectArtifactLocal(ctx.cwd, artifact);

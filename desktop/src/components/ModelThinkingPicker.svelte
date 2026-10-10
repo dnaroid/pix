@@ -4,6 +4,7 @@
   import { onMount, tick, untrack } from "svelte";
   import type { SessionConfigOption } from "@agentclientprotocol/sdk";
   import ModelProviderIcon from "./ModelProviderIcon.svelte";
+  import FrontierModelBadge from "./FrontierModelBadge.svelte";
   import { fuzzySearch } from "../lib/fuzzy";
   import { activateModelPickerPopover, modelPickerPopoverPosition } from "../lib/model-picker-popover";
   import { pickerModelIndex, nextPickerThinking } from "../lib/model-picker-navigation";
@@ -29,6 +30,7 @@
     restoreFocus,
     anchor,
     selectionDescription = "Choose both, then apply them together to this session.",
+    applyUnchanged = false,
   }: {
     configOptions: readonly SessionConfigOption[];
     visibleModelRefs?: readonly string[];
@@ -42,6 +44,8 @@
     restoreFocus?: () => void;
     anchor?: HTMLButtonElement;
     selectionDescription?: string;
+    /** Assignment pickers must persist a choice even when it matches the current session. */
+    applyUnchanged?: boolean;
   } = $props();
 
   const config = $derived(modelThinkingConfigState(configOptions));
@@ -299,8 +303,10 @@
   async function applySelection(): Promise<void> {
     if (!selectedModel || disabled || applying) return;
     if (!dirty) {
-      confirmSelection();
-      return;
+      if (!applyUnchanged) {
+        confirmSelection();
+        return;
+      }
     }
     applying = true;
     applyError = "";
@@ -427,7 +433,10 @@
           <ModelProviderIcon provider={model.provider} />
           <span class="min-w-0">
             <strong class={["block truncate font-mono text-xs font-medium", modelDisplayToneClass(model.tone)]}>{model.ref}</strong>
-            <small class="mt-0.5 block truncate text-xs text-muted-foreground">{model.name}</small>
+            <small class="mt-0.5 flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+              <span class="truncate">{model.name}</span>
+              <FrontierModelBadge modelRef={model.ref} />
+            </small>
           </span>
           {#if model.current || (defaultSelection?.kind === "auto" && model.ref === AUTO_MODEL_REF) || (defaultSelection?.kind === "model" && defaultSelection.modelRef === model.ref)}
             <span class="shrink-0 text-xs font-medium text-muted-foreground">

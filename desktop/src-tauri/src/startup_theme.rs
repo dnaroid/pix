@@ -1,7 +1,25 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{
-    webview::PageLoadEvent, window::Color, Manager, Theme, WebviewWindow, WebviewWindowBuilder,
+    webview::PageLoadEvent, window::Color, Manager, Theme, Url, WebviewWindow, WebviewWindowBuilder,
 };
+
+/// WKNavigationDelegate observes both top-level AND iframe navigations. The
+/// HTML sandbox cannot rely on guest CSP alone to block `window.location`
+/// requests: even "default-src 'none'" does not stop self-navigation.
+/// Keep the workbench at its own origin and deny external navigations before
+/// WebKit issues the request. Normal external links use the OS opener plugin.
+fn allow_workbench_navigation(url: &Url) -> bool {
+    match url.scheme() {
+        "about" => matches!(url.as_str(), "about:blank" | "about:srcdoc"),
+        "tauri" => url.host_str() == Some("localhost"),
+        // The macOS dev workbench is served by Vite on this configured port.
+        "http" if cfg!(debug_assertions) => {
+            matches!(url.host_str(), Some("127.0.0.1" | "localhost"))
+                && url.port_or_known_default() == Some(1420)
+        }
+        _ => false,
+    }
+}
 
 /// WKWebView's unpainted surface is white even when the native window is dark:
 /// Tauri's background-color API does not cover the macOS webview layer.
@@ -22,6 +40,7 @@ pub(crate) fn build(
     };
     let window = builder
         .visible(false)
+        .on_navigation(allow_workbench_navigation)
         .on_page_load(move |window, payload| {
             if claim_initial_reveal(payload.event(), visible, &revealed) {
                 apply_to(&window);
@@ -109,5 +128,26 @@ mod tests {
             false,
             &revealed
         ));
+    }
+
+    #[test]
+    fn webview_navigation_blocks_external_urls_even_in_guest_frames() {
+        for denied in [
+            "https://example.com/leak?payload=secret",
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "data:text/html,hello",
+            "http://127.0.0.1:11111/leak",
+            "https://tauri.localhost",
+        ] {
+            assert!(!allow_workbench_navigation(&Url::parse(denied).unwrap()), "{denied}");
+        }
+        for allowed in ["about:blank", "about:srcdoc", "tauri://localhost/index.html"] {
+            assert!(allow_workbench_navigation(&Url::parse(allowed).unwrap()), "{allowed}");
+        }
+        assert_eq!(
+            allow_workbench_navigation(&Url::parse("http://127.0.0.1:1420/index.html").unwrap()),
+            cfg!(debug_assertions)
+        );
     }
 }

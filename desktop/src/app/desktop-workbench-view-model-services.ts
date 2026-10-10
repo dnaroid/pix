@@ -22,6 +22,7 @@ export function createDesktopWorkbenchViewModelServices(
       errors: options.errors,
       sessionStartOpen: () => options.presentation.sessionStartOpen,
       sessionStartCandidates: () => options.presentation.sessionStartCandidates,
+      searchClient: options.client,
       sessionTabs: options.transitions.sessionTabs,
     },
     conversation: {

@@ -34,6 +34,24 @@ capability errors), still produce the existing startup error. Install/configure
 Claude and reload/restart to activate the provider; there is no background
 installation or automatic reprobe.
 
+An installed CLI whose auth status explicitly says `loggedIn: false` reports
+that Claude Code is not logged in and asks the user to run `claude auth login`
+with an eligible first-party subscription, then `/reload`. Claude's exit 1 for
+this structured auth result is classified as `auth_required`, not an opaque
+command failure. Other nonzero exits, malformed output and process failures
+remain preflight errors; a nonzero exit never enables the provider. Auth status
+payloads/identity fields are not copied into the login notice. The unavailable
+notice is emitted once for consecutive startup bindings of the same session.
+
+Pix Desktop's ACP bridge delivers startup and background extension `warning`
+and `error` notifications as visible system rows (`pix-system:` message ids),
+without requiring an active prompt. Slash-command feedback still delivers all
+levels; background informational notifications stay quiet. This is conversation
+feedback, not an OS notification. Notices are live feedback, not persisted Pi
+history.
+Desktop retains early startup rows when a draft becomes a real session, as
+specified in [draft optimistic submit](desktop-draft-optimistic-submit.md).
+
 Before enabling the suite, `scripts/migrate-claude-provider.mjs` changes
 only legacy provider package declarations to `extensions: []` and removes
 explicit legacy extension paths. It preserves package files, model selections,
@@ -130,6 +148,7 @@ is attempted if native input is rejected.
 - `scripts/sync-pi-tools-suite.mjs`
 - `src/app/runtime.ts`
 - `acp/src/acp/draft-model-runtime.ts`
+- `acp/src/acp/pix-acp-agent.ts`
 
 ## Tests
 
@@ -140,6 +159,7 @@ is attempted if native input is rejected.
 - `external/pi-tools-suite/test/async-subagents/provider-offline.test.ts`
 - `tests/claude-provider-migration.test.ts`
 - `tests/claude-provider-registration.test.ts`
+- `acp/test/agent.test.ts`
 
 ## Verification
 

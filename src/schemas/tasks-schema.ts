@@ -1,10 +1,11 @@
-/** JSON Schema for project-scoped Desktop tasks stored in <cwd>/.pi/tasks.jsonc. */
+/** JSON Schema for project-scoped tasks stored as payloads in <cwd>/.pi/tasks.sqlite. */
 import { Static, Type } from "typebox";
 
 const TaskType = Type.Union([
 	Type.Literal("bug"),
 	Type.Literal("feature"),
 	Type.Literal("improvement"),
+	Type.Literal("idea"),
 ]);
 
 const TaskStatus = Type.Union([
@@ -12,6 +13,7 @@ const TaskStatus = Type.Union([
 	Type.Literal("todo"),
 	Type.Literal("in-progress"),
 	Type.Literal("done"),
+	Type.Literal("failed"),
 ]);
 
 const TaskPriority = Type.Union([
@@ -30,6 +32,17 @@ const ProjectTask = Type.Object(
 		status: TaskStatus,
 		priority: TaskPriority,
 		sessionId: Type.Optional(Type.String({ minLength: 1, maxLength: 512, description: "Optional Pi session associated with this task." })),
+		links: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 1024 }), { maxItems: 50, description: "Optional project-relative paths to files/artifacts or http(s) URLs." })),
+		relatedTaskIds: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 128 }), {
+			maxItems: 50,
+			description: "Optional references to other existing project tasks; duplicates and self links are prohibited.",
+		})),
+		parentId: Type.Optional(Type.String({ minLength: 1, maxLength: 128,
+			description: "Optional id of a parent task in this project; cycles and dangling references are prohibited." })),
+		epic: Type.Optional(Type.Boolean({ description: "Top-level epic marker (cannot be combined with parentId)." })),
+		modelRef: Type.Optional(Type.String({ minLength: 3, maxLength: 256,
+			pattern: "^[^\\s/]+/[^\\s/]+(?:/[^\\s]+)*(?::(?:off|minimal|low|medium|high|xhigh|max))?$",
+			description: "Optional provider/model[:thinking] override for new task sessions." })),
 		createdAt: Type.String({ format: "date-time", description: "RFC 3339 creation timestamp." }),
 		updatedAt: Type.String({ format: "date-time", description: "RFC 3339 last-update timestamp." }),
 	},
@@ -46,7 +59,7 @@ export const ProjectTasksSchema = Type.Object(
 		$id: "https://unpkg.com/pi-ui-extend/schemas/tasks.json",
 		$schema: "https://json-schema.org/draft-07/schema#",
 		title: "Pix Project Tasks",
-		description: "Project-scoped task document stored in <cwd>/.pi/tasks.jsonc.",
+		description: "Project-scoped task view backed by <cwd>/.pi/tasks.sqlite.",
 		additionalProperties: false,
 	},
 );

@@ -49,7 +49,16 @@ export function parseAuthStatus(stdout: string): ClaudeSubscriptionType {
   } catch {
     throw new ClaudeCodeError("auth_invalid", "Claude Code returned invalid authentication status JSON");
   }
-  const subscription = status.subscriptionType?.toLowerCase();
+  if (!status || typeof status !== "object") {
+    throw new ClaudeCodeError("auth_invalid", "Claude Code returned invalid authentication status JSON");
+  }
+  if (status.loggedIn === false) {
+    throw new ClaudeCodeError(
+      "auth_required",
+      "Claude Code is not logged in. Run `claude auth login` with a first-party claude.ai subscription, then /reload",
+    );
+  }
+  const subscription = typeof status.subscriptionType === "string" ? status.subscriptionType.toLowerCase() : undefined;
   if (!status.loggedIn || status.authMethod !== "claude.ai" || status.apiProvider !== "firstParty" || !subscription) {
     throw new ClaudeCodeError(
       "auth_ineligible",
@@ -77,7 +86,7 @@ export async function inspectClaudeInstallation(): Promise<ClaudeInstallation> {
   try {
     const [{ stdout: versionOutput }, { stdout: authOutput }, { stdout: helpOutput }] = await Promise.all([
       execClaudeFile(executable, ["--version"]),
-      execClaudeFile(executable, ["auth", "status"]),
+      execClaudeAuthStatus(executable),
       execClaudeFile(executable, ["--help"]),
     ]);
     const version = versionOutput.trim().match(/\d+\.\d+\.\d+/)?.[0];
@@ -95,6 +104,25 @@ export async function inspectClaudeInstallation(): Promise<ClaudeInstallation> {
       throw new ClaudeCodeError("executable_missing", `Claude Code executable was not found: ${executable}`);
     }
     throw new ClaudeCodeError("preflight_failed", `Claude Code preflight failed: ${cause.message}`);
+  }
+}
+
+async function execClaudeAuthStatus(executable: string): Promise<{ stdout: string }> {
+  try {
+    return await execClaudeFile(executable, ["auth", "status"]);
+  } catch (error) {
+    // Claude exits 1 for loggedIn:false. Only that explicit structured result
+    // is a login failure; malformed output, timeouts and other failures remain
+    // preflight errors. Never surface the raw auth payload (which may hold PII).
+    const cause = error as { code?: unknown; killed?: boolean; signal?: unknown; stdout?: unknown };
+    if (cause.code === 1 && !cause.killed && !cause.signal && typeof cause.stdout === "string") {
+      try {
+        parseAuthStatus(cause.stdout);
+      } catch (authError) {
+        if (authError instanceof ClaudeCodeError && authError.code === "auth_required") throw authError;
+      }
+    }
+    throw error;
   }
 }
 

@@ -2,11 +2,13 @@
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import Copy from "@lucide/svelte/icons/copy";
   import type { Attachment } from "../lib/attachments";
+  import { splitHtmlSandboxSegments } from "../lib/html-sandbox";
   import { renderMarkdown } from "../lib/markdown";
   import type { ProjectFileLineRange } from "../lib/project-files";
   import { createMarkdownContentAction } from "./markdown-content-action";
   import { createMarkdownCodeCopyAction } from "./markdown-code-copy-action";
   import { createMarkdownLinkAction } from "./markdown-link-action";
+  import HtmlSandbox from "./HtmlSandbox.svelte";
 
   let {
     text,
@@ -15,6 +17,8 @@
     fitTables = false,
     remoteImages = false,
     headingAnchors = false,
+    enableHtmlSandbox = false,
+    onHtmlSandboxSubmit,
     onValidateProjectFile,
     onValidateLocalFile,
     onOpenProjectFile,
@@ -28,6 +32,8 @@
     fitTables?: boolean;
     remoteImages?: boolean;
     headingAnchors?: boolean;
+    enableHtmlSandbox?: boolean;
+    onHtmlSandboxSubmit?: (payload: unknown) => Promise<"sent" | "queued">;
     onValidateProjectFile?: (path: string) => Promise<boolean>;
     onValidateLocalFile?: (path: string) => Promise<boolean>;
     onOpenProjectFile?: (path: string, range?: ProjectFileLineRange) => void | Promise<void>;
@@ -35,7 +41,9 @@
     onOpenLocalFile?: (path: string) => void | Promise<void>;
     onResolveLocalMedia?: (path: string) => Promise<Attachment | undefined>;
   } = $props();
-  let html = $derived(renderMarkdown(text, { remoteImages, headingAnchors }));
+  let segments = $derived(enableHtmlSandbox && onHtmlSandboxSubmit
+    ? splitHtmlSandboxSegments(text)
+    : [{ type: "markdown" as const, text }]);
   let externalLinkIconTemplate: HTMLSpanElement | undefined;
   let copyIconTemplate: HTMLSpanElement | undefined;
   const codeCopy = createMarkdownCodeCopyAction(() => copyIconTemplate);
@@ -58,14 +66,23 @@
 <span class="external-link-icon-template" aria-hidden="true" bind:this={copyIconTemplate}>
   <Copy size={14} strokeWidth={2} />
 </span>
-<div
-  class={["markdown-text", compact && "compact", dense && "dense", fitTables && "fit-tables"]}
-  use:linkClicks
-  use:markdownContent={html}
-  use:codeCopy={html}
->
-  {@html html}
-</div>
+{#each segments as segment, index (index)}
+  {#if segment.type === "sandbox"}
+    {#if onHtmlSandboxSubmit}
+      <HtmlSandbox source={segment.html} onSubmit={onHtmlSandboxSubmit} />
+    {/if}
+  {:else}
+    {@const html = renderMarkdown(segment.text, { remoteImages, headingAnchors })}
+    <div
+      class={["markdown-text", compact && "compact", dense && "dense", fitTables && "fit-tables"]}
+      use:linkClicks
+      use:markdownContent={html}
+      use:codeCopy={html}
+    >
+      {@html html}
+    </div>
+  {/if}
+{/each}
 
 <style>
   .markdown-text {

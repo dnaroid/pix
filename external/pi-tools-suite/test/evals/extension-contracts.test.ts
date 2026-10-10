@@ -102,6 +102,7 @@ function allModelFacingToolNames(): string[] {
 	add(Object.values(asyncSubagentToolDescriptions(false)));
 	add(REPO_DISCOVERY_TOOLS);
 	names.add("project_search");
+	names.add("project_tasks");
 	add([TODO_TOOL_DESCRIPTION, SESSION_TOOL_DESCRIPTION, COMPRESS_TOOL_DESCRIPTION]);
 	add(Object.values(WEB_SEARCH_TOOL_DESCRIPTIONS));
 	add(Object.values(claudeAliasToolDescriptions(false)));

@@ -118,6 +118,9 @@ export class SearchDialogController {
 
 export function searchStatusLabel(status: SearchStatus | undefined): string {
   if (!status) return "Search status unavailable";
+  if (status.tasksSemanticEnabled && status.keyAvailable) {
+    return "Semantic task search enabled · task titles/descriptions require separate consent";
+  }
   if (status.keyAvailable && status.enabled && status.sessionTitlesEnabled) {
     return "Semantic settings + session-title search enabled · history stays local";
   }
@@ -127,7 +130,7 @@ export function searchStatusLabel(status: SearchStatus | undefined): string {
   if (status.enabled && status.keyAvailable) {
     return "Semantic settings search enabled · session titles require separate opt-in";
   }
-  if (status.enabled || status.sessionTitlesEnabled) {
+  if (status.enabled || status.sessionTitlesEnabled || status.tasksSemanticEnabled) {
     return "Semantic search enabled · OpenRouter key unavailable; local search remains available";
   }
   return "Local search · semantic search is opt-in";

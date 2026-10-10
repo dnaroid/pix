@@ -14,7 +14,7 @@ export const REGISTRY_PROJECTS_DIR = "projects";
 
 export const SKILL_FILE = "SKILL.md";
 
-export const PROJECT_TASKS_FILE = "tasks.jsonc";
+export const PROJECT_TASKS_FILE = "tasks.sqlite";
 
 export const PROJECT_TASK_ATTACHMENTS_DIR = "task-attachments";
 
@@ -37,6 +37,28 @@ export const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 export const SAFE_BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 
 export const SKIP_NAMES = new Set([".DS_Store"]);
+
+/** Registry payloads contain authored project content, never generated scratch.
+ * Keep this identical to Desktop's native Registry indicator filter.
+ * A skill/agent package itself is canonical; only its non-service entries count.
+ */
+const SERVICE_DIRECTORIES = new Set(["node_modules", "__pycache__", "artifacts", "cache", "tmp", "temp", "coverage", "build", "dist", "out", "target", "venv"]);
+const SERVICE_FILENAMES = new Set(["thumbs.db", "desktop.ini"]);
+
+export function canonicalRegistryEntryName(name: string): boolean {
+	return Boolean(name)
+		&& !name.startsWith(".")
+		&& !name.endsWith("~")
+		&& !/\.(?:tmp|temp|bak|backup|lock|swp|swo|orig|log|pid|pyc|pyo)$/i.test(name)
+		&& !/-(?:wal|shm|journal)$/i.test(name)
+		&& !SERVICE_FILENAMES.has(name.toLowerCase())
+		&& !SERVICE_DIRECTORIES.has(name.toLowerCase());
+}
+
+/** Plans are the Markdown documents exposed in the Desktop plan manager. */
+export function canonicalPlanFileName(name: string): boolean {
+	return canonicalRegistryEntryName(name) && name.toLowerCase().endsWith(".md");
+}
 
 export type ResourceType = "skill" | "agent";
 export type PublicationScope = "global" | "project";

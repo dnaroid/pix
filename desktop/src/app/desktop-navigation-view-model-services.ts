@@ -33,6 +33,7 @@ export function createDesktopNavigationViewModelServices(options: DesktopViewMod
       : [],
     workspace: options.workspace,
     configOptions: options.displayedConfigOptions,
+    modelPreferences: options.model.preferences,
     canUseSession: () => options.presentation.canUseSession,
     registryReady: () => options.status() === "ready" && options.clientAvailable() && !!options.workspace(),
     gitAssistantReady: () => options.status() === "ready" && options.clientAvailable() && !!options.workspace(),

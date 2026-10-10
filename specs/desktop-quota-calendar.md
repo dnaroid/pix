@@ -10,39 +10,50 @@ status: active
 Decision: [0039 — Compact quota reset calendar](../docs/decisions/0039-quota-reset-calendar.md).
 Claude banked grants: [0051 — Read-only Claude reset grants](../docs/decisions/0051-claude-reset-grants.md).
 
-Desktop Usage preserves the weekly reset calendar: seven local civil dates
-starting today, plus the actual reported reset date as an eighth cell when
-outside that range. The grid stays on one row, highlights today and the reset,
-and colors weekends with the theme's muted red. Exact local reset date/year
-and minute-level time remain visible below it, without predicted future resets.
-Date cells are compact (28px high), with an outlined today and a solid primary
-reset marker with contrasting text (also on weekends). Ordinary weekend dates
-retain muted red. The exact reset time is a higher-contrast, medium-weight
-unboxed line, not a separate filled card.
+Desktop Usage combines the weekly calendar and quota track into **one compact
+timeline**, following the user's approved minimal mockup. This replaces the
+separate rolling calendar presentation described historically in decision 0039.
+The provider-agnostic **Limits** section shows account quota windows (`hourly`,
+then `weekly`), including weekly-only snapshots. Headers retain the window name
+and percentage explicitly labelled “remaining”.
 
-A provider-agnostic **Limits** section shows the account quota windows
-(`hourly`, then `weekly`) above the calendar when available, including weekly-only
-snapshots. Each shows a neutral progress track,
-remaining percentage explicitly labelled “remaining”, reset countdown and
-cumulative daily-budget warning as defined in [runtime status](desktop-runtime-status.md). Each window has a readable label/percentage row,
-a full-width track and a separate “Resets in …” line. A passed reset explicitly
-says “Reset time reached · Awaiting quota refresh”, not just “reset”.
-The weekly track has seven equal day sectors, matching the compact status-bar
-track; separators overlay the aggregate remaining fill, not measured per-day
-usage. Short-window tracks remain continuous.
-The popup weekly track also overlays a thin primary-colored **now** marker:
-its position is `clamp((resetAt - now) / (windowSeconds * 1000) * 100, 0, 100)`
-percent from the left. The window starts at the right edge and time moves left
-toward reset, independently of the remaining-quota fill. The marker stays visible
-at both edges, is omitted for unknown/invalid timing, and its time-remaining meaning
-and orientation are included in the row's accessible label. It uses the existing
-minute tick, without another timer or request; compact footer tracks are unchanged.
-The weekly calendar also retains the exact reset date/time; header-derived rate windows are
-excluded from this section. Stale windows remain visibly marked as cached.
+The weekly timeline runs **start left, reset right**. Its single neutral
+foreground fill (white in dark mode, theme-adaptive in light mode) shows
+`clamp(remainingPercent, 0, 100)` **remaining** quota, anchored to the right
+(reset) edge. The empty left portion represents used quota. Its boundary moves
+right as quota is consumed: left of the time pin means spending below the elapsed
+time budget; right of the pin means spending ahead of it. Calendar and pin
+orientation are unchanged. Seven equal window sectors
+overlay that aggregate fill; they are not measured per-day consumption. Eight
+ticks below the track label the local dates of the actual window start,
+six intervening slice boundaries, and reported reset. The first tick and month
+changes include the short month; the reset tick includes a reset icon. Boundaries
+use absolute window time, so local times may shift across DST; neither extra
+days nor future resets are predicted. Non-seven-day windows still use seven
+equal slices of their actual reported duration, not invented daily measurements.
+
+A thin primary-colored pin with triangular head marks elapsed time:
+`clamp((now - (resetAt - windowSeconds * 1000)) / (windowSeconds * 1000) * 100, 0, 100)`.
+It moves right independently of quota consumption and stays visible at either
+edge. There is no visible “Now” label, month/cycle heading, used-percentage
+callout, normal weekly countdown or reset-detail footer. Exact local reset
+date/year/time, countdown, used percentage and pin orientation remain accessible.
+The pin uses the existing minute tick without another timer or request.
+
+Hourly popup and all compact status-bar quota tracks also anchor their remaining
+fill to the right, leaving consumed quota empty on the left. Percentages, colors,
+countdowns and context capacity tracks are unchanged; calendar and elapsed-time
+pin retain their normal left-to-right orientation. Cumulative daily-budget warnings defined in
+[runtime status](desktop-runtime-status.md) remain; the weekly warning sits in
+the header rather than a separate footer. Passed resets explicitly say “Reset
+time reached · Awaiting quota refresh”. Unknown/invalid timing omits date ticks
+and the pin, retains the remaining-quota fill and explains unavailable timing; a valid
+reset remains visible in this fallback. Header-derived rate windows are excluded.
+Stale windows remain visibly marked as cached.
 The complete popup is bounded by the application viewport height minus 70px,
 with internal scrolling and no extra timers or refresh-on-open requests.
 
-After the calendar and any reset credits, directly before the spend table,
+After the integrated limits/timeline and any reset credits, directly before the spend table,
 **Token usage by model** adds a donut only when more than
 one provider/model entry has nonzero recorded tokens. Its center shows the sum
 of attributed model tokens; its legend identifies the models and token counts.
@@ -129,9 +140,10 @@ request or control is implemented.
   accept explicit RFC3339 instants only. Known grant expirations remove the whole
   quantity, including on the owned minute tick. Claude credential-pending stale
   quota retains only quota windows, not grant rows/counts that may have been spent.
-- Date construction uses local civil-day arithmetic, not fixed 24-hour steps,
-  so DST and month/year boundaries preserve seven unique consecutive base dates
-  and, when needed, one distinct reported reset date.
+- Tick positions derive from the reported reset and known window duration, not
+  today's date. Labels format those instants locally, including month/year
+  boundaries and DST; the range does not jump forward at midnight. Unknown or
+  unrepresentable timing must not produce fabricated dates or a pin.
 - No weekly data means no calendar. Existing hourly/rate triggers are unchanged.
 - Opening and focus/click remain idempotent, gap-free, and perform no quota
   refresh. Explicit Claude limits refresh remains independent.

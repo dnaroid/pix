@@ -84,12 +84,12 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 3. **Pi args**: `--mode rpc`, `--session-dir <dir>` or `--no-session`, `--no-extensions`, `--extension <model-tools>`, the allowlisted provider dependencies of the final model (`--extension <antigravity-auth>` or the suite-local `claude-code-provider/index.ts` entrypoint), `--no-skills`, `--model <model>`, `--tools <list>` (or `--no-tools`), `--thinking <level>`, filtered extra user args, `--models <effective-model>`, then `--extension <tool-guard>`. The final model scope prevents persisted `enabledModels` or an extra `--models` value from resolving unrelated providers in the isolated child. Skill flags from `extraArgs` are stripped, so child agents never discover or receive skills. Before anything else, `-m value`, `--model=value` and `--provider=value` in extra args are normalized to `--model value` / `--provider value` (the installed Pi CLI documents the long, space-separated forms), so owned-launch selection, provider dependencies and the child all see the same final model. `[confirmed by code, spawn.ts, provider-extensions.ts; confirmed by tests, core.test.ts, provider-extensions.test.ts]`
 4. **Stdin RPC**: sends two JSONL messages — `{type:"get_state",id:"sub_get_state"}` then `{type:"prompt",id:"sub_prompt",message:<prompt>[,images:<base64[]>]}`. Stdin stays open; EOF = pi shutdown. `[confirmed by code]`
 5. **Extensions** loaded into children: `model-tools` (model-specific tool args) and `tool-guard` (strips parent-only tools: `question`, `subagents`, all `async_subagents_*`). Provider dependencies come from an explicit allowlist in `core/provider-extensions.ts`, recomputed on every attempt (retry and provider-changing fallback) from that attempt's final model:
-   - `todo/subagent.ts` is also loaded for **every role**, including project-local roles such as `frontier-review`, and automatically for future roles. It exposes regular `todo` actions with a private child-session/attempt list. This is a planning exception to work-tool restrictions: restricted/empty role tool selections and extra CLI tool flags retain `todo` while preserving restrictions on work tools. Children neither read nor write the parent's project `.pi/todo-plan.json`. Retries/new attempts start with a new list; optional child session history stores local snapshots, branch navigation replays only that branch, and compaction retains unfinished tasks with a fresh snapshot. The lean entrypoint does not load persistence commands, UI widgets, thinking overrides, auto-follow-up turns or the parent's knowledge-audit reminder. Recursive delegation and interactive user questions remain denied. Children use todos for non-trivial multi-step work and report unfinished work/blockers to the parent; trivial work needs no plan. See [decision 0059](../docs/decisions/0059-subagent-private-todos.md), with the common-capability exception expanded by [decision 0060](../docs/decisions/0060-subagent-read-only-repo-tools.md). `[confirmed by todo/subagent.ts, core/child-tools.ts; tests: test/async-subagents/todo.test.ts, provider-child-inventory.test.ts]`
+   - `todo/subagent.ts` is also loaded for **every role**, including project-local roles, and automatically for future roles. It exposes regular `todo` actions with a private child-session/attempt list. This is a planning exception to work-tool restrictions: restricted/empty role tool selections and extra CLI tool flags retain `todo` while preserving restrictions on work tools. Children neither read nor write the parent's project `.pi/todo-plan.json`. Retries/new attempts start with a new list; optional child session history stores local snapshots, branch navigation replays only that branch, and compaction retains unfinished tasks with a fresh snapshot. The lean entrypoint does not load persistence commands, UI widgets, thinking overrides, auto-follow-up turns or the parent's knowledge-audit reminder. Recursive delegation and interactive user questions remain denied. Children use todos for non-trivial multi-step work and report unfinished work/blockers to the parent; trivial work needs no plan. See [decision 0059](../docs/decisions/0059-subagent-private-todos.md), with the common-capability exception expanded by [decision 0060](../docs/decisions/0060-subagent-read-only-repo-tools.md). `[confirmed by todo/subagent.ts, core/child-tools.ts; tests: test/async-subagents/todo.test.ts, provider-child-inventory.test.ts]`
    - `repo-discovery/subagent.ts` is loaded for every child role and attempt. When the launch project already has IDX and an executable `idx`, the read-only child facade registers exactly three indexed `repo_*` queries (`repo_context`, `repo_inspect`, `repo_audit`) plus `project_search` as the sole focused Code/Knowledge search tool. The child wrapper restricts `project_search` to Code and Knowledge (and rejects omitted/default-all expansion into sessions, tasks, commits or `patch:` requests); private project history remains parent-only. No child setup/update commands, implicit indexing, credentials or recursive delegation are exposed. Empty and restricted selections keep the same explicitly allowed common query tools. Normal cancellation and read-only guards still apply; IDX may refresh its own cache. Council children use the same common entrypoint. See [decision 0060](../docs/decisions/0060-subagent-read-only-repo-tools.md) and [project search](project-search-agent-tool.md). `[confirmed by repo-discovery/subagent.ts, core/child-tools.ts; tests: test/async-subagents/repo-tools.test.ts, provider-child-inventory.test.ts]`
    - `dcp/subagent.ts` loads DCP for **every role and attempt**, including project-local replacements and read-only council participants. It uses normal DCP configuration/model overrides, prompts, compression and lifecycle hooks but registers no interactive `/dcp` commands. `compress` is a common capability alongside private todo and gated repo queries: empty/restricted tool lists, CLI exclusions and model changes cannot remove it when DCP is enabled. Read-only guards permit context compression, not product-source mutation. Disabled DCP configuration still suppresses registration. Default `--no-session` children keep DCP decisions only in memory, preserving raw history without session files or journal writes; each retry/new attempt starts fresh. Opted-in persisted child sessions use the normal journal contract. This does not enable session persistence or load the whole suite. See [DCP lifecycle](dcp.md#lifecycle-and-persistence). `[confirmed by dcp/subagent.ts, core/child-tools.ts, core/spawn.ts, brainstorm/research-extension.ts; tests: test/async-subagents/dcp.test.ts, provider-child-inventory.test.ts, work-tools.test.ts, test/brainstorm/research-extension.test.ts]`
    - Optional work capabilities are tool-driven, not universal or granted by role
      name. Bundled `research`, `implement`, `implement-core`, `mechanical` and
-     `frontier-review` opt into read-only `ast_grep`; only bundled `research`
+     `oracle` opt into read-only `ast_grep`; only bundled `research`
      adds `web_search`/`web_fetch`. Executors explicitly retain the existing
      seven builtin work tools. Project-local full replacements do not inherit
      these optional choices. Common launch preserves supported extension names
@@ -136,17 +136,27 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
    its own fallback array. Modern `models` profiles already encode the complete
    ordered candidate chain. `[confirmed by code, config.ts]`
    The bundled `oracle` uses `modelSelection: frontier` with
-   `parentProviderPolicy: require-other-if-frontier`: for a frontier parent its
-   entire initial/fallback chain excludes the parent's vendor; for other parents
-   other vendors are preferred. A new frontier model is a `frontierModels` config
-   entry, not an oracle edit. `[confirmed by oracle.md and frontier-models.test.ts]`
+   `parentProviderPolicy: require-other`: for every parent, its entire
+   initial/fallback chain excludes the parent's vendor. Missing parent identity
+   or no eligible other-vendor candidate fails closed. A new frontier model is
+   a `frontierModels` config entry, not an oracle edit.
    The shipped frontier list is Astra, GLM-5.3, and
    `anthropic/claude-opus-5-5` with alias `*opus*` (any serving provider).
-   Sol is not frontier; the bundled `frontier-review` explicitly excludes
-   `*gpt-6.1-sol*` parents independently of the frontier list. The `implement`
-   role uses Luna then Sol; `implement-core`, `frontier-review` and
-   `delivery-review` use their own Sol-only model lists rather than the frontier
-   candidate list. `mechanical` uses GLM-5.3 only.
+   Sol is not frontier. Astra is enabled for `oracle` in the default list.
+   The bundled `frontier-review` role has been merged into `oracle` and removed;
+   oracle has no parent-tier visibility gate. User/project roles and model lists
+   remain explicit overrides and are not rewritten. Oracle provides both a
+   deliberate second opinion and the independent architectural review gate.
+   The review gate applies **only to complex architectural tasks** after
+   implementation and targeted checks: consequential changes to subsystem
+   boundaries, core interfaces, or cross-module lifecycle/persistence invariants.
+   Routine features, local bug fixes, mechanical edits, role availability, and
+   large diffs alone do not trigger it. The parent classifies the task; this is
+   instruction policy, not a runtime complexity classifier. This replaces the
+   code-review portion of [decision 0001](../docs/decisions/0001-subagent-coding-roles.md);
+   delivery-review and coding role policies remain unchanged.
+   The `implement` role uses Luna then Sol; `implement-core` and
+   `delivery-review` retain their own Sol-only lists. `mechanical` uses GLM-5.3 only.
    GPT-6 Sol is not an alias for GPT-6.1 Sol. Existing user/project model
    lists still override defaults and are not rewritten by this rollover.
    `[confirmed by frontier-models.ts and agents/implement.md]`
@@ -1170,7 +1180,6 @@ runtime is unchanged.
 - `external/pi-tools-suite/src/async-subagents/agents/implement-core.md`
 - `external/pi-tools-suite/src/async-subagents/agents/mechanical.md`
 - `external/pi-tools-suite/src/async-subagents/agents/knowledge-auditor.md`
-- `external/pi-tools-suite/src/async-subagents/agents/frontier-review.md`
 - `external/pi-tools-suite/src/todo/subagent.ts`
 - `external/pi-tools-suite/src/repo-discovery/subagent.ts`
 - `external/pi-tools-suite/src/repo-discovery/index.ts`

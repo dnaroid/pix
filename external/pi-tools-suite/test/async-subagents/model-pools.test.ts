@@ -43,7 +43,6 @@ describe("role-owned model candidates", () => {
 			["implement", ["openai-codex/gpt-6-luna", "openai-codex/gpt-6.1-sol"]],
 			["implement-core", ["openai-codex/gpt-6.1-sol"]],
 			["mechanical", ["zai/glm-5.3"]],
-			["frontier-review", ["openai-codex/gpt-6.1-sol"]],
 			["delivery-review", ["openai-codex/gpt-6.1-sol"]],
 		] as const) {
 			const resolved = resolveAgentTaskConfig(task(role), config, { parentModel: "openai-codex/gpt-6-luna" });
@@ -61,7 +60,12 @@ describe("role-owned model candidates", () => {
 			expect(prompt).toContain("hidden blockers");
 		}
 		expect(config.types.mechanical.promptAppend).toContain("stop and return the blocker");
-		expect(config.types["frontier-review"].promptAppend).toContain("Compare old and new regression assertions");
+		expect(config.types["oracle"].promptAppend).toContain("Compare old and new regression assertions");
+		expect(config.types["oracle"].modelSelection).toBe("frontier");
+		expect(config.types["oracle"].parentProviderPolicy).toBe("require-other");
+		expect(config.types["oracle"].description).toContain("complex architectural tasks only");
+		expect(SUBAGENT_DELEGATION_GUIDANCE).toContain("large diffs alone do not require oracle");
+		expect(SUBAGENT_DELEGATION_GUIDANCE).not.toContain("and substantive code changed");
 		expect(SUBAGENT_DELEGATION_GUIDANCE).toContain("Do not route broad migrations or semantic test changes to mechanical");
 		expect(SUBAGENT_DELEGATION_GUIDANCE).toContain("including failed attempts, review and rework");
 	});
@@ -69,21 +73,21 @@ describe("role-owned model candidates", () => {
 	test("ships one oracle role selecting from the frontier list with a cross-vendor policy", () => {
 		const config = loadSubagentConfig(temp(), {});
 		expect(Object.keys(config.types).sort()).toEqual([
-			"delivery-review", "frontier-review", "implement", "implement-core", "knowledge-auditor", "mechanical", "oracle", "research", "ui-qa", "verify",
+			"delivery-review", "implement", "implement-core", "knowledge-auditor", "mechanical", "oracle", "research", "ui-qa", "verify",
 		]);
 		expect(config.types.oracle.models).toBeUndefined();
 		expect(config.types.oracle.modelSelection).toBe("frontier");
-		expect(config.types.oracle.parentProviderPolicy).toBe("require-other-if-frontier");
+		expect(config.types.oracle.parentProviderPolicy).toBe("require-other");
 		expect(buildSubagentCatalogPrompt(config, "openai-codex/gpt-6-luna")).toContain("- oracle:");
 
-		// Non-frontier parent: other-vendor frontier first, same-vendor frontier after.
+		// Non-frontier parent: every candidate must also be cross-vendor.
 		const fromLuna = resolveAgentTaskConfig(task("oracle"), config, { parentModel: "openai-codex/gpt-6-luna" });
 		expect(fromLuna.task.model).toBe("zai/glm-5.3");
-		expect(fromLuna.fallbackModels).toEqual(["anthropic/claude-opus-5-5", "openai-codex/gpt-6-astra"]);
+		expect(fromLuna.fallbackModels).toEqual(["anthropic/claude-opus-5-5"]);
 
 		const fromTurbo = resolveAgentTaskConfig(task("oracle"), config, { parentModel: "zai/glm-5-turbo" });
 		expect(fromTurbo.task.model).toBe("openai-codex/gpt-6-astra");
-		expect(fromTurbo.fallbackModels).toEqual(["anthropic/claude-opus-5-5", "zai/glm-5.3"]);
+		expect(fromTurbo.fallbackModels).toEqual(["anthropic/claude-opus-5-5"]);
 		expect(() => resolveAgentTaskConfig(task("oracle"), config)).toThrow(/parent model/i);
 	});
 

@@ -1,8 +1,8 @@
-import type { ProjectTaskType } from "../lib/project-tasks";
+import { TASK_STATUSES, type ProjectTaskStatus } from "../lib/project-tasks";
 
 export type WorkspaceSidebarTaskDropPosition = "before" | "after";
 export type WorkspaceSidebarTaskDropTarget = {
-  type: ProjectTaskType;
+  status: ProjectTaskStatus;
   targetTaskId: string | null;
   position: WorkspaceSidebarTaskDropPosition;
 };
@@ -12,18 +12,22 @@ interface WorkspaceSidebarTaskDragControllerOptions {
   readonly closeStatusMenu: () => void;
   readonly onReorder: (
     taskId: string,
-    targetType: ProjectTaskType,
+    targetStatus: ProjectTaskStatus,
     targetTaskId: string | null,
     position: WorkspaceSidebarTaskDropPosition,
   ) => void;
 }
 
-const TASK_TYPES: readonly ProjectTaskType[] = ["bug", "feature", "improvement"];
-
 export function createWorkspaceSidebarTaskDragController(
   options: WorkspaceSidebarTaskDragControllerOptions,
 ) {
+  const DRAG_THRESHOLD_PX = 7;
   let taskId = $state<string | null>(null);
+  let pendingTaskId: string | null = null;
+  let pendingHandle: HTMLElement | null = null;
+  let startX = 0;
+  let startY = 0;
+  let blockNextClick = false;
   let dropTarget = $state<WorkspaceSidebarTaskDropTarget | null>(null);
   let height = $state(44);
   let width = $state(0);
@@ -41,23 +45,35 @@ export function createWorkspaceSidebarTaskDragController(
     const handle = event.currentTarget as HTMLElement;
     const card = handle.closest<HTMLElement>("[data-task-card]");
     if (!card) return;
-    event.preventDefault();
-    const bounds = card.getBoundingClientRect();
-    height = Math.max(36, Math.round(bounds.height));
-    width = Math.round(bounds.width);
+    blockNextClick = false;
+    pendingTaskId = nextTaskId;
+    pendingHandle = handle;
     pointerId = event.pointerId;
-    offsetX = event.clientX - bounds.left;
-    offsetY = event.clientY - bounds.top;
+    startX = event.clientX;
+    startY = event.clientY;
     clientX = event.clientX;
     clientY = event.clientY;
-    taskId = nextTaskId;
+    taskId = null;
     dropTarget = null;
-    setDocumentDragState(true);
-    handle.setPointerCapture(event.pointerId);
   }
 
   function move(event: PointerEvent): void {
-    if (event.pointerId !== pointerId || !taskId) return;
+    if (event.pointerId !== pointerId) return;
+    if (!taskId && pendingTaskId && pendingHandle) {
+      if (Math.hypot(event.clientX - startX, event.clientY - startY) < DRAG_THRESHOLD_PX) return;
+      const card = pendingHandle.closest<HTMLElement>("[data-task-card]");
+      if (!card) { clear(); return; }
+      const bounds = card.getBoundingClientRect();
+      height = Math.max(36, Math.round(bounds.height));
+      width = Math.round(bounds.width);
+      offsetX = startX - bounds.left;
+      offsetY = startY - bounds.top;
+      taskId = pendingTaskId;
+      blockNextClick = true;
+      setDocumentDragState(true);
+      pendingHandle.setPointerCapture(event.pointerId);
+    }
+    if (!taskId) return;
     event.preventDefault();
     clientX = event.clientX;
     clientY = event.clientY;
@@ -67,7 +83,7 @@ export function createWorkspaceSidebarTaskDragController(
   }
 
   function targetAt(nextClientX: number, nextClientY: number): WorkspaceSidebarTaskDropTarget | null {
-    const groups = [...document.querySelectorAll<HTMLElement>("[data-task-group]")];
+    const groups = [...document.querySelectorAll<HTMLElement>("[data-task-status-group]")];
     const group = groups.find((candidate) => {
       const bounds = candidate.getBoundingClientRect();
       return nextClientX >= bounds.left - 12
@@ -77,23 +93,23 @@ export function createWorkspaceSidebarTaskDragController(
     });
     if (!group) return null;
 
-    const type = group.dataset.taskGroup as ProjectTaskType | undefined;
-    if (!type || !TASK_TYPES.includes(type)) return null;
+    const status = group.dataset.taskStatusGroup as ProjectTaskStatus | undefined;
+    if (!status || !TASK_STATUSES.includes(status)) return null;
     const cards = [...group.querySelectorAll<HTMLElement>("[data-task-card]")]
       .filter((card) => card.dataset.taskId !== taskId);
-    if (cards.length === 0) return { type, targetTaskId: null, position: "after" };
+    if (cards.length === 0) return { status, targetTaskId: null, position: "after" };
 
     for (const card of cards) {
       const targetTaskId = card.dataset.taskId;
       if (!targetTaskId) continue;
       const bounds = card.getBoundingClientRect();
       if (nextClientY < bounds.top + bounds.height / 2) {
-        return { type, targetTaskId, position: "before" };
+        return { status, targetTaskId, position: "before" };
       }
     }
 
     const lastTaskId = cards.at(-1)?.dataset.taskId;
-    return lastTaskId ? { type, targetTaskId: lastTaskId, position: "after" } : null;
+    return lastTaskId ? { status, targetTaskId: lastTaskId, position: "after" } : null;
   }
 
   function finish(event: PointerEvent): void {
@@ -102,7 +118,7 @@ export function createWorkspaceSidebarTaskDragController(
     const target = dropTarget;
     clear();
     if (!draggedTaskId || !target) return;
-    options.onReorder(draggedTaskId, target.type, target.targetTaskId, target.position);
+    options.onReorder(draggedTaskId, target.status, target.targetTaskId, target.position);
   }
 
   function cancel(event: PointerEvent): void {
@@ -111,10 +127,19 @@ export function createWorkspaceSidebarTaskDragController(
   }
 
   function clear(): void {
+    pendingTaskId = null;
+    pendingHandle = null;
     taskId = null;
     dropTarget = null;
     pointerId = null;
     setDocumentDragState(false);
+  }
+
+  /** Browser dispatches click after pointerup even for captured pointer drags. */
+  function consumeClick(): boolean {
+    const consumed = blockNextClick;
+    blockNextClick = false;
+    return consumed;
   }
 
   function setDocumentDragState(active: boolean): void {
@@ -151,6 +176,7 @@ export function createWorkspaceSidebarTaskDragController(
     move,
     finish,
     cancel,
+    consumeClick,
     clear,
     dispose: clear,
   };

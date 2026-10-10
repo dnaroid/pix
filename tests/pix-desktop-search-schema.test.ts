@@ -8,12 +8,15 @@ test("Desktop search schema models optional explicit boolean consent without cre
 	assert.equal(Value.Check(PixDesktopConfigSchema, {}), true);
 	for (const enabled of [true, false]) assert.equal(Value.Check(PixDesktopConfigSchema, { search: { semanticEnabled: enabled } }), true);
 	for (const enabled of [true, false]) assert.equal(Value.Check(PixDesktopConfigSchema, { search: { sessionTitlesEnabled: enabled } }), true);
+	for (const enabled of [true, false]) assert.equal(Value.Check(PixDesktopConfigSchema, { search: { tasksSemanticEnabled: enabled } }), true);
 	assert.equal(Value.Check(PixDesktopConfigSchema, { search: { semanticEnabled: "true" } }), false);
 	assert.equal(Value.Check(PixDesktopConfigSchema, { search: { sessionTitlesEnabled: "true" } }), false);
+	assert.equal(Value.Check(PixDesktopConfigSchema, { search: { tasksSemanticEnabled: "true" } }), false);
 	const search = PixDesktopConfigSchema.properties.search;
 	assert.equal((search.properties.semanticEnabled as { default?: boolean }).default, false);
 	assert.equal((search.properties.sessionTitlesEnabled as { default?: boolean }).default, false);
-	assert.deepEqual(Object.keys(search.properties), ["semanticEnabled", "sessionTitlesEnabled", "ragModelRef", "ragThinking"]);
+	assert.equal((search.properties.tasksSemanticEnabled as { default?: boolean }).default, false);
+	assert.deepEqual(Object.keys(search.properties), ["semanticEnabled", "sessionTitlesEnabled", "tasksSemanticEnabled", "ragModelRef", "ragThinking"]);
 	assert.equal(Value.Check(PixDesktopConfigSchema, { search: { ragModelRef: "openai-codex/gpt-6.1-sol", ragThinking: "high" } }), true);
 	assert.equal(Value.Check(PixDesktopConfigSchema, { search: { ragModelRef: "", ragThinking: "off" } }), true);
 	assert.equal(Value.Check(PixDesktopConfigSchema, { search: { ragThinking: "unlimited" } }), false);

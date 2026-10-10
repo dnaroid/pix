@@ -57,6 +57,10 @@
               {
                 "type": "string",
                 "const": "improvement"
+              },
+              {
+                "type": "string",
+                "const": "idea"
               }
             ]
           },
@@ -77,6 +81,10 @@
               {
                 "type": "string",
                 "const": "done"
+              },
+              {
+                "type": "string",
+                "const": "failed"
               }
             ]
           },
@@ -106,6 +114,43 @@
             "maxLength": 512,
             "description": "Optional Pi session associated with this task."
           },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "maxItems": 50,
+            "description": "Optional project-relative paths to files/artifacts or http(s) URLs."
+          },
+          "relatedTaskIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "maxItems": 50,
+            "description": "Optional references to other existing project tasks; duplicates and self links are prohibited."
+          },
+          "parentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "Optional id of a parent task in this project; cycles and dangling references are prohibited."
+          },
+          "epic": {
+            "type": "boolean",
+            "description": "Top-level epic marker (cannot be combined with parentId)."
+          },
+          "modelRef": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 256,
+            "pattern": "^[^\\s/]+/[^\\s/]+(?:/[^\\s]+)*(?::(?:off|minimal|low|medium|high|xhigh|max))?$",
+            "description": "Optional provider/model[:thinking] override for new task sessions."
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time",
@@ -126,6 +171,6 @@
   "$id": "https://unpkg.com/pi-ui-extend/schemas/tasks.json",
   "$schema": "https://json-schema.org/draft-07/schema#",
   "title": "Pix Project Tasks",
-  "description": "Project-scoped task document stored in <cwd>/.pi/tasks.jsonc.",
+  "description": "Project-scoped task view backed by <cwd>/.pi/tasks.sqlite.",
   "additionalProperties": false
 }

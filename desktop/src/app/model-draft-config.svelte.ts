@@ -8,6 +8,7 @@ import {
   withAutoModelRoutingOption,
 } from "../lib/model-thinking";
 import type { ModelConfigOptions } from "./model-config-options";
+import { createDraftModelDisplay } from "./draft-model-display.svelte";
 
 /**
  * Faster cadence for a draft quota refresh flagged
@@ -20,6 +21,7 @@ const MODEL_USAGE_CREDENTIAL_RETRY_MS = 60_000;
 const MODEL_USAGE_REFRESH_MS = 5 * 60_000;
 
 export function createModelDraftConfig(options: ModelConfigOptions) {
+  const display = createDraftModelDisplay(() => options.preferences?.defaultSelection);
   let configOptions = $state<SessionConfigOption[]>([]);
   let modelOverride = $state<{ modelRef: string; thinkingLevel: string } | null>(null);
   let runtimeStatus = $state<RuntimeStatus | undefined>(undefined);
@@ -111,8 +113,12 @@ export function createModelDraftConfig(options: ModelConfigOptions) {
         requestGeneration !== generation
         || requestClient !== options.client()
         || requestWorkspace !== options.workspace()
-        || !options.draftSessionTabOpen()
       ) return;
+      // Warm the display even before New Conversation is opened. Only defaults
+      // from this sessionless response are remembered, never a staged override.
+      const defaultAuto = response.modelRoutingEnabled && response.modelRoutingDefault;
+      display.remember(requestWorkspace, withAutoModelRoutingOption(response.configOptions, response.modelRoutingEnabled, defaultAuto));
+      if (!options.draftSessionTabOpen()) return;
       autoRoutingAvailable = response.modelRoutingEnabled;
       autoRoutingSelected = autoRoutingAvailable
         && (preserveAutoSelection || (initializeSelection && response.modelRoutingDefault));
@@ -171,6 +177,7 @@ export function createModelDraftConfig(options: ModelConfigOptions) {
   }
 
   function applySelection(modelRef: string, thinkingLevel: string): string {
+    generation += 1;
     if (modelRef === AUTO_MODEL_REF) {
       if (!autoRoutingAvailable) throw new Error("Automatic model routing is disabled.");
       clearUsageRefresh();
@@ -204,6 +211,7 @@ export function createModelDraftConfig(options: ModelConfigOptions) {
     if (!modelRef) throw new Error("Model selection is unavailable.");
     const selected = state.models.find((model) => model.ref === modelRef);
     if (!selected) throw new Error(`Unknown model: ${modelRef}`);
+    generation += 1;
     const thinkingLevel = configId === "thought_level"
       ? value
       : clampThinkingLevel(state.currentThinking, selected.thinkingLevels);
@@ -237,6 +245,7 @@ export function createModelDraftConfig(options: ModelConfigOptions) {
 
   return {
     get configOptions() { return configOptions; },
+    get displayConfigOptions() { return display.options(options.workspace()); },
     get modelOverride() { return modelOverride; },
     get runtimeStatus() { return runtimeStatus; },
     get modelUsageRefreshing() { return modelUsageRefreshing; },

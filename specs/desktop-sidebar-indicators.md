@@ -164,11 +164,11 @@ Decision: [0027 — Cause-specific sidebar quick actions](../docs/decisions/0027
   Companion edits/addition/removal remain dirty until synced, while a fully
   synced package clears the local warning. Symlinked or non-directory companions
   fail closed as indicator health errors rather than appearing clean.
-- The `tasks` fast-poll hash follows the portable Registry task-bundle hash rather
-  than hashing `tasks.jsonc` alone: local markers are normalized to portable
-  attachment names and referenced `.pi/task-attachments` bytes participate in
-  the comparison. Attachment-only task changes therefore become observable
-  project dirtiness without leaving a permanent false-positive after sync.
+- The `tasks` fast-poll hash follows Registry's canonical logical SQLite
+  rows/attachment relationships and verified content-addressed blob bytes,
+  rather than hashing physical `.pi/tasks.sqlite`/WAL/SHM bytes. A task or
+  attachment association change is observable without false positives from
+  SQLite checkpoints or page reorganization. Unreferenced blobs do not count.
 - Registry provenance/config reads use stable before/after file stamps, and content hashing verifies the metadata fingerprint again before publishing. If a write races a poll, the backend marks that Registry sample unstable and the frontend keeps the last stable Registry indicator until a later poll completes, preventing stale-result flicker without locking Registry writes.
 - Registry cache entries are pruned against current provenance and capped per workspace; resource churn cannot retain an unbounded history of hashes.
 

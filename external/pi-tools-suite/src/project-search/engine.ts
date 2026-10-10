@@ -3,9 +3,14 @@ import { lstat, readFile, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { parse as parseJsonc, type ParseError } from "jsonc-parser";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { commandAvailable, findProjectRoot } from "../lib/project.js";
+import { withTaskDatabase } from "../project-tasks/storage.js";
+import { validateTaskDocument, type ProjectTask } from "../project-tasks/schema.js";
+import { cachedProjectSemantics, type SemanticSearchOptions } from "./semantic.js";
+import { searchSemanticCommits, type CommitSemanticServices } from "./semantic-commit-indexer.js";
+import type { CachedSessionCandidate } from "./semantic-cache.js";
+import { setImmediate as yieldToLoop } from "node:timers/promises";
 
 const exec = promisify(execFile);
 export const PROJECT_SEARCH_SOURCES = ["sessions", "tasks", "commits", "code", "knowledge"] as const;
@@ -49,12 +54,14 @@ export interface ProjectSearchHit {
   sessionId?: string;
   /** Native Pi session file path, usable when opening a past session. */
   sessionPath?: string;
-  /** Task: ID in .pi/tasks.jsonc. */
+  /** Task: ID in .pi/tasks.sqlite. */
   taskId?: string;
   /** Commit: full HEAD-reachable Git hash. */
   hash?: string;
   /** Commit: project-relative changed paths. */
   changedPaths?: string[];
+  /** Reused an up-to-date task or explicitly named session vector. */
+  semantic?: boolean;
 }
 
 export interface ProjectSearchResponse {
@@ -86,13 +93,16 @@ export interface ProjectSearchServices {
   readSession?(path: string, signal: AbortSignal): Promise<SessionBoundary | undefined>;
   git?(cwd: string, args: string[], signal: AbortSignal): Promise<string>;
   indexed?(cwd: string): boolean;
+  /** Optional test-only overrides; production uses shared read-only cache,
+   * saved Desktop consent and the already configured OpenRouter API key. */
+  semantic?: SemanticSearchOptions;
+  commitSemantic?: CommitSemanticServices;
 }
 
 const MAX_OUTPUT = 12_000;
-const MAX_SESSIONS = 100;
-const MAX_COMMITS = 1000;
-const MAX_TASK_FILE = 2 * 1024 * 1024;
-const MAX_SESSION_FILE = 2 * 1024 * 1024;
+const MAX_SESSIONS = 1000;
+const MAX_COMMITS = 5000;
+const MAX_SESSION_FILE = 4 * 1024 * 1024;
 const STOP_WORDS = new Set(["как", "почему", "когда", "где", "зачем", "что", "какие", "какой", "какая", "кто",
   "мы", "наш", "наша", "наши", "для", "это", "и", "или", "по", "в", "на", "из", "the", "why", "how", "when",
   "where", "what", "which", "who", "for", "with", "and", "from", "about", "did", "does", "our", "was"]);
@@ -211,7 +221,7 @@ export async function readSessionBoundary(pathname: string, signal: AbortSignal)
   return { firstText, finalText };
 }
 
-async function searchSessions(root: string, queryTerms: readonly string[], signal: AbortSignal, deps: ProjectSearchServices): Promise<{ hits: ProjectSearchHit[]; notices: string[] }> {
+async function searchSessions(root: string, queryTerms: readonly string[], signal: AbortSignal, deps: ProjectSearchServices): Promise<{ hits: ProjectSearchHit[]; notices: string[]; records: CachedSessionCandidate[] }> {
   const discovered = await (deps.listSessions ?? defaultSessionList)(root, signal);
   signal.throwIfAborted();
   const relevant: SessionRecord[] = [];
@@ -222,8 +232,9 @@ async function searchSessions(root: string, queryTerms: readonly string[], signa
   }
   const items = relevant.slice(0, MAX_SESSIONS);
   const hits: ProjectSearchHit[] = [];
+  const records: CachedSessionCandidate[] = [];
   let unreadable = 0;
-  for (const session of items) {
+  for (const [index, session] of items.entries()) {
     signal.throwIfAborted();
     const title = (session.name?.trim() || session.firstMessage.trim().slice(0, 140) || session.id).slice(0, 240);
     let content: SessionBoundary | undefined;
@@ -235,51 +246,86 @@ async function searchSessions(root: string, queryTerms: readonly string[], signa
     }
     const first = content?.firstText ?? session.firstMessage.slice(0, 4096);
     const last = content?.finalText ?? "";
+    records.push({ ...session, snippet: preview(`First: ${first.slice(0, 180)}\nFinal: ${last.slice(0, 180)}`) });
+    if (index % 32 === 31) await yieldToLoop();
     const score = scoreMatch(queryTerms, title, `${session.id} ${first} ${last}`);
     if (!score) continue;
     hits.push({
       kind: "sessions", id: `sessions:${session.id}`, sessionId: session.id,
       sessionPath: session.path, title, score,
-      snippet: preview(`First: ${first.slice(0, 180)}\nFinal: ${last.slice(0, 180)}`),
+      snippet: records[records.length - 1]!.snippet!,
     });
   }
   const notices: string[] = [];
-  if (relevant.length > MAX_SESSIONS) notices.push(`Sessions: inspected the ${MAX_SESSIONS} most recent sessions; narrow the query if older history is needed.`);
+  if (relevant.length > MAX_SESSIONS) notices.push(`Sessions: inspected the ${MAX_SESSIONS.toLocaleString("en-US")} most recent sessions; narrow the query if older history is needed.`);
   if (unreadable) notices.push(`Sessions: ${unreadable} session files could not be read.`);
-  return { hits, notices };
+  return { hits, notices, records };
 }
 
-async function searchTasks(root: string, queryTerms: readonly string[], signal: AbortSignal): Promise<{ hits: ProjectSearchHit[]; notices: string[] }> {
+async function searchTasks(root: string, queryTerms: readonly string[], signal: AbortSignal): Promise<{ hits: ProjectSearchHit[]; notices: string[]; records: ProjectTask[]; safe: boolean }> {
   const folder = await lstat(path.join(root, ".pi")).catch(() => undefined);
-  if (!folder?.isDirectory() || folder.isSymbolicLink()) return { hits: [], notices: [] };
-  const filename = path.join(root, ".pi", "tasks.jsonc");
-  const info = await lstat(filename).catch(() => undefined);
-  if (!info) return { hits: [], notices: [] };
-  if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_TASK_FILE) return { hits: [], notices: ["Tasks: storage is unsafe or too large."] };
-  const errors: ParseError[] = [];
-  const content = await readFile(filename, { encoding: "utf8", signal });
-  const parsed: unknown = parseJsonc(content, errors, { allowTrailingComma: true });
-  if (errors.length || !parsed || typeof parsed !== "object" || Array.isArray(parsed)
-    || !("version" in parsed) || parsed.version !== 1 || !("tasks" in parsed)
-    || !Array.isArray(parsed.tasks)) return { hits: [], notices: ["Tasks: invalid project task storage."] };
-  const seen = new Set<string>();
+  if (!folder?.isDirectory() || folder.isSymbolicLink()) return { hits: [], notices: [], records: [], safe: !folder };
+  signal.throwIfAborted();
+  let tasks: ProjectTask[];
+  let attachmentNames = new Map<string, string[]>();
+  try {
+    ({ tasks, attachmentNames } = await withTaskDatabase(path.join(root, ".pi"), "read", db => {
+      if (!db) return { tasks: [], attachmentNames: new Map<string, string[]>() };
+      // One SQLite read snapshot owns both task payloads and the association
+      // metadata. Never open blobs or read unrelated files for search.
+      db.exec("BEGIN");
+      try {
+      const rows = db.prepare("SELECT id,payload FROM tasks ORDER BY position ASC,id ASC LIMIT 10001")
+        .all() as Array<{id: string; payload: string}>;
+      const tasks = rows.map(row => {
+        // Cross-task references must be checked against the FULL document.
+        const task = validateTaskDocument({ version: 1, tasks: [JSON.parse(row.payload)] }, false).tasks[0]!;
+        if (task.id !== row.id) throw new Error("Task payload id does not match database row");
+        return task;
+      });
+      validateTaskDocument({ version: 1, tasks });
+      const names = new Map<string, string[]>();
+      for (const row of db.prepare("SELECT t.task_id AS id,a.name AS name FROM task_attachments t JOIN attachments a ON a.hash=t.hash ORDER BY t.task_id,t.ordinal,t.hash").all() as Array<{id: string; name: string}>) {
+        if (typeof row.name !== "string") throw new Error("Invalid attachment name");
+        const values = names.get(row.id) ?? [];
+        values.push(row.name.slice(0, 256));
+        names.set(row.id, values);
+      }
+      db.exec("COMMIT");
+      return { tasks, attachmentNames: names };
+      } catch (error) { db.exec("ROLLBACK"); throw error; }
+    }));
+  } catch (error) {
+    return { hits: [], notices: [`Tasks: invalid or unsafe SQLite project task database (${error instanceof Error ? error.message : String(error)}).`], records: [], safe: false };
+  }
   const hits: ProjectSearchHit[] = [];
-  for (const raw of parsed.tasks.slice(0, 10_000) as unknown[]) {
+  const byId = new Map(tasks.map(task => [task.id, task]));
+  const backlinks = new Map<string, ProjectTask[]>();
+  for (const task of tasks) for (const id of task.relatedTaskIds ?? []) {
+    const related = backlinks.get(id) ?? [];
+    related.push(task);
+    backlinks.set(id, related);
+  }
+  for (const task of tasks.slice(0, 10_000)) {
     signal.throwIfAborted();
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
-    const task = raw as Record<string, unknown>;
-    if (typeof task.id !== "string" || !task.id || task.id.length > 128 || seen.has(task.id)) continue;
-    seen.add(task.id);
-    const description = typeof task.description === "string" ? task.description.slice(0, 10000) : "";
-    const title = (typeof task.title === "string" && task.title.trim()
+    const description = task.description ?? "";
+    const title = (task.title.trim()
       ? task.title : description.split("\n").find(s => s.trim()) ?? "Untitled task").trim().slice(0, 200);
-    const metadata = `${task.id} ${task.type ?? ""} ${task.status ?? ""} ${task.priority ?? ""} ${description}`;
+    const references = [
+      ...(task.links ?? []),
+      ...(task.parentId ? [task.parentId, byId.get(task.parentId)?.title ?? ""] : []),
+      ...(task.relatedTaskIds ?? []).flatMap(id => [id, byId.get(id)?.title ?? ""]),
+      ...(backlinks.get(task.id) ?? []).flatMap(other => [other.id, other.title]),
+      ...(attachmentNames.get(task.id) ?? []),
+      task.sessionId ?? "", task.modelRef ?? "", task.epic ? "epic эпик" : "",
+    ].join(" ");
+    const metadata = `${task.id} ${task.type} ${task.status} ${task.priority} ${description} ${references}`;
     const score = scoreMatch(queryTerms, title, metadata);
     if (!score) continue;
     hits.push({ kind: "tasks", id: `tasks:${task.id}`, taskId: task.id, title,
       snippet: preview(`${task.status ?? ""} · ${task.type ?? ""} · ${task.priority ?? ""} · ${description}`), score });
   }
-  return { hits, notices: parsed.tasks.length > 10_000 ? ["Tasks: truncated to 10,000 saved tasks."] : [] };
+  return { hits, notices: tasks.length > 10_000 ? ["Tasks: truncated to 10,000 saved tasks."] : [], records: tasks, safe: true };
 }
 
 /** Git-owned, HEAD-only history; never reads or retains patches except on explicit patch:<literal>. */
@@ -290,14 +336,14 @@ async function safeGit(root: string, args: string[], signal: AbortSignal): Promi
     cwd: root,
     env: { ...env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0" },
     encoding: "utf8",
-    timeout: 8_000,
-    maxBuffer: 3 * 1024 * 1024,
+    timeout: 15_000,
+    maxBuffer: 12 * 1024 * 1024,
     signal,
   });
   return stdout;
 }
 
-interface CommitRecord {
+export interface CommitRecord {
   hash: string;
   shortHash: string;
   title: string;
@@ -332,7 +378,7 @@ export function parseGitHistory(output: string): CommitRecord[] {
   return commits;
 }
 
-async function searchCommits(root: string, query: string, queryTerms: readonly string[], signal: AbortSignal, deps: ProjectSearchServices): Promise<{ hits: ProjectSearchHit[]; notices: string[] }> {
+async function searchCommits(root: string, query: string, queryTerms: readonly string[], signal: AbortSignal, deps: ProjectSearchServices): Promise<{ hits: ProjectSearchHit[]; notices: string[]; records: CommitRecord[] }> {
   const pickaxe = /^patch:\s*(.{1,256})$/iu.exec(query)?.[1]?.trim();
   const args = [
     "log", "HEAD", "--no-decorate", "--no-show-signature", "--no-renames",
@@ -358,7 +404,7 @@ async function searchCommits(root: string, query: string, queryTerms: readonly s
   }
   const notices = commits.length >= (pickaxe ? 50 : MAX_COMMITS)
     ? [`Commits: scanned at most ${pickaxe ? 50 : MAX_COMMITS} HEAD ancestors/matches; older history may need a narrower query.`] : [];
-  return { hits, notices };
+  return { hits, notices, records: commits };
 }
 
 /** Parse IDX's length-delimited body sections; never reinterpret a body line as a result header. */
@@ -433,7 +479,7 @@ async function searchIdx(root: string, query: string, kinds: readonly ("code" | 
   for (const kind of kinds) {
     signal.throwIfAborted();
     try {
-      const response = await deps.exec("idx", indexSearchArgs(query, kind, params), { cwd: root, signal, timeout: 12_000 });
+      const response = await deps.exec("idx", indexSearchArgs(query, kind, params), { cwd: root, signal, timeout: 60_000 });
       signal.throwIfAborted();
       if ((response.code ?? 0) !== 0) {
         notices.push(`${kind}: IDX query unavailable; existing local results remain available.`);
@@ -464,7 +510,7 @@ export async function searchProject(
   const wanted = /^patch:/iu.test(query) ? sources.filter(source => source === "commits") : sources;
   const queryTerms = terms(query);
   const timeout = new AbortController();
-  const timer = setTimeout(() => timeout.abort(), 18_000);
+  const timer = setTimeout(() => timeout.abort(), 60_000);
   const deadline = AbortSignal.any([signal, timeout.signal]);
   let wake!: () => void;
   const deadlineReached = new Promise<void>(resolve => { wake = resolve; });
@@ -485,9 +531,65 @@ export async function searchProject(
       }
     })());
   };
-  if (wanted.includes("tasks")) collect("Tasks", () => searchTasks(root, queryTerms, deadline));
-  if (wanted.includes("sessions")) collect("Sessions", () => searchSessions(root, queryTerms, deadline, deps));
-  if (wanted.includes("commits")) collect("Commits", () => searchCommits(root, query, queryTerms, deadline, deps));
+  const taskSource = wanted.includes("tasks") ? searchTasks(root, queryTerms, deadline) : undefined;
+  const sessionSource = wanted.includes("sessions") ? searchSessions(root, queryTerms, deadline, deps) : undefined;
+  if (taskSource) collect("Tasks", () => taskSource);
+  if (sessionSource) collect("Sessions", () => sessionSource);
+  if ((taskSource || sessionSource) && ["hybrid", "semantic"].includes(parsed.params.indexMode)) {
+    collect("Cached semantics", async () => {
+      // Wait for authoritative local snapshots, not for unrelated IDX/Git.
+      // Run only once, so Tasks and Sessions share the same query embedding.
+      const [taskResult, sessionResult] = await Promise.allSettled([
+        taskSource ?? Promise.resolve({ records: [] as ProjectTask[], safe: true }),
+        sessionSource ?? Promise.resolve({ records: [] as CachedSessionCandidate[] }),
+      ]);
+      deadline.throwIfAborted();
+      const tasks = taskResult.status === "fulfilled" ? taskResult.value.records : [];
+      const sessions = sessionResult.status === "fulfilled" ? sessionResult.value.records : [];
+      if (!tasks.length && !sessions.length && !(taskSource && taskResult.status === "fulfilled" && taskResult.value.safe)) {
+        return { hits: [], notices: [] };
+      }
+      const semantic = await cachedProjectSemantics(root, query, {
+        tasks, sessions, tasksSelected: Boolean(taskSource),
+        tasksSafe: !taskSource || (taskResult.status === "fulfilled" && taskResult.value.safe === true),
+      }, deadline, deps.semantic);
+      deadline.throwIfAborted();
+      const hits: ProjectSearchHit[] = [];
+      for (const task of tasks) {
+        const similarity = semantic.tasks.get(task.id);
+        if (similarity === undefined) continue;
+        const description = task.description ?? "";
+        const title = (task.title.trim() || description.split("\n").find(s => s.trim()) || "Untitled task").trim().slice(0, 200);
+        hits.push({ kind: "tasks", id: `tasks:${task.id}`, taskId: task.id, title,
+          snippet: preview(`${task.status} · ${task.type} · ${task.priority} · ${description}`),
+          score: 0.2 + similarity * 0.8, semantic: true });
+      }
+      for (const session of sessions) {
+        const similarity = semantic.sessions.get(session.id);
+        if (similarity === undefined) continue;
+        const title = (session.name?.trim() || session.firstMessage.trim().slice(0, 140) || session.id).slice(0, 240);
+        hits.push({ kind: "sessions", id: `sessions:${session.id}`, sessionId: session.id,
+          sessionPath: session.path, title, snippet: session.snippet ?? "Saved session name",
+          score: 0.2 + similarity * 0.8, semantic: true });
+      }
+      return { hits, notices: semantic.notices };
+    });
+  }
+  const commitsSource = wanted.includes("commits") ? searchCommits(root, query, queryTerms, deadline, deps) : undefined;
+  if (commitsSource) collect("Commits", () => commitsSource);
+  if (commitsSource && ["hybrid", "semantic"].includes(parsed.params.indexMode) && !/^patch:/iu.test(query)) {
+    collect("Semantic Commits", async () => {
+      const result = await commitsSource;
+      deadline.throwIfAborted();
+      if (!result.records.length) return { hits: [], notices: [] };
+      const readHead = async (owned: AbortSignal) => {
+        const output = deps.git ? await deps.git(root, ["rev-parse", "HEAD"], owned)
+          : await safeGit(root, ["rev-parse", "HEAD"], owned);
+        return output.trim();
+      };
+      return searchSemanticCommits(root, result.records, query, readHead, deadline, deps.commitSemantic);
+    });
+  }
   const idxKinds = wanted.filter((source): source is "code" | "knowledge" => source === "code" || source === "knowledge");
   if (idxKinds.length) collect("IDX", () => searchIdx(root, query, idxKinds, parsed.params!, deadline, deps));
   try {
@@ -496,7 +598,7 @@ export async function searchProject(
       deadlineReached,
     ]);
     signal.throwIfAborted();
-    if (timeout.signal.aborted) notices.push("Some sources exceeded the 18-second search deadline.");
+    if (timeout.signal.aborted) notices.push("Some sources exceeded the 60-second search deadline.");
   } finally {
     deadline.removeEventListener("abort", onAbort);
     clearTimeout(timer);
@@ -504,7 +606,16 @@ export async function searchProject(
   if (wanted.length !== sources.length) notices.push("patch: only searches changed Git lines; other sources were skipped.");
   const sorted = all.sort((a, b) => b.score - a.score || a.kind.localeCompare(b.kind) || a.id.localeCompare(b.id));
   const unique = new Map<string, ProjectSearchHit>();
-  for (const hit of sorted) if (!unique.has(hit.id)) unique.set(hit.id, hit);
+  for (const hit of sorted) {
+    const previous = unique.get(hit.id);
+    if (!previous) { unique.set(hit.id, hit); continue; }
+    if (previous.semantic || hit.semantic) {
+      // Preserve current lexical metadata/snippets; semantic evidence can
+      // rank an item even with zero literal query-term matches.
+      const lexical = previous.semantic ? hit : previous;
+      unique.set(hit.id, { ...lexical, score: Math.max(previous.score, hit.score), semantic: true });
+    }
+  }
   return { projectRoot: root, query, sources: wanted, hits: [...unique.values()].slice(0, limit),
     notices: [...new Set(notices)] };
 }

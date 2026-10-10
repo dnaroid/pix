@@ -9,17 +9,35 @@ import sidebarViewModelSource from "../app/desktop-sidebar-view-model.svelte.ts?
 import navigationViewModelSource from "../app/desktop-navigation-view-model-services.ts?raw";
 
 describe("WorkspaceSidebar project sizing", () => {
+  it("owns visible-panel polling and preserves interactive Task management", () => {
+    expect(sidebarSource).toContain('activeTab === "tasks" && !layoutController.collapsed && !editorOpen && workspace');
+    expect(sidebarSource).toContain("return onObserveTasks?.()");
+    expect(sidebarViewModelSource).toContain("onObserveTasks: options.projectTasks.observe");
+    expect(sidebarSource).toContain('<WorkspaceSidebarTaskEditor');
+    expect(sidebarSource).toContain('<WorkspaceSidebarTaskQuickAdd');
+    expect(sidebarSource).toContain('onSubmit={submitEditor}');
+    expect(sidebarSource).toContain('onDeleteRequest={statusMenuController.requestDelete}');
+    expect(tasksPanelSource).toContain('data-task-drop-placeholder');
+    expect(sidebarSource).toContain('isStatusCollapsed={tasksView.isStatusCollapsed}');
+    expect(sidebarSource).toContain('onToggleStatusCollapsed={tasksView.toggleStatusCollapsed}');
+    expect(sidebarSource).toContain('tasksView.selectWorkspace(workspace)');
+  });
+  it("keeps the authoritative unfiltered task counter only in the sidebar header", () => {
+    expect(sidebarSource).toContain('{tasks.length} {tasks.length === 1 ? "task" : "tasks"} · {doneCount} done');
+    expect(tasksPanelSource).not.toContain("tasks ·");
+    expect(tasksPanelSource).toContain('aria-haspopup="menu"');
+    expect(tasksPanelSource).toContain('onSetTaskPriority(task.id, priority)');
+  });
   it("rechecks task navigation ownership after rendering before scrolling", () => {
     expect(sidebarSource).toContain("isCurrent: () => boolean = () => true");
     expect(sidebarSource).toMatch(/await tick\(\);\s*if \(!isCurrent\(\) \|\| workspace !== requestWorkspace\) return;\s*const taskCard/);
   });
-  it("creates tasks from group headers with the selected type instead of the toolbar", () => {
-    expect(sidebarSource).toContain("function openCreate(type: ProjectTaskType): void");
-    expect(sidebarSource).toContain("if (!workspace || busy) return;");
-    expect(sidebarSource).toContain("taskType = type;");
-    expect(sidebarSource).toContain("onCreate={openCreate}");
-    expect(tasksPanelSource).toContain("onclick={() => onCreate(group.type)}");
-    expect(sidebarSource).not.toContain('aria-label="Add task"');
+  it("keeps task creation, editor, deletion and drag interactions", () => {
+    expect(tasksPanelSource).toContain('onclick={() => onCreate(');
+    expect(tasksPanelSource).toContain('if (!busy) onEdit(task)');
+    expect(tasksPanelSource).toContain('onCardDragClickConsumed()');
+    expect(tasksPanelSource).toContain('onclick={() => onDeleteRequest(');
+    expect(tasksPanelSource).toContain('onpointerdown={(event) => startCardDrag');
   });
 
   it("uses self-refreshing eligibility for the combined Git command and does not open a panel", () => {
@@ -93,7 +111,7 @@ describe("WorkspaceSidebar project sizing", () => {
     expect(sidebarSource).toContain("bg-sidebar pl-3 pr-1");
   });
 
-  it("uses the shared menu navigation contract for task status", () => {
+  it("keeps the reusable menu navigation helper and task status popup", () => {
     expect(statusMenuControllerSource).toContain("menuFocusIndex(navigationItems, currentIndex, event.key)");
     expect(statusMenuControllerSource).toContain("menuTypeaheadFocusIndex(navigationItems, currentIndex, query)");
     expect(tasksPanelSource).toContain('role="menuitemradio"');
@@ -110,6 +128,11 @@ describe("WorkspaceSidebar project sizing", () => {
     expect(sidebarViewModelSource).toContain("settingsConfigOptions: options.configOptions()");
     expect(sidebarSource).toMatch(/<SettingsPanel\b[^>]*configOptions=\{settingsConfigOptions\}/);
     expect(sidebarSource).toContain("bind:this={settingsPanel}");
+    expect(navigationViewModelSource).toContain("modelPreferences: options.model.preferences");
+    expect(sidebarViewModelSource).toContain("visibleModelRefs: options.modelPreferences.visibleModelRefs");
+    expect(sidebarViewModelSource).toContain("rememberedThinkingByModel: options.modelPreferences.rememberedThinkingByModel");
+    expect(sidebarViewModelSource).toContain("onVisibleModelsChange: options.modelPreferences.saveVisibleModelRefs");
+    expect(sidebarSource).toContain("onVisibleModelsChange");
   });
 
   it("routes externally observed registry changes through the local-state observer", () => {

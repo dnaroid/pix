@@ -22,7 +22,9 @@ This package keeps shared Pi tools as ordinary source folders under `src/` and r
 - `src/session` — one `session` tool for naming and bounded raw-history recovery through `action: name | overview | read | search | recovery`; no old tool aliases
 - `src/truncation-metadata-normalizer` — default-on metadata cleanup for SDK-truncated `Read` / shell / `ast_grep` results; removes only a proven duplicate `details.truncation.content` copy while preserving visible content and structural truncation metadata; can be disabled through the normal module config
 - `src/repo-discovery` — `/idx-init`, `/idx-update`, and idx-backed `repo_context` / `repo_inspect` / `repo_audit`; `repo_inspect` selects architecture, structure, AST, symbol explanation or dependency views with typed options. Repo tools and repo-aware mutation guidance register only when the launch project has `.indexer-cli` **and** an executable `idx` is available on `PATH`.
-- `src/project-search` — always-registered read-only `project_search`.
+- `src/project-search` — always-registered `project_search`: authoritative
+  project stores are read-only; explicitly opted-in semantic searches can
+  incrementally write the project-owned search-vector cache.
   Searches saved Sessions (first user/last completed assistant on the active
   branch), Tasks, HEAD-reachable commits and changed paths, and Code/Knowledge
   via the existing IDX index when available. `patch:<literal>` searches Git
@@ -31,6 +33,16 @@ This package keeps shared Pi tools as ordinary source folders under `src/` and r
   snippets plus source identities (file/line, commit, session path or task ID).
   `indexMode: "lexical"` avoids IDX embedding calls; hybrid may contact the
   project's saved embedding provider.
+
+- `src/project-tasks` — default-enabled `project_tasks` reads and edits saved
+  cwd `.pi/tasks.sqlite` tasks (`list`, `get`, `update`, `create`),
+  independently of IDX. Updates are scoped to a single row and protected by
+  SQLite transactions plus optimistic task revisions. The agent tool cannot
+  delete or write SQL; user-invoked `/tasks list`, `/task get|add|update|delete`
+  and `/task attach` perform validated user operations. Stored attachments
+  are content-addressed SHA-256 blobs. This is separate from session `todo`.
+  No legacy JSONC/overlay task import. See
+  [contract](../../specs/project-tasks-agent-tool.md).
 
 The ordered module catalog places `project-search` immediately after
 `repo-discovery`. Unlike IDX-gated `repo_*` tools, `project_search`
@@ -48,7 +60,7 @@ is available for local sources even when IDX is not configured.
 
 `index.ts` is intentionally only a thin auto-discovery shim that re-exports `src/index.ts`. There is no `pi.extensions` manifest here, so local Pi auto-discovery loads the suite once via `~/.pi/agent/extensions/pi-tools-suite/index.ts` and does not double-register tools. `src/module-catalog.ts` is the ordered single source of truth for bundled module names, defaults, descriptions, and host policy; runtime registration derives each conventional `src/<module-name>/index.ts` loader from that catalog, and Desktop Settings consumes the same metadata without importing runtime modules.
 
-Registration order is preserved by the ordered catalog in `src/module-catalog.ts`: coding-discipline, ast-grep, async-subagents, lsp, comment-checker, session, repo-discovery command/tool gate, project-search, antigravity-auth provider, local claude-code-provider, OpenCode import, clean-Pi-only question, todo, model-tools, usage, web-search, truncation-metadata-normalizer, dcp, prompt-commands, resource-registry, credential-firewall, then codex-reasoning-fix. Tool metadata and active model-specific tool sets have two modes: standard and repo-aware. Repo-aware mode requires both project `.indexer-cli` state and an executable `idx`; when enabled, `repo_*` tools stay active ahead of overlapping lower-level aliases. If `idx` is unavailable, the suite retains local `project_search` history and ordinary Read/Grep/LSP/sub-agent guidance and does **not** implicitly install, initialize, or create index state. `/idx-init` is the explicit setup/repair path and should be run only with user permission. Independently of the catalog, `src/index.ts` registers an unconditional guard (see [provider-web-search-policy](../../specs/provider-web-search-policy.md)) that removes and blocks the Claude provider's metered `pi_claude_code_provider_web_search` tool in parent sessions while keeping the provider itself and the suite's own `web_search` available. Sub-agents exclude that tool through their separate tool guard.
+Registration order is preserved by the ordered catalog in `src/module-catalog.ts`: coding-discipline, ast-grep, async-subagents, lsp, comment-checker, session, repo-discovery command/tool gate, project-search, project-tasks, antigravity-auth provider, local claude-code-provider, OpenCode import, clean-Pi-only question, todo, model-tools, usage, web-search, truncation-metadata-normalizer, dcp, prompt-commands, resource-registry, credential-firewall, then codex-reasoning-fix. Tool metadata and active model-specific tool sets have two modes: standard and repo-aware. Repo-aware mode requires both project `.indexer-cli` state and an executable `idx`; when enabled, `repo_*` tools stay active ahead of overlapping lower-level aliases. If `idx` is unavailable, the suite retains local `project_search` history and ordinary Read/Grep/LSP/sub-agent guidance and does **not** implicitly install, initialize, or create index state. An explicit agent `project_search` in hybrid/semantic mode can **incrementally fill missing** task and saved-session-name vectors in the same `.pi/search/index.sqlite` after their independent Desktop opt-ins; **task titles/descriptions and saved session names**, as well as the query, may be sent to OpenRouter and incur charges. Selected Git commits are likewise indexed incrementally using the project’s configured IDX embedding provider; **commit subjects/authors/messages** may be sent externally. `indexMode=lexical` disables all provider calls and index writes. See [project-search-agent-tool](../../specs/project-search-agent-tool.md). `/idx-init` is the explicit IDX setup/repair path and should be run only with user permission. Independently of the catalog, `src/index.ts` registers an unconditional guard (see [provider-web-search-policy](../../specs/provider-web-search-policy.md)) that removes and blocks the Claude provider's metered `pi_claude_code_provider_web_search` tool in parent sessions while keeping the provider itself and the suite's own `web_search` available. Sub-agents exclude that tool through their separate tool guard.
 
 ### IDX embedding setup and privacy
 
@@ -696,18 +708,17 @@ changes, with Sol fallback), `implement-core` (Sol for complex core changes or
 ambiguous bugs), `mechanical` (GLM for small prescribed behavior-preserving
 edits with deterministic checks), `verify`
 (run checks and diagnose logs without fixing files), `ui-qa` (real browser,
-terminal/TUI, and desktop-GUI verification), `frontier-review` (independent
-post-implementation review), `delivery-review` (explicit delivery-readiness
+terminal/TUI, and desktop-GUI verification), `delivery-review` (explicit delivery-readiness
 assessment), `knowledge-auditor` (final indexed-repository documentation
-audit/minor drift repair), and `oracle` (deliberate strong second opinion).
+audit/minor drift repair), and `oracle` (deliberate strong second opinion and complex architectural review).
 Ordinary workers use economical model candidates; no built-in parent-tier
 rule promotes them to a flagship. Oracle is the exception, not an automatic
 retry for difficult work. Task-specific discipline belongs in the brief.
 
 Broad migrations and semantic regression changes never belong to `mechanical`.
 Use coherent slices, an early affected typecheck and focused regression; do not
-weaken assertions to make a migration pass. Review roles use Sol without a GLM
-fallback. Compare cost per accepted verified change including failures, review
+weaken assertions to make a migration pass. Delivery review uses Sol without a GLM
+fallback; oracle uses the cross-vendor frontier pool. Compare cost per accepted verified change including failures, review
 and rework, not token price alone. See [coding acceptance guidance](docs/subagent-model-pools.md#coding-quality-and-acceptance).
 
 For non-UI work, start with the shortest parent pass that resolves user intent,
@@ -1027,13 +1038,15 @@ release is a config edit:
 }
 ```
 
-- `oracle` (`require-other-if-frontier`): a frontier parent gets all eligible
-  frontier models from other vendors,
-  and a non-frontier parent gets any frontier model, other vendors first.
-- `frontier-review` (`forParentTier: non-frontier`) is hidden for frontier
-  parents and explicitly excluded for `*gpt-6.1-sol*` parents even though Sol
-  is not frontier; `delivery-review` stays available to all parents. Both use
-  their own Sol-only `models`, not the frontier candidate list.
+- `oracle` (`modelSelection: frontier`, `require-other`) selects frontier
+  models from other vendors only for every parent, including all fallbacks.
+  Missing parent identity or no other-vendor candidate fails closed. It provides
+  a deliberate second opinion and required post-implementation review only for
+  complex architectural tasks, not routine features, local bug fixes, mechanical
+  edits, or large diffs alone. There is no parent-tier gate. The separate bundled
+  `frontier-review` role was merged into oracle and removed. Task complexity is
+  classified by the parent, not by runtime. `delivery-review` keeps its own
+  Sol-only list and remains available to all parents.
 - Entry fields: `vendor` (override inference), `expensive`, `enabled: false`
   (still recognized as frontier, never selected), `aliases` (globs recognizing
   the same model under other refs, e.g. OpenRouter), `roles` (limit an entry to
@@ -1080,7 +1093,7 @@ Sub-agents run with `--no-session` by default to avoid writing duplicate Pi sess
 Every sub-agent role (including project-local and future roles) gets a private `todo` tool for non-trivial multi-step work. Each child attempt owns its list; it cannot read or overwrite the parent's project plan. `todo` remains available even with restricted or empty work-tool selections. Child todos do not enable persistence commands, thinking overrides or automatic follow-up turns; unfinished work and blockers belong in the report to the parent.
 
 Optional work tools follow the final tool selection: bundled `research`,
-`implement`, `implement-core`, `mechanical` and `frontier-review` request read-only
+`implement`, `implement-core`, `mechanical` and `oracle` request read-only
 `ast_grep`; only bundled `research` adds `web_search`/`web_fetch`. The tools-only
 loader preserves these extension names without loading `ast_apply`, LSP or
 credential/setup commands. Unlike universal todo/repo, optional tools can be

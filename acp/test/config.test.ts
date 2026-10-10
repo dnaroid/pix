@@ -17,6 +17,7 @@ test("resolveAdapterConfig trims and keeps explicit values", () => {
 		questionExtensionPath: "  /opt/pix/question.js  ",
 		sessionTitleExtensionPath: "  /opt/pix/session-title.js  ",
 		headsUpExtensionPath: "  /opt/pix/heads-up.js  ",
+		htmlSandboxExtensionPath: "  /opt/pix/html-sandbox.js  ",
 		toolsSuiteExtensionPath: "  /opt/pix/pi-tools-suite.ts  ",
 	});
 	assert.equal(config.piEntry, "/opt/pi/rpc-entry.js");
@@ -24,6 +25,7 @@ test("resolveAdapterConfig trims and keeps explicit values", () => {
 	assert.equal(config.questionExtensionPath, "/opt/pix/question.js");
 	assert.equal(config.sessionTitleExtensionPath, "/opt/pix/session-title.js");
 	assert.equal(config.headsUpExtensionPath, "/opt/pix/heads-up.js");
+	assert.equal(config.htmlSandboxExtensionPath, "/opt/pix/html-sandbox.js");
 	assert.equal(config.toolsSuiteExtensionPath, "/opt/pix/pi-tools-suite.ts");
 });
 
@@ -44,6 +46,7 @@ test("adapterConfigFromEnv reads environment", () => {
 		PIX_ACP_QUESTION_EXTENSION: "/opt/pix/question.js",
 		PIX_ACP_SESSION_TITLE_EXTENSION: "/opt/pix/session-title.js",
 		PIX_ACP_HEADS_UP_EXTENSION: "/opt/pix/heads-up.js",
+		PIX_ACP_HTML_SANDBOX_EXTENSION: "/opt/pix/html-sandbox.js",
 		PIX_ACP_TOOLS_SUITE_EXTENSION: "/opt/pix/pi-tools-suite.ts",
 	} as NodeJS.ProcessEnv);
 	assert.equal(config.piEntry, "/opt/pi/rpc-entry.js");
@@ -51,6 +54,7 @@ test("adapterConfigFromEnv reads environment", () => {
 	assert.equal(config.questionExtensionPath, "/opt/pix/question.js");
 	assert.equal(config.sessionTitleExtensionPath, "/opt/pix/session-title.js");
 	assert.equal(config.headsUpExtensionPath, "/opt/pix/heads-up.js");
+	assert.equal(config.htmlSandboxExtensionPath, "/opt/pix/html-sandbox.js");
 	assert.equal(config.toolsSuiteExtensionPath, "/opt/pix/pi-tools-suite.ts");
 });
 

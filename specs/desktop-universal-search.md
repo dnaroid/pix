@@ -11,7 +11,14 @@ Desktop's UI retrieves and navigates these sources independently of the
 headless `project_search` agent tool. Both read the same canonical task,
 session and Git stores and existing IDX code/document index; the agent tool
 provides compact evidence and IDs for the calling agent, without RAG inference
-or a separate persistent index. See
+or a separate persistent index. It can incrementally populate and reuse the
+same task and saved-session-name vectors after independent user-global
+consent, sending **title/description or saved name and bounded query** to
+OpenRouter. It also incrementally populates current Git commit metadata/message
+vectors using the configured IDX embedding provider and the shared
+`pix_commit_*` tables. Unlike Desktop's progressively updated UI, the agent
+tool waits for
+the selected sources (up to 60 seconds) and returns one combined response. See
 [project-wide agent search](project-search-agent-tool.md).
 
 - Desktop provides one current-project dialog, opened from the titlebar or
@@ -35,7 +42,7 @@ or a separate persistent index. See
   requests include IDX's existing
   matched-content excerpts, bounded before use in local BM25 and previews.
   Missing/truncated IDX excerpts remain opaque candidates below lexical matches,
-  as are opt-in semantic settings candidates, first/final session-excerpt
+  as are opt-in semantic settings/task candidates, first/final session-excerpt
   matches, and semantic/full-message/patch commit candidates without visible
   lexical evidence. Length-delimited IDX body output
   is never parsed as new result headers.
@@ -141,15 +148,48 @@ or a separate persistent index. See
   current window, without resubmitting. Workspace or ACP-client replacement clears
   this memory. Closing cancels pending work; an interrupted query retains its input
   but must be explicitly submitted again. Nothing is persisted to disk.
-- Tasks search reads the same `.pi/tasks.jsonc` document as the Tasks panel and
-  locally matches labels, descriptions, IDs, type, status and priority across all
-  tasks (including done). Attachment contents are not read. Selection verifies
+- Tasks search reads the same `.pi/tasks.sqlite` rows as the Tasks panel and
+  locally matches labels, descriptions, IDs, type, status, priority, links to
+  project files/artifacts, parent task ID/title, related task IDs/titles in
+  both directions, epic flag, assigned model/effort and associated `sessionId`
+  across all tasks (including done). Linked attachment **names** are read from
+  the SQLite association table in one background native query. File contents,
+  attachment blobs and session contents are never searched as part of Tasks.
+  Selection verifies
   the stable task ID still exists in storage, then reveals it in Tasks; it never
   runs or edits the task. If the panel has not loaded a newly added external task,
   selection asks to refresh Tasks rather than overwriting its current document.
   The reveal/scroll operation rechecks workspace, connection and navigation
   ownership after rendering so a cancelled or superseded selection cannot scroll
   a different project's panel.
+- Task semantics require a third independent opt-in,
+  `search.tasksSemanticEnabled` (false by default), in Desktop Search Settings.
+  Enabling consent does not initiate an upload; **only an explicit Tasks search**
+  contacts the search service for optional embeddings. It can send the entered
+  query and only the task `title`+`description` (2,000-character combined cap
+  per task) to the existing pinned OpenRouter embedding model. Status, priority,
+  IDs, hierarchy, links/paths, session/model assignment, attachment filenames
+  and bytes are never included in the embedding input; existing user-authored
+  description text remains eligible even if it itself contains paths.
+  Task data never uses IDX code/knowledge tables or the settings-only `documents`
+  table: `pix_task_index_meta`, `pix_task_documents` and `pix_task_vectors`
+  are separate table families in `.pi/search/index.sqlite`. Only IDs, content
+  hashes and 1,024-dimensional float32 vectors persist, not the task text.
+  Embeddings are keyed by a hash of semantic text. Status/link/model changes
+  reuse the same vector; description edits, renames and deletions reconcile
+  changed IDs/hashes and prune unreferenced vectors. Queries validate returned
+  hashes against the current SQLite corpus before surfacing any task hit.
+  SQLite write ownership, revalidation and cancellation fence concurrent
+  writes, provider responses after consent revocation, and stale task payloads.
+  To bound first-use paid traffic, each submitted search indexes no more than
+  64 previously unindexed task texts (16 per provider batch), retaining partial
+  semantic results and reporting the unfinished index. Subsequent searches
+  continue indexing. Cached vectors are retained when disabled, but no further
+  provider requests are made without new consent.
+  The ACP semantic task RPC returns bounded search hits, fused with the local
+  task hits by stable task ID; a semantic-only hit is not discarded by lexical
+  BM25 coverage rules. A disconnected, slow or failing ACP preserves fully
+  usable local task search with an independent diagnostic.
 - Commits search examines metadata for all ancestors of current HEAD, with no
   30-commit window; it does not enumerate unrelated branches. The dedicated
   `git_search_history` command leaves Source Control's 30-item history unchanged.
@@ -171,8 +211,10 @@ or a separate persistent index. See
   commit objects and cannot check out or modify the working tree. Root commits
   and merges display their changes, with large patches visibly truncated.
   Navigating to a newer search result, closing the dialog, or switching
-  projects invalidates a pending older commit reveal. Tasks-only searches never invoke
-  ACP, IDX or providers. Missing Git or
+  projects invalidates a pending older commit reveal. Tasks-only searches
+  never invoke IDX, Git or provider APIs without task semantic consent; when
+  connected, Desktop may query ACP to check the independent task opt-in, but
+  the backend performs no task embedding without it. Missing Git or
   malformed task storage reports a source-specific error without hiding other hits.
 - Explicit `patch:<literal>` with Commits selected uses a read-only Git
   pickaxe (`git log -G`, with the literal regex-escaped) over HEAD-reachable
@@ -213,6 +255,20 @@ or a separate persistent index. See
 - Settings search uses authored labels, descriptions and synonyms, never
   configured values, credentials or unrelated settings files. A result opens
   its exact section and focuses its stable field ID.
+- The inline Settings sidebar and saved-conversation search box reuse the same
+  Desktop authored settings catalog, local BM25 normalization/ranking, and
+  explicit `pix/search/query` Search retrieval as Universal Search, scoped to
+  their respective source only. Typing previews local catalog fields or visible
+  saved session titles immediately, including partial-word matches; it does not
+  start semantic/provider work. Enter or the compact Search control submits
+  the current query to the shared ACP backend. No Auto intent or RAG runs from
+  these fields. Settings matches filter the existing mounted field controls
+  by section/field identity (unlisted advanced rows retain local filtering);
+  session matches are shown only when their stable ID remains in the available
+  saved-conversation list, so already open tabs never reappear through search.
+  Editing, connection/project changes and unmount cancel requests and ignore
+  stale completions; unavailable ACP leaves local previews usable. Independent
+  settings/session-title semantic consent and provider disclosures still apply.
 - Sessions search is local lexical lookup of the current project's session-list
   titles, deduplicated by stable session ID. The existing listing's display
   title (named title or first-message fallback) is used. On explicit session

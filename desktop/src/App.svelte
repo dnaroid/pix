@@ -5,6 +5,7 @@
   import { installDesktopContextMenu } from "./lib/desktop-context-menu";
   import type { DesktopShortcutPlatform } from "./lib/desktop-commands";
   import type { Attachment } from "./lib/attachments";
+  import { sandboxInlineHeightLimit, type HtmlSandboxViewport } from "./lib/html-sandbox-layout";
   import DesktopTitlebar from "./components/DesktopTitlebar.svelte";
   import UniversalSearch from "./components/UniversalSearch.svelte";
   import { createSearchNavigation } from "./app/search-navigation";
@@ -84,6 +85,24 @@
   let workbenchTerminalPane = $state<{ openTerminal: (command: string) => Promise<void> } | null>(null);
   let transcriptPane = $state<HTMLDivElement | null>(null);
   let transcriptContent = $state<HTMLDivElement | null>(null);
+  function htmlSandboxViewport(): HtmlSandboxViewport | undefined {
+    // Existing messages use the centered, padded transcript column. The
+    // empty/draft conversation has no column yet, so estimate its max width
+    // from the available pane without treating the entire window as usable.
+    const content = transcriptContent;
+    const pane = transcriptPane;
+    if (!content && !pane) return undefined;
+    const width = content
+      ? content.clientWidth
+        - (Number.parseFloat(getComputedStyle(content).paddingLeft) || 0)
+        - (Number.parseFloat(getComputedStyle(content).paddingRight) || 0)
+      : Math.min(848, pane!.clientWidth - (pane!.clientWidth <= 760 ? 24 : 48));
+    if (width < 200) return undefined;
+    return {
+      width: Math.floor(width),
+      maxHeight: sandboxInlineHeightLimit(window.innerHeight),
+    };
+  }
   let promptComposer = $state<{
     focus: () => Promise<void>;
     insertPaths: (paths: readonly string[]) => Promise<void>;
@@ -554,6 +573,7 @@
     setPromptText: (text) => promptText = text,
     setPromptAttachments: (attachments) => promptAttachments = attachments,
     imagePromptSupported: () => imagePromptSupported,
+    htmlSandboxViewport,
     focusComposer: () => promptComposer?.focus(),
     conversation: conversationActions,
     requestLocalTextInput: (message, title) => elicitationStore.requestLocalTextInput(message, title),

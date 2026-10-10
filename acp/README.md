@@ -35,8 +35,10 @@ Zed (Agent Panel)  <--ACP JSON-RPC over stdio-->  pix-acp  <--JSONL RPC over std
   edit/write diffs).
 - `src/acp/ui-request-bridge.ts` — maps pi `extension_ui_request` dialogs to
   ACP form elicitations and the answers back to `extension_ui_response`
-  lines on pi's stdin; fire-and-forget UI updates (notify/status/widget) are
-  ignored.
+  lines on pi's stdin. Extension `notify` feedback from commands and background
+  warning/error notifications (including startup failures) becomes live system
+  transcript rows. Background info/status/widget updates are ignored except for
+  Pix's structured state channels.
 - `src/acp/session-map.ts` — persistent ACP↔pi session map
   (`~/.pi/agent/pix-acp/sessions.json` by default) backing
   `session/list`/`load`/`resume`/`fork`/`delete` across adapter restarts.

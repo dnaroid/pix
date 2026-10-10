@@ -29,7 +29,7 @@ Show live execution Plan, Subagents, and brainstorm activity for the active sess
 
 - Creating, editing, or reordering todos from Desktop, or directly mutating todo state outside the runtime command path.
 - Starting, stopping, opening, waiting for, or reading Subagent results from Desktop.
-- Moving or changing project tasks stored in `.pi/tasks.jsonc`.
+- Moving or changing project tasks stored in `.pi/tasks.sqlite`.
 - Showing historical completed, failed, or stopped Subagents after they leave the live widget.
 - Persisting a second Desktop-owned copy of extension state.
 

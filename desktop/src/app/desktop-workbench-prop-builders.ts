@@ -1,4 +1,5 @@
 import type { ComponentProps } from "svelte";
+import type { AcpClient } from "../lib/acp-client";
 import DesktopWorkbenchSurface from "../components/DesktopWorkbenchSurface.svelte";
 import { isWorkspaceProjectFilePath } from "../lib/project-files";
 import { composerActivity } from "../lib/composer-activity";
@@ -43,6 +44,7 @@ export type WorkbenchShellBuilderOptions = {
   errors: ReturnType<typeof createErrorState>;
   sessionStartOpen: () => boolean;
   sessionStartCandidates: () => SessionStartProps["sessions"];
+  searchClient: () => AcpClient | null;
   sessionTabs: ReturnType<typeof createSessionTabController>;
 };
 
@@ -119,6 +121,7 @@ export function buildWorkbenchShellProps(
     sessionStart: options.sessionStartOpen() ? {
       workspace: options.workspace(),
       sessions: options.sessionStartCandidates(),
+      searchClient: options.searchClient(),
       onSelect: (selectedSessionId) => void options.sessionTabs.selectSessionFromDraft(selectedSessionId),
     } : null,
   };
@@ -173,6 +176,9 @@ export function buildWorkbenchConversationProps(
       onResolveLocalMedia: options.preview.resolveLocalMedia,
       onLoadToolResult: (toolCallId) => void options.history.loadDeferredToolResult(toolCallId),
       onUserMessageAction: (message, action) => { if (!link?.owned) void options.branchActions.runUserMessageContextAction(message, action); },
+      onHtmlSandboxSubmit: sessionId && !link?.owned
+        ? (messageId, payload) => options.promptSubmit.submitHtmlSandbox(sessionId, messageId, payload)
+        : undefined,
       lspSuggestion: options.lspOnboarding.activeSuggestion(),
       onInstallLsp: sessionId ? () => void options.lspOnboarding.pauseAndInstall(sessionId) : undefined,
       onDismissLsp: sessionId ? () => options.lspOnboarding.dismiss(sessionId) : undefined,

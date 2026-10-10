@@ -11,18 +11,22 @@
   import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
   import X from "@lucide/svelte/icons/x";
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { openExternalHref } from "../lib/external-links";
+  import { invoke } from "@tauri-apps/api/core";
   import { windowLayoutKey } from "../lib/window-layout-storage";
   import { onMount, tick } from "svelte";
   import {
-    extractAttachmentMarkers,
-    textWithAttachmentMarkers,
+    attachmentFromFile,
     type Attachment,
+    type AttachmentFile,
   } from "../lib/attachments";
   import {
     projectTaskDisplayLabel,
     type ProjectTask,
     type ProjectTaskStatus,
+    type ProjectTaskPriority,
     type ProjectTaskType,
+    normalizeProjectTaskLink,
   } from "../lib/project-tasks";
   import { fuzzySearch } from "../lib/fuzzy";
   import type { GitDiffScope, GitSnapshot } from "../lib/git";
@@ -76,12 +80,22 @@
     type WorkspaceSidebarTaskDropPosition,
   } from "./workspace-sidebar-task-drag-controller.svelte";
   import WorkspaceSidebarTaskEditor from "./WorkspaceSidebarTaskEditor.svelte";
+  import WorkspaceSidebarTaskQuickAdd from "./WorkspaceSidebarTaskQuickAdd.svelte";
   import WorkspaceSidebarTasksPanel from "./WorkspaceSidebarTasksPanel.svelte";
+  import { createWorkspaceSidebarTasksViewController } from "./workspace-sidebar-tasks-view-controller.svelte";
 
   type TaskDraft = {
     title: string;
     description?: string;
     type: ProjectTaskType;
+    expectedTask?: ProjectTask;
+    status?: ProjectTaskStatus;
+    attachments?: readonly Attachment[];
+    links?: readonly string[];
+    relatedTaskIds?: readonly string[];
+    parentId?: string;
+    epic?: boolean;
+    modelRef?: string;
   };
 
   type SidebarTab = SidebarIndicatorTab;
@@ -102,6 +116,9 @@
     lspClient,
     lspSessionId,
     settingsConfigOptions,
+    visibleModelRefs,
+    rememberedThinkingByModel = {},
+    onVisibleModelsChange = () => {},
     tasks,
     loading,
     initialLoading = loading,
@@ -140,6 +157,8 @@
     onCreate,
     onUpdate,
     onStatusChange,
+    onPriorityChange = () => {},
+    onObserveTasks,
     onChooseTaskAttachments,
     onPasteTaskAttachments,
     onOpenTaskAttachment,
@@ -188,6 +207,9 @@
     lspClient: AcpClient | null;
     lspSessionId: string | null;
     settingsConfigOptions: SessionConfigOption[];
+    visibleModelRefs?: readonly string[];
+    rememberedThinkingByModel?: Readonly<Record<string, string>>;
+    onVisibleModelsChange?: (modelRefs: readonly string[]) => Promise<void> | void;
     tasks: ProjectTask[];
     loading: boolean;
     initialLoading?: boolean;
@@ -223,16 +245,18 @@
     projectColors: ReadonlyMap<string, string>;
     projectSwitchDisabled: boolean;
     externalEditorLabel: string;
-    onCreate: (draft: TaskDraft) => void;
-    onUpdate: (taskId: string, draft: TaskDraft) => void;
+    onCreate: (draft: TaskDraft) => void | boolean | Promise<boolean | void>;
+    onUpdate: (taskId: string, draft: TaskDraft) => void | boolean | Promise<boolean | void>;
     onStatusChange: (taskId: string, status: ProjectTaskStatus) => void;
+    onPriorityChange?: (taskId: string, priority: ProjectTaskPriority) => void;
+    onObserveTasks?: () => () => void;
     onChooseTaskAttachments: (current: readonly Attachment[]) => Promise<Attachment[]>;
     onPasteTaskAttachments: (files: readonly File[], current: readonly Attachment[]) => Promise<Attachment[]>;
     onOpenTaskAttachment: (attachment: Attachment) => void;
     onDelete: (taskId: string) => void;
     onReorder: (
       taskId: string,
-      targetType: ProjectTaskType,
+      targetStatus: ProjectTaskStatus,
       targetTaskId: string | null,
       position: WorkspaceSidebarTaskDropPosition,
     ) => void;
@@ -292,16 +316,38 @@
     saveProjectColor: (color) => onSaveProjectColor(color),
   });
   let editorOpen = $state(false);
+  let editorAttachmentsLoading = $state(false);
+  let editorAttachmentError = $state<string | null>(null);
+  let editorBaseTask = $state<ProjectTask | undefined>(undefined);
+  let editorGeneration = 0;
+  let editorCreateStatus = $state<ProjectTaskStatus>("todo");
+  const tasksView = createWorkspaceSidebarTasksViewController();
+  $effect(() => { tasksView.selectWorkspace(workspace); });
+  $effect(() => {
+    workspace;
+    if (activeTab === "tasks" && !layoutController.collapsed && !editorOpen && workspace) {
+      return onObserveTasks?.();
+    }
+  });
   let editingTaskId = $state<string | null>(null);
   let deleteTaskId = $state<string | null>(null);
   let title = $state("");
   let description = $state("");
   let editorAttachments = $state<Attachment[]>([]);
+  let editorOriginalAttachments = $state<string[]>([]);
   let taskType = $state<ProjectTaskType>("feature");
+  let editorParentId = $state("");
+  let editorEpic = $state(false);
+  let editorLinks = $state<string[]>([]);
+  let editorRelatedTaskIds = $state<string[]>([]);
+  let editorModelRef = $state("");
+  let taskAttachmentCounts = $state<Record<string, number>>({});
   let statusMenu = $state<HTMLDivElement | null>(null);
   const statusMenuController = createWorkspaceSidebarStatusMenuController({
     menu: () => statusMenu,
     onStatusChange: (taskId, status) => onStatusChange(taskId, status),
+    onPriorityChange: (taskId, priority) => onPriorityChange(taskId, priority),
+    onDeleteRequest: (taskId) => deleteTaskId = taskId,
   });
   let revealedTaskId = $state<string | null>(null);
   let planSelectorOpen = $state(false);
@@ -311,7 +357,7 @@
   const taskDragController = createWorkspaceSidebarTaskDragController({
     busy: () => busy,
     closeStatusMenu: () => statusMenuController.close(),
-    onReorder: (taskId, targetType, targetTaskId, position) => onReorder(taskId, targetType, targetTaskId, position),
+    onReorder: (taskId, targetStatus, targetTaskId, position) => onReorder(taskId, targetStatus, targetTaskId, position),
   });
   let titleInput = $state<HTMLInputElement | null>(null);
   let indicatorService: SidebarIndicatorService | undefined;
@@ -325,6 +371,27 @@
   let observedGitRemoteTarget = "";
 
   const busy = $derived(loading || saving || storageError || activeTaskId !== null);
+  $effect(() => {
+    const ownerWorkspace = workspace;
+    const taskIds = tasks.map((task) => task.id).join("\0");
+    if (activeTab !== "tasks" || layoutController.collapsed || !ownerWorkspace || storageError || initialLoading) {
+      taskAttachmentCounts = {};
+      return;
+    }
+    let disposed = false;
+    const poll = async () => {
+      try {
+        const counts = await invoke<Record<string, number>>("read_project_task_attachment_counts", { workspace: ownerWorkspace });
+        if (!disposed && workspace === ownerWorkspace && counts && typeof counts === "object" && !Array.isArray(counts)) {
+          taskAttachmentCounts = counts;
+        }
+      } catch { /* Attachment load errors are reported when the editor opens. */ }
+    };
+    void taskIds;
+    void poll();
+    const timer = setInterval(() => void poll(), 4_000);
+    return () => { disposed = true; clearInterval(timer); };
+  });
   const doneCount = $derived(tasks.filter((task) => task.status === "done").length);
   const indicatorInputs = $derived({
     service: indicatorServiceState,
@@ -578,6 +645,11 @@
     if (layoutController.collapsed) layoutController.setCollapsed(false);
     revealedTaskId = taskId ?? null;
     if (!taskId) return;
+    tasksView.selectWorkspace(requestWorkspace);
+    tasksView.typeFilter = "all";
+    tasksView.priorityFilter = "all";
+    const revealedTask = tasks.find((task) => task.id === taskId);
+    if (revealedTask) tasksView.expandStatus(revealedTask.status);
     await tick();
     if (!isCurrent() || workspace !== requestWorkspace) return;
     const taskCard = [...(sidebarElement?.querySelectorAll<HTMLElement>("[data-task-card]") ?? [])]
@@ -634,28 +706,107 @@
     projectSwitcher?.close();
   }
 
-  function openCreate(type: ProjectTaskType): void {
+  function openCreate(type: ProjectTaskType, status: ProjectTaskStatus = "todo"): void {
     if (!workspace || busy) return;
+    editorGeneration++;
     statusMenuController.close();
     editingTaskId = null;
+    editorBaseTask = undefined;
+    editorAttachmentsLoading = false;
+    editorAttachmentError = null;
+    editorCreateStatus = status;
     title = "";
     description = "";
     editorAttachments = [];
+    editorOriginalAttachments = [];
     taskType = type;
+    editorParentId = "";
+    editorEpic = false;
+    editorLinks = [];
+    editorRelatedTaskIds = [];
+    editorModelRef = "";
     editorOpen = true;
     void focusEditorTitle();
   }
 
+  async function createQuickTask(draft: TaskDraft): Promise<boolean> {
+    const project = workspace;
+    if (!project || busy) return false;
+    const result = await onCreate(draft);
+    if (result !== false && workspace === project) {
+      // A just-created task must remain visible despite existing type/priority
+      // filters and any collapsed Todo section.
+      tasksView.typeFilter = "all";
+      tasksView.priorityFilter = "all";
+      tasksView.expandStatus("todo");
+    }
+    return result !== false;
+  }
+
   function openEdit(task: ProjectTask): void {
+    const owner = ++editorGeneration;
+    const sourceWorkspace = workspace;
     statusMenuController.close();
     editingTaskId = task.id;
+    editorBaseTask = $state.snapshot(task);
     title = task.title;
-    const parsedDescription = extractAttachmentMarkers(task.description ?? "", `task-editor:${task.id}`);
-    description = parsedDescription.text;
-    editorAttachments = parsedDescription.attachments;
+    description = task.description ?? "";
+    editorAttachments = [];
+    editorOriginalAttachments = [];
+    editorAttachmentsLoading = true;
+    editorAttachmentError = null;
     taskType = task.type;
+    editorParentId = task.parentId ?? "";
+    editorEpic = task.epic ?? false;
+    editorLinks = [...(task.links ?? [])];
+    editorRelatedTaskIds = [...(task.relatedTaskIds ?? [])];
+    editorModelRef = task.modelRef ?? "";
     editorOpen = true;
     void focusEditorTitle();
+    void invoke<AttachmentFile[]>("read_project_task_attachments", {
+      workspace: sourceWorkspace, id: task.id,
+    }).then(files => {
+      if (owner !== editorGeneration || workspace !== sourceWorkspace || !editorOpen || editingTaskId !== task.id) return;
+      editorAttachments = files.map((file, index) =>
+        attachmentFromFile(file, `task:${task.id}:attachment:${index}`));
+      editorOriginalAttachments = editorAttachmentIdentities(editorAttachments);
+    }).catch(error => {
+      if (owner === editorGeneration && workspace === sourceWorkspace && editorOpen && editingTaskId === task.id) {
+        editorAttachmentError = error instanceof Error ? error.message : String(error);
+      }
+    }).finally(() => {
+      if (owner === editorGeneration) editorAttachmentsLoading = false;
+    });
+  }
+
+  function editorAttachmentIdentities(files: readonly Attachment[]): string[] {
+    return files.map((file) => JSON.stringify([file.path ?? "", file.name, file.size ?? -1]));
+  }
+
+  function openRelatedTask(task: ProjectTask): void {
+    if (busy || editorAttachmentsLoading || editorAttachmentError) return;
+    const original = editorBaseTask;
+    const hasUnsaved = original && (
+      title !== original.title || description !== (original.description ?? "")
+      || taskType !== original.type || editorParentId !== (original.parentId ?? "")
+      || editorEpic !== (original.epic ?? false) || editorModelRef !== (original.modelRef ?? "")
+      || JSON.stringify(editorLinks) !== JSON.stringify(original.links ?? [])
+      || JSON.stringify(editorRelatedTaskIds) !== JSON.stringify(original.relatedTaskIds ?? [])
+      || JSON.stringify(editorAttachmentIdentities(editorAttachments)) !== JSON.stringify(editorOriginalAttachments)
+    );
+    if (hasUnsaved && !window.confirm("Discard unsaved changes and open the related task?")) return;
+    editorGeneration++;
+    openEdit(task);
+  }
+
+  function openTaskLink(link: string): void {
+    const destination = normalizeProjectTaskLink(link);
+    if (!destination) return;
+    if (/^https?:\/\//i.test(destination)) {
+      void openExternalHref(destination).catch(console.error);
+    } else {
+      onOpenProjectFile(destination);
+    }
   }
 
   async function focusEditorTitle(): Promise<void> {
@@ -663,20 +814,31 @@
     titleInput?.focus();
   }
 
-  function submitEditor(): void {
+  async function submitEditor(): Promise<void> {
+    const generation = editorGeneration;
     const trimmedTitle = title.trim();
-    const storedDescription = textWithAttachmentMarkers(description, editorAttachments);
-    if (busy) return;
+    const storedDescription = description.trim()
+      || (!trimmedTitle && editorAttachments.length
+        ? editorAttachments.map((attachment) => `Attachment: ${attachment.name}`).join("\n")
+        : "");
+    if (busy || editorAttachmentsLoading || editorAttachmentError) return;
     if (!editingTaskId && !trimmedTitle) return;
     if (editingTaskId && !trimmedTitle && !storedDescription) return;
     const draft: TaskDraft = {
       title: trimmedTitle,
       ...(storedDescription ? { description: storedDescription } : {}),
       type: taskType,
+      attachments: editorAttachments,
+      links: editorLinks,
+      relatedTaskIds: editorRelatedTaskIds,
+      parentId: editorParentId,
+      epic: editorEpic,
+      modelRef: editorModelRef,
+      ...(editorBaseTask ? { expectedTask: editorBaseTask } : {}),
+      ...(!editingTaskId ? { status: editorCreateStatus } : {}),
     };
-    if (editingTaskId) onUpdate(editingTaskId, draft);
-    else onCreate(draft);
-    editorOpen = false;
+    const result = editingTaskId ? await onUpdate(editingTaskId, draft) : await onCreate(draft);
+    if (result !== false && generation === editorGeneration) editorOpen = false;
   }
 
   async function chooseEditorAttachments(): Promise<void> {
@@ -803,9 +965,14 @@
       </div>
 
       {#if activeTab === "tasks"}
+        <div class="grid min-h-0 grid-rows-[auto_minmax(0,1fr)]">
+          {#if workspace && !initialLoading && !storageError}
+            <WorkspaceSidebarTaskQuickAdd {workspace} client={lspClient} {busy} onCreate={createQuickTask} />
+          {/if}
         <WorkspaceSidebarTasksPanel
           {workspace}
           {tasks}
+          attachmentCounts={taskAttachmentCounts}
           loading={initialLoading}
           {storageError}
           {busy}
@@ -816,6 +983,7 @@
           draggedTaskHeight={taskDragController.height}
           {revealedTaskId}
           statusMenuTaskId={statusMenuController.taskId}
+          statusMenuSection={statusMenuController.section}
           bind:statusMenu
           onPanelPointerDown={statusMenuController.closeOutside}
           {onReload}
@@ -823,15 +991,22 @@
           onTaskDragMove={taskDragController.move}
           onTaskDragFinish={taskDragController.finish}
           onTaskDragCancel={taskDragController.cancel}
+          onCardDragClickConsumed={taskDragController.consumeClick}
           onToggleStatusMenu={statusMenuController.toggle}
           onStatusMenuKeydown={statusMenuController.handleKeydown}
           onSetTaskStatus={statusMenuController.setStatus}
+          onSetTaskPriority={statusMenuController.setPriority}
+          isStatusCollapsed={tasksView.isStatusCollapsed}
+          onToggleStatusCollapsed={tasksView.toggleStatusCollapsed}
+          bind:typeFilter={tasksView.typeFilter}
+          bind:priorityFilter={tasksView.priorityFilter}
           {onRun}
           {onOpenSession}
           onCreate={openCreate}
           onEdit={openEdit}
-          onDeleteRequest={(taskId) => deleteTaskId = taskId}
+          onDeleteRequest={statusMenuController.requestDelete}
         />
+        </div>
       {:else if activeTab === "project"}
         <section id="workspace-project-panel" class="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden" aria-label="Project">
           <ProjectSwitcher
@@ -1003,17 +1178,32 @@
   {#if editorOpen && !layoutController.collapsed}
     <WorkspaceSidebarTaskEditor
       {editingTaskId}
-      {busy}
+      busy={busy || editorAttachmentsLoading}
+      attachmentError={editorAttachmentError}
       bind:title
       bind:description
       {editorAttachments}
       bind:taskType
+      bind:editorParentId
+      bind:editorEpic
+      bind:editorLinks
+      bind:editorRelatedTaskIds
+      bind:editorModelRef
+      {tasks}
+      configOptions={settingsConfigOptions}
+      {visibleModelRefs}
+      {rememberedThinkingByModel}
+      {onVisibleModelsChange}
+      projectFileSuggestions={[...projectDocuments.plans, ...(projectDocuments.todoExists ? [PROJECT_TODO_PATH] : [])]}
+      onValidateProjectFile={onValidateProjectFile}
+      onOpenRelatedTask={openRelatedTask}
+      onOpenLink={openTaskLink}
       bind:titleInput
       onChooseAttachments={chooseEditorAttachments}
       onPasteAttachments={pasteEditorAttachments}
       onRemoveAttachment={removeEditorAttachment}
       onOpenAttachment={onOpenTaskAttachment}
-      onClose={() => editorOpen = false}
+      onClose={() => { editorGeneration++; editorOpen = false; }}
       onSubmit={submitEditor}
     />
   {/if}
