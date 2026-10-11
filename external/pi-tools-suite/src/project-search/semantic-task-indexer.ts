@@ -67,14 +67,14 @@ async function cancellable<T>(work: Promise<T>, signal: AbortSignal): Promise<T>
  * twice for a hash, and each batch uses current canonical tasks, not a query's
  * captured candidates. Never writes canonical tasks.sqlite. */
 export async function syncSavedTaskVectors(root: string, key: string | undefined,
-  options: SemanticSearchOptions, signal: AbortSignal, config: CommitEmbeddingConfig): Promise<{ indexed: number }> {
+  options: SemanticSearchOptions, signal: AbortSignal, config: CommitEmbeddingConfig, retry = false): Promise<{ indexed: number }> {
   let indexed = 0;
   while (true) {
     signal.throwIfAborted();
     await requireSemanticIdentity(options, config, signal);
     // Do not initialize an index just to record a project with no tasks.
     if (!(await readSemanticTaskCorpus(root, signal)).length) {
-      if (!await pruneEmptyTaskIndex(root, signal, options, config)) return { indexed };
+      if (!await pruneEmptyTaskIndex(root, signal, options, config, retry)) return { indexed };
       // Tasks created while waiting for the source claim still drain now,
       // without depending on delivery of a later filesystem notification.
     }
@@ -109,7 +109,8 @@ export async function syncSavedTaskVectors(root: string, key: string | undefined
       const remaining = (await reconcile(db, current, signal)).length;
       await requireSemanticIdentity(options, config, signal);
       return { remaining, indexed: added };
-    }, "tasks");
+    }, "tasks", retry);
+    retry = false;
     indexed += response.indexed;
     if (!response.remaining) return { indexed };
     await yieldToHost(undefined, { signal });
@@ -120,7 +121,7 @@ export async function syncSavedTaskVectors(root: string, key: string | undefined
  * there are no tasks left to embed. Never initialize a
  * fresh index just to record an empty corpus. */
 export async function pruneEmptyTaskIndex(root: string, signal: AbortSignal,
-  options: SemanticSearchOptions, config: CommitEmbeddingConfig): Promise<boolean> {
+  options: SemanticSearchOptions, config: CommitEmbeddingConfig, retry = false): Promise<boolean> {
   const filename = join(root, ".pi", "search", "tasks.sqlite");
   const present = await lstat(filename).catch(error => {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
@@ -137,5 +138,5 @@ export async function pruneEmptyTaskIndex(root: string, signal: AbortSignal,
     await reconcile(db, tasks, signal);
     await requireSemanticIdentity(options, config, signal);
     return false;
-  }, "tasks");
+  }, "tasks", retry);
 }

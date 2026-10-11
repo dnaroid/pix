@@ -69,9 +69,11 @@ see [native repository search](native-repository-search.md) and [0065](../docs/d
   another TUI preference, source opt-ins or a duplicate index.
   Task input is precisely the title+description projection capped at 2,000
   characters. Only current task ID + text-content-hash matches are eligible.
-  Saved session titles require an authenticated ACP session-map record,
-  matching native JSONL path, explicit `namedTitle`, indexed ACP session ID,
-  title hash and current Pi `session_info` name. A first-message fallback is
+  Saved session titles require the current Pi `session_info` name plus matching
+  native session header ID and project cwd. Ordinary Pi/TUI names use the native
+  session ID without requiring an ACP map. Mapped Desktop sessions additionally
+  require an authenticated ACP session-map record, matching native JSONL path,
+  explicit `namedTitle`, indexed ACP session ID and title hash. A first-message fallback is
   never treated as an explicitly saved session name. Records changed or
   deleted during provider latency are rechecked and discarded.
 - When the global provider is configured and required credentials are available,
@@ -91,12 +93,12 @@ see [native repository search](native-repository-search.md) and [0065](../docs/d
   course contain user-authored sensitive text. Query-driven session indexing uses
   batches of 16, up to 256 explicitly named-session vectors per request, and a
   40-second indexing ceiling. A further search continues incomplete session
-  indexing and reports remaining work. SQLite `BEGIN IMMEDIATE`
-  owns each bounded embedding batch so concurrent Desktop/agent searches do
-  not pay for the same missing vector. Completed batches survive subsequent
+  indexing and reports remaining work. Renewable source claims own each bounded
+  embedding batch so concurrent Desktop/agent searches do not pay for the same
+  missing vector; SQLite write transactions do not span provider latency. Completed batches survive subsequent
   failures, while removed/changed configuration, changed task text or a session rename
   rolls back the current batch. A missing cache is initialized only by an
-  active task synchronization or an explicitly submitted session search with valid configuration.
+  active task synchronization, explicit manual indexing or an explicitly submitted session search with valid configuration.
   Index identity mismatches fail closed without
   deleting previously paid vectors. No implicit external-backend setup, user-config edits,
   shared-credential writes or full-transcript indexing occur.
@@ -207,9 +209,44 @@ see [native repository search](native-repository-search.md) and [0065](../docs/d
 - [Native repository discovery](repo-knowledge-agent-workflow.md)
 - [Async subagent tool access](async-subagents.md)
 
+## Manual indexing in Pi/TUI
+
+- `/search-index code|knowledge|sessions|tasks|commits` starts document-only
+  indexing for that source in the current project, returning immediately so the
+  user can inspect status or cancel. `/search-index all` starts these five sources
+  independently. Settings is deliberately excluded.
+- `/search-index status` (also the no-argument default) reads stored item/vector
+  counts without initializing caches or contacting the provider, and reports this
+  session's run states. Stored counts are **not** current corpus coverage, freshness
+  or model compatibility; other sessions' in-flight runs are not enumerated.
+- `/search-index cancel [source|all]` requests cancellation of this session's runs
+  (all by default). Same-source starts remain deduplicated until actual settlement,
+  including the stopping phase. Session replacement/shutdown cancels owned work,
+  waits for settlement and suppresses stale UI updates.
+- Manual runs use the existing global provider configuration and may incur charges;
+  `/search-semantic` remains the configuration command. There is no dummy query or
+  query embedding. Missing provider configuration/credentials yields an incomplete
+  result rather than silently installing or changing anything.
+- Code/Knowledge use the native document-only subprocess. History writers reuse
+  source-local stores and the shared source/provider lease protocol. Manual work
+  drains missing vectors in batches of at most 16 without the query-only 128/256
+  vector limits or overall search deadline. Provider HTTP and individual Git
+  command deadlines remain. Commits page the full pinned HEAD ancestry, checking
+  HEAD before/after paid batches. Sessions index eligible explicit saved names,
+  never transcript bodies. Tasks use the canonical title/description projection.
+- Completed batches survive cancellation/failure; unchanged text reuses paid
+  vectors. Explicit reruns reset the interrupted-provider failure budget and
+  continue missing work. Identity mismatches remain fail-closed, retaining cached
+  vectors. One source failure does not cancel other requested sources.
+
 ## Implementation
 
 - `external/pi-tools-suite/src/project-search/index.ts`
+- `external/pi-tools-suite/src/project-search/index-command.ts`
+- `external/pi-tools-suite/src/project-search/index-runner.ts`
+- `external/pi-tools-suite/src/project-search/index-status.ts`
+- `external/pi-tools-suite/src/project-search/native.ts`
+- `external/pi-tools-suite/src/project-search/source-work.d.mts`
 - `external/pi-tools-suite/src/project-search/engine.ts`
 - `external/pi-tools-suite/src/project-search/semantic.ts`
 - `external/pi-tools-suite/src/project-search/semantic-cache.ts`
@@ -228,6 +265,9 @@ see [native repository search](native-repository-search.md) and [0065](../docs/d
 ## Tests
 
 - `external/pi-tools-suite/test/project-search.test.ts`
+- `external/pi-tools-suite/test/search-index-command.test.ts`
+- `external/pi-tools-suite/test/search-index-runner.test.ts`
+- `external/pi-tools-suite/test/native-project-search.test.ts`
 - `external/pi-tools-suite/test/project-search-semantic.test.ts`
 - `external/pi-tools-suite/test/config.test.ts`
 - `external/pi-tools-suite/test/module-loader.test.ts`

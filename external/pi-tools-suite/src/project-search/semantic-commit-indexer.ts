@@ -69,6 +69,55 @@ function cosine(a: readonly number[], b: readonly number[]): number {
   return Number.isFinite(value) ? Math.max(-1, Math.min(1, value)) : 0;
 }
 
+/** Shared document-only writer. Manual callers pass no query budget and own cancellation. */
+export async function indexCommitVectors(root: string, records: readonly CommitRecord[], head: string,
+  readHead: (signal: AbortSignal) => Promise<string>, owned: AbortSignal,
+  config: CommitEmbeddingConfig, key: string | undefined, services: CommitSemanticServices = {},
+  limit = Infinity, retry = false): Promise<{ indexed: number; remaining: number }> {
+  const docs = records.map(candidate);
+  let indexed = 0, remaining = 0;
+  for (let batch = 0; batch <= limit / BATCH; batch++) {
+    owned.throwIfAborted();
+    const result = await withSearchIndexWriter(root, owned, async db => {
+      ensureCommitSchema(db, config);
+      const { missing } = cachedVectors(db, docs, config);
+      if (!missing.length || batch === limit / BATCH) return { indexed: 0, remaining: missing.length };
+      const targets = missing.slice(0, BATCH);
+      if ((await readHead(owned)).trim() !== head) throw new Error("Commit HEAD changed during indexing");
+      const before = await (services.loadConfig ?? loadCommitConfig)(root);
+      if (!before || commitIdentity(before) !== commitIdentity(config)) throw new Error("Commit configuration changed before indexing");
+      owned.throwIfAborted();
+      const input = targets.map(doc => (config.documentPrefix + doc.record.title + "\n" + doc.record.author + "\n" + doc.record.message).slice(0, 8192));
+      const vectors = await db.outside(() => withProviderSlot(owned, () => (services.embed ?? embedCommits)(input, config, key, owned)));
+      owned.throwIfAborted();
+      if (vectors.length !== targets.length || !vectors.every(v => validCommitVector(v, config.dimension))) {
+        throw new Error("Invalid commit embedding result");
+      }
+      const currentHead = await readHead(owned);
+      const current = await (services.loadConfig ?? loadCommitConfig)(root);
+      if (!current || commitIdentity(current) !== commitIdentity(config) || currentHead.trim() !== head) {
+        throw new Error("Commit configuration or HEAD changed during indexing");
+      }
+      const add = db.prepare("INSERT INTO pix_commit_vectors(hash,vector) VALUES(?,?) ON CONFLICT(hash) DO NOTHING");
+      for (let i = 0; i < targets.length; i++) add.run(targets[i]!.contentHash, JSON.stringify(vectors[i]));
+      const put = db.prepare(`INSERT INTO pix_commit_documents(hash,content_hash,metadata,message) VALUES(?,?,?,?)
+        ON CONFLICT(hash) DO UPDATE SET content_hash=excluded.content_hash,metadata=excluded.metadata,message=excluded.message
+        WHERE pix_commit_documents.content_hash!=excluded.content_hash OR pix_commit_documents.metadata!=excluded.metadata OR pix_commit_documents.message!=excluded.message`);
+      for (const target of targets) {
+        const item = target.record;
+        put.run(item.hash, target.contentHash, JSON.stringify({ hash: item.hash, shortHash: item.shortHash,
+          subject: item.title, author: item.author, date: item.date, changedPaths: item.paths }), item.message);
+      }
+      db.prepare("INSERT INTO pix_commit_meta(key,value) VALUES('identity',?) ON CONFLICT(key) DO NOTHING").run(commitIdentity(config));
+      return { indexed: targets.length, remaining: missing.length - targets.length };
+    }, "commits", retry && batch === 0);
+    indexed += result.indexed;
+    remaining = result.remaining;
+    if (!remaining || !result.indexed) break;
+  }
+  return { indexed, remaining };
+}
+
 /** Git commits are immutable; current HEAD is checked after every paid batch
  * and again before publishing results. The persisted documents use Desktop's
  * existing pix_commit_* schema, model identity and content-hash projection. */
@@ -93,45 +142,8 @@ export async function searchSemanticCommits(root: string, records: readonly Comm
   const docs = records.map(candidate);
   let indexed = 0, remaining = 0;
   try {
-    for (let batch = 0; batch <= MAX_NEW_COMMIT_VECTORS / BATCH; batch++) {
-      owned.throwIfAborted();
-      const result = await withSearchIndexWriter(root, owned, async db => {
-        ensureCommitSchema(db, config!);
-        const { missing } = cachedVectors(db, docs, config!);
-        if (!missing.length || batch === MAX_NEW_COMMIT_VECTORS / BATCH) return { indexed: 0, remaining: missing.length };
-        const targets = missing.slice(0, BATCH);
-        if ((await readHead(owned)).trim() !== head) throw new Error("Commit HEAD changed during indexing");
-        const before = await (services.loadConfig ?? loadCommitConfig)(root);
-        if (!before || commitIdentity(before) !== commitIdentity(config!)) throw new Error("Commit configuration changed before indexing");
-        owned.throwIfAborted();
-        const input = targets.map(doc => (config!.documentPrefix + doc.record.title + "\n" + doc.record.author + "\n" + doc.record.message).slice(0, 8192));
-        const vectors = await db.outside(() => withProviderSlot(owned, () => (services.embed ?? embedCommits)(input, config!, key, owned)));
-        owned.throwIfAborted();
-        if (vectors.length !== targets.length || !vectors.every(v => validCommitVector(v, config!.dimension))) {
-          throw new Error("Invalid commit embedding result");
-        }
-        const currentHead = await readHead(owned);
-        const current = await (services.loadConfig ?? loadCommitConfig)(root);
-        if (!current || commitIdentity(current) !== commitIdentity(config!) || currentHead.trim() !== head) {
-          throw new Error("Commit configuration or HEAD changed during indexing");
-        }
-        const add = db.prepare("INSERT INTO pix_commit_vectors(hash,vector) VALUES(?,?) ON CONFLICT(hash) DO NOTHING");
-        for (let i = 0; i < targets.length; i++) add.run(targets[i]!.contentHash, JSON.stringify(vectors[i]));
-        const put = db.prepare(`INSERT INTO pix_commit_documents(hash,content_hash,metadata,message) VALUES(?,?,?,?)
-          ON CONFLICT(hash) DO UPDATE SET content_hash=excluded.content_hash,metadata=excluded.metadata,message=excluded.message
-          WHERE pix_commit_documents.content_hash!=excluded.content_hash OR pix_commit_documents.metadata!=excluded.metadata OR pix_commit_documents.message!=excluded.message`);
-        for (const target of targets) {
-          const item = target.record;
-          put.run(item.hash, target.contentHash, JSON.stringify({ hash: item.hash, shortHash: item.shortHash,
-            subject: item.title, author: item.author, date: item.date, changedPaths: item.paths }), item.message);
-        }
-        db.prepare("INSERT INTO pix_commit_meta(key,value) VALUES('identity',?) ON CONFLICT(key) DO NOTHING").run(commitIdentity(config!));
-        return { indexed: targets.length, remaining: missing.length - targets.length };
-      }, "commits");
-      indexed += result.indexed;
-      remaining = result.remaining;
-      if (!remaining || !result.indexed) break;
-    }
+    ({ indexed, remaining } = await indexCommitVectors(root, records, head, readHead, owned,
+      config, key, services, MAX_NEW_COMMIT_VECTORS));
   } catch (error) {
     signal.throwIfAborted();
     notices.push("Semantic commit indexing unavailable or interrupted; local Git matches remain available.");

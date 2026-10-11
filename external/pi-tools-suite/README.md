@@ -12,6 +12,9 @@ workspace scope, read-only mode and approvals. The bridge also exposes the
 original Pix `todo` tool with session-scoped persisted state and the original
 async `subagents` actions through a detached broker, including project-local
 roles from `.pi/agents/*.md` (`subagents_catalog` lists them).
+The headless tool inventory also exports a **strict allowlist** of GPT-facing
+instructions for `todo`, `ast_grep`, and writable `subagents`; it never
+forwards the full Pi parent prompt, coding-discipline or DCP hooks.
 
 - `src/claude-code-provider` — maintained local Claude Code subscription adapter,
   derived from upstream 0.5.0 with Pix image-count/recovery fixes. See

@@ -20,6 +20,7 @@ const inventory = api.inventory();
 // inventory.profile === "codex"
 // inventory.nativeTools === ["read", "shell", "apply_patch"]
 // inventory.tools: original SDK + Pix extension tool schemas
+// inventory.instructions: allowlisted, model-aware Pi guidance for the MCP host
 
 const result = await api.execute("ast_grep", {
   lang: "ts", pattern: "console.log($A)", paths: ["src"],
@@ -42,6 +43,36 @@ request per invocation, with `operation: "list"` or `"call"`, `cwd`,
 `model`, and `tool`/`args` for calls. The CLI returns one JSON object on stdout.
 For `todo`, the trusted MCP host also sends an opaque `todoSessionKey` that
 identifies the current ChatGPT conversation **and** selected project.
+
+## Selective system instructions for ChatGPT
+
+The `list` inventory also returns `instructions: [{ id, text }]`, owned
+by Pix and intended for the MCP server's **initialize.instructions** field.
+This is **not** the complete Pi system prompt and does not replace ChatGPT's
+own instructions. The allowlist is intentionally closed:
+
+| Section ID | Pix source | Availability |
+| --- | --- | --- |
+| `todo` | Selected standalone todo snippet and workflow guidelines | When writable `todo` is available |
+| `ast_grep` | Pix AST-first inspection guidance | When `ast_grep` is available |
+| `subagents` | Pix cost-aware parent delegation strategy | When writable `subagents` is available and strategy is enabled |
+
+`subagents` uses the original Pix strategy builder, respects
+`PI_AGENT_STRATEGY=off` and omits references to unsupported context pruning
+in external-host mode. The read-only inventory exposes just the AST section:
+mutating todo and delegation workflow advice does not apply in that mode.
+The MCP server applies its own explicit allowlist and validates text again.
+An unknown section added later by the suite will **not** reach ChatGPT.
+
+Excluded by design: `coding-discipline`, DCP, all non-allowlisted
+`before_agent_start` hooks, full Pi/SDK prompts, user/custom prompt files,
+session/compaction/persistence hooks, interactive UI prompts, and project-local
+`AGENTS.md`, skills or agent prompt bodies. Context for selected projects is
+provided separately by the MCP `projects` and `skills` tools, while
+`subagents_catalog` resolves effective project roles **per selected chat**.
+No parent Pi model is started, and nothing writes to a project while exporting
+instructions. A host obtains one static export at startup; changed suite
+instructions require a new daemon/ChatGPT MCP initialization to take effect.
 
 ## Model-aware selection
 
@@ -126,4 +157,5 @@ regression test verifies completion after the initiating CLI process exits.
   are not exposed.
 
 Regression tests: `bun test external/pi-tools-suite/test/headless.test.ts
+external/pi-tools-suite/test/headless-prompt-instructions.test.ts
 external/pi-tools-suite/test/headless-broker.test.ts`.

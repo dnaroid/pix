@@ -6,6 +6,7 @@ import { Type } from "typebox";
 import { detectModelProfile, selectSuitableToolsForModel, type ModelProfile } from "../lib/tool-args.js";
 import { assertPatchWorkspace, assertWorkspacePath } from "./workspace.js";
 import { withHeadlessTodoSession, type HeadlessTodoSession } from "./session-todo.js";
+import { headlessPromptInstructions, type HeadlessInstructionSection } from "./prompt-instructions.js";
 
 /** ChatGPT is an OpenAI GPT model, NOT Pi's default/unknown (Claude) profile. */
 export const CHATGPT_HEADLESS_MODEL = Object.freeze({ provider: "openai", id: "gpt-6" });
@@ -18,6 +19,8 @@ export interface HeadlessInventory {
 	profile: ModelProfile;
 	nativeTools: string[];
 	tools: HeadlessTool[];
+	/** Filtered Pix-owned guidance for external GPT hosts, not the full Pi prompt. */
+	instructions: HeadlessInstructionSection[];
 }
 
 export type HeadlessContent = { type: "text"; text: string } |
@@ -231,7 +234,11 @@ export async function createHeadlessToolApi(options: HeadlessApiOptions): Promis
 	});
 	return {
 		listTools,
-		inventory: () => ({ model, profile, nativeTools: [...nativeTools], tools: listTools() }),
+		inventory: () => {
+			const tools = listTools();
+			return { model, profile, nativeTools: [...nativeTools], tools,
+				instructions: headlessPromptInstructions(tools.map((tool) => tool.name), profile, process.env, readOnly) };
+		},
 		async execute(name, rawArgs, signal = new AbortController().signal) {
 			const tool = registered.get(name);
 			if (!tool || !visible.includes(tool)) throw new Error(`Headless tool not available: ${name}`);

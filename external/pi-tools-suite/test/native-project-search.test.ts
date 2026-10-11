@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { searchNative } from "../src/project-search/native-engine.mjs";
 import { scanProject, SCAN_LIMITS, validateMissingSources } from "../src/project-search/native-scan.mjs";
 import { openStore, snapshot, publish, queryStore } from "../src/project-search/native-store.mjs";
-import { searchNativeProject } from "../src/project-search/native.ts";
+import { indexNativeProject, searchNativeProject } from "../src/project-search/native.ts";
 
 const artifactRoot = fileURLToPath(new URL("../../../.pi/artifacts/", import.meta.url));
 const roots: string[] = [];
@@ -371,6 +371,22 @@ describe("independent native Code/Knowledge search", () => {
     const result = await pending;
     expect(result.status.complete).toBe(false); expect(result.notices[0]).toContain("cancelled");
     expect((await searchNative(root, request("cancel"))).status.complete).toBe(true);
+  });
+
+  test("manual index transport accepts document responses and cancellation without a query", async () => {
+    const root = await fixture(); await put(root, "a.ts", "indexOnlyNeedle");
+    const home = process.env.HOME;
+    process.env.HOME = root;
+    try {
+      const result = await indexNativeProject(root, "code", new AbortController().signal);
+      expect(result.source).toBe("code");
+      expect(result.complete).toBe(false);
+      expect(result.message).toContain("configuration is unavailable");
+      const controller = new AbortController();
+      const pending = indexNativeProject(root, "knowledge", controller.signal);
+      controller.abort();
+      expect(await pending).toMatchObject({ source: "knowledge", complete: false });
+    } finally { process.env.HOME = home; }
   });
 
   test("a competing process's stale scan cannot overwrite a newer completed generation", async () => {

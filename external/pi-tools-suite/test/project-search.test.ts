@@ -347,7 +347,7 @@ describe("project_search registration in Pix Desktop and TUI", () => {
       on: (event: string) => { events.push(event); },
     } as never);
     expect(registered.map(t => t.name)).toEqual(["project_search"]);
-    expect(events).toEqual(["session_start", "session_shutdown"]);
+    expect(events).toEqual(["session_start", "session_shutdown", "session_start", "session_shutdown"]);
     expect(registered[0]?.promptSnippet).toContain("No second LLM");
     const ok = await registered[0]!.execute("1", { query: "scheduler", sources: ["tasks"] },
       signal(), undefined, { cwd: root });

@@ -18,7 +18,7 @@ export interface SourceWriter extends SqlDatabase {
 /** Durable per-source claim spans planning/HTTP/publication, not a write lock.
  * Publication verifies the claim inside its own short SQLite transaction. */
 export async function withSearchIndexWriter<T>(root: string, signal: AbortSignal,
-  operation: (db: SourceWriter) => Promise<T>, source: "tasks" | "sessions" | "commits" | "settings" = "sessions"): Promise<T> {
+  operation: (db: SourceWriter) => Promise<T>, source: "tasks" | "sessions" | "commits" | "settings" = "sessions", retry = false): Promise<T> {
   signal.throwIfAborted();
   await safeDirectory(join(root, ".pi"));
   await safeDirectory(join(root, ".pi/search"));
@@ -26,7 +26,7 @@ export async function withSearchIndexWriter<T>(root: string, signal: AbortSignal
   let inTransaction = false, success = false;
   let work: Awaited<ReturnType<typeof claimWork>> | undefined;
   try {
-    work = await claimWork(db, signal);
+    work = await claimWork(db, signal, { retry });
     await beginWrite(db, signal); inTransaction = true;
     const writer: SourceWriter = {
       exec: sql => db.exec(sql), prepare: sql => db.prepare(sql) as unknown as SqlStatement,

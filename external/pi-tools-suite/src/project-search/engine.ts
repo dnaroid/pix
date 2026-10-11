@@ -314,7 +314,7 @@ async function searchTasks(root: string, queryTerms: readonly string[], signal: 
 }
 
 /** Git-owned, HEAD-only history; never reads or retains patches except on explicit patch:<literal>. */
-async function safeGit(root: string, args: string[], signal: AbortSignal): Promise<string> {
+export async function safeGit(root: string, args: string[], signal: AbortSignal): Promise<string> {
   const env = { ...process.env };
   for (const key of Object.keys(env)) if (key.startsWith("GIT_")) delete env[key];
   const { stdout } = await exec("git", ["--no-pager", "--no-replace-objects", ...args], {

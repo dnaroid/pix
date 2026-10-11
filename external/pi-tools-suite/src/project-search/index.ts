@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerSemanticConsentCommand } from "./semantic-command.js";
 import { registerSavedTaskEmbeddingSync } from "./semantic-task-sync.js";
+import { registerSearchIndexCommand } from "./index-command.js";
 import { REPOSITORY_DISCOVERY_GUIDELINES } from "../tool-descriptions.js";
 import { formatProjectSearch, INDEX_SEARCH_MODES, parseProjectSearchParams, PROJECT_SEARCH_SOURCES, searchProject } from "./engine.js";
 
@@ -11,6 +12,7 @@ import { formatProjectSearch, INDEX_SEARCH_MODES, parseProjectSearchParams, PROJ
 export default function projectSearch(pi: ExtensionAPI): void {
   const refreshTasks = registerSavedTaskEmbeddingSync(pi);
   registerSemanticConsentCommand(pi, refreshTasks);
+  registerSearchIndexCommand(pi);
   pi.registerTool({
     name: "project_search",
     label: "Project Search",

@@ -29,11 +29,11 @@ function ensureSessionSchema(db: SqlDatabase, config: CommitEmbeddingConfig): vo
 /** The cache indexes explicit saved titles only, never first-message fallbacks,
  * first/final transcript boundaries or generated session labels. */
 export async function indexMissingSessionVectors(root: string, candidates: readonly CachedSessionCandidate[], key: string | undefined,
-  options: SemanticSearchOptions, signal: AbortSignal, config: CommitEmbeddingConfig): Promise<{ remaining: number; indexed: number }> {
+  options: SemanticSearchOptions, signal: AbortSignal, config: CommitEmbeddingConfig, drain = false): Promise<{ remaining: number; indexed: number }> {
   if (!candidates.length) return { remaining: 0, indexed: 0 };
-  const owned = AbortSignal.any([signal, AbortSignal.timeout(DEADLINE_MS)]);
+  const owned = drain ? signal : AbortSignal.any([signal, AbortSignal.timeout(DEADLINE_MS)]);
   let remaining = 0, indexed = 0;
-  for (let batch = 0; batch <= MAX_PER_QUERY / BATCH; batch++) {
+  for (let batch = 0; drain || batch <= MAX_PER_QUERY / BATCH; batch++) {
     owned.throwIfAborted();
     await requireSemanticIdentity(options, config, owned);
     const verified = await freshSemanticCandidates(root, { tasks: [], sessions: candidates }, options, owned);
@@ -56,7 +56,7 @@ export async function indexMissingSessionVectors(root: string, candidates: reado
       const has = db.prepare("SELECT 1 AS found FROM pix_session_vectors WHERE title_hash=?");
       const unique = new Set<string>();
       const missing = live.filter(title => !has.get(title.hash) && !unique.has(title.hash) && (unique.add(title.hash), true));
-      if (!missing.length || batch === MAX_PER_QUERY / BATCH) {
+      if (!missing.length || (!drain && batch === MAX_PER_QUERY / BATCH)) {
         for (const title of live) put.run(title.sessionId, title.title, title.hash);
         return { remaining: missing.length, indexed: 0 };
       }
@@ -86,7 +86,7 @@ export async function indexMissingSessionVectors(root: string, candidates: reado
         add.run(targets[i]!.hash, bytes);
       }
       return { remaining: missing.length - targets.length, indexed: targets.length };
-    });
+    }, "sessions", drain && batch === 0);
     indexed += response.indexed;
     remaining = response.remaining;
     if (!remaining || !response.indexed) break;

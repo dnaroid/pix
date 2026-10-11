@@ -93,21 +93,35 @@ export interface NamedSessionLink { sessionId: string; name: string }
 
 export async function sessionLinks(root: string, sessions: readonly CachedSessionCandidate[], options: SemanticSearchOptions,
   signal: AbortSignal): Promise<Map<string, NamedSessionLink>> {
+  // Ordinary Pi/TUI saved names need no Desktop ACP map. Freshness below still
+  // authenticates the name, project and native ID against the session file.
+  const found = new Map<string, NamedSessionLink>();
+  for (const session of sessions) {
+    const name = session.name?.trim();
+    if (name && name.length <= 2000 && name !== session.firstMessage.trim()) {
+      found.set(session.id, { sessionId: session.id, name });
+    }
+  }
   const override = process.env.PIX_ACP_SESSION_MAP;
   const filename = options.sessionMapPath ?? (override !== undefined && isAbsolute(override) ? override : undefined)
     ?? join(homedir(), ".pi", "agent", "pix-acp", "sessions.json");
-  if (!await regularFile(filename, 8 * 1024 * 1024)) return new Map();
+  if (!await regularFile(filename, 8 * 1024 * 1024)) return found;
   signal.throwIfAborted();
   const parsed: unknown = JSON.parse(await readFile(filename, "utf8"));
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || (parsed as Record<string, unknown>).version !== 1) return new Map();
   const records = (parsed as Record<string, unknown>).sessions;
   if (!Array.isArray(records) || records.length > 50_000) return new Map();
   const byPath = new Map(sessions.map(session => [resolve(session.path), session]));
-  const found = new Map<string, NamedSessionLink>();
   for (const record of records) {
     signal.throwIfAborted();
     if (!record || typeof record !== "object" || Array.isArray(record)) continue;
     const value = record as Record<string, unknown>;
+    // Mapped Desktop sessions must satisfy the stronger two-authority contract;
+    // an invalid/renamed map entry cannot fall back to a native-only name.
+    if (typeof value.piSessionPath === "string") {
+      const mapped = byPath.get(resolve(value.piSessionPath));
+      if (mapped) found.delete(mapped.id);
+    }
     if (typeof value.cwd !== "string" || resolve(value.cwd) !== root
       || typeof value.piSessionPath !== "string" || !isAbsolute(value.piSessionPath)
       || typeof value.sessionId !== "string" || !value.sessionId || value.sessionId.length > 256
@@ -165,7 +179,10 @@ export async function freshSemanticCandidates(root: string, inputs: {
       const info = await lstat(session.path).catch(() => undefined);
       if (!info?.isFile() || info.isSymbolicLink() || info.size > 4 * 1024 * 1024) continue;
       try {
-        if (SessionManager.open(session.path).getSessionName()?.trim() === record.name) fresh.sessions.add(session.id);
+        const manager = SessionManager.open(session.path);
+        const header = manager.getHeader();
+        if (header?.id === session.id && resolve(header.cwd) === root
+          && manager.getSessionName()?.trim() === record.name) fresh.sessions.add(session.id);
       } catch { /* Missing/corrupt/renamed session does not become evidence. */ }
     }
   }
