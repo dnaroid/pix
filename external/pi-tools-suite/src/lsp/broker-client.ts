@@ -86,7 +86,11 @@ export async function connectLspBroker(cwd: string): Promise<LspBrokerConnection
       catch (error) { await connection.close().catch(() => {}); throw error; }
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
-      const retiring = /LSP (?:owner stopped|broker disconnected)/.test((error as Error).message);
+      // A retiring broker can reject a queued Unix socket before its connect
+      // event (ECONNRESET), as well as disconnect during the attach RPC. Wait
+      // for retirement in either case; launch only once the endpoint is gone
+      // or refusing connections, never by replaying an attached mutation.
+      const retiring = code === "ECONNRESET" || /LSP (?:owner stopped|broker disconnected)/.test((error as Error).message);
       if (code !== "ENOENT" && code !== "ECONNREFUSED" && !retiring) throw error;
       if (!launched && !retiring) {
         launched = true;

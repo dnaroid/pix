@@ -1,9 +1,10 @@
 import { afterEach, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resetHistoryVectors } from "../src/project-search/semantic-reset.js";
+import { removeDirsWithRetry } from "./support/fs-retry.js";
 
 const roots: string[] = [];
 const artifacts = fileURLToPath(new URL("../../../.pi/artifacts/", import.meta.url));
@@ -34,7 +35,7 @@ function populate(file: string) {
     INSERT INTO unrelated VALUES ('canonical','untouched');`);
   db.close();
 }
-afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { force: true, recursive: true, maxRetries: 50, retryDelay: 100 }); });
+afterEach(() => removeDirsWithRetry(roots));
 
 test("explicit reset removes only history vectors and identity metadata, preserving canonical files and ignoring obsolete stores", async () => {
   const f = await fixture(); for (const file of f.files) populate(file);

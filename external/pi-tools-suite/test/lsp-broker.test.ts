@@ -248,6 +248,9 @@ describeBroker("independent-process shared LSP broker", () => {
     await a.request("close");
     expect(exists(brokerPid)).toBe(true);
     expect(fs.readFileSync(lock, "utf8")).toBe(String(brokerPid));
+    // Stop accepting immediately, but retain ownership until process teardown
+    // finishes: a new broker must not bind while the retiring owner is alive.
+    expect(fs.existsSync(endpoint)).toBe(false);
     const b = actor(); const next = await b.request("attach");
     expect(next.brokerPid).not.toBe(brokerPid);
     expect(exists(brokerPid)).toBe(false);

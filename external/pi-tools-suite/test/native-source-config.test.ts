@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtemp, mkdir, writeFile, rm, readFile, symlink } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, symlink } from "node:fs/promises";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,13 +7,14 @@ import { parseSourceExtensions, sourceKind } from "../src/project-search/native-
 import { searchNative, indexNative } from "../src/project-search/native-engine.mjs";
 import { openStore, snapshot } from "../src/project-search/native-store.mjs";
 import { scanProject } from "../src/project-search/native-scan.mjs";
+import { removeDirsWithRetry } from "./support/fs-retry.js";
 
 const artifacts = fileURLToPath(new URL("../../../.pi/artifacts/", import.meta.url));
 const originalHome = process.env.HOME;
 const roots: string[] = [];
 afterEach(async () => {
   if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome;
-  for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 });
+  await removeDirsWithRetry(roots);
 });
 
 async function fixture() {

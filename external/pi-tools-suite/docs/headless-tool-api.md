@@ -131,8 +131,14 @@ streams, callbacks, timeouts, and final result receipts alive after the
 initial MCP tool response. Agent state remains in `<project>/.pi/subagents`;
 later `status`, `wait`, and `result` calls reopen the original Pix state from
 those artifacts. The headless CLI omits `watchSeconds` on spawn: call
-`subagents(action="wait")` separately for waiting. The offline fake-Pi
+`subagents(action="wait")` separately for waiting. The broker publishes its
+CLI acknowledgment via a completed-write atomic rename, so the initiating
+CLI cannot parse an empty or partially written JSON reply. The offline fake-Pi
 regression test verifies completion after the initiating CLI process exits.
+Its offline child is released only after that CLI exits, and the test waits
+for the broker's durable `exit_code` receipt before asserting final status:
+a dead child PID can briefly report `stopped` while RPC stdout is draining
+and completion callbacks are still pending (notably after Windows `taskkill`).
 
 ## Boundaries
 

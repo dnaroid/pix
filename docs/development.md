@@ -83,7 +83,9 @@ clear inherited `PIX_CONFIG_PROFILE`, `PIX_BRAINSTORM_HOST_URL` and
 reach the live council host; tests can still explicitly choose a profile or
 supply their own fake host. Tools-suite
 tests receive an isolated HOME/config directory, without changing your shell's
-environment. Full per-step output and a machine-readable result (including
+environment. The gate prepends the checkout's `node_modules/.bin` to each
+check's `PATH`, so nested npm scripts retain access to root development binaries.
+Full per-step output and a machine-readable result (including
 steps not run) are written to a unique `.pi/artifacts/check-ci-*/` directory.
 CI uploads the logs and summary even on failure. Scratch evidence is disposable;
 export it if you need durable retention.

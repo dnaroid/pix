@@ -1,6 +1,6 @@
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, readFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile } from "node:fs/promises";
 import { fork } from "node:child_process";
 import { Worker } from "node:worker_threads";
 import { once } from "node:events";
@@ -8,14 +8,13 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { claimWork, beginWrite, withProviderSlot } from "../src/project-search/source-work.mjs";
+import { removeDirsWithRetry } from "./support/fs-retry.mjs";
 
 const signal = () => new AbortController().signal;
 const fixtureRoots = [];
 // Remove fixtures after every test's own child-process/worker after hooks have
 // completed; Windows cannot remove an SQLite directory while those remain alive.
-after(async () => {
-  for (const root of fixtureRoots.splice(0)) await rm(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 });
-});
+after(() => removeDirsWithRetry(fixtureRoots));
 async function fixture() {
   const base = fileURLToPath(new URL("../../../.pi/artifacts/source-index-split/", import.meta.url));
   await mkdir(base, { recursive: true });

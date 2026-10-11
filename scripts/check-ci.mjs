@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { closeSync, mkdirSync, mkdtempSync, openSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const repoRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -122,6 +122,9 @@ export async function runGate({
       XDG_CACHE_HOME: join(home, ".cache"), XDG_DATA_HOME: join(home, ".local/share"),
       PI_CODING_AGENT_DIR: join(home, ".pi/agent"),
     } : {}) };
+    // Nested npm --prefix scripts can replace npm's PATH entries. The headless
+    // AST regression invokes the root devDependency binary directly.
+    childEnv.PATH = [join(cwd, "node_modules", ".bin"), childEnv.PATH || childEnv.Path || ""].join(delimiter);
     // Desktop profile/council capabilities must not redirect fixtures or reach the live host.
     delete childEnv.PIX_CONFIG_PROFILE;
     delete childEnv.PIX_BRAINSTORM_HOST_URL;

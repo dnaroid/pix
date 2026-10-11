@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { searchNative } from "../src/project-search/native-engine.mjs";
 import { openVectorStore } from "../src/project-search/native-vector-store.mjs";
 import { embedRepository, repositoryEmbeddingSettings } from "../src/project-search/native-embedding-provider.mjs";
+import { removeDirsWithRetry, unlinkWithRetry } from "./support/fs-retry.js";
 
 const roots: string[] = [];
 const originalHome = process.env.HOME;
@@ -35,7 +36,7 @@ function fakeProvider() {
       i === (/renewCredentials|restore access|Token rotation/.test(text) ? 0 : 1) ? 1 : 0));
   } };
 }
-afterEach(async () => { if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome; for (const root of roots.splice(0)) await rm(root, { force: true, recursive: true, maxRetries: 50, retryDelay: 100 }); });
+afterEach(async () => { if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome; await removeDirsWithRetry(roots); });
 
 describe("native semantic repository retrieval", () => {
   test("split Code and Knowledge share the original 128-document upload budget", async () => {
@@ -249,7 +250,7 @@ describe("native semantic repository retrieval", () => {
     await searchNative(root, request(), provider);
     expect(provider.calls).toEqual([]);
     await put(outside, "cache", "unchanged");
-    await rm(join(root, ".pi/search/code.sqlite"));
+    await unlinkWithRetry(join(root, ".pi/search/code.sqlite"));
     await symlink(join(outside, "cache"), join(root, ".pi/search/code.sqlite"));
     await expect(openVectorStore(root)).rejects.toThrow();
     expect(await readFile(join(outside, "cache"), "utf8")).toBe("unchanged");

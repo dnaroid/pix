@@ -98,12 +98,15 @@ export async function runLspBroker(project: string, endpoint: string): Promise<v
     if (closing) return;
     closing = true;
     clearTimeout(idle);
+    // Stop admitting connections before awaiting owned-process shutdown. The
+    // ownership lock stays held through exit, so a replacement still waits for
+    // native teardown rather than binding beneath this retiring process.
+    server.close();
     for (const peer of sockets) peer.destroy();
-    const force = setTimeout(() => { manager.shutdownAllSync(); server.close(); process.exit(0); }, 3_000);
+    const force = setTimeout(() => { manager.shutdownAllSync(); process.exit(0); }, 3_000);
     force.unref();
     await manager.shutdownAll();
     manager.shutdownAllSync();
-    server.close();
     try { if (endpointInode === fs.lstatSync(endpoint).ino) fs.unlinkSync(endpoint); } catch {}
     process.exit(0);
   };

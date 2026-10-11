@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
-import { appendFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { HeadlessToolApi, HeadlessResult } from "./api.js";
@@ -9,8 +9,21 @@ type BrokerReply = { ok: true; result: HeadlessResult } | { ok: false; error: st
 
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 
-async function reply(file: string, payload: BrokerReply): Promise<void> {
-	await writeFile(file, `${JSON.stringify(payload)}\n`, { flag: "wx", mode: 0o600 });
+export async function writeSubagentsBrokerReply(
+	file: string,
+	payload: BrokerReply,
+	write: typeof writeFile = writeFile,
+): Promise<void> {
+	// The CLI polls for existence. writeFile creates an empty destination before
+	// writing JSON, so publish only after the same-directory write has closed.
+	const pending = `${file}.pending`;
+	try {
+		await write(pending, `${JSON.stringify(payload)}\n`, { flag: "wx", mode: 0o600 });
+		await rename(pending, file);
+	} finally {
+		// A failed success reply must not prevent publishing the error reply.
+		await rm(pending, { force: true });
+	}
 }
 
 /**
@@ -71,9 +84,9 @@ export async function runSubagentsBroker(
 	let result: HeadlessResult;
 	try {
 		result = await api.execute("subagents", params);
-		await reply(file, { ok: true, result });
+		await writeSubagentsBrokerReply(file, { ok: true, result });
 	} catch (error) {
-		await reply(file, { ok: false, error: message(error) }).catch(() => {});
+		await writeSubagentsBrokerReply(file, { ok: false, error: message(error) }).catch(() => {});
 		return;
 	}
 	if (result.isError) return;

@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runSourceIndex, type IndexServices } from "../src/project-search/index-runner.js";
@@ -8,10 +8,11 @@ import { readIndexStatus } from "../src/project-search/index-status.js";
 import { readCachedProjectVectors } from "../src/project-search/semantic-cache.js";
 import { indexMissingSessionVectors } from "../src/project-search/semantic-session-indexer.js";
 import type { CommitEmbeddingConfig } from "../src/project-search/semantic-commit-provider.js";
+import { removeDirsWithRetry } from "./support/fs-retry.js";
 
 const roots: string[] = [];
 const home = process.env.HOME;
-afterEach(() => { process.env.HOME = home; for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 }); });
+afterEach(async () => { process.env.HOME = home; await removeDirsWithRetry(roots); });
 const config: CommitEmbeddingConfig = { provider: "ollama", model: "fixture", dimension: 2,
   documentPrefix: "document: ", queryPrefix: "query: ", baseUrl: "http://127.0.0.1:1" };
 const vector = [1, 0];

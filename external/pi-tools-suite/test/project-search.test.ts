@@ -296,18 +296,26 @@ describe("project_search shared store lookup", () => {
     expect(parseGitHistory("PIX-PROJECT-COMMIT:bad\0")).toEqual([]);
   });
 
-  test("inspects a substantially larger but explicitly bounded session history", async () => {
+  test.each(["posix", "win32"] as const)("inspects a substantially larger but explicitly bounded session history (%s paths)", async style => {
     const root = fixture();
+    const sessionPaths = path[style];
     const sessions: SessionRecord[] = Array.from({ length: 1002 }, (_, i) => ({
-      id: `session-${i}`, cwd: root, path: path.join(root, `${i}.jsonl`),
+      id: `session-${i}`, cwd: root, path: sessionPaths.join(root, `${i}.jsonl`),
       firstMessage: `First question number ${i}`, name: `Session ${i}`,
     }));
+    const reads: string[] = [];
     const result = await searchProject(root, { query: "uniquelate999", sources: ["sessions"] }, {
       ...services,
       listSessions: async () => sessions,
-		readSession: async filename => ({ firstText: path.basename(filename) === "999.jsonl" ? "uniquelate999" : "ordinary", finalText: "" }),
+      readSession: async filename => {
+        reads.push(filename);
+        // Use the fixture's path dialect, not a POSIX-only suffix, on every host.
+        const basename = sessionPaths.basename(filename);
+        return { firstText: basename === "999.jsonl" || basename === "1000.jsonl" ? "uniquelate999" : "ordinary", finalText: "" };
+      },
     });
     expect(result.hits.map(hit => hit.sessionId)).toEqual(["session-999"]);
+    expect(reads).toEqual(sessions.slice(0, 1000).map(session => session.path));
     expect(result.notices.join(" ")).toContain("1,000 most recent sessions");
   });
 

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { ChildProcess, type SpawnOptions } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { test } from "node:test";
 import { ciPlan, repoRoot, resolveCommand, runGate } from "../scripts/check-ci.mjs";
 
@@ -64,6 +64,8 @@ test("gate executes in order, isolates only configuration-sensitive steps, and s
   assert.ok(calls.every((call) => call.options.env.PIX_BRAINSTORM_HOST_URL === undefined));
   assert.ok(calls.every((call) => call.options.env.PIX_BRAINSTORM_HOST_TOKEN === undefined));
   assert.equal(calls[2].options.env.CI, "true");
+  assert.ok(calls.every(call => call.options.env.PATH?.startsWith(`${join(repoRoot, "node_modules/.bin")}${delimiter}`)),
+    "nested npm scripts must inherit the root ast-grep executable");
   assert.notEqual(calls[2].options.env.HOME, "original-home");
   assert.equal(calls[2].options.env.USERPROFILE, calls[2].options.env.HOME);
   assert.equal(calls[2].options.env.PI_CODING_AGENT_DIR, join(calls[2].options.env.HOME!, ".pi/agent"));
