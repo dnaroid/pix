@@ -305,7 +305,7 @@ describe("project_search shared store lookup", () => {
     const result = await searchProject(root, { query: "uniquelate999", sources: ["sessions"] }, {
       ...services,
       listSessions: async () => sessions,
-      readSession: async filename => ({ firstText: filename.endsWith("/999.jsonl") ? "uniquelate999" : "ordinary", finalText: "" }),
+		readSession: async filename => ({ firstText: path.basename(filename) === "999.jsonl" ? "uniquelate999" : "ordinary", finalText: "" }),
     });
     expect(result.hits.map(hit => hit.sessionId)).toEqual(["session-999"]);
     expect(result.notices.join(" ")).toContain("1,000 most recent sessions");

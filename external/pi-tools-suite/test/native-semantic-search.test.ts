@@ -35,7 +35,7 @@ function fakeProvider() {
       i === (/renewCredentials|restore access|Token rotation/.test(text) ? 0 : 1) ? 1 : 0));
   } };
 }
-afterEach(async () => { if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome; for (const root of roots.splice(0)) await rm(root, { force: true, recursive: true }); });
+afterEach(async () => { if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome; for (const root of roots.splice(0)) await rm(root, { force: true, recursive: true, maxRetries: 50, retryDelay: 100 }); });
 
 describe("native semantic repository retrieval", () => {
   test("split Code and Knowledge share the original 128-document upload budget", async () => {

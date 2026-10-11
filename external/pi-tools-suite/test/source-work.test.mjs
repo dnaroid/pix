@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, readFile } from "node:fs/promises";
 import { fork } from "node:child_process";
@@ -10,17 +10,23 @@ import { DatabaseSync } from "node:sqlite";
 import { claimWork, beginWrite, withProviderSlot } from "../src/project-search/source-work.mjs";
 
 const signal = () => new AbortController().signal;
-async function fixture(t) {
+const fixtureRoots = [];
+// Remove fixtures after every test's own child-process/worker after hooks have
+// completed; Windows cannot remove an SQLite directory while those remain alive.
+after(async () => {
+  for (const root of fixtureRoots.splice(0)) await rm(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 });
+});
+async function fixture() {
   const base = fileURLToPath(new URL("../../../.pi/artifacts/source-index-split/", import.meta.url));
   await mkdir(base, { recursive: true });
   const root = await mkdtemp(join(base, "protocol-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  fixtureRoots.push(root);
   await mkdir(join(root, ".pi/search"), { recursive: true });
   return root;
 }
 function worker(t, mode, location) {
   const child = fork(fileURLToPath(new URL("./support/source-work-child.mjs", import.meta.url)), [mode, location], { stdio: ["ignore", "ignore", "ignore", "ipc"] });
-  t.after(() => child.kill("SIGKILL"));
+  t.after(async () => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); await exited; });
   const messages = [], waiters = [];
   child.on("message", message => {
     messages.push(message);

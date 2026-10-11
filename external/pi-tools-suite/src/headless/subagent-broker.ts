@@ -3,7 +3,6 @@ import { closeSync, openSync } from "node:fs";
 import { appendFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import type { HeadlessToolApi, HeadlessResult } from "./api.js";
 
 type BrokerReply = { ok: true; result: HeadlessResult } | { ok: false; error: string };
@@ -32,7 +31,7 @@ export async function launchSubagentsBroker(
 		// Source CLI must use an ABSOLUTE tsx import. Inheriting `--import tsx`
 		// would resolve from the *selected project* cwd, where tsx isn't installed.
 		const loader = process.argv[1]?.endsWith(".ts")
-			? ["--import", fileURLToPath(import.meta.resolve("tsx"))] : [];
+			? ["--import", import.meta.resolve("tsx")] : [];
 		const stderr = openSync(log, "a", 0o600);
 		try {
 			proc = spawn(process.execPath, [...loader, process.argv[1]!, encodedRequest, "--allow-write", "--broker", file], {

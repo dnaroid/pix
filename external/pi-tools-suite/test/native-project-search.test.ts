@@ -26,7 +26,7 @@ async function put(root: string, name: string, value: string | Uint8Array) {
   await writeFile(path.join(root, name), value);
 }
 const digest = (buffer: Uint8Array) => createHash("sha256").update(buffer).digest("hex");
-afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
+afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 }); });
 
 function childCli(executable: string, root: string, query: string) {
   return new Promise<any>((resolve, reject) => {

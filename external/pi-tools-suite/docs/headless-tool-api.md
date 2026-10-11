@@ -40,6 +40,9 @@ Run this source API using `node --import tsx` from the Pix checkout. For a
 process boundary, `src/headless/cli.ts` accepts one base64url-encoded JSON
 request per invocation, with `operation: "list"` or `"call"`, `cwd`,
 `model`, and `tool`/`args` for calls. The CLI returns one JSON object on stdout.
+`cwd` must be an absolute path in the host OS's native syntax (including
+Windows drive-letter paths). The detached subagent broker passes the TypeScript
+loader as a file URL so Node can resolve it on Windows as well as Unix.
 For `todo`, the trusted MCP host also sends an opaque `todoSessionKey` that
 identifies the current ChatGPT conversation **and** selected project.
 

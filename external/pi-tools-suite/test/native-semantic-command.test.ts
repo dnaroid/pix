@@ -32,7 +32,7 @@ function command(root: string) {
 }
 afterEach(async () => {
   for (const [key, value] of Object.entries(original)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
-  for (const root of roots.splice(0)) await rm(root, { force: true, recursive: true });
+  for (const root of roots.splice(0)) await rm(root, { force: true, recursive: true, maxRetries: 50, retryDelay: 100 });
 });
 
 describe("ordinary Pi global semantic configuration", () => {

@@ -13,7 +13,7 @@ const originalHome = process.env.HOME;
 const roots: string[] = [];
 afterEach(async () => {
   if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome;
-  for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
+  for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 });
 });
 
 async function fixture() {

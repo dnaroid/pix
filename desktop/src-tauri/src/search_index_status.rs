@@ -45,12 +45,68 @@ fn read_status(workspace: &str) -> Result<SearchIndexStatus, String> {
         .map(|m| m.file_type().is_dir() && !m.file_type().is_symlink())
         .unwrap_or(false);
     let stores = [
-        ("code", "code.sqlite", &[("files", "SELECT count(*) FROM pix_native_files"), ("codeChunks", "SELECT count(*) FROM pix_native_chunks WHERE kind='code'"), ("vectors", "SELECT count(*) FROM vectors")][..]),
-        ("knowledge", "knowledge.sqlite", &[("files", "SELECT count(*) FROM pix_native_files"), ("knowledgeChunks", "SELECT count(*) FROM pix_native_chunks WHERE kind='knowledge'"), ("vectors", "SELECT count(*) FROM vectors")][..]),
-        ("settings", "settings.sqlite", &[("settingsDocuments", "SELECT count(*) FROM documents WHERE json_extract(hit, '$.kind')='settings'"), ("settingsVectors", "SELECT count(*) FROM vectors")][..]),
-        ("sessions", "sessions.sqlite", &[("sessionTitles", "SELECT count(*) FROM pix_session_titles"), ("sessionVectors", "SELECT count(*) FROM pix_session_vectors")][..]),
-        ("tasks", "tasks.sqlite", &[("taskDocuments", "SELECT count(*) FROM pix_task_documents"), ("taskVectors", "SELECT count(*) FROM pix_task_vectors")][..]),
-        ("commits", "git-commits.sqlite", &[("commitDocuments", "SELECT count(*) FROM pix_commit_documents"), ("commitVectors", "SELECT count(*) FROM pix_commit_vectors")][..]),
+        (
+            "code",
+            "code.sqlite",
+            &[
+                ("files", "SELECT count(*) FROM pix_native_files"),
+                (
+                    "codeChunks",
+                    "SELECT count(*) FROM pix_native_chunks WHERE kind='code'",
+                ),
+                ("vectors", "SELECT count(*) FROM vectors"),
+            ][..],
+        ),
+        (
+            "knowledge",
+            "knowledge.sqlite",
+            &[
+                ("files", "SELECT count(*) FROM pix_native_files"),
+                (
+                    "knowledgeChunks",
+                    "SELECT count(*) FROM pix_native_chunks WHERE kind='knowledge'",
+                ),
+                ("vectors", "SELECT count(*) FROM vectors"),
+            ][..],
+        ),
+        (
+            "settings",
+            "settings.sqlite",
+            &[
+                (
+                    "settingsDocuments",
+                    "SELECT count(*) FROM documents WHERE json_extract(hit, '$.kind')='settings'",
+                ),
+                ("settingsVectors", "SELECT count(*) FROM vectors"),
+            ][..],
+        ),
+        (
+            "sessions",
+            "sessions.sqlite",
+            &[
+                ("sessionTitles", "SELECT count(*) FROM pix_session_titles"),
+                ("sessionVectors", "SELECT count(*) FROM pix_session_vectors"),
+            ][..],
+        ),
+        (
+            "tasks",
+            "tasks.sqlite",
+            &[
+                ("taskDocuments", "SELECT count(*) FROM pix_task_documents"),
+                ("taskVectors", "SELECT count(*) FROM pix_task_vectors"),
+            ][..],
+        ),
+        (
+            "commits",
+            "git-commits.sqlite",
+            &[
+                (
+                    "commitDocuments",
+                    "SELECT count(*) FROM pix_commit_documents",
+                ),
+                ("commitVectors", "SELECT count(*) FROM pix_commit_vectors"),
+            ][..],
+        ),
     ]
     .into_iter()
     .map(|(id, file, queries)| inspect_store(id, usable_dir.then(|| search.join(file)), queries))
@@ -171,7 +227,9 @@ fn query_store(
             ("tasks", "taskVectors", "pix_task_index_meta"),
             ("commits", "commitVectors", "pix_commit_meta"),
         ] {
-            if id != source { continue; }
+            if id != source {
+                continue;
+            }
             if status.counts.get(count).copied().unwrap_or(0) == 0 {
                 continue;
             }
@@ -308,7 +366,9 @@ mod tests {
         assert!(status.stores[3].incompatible_sources.is_empty());
         assert_eq!(fs::read(&path).unwrap(), before);
         db.execute_batch("DELETE FROM vectors").unwrap();
-        assert!(read_status(root.to_str().unwrap()).unwrap().stores[2].incompatible_sources.is_empty());
+        assert!(read_status(root.to_str().unwrap()).unwrap().stores[2]
+            .incompatible_sources
+            .is_empty());
         drop(db);
         fs::remove_dir_all(root).unwrap();
     }

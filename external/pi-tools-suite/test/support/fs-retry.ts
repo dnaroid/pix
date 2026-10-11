@@ -21,14 +21,14 @@ async function withRetry(operation: () => void, attempts: number, delayMs: numbe
 
 /** Removes every root recursively, draining the array like the existing
  * afterEach cleanup loops, retrying transient Windows lock errors. */
-export async function removeDirsWithRetry(roots: string[], attempts = 20, delayMs = 50): Promise<void> {
+export async function removeDirsWithRetry(roots: string[], attempts = 50, delayMs = 100): Promise<void> {
   await Promise.all(roots.splice(0).map(root => withRetry(() => rmSync(root, { recursive: true, force: true }), attempts, delayMs)));
 }
 
-export function unlinkWithRetry(filename: string, attempts = 20, delayMs = 50): Promise<void> {
+export function unlinkWithRetry(filename: string, attempts = 50, delayMs = 100): Promise<void> {
   return withRetry(() => unlinkSync(filename), attempts, delayMs);
 }
 
-export function renameWithRetry(from: string, to: string, attempts = 20, delayMs = 50): Promise<void> {
+export function renameWithRetry(from: string, to: string, attempts = 50, delayMs = 100): Promise<void> {
   return withRetry(() => renameSync(from, to), attempts, delayMs);
 }

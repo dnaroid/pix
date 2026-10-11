@@ -69,7 +69,10 @@ OS matrix legs or release smoke. It does not install dependencies or act as a Gi
 
 Install the root and ACP dependencies first (`npm ci --ignore-scripts`,
 `npm ci --prefix acp --ignore-scripts`), plus Desktop dependencies on macOS
-(`npm ci --prefix desktop --ignore-scripts`). Bun must be on PATH, along with
+(`npm ci --prefix desktop --ignore-scripts`). Use Bun **1.4.2**, the version
+pinned across the GitHub CI matrix: earlier Bun builds such as 1.3.14 cannot
+resolve the `node:sqlite` import in the suite's native-storage tests. Bun must
+be on PATH, along with
 Rust/Tauri prerequisites on macOS. Linux browser E2E requires
 `npx playwright install --with-deps chromium` beforehand. These checks do not
 enable paid/live-model evals; leave their opt-in environment flags unset.
@@ -95,8 +98,8 @@ npm run build:pix
 ```
 
 The tools-suite's default Bun command uses `--isolate` to keep per-file module
-mocks from leaking into unrelated tests. Use a Bun version supporting that flag
-(the local regression was verified with 1.3.14). For multi-file focused Bun runs,
+mocks from leaking into unrelated tests. For the complete suite use the
+CI-pinned Bun 1.4.2; for multi-file focused Bun runs,
 also pass `--isolate`; restoring mocks alone cannot repair cached fake schemas.
 
 ## Desktop development

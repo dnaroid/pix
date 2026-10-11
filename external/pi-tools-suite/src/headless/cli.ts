@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { isAbsolute } from "node:path";
 import { assertHeadlessSubagentSpawn, createHeadlessToolApi, type HeadlessModel } from "./api.js";
 import { launchSubagentsBroker, runSubagentsBroker } from "./subagent-broker.js";
 
@@ -21,7 +22,7 @@ async function main(): Promise<void> {
 	}
 	const request = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as Request;
 	if (request?.operation !== "list" && request?.operation !== "call") throw new Error("Invalid headless operation");
-	if (typeof request.cwd !== "string" || !request.cwd || !request.cwd.startsWith("/")) throw new Error("Absolute cwd required");
+	if (typeof request.cwd !== "string" || !isAbsolute(request.cwd)) throw new Error("Absolute cwd required");
 	if (request.readOnly === false && !process.argv.includes("--allow-write")) {
 		throw new Error("Write mode requires the explicit --allow-write CLI flag");
 	}

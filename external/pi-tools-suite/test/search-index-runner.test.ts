@@ -11,7 +11,7 @@ import type { CommitEmbeddingConfig } from "../src/project-search/semantic-commi
 
 const roots: string[] = [];
 const home = process.env.HOME;
-afterEach(() => { process.env.HOME = home; for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(() => { process.env.HOME = home; for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 }); });
 const config: CommitEmbeddingConfig = { provider: "ollama", model: "fixture", dimension: 2,
   documentPrefix: "document: ", queryPrefix: "query: ", baseUrl: "http://127.0.0.1:1" };
 const vector = [1, 0];

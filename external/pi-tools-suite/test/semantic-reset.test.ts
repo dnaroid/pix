@@ -34,7 +34,7 @@ function populate(file: string) {
     INSERT INTO unrelated VALUES ('canonical','untouched');`);
   db.close();
 }
-afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { force: true, recursive: true }); });
+afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { force: true, recursive: true, maxRetries: 50, retryDelay: 100 }); });
 
 test("explicit reset removes only history vectors and identity metadata, preserving canonical files and ignoring obsolete stores", async () => {
   const f = await fixture(); for (const file of f.files) populate(file);

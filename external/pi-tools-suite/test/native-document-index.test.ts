@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { indexNative, searchNative } from "../src/project-search/native-engine.mjs";
 import { openVectorStore } from "../src/project-search/native-vector-store.mjs";
@@ -51,7 +51,7 @@ function cached(root: string) {
 }
 async function child(root: string, payload: any, executable = "node", preload?: string): Promise<NativeIndexResponse> {
   return new Promise((resolve, reject) => {
-    const proc = spawn(executable, [...(preload ? ["--import", preload] : []), cli, root], {
+    const proc = spawn(executable, [...(preload ? ["--import", pathToFileURL(preload).href] : []), cli, root], {
       stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, OPENROUTER_API_KEY: "" },
     });
     const chunks: Buffer[] = [], errors: Buffer[] = [];
@@ -67,7 +67,8 @@ async function child(root: string, payload: any, executable = "node", preload?: 
 }
 afterEach(async () => {
   if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome;
-  for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
+  // Windows scanners/SQLite can briefly retain NTFS handles after a connection closes.
+  for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 });
 });
 
 describe("explicit native document indexing", () => {

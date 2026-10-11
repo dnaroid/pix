@@ -33,11 +33,11 @@ jobs:
           npm --version
       - uses: oven-sh/setup-bun@v2
         if: runner.os != 'Windows'
+        with:
+          bun-version: 1.4.2
       - name: Install Bun on Windows
         if: runner.os == 'Windows'
-        # Align the Windows runtime with the other matrix legs (setup-bun
-        # installs the latest release there) so the suite does not depend on
-        # platform-specific bun behavior differences.
+        # Use the same pinned Bun runtime across all three matrix legs.
         run: npm install -g bun@1.4.2
       - run: bun --version
       - run: npm ci --ignore-scripts

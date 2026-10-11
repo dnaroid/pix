@@ -25,7 +25,9 @@ impl SearchState {
         }
         let mut requests = self.0.lock().map_err(|_| "Search state unavailable")?;
         // Active requests can outlive the tombstone TTL while indexing.
-        requests.retain(|_, (time, token)| Arc::strong_count(token) > 1 || time.elapsed() < Duration::from_secs(60));
+        requests.retain(|_, (time, token)| {
+            Arc::strong_count(token) > 1 || time.elapsed() < Duration::from_secs(60)
+        });
         if requests.len() >= 128 && !requests.contains_key(id) {
             return Err("Too many native search requests".into());
         }
@@ -126,7 +128,8 @@ fn run(
     let deadline = request_deadline(&request.query);
     let mut failed = !wrote;
     loop {
-        if cancelled.load(Ordering::Acquire) || deadline.is_some_and(|time| Instant::now() >= time) {
+        if cancelled.load(Ordering::Acquire) || deadline.is_some_and(|time| Instant::now() >= time)
+        {
             failed = true;
         }
         if failed {
@@ -204,7 +207,10 @@ mod tests {
         }
         state.token("other").unwrap();
         assert!(!state.0.lock().unwrap().contains_key("expired-tombstone"));
-        state.token("long-index").unwrap().store(true, Ordering::Release);
+        state
+            .token("long-index")
+            .unwrap()
+            .store(true, Ordering::Release);
         assert!(active.load(Ordering::Acquire));
     }
     #[test]

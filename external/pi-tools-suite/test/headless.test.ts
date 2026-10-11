@@ -132,9 +132,9 @@ describe("headless Pix tool API", () => {
 			"ast_grep", "ast_apply", "project_search", "project_tasks", "todo", "subagents", "subagents_catalog",
 			"read", "shell", "apply_patch",
 		]);
-		const shell = await api.execute("shell", { command: "pwd" });
+		const shell = await api.execute("shell", { command: 'node -p "require(\'node:fs\').readFileSync(\'test.ts\', \'utf8\')"' });
 		expect(shell.isError).not.toBe(true);
-		expect(shell.content[0]).toMatchObject({ type: "text", text: expect.stringContaining(root) });
+		expect(shell.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("function hello() { return 42; }") });
 		const patch = await api.execute("apply_patch", { input: [
 			"*** Begin Patch", "*** Update File: test.ts", "@@",
 			"-function hello() { return 42; }", "+function hello() { return 43; }",

@@ -82,7 +82,7 @@ test("child project_search shares the parent schema and permits all sources and 
 	const search = child.registered.find((tool) => tool.name === "project_search");
 	expect(search).toBeDefined();
 	let parentTool: any;
-	projectSearch({ registerTool: (tool: any) => { parentTool = tool; }, registerCommand: () => {} } as any);
+	projectSearch({ registerTool: (tool: any) => { parentTool = tool; }, registerCommand: () => {}, on: () => {} } as any);
 	expect(search.parameters).toEqual(parentTool.parameters);
 	expect(search.description).toEqual(parentTool.description);
 	expect(search.parameters.properties.sources.items.enum).toEqual(["sessions", "tasks", "commits", "code", "knowledge"]);

@@ -28,8 +28,7 @@ test("detached Pix subagents broker owns RPC pipes after CLI responds (offline f
 		await writeFile(path.join(agentDir, "auth.json"), JSON.stringify({
 			zai: { type: "api_key", key: "OFFLINE_FIXTURE_DO_NOT_SEND" },
 		}), { mode: 0o600 });
-		const pi = path.join(binaryDir, "pi");
-		await writeFile(pi, [
+		const fakePiSource = [
 			"#!/usr/bin/env node",
 			"let buffer = '';",
 			"process.stdin.setEncoding('utf8');",
@@ -47,10 +46,20 @@ test("detached Pix subagents broker owns RPC pipes after CLI responds (offline f
 			"    }, 350);",
 			"  }",
 			"});",
-		].join("\n") + "\n");
-		await chmod(pi, 0o755);
+		].join("\n") + "\n";
+		if (process.platform === "win32") {
+			// Windows cannot spawn a shebang-only `pi` fixture. Compile a real
+			// executable using Bun, which is already required by the CI gate.
+			const source = path.join(scratch, "mock-pi.mjs");
+			await writeFile(source, fakePiSource);
+			await execFile("bun", ["build", "--compile", source, "--outfile", path.join(binaryDir, "pi.exe")]);
+		} else {
+			const pi = path.join(binaryDir, "pi");
+			await writeFile(pi, fakePiSource);
+			await chmod(pi, 0o755);
+		}
 		const env = { ...process.env,
-			PATH: `${binaryDir}:${process.env.PATH ?? ""}`,
+			PATH: `${binaryDir}${path.delimiter}${process.env.PATH ?? ""}`,
 			HOME: scratch,
 			XDG_CONFIG_HOME: path.join(scratch, "config"),
 			PI_CODING_AGENT_DIR: agentDir,
@@ -107,6 +116,6 @@ test("detached Pix subagents broker owns RPC pipes after CLI responds (offline f
 		}
 		expect(visualStatus).toBe("done");
 	} finally {
-		await rm(scratch, { recursive: true, force: true });
+		await rm(scratch, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 });
 	}
 }, 60_000);

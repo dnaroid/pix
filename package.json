@@ -119,6 +119,7 @@
     "yauzl": "^3.4.0"
   },
   "devDependencies": {
+    "@ast-grep/cli": "0.42.2",
     "@types/node": "26.6.2",
     "@types/yauzl": "^3.4.0",
     "playwright": "1.63.0",
