@@ -82,7 +82,7 @@
           aria-label={`${day.fullDate}${index === days.length - 1 ? ", quota resets at the end of this day" : ""}`}
           data-quota-day={index === todayIndex ? "today" : undefined}
         >
-          <span class="text-[10px] uppercase tracking-wide">{day.weekday}</span>
+          <span class="text-xs uppercase tracking-wide">{day.weekday}</span>
           <span class={["inline-block min-w-[2ch]", index === todayIndex ? "text-base" : "text-xs"]}>{day.day}</span>
         </span>
       {/each}

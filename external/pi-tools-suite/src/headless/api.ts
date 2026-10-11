@@ -4,9 +4,9 @@ import { createReadToolDefinition, type ExtensionAPI } from "@earendil-works/pi-
 import { Check, Errors } from "typebox/value";
 import { Type } from "typebox";
 import { detectModelProfile, selectSuitableToolsForModel, type ModelProfile } from "../lib/tool-args.js";
+import { SUBAGENT_TYPE_SELECTION_GUIDANCE } from "../async-subagents/core/agent-catalog.js";
 import { assertPatchWorkspace, assertWorkspacePath } from "./workspace.js";
 import { withHeadlessTodoSession, type HeadlessTodoSession } from "./session-todo.js";
-import { headlessPromptInstructions, type HeadlessInstructionSection } from "./prompt-instructions.js";
 
 /** ChatGPT is an OpenAI GPT model, NOT Pi's default/unknown (Claude) profile. */
 export const CHATGPT_HEADLESS_MODEL = Object.freeze({ provider: "openai", id: "gpt-6" });
@@ -19,8 +19,6 @@ export interface HeadlessInventory {
 	profile: ModelProfile;
 	nativeTools: string[];
 	tools: HeadlessTool[];
-	/** Filtered Pix-owned guidance for external GPT hosts, not the full Pi prompt. */
-	instructions: HeadlessInstructionSection[];
 }
 
 export type HeadlessContent = { type: "text"; text: string } |
@@ -56,6 +54,40 @@ type RegisteredTool = {
 
 const MUTATING_TOOLS = new Set(["shell", "apply_patch", "ast_apply", "todo", "subagents"]);
 type HostSession = { getSessionId(): string; getSessionFile(): undefined };
+
+/** Replace two Pi-parent promises that do not hold for ChatGPT MCP headless. */
+export function headlessSubagentsDescription(source: string): string {
+	const parentFollowups = "Parent sessions receive completion/failure follow-ups, so spawn can return without polling.";
+	if (!source.includes(SUBAGENT_TYPE_SELECTION_GUIDANCE) || !source.includes(parentFollowups)) {
+		throw new Error("Pix subagents description changed; audit its headless guidance before publishing");
+	}
+	return source
+		.replace(SUBAGENT_TYPE_SELECTION_GUIDANCE,
+			"Headless ChatGPT MCP: every spawn task must include an explicit subagentType from subagents_catalog. " +
+			"The parent Pi model registry and automatic LLM role routing are unavailable. " +
+			"Use the selected role's configured model unless a model override is genuinely required.")
+		.replace(parentFollowups,
+			"ChatGPT MCP receives no automatic sub-agent completion follow-ups. " +
+			"After spawn returns, continue independent work and call status, wait or result only when the agent outcome is needed.")
+		+ " Headless spawn returns after scheduling; watchSeconds is unavailable, use a separate wait call.";
+}
+
+/** Validate before starting the detached broker: no parent-model role router exists. */
+export function assertHeadlessSubagentSpawn(args: unknown): void {
+	if (!args || typeof args !== "object" || Array.isArray(args)) return;
+	const params = args as Record<string, unknown>;
+	if (params.action !== "spawn") return;
+	if (!Array.isArray(params.tasks) || params.tasks.length === 0) {
+		throw new Error("Headless subagents spawn requires a nonempty tasks array");
+	}
+	for (const [index, task] of params.tasks.entries()) {
+		if (!task || typeof task !== "object" || Array.isArray(task)
+			|| typeof task.subagentType !== "string" || !task.subagentType.trim()) {
+			throw new Error("Headless subagents spawn requires tasks[" + index
+				+ "].subagentType from subagents_catalog; automatic role routing is unavailable");
+		}
+	}
+}
 
 const MODULES = [
 	() => import("../ast-grep/index.js"),
@@ -221,12 +253,20 @@ export async function createHeadlessToolApi(options: HeadlessApiOptions): Promis
 			// Spawn returns promptly while a detached broker owns the original Pix
 			// process handles. A watch window is a separate `action=wait` call.
 			delete (schema.properties as Record<string, unknown>).watchSeconds;
+			const itemSchema = (schema.properties as Record<string, any>).tasks?.items;
+			if (!itemSchema?.properties?.subagentType) {
+				throw new Error("Pix subagents task schema changed; review headless subagentType requirement");
+			}
+			itemSchema.required = [...new Set([...(itemSchema.required ?? []), "subagentType"])];
+			itemSchema.properties.subagentType.description =
+				"Required for headless spawn: exact subagentType from subagents_catalog for the selected project. " +
+				"Automatic LLM role routing is unavailable.";
 		}
 		return { name: tool.name, label: tool.label ?? tool.name,
 			description: !taskWrites && tool.name === "project_tasks"
 				? "Read saved Pix project tasks. Only list/get are available until the host enables authorized task writes."
 				: tool.name === "subagents"
-					? `${tool.description} Headless mode: choose an explicit subagentType from subagents_catalog (including project agents). spawn returns immediately; use action=wait or status and result to collect output.`
+					? headlessSubagentsDescription(tool.description)
 					: tool.description,
 			inputSchema: schema,
 			readOnly: (readOnly && tool.name === "todo") ||
@@ -234,11 +274,7 @@ export async function createHeadlessToolApi(options: HeadlessApiOptions): Promis
 	});
 	return {
 		listTools,
-		inventory: () => {
-			const tools = listTools();
-			return { model, profile, nativeTools: [...nativeTools], tools,
-				instructions: headlessPromptInstructions(tools.map((tool) => tool.name), profile, process.env, readOnly) };
-		},
+		inventory: () => ({ model, profile, nativeTools: [...nativeTools], tools: listTools() }),
 		async execute(name, rawArgs, signal = new AbortController().signal) {
 			const tool = registered.get(name);
 			if (!tool || !visible.includes(tool)) throw new Error(`Headless tool not available: ${name}`);
@@ -253,6 +289,7 @@ export async function createHeadlessToolApi(options: HeadlessApiOptions): Promis
 				throw new Error(`Invalid ${name} arguments${issue ? `: ${issue.message}` : ""}`);
 			}
 			const params = args as Record<string, unknown>;
+			if (name === "subagents") assertHeadlessSubagentSpawn(params);
 			if (readOnly && name === "todo" && !["list", "get", "export"].includes(String(params.action))) {
 				throw new Error("Headless todo is read-only; only list/get/export are available");
 			}

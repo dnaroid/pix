@@ -20,8 +20,7 @@ type SessionCoordinatorRef = {
 };
 
 type DesktopConversationServicesOptions = {
-  requestMessageEdit?: ConversationBranchActionsOptions["requestMessageEdit"];
-  prepareEditedMessage?: ConversationBranchActionsOptions["prepareEditedMessage"];
+  beginMessageEdit?: ConversationBranchActionsOptions["beginMessageEdit"];
   client: () => AcpClient | null;
   state: ActiveSessionState;
   workspace: () => string;
@@ -77,8 +76,7 @@ export function createDesktopConversationServices(options: DesktopConversationSe
   });
 
   const branches = createConversationBranchActions({
-    requestMessageEdit: options.requestMessageEdit,
-    prepareEditedMessage: options.prepareEditedMessage,
+    beginMessageEdit: options.beginMessageEdit,
     client: options.client,
     state: options.state,
     workspace: options.workspace,

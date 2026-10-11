@@ -20,7 +20,6 @@ const inventory = api.inventory();
 // inventory.profile === "codex"
 // inventory.nativeTools === ["read", "shell", "apply_patch"]
 // inventory.tools: original SDK + Pix extension tool schemas
-// inventory.instructions: allowlisted, model-aware Pi guidance for the MCP host
 
 const result = await api.execute("ast_grep", {
   lang: "ts", pattern: "console.log($A)", paths: ["src"],
@@ -44,35 +43,33 @@ request per invocation, with `operation: "list"` or `"call"`, `cwd`,
 For `todo`, the trusted MCP host also sends an opaque `todoSessionKey` that
 identifies the current ChatGPT conversation **and** selected project.
 
-## Selective system instructions for ChatGPT
+## Tool descriptions and MCP instructions
 
-The `list` inventory also returns `instructions: [{ id, text }]`, owned
-by Pix and intended for the MCP server's **initialize.instructions** field.
-This is **not** the complete Pi system prompt and does not replace ChatGPT's
-own instructions. The allowlist is intentionally closed:
+The `list` response returns the actual Pix GPT/Codex tool descriptions and
+schemas. The MCP host publishes those descriptions in `tools/list`; it does
+**not** copy Pix `promptSnippet`, `promptGuidelines` or system-prompt hooks
+into `initialize.instructions`. The MCP server uses that separate field only
+for its short project/workspace/transport contract.
 
-| Section ID | Pix source | Availability |
-| --- | --- | --- |
-| `todo` | Selected standalone todo snippet and workflow guidelines | When writable `todo` is available |
-| `ast_grep` | Pix AST-first inspection guidance | When `ast_grep` is available |
-| `subagents` | Pix cost-aware parent delegation strategy | When writable `subagents` is available and strategy is enabled |
+Most Pix descriptions are passed through unchanged. `project_tasks` already
+has its headless-mode authorization description. The `subagents` adapter
+changes the two incompatible parent-session statements: `subagentType`
+must be explicitly chosen from `subagents_catalog` because there is no LLM
+role router, and ChatGPT MCP does not receive automatic child-completion
+follow-ups. The headless task schema also marks `subagentType` as required,
+and both the direct API and the CLI reject missing roles before launching
+the broker. `spawn` returns after scheduling; call `status`, `wait` or
+`result` when a result is needed.
+If those upstream statements change, the adapter fails closed for review
+instead of publishing contradictory guidance.
 
-`subagents` uses the original Pix strategy builder, respects
-`PI_AGENT_STRATEGY=off` and omits references to unsupported context pruning
-in external-host mode. The read-only inventory exposes just the AST section:
-mutating todo and delegation workflow advice does not apply in that mode.
-The MCP server applies its own explicit allowlist and validates text again.
-An unknown section added later by the suite will **not** reach ChatGPT.
-
-Excluded by design: `coding-discipline`, DCP, all non-allowlisted
-`before_agent_start` hooks, full Pi/SDK prompts, user/custom prompt files,
-session/compaction/persistence hooks, interactive UI prompts, and project-local
-`AGENTS.md`, skills or agent prompt bodies. Context for selected projects is
-provided separately by the MCP `projects` and `skills` tools, while
-`subagents_catalog` resolves effective project roles **per selected chat**.
-No parent Pi model is started, and nothing writes to a project while exporting
-instructions. A host obtains one static export at startup; changed suite
-instructions require a new daemon/ChatGPT MCP initialization to take effect.
+The complete Pi system prompt, `coding-discipline`, DCP, provider hooks,
+custom prompt files and other `before_agent_start` sections are not
+collected or forwarded. Project-specific instructions come through the
+MCP host's per-chat `projects` and `skills` tools, and role definitions
+come through `subagents_catalog` for the selected project. Changing the
+published tool descriptions requires reconnecting ChatGPT to the updated
+MCP daemon; ordinary Pix tool calls still execute from its source checkout.
 
 ## Model-aware selection
 
@@ -157,5 +154,4 @@ regression test verifies completion after the initiating CLI process exits.
   are not exposed.
 
 Regression tests: `bun test external/pi-tools-suite/test/headless.test.ts
-external/pi-tools-suite/test/headless-prompt-instructions.test.ts
 external/pi-tools-suite/test/headless-broker.test.ts`.

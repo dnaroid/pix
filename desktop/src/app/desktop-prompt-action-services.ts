@@ -30,6 +30,9 @@ type ConversationNavigationRef = {
 };
 
 type DesktopPromptActionServicesOptions = {
+  submitMessageEdit?: () => Promise<boolean>;
+  messageEditActive?: () => boolean;
+  cancelMessageEdit?: () => void;
   client: () => AcpClient | null;
   workspace: () => string;
   state: ActiveSessionState;
@@ -110,6 +113,9 @@ export function createDesktopPromptActionServices(options: DesktopPromptActionSe
   }
 
   const submit = createPromptSubmit({
+    submitMessageEdit: options.submitMessageEdit,
+    messageEditActive: options.messageEditActive,
+    cancelMessageEdit: options.cancelMessageEdit,
     client: options.client,
     sessionMutationRunning: options.sessionMutationRunning,
     sessionHistoryLoading: () => options.sessions.history.loading,

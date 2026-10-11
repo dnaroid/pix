@@ -83,8 +83,8 @@ describe("tool descriptions", () => {
 		const events: string[] = [];
 		projectSearch({ registerTool: (tool: any) => { registered = tool; }, registerCommand: (name: string) => { commands.push(name); },
 			on: (name: string) => { events.push(name); } } as never);
-		expect(commands).toEqual(["search-semantic"]);
-		expect(events).toEqual(["session_start", "session_shutdown"]);
+		expect(commands).toEqual(["search-semantic", "search-index"]);
+		expect(events).toEqual(["session_start", "session_shutdown", "session_start", "session_shutdown"]);
 		expect(registered.name).toBe("project_search");
 		expect(registered.promptSnippet).toContain("first pass maxFiles=3, no includeContent");
 		expect(registered.promptSnippet).toContain("Start focused code-path lookup or diagnosis with project_search");

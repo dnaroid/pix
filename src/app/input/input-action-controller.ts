@@ -16,6 +16,9 @@ import type { Entry, SessionActivity } from "../types.js";
 const ABORT_STATUS_RESTORE_MS = 1200;
 
 export type AppInputActionControllerHost = {
+	messageEditActive?(): boolean;
+	submitMessageEdit?(): Promise<boolean>;
+	cancelMessageEdit?(): boolean;
 	runtime(): AgentSessionRuntime | undefined;
 	inputScopeKey?(): string | undefined;
 	isDraftTabActive?(): boolean;
@@ -63,6 +66,7 @@ export class AppInputActionController {
 	}
 
 	async queueInputFromEditor(): Promise<void> {
+		if (this.host.messageEditActive?.()) { this.host.showToast("Send or cancel the message edit before queueing", "info"); return; }
 		const inputScopeKey = this.host.inputScopeKey?.();
 		await this.host.stopVoiceInput();
 		if (this.host.inputScopeKey && this.host.inputScopeKey() !== inputScopeKey) return;
@@ -86,6 +90,7 @@ export class AppInputActionController {
 	}
 
 	async handleInterrupt(): Promise<void> {
+		if (this.host.cancelMessageEdit?.()) return;
 		if (this.host.interruptShellCommand()) {
 			this.host.inputEditor().clear();
 			await this.host.clearPersistedInputDraft();
@@ -110,6 +115,7 @@ export class AppInputActionController {
 
 	async handleEscape(): Promise<void> {
 		if (this.closeActiveGlobalUi()) return;
+		if (this.host.cancelMessageEdit?.()) return;
 
 		const session = this.host.runtime()?.session;
 		if (session?.isCompacting) {
@@ -197,6 +203,7 @@ export class AppInputActionController {
 		const inputScopeKey = this.host.inputScopeKey?.();
 		await this.host.stopVoiceInput();
 		if (this.host.inputScopeKey && this.host.inputScopeKey() !== inputScopeKey) return;
+		if (await this.host.submitMessageEdit?.()) return;
 
 		const inputEditor = this.host.inputEditor();
 		const rawPromptText = inputEditor.promptText;

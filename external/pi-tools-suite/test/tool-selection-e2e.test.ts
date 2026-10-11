@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { e2eRetryConfigFromEnv, withE2ERetry } from "./e2e-retry.js";
 import { runSelectionProcess } from "./tool-selection-process.js";
-import { makeToolSelectionFixture, writeToolSelectionIdx } from "./tool-selection-fixture.js";
+import { makeToolSelectionFixture } from "./tool-selection-fixture.js";
 import { resolveEvalOutputDir } from "./evals/harness/output-dir.js";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { Message } from "@earendil-works/pi-ai";
@@ -78,12 +78,12 @@ ${"DISPOSABLE_LOG_LINE_777 repeated output with no new evidence.\n".repeat(160)}
 	},
 ];
 
-function makeFixtureProject(options: { indexed: boolean }): string {
-	return makeToolSelectionFixture(RUN_DIR, options);
+function makeFixtureProject(): string {
+	return makeToolSelectionFixture(RUN_DIR);
 }
 
-async function withFixtureProject<T>(options: { indexed: boolean }, fn: (projectDir: string) => Promise<T>): Promise<T> {
-	const projectDir = makeFixtureProject(options);
+async function withFixtureProject<T>(fn: (projectDir: string) => Promise<T>): Promise<T> {
+	const projectDir = makeFixtureProject();
 	try {
 		return await fn(projectDir);
 	} finally {
@@ -142,7 +142,7 @@ async function runPiToolSelectionE2E(
 	projectDir: string,
 	prompt: string,
 	label: string,
-	options: { fakeIdx?: boolean; injectDcpReminder?: boolean } = {},
+	options: { injectDcpReminder?: boolean } = {},
 ): Promise<{ stdout: string; stderr: string; events: ToolEvent[] }> {
 	if (!E2E_MODEL) throw new Error("TOOL_SELECTION_E2E_MODEL/PI_TOOLS_SUITE_E2E_MODEL resolved to an empty model");
 
@@ -151,7 +151,6 @@ async function runPiToolSelectionE2E(
 		fs.mkdirSync(sessionDir, { recursive: true });
 		const recorder = writeToolRecorderExtension(projectDir, options);
 		fs.rmSync(recorder.logPath, { force: true });
-		const fakeBin = options.fakeIdx ? writeToolSelectionIdx(projectDir) : undefined;
 		const extensionArgs = ["--extension", EXTENSION_ENTRYPOINT, "--extension", recorder.extensionPath];
 		let sessionFile: string | undefined;
 		if (options.injectDcpReminder) {
@@ -178,7 +177,6 @@ async function runPiToolSelectionE2E(
 			timeoutMs: E2E_TIMEOUT_MS,
 			env: {
 				...process.env,
-				PATH: fakeBin ? `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}` : process.env.PATH,
 				PI_OFFLINE: "1",
 				NO_COLOR: "1",
 				CI: "1",
@@ -357,9 +355,9 @@ Audit the moved document paths and inspect the moved source against its existing
 
 describe("repo-aware tool-selection live e2e", () => {
 	for (const variant of FOCUSED_PAYMENT_BEHAVIOR_PROMPTS) {
-		e2eTest(`uses project_search for semantic discovery when indexed search is available (${variant.name})`, async () => {
-			await withFixtureProject({ indexed: true }, async (projectDir) => {
-				const result = await runPiToolSelectionE2E(projectDir, variant.prompt, `project-search selection (${variant.name})`, { fakeIdx: true });
+		e2eTest(`uses project_search for semantic discovery with native search available (${variant.name})`, async () => {
+			await withFixtureProject(async (projectDir) => {
+				const result = await runPiToolSelectionE2E(projectDir, variant.prompt, `project-search selection (${variant.name})`);
 				const names = toolCallNames(result.events);
 				expect(names).toContain("project_search");
 				expect(names).not.toContain("subagents");
@@ -370,8 +368,8 @@ describe("repo-aware tool-selection live e2e", () => {
 	}
 
 	for (const variant of FOCUSED_PAYMENT_BEHAVIOR_PROMPTS) {
-		e2eTest(`falls back to direct file/search tools when indexed search is unavailable (${variant.name})`, async () => {
-			await withFixtureProject({ indexed: false }, async (projectDir) => {
+		e2eTest(`falls back to direct file/search tools when native search is unavailable (${variant.name})`, async () => {
+			await withFixtureProject(async (projectDir) => {
 				const result = await runPiToolSelectionE2E(projectDir, variant.prompt, `fallback selection (${variant.name})`);
 				const names = toolCallNames(result.events);
 				expect(names.some((name) => name.startsWith("repo_"))).toBe(false);
@@ -383,9 +381,9 @@ describe("repo-aware tool-selection live e2e", () => {
 	}
 
 	for (const variant of ARCHITECTURE_OVERVIEW_PROMPTS) {
-		e2eTest(`uses project_search for broad architecture discovery when indexed search is available (${variant.name})`, async () => {
-			await withFixtureProject({ indexed: true }, async (projectDir) => {
-				const result = await runPiToolSelectionE2E(projectDir, variant.prompt, `project-search architecture selection (${variant.name})`, { fakeIdx: true });
+		e2eTest(`uses project_search for broad architecture discovery with native search available (${variant.name})`, async () => {
+			await withFixtureProject(async (projectDir) => {
+				const result = await runPiToolSelectionE2E(projectDir, variant.prompt, `project-search architecture selection (${variant.name})`);
 				const names = toolCallNames(result.events);
 				expect(names).toContain("project_search");
 				expect(names).not.toContain("subagents");
@@ -396,9 +394,9 @@ describe("repo-aware tool-selection live e2e", () => {
 	}
 
 	for (const variant of EXACT_LITERAL_SMALL_EDIT_PROMPTS) {
-		e2eTest(`uses direct search/read for exact-string small edits even when indexed search is available (${variant.name})`, async () => {
-			await withFixtureProject({ indexed: true }, async (projectDir) => {
-				const result = await runPiToolSelectionE2E(projectDir, variant.prompt, `repo-direct-exact-edit selection (${variant.name})`, { fakeIdx: true });
+		e2eTest(`uses direct search/read for exact-string small edits even when native search is available (${variant.name})`, async () => {
+			await withFixtureProject(async (projectDir) => {
+				const result = await runPiToolSelectionE2E(projectDir, variant.prompt, `repo-direct-exact-edit selection (${variant.name})`);
 				const names = toolCallNames(result.events);
 				expect(names).not.toContain("project_search");
 				expect(names.some((name) => DIRECT_DISCOVERY_TOOLS.includes(name))).toBe(true);
@@ -408,8 +406,8 @@ describe("repo-aware tool-selection live e2e", () => {
 	}
 
 	e2eTest("starts general repository discovery with project_search", async () => {
-		await withFixtureProject({ indexed: true }, async (projectDir) => {
-			const result = await runPiToolSelectionE2E(projectDir, GENERAL_DISCOVERY_PROMPT, "project-search general selection", { fakeIdx: true });
+		await withFixtureProject(async (projectDir) => {
+			const result = await runPiToolSelectionE2E(projectDir, GENERAL_DISCOVERY_PROMPT, "project-search general selection");
 			const calls = result.events.filter((event) => event.type === "tool_call");
 			expect(calls[0]?.toolName).toBe("project_search");
 			expect(calls[0]?.input).toMatchObject({ query: expect.any(String) });
@@ -418,8 +416,8 @@ describe("repo-aware tool-selection live e2e", () => {
 	}, E2E_TEST_TIMEOUT_MS);
 
 	e2eTest("uses project_search for an authoritative behavior/contract question", async () => {
-		await withFixtureProject({ indexed: true }, async (projectDir) => {
-			const result = await runPiToolSelectionE2E(projectDir, CONTRACT_BEHAVIOR_PROMPT, "project-search contract selection", { fakeIdx: true });
+		await withFixtureProject(async (projectDir) => {
+			const result = await runPiToolSelectionE2E(projectDir, CONTRACT_BEHAVIOR_PROMPT, "project-search contract selection");
 			const calls = result.events.filter((event) => event.type === "tool_call");
 			expect(calls[0]?.toolName).toBe("project_search");
 			expect(calls[0]?.input).toMatchObject({ query: expect.any(String) });
@@ -428,8 +426,8 @@ describe("repo-aware tool-selection live e2e", () => {
 	}, E2E_TEST_TIMEOUT_MS);
 
 	e2eTest("uses semantic search and exact-path reads for a task-scoped contract review", async () => {
-		await withFixtureProject({ indexed: true }, async (projectDir) => {
-			const result = await runPiToolSelectionE2E(projectDir, CONTRACT_AUDIT_PROMPT, "project-search scoped review", { fakeIdx: true });
+		await withFixtureProject(async (projectDir) => {
+			const result = await runPiToolSelectionE2E(projectDir, CONTRACT_AUDIT_PROMPT, "project-search scoped review");
 			const calls = result.events.filter((event) => event.type === "tool_call");
 			expect(calls[0]?.toolName).toBe("project_search");
 			expect(calls.some((event) => ["read", "Read"].includes(event.toolName))).toBe(true);
@@ -440,10 +438,10 @@ describe("repo-aware tool-selection live e2e", () => {
 	}, E2E_TEST_TIMEOUT_MS);
 
 	e2eTest("creates a new primary spec when no suitable contract exists", async () => {
-		await withFixtureProject({ indexed: true }, async (projectDir) => {
+		await withFixtureProject(async (projectDir) => {
 			const paymentsPath = path.join(projectDir, "src", "payments.ts");
 			const paymentsBefore = fs.readFileSync(paymentsPath, "utf8");
-			const result = await runPiToolSelectionE2E(projectDir, KNOWLEDGE_CREATE_SPEC_PROMPT, "repo-context create-spec maintenance", { fakeIdx: true });
+			const result = await runPiToolSelectionE2E(projectDir, KNOWLEDGE_CREATE_SPEC_PROMPT, "repo-context create-spec maintenance");
 			const calls = result.events.filter((event) => event.type === "tool_call");
 			expect(calls.some((event) => event.toolName === "project_search")).toBe(true);
 
@@ -459,7 +457,7 @@ describe("repo-aware tool-selection live e2e", () => {
 	}, E2E_TEST_TIMEOUT_MS);
 
 	e2eTest("updates an existing primary spec and verifies after intentional semantic drift", async () => {
-		await withFixtureProject({ indexed: true }, async (projectDir) => {
+		await withFixtureProject(async (projectDir) => {
 			const specDir = path.join(projectDir, "specs");
 			fs.mkdirSync(specDir, { recursive: true });
 			const specPath = path.join(specDir, "payment-retry.md");
@@ -482,7 +480,7 @@ describe("repo-aware tool-selection live e2e", () => {
 			const paymentsPath = path.join(projectDir, "src", "payments.ts");
 			const paymentsBefore = fs.readFileSync(paymentsPath, "utf8");
 
-			const result = await runPiToolSelectionE2E(projectDir, KNOWLEDGE_UPDATE_SPEC_PROMPT, "repo-audit update-spec maintenance", { fakeIdx: true });
+			const result = await runPiToolSelectionE2E(projectDir, KNOWLEDGE_UPDATE_SPEC_PROMPT, "repo-audit update-spec maintenance");
 			const searchCalls = result.events.filter((event) => event.type === "tool_call" && event.toolName === "project_search");
 			expect(searchCalls.length).toBeGreaterThan(0);
 			expect(result.events.some((event) => ["read", "Read"].includes(event.toolName) && toolCallIncludesPaths(event, "src/payments.ts"))).toBe(true);
@@ -496,7 +494,7 @@ describe("repo-aware tool-selection live e2e", () => {
 	}, E2E_TEST_TIMEOUT_MS);
 
 	e2eTest("accepts reviewed no-impact without inventing a relation or spec mutation", async () => {
-		await withFixtureProject({ indexed: true }, async (projectDir) => {
+		await withFixtureProject(async (projectDir) => {
 			const specDir = path.join(projectDir, "specs");
 			fs.mkdirSync(specDir, { recursive: true });
 			const specPath = path.join(specDir, "payment-retry.md");
@@ -504,7 +502,7 @@ describe("repo-aware tool-selection live e2e", () => {
 			const beforeSpec = fs.readFileSync(specPath, "utf8");
 			const beforeAudit = fs.readFileSync(path.join(projectDir, "src", "audit.ts"), "utf8");
 
-			const result = await runPiToolSelectionE2E(projectDir, KNOWLEDGE_NO_IMPACT_PROMPT, "repo-audit no-impact maintenance", { fakeIdx: true });
+			const result = await runPiToolSelectionE2E(projectDir, KNOWLEDGE_NO_IMPACT_PROMPT, "repo-audit no-impact maintenance");
 			const calls = result.events.filter((event) => event.type === "tool_call");
 			const searchCalls = calls.filter((event) => event.toolName === "project_search");
 			expect(searchCalls.length).toBeGreaterThan(0);
@@ -516,7 +514,7 @@ describe("repo-aware tool-selection live e2e", () => {
 	}, E2E_TEST_TIMEOUT_MS);
 
 	e2eTest("audits a moved primary spec without rewriting its source", async () => {
-		await withFixtureProject({ indexed: true }, async (projectDir) => {
+		await withFixtureProject(async (projectDir) => {
 			const oldPath = path.join(projectDir, "specs", "payment-retry.md");
 			const newPath = path.join(projectDir, "specs", "payments", "retry-contract.md");
 			fs.mkdirSync(path.dirname(oldPath), { recursive: true });
@@ -542,7 +540,7 @@ describe("repo-aware tool-selection live e2e", () => {
 			const paymentsPath = path.join(projectDir, "src", "payments.ts");
 			const paymentsBefore = fs.readFileSync(paymentsPath, "utf8");
 
-			const result = await runPiToolSelectionE2E(projectDir, KNOWLEDGE_MOVE_SPEC_PROMPT, "repo-audit move-spec maintenance", { fakeIdx: true });
+			const result = await runPiToolSelectionE2E(projectDir, KNOWLEDGE_MOVE_SPEC_PROMPT, "repo-audit move-spec maintenance");
 			const searchCalls = result.events.filter((event) => event.type === "tool_call" && event.toolName === "project_search");
 			expect(searchCalls.length).toBeGreaterThan(0);
 			expect(result.events.some((event) => ["read", "Read"].includes(event.toolName) && toolCallIncludesPaths(event, "specs/payments/retry-contract.md"))).toBe(true);
@@ -554,8 +552,8 @@ describe("repo-aware tool-selection live e2e", () => {
 	}, E2E_TEST_TIMEOUT_MS);
 
 	for (const variant of BROAD_NON_INDEXED_INVESTIGATION_PROMPTS) {
-		e2eTest(`uses subagents for broad independent discovery when indexed search is unavailable (${variant.name})`, async () => {
-			await withFixtureProject({ indexed: false }, async (projectDir) => {
+		e2eTest(`uses subagents for broad independent discovery when native search is unavailable (${variant.name})`, async () => {
+			await withFixtureProject(async (projectDir) => {
 				const result = await runPiToolSelectionE2E(projectDir, variant.prompt, `fallback-subagents selection (${variant.name})`);
 				const names = toolCallNames(result.events);
 				expect(names).toContain("subagents");
@@ -564,7 +562,7 @@ describe("repo-aware tool-selection live e2e", () => {
 	}
 
 	e2eTest("creates a synchronized todo plan for non-trivial multi-stage work", async () => {
-		await withFixtureProject({ indexed: false }, async (projectDir) => {
+		await withFixtureProject(async (projectDir) => {
 			const result = await runPiToolSelectionE2E(projectDir, TODO_PLAN_PROMPT, "todo plan selection");
 			const todoCalls = result.events.filter((event) => event.type === "tool_call" && event.toolName === "todo");
 			expect(todoCalls).toHaveLength(1);
@@ -590,7 +588,7 @@ describe("repo-aware tool-selection live e2e", () => {
 	}, E2E_TEST_TIMEOUT_MS);
 
 	e2eTest("compresses a high-pressure closed range with continuation-critical details", async () => {
-		await withFixtureProject({ indexed: false }, async (projectDir) => {
+		await withFixtureProject(async (projectDir) => {
 			const result = await runPiToolSelectionE2E(projectDir, COMPRESS_HIGH_PRESSURE_PROMPT, "compress high-pressure selection", { injectDcpReminder: true });
 			expect(toolCallNames(result.events)[0]).toBe("compress");
 			const compressCalls = result.events.filter((event) => event.type === "tool_call" && event.toolName === "compress");
@@ -625,7 +623,7 @@ describe("repo-aware tool-selection live e2e", () => {
 	}, E2E_TEST_TIMEOUT_MS);
 
 	e2eTest("starts unknown-query context recovery with session action=overview", async () => {
-		await withFixtureProject({ indexed: false }, async (projectDir) => {
+		await withFixtureProject(async (projectDir) => {
 			const result = await runPiToolSelectionE2E(projectDir, SESSION_RECOVERY_PROMPT, "session overview recovery selection");
 			expect(toolCallNames(result.events)[0]).toBe("session");
 			const call = result.events.find((event) => event.type === "tool_call");
@@ -634,7 +632,7 @@ describe("repo-aware tool-selection live e2e", () => {
 	}, E2E_TEST_TIMEOUT_MS);
 
 	e2eTest("does not create todos or compress for a trivial chat question", async () => {
-		await withFixtureProject({ indexed: false }, async (projectDir) => {
+		await withFixtureProject(async (projectDir) => {
 			const result = await runPiToolSelectionE2E(projectDir, TRIVIAL_CHAT_PROMPT, "trivial chat negative control");
 			const names = toolCallNames(result.events);
 			expect(names).not.toContain("todo");

@@ -13,6 +13,9 @@ import type { createPromptRuntime } from "./prompt-runtime.svelte";
 type PromptRuntime = ReturnType<typeof createPromptRuntime>;
 
 type PromptSubmitOptions = {
+  submitMessageEdit?: () => Promise<boolean>;
+  messageEditActive?: () => boolean;
+  cancelMessageEdit?: () => void;
   client: () => AcpClient | null;
   sessionMutationRunning: () => boolean;
   sessionHistoryLoading: () => boolean;
@@ -130,6 +133,7 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
     const initialDraftKey = options.attachmentDraftKey();
     await options.waitForAttachmentDraftSettled(initialDraftKey);
     if (initialDraftKey !== options.attachmentDraftKey()) return;
+    if (await options.submitMessageEdit?.()) return;
     const text = options.promptText().trim();
     const attachments = options.promptAttachments();
     if (/^\/btw(?:\s|$)/i.test(text) && attachments.length > 0) {
@@ -423,5 +427,5 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
     if (reloadAfterSlash && sessionId === options.activeSessionId()) await options.reloadResources({ echo: false });
   }
 
-  return { submit, submitHtmlSandbox };
+  return { submit, submitHtmlSandbox, get editActive() { return options.messageEditActive?.() ?? false; }, cancelEdit: () => options.cancelMessageEdit?.() };
 }

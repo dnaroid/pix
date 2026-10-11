@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { createHeadlessToolApi, type HeadlessModel } from "./api.js";
+import { assertHeadlessSubagentSpawn, createHeadlessToolApi, type HeadlessModel } from "./api.js";
 import { launchSubagentsBroker, runSubagentsBroker } from "./subagent-broker.js";
 
 type Request = {
@@ -45,6 +45,7 @@ async function main(): Promise<void> {
 	process.once("SIGINT", stop);
 	try {
 		const spawnAgents = request.tool === "subagents" && (request.args as { action?: unknown } | undefined)?.action === "spawn";
+		if (spawnAgents) assertHeadlessSubagentSpawn(request.args);
 		if (spawnAgents && (request.args as { watchSeconds?: unknown }).watchSeconds !== undefined
 			&& (request.args as { watchSeconds?: unknown }).watchSeconds !== 0) {
 			throw new Error("Headless spawn does not support watchSeconds; use subagents(action=wait) after spawn");

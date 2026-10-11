@@ -79,20 +79,14 @@ export function createUserMessageContextActions(
         || options.sessionHistoryLoading()
       ) return;
 
+      if (action === "edit") {
+        options.beginMessageEdit?.(entryId, message);
+        return;
+      }
       options.setOperationRunning(true);
       ownsUndoOperation = true;
       options.setErrorMessage(null);
-      const isCurrent = () => requestClient === options.client()
-        && sessionId === options.state.sessionId && requestWorkspace === options.workspace();
-      let resend: (() => void) | undefined;
-      if (action === "edit") {
-        if (!options.requestMessageEdit || !options.prepareEditedMessage) return;
-        const edit = await options.requestMessageEdit(message.text, message.attachments);
-        if (!edit || !isCurrent() || options.promptRunning() || options.sessionHistoryLoading()) return;
-        resend = await options.prepareEditedMessage(sessionId, edit);
-        if (!isCurrent() || options.promptRunning() || options.sessionHistoryLoading()) return;
-      }
-      const result = await requestClient.userMessageAction(sessionId, entryId, action === "edit" ? "rewind" : "undo");
+      const result = await requestClient.userMessageAction(sessionId, entryId, "undo");
       if (
         requestClient !== options.client()
         || sessionId !== options.state.sessionId
@@ -109,12 +103,6 @@ export function createUserMessageContextActions(
       let loaded = applySessionUpdates(emptyTranscript, history.updates);
       loaded = markDeferredToolResults(loaded, history.deferredToolCallIds);
       options.markHistoryFullyLoaded(sessionId);
-      if (resend) {
-        options.state.setTranscript(loaded);
-        options.state.setSessionTranscript(sessionId, loaded);
-        resend();
-        return;
-      }
       const summary = result.status === "warning"
         ? `Session rewound, but workspace revert had conflicts.\n\n${result.warning ?? "Some recorded mutations could not be reverted safely."}`
         : `Undid changes from entry ${entryId}. Reverted ${result.revertedChanges ?? 0} recorded command${result.revertedChanges === 1 ? "" : "s"} across ${result.changedFiles ?? 0} file${result.changedFiles === 1 ? "" : "s"}.`;

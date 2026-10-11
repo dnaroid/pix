@@ -42,7 +42,7 @@
 <section aria-label="Index activity history" class="mt-2 flex min-h-32 min-w-0 flex-1 flex-col border-t border-sidebar-border pt-2">
   <h3 class="mb-2 flex shrink-0 items-center justify-between text-xs font-medium">Activity <span class="font-normal text-muted-foreground">{events.length}/200</span></h3>
   <!-- svelte-ignore a11y_no_noninteractive_tabindex (scrollable history needs keyboard scrolling) -->
-  <div bind:this={viewport} onscroll={trackScroll} class="min-h-0 flex-1 overflow-y-auto rounded bg-panel p-2 font-mono text-[11px] leading-4 [overflow-anchor:none]" role="region" aria-label="Recent index events" tabindex="0">
+  <div bind:this={viewport} onscroll={trackScroll} class="min-h-0 flex-1 overflow-y-auto rounded bg-panel p-2 font-mono text-xs leading-4 [overflow-anchor:none]" role="region" aria-label="Recent index events" tabindex="0">
     {#if events.length === 0}<p class="text-muted-foreground">No events yet</p>{/if}
     <ol bind:this={content} class="space-y-1">
       {#each events as event (event.id)}

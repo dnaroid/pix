@@ -31,9 +31,11 @@ Pix Desktop exposes five user-message actions, including Edit and resend, withou
 
 ## Edit and resend behavior
 
-- **Edit** opens a scoped multiline editor for the exact selected Pi user entry. Original image and file attachments are retained unless individually removed; the flow does not add attachments. Canceling at either editor step leaves history, composer draft, and files unchanged. `[confirmed by code]` `[confirmed by tests: desktop/src/app/edited-message-submit.test.ts, desktop/src/app/user-message-edit-actions.test.ts]`
-- After confirmation and successful preparation, the selected entry is rewound and the edited prompt is resent in the same session from the selected user entry's parent. The old branch remains in session history, and the independent composer draft is not replaced or cleared. `[confirmed by code]`
+- **Edit** loads the exact selected Pi user entry into the **main composer**, just like Fork's composer prefill; it never opens a popup editor or attachment-confirmation dialog. Original images and files are retained and removable through ordinary composer controls. Normal composer attachment additions remain available. Desktop shows an inline editing indicator and **Cancel edit**; TUI shows an editing status. `[confirmed by code: desktop/src/app/composer-message-edit.svelte.ts, desktop/src/components/PromptComposer.svelte, src/app/workspace/workspace-actions-controller.ts]`
+- Selecting and editing a message do not change session history or files. **Cancel edit** / Escape restores the pre-edit composer text and attachments, without navigation. Pending edits are scoped to their source draft/session; switching tabs never sends an edit into another session. `[confirmed by tests: desktop/src/app/composer-message-edit.test.ts, tests/user-message-edit.test.ts]`
+- Ordinary **Send** / TUI Enter prepares the edited composer text and remaining attachments, then rewinds and resends in the **same session** from the selected user entry's parent. The old branch remains in the session tree. Successful Send clears the submitted composer draft (but does not erase newer typing during async navigation); no separate confirmation is required. Defer and composer Fork are unavailable while editing. Slash-looking edited text is sent as the edited message, not dispatched as a local composer command. `[confirmed by code]`
 - Edit rejects stale session/branch scope, queued prompts, and a busy session. It never invokes Undo, applies workspace mutations, or reads the workspace mutation journal. `[confirmed by code]` `[confirmed by tests: desktop/src/app/user-message-edit-actions.test.ts]`
+- Once rewind commits, a later tab switch or refresh/resend failure retires the pending edit instead of allowing another rewind against its old target. Edited input is kept when it was not sent. Desktop refreshes the source session's history cache without replacing another tab's transcript; TUI also retires edits when cancelled/rejected navigation has already moved the branch. Navigation cancelled before any branch change keeps the edit pending. `[confirmed by tests: desktop/src/app/composer-message-edit.test.ts, tests/user-message-edit.test.ts]`
 - Desktop and TUI **Edit and resend** use parent-entry navigation and retain the old tree. A user entry that is itself the current tree leaf cannot be edited until the session has a later entry; Pi navigation otherwise treats that target as a no-op. `[confirmed by code: src/app/workspace/user-message-edit.ts, src/bundled-extensions/workspace-undo/index.ts]`
 
 ## Undo changes contract
@@ -70,6 +72,10 @@ Pix Desktop exposes five user-message actions, including Edit and resend, withou
 
 ## Related files
 
+- `desktop/src/app/composer-message-edit.svelte.ts`
+- `desktop/src/components/PromptComposer.svelte`
+- `desktop/src/app/prompt-submit.ts`
+- `src/app/input/input-action-controller.ts`
 - `desktop/src/app/edited-message-submit.ts`
 - `desktop/src/app/user-message-context-actions.ts`
 - `src/app/workspace/user-message-edit.ts`
@@ -101,7 +107,7 @@ Pix Desktop exposes five user-message actions, including Edit and resend, withou
 
 - `desktop/src/app/conversation-fork-action.test.ts` covers running-source preservation, latest transcript/composer ownership, late source updates, stale fork cleanup, and unchanged replacement/history/mutation gates. `desktop/src/components/transcript-user-message-menu-controller.test.ts` covers running-session action permissions and renderer-only rejection.
 - `desktop/src/app/user-message-context-actions.test.ts` covers exact persisted/bound entry selection with duplicate text, hidden entries and an in-flight user, plus fail-closed unbound/legacy rows. `desktop/src/app/prompt-run-lifecycle.test.ts` covers first-new-entry binding with steering and stale binding rejection.
-- `desktop/src/app/edited-message-submit.test.ts` and `desktop/src/app/user-message-edit-actions.test.ts` cover edit preparation, attachment handling, cancellation, stale scope, and no workspace-file rollback. `tests/user-message-edit.test.ts` covers TUI edit/resend navigation and preservation of the old tree.
+- `desktop/src/app/composer-message-edit.test.ts`, `desktop/src/app/edited-message-submit.test.ts`, and `desktop/src/app/user-message-edit-actions.test.ts` cover composer prefill, preparation, removable attachments, draft restoration, ordinary Send, cancelled navigation and stale scope. `tests/user-message-edit.test.ts` covers TUI main-composer cancellation, Send, exact branch navigation and preservation of the old tree.
 - `tests/workspace-undo-extension.test.ts` covers session mutation recording, tool-start ownership, conflict refusal against a later parallel edit, and legacy TUI index fallback.
 - `tests/workspace-undo.test.ts` covers patch/write rollback, changed-file refusal, path confinement, and transactional rollback after a later failure.
 - `tests/workspace-actions-controller.test.ts` verifies TUI mutations also append portable hidden session entries.

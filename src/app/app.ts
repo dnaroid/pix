@@ -413,7 +413,7 @@ export class PiUiExtendApp {
 			modelColors: this.pixConfig.modelColors,
 			get sessionActivity() { return app.statusController.sessionActivity; },
 			get statusDotBright() { return app.statusController.statusDotBright; },
-			currentStatus: () => this.statusController.currentStatus(),
+            currentStatus: () => this.workspaceActions?.messageEditActive ? "Editing · Enter resend · Esc cancel" : this.statusController.currentStatus(),
 			statusWorkspaceLabel: () => this.statusController.statusWorkspaceLabel(),
 			statusWorkspaceGitBranchLabel: () => this.statusController.statusWorkspaceGitBranchLabel(),
 			statusModelLabel: (session) => this.statusController.statusModelLabel(session),
@@ -497,11 +497,20 @@ export class PiUiExtendApp {
 			render: () => this.scheduleRender(),
 		});
 		this.workspaceActions = new AppWorkspaceActionsController({
-			messageEditUi: () => this.extensionUiController.createExtensionUIContext(),
+			getInputDraft: () => this.inputEditor.draftState,
+			setInputDraft: (draft) => this.inputEditor.restoreDraftState(draft),
+			loadEditDraft: (edit) => {
+				this.inputEditor.clear(); this.inputEditor.setText(edit.text);
+				for (const image of edit.images) this.inputEditor.attachImage(image.data, image.mimeType);
+			},
+			getEditedInput: () => ({ text: this.inputEditor.promptText, displayText: this.inputEditor.expandedText, images: [...this.inputEditor.images] }),
+			inputVersion: () => this.inputEditor.contentVersion,
+			clearEditedInput: () => { this.inputEditor.clear(); void this.clearPersistedInputDraft(); },
 			canEditUserMessage: () => Boolean(this.runtime && this.queuedMessages.canEditUserMessage(this.runtime.session)),
 			reserveMessageEdit: (runtime) => this.queuedMessages.reserveMessageEdit(runtime.session),
 			resendEditedUserMessage: (runtime, edit) => {
-				const message = this.queuedMessages.createSubmittedUserMessage(edit.text, edit.text, edit.images);
+				const message = this.queuedMessages.createSubmittedUserMessage(edit.text, edit.displayText ?? edit.text, edit.images);
+				this.requestHistory.add(message.displayText);
 				void this.queuedMessages.sendUserMessageToSession(message, {}, runtime.session).catch((error: unknown) => {
 					if (this.runtime === runtime) this.showToast(error instanceof Error ? error.message : String(error), "error");
 				});
@@ -871,6 +880,9 @@ export class PiUiExtendApp {
 		});
 		this.inputActions = new AppInputActionController(
 			{
+				messageEditActive: () => this.workspaceActions.messageEditActive,
+				submitMessageEdit: () => this.workspaceActions.submitMessageEdit(),
+				cancelMessageEdit: () => this.workspaceActions.cancelMessageEdit(),
 				runtime: () => this.runtime,
 				inputScopeKey: () => this.tabsController.activeInputTabId(),
 				isDraftTabActive: () => this.tabsController.isDraftTabActive(),

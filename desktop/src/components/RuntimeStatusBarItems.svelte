@@ -4,7 +4,7 @@
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
-  import RotateCw from "@lucide/svelte/icons/rotate-cw";
+  import AlarmClock from "@lucide/svelte/icons/alarm-clock";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import type { ModelUsageLimitWindow, RuntimeStatus, SessionUsageReport } from "../lib/acp-client";
   import { parseDcpContextMap } from "../lib/dcp-context-map";
@@ -370,7 +370,7 @@
       data-quota-wait-indicator
       onclick={() => quotaWaitIndicator?.onReopen()}
     >
-      <RotateCw class="h-3 w-3 shrink-0" aria-hidden="true" />
+      <AlarmClock class="h-3 w-3 shrink-0" aria-hidden="true" />
     </button>
   {/if}
 {/snippet}

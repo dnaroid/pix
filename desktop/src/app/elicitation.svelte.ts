@@ -2,7 +2,6 @@ import type {
   CreateElicitationRequest,
   CreateElicitationResponse,
 } from "@agentclientprotocol/sdk";
-import type { Attachment } from "../lib/attachments";
 import {
   canAcceptElicitationForSession,
   elicitationSessionId,
@@ -23,7 +22,6 @@ export type PendingFormElicitation = {
   sessionId: string | null;
   message: string;
   field: ElicitationField;
-  editAttachments?: readonly Attachment[];
   resolve: (response: CreateElicitationResponse) => void;
 };
 
@@ -96,7 +94,6 @@ export function createElicitationStore(options: ElicitationStoreOptions) {
   function requestInternal(
     request: CreateElicitationRequest,
     notifyPending: boolean,
-    editAttachments?: readonly Attachment[],
   ): Promise<CreateElicitationResponse> {
     const question = parseQuestionElicitation(request);
     const field = parseElicitation(request);
@@ -121,7 +118,7 @@ export function createElicitationStore(options: ElicitationStoreOptions) {
             state: createQuestionnaireState(question.questions),
             resolve,
           }
-        : { kind: "form", sessionId: ownerSessionId, message: request.message, field: field!, resolve, editAttachments };
+        : { kind: "form", sessionId: ownerSessionId, message: request.message, field: field!, resolve };
       if (ownerSessionId === null) {
         pendingUnscoped = pending;
       } else {
@@ -160,7 +157,6 @@ export function createElicitationStore(options: ElicitationStoreOptions) {
     active.resolve(accepted
       ? { action: "accept", content: {
           [active.field.key]: active.field.value,
-          ...(active.editAttachments ? { attachmentIds: active.editAttachments.map((item) => item.id) } : {}),
         } }
       : { action: "cancel" });
   }
@@ -216,31 +212,6 @@ export function createElicitationStore(options: ElicitationStoreOptions) {
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
   }
 
-  async function requestMessageEdit(text: string, attachments: readonly Attachment[]) {
-    const response = await requestInternal({
-      mode: "form",
-      sessionId: options.activeSessionId() ?? "local",
-      message: "Edit and resend",
-      requestedSchema: {
-        type: "object",
-        properties: { value: { type: "string", title: "Message", default: text } },
-        required: ["value"],
-      },
-      _meta: { "_pix/ui-kind": "editor" },
-    } as unknown as CreateElicitationRequest, false, [...attachments]);
-    if (response.action !== "accept") return undefined;
-    const content = response.content as Record<string, unknown> | undefined;
-    if (typeof content?.value !== "string" || !Array.isArray(content.attachmentIds)) return undefined;
-    const ids = content.attachmentIds;
-    const kept = attachments.filter((item) => ids.includes(item.id));
-    if (!content.value.trim() && kept.length === 0) return undefined;
-    return { text: content.value, attachments: kept };
-  }
-
-  function removeEditAttachment(active: PendingFormElicitation, id: string): void {
-    replace({ ...active, editAttachments: active.editAttachments?.filter((item) => item.id !== id) });
-  }
-
   return {
     get pendingBySession() { return pendingBySession; },
     get pendingUnscoped() { return pendingUnscoped; },
@@ -255,7 +226,5 @@ export function createElicitationStore(options: ElicitationStoreOptions) {
     cancel,
     cancelForSession,
     requestLocalTextInput,
-    requestMessageEdit,
-    removeEditAttachment,
   };
 }

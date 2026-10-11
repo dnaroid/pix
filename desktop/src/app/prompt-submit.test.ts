@@ -3,6 +3,15 @@ import type { AcpClient } from "../lib/acp-client";
 import { createPromptSubmit } from "./prompt-submit";
 
 describe("createPromptSubmit terminal commands", () => {
+  it("ordinary Send handles edit before slash/terminal routing", async () => {
+    const submitMessageEdit = vi.fn(async () => true);
+    const create = createPromptSubmit({
+      client: () => ({} as AcpClient), sessionMutationRunning: () => false, sessionHistoryLoading: () => false,
+      waitForAttachmentDraftSettled: async () => {}, attachmentDraftKey: () => "source", attachmentGeneration: () => 1,
+      promptText: () => "/fork edited body", promptAttachments: () => [], activeSessionId: () => "source", submitMessageEdit,
+    } as unknown as Parameters<typeof createPromptSubmit>[0]);
+    await create.submit(); expect(submitMessageEdit).toHaveBeenCalledOnce();
+  });
   it("keeps the optimistic first draft prompt alive when another tab is selected during materialization", async () => {
     let promptText = "Implement the subsystem";
     const promptAttachments: never[] = [];

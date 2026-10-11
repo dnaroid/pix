@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { CHATGPT_HEADLESS_MODEL, createHeadlessToolApi } from "../src/headless/api.js";
+import { CHATGPT_HEADLESS_MODEL, assertHeadlessSubagentSpawn, createHeadlessToolApi, headlessSubagentsDescription } from "../src/headless/api.js";
+import { TODO_TOOL_DESCRIPTION } from "../src/tool-descriptions.js";
 
 async function workspace(run: (root: string, outside: string) => Promise<void>): Promise<void> {
 	const scratch = await mkdtemp(path.join(tmpdir(), "pix-headless-test-"));
@@ -20,6 +21,39 @@ async function workspace(run: (root: string, outside: string) => Promise<void>):
 }
 
 describe("headless Pix tool API", () => {
+	test("publishes original Pix descriptions, with only headless subagent caveats adapted", async () => workspace(async (root) => {
+		const api = await createHeadlessToolApi({ cwd: root, readOnly: false });
+		const inventory = api.inventory();
+		expect("instructions" in inventory).toBe(false);
+		const descriptions = new Map(inventory.tools.map((tool) => [tool.name, tool.description]));
+		expect(descriptions.get("todo")).toBe(TODO_TOOL_DESCRIPTION.description);
+		expect(descriptions.get("ast_grep")).toContain("MANDATORY ROUTING");
+		const subagents = inventory.tools.find((tool) => tool.name === "subagents");
+		expect((subagents?.inputSchema.properties as any).tasks.items.required)
+			.toContain("subagentType");
+		const roleDescription = (subagents?.inputSchema.properties as any).tasks.items.properties.subagentType.description;
+		expect(roleDescription).toContain("Required for headless spawn");
+		expect(roleDescription).not.toContain("Omit subagentType only");
+		const delegated = descriptions.get("subagents") ?? "";
+		expect(delegated).toContain("every spawn task must include an explicit subagentType from subagents_catalog");
+		expect(delegated).toContain("automatic LLM role routing are unavailable");
+		expect(delegated).toContain("ChatGPT MCP receives no automatic sub-agent completion follow-ups");
+		expect(delegated).toContain("use a separate wait call");
+		expect(delegated).not.toContain("Omit subagentType only when unsure");
+		expect(delegated).not.toContain("the LLM router handles omissions only");
+		expect(delegated).not.toContain("Parent sessions receive completion/failure follow-ups");
+		expect(() => headlessSubagentsDescription("Upstream contract changed")).toThrow(
+			"description changed; audit its headless guidance",
+		);
+		expect(() => assertHeadlessSubagentSpawn({
+			action: "spawn", tasks: [{ id: "missing-role", task: "Do not launch anything" }],
+		})).toThrow("tasks[0].subagentType");
+		await expect(api.execute("subagents", {
+			action: "spawn", tasks: [{ id: "missing-role", task: "Do not launch anything" }],
+		})).rejects.toThrow("tasks[0].subagentType");
+		expect(() => assertHeadlessSubagentSpawn({ action: "status" })).not.toThrow();
+	}));
+
 	test("models ChatGPT as GPT/Codex, not as the default Claude profile", async () => workspace(async (root) => {
 		const api = await createHeadlessToolApi({ cwd: root });
 		const inventory = api.inventory();

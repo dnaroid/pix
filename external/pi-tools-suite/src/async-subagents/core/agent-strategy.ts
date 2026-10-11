@@ -4,8 +4,6 @@ export interface AgentStrategyOptions {
 	modelRef?: string;
 	customPrompt?: boolean;
 	env?: NodeJS.ProcessEnv;
-	/** External model hosts have no Pix context-pruning lifecycle. */
-	omitDcpGuidance?: boolean;
 }
 
 /** Canonical delegation policy, emitted once in the subagents tool description. */
@@ -20,15 +18,12 @@ export function agentStrategyPrompt(options: AgentStrategyOptions = {}): string 
 	const allowCustom = env.PI_AGENT_STRATEGY_WITH_CUSTOM_PROMPT ?? env.ASYNC_SUBAGENTS_AGENT_STRATEGY_WITH_CUSTOM_PROMPT;
 	if (options.customPrompt && !/^(1|true|on|yes|auto)$/i.test(allowCustom?.trim() ?? "")) return undefined;
 	// Old strategy names remain accepted, but no longer cause hidden tier escalation.
-	const todoLifecycle = options.omitDcpGuidance
-		? "Keep delegated todo lifecycle synchronized and maintain the active objective and next step explicitly; do not poll merely for progress."
-		: "Keep delegated todo lifecycle synchronized, preserve active objective + next step via todo/DCP rules, and do not poll merely for progress.";
 	return `<agent_strategy name="cost-aware-orchestrator">
 Worker briefing and integration guidance. Delegation triggers and mandatory gates are defined in the subagents tool description, not repeated here.
 
 Give each worker a scoped task, necessary context, acceptance criteria, and a compact return contract. Put task-specific discipline in the brief, not a new persona. Respect the configured worker budget; do not force the parent model or repeatedly retry with stronger workers. On a capability or reasoning blocker, collect the evidence and decide in the parent whether an oracle is justified.
 
-Read compact results first and verify selectively; do not reload every source file or repeat the worker's whole investigation. Independent tracks may run in parallel; serialize overlapping edits. After spawning, continue available parent work; wait only when a child result blocks the next decision and no independent parent work remains. ${todoLifecycle}
+Read compact results first and verify selectively; do not reload every source file or repeat the worker's whole investigation. Independent tracks may run in parallel; serialize overlapping edits. After spawning, continue available parent work; wait only when a child result blocks the next decision and no independent parent work remains. Keep delegated todo lifecycle synchronized, preserve active objective + next step via todo/DCP rules, and do not poll merely for progress.
 </agent_strategy>`;
 }
 

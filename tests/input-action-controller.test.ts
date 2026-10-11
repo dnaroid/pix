@@ -11,6 +11,20 @@ import type { SubmittedUserMessage } from "../src/app/types.js";
 import type { AgentSession, AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 
 describe("AppInputActionController", () => {
+	it("ordinary Enter commits composer edit before shell or slash routing; Escape cancels", async () => {
+		const inputEditor = new InputEditor(); inputEditor.setText("/fork edited body");
+		const session = {} as AgentSession;
+		let sends = 0; let cancels = 0; let voiceStops = 0;
+		const controller = new AppInputActionController({
+			runtime: () => ({ session }) as AgentSessionRuntime, isRunning: () => true, isSessionSwitching: () => false,
+			inputEditor: () => inputEditor, stopVoiceInput: async () => { voiceStops++; },
+			submitMessageEdit: async () => { sends++; return true; },
+			cancelMessageEdit: () => { cancels++; return true; },
+		} as any, { syncActivePopupMenu: () => false } as any, {} as any, {} as any);
+		await (controller as unknown as { submitInput(): Promise<void> }).submitInput();
+		assert.equal(sends, 1); assert.equal(voiceStops, 1); assert.equal(inputEditor.text, "/fork edited body");
+		await controller.handleEscape(); assert.equal(cancels, 1);
+	});
 	it("clears the persisted draft when submitting input", async () => {
 		const inputEditor = new InputEditor();
 		inputEditor.setText("hello draft");

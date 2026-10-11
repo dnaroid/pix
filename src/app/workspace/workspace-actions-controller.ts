@@ -2,7 +2,8 @@ import { getAgentDir, type AgentSessionRuntime } from "@earendil-works/pi-coding
 import { copyTextToClipboard } from "../screen/clipboard.js";
 import { createId } from "../id.js";
 import type { Entry } from "../types.js";
-import { editUserMessageInSession, type EditedUserMessage, type MessageEditUi } from "./user-message-edit.js";
+import { commitUserMessageEdit, prepareUserMessageEdit, type PreparedUserMessageEdit, type EditedUserMessage } from "./user-message-edit.js";
+import type { InputEditorDraftState } from "../../input-editor.js";
 import {
 	loadWorkspaceUndoIndex,
 	prepareWorkspaceMutation,
@@ -17,7 +18,12 @@ import {
 } from "./workspace-undo.js";
 
 export type AppWorkspaceActionsControllerHost = {
-	messageEditUi?(): MessageEditUi;
+	getInputDraft?(): InputEditorDraftState;
+	setInputDraft?(draft: InputEditorDraftState): void;
+	loadEditDraft?(edit: EditedUserMessage): void;
+	getEditedInput?(): EditedUserMessage;
+	inputVersion?(): number;
+	clearEditedInput?(): void;
 	canEditUserMessage?(): boolean;
 	reserveMessageEdit?(runtime: AgentSessionRuntime): () => void;
 	resendEditedUserMessage?(runtime: AgentSessionRuntime, edit: EditedUserMessage): void;
@@ -42,6 +48,8 @@ export type AppWorkspaceActionsControllerHost = {
 
 export class AppWorkspaceActionsController {
 	messageEditRunning = false;
+	private readonly messageEdits = new WeakMap<AgentSessionRuntime, { target: PreparedUserMessageEdit; previous: InputEditorDraftState }>();
+	get messageEditActive(): boolean { const runtime = this.host.runtime(); return !!runtime && this.messageEdits.has(runtime); }
 	private readonly workspaceUndoIndex = loadWorkspaceUndoIndex(getAgentDir());
 
 	constructor(private readonly host: AppWorkspaceActionsControllerHost) {}
@@ -50,7 +58,7 @@ export class AppWorkspaceActionsController {
 		if (this.messageEditRunning) return;
 		const runtime = this.getIdleRuntimeForAction("Edit and resend");
 		const visible = this.host.findUserEntry(entryId);
-		if (!runtime || !visible || !this.host.messageEditUi || !this.host.reserveMessageEdit || !this.host.resendEditedUserMessage) return;
+		if (!runtime || !visible || !this.host.getInputDraft || !this.host.loadEditDraft) return;
 		const sessionEntryId = this.resolveUserSessionEntryId(visible);
 		if (!sessionEntryId) throw new Error("This message is not backed by a Pi session entry.");
 		await this.host.awaitCurrentSessionExtensions(runtime);
@@ -58,15 +66,61 @@ export class AppWorkspaceActionsController {
 		const isCurrent = () => this.host.isRunning() && this.host.runtime() === runtime
 			&& !runtime.session.isStreaming && !runtime.session.isCompacting && (this.host.canEditUserMessage?.() ?? true);
 		if (!isCurrent()) throw new Error("Edit and resend is unavailable while the session is busy or has queued messages.");
+		const target = prepareUserMessageEdit(runtime, sessionEntryId);
+		const previous = this.messageEdits.get(runtime)?.previous ?? this.host.getInputDraft();
+		this.messageEdits.set(runtime, { target, previous });
+		this.host.loadEditDraft(target);
+		this.host.showToast("Editing in composer · Enter to resend here · Esc to cancel · Files stay unchanged", "info");
+		this.host.render();
+	}
+
+	cancelMessageEdit(): boolean {
+		const runtime = this.host.runtime();
+		const pending = runtime && this.messageEdits.get(runtime);
+		if (!pending) return false;
+		if (this.messageEditRunning) return true;
+		this.messageEdits.delete(runtime!);
+		this.host.setInputDraft?.(pending.previous);
+		this.host.render();
+		return true;
+	}
+
+	async submitMessageEdit(): Promise<boolean> {
+		const runtime = this.host.runtime();
+		const pending = runtime && this.messageEdits.get(runtime);
+		if (!runtime || !pending) return false;
+		if (this.messageEditRunning) return true;
+		const edit = this.host.getEditedInput?.();
+		if (!edit || (!edit.text.trim() && !edit.images.length)) return true;
+		if (!this.host.reserveMessageEdit || !this.host.resendEditedUserMessage) return true;
+		const version = this.host.inputVersion?.();
+		const isCurrent = () => this.host.isRunning() && this.host.runtime() === runtime && this.messageEdits.get(runtime) === pending;
 		this.messageEditRunning = true;
+		let rewound = false;
+		let sent = false;
 		try {
-			await editUserMessageInSession({
-				runtime, entryId: sessionEntryId, isCurrent, ui: this.host.messageEditUi(),
+			sent = await commitUserMessageEdit({
+				runtime, pending: pending.target, edit, isCurrent,
+				onRewound: () => { rewound = true; },
 				reserve: () => this.host.reserveMessageEdit!(runtime),
 				reloadHistory: () => { this.host.resetSessionView(); this.host.loadSessionHistory(); },
-				resend: (edit) => this.host.resendEditedUserMessage!(runtime, edit),
+				resend: (value) => this.host.resendEditedUserMessage!(runtime, value),
 			});
-		} finally { this.messageEditRunning = false; this.host.render(); }
+			if (sent) {
+				this.messageEdits.delete(runtime);
+				if (this.host.runtime() === runtime && this.host.inputVersion?.() === version) this.host.clearEditedInput?.();
+			}
+		} catch (error) {
+			if (isCurrent()) this.host.showToast(error instanceof Error ? error.message : String(error), "error");
+		} finally {
+			if (rewound) {
+				this.messageEdits.delete(runtime);
+				if (!sent && this.host.runtime() === runtime) this.host.showToast("Conversation rewound without resending. Your edited draft is kept; send it normally.", "warning");
+			}
+			this.messageEditRunning = false;
+			this.host.render();
+		}
+		return true;
 	}
 
 	prepareWorkspaceMutation(toolName: string, args: unknown): WorkspaceMutationPreparation | undefined {
@@ -325,6 +379,10 @@ export class AppWorkspaceActionsController {
 
 	private getIdleRuntimeForAction(actionName: string): AgentSessionRuntime | undefined {
 		if (this.messageEditRunning) throw new Error("A message edit is in progress.");
+		if (this.messageEditActive && actionName !== "Edit and resend") {
+			this.host.showToast("Send or cancel the message edit first", "info");
+			return undefined;
+		}
 		const runtime = this.host.runtime();
 		if (!runtime) {
 			this.host.addEntry({ id: createId("error"), kind: "error", text: "Runtime is not initialized" });

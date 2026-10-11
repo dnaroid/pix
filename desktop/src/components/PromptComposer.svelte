@@ -34,6 +34,8 @@
 
   let {
     promptText = $bindable(""),
+    messageEditActive = false,
+    onCancelMessageEdit,
     attachments,
     variant = "prompt",
     placeholder,
@@ -71,6 +73,8 @@
     headsUp,
   }: {
     promptText?: string;
+    messageEditActive?: boolean;
+    onCancelMessageEdit?: () => void;
     attachments: readonly Attachment[];
     variant?: "prompt" | "editor";
     placeholder?: string;
@@ -324,7 +328,7 @@
 
   async function deferWithVoiceStop(): Promise<void> {
     composerMenuOpen = false;
-    if (!activeSessionId || !ready || !hasQueueableDraft) return;
+    if (messageEditActive || !activeSessionId || !ready || !hasQueueableDraft) return;
     await voiceController.stop();
     await onDefer();
   }
@@ -560,6 +564,10 @@
       return;
     }
     questionnaireController.handleEscape(event);
+    if (messageEditActive && !event.defaultPrevented && event.key === "Escape" && !event.isComposing) {
+      event.preventDefault();
+      onCancelMessageEdit?.();
+    }
   }
 </script>
 
@@ -568,6 +576,12 @@
 <div class={editorMode ? "relative" : "relative py-2"}>
 <div class={editorMode ? "" : "relative mx-auto w-full max-w-4xl px-6 max-[760px]:px-3"}>
 {#if !editorMode}
+  {#if messageEditActive}
+    <div class="mb-2 flex items-center gap-2 text-xs text-muted-foreground" role="status">
+      <span class="min-w-0 flex-1">Editing message · Send to resend here · Files stay unchanged</span>
+      <button type="button" class="rounded-sm px-2 py-1 hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" disabled={!ready} onclick={onCancelMessageEdit}>Cancel edit</button>
+    </div>
+  {/if}
   {#key activeSessionId}
     <PromptComposerActivityRow
       {activity}
@@ -603,7 +617,7 @@
     canOpenHistory={canOpenPromptHistory}
     canEnhance={canEnhancePrompt}
     {canCreateTask}
-    canDefer={!!activeSessionId && ready && hasQueueableDraft}
+    canDefer={!messageEditActive && !!activeSessionId && ready && hasQueueableDraft}
     {canFork}
     scheduleContinuationLabel={scheduleContinuationCommand.label}
     canScheduleContinuation={canScheduleContinuation}

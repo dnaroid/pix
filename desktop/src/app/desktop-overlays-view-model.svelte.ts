@@ -35,8 +35,6 @@ export function createDesktopOverlaysViewModel(options: {
       elicitation: pending?.kind === "form" ? {
         message: pending.message,
         field: pending.field,
-        editAttachments: pending.editAttachments,
-        onRemoveAttachment: (id: string) => options.elicitation.removeEditAttachment(pending, id),
         onValueChange: (value) => options.elicitation.updateFormValue(pending, value),
         onAnswer: (accepted) => options.elicitation.answerForm(pending, accepted),
       } : null,

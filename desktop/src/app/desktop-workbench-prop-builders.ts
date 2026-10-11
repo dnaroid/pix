@@ -189,6 +189,8 @@ export function buildWorkbenchConversationProps(
       onAction: (item, action) => void options.promptQueue.actOnQueuedMessage(item, action),
     },
     composer: {
+      messageEditActive: options.promptSubmit.editActive,
+      onCancelMessageEdit: options.promptSubmit.cancelEdit,
       onOpenBtw: sessionId && options.openBtw ? () => options.openBtw!(sessionId) : undefined,
       headsUp: (() => {
         const observerNotice = options.headsUp.notice(sessionId);
@@ -250,7 +252,7 @@ export function buildWorkbenchConversationProps(
       onEnhance: () => options.conversationActions.enhancePromptDraft(options.promptText()),
       onSubmit: options.promptSubmit.submit,
       onDefer: options.promptQueue.deferCurrentDraft,
-      onFork: options.promptQueue.forkCurrentDraft,
+      onFork: options.promptSubmit.editActive ? undefined : options.promptQueue.forkCurrentDraft,
       onCreateTask: options.projectActions.createTaskFromComposer,
       onScheduleContinuation: sessionId ? () => options.quotaWait.openSchedule(sessionId) : undefined,
       onPause: options.promptRuntime.pauseActiveAgent,

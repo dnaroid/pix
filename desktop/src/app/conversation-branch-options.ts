@@ -1,12 +1,11 @@
 import type { SessionConfigOption } from "@agentclientprotocol/sdk";
 import type { AcpClient } from "../lib/acp-client";
 import type { Attachment } from "../lib/attachments";
-import type { MessageEdit } from "./edited-message-submit";
+import type { MessageItem } from "../lib/transcript";
 import type { ActiveSessionState } from "./active-session-state.svelte";
 
 export type ConversationBranchActionsOptions = {
-  requestMessageEdit?: (text: string, attachments: readonly Attachment[]) => Promise<MessageEdit | undefined>;
-  prepareEditedMessage?: (sessionId: string, edit: MessageEdit) => Promise<() => void>;
+  beginMessageEdit?: (entryId: string, message: MessageItem) => void;
   client: () => AcpClient | null;
   state: ActiveSessionState;
   workspace: () => string;

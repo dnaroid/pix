@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { createComposerMessageEdit } from "./app/composer-message-edit.svelte";
   import { onDestroy, onMount, tick, untrack } from "svelte";
   import { invoke, isTauri } from "@tauri-apps/api/core";
   import { createWindowRunActivitySync } from "./app/window-run-activity";
@@ -379,8 +380,7 @@
     clearCommandPicker: () => desktopCommands.setPicker(null),
     setCommandPicker: (picker) => desktopCommands.setPicker(picker),
     requestLocalTextInput: (message, title) => elicitationStore.requestLocalTextInput(message, title),
-    requestMessageEdit: (text, attachments) => elicitationStore.requestMessageEdit(text, attachments),
-    prepareEditedMessage: (sessionId, edit) => promptActionServices.prepareEditedMessage(sessionId, edit),
+    beginMessageEdit: (entryId, message) => messageEdit.begin(entryId, message),
     promptText: () => promptText,
     setPromptText: (text) => promptText = text,
     setPromptAttachments: (attachments) => promptAttachments = attachments,
@@ -563,6 +563,9 @@
   const taskActionId = $derived(projectActions.actionId);
 
   const promptActionServices = createDesktopPromptActionServices({
+    submitMessageEdit: () => messageEdit.submit(),
+    messageEditActive: () => messageEdit.active,
+    cancelMessageEdit: () => messageEdit.cancel(),
     openBtw,
     workspace: () => workspace,
     client: () => client,
@@ -715,6 +718,28 @@
   const tabSessions = $derived(presentationState.tabSessions);
   const activeConversationWorkbenchTabId = $derived(presentationState.activeConversationWorkbenchTabId);
   const attachmentDraftKey = $derived(presentationState.attachmentDraftKey);
+  $effect(() => {
+    const currentClient = client;
+    const openDraftKeys = tabSessions.map((session) => `${workspace}\0${session.sessionId}`);
+    untrack(() => messageEdit.prune(currentClient, openDraftKeys));
+  });
+  const messageEdit = createComposerMessageEdit({
+    client: () => client,
+    state: activeSessionState,
+    draftKey: () => attachmentDraftKey,
+    promptText: () => promptText,
+    promptAttachments: () => promptAttachments,
+    setPromptText: (text) => promptText = text,
+    setPromptAttachments: (attachments) => promptAttachments = attachments,
+    invalidateAttachments: attachmentDrafts.invalidate,
+    busy: () => sessionMutationRunning || anyPromptRunning || sessionServices.history.loading,
+    setOperationRunning: (value) => operationRunning = value,
+    prepare: promptActionServices.prepareEditedMessage,
+    markHistoryFullyLoaded: sessionServices.history.markFullyLoaded,
+    focus: () => promptComposer?.focus(),
+    reportError,
+  });
+  onDestroy(messageEdit.dispose);
   const activePendingElicitation = $derived(presentationState.activePendingElicitation);
 
   const desktopLifecycle = createDesktopLifecycleServices({
