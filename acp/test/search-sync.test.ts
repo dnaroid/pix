@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import { test, type TestContext } from "node:test";
+import { after, before, test, type TestContext } from "node:test";
+import { mkdtempSync } from "node:fs";
 import { access, mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
@@ -13,6 +15,16 @@ import { TASK_SCHEMA } from "../src/registry/task-database.js";
 import type { Embedder } from "../src/search/embeddings.js";
 import { SEARCH_CACHE_REBUILD_REQUIRED, type SearchSetting } from "../src/search/contract.js";
 import { SearchIndexStore } from "../src/search/index-store.js";
+
+// Separate file-level provider quotas: Node's test runner executes other test
+// files in parallel, and those must not exhaust this suite's mock-provider slots.
+const savedHome = process.env.HOME;
+const providerHome = mkdtempSync(join(tmpdir(), "pix-acp-sync-provider-"));
+before(() => { process.env.HOME = providerHome; });
+after(async () => {
+	if (savedHome === undefined) delete process.env.HOME; else process.env.HOME = savedHome;
+	await rm(providerHome, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 });
+});
 
 const setting = (id: string, description = `Description ${id}`): SearchSetting =>
   ({ id, label: `Label ${id}`, section: "General", description, synonyms: ["second", "first"] });

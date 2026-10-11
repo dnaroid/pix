@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { after, before, test } from "node:test";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { mkdtempSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -14,6 +16,15 @@ import { canonicalSearchIndexPath } from "../src/search/canonical-index.js";
 import { COMMIT_DOCUMENTS, COMMIT_META, COMMIT_VECTORS } from "../src/search/commit-storage.js";
 
 const exec = promisify(execFile);
+// Other Node test files run in parallel. Give this file its own provider-slot
+// database so unrelated indexing tests cannot consume its global quota.
+const savedHome = process.env.HOME;
+const providerHome = mkdtempSync(join(tmpdir(), "pix-acp-commits-provider-"));
+before(() => { process.env.HOME = providerHome; });
+after(async () => {
+	if (savedHome === undefined) delete process.env.HOME; else process.env.HOME = savedHome;
+	await rm(providerHome, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 });
+});
 const config: CommitEmbeddingConfig = { provider: "openrouter", model: "test/model", dimension: 3, queryPrefix: "Q:", documentPrefix: "D:", baseUrl: "https://openrouter.ai/api/v1" };
 const signal = () => new AbortController().signal;
 const options = (embed: CommitEmbedder = async texts => texts.map(() => [1, 0, 0])) => ({ loadConfig: async () => config, loadKey: async () => "mock-key", embed });
