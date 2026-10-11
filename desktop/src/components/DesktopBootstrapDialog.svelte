@@ -1,7 +1,6 @@
 <script lang="ts">
   import CheckCircle2 from "@lucide/svelte/icons/circle-check";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
-  import Download from "@lucide/svelte/icons/download";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import { onMount } from "svelte";
   import {
@@ -9,7 +8,6 @@
     importCodexApiKey,
     importOpenCodeCredentials,
     inspectDesktopBootstrap,
-    installManagedIdx,
     type DesktopBootstrapSnapshot,
   } from "../lib/desktop-bootstrap";
   import { activateModalDialog } from "../lib/modal-dialog";
@@ -27,13 +25,12 @@
   let visible = $state(false);
   let loading = $state(false);
   let snapshot = $state<DesktopBootstrapSnapshot | null>(null);
-  let busy = $state<"opencode" | "codex" | "idx" | null>(null);
+  let busy = $state<"opencode" | "codex" | null>(null);
   let error = $state<string | null>(null);
   let message = $state<string | null>(null);
 
   const piReady = $derived(snapshot?.runtime.ready === true);
   const opencodeDetected = $derived(Boolean(snapshot?.opencode.authDetected || snapshot?.opencode.antigravityDetected));
-  const idxReady = $derived(snapshot?.idx.available === true);
 
   $effect(() => {
     if (!visible || !dialogElement) return;
@@ -58,7 +55,7 @@
     }
   }
 
-  async function runAction(kind: "opencode" | "codex" | "idx"): Promise<void> {
+  async function runAction(kind: "opencode" | "codex"): Promise<void> {
     if (busy) return;
     busy = kind;
     error = null;
@@ -83,11 +80,6 @@
               ? "Pi already has OpenAI credentials, so they were kept unchanged."
               : "No static OPENAI_API_KEY was found in Codex.";
         if (result.status === "imported") await onCredentialsChanged();
-      } else {
-        const result = await installManagedIdx();
-        message = result.status === "installed"
-          ? `Installed managed IDX${result.version ? ` ${result.version}` : ""} for Pix.`
-          : "Managed IDX is already installed.";
       }
       await refresh();
     } catch (cause) {
@@ -196,38 +188,6 @@
               {#if busy === "codex"}<RotateCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />{/if}
               Import key
             </button>
-          </div>
-        </section>
-
-        <section class="rounded-md border border-border bg-background p-3">
-          <div class="flex items-start justify-between gap-3">
-            <div class="min-w-0">
-              <div class="flex items-center gap-1.5 text-sm font-medium">
-                IDX
-                <span class="text-xs font-normal text-muted-foreground">optional</span>
-              </div>
-              <p class="mt-0.5 text-xs leading-4 text-muted-foreground">
-                {idxReady
-                  ? `Available${snapshot?.idx.version ? ` · managed ${snapshot.idx.version}` : ""}. Project indexing still starts only when you explicitly initialize a project.`
-                  : "Install indexer-cli into Pix's private tools directory using the bundled Node/npm. Nothing is installed globally."}
-              </p>
-              {#if snapshot?.idx.toolsRoot}
-                <p class="mt-1 truncate font-mono text-xs text-muted-foreground" title={snapshot.idx.toolsRoot}>{snapshot.idx.toolsRoot}</p>
-              {/if}
-            </div>
-            {#if idxReady}
-              <CheckCircle2 class="mt-1 h-4 w-4 shrink-0 text-tool-success" aria-hidden="true" />
-            {:else}
-              <button
-                class="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-panel px-2.5 text-xs font-medium hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
-                type="button"
-                disabled={busy !== null}
-                onclick={() => void runAction("idx")}
-              >
-                {#if busy === "idx"}<RotateCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />{:else}<Download class="h-3.5 w-3.5" aria-hidden="true" />{/if}
-                Install
-              </button>
-            {/if}
           </div>
         </section>
 

@@ -5,7 +5,7 @@
   import Play from "@lucide/svelte/icons/play";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import Square from "@lucide/svelte/icons/square";
-  import { onDestroy } from "svelte";
+  import { createSandboxAutorun } from "../lib/html-sandbox-autorun.svelte";
   import {
     HTML_SANDBOX_CHANNEL,
     parseHtmlSandboxSubmission,
@@ -37,7 +37,6 @@
   let submitting = $state(false);
   let acceptedCount = 0;
   let lastSubmissionAt = 0;
-  let mountedSource = $state<string | null>(null);
   let displayHeight = $derived(sandboxFrameHeight(contentHeight, expanded, windowHeight));
 
   // Sidebar, workbench and main-window resizing affect the iframe width even
@@ -74,9 +73,8 @@
     contentHeight = undefined;
   }
 
-  async function start(): Promise<void> {
+  async function start(requestedSource = source): Promise<void> {
     stop();
-    const requestedSource = source;
     loading = true;
     status = "Loading local prototype…";
     const prepared = await run.start(requestedSource);
@@ -90,19 +88,9 @@
     status = "";
     frameGeneration += 1;
     running = true;
-    mountedSource = source;
   }
 
-  // A rewritten assistant message invalidates its old executable document.
-  $effect(() => {
-    if (mountedSource === null) { mountedSource = source; return; }
-    if (source !== mountedSource) {
-      stop();
-      mountedSource = source;
-      status = "Prototype changed. Run it again to see the new version.";
-    }
-  });
-  onDestroy(stop);
+  createSandboxAutorun(() => source, (html) => { void start(html); }, stop);
 
   async function handleMessage(event: MessageEvent): Promise<void> {
     // Opaque origin and exact WindowProxy identity are BOTH required. Never
@@ -176,7 +164,7 @@
       </button>
       <button type="button" title={running ? "Restart" : "Run"} aria-label={running ? "Restart prototype" : "Run prototype"}
         class="grid h-7 w-7 place-items-center rounded-sm text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring"
-        onclick={start}>{#if running}<RotateCcw class="h-3.5 w-3.5" aria-hidden="true" />{:else}<Play class="h-3.5 w-3.5" aria-hidden="true" />{/if}</button>
+        onclick={() => start()}>{#if running}<RotateCcw class="h-3.5 w-3.5" aria-hidden="true" />{:else}<Play class="h-3.5 w-3.5" aria-hidden="true" />{/if}</button>
       {#if running || loading}
         <button type="button" title="Stop prototype" aria-label="Stop prototype"
           class="grid h-7 w-7 place-items-center rounded-sm text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
@@ -195,11 +183,13 @@
       {/key}
     {:else}
       <div class="grid h-full place-content-center gap-3 bg-panel-strong px-4 text-center">
-        <p class="text-xs text-muted-foreground">This prototype contains executable JavaScript. It runs only when you choose Run.</p>
-        <button type="button" onclick={start}
+        <p class="text-xs text-muted-foreground">{loading ? "Loading local prototype…" : "Prototype stopped. Run it again when ready."}</p>
+        {#if !loading}
+        <button type="button" onclick={() => start()}
           class="mx-auto flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90 focus-visible:outline-2 focus-visible:outline-ring">
           <Play class="h-3.5 w-3.5" aria-hidden="true" /> Run prototype
         </button>
+        {/if}
       </div>
     {/if}
   </div>

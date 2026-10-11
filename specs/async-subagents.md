@@ -24,7 +24,8 @@ Active implemented contract.
 
 ## Purpose
 
-Decision rationale: [0001 — Subagent coding roles](../docs/decisions/0001-subagent-coding-roles.md).
+Decision rationale: [0069 — Parent-owned implementation and a smaller role pool](../docs/decisions/0069-parent-owned-implementation.md)
+(supersedes [0001](../docs/decisions/0001-subagent-coding-roles.md)).
 
 Headless system for running isolated async sub-agents. Each sub-agent is a
 separate `pi --mode rpc` child process that receives a task prompt via stdin
@@ -42,13 +43,17 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
   continues directly rather than spawning research that duplicates the same
   investigation. `[confirmed by code, core/agent-strategy.ts]`
 - The parent writes code by default. Implementation delegation requires an
-  explicit user request or a substantial independent task that can run alongside
-  useful parent work; size, isolation, lower cost, or worker availability alone
-  are insufficient. Research addresses named uncertainties or independent
+  explicit user request, a concrete capability gap in the implementation itself,
+  or sufficiently large prescribed mechanical work with deterministic checks and
+  expected net savings after handoff overhead. Size, parallelism, isolation,
+  token price, and worker availability alone are insufficient. Difficult
+  architecture calls for bounded read-only `oracle` advice first when needed;
+  the parent still implements unless a concrete implementation gap remains.
+  Research addresses named uncertainties or independent
   evidence tracks. When the user requests independent investigation/review tracks,
   spawn scoped research agents before doing those tracks in the parent; a serial
-  checklist is not delegation. Mandatory UI QA, review and knowledge-audit gates remain
-  exceptions. Implementation delegation begins only after cause,
+  checklist is not delegation. Mandatory UI QA and architectural review gates remain
+  exceptions, as does final knowledge maintenance. Implementation delegation begins only after cause,
   desired behavior, and acceptance criteria are settled; the prompt prefers the
   smallest coherent slice over broad speculative cross-layer edits. Product/UX
   decisions and integration stay with the parent. `[confirmed by code,
@@ -64,19 +69,33 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
   windows remain opt-in and capped at 300 seconds, for a true dependency with no
   independent parent work. This does not change the separate `wait` timeout,
   concurrency queue, cancellation, retries or completion notifications.
-- Delegated coding uses `implement` (Luna, then Sol for availability/quota),
-  `implement-core` (Sol only for complex core changes or ambiguous bugs), and
-  `mechanical` (GLM-5.3 only for small prescribed behavior-preserving edits with
-  deterministic checks). Broad migrations and semantic test changes must not
+- The bundled pool contains seven roles: `implement-core`, `mechanical`,
+  `research`, `verify`, `ui-qa`, `oracle`, and `knowledge-auditor`.
+  `implement-core` (Sol only) handles approved capability-driven or explicitly
+  requested implementation handoffs. `mechanical` (GLM-5.3 only) handles prescribed
+  behavior-preserving transformations large enough to amortize handoff overhead,
+  not a few replacements. Broad migrations and semantic test changes must not
   go to `mechanical`. Workers verify interfaces/types and focused regressions
   after an early coherent slice, preserve negative/hidden-blocker assertions,
   and report partial work honestly. These are prompt contracts, not automatic
   rollback/checkpoint enforcement. Parents compare cost per accepted verified
-  change including failed attempts, review and rework, not token price alone.
+  change including failed attempts, review, rework, duplicated context, briefing,
+  and integration, not token price alone. Parallel execution can reduce latency
+  without reducing total cost; model tier or review success alone is not proof
+  of an implementation capability advantage.
   Research/verification/UI QA/knowledge-auditor/oracle candidate policies are
   unchanged. `[confirmed by agents/*.md, core/agent-strategy.ts;
   tests: test/async-subagents/model-pools.test.ts,
   test/prompt-evals/async-routing-e2e.test.ts under external/pi-tools-suite/]`
+- Bundled `implement` and `delivery-review` are removed, with no alias. An
+  explicit request for either is an unknown-role error unless a project-local
+  Markdown profile defines that exact name; custom roles remain supported.
+  Ordinary/readiness review is a focused `research` task, actual checks belong
+  to `verify`/`ui-qa`, and the parent owns the readiness decision.
+- `/ultrawork` and its auto-classifier do not override these delegation grounds.
+  Explicit user invocation authorizes scoped delegation; an automatic suggestion
+  is not a user request. Broad scope alone must not trigger immediate workers.
+  These are prompt contracts, not a runtime capability or cost estimator.
 
 ### Spawn (`core/spawn.ts`)
 1. Each sub-agent is spawned via `node:child_process.spawn()` running the pi binary in RPC mode. `[confirmed by code, spawn.ts ~188]`
@@ -85,10 +104,10 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 4. **Stdin RPC**: sends two JSONL messages — `{type:"get_state",id:"sub_get_state"}` then `{type:"prompt",id:"sub_prompt",message:<prompt>[,images:<base64[]>]}`. Stdin stays open; EOF = pi shutdown. `[confirmed by code]`
 5. **Extensions** loaded into children: `model-tools` (model-specific tool args) and `tool-guard` (strips parent-only tools: `question`, `subagents`, all `async_subagents_*`). Provider dependencies come from an explicit allowlist in `core/provider-extensions.ts`, recomputed on every attempt (retry and provider-changing fallback) from that attempt's final model:
    - `todo/subagent.ts` is also loaded for **every role**, including project-local roles, and automatically for future roles. It exposes regular `todo` actions with a private child-session/attempt list. This is a planning exception to work-tool restrictions: restricted/empty role tool selections and extra CLI tool flags retain `todo` while preserving restrictions on work tools. Children neither read nor write the parent's project `.pi/todo-plan.json`. Retries/new attempts start with a new list; optional child session history stores local snapshots, branch navigation replays only that branch, and compaction retains unfinished tasks with a fresh snapshot. The lean entrypoint does not load persistence commands, UI widgets, thinking overrides, auto-follow-up turns or the parent's knowledge-audit reminder. Recursive delegation and interactive user questions remain denied. Children use todos for non-trivial multi-step work and report unfinished work/blockers to the parent; trivial work needs no plan. See [decision 0059](../docs/decisions/0059-subagent-private-todos.md), with the common-capability exception expanded by [decision 0060](../docs/decisions/0060-subagent-read-only-repo-tools.md). `[confirmed by todo/subagent.ts, core/child-tools.ts; tests: test/async-subagents/todo.test.ts, provider-child-inventory.test.ts]`
-   - `repo-discovery/subagent.ts` is loaded for every child role and attempt. When the launch project already has IDX and an executable `idx`, the read-only child facade registers exactly three indexed `repo_*` queries (`repo_context`, `repo_inspect`, `repo_audit`) plus `project_search` as the sole focused Code/Knowledge search tool. The child wrapper restricts `project_search` to Code and Knowledge (and rejects omitted/default-all expansion into sessions, tasks, commits or `patch:` requests); private project history remains parent-only. No child setup/update commands, implicit indexing, credentials or recursive delegation are exposed. Empty and restricted selections keep the same explicitly allowed common query tools. Normal cancellation and read-only guards still apply; IDX may refresh its own cache. Council children use the same common entrypoint. See [decision 0060](../docs/decisions/0060-subagent-read-only-repo-tools.md) and [project search](project-search-agent-tool.md). `[confirmed by repo-discovery/subagent.ts, core/child-tools.ts; tests: test/async-subagents/repo-tools.test.ts, provider-child-inventory.test.ts]`
-   - `dcp/subagent.ts` loads DCP for **every role and attempt**, including project-local replacements and read-only council participants. It uses normal DCP configuration/model overrides, prompts, compression and lifecycle hooks but registers no interactive `/dcp` commands. `compress` is a common capability alongside private todo and gated repo queries: empty/restricted tool lists, CLI exclusions and model changes cannot remove it when DCP is enabled. Read-only guards permit context compression, not product-source mutation. Disabled DCP configuration still suppresses registration. Default `--no-session` children keep DCP decisions only in memory, preserving raw history without session files or journal writes; each retry/new attempt starts fresh. Opted-in persisted child sessions use the normal journal contract. This does not enable session persistence or load the whole suite. See [DCP lifecycle](dcp.md#lifecycle-and-persistence). `[confirmed by dcp/subagent.ts, core/child-tools.ts, core/spawn.ts, brainstorm/research-extension.ts; tests: test/async-subagents/dcp.test.ts, provider-child-inventory.test.ts, work-tools.test.ts, test/brainstorm/research-extension.test.ts]`
+   - `repo-discovery/subagent.ts` is loaded for every child role and attempt. It registers the same unrestricted `project_search` schema and execution as ordinary Pi: all five sources (`sessions`, `tasks`, `commits`, `code`, `knowledge`), all supported options, and `patch:<literal>`. This applies equally to async children, provider children and council participants. The child facade only suppresses suite setup commands and parent orchestration guidance; ordinary role work-tool restrictions and parent-only delegation guards remain. Repository semantic embedding remains governed by independent user consent and saved-provider safeguards. Legacy IDX setup/update commands are removed. See [0060](../docs/decisions/0060-subagent-read-only-repo-tools.md), [0066](../docs/decisions/0066-native-repository-semantic-search.md) and [project search](project-search-agent-tool.md). `[confirmed by repo-discovery/subagent.ts, core/child-tools.ts; tests: test/async-subagents/repo-tools.test.ts, provider-child-inventory.test.ts]`
+   - `dcp/subagent.ts` loads DCP for **every role and attempt**, including project-local replacements and read-only council participants. It uses normal DCP configuration/model overrides, prompts, compression and lifecycle hooks but registers no interactive `/dcp` commands. `compress` is a common capability alongside private todo and unrestricted `project_search`: empty/restricted tool lists, CLI exclusions and model changes cannot remove it when DCP is enabled. Read-only guards permit context compression, not product-source mutation. Disabled DCP configuration still suppresses registration. Default `--no-session` children keep DCP decisions only in memory, preserving raw history without session files or journal writes; each retry/new attempt starts fresh. Opted-in persisted child sessions use the normal journal contract. This does not enable session persistence or load the whole suite. See [DCP lifecycle](dcp.md#lifecycle-and-persistence). `[confirmed by dcp/subagent.ts, core/child-tools.ts, core/spawn.ts, brainstorm/research-extension.ts; tests: test/async-subagents/dcp.test.ts, provider-child-inventory.test.ts, work-tools.test.ts, test/brainstorm/research-extension.test.ts]`
    - Optional work capabilities are tool-driven, not universal or granted by role
-     name. Bundled `research`, `implement`, `implement-core`, `mechanical` and
+     name. Bundled `research`, `implement-core`, `mechanical` and
      `oracle` opt into read-only `ast_grep`; only bundled `research`
      adds `web_search`/`web_fetch`. Executors explicitly retain the existing
      seven builtin work tools. Project-local full replacements do not inherit
@@ -154,12 +173,14 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
    large diffs alone do not trigger it. The parent classifies the task; this is
    instruction policy, not a runtime complexity classifier. This replaces the
    code-review portion of [decision 0001](../docs/decisions/0001-subagent-coding-roles.md);
-   delivery-review and coding role policies remain unchanged.
-   The `implement` role uses Luna then Sol; `implement-core` and
-   `delivery-review` retain their own Sol-only lists. `mechanical` uses GLM-5.3 only.
+   the parent-owned implementation and role-retirement policy is recorded in
+   [decision 0069](../docs/decisions/0069-parent-owned-implementation.md).
+   The retained `implement-core` role uses Sol; `mechanical` uses GLM-5.3.
+   Other retained role candidate policies are unchanged. Project-local profiles
+   with retired names remain valid; there are no aliases.
    GPT-6 Sol is not an alias for GPT-6.1 Sol. Existing user/project model
    lists still override defaults and are not rewritten by this rollover.
-   `[confirmed by frontier-models.ts and agents/implement.md]`
+   `[confirmed by frontier-models.ts and agents/*.md]`
 8. **Role router / auto-ultrawork classifier**: the role router and the
    `ULTRAWORK_AUTO` classifier both try `routing.model`, then
    `routing.fallbackModels`, then the current parent model, de-duplicating refs
@@ -192,25 +213,18 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
     The parent catalog explicitly lists active project replacements. There are
     no role-name aliases or partial-merge exceptions. `[confirmed by code,
     config.ts/agent-catalog.ts; confirmed by tests, core.test.ts]`
-    Role profiles may additionally set `requiresIndexedProject: true`.
-    This project-context gate requires only `.indexer-cli/` at the resolved
-    project root and filters the parent catalog, automatic router, and explicit
-    role validation. It does not require the `idx` executable and does not
-    initialize anything. The bundled `knowledge-auditor` uses this gate.
-    `[confirmed by code, config.ts/agent-catalog.ts/routing.ts]`
-    `knowledge-auditor` is a low-thinking economical docs-only finalization
-    role with a 20-minute default role timeout: the parent supplies a behavior/result summary and exact task-changed
-    paths; the child runs task-scoped `idx audit`, fixes only small confirmed
-    documentation drift, and escalates substantial or ambiguous drift rather
-    than inventing a contract.
-    It also accepts explicit **spec-review** assignments for bounded global
-    knowledge-review slices: the parent supplies exact spec paths, review goal
-    and pass budget rather than changed product paths. The child reviews every
-    declared dependency, repairs only small proven documentation drift, and
-    returns actual coverage, gaps and evidence (inline or as disposable reports
-    under `.pi/artifacts/`). In this mode only the parent may acknowledge after
-    integrated, stable review coverage; the child must not own a global cleanup
-    loop. Project-local replacements must explicitly support this mode.
+    `knowledge-auditor` is a low-thinking economical docs-only role with a
+    20-minute default timeout. Before task completion the parent supplies the final
+    behavior/result and exact task-changed paths. The child updates affected
+    documentation from relevant implementation/tests, fixes small proven drift
+    and returns substantial or ambiguous discrepancies to the parent.
+    It also accepts explicit **spec-review** assignments with exact documentation
+    paths and a review goal. Neither mode runs knowledge dirty/acknowledgment,
+    index refreshes or exhaustive dependency traversal. No IDX installation,
+    initialized index, global clean verdict or review receipt is required.
+    Results contain changed documentation paths and concrete unresolved questions,
+    not global knowledge-state reporting. Preserve concurrent work and keep
+    disposable reports under `.pi/artifacts/`.
 11. **Session persistence**: only when `ASYNC_SUBAGENTS_ENABLE_SESSIONS` is truthy (child gets `--session-dir <agentDir>/sessions`; otherwise `--no-session`). `[confirmed by code]`
 12. **Timeout**: default 30 min (`DEFAULT_AGENT_TIMEOUT_MS`). On timeout: writes `timeout_ms`/`timed_out_at`/result.md, SIGTERM, SIGKILL after 5s grace, exit code 124. `[confirmed by code, spawn.ts ~168-187]`
 13. **agent_end**: writes result.md, SIGTERM after 50ms grace, SIGKILL after 1s fallback. `[confirmed by code]`
@@ -1182,7 +1196,6 @@ runtime is unchanged.
 - `external/pi-tools-suite/src/async-subagents/agents/knowledge-auditor.md`
 - `external/pi-tools-suite/src/todo/subagent.ts`
 - `external/pi-tools-suite/src/repo-discovery/subagent.ts`
-- `external/pi-tools-suite/src/repo-discovery/index.ts`
 - `external/pi-tools-suite/src/brainstorm/research-extension.ts`
 - `external/pi-tools-suite/src/todo/todo.ts`
 - `external/pi-tools-suite/src/todo/state/store.ts`

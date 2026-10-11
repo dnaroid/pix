@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import source from "./UniversalSearch.svelte?raw";
+import consentSource from "./NativeRepositorySemanticConsent.svelte?raw";
 import { SEARCH_KINDS } from "../lib/universal-search";
 
 describe("search category presentation", () => {
@@ -83,14 +84,28 @@ describe("search category presentation", () => {
     expect(insideDetails).toContain('aria-hidden="true"');
     expect(source).toContain("Jev receives only the question");
   });
-  it("uses native hybrid queries and discloses their separate provider/index behavior", () => {
-    expect(source).toContain('request: { workspace, query }');
-    expect(source).not.toContain("snapshotOnly: true");
-    expect(source).toContain("Local BM25");
-    expect(source).toContain("IDX hybrid uses the project provider and may refresh the index");
+  it("uses native repository search without IDX fallback and discloses the commit provider", () => {
+    expect(source).toContain("queryNativeRepository(invoke, workspace, query, signal)");
+    expect(source).not.toMatch(/idx_overview|idx_query|snapshotOnly/);
+    expect(source).toContain("Local Code/Knowledge FTS5");
+    expect(source).toContain("no external index fallback");
     expect(source).toContain("requestClient.searchCommits({ cwd, query, limit: 20 }, signal)");
     expect(source).toContain("Commits: BM25 + optional semantic search");
-    expect(source).toContain("The saved IDX provider may receive commit messages and queries.");
+    expect(source).toContain("Optional semantic commit search may send commit messages and search queries to the configured provider.");
+  });
+  it("exposes global semantic status and settings navigation, refreshing stale searches after changes", () => {
+    expect(source).toContain("<NativeRepositorySemanticConsent {workspace} onSettings={onPreferences} onChanged={repositoryConsentChanged} />");
+    expect(consentSource).toContain("native_repository_semantic_config");
+    expect(consentSource).toContain("Configure in Settings");
+    expect(consentSource).not.toContain("type=\"checkbox\"");
+    expect(source).toContain("requests?.submit(query, types)");
+    expect(source).toContain("existing controller");
+  });
+  it("uses global config change events to refresh and restart searches", () => {
+    expect(consentSource).toContain("pix-semantic-config-changed");
+    expect(consentSource).toContain("removeEventListener");
+    expect(consentSource).toContain("Not configured; semantic search is off");
+    expect(source).toContain("Native semantic provider configuration is shown above");
   });
   it("shares theme-aware category colors between filters and result badges", () => {
     expect(source).toContain("data-search-kind={kind}");

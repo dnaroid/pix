@@ -77,3 +77,16 @@ test("names a record by its bounded type and subtype", () => {
     assert.equal(recordKind({}), "untyped");
     assert.equal(recordKind({ type: "sys<tem>\n", subtype: 7 }), "system");
 });
+
+test("still rejects plugin-authoring if explicit suppression fails", () => {
+    for (const name of ["plugin-authoring", "cc-plugin-plugin-authoring"]) {
+        assert.throws(
+            () => validateClaudeInitialization({
+                ...base,
+                plugins: [{ name, path: "builtin", source: `${name}@builtin` }],
+            }, { tools: new Set(), mcpServer: "none" }),
+            (error) => error.code === "isolation_customizations"
+                && error.message === `Claude Code loaded unexpected customizations (plugins: ${name})`,
+        );
+    }
+});

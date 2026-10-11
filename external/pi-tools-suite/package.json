@@ -17,6 +17,8 @@
     "README.md"
   ],
   "scripts": {
+    "benchmark:search": "node benchmarks/repository-search/run.mjs",
+    "benchmark:search:test": "node --test benchmarks/repository-search/metrics.test.mjs",
     "smoke:explicit": "PI_OFFLINE=1 pi --no-extensions --extension ./index.ts --no-session --no-tools -p \"ping\"",
     "smoke:auto": "PI_OFFLINE=1 pi --no-session --no-tools -p \"ping\"",
     "smoke:tools": "PI_OFFLINE=1 pi --no-session -p \"ping\"",
@@ -36,9 +38,8 @@
     "test:evals:live": "PI_TOOLS_SUITE_EVALS_LIVE=1 bun test --concurrent --max-concurrency=4 test/evals/live-evals.test.ts",
     "evals": "npm run test:evals:contracts && bun test test/evals/live-evals.test.ts",
     "evals:report": "bun test/evals/run-evals.ts",
-    "evals:p01n": "bun test/evals/run-p01n-paired.ts",
     "evals:todo-paired": "bun test/evals/run-todo-paired.ts",
-    "bench:locate": "PI_LOCATE_BENCH_ITERATIONS=5 PI_LOCATE_BENCH_FAKE_IDX=0 PI_LOCATE_BENCH_MODEL=zai/glm-5-turbo PI_LOCATE_BENCH_MODES=direct-read-grep,ast-structural,repo-search-hybrid,repo-discovery,subagent-search,unrestricted-suite node test/fixtures/hard-to-find-project/benchmark/run-locate-benchmark.mjs",
+    "bench:locate": "PI_LOCATE_BENCH_ITERATIONS=5 PI_LOCATE_BENCH_MODEL=zai/glm-5-turbo PI_LOCATE_BENCH_MODES=direct-read-grep,ast-structural,repo-search-hybrid,subagent-search,unrestricted-suite node test/fixtures/hard-to-find-project/benchmark/run-locate-benchmark.mjs",
     "bench:locate:analyze": "node test/fixtures/hard-to-find-project/benchmark/analyze-locate-benchmark.mjs",
     "test:locate-benchmark-e2e": "PI_LOCATE_BENCH_E2E=1 PI_LOCATE_BENCH_MODEL=zai/glm-5-turbo bun test test/locate-benchmark-e2e.test.ts",
     "test:tool-selection-e2e": "TOOL_SELECTION_E2E=1 TOOL_SELECTION_E2E_MODEL=zai/glm-5-turbo bun test --concurrent --max-concurrency=30 test/tool-selection-e2e.test.ts",
@@ -51,6 +52,7 @@
     "@cortexkit/antigravity-auth-core": "2.2.1",
     "@lydell/node-pty": "1.1.0",
     "@xterm/headless": "^6.0.0",
+    "ignore": "7.0.8",
     "jsonc-parser": "^3.3.1",
     "vscode-jsonrpc": "^9.0.2",
     "vscode-languageserver-protocol": "^3.18.3"

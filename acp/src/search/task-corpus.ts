@@ -86,7 +86,7 @@ export async function readTaskSemanticCorpus(cwd: string, signal: AbortSignal): 
         const title = task.title.trim();
         const description = (task.description as string | undefined)?.trim() ?? "";
         if (!title && !description) throw new Error("Invalid empty task content");
-        const text = `Task title: ${title}\nTask description: ${description}`.slice(0, 2000);
+        const text = `Task title: ${title}\nTask description: ${description}`;
         docs.push({ id: row.id, title: title || description.split("\n").find(Boolean)?.slice(0, 200) || "Untitled task",
           snippet: description.slice(0, 320), text, hash: hashText(text) });
       }

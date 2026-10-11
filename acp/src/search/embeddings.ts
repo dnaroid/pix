@@ -1,10 +1,12 @@
 import { SEARCH_EMBEDDING_MODEL } from "./contract.js";
+import type { SemanticEmbeddingConfig } from "./config.js";
+import { embedCommitHTTP } from "./commit-provider.js";
 
 export const EMBEDDING_DIMENSIONS = 1024;
 export const EMBEDDING_ENDPOINT = "https://openrouter.ai/api/v1/embeddings";
-export type Embedder = (input: readonly string[], key: string, signal: AbortSignal) => Promise<number[][]>;
-export function validVector(value: unknown): value is number[] {
-  return Array.isArray(value) && value.length === EMBEDDING_DIMENSIONS && value.every(v => typeof v === "number" && Number.isFinite(v) && Number.isFinite(Math.fround(v)))
+export type Embedder = (input: readonly string[], key: string, signal: AbortSignal, config?: SemanticEmbeddingConfig) => Promise<number[][]>;
+export function validVector(value: unknown, dimension = EMBEDDING_DIMENSIONS): value is number[] {
+  return Array.isArray(value) && value.length === dimension && value.every(v => typeof v === "number" && Number.isFinite(v) && Number.isFinite(Math.fround(v)))
     && value.some(v => Math.fround(v) !== 0);
 }
 /** Only canonical standard base64 of exactly 1024 float32 little-endian values. */
@@ -34,7 +36,8 @@ export function decodeEmbeddings(value: unknown, count: number): number[][] {
   if (vectors.filter(Boolean).length !== count) throw new Error("Invalid embedding response");
   return vectors;
 }
-export const embedOpenRouter: Embedder = async (input, key, signal) => {
+export const embedOpenRouter: Embedder = async (input, key, signal, config) => {
+  if (config) return embedCommitHTTP(input, config, key || undefined, signal);
   if (input.length < 1 || input.length > 16 || input.some(text => text.length > 2000)) throw new Error("Invalid embedding batch");
   const bounded = AbortSignal.any([signal, AbortSignal.timeout(10_000)]);
   // Transport exceptions and provider bodies are deliberately not propagated or logged.

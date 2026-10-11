@@ -19,8 +19,8 @@ describe("SessionCommandActions.runReloadCommand", () => {
 				resourceLoader: {
 					getSkills: () => ({
 						skills: [
-							{ name: "frontier-model-rollover" },
-							{ name: "project-agent-creator" },
+							{ name: "frontier-model-rollover", sourceInfo: { scope: "user" } },
+							{ name: "project-agent-creator", sourceInfo: { scope: "project" } },
 						],
 					}),
 					getAgentsFiles: () => ({
@@ -33,7 +33,7 @@ describe("SessionCommandActions.runReloadCommand", () => {
 		const host = ({
 			options: {},
 			runtime: () => runtime,
-			subagentTypes: () => ["research", "frontier-review"],
+			subagentTypes: () => ({ types: ["research", "frontier-review"], projectTypes: ["research"] }),
 			isRunning: () => true,
 			awaitCurrentSessionExtensions: async () => { events.push("await-extensions"); },
 			setStatus: (status: string) => events.push(`status:${status}`),
@@ -61,8 +61,8 @@ describe("SessionCommandActions.runReloadCommand", () => {
 		assert.equal(entries.length, 1);
 		assert.match(entries[0]!, /Model: openai-codex\/gpt-5\.6-luna:medium/);
 		assert.match(entries[0]!, /Context files \(in context\):\n- AGENTS\.md/);
-		assert.match(entries[0]!, /Skills \(in context\): frontier-model-rollover, project-agent-creator/);
+		assert.match(entries[0]!, /Skills \(global\): frontier-model-rollover\nSkills \(project\): project-agent-creator/);
 		assert.match(entries[0]!, /Tools \(active\): repo_search, read, subagents/);
-		assert.match(entries[0]!, /Agents \(available\): frontier-review, research/);
+		assert.match(entries[0]!, /Agents \(global\): frontier-review\nAgents \(project\): research/);
 	});
 });

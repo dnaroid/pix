@@ -210,10 +210,10 @@ describe("economy mode", () => {
 	test("excludes expensive frontier models for every role", () => {
 		const config = configWith({ economy: true });
 		expect(oracle(config, "openai-codex/gpt-6-luna")).toEqual(["zai/glm-5.3"]);
-		const implement = resolveAgentTaskConfig({ id: "i", task: "x", subagentType: "implement" }, config);
-		expect([implement.task.model, ...implement.fallbackModels]).toEqual(["openai-codex/gpt-6-luna", "openai-codex/gpt-6.1-sol"]);
-		const review = resolveAgentTaskConfig({ id: "d", task: "x", subagentType: "delivery-review" }, config);
-		expect([review.task.model, ...review.fallbackModels]).toEqual(["openai-codex/gpt-6.1-sol"]);
+		const core = resolveAgentTaskConfig({ id: "i", task: "x", subagentType: "implement-core" }, config);
+		expect([core.task.model, ...core.fallbackModels]).toEqual(["openai-codex/gpt-6.1-sol"]);
+		const mechanical = resolveAgentTaskConfig({ id: "m", task: "x", subagentType: "mechanical" }, config);
+		expect([mechanical.task.model, ...mechanical.fallbackModels]).toEqual(["zai/glm-5.3"]);
 	});
 
 	test("reports economy as the reason when nothing remains, and hides the oracle", () => {
@@ -225,9 +225,9 @@ describe("economy mode", () => {
 
 	test("blocks an explicit expensive override but not the forced current model", () => {
 		const config = configWith({ economy: true });
-		expect(() => resolveAgentTaskConfig({ id: "i", task: "x", subagentType: "implement", model: "openai/gpt-6-astra" }, config)).toThrow(/economy mode is on/);
-		expect(resolveAgentTaskConfig({ id: "i", task: "x", subagentType: "implement", model: "openai/gpt-6.1-sol" }, config).task.model).toBe("openai/gpt-6.1-sol");
-		expect(resolveAgentTaskConfig({ id: "i", task: "x", subagentType: "implement" }, config, { forcedModel: "openai-codex/gpt-6.1-sol" }).task.model).toBe("openai-codex/gpt-6.1-sol");
+		expect(() => resolveAgentTaskConfig({ id: "i", task: "x", subagentType: "implement-core", model: "openai/gpt-6-astra" }, config)).toThrow(/economy mode is on/);
+		expect(resolveAgentTaskConfig({ id: "i", task: "x", subagentType: "implement-core", model: "openai/gpt-6.1-sol" }, config).task.model).toBe("openai/gpt-6.1-sol");
+		expect(resolveAgentTaskConfig({ id: "i", task: "x", subagentType: "implement-core" }, config, { forcedModel: "openai-codex/gpt-6.1-sol" }).task.model).toBe("openai-codex/gpt-6.1-sol");
 	});
 
 	test("env toggle overrides the file and is read fresh on every load", () => {

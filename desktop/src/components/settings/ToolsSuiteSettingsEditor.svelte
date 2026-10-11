@@ -51,10 +51,6 @@
     { value: "soft", label: "Soft" },
     { value: "strong", label: "Strong" },
   ];
-  const REPO_DISCOVERY_PROFILE = [
-    { value: "baseline", label: "Baseline" },
-    { value: "native-compact", label: "Native compact" },
-  ];
 
   let {
     source,
@@ -410,12 +406,9 @@
 {:else if section === "context"}
   <div class="px-2.5 py-2.5">
     <h2 class="text-sm font-semibold text-foreground">Context & repository</h2>
-    <p class="mt-0.5 text-xs leading-4 text-muted-foreground">Repository discovery policy and reusable resource registry.</p>
+    <p class="mt-0.5 text-xs leading-4 text-muted-foreground">Reusable resource registry.</p>
   </div>
   <div class="border-y border-sidebar-border/70 bg-panel">
-    <SettingsFieldRow label="Repository discovery profile" description="Baseline keeps historical behavior; Native compact enables bounded native flags/cursors/output." explicit={has(["repoDiscovery", "profile"])} defaultLabel={defaultLabel(["repoDiscovery", "profile"])} onReset={() => reset(["repoDiscovery", "profile"])}>
-      <SettingsSelect value={text(["repoDiscovery", "profile"])} options={REPO_DISCOVERY_PROFILE} onChange={(value) => set(["repoDiscovery", "profile"], value)} />
-    </SettingsFieldRow>
     <SettingsFieldRow label="Registry remote" description="Private Git remote for reusable skills, agents, and project-scoped state." explicit={has(["resourceRegistry", "remote"])} defaultLabel={defaultLabel(["resourceRegistry", "remote"])} onReset={() => reset(["resourceRegistry", "remote"])}>
       <SettingsTextInput value={text(["resourceRegistry", "remote"])} placeholder="SSH or HTTPS Git remote URL" onChange={(value) => set(["resourceRegistry", "remote"], value)} />
     </SettingsFieldRow>

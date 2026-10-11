@@ -92,7 +92,7 @@ export async function collectRagEvidence(request: RagRequest, signal: AbortSigna
       else if (source.kind === "sessions" && source.sessionId) original = await sessionEvidence(root, source.sessionId, signal);
       else if (source.kind === "commits" && source.hash) original = await commitEvidence(root, source.hash, signal);
     } catch { signal.throwIfAborted(); }
-    // IDX content is a secondary fallback. A path that escaped the project must never
+    // A cached excerpt cannot replace repository validation. A path that escaped the project must never
     // be used even if the Desktop presented a stale cached excerpt.
     if ((source.kind === "code" || source.kind === "knowledge") && !original) continue;
     const text = original && source.kind === "commits"

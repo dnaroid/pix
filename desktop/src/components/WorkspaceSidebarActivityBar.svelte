@@ -22,7 +22,7 @@
     "git",
     "registry",
     "scripts",
-    "idx",
+    "search",
     "lsp",
     "settings",
   ];
@@ -162,21 +162,21 @@
     onclick={() => onSelect("scripts")}
   ><SquareTerminal class="h-5 w-5" aria-hidden="true" /><SidebarIndicatorDot indicator={indicators.scripts} /></button>
   <button
-    class={["relative grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", selected("idx") ? "border-l-primary bg-panel-selected text-foreground" : "border-l-transparent text-muted-foreground"]}
+    class={["relative grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", selected("search") ? "border-l-primary bg-panel-selected text-foreground" : "border-l-transparent text-muted-foreground"]}
     type="button"
     data-sidebar-tab
-    tabindex={activeTab === "idx" ? 0 : -1}
-    title={activityTitle("idx", activeTab === "idx" && !collapsed ? "Hide IDX" : "IDX")}
-    aria-label={activityLabel("idx", "IDX repository intelligence")}
-    aria-controls="workspace-idx-panel"
-    aria-pressed={activeTab === "idx" && !collapsed}
-    onkeydown={(event) => handleKeydown(event, "idx")}
-    oncontextmenu={(event) => onIndicatorContext(event, "idx")}
-    aria-haspopup={indicators.idx ? "menu" : undefined}
-    onclick={() => onSelect("idx")}
+    tabindex={activeTab === "search" ? 0 : -1}
+    title={activityTitle("search", activeTab === "search" && !collapsed ? "Hide search indexes" : "Search indexes")}
+    aria-label={activityLabel("search", "Search index status")}
+    aria-controls="workspace-search-index-panel"
+    aria-pressed={activeTab === "search" && !collapsed}
+    onkeydown={(event) => handleKeydown(event, "search")}
+    oncontextmenu={(event) => onIndicatorContext(event, "search")}
+    aria-haspopup={indicators.search ? "menu" : undefined}
+    onclick={() => onSelect("search")}
   >
     <ScanSearch class="h-5 w-5" aria-hidden="true" />
-    <SidebarIndicatorDot indicator={indicators.idx} />
+    <SidebarIndicatorDot indicator={indicators.search} />
   </button>
   <button
     class={["relative grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", selected("lsp") ? "border-l-primary bg-panel-selected text-foreground" : "border-l-transparent text-muted-foreground"]}

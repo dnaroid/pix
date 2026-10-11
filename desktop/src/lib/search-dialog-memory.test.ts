@@ -51,7 +51,7 @@ describe("window-owned search memory", () => {
     const submitted = controller.submit("pending", ["commits"]);
     controller.dispose();
     memory.save("/project", null, { query: "pending", types: ["commits"], view, active: 0 });
-    finish({ results: [], notices: ["late"], idxAvailable: false });
+    finish({ results: [], notices: ["late"] });
     await submitted;
     const restored = memory.restore("/project", null);
     expect(restored.query).toBe("pending");

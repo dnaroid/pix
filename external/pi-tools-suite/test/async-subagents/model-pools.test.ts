@@ -37,29 +37,29 @@ afterEach(() => {
 });
 
 describe("role-owned model candidates", () => {
-	test("separates default, core and mechanical coding without a GLM fallback for semantic work", () => {
+	test("retains capability-driven core and substantial mechanical coding without a GLM fallback for semantic work", () => {
 		const config = loadSubagentConfig(temp(), {});
 		for (const [role, models] of [
-			["implement", ["openai-codex/gpt-6-luna", "openai-codex/gpt-6.1-sol"]],
 			["implement-core", ["openai-codex/gpt-6.1-sol"]],
 			["mechanical", ["zai/glm-5.3"]],
-			["delivery-review", ["openai-codex/gpt-6.1-sol"]],
 		] as const) {
 			const resolved = resolveAgentTaskConfig(task(role), config, { parentModel: "openai-codex/gpt-6-luna" });
 			expect([resolved.task.model, ...resolved.fallbackModels]).toEqual([...models]);
 			expect(config.types[role].modelSelection).toBeUndefined();
 		}
-		for (const role of ["implement", "implement-core", "mechanical"]) {
+		for (const role of ["implement-core", "mechanical"]) {
 			const prompt = generatePrompt(resolveAgentTaskConfig(task(role), config).task);
 			expect(prompt).toContain("behavioral meaning of regression tests");
 			expect(prompt).toContain("nearing the execution limit");
 		}
-		for (const role of ["implement", "implement-core"]) {
+		for (const role of ["implement-core"]) {
 			const prompt = generatePrompt(resolveAgentTaskConfig(task(role), config).task);
 			expect(prompt.replace(/\s+/g, " ")).toContain("after the first coherent slice");
 			expect(prompt).toContain("hidden blockers");
 		}
 		expect(config.types.mechanical.promptAppend).toContain("stop and return the blocker");
+		expect(config.types.mechanical.description).toContain("Not a few replacements");
+		expect(config.types["implement-core"].promptAppend).toContain("concrete implementation");
 		expect(config.types["oracle"].promptAppend).toContain("Compare old and new regression assertions");
 		expect(config.types["oracle"].modelSelection).toBe("frontier");
 		expect(config.types["oracle"].parentProviderPolicy).toBe("require-other");
@@ -73,7 +73,7 @@ describe("role-owned model candidates", () => {
 	test("ships one oracle role selecting from the frontier list with a cross-vendor policy", () => {
 		const config = loadSubagentConfig(temp(), {});
 		expect(Object.keys(config.types).sort()).toEqual([
-			"delivery-review", "implement", "implement-core", "knowledge-auditor", "mechanical", "oracle", "research", "ui-qa", "verify",
+			"implement-core", "knowledge-auditor", "mechanical", "oracle", "research", "ui-qa", "verify",
 		]);
 		expect(config.types.oracle.models).toBeUndefined();
 		expect(config.types.oracle.modelSelection).toBe("frontier");

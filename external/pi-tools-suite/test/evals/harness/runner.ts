@@ -33,12 +33,10 @@ export async function runEvalCase(evalCase: EvalCase, model: string, options: Ru
 		const before = snapshotFiles(projectDir);
 		const sessionDir = path.join(projectDir, ".pi", `eval-session-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		fs.mkdirSync(sessionDir, { recursive: true });
-		if (evalCase.indexed) fs.mkdirSync(path.join(projectDir, ".indexer-cli"), { recursive: true });
 		const recorder = writeRecorder(
 			projectDir,
 			evalCase.blockTools ?? [],
 		);
-		const fakeBin = evalCase.fakeIdx ? writeFakeIdxBin(projectDir) : undefined;
 		const args = [
 			"--model", model,
 			...(evalCase.appendSystemPrompt ? ["--append-system-prompt", evalCase.appendSystemPrompt] : []),
@@ -60,7 +58,7 @@ export async function runEvalCase(evalCase: EvalCase, model: string, options: Ru
 				...process.env,
 				...evalCase.env,
 				...options.env,
-				PATH: fakeBin ? `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}` : process.env.PATH,
+				PATH: process.env.PATH,
 				PI_OFFLINE: "1",
 				NO_COLOR: "1",
 				CI: "1",
@@ -222,25 +220,6 @@ export default function recorder(pi) {
 	return { extensionPath, logPath };
 }
 
-function writeFakeIdxBin(projectDir: string): string {
-	const binDir = path.join(projectDir, ".pi", "fake-bin");
-	const idxPath = path.join(binDir, "idx");
-	fs.mkdirSync(binDir, { recursive: true });
-	fs.writeFileSync(idxPath, `#!/usr/bin/env node
-const args = process.argv.slice(2); const command = args[0] || "";
-if (command === "context") console.log("CONTEXT query=payment retry idempotency\\nPrimary knowledge:\\nS specs/payment-retry.md status=fresh lifecycle=active score=9.10\\nImplementation:\\nC src/payments.ts:19-33 reason=tracked+semantic\\nTests:\\nT test/payments.test.ts reason=explicit conf=high");
-else if (command === "audit") console.log("changed: 1 | known affected: 1 | uncovered: 0 | changed docs: 0 | semantic sweep: yes\\n  known specs/payment-retry.md — inputs-changed — src/payments.ts");
-else if (command === "architecture") console.log("Checkout modules: cart, discounts, payments, audit. Payment request construction lives in src/payments.ts.");
-else if (command === "structure") console.log("src/payments.ts::buildPaymentRequest; src/cart.ts::calculateCartTotals; src/discounts.ts::applyCoupon; src/audit.ts::recordAuditEvent");
-else if (command === "search") console.log("src/payments.ts:19-33 buildPaymentRequest creates a random idempotencyKey, so payment retries can double-charge.");
-else if (command === "deps") console.log("src/payments.ts::buildPaymentRequest -> calculateCartTotals, applyCoupon");
-else if (command === "explain" || command === "ast") console.log("src/payments.ts::buildPaymentRequest handles payment amount, card token, and idempotency key.");
-else { console.error("unsupported fake idx command: " + command); process.exitCode = 1; }
-`, "utf8");
-	fs.chmodSync(idxPath, 0o755);
-	return binDir;
-}
-
 function readEvents(file: string): EvalEvent[] {
 	if (!fs.existsSync(file)) return [];
 	return fs.readFileSync(file, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as EvalEvent);
@@ -252,7 +231,7 @@ function snapshotFiles(root: string): Map<string, string> {
 	while (stack.length > 0) {
 		const current = stack.pop()!;
 		for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
-			if (entry.name === ".pi" || entry.name === ".indexer-cli" || entry.name === "node_modules") continue;
+			if (entry.name === ".pi" || entry.name === "node_modules") continue;
 			const absolute = path.join(current, entry.name);
 			if (entry.isDirectory()) stack.push(absolute);
 			else if (entry.isFile()) result.set(path.relative(root, absolute), crypto.createHash("sha1").update(fs.readFileSync(absolute)).digest("hex"));

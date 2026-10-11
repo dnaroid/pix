@@ -17,27 +17,28 @@ The provider-agnostic **Limits** section shows account quota windows (`hourly`,
 then `weekly`), including weekly-only snapshots. Headers retain the window name
 and percentage explicitly labelled “remaining”.
 
-The weekly timeline runs **start left, reset right**. Its single neutral
-foreground fill (white in dark mode, theme-adaptive in light mode) shows
-`clamp(remainingPercent, 0, 100)` **remaining** quota, anchored to the right
-(reset) edge. The empty left portion represents used quota. Its boundary moves
-right as quota is consumed: left of the time pin means spending below the elapsed
-time budget; right of the pin means spending ahead of it. Calendar and pin
-orientation are unchanged. Seven equal window sectors
-overlay that aggregate fill; they are not measured per-day consumption. Eight
-ticks below the track label the local dates of the actual window start,
-six intervening slice boundaries, and reported reset. The first tick and month
-changes include the short month; the reset tick includes a reset icon. Boundaries
-use absolute window time, so local times may shift across DST; neither extra
-days nor future resets are predicted. Non-seven-day windows still use seven
-equal slices of their actual reported duration, not invented daily measurements.
+The weekly timeline runs **start left, reset right**. One visibly gapped segment per local calendar day (the first and last are partial,
+widths proportional to time, so labels, pin and fill share one time axis) each show their share of `clamp(remainingPercent, 0, 100)` remaining
+quota, filled from the right edge. These are a visual distribution of the
+aggregate value, not measured per-day consumption. A thin primary-colored pin
+marks elapsed window time inside the corresponding segment, positioned by time
+of day; the date row labels each segment with an uppercase short
+weekday above its day number. The current date is full-contrast and larger;
+other dates are dimmed. The final day's accessible label says quota resets at
+the end of that day. Saturday and Sunday labels (local date) use the warning
+tone (`text-tool-warning`, `data-weekend`); a current weekend day stays
+full-contrast. Boundaries use absolute window time, so local dates may
+shift across DST; neither extra days nor future resets are predicted. Any window length is split by its actual calendar days, not invented daily measurements. Expiries of available reset credits that fall within the window are drawn as thin red ticks (`data-reset-credit-deadline`, `text-tool-error` tone) on the same time axis as the pin; expiries outside the window are not shown.
 
 A thin primary-colored pin with triangular head marks elapsed time:
 `clamp((now - (resetAt - windowSeconds * 1000)) / (windowSeconds * 1000) * 100, 0, 100)`.
 It moves right independently of quota consumption and stays visible at either
-edge. There is no visible “Now” label, month/cycle heading, used-percentage
-callout, normal weekly countdown or reset-detail footer. Exact local reset
-date/year/time, countdown, used percentage and pin orientation remain accessible.
+edge, within the corresponding day segment. There is no visible “Now” label, month/cycle heading or used-percentage
+callout. Below the date row, a single compact line (`data-quota-reset-time`)
+shows a refresh icon with the local reset weekday, date and time on the left and
+the countdown on the right; it appears only for a valid future reset with known
+timing. Exact local reset date/year/time, used percentage and pin orientation
+remain accessible.
 The pin uses the existing minute tick without another timer or request.
 
 Hourly popup and all compact status-bar quota tracks also anchor their remaining
@@ -45,7 +46,7 @@ fill to the right, leaving consumed quota empty on the left. Percentages, colors
 countdowns and context capacity tracks are unchanged; calendar and elapsed-time
 pin retain their normal left-to-right orientation. Cumulative daily-budget warnings defined in
 [runtime status](desktop-runtime-status.md) remain; the weekly warning sits in
-the header rather than a separate footer. Passed resets explicitly say “Reset
+the header. Passed resets explicitly say “Reset
 time reached · Awaiting quota refresh”. Unknown/invalid timing omits date ticks
 and the pin, retains the remaining-quota fill and explains unavailable timing; a valid
 reset remains visible in this fallback. Header-derived rate windows are excluded.

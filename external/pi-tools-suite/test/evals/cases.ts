@@ -2,79 +2,63 @@ import type { EvalCase, EvalRunResult } from "./harness/types.js";
 import { DECISION_POLICY_CASES } from "./decision-policy.js";
 import { SESSION_EVAL_CASES } from "./session-cases.js";
 import { TODO_CONCISENESS_CASES } from "./todo-conciseness.js";
+import { DELEGATION_POLICY_CASES } from "./delegation-policy.js";
 
 const DIRECT_TOOLS = ["read", "Read", "grep", "Grep", "find", "Glob", "bash", "Bash", "shell", "shell_command"];
 const MUTATION_TOOLS = ["edit", "Edit", "write", "Write", "apply_patch", "ast_apply"];
 const NO_ORCHESTRATION = ["subagents", "async_subagents_spawn"];
-const REPO_SEMANTIC_TOOLS = ["repo_inspect", "project_search", "repo_context", "repo_audit"];
+const REPO_SEMANTIC_TOOLS = ["project_search"];
 
 export const EVAL_CASES: EvalCase[] = [
 	...DECISION_POLICY_CASES,
 	...SESSION_EVAL_CASES,
 	...TODO_CONCISENESS_CASES,
+	...DELEGATION_POLICY_CASES,
 	{
 		id: "tool.semantic-repo-search",
 		category: "tool-selection",
 		description: "Unknown behavior owner should use semantic repo search before direct reads.",
 		fixture: "demo",
-		indexed: true,
-		fakeIdx: true,
 		prompt: "Users report duplicate charges after payment retry. Find the code path that creates the gateway payment request, identify the risky retry-key behavior, and cite the owning file. I do not know the file or symbol yet.",
 		assert: { requiredTools: ["project_search"], forbiddenTools: NO_ORCHESTRATION, firstToolOneOf: ["project_search", "todo"], stdoutIncludes: ["src/payments.ts"] },
 	},
 	{
 		id: "tool.architecture-first",
 		category: "tool-selection",
-		description: "Broad unfamiliar architecture request should start with indexed architecture.",
+		description: "Broad unfamiliar architecture request should use semantic discovery to locate key modules.",
 		fixture: "demo",
-		indexed: true,
-		fakeIdx: true,
 		prompt: "Give me a compact architecture overview of this unfamiliar checkout project: main modules, responsibilities, and dependency flow. Do not perform a code review or change files.",
-		assert: { requiredTools: ["repo_inspect"], forbiddenTools: [...NO_ORCHESTRATION, ...MUTATION_TOOLS], firstToolOneOf: ["repo_inspect", "todo"] },
-		validate: (result) => {
-			const firstInspect = result.events.find((event) => event.type === "tool_call" && event.toolName === "repo_inspect");
-			return firstInspect && isRecord(firstInspect.input) && firstInspect.input.mode === "architecture"
-				? [] : ["First repo_inspect call must use mode=architecture"];
-		},
+		assert: { requiredTools: ["project_search"], forbiddenTools: [...NO_ORCHESTRATION, ...MUTATION_TOOLS], firstToolOneOf: ["project_search", "todo"], stdoutIncludes: ["checkout"] },
 	},
 	{
-		id: "tool.repo-context-general",
+		id: "tool.project-search-general",
 		category: "tool-selection",
-		description: "General unfamiliar-repository discovery should start with repo_context.",
+		description: "General unfamiliar-repository discovery should use semantic repository search.",
 		fixture: "demo",
-		indexed: true,
-		fakeIdx: true,
 		prompt: "I am new to this checkout repository. Where does payment retry behavior live, and what should I read to understand it? Give me a concise starting point before I inspect files.",
-		assert: { requiredTools: ["repo_context"], forbiddenTools: NO_ORCHESTRATION, firstTool: "repo_context", stdoutIncludes: ["src/payments.ts"] },
+		assert: { requiredTools: ["project_search"], forbiddenTools: NO_ORCHESTRATION, firstTool: "project_search", stdoutIncludes: ["src/payments.ts"] },
 	},
 	{
-		id: "tool.repo-context",
+		id: "tool.project-search-contract",
 		category: "tool-selection",
-		description: "Authoritative project behavior question should use indexed primary knowledge plus implementation/tests.",
+		description: "Authoritative behavior question should search for primary knowledge and implementation/tests.",
 		fixture: "demo",
-		indexed: true,
-		fakeIdx: true,
 		prompt: "Before changing checkout payment retry behavior, find the current authoritative project contract and the implementation/tests that enforce it. I do not know which spec file contains the requirement. Stop after the first useful contract result.",
-		assert: { requiredTools: ["repo_context"], forbiddenTools: NO_ORCHESTRATION, firstTool: "repo_context", stdoutIncludes: ["specs/payment-retry.md"] },
+		assert: { requiredTools: ["project_search"], forbiddenTools: NO_ORCHESTRATION, firstTool: "project_search", stdoutIncludes: ["specs/payment-retry.md"] },
 	},
 	{
-		id: "tool.repo-audit",
+		id: "tool.project-search-scoped-review",
 		category: "tool-selection",
-		description: "Material behavior change should finish with task-scoped contract audit.",
+		description: "Material behavior change should compare only the named changed path with relevant contract evidence.",
 		fixture: "demo",
-		indexed: true,
-		fakeIdx: true,
-		prompt: "I just completed a material behavior change in src/payments.ts that changes payment retry/idempotency behavior. Before finishing, audit the project contract for this task-scoped changed path. Do not broaden to the whole dirty worktree; stop after the audit result.",
-		assert: { requiredTools: ["repo_audit"], forbiddenTools: NO_ORCHESTRATION, firstTool: "repo_audit", maxToolCalls: 2 },
-		validate: (result) => result.events.some((event) => event.type === "tool_call" && event.toolName === "repo_audit" && isRecord(event.input) && Array.isArray(event.input.paths) && event.input.paths.length === 1 && event.input.paths[0] === "src/payments.ts") ? [] : ["repo_audit must receive only the task-changed src/payments.ts path"],
+		prompt: "I just completed a material behavior change in src/payments.ts that changes payment retry/idempotency behavior. Find the relevant primary contract with semantic search, then inspect only src/payments.ts and that contract to check for drift. Do not broaden to the whole dirty worktree; stop after the comparison.",
+		assert: { requiredTools: ["project_search", "read"], forbiddenTools: NO_ORCHESTRATION, firstTool: "project_search", maxToolCalls: 5 },
 	},
 	{
 		id: "tool.exact-literal-direct",
 		category: "tool-selection",
 		description: "Exact literal lookup should avoid semantic/architecture discovery.",
 		fixture: "demo",
-		indexed: true,
-		fakeIdx: true,
 		prompt: "Find the exact literal `✅ typescript: no diagnostics` in this project and tell me the file. This is an exact-string lookup only; do not edit anything.",
 		assert: { forbiddenTools: [...REPO_SEMANTIC_TOOLS, ...NO_ORCHESTRATION, ...MUTATION_TOOLS], firstToolOneOf: DIRECT_TOOLS, stdoutIncludes: ["docs/lsp-diagnostics.md"] },
 	},
@@ -166,45 +150,6 @@ export const EVAL_CASES: EvalCase[] = [
 		},
 	},
 	{
-		id: "orchestration.sol-delegates-substantial",
-		category: "orchestration",
-		description: "Expensive Sol parent should delegate substantial multi-file implementation work.",
-		fixture: "demo",
-		models: [/gpt-5\.6-sol/i],
-		blockTools: ["subagents"],
-		prompt: "Implement checkout hardening across payments and discounts, add focused tests, update rollout documentation, and verify the integrated result. This is substantial multi-file implementation work; keep the parent focused on integration and verification.",
-		assert: { requiredTools: ["subagents"] },
-	},
-	{
-		id: "orchestration.sol-keeps-tiny-edit",
-		category: "orchestration",
-		description: "Sol should not delegate a tiny exact known-file edit.",
-		fixture: "demo",
-		models: [/gpt-5\.6-sol/i],
-		prompt: "In docs/lsp-diagnostics.md replace the exact phrase `no diagnostics` with `clean diagnostics`. This is a tiny known-file wording edit. Make only that edit and verify the text.",
-		assert: { forbiddenTools: NO_ORCHESTRATION, maxFilesChanged: 1 },
-	},
-	{
-		id: "orchestration.luna-delegates-substantial",
-		category: "orchestration",
-		description: "Luna should use a stronger worker for substantial multi-file implementation/research.",
-		fixture: "demo",
-		models: [/gpt-5\.6-luna/i],
-		blockTools: ["subagents"],
-		prompt: "Investigate payment/idempotency risks, strengthen the implementation, add tests, and update the rollout plan across this checkout project. Use the configured tiered delegation strategy for substantial work.",
-		assert: { requiredTools: ["subagents"] },
-	},
-	{
-		id: "orchestration.luna-escalates-high-risk",
-		category: "orchestration",
-		description: "Luna should escalate a high-risk cross-module security/public-API decision.",
-		fixture: "demo",
-		models: [/gpt-5\.6-luna/i],
-		blockTools: ["subagents"],
-		prompt: "Perform a high-risk security and public-API review of payment retries, raw gateway payload auditing, and rollout safety. Resolve cross-module invariants and propose the safest design; use a stronger independent review/deep escalation where the strategy calls for it.",
-		assert: { requiredTools: ["subagents"] },
-	},
-	{
 		id: "negative.trivial-chat-no-tools",
 		category: "negative",
 		description: "Trivial chat should not trigger planning, compression, or orchestration.",
@@ -218,7 +163,7 @@ export const EVAL_CASES: EvalCase[] = [
 		description: "One known-file factual read should use the cheapest direct path.",
 		fixture: "demo",
 		prompt: "Read package.json and tell me only the package name. Do not change anything.",
-		assert: { forbiddenTools: ["todo", "repo_inspect", "project_search", ...NO_ORCHESTRATION, ...MUTATION_TOOLS], firstToolOneOf: ["read", "Read", "shell", "Bash", "bash"] },
+		assert: { forbiddenTools: ["todo", "project_search", ...NO_ORCHESTRATION, ...MUTATION_TOOLS], firstToolOneOf: ["read", "Read", "shell", "Bash", "bash"] },
 	},
 	{
 		id: "negative.routine-local-failure-no-oracle",
@@ -234,7 +179,7 @@ export const EVAL_CASES: EvalCase[] = [
 		description: "Tiny known-file edit should not create todo or subagent overhead.",
 		fixture: "demo",
 		prompt: "In docs/lsp-diagnostics.md change `product polish` to `UI polish`. This is a tiny known-file wording edit; make only that replacement.",
-		assert: { forbiddenTools: ["todo", "repo_inspect", "project_search", ...NO_ORCHESTRATION], maxFilesChanged: 1 },
+		assert: { forbiddenTools: ["todo", "project_search", ...NO_ORCHESTRATION], maxFilesChanged: 1 },
 	},
 ];
 

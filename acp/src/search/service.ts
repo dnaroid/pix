@@ -1,15 +1,20 @@
 import { resolve } from "node:path";
 import type { SessionMapRecord } from "../acp/session-map.js";
-import type { LocalSearchHit, SearchConfigRequest, SearchQueryRequest, SearchQueryResponse, SearchStatus, SessionSearchHit, SemanticTasksRequest, SemanticTasksResponse, SemanticTaskHit } from "./contract.js";
-import { SearchPreferences, sharedSearchAuth, type SearchAuth } from "./config.js";
+import type { LocalSearchHit, SearchConfigRequest, SearchIndexRequest, SearchIndexResponse, SearchSyncRequest, SearchQueryRequest, SearchQueryResponse, SearchStatus, SessionSearchHit, SemanticTasksRequest, SemanticTasksResponse, SemanticTaskHit } from "./contract.js";
+import { SearchPreferences, sharedSearchAuth, semanticEmbeddingIdentity, type SemanticEmbeddingConfig, type SearchAuth } from "./config.js";
+import { parseSearchConfigRequest, parseSearchIndexRequest, parseSearchSyncRequest } from "./request.js";
 import { bounded } from "./bounded.js";
-import { hashText, lexicalScore, settingsDocuments, type SearchDocument } from "./documents.js";
+import { hashText, lexicalScore, settingsDocuments, settingsFingerprint, type SearchDocument } from "./documents.js";
 import { cosine, embedOpenRouter, validVector, type Embedder } from "./embeddings.js";
 import { SearchIndexBusyError, SearchIndexStore, emptyIndex, type CachedIndex } from "./index-store.js";
 import { sessionTitleHits } from "./session-titles.js";
 import { namedSessionTitles, type NamedSessionTitle } from "./session-index.js";
 import { synchronizeSessionBoundaries } from "./session-boundary-service.js";
 import { readTaskSemanticCorpus } from "./task-corpus.js";
+import { SettingsTaskIndexer } from "./settings-task-indexer.js";
+import type { TaskChangeWatcher } from "./task-watcher.js";
+import { SearchCacheCompatibilityError } from "./embedding-cache.js";
+import { IndexActions } from "./index-actions.js";
 
 const PROVIDER_WARNING = "Semantic settings search unavailable; local search remains available";
 const SESSION_PROVIDER_WARNING = "Semantic session-title search unavailable; local search remains available";
@@ -24,9 +29,8 @@ interface Workspace {
   namedSessions: NamedSessionTitle[];
   namedRevision: number;
   refresh: Promise<unknown>;
-  worker?: Promise<void>;
+  background?: SettingsTaskIndexer;
   sessionWorker?: Promise<void>;
-  taskIndexing?: number;
   queryVectors: Map<string, number[]>;
   migrated: boolean;
   migration?: Promise<void>;
@@ -40,6 +44,8 @@ export interface SearchServiceOptions {
   discoveryTimeoutMs?: number;
   store?: SearchIndexStore;
   embed?: Embedder;
+  watchTasks?: TaskChangeWatcher;
+  taskDebounceMs?: number;
 }
 /** Only explicit session names may be persisted/embedded; history stays local. */
 export class DesktopSearchService {
@@ -54,54 +60,78 @@ export class DesktopSearchService {
   private sessionTitlesEnabled = false;
   private tasksSemanticEnabled = false;
   private keyAvailable = false;
+  private embeddingConfig: SemanticEmbeddingConfig | undefined;
+  private consentRevision = 0;
+  private catalogueRevision = 0;
+  private indexCatalogue: { revision: number; fingerprint: string } | undefined;
   private disposed = false;
   private configQueue: Promise<void> = Promise.resolve();
+  private readonly retired = new Set<Promise<void>>();
+  private readonly indexActions = new IndexActions<SearchIndexResponse>();
   constructor(private readonly options: SearchServiceOptions) {
     this.preferences = options.preferences ?? new SearchPreferences();
     this.auth = options.auth ?? sharedSearchAuth();
     this.store = options.store ?? new SearchIndexStore();
     this.embed = options.embed ?? embedOpenRouter;
   }
-  private revoke(): void { this.epoch++; this.network.abort(); this.network = new AbortController(); }
+  private revoke(): void {
+    this.epoch++; this.network.abort(); this.network = new AbortController();
+    this.workspace?.queryVectors.clear();
+    if (this.workspace) {
+      this.workspace.cache = emptyIndex();
+      if (this.workspace.background) {
+        const operation = this.workspace.background.dispose().finally(() => this.retired.delete(operation));
+        this.retired.add(operation); delete this.workspace.background;
+      }
+    }
+  }
   private current(w: Workspace, epoch = this.epoch): boolean {
     return !this.disposed && this.workspace === w && !w.controller.signal.aborted && this.epoch === epoch;
   }
   private status(): SearchStatus {
+    const sources = { settings: this.workspace?.background?.indexing.settings ?? false,
+      tasks: this.workspace?.background?.indexing.tasks ?? false, sessions: Boolean(this.workspace?.sessionWorker) };
+    const sourceErrors = { ...this.workspace?.background?.errors,
+      ...(this.workspace?.indexError ? { sessions: this.workspace.indexError } : {}) };
+    const error = this.workspace?.indexError ?? sourceErrors.settings ?? sourceErrors.tasks ?? this.workspace?.error;
     return { enabled: this.enabled, sessionTitlesEnabled: this.sessionTitlesEnabled, tasksSemanticEnabled: this.tasksSemanticEnabled,
-      keyAvailable: this.keyAvailable, indexing: Boolean(this.workspace?.worker || this.workspace?.sessionWorker || this.workspace?.taskIndexing),
-      ...((this.workspace?.indexError ?? this.workspace?.error) ? { error: this.workspace?.indexError ?? this.workspace?.error } : {}) };
+      keyAvailable: this.keyAvailable, indexing: Object.values(sources).some(Boolean), indexingSources: sources,
+      ...(Object.keys(sourceErrors).length ? { sourceErrors } : {}), ...(error ? { error } : {}) };
   }
   private async consent(signal: AbortSignal): Promise<boolean> {
     signal.throwIfAborted();
-    let enabled = false;
-    let sessionTitlesEnabled = false;
-    let tasksSemanticEnabled = false;
-    try {
-      enabled = await this.preferences.enabled();
-      sessionTitlesEnabled = await this.preferences.sessionTitlesEnabled();
-      tasksSemanticEnabled = await this.preferences.tasksSemanticEnabled();
-    }
-    catch { if (this.workspace) this.workspace.error = "Search preferences unavailable; local search remains available"; }
+    const revision = ++this.consentRevision;
+    let config = await this.preferences.embedding();
+    let keyAvailable = config?.provider === "ollama";
+    try { if (config?.provider === "openrouter") keyAvailable = await this.auth.available(signal); }
+    catch { keyAvailable = false; if (this.workspace) this.workspace.error = "Search credentials unavailable; local search remains available"; }
     signal.throwIfAborted();
-    if (enabled !== this.enabled || sessionTitlesEnabled !== this.sessionTitlesEnabled || tasksSemanticEnabled !== this.tasksSemanticEnabled) {
+    // Credential lookup may be asynchronous; do not authorize an obsolete snapshot.
+    const after = await this.preferences.embedding();
+    if ((config && semanticEmbeddingIdentity(config)) !== (after && semanticEmbeddingIdentity(after))) {
+      keyAvailable = after?.provider === "ollama";
+      config = after;
+    }
+    signal.throwIfAborted();
+    const identity = config ? semanticEmbeddingIdentity(config) : undefined;
+    const prior = this.embeddingConfig ? semanticEmbeddingIdentity(this.embeddingConfig) : undefined;
+    // A superseded read cannot mutate shared state or authorize a different snapshot.
+    if (revision !== this.consentRevision) return Boolean(config) && keyAvailable && identity === prior && !this.disposed;
+    if (identity !== prior || (this.keyAvailable && !keyAvailable)) {
       this.revoke();
-      this.enabled = enabled;
-      this.sessionTitlesEnabled = sessionTitlesEnabled;
-      this.tasksSemanticEnabled = tasksSemanticEnabled;
+      if (this.workspace) delete this.workspace.error;
     }
-    const hadKey = this.keyAvailable;
-    try { this.keyAvailable = await this.auth.available(signal); }
-    catch { this.keyAvailable = false; if (this.workspace) this.workspace.error = "Search credentials unavailable; local search remains available"; }
-    signal.throwIfAborted();
-    if (hadKey && !this.keyAvailable) this.revoke();
-    return (this.enabled || this.sessionTitlesEnabled || this.tasksSemanticEnabled) && this.keyAvailable && !this.disposed;
+    this.embeddingConfig = config;
+    this.enabled = this.sessionTitlesEnabled = this.tasksSemanticEnabled = Boolean(config);
+    this.keyAvailable = keyAvailable;
+    return this.enabled && this.keyAvailable && !this.disposed;
   }
-  private async activate(cwd: string): Promise<Workspace> {
+  private async activate(cwd: string, migrate = true): Promise<Workspace> {
     if (this.disposed) throw new SearchUnavailableError("Search unavailable");
     const path = resolve(cwd);
     if (this.workspace?.cwd === path) {
       const w = this.workspace;
-      await this.migrate(w);
+      if (migrate) await this.migrate(w);
       w.controller.signal.throwIfAborted();
       return w;
     }
@@ -109,14 +139,14 @@ export class DesktopSearchService {
     const w: Workspace = { cwd: path, controller: new AbortController(), cache: emptyIndex(), settings: [],
       namedSessions: [], namedRevision: 0, refresh: Promise.resolve(), queryVectors: new Map(), migrated: false };
     this.workspace = w;
-    await this.migrate(w);
+    if (migrate) await this.migrate(w);
     w.controller.signal.throwIfAborted();
     return w;
   }
   private async migrate(w: Workspace): Promise<void> {
     if (w.migrated) return;
     if (!w.migration) {
-      // Retry transient contention on later activation/status requests, without provider work.
+      // Retry transient contention on later sync/query activation, not status polling.
       const operation = this.store.write(w.cwd, w.controller.signal, async tx => { w.cache = await tx.load(); })
         .then(() => { w.migrated = true; delete w.indexError; })
         .catch(error => {
@@ -128,36 +158,142 @@ export class DesktopSearchService {
     await w.migration;
   }
   async config(request: SearchConfigRequest, signal = new AbortController().signal): Promise<SearchStatus> {
-    const changed = request.enabled !== undefined || request.sessionTitlesEnabled !== undefined || request.tasksSemanticEnabled !== undefined || request.apiKey !== undefined;
-    if (changed) this.revoke();
-    if (request.enabled === false) this.enabled = false;
-    if (request.sessionTitlesEnabled === false) this.sessionTitlesEnabled = false;
-    if (request.tasksSemanticEnabled === false) this.tasksSemanticEnabled = false;
+    request = parseSearchConfigRequest(request);
     const operation = this.configQueue.catch(() => {}).then(async () => {
       if (this.disposed) return;
-      const w = await this.activate(request.cwd);
+      const w = await this.activate(request.cwd, false);
       const owned = AbortSignal.any([signal, w.controller.signal]);
       try {
         owned.throwIfAborted();
-        if (request.apiKey !== undefined) await this.auth.save(request.apiKey, owned);
-        if (request.enabled !== undefined) await this.preferences.setEnabled(request.enabled);
-        if (request.sessionTitlesEnabled !== undefined) await this.preferences.setSessionTitlesEnabled(request.sessionTitlesEnabled);
-        if (request.tasksSemanticEnabled !== undefined) await this.preferences.setTasksSemanticEnabled(request.tasksSemanticEnabled);
-        if (changed) delete w.error;
         await this.consent(owned);
       } catch {
         owned.throwIfAborted();
-        throw new SearchUnavailableError("Search configuration could not be updated");
+        throw new SearchUnavailableError("Search configuration unavailable");
       }
-      // Merely enabling session-title consent must not upload an earlier,
-      // potentially stale title snapshot. Only a fresh explicit session search
-      // may start session-vector indexing after native title rediscovery.
-      if (changed) this.schedule(w);
+      // Reading status/config never starts provider work.
     });
     this.configQueue = operation;
     await operation;
     signal.throwIfAborted();
     return this.status();
+  }
+  private background(w: Workspace): SettingsTaskIndexer | undefined {
+    if (!this.current(w) || !this.embeddingConfig || !this.enabled || !this.keyAvailable) return undefined;
+    return w.background ??= new SettingsTaskIndexer({ cwd: w.cwd,
+      signal: AbortSignal.any([w.controller.signal, this.network.signal]), config: this.embeddingConfig,
+      store: this.store, embed: (inputs, signal, domain) => this.vectors(inputs, signal, domain),
+      authorized: signal => this.consent(signal), watchTasks: this.options.watchTasks, debounceMs: this.options.taskDebounceMs,
+      completed: source => {
+        if (this.current(w) && source === "settings" && w.error === PROVIDER_WARNING) delete w.error;
+      } });
+  }
+  /** Explicit workspace ownership/catalogue supply. Never waits for provider batches. */
+  async sync(request: SearchSyncRequest, caller = new AbortController().signal): Promise<SearchStatus> {
+    request = parseSearchSyncRequest(request);
+    caller.throwIfAborted();
+    const revision = ++this.catalogueRevision;
+    const w = await this.activate(request.cwd);
+    const signal = AbortSignal.any([caller, w.controller.signal]);
+    await this.consent(signal);
+    signal.throwIfAborted();
+    if (!this.current(w)) throw new SearchUnavailableError("Search unavailable");
+    if (revision !== this.catalogueRevision) return this.status();
+    w.settings = settingsDocuments(request.settings);
+    this.background(w)?.sync(request.settings);
+    return this.status();
+  }
+  /** Explicit document-only indexing. This is deliberately not a search query or sync. */
+  async index(request: SearchIndexRequest, caller = new AbortController().signal): Promise<SearchIndexResponse> {
+    request = parseSearchIndexRequest(request);
+    if (request.source === "commits") throw new SearchUnavailableError("Commit indexing uses the commit worker");
+    caller.throwIfAborted();
+    const documents = request.source === "settings" ? settingsDocuments(request.settings!) : [];
+    const fingerprint = settingsFingerprint(documents);
+    const revision = request.source === "settings" ? ++this.catalogueRevision : this.catalogueRevision;
+    if (request.source === "settings") this.indexCatalogue = { revision, fingerprint };
+    const w = await this.activate(request.cwd, false);
+    const key = JSON.stringify([w.cwd, request.source, fingerprint]);
+    // Coalesce before consent as well: two first-use clicks must not supersede
+    // one another's authorization reads and return a fictitious missing config.
+    return this.indexActions.run(key, caller, w.controller.signal, async operationSignal => {
+      const source = request.source;
+      if (!await bounded(operationSignal, undefined, signal => this.consent(signal))) return { source, complete: false,
+        message: "Configure an embedding model and its credential to index this source" };
+      const owned = AbortSignal.any([operationSignal, this.network.signal]);
+      owned.throwIfAborted();
+      const config = this.embeddingConfig!;
+      const epoch = this.epoch;
+      try {
+        let indexed = 0, total = 0;
+        let namedRevision: number | undefined;
+        if (source === "settings" || source === "tasks") {
+          if (source === "settings") {
+            if (revision !== this.catalogueRevision && (this.indexCatalogue?.revision !== this.catalogueRevision
+              || this.indexCatalogue.fingerprint !== fingerprint)) throw new SearchUnavailableError("Settings catalogue changed; retry indexing");
+            w.settings = documents;
+          }
+          const background = this.background(w);
+          if (!background) throw new SearchUnavailableError("Search authorization changed");
+          await background.index(source, request.settings ?? [], owned);
+          if (source === "settings") {
+            if (settingsFingerprint(w.settings) !== fingerprint) throw new SearchUnavailableError("Settings catalogue changed; retry indexing");
+            const cache = await this.store.read(w.cwd, owned, config);
+            total = documents.length;
+            indexed = documents.filter(document => document.chunks.every(chunk => cache.vectors.has(hashText(chunk)))).length;
+            if (this.current(w, epoch)) w.cache = cache;
+          } else {
+            const tasks = await readTaskSemanticCorpus(w.cwd, owned);
+            const saved = await this.store.readTaskVectors(w.cwd, owned, config);
+            total = tasks.length;
+            indexed = tasks.filter(task => saved.has(task.hash)).length;
+          }
+        } else {
+          const previous = w.sessionWorker;
+          let previousSettled = !previous;
+          const operation = (async () => {
+            await bounded(owned, undefined, () => previous?.finally(() => { previousSettled = true; }) ?? Promise.resolve());
+            const records = await this.discover(w, owned);
+            await this.reconcileSessions(w, records, owned, false);
+            await this.indexSessions(w, epoch, owned, 8);
+            // Refresh discovery so a rename/deletion during the pass cannot be reported current.
+            await this.reconcileSessions(w, await this.discover(w, owned), owned, false);
+            const saved = await this.store.readSessionTitles(w.cwd, owned, config);
+            total = w.namedSessions.length;
+            indexed = w.namedSessions.filter(title => saved.get(title.sessionId)?.hash === title.hash).length;
+            namedRevision = w.namedRevision;
+          })();
+          const worker = operation.catch(error => {
+            if (this.current(w, epoch) && !owned.aborted) w.indexError = error instanceof SearchIndexBusyError || error instanceof SearchCacheCompatibilityError
+              ? error.message : SESSION_PROVIDER_WARNING;
+          }).finally(() => {
+            if (w.sessionWorker === worker) {
+              if (previous && !previousSettled) w.sessionWorker = previous;
+              else delete w.sessionWorker;
+            }
+          });
+          w.sessionWorker = worker;
+          await operation;
+          delete w.indexError;
+        }
+        if (!await this.consent(owned) || !this.current(w, epoch)) throw new SearchUnavailableError("Search authorization changed");
+        if (source === "settings" && settingsFingerprint(w.settings) !== fingerprint) throw new SearchUnavailableError("Settings catalogue changed; retry indexing");
+        if (source === "sessions" && namedRevision !== w.namedRevision) throw new SearchUnavailableError("Saved session names changed; retry indexing");
+        if (source === "tasks") {
+          // Canonical tasks may change during the final authorization read.
+          const tasks = await readTaskSemanticCorpus(w.cwd, owned);
+          const saved = await this.store.readTaskVectors(w.cwd, owned, config);
+          total = tasks.length; indexed = tasks.filter(task => saved.has(task.hash)).length;
+        }
+        if (!this.current(w, epoch)) throw new SearchUnavailableError("Search authorization changed");
+        owned.throwIfAborted();
+        return { source, complete: indexed === total, indexed, total,
+          ...(indexed < total ? { message: "Indexing pass finished; continue to index remaining documents" } : {}) };
+      } catch (error) {
+        owned.throwIfAborted();
+        return { source, complete: false, message: error instanceof SearchIndexBusyError || error instanceof SearchCacheCompatibilityError
+          || error instanceof SearchUnavailableError ? error.message : "Document indexing unavailable; retry this source" };
+      }
+    });
   }
   private async discover(w: Workspace, signal: AbortSignal): Promise<readonly SessionMapRecord[]> {
     return bounded(signal, undefined, async owned => {
@@ -171,23 +307,31 @@ export class DesktopSearchService {
       return operation;
     });
   }
-  private async vectors(inputs: readonly string[], signal: AbortSignal, domain: "settings" | "sessions" | "tasks" = "settings"): Promise<number[][]> {
+  private async vectors(inputs: readonly string[], signal: AbortSignal, domain: "settings" | "sessions" | "tasks" = "settings", query = false): Promise<number[][]> {
     return bounded(signal, 10000, async owned => {
-      await this.consent(owned);
+      if (!await this.consent(owned)) throw new Error(PROVIDER_WARNING);
       if (!(domain === "sessions" ? this.sessionTitlesEnabled : domain === "tasks" ? this.tasksSemanticEnabled : this.enabled) || !this.keyAvailable) {
         throw new Error(domain === "sessions" ? SESSION_PROVIDER_WARNING : domain === "tasks" ? TASK_PROVIDER_WARNING : PROVIDER_WARNING);
       }
-      const key = await this.auth.key(owned);
+      const config = this.embeddingConfig;
+      if (!config) throw new Error(PROVIDER_WARNING);
+      const epoch = this.epoch;
+      const key = config.provider === "ollama" ? "" : await this.auth.key(owned);
+      if (!await this.consent(owned)) throw new Error(PROVIDER_WARNING);
       owned.throwIfAborted();
-      if (!key) throw new Error(domain === "sessions" ? SESSION_PROVIDER_WARNING : domain === "tasks" ? TASK_PROVIDER_WARNING : PROVIDER_WARNING);
-      const vectors = await this.embed(inputs, key, owned);
+      if (epoch !== this.epoch || !this.embeddingConfig || semanticEmbeddingIdentity(config) !== semanticEmbeddingIdentity(this.embeddingConfig)) throw new Error(PROVIDER_WARNING);
+      if (config.provider === "openrouter" && !key) throw new Error(domain === "sessions" ? SESSION_PROVIDER_WARNING : domain === "tasks" ? TASK_PROVIDER_WARNING : PROVIDER_WARNING);
+      const prefix = query ? config.queryPrefix : config.documentPrefix;
+      const vectors = await this.embed(inputs.map(text => (prefix + text).slice(0, 8192)), key ?? "", owned, config);
+      if (!await this.consent(owned)) throw new Error(PROVIDER_WARNING);
       owned.throwIfAborted();
-      if (vectors.length !== inputs.length || !vectors.every(validVector)) throw new Error(PROVIDER_WARNING);
+      if (epoch !== this.epoch || !this.embeddingConfig || semanticEmbeddingIdentity(config) !== semanticEmbeddingIdentity(this.embeddingConfig)
+        || vectors.length !== inputs.length || !vectors.every(vector => validVector(vector, config.dimension))) throw new Error(PROVIDER_WARNING);
       return vectors;
     });
   }
   /** Reconcile only explicitly named titles, never first-message display fallbacks. */
-  private async reconcileSessions(w: Workspace, records: readonly SessionMapRecord[], signal: AbortSignal): Promise<void> {
+  private async reconcileSessions(w: Workspace, records: readonly SessionMapRecord[], signal: AbortSignal, schedule = true): Promise<void> {
     const current = namedSessionTitles(records, w.cwd);
     const changed = current.length !== w.namedSessions.length || current.some((title, index) =>
       title.sessionId !== w.namedSessions[index]?.sessionId || title.hash !== w.namedSessions[index]?.hash);
@@ -195,17 +339,19 @@ export class DesktopSearchService {
       w.namedSessions = current;
       w.namedRevision++;
     }
+    if (!this.embeddingConfig) return;
     try {
-      await this.store.write(w.cwd, signal, async tx => tx.sessionTitles().reconcile(current));
+      await this.store.write(w.cwd, signal, async tx => tx.sessionTitles().reconcile(current), this.embeddingConfig);
       delete w.indexError;
     } catch (error) {
       signal.throwIfAborted();
+      if (!schedule) throw error;
       if (this.current(w)) {
-        w.indexError = error instanceof SearchIndexBusyError
+        w.indexError = error instanceof SearchIndexBusyError || error instanceof SearchCacheCompatibilityError
           ? error.message : "Session title index unavailable; local search remains available";
       }
     }
-    this.scheduleSessions(w);
+    if (schedule) this.scheduleSessions(w);
   }
 
   private async refreshSessionBoundaries(w: Workspace, records: readonly SessionMapRecord[], signal: AbortSignal): Promise<void> {
@@ -225,7 +371,7 @@ export class DesktopSearchService {
     const signal = AbortSignal.any([w.controller.signal, this.network.signal]);
     const worker = this.indexSessions(w, epoch, signal).catch(error => {
       if (this.current(w, epoch) && !signal.aborted) {
-        w.indexError = error instanceof SearchIndexBusyError ? error.message : SESSION_PROVIDER_WARNING;
+        w.indexError = error instanceof SearchIndexBusyError || error instanceof SearchCacheCompatibilityError ? error.message : SESSION_PROVIDER_WARNING;
       }
     }).finally(() => {
       if (w.sessionWorker === worker) delete w.sessionWorker;
@@ -235,8 +381,10 @@ export class DesktopSearchService {
   }
 
   /** One SQLite-owned batch at a time, with durable hashes reused across restarts. */
-  private async indexSessions(w: Workspace, epoch: number, signal: AbortSignal): Promise<void> {
-    while (this.current(w, epoch) && this.sessionTitlesEnabled && w.namedSessions.length) {
+  private async indexSessions(w: Workspace, epoch: number, signal: AbortSignal, batches = Infinity): Promise<void> {
+    const config = this.embeddingConfig;
+    if (!config) return;
+    while (this.current(w, epoch) && this.sessionTitlesEnabled && w.namedSessions.length && batches-- > 0) {
       let pending = false;
       await this.store.write(w.cwd, signal, async tx => {
         const revision = w.namedRevision;
@@ -248,149 +396,87 @@ export class DesktopSearchService {
         const vectors = await this.vectors(missing.map(entry => entry.title), signal, "sessions");
         // Preferences can also be edited by a second Desktop process while
         // the provider is in flight. Revalidate before committing paid output.
-        await this.consent(signal);
-        if (!this.sessionTitlesEnabled || !this.keyAvailable || !this.current(w, epoch) || revision !== w.namedRevision) {
+        if (!await this.consent(signal) || !this.sessionTitlesEnabled || !this.keyAvailable || !this.current(w, epoch) || revision !== w.namedRevision) {
           throw new Error("Session title index changed during provider request");
         }
         index.save(new Map(missing.map((entry, position) => [entry.hash, vectors[position]!])));
-      });
+      }, config);
       if (!pending) break;
     }
   }
-  private schedule(w: Workspace): void {
-    if (w.worker || !this.current(w) || !w.settings.length) return;
-    const epoch = this.epoch;
-    const signal = AbortSignal.any([w.controller.signal, this.network.signal]);
-    const worker = this.indexSettings(w, epoch, signal).catch(error => {
-      if (this.current(w, epoch) && !signal.aborted) w.error = error instanceof SearchIndexBusyError ? error.message : PROVIDER_WARNING;
-    }).finally(() => {
-      if (w.worker === worker) delete w.worker;
-      // Revocation may have interrupted a batch while a config/query scheduled its replacement.
-      if (this.current(w) && epoch !== this.epoch) this.schedule(w);
-    });
-    w.worker = worker;
-  }
-  private async indexSettings(w: Workspace, epoch: number, signal: AbortSignal): Promise<void> {
-    await this.store.write(w.cwd, signal, async tx => {
-      const cache = await tx.load();
-      while (this.current(w, epoch)) {
-        const missing = new Map<string, string>();
-        for (const document of w.settings) for (const text of document.chunks) {
-          const hash = hashText(text);
-          if (!cache.vectors.has(hash)) missing.set(hash, text);
-        }
-        if (!missing.size || !await this.consent(signal)) break;
-        if (!this.current(w, epoch)) return;
-        const batch: [string, string][] = [];
-        let size = 0;
-        for (const pair of missing) {
-          if (batch.length === 16 || size + pair[1].length > 16000) break;
-          batch.push(pair); size += pair[1].length;
-        }
-        const vectors = await this.vectors(batch.map(([, text]) => text), signal);
-        if (!this.current(w, epoch)) return;
-        batch.forEach(([hash], index) => cache.vectors.set(hash, vectors[index]!));
-        await tx.save(w.settings, cache.vectors);
-      }
-      if (!this.current(w, epoch)) return;
-      await tx.save(w.settings, cache.vectors);
-      w.cache = cache;
-      w.migrated = true; delete w.indexError;
-      if (w.error === PROVIDER_WARNING || w.error === "Search index busy; update deferred") delete w.error;
-    });
-  }
-
-  /** Explicitly requested, opt-in task embeddings. The persisted index stores
-   * only id/content hash/vector and never affects canonical tasks.sqlite.
-   * Max 64 new task embeddings per search prevents a large backlog from
-   * silently uploading thousands of descriptions on one submission. */
+  /** Rank already indexed canonical hashes; a query never creates missing task vectors. */
   async queryTasks(request: SemanticTasksRequest, caller = new AbortController().signal): Promise<SemanticTasksResponse> {
     caller.throwIfAborted();
     const w = await this.activate(request.cwd);
     const signal = AbortSignal.any([caller, w.controller.signal]);
-    await this.consent(signal);
-    if (!this.tasksSemanticEnabled || !this.keyAvailable) return { results: [], pendingIndex: false };
+    if (!await this.consent(signal) || !this.tasksSemanticEnabled || !this.keyAvailable) return { results: [], pendingIndex: false };
+    const config = this.embeddingConfig!;
     const epoch = this.epoch;
     const owned = AbortSignal.any([signal, this.network.signal]);
-    w.taskIndexing = (w.taskIndexing ?? 0) + 1;
-    try {
-      const documents = await readTaskSemanticCorpus(w.cwd, owned);
-      if (!this.current(w, epoch)) return { results: [], pendingIndex: false };
-      let pendingIndex = false;
-      await this.store.write(w.cwd, owned, async tx => {
-        const index = tx.tasks();
-        index.reconcile(documents);
-        for (let batch = 0; batch < 4; batch++) {
-          const missing = index.missing(16);
-          if (!missing.length) break;
-          const embeddings = await this.vectors(missing.map(task => task.text), owned, "tasks");
-          await this.consent(owned);
-          if (!this.current(w, epoch) || !this.tasksSemanticEnabled || !this.keyAvailable) throw new Error(TASK_PROVIDER_WARNING);
-          const latest = await readTaskSemanticCorpus(w.cwd, owned);
-          const hashes = new Map(latest.map(task => [task.id, task.hash]));
-          if (hashes.size !== documents.length || documents.some(task => hashes.get(task.id) !== task.hash)) {
-            throw new Error("Task content changed while indexing; retry search");
-          }
-          index.save(new Map(missing.map((task, offset) => [task.hash, embeddings[offset]!] as const)));
-        }
-        pendingIndex = index.missing(1).length > 0;
-      });
-      if (!documents.length) return { results: [], pendingIndex: false };
-      if (!this.current(w, epoch)) return { results: [], pendingIndex: false };
-      // Avoid embedding a query when no task document has a usable vector yet.
-      const saved = await this.store.readTaskVectors(w.cwd, owned);
-      if (!documents.some(task => saved.has(task.hash))) return { results: [], pendingIndex };
-      const queryVector = (await this.vectors([request.query], owned, "tasks"))[0]!;
-      await this.consent(owned);
-      if (!this.current(w, epoch) || !this.tasksSemanticEnabled || !this.keyAvailable) return { results: [], pendingIndex: false };
-      // A task may have changed while its query vector was being calculated.
-      const currentDocuments = await readTaskSemanticCorpus(w.cwd, owned);
-      const results: SemanticTaskHit[] = [];
-      for (const task of currentDocuments) {
-        const vector = saved.get(task.hash);
-        if (!vector) continue;
-        const similarity = cosine(queryVector, vector);
-        if (similarity < 0.25) continue;
-        results.push({ kind: "tasks", id: `tasks:${task.id}`, taskId: task.id, title: task.title,
-          snippet: task.snippet, score: similarity, semantic: true });
-      }
-      results.sort((a, b) => b.score - a.score || a.taskId.localeCompare(b.taskId));
-      return { results: results.slice(0, request.limit), pendingIndex };
-    } finally {
-      w.taskIndexing = Math.max(0, (w.taskIndexing ?? 1) - 1);
+    const documents = await readTaskSemanticCorpus(w.cwd, owned);
+    if (!this.current(w, epoch) || !documents.length) return { results: [], pendingIndex: false };
+    // Avoid embedding a query when no task document has a usable vector yet.
+    const saved = await this.store.readTaskVectors(w.cwd, owned, config);
+    const pendingIndex = documents.some(task => !saved.has(task.hash));
+    if (!documents.some(task => saved.has(task.hash))) return { results: [], pendingIndex };
+    const queryVector = (await this.vectors([request.query], owned, "tasks", true))[0]!;
+    if (!await this.consent(owned) || !this.current(w, epoch) || !this.tasksSemanticEnabled || !this.keyAvailable) return { results: [], pendingIndex: false };
+    // A task may have changed while its query vector was being calculated.
+    const currentDocuments = await readTaskSemanticCorpus(w.cwd, owned);
+    if (!await this.consent(owned)) return { results: [], pendingIndex: false };
+    owned.throwIfAborted();
+    if (!this.current(w, epoch)) return { results: [], pendingIndex: false };
+    const results: SemanticTaskHit[] = [];
+    for (const task of currentDocuments) {
+      const vector = saved.get(task.hash);
+      if (!vector) continue;
+      const similarity = cosine(queryVector, vector);
+      if (similarity < 0.25) continue;
+      results.push({ kind: "tasks", id: `tasks:${task.id}`, taskId: task.id, title: task.title,
+        snippet: task.snippet, score: similarity, semantic: true });
     }
+    results.sort((a, b) => b.score - a.score || a.taskId.localeCompare(b.taskId));
+    return { results: results.slice(0, request.limit), pendingIndex: currentDocuments.some(task => !saved.has(task.hash)) };
   }
   async query(request: SearchQueryRequest, caller = new AbortController().signal): Promise<SearchQueryResponse> {
     caller.throwIfAborted();
+    const wantsSettings = request.types.includes("settings");
+    const catalogueRevision = wantsSettings ? ++this.catalogueRevision : undefined;
     const w = await this.activate(request.cwd);
     const signal = AbortSignal.any([caller, w.controller.signal]);
-    await this.consent(signal);
+    let authorized = await this.consent(signal);
+    signal.throwIfAborted();
+    if (!this.current(w)) throw new SearchUnavailableError("Search unavailable");
+    if (catalogueRevision !== undefined && catalogueRevision !== this.catalogueRevision) return { results: [], status: this.status() };
     const epoch = this.epoch;
-    const wantsSettings = request.types.includes("settings");
     const settings = wantsSettings ? settingsDocuments(request.settings) : [];
-    if (wantsSettings) { w.settings = settings; this.schedule(w); }
+    if (wantsSettings) { w.settings = settings; this.background(w)?.catalogue(request.settings); }
     const wantsSessions = request.types.includes("sessions");
     let records = wantsSessions ? await this.discover(w, signal) : [];
     if (wantsSessions) {
       await this.reconcileSessions(w, records, signal);
       await this.refreshSessionBoundaries(w, records, signal);
     }
+    authorized = await this.consent(signal);
     let queryVector: number[] | undefined;
     const query = request.query.trim();
-    const semanticSettings = wantsSettings && w.settings.length > 0 && this.enabled;
-    const semanticSessions = wantsSessions && w.namedSessions.length > 0 && this.sessionTitlesEnabled;
+    const semanticSettings = authorized && wantsSettings && w.settings.length > 0 && this.enabled;
+    const semanticSessions = authorized && wantsSessions && w.namedSessions.length > 0 && this.sessionTitlesEnabled;
     if (query && (semanticSettings || semanticSessions) && this.keyAvailable && this.current(w, epoch)) {
       const owned = AbortSignal.any([signal, this.network.signal]);
       try {
         queryVector = w.queryVectors.get(query);
         if (!queryVector) {
-          queryVector = (await this.vectors([query], owned, semanticSettings ? "settings" : "sessions"))[0]!;
+          queryVector = (await this.vectors([query], owned, semanticSettings ? "settings" : "sessions", true))[0]!;
           if (this.current(w, epoch)) {
             if (w.queryVectors.size >= 100) w.queryVectors.delete(w.queryVectors.keys().next().value!);
             w.queryVectors.set(query, queryVector);
           }
         }
-        if (this.current(w, epoch) && semanticSettings) w.cache = await this.store.read(w.cwd, signal);
+        if (this.current(w, epoch) && semanticSettings) {
+          const cache = await this.store.read(w.cwd, owned, this.embeddingConfig);
+          if (this.current(w, epoch)) w.cache = cache;
+        }
       } catch {
         signal.throwIfAborted();
         queryVector = undefined;
@@ -426,10 +512,13 @@ export class DesktopSearchService {
         if (this.current(w)) w.indexError = "Local session excerpt search unavailable; title search remains available";
       }
     }
+    if (!await this.consent(signal) || !this.current(w, epoch)) queryVector = undefined;
     if (wantsSessions && queryVector && this.sessionTitlesEnabled) {
       try {
-        const embeddings = await this.store.readSessionTitles(w.cwd, signal);
+        const embeddings = await this.store.readSessionTitles(w.cwd, signal, this.embeddingConfig);
+        if (!await this.consent(signal) || !this.current(w, epoch)) queryVector = undefined;
         for (const title of namedSessionTitles(records, w.cwd)) {
+          if (!queryVector) break;
           const stored = embeddings.get(title.sessionId);
           if (!stored || stored.hash !== title.hash) continue;
           const similarity = cosine(queryVector, stored.vector);
@@ -473,11 +562,13 @@ export class DesktopSearchService {
   }
   async dispose(): Promise<void> {
     this.disposed = true; this.workspace?.controller.abort(); this.revoke();
-    await this.workspace?.worker;
+    await this.workspace?.background?.dispose();
+    await Promise.allSettled([...this.retired]);
     await this.workspace?.sessionWorker;
     await this.workspace?.migration?.catch(() => {});
     await this.workspace?.refresh.catch(() => {});
     await this.configQueue.catch(() => {});
+    await this.indexActions.settled();
     this.workspace = undefined;
   }
 }

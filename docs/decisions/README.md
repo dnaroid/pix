@@ -67,6 +67,11 @@ errors, not invent or approve decisions.
 
 ## Records
 
+- [0068 — Global semantic configuration is authorization](0068-global-semantic-configuration.md)
+- [0069 — Parent-owned implementation and a smaller role pool](0069-parent-owned-implementation.md)
+- [0067 — Final documentation maintenance without knowledge-state gates](0067-final-documentation-maintenance.md)
+- [0066 — Consent-gated native repository embeddings](0066-native-repository-semantic-search.md)
+- [0065 — Native repository lexical search](0065-native-repository-search.md) (lexical-only scope superseded by 0066)
 - [0064 — SQLite project tasks without legacy storage](0064-sqlite-project-tasks.md)
 - [0063 — Kernel-owned task-file exclusion](0063-task-file-kernel-lock.md)
 - [0061 — Scoped AST and public web tools for subagents](0061-subagent-scoped-ast-web-tools.md)
@@ -99,7 +104,7 @@ errors, not invent or approve decisions.
 
 - [0033 — Assistant prompt hygiene](0033-assistant-prompt-hygiene.md)
 - [0034 — Bounded, opt-in Heads up observer](0034-heads-up-observer.md)
-- [0046 — Task-scoped knowledge audit completion](0046-task-scoped-knowledge-completion.md)
+- [0046 — Task-scoped knowledge audit completion](0046-task-scoped-knowledge-completion.md) (superseded by 0067)
 - [0047 — Remove the Desktop Session inspector](0047-remove-session-inspector.md)
 - [0048 — Status-bar click popups](0048-status-bar-click-popups.md)
 - [0049 — Nonmodal model picker](0049-nonmodal-model-picker.md)

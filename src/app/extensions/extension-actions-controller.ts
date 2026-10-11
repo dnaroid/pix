@@ -3,12 +3,12 @@ import type { AgentSessionRuntime, ExtensionCommandContextActions, ExtensionErro
 import { createId } from "../id.js";
 import { logPixEvent, type PixLogDetails, type PixLogLevel } from "../logger.js";
 import type { Entry } from "../types.js";
-import { createReloadContextInventory, formatReloadContextInventory } from "../commands/reload-context-inventory.js";
+import { createReloadContextInventory, formatReloadContextInventory, type ReloadAgentCatalog } from "../commands/reload-context-inventory.js";
 
 export type AppExtensionActionsHost = {
 	isRunning(): boolean;
 	runtime(): AgentSessionRuntime | undefined;
-	subagentTypes?(runtime: AgentSessionRuntime): readonly string[] | undefined;
+	subagentTypes?(runtime: AgentSessionRuntime): ReloadAgentCatalog | undefined;
 	getInput(): string;
 	setInput(value: string): void;
 	awaitCurrentSessionExtensions(runtime?: AgentSessionRuntime): Promise<void>;

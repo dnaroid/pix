@@ -14,8 +14,6 @@ import { spawnAgent } from "../../src/async-subagents/core/spawn.js";
 import { localClaudeProviderModule } from "../../src/async-subagents/core/provider-extensions.js";
 import { SUBAGENT_DENIED_TOOLS } from "../../src/async-subagents/core/tool-guard.js";
 import { SUBAGENT_COMMON_TOOLS } from "../../src/async-subagents/core/child-tools.js";
-import { REPO_DISCOVERY_TOOLS } from "../../src/tool-descriptions.js";
-import { installFakeIdxOnPath } from "../support/fake-idx.js";
 import type { OwnedLaunchBinaries } from "../../src/async-subagents/core/owned-launch/bootstrap.js";
 import { localProviderAvailable } from "./provider-offline-harness.ts";
 import { localNode } from "./provider-offline-rpc.ts";
@@ -51,8 +49,6 @@ async function inventory(tools: string[] | undefined, indexed = false, extraArgs
 	for (const dir of [home, agent, cwd]) mkdirSync(dir);
 	mkdirSync(join(cwd, ".git"));
 	if (indexed) mkdirSync(join(cwd, ".indexer-cli"));
-	const restorePath = installFakeIdxOnPath(work);
-	restorePath(); // Only the isolated child's PATH needs the fixture.
 	writeFileSync(join(home, "fake-exit-code"), "0");
 	writeFileSync(join(agent, "settings.json"), JSON.stringify({ retry: { enabled: false }, enableInstallTelemetry: false,
 		enableAnalytics: false, extensions: [], packages: [], skills: [], prompts: [], themes: [] }));
@@ -72,7 +68,7 @@ async function inventory(tools: string[] | undefined, indexed = false, extraArgs
 					...request.env,
 					HOME: home, PI_CODING_AGENT_DIR: agent, PI_CODING_AGENT_SESSION_DIR: join(work, "sessions"),
 					PI_CLAUDE_CODE_PROVIDER_PATH: fakeCli, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0",
-					PATH: `${join(work, ".test-bin")}:${dirname(node)}:/usr/bin:/bin`, TMPDIR: work, LANG: "C", NO_COLOR: "1", T2_PROBE_LOG: probeLog } });
+					PATH: `${dirname(node)}:/usr/bin:/bin`, TMPDIR: work, LANG: "C", NO_COLOR: "1", T2_PROBE_LOG: probeLog } });
 				children.push(child);
 				return { pid: child.pid!, process: child, runDir: join(request.agentDir, "owned-launch", "t2"),
 					labelSupervisor: "t2-supervisor", labelWorker: "t2-worker", stop: () => child?.kill("SIGTERM") } as any;
@@ -120,6 +116,8 @@ offline("default role: private todo is active; provider web search and other sui
 	expect(tools.length).toBeGreaterThan(0);
 	expect(tools).toContain("todo");
 	expect(tools).toContain("compress");
+	expect(tools).toContain("project_search");
+	for (const name of ["repo_context", "repo_inspect", "repo_audit"]) expect(all).not.toContain(name);
 	expect(piArgs).toContain("--no-session");
 	expect(piArgs.some((arg) => arg.endsWith("dcp/subagent.ts"))).toBe(true);
 	for (const name of tools) {
@@ -135,13 +133,13 @@ offline("restricted role: only the selected tools, never the provider web search
 	expect(tools).not.toContain(WEB_SEARCH);
 	expect(tools.length).toBeGreaterThan(0);
 	expect(tools).toContain("todo");
-	for (const name of tools) expect(["read", "grep", "todo", "compress"]).toContain(name.toLowerCase());
+	for (const name of tools) expect(["read", "grep", "todo", "compress", "project_search"]).toContain(name.toLowerCase());
 }, 60_000);
 
-offline("no-work-tools role: private todo and DCP are available", async () => {
+offline("no-work-tools role: private todo, DCP and native repository search are available without IDX", async () => {
 	const { tools, piArgs } = await inventory([]);
 	expect(piArgs[piArgs.indexOf("--tools") + 1]).toBe(SUBAGENT_COMMON_TOOLS.join(","));
-	expect(tools.sort()).toEqual(["compress", "todo"]);
+	expect(tools.sort()).toEqual(["compress", "project_search", "todo"]);
 }, 60_000);
 
 for (const selected of [undefined, ["read", "grep"], []]) {
@@ -156,6 +154,6 @@ for (const selected of [undefined, ["read", "grep"], []]) {
 			const allowed = [...selected, ...SUBAGENT_COMMON_TOOLS].map((name) => name.toLowerCase());
 			for (const name of tools) expect(allowed).toContain(name.toLowerCase());
 		}
-		expect(REPO_DISCOVERY_TOOLS.map(tool => tool.name).sort()).toEqual(["repo_audit", "repo_context", "repo_inspect"]);
+		for (const name of ["repo_context", "repo_inspect", "repo_audit"]) expect(all).not.toContain(name);
 	}, 60_000);
 }

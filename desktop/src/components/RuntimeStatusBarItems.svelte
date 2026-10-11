@@ -514,7 +514,7 @@
                 {/if}
               </header>
               <div class="min-h-0 overflow-y-auto overscroll-contain px-3 py-2.5 text-xs">
-                <UsageLimitBars windows={popupLimitWindows} {now} stale={modelUsage?.stale === true} />
+                <UsageLimitBars windows={popupLimitWindows} {now} stale={modelUsage?.stale === true} creditDeadlines={(modelUsage?.resetCredits ?? []).flatMap((c) => c.expiresAt !== undefined && c.expiresAt > now ? [c.expiresAt] : [])} />
                 {#if modelUsage?.resetCredits?.length || modelUsage?.resetCreditsAvailableCount}
                   <ResetCreditsSection credits={modelUsage.resetCredits ?? []} availableCount={modelUsage.resetCreditsAvailableCount} {now} />
                 {/if}

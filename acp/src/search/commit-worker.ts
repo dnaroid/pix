@@ -7,12 +7,14 @@ import {
   COMMIT_DOCUMENTS, COMMIT_META, COMMIT_VECTORS, createCommitTables, importLegacyCommitVectors,
 } from "./commit-storage.js";
 import { setTimeout as delay } from "node:timers/promises";
-import { patchSearchTerm, rankCommits, readCommitCorpus, readPatchMatches } from "./commit-corpus.js";
+import { commitHead, patchSearchTerm, rankCommits, readCommitCorpus, readPatchMatches } from "./commit-corpus.js";
 import { embeddingIdentity, SEMANTIC_NOTICE, validCommitVector, type CommitEmbeddingConfig } from "./commit-provider.js";
 import type { CommitSearchRequest } from "./commit-contract.js";
+import type { SearchIndexRequest } from "./contract.js";
 
 const port = parentPort!;
-const data = workerData as { request: CommitSearchRequest; root: string; config?: CommitEmbeddingConfig; lockWaitMs: number };
+const data = workerData as { request: CommitSearchRequest | SearchIndexRequest; root: string; config?: CommitEmbeddingConfig; lockWaitMs: number };
+const indexOnly = "source" in data.request;
 const controller = new AbortController(); const signal = controller.signal;
 let serial = 0;
 const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
@@ -67,11 +69,13 @@ async function commitIndexPath(root: string): Promise<string> {
   return file;
 }
 async function run() {
+  let head: string | undefined;
   let docs;
-  try { docs = await readCommitCorpus(data.root, signal); }
-  catch { signal.throwIfAborted(); return { results: [], notices: ["Commit history unavailable (repository may have no HEAD)."] }; }
-  const patchTerm = patchSearchTerm(data.request.query);
-  if (patchTerm) {
+  try { if (indexOnly) head = await commitHead(data.root, signal); docs = await readCommitCorpus(data.root, signal); }
+  catch { signal.throwIfAborted(); return indexOnly ? { source: "commits", complete: false, message: "Commit history unavailable (repository may have no HEAD)." }
+    : { results: [], notices: ["Commit history unavailable (repository may have no HEAD)."] }; }
+  const patchTerm = "query" in data.request ? patchSearchTerm(data.request.query) : undefined;
+  if (patchTerm && "query" in data.request) {
     try {
       const matches = new Set(await readPatchMatches(data.root, patchTerm, signal));
       signal.throwIfAborted();
@@ -87,6 +91,7 @@ async function run() {
   }
   const vectors = new Map<string, number[]>(); const notices: string[] = [];
   let queryVector: number[] | undefined;
+  let budget = indexOnly ? 128 : Infinity;
   if (data.config && docs.length) {
     let db: DatabaseSync | undefined;
     try {
@@ -96,6 +101,7 @@ async function run() {
       await lock(db);
       try {
         createCommitTables(db);
+        if (indexOnly) db.exec("CREATE TEMP TABLE pix_live_commit_ids (hash TEXT PRIMARY KEY)");
         await importLegacyCommitVectors(db, data.root, signal);
         db.exec("COMMIT");
       } catch (e) { db.exec("ROLLBACK"); throw e; }
@@ -106,7 +112,9 @@ async function run() {
           const saved = db.prepare(`SELECT value FROM ${COMMIT_META} WHERE key='identity'`).get()?.value;
           if (saved !== undefined && (typeof saved !== "string" || JSON.parse(saved)[0] !== 1)) throw new Error(SEMANTIC_NOTICE);
           const same = saved === identity;
+          if (saved !== undefined && !same) throw new Error(SEMANTIC_NOTICE);
           const batch = docs.slice(offset, offset + 16);
+          const purchased = new Map<string, number[]>();
           const missing = batch.filter(d => {
             const row = same ? db!.prepare(`SELECT vector FROM ${COMMIT_VECTORS} WHERE hash=?`).get(d.contentHash) : undefined;
             if (row) {
@@ -115,20 +123,33 @@ async function run() {
             }
             return true;
           });
-          // No reset until prerequisites AND a successful validated embedding exist.
-          const embedded = missing.length ? await embed(missing.map(d => (c.documentPrefix + d.commit.subject + "\n" + d.commit.author + "\n" + d.message).slice(0, 8192)), c) : [];
+          // Never destructively reinterpret purchased vectors under another identity.
+          const selected = missing.slice(0, budget);
+          const embedded = selected.length ? await embed(selected.map(d => (c.documentPrefix + d.commit.subject + "\n" + d.commit.author + "\n" + d.message).slice(0, 8192)), c) : [];
+          budget -= selected.length;
           signal.throwIfAborted();
-          if (!same) { db.exec(`DELETE FROM ${COMMIT_VECTORS}`); db.prepare(`INSERT OR REPLACE INTO ${COMMIT_META} VALUES ('identity',?)`).run(identity); }
-          for (let i = 0; i < missing.length; i++) {
-            const d = missing[i]!; const v = embedded[i]!; vectors.set(d.contentHash, v);
+          if (!same) db.prepare(`INSERT INTO ${COMMIT_META} VALUES ('identity',?)`).run(identity);
+          for (let i = 0; i < selected.length; i++) {
+            const d = selected[i]!; const v = embedded[i]!; purchased.set(d.contentHash, v);
             db.prepare(`INSERT OR REPLACE INTO ${COMMIT_VECTORS} VALUES (?,?)`).run(d.contentHash, JSON.stringify(v));
           }
           for (const d of batch) db.prepare(`INSERT INTO ${COMMIT_DOCUMENTS} VALUES (?,?,?,?) ON CONFLICT(hash) DO UPDATE SET content_hash=excluded.content_hash, metadata=excluded.metadata, message=excluded.message WHERE ${COMMIT_DOCUMENTS}.content_hash!=excluded.content_hash OR ${COMMIT_DOCUMENTS}.metadata!=excluded.metadata OR ${COMMIT_DOCUMENTS}.message!=excluded.message`).run(d.commit.hash, d.contentHash, JSON.stringify(d.commit), d.message);
+          if (indexOnly) for (const d of batch) db.prepare("INSERT OR IGNORE INTO pix_live_commit_ids VALUES (?)").run(d.commit.hash);
           db.exec("COMMIT");
+          for (const [hash, vector] of purchased) vectors.set(hash, vector);
         } catch (e) { db.exec("ROLLBACK"); throw e; }
         await delay(0, undefined, { signal });
       }
-      queryVector = (await embed([(c.queryPrefix + data.request.query).slice(0, 8192)], c, true))[0];
+      if (indexOnly && docs.length) {
+        await lock(db);
+        try {
+          if (!(await rpc("validate"))) throw new Error(SEMANTIC_NOTICE);
+          if (head !== await commitHead(data.root, signal)) throw new Error(SEMANTIC_NOTICE);
+          db.exec(`DELETE FROM ${COMMIT_DOCUMENTS} WHERE hash NOT IN (SELECT hash FROM pix_live_commit_ids)`);
+          signal.throwIfAborted(); db.exec("COMMIT");
+        } catch (error) { db.exec("ROLLBACK"); throw error; }
+      }
+      if ("query" in data.request) queryVector = (await embed([(c.queryPrefix + data.request.query).slice(0, 8192)], c, true))[0];
     } catch (e) {
       signal.throwIfAborted();
       notices.push(e instanceof Error && e.message === "Commit index busy; local BM25 results remain available." ? e.message : SEMANTIC_NOTICE);
@@ -139,6 +160,16 @@ async function run() {
     catch { signal.throwIfAborted(); queryVector = undefined; notices.push(SEMANTIC_NOTICE); }
   }
   signal.throwIfAborted();
+  if (indexOnly) {
+    try {
+      if (!(await rpc("validate"))) throw new Error(SEMANTIC_NOTICE);
+      if (head !== await commitHead(data.root, signal)) notices.push("Commit history changed; retry indexing this source");
+    } catch { signal.throwIfAborted(); notices.push(SEMANTIC_NOTICE); }
+    const indexed = docs.filter(doc => vectors.has(doc.contentHash)).length;
+    return { source: "commits", complete: notices.length === 0 && indexed === docs.length, indexed, total: docs.length,
+      ...(notices.length ? { message: notices[0] } : indexed < docs.length ? { message: "Indexing pass finished; continue to index remaining documents" } : {}) };
+  }
+  if (!("query" in data.request)) throw new Error("Invalid commit request");
   return { results: rankCommits(docs, data.request.query, data.request.limit, vectors, queryVector), notices };
 }
 run().then(value => port.postMessage({ type: "result", value }), () => port.postMessage({ type: "failed" })).finally(() => port.close());

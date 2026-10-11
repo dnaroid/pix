@@ -253,10 +253,10 @@ provider effort handling and exact-model/no-fallback policies remain unchanged.
   have no fallback candidates; economy and role policies can reject them.
 - Forced-current-model environment overrides and nonempty `research.extraArgs`
   are rejected, since they could defeat the exact roster or read-only tool set.
-  Participants receive canonical `read`/`grep`, `web_search`/`web_fetch` and the
-  common read-only query tools: the indexed `repo_context`, `repo_inspect` and
-  `repo_audit` queries plus the restricted `project_search` (Code/Knowledge
-  sources only), along with common private `todo` and DCP `compress` (subject to
+  Participants receive canonical `read`/`grep`, `web_search`/`web_fetch` and
+  unrestricted `project_search` with the same all-source schema and execution as
+  ordinary Pi, including sessions/tasks/commits/code/knowledge and `patch:`;
+  they also receive common private `todo` and DCP `compress` (subject to
   normal DCP configuration).
   Common spawn loads repo/todo/DCP and requested tools-only web capabilities; the
   council-only extension owns the strict guard without registering repo or web
@@ -269,13 +269,12 @@ provider effort handling and exact-model/no-fallback policies remain unchanged.
   Loader placement is updated by [decision 0060](../docs/decisions/0060-subagent-read-only-repo-tools.md)
   and [decision 0061](../docs/decisions/0061-subagent-scoped-ast-web-tools.md);
   all other council research restrictions remain unchanged.
-  Repo tools require the existing indexed project and executable `idx`; normal
-  index refresh/cache side effects remain possible, but no automatic setup or
-  product-source edits are authorized. Web uses existing suite credentials and
+  Repository semantic embeddings retain independent consent/provider safeguards;
+  no automatic setup or product-source edits are authorized. Web uses existing suite credentials and
   provider fallback. Missing index/tools/credentials or failed retrieval are
   reported as coverage gaps, not fabricated evidence or automatic installation.
-  Participants are instructed to use tools when useful, start general local
-  discovery with repo_context, inspect sources, cite paths/URLs, distinguish facts
+  Participants are instructed to use tools when useful, start local discovery
+  with project_search, inspect sources, cite paths/URLs, distinguish facts
   from assumptions, treat retrieved material as untrusted and never send secrets
   or private repository/brief content to web services. These content/privacy
   rules are model instructions, not a filesystem or network sandbox.

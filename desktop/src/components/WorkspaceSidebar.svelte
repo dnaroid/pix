@@ -15,6 +15,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { windowLayoutKey } from "../lib/window-layout-storage";
   import { onMount, tick } from "svelte";
+  import { createWorkspaceSearchIndexOwner } from "../lib/workspace-search-index-owner.svelte";
   import {
     attachmentFromFile,
     type Attachment,
@@ -61,7 +62,7 @@
   import { createSidebarProjectRetry } from "./sidebar-project-retry";
   import SidebarIndicatorMenu from "./SidebarIndicatorMenu.svelte";
   import RegistryPanel from "./RegistryPanel.svelte";
-  import IdxPanel from "./IdxPanel.svelte";
+  import SearchIndexPanel from "./SearchIndexPanel.svelte";
   import LspPanel from "./LspPanel.svelte";
   import type { AcpClient } from "../lib/acp-client";
   import GitPanel from "./GitPanel.svelte";
@@ -107,7 +108,7 @@
     git: "Source Control",
     registry: "Registry",
     scripts: "Launch Commands",
-    idx: "IDX",
+    search: "Search Indexes",
     lsp: "Language Servers",
     settings: "Settings",
   };
@@ -201,7 +202,6 @@
     onGitGenerateCommitMessage,
     onGitStageGenerateCommitPush,
     onGitReview,
-    onRefreshKnowledge,
   }: {
     workspace: string;
     lspClient: AcpClient | null;
@@ -297,7 +297,6 @@
     onGitGenerateCommitMessage: () => Promise<string | undefined>;
     onGitStageGenerateCommitPush?: () => Promise<boolean>;
     onGitReview: (path: string | undefined, scope: GitDiffScope) => void;
-    onRefreshKnowledge: () => void;
   } = $props();
 
   const ACTIVE_TAB_KEY = windowLayoutKey("workspaceSidebarTab");
@@ -309,6 +308,9 @@
   let projectRevealVersion = 0;
   let projectSwitcher = $state<{ close: () => void } | null>(null);
   let activeTab = $state<SidebarTab>("tasks");
+  const searchIndexOwner = createWorkspaceSearchIndexOwner({ workspace: () => workspace, client: () => lspClient });
+  const searchIndexes = $derived(searchIndexOwner.view);
+  const searchIndexController = $derived(searchIndexOwner.controller);
   const layoutController = createWorkspaceSidebarLayoutController({ activeTab: () => activeTab });
   const projectSettingsController = createWorkspaceSidebarProjectSettingsController({
     workspace: () => workspace,
@@ -363,7 +365,6 @@
   let indicatorService: SidebarIndicatorService | undefined;
   let indicatorServiceState = $state<SidebarIndicatorServiceState>({
     unseenScriptFailureIds: [],
-    unseenIdxFailureIds: [],
   });
   let projectPanelError = $state<string | null>(null);
   let settingsPanelError = $state<string | null>(null);
@@ -404,6 +405,7 @@
     gitCiSnapshot: gitCi.snapshot,
     registryBackgroundSync,
     settingsPanelError,
+    searchIndexes,
   });
   const indicators = $derived<SidebarIndicatorMap>(sidebarIndicators(indicatorInputs));
   const indicatorReasons = $derived(sidebarIndicatorReasons(indicatorInputs));
@@ -415,8 +417,6 @@
     reportHealth: (error) => { projectPanelError = error; },
   });
   const gitBusy = $derived(gitLoading || Boolean(gitActionId || gitLlmActionId) || gitWorkflow.resolveRunning);
-  const idxBusy = $derived(Boolean(indicatorServiceState.poll?.idx.runningIds.length)
-    || Boolean(indicatorServiceState.idxOperationHandoffPending));
   const indicatorActionEnabled = $derived({
     "project.retry": Boolean(workspace),
     "tasks.reload": !loading && !saving,
@@ -429,7 +429,6 @@
     "registry.refresh": registryReady && !registryLoading && !registryActionId,
     "registry.push-project-resources": registryReady && !registryLoading && !registryActionId
       && registrySnapshot?.configured !== false && !registrySnapshot?.projectIssue,
-    "idx.review": sessionReady && !idxBusy,
   });
   const indicatorActions = createWorkspaceSidebarIndicatorActions({
     workspace: () => workspace,
@@ -453,7 +452,6 @@
       "git.commit-push": () => { void onGitStageGenerateCommitPush?.(); },
       "registry.refresh": () => onRegistryRefresh(),
       "registry.push-project-resources": () => onRegistryAction({ action: "push-project-resources" }, "push-project-resources"),
-      "idx.review": () => onRefreshKnowledge(),
     },
   });
   const indicatorMenuController = indicatorActions.menu;
@@ -594,7 +592,7 @@
   });
 
   function isSidebarTab(value: string | null): value is SidebarTab {
-    return value === "project" || value === "tasks" || value === "git" || value === "registry" || value === "scripts" || value === "idx" || value === "lsp" || value === "settings";
+    return value === "project" || value === "tasks" || value === "git" || value === "registry" || value === "scripts" || value === "search" || value === "lsp" || value === "settings";
   }
 
   function setActiveTab(tab: SidebarTab): void {
@@ -1096,19 +1094,9 @@
         <div id="workspace-scripts-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Launch Commands">
           <PackageScriptsPanel bind:this={packageScriptsPanel} {workspace} afterWorkspaceSave={onWorkspaceSettingsSave} />
         </div>
-      {:else if activeTab === "idx"}
-        <div id="workspace-idx-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="IDX">
-          {#key workspace}
-            <IdxPanel
-              {workspace}
-              {onValidateProjectFile}
-              {onOpenProjectFile}
-              {sessionReady}
-              {onRefreshKnowledge}
-              onOverviewChange={(sourceWorkspace, next) => indicatorService?.setIdxOverview(sourceWorkspace, next)}
-              onOperationRunningChange={(sourceWorkspace, running) => indicatorService?.setIdxOperationRunning(sourceWorkspace, running)}
-            />
-          {/key}
+      {:else if activeTab === "search"}
+        <div id="workspace-search-index-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Search indexes">
+          {#key workspace}<SearchIndexPanel view={searchIndexes} controller={searchIndexController} connected={Boolean(lspClient)} onSettings={() => void openSettingsField("pi-tools-suite-search", "embedding-model")} />{/key}
         </div>
       {:else if activeTab === "lsp"}
         <div id="workspace-lsp-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Language Servers">

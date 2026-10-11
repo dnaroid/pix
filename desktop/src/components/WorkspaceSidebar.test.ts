@@ -45,7 +45,7 @@ describe("WorkspaceSidebar project sizing", () => {
     expect(sidebarSource).toContain('"git.commit-push": () => { void onGitStageGenerateCommitPush?.(); }');
   });
   it("does not reveal panels for work commands; inspection remains separate", () => {
-    const workActions = ["project.retry", "tasks.reload", "git.refresh", "git.fix-ci", "git.fetch", "git.push", "git.commit-push", "registry.refresh", "registry.push-project-resources", "idx.review"];
+    const workActions = ["project.retry", "tasks.reload", "git.refresh", "git.fix-ci", "git.fetch", "git.push", "git.commit-push", "registry.refresh", "registry.push-project-resources"];
     const handlers = sidebarSource.slice(sidebarSource.indexOf("handlers: {"), sidebarSource.indexOf("const indicatorMenuController"));
     for (const id of workActions) {
       expect(handlers).toContain(`"${id}":`);
@@ -71,7 +71,7 @@ describe("WorkspaceSidebar project sizing", () => {
     expect(layoutControllerSource).toContain("viewportWidth - ACTIVITY_BAR_WIDTH - MIN_MAIN_WORKSPACE_WIDTH");
     expect(layoutControllerSource).not.toContain("DEFAULT_MAX_WIDTH");
     expect(layoutControllerSource).not.toContain("SCRIPTS_MAX_WIDTH");
-    expect(layoutControllerSource).not.toContain("IDX_MAX_WIDTH");
+    expect(layoutControllerSource).toContain("SEARCH_MIN_WIDTH");
     expect(layoutControllerSource).not.toContain("sidebarMaxWidth");
   });
 

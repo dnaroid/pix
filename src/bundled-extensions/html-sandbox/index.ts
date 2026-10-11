@@ -8,7 +8,7 @@ import { advertiseHtmlSandbox, HTML_SANDBOX_GUIDE, HTML_SANDBOX_TOOL_DESCRIPTION
  */
 export default function htmlSandboxExtension(pi: ExtensionAPI): void {
 	pi.registerTool({
-		name: "pix_html_sandbox_guide",
+		name: "pix_html_guide",
 		label: "Pix HTML Sandbox guide",
 		description: HTML_SANDBOX_TOOL_DESCRIPTION,
 		parameters: Type.Object({}),

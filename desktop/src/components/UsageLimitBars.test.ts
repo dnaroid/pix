@@ -18,13 +18,13 @@ describe("UsageLimitBars", () => {
     expect(body).toContain("32%");
     expect(body).toContain("width: 62%");
     expect(body).toContain('class="absolute inset-y-0 right-0 bg-muted-foreground"');
-    expect(body).toContain("width: 32%");
+    expect(body).toContain("32%");
     expect(body).toContain("bg-muted-foreground");
     expect(body).toContain("bg-foreground");
     expect(body).toContain("remaining</span>");
     expect(body).toContain("Resets in 2h0m");
     expect(body.match(/data-quota-calendar/g)).toHaveLength(1);
-    expect(body.match(/data-weekly-remaining-fill/g)).toHaveLength(1);
+    expect(body.match(/data-weekly-remaining-fill/g)).toHaveLength(8);
     expect(body).not.toContain("Resets in 2d0h");
     expect(body).not.toContain("Cached");
   });

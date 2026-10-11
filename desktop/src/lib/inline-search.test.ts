@@ -37,7 +37,6 @@ describe("inline reuse of universal search", () => {
     const sessions = await queryInlineSearch("sessions", client, "/workspace", "interview", signal);
     expect(sessions.results[0]).toMatchObject({ kind: "sessions", sessionId: "1", boundaryMatch: true });
     expect(client.searchQuery).toHaveBeenLastCalledWith(expect.objectContaining({ types: ["sessions"], query: "interview" }), signal);
-    expect(settings.idxAvailable).toBe(false);
     expect(sessions.notices).toEqual([]);
   });
 

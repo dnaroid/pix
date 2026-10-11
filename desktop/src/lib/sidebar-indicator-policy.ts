@@ -1,4 +1,5 @@
 import { registryHasAttention } from "./registry";
+import { searchIndexIndicatorReasons } from "./search-index-indicators";
 import type {
   SidebarIndicator,
   SidebarIndicatorInputs,
@@ -101,36 +102,14 @@ export function sidebarIndicatorReasons(inputs: SidebarIndicatorInputs): Sidebar
       : undefined,
   );
 
-  const idxOverview = service.idxOverview;
-  indicators.idx = collectIndicators(
-    errorIndicator("idx.error", poll?.idx.error),
-    service.unseenIdxFailureIds.length > 0
-      ? { id: "idx.failed", tone: "error", reason: "An IDX maintenance operation failed" }
-      : undefined,
-    errorIndicator("idx.error", service.idxPollError),
-    idxOverview?.initialized && idxOverview.available === false
-      ? { id: "idx.unavailable", tone: "error", reason: "IDX is unavailable for this indexed project" }
-      : undefined,
-    (idxOverview?.errors.length ?? 0) > 0
-      ? { id: "idx.error", tone: "error", reason: idxOverview?.errors[0] ?? "IDX status check failed" }
-      : undefined,
-    idxOverview?.knowledgeDirty === true
-      ? { id: "idx.dirty", tone: "warning", reason: "Knowledge base requires review" }
-      : undefined,
-    idxOverview?.indexStale === true
-      ? { id: "idx.stale", tone: "warning", reason: "Index Git revision differs from HEAD" }
-      : undefined,
-    (poll?.idx.runningIds.length ?? 0) > 0
-      ? { id: "idx.running", tone: "info", reason: "IDX maintenance is running" }
-      : undefined,
-  );
-
   indicators.settings = collectIndicators(
     errorIndicator("settings.error", inputs.settingsPanelError),
     poll?.settings.errors[0]
       ? { id: "settings.error", tone: "error", reason: poll.settings.errors[0] }
       : undefined,
   );
+
+  indicators.search = searchIndexIndicatorReasons(inputs.searchIndexes);
 
   return Object.fromEntries(Object.entries(indicators).filter(([, value]) => value.length > 0));
 }

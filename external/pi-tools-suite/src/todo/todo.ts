@@ -84,11 +84,6 @@ interface TodoToolHooks {
 		ctx: ExtensionContext,
 		info: { action: TaskAction; params: TaskMutationParams },
 	) => TaskMutationParams | Promise<TaskMutationParams>;
-	resultReminder?: (
-		state: ReturnType<typeof getState>,
-		ctx: ExtensionContext,
-		info: { action: TaskAction; params: TaskMutationParams },
-	) => string | undefined | Promise<string | undefined>;
 	afterCommit?: (
 		state: ReturnType<typeof getState>,
 		ctx: ExtensionContext,
@@ -453,20 +448,7 @@ export function registerTodoTool(pi: ExtensionAPI, hooks: TodoToolRegistrationOp
 				params: preparedParams,
 				committedState: autoClear.state,
 			});
-			let toolResult = buildToolResult(params.action, preparedParams, autoClear.state, result.op);
-			const resultReminder = await hooks.resultReminder?.(result.state, _ctx as ExtensionContext, {
-				action: params.action,
-				params: preparedParams,
-			});
-			if (resultReminder?.trim()) {
-				toolResult = {
-					...toolResult,
-					content: [{
-						type: "text" as const,
-						text: `${toolResult.content[0]?.text ?? ""}\n\n${resultReminder.trim()}`.trim(),
-					}],
-				};
-			}
+			const toolResult = buildToolResult(params.action, preparedParams, autoClear.state, result.op);
 			if (!autoClear.cleared) return toolResult;
 			return {
 				...toolResult,

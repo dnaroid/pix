@@ -134,6 +134,17 @@ impl BackendRuntime {
         self.command_for(entry)
     }
 
+    /// Shared headless engine: no ACP process or chat session is started.
+    pub(crate) fn native_search_command(&self) -> Result<Command, String> {
+        let suite = self
+            .extensions
+            .iter()
+            .find(|(key, _)| *key == "PIX_ACP_TOOLS_SUITE_EXTENSION")
+            .and_then(|(_, entry)| entry.parent())
+            .ok_or("Pix tools suite entry is unavailable")?;
+        self.script_command(&suite.join("src/project-search/native-cli.mjs"))
+    }
+
     #[cfg(feature = "bundled-runtime")]
     pub fn verification_command(&self) -> Result<Command, String> {
         let root = self
@@ -161,9 +172,6 @@ impl BackendRuntime {
             command.env_remove("PIX_ACP_PI_ENTRY");
             command.env_remove("PIX_ACP_PI_BIN");
             let mut paths = Vec::new();
-            if let Some(home) = home_dir_from_environment() {
-                paths.push(home.join(".pi/pix-desktop-tools/node_modules/.bin"));
-            }
             paths.push(root.join("runtime"));
             paths.push(root.join("app/node_modules/.bin"));
             paths.extend(env::split_paths(&env::var_os("PATH").unwrap_or_default()));
@@ -184,14 +192,6 @@ impl BackendRuntime {
         }
         Ok(command)
     }
-}
-
-fn home_dir_from_environment() -> Option<PathBuf> {
-    #[cfg(windows)]
-    let value = env::var_os("USERPROFILE").or_else(|| env::var_os("HOME"));
-    #[cfg(not(windows))]
-    let value = env::var_os("HOME");
-    value.map(PathBuf::from)
 }
 
 fn require_file(path: &Path) -> Result<(), String> {
@@ -274,6 +274,24 @@ mod tests {
         for (_, path) in runtime.extensions {
             assert!(path.starts_with(&fixture.0));
         }
+    }
+
+    #[test]
+    fn native_search_uses_relocated_suite_without_starting_acp() {
+        let fixture = Fixture::new();
+        fixture.payload();
+        let runtime = BackendRuntime::bundled(&fixture.0).unwrap();
+        assert!(runtime.native_search_command().is_err());
+        fixture.file("app/external/pi-tools-suite/src/project-search/native-cli.mjs");
+        let command = runtime.native_search_command().unwrap();
+        assert!(Path::new(command.get_program()).starts_with(&fixture.0));
+        assert_eq!(
+            command.get_args().next().unwrap(),
+            fixture
+                .0
+                .join("app/external/pi-tools-suite/src/project-search/native-cli.mjs")
+        );
+        assert!(!format!("{command:?}").contains("acp/dist/main.js"));
     }
 
     #[cfg(feature = "bundled-runtime")]

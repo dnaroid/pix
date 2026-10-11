@@ -1,31 +1,40 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Database } from "bun:sqlite";
 import { DefaultResourceLoader, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { installFakeIdxOnPath } from "./support/fake-idx.js";
 import { removeDirsWithRetry } from "./support/fs-retry.js";
 import projectSearchExtension from "../src/project-search/index.js";
 import {
-  formatProjectSearch, indexSearchArgs, parseGitHistory, parseIdxHits, parseProjectSearchParams, readSessionBoundary,
+  formatProjectSearch, parseGitHistory, parseProjectSearchParams, readSessionBoundary,
   searchProject, type ProjectSearchServices, type SessionRecord,
 } from "../src/project-search/engine.js";
 
 const directories: string[] = [];
-afterEach(() => removeDirsWithRetry(directories));
+const originalEnvironment = { HOME: process.env.HOME, PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR, OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY };
+beforeEach(() => {
+  process.env.HOME = fixture();
+  process.env.PI_CODING_AGENT_DIR = path.join(process.env.HOME, ".pi", "agent");
+  delete process.env.OPENROUTER_API_KEY;
+});
+afterEach(async () => {
+  for (const [key, value] of Object.entries(originalEnvironment)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  await removeDirsWithRetry(directories);
+});
 const fixture = () => {
   const root = mkdtempSync(path.join(tmpdir(), "pix-project-search-"));
   directories.push(root);
   return root;
 };
 const signal = () => new AbortController().signal;
-const disabledIdx: ProjectSearchServices = {
-  exec: async () => { throw new Error("IDX must not run"); },
-  indexed: () => false,
+const services: ProjectSearchServices = {
   listSessions: async () => [],
 };
 function writeSearchTasks(root: string, records: Array<Record<string, unknown>>): void {
@@ -87,7 +96,7 @@ describe("project_search shared store lookup", () => {
       { query: "x", chunkTypes: [] }, { query: "x", includeContent: "true" },
       { query: "x", dedupeFile: "true" }, { query: "x", includeTests: true, excludeTests: true },
     ]) expect(parseProjectSearchParams(invalid).error).toContain("Invalid project_search request");
-    for (const indexMode of ["hybrid", "semantic", "lexical", "symbol"]) {
+    for (const indexMode of ["hybrid", "semantic", "lexical"]) {
       expect(parseProjectSearchParams({ query: "test", indexMode }).params?.indexMode).toBe(indexMode);
     }
     expect(parseProjectSearchParams({ query: "test", maxFiles: 50 }).params?.maxFiles).toBe(50);
@@ -108,7 +117,7 @@ describe("project_search shared store lookup", () => {
     ];
     let calls = 0;
     const result = await searchProject(root, { query: "semaphore race", sources: ["sessions", "tasks"] }, {
-      ...disabledIdx,
+      ...services,
       listSessions: async () => sessions,
       readSession: async pathname => {
         calls++;
@@ -149,7 +158,7 @@ describe("project_search shared store lookup", () => {
       ["smart-model", ["CHILD-2"]],
       ["эпик", ["EPIC-1"]],
     ] as const) {
-      const result = await searchProject(root, { query, sources: ["tasks"] }, disabledIdx);
+      const result = await searchProject(root, { query, sources: ["tasks"] }, services);
       expect(result.notices).toEqual([]);
       expect(result.hits.map(hit => hit.taskId).sort()).toEqual([...expected].sort());
     }
@@ -165,10 +174,10 @@ describe("project_search shared store lookup", () => {
     const response = await searchProject(sessionRoot, {
       query: "alternate project", sources: ["tasks"],
       projectPath: path.relative(sessionRoot, other),
-    }, disabledIdx);
+    }, services);
     expect(response.projectRoot).toBe(await realpath(other));
     expect(response.hits.map(hit => hit.id)).toEqual(["tasks:NEW"]);
-    const same = await searchProject(sessionRoot, { query: "existing client", sources: ["tasks"] }, disabledIdx);
+    const same = await searchProject(sessionRoot, { query: "existing client", sources: ["tasks"] }, services);
     expect(same.projectRoot).toBe(await realpath(sessionRoot));
     expect(same.hits.map(hit => hit.id)).toEqual(["tasks:OLD"]);
   });
@@ -180,95 +189,50 @@ describe("project_search shared store lookup", () => {
     const { symlinkSync } = await import("node:fs");
     symlinkSync(path.join(external, ".pi"), path.join(root, ".pi"));
     const response = await searchProject(root, { query: "secret", sources: ["tasks", "sessions"] },
-      { ...disabledIdx, listSessions: async () => [] });
+      { ...services, listSessions: async () => [] });
     expect(response.hits).toEqual([]);
   });
 
-  test("isolates missing IDX from local sources without automatically creating an index", async () => {
+  test("native repository search coexists with local history without external setup", async () => {
     const root = fixture();
     mkdirSync(path.join(root, ".pi"));
     writeSearchTasks(root, [{ id: "ID-1", title: "Fix signal timeout", status: "done", type: "bug", priority: "high" }]);
-    const result = await searchProject(root, { query: "signal timeout", sources: ["tasks", "code", "knowledge"] }, disabledIdx);
+    const result = await searchProject(root, { query: "signal timeout", sources: ["tasks", "code", "knowledge"] }, services);
     expect(result.hits.map(hit => hit.id)).toEqual(["tasks:ID-1"]);
-    expect(result.notices.join(" ")).toContain("No initialization was performed");
+    expect(result.notices.join(" ")).not.toContain("unavailable");
     expect(await import("node:fs").then(fs => fs.existsSync(path.join(root, ".indexer-cli")))).toBe(false);
   });
 
-  test("reuses IDX for code/docs, with explicit lexical mode and navigable file ranges", async () => {
+  test("native lexical retrieval returns both repository domains without external tools", async () => {
     const root = fixture();
-    const calls: string[][] = [];
-    const code = "src/main.ts:12-20 (score: 0.94, rank=1, domain=code)\n  kind=function\nContent: 2 lines\nreturn abort();\n// no tool run\n";
-    const docs = "docs/decision.md:3-7 (score: 0.83, rank=1, domain=document)\nContent: 1 lines\nWe migrated from polling\n";
-    const result = await searchProject(root, { query: "abort", sources: ["code", "knowledge"], indexMode: "lexical" }, {
-      ...disabledIdx,
-      indexed: () => true,
-      exec: async (command, args, options) => {
-        expect(command).toBe("idx");
-        expect(options.timeout).toBe(60_000);
-        calls.push(args);
-        return { stdout: args.includes("code") ? code : docs, stderr: "", code: 0 };
-      },
-    });
-    expect(calls).toHaveLength(2);
-    expect(calls.every(args => args.includes("--domain") && args.includes("lexical")
-      && !args.includes("--include-content") && args[0] === "search")).toBe(true);
-    expect(result.hits.map(hit => hit.id)).toEqual(["code:src/main.ts:12-20", "knowledge:docs/decision.md:3-7"]);
-    expect(result.hits[0]).toMatchObject({ path: "src/main.ts", startLine: 12, endLine: 20 });
-    expect(result.hits[1]).toMatchObject({ path: "docs/decision.md", startLine: 3, endLine: 7 });
-    expect(parseIdxHits("../../../outside.ts:1-2 (score: 0.9, rank=1, domain=code)", "code")).toEqual([]);
-    expect(parseIdxHits("/private/file.ts:1-2 (score: 0.9, rank=1, domain=code)", "code")).toEqual([]);
-    expect(parseIdxHits("src/legit.ts:1-2 (score: 0.9, rank=1, domain=document)", "code")).toEqual([]);
-    expect(parseIdxHits(
-      "src/real.ts:10-11 (score: 0.9, rank=1, domain=code)\nContent: 2 lines\n"+
-      "src/fake.ts:1-1 (score: 1.00, rank=1, domain=code)\nbody text\n",
-      "code",
-    ).map(hit => hit.path)).toEqual(["src/real.ts"], "header-shaped IDX body text must not create additional hits");
+    writeFileSync(path.join(root, "worker.ts"), "export const uniqueSearchNeedle = true;\n");
+    writeFileSync(path.join(root, "guide.md"), "# Unique search\nuniqueSearchNeedle reference\n");
+    const result = await searchProject(root, { query: "uniqueSearchNeedle", sources: ["code", "knowledge"], indexMode: "lexical", includeContent: true }, {});
+    expect(result.hits.map(hit => hit.kind).sort()).toEqual(["code", "knowledge"]);
+    expect(result.hits).toContainEqual(expect.objectContaining({ path: "worker.ts", startLine: 1 }));
+    expect(existsSync(path.join(root, ".indexer-cli"))).toBe(false);
+    expect(existsSync(path.join(root, ".pi/search/file-vectors.sqlite"))).toBe(false);
   });
 
-  test("migrates all focused IDX search filters into strongly typed project_search arguments", async () => {
-    const root = fixture();
-    const calls: string[][] = [];
-    const result = await searchProject(root, {
-      query: "createSession", sources: ["code"], indexMode: "symbol",
-      pathPrefix: "src/components", maxFiles: 7,
-      chunkTypes: ["api", "impl"], minScore: 0.4,
-      includeContent: true, includeImports: true, dedupeFile: true, dedupeSymbol: true,
-      cluster: true, excludeTests: true,
-    }, {
-      ...disabledIdx, indexed: () => true,
-      exec: async (command, argv) => {
-        expect(command).toBe("idx");
-        calls.push(argv);
-        return { stdout: "src/components/Session.ts:8-13 (score: 0.92, rank=symbol, domain=code)\nContent: 1 lines\nexport const createSession = () => {}\n",
-          stderr: "", code: 0 };
-      },
-    });
-    expect(calls).toEqual([[
-      "search", "createSession", "--domain", "code", "--mode", "symbol", "--max-files", "7",
-      "--path-prefix", "src/components", "--chunk-types", "api,impl", "--min-score", "0.4",
-      "--include-content", "--include-imports", "--dedupe-file", "--dedupe-symbol", "--cluster", "--exclude-tests",
-    ]]);
-    expect(result.hits).toMatchObject([{ id: "code:src/components/Session.ts:8-13",
-      path: "src/components/Session.ts", startLine: 8, endLine: 13 }]);
-    expect(indexSearchArgs("abc", "knowledge", { indexMode: "semantic", includeTests: true }))
-      .toEqual(["search", "abc", "--domain", "document", "--mode", "semantic", "--max-files", "3", "--include-tests"]);
-    expect(indexSearchArgs("abc", "code", { includeContent: true }))
-      .toEqual(["search", "abc", "--domain", "code", "--mode", "hybrid", "--max-files", "1", "--include-content"]);
+  test("retired backend and structural filters are rejected rather than ignored", () => {
+    for (const option of [{ indexBackend: "idx" }, { indexMode: "symbol" }, { chunkTypes: ["api"] },
+      { minScore: 0.2 }, { includeImports: true }, { dedupeSymbol: true }, { cluster: true }]) {
+      expect(parseProjectSearchParams({ query: "needle", ...option }).error).toBeDefined();
+    }
   });
 
   test("one failed source does not hide successful sources or leak provider diagnostics", async () => {
     const root = fixture();
     const result = await searchProject(root, { query: "test", sources: ["sessions", "code"] }, {
-      ...disabledIdx,
-      indexed: () => true,
+      ...services,
       listSessions: async () => [{
         id: "s", cwd: root, path: "/sessions/s.jsonl", firstMessage: "test",
       }],
       readSession: async () => ({ firstText: "test message", finalText: "test reply" }),
-      exec: async () => { throw new Error("Bearer SECRET-CREDENTIAL provider debug"); },
+      native: async () => { throw new Error("Bearer SECRET-CREDENTIAL provider debug"); },
     });
     expect(result.hits[0]?.id).toBe("sessions:s");
-    expect(result.notices.join(" ")).toContain("IDX query unavailable");
+    expect(result.notices.join(" ")).toContain("Native Code/Knowledge unavailable");
     expect(JSON.stringify(result)).not.toContain("SECRET-CREDENTIAL");
   });
 
@@ -283,7 +247,7 @@ describe("project_search shared store lookup", () => {
     }) as typeof setTimeout);
     try {
       const result = await searchProject(root, { query: "unused", sources: ["sessions"] }, {
-        ...disabledIdx,
+        ...services,
         listSessions: async () => { expire(); return new Promise(() => {}); },
       });
       expect(result.notices).toContain("Some sources exceeded the 60-second search deadline.");
@@ -299,7 +263,7 @@ describe("project_search shared store lookup", () => {
     const ready = new Promise<void>(resolve => { entered = resolve; });
     const owner = new AbortController();
     const pending = searchProject(root, { query: "unused", sources: ["sessions"] }, {
-      ...disabledIdx, listSessions: async () => { entered(); return new Promise(() => {}); },
+      ...services, listSessions: async () => { entered(); return new Promise(() => {}); },
     }, owner.signal);
     await ready;
     owner.abort();
@@ -319,12 +283,12 @@ describe("project_search shared store lookup", () => {
     writeFileSync(path.join(root, "src", "worker_abort.ts"), "const worker = 1;\nconst ABORT_HOOK_SENTINEL = 1;\n");
     git("add", "src/worker_abort.ts");
     git("commit", "-qm", "Neutral follow-up");
-    const byPath = await searchProject(root, { query: "worker_abort", sources: ["commits"], limit: 2 }, disabledIdx);
+    const byPath = await searchProject(root, { query: "worker_abort", sources: ["commits"], limit: 2 }, services);
     expect(byPath.hits).toHaveLength(2);
     expect(byPath.hits.every(hit => hit.changedPaths?.includes("src/worker_abort.ts"))).toBe(true);
     expect(byPath.hits[0]?.hash).toMatch(/^[a-f0-9]{40}$/u);
     expect(byPath.hits[0]?.snippet).not.toContain("ABORT_HOOK_SENTINEL");
-    const patch = await searchProject(root, { query: "patch:ABORT_HOOK_SENTINEL", sources: ["commits", "tasks"] }, disabledIdx);
+    const patch = await searchProject(root, { query: "patch:ABORT_HOOK_SENTINEL", sources: ["commits", "tasks"] }, services);
     expect(patch.sources).toEqual(["commits"]);
     expect(patch.hits).toHaveLength(1);
     expect(patch.hits[0]?.hash).toBe(git("rev-parse", "HEAD"));
@@ -339,7 +303,7 @@ describe("project_search shared store lookup", () => {
       firstMessage: `First question number ${i}`, name: `Session ${i}`,
     }));
     const result = await searchProject(root, { query: "uniquelate999", sources: ["sessions"] }, {
-      ...disabledIdx,
+      ...services,
       listSessions: async () => sessions,
       readSession: async filename => ({ firstText: filename.endsWith("/999.jsonl") ? "uniquelate999" : "ordinary", finalText: "" }),
     });
@@ -357,7 +321,7 @@ describe("project_search shared store lookup", () => {
       ].join("\0") + "\0";
     }).join("");
     const result = await searchProject(root, { query: "UniqueHistoricalMark", sources: ["commits"] }, {
-      ...disabledIdx,
+      ...services,
       git: async (_cwd, argv) => {
         expect(argv).toContain("--max-count=5000");
         expect(argv).not.toContain("--max-count=1000");
@@ -376,11 +340,14 @@ describe("project_search registration in Pix Desktop and TUI", () => {
     mkdirSync(path.join(root, ".pi"));
     writeSearchTasks(root, [{ id: "T-1", title: "Fix scheduler", type: "bug", status: "done", priority: "high" }]);
     const registered: Array<{ name: string; execute: Function; promptSnippet: string; parameters: Record<string, unknown> }> = [];
+    const events: string[] = [];
     projectSearchExtension({
       registerTool: (tool: typeof registered[number]) => registered.push(tool),
-      exec: async () => { throw new Error("Remote IDX must not be used for tasks-only search"); },
+      registerCommand: () => {},
+      on: (event: string) => { events.push(event); },
     } as never);
     expect(registered.map(t => t.name)).toEqual(["project_search"]);
+    expect(events).toEqual(["session_start", "session_shutdown"]);
     expect(registered[0]?.promptSnippet).toContain("No second LLM");
     const ok = await registered[0]!.execute("1", { query: "scheduler", sources: ["tasks"] },
       signal(), undefined, { cwd: root });
@@ -392,23 +359,14 @@ describe("project_search registration in Pix Desktop and TUI", () => {
     expect(invalid.details.valid).toBe(false);
   });
 
-  test("the actual Pi SDK loads project_search and the retained repo tools without a repo_search alias", async () => {
+  test("the actual Pi SDK loads only project_search without external index setup", async () => {
     const root = fixture();
     const lookupPath = fileURLToPath(new URL("../src/project-search/index.ts", import.meta.url));
-    const discoveryPath = fileURLToPath(new URL("../src/repo-discovery/index.ts", import.meta.url));
-    // Repo tools register only when the registering process runs inside an
-    // indexed project with idx on PATH; the path-based SDK loader passes no
-    // extension options, so that gate reads process.cwd(). Seed both
-    // conditions hermetically instead of relying on developer-machine state.
-    const gateMarker = path.join(process.cwd(), ".indexer-cli");
-    const gateMarkerExisted = existsSync(gateMarker);
-    mkdirSync(gateMarker, { recursive: true });
-    const restorePath = installFakeIdxOnPath(root);
     const loader = new DefaultResourceLoader({
       cwd: root, agentDir: path.join(root, "agent"),
       settingsManager: SettingsManager.inMemory({ enableInstallTelemetry: false }),
       noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true,
-      additionalExtensionPaths: [lookupPath, discoveryPath],
+      additionalExtensionPaths: [lookupPath],
     });
     try {
       await loader.reload();
@@ -416,18 +374,15 @@ describe("project_search registration in Pix Desktop and TUI", () => {
       expect(loaded.errors).toEqual([]);
       const toolNames = loaded.extensions.flatMap(extension => [...extension.tools.keys()]);
       expect(toolNames).toContain("project_search");
-      expect(toolNames).toContain("repo_context");
-      expect(toolNames).toContain("repo_inspect");
+      for (const name of ["repo_context", "repo_inspect", "repo_audit"]) expect(toolNames).not.toContain(name);
       expect(toolNames.filter(name => name === "project_search")).toHaveLength(1);
       expect(toolNames).not.toContain("repo_search");
       const tool = loaded.extensions[0]?.tools.get("project_search");
       const parameters = tool?.definition.parameters as unknown as { properties: Record<string, { enum?: string[]; maximum?: number }> };
-      expect(parameters.properties.indexMode.enum).toEqual(["hybrid", "semantic", "lexical", "symbol"]);
+      expect(parameters.properties.indexMode.enum).toEqual(["hybrid", "semantic", "lexical"]);
       expect(parameters.properties.maxFiles.maximum).toBe(50);
     } finally {
       loader.getExtensions().runtime.invalidate();
-      restorePath();
-      if (!gateMarkerExisted) rmSync(gateMarker, { recursive: true, force: true });
     }
   });
 });

@@ -15,13 +15,14 @@
   import { SearchDialogController, emptySearchDialogState, searchStatusLabel } from "../lib/search-dialog-controller";
   import { SETTINGS_SEARCH_CATALOG } from "../lib/settings-search-catalog";
   import type { AcpClient } from "../lib/acp-client";
-  import type { IdxOverview, IdxCommandResult } from "../lib/idx";
+  import { queryNativeRepository } from "../lib/native-repository-search";
   import { parseTaskDocument } from "../lib/project-tasks";
   import type { GitHistoryEntry } from "../lib/git-workflow";
   import type { SearchDialogMemory } from "../lib/search-dialog-memory";
   import { SearchIntentController } from "../lib/search-intent-controller";
   import { linkRagCitations, ragRequest, retrieveRagHits } from "../lib/search-rag";
   import MarkdownText from "./MarkdownText.svelte";
+  import NativeRepositorySemanticConsent from "./NativeRepositorySemanticConsent.svelte";
   import type { SearchSources, UnifiedSearchResult } from "../lib/universal-search";
 
   let { workspace, client, memory, onSelect, onPreferences, onClose }: {
@@ -107,9 +108,8 @@
     const restored = untrack(() => requestMemory.restore(requestWorkspace, requestClient));
     let latestState = restored.view;
     const searchSources: SearchSources = {
+        repository: (workspace, query, signal) => queryNativeRepository(invoke, workspace, query, signal),
         local: requestClient ? (request, signal) => requestClient.searchQuery(request, signal) : undefined,
-        overview: workspace => invoke<IdxOverview>("idx_overview", { workspace }),
-        index: (workspace, query) => invoke<IdxCommandResult>("idx_query", { request: { workspace, query } }),
         tasks: async workspace => parseTaskDocument(await invoke<unknown>("read_project_tasks", { workspace })),
         taskAttachmentNames: workspace => invoke<Record<string, string[]>>("read_project_task_attachment_names", { workspace }),
         ...(requestClient ? { taskSemantic: (cwd: string, query: string, signal: AbortSignal) =>
@@ -279,6 +279,12 @@
     mode = next;
     invalidate();
   }
+  function repositoryConsentChanged() {
+    // Re-submit through the existing controller so its AbortSignal and generation fence
+    // prevent results produced under the previous consent identity from being published.
+    if (view.submitted && query.trim() && mode !== "rag") void requests?.submit(query, types);
+    else requests?.invalidate();
+  }
   async function choose(hit: SearchHit) {
     if (navigating) return;
     navigating = true;
@@ -445,12 +451,13 @@
           <p>RAG reuses the selected project search sources, retrieves bounded source excerpts and sends the question and those excerpts to your configured RAG model provider. This may incur charges and share code, documentation and session excerpts with that provider. Results have navigable source references, but model-generated claims still require verification.</p>
           {#if types.includes("commits")}<p>Commits: BM25 + optional semantic search · all ancestors of current HEAD · changed file paths</p>
             <p>Use <code>patch:sessionWorker</code> to search changed Git lines on demand (literal text, read-only, limited to 50 matches / 8 seconds). Patch text is never indexed or sent to an embedding provider.</p>
-            <p>The saved IDX provider may receive commit messages and queries. The first search may index the full HEAD history.</p>{/if}
+            <p>Optional semantic commit search may send commit messages and search queries to the configured provider. The first search may index the full HEAD history.</p>{/if}
           <p>{view.statusError ?? (status ? searchStatusLabel(status) : client ? 'Search status: loading…' : 'Session search: backend disconnected')}</p>
           {#if status?.error}<p>{status.error}</p>{/if}
           {#if status?.warning}<p>{status.warning}</p>{/if}
-          {#if types.includes("sessions")}<p>Session excerpts: first user message and last completed assistant reply on the current branch. Indexed locally (FTS5), never sent to an embedding provider. Session names have a separate semantic opt-in.</p>{/if}
-          <p>Local BM25 · {status?.enabled && status.keyAvailable ? 'semantic settings enabled' : 'semantic settings are opt-in'} · IDX hybrid uses the project provider and may refresh the index</p>
+          {#if types.includes("sessions")}<p>Session excerpts: first user message and last completed assistant reply on the current branch. Indexed locally (FTS5), never sent to an embedding provider. A valid global embedding configuration also applies to semantic session-title search.</p>{/if}
+          <p>Local Code/Knowledge FTS5 · Native semantic provider configuration is shown above; ACP history search status is {status?.enabled && status.keyAvailable ? "active" : "inactive"} · no external index fallback</p>
+          <NativeRepositorySemanticConsent {workspace} onSettings={onPreferences} onChanged={repositoryConsentChanged} />
           {#if voiceSupported}<p>Voice input sends microphone audio to Deepgram. It fills the query; press Search or Enter to search.</p>{/if}
           </div>
         </div>

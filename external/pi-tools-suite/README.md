@@ -16,23 +16,23 @@ This package keeps shared Pi tools as ordinary source folders under `src/` and r
 - `src/credential-firewall` — opt-in secret firewall for high-confidence outbound/session credential redaction; disabled by default
 - `src/ast-grep` — `ast_grep` / `ast_apply`
 - `src/brainstorm` — `/brainstorm [--mode auto|brainstorm|audit] <topic>` and the model-only `brainstorm` tool: five-round brainstorming or evidence-based audit with reviewed parent synthesis. Preserves the protocol under `.pi/brainstorms/`, without starting implementation. Desktop uses persistent native participant sessions; TUI/legacy runs require async-subagents and the research role. See [the council contract](../../specs/brainstorm.md).
-- `src/async-subagents` — `subagents` tool and sub-agent slash commands, including oh-my-openagent-style `/ultrawork` (`/ulw`) and `/hyperplan` orchestration prompts; agent roles are Markdown files under `src/async-subagents/agents/*.md` plus project `.pi/agents/*.md`, and each role owns its ordered model candidate list (or selects from the suite-level `frontierModels` list) and optional parent-vendor policy; includes a cross-vendor `oracle` profile for strong second opinions and explicitly requested read-only `delivery-review` readiness assessments; enforces a 30-minute per-agent execution timeout, project-wide concurrency queueing, optional per-agent retry/backoff, and `result.json` structured metadata/chaining fields next to raw `result.md`; stores project-local run files and a registry under `.pi/subagents/` so result/status collection can recover after compaction or reload while the main session remains alive; clean Pi TUI sessions additionally get a live native widget for queued/running/retrying agents, while Pix keeps its renderer-owned presentation
+- `src/async-subagents` — `subagents` tool and sub-agent slash commands, including oh-my-openagent-style `/ultrawork` (`/ulw`) and `/hyperplan` orchestration prompts; roles are Markdown files under `src/async-subagents/agents/*.md` plus project `.pi/agents/*.md`; parent implementation is default, with handoffs only for explicit user delegation, an implementation capability gap, or sufficiently large prescribed mechanical work whose deterministic checks and expected net savings justify overhead; includes a cross-vendor `oracle` profile for bounded second opinions and complex architectural review; enforces a 30-minute per-agent execution timeout, project-wide concurrency queueing, optional per-agent retry/backoff, and `result.json` structured metadata/chaining fields next to raw `result.md`; stores project-local run files and a registry under `.pi/subagents/` so result/status collection can recover after compaction or reload while the main session remains alive; clean Pi TUI sessions additionally get a live native widget for queued/running/retrying agents, while Pix keeps its renderer-owned presentation
 - `src/lsp` — shared LSP diagnostics hook/library that enriches mutating tool results with diagnostics and shuts down language servers on session shutdown
 - `src/comment-checker` — AI-slop comment guard that listens to the `tool_result` event for `write` / `edit` / `apply_patch` mutations, extracts net-new code comment lines, classifies them (filler phrasing, restating code, decorative separators, generic paraphrasing, or — under aggressive strictness — any non-valuable comment), and appends a short nudge to the tool result so the agent removes unnecessary comments on its next turn; TODO/FIXME, license headers, docstrings, pragmas, linter directives, shebangs, and decorators are never flagged; language-agnostic across `//` / `/* */` / `#` / `--` / `<!-- -->` / triple-quote comment styles; per-session deduplication (at most one nudge per 30 s) prevents fix/remark loops; configured via the `commentChecker` section (`enabled`, `strictness`: `conservative` | `balanced` | `aggressive`, default `balanced`) or `PI_COMMENT_CHECKER_ENABLED` / `PI_COMMENT_CHECKER_STRICTNESS`
 - `src/session` — one `session` tool for naming and bounded raw-history recovery through `action: name | overview | read | search | recovery`; no old tool aliases
 - `src/truncation-metadata-normalizer` — default-on metadata cleanup for SDK-truncated `Read` / shell / `ast_grep` results; removes only a proven duplicate `details.truncation.content` copy while preserving visible content and structural truncation metadata; can be disabled through the normal module config
-- `src/repo-discovery` — `/idx-init`, `/idx-update`, and idx-backed `repo_context` / `repo_inspect` / `repo_audit`; `repo_inspect` selects architecture, structure, AST, symbol explanation or dependency views with typed options. Repo tools and repo-aware mutation guidance register only when the launch project has `.indexer-cli` **and** an executable `idx` is available on `PATH`.
-- `src/project-search` — always-registered `project_search`: authoritative
+- `src/repo-discovery/subagent.ts` — internal child facade for native project search, not a catalog module or command registrar.
+- `src/project-search` — always-registered `project_search`, with the same full schema and execution for ordinary Pi and every async/provider/council child: authoritative
   project stores are read-only; explicitly opted-in semantic searches can
   incrementally write the project-owned search-vector cache.
   Searches saved Sessions (first user/last completed assistant on the active
   branch), Tasks, HEAD-reachable commits and changed paths, and Code/Knowledge
-  via the existing IDX index when available. `patch:<literal>` searches Git
+  via the native backend. `patch:<literal>` searches Git
   changed lines only on demand. Available in both Pix Desktop and TUI without
   a second LLM, another persistent index or implicit setup. Hits carry bounded
   snippets plus source identities (file/line, commit, session path or task ID).
-  `indexMode: "lexical"` avoids IDX embedding calls; hybrid may contact the
-  project's saved embedding provider.
+  `indexMode: "lexical"` avoids embedding calls; repository semantic retrieval
+  is authorized by `search.embedding` in the shared global `~/.config/pi/pi-tools-suite.jsonc` config.
 
 - `src/project-tasks` — default-enabled `project_tasks` reads and edits saved
   cwd `.pi/tasks.sqlite` tasks (`list`, `get`, `update`, `create`),
@@ -44,9 +44,11 @@ This package keeps shared Pi tools as ordinary source folders under `src/` and r
   No legacy JSONC/overlay task import. See
   [contract](../../specs/project-tasks-agent-tool.md).
 
-The ordered module catalog places `project-search` immediately after
-`repo-discovery`. Unlike IDX-gated `repo_*` tools, `project_search`
-is available for local sources even when IDX is not configured.
+The ordered module catalog registers `project-search` without a repository-state gate.
+Children suppress suite
+setup commands and parent orchestration guidance only; they receive no restricted
+search facade. Repository embeddings use the shared global configuration and
+saved-provider safeguards.
 - `src/antigravity-auth` — `antigravity` custom provider with Google Antigravity OAuth login, startup account list, auth.json-only runtime account loading, `/antigravity-add-account` OAuth append into rotation, `/antigravity-account` status display, account rotation/failover, model registration with live route mapping (current Antigravity catalog: Gemini 3.5/3.6/3.7/3.8 Flash, Gemini 3.1 Pro, Claude Sonnet 4.6 Thinking, Claude Opus 4.6 Thinking, GPT-OSS 120B Medium, plus legacy Antigravity aliases and Gemini CLI mirrors), and streaming through the Cloud Code Assist unified gateway
 - `src/opencode-import` — `/opencode-import` for bounded migration of supported OpenCode OpenAI/Codex, GitHub Copilot, Z.ai, and Antigravity credentials into Pi; existing entries are preserved unless `--force` is passed
 - `src/question` — clean-Pi-only native `question` tool with the suite questionnaire contract, multi-select/custom-answer support, and a transient questionnaire widget kept immediately above the real Pi composer; Pix deliberately skips this module because Pix owns its bundled question renderer/Desktop bridge
@@ -60,36 +62,26 @@ is available for local sources even when IDX is not configured.
 
 `index.ts` is intentionally only a thin auto-discovery shim that re-exports `src/index.ts`. There is no `pi.extensions` manifest here, so local Pi auto-discovery loads the suite once via `~/.pi/agent/extensions/pi-tools-suite/index.ts` and does not double-register tools. `src/module-catalog.ts` is the ordered single source of truth for bundled module names, defaults, descriptions, and host policy; runtime registration derives each conventional `src/<module-name>/index.ts` loader from that catalog, and Desktop Settings consumes the same metadata without importing runtime modules.
 
-Registration order is preserved by the ordered catalog in `src/module-catalog.ts`: coding-discipline, ast-grep, async-subagents, lsp, comment-checker, session, repo-discovery command/tool gate, project-search, project-tasks, antigravity-auth provider, local claude-code-provider, OpenCode import, clean-Pi-only question, todo, model-tools, usage, web-search, truncation-metadata-normalizer, dcp, prompt-commands, resource-registry, credential-firewall, then codex-reasoning-fix. Tool metadata and active model-specific tool sets have two modes: standard and repo-aware. Repo-aware mode requires both project `.indexer-cli` state and an executable `idx`; when enabled, `repo_*` tools stay active ahead of overlapping lower-level aliases. If `idx` is unavailable, the suite retains local `project_search` history and ordinary Read/Grep/LSP/sub-agent guidance and does **not** implicitly install, initialize, or create index state. An explicit agent `project_search` in hybrid/semantic mode can **incrementally fill missing** task and saved-session-name vectors in the same `.pi/search/index.sqlite` after their independent Desktop opt-ins; **task titles/descriptions and saved session names**, as well as the query, may be sent to OpenRouter and incur charges. Selected Git commits are likewise indexed incrementally using the project’s configured IDX embedding provider; **commit subjects/authors/messages** may be sent externally. `indexMode=lexical` disables all provider calls and index writes. See [project-search-agent-tool](../../specs/project-search-agent-tool.md). `/idx-init` is the explicit IDX setup/repair path and should be run only with user permission. Independently of the catalog, `src/index.ts` registers an unconditional guard (see [provider-web-search-policy](../../specs/provider-web-search-policy.md)) that removes and blocks the Claude provider's metered `pi_claude_code_provider_web_search` tool in parent sessions while keeping the provider itself and the suite's own `web_search` available. Sub-agents exclude that tool through their separate tool guard.
+Registration order is preserved by the ordered catalog in `src/module-catalog.ts`. `project_search` uses native search and has no IDX setup, fallback or project-state gate. Repository and history semantics are enabled across sources/projects when the global `~/.config/pi/pi-tools-suite.jsonc` contains a valid `search.embedding` object; eligible semantic inputs may be sent to its configured endpoint. Project overrides and the former standalone semantic configuration do not authorize uploads and are not migrated. `/search-semantic configure` preserves JSONC comments and unrelated settings; Desktop edits the same configuration under Tools Suite → Search using the shared top Save button. See [project-search-agent-tool](../../specs/project-search-agent-tool.md). Independently of the catalog, `src/index.ts` registers an unconditional guard (see [provider-web-search-policy](../../specs/provider-web-search-policy.md)) that removes and blocks the Claude provider's metered `pi_claude_code_provider_web_search` tool in parent sessions while keeping the provider itself and the suite's own `web_search` available. Sub-agents exclude that tool through their separate tool guard.
 
-### IDX embedding setup and privacy
+### Native repository embedding setup and privacy
 
-`/idx-init` with no argument invokes `idx init` and uses the upstream default:
-OpenRouter `perplexity/pplx-embed-v1-0.6b` embeddings at 1024 dimensions for
-both code and document domains. It requires `OPENROUTER_API_KEY` in the
-environment or `~/.config/idx/.env`; chunks and queries are sent to OpenRouter
-and leave the machine. Tell the user about the provider, key requirement, and
-privacy boundary before requesting permission to initialize, and offer
-`/idx-init --embedding local` as the explicit no-key embedding alternative.
-That mode configures Ollama `jina-8k` for code and `nomic-embed-text-v2-moe`
-for documents at 768 dimensions. Index storage remains local in both modes;
-local mode uses Ollama instead of sending embedding requests to OpenRouter.
-
-`/idx-init --embedding openrouter` explicitly selects the default cloud provider.
-Only these exact optional arguments are supported; invalid input is rejected
-before installation or initialization. An already-indexed project is never
-implicitly switched by `/idx-init`; its saved provider remains in force unless
-the user explicitly runs the corresponding upstream doctor/reinitialization
-workflow. Reinitializing without an embedding override preserves the saved
-provider and does not migrate it. The setup command's default is cloud,
-requires a cloud key, and skips Ollama setup; installing `indexer-cli` with npm
-requires no key.
-`idx doctor` defaults to saved providers of the selected projects (a mixed set
-requires both Ollama and an OpenRouter key); with no projects it defaults to cloud. Its explicit
-`--embedding local|openrouter` mode checks prerequisites before deleting data
-and reinitializing; a provider switch rebuilds the index. Agents must not run
-doctor/setup/indexing automatically or read credentials. These upstream actions
-are separate from ordinary `repo_*` queries.
+Native lexical search requires no credentials. `/search-semantic status` shows
+whether global semantics are configured. `/search-semantic configure <embedding JSON>`
+saves the embedding object and authorizes semantic retrieval for all sources/projects;
+`/search-semantic off` removes it. `/search-semantic reset-history` is an explicit
+user-only recovery command for incompatible history caches in the current project: it
+clears only recognized derived task/session/commit/settings vectors and identity metadata
+from `.pi/search/index.sqlite`, preserving canonical tasks, sessions and Git history,
+settings documents/schema and the commit legacy-import marker. Repository vectors in
+`.pi/search/file-vectors.sqlite`, global settings, and canonical source data are unchanged.
+The next search can re-embed and incur charges. Busy, unsafe, redirected or unrecognized
+storage fails closed without a reset. Desktop Settings Search edits the same global file
+without ACP. No independent consent flag or confirmation step is used. Old
+`.pi/search/semantic.json` and Desktop semantic booleans are ignored; keys/caches alone
+never activate semantics. OpenRouter credentials use `OPENROUTER_API_KEY`, then shared
+Pi auth storage (`PI_CODING_AGENT_DIR` or `~/.pi/agent`); Ollama needs no key. IDX
+configuration and `.env` are not read, migrated or modified.
 
 The [Codex reasoning replay spec](../../specs/codex-reasoning-fix.md) owns the
 last suite hook's narrow wire-only contract, evidence, and known cached
@@ -145,63 +137,44 @@ model overrides and research CLI overrides are incompatible. Disable with
 `modules.brainstorm: false`. Reload/restart after installing the module.
 
 Participants in both modes can use `read`/`grep`, `web_search`/`web_fetch`, and
-read-only `repo_*` tools through the common tools-only child entrypoint. The
-council-specific extension adds web access and its strict call guard; private
-child `todo` is also allowed, without enabling mutations or nested delegation.
-Repo tools require an existing index and `idx`; web tools use existing credentials.
-No shell, edits, setup/credential commands or nested agents are enabled. Participants
+the unrestricted `project_search` tool through the common tools-only child entrypoint.
+It has the same sources and schema as ordinary Pi, including private history and
+`patch:` searches. The council-specific extension adds web access and its strict
+call guard; private child `todo` is also allowed, without enabling mutations or
+nested delegation. Repository embeddings use shared global configuration/provider
+safeguards. No shell, edits, suite setup commands or nested agents are enabled. Participants
 are instructed to research when useful, cite sources, report access gaps, and never
 send private repository/brief content or secrets to web services. Tool selection is
 enforced; privacy and source-quality instructions are not a network/filesystem sandbox.
 
 ## Repository knowledge and spec maintenance
 
-When repo-aware mode is available, use `repo_context` for general behavior/task
-discovery: it returns a bounded view of project documents, implementation ranges,
-and tests. The parent model performs reasoning and synthesis from those primary
-retrieval results. Use `project_search` with `sources: ["code", "knowledge"]`
-for focused IDX lookup; it replaces the old `repo_search` registration,
-including lexical, semantic and symbol modes plus the previous IDX filters.
-All indexed Markdown documents are
-searchable subject to ignore/exclusion filters; they are not split into primary
-and secondary collections. Follow truncation/degradation diagnostics and read
-the primary source itself before relying on a summary.
+Use `project_search` for both broad repository discovery and focused lookup,
+selecting sources and options as needed. It defaults to all five sources; Code and
+Knowledge use native search exclusively. Follow
+truncation/degradation diagnostics and read primary sources before relying on a
+summary. The former `repo_context`, `repo_inspect`, `repo_audit` and `repo_search`
+tools and the `/idx-init` and `/idx-update` commands are removed.
 
-All `repo_*` tools accept optional `projectPath` to query another already indexed
-project without switching the session workspace. Use an absolute project-root
-path, a path relative to the session cwd, or `~/...`; omit it for the current
-project. The selected root must contain `.indexer-cli` directly (no ancestor
-fallback or implicit setup). Targets, scopes and audit paths are relative to that
-root. Example: `repo_context({ query: "authentication", projectPath: "/path/to/other-project" })`.
-The launch-project registration gate above is unchanged.
-
-For a **material behavior-changing implementation** in repo-aware mode, the
+For a **material behavior-changing implementation**, the
 model-facing contract is:
 
 1. Find the existing primary behavioral contract before or while implementing.
 2. Keep the governing spec aligned with the intended behavior in the same task.
    If none exists, create a focused spec with normal file editing tools. For a
-   new spec, use the template installed by `idx init` at
-   `.indexer-cli/spec-template.md` without overwriting existing documents. If
-   absent, ask before running setup rather than inventing a template. Declare
+   new spec, use the project's spec template (`specs/TEMPLATE.md` when present)
+   without overwriting existing documents. If no template exists, ask before creating one.
+   Declare
    `kind: spec` and intended `status` in frontmatter and list
    project-relative implementation/test paths in the appropriate sections.
-3. After implementation, delegate the final task-scoped knowledge pass to
-   `knowledge-auditor` when that role is present in the effective catalog. Give
-   it a concise behavior/result summary plus the exact project-relative paths
-   changed by the task. It runs `idx audit`, fixes only small confirmed
-   documentation drift, and escalates substantial or ambiguous drift. If the
-   role is unavailable/disabled, run the existing parent-owned `repo_audit`
-   fallback. An audit candidate is not proof of an error, and a reviewed
-   no-impact result is valid.
-   Obtain the result before finalizing. Close the audit todo when task-scoped
-   review is complete, not only when the whole knowledge base is clean. Report
-   task audit `passed/blocked` separately from global dirty `yes/no/unknown` and
-   check errors. A global `yes` alone (including an unclassified cause) does not
-   block completion or prove unrelated dirtiness. Missing task coverage, drift,
-   and concurrent edits to reviewed specs/dependencies still require resolution;
-   unrelated parallel edits do not. Never acknowledge unrelated specs just to
-   obtain `no`, or claim global cleanliness from task-scoped success.
+3. Before completion, run the available `knowledge-auditor` with the final
+   behavior/result and exact task-changed paths. It updates affected documentation
+   against relevant source/tests, makes small proven fixes and returns substantial
+   or ambiguous discrepancies to the parent. Obtain the result and resolve concrete
+   documentation questions. If the role is unavailable, maintain the docs directly.
+   This needs no IDX, knowledge dirty check, acknowledgment, index refresh or full
+   traversal of declared dependencies. Accurate documentation needs no edit;
+   do not expand into unrelated work.
 
 Retrieval is bounded: output may be truncated, hybrid mode may degrade with
 diagnostics, and an empty result does not prove that no contract exists.
@@ -214,7 +187,7 @@ Keep current behavior in specs and significant rationale in `docs/decisions/`,
 following the project's convention/template. Before changing a contract, read
 linked decisions and check status/superseding links. Historical rationale does
 not override the current spec. Plain Markdown already participates in retrieval
-subject to normal exclusions; no special idx kind or new storage is required.
+subject to normal exclusions; no special document kind or new storage is required.
 
 Default to no new record. Record a decision only when explicitly requested by the
 user, or when a choice involves materially different plausible alternatives,
@@ -242,16 +215,10 @@ conflicting rationale still requires clarification. The parent performs the same
 check if the auditor is absent.
 This is a prompt/workflow contract, not automatic enforcement or measurement.
 
-Mechanical refactors, typo/formatting edits, exact renames, and other changes
-that do not alter project behavior still need task-scoped review-state checks;
-a reviewed no-impact result is sufficient and no new contract is required.
-Repo-aware tools still require both indexed project state and an
-executable `idx`. The `knowledge-auditor` visibility gate intentionally
-requires only `.indexer-cli/`; if `idx` is missing at execution time, the
-child reports a blocker instead of installing or initializing anything. For
-indexed projects, completing a todo when only the final active todo remains adds
-one compact reminder to hand the final knowledge pass to the auditor. File
-mutations themselves do not emit knowledge reminders.
+Mechanical edits do not require invented documentation changes or review receipts.
+The documentation specialist is available without IDX or initialized project state. Todo completion and
+file mutation results emit no knowledge-state reminders. The parent/catalog guidance
+owns the final documentation handoff.
 
 ## Session recovery
 
@@ -702,34 +669,35 @@ Explicit task/CLI model overrides suppress automatic fallbacks. Setting
 `PI_SUBAGENTS_FORCE_CURRENT_MODEL=1`) deliberately selects the parent model and
 strips conflicting model arguments; this is not the economical default.
 
-The built-in modes are `research` (read-only evidence and independent
-review), `implement` (default Luna coder for bounded code, docs, tests, or UI
-changes, with Sol fallback), `implement-core` (Sol for complex core changes or
-ambiguous bugs), `mechanical` (GLM for small prescribed behavior-preserving
-edits with deterministic checks), `verify`
-(run checks and diagnose logs without fixing files), `ui-qa` (real browser,
-terminal/TUI, and desktop-GUI verification), `delivery-review` (explicit delivery-readiness
-assessment), `knowledge-auditor` (final indexed-repository documentation
-audit/minor drift repair), and `oracle` (deliberate strong second opinion and complex architectural review).
-Ordinary workers use economical model candidates; no built-in parent-tier
-rule promotes them to a flagship. Oracle is the exception, not an automatic
-retry for difficult work. Task-specific discipline belongs in the brief.
+The seven built-in modes are `implement-core` (Sol for approved implementation
+handoffs), `mechanical` (GLM for sufficiently large prescribed behavior-preserving
+edits with deterministic checks), `research` (read-only evidence, focused review,
+and readiness evidence), `verify` (run checks and diagnose logs without fixing
+files), `ui-qa` (real browser, terminal/TUI, and desktop-GUI verification),
+`knowledge-auditor` (final affected-documentation maintenance without IDX or
+knowledge-state receipts), and `oracle` (bounded second opinion and complex
+architectural review). The parent owns readiness decisions. Bundled `implement`
+and `delivery-review` are removed without aliases; project-local profiles under
+those names remain valid. Task-specific discipline belongs in the brief.
 
 Broad migrations and semantic regression changes never belong to `mechanical`.
 Use coherent slices, an early affected typecheck and focused regression; do not
-weaken assertions to make a migration pass. Delivery review uses Sol without a GLM
-fallback; oracle uses the cross-vendor frontier pool. Compare cost per accepted verified change including failures, review
-and rework, not token price alone. See [coding acceptance guidance](docs/subagent-model-pools.md#coding-quality-and-acceptance).
+weaken assertions to make a migration pass. Oracle uses the cross-vendor frontier
+pool. Compare expected net savings including failures, review, rework, duplicate
+context, briefing and integration, not token price alone. No savings benchmark
+is claimed; prompt policy does not enforce runtime cost/capability measurement.
+See [coding acceptance guidance](docs/subagent-model-pools.md#coding-quality-and-acceptance).
 
 For non-UI work, start with the shortest parent pass that resolves user intent,
 semantics, and the main causal path. If a few targeted repository searches or
 reads are enough to establish the diagnosis and desired behavior, continue in
 the parent instead of spawning research that repeats the same investigation.
 Write code in the parent by default. Delegate implementation only on explicit
-user request or for a substantial independent task alongside useful parent work.
-Size, isolation, lower cost, or worker availability alone are not sufficient.
+user request, a concrete capability gap in the implementation itself, or sufficiently
+large prescribed mechanical work with deterministic checks and expected net savings.
+Size, parallelism, isolation, token price, or worker availability alone are not sufficient.
 Research may address a named uncertainty or independent evidence track.
-Mandatory UI QA, review and knowledge-audit gates remain exceptions.
+Mandatory UI QA, architectural review and final documentation maintenance remain exceptions.
 
 Keep product/UX decisions and integration in the parent. Do not delegate
 implementation before the cause, desired behavior, and acceptance criteria are
@@ -823,7 +791,7 @@ You are this project's staff reviewer. Apply the repo rules from
 AGENTS.md before approving anything; cite file paths first.
 ```
 
-- Frontmatter keys: `name` (must match the filename), `description`, `icon`, `models`, `thinking`, `tools`, `extraArgs`, `promptAppend`, `promptOverride`, `retry`, `maxResultBytes`, `timeoutMs`, parent-model gates, and `requiresIndexedProject`. Legacy `model`, `fallbackModels`, and `modelByParent` still load. Unknown keys are rejected with an error naming the file.
+- Frontmatter keys: `name` (must match the filename), `description`, `icon`, `models`, `thinking`, `tools`, `extraArgs`, `promptAppend`, `promptOverride`, `retry`, `maxResultBytes`, `timeoutMs`, and parent-model gates. Legacy `model`, `fallbackModels`, and `modelByParent` still load. Unknown keys are rejected with an error naming the file.
 - Array fields accept block lists (`- item`), inline arrays (`[a, b]`), or comma-separated strings (`tools: read, grep, bash`). The frontmatter YAML subset is intentionally small: scalars, quoted strings, numbers, comments, lists, and nested maps for `modelByParent`/`retry`. Tabs, block scalars (`|`/`>`), anchors/aliases, and flow maps are hard errors naming file and line.
 - The markdown body becomes `promptAppend`: it is appended after the standard generated prompt (parent objective + task + output format), so the agent still receives its task in the usual structure. Use frontmatter `promptOverride` for full prompt replacement.
 - Precedence: bundled Markdown defines the built-ins, then the nearest project
@@ -837,9 +805,6 @@ AGENTS.md before approving anything; cite file paths first.
 - The parent catalog explicitly prints the active bundled-role names replaced by
   project-local definitions, so chat context reflects that the local role owns
   the complete effective contract.
-- `requiresIndexedProject: true` hides a role unless the project root resolved
-  from the current cwd contains `.indexer-cli/`. The marker alone controls
-  visibility; `idx` does not need to be on `PATH` for the role to appear.
   The gate applies consistently to the parent catalog, auto-router, and explicit
   role validation. The built-in `knowledge-auditor` uses this flag.
 - `icon` names an agent glyph for UIs that render sub-agent widgets (pix TUI panel, Pix Desktop subagents panel): `agent` (neutral default), `search`, `code`, `flask`, `globe`, `sparkles`, `brain`, `wrench`, `terminal`, `bug`, `book`, `eye`, `zap`, `rocket`. The value is passed through opaquely; unknown names render as the neutral agent icon, and status stays color-coded next to it.
@@ -1045,8 +1010,9 @@ release is a config edit:
   complex architectural tasks, not routine features, local bug fixes, mechanical
   edits, or large diffs alone. There is no parent-tier gate. The separate bundled
   `frontier-review` role was merged into oracle and removed. Task complexity is
-  classified by the parent, not by runtime. `delivery-review` keeps its own
-  Sol-only list and remains available to all parents.
+  classified by the parent, not by runtime. Bundled `implement` and
+  `delivery-review` are retired without aliases; project-local profiles using
+  those names remain valid.
 - Entry fields: `vendor` (override inference), `expensive`, `enabled: false`
   (still recognized as frontier, never selected), `aliases` (globs recognizing
   the same model under other refs, e.g. OpenRouter), `roles` (limit an entry to
@@ -1093,7 +1059,7 @@ Sub-agents run with `--no-session` by default to avoid writing duplicate Pi sess
 Every sub-agent role (including project-local and future roles) gets a private `todo` tool for non-trivial multi-step work. Each child attempt owns its list; it cannot read or overwrite the parent's project plan. `todo` remains available even with restricted or empty work-tool selections. Child todos do not enable persistence commands, thinking overrides or automatic follow-up turns; unfinished work and blockers belong in the report to the parent.
 
 Optional work tools follow the final tool selection: bundled `research`,
-`implement`, `implement-core`, `mechanical` and `oracle` request read-only
+`implement-core`, `mechanical` and `oracle` request read-only
 `ast_grep`; only bundled `research` adds `web_search`/`web_fetch`. The tools-only
 loader preserves these extension names without loading `ast_apply`, LSP or
 credential/setup commands. Unlike universal todo/repo, optional tools can be
@@ -1103,13 +1069,12 @@ credentials/fallback and is for public evidence only, never secrets/private repo
 data; missing prerequisites are reported to the parent. Council shares web
 registration but retains its stricter guard and does not gain AST.
 
-Every role also gets the eight read-only `repo_*` queries when its launch project
-is already indexed and `idx` is executable. Common spawn loads only the query
-entrypoint, never setup/update commands or the full suite. Restricted/empty tool
-lists and exclusions retain private todo and these queries, not other work tools.
-Without an index or `idx`, ordinary role tools and todo remain usable; no setup is
-attempted. Existing output profiles, project selection and cancellation apply.
-Child `repo_audit` guidance reports findings to the parent rather than delegating.
+Every role also gets the full `project_search` tool without requiring IDX.
+Common spawn loads only the tools-only entrypoint, never setup/update commands
+or the full suite. Restricted/empty tool lists and exclusions retain private
+todo and `project_search`, not other work tools. All five sources and `patch:`
+are available, with the same consent, provider and cancellation safeguards as
+ordinary Pi. No implicit IDX setup is attempted.
 
 Sub-agent runs are stored in the current project's `.pi/subagents/` directory and survive main-session shutdown. Each spawn updates `.pi/subagents/registry.json` with the latest run and `agentId -> runDir` mappings. Because of that, `subagents({ action: "status" })`, `wait`, and `stop` can omit `runDir` to target the latest run, and `subagents({ action: "result", agentId: "..." })` can resolve the run from the registry even if the exact `runDir` was lost during compaction or the session closed. Result reads always return a summary-first response with artifact paths; raw `result.md` and `stderr.log` are not inlined, which avoids IPC/socket buffer overflows. Include `runDir` when you need an older or non-latest run, and use `cleanup` with `delete=true` to remove collected old runs. On normal main-session shutdown, Pi stops that session's sub-agents but preserves run files, reports, attachments and registry pointers; reload and fork shutdowns also skip stopping. Desktop's separate 72-hour background TTL and immediate manual Clean remain unchanged. The draft macOS owned launcher prevents explicit cleanup while containment or either UUID launchd service's retirement is uncertain; stopping the bridge alone never authorizes deletion. This candidate remains gated on G1/T3 acceptance (see `specs/async-subagents.md` in the Pix repository).
 

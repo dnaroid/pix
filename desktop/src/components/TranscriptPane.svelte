@@ -407,7 +407,8 @@
 </div>
 
 <style>
-  .transcript-entry {
+  /* Keep live iframe surfaces painted when scrolling across message bounds. */
+  .transcript-entry:not(:has(:global([data-html-sandbox]))) {
     content-visibility: auto;
     contain-intrinsic-size: auto 120px;
   }

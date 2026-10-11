@@ -2,7 +2,6 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { loadPiToolsSuiteConfig, type TodoThinkingPolicy } from "../config.js";
 import { clampTodoThinkingRange } from "./thinking-policy.js";
 import { isAgentBusyRaceError } from "../context-usage.js";
-import { hasIndexedProjectRoot } from "../lib/project.js";
 import { autoClearCompletedTodos } from "./state/auto-clear.js";
 import { loadPersistedPlan, syncPersistedPlan } from "./state/persistence.js";
 import { replayFromBranch } from "./state/replay.js";
@@ -36,25 +35,6 @@ const TODO_NUDGE_IDLE_RETRY_DELAY_MS = 100;
 const TODO_NUDGE_MAX_IDLE_ATTEMPTS = 40;
 const ASK_USER_TOOL_NAMES = new Set(["ask_user", "ask_user_question", "question"]);
 const TODO_THINKING_RESTORE_METADATA_KEY = "__piTodoRestoreThinking";
-const REPO_KNOWLEDGE_FINALIZATION_REMINDER =
-	"📚 Before completing the final todo: delegate the final knowledge pass to subagentType='knowledge-auditor' with the behavior/result and exact project-relative paths changed by this task. Obtain its result; resolve task-related escalations/unreviewed specs or report blockers. Close the audit todo when task-scoped review is complete; global knowledge dirty=yes alone must not keep it open. Report global dirty state separately, without claiming the whole project is clean or acknowledging unrelated specs. Spawning alone is not completion.";
-
-function completesTodo(info: { action: string; params: TaskMutationParams }): boolean {
-	if (info.action === "update") return info.params.status === "completed";
-	if (info.action !== "batch_update") return false;
-	return (info.params.items ?? []).some((item) => item.status === "completed");
-}
-
-function repoKnowledgeFinalizationReminder(
-	state: ReturnType<typeof getState>,
-	ctx: ExtensionContext,
-	info: { action: string; params: TaskMutationParams },
-): string | undefined {
-	if (!hasIndexedProjectRoot(ctx.cwd)) return undefined;
-	if (!completesTodo(info)) return undefined;
-	const remainingActive = selectVisibleTasks(state).filter((task) => ACTIVE_STATUSES.has(task.status));
-	return remainingActive.length === 1 ? REPO_KNOWLEDGE_FINALIZATION_REMINDER : undefined;
-}
 
 function isStaleExtensionContextError(error: unknown): boolean {
 	return error instanceof Error && /ctx is stale|stale ctx|stale after session replacement|stale after.*reload/i.test(error.message);
@@ -264,7 +244,6 @@ export default function (pi: ExtensionAPI) {
 		registerTodoTool(pi, {
 			...thinkingPrompt,
 			...(availableThinkingLevels ? { parameters: todoParamsSchemaForThinkingLevels(availableThinkingLevels) } : {}),
-			resultReminder: repoKnowledgeFinalizationReminder,
 			prepareMutation: (state, ctx, info) => {
 				if (!todoThinkingEnabled) return info.params;
 				if (info.action === "create" || info.action === "update") return prepareTodoThinkingMutation(state, ctx, info.params);

@@ -68,7 +68,6 @@ import { AppTerminalController } from "./terminal/terminal-controller.js";
 import { TerminalBellSoundController } from "./terminal/terminal-bell-sound-controller.js";
 import { AppToastController, type AppToastOptions } from "./rendering/toast-controller.js";
 import { checkPiUpdate, checkPixUpdate, formatPixStartupUpdateDialog, formatPiStartupUpdateToast } from "./cli/update.js";
-import { checkAndUpdateIdxOnStartup, formatIdxStartupUpdateNotice } from "./cli/startup-checks.js";
 import { AppVoiceController } from "./input/voice-controller.js";
 import { createIsolatedExtensionEventBus } from "./extensions/extension-event-bus.js";
 import { MemoryWatchdog } from "./diagnostics/memory-watchdog.js";
@@ -1268,17 +1267,6 @@ export class PiUiExtendApp {
 	}
 
 	private checkUpdatesOnStartup(): void {
-		void checkAndUpdateIdxOnStartup()
-			.then((result) => {
-				if (!this.running) return;
-				const notice = formatIdxStartupUpdateNotice(result);
-				if (!notice) return;
-				this.showToast(notice, result.status === "updated" ? "success" : "warning");
-			})
-			.catch(() => {
-				// Startup update checks should never interrupt the TUI.
-			});
-
 		void checkPiUpdate()
 			.then((result) => {
 				if (result.status !== "newer") return;
@@ -1364,14 +1352,14 @@ export class PiUiExtendApp {
 		});
 	}
 
-	private subagentTypesForRuntime(runtime: AgentSessionRuntime): readonly string[] | undefined {
+	private subagentTypesForRuntime(runtime: AgentSessionRuntime): SubagentCatalogState | undefined {
 		const sessionId = runtime.session.sessionManager.getSessionId();
 		const catalog = this.subagentCatalogBySessionId.get(sessionId);
 		if (!catalog) return undefined;
 		const model = runtime.session.model;
 		const currentModelRef = model ? `${model.provider}/${model.id}` : undefined;
 		if (catalog.model && currentModelRef && catalog.model !== currentModelRef) return undefined;
-		return catalog.types;
+		return catalog;
 	}
 
 	private contextInventoryText(runtime: AgentSessionRuntime, heading: string): string {

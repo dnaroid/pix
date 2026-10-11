@@ -1277,25 +1277,6 @@
       },
       "description": "Settings for the opt-in credential-firewall module."
     },
-    "repoDiscovery": {
-      "type": "object",
-      "properties": {
-        "profile": {
-          "anyOf": [
-            {
-              "type": "string",
-              "const": "baseline"
-            },
-            {
-              "type": "string",
-              "const": "native-compact"
-            }
-          ],
-          "description": "repo_* runtime profile. baseline preserves historical argv/defaults; native-compact enables bounded native flags, cursors, validation, and an explicit per-call full override."
-        }
-      },
-      "description": "Repository discovery runtime policy. Default profile is baseline."
-    },
     "resourceRegistry": {
       "type": "object",
       "properties": {
@@ -1313,6 +1294,67 @@
         }
       },
       "description": "Private Git-backed registry for reusable skills/agents and project-scoped tasks/plans state."
+    },
+    "search": {
+      "type": "object",
+      "properties": {
+        "embedding": {
+          "type": "object",
+          "required": [
+            "embeddingProvider",
+            "embeddingModel",
+            "vectorSize"
+          ],
+          "properties": {
+            "embeddingProvider": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "openrouter"
+                },
+                {
+                  "type": "string",
+                  "const": "ollama"
+                }
+              ],
+              "description": "Provider used for shared native Code/Knowledge and history embeddings."
+            },
+            "embeddingModel": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "description": "Embedding model used for Code and, by default, Knowledge."
+            },
+            "vectorSize": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 8192,
+              "description": "Embedding vector dimension."
+            },
+            "knowledgeEmbeddingModel": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "description": "Optional separate Knowledge/history model."
+            },
+            "knowledgeEmbeddingQueryPrefix": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "knowledgeEmbeddingDocumentPrefix": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "ollamaBaseUrl": {
+              "type": "string",
+              "maxLength": 2048,
+              "description": "Optional Ollama-compatible endpoint."
+            }
+          },
+          "description": "Explicit global authorization for semantic search across projects and sources; never populated by shipped defaults."
+        }
+      },
+      "description": "Global semantic-search configuration in ~/.config/pi/pi-tools-suite.jsonc."
     },
     "lsp": {
       "type": "object",

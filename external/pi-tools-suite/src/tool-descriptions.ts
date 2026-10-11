@@ -11,13 +11,6 @@ export type ToolDescription = {
 	promptGuidelines?: string[];
 };
 
-export type RepoDiscoveryCommand = "context" | "audit" | "inspect";
-
-export type RepoDiscoveryToolDescription = ToolDescription & Required<Pick<ToolDescription, "promptSnippet" | "promptGuidelines">> & {
-	command: RepoDiscoveryCommand;
-	targetDescription?: string;
-};
-
 export type ToolDescriptionSetOptions = {
 	repoDiscovery?: boolean;
 };
@@ -63,8 +56,7 @@ export function astGrepToolDescriptions(maxLines: number, maxBytesLabel: string)
 	} satisfies Record<string, ToolDescription>;
 }
 
-export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions | boolean = false) {
-	const repoDiscovery = hasRepoDiscovery(options);
+export function asyncSubagentToolDescriptions(_options: ToolDescriptionSetOptions | boolean = false) {
 
 	return {
 		subagents: {
@@ -77,27 +69,20 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 				SUBAGENT_DELEGATION_GUIDANCE,
 				"Each agent role owns an ordered model candidate list. Parent-provider policy and runtime availability select the first usable candidate; project-local .pi/agents/*.md files may replace role profiles. Do not override the model merely to choose a role.",
 				SUBAGENT_TYPE_SELECTION_GUIDANCE,
-				"When knowledge-auditor appears in the effective catalog, use it for the final task-scoped repository-knowledge pass after implementation; give it the concise final behavior/result plus exact task-changed project-relative paths, and handle any escalation in the parent.",
-				repoDiscovery
-					? "Use for broad independent tracks, review axes, or hypotheses even though repo_* tools are available."
-					: "Use first for broad codebase discovery split into tracks, review axes, or incident-triage hypotheses when repo_* tools are unavailable.",
+				"Before completing an implementation task, use the available knowledge-auditor to update affected documentation against the final behavior and exact task-changed paths. Obtain its result and handle substantial or ambiguous discrepancies in the parent. No knowledge dirty checks, acknowledgment or exhaustive dependency review is required.",
+				"Use for broad independent tracks, review axes, or hypotheses; repository search does not replace scoped delegation.",
 				"Use action=spawn/status/wait/result/stop/cleanup; .pi/subagents tracks runs so status/wait/stop can omit the latest runDir and result can resolve by agentId. Parent sessions receive completion/failure follow-ups, so spawn can return without polling.",
 				"Results are compact with artifact links. Agents run isolated pi processes with extensions disabled to prevent recursive spawning; spawn/task timeoutSeconds can shorten the default 30m watchdog, project concurrency queues excess agents, and retry backoff/fallback models/Antigravity account rotation are config-driven.",
 			].join(" "),
 			promptSnippet:
-				"When the user requests independent investigation/review tracks, spawn scoped research agents before doing those tracks yourself; a serial parent checklist is not delegation. For other delegation see this tool's description. Real UI QA immediately uses ui-qa before preflight; preserve evidence links and credential boundaries. Choose a role from the effective catalog. Continue independent work after spawning. Obtain the final knowledge-auditor result when available.",
+				"When the user requests independent investigation/review tracks, spawn scoped research agents before doing those tracks yourself; a serial parent checklist is not delegation. For other delegation see this tool's description. Real UI QA immediately uses ui-qa before preflight; preserve evidence links and credential boundaries. Choose a role from the effective catalog. Continue independent work after spawning.",
 			promptGuidelines: [
-				"Treat every real UI QA request as a mandatory delegation trigger and an explicit exception to the large/parallel threshold: immediately spawn with `subagentType: \"ui-qa\"` before checking prerequisites. The QA sub-agent owns target discovery, feasibility checks, UI automation, evidence, and blocked reports; the parent must not inspect the project first or substitute non-UI checks.",
+				"Treat every real UI QA request as a mandatory delegation trigger and an explicit exception to parent-first delegation: immediately spawn with `subagentType: \"ui-qa\"` before checking prerequisites. The QA sub-agent owns target discovery, feasibility checks, UI automation, evidence, and blocked reports; the parent must not inspect the project first or substitute non-UI checks.",
 				"Keep the ui-qa task payload at the user-visible acceptance level: known target URL/app/command, actions to perform, expected observable outcome, and requested evidence. Do not turn it into a repository investigation plan, name internal files or commands, dictate setup, or invent a mock/synthetic target. Leave unknown prerequisites to the QA sub-agent.",
 				"When ui-qa browser testing reports missing credentials, relay its explicit request and generated `.pi/qa_auth.jsonc` template path; never inspect, populate, or edit that credential file in the parent.",
 				"After ui-qa completes a test, preserve its clickable screenshot, terminal capture, video, trace, and other evidence links in the final user-facing response whenever those artifacts exist.",
-				"When `knowledge-auditor` is present in the effective role catalog, use it as the final repository-knowledge handoff: supply the concise final behavior/result and exact task-changed project-relative paths; accept small documentation repairs from the child and keep substantial/ambiguous decisions in the parent.",
-				repoDiscovery
-					? "For general discovery, start with repo_context; use project_search for focused code/document lookup. Spawn for independent tracks/hypotheses/review axes, and do not let repo_* availability suppress delegation."
-					: "For one small discovery question, use direct read/grep; when repo_* tools are unavailable, delegate scoped research to keep broad search output outside the parent context.",
-				repoDiscovery
-					? "For incident triage, release readiness, or risk/test strategy with separate hypotheses/review tracks, prefer focused agents over serial parent-context work."
-					: "For incident triage, release readiness, or risk/test strategy with separate hypotheses/review tracks and no repo_* tools, call action='spawn' as the first discovery step; direct read/grep can follow.",
+				"Use project_search for repository discovery and read original sources. Delegate independent tracks/hypotheses/review axes, not trivial lookups.",
+				"For incident triage, release readiness, or risk/test strategy with separate hypotheses/review tracks, prefer focused agents over serial parent-context work.",
 				"Do not use subagents for trivial exact-string lookups, typo replacements, or interactive user input; use the cheapest direct path.",
 				"Spawn multiple focused agents in one action='spawn' call for independent questions; set subagentType for clear role matches, timeoutSeconds for bounded probes, and use oracle sparingly for high-stakes uncertainty/final checks.",
 				"If spawn reports a routing error, no agents from that batch were launched. Correct the invalid or unresolved subagentType values using the available catalog and resubmit the whole batch; do not blindly retry omitted types or substitute an unsuitable role to suppress the error.",
@@ -149,43 +134,14 @@ export function asyncSubagentToolDescriptions(options: ToolDescriptionSetOptions
 export const ASYNC_SUBAGENT_TOOL_DESCRIPTIONS = asyncSubagentToolDescriptions(false);
 export const ASYNC_SUBAGENT_TOOL_DESCRIPTIONS_WITH_REPO = asyncSubagentToolDescriptions(true);
 
-export const REPO_DISCOVERY_TOOLS: RepoDiscoveryToolDescription[] = [
-	{
-		name: "repo_context", label: "Repo Context", command: "context",
-		description: "First choice for general task discovery or authoritative contracts: compact documents plus implementation and tests. For a high-level module map or architecture/onboarding overview, start with repo_inspect mode=architecture instead. For focused code-path lookup or diagnosis, start with project_search.",
-		promptSnippet: "Use repo_context for a general starting point or primary contract plus implementation/tests. A reading guide to understand a behavior is context discovery, not a cross-module architecture map. Start explicit cross-module architecture maps with repo_inspect mode=architecture. Use project_search first for a focused code-path lookup or diagnosis, even when the owner is unknown. Before creating a spec or making a material behavior change, use repo_context to find any existing primary contract and read returned sources directly.",
-		promptGuidelines: [
-			"For any repo_* tool, pass projectPath when the task targets another project; omit it for the current project. Use the same selected root for related calls and keep targets, scopes and audit paths relative to it. projectPath accepts absolute, session-cwd-relative or ~/ paths, requires .indexer-cli directly in that root, and does not change cwd; do not run setup implicitly. Resolve returned file paths against that root when using read. The parent model owns reasoning and synthesis from retrieved evidence; repo_context is retrieval, not a second answer-generating model.",
+export const REPOSITORY_DISCOVERY_GUIDELINES: string[] = [
+"Before a material behavior change, use project_search with sources=['code','knowledge'] to find the primary contract and relevant implementation/tests, then read the original files. Use standard file/path search for inventories and ast_grep for structural questions; do not assume search provides architecture or dependency graphs.",
 			"Documents remain searchable even without frontmatter. Retrieval rankings are navigation, not authoritative contracts; an empty result does not prove no contract exists.",
 			"Before significant changes, read linked decision records as well as the current spec; search docs/decisions when needed. Check status and superseding links: historical rationale is not the current contract. Default to no new decision record. Record only when explicitly requested by the user, or when a choice involves materially different plausible alternatives, consequential accepted risk or costly reversal AND its durable rationale helps avoid repeating a dispute or mistake not already captured by an existing record. Ask whether the rationale will still be useful in six months. Features, UX changes, bug fixes, implementation details, dependency/model changes and changed specs alone are not triggers; keep ordinary behavior in specs. Do not invent alternatives; link existing applicable records. Do not prune or rewrite historical records merely to apply this prospective threshold.",
-		],
-	},
-	{
-		name: "repo_audit", label: "Repo Audit", command: "audit",
-		description: "Task-scoped documentation relationship signals for changed paths; read-only, not proof of semantic correctness.",
-		promptSnippet: "After implementation, use knowledge-auditor for the final task-scoped audit when available; otherwise run repo_audit with only this task's changed paths. Obtain the result and resolve task-related semantic drift, escalations and missing review coverage, or report blockers. Close the audit todo when task-scoped review is complete; global knowledge dirty=yes alone must not keep it open.",
-		promptGuidelines: [
-			"Keep or create the primary spec for material behavior changes; mechanical edits still need review-state checks. Audit may use a stale index: read sources and verify semantics. After all final edits, the auditor (or parent fallback) runs idx knowledge dirty, acknowledges only explicit active specs reviewed against current content and every declared Implementation/Tests dependency via idx knowledge acknowledge <spec-paths...>, then rechecks dirty. Audit/index/tests alone are not acknowledgment. Report task audit passed/blocked separately from global dirty yes/no/unknown and check errors; unclassified global dirtiness alone is not a task blocker or proof of unrelated changes. Uncovered task-related specs or concurrent changes to reviewed specs/dependencies still require resolution; never bulk-acknowledge unrelated specs to force no.",
-			"For a new spec, use the non-overwriting template installed by idx init at .indexer-cli/spec-template.md. Declare kind: spec and the intended status in frontmatter; list project-root-relative paths under Implementation and Tests. If the template is absent, ask before running setup instead of inventing one.",
+			"Keep or create the primary spec for material behavior changes. Review affected documentation against final source and tests and fix actual semantic drift. Before completion, use the available knowledge-auditor to update affected documentation; no dirty check, acknowledgment or exhaustive dependency review is required.",
+			"For a new spec, use the project's spec template (specs/TEMPLATE.md when present). Declare kind: spec and the intended status in frontmatter; list project-root-relative paths under Implementation and Tests. If no template is available, ask before creating one.",
 			"Record qualifying choices in docs/decisions via project template while context is available: status, context, evidence vs assumptions, decision/scope, alternatives, consequences and revisit triggers; link the spec both ways. Parent handoff: paths and rationale (or no-record reason); missing rationale is an escalation only for qualifying choices; never invent motives from code. Supersede old decisions explicitly instead of erasing history.",
-		],
-	},
-	{
-		name: "repo_inspect",
-		label: "Repo Inspect",
-		command: "inspect",
-		description: "Compact indexed architecture, structure, AST, symbol and dependency views. Select a mode; read exact returned source ranges when needed.",
-		promptSnippet: "For a high-level map or cross-module onboarding overview, start with mode architecture (not structure). Being new to a repository alone is not an architecture request: a behavior reading guide starts with repo_context. Use structure for a scoped file/symbol listing (limit 20, depth 2), ast (depth 3, limit 40), explain (signature by default), or deps (depth 1, direction callers/callees).",
-		promptGuidelines: [
-			"Optional scope is a project-relative path prefix for architecture, structure and explain. Structure supports kind, includeInternal and tests=include|exclude|summary; structure/AST support depth and cursor. AST always returns an outline without source text.",
-			"Explain a known symbol with target=file::symbol; set includeBody only for implementation details (body limit defaults to 20). Use project_search when the symbol is unknown.",
-			"Dependencies default to one level and callers; select modules, module-imports, calls or call-graph and a direction for the question. `tests: include` and showEdges are optional; add edges/tests or depth only for a named gap.",
-		],
-		targetDescription: "Required for ast/explain/deps; a file path or file-scoped symbol, e.g. src/api/client.ts::createClient.",
-	},
 ];
-
-export const REPO_DISCOVERY_TOOL_NAMES = REPO_DISCOVERY_TOOLS.map((tool) => tool.name);
 
 export const TODO_TOOL_DESCRIPTION: ToolDescription = {
 	name: "todo",
@@ -230,7 +186,7 @@ export const WEB_SEARCH_TOOL_DESCRIPTIONS = {
 		promptSnippet: "Search the web for current or real-time information through Ollama, with Tavily fallback when configured.",
 		promptGuidelines: [
 			"Use web_search only for current public web information; keep queries focused and set max_results only when useful.",
-			"Never include secrets, tokens, or private repository data; do not use web_search for repo-local discovery—use repo_* or file/search tools.",
+			"Never include secrets, tokens, or private repository data; do not use web_search for repo-local discovery—use project_search or file/search tools.",
 		],
 	},
 	webFetch: {
@@ -255,21 +211,21 @@ export function claudeAliasToolDescriptions(options: ToolDescriptionSetOptions |
 			name: "Read",
 			label: "Read",
 			description: repoDiscovery
-				? "Read file contents when the exact path is known. Use Glob/Grep or project_search/repo_inspect (mode structure) first when you still need to locate the file."
+				? "Read file contents when the exact path is known. Use Glob/Grep or project_search first when you still need to locate the file."
 				: "Read file contents when the exact path is known. Use Glob/Grep first when you still need to locate the file.",
 		},
 		Edit: {
 			name: "Edit",
 			label: "Edit",
 			description: repoDiscovery
-				? "Replace exact text in an existing file. Use for surgical edits; use Write only for whole-file replacement. Keep the primary spec aligned for behavior changes; follow repo_audit finalization guidance."
+				? "Replace exact text in an existing file. Use for surgical edits; use Write only for whole-file replacement. Keep the primary spec aligned for behavior changes."
 				: "Replace exact text in an existing file. Use for surgical edits; use Write only for intentional whole-file replacement.",
 		},
 		Write: {
 			name: "Write",
 			label: "Write",
 			description: repoDiscovery
-				? "Create or overwrite a file with complete contents. Use only for intentional whole-file writes. Keep the primary spec aligned for behavior changes; follow repo_audit finalization guidance."
+				? "Create or overwrite a file with complete contents. Use only for intentional whole-file writes. Keep the primary spec aligned for behavior changes."
 				: "Create or overwrite a file with complete contents. Use only when replacing the whole file is intended.",
 		},
 		Bash: {
@@ -308,7 +264,7 @@ export function codexAliasToolDescriptions(options: ToolDescriptionSetOptions | 
 	applyPatch: {
 		name: "apply_patch",
 		label: "apply_patch",
-		description: `Apply file edits with a relative-path patch or standard unified diff. Use for creating, updating, moving, or deleting files; keep each patch focused.${repoDiscovery ? " Keep the primary spec aligned for behavior changes; follow repo_audit finalization guidance." : ""}
+		description: `Apply file edits with a relative-path patch or standard unified diff. Use for creating, updating, moving, or deleting files; keep each patch focused.${repoDiscovery ? " Keep the primary spec aligned for behavior changes." : ""}
 
 Begin-patch format:
 *** Begin Patch

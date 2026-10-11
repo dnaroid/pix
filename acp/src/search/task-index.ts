@@ -1,7 +1,8 @@
 import type { DatabaseSync } from "node:sqlite";
 import { setImmediate as yieldTask } from "node:timers/promises";
-import { SEARCH_EMBEDDING_MODEL } from "./contract.js";
 import { EMBEDDING_DIMENSIONS, validVector } from "./embeddings.js";
+import type { SemanticEmbeddingConfig } from "./config.js";
+import { compatibleEmbeddingMetadata, initializeEmbeddingMetadata } from "./embedding-cache.js";
 
 export interface TaskSemanticDocument {
   id: string;
@@ -17,24 +18,14 @@ export interface TaskIndexTransaction {
   save(vectors: ReadonlyMap<string, number[]>): void;
 }
 
-const identity = [SEARCH_EMBEDDING_MODEL, String(EMBEDDING_DIMENSIONS), "float32le"] as const;
-
 /** Namespaced task index. It never stores task text or alters canonical tasks.sqlite. */
-export function taskIndexTransaction(db: DatabaseSync): TaskIndexTransaction {
+export function taskIndexTransaction(db: DatabaseSync, config?: SemanticEmbeddingConfig): TaskIndexTransaction {
+  const dimension = config?.dimension ?? EMBEDDING_DIMENSIONS;
   db.exec(`CREATE TABLE IF NOT EXISTS pix_task_index_meta (key TEXT PRIMARY KEY,value TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS pix_task_documents (task_id TEXT PRIMARY KEY,content_hash TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS pix_task_vectors (content_hash TEXT PRIMARY KEY,vector BLOB NOT NULL);
     CREATE TEMP TABLE IF NOT EXISTS pix_live_task_ids (id TEXT PRIMARY KEY);`);
-  const get = db.prepare("SELECT value FROM pix_task_index_meta WHERE key=?");
-  const prior = db.prepare("SELECT COUNT(*) AS count FROM pix_task_index_meta").get();
-  if (Number(prior?.count) > 0
-    && identity.some((value, index) => get.get(["model", "dimensions", "encoding"][index]!)?.value !== value)) {
-    // An incompatible/corrupt namespace fails closed. Never silently erase
-    // already-purchased embeddings; this matches session-title semantics.
-    throw new Error("Task embedding identity is incompatible");
-  }
-  const set = db.prepare("INSERT INTO pix_task_index_meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value");
-  ["model", "dimensions", "encoding"].forEach((key, index) => set.run(key, identity[index]!));
+  initializeEmbeddingMetadata(db, "pix_task_index_meta", config);
   let corpus: readonly TaskSemanticDocument[] = [];
   return {
     reconcile(tasks) {
@@ -58,8 +49,8 @@ export function taskIndexTransaction(db: DatabaseSync): TaskIndexTransaction {
     save(vectors) {
       const put = db.prepare("INSERT INTO pix_task_vectors(content_hash,vector) VALUES(?,?) ON CONFLICT(content_hash) DO NOTHING");
       for (const [hash, vector] of vectors) {
-        if (!/^[a-f0-9]{64}$/.test(hash) || !validVector(vector)) throw new Error("Invalid task vector");
-        const buffer = Buffer.alloc(EMBEDDING_DIMENSIONS * 4);
+        if (!/^[a-f0-9]{64}$/.test(hash) || !validVector(vector, dimension)) throw new Error("Invalid task vector");
+        const buffer = Buffer.alloc(dimension * 4);
         vector.forEach((value, index) => buffer.writeFloatLE(value, index * 4));
         put.run(hash, buffer);
       }
@@ -69,19 +60,19 @@ export function taskIndexTransaction(db: DatabaseSync): TaskIndexTransaction {
 
 /** Reads only trusted vector blobs. Query-time canonical row hashes are compared
  * separately so stale index entries cannot produce stale task results. */
-export async function readTaskVectors(db: DatabaseSync, signal: AbortSignal): Promise<Map<string, number[]>> {
+export async function readTaskVectors(db: DatabaseSync, signal: AbortSignal, config?: SemanticEmbeddingConfig): Promise<Map<string, number[]>> {
+  const dimension = config?.dimension ?? EMBEDDING_DIMENSIONS;
   const result = new Map<string, number[]>();
   if (!db.prepare("SELECT 1 FROM sqlite_master WHERE name='pix_task_index_meta'").get()) return result;
-  const get = db.prepare("SELECT value FROM pix_task_index_meta WHERE key=?");
-  if (identity.some((value, index) => get.get(["model", "dimensions", "encoding"][index]!)?.value !== value)) return result;
+  if (!compatibleEmbeddingMetadata(db, "pix_task_index_meta", config)) return result;
   let count = 0;
   for (const row of db.prepare("SELECT content_hash,vector FROM pix_task_vectors").iterate()) {
     signal.throwIfAborted();
     if (typeof row.content_hash !== "string" || !/^[a-f0-9]{64}$/.test(row.content_hash)
-      || !(row.vector instanceof Uint8Array) || row.vector.byteLength !== EMBEDDING_DIMENSIONS * 4) continue;
+      || !(row.vector instanceof Uint8Array) || row.vector.byteLength !== dimension * 4) continue;
     const buffer = Buffer.from(row.vector);
-    const vector = Array.from({ length: EMBEDDING_DIMENSIONS }, (_, index) => buffer.readFloatLE(index * 4));
-    if (validVector(vector)) result.set(row.content_hash, vector);
+    const vector = Array.from({ length: dimension }, (_, index) => buffer.readFloatLE(index * 4));
+    if (validVector(vector, dimension)) result.set(row.content_hash, vector);
     if (++count % 32 === 0) await yieldTask();
   }
   return result;

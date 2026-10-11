@@ -16,7 +16,6 @@ async function fixture() {
     codex: join(home, "codex"),
     opencodeData: join(home, "opencode-data"),
     opencodeConfig: join(home, "opencode-config"),
-    tools: join(home, "tools"),
   };
   await Promise.all([
     mkdir(paths.agent, { recursive: true }),
@@ -32,7 +31,6 @@ async function fixture() {
     CODEX_HOME: paths.codex,
     OPENCODE_DATA_DIR: paths.opencodeData,
     OPENCODE_CONFIG_DIR: paths.opencodeConfig,
-    PIX_DESKTOP_TOOLS_DIR: paths.tools,
   };
   return { paths, env, cleanup: () => rm(home, { recursive: true, force: true }) };
 }
@@ -116,38 +114,18 @@ test("OpenCode bootstrap uses the suite importer and never overwrites Pi auth im
   }
 });
 
-test("IDX install needs no embedding prerequisites and never initializes a project", async () => {
-  const { paths, env, cleanup } = await fixture();
+test("bootstrap inspect omits IDX state and no longer accepts IDX installation", async () => {
+  const { env, cleanup } = await fixture();
   try {
-    const npmCli = join(paths.home, "fake-npm.mjs");
-    const calls = join(paths.home, "npm-calls.json");
-    await writeFile(npmCli, `
-      import { mkdir, writeFile } from "node:fs/promises";
-      import { join } from "node:path";
-      const args = process.argv.slice(2);
-      await writeFile(${JSON.stringify(calls)}, JSON.stringify(args));
-      const root = args[args.indexOf("--prefix") + 1];
-      const pkg = join(root, "node_modules", "indexer-cli");
-      await mkdir(join(pkg, "dist"), { recursive: true });
-      await writeFile(join(pkg, "package.json"), JSON.stringify({
-        name: "indexer-cli", version: "0.0.0-test", bin: { idx: "dist/cli.js" }
-      }));
-      // Fail if bootstrap ever runs the installed CLI (setup/init/doctor).
-      await writeFile(join(pkg, "dist", "cli.js"), "process.exit(99);\\n");
-    `);
-    const isolatedEnv = { ...env, PIX_BUNDLED_NPM_CLI: npmCli, PATH: "" };
-    delete isolatedEnv.OPENROUTER_API_KEY;
-    delete isolatedEnv.OLLAMA_HOST;
-    delete isolatedEnv.OLLAMA_API_KEY;
-
-    assert.equal(run("install-idx", isolatedEnv).json.status, "installed");
-    const args = JSON.parse(await readFile(calls, "utf8"));
-    assert.deepEqual(args, [
-      "install", "--prefix", paths.tools, "--no-audit", "--no-fund",
-      "--omit=dev", "indexer-cli@latest",
-    ]);
-    assert.equal(run("install-idx", isolatedEnv).json.status, "already-installed");
-    await assert.rejects(readFile(join(paths.home, ".indexer-cli", "config.json")), { code: "ENOENT" });
+    const { json } = run("inspect", env);
+    assert.equal(Object.hasOwn(json, "idx"), false);
+    const result = spawnSync(process.execPath, [bootstrap, "install-idx"], {
+      env,
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Unknown Pix Desktop bootstrap action/u);
   } finally {
     await cleanup();
   }

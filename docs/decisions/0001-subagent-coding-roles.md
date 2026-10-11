@@ -1,12 +1,12 @@
 # 0001 — Separate default, core and mechanical subagent coding
 
-- Status: accepted
+- Status: superseded
 - Recorded: 2026-10-02 (retrospective)
 - Decided: 2026-10-01, in the preceding subagent-role change discussion
 - Owner / approval evidence: user requested the Luna/Sol/GLM split and selected
   the common pi-tools-suite rather than project-local overrides.
 - Governing spec: [async-subagents](../../specs/async-subagents.md)
-- Replaces / replaced by: none
+- Replaces / replaced by: superseded by [0069 — Parent-owned implementation](0069-parent-owned-implementation.md)
 
 ## Context
 

@@ -225,8 +225,7 @@ describe("pi-tools-suite config", () => {
 		expect(content).toContain('"truncation-metadata-normalizer": true');
 		expect(content).toContain('"secretFirewall"');
 		expect(content).not.toContain('"contextGateway"');
-		expect(content).toContain('"repoDiscovery"');
-		expect(content).toContain('"profile": "baseline"');
+		expect(content).not.toContain('"repoDiscovery"');
 		expect(content).toContain('"resourceRegistry"');
 		expect(content).toContain('"branch": "main"');
 		expect(content).toContain('// "ast-grep",');
@@ -236,7 +235,6 @@ describe("pi-tools-suite config", () => {
 		const parsed = parse(content) as {
 			$schema?: string;
 			lsp?: { servers?: Array<{ id?: string }> };
-			repoDiscovery?: { profile?: string };
 			resourceRegistry?: { remote?: string; branch?: string; projectKey?: string };
 			dcp?: {
 				modelOverrides?: Record<string, {
@@ -251,7 +249,6 @@ describe("pi-tools-suite config", () => {
 		};
 		expect(parsed.$schema).toBe(PI_TOOLS_SUITE_SCHEMA_URL);
 		expect(parsed.lsp?.servers?.map((server) => server.id)).toEqual(["typescript"]);
-		expect(parsed.repoDiscovery?.profile).toBe("baseline");
 		expect(parsed.resourceRegistry).toEqual({ branch: "main" });
 		expect(parsed.dcp?.modelOverrides?.["openai-codex/gpt-6-astra"]?.compress).toEqual({
 			minContextPercent: "26%",

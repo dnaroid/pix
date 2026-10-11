@@ -56,6 +56,7 @@ interface SubagentCatalogStateEvent {
 	sessionFile?: string;
 	model?: string;
 	types: string[];
+	projectTypes: string[];
 }
 
 function createLiveStatePayload(
@@ -110,6 +111,7 @@ function createSubagentCatalogState(ctx: unknown): SubagentCatalogStateEvent {
 		...(sessionFile ? { sessionFile } : {}),
 		...(model ? { model } : {}),
 		types: Object.keys(effective?.types ?? {}).sort(),
+		projectTypes: Object.keys(effective?.types ?? {}).filter((name) => effective?.projectAgentMetadata?.[name] !== undefined).sort(),
 	};
 }
 

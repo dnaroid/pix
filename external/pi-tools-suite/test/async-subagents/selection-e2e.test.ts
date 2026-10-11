@@ -300,7 +300,7 @@ Let the configured router choose the helper profile: leave subagentType unset. D
 		});
 	}, E2E_TIMEOUT_MS);
 
-	e2eTest("selects research, implement, and verify by execution mode rather than discipline", async () => {
+	e2eTest("selects research, implement-core, and verify for explicitly requested handoffs", async () => {
 		await withFixtureProject(async (projectDir) => {
 			const prompt = `
 Launch exactly three sub-agents now and then stop after the spawn call; do not wait for results and do not inspect files first.
@@ -314,7 +314,7 @@ The goal is to route each track to the right kind of helper, not to complete the
 			const input = firstSpawnInput(result.events);
 			expectResolvedTaskTypes(input, {
 				"payment-review": "research",
-				"docs-update": "implement",
+				"docs-update": "implement-core",
 				"test-run": "verify",
 			});
 		});

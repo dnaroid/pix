@@ -115,24 +115,23 @@ describe.serial("model tools", () => {
 		expect(pi.activeTools).toEqual(["custom", "Read", "Edit", "Write", "Bash", "Grep", "Glob"]);
 	});
 
-	test.serial("keeps active repo discovery tools ahead of lower-level profile tools", async () => {
+	test.serial("keeps project_search active across model profile changes", async () => {
 		const { default: register } = await import("../src/model-tools/index.js");
-		const { REPO_DISCOVERY_TOOL_NAMES } = await import("../src/tool-descriptions.js");
 		const pi = new FakePi();
-		pi.activeTools = ["read", "custom", ...REPO_DISCOVERY_TOOL_NAMES, "bash"];
+		pi.activeTools = ["read", "custom", "project_search", "bash"];
 
 		register(pi as any, MODEL_TOOL_TEST_DEPENDENCIES as any);
 		pi.handlers.get("session_start")({}, { model: { id: "claude-sonnet" } });
-		expect(pi.activeTools).toEqual([...REPO_DISCOVERY_TOOL_NAMES, "custom", "Read", "Edit", "Write", "Bash", "Grep", "Glob"]);
+		expect(pi.activeTools).toEqual(["custom", "project_search", "Read", "Edit", "Write", "Bash", "Grep", "Glob"]);
 
 		pi.handlers.get("model_select")({ model: { provider: "openai", id: "gpt-5" } });
-		expect(pi.activeTools).toEqual([...REPO_DISCOVERY_TOOL_NAMES, "custom", "read", "shell", "apply_patch"]);
+		expect(pi.activeTools).toEqual(["custom", "project_search", "read", "shell", "apply_patch"]);
 
 		pi.handlers.get("model_select")({ model: { provider: "zai", id: "glm-5-turbo" } });
-		expect(pi.activeTools).toEqual([...REPO_DISCOVERY_TOOL_NAMES, "custom", "Read", "Edit", "Write", "Bash", "Grep", "Glob"]);
+		expect(pi.activeTools).toEqual(["custom", "project_search", "Read", "Edit", "Write", "Bash", "Grep", "Glob"]);
 
 		pi.handlers.get("model_select")({ model: { id: "unknown" } });
-		expect(pi.activeTools).toEqual([...REPO_DISCOVERY_TOOL_NAMES, "custom", "Read", "Edit", "Write", "Bash", "Grep", "Glob"]);
+		expect(pi.activeTools).toEqual(["custom", "project_search", "Read", "Edit", "Write", "Bash", "Grep", "Glob"]);
 	});
 
 	test.serial("can preserve a narrowed managed tool selection while switching names for the model", async () => {

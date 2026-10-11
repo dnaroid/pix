@@ -113,7 +113,7 @@ Major capabilities include:
 | Area | Modules / behavior |
 | --- | --- |
 | Parallel work | `async-subagents`, presets, fallback routing, `/ultrawork`, `/hyperplan` |
-| Repository intelligence | indexed architecture/structure/AST/semantic/symbol/dependency tools |
+| Repository search | Native Code/Knowledge retrieval via `project_search` |
 | Structural edits | `ast-grep` |
 | Feedback | LSP diagnostics and comment checks |
 | Planning | hierarchical durable todos |
@@ -140,8 +140,8 @@ Parallel sub-agents report live status without taking over the main session:
 ![Pix running parallel sub-agents alongside the main implementation plan](../assets/screenshots/pix-subagents.png)
 
 Useful suite commands include `/todos`, `/sub-status`, `/sub-stop`,
-`/ultrawork`, `/hyperplan`, `/usage`, `/dcp`, `/idx-init`,
-`/idx-update`, `/opencode-import`, and `/antigravity-add-account`.
+`/ultrawork`, `/hyperplan`, `/usage`, `/dcp`, `/opencode-import`, and
+`/antigravity-add-account`.
 The Git-backed resource Registry is available only in Pix Desktop.
 
 ## Command map

@@ -1,7 +1,6 @@
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadPiToolsSuiteConfig } from "../../config.js";
-import { hasIndexedProjectRoot } from "../../lib/project.js";
 import { readAgentDefinitionsFromDir, readProjectAgentDefinitions, type AgentDefinition } from "./agents-dir.js";
 import {
 	applyVendorPolicy,
@@ -60,8 +59,6 @@ export interface SubagentTypeConfig {
 	notForParentModels?: string[];
 	/** Expose the role only to parents in this tier of the suite's frontier list. */
 	forParentTier?: "frontier" | "non-frontier";
-	/** Expose the role only when the current project root contains `.indexer-cli/`. */
-	requiresIndexedProject?: boolean;
 	/**
 	 * Relationship between child candidates and the parent model's vendor.
 	 * Vendors are model-family owners (openai, zai, anthropic, ...), so one
@@ -459,9 +456,6 @@ export function isSubagentTypeAvailableForContext(
 	context: SubagentAvailabilityContext,
 	frontier: FrontierConfig = defaultFrontierConfig(),
 ): boolean {
-	if (profile.requiresIndexedProject === true) {
-		if (!context.cwd || !hasIndexedProjectRoot(context.cwd)) return false;
-	}
 	return isSubagentTypeAvailableForParent(profile, context.parentModelRef, frontier);
 }
 
@@ -548,10 +542,6 @@ export function normalizeSubagentTypeProfile(
 	const fallbackModels = models === undefined ? modelList(rawProfile.fallbackModels, rawProfile.fallbackModel) : undefined;
 	const parentProviderPolicy = normalizeParentProviderPolicy(rawProfile.parentProviderPolicy, name, file);
 	const requireDifferentProvider = rawProfile.requireDifferentProvider;
-	const requiresIndexedProject = rawProfile.requiresIndexedProject;
-	if (requiresIndexedProject !== undefined && typeof requiresIndexedProject !== "boolean") {
-		throw new Error(`Agent ${name}: requiresIndexedProject must be a boolean (${file})`);
-	}
 	if (requireDifferentProvider !== undefined && typeof requireDifferentProvider !== "boolean") {
 		throw new Error(`Agent ${name}: requireDifferentProvider must be a boolean (${file})`);
 	}
@@ -569,7 +559,6 @@ export function normalizeSubagentTypeProfile(
 		forParentModels: normalizeParentModelPatterns(rawProfile.forParentModels, "forParentModels", name, file),
 		notForParentModels: normalizeParentModelPatterns(rawProfile.notForParentModels, "notForParentModels", name, file),
 		forParentTier: normalizeParentTier(rawProfile.forParentTier, name, file),
-		requiresIndexedProject,
 		parentProviderPolicy: parentProviderPolicy ?? (requireDifferentProvider ? "require-other" : undefined),
 		thinking: trimString(rawProfile.thinking),
 		tools: arrayOfStrings(rawProfile.tools),
@@ -630,7 +619,6 @@ function compactProfile(profile: SubagentTypeConfig): SubagentTypeConfig {
 	if (profile.forParentModels !== undefined) compact.forParentModels = profile.forParentModels;
 	if (profile.notForParentModels !== undefined) compact.notForParentModels = profile.notForParentModels;
 	if (profile.forParentTier !== undefined) compact.forParentTier = profile.forParentTier;
-	if (profile.requiresIndexedProject !== undefined) compact.requiresIndexedProject = profile.requiresIndexedProject;
 	if (profile.parentProviderPolicy !== undefined) compact.parentProviderPolicy = profile.parentProviderPolicy;
 	if (profile.thinking) compact.thinking = profile.thinking;
 	if (profile.tools && profile.tools.length > 0) compact.tools = profile.tools;

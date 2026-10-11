@@ -1,6 +1,6 @@
 import { RequestError } from "@agentclientprotocol/sdk";
 import { isAbsolute } from "node:path";
-import type { SearchConfigRequest, SearchQueryRequest, SearchSetting, SemanticTasksRequest } from "./contract.js";
+import type { SearchConfigRequest, SearchIndexRequest, SearchQueryRequest, SearchSetting, SearchSyncRequest, SemanticTasksRequest } from "./contract.js";
 
 const invalid = (): never => { throw new RequestError(-32602, "Invalid Desktop search request"); };
 const record = (value: unknown): Record<string, unknown> => {
@@ -18,14 +18,36 @@ function cwd(value: unknown): string {
 }
 export function parseSearchConfigRequest(value: unknown): SearchConfigRequest {
   const p = record(value);
-  if (p.enabled !== undefined && typeof p.enabled !== "boolean") return invalid();
-  if (p.sessionTitlesEnabled !== undefined && typeof p.sessionTitlesEnabled !== "boolean") return invalid();
-  if (p.tasksSemanticEnabled !== undefined && typeof p.tasksSemanticEnabled !== "boolean") return invalid();
-  if (p.messageFilterEnabled !== undefined) return invalid();
-  return { cwd: cwd(p.cwd), ...(p.enabled === undefined ? {} : { enabled: p.enabled as boolean }),
-    ...(p.sessionTitlesEnabled === undefined ? {} : { sessionTitlesEnabled: p.sessionTitlesEnabled as boolean }),
-    ...(p.tasksSemanticEnabled === undefined ? {} : { tasksSemanticEnabled: p.tasksSemanticEnabled as boolean }),
-    ...(p.apiKey === undefined ? {} : { apiKey: text(p.apiKey, 4096).trim() }) };
+  if (Object.keys(p).some(key => key !== "cwd")) return invalid();
+  return { cwd: cwd(p.cwd) };
+}
+export function parseSearchSyncRequest(value: unknown): SearchSyncRequest {
+  const p = record(value);
+  if (Object.keys(p).some(key => !["cwd", "settings"].includes(key))) return invalid();
+  return { cwd: cwd(p.cwd), settings: parseSettings(p.settings) };
+}
+export function parseSearchIndexRequest(value: unknown): SearchIndexRequest {
+  const p = record(value);
+  if (Object.keys(p).some(key => !["cwd", "source", "settings"].includes(key))) return invalid();
+  if (p.source !== "settings" && p.source !== "sessions" && p.source !== "tasks" && p.source !== "commits") return invalid();
+  if (p.source !== "settings") {
+    if (Object.hasOwn(p, "settings")) return invalid();
+    return { cwd: cwd(p.cwd), source: p.source };
+  }
+  // Unlike legacy query/sync, explicit indexing accepts only authored metadata.
+  if (!Array.isArray(p.settings) || p.settings.some(value => Object.keys(record(value))
+    .some(key => !["id", "section", "label", "description", "synonyms"].includes(key)))) return invalid();
+  return { cwd: cwd(p.cwd), source: p.source, settings: parseSettings(p.settings) };
+}
+function parseSettings(value: unknown): SearchSetting[] {
+  if (!Array.isArray(value) || value.length > 1000) return invalid();
+  return value.map(value => {
+    const s = record(value);
+    if (!Array.isArray(s.synonyms) || s.synonyms.length > 30) return invalid();
+    // Values, drafts and presentation-only fields never reach indexing.
+    return { id: text(s.id, 256), section: text(s.section, 256), label: text(s.label, 512),
+      description: text(s.description), synonyms: s.synonyms.map(v => text(v, 512)) };
+  });
 }
 export function parseSemanticTasksRequest(value: unknown): SemanticTasksRequest {
   const p = record(value);
@@ -37,14 +59,7 @@ export function parseSemanticTasksRequest(value: unknown): SemanticTasksRequest 
 export function parseSearchQueryRequest(value: unknown): SearchQueryRequest {
   const p = record(value);
   if (!Array.isArray(p.types) || p.types.some(t => t !== "settings" && t !== "sessions") || p.types.length > 2) return invalid();
-  if (!Array.isArray(p.settings) || p.settings.length > 1000) return invalid();
-  const settings: SearchSetting[] = p.settings.map(value => {
-    const s = record(value);
-    if (!Array.isArray(s.synonyms) || s.synonyms.length > 30) return invalid();
-    // Deliberately reconstruct the allowlist: values, drafts and unknown fields never reach indexing.
-    return { id: text(s.id, 256), section: text(s.section, 256), label: text(s.label, 512),
-      description: text(s.description), synonyms: s.synonyms.map(v => text(v, 512)) };
-  });
+  const settings = parseSettings(p.settings);
   const limit = p.limit ?? 30;
   if (!Number.isInteger(limit) || (limit as number) < 1 || (limit as number) > 100) return invalid();
   return { cwd: cwd(p.cwd), query: text(p.query, 2048), types: [...new Set(p.types)] as SearchQueryRequest["types"], settings, limit: limit as number };

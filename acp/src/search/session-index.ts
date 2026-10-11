@@ -2,15 +2,15 @@ import { DatabaseSync } from "node:sqlite";
 import { setImmediate as yieldTask } from "node:timers/promises";
 import { resolve } from "node:path";
 import type { SessionMapRecord } from "../acp/session-map.js";
-import { SEARCH_EMBEDDING_MODEL } from "./contract.js";
 import { hashText } from "./documents.js";
 import { EMBEDDING_DIMENSIONS, validVector } from "./embeddings.js";
+import type { SemanticEmbeddingConfig } from "./config.js";
+import { compatibleEmbeddingMetadata, initializeEmbeddingMetadata } from "./embedding-cache.js";
 
-/** Separate schema/embedding identity from settings, commits, and future IDX tables. */
+/** Separate schema/embedding identity from settings and commits. */
 export const SESSION_META = "pix_session_meta";
 export const SESSION_TITLES = "pix_session_titles";
 export const SESSION_VECTORS = "pix_session_vectors";
-const FORMAT = "float32le";
 
 export interface NamedSessionTitle {
   readonly sessionId: string;
@@ -44,32 +44,13 @@ function tableExists(db: DatabaseSync, name: string): boolean {
   return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
 }
 
-function schemaIsCompatible(db: DatabaseSync): boolean {
-  const values = new Map<string, string>();
-  for (const row of db.prepare(`SELECT key,value FROM ${SESSION_META}`).iterate()) {
-    if (typeof row.key === "string" && typeof row.value === "string") values.set(row.key, row.value);
-  }
-  return values.get("model") === SEARCH_EMBEDDING_MODEL
-    && values.get("dimensions") === String(EMBEDDING_DIMENSIONS)
-    && values.get("encoding") === FORMAT;
-}
-
-export function createSessionIndexTransaction(db: DatabaseSync, signal: AbortSignal): SessionIndexTransaction {
+export function createSessionIndexTransaction(db: DatabaseSync, signal: AbortSignal, config?: SemanticEmbeddingConfig): SessionIndexTransaction {
+  const dimension = config?.dimension ?? EMBEDDING_DIMENSIONS;
   db.exec(`CREATE TABLE IF NOT EXISTS ${SESSION_META} (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS ${SESSION_TITLES} (session_id TEXT PRIMARY KEY, title TEXT NOT NULL, title_hash TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS ${SESSION_VECTORS} (title_hash TEXT PRIMARY KEY, vector BLOB NOT NULL);
     CREATE INDEX IF NOT EXISTS pix_session_titles_by_hash ON ${SESSION_TITLES}(title_hash);`);
-  const metadata = db.prepare(`SELECT COUNT(*) AS count FROM ${SESSION_META}`).get()?.count;
-  if (metadata === 0) {
-    const insert = db.prepare(`INSERT INTO ${SESSION_META} VALUES (?,?)`);
-    insert.run("model", SEARCH_EMBEDDING_MODEL);
-    insert.run("dimensions", String(EMBEDDING_DIMENSIONS));
-    insert.run("encoding", FORMAT);
-  } else if (!schemaIsCompatible(db)) {
-    // Do not discard existing paid vectors because an unknown model's
-    // metadata was found. Fail closed until a deliberate migration exists.
-    throw new Error("Session title embedding identity is incompatible");
-  }
+  initializeEmbeddingMetadata(db, SESSION_META, config);
   db.exec("CREATE TEMP TABLE IF NOT EXISTS pix_live_session_ids (session_id TEXT PRIMARY KEY)");
   const saveTitle = db.prepare(`INSERT INTO ${SESSION_TITLES} (session_id,title,title_hash) VALUES (?,?,?)
     ON CONFLICT(session_id) DO UPDATE SET title=excluded.title,title_hash=excluded.title_hash
@@ -103,9 +84,9 @@ export function createSessionIndexTransaction(db: DatabaseSync, signal: AbortSig
     save(vectors): void {
       for (const [hash, values] of vectors) {
         signal.throwIfAborted();
-        if (!validVector(values)) throw new Error("Invalid session title vector");
+        if (!validVector(values, dimension)) throw new Error("Invalid session title vector");
         if (!db.prepare(`SELECT 1 FROM ${SESSION_TITLES} WHERE title_hash=?`).get(hash)) continue;
-        const bytes = Buffer.alloc(EMBEDDING_DIMENSIONS * 4);
+        const bytes = Buffer.alloc(dimension * 4);
         values.forEach((value, index) => bytes.writeFloatLE(value, index * 4));
         addVector.run(hash, bytes);
       }
@@ -114,19 +95,20 @@ export function createSessionIndexTransaction(db: DatabaseSync, signal: AbortSig
 }
 
 /** Read-only snapshot; does not create a DB or expose session texts. */
-export async function loadSessionTitleVectors(db: DatabaseSync, signal: AbortSignal): Promise<Map<string, StoredSessionVector>> {
+export async function loadSessionTitleVectors(db: DatabaseSync, signal: AbortSignal, config?: SemanticEmbeddingConfig): Promise<Map<string, StoredSessionVector>> {
+  const dimension = config?.dimension ?? EMBEDDING_DIMENSIONS;
   const found = new Map<string, StoredSessionVector>();
   if (!tableExists(db, SESSION_META) || !tableExists(db, SESSION_TITLES) || !tableExists(db, SESSION_VECTORS)) return found;
-  if (!schemaIsCompatible(db)) return found;
+  if (!compatibleEmbeddingMetadata(db, SESSION_META, config)) return found;
   let count = 0;
   for (const row of db.prepare(`SELECT t.session_id, t.title_hash, v.vector FROM ${SESSION_TITLES} t
     JOIN ${SESSION_VECTORS} v ON v.title_hash=t.title_hash`).iterate()) {
     signal.throwIfAborted();
     if (typeof row.session_id === "string" && typeof row.title_hash === "string" && row.vector instanceof Uint8Array
-      && row.vector.byteLength === EMBEDDING_DIMENSIONS * 4) {
+      && row.vector.byteLength === dimension * 4) {
       const bytes = Buffer.from(row.vector);
-      const vector = Array.from({ length: EMBEDDING_DIMENSIONS }, (_, i) => bytes.readFloatLE(i * 4));
-      if (validVector(vector)) found.set(row.session_id, { hash: row.title_hash, vector });
+      const vector = Array.from({ length: dimension }, (_, i) => bytes.readFloatLE(i * 4));
+      if (validVector(vector, dimension)) found.set(row.session_id, { hash: row.title_hash, vector });
     }
     if (++count % 32 === 0) await yieldTask();
   }

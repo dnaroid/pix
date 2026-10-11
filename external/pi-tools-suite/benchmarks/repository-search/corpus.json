@@ -1,0 +1,42 @@
+{
+  "files": [
+    "external/pi-tools-suite/src/project-search/engine.ts",
+    "external/pi-tools-suite/src/project-search/index.ts",
+    "external/pi-tools-suite/src/project-search/native.ts",
+    "external/pi-tools-suite/src/project-search/native-cli.mjs",
+    "external/pi-tools-suite/src/project-search/native-engine.mjs",
+    "external/pi-tools-suite/src/project-search/native-store.mjs",
+    "external/pi-tools-suite/src/project-search/native-scan.mjs",
+    "external/pi-tools-suite/src/project-search/native-semantic.mjs",
+    "external/pi-tools-suite/src/project-search/native-vector-store.mjs",
+    "external/pi-tools-suite/src/project-search/native-embedding-provider.mjs",
+    "external/pi-tools-suite/src/project-search/semantic-command.ts",
+    "specs/project-search-agent-tool.md",
+    "specs/native-repository-search.md",
+    "docs/decisions/0065-native-repository-search.md",
+    "docs/decisions/0066-native-repository-semantic-search.md",
+    "docs/configuration.md",
+    "docs/development.md",
+    "specs/harness-artifact-storage.md"
+  ],
+  "queries": [
+    {"id":"id-parser", "group":"identifier", "source":"code", "query":"parseProjectSearchParams", "targets":[["external/pi-tools-suite/src/project-search/engine.ts", "export function parseProjectSearchParams"]]},
+    {"id":"id-provider", "group":"identifier", "source":"code", "query":"repositoryEmbeddingSettings", "targets":[["external/pi-tools-suite/src/project-search/native-embedding-provider.mjs", "export async function repositoryEmbeddingSettings"]]},
+    {"id":"id-ignore", "group":"identifier", "source":"code", "query":"validateMissingSources", "targets":[["external/pi-tools-suite/src/project-search/native-scan.mjs", "export async function validateMissingSources"]]},
+    {"id":"id-fusion", "group":"identifier", "source":"code", "query":"fuseRepositoryHits", "targets":[["external/pi-tools-suite/src/project-search/native-semantic.mjs", "export function fuseRepositoryHits"]]},
+    {"id":"id-budget", "group":"identifier", "source":"code", "query":"MAX_CHUNKS_PER_SEARCH", "targets":[["external/pi-tools-suite/src/project-search/native-semantic.mjs", "const MAX_CHUNKS_PER_SEARCH"]]},
+    {"id":"id-storage", "group":"identifier", "source":"code", "query":"MAX_DATABASE_BYTES", "targets":[["external/pi-tools-suite/src/project-search/native-store.mjs", "export const MAX_DATABASE_BYTES"]]},
+    {"id":"nl-credentials", "group":"no-token-overlap", "source":"code", "query":"Где получают секрет доступа из пользовательских настроек, не читая окружение проекта?", "targets":[["external/pi-tools-suite/src/project-search/native-embedding-provider.mjs", "export async function repositoryEmbeddingKey"]]},
+    {"id":"nl-stale", "group":"no-token-overlap", "source":"code", "query":"Как прерывают устаревший ответ при смене поколения или согласия?", "targets":[["external/pi-tools-suite/src/project-search/native-semantic.mjs", "const current = async"]]},
+    {"id":"nl-ranking", "group":"no-token-overlap", "source":"code", "query":"Где объединяются лексические и векторные ранги без суммирования несопоставимых исходных оценок?", "targets":[["external/pi-tools-suite/src/project-search/native-semantic.mjs", "export function fuseRepositoryHits"]]},
+    {"id":"nl-transaction", "group":"no-token-overlap", "source":"code", "query":"Какая операция публикует снимок короткой транзакцией?", "targets":[["external/pi-tools-suite/src/project-search/native-store.mjs", "export function publish"]]},
+    {"id":"doc-budget", "group":"contract", "source":"knowledge", "query":"128 new chunks per search", "targets":[["specs/project-search-agent-tool.md", "128 new chunks per search"]]},
+    {"id":"doc-platform", "group":"contract", "source":"knowledge", "query":"Desktop macOS only", "targets":[["docs/development.md", "macOS"]]},
+    {"id":"doc-storage", "group":"contract", "source":"knowledge", "query":"scratch output .pi/artifacts", "targets":[["specs/harness-artifact-storage.md", ".pi/artifacts/"]]},
+    {"id":"doc-provider", "group":"contract", "source":"knowledge", "query":"OpenRouter perplexity/pplx-embed-v1-0.6b", "targets":[["docs/configuration.md", "perplexity/pplx-embed-v1-0.6b"]]},
+    {"id":"nl-consent", "group":"no-token-overlap", "source":"knowledge", "query":"Почему разрешение на передачу текстов репозитория отделено от истории диалогов?", "targets":[["docs/decisions/0066-native-repository-semantic-search.md", "Keep `.pi/search/files.sqlite` local/lexical"]]},
+    {"id":"nl-cap", "group":"no-token-overlap", "source":"knowledge", "query":"Какой предел пополнения векторов за один запрос и как продолжить заполнение?", "targets":[["specs/project-search-agent-tool.md", "128 new chunks per search"]]},
+    {"id":"nl-prerequisites", "group":"no-token-overlap", "source":"knowledge", "query":"Можно ли установить индексатор без секретного ключа и запущенной локальной модели?", "targets":[["docs/configuration.md", "Installing `indexer-cli` with npm"]]},
+    {"id":"nl-ci", "group":"no-token-overlap", "source":"knowledge", "query":"Какой полный проверочный шлюз нужен перед отправкой изменений, в отличие от быстрой проверки?", "targets":[["docs/development.md", "npm run check:ci"]]}
+  ]
+}

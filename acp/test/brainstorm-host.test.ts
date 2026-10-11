@@ -199,7 +199,7 @@ test("participant launch isolates extensions/tools and clears inherited capabili
 	assert.equal(options.env?.PIX_BRAINSTORM_HOST_TOKEN, ""); assert.equal(options.env?.PIX_BRAINSTORM_HOST_URL, "");
 	assert.ok(options.args?.includes("--no-extensions"));
 	const tools = options.args![options.args!.indexOf("--tools") + 1]!;
-	assert.deepEqual(tools.split(",").filter(tool => tool.startsWith("repo_")), ["repo_context", "repo_inspect", "repo_audit"]);
+	assert.deepEqual(tools.split(",").filter(tool => tool.startsWith("repo_")), []);
 	assert.ok(tools.split(",").includes("project_search"));
 	assert.ok(!tools.split(",").some((tool) => ["bash", "write", "edit", "shell", "async_subagents"].includes(tool)));
 	const extensions = options.args!.filter((_, i, args) => args[i - 1] === "--extension");

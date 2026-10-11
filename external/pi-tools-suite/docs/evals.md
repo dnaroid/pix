@@ -38,8 +38,8 @@ Live cases are used for questions such as:
 
 - should the model choose `project_search` or a direct read?
 - should a non-trivial task create a todo plan?
-- should an expensive Sol parent delegate substantial implementation work?
-- should Luna escalate a high-risk architecture decision?
+- should implementation stay with the parent when size alone is the reason to delegate?
+- should architecture uncertainty trigger bounded oracle advice before implementation?
 - should a narrow local failure stay local instead of calling an oracle?
 - did a coding agent reproduce the bug before editing and verify behavior after
   editing?
@@ -186,12 +186,12 @@ Representative coverage:
 | --- | --- | --- |
 | `coding-discipline` | coding-discipline tests | coding-quality workflows |
 | `ast-grep` | ast-grep tests | structural tool selection |
-| `async-subagents` | core/tools/UI tests | Sol/Luna orchestration |
+| `async-subagents` | core/tools/UI/retired-role/delegation-policy tests | model-independent orchestration policy cases |
 | `brainstorm` | config, command/tool routing instructions, audit/brainstorm prompts, mode persistence/v2–v3→v4 migration, quorum gaps, ledger history/position matrix, outputDir/publish, nested subagent adapter, isolated SDK research-tool inventory/guards, five-round workflow and locked review/finalization tests | deterministic only; no paid council/routing or live web-service eval yet; actual routing, clarification and audit/synthesis quality are not certified |
 | `lsp` | LSP tests | deterministic only |
 | `comment-checker` | comment-checker tests | deterministic only |
 | `session` | naming, recovery, action dispatch, codemode SDK tests + live-validator controls | all five actions; title read/rename; overview before raw read/recovery; known-literal search |
-| `repo-discovery` | repo-discovery tests | search/architecture selection |
+| `project-search` | project-search tests and decision-policy guidance tests | semantic discovery, architecture, contract lookup and scoped review |
 | `antigravity-auth` | provider/auth tests | deterministic only |
 | `opencode-import` | import tests | deterministic only |
 | `todo` | todo + persistence tests | plan creation / negative control |
@@ -205,8 +205,16 @@ Representative coverage:
 | `codex-reasoning-fix` | reasoning-fix tests | deterministic only |
 
 The tool registry similarly covers `lookup`, `ast_grep`, `ast_apply`, all
-subagent actions, all `repo_*` tools, `todo`, session tools, web tools, Claude
-aliases, Codex aliases, and `compress`.
+subagent actions, `project_search`, `todo`, session tools, web tools, Claude
+aliases, Codex aliases, and `compress`. Exact text and path lookup use standard
+read/grep/find tools; syntax-aware structural matching uses `ast_grep`.
+
+Repository discovery evals exercise `project_search` and direct file tools; the
+removed `repo_context`, `repo_audit`, and `repo_inspect` tools have no runnable
+eval cases. The retired P01-N paired runner compared a native-compact profile
+that is no longer supported, so it must not be used to generate new results.
+Previously generated P01-N reports remain historical evidence and are not
+rewritten or deleted.
 
 ## Live case model
 
@@ -218,7 +226,6 @@ Each live case is an `EvalCase` with:
 - a fixture project;
 - a user prompt;
 - optional model filters;
-- optional fake indexed-repository support;
 - optional tools that should be recorded but not executed;
 - machine-checkable assertions;
 - an optional custom validator for structured tool input.
@@ -254,8 +261,14 @@ passing merely because the answer was embedded in the prompt.
 
 - `tool.semantic-repo-search`: an unknown behavior owner should select
   `project_search` before direct discovery.
-- `tool.architecture-first`: a broad unfamiliar-repository overview should
-  select `repo_inspect` with `mode: "architecture"`.
+- `tool.architecture-first`: a broad unfamiliar-repository overview should use
+  `project_search` to locate important modules, then synthesize a compact map.
+- `tool.project-search-general` and `tool.project-search-contract`: general
+  unfamiliar-repository discovery and authoritative contract lookup should use
+  semantic search to identify relevant files.
+- `tool.project-search-scoped-review`: a material behavior review should search
+  for the relevant contract and read only that contract plus the named changed
+  path, rather than auditing the entire worktree.
 - `tool.exact-literal-direct`: an exact literal lookup should avoid semantic
   and architecture-discovery overhead.
 - `tool.ast-structural`: a syntax-aware structural query should select
@@ -326,16 +339,14 @@ of statistical superiority; these cases do not measure actual coding/test work.
 - `quality.counterexample-preserves-validation`: preserve nearby validation and
   explicitly check a boundary or counterexample.
 
-### Orchestration and escalation
+### Orchestration policy
 
-- `orchestration.sol-delegates-substantial` (Sol): the expensive parent should
-  delegate substantial multi-file work.
-- `orchestration.sol-keeps-tiny-edit` (Sol): a tiny known-file edit should stay
-  in the parent.
-- `orchestration.luna-delegates-substantial` (Luna): substantial implementation
-  or research should use the configured worker tier.
-- `orchestration.luna-escalates-high-risk` (Luna): high-risk cross-module or
-  security work should trigger stronger review/deep escalation.
+Model-independent cases check that size/parallelism alone do not trigger coding
+handoff, tiny edits stay in the parent, explicit implementation requests select
+`implement-core`, architecture uncertainty selects bounded `oracle` advice, and
+large prescribed mechanical transformations select `mechanical`. These are
+orchestration evaluations; no live model success is claimed without a reported
+actual run.
 
 ### Negative controls
 
@@ -396,14 +407,12 @@ For each `(case, model)` pair the runner:
 1. copies the selected fixture into a fresh temporary project;
 2. snapshots ordinary project files before execution;
 3. creates an isolated `.pi` session directory;
-4. optionally marks the project as indexed and installs a deterministic fake
-   `idx` executable for repository-selection cases;
-5. writes a recorder extension that captures tool calls/results and final usage;
-6. starts a real `pi` subprocess with the requested model and suite extension;
-7. waits for completion or the per-case timeout;
-8. snapshots the project again and derives changed files;
-9. computes workflow/cost metrics;
-10. evaluates assertions and post-run behavioral checks;
+4. writes a recorder extension that captures tool calls/results and final usage;
+5. starts a real `pi` subprocess with the requested model and suite extension;
+6. waits for completion or the per-case timeout;
+7. snapshots the project again and derives changed files;
+8. computes workflow/cost metrics;
+9. evaluates assertions and post-run behavioral checks;
 11. deletes the temporary project unless retention was requested.
 
 The subprocess disables unrelated extension/skill/template/theme discovery so
@@ -512,7 +521,7 @@ starts at the caller's cwd and uses the nearest ancestor with `.pi` or `.git`
 Thus running from the nested suite writes under the enclosing project's `.pi`,
 not alongside installed harness sources. No absolute project path is cached.
 Each run gets a unique timestamp/UUID directory. `PI_TOOLS_SUITE_EVAL_OUTPUT_DIR`
-and delivery-review's `DELIVERY_REVIEW_OUTPUT` remain explicit output overrides
+and project-local role output overrides remain explicit output overrides
 (relative paths resolve from cwd). Export retained CI evidence to durable storage;
 Desktop may clean scratch output. See the Pix
 [artifact storage contract](../../../specs/harness-artifact-storage.md).
@@ -608,10 +617,8 @@ negative
 ### Run named cases
 
 ```bash
-PI_TOOLS_SUITE_EVAL_MODELS='openai-codex/gpt-6.1-sol' \
-CASES='orchestration.sol-delegates-substantial,'\
-'orchestration.sol-keeps-tiny-edit'
-PI_TOOLS_SUITE_EVAL_CASES="$CASES" \
+PI_TOOLS_SUITE_EVAL_MODELS='zai/glm-5.3' \
+PI_TOOLS_SUITE_EVAL_CASES='orchestration.size-alone-stays-parent,orchestration.keeps-tiny-edit' \
   npm run evals:report
 ```
 
@@ -638,11 +645,10 @@ npm run test:prompt-evals:async
 npm run test:prompt-evals:dcp
 ```
 
-The tool-selection suite uses real model calls with a simulated IDX CLI, not a
-real semantic index. Each fixture has its own project-root boundary, installed
-spec template, and source-backed search/context results. Its catalog omits
-`knowledge-auditor` explicitly to test direct `repo_audit` fallback; auditor
-delegation is covered separately. DCP history is persisted in a seed session so
+The tool-selection suite uses native source-backed project search. Each fixture
+has its own project-root boundary and ordinary source/document fixtures. Its catalog omits
+`knowledge-auditor` explicitly to test parent-side project search and direct
+file inspection; auditor delegation is covered separately. DCP history is persisted in a seed session so
 compression IDs remain valid when the tool reconstructs the transcript.
 
 Set `TOOL_SELECTION_E2E_MODEL` to select the provider/model and
@@ -651,7 +657,7 @@ The outer test deadline includes the configured infrastructure retry budget and
 child termination grace period; assertions are not retried. Slow providers can
 be run with lower Bun concurrency without changing the scenario assertions.
 With `TOOL_SELECTION_E2E_KEEP=1`, fixtures retain `.pi/case.json`, stdout/stderr,
-and tool/IDX event logs under the project `.pi/artifacts/` eval run directory.
+and tool event logs under the project `.pi/artifacts/` eval run directory.
 Timeouts terminate and reap the child before cleanup and remain failed/incomplete
 evidence, never successful selection results.
 
@@ -677,11 +683,11 @@ openai-codex/gpt-6.1-sol
 
 This matrix exposes several important regressions:
 
-- a prompt improves GLM but makes Luna overthink simple tasks;
-- Luna stops delegating substantial work;
-- Luna escalates routine failures unnecessarily;
-- Sol stops delegating expensive implementation work;
-- Sol delegates tiny tasks and increases total cost;
+- a prompt causes size-alone implementation handoffs;
+- a prompt bypasses oracle-first architectural advice when architecture is uncertain;
+- a prompt routes routine failures to oracle unnecessarily;
+- a prompt transfers implementation without explicit authorization or an actual capability gap;
+- a prompt hands tiny exact edits to `mechanical`;
 - a cheaper route saves parent tokens but increases total worker tokens or
   wall-clock time enough to erase the benefit.
 
@@ -776,7 +782,7 @@ Run the relevant live category/model subset in addition to deterministic tests.
 
 ### Nightly or manual comparison
 
-Run the full available GLM/Luna/Sol matrix and persist the JSON/Markdown
+Run the requested model matrix and persist the JSON/Markdown
 report as a CI artifact. This is the right place to watch token/cost/latency
 drift because live-model variance and expense make it a poor default PR gate.
 
@@ -810,7 +816,7 @@ Useful next additions include:
 - comment-checker precision/recall corpora;
 - larger AST transformation fixtures with semantic hidden tests;
 - end-to-end orchestration cases that allow real workers to complete and compare
-  `Sol direct` vs `Sol + Luna` vs `Luna + Sol escalation`;
+  parent-owned implementation versus explicitly authorized handoffs;
 - machine-readable CI summary output for trend dashboards.
 
 The important constraint is to keep correctness evidence objective whenever it

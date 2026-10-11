@@ -5,6 +5,7 @@ export interface SearchDocument {
   readonly hit: LocalSearchHit;
   readonly text: string;
   readonly chunks: readonly string[];
+  readonly metadataHash?: string;
 }
 export const hashText = (text: string): string => createHash("sha256").update(text).digest("hex");
 // Bounded even for dense multilingual text; overlap preserves words crossing a boundary.
@@ -16,11 +17,16 @@ export function chunkText(text: string): string[] {
 export function settingsDocuments(settings: readonly SearchSetting[]): SearchDocument[] {
   const unique = new Map<string, SearchDocument>();
   for (const s of settings) {
-    const text = [s.section, s.label, s.description, ...s.synonyms].join("\n");
-    unique.set(s.id, { text, chunks: chunkText(text), hit: { kind: "settings", id: `settings:${s.id}`,
+    const synonyms = [...new Set(s.synonyms)].sort();
+    const text = [s.section, s.label, s.description, ...synonyms].join("\n");
+    unique.set(s.id, { text, chunks: chunkText(text), metadataHash: hashText(JSON.stringify([s.id, s.section, s.label, s.description, synonyms])), hit: { kind: "settings", id: `settings:${s.id}`,
       fieldId: s.id, section: s.section, title: s.label, snippet: s.description.slice(0, 240), score: 0 } });
   }
-  return [...unique.values()];
+  return [...unique.values()].sort((a, b) => a.hit.id.localeCompare(b.hit.id));
+}
+/** Only authored metadata participates; catalogue/synonym ordering is immaterial. */
+export function settingsFingerprint(documents: readonly SearchDocument[]): string {
+  return hashText(JSON.stringify(documents.map(document => [document.hit.id, document.metadataHash ?? document.text])));
 }
 export function lexicalScore(text: string, query: string): number {
   const haystack = text.normalize("NFKC").toLocaleLowerCase();

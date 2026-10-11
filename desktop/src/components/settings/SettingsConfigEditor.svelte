@@ -22,6 +22,7 @@
   import DesktopSettingsEditor, { type DesktopSettingsSection } from "./DesktopSettingsEditor.svelte";
   import ToolsSuiteSettingsEditor, { type ToolsSuiteSettingsSection } from "./ToolsSuiteSettingsEditor.svelte";
   import SettingsSearchPreferences from "./SettingsSearchPreferences.svelte";
+  import NativeSemanticSettings from "./NativeSemanticSettings.svelte";
 
   let {
     configOptions,
@@ -137,6 +138,7 @@
       const latest = active;
       if (!latest) return;
       setDraft(reconcileSavedSettingsDraft(latest, savedSource, result.document));
+      if (kind === "pi-tools-suite") window.dispatchEvent(new CustomEvent("pix-semantic-config-changed"));
     } catch (caught) {
       if (!indicatorDisposed && generation === saveGeneration) error = caught instanceof Error ? caught.message : String(caught);
     } finally {
@@ -213,9 +215,13 @@
         {:else if parsed.errors.length === 0}
           {#if activeKind === "desktop"}
             <DesktopSettingsEditor source={active.source} schema={active.schemaObject} models={settingsModels} section={chapter.id as DesktopSettingsSection} onChange={updateSource} />
-            {#if chapter.id === "assistant"}<SettingsSearchPreferences cwd={workspace} client={searchClient} />{/if}
+            {#if chapter.id === "assistant"}<SettingsSearchPreferences cwd={workspace} />{/if}
           {:else}
+            {#if chapter.id === "search"}
+            <NativeSemanticSettings source={active.source} onChange={updateSource} />
+            {:else}
             <ToolsSuiteSettingsEditor source={active.source} schema={active.schemaObject} models={settingsModels} section={chapter.id as ToolsSuiteSettingsSection} onChange={updateSource} />
+            {/if}
           {/if}
         {/if}
         </section>

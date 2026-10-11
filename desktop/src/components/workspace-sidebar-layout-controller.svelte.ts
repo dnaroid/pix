@@ -8,7 +8,7 @@ const GIT_MIN_WIDTH = 360;
 const REGISTRY_MIN_WIDTH = 344;
 const SETTINGS_MIN_WIDTH = 360;
 const SCRIPTS_MIN_WIDTH = 400;
-const IDX_MIN_WIDTH = 420;
+const SEARCH_MIN_WIDTH = 360;
 const MIN_MAIN_WORKSPACE_WIDTH = 280;
 
 interface WorkspaceSidebarLayoutControllerOptions {
@@ -145,7 +145,7 @@ export function createWorkspaceSidebarLayoutController(options: WorkspaceSidebar
     if (tab === "registry") return REGISTRY_MIN_WIDTH;
     if (tab === "settings") return SETTINGS_MIN_WIDTH;
     if (tab === "scripts") return SCRIPTS_MIN_WIDTH;
-    if (tab === "idx") return IDX_MIN_WIDTH;
+    if (tab === "search") return SEARCH_MIN_WIDTH;
     return MIN_WIDTH;
   }
 

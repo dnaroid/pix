@@ -9,7 +9,7 @@ export interface SearchDialogState {
   statusError?: string;
 }
 export const emptySearchDialogState = (): SearchDialogState => ({
-  result: { results: [], idxAvailable: false, notices: [] }, busy: false, submitted: false,
+  result: { results: [], notices: [] }, busy: false, submitted: false,
 });
 
 async function cancellable<T>(signal: AbortSignal, operation: () => Promise<T>): Promise<T> {
@@ -83,7 +83,7 @@ export class SearchDialogController {
     } catch {
       if (this.disposed || controller.signal.aborted || generation !== this.generation) return;
       controller.abort();
-      this.update({ result: { results: [], idxAvailable: false, notices: ["Search failed. Please try again."] }, busy: false });
+      this.update({ result: { results: [], notices: ["Search failed. Please try again."] }, busy: false });
     } finally {
       if (this.queryController === controller && !this.state.result.pendingSources?.length) this.queryController = undefined;
     }
@@ -119,19 +119,19 @@ export class SearchDialogController {
 export function searchStatusLabel(status: SearchStatus | undefined): string {
   if (!status) return "Search status unavailable";
   if (status.tasksSemanticEnabled && status.keyAvailable) {
-    return "Semantic task search enabled · task titles/descriptions require separate consent";
+    return "Semantic task search active · global embedding configuration";
   }
   if (status.keyAvailable && status.enabled && status.sessionTitlesEnabled) {
-    return "Semantic settings + session-title search enabled · history stays local";
+    return "Semantic settings and session-title search active · global embedding configuration";
   }
   if (status.keyAvailable && status.sessionTitlesEnabled) {
-    return "Semantic session-title search enabled · conversation history stays local";
+    return "Semantic session-title search active · global embedding configuration";
   }
   if (status.enabled && status.keyAvailable) {
-    return "Semantic settings search enabled · session titles require separate opt-in";
+    return "Semantic settings search active · global embedding configuration";
   }
   if (status.enabled || status.sessionTitlesEnabled || status.tasksSemanticEnabled) {
-    return "Semantic search enabled · OpenRouter key unavailable; local search remains available";
+    return "Semantic search unavailable · OpenRouter key missing; local search remains available";
   }
-  return "Local search · semantic search is opt-in";
+  return "Local search · no valid global embedding configuration";
 }

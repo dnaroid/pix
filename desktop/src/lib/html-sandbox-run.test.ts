@@ -36,4 +36,14 @@ describe("sandbox Run ownership while engines load", () => {
     expect(await run.start("bad")).toEqual({ error: "Local engine unavailable" });
     expect(await run.start("good")).toEqual({ srcdoc: "good" });
   });
+
+  it("keeps the rewritten source when an earlier automatic start finishes late", async () => {
+    const old = deferred();
+    const run = createSandboxRun(async source => source === "old" ? old.promise : { srcdoc: source });
+    const first = run.start("old");
+    run.cancel();
+    expect(await run.start("rewritten")).toEqual({ srcdoc: "rewritten" });
+    old.resolve({ srcdoc: "old" });
+    expect(await first).toBeUndefined();
+  });
 });

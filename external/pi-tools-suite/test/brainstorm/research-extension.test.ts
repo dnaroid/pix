@@ -6,7 +6,6 @@ import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsMana
 import { fauxProvider } from "@earendil-works/pi-ai";
 import councilResearch from "../../src/brainstorm/research-extension.js";
 import { COUNCIL_RESEARCH_TOOLS } from "../../src/brainstorm/research-tools.js";
-import { installFakeIdxOnPath } from "../support/fake-idx.js";
 import { SUBAGENT_WORK_TOOLS_ENV, subagentWorkTools, withSubagentCapabilities } from "../../src/async-subagents/core/child-tools.js";
 
 const scratchRoot = resolve(import.meta.dir, "../../../../.pi/artifacts/council-research-tools");
@@ -30,7 +29,7 @@ test("council guard denies mutations, recursive tools and late activation", asyn
 		await handlers.get(event)!();
 		expect(active).toEqual([...COUNCIL_RESEARCH_TOOLS, "todo", "compress"]);
 	}
-	for (const toolName of ["shell", "bash", "Bash", "write", "Edit", "apply_patch", "ast_apply", "subagents", "brainstorm", "pi_claude_code_provider_web_search", "unknown"]) {
+	for (const toolName of ["shell", "bash", "Bash", "write", "Edit", "apply_patch", "ast_apply", "subagents", "brainstorm", "pi_claude_code_provider_web_search", "unknown", "repo_context", "repo_audit", "repo_inspect"]) {
 		expect(handlers.get("tool_call")!({ toolName }).block).toBe(true);
 	}
 	for (const toolName of COUNCIL_RESEARCH_TOOLS) expect(handlers.get("tool_call")!({ toolName })).toBeUndefined();
@@ -45,7 +44,6 @@ for (const indexed of [false, true]) test(`isolated SDK child loads actual resea
 	mkdirSync(join(root, ".git"));
 	const oldCwd = process.cwd();
 	const oldWorkTools = process.env[SUBAGENT_WORK_TOOLS_ENV];
-	const restorePath = installFakeIdxOnPath(root);
 	let session: Awaited<ReturnType<typeof createAgentSession>>["session"] | undefined;
 	try {
 		process.chdir(root);
@@ -71,14 +69,13 @@ for (const indexed of [false, true]) test(`isolated SDK child loads actual resea
 		await session.bindExtensions({ onError: (error) => errors.push(error) });
 		expect(errors).toEqual([]);
 		const active = session.getActiveToolNames();
-		expect(active.sort()).toEqual([...COUNCIL_RESEARCH_TOOLS.filter((name) => indexed || !name.startsWith("repo_")), "todo", "compress"].sort());
+		expect(active.sort()).toEqual([...COUNCIL_RESEARCH_TOOLS, "todo", "compress"].sort());
 		expect(session.getAllTools().some((tool) => tool.name === "subagents")).toBe(false);
 	} finally {
 		session?.dispose();
 		process.chdir(oldCwd);
 		if (oldWorkTools === undefined) delete process.env[SUBAGENT_WORK_TOOLS_ENV];
 		else process.env[SUBAGENT_WORK_TOOLS_ENV] = oldWorkTools;
-		restorePath();
 		rmSync(root, { recursive: true, force: true });
 	}
 });

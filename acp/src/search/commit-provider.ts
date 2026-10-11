@@ -1,48 +1,18 @@
-import { readFile, stat } from "node:fs/promises";
-import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
-import { parseEnv } from "node:util";
+import { loadSemanticEmbeddingConfig, semanticEmbeddingIdentity, type SemanticEmbeddingConfig } from "./semantic-config.js";
 
-export interface CommitEmbeddingConfig {
-  readonly provider: "openrouter" | "ollama"; readonly model: string; readonly dimension: number;
-  readonly queryPrefix: string; readonly documentPrefix: string; readonly baseUrl: string;
-}
+export type CommitEmbeddingConfig = SemanticEmbeddingConfig;
 export type CommitEmbedder = (input: readonly string[], config: CommitEmbeddingConfig, key: string | undefined, signal: AbortSignal) => Promise<number[][]>;
 export const SEMANTIC_NOTICE = "Commit semantic search unavailable; local BM25 results remain available.";
 export function embeddingIdentity(c: CommitEmbeddingConfig): string {
-  return JSON.stringify([1, c.provider, c.model, c.dimension, c.queryPrefix, c.documentPrefix, c.baseUrl]);
+  return semanticEmbeddingIdentity(c);
 }
-async function boundedFile(path: string, max: number): Promise<string> {
-  const s = await stat(path);
-  if (!s.isFile() || s.size > max) throw new Error("Invalid configuration");
-  const text = await readFile(path, "utf8");
-  if (Buffer.byteLength(text) > max) throw new Error("Invalid configuration");
-  return text;
+export async function loadCommitEmbeddingConfig(_cwd: string): Promise<CommitEmbeddingConfig | undefined> {
+  return loadSemanticEmbeddingConfig();
 }
-export async function loadCommitEmbeddingConfig(cwd: string): Promise<CommitEmbeddingConfig | undefined> {
-  try {
-    const p = JSON.parse(await boundedFile(join(cwd, ".indexer-cli", "config.json"), 65536));
-    const provider = p.embeddingProvider;
-    const model = p.knowledgeEmbeddingModel ?? p.embeddingModel;
-    const dimension = p.vectorSize;
-    if ((provider !== "openrouter" && provider !== "ollama") || typeof model !== "string" || !model.trim() || model.length > 256
-      || !Number.isInteger(dimension) || dimension < 1 || dimension > 8192) return undefined;
-    const queryPrefix = p.knowledgeEmbeddingQueryPrefix ?? (provider === "ollama" ? "search_query: " : "");
-    const documentPrefix = p.knowledgeEmbeddingDocumentPrefix ?? (provider === "ollama" ? "search_document: " : "");
-    if (typeof queryPrefix !== "string" || typeof documentPrefix !== "string" || queryPrefix.length > 512 || documentPrefix.length > 512) return undefined;
-    const baseUrl = provider === "openrouter" ? "https://openrouter.ai/api/v1" : (p.ollamaBaseUrl ?? "http://127.0.0.1:11434");
-    const url = new URL(baseUrl);
-    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) return undefined;
-    return { provider, model, dimension, queryPrefix, documentPrefix, baseUrl: url.toString().replace(/\/$/, "") };
-  } catch { return undefined; }
-}
-/** IDX's credential precedence, without loading or mutating its singleton. */
-export async function loadCommitEmbeddingKey(env: NodeJS.ProcessEnv = process.env, home = homedir()): Promise<string | undefined> {
-  const direct = env.OPENROUTER_API_KEY?.trim();
-  if (direct) return direct;
-  const root = env.XDG_CONFIG_HOME && isAbsolute(env.XDG_CONFIG_HOME) ? env.XDG_CONFIG_HOME : join(home, ".config");
-  try { return parseEnv(await boundedFile(join(root, "idx", ".env"), 65536)).OPENROUTER_API_KEY?.trim() || undefined; }
-  catch { return undefined; }
+/** Same environment-first shared SDK credential contract as settings/history. */
+export async function loadCommitEmbeddingKey(env: NodeJS.ProcessEnv = process.env): Promise<string | undefined> {
+  const { sharedSearchAuth } = await import("./config.js");
+  return sharedSearchAuth(undefined, env).key(new AbortController().signal);
 }
 export function validCommitVector(v: unknown, dimension: number): v is number[] {
   return Array.isArray(v) && v.length === dimension && v.every(n => typeof n === "number" && Number.isFinite(n) && Number.isFinite(Math.fround(n)))

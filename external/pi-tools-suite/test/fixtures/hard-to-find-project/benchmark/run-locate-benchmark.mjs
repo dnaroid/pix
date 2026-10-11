@@ -13,13 +13,8 @@ const manifest = JSON.parse(fs.readFileSync(path.join(benchmarkDir, "manifest.js
 
 const model = process.env.PI_LOCATE_BENCH_MODEL || process.env.TOOL_SELECTION_E2E_MODEL || "";
 const piBin = process.env.PI_BIN || "pi";
-const idxBin = process.env.IDX_BIN || "idx";
 const keepRuns = /^(1|true|yes)$/i.test(process.env.PI_LOCATE_BENCH_KEEP ?? "");
 const timeoutMs = Number(process.env.PI_LOCATE_BENCH_TIMEOUT_MS ?? 300_000);
-const idxInitTimeoutMs = Number(process.env.PI_LOCATE_BENCH_IDX_INIT_TIMEOUT_MS ?? 180_000);
-const useFakeIdx = /^(1|true|yes)$/i.test(process.env.PI_LOCATE_BENCH_FAKE_IDX ?? "");
-const runIdxUpdate = /^(1|true|yes)$/i.test(process.env.PI_LOCATE_BENCH_IDX_UPDATE ?? (useFakeIdx ? "0" : "1"));
-const idxUpdateTimeoutMs = Number(process.env.PI_LOCATE_BENCH_IDX_UPDATE_TIMEOUT_MS ?? 180_000);
 const reportPath = process.env.PI_LOCATE_BENCH_REPORT || "";
 const reportDir = resolveReportDir();
 const reportJsonPath = reportPath ? path.resolve(reportPath) : path.join(reportDir, "report.json");
@@ -38,35 +33,25 @@ const modes = [
   {
     name: "direct-read-grep",
     tools: ["read", "grep", "Glob", "shell"],
-    indexed: false,
   },
   {
     name: "ast-structural",
     tools: ["read", "grep", "Glob", "ast_grep"],
-    indexed: false,
   },
   {
     name: "project-search-hybrid",
     aliases: ["repo-search-hybrid", "semantic-repo-search"],
     tools: ["project_search", "read"],
-    indexed: true,
     promptSuffix: "\n\nFor this benchmark run, use project_search with sources=['code','knowledge'] first, default hybrid ranking, then read only the cited code. Use indexMode=lexical only for an explicit lexical follow-up.",
-  },
-  {
-    name: "repo-discovery",
-    tools: ["repo_inspect", "project_search", "repo_context", "read"],
-    indexed: true,
   },
   {
     name: "subagent-search",
     tools: ["subagents"],
-    indexed: false,
     promptSuffix: "\n\nFor this benchmark run, delegate the code-location work to exactly one focused sub-agent with the subagents tool. Spawn it with a scan or quick profile, wait for it if needed, read its compact result, then answer from that result. Ask the sub-agent to return the exact file, symbol, and condition.",
   },
   {
     name: "unrestricted-suite",
     tools: [],
-    indexed: true,
   },
 ];
 
@@ -88,17 +73,11 @@ if (runModes.length === 0) throw new Error(`No benchmark modes matched: ${select
 const concurrency = normalizeConcurrency(requestedConcurrency, runModes.length);
 const iterationCount = normalizeIterationCount(requestedIterations);
 logProgress(`Starting hard-to-find locate benchmark with ${runModes.length} mode(s): ${runModes.map((mode) => mode.name).join(", ")}`);
-logProgress(`Model: ${model}; fake idx: ${useFakeIdx ? "on" : "off"}; per-mode timeout: ${timeoutMs}ms`);
+logProgress(`Model: ${model}; per-mode timeout: ${timeoutMs}ms`);
 logProgress(`Mode concurrency: ${concurrency}`);
 logProgress(`Iterations: ${iterationCount}`);
 logProgress(`Reports directory: ${reportDir}`);
 fs.mkdirSync(reportDir, { recursive: true });
-
-const preflight = {
-  idxUpdate: runIdxUpdate
-    ? runIdxUpdatePreflight()
-    : { skipped: true, reason: useFakeIdx ? "fake idx enabled" : "disabled by PI_LOCATE_BENCH_IDX_UPDATE" },
-};
 
 if (iterationCount > 1) {
   const iterations = await runBenchmarkIterations(iterationCount);
@@ -109,9 +88,7 @@ if (iterationCount > 1) {
     benchmarkGuidance: commonPromptSuffix.trim(),
     generatedAt: new Date().toISOString(),
     model,
-    fakeIdx: useFakeIdx,
     report: { directory: reportDir, iterationsJson: path.join(reportDir, "iterations.json") },
-    preflight,
     iterations,
   };
   fs.writeFileSync(aggregate.report.iterationsJson, `${JSON.stringify(aggregate, null, 2)}\n`, "utf-8");
@@ -128,14 +105,12 @@ const report = {
   benchmarkGuidance: commonPromptSuffix.trim(),
   generatedAt: new Date().toISOString(),
   model,
-  fakeIdx: useFakeIdx,
   report: {
     directory: reportDir,
     json: reportJsonPath,
     html: reportHtmlPath,
     sessionExportsEnabled: exportSessionHtml,
   },
-  preflight,
   summary: summarizeResults(results),
   results,
 };
@@ -221,7 +196,6 @@ function spawnBenchmarkIteration(iterationReportDir) {
     const env = { ...process.env };
     env.PI_LOCATE_BENCH_ITERATIONS = "1";
     env.PI_LOCATE_BENCH_REPORT_DIR = iterationReportDir;
-    env.PI_LOCATE_BENCH_IDX_UPDATE = "0";
     delete env.PI_LOCATE_BENCH_REPORT;
     delete env.PI_LOCATE_BENCH_HTML;
 
@@ -261,42 +235,6 @@ function openHtmlReport(targetPath) {
   }
 }
 
-function runIdxUpdatePreflight() {
-  logProgress(`Running idx update before benchmark modes`);
-  const startedAt = Date.now();
-  const env = { ...process.env, NO_COLOR: "1" };
-  delete env.CI;
-  const result = spawnSync(idxBin, ["update"], {
-    cwd: suiteDir,
-    env,
-    encoding: "utf-8",
-    timeout: idxUpdateTimeoutMs,
-    maxBuffer: 10 * 1024 * 1024,
-  });
-  const elapsedMs = Date.now() - startedAt;
-  const stdout = result.stdout ?? "";
-  const stderr = result.stderr ?? "";
-  const status = result.status ?? (result.signal ? 128 : 1);
-
-  if (result.error || status !== 0) {
-    throw new Error([
-      `idx update failed before benchmark modes after ${elapsedMs}ms`,
-      `status=${status}${result.signal ? ` signal=${result.signal}` : ""}`,
-      result.error ? `error=${result.error.message}` : "",
-      stdout ? `STDOUT:\n${stdout}` : "",
-      stderr ? `STDERR:\n${stderr}` : "",
-    ].filter(Boolean).join("\n"));
-  }
-
-  logProgress(`idx update finished in ${elapsedMs}ms (stdout=${Buffer.byteLength(stdout)}B, stderr=${Buffer.byteLength(stderr)}B)`);
-  return {
-    skipped: false,
-    elapsedMs,
-    stdoutBytes: Buffer.byteLength(stdout),
-    stderrBytes: Buffer.byteLength(stderr),
-  };
-}
-
 async function runModesWithConcurrency(modeList, limit) {
   const results = new Array(modeList.length);
   let nextIndex = 0;
@@ -323,19 +261,9 @@ async function runMode(mode) {
   });
   assertFixtureCopied(projectDir);
   logProgress(`Mode ${mode.name} working directory: ${projectDir}`);
-  const fakeIdxBin = useFakeIdx && mode.indexed ? writeFakeIdxBin(projectDir) : undefined;
-  const preparationStartedAt = Date.now();
-  const preparation = {
-    elapsedMs: 0,
-    idxInit: mode.indexed
-      ? initializeIdxProject(projectDir, { fake: Boolean(fakeIdxBin) })
-      : undefined,
-  };
-  preparation.elapsedMs = Date.now() - preparationStartedAt;
-
-  logProgress(`Starting agent for mode ${mode.name}; index preparation is complete and excluded from agent timing/token metrics`);
+  logProgress(`Starting agent for mode ${mode.name}`);
   const startedAt = Date.now();
-  const { stdout, stderr, exitCode, timedOut, recorder, sessionDir } = await runModeAgentWithRetry(mode, projectDir, fakeIdxBin);
+  const { stdout, stderr, exitCode, timedOut, recorder, sessionDir } = await runModeAgentWithRetry(mode, projectDir);
   const elapsedMs = Date.now() - startedAt;
   const eventText = readOptional(recorder.logPath);
   const subagentEventText = readSubagentEvents(projectDir);
@@ -346,7 +274,6 @@ async function runMode(mode) {
   const answerText = `${stdout}\n${stderr}`.toLowerCase();
   const success = !timedOut && answerText.includes(expected.file.toLowerCase())
     && (answerText.includes(expected.symbol.toLowerCase()) || answerText.includes("lastpulseat"));
-  const idxCalls = readIdxEvents(projectDir);
   const sessionMetrics = analyzeSessionArtifacts({ projectDir, sessionDir, stdout, stderr, eventText });
   const sessionArtifacts = collectSessionArtifacts(projectDir, sessionDir, { pathsRetained: keepRuns });
   const persistedArtifacts = persistModeArtifacts({
@@ -357,7 +284,6 @@ async function runMode(mode) {
     stderr,
     eventText,
     subagentEventText,
-    idxCalls,
   });
 
   const result = {
@@ -370,8 +296,6 @@ async function runMode(mode) {
     toolCallCount: events.filter((event) => event.type === "tool_call").length,
     toolCalls: events.filter((event) => event.type === "tool_call").map((event) => event.toolName),
     firstCorrectEvidence,
-    idxCalls,
-    preparation,
     sessionArtifacts,
     persistedArtifacts,
     metrics: sessionMetrics,
@@ -387,7 +311,7 @@ async function runMode(mode) {
   return result;
 }
 
-async function runModeAgentWithRetry(mode, projectDir, fakeIdxBin) {
+async function runModeAgentWithRetry(mode, projectDir) {
   let lastResult;
 
   for (let attempt = 1; attempt <= e2eRetryAttempts; attempt += 1) {
@@ -411,7 +335,7 @@ async function runModeAgentWithRetry(mode, projectDir, fakeIdxBin) {
     args.push("-p", `${manifest.prompt}${commonPromptSuffix}${mode.promptSuffix ?? ""}`);
 
     const result = {
-      ...(await spawnPi(projectDir, args, fakeIdxBin ? { PATH: `${fakeIdxBin}${path.delimiter}${process.env.PATH ?? ""}` } : undefined)),
+      ...(await spawnPi(projectDir, args)),
       recorder,
       sessionDir,
     };
@@ -507,78 +431,6 @@ function assertFixtureCopied(projectDir) {
     `copied fixture: ${projectDir}`,
     "The copy filter must be relative to the fixture root; absolute paths may contain parent .pi directories.",
   ].join("\n"));
-}
-
-function initializeIdxProject(projectDir, options) {
-  if (options.fake) {
-    fs.mkdirSync(path.join(projectDir, ".indexer-cli"), { recursive: true });
-    logProgress(`Fake idx enabled; created indexed-project marker for ${projectDir}`);
-    return { skipped: true, fake: true, elapsedMs: 0 };
-  }
-
-  logProgress(`Running idx init in ${projectDir}`);
-  const startedAt = Date.now();
-  const result = spawnSync(idxBin, ["init", "--embedding", "local"], {
-    cwd: projectDir,
-    env: { ...process.env, NO_COLOR: "1", CI: "1" },
-    encoding: "utf-8",
-    timeout: idxInitTimeoutMs,
-    maxBuffer: 10 * 1024 * 1024,
-  });
-  const elapsedMs = Date.now() - startedAt;
-  const stdout = result.stdout ?? "";
-  const stderr = result.stderr ?? "";
-  const status = result.status ?? (result.signal ? 128 : 1);
-
-  if (result.error || status !== 0) {
-    throw new Error([
-      `idx init failed for ${projectDir} after ${elapsedMs}ms`,
-      `status=${status}${result.signal ? ` signal=${result.signal}` : ""}`,
-      result.error ? `error=${result.error.message}` : "",
-      stdout ? `STDOUT:\n${stdout}` : "",
-      stderr ? `STDERR:\n${stderr}` : "",
-    ].filter(Boolean).join("\n"));
-  }
-
-  if (!fs.existsSync(path.join(projectDir, ".indexer-cli"))) {
-    throw new Error(`idx init completed but did not create .indexer-cli in ${projectDir}`);
-  }
-
-  logProgress(`idx init finished in ${elapsedMs}ms (stdout=${Buffer.byteLength(stdout)}B, stderr=${Buffer.byteLength(stderr)}B)`);
-  return {
-    skipped: false,
-    fake: false,
-    elapsedMs,
-    stdoutBytes: Buffer.byteLength(stdout),
-    stderrBytes: Buffer.byteLength(stderr),
-  };
-}
-
-function writeFakeIdxBin(projectDir) {
-  const binDir = path.join(projectDir, ".pi", "fake-bin");
-  const idxPath = path.join(binDir, "idx");
-  const logPath = path.join(projectDir, ".pi", "idx-events.jsonl");
-  fs.mkdirSync(binDir, { recursive: true });
-  fs.writeFileSync(idxPath, `#!/usr/bin/env node
-const fs = require("node:fs");
-const args = process.argv.slice(2);
-fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args }) + "\\n");
-const command = args[0] || "";
-if (command === "search") {
-  console.log("src/platform/transit/packet-fold.ts:20-34 foldPacketEdges updates markers.lastPulseAt when a non-commit/shadow rehearsal packet is observed; shouldAdvancePulse is input.node.intent !== \\\"commit\\\" && input.edge.disposition === \\\"observe\\\".");
-  console.log("src/features/retention/renewal-preview.ts:19-27 planRenewalReminder maps preview to shadow intent and observe disposition before calling foldPacketEdges.");
-} else if (command === "architecture") {
-  console.log("Retention preview flow builds a rehearsal node, then platform transit folding mutates pulse markers. Target helper: src/platform/transit/packet-fold.ts::foldPacketEdges.");
-} else if (command === "structure") {
-  console.log("src/features/retention/renewal-preview.ts — planRenewalReminder; src/platform/transit/packet-fold.ts — foldPacketEdges; src/platform/transit/rehearsal-node.ts — makeRehearsalNode");
-} else if (command === "ast" || command === "explain" || command === "deps") {
-  console.log("src/platform/transit/packet-fold.ts::foldPacketEdges contains lastPulseAt: shouldAdvancePulse ? input.clock.iso() : current.markers.lastPulseAt");
-} else {
-  console.log("fake idx ok");
-}
-`, "utf-8");
-  fs.chmodSync(idxPath, 0o755);
-  return binDir;
 }
 
 function writeRecorder(projectDir) {
@@ -741,7 +593,7 @@ function collectSubagentSessionArtifacts(projectDir) {
   return artifacts;
 }
 
-function persistModeArtifacts({ modeName, projectDir, sessionArtifacts, stdout, stderr, eventText, subagentEventText, idxCalls }) {
+function persistModeArtifacts({ modeName, projectDir, sessionArtifacts, stdout, stderr, eventText, subagentEventText }) {
   const modeDir = path.join(reportDir, "modes", safeFileName(modeName));
   const filesDir = path.join(modeDir, "files");
   fs.mkdirSync(filesDir, { recursive: true });
@@ -751,7 +603,6 @@ function persistModeArtifacts({ modeName, projectDir, sessionArtifacts, stdout, 
     stderr: writeArtifactFile(path.join(filesDir, "stderr.txt"), stderr),
     toolEvents: writeArtifactFile(path.join(filesDir, "tool-events.jsonl"), eventText),
     subagentEvents: writeArtifactFile(path.join(filesDir, "subagent-events.jsonl"), subagentEventText),
-    idxCalls: writeArtifactFile(path.join(filesDir, "idx-calls.json"), JSON.stringify(idxCalls, null, 2)),
   };
 
   const sessionExports = [];
@@ -769,13 +620,10 @@ function persistModeArtifacts({ modeName, projectDir, sessionArtifacts, stdout, 
     }
   }
 
-  const projectSnapshot = keepRuns ? undefined : copyDebugSnapshot(projectDir, modeDir);
-
   return {
     directory: modeDir,
     files,
     sessionExports,
-    projectSnapshot,
   };
 }
 
@@ -836,21 +684,6 @@ function exportSessionToHtml(sessionFile, htmlPath) {
       result.stderr ? `STDERR: ${previewText(result.stderr, 600)}` : "",
     ].filter(Boolean).join("\n"),
   };
-}
-
-function copyDebugSnapshot(projectDir, modeDir) {
-  const snapshotDir = path.join(modeDir, "debug-snapshot");
-  const candidates = [".pi/idx-events.jsonl", ".indexer-cli"];
-  let copied = 0;
-  for (const relative of candidates) {
-    const source = path.join(projectDir, relative);
-    if (!fs.existsSync(source)) continue;
-    const target = path.join(snapshotDir, relative);
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.cpSync(source, target, { recursive: true });
-    copied += 1;
-  }
-  return copied > 0 ? { directory: snapshotDir, copiedItems: copied } : undefined;
 }
 
 function fileRecord(targetPath) {
@@ -1120,12 +953,6 @@ function writeHtmlReport(report, targetPath) {
 }
 
 function renderHtmlReport(report, targetPath) {
-  const idxUpdate = report.preflight?.idxUpdate;
-  const idxUpdateText = idxUpdate?.skipped
-    ? `skipped${idxUpdate.reason ? ` (${idxUpdate.reason})` : ""}`
-    : idxUpdate
-      ? `${idxUpdate.elapsedMs}ms`
-      : "n/a";
   const rows = [...report.summary.rows].sort((a, b) => a.parentTokens - b.parentTokens);
   const resultByMode = new Map(report.results.map((result) => [result.mode, result]));
   const summaryRows = rows.map((row) => {
@@ -1203,8 +1030,6 @@ function renderHtmlReport(report, targetPath) {
       <div><b>Fixture:</b> ${escapeHtml(report.fixture)}</div>
       <div><b>Model:</b> ${escapeHtml(report.model)}</div>
       <div><b>Generated:</b> ${escapeHtml(report.generatedAt)}</div>
-      <div><b>Fake idx:</b> ${escapeHtml(String(report.fakeIdx))}</div>
-      <div><b>idx update:</b> ${escapeHtml(idxUpdateText)}</div>
       <div><b>JSON:</b> <a href="${escapeAttr(relativeHref(report.report.json, targetPath))}">${escapeHtml(path.basename(report.report.json))}</a></div>
     </div>
     <p class="small">${escapeHtml(report.summary.tokenMetric)}</p>
@@ -1289,8 +1114,6 @@ function renderModeCard(result, targetPath) {
       <pre>${escapeHtml(result.metrics?.parent?.answerPreview ?? "")}</pre>
       <h3>First correct evidence</h3>
       <pre>${escapeHtml(JSON.stringify(result.firstCorrectEvidence ?? { found: false }, null, 2))}</pre>
-      <h3>Preparation</h3>
-      <pre>${escapeHtml(JSON.stringify(result.preparation ?? {}, null, 2))}</pre>
     </div>
     <div id="${group}-tools" data-tab-panel-group="${group}" class="tab-panel">
       <h3>Tool sequence</h3>
@@ -1338,7 +1161,6 @@ function modeColor(modeName) {
     "ast-structural": "#38bdf8",
     "repo-search-hybrid": "#a78bfa",
     "semantic-repo-search": "#a78bfa",
-    "repo-discovery": "#f59e0b",
     "subagent-search": "#fb7185",
     "unrestricted-suite": "#14b8a6",
   };
@@ -1439,10 +1261,4 @@ function safeIsDirectory(targetPath) {
 
 function parseEvents(text) {
   return text.split("\n").filter(Boolean).map((line) => JSON.parse(line));
-}
-
-function readIdxEvents(projectDir) {
-  const text = readOptional(path.join(projectDir, ".pi", "idx-events.jsonl"));
-  if (!text) return [];
-  return text.split("\n").filter(Boolean).map((line) => JSON.parse(line).args);
 }

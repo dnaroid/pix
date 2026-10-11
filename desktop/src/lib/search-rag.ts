@@ -58,7 +58,7 @@ export function linkRagCitations(answer: string, sourceCount: number): string {
 
 /**
  * Retrieve from all existing project search providers; prefer a settled snapshot
- * but accept bounded partial evidence if an IDX source continues after its deadline.
+ * but accept bounded partial evidence if a slow source continues after its deadline.
  */
 export async function retrieveRagHits(
   search: (onUpdate: (result: UnifiedSearchResult) => void) => Promise<UnifiedSearchResult>,
@@ -71,6 +71,6 @@ export async function retrieveRagHits(
     if (!signal.aborted) { latest = next; update(next); }
   });
   signal.throwIfAborted();
-  // Use the latest completed snapshot without waiting indefinitely for a slow IDX.
+  // Use the latest completed snapshot without waiting indefinitely for a slow source.
   return selectRagHits((latest ?? result).results);
 }

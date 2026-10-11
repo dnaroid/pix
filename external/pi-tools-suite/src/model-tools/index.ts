@@ -14,8 +14,7 @@ import {
   type ToolRenderResultOptions,
 } from "@earendil-works/pi-coding-agent";
 import { Type, type TSchema } from "typebox";
-import { REPO_DISCOVERY_TOOL_NAMES, claudeAliasToolDescriptions, codexAliasToolDescriptions } from "../tool-descriptions";
-import { hasAvailableIndexedProjectRoot } from "../lib/project.js";
+import { claudeAliasToolDescriptions, codexAliasToolDescriptions } from "../tool-descriptions";
 import { applyPatch } from "./apply-patch";
 import { registerShellWorkdir } from "./shell-workdir";
 import {
@@ -37,7 +36,6 @@ const CODEX_ALIAS_TOOLS = ["read", ...Object.values(CODEX_ALIAS_TOOL_DESCRIPTION
 const BUILTIN_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"] as const;
 const LEGACY_MANAGED_TOOLS = ["LS", "shell_command"];
 const MANAGED_TOOLS = new Set([...CLAUDE_ALIAS_TOOLS, ...CODEX_ALIAS_TOOLS, ...BUILTIN_TOOLS, ...LEGACY_MANAGED_TOOLS]);
-const REPO_DISCOVERY_TOOL_NAME_SET = new Set(REPO_DISCOVERY_TOOL_NAMES);
 const MAX_BUILTIN_DEFINITIONS = 64;
 
 function isStaleExtensionContextError(error: unknown): boolean {
@@ -415,11 +413,6 @@ function toolsForProfile(profile: ModelProfile): string[] | undefined {
   return undefined;
 }
 
-function activeRepoDiscoveryTools(activeTools: string[], baseTools: string[]): string[] {
-  const availableTools = new Set([...activeTools, ...baseTools]);
-  return REPO_DISCOVERY_TOOL_NAMES.filter((tool) => availableTools.has(tool));
-}
-
 function sameTools(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((tool, index) => tool === right[index]);
 }
@@ -429,13 +422,11 @@ function applyToolProfile(pi: ExtensionAPI, model: unknown, baseTools: string[])
 		const targetTools = toolsForProfile(detectModelProfile(model));
 		const preserveSelection = shouldPreserveSelection();
 		const active = pi.getActiveTools();
-		const repoTools = activeRepoDiscoveryTools(active, baseTools);
-		const preserved = active.filter((tool) => !MANAGED_TOOLS.has(tool) && !REPO_DISCOVERY_TOOL_NAME_SET.has(tool));
-		const baseWithoutRepoTools = baseTools.filter((tool) => !REPO_DISCOVERY_TOOL_NAME_SET.has(tool));
+		const preserved = active.filter((tool) => !MANAGED_TOOLS.has(tool));
 		const selectedTargetTools = preserveSelection
 			? selectSuitableToolsForModel(model, active.filter((tool) => MANAGED_TOOLS.has(tool)))
 			: targetTools;
-		const next = selectedTargetTools ? [...repoTools, ...preserved, ...selectedTargetTools] : [...repoTools, ...preserved, ...baseWithoutRepoTools];
+		const next = selectedTargetTools ? [...preserved, ...selectedTargetTools] : [...preserved, ...baseTools];
 		const nextTools = [...new Set(next)];
 		if (!sameTools(active, nextTools)) pi.setActiveTools(nextTools);
 	} catch (error) {
@@ -451,7 +442,7 @@ function shouldPreserveSelection(env: NodeJS.ProcessEnv = process.env): boolean 
 export default function modelTools(pi: ExtensionAPI, dependencies: Partial<ModelToolsDependencies> = {}): void {
   const runtime = createModelToolsRuntime(dependencies);
   const resolveWorkdir = registerShellWorkdir(pi);
-  const repoDiscovery = hasAvailableIndexedProjectRoot();
+  const repoDiscovery = true;
   registerClaudeAliases(runtime, pi, repoDiscovery);
   registerCodexAliases(runtime, pi, repoDiscovery, resolveWorkdir);
 

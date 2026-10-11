@@ -18,6 +18,22 @@ afterEach(() => {
 });
 
 describe("context inventory", () => {
+	test("uses skill provenance and effective project role metadata", () => {
+		const cwd = tempDir();
+		fs.mkdirSync(path.join(cwd, ".pi", "agents"), { recursive: true });
+		fs.writeFileSync(path.join(cwd, ".pi", "agents", "research.md"), "---\nname: research\ndescription: Local research\n---\nProject instructions\n");
+		fs.writeFileSync(path.join(cwd, ".pi", "agents", "hidden.md"), "---\nname: hidden\nforParentModels: [\"other/*\"]\n---\nHidden\n");
+		const state = createContextInventoryState({
+			getActiveTools: () => ["read", "subagents"],
+			getCommands: () => [
+				{ name: "skill:global", source: "skill", sourceInfo: { scope: "user" } },
+				{ name: "skill:local", source: "skill", sourceInfo: { scope: "project" } },
+			] as any,
+		} as any, context(cwd, "openai-codex", "gpt-6-luna"));
+		expect(state.projectSkills).toEqual(["local"]);
+		expect(state.projectAgents).toEqual(["research"]);
+		expect(state.agents).not.toContain("hidden");
+	});
 	test("reports final active tools, skills readable in context, and parent-model-gated agents", () => {
 		const cwd = tempDir();
 		const state = createContextInventoryState({

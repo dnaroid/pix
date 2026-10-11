@@ -1,10 +1,6 @@
-import { readFile, lstat } from "node:fs/promises";
-import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
-import { parseEnv } from "node:util";
+import { repositoryEmbeddingSettings, repositoryEmbeddingKey } from "./native-embedding-provider.mjs";
 
-/** Mirrors Desktop's existing commit-provider identity and IDX config. Do not
- * repurpose the pinned task/session model for Git commit embeddings. */
+/** History sources share the centrally configured Knowledge identity. */
 export interface CommitEmbeddingConfig {
   provider: "openrouter" | "ollama";
   model: string;
@@ -19,51 +15,15 @@ export function commitIdentity(config: CommitEmbeddingConfig): string {
     config.queryPrefix, config.documentPrefix, config.baseUrl]);
 }
 
-async function regularText(file: string, maxBytes: number): Promise<string | undefined> {
-  const stat = await lstat(file).catch(error => {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw error;
-  });
-  if (!stat?.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size > maxBytes) return;
-  const text = await readFile(file, "utf8");
-  return Buffer.byteLength(text) <= maxBytes ? text : undefined;
-}
-
 export async function loadCommitConfig(root: string): Promise<CommitEmbeddingConfig | undefined> {
   try {
-    const directory = await lstat(join(root, ".indexer-cli"));
-    if (!directory.isDirectory() || directory.isSymbolicLink()) return;
-    const text = await regularText(join(root, ".indexer-cli", "config.json"), 65_536);
-    if (!text) return;
-    const input: unknown = JSON.parse(text);
-    if (!input || typeof input !== "object" || Array.isArray(input)) return;
-    const config = input as Record<string, unknown>;
-    const provider = config.embeddingProvider;
-    const model = config.knowledgeEmbeddingModel ?? config.embeddingModel;
-    const dimension = config.vectorSize;
-    if ((provider !== "openrouter" && provider !== "ollama") || typeof model !== "string" || !model.trim()
-      || model.length > 256 || !Number.isInteger(dimension) || (dimension as number) < 1 || (dimension as number) > 8192) return;
-    const queryPrefix = config.knowledgeEmbeddingQueryPrefix ?? (provider === "ollama" ? "search_query: " : "");
-    const documentPrefix = config.knowledgeEmbeddingDocumentPrefix ?? (provider === "ollama" ? "search_document: " : "");
-    if (typeof queryPrefix !== "string" || typeof documentPrefix !== "string" || queryPrefix.length > 512 || documentPrefix.length > 512) return;
-    const url = new URL(provider === "openrouter" ? "https://openrouter.ai/api/v1" : String(config.ollamaBaseUrl ?? "http://127.0.0.1:11434"));
-    if (!(["http:", "https:"] as string[]).includes(url.protocol) || url.username || url.password || url.search || url.hash) return;
-    return { provider, model, dimension: dimension as number, queryPrefix, documentPrefix,
-      baseUrl: url.toString().replace(/\/$/, "") };
+    return (await repositoryEmbeddingSettings(root))?.configs.knowledge;
   } catch { return; }
 }
 
-/** Identical credential precedence to Desktop/IDX commits, not the separate
- * Tasks/Sessions opt-in credential store. Never write IDX credentials. */
+/** Environment, then bounded shared SDK credential storage; never config secrets. */
 export async function loadCommitKey(): Promise<string | undefined> {
-  const direct = process.env.OPENROUTER_API_KEY?.trim();
-  if (direct) return direct;
-  const home = process.env.XDG_CONFIG_HOME && isAbsolute(process.env.XDG_CONFIG_HOME)
-    ? process.env.XDG_CONFIG_HOME : join(homedir(), ".config");
-  try {
-    const source = await regularText(join(home, "idx", ".env"), 65_536);
-    return source ? parseEnv(source).OPENROUTER_API_KEY?.trim() || undefined : undefined;
-  } catch { return; }
+  return repositoryEmbeddingKey();
 }
 
 export function validCommitVector(value: unknown, dimension: number): value is number[] {
@@ -113,7 +73,8 @@ export async function embedCommits(inputs: readonly string[], config: CommitEmbe
   const data: unknown = JSON.parse(Buffer.concat(parts).toString("utf8"));
   if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Invalid commit embedding response");
   const result = data as Record<string, unknown>;
-  if (result.model !== config.model && !(config.provider === "openrouter" && result.model === config.model.split("/").slice(1).join("/"))) {
+  if (result.model !== config.model && !(config.provider === "openrouter" && config.model.includes("/")
+    && result.model === config.model.slice(config.model.indexOf("/") + 1))) {
     throw new Error("Incompatible commit embedding model");
   }
   if (config.provider === "ollama") {

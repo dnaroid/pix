@@ -2,7 +2,7 @@ import { access, readFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import type { PiClient, PiRpcClientOptions } from "../pi/pi-rpc-client.js";
 
-const RESEARCH_TOOLS = "read,grep,web_search,web_fetch,repo_context,repo_inspect,repo_audit,project_search";
+const RESEARCH_TOOLS = "read,grep,web_search,web_fetch,project_search";
 
 /** Only trusted suite-relative provider entrypoints, never the full suite. */
 export async function brainstormParticipantOptions(piEntry: string, cwd: string, suiteEntry: string | undefined, model: string): Promise<PiRpcClientOptions> {

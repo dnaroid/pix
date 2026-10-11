@@ -39,6 +39,12 @@ export async function commitProjectRoot(cwd: string, signal: AbortSignal): Promi
   await git(cwd, ["rev-parse", "--show-toplevel"], signal, b => { size += b.length; if (size > 16384) throw new Error("Commit history unavailable."); parts.push(b); });
   return Buffer.concat(parts).toString("utf8").replace(/\r?\n$/, "");
 }
+/** Explicit indexing fences the reachable snapshot against HEAD changes. */
+export async function commitHead(cwd: string, signal: AbortSignal): Promise<string> {
+  let head = "";
+  await git(cwd, ["rev-parse", "HEAD"], signal, b => { head += b.toString("utf8"); if (head.length > 128) throw new Error("Commit history unavailable."); });
+  return head.trim();
+}
 /** Stream every HEAD ancestor, bounding individual fields but never the history count. */
 export async function readCommitCorpus(cwd: string, signal: AbortSignal): Promise<CommitDocument[]> {
   const docs: CommitDocument[] = [];

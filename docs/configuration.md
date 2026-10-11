@@ -219,13 +219,13 @@ across Desktop and agents under SQLite writer transactions. Changing a task's
 status or model alone never triggers a new task vector, and deleting the last
 task cleans the corresponding index only on an explicit opted-in Tasks search.
 Selecting Commits with `hybrid` or `semantic` similarly fills missing current
-`HEAD` commit vectors using the project's configured IDX embedding model and
-provider; **commit titles, authors and messages may be transmitted**. Each
+`HEAD` commit vectors using the configured repository embedding provider and
+`OPENROUTER_API_KEY`; **commit titles, authors and messages may be transmitted**. Each
 source has an upper bound of 256 new vectors per request and a 40-second
 indexing budget; repeat searches continue when a large corpus remains. The
 full federated search waits up to 60 seconds and returns one merged answer.
 Use `indexMode: "lexical"` to prevent all embedding and index writes even when
-the consent flags or IDX embedding configuration are present.
+the consent flags or repository embedding configuration are present.
 
 RAG retrieves the selected sources from the existing search indexes, reads
 bounded original excerpts as needed and streams a Markdown answer **inside**
@@ -380,46 +380,11 @@ microphone permission.
 - **Context7:** export `CONTEXT7_API_KEY`.
 - **LSP:** configure/trust servers in tools-suite configuration. See
   [pi-tools-suite LSP setup](../external/pi-tools-suite/README.md#lsp-setup).
-- **IDX:** Desktop can install managed IDX from the IDX panel; TUI repository
-  discovery requires `idx` plus a project `.indexer-cli` index.
-
-### IDX embedding providers
-
-Installing `indexer-cli` with npm (including Desktop's managed install) requires
-neither an API key nor Ollama; installation does not run setup or initialize a
-project.
-
-For a **new** project, `idx init` defaults to OpenRouter:
-`perplexity/pplx-embed-v1-0.6b` for both code and documents, with 1024 dimensions.
-Set `OPENROUTER_API_KEY` in the environment or `~/.config/idx/.env`; Ollama is not
-needed. `idx setup` also defaults to OpenRouter, requires that key and skips
-Ollama. Never commit real keys.
-
-For local embeddings, explicitly use `idx setup --embedding local` and
-`idx init --embedding local`. This mode requires Ollama with `jina-8k` for code
-and `nomic-embed-text-v2-moe` for documents (768 dimensions), but no API key.
-Tests/benchmarks that initialize a real local index must pass `--embedding local`
-instead of relying on a default; mocked CLI tests need no embedding service.
-
-Re-running `idx init` **without** `--embedding` preserves the existing project's
-configuration, including older local configurations. There is no automatic
-OpenRouter migration. In Desktop, an unchecked OpenRouter override means no
-flag, **not** local mode. For explicit local initialization use the CLI.
-
-`idx doctor` without an override checks dependencies of the saved providers in
-the selected projects. A mixed local/OpenRouter set needs both Ollama and the
-OpenRouter key; with no projects it defaults to OpenRouter prerequisites.
-`idx doctor --embedding local|openrouter` explicitly selects the provider for
-dependency checks and full reinitialization. A missing key or any prerequisite
-failure must stop repair **before deleting the index**. An explicit provider
-change rebuilds the derived index; vectors from different modes must not mix.
-Do not switch an existing project without separate user approval.
-
-Index storage stays local in both modes. In OpenRouter mode, however, code and
-document chunks **and search queries are sent to an external service**. Agents
-must disclose this before initialization and avoid paid indexing/semantic
-queries merely to verify setup. Ollama-based web search is a separate integration
-and is not an IDX OpenRouter prerequisite.
+- **Repository search:** Code and Knowledge search is native across Pi, TUI,
+  ACP and Desktop. Optional repository embeddings use the `embedding` object in
+  project `.pi/search/semantic.json` and `OPENROUTER_API_KEY`; chunks/queries may
+  be transmitted externally. Legacy IDX data/configuration is not read, migrated,
+  deleted or modified by this integration.
 
 ## Ignoring legacy context files
 

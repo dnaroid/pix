@@ -63,7 +63,7 @@ test("CLI restrictions retain allowed work tools plus common capabilities, inclu
 	expect(withSubagentCapabilities(["--tools", "read", "-nt"])).toEqual(["--tools", common]);
 	expect(withSubagentCapabilities(["--no-tools", "--tools", "read"])).toEqual(["--tools", common]);
 	expect(withSubagentCapabilities(["-xt", "todo,compress,project_search,write"])).toEqual(["--exclude-tools", "write"]);
-	expect(withSubagentCapabilities(["-xt", "todo,write", "--exclude-tools", "todo,repo_context"])).toEqual([]);
+	expect(withSubagentCapabilities(["-xt", "todo,write", "--exclude-tools", "todo,project_search"])).toEqual([]);
 });
 
 test("todo is the only added tool, including empty work-tool selection and model changes", async () => {

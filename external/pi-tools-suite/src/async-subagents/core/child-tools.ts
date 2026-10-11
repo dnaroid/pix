@@ -1,7 +1,6 @@
-import { REPO_DISCOVERY_TOOLS } from "../../tool-descriptions.js";
 import { selectSuitableToolsForModel } from "../../lib/tool-args.js";
 
-export const SUBAGENT_COMMON_TOOLS = ["todo", "compress", ...REPO_DISCOVERY_TOOLS.map((tool) => tool.name), "project_search"];
+export const SUBAGENT_COMMON_TOOLS = ["todo", "compress", "project_search"];
 const commonTools = new Set(SUBAGENT_COMMON_TOOLS);
 
 export const SUBAGENT_OPTIONAL_TOOLS = ["ast_grep", "web_search", "web_fetch"] as const;

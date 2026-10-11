@@ -26,11 +26,6 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
     "sessionHygiene": true,
     "notify": true
   },
-  // Baseline preserves the historical repo_* argv/defaults. Native Compact is
-  // an explicit experimental arm with bounded native flags/cursors/output.
-  "repoDiscovery": {
-    "profile": "baseline"
-  },
   // Private Git repository used as the reusable resource registry. Create the
   // repo first, then set remote with /registry configure <git-url>.
   "resourceRegistry": {
@@ -55,7 +50,7 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   "lookupFallbackModels": [],
   // Frontier models used by frontier-selecting sub-agent roles, in preference
   // order: oracle requires another vendor for every parent, including fallback;
-  // delivery-review owns a separate model list. A new
+  // implement-core owns a separate model list. A new
   // frontier release is just a new entry here. Per entry: "vendor" (inferred
   // from the model id when omitted), "expensive", "enabled": false to stop
   // selecting it, "aliases" (globs recognizing the same model under other

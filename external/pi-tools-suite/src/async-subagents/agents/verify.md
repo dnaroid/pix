@@ -1,5 +1,5 @@
 ---
-description: Run targeted tests, builds, or checks and diagnose their output in an isolated context. Return pass/fail, relevant failure evidence and log paths. Do not fix source code; creating or changing tests belongs to implement.
+description: Run targeted tests, builds, or checks when isolated diagnosis is useful. Return pass/fail, relevant failure evidence and log paths. Do not fix source or tests; plain command execution with no interpretation stays in the parent with output redirected to a log.
 icon: flask
 models: [openai-codex/gpt-6-luna, zai/glm-5.3-flash]
 thinking: low

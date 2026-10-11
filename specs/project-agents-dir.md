@@ -59,7 +59,6 @@ modelByParent:
 forParentModels: [zai/*, openai-codex/*]
 notForParentModels: [openai-codex/gpt-6.1-sol*]
 forParentTier: non-frontier # frontier | non-frontier
-requiresIndexedProject: true
 parentProviderPolicy: require-other # any | prefer-other | require-other | require-other-if-frontier
 ---
 
@@ -70,7 +69,6 @@ You are a ... role prompt (markdown body).
   error), plus every `SubagentTypeConfig` field (`description`, `icon`, `model`,
   `models`, `modelSelection`, legacy `fallbackModels`/`modelByParent`,
   `forParentModels`, `notForParentModels`, `forParentTier`,
-  `requiresIndexedProject`,
   `parentProviderPolicy`, deprecated
   `requireDifferentProvider`, `thinking`, `tools`, `extraArgs`,
   `promptAppend`, `promptOverride`, `retry`, `maxResultBytes`, `timeoutMs`).
@@ -83,12 +81,6 @@ You are a ... role prompt (markdown body).
   `frontierModels` list instead of `models` (they are mutually exclusive in one
   file; a project file with `models` replaces an inherited `modelSelection`).
   `forParentTier` exposes a role only to frontier or non-frontier parents.
-- `requiresIndexedProject: true` exposes a role only when the project root
-  resolved from the current cwd contains `.indexer-cli/`. This is a visibility
-  gate only: it does not require `idx` to be executable and does not initialize
-  the project. The gate applies to the parent catalog, automatic routing, and
-  explicit-role validation. A raw loaded config may still contain the role so an
-  explicit request can be reported as unavailable rather than unknown.
 - `parentProviderPolicy` defaults to `any` and compares model vendors
   (family owners inferred from the model id, provider id as fallback), not
   provider strings. `prefer-other` stable-partitions other-vendor candidates
@@ -159,11 +151,10 @@ the current sub-agent profile merge pipeline.
 - `defaultType` is now `research` while bundled files are loaded in
   deterministic filename order. Spec 29 supersedes silent spawn-error fallback
   with parent-first role selection and recoverable routing errors.
-- The bundled `knowledge-auditor` is an economical docs-only finalization role.
-  It sets `requiresIndexedProject: true`, so it exists in raw built-in config
-  but is effective only for projects with `.indexer-cli/`. It runs the final
-  task-scoped audit, fixes only small unambiguous documentation drift, and
-  escalates substantial or ambiguous contract drift to the parent.
+- The bundled `knowledge-auditor` is an economical docs-only role that updates
+  affected documentation from relevant implementation/tests without IDX or
+  knowledge-state checks; it fixes small proven drift and returns substantial
+  discrepancies to the parent.
 - Runtime-only invariants stay in runtime code. All async sub-agents disable
   skill discovery and reject skill injection through `extraArgs`; role files are
   therefore self-contained. As extended by `ui-qa-agent.md`, `ui-qa` additionally

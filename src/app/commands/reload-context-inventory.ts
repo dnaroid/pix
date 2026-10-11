@@ -1,25 +1,32 @@
 import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 
+export type ReloadAgentCatalog = readonly string[] | { readonly types: readonly string[]; readonly projectTypes?: readonly string[] };
+
 export interface ReloadContextInventory {
 	readonly model: string;
 	readonly contextFiles: readonly string[];
 	readonly skills: readonly string[];
+	readonly projectSkills: readonly string[];
 	readonly tools: readonly string[];
 	readonly agents: readonly string[] | undefined;
+	readonly projectAgents?: readonly string[];
 	readonly skillsReadable: boolean;
 	readonly subagentsActive: boolean;
 }
 
 export function createReloadContextInventory(
 	runtime: AgentSessionRuntime,
-	agentTypes: readonly string[] | undefined,
+	agentCatalog: ReloadAgentCatalog | undefined,
 ): ReloadContextInventory {
 	const session = runtime.session;
 	const tools = unique(session.getActiveToolNames());
 	const skillsReadable = tools.some(isSkillFileAccessTool);
 	const subagentsActive = tools.includes("subagents");
+	const loadedSkills = skillsReadable ? session.resourceLoader.getSkills().skills : [];
+	const agentTypes = agentCatalog && ("types" in agentCatalog ? agentCatalog.types : agentCatalog);
+	const projectTypes = agentCatalog && "types" in agentCatalog ? agentCatalog.projectTypes : undefined;
 	const skills = skillsReadable
-		? unique(session.resourceLoader.getSkills().skills.map((skill) => skill.name)).sort(compareText)
+		? unique(loadedSkills.map((skill) => skill.name)).sort(compareText)
 		: [];
 	const agents = subagentsActive && agentTypes !== undefined
 		? unique(agentTypes).sort(compareText)
@@ -30,8 +37,10 @@ export function createReloadContextInventory(
 		model: currentModelLabel(runtime),
 		contextFiles: unique(session.resourceLoader.getAgentsFiles().agentsFiles.map((file) => file.path)),
 		skills,
+		projectSkills: unique(loadedSkills.filter((skill) => skill.sourceInfo?.scope === "project").map((skill) => skill.name)).sort(compareText),
 		tools,
 		agents,
+		...(projectTypes === undefined ? {} : { projectAgents: subagentsActive ? unique(projectTypes).filter((name) => agents?.includes(name)).sort(compareText) : [] }),
 		skillsReadable,
 		subagentsActive,
 	};
@@ -64,11 +73,11 @@ export function formatReloadContextInventory(
 		"",
 		`Context files (in context):${inventory.contextFiles.length ? `\n${inventory.contextFiles.map((path) => `- ${path}`).join("\n")}` : " (none)"}`,
 		"",
-		`Skills (in context): ${inventory.skillsReadable ? listOrNone(inventory.skills) : "(none; read/bash inactive)"}`,
+		inventory.skillsReadable ? formatScopedResources("Skills", inventory.skills, inventory.projectSkills) : "Skills (in context): (none; read/bash inactive)",
 		"",
 		`Tools (active): ${listOrNone(inventory.tools)}`,
 		"",
-		`Agents (available): ${formatAgents(inventory)}`,
+		formatAgents(inventory),
 	].join("\n");
 }
 
@@ -81,9 +90,14 @@ function currentModelLabel(runtime: AgentSessionRuntime): string {
 }
 
 function formatAgents(inventory: ReloadContextInventory): string {
-	if (!inventory.subagentsActive) return "(none; subagents tool inactive)";
-	if (inventory.agents === undefined) return "(catalog unavailable)";
-	return listOrNone(inventory.agents);
+	if (!inventory.subagentsActive) return "Agents (available): (none; subagents tool inactive)";
+	if (inventory.agents === undefined) return "Agents (available): (catalog unavailable)";
+	if (inventory.projectAgents === undefined) return `Agents (available): ${listOrNone(inventory.agents)}`;
+	return formatScopedResources("Agents", inventory.agents, inventory.projectAgents);
+}
+
+function formatScopedResources(label: string, names: readonly string[], project: readonly string[]): string {
+	return `${label} (global): ${listOrNone(names.filter((name) => !project.includes(name)))}\n${label} (project): ${listOrNone(names.filter((name) => project.includes(name)))}`;
 }
 
 function listOrNone(values: readonly string[]): string {

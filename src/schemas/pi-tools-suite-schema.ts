@@ -238,16 +238,6 @@ const CommentCheckerConfig = Type.Object(
 	{ description: "Settings for the comment-checker module." },
 );
 
-const RepoDiscoveryConfig = Type.Object(
-	{
-		profile: Type.Optional(Type.Union(
-			[Type.Literal("baseline"), Type.Literal("native-compact")],
-			{ description: "repo_* runtime profile. baseline preserves historical argv/defaults; native-compact enables bounded native flags, cursors, validation, and an explicit per-call full override." },
-		)),
-	},
-	{ description: "Repository discovery runtime policy. Default profile is baseline." },
-);
-
 const ResourceRegistryConfig = Type.Object(
 	{
 		remote: Type.Optional(Type.String({ description: "Git remote URL for the private registry. The repository contains reusable top-level skills/ and agents/ plus project-scoped state under projects/." })),
@@ -292,6 +282,20 @@ const LspConfig = Type.Object(
 	{ description: "Language Server Protocol configuration." },
 );
 
+const SearchEmbeddingConfig = Type.Object({
+	embeddingProvider: Type.Union([Type.Literal("openrouter"), Type.Literal("ollama")], { description: "Provider used for shared native Code/Knowledge and history embeddings." }),
+	embeddingModel: Type.String({ minLength: 1, maxLength: 256, description: "Embedding model used for Code and, by default, Knowledge." }),
+	vectorSize: Type.Integer({ minimum: 1, maximum: 8192, description: "Embedding vector dimension." }),
+	knowledgeEmbeddingModel: Type.Optional(Type.String({ minLength: 1, maxLength: 256, description: "Optional separate Knowledge/history model." })),
+	knowledgeEmbeddingQueryPrefix: Type.Optional(Type.String({ maxLength: 512 })),
+	knowledgeEmbeddingDocumentPrefix: Type.Optional(Type.String({ maxLength: 512 })),
+	ollamaBaseUrl: Type.Optional(Type.String({ maxLength: 2048, description: "Optional Ollama-compatible endpoint." })),
+}, { description: "Explicit global authorization for semantic search across projects and sources; never populated by shipped defaults." });
+
+const SearchConfig = Type.Object({
+	embedding: Type.Optional(SearchEmbeddingConfig),
+}, { description: "Global semantic-search configuration in ~/.config/pi/pi-tools-suite.jsonc." });
+
 // ---------------------------------------------------------------------------
 // Top-level schema
 // ---------------------------------------------------------------------------
@@ -332,8 +336,8 @@ export const PiToolsSuiteConfigSchema = Type.Object(
 		toolRenderer: Type.Optional(ToolRendererConfig),
 		promptCommands: Type.Optional(PromptCommandsConfig),
 		secretFirewall: Type.Optional(SecretFirewallConfig),
-		repoDiscovery: Type.Optional(RepoDiscoveryConfig),
 		resourceRegistry: Type.Optional(ResourceRegistryConfig),
+		search: Type.Optional(SearchConfig),
 		lsp: Type.Optional(LspConfig),
 		asyncSubagents: Type.Optional(Type.Never({ description: "Removed legacy key. Configure sub-agents in .pi/agents/*.md and model pools in .pi/agents/presets.jsonc." })),
 	},

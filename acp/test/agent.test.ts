@@ -23,7 +23,7 @@ import type {
 import { PixAcpAgent } from "../src/acp/pix-acp-agent.js";
 import { DesktopSearchService } from "../src/search/service.js";
 import { SearchPreferences } from "../src/search/config.js";
-import { SEARCH_QUERY_METHOD, SEARCH_CONFIG_METHOD, SEARCH_INTENT_METHOD, SEARCH_TASKS_METHOD, type SearchQueryResponse, type SemanticTasksResponse } from "../src/search/contract.js";
+import { SEARCH_QUERY_METHOD, SEARCH_CONFIG_METHOD, SEARCH_SYNC_METHOD, SEARCH_INDEX_METHOD, SEARCH_INTENT_METHOD, SEARCH_TASKS_METHOD, type SearchQueryResponse, type SemanticTasksResponse } from "../src/search/contract.js";
 import { TASK_TYPE_CLASSIFY_METHOD } from "../src/tasks/type-classification-contract.js";
 import { SEARCH_RAG_METHOD, SEARCH_RAG_DELTA_METHOD } from "../src/search/rag-contract.js";
 import { SEARCH_COMMITS_METHOD, type CommitSearchRequest } from "../src/search/commit-contract.js";
@@ -3166,11 +3166,12 @@ test("session/load switches the pi session and replays history as chunk updates"
 	assert.equal(harness.adapter.getSession(sessionId) !== undefined, true, "loaded session is live");
 });
 
-test("Pix Desktop search query/config use the exact private contract without spawning Pi and reject other clients", async t => {
-	const artifacts = resolve(".pi/artifacts/search-backend-locked/agent");
+test("Pix Desktop search query/config/sync use the exact private contract without spawning Pi and reject other clients", async t => {
+	const artifacts = resolve(".pi/artifacts/central-semantics-acp/agent");
 	await mkdir(artifacts, { recursive: true });
 	const cwd = mkdtempSync(join(artifacts, "run-"));
-	const searchService = new DesktopSearchService({ discover: async () => [], preferences: new SearchPreferences(join(cwd, "preferences.jsonc")),
+	const preferencesPath = join(cwd, "semantic-search.json");
+	const searchService = new DesktopSearchService({ discover: async () => [], preferences: new SearchPreferences(preferencesPath),
 		auth: { available: async () => false, key: async () => undefined, save: async () => {} },
 		embed: async () => { throw new Error("No paid requests allowed"); } });
 	const harness = createTestAdapter({ searchService, createPiClient: () => { throw new Error("Search must not create Pi"); } });
@@ -3183,19 +3184,38 @@ test("Pix Desktop search query/config use the exact private contract without spa
 		assert.equal(response.results[0]?.id, "settings:theme");
 		assert.equal(response.status.enabled, false);
 		assert.doesNotMatch(JSON.stringify(response), /SECRET VALUE/);
-		const config = await cx.request(SEARCH_CONFIG_METHOD, { cwd, enabled: false }) as SearchQueryResponse["status"];
+		const config = await cx.request(SEARCH_CONFIG_METHOD, { cwd }) as SearchQueryResponse["status"];
 		assert.equal(config.enabled, false);
 		assert.equal(config.keyAvailable, false);
 		assert.equal(typeof config.indexing, "boolean");
 		assert.equal(config.tasksSemanticEnabled, false);
+		const synced = await cx.request(SEARCH_SYNC_METHOD, { cwd, settings: request.settings }) as SearchQueryResponse["status"];
+		assert.equal(synced.enabled, false);
+		assert.deepEqual(synced.indexingSources, { settings: false, tasks: false, sessions: false });
+		assert.doesNotMatch(JSON.stringify(synced), /SECRET VALUE/);
+		await assert.rejects(cx.request(SEARCH_SYNC_METHOD, { cwd }), /Invalid Desktop search request/);
+		await assert.rejects(cx.request(SEARCH_SYNC_METHOD, { cwd, settings: [], enabled: true }), /Invalid Desktop search request/);
+		assert.deepEqual(await cx.request(SEARCH_INDEX_METHOD, { cwd, source: "settings", settings: [] }), {
+			source: "settings", complete: false, message: "Configure an embedding model and its credential to index this source",
+		});
+		for (const invalid of [{ cwd, source: "settings" }, { cwd, source: "tasks", settings: [] },
+			{ cwd, source: "tasks", apiKey: "secret" }, { cwd, source: "code" }, { cwd: ".", source: "sessions" }]) {
+			await assert.rejects(cx.request(SEARCH_INDEX_METHOD, invalid), /Invalid Desktop search request/);
+		}
 		const semanticTaskRequest = { cwd, query: "unfinished work", limit: 20 };
 		assert.deepEqual(await cx.request(SEARCH_TASKS_METHOD, semanticTaskRequest), {
 			results: [], pendingIndex: false,
 		} satisfies SemanticTasksResponse);
-		const consent = await cx.request(SEARCH_CONFIG_METHOD, { cwd, tasksSemanticEnabled: true }) as SearchQueryResponse["status"];
+		await writeFile(preferencesPath, JSON.stringify({ search: { embedding: { embeddingProvider: "openrouter", embeddingModel: "fixture-model", vectorSize: 3 } } }));
+		const consent = await cx.request(SEARCH_CONFIG_METHOD, { cwd }) as SearchQueryResponse["status"];
 		assert.equal(consent.tasksSemanticEnabled, true);
+		assert.equal(consent.sessionTitlesEnabled, true);
+		assert.equal(consent.enabled, true);
 		assert.deepEqual(await cx.request(SEARCH_TASKS_METHOD, semanticTaskRequest), { results: [], pendingIndex: false },
-			"consent without a stored provider credential cannot send embeddings");
+			"configuration without a provider credential cannot send embeddings");
+		for (const flag of ["enabled", "sessionTitlesEnabled", "tasksSemanticEnabled", "apiKey"]) {
+			await assert.rejects(cx.request(SEARCH_CONFIG_METHOD, { cwd, [flag]: flag === "apiKey" ? "secret" : true }), /Invalid Desktop search request/);
+		}
 		for (const bad of [
 			{ ...semanticTaskRequest, cwd: "relative" }, { ...semanticTaskRequest, query: "" },
 			{ ...semanticTaskRequest, limit: 0 }, { ...semanticTaskRequest, unexpected: true },
@@ -3209,6 +3229,8 @@ test("Pix Desktop search query/config use the exact private contract without spa
 		await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION });
 		await assert.rejects(cx.request(SEARCH_QUERY_METHOD, request), /Desktop search unavailable/);
 		await assert.rejects(cx.request(SEARCH_CONFIG_METHOD, { cwd }), /Desktop search unavailable/);
+		await assert.rejects(cx.request(SEARCH_SYNC_METHOD, { cwd, settings: [] }), /Desktop search unavailable/);
+		await assert.rejects(cx.request(SEARCH_INDEX_METHOD, { cwd, source: "tasks" }), /Desktop search unavailable/);
 		await assert.rejects(cx.request(SEARCH_TASKS_METHOD, { cwd, query: "tasks", limit: 10 }), /Desktop search unavailable/);
 	});
 	assert.equal(harness.adapter.sessionCount, 0);
@@ -3325,6 +3347,12 @@ test("Pix Desktop commit search uses a separate private contract without startin
 	let disposed = false;
 	const harness = createTestAdapter({
 		commitSearchService: {
+			index: async (request, signal) => {
+				assert.ok(signal instanceof AbortSignal);
+				assert.equal(request.source, "commits");
+				if (fail) throw new Error("Bearer PRIVATE_PROVIDER_ERROR");
+				return { source: "commits", complete: true, indexed: 2, total: 2 };
+			},
 			query: async (request, signal) => {
 				assert.ok(signal instanceof AbortSignal);
 				requests.push(request);
@@ -3341,11 +3369,15 @@ test("Pix Desktop commit search uses a separate private contract without startin
 		await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, clientInfo: { name: "pix-desktop", version: "test" } });
 		assert.deepEqual(await cx.request(SEARCH_COMMITS_METHOD, request), { results: [], notices: ["local fallback"] });
 		assert.deepEqual(requests, [request]);
+		assert.deepEqual(await cx.request(SEARCH_INDEX_METHOD, { cwd: request.cwd, source: "commits" }),
+			{ source: "commits", complete: true, indexed: 2, total: 2 });
 		await assert.rejects(cx.request(SEARCH_COMMITS_METHOD, { ...request, cwd: "relative" }));
 		await assert.rejects(cx.request(SEARCH_COMMITS_METHOD, { ...request, query: "x".repeat(2049) }));
 		await assert.rejects(cx.request(SEARCH_COMMITS_METHOD, { ...request, limit: 0 }));
 		assert.equal(requests.length, 1);
 		fail = true;
+		assert.deepEqual(await cx.request(SEARCH_INDEX_METHOD, { cwd: request.cwd, source: "commits" }),
+			{ source: "commits", complete: false, message: "Document indexing unavailable; retry this source" });
 		await assert.rejects(cx.request(SEARCH_COMMITS_METHOD, request), error => {
 			assert.ok(error instanceof RequestError);
 			assert.equal(error.code, -32000);
@@ -3361,6 +3393,31 @@ test("Pix Desktop commit search uses a separate private contract without startin
 	assert.equal(harness.adapter.sessionCount, 0);
 	await harness.adapter.dispose();
 	assert.equal(disposed, true);
+});
+
+test("Pix Desktop explicit indexing propagates ACP caller cancellation to its owned action", async t => {
+	let observed: AbortSignal | undefined;
+	const harness = createTestAdapter({
+		commitSearchService: {
+			query: async () => ({ results: [], notices: [] }),
+			index: (_request, signal) => new Promise((_resolve, reject) => {
+				observed = signal;
+				signal!.addEventListener("abort", () => reject(signal!.reason), { once: true });
+			}),
+			dispose: async () => {},
+		},
+		createPiClient: () => { throw new Error("Index must not create Pi"); },
+	});
+	t.after(() => harness.adapter.dispose());
+	await connectAs(harness.adapter, "pix-desktop", async cx => {
+		await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, clientInfo: { name: "pix-desktop", version: "test" } });
+		const pending = cx.request(SEARCH_INDEX_METHOD, { cwd: resolve("."), source: "commits" });
+		await waitFor(() => Boolean(observed));
+		await cx.notify(methods.protocol.cancelRequest, { requestId: 1 });
+		await assert.rejects(pending);
+		assert.equal(observed?.aborted, true);
+	});
+	assert.equal(harness.adapter.sessionCount, 0);
 });
 
 test("Pix Desktop search preserves controlled source errors across ACP without leaking underlying failures", async t => {
@@ -4656,8 +4713,8 @@ test("pix/session/reload reports model-available skills, tools, and agents from 
 			fakes.push(fake);
 			if (fakes.length === 2) {
 				fake.commands.push(
-					{ name: "skill:frontier-model-rollover", source: "skill", sourceInfo: {} },
-					{ name: "skill:project-agent-creator", source: "skill", sourceInfo: {} },
+					{ name: "skill:frontier-model-rollover", source: "skill", sourceInfo: { scope: "user" } },
+					{ name: "skill:project-agent-creator", source: "skill", sourceInfo: { scope: "project" } },
 				);
 				fake.eventsOnStart.push({
 					type: "extension_ui_request",
@@ -4673,6 +4730,7 @@ test("pix/session/reload reports model-available skills, tools, and agents from 
 							tools: ["repo_search", "read", "subagents"],
 							skills: ["frontier-model-rollover", "project-agent-creator"],
 							agents: ["frontier-review", "research"],
+							projectAgents: ["research"],
 						}),
 					],
 				});
@@ -4698,9 +4756,9 @@ test("pix/session/reload reports model-available skills, tools, and agents from 
 
 	const text = notifications.map((item) => (item.update as { content?: { text?: string } }).content?.text ?? "").join("\n");
 	assert.match(text, /Model: openai-codex\/gpt-5\.6-luna:medium/);
-	assert.match(text, /Skills \(in context\): frontier-model-rollover, project-agent-creator/);
+	assert.match(text, /Skills \(global\): frontier-model-rollover\nSkills \(project\): project-agent-creator/);
 	assert.match(text, /Tools \(active\): repo\\_search, read, subagents/);
-	assert.match(text, /Agents \(available\): frontier-review, research/);
+	assert.match(text, /Agents \(global\): frontier-review\nAgents \(project\): research/);
 });
 
 test("pix/session/reload rejects while the session is streaming", async () => {

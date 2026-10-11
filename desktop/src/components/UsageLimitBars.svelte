@@ -16,11 +16,14 @@
     windows,
     now,
     stale = false,
+    creditDeadlines = [],
   }: {
     /** Account quota windows only (hourly/weekly); header-derived rate windows do not belong here. */
     windows: readonly { key: string; label: "H" | "W"; window: ModelUsageLimitWindow }[];
     now: number;
     stale?: boolean;
+    /** Expiry instants (ms) of available reset credits; shown on the weekly scale when in range. */
+    creditDeadlines?: readonly number[];
   } = $props();
 
   function toneTextClass(tone: UsageTone): string {
@@ -51,7 +54,7 @@
             </span>
           </div>
           {#if label === "W"}
-            <QuotaResetCalendar {window} {now} />
+            <QuotaResetCalendar {window} {now} deadlines={creditDeadlines} />
           {:else}
             <span class="relative h-2 w-full" aria-hidden="true">
               <span class="absolute inset-0 overflow-hidden rounded-sm bg-border">

@@ -4,8 +4,8 @@ import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { withTaskDatabase } from "../project-tasks/storage.js";
-import { SEARCH_VECTOR_DIMENSIONS, SEARCH_VECTOR_MODEL, validSearchVector,
-  type SemanticConsents, type SemanticSearchOptions } from "./semantic-provider.js";
+import { validSearchVector, type SemanticSearchOptions } from "./semantic-provider.js";
+import { commitIdentity, type CommitEmbeddingConfig } from "./semantic-commit-provider.js";
 
 export interface CachedTaskCandidate { id: string; title: string; description?: string }
 export interface CachedSessionCandidate { id: string; path: string; name?: string; firstMessage: string; snippet?: string }
@@ -59,23 +59,24 @@ async function openCachedIndex(root: string): Promise<ReadonlyDatabase | undefin
   return new DatabaseSync(filename, { readOnly: true }) as unknown as ReadonlyDatabase;
 }
 
-function schemaCompatible(db: ReadonlyDatabase, namespace: "task" | "session"): boolean {
+function schemaCompatible(db: ReadonlyDatabase, namespace: "task" | "session", config: CommitEmbeddingConfig): boolean {
   const tables = namespace === "task"
     ? ["pix_task_index_meta", "pix_task_documents", "pix_task_vectors"]
     : ["pix_session_meta", "pix_session_titles", "pix_session_vectors"];
   const available = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name));
   if (tables.some(name => !available.has(name))) return false;
   const get = db.prepare(`SELECT value FROM ${tables[0]} WHERE key=?`);
-  return get.get("model")?.value === SEARCH_VECTOR_MODEL
-    && get.get("dimensions")?.value === String(SEARCH_VECTOR_DIMENSIONS)
+  return get.get("identity")?.value === commitIdentity(config)
+    && get.get("model")?.value === config.model
+    && get.get("dimensions")?.value === String(config.dimension)
     && get.get("encoding")?.value === "float32le";
 }
 
-function decodeVector(raw: unknown): number[] | undefined {
-  if (!(raw instanceof Uint8Array) || raw.byteLength !== SEARCH_VECTOR_DIMENSIONS * 4) return;
+function decodeVector(raw: unknown, dimension: number): number[] | undefined {
+  if (!(raw instanceof Uint8Array) || raw.byteLength !== dimension * 4) return;
   const data = Buffer.from(raw);
-  const vector = Array.from({ length: SEARCH_VECTOR_DIMENSIONS }, (_, index) => data.readFloatLE(index * 4));
-  return validSearchVector(vector) ? vector : undefined;
+  const vector = Array.from({ length: dimension }, (_, index) => data.readFloatLE(index * 4));
+  return validSearchVector(vector, dimension) ? vector : undefined;
 }
 
 /** Match ACP task-corpus.ts exactly; status, paths, attachments and model
@@ -176,25 +177,25 @@ export async function freshSemanticCandidates(root: string, inputs: {
  * current native session listing. Stale rows never become search evidence. */
 export async function readCachedProjectVectors(root: string, inputs: {
   tasks: readonly CachedTaskCandidate[]; sessions: readonly CachedSessionCandidate[];
-}, consent: SemanticConsents, options: SemanticSearchOptions, signal: AbortSignal): Promise<CachedProjectVectors> {
+}, options: SemanticSearchOptions, signal: AbortSignal, config: CommitEmbeddingConfig): Promise<CachedProjectVectors> {
   const result: CachedProjectVectors = { tasks: new Map(), sessions: new Map(), uncachedTasks: 0, uncachedSessions: 0 };
-  if ((!consent.tasks || !inputs.tasks.length) && (!consent.sessions || !inputs.sessions.length)) return result;
+  if (!inputs.tasks.length && !inputs.sessions.length) return result;
   const db = await openCachedIndex(root);
-  if (!db) return result;
+  if (!db) return { ...result, uncachedTasks: inputs.tasks.length, uncachedSessions: inputs.sessions.length };
   try {
     db.exec("PRAGMA busy_timeout=200; BEGIN");
-    if (consent.tasks && schemaCompatible(db, "task")) {
+    if (inputs.tasks.length && schemaCompatible(db, "task", config)) {
       const get = db.prepare("SELECT d.content_hash,v.vector FROM pix_task_documents d JOIN pix_task_vectors v ON v.content_hash=d.content_hash WHERE d.task_id=?");
       for (const task of inputs.tasks) {
         signal.throwIfAborted();
         const stored = get.get(task.id);
         if (!stored || stored.content_hash !== taskSemanticHash(task)) { result.uncachedTasks++; continue; }
-        const vector = decodeVector(stored.vector);
+        const vector = decodeVector(stored.vector, config.dimension);
         if (vector) result.tasks.set(task.id, vector);
         else result.uncachedTasks++;
       }
-    } else if (consent.tasks) result.uncachedTasks = inputs.tasks.length;
-    if (consent.sessions && schemaCompatible(db, "session")) {
+    } else result.uncachedTasks = inputs.tasks.length;
+    if (inputs.sessions.length && schemaCompatible(db, "session", config)) {
       const named = await sessionLinks(root, inputs.sessions, options, signal).catch(() => {
         signal.throwIfAborted();
         return new Map<string, NamedSessionLink>();
@@ -207,11 +208,11 @@ export async function readCachedProjectVectors(root: string, inputs: {
         const row = get.get(current.sessionId);
         const titleHash = createHash("sha256").update(current.name).digest("hex");
         if (!row || row.title !== current.name || row.title_hash !== titleHash) { result.uncachedSessions++; continue; }
-        const vector = decodeVector(row.vector);
+        const vector = decodeVector(row.vector, config.dimension);
         if (vector) result.sessions.set(session.id, vector);
         else result.uncachedSessions++;
       }
-    }
+    } else result.uncachedSessions = inputs.sessions.length;
     db.exec("COMMIT");
     return result;
   } catch (error) {

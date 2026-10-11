@@ -1,9 +1,13 @@
 ---
 kind: spec
-status: active
+status: retired
 ---
 
-# Desktop IDX panel
+# Retired: Desktop IDX panel
+
+> Historical contract only. The legacy IDX tab and its integration are removed.
+> The current native search panel is preserved; see
+> [Desktop search index status](desktop-search-index-status.md).
 
 <!-- markdownlint-disable MD013 -->
 
@@ -13,7 +17,7 @@ Change
 
 ## Lifecycle
 
-Active implemented contract.
+Retired historical contract; not an active Pix behavior.
 
 ## Goal
 
@@ -21,7 +25,7 @@ Expose installed IDX v2 repository intelligence in Pix Desktop with typed querie
 
 ## Scope
 
-- IDX activity view in the workspace sidebar, with availability, version, initialization and code-index status for the active workspace.
+- **Legacy IDX** view in the workspace sidebar, with availability, version, initialization and code-index status for the active workspace. The sidebar's former IDX activity now opens [Search indexes](desktop-search-index-status.md); this panel remains available as the optional external-tool interface.
 - Named index maintenance (initialize, incremental/full update, dry run, doctor), bounded streamed output, cancellation and managed installation.
 - Typed search of code (`idx search --domain code`) and documents (`idx search --domain document`), context packs, and typed index inspections.
 - Query & diagnostics tab: explicit changed project-relative paths entered one per line or comma-separated; read-only `idx audit <paths...>` scoped to those paths.

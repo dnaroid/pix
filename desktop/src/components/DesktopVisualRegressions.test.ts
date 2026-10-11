@@ -13,7 +13,6 @@ import composerActionsSource from "./PromptComposerActionsMenu.svelte?raw";
 import diffViewSource from "./DiffView.svelte?raw";
 import elicitationSource from "./ElicitationDialog.svelte?raw";
 import gitCommitComposerSource from "./GitCommitComposer.svelte?raw";
-import idxSource from "./IdxPanel.svelte?raw";
 import lspInstallPaneSource from "./LspInstallPane.svelte?raw";
 import packageScriptsSource from "./PackageScriptsPanel.svelte?raw";
 import runtimeStatusSource from "./RuntimeStatusBarItems.svelte?raw";
@@ -266,15 +265,6 @@ describe("desktop visual regressions", () => {
     expect(content).not.toMatch(/@layer\s+base\s*\{[^}]*:focus-visible\s*\{[^}]*outline:\s*none;/);
     expect(markdownSource).not.toContain("outline: 2px solid var(--ring)");
     expect(transcriptSource).not.toContain(".message-action-item:focus-visible { outline: 2px solid var(--ring)");
-  });
-
-  it("preserves visible focus ring on idx context input controls", () => {
-    expect(idxSource).toContain('bind:value={queryState.contextMaxSpecs}');
-    expect(idxSource).toContain('bind:value={queryState.contextMaxCode}');
-    expect(idxSource).toContain('bind:value={queryState.contextMaxTests}');
-    expect(idxSource).toContain('focus-visible:ring-2 focus-visible:ring-ring/30" type="number" min="1" max="20" aria-label="Maximum context specs"');
-    expect(idxSource).toContain('focus-visible:ring-2 focus-visible:ring-ring/30" type="number" min="1" max="30" aria-label="Maximum context code files"');
-    expect(idxSource).toContain('focus-visible:ring-2 focus-visible:ring-ring/30" type="number" min="1" max="20" aria-label="Maximum context tests"');
   });
 
   it("shows detailed hover/focus Session status only for real hidden activity", () => {
@@ -777,7 +767,6 @@ describe("desktop visual regressions", () => {
       }
     }
 
-    expect(idxSource).toContain('className="text-xs leading-[1.55]"');
     expect(sessionActivityStatusHudSource).toContain("text-xs leading-4 text-muted-foreground");
     expect(toolResultSource).toContain("font-size: 12px");
     expect(terminalSource).toContain("fontSize: 10");

@@ -4,6 +4,13 @@ import { commitProjectRoot } from "./commit-corpus.js";
 import { parseCommitSearchRequest, type CommitSearchRequest, type CommitSearchResponse } from "./commit-contract.js";
 import { embedCommitHTTP, embeddingIdentity, loadCommitEmbeddingConfig, loadCommitEmbeddingKey, SEMANTIC_NOTICE, validCommitVector,
   type CommitEmbedder, type CommitEmbeddingConfig } from "./commit-provider.js";
+import type { SearchIndexRequest, SearchIndexResponse } from "./contract.js";
+import { parseSearchIndexRequest } from "./request.js";
+import { IndexActions } from "./index-actions.js";
+
+type Request = CommitSearchRequest | SearchIndexRequest;
+type Response = CommitSearchResponse | SearchIndexResponse;
+const indexing = (request: Request): request is SearchIndexRequest => "source" in request;
 
 export interface CommitSearchOptions {
   readonly loadConfig?: (cwd: string) => Promise<CommitEmbeddingConfig | undefined>;
@@ -19,6 +26,8 @@ export class DesktopCommitSearchService {
   private readonly tails = new Map<string, Promise<unknown>>();
   private readonly queryCache = new Map<string, number[][]>();
   private disposed = false;
+  private readonly lifetime = new AbortController();
+  private readonly indexActions = new IndexActions<SearchIndexResponse>();
   constructor(options: CommitSearchOptions = {}) { this.options = options; }
   changed(cwd: string): void {
     // Cancel all aliases of this project conservatively; no background reindexing.
@@ -29,12 +38,23 @@ export class DesktopCommitSearchService {
   }
   async dispose(): Promise<void> {
     this.disposed = true;
+    this.lifetime.abort();
     for (const controller of this.active.keys()) controller.abort();
     await Promise.allSettled([...this.jobs]);
+    await this.indexActions.settled();
     this.queryCache.clear();
   }
   query(request: CommitSearchRequest, signal: AbortSignal = new AbortController().signal): Promise<CommitSearchResponse> {
     request = parseCommitSearchRequest(request);
+    return this.start(request, signal) as Promise<CommitSearchResponse>;
+  }
+  index(request: SearchIndexRequest, signal: AbortSignal = new AbortController().signal): Promise<SearchIndexResponse> {
+    request = parseSearchIndexRequest(request);
+    if (request.source !== "commits") return Promise.reject(new Error("Invalid commit indexing source"));
+    return this.indexActions.run(request.cwd, signal, this.lifetime.signal,
+      owned => this.start(request, owned) as Promise<SearchIndexResponse>);
+  }
+  private start(request: Request, signal: AbortSignal): Promise<Response> {
     if (this.disposed) return Promise.reject(new Error("Commit search disposed"));
     const controller = new AbortController();
     const abort = () => controller.abort();
@@ -49,12 +69,14 @@ export class DesktopCommitSearchService {
   private async config(root: string): Promise<CommitEmbeddingConfig | undefined> {
     try { return await (this.options.loadConfig ?? loadCommitEmbeddingConfig)(root); } catch { return undefined; }
   }
-  private async perform(request: CommitSearchRequest, controller: AbortController): Promise<CommitSearchResponse> {
+  private async perform(request: Request, controller: AbortController): Promise<Response> {
     const signal = controller.signal; signal.throwIfAborted();
-    if (!request.query.trim()) return { results: [], notices: [] };
+    if (!indexing(request) && !request.query.trim()) return { results: [], notices: [] };
     let root: string;
     try { root = await realpath(await commitProjectRoot(request.cwd, signal)); }
-    catch { signal.throwIfAborted(); return { results: [], notices: ["Commit history unavailable (not a Git repository)."] }; }
+    catch { signal.throwIfAborted(); return indexing(request)
+      ? { source: "commits", complete: false, message: "Commit history unavailable (not a Git repository)." }
+      : { results: [], notices: ["Commit history unavailable (not a Git repository)."] }; }
     this.active.set(controller, { requested: request.cwd, root });
     const previous = this.tails.get(root) ?? Promise.resolve();
     const work = previous.catch(() => {}).then(async () => {
@@ -64,13 +86,14 @@ export class DesktopCommitSearchService {
       try { if (config?.provider === "openrouter") key = await (this.options.loadKey ?? loadCommitEmbeddingKey)(); } catch { /* Local fallback. */ }
       const usable = config && (config.provider === "ollama" || (config.provider === "openrouter" && key)) ? config : undefined;
       signal.throwIfAborted();
+      if (indexing(request) && !usable) return { source: "commits" as const, complete: false, message: SEMANTIC_NOTICE };
       return this.worker(request, root, usable, key, signal);
     });
     this.tails.set(root, work);
     try { return await work; }
     finally { if (this.tails.get(root) === work) this.tails.delete(root); }
   }
-  private worker(request: CommitSearchRequest, root: string, config: CommitEmbeddingConfig | undefined, key: string | undefined, signal: AbortSignal): Promise<CommitSearchResponse> {
+  private worker(request: Request, root: string, config: CommitEmbeddingConfig | undefined, key: string | undefined, signal: AbortSignal): Promise<Response> {
     const url = new URL(import.meta.url.endsWith(".ts") ? "./commit-worker.ts" : "./commit-worker.js", import.meta.url);
     // Production runs compiled JS. tsx registration is development/test-only.
     const worker = url.pathname.endsWith(".ts")
@@ -80,7 +103,7 @@ export class DesktopCommitSearchService {
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
     const inflight = new Set<Promise<void>>();
-    let result: CommitSearchResponse | undefined;
+    let result: Response | undefined;
     return new Promise((resolve, reject) => {
       worker.on("message", p => {
         if (p.type === "result") { result = p.value; return; }
@@ -112,7 +135,8 @@ export class DesktopCommitSearchService {
         void Promise.allSettled([...inflight]).then(() => {
           signal.removeEventListener("abort", abort);
           if (signal.aborted) { reject(signal.reason); return; }
-          resolve(result ?? { results: [], notices: ["Commit search unavailable."] });
+          resolve(result ?? (indexing(request) ? { source: "commits", complete: false, message: "Commit indexing unavailable." }
+            : { results: [], notices: ["Commit search unavailable."] }));
         });
       });
     });

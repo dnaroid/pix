@@ -1,7 +1,7 @@
-import type { IdxOverview } from "./idx";
 import type { GitCiSnapshot } from "./git-ci";
 import type { RegistryProjectArtifact, RegistrySnapshot } from "./registry";
 import type { RegistryBackgroundSyncState } from "./registry-background-sync";
+import type { SearchIndexViewState } from "./search-index-controller";
 
 export type SidebarIndicatorTab =
   | "project"
@@ -9,7 +9,7 @@ export type SidebarIndicatorTab =
   | "git"
   | "registry"
   | "scripts"
-  | "idx"
+  | "search"
   | "lsp"
   | "settings";
 
@@ -30,7 +30,7 @@ export type SidebarIndicatorReasonId =
   | "registry.error" | "registry.issue" | "registry.attention"
   | "registry.syncing" | "registry.pending" | "registry.local"
   | "scripts.error" | "scripts.failed" | "scripts.running"
-  | "idx.error" | "idx.failed" | "idx.unavailable" | "idx.dirty" | "idx.stale" | "idx.running"
+  | "search.error" | "search.indexing" | "search.pending"
   | "settings.error";
 
 export interface SidebarIndicatorReason extends SidebarIndicator {
@@ -65,7 +65,6 @@ export interface WorkspaceSidebarIndicatorPoll {
     readonly error?: string;
   };
   readonly scripts: RuntimeIndicatorPoll;
-  readonly idx: RuntimeIndicatorPoll;
   readonly settings: {
     readonly errors: readonly string[];
   };
@@ -78,13 +77,9 @@ export interface SidebarGitRemoteUpdateProbe {
 }
 
 export interface SidebarIndicatorServiceState {
-  readonly idxOperationHandoffPending?: boolean;
   readonly poll?: WorkspaceSidebarIndicatorPoll;
   readonly gitRemote?: SidebarGitRemoteUpdateProbe;
-  readonly idxOverview?: IdxOverview;
-  readonly idxPollError?: string;
   readonly unseenScriptFailureIds: readonly string[];
-  readonly unseenIdxFailureIds: readonly string[];
 }
 
 export interface SidebarIndicatorInputs {
@@ -98,6 +93,7 @@ export interface SidebarIndicatorInputs {
   readonly registrySnapshot?: RegistrySnapshot;
   readonly registryBackgroundSync?: RegistryBackgroundSyncState;
   readonly settingsPanelError?: string | null;
+  readonly searchIndexes?: SearchIndexViewState;
 }
 
 export type SidebarIndicatorMap = Readonly<Partial<Record<SidebarIndicatorTab, SidebarIndicator>>>;

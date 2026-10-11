@@ -1,9 +1,8 @@
 import { fileURLToPath } from "node:url";
-import { REPO_DISCOVERY_TOOLS } from "../tool-descriptions.js";
 
 export const COUNCIL_RESEARCH_TOOLS = [
 	"read", "grep", "web_search", "web_fetch",
-	...REPO_DISCOVERY_TOOLS.map((tool) => tool.name),
+	"project_search",
 ];
 
 export function councilResearchArgs(): string[] {

@@ -9,6 +9,24 @@ import {
 } from "../src/acp/context-inventory.js";
 
 describe("Desktop context inventory formatting", () => {
+	it("separates global and project resources with literal identifiers", () => {
+		const state = parseContextInventoryState({ version: 1, tools: ["read"], skills: ["global_skill", "local_skill"], projectSkills: ["local_skill", "stale"], agents: ["research", "verify"], projectAgents: ["research", "hidden"] });
+		const text = formatReloadContextInventory(state);
+		assert.ok(text.includes("Skills (global): global\\_skill\nSkills (project): local\\_skill"));
+		assert.ok(text.includes("Agents (global): verify\nAgents (project): research"));
+		assert.equal(parseContextInventoryState({ version: 1, tools: [], skills: [], projectSkills: [42] }), undefined);
+		assert.equal(parseContextInventoryState({ version: 1, tools: [], skills: [], projectAgents: "bad" }), undefined);
+	});
+
+	it("refreshes skill scope from final commands and removes stale names", () => {
+		const state = withFinalSkillCommands({ version: 1, tools: ["read"], skills: ["old"], projectSkills: ["old"] }, [
+			{ name: "skill:local", source: "skill", sourceInfo: { scope: "project" } },
+			{ name: "skill:global", source: "skill", sourceInfo: { scope: "user" } },
+		]);
+		assert.deepEqual(state?.skills, ["global", "local"]);
+		assert.deepEqual(state?.projectSkills, ["local"]);
+		assert.deepEqual(withFinalSkillCommands({ ...state!, tools: [] }, [])?.projectSkills, []);
+	});
 	it("parses loaded context paths without duplicates and preserves them across skill refresh", () => {
 		const state = parseContextInventoryState({
 			version: 1, tools: ["read"], skills: [],

@@ -20,8 +20,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { BTW_METHOD, BTW_CHANNEL, parseBtwEvent, type BtwRequest, type BtwState } from "../btw/contract.js";
 import { parseDesktopBtwRequest } from "../btw/request.js";
-import { SEARCH_QUERY_METHOD, SEARCH_CONFIG_METHOD, SEARCH_COMMITS_METHOD, SEARCH_INTENT_METHOD, SEARCH_TASKS_METHOD } from "../search/contract.js";
-import { parseSearchQueryRequest, parseSearchConfigRequest, parseSemanticTasksRequest } from "../search/request.js";
+import { SEARCH_QUERY_METHOD, SEARCH_CONFIG_METHOD, SEARCH_SYNC_METHOD, SEARCH_INDEX_METHOD, SEARCH_COMMITS_METHOD, SEARCH_INTENT_METHOD, SEARCH_TASKS_METHOD } from "../search/contract.js";
+import { parseSearchQueryRequest, parseSearchConfigRequest, parseSearchSyncRequest, parseSearchIndexRequest, parseSemanticTasksRequest } from "../search/request.js";
 import { DesktopSearchService, SearchUnavailableError } from "../search/service.js";
 import { parseCommitSearchRequest } from "../search/commit-contract.js";
 import { DesktopCommitSearchService } from "../search/commit-service.js";
@@ -452,7 +452,7 @@ export interface PixAcpAgentOptions {
 	readonly nativeSessionRevision?: (cwd: string) => Promise<string>;
 	/** Hermetic Desktop search backend override. */
 	readonly searchService?: DesktopSearchService;
-	readonly commitSearchService?: Pick<DesktopCommitSearchService, "query" | "dispose">;
+	readonly commitSearchService?: Pick<DesktopCommitSearchService, "query" | "index" | "dispose">;
 	/** Stateless search-intent classifier; no session or project-source access. */
 	readonly searchIntentService?: Pick<DesktopSearchIntentService, "classify">;
 	/** Stateless Quick Add type classifier; never reads the task document. */
@@ -522,7 +522,7 @@ export class PixAcpAgent {
 	private readonly sessionMap: SessionMapStore;
 	private readonly nativeSessionCatalog: NativeSessionCatalog;
 	private readonly searchService: DesktopSearchService;
-	private readonly commitSearchService: Pick<DesktopCommitSearchService, "query" | "dispose">;
+	private readonly commitSearchService: Pick<DesktopCommitSearchService, "query" | "index" | "dispose">;
 	private readonly searchIntentService: Pick<DesktopSearchIntentService, "classify">;
 	private readonly taskTypeClassifier: Pick<DesktopTaskTypeClassifier, "classify">;
 	private readonly ragService: Pick<DesktopRagService, "generate">;
@@ -738,6 +738,23 @@ export class PixAcpAgent {
 				catch (error) {
 					if (error instanceof SearchUnavailableError) throw new RequestError(ERROR_SERVER, error.message);
 					throw error;
+				}
+			})
+			.onRequest(SEARCH_SYNC_METHOD, parseSearchSyncRequest, async (ctx) => {
+				if (this.clientName !== "pix-desktop") throw new RequestError(ERROR_SERVER, "Desktop search unavailable");
+				try { return await this.searchService.sync(ctx.params, ctx.signal); }
+				catch (error) {
+					if (error instanceof SearchUnavailableError) throw new RequestError(ERROR_SERVER, error.message);
+					throw error;
+				}
+			})
+			.onRequest(SEARCH_INDEX_METHOD, parseSearchIndexRequest, async (ctx) => {
+				if (this.clientName !== "pix-desktop") throw new RequestError(ERROR_SERVER, "Desktop search unavailable");
+				try {
+					return await (ctx.params.source === "commits" ? this.commitSearchService : this.searchService).index(ctx.params, ctx.signal);
+				} catch (error) {
+					if (ctx.signal.aborted) throw error;
+					return { source: ctx.params.source, complete: false, message: "Document indexing unavailable; retry this source" };
 				}
 			})
 			.onRequest("session/new", (ctx) => this.newSession(ctx.params, ctx.client))

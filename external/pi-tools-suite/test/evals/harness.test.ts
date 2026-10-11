@@ -7,18 +7,19 @@ import { deriveMetrics } from "./harness/metrics.js";
 import { renderEvalReportMarkdown } from "./harness/report.js";
 import { writeRecorder } from "./harness/runner.js";
 import { EVAL_CASES } from "./cases.js";
-import type { EvalCase, EvalEvent, EvalReport, EvalRunResult } from "./harness/types.js";
+import type { EvalCase, EvalEvent, EvalReport } from "./harness/types.js";
 
 describe("eval harness", () => {
-	test("architecture scenario requires the correct inspect mode, not just the consolidated tool name", () => {
+	test("architecture discovery uses project search instead of a removed specialized tool", () => {
 		const scenario = EVAL_CASES.find((item) => item.id === "tool.architecture-first")!;
-		const validate = (events: EvalEvent[]) => scenario.validate!({ events } as EvalRunResult);
-		const call = (mode: string): EvalEvent => ({ type: "tool_call", toolName: "repo_inspect", input: { mode } });
-		expect(validate([call("architecture")])).toEqual([]);
-		expect(validate([call("structure")])).toHaveLength(1);
-		expect(validate([call("structure"), call("architecture")])).toHaveLength(1);
-		expect(validate([])).toHaveLength(1);
-		expect(validate([{ type: "tool_call", toolName: "repo_inspect", input: {} }])).toHaveLength(1);
+		expect(scenario.assert?.requiredTools).toContain("project_search");
+		expect(scenario.assert?.firstToolOneOf).toEqual(["project_search", "todo"]);
+		const mentionedTools = [
+			...(scenario.assert?.requiredTools ?? []),
+			...(scenario.assert?.forbiddenTools ?? []),
+			...(scenario.assert?.firstToolOneOf ?? []),
+		];
+		expect(mentionedTools.some((name) => name.startsWith("repo_"))).toBe(false);
 	});
 
 	test("generated recorder logs calls, native results and usage without extra modules", async () => {
@@ -32,13 +33,12 @@ describe("eval harness", () => {
 			recorder({ on: (name: string, handler: (event: Record<string, unknown>) => Promise<unknown>) => handlers.set(name, handler) });
 			expect(await handlers.get("tool_call")!({ toolCallId: "c1", toolName: "apply_patch", input: {} })).toMatchObject({ block: true });
 			await handlers.get("tool_result")!({
-				toolCallId: "c2", toolName: "repo_inspect", content: [{ type: "text", text: "result" }],
-				details: { nativePolicy: { version: 1, profile: "native-compact", refused: false, outputMode: "full" } },
+				toolCallId: "c2", toolName: "project_search", content: [{ type: "text", text: "result" }],
 			});
 			await handlers.get("agent_end")!({ messages: [{ role: "assistant", usage: { input: 10, output: 2, totalTokens: 12, cost: { total: 0.01 } } }] });
 			const events = fs.readFileSync(logPath, "utf8").trim().split("\n").map((line) => JSON.parse(line));
 			expect(events.map((event) => event.type)).toEqual(["tool_call", "tool_result", "agent_end"]);
-			expect(events[1].nativePolicy).toEqual({ refused: false, outputMode: "full" });
+			expect(events[1].contentBytes).toBeGreaterThan(0);
 			expect(events[1].textBytes).toBe(6);
 			expect(events[2].usage).toMatchObject({ totalTokens: 12, cost: 0.01 });
 		} finally {
@@ -46,7 +46,7 @@ describe("eval harness", () => {
 		}
 	});
 
-	test("derives mutation and behavioral verification metrics from tool events", () => {
+	test("derives mutation and verification metrics including historical repo tool events", () => {
 		const events: EvalEvent[] = [
 			{ type: "tool_call", toolName: "shell", input: { command: "npm test" } },
 			{ type: "tool_result", toolName: "shell", isError: true, contentBytes: 30, textBytes: 20 },
@@ -132,7 +132,7 @@ describe("eval harness", () => {
 				metrics: {
 					elapsedMs: 1000,
 					toolCallCount: 2,
-					toolCalls: ["repo_inspect", "read"],
+					toolCalls: ["project_search", "read"],
 					failedToolResults: 0,
 					toolResultContentBytes: 1200,
 					toolResultTextBytes: 1000,

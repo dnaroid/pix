@@ -9,50 +9,25 @@ policy, not a price oracle.
 ## Execution modes
 
 - `research`: read-only evidence gathering, searches and focused review questions.
-- `implement`: default Luna coder for bounded code, documentation, test and
-  frontend changes; Sol is the availability/quota fallback, not GLM.
-- `implement-core`: Sol for complex core changes, risky interface migrations
-  and ambiguous bugs in a bounded scope; no automatic weaker-model fallback.
-- `mechanical`: GLM-5.3 for small prescribed behavior-preserving edits with an
-  exact scope and deterministic acceptance check, never broad migrations,
+- `implement-core`: Sol for approved implementation handoffs, including explicit
+  user delegation or a concrete capability gap; no automatic weaker-model fallback.
+- `mechanical`: GLM-5.3 for sufficiently large prescribed behavior-preserving edits
+  with an exact scope and deterministic acceptance check, never broad migrations,
   interface redesign or semantic changes to regression tests.
 - `verify`: run checks and interpret logs, without fixing source or tests.
 - `ui-qa`: isolated real-UI workflow for browsers, terminal/TUI apps, and
   desktop GUIs with deterministic assertions and inspectable evidence.
-- `delivery-review`: explicitly requested, read-only delivery readiness and
-  evidence review, available to any parent; does not perform real UI QA or
-  assume release authority.
 - `oracle`: a deliberate cross-vendor frontier second opinion and independent
   post-implementation review for complex architectural tasks only, not automatic
   worker escalation. Every parent requires another vendor, including fallbacks.
   The duplicate bundled `frontier-review` role has been removed.
-- `knowledge-auditor`: economical docs-only finalization role that runs the
-  task-scoped repository-knowledge audit after implementation.
+- `knowledge-auditor`: economical docs-only role run before completion to update
+  task-affected documentation, without IDX, dirty-state checks or review receipts.
 
 Task-specific discipline belongs in the brief or `promptAppend`. A new project
 agent is warranted when it adds a durable contract, capabilities or resources,
 not merely a professional title. `verify` has a behavioral no-edit contract;
 shell access is not a read-only filesystem sandbox.
-
-### Delivery review contract
-
-`delivery-review` reviews the actual diff, surrounding code, and completed
-verification to assess residual delivery risk. Its bundled profile is
-self-contained: it does not require project skills or their discovery in the
-child. It uses GPT-6.1-Sol without a GLM fallback, `high` thinking, and the inspection
-tools `read`, `grep`, and `bash`, subject to runtime availability. It remains
-available even when the parent is a frontier model.
-
-The role must not edit files, execute tests, perform UI QA, or spawn children.
-Missing test/UI evidence is requested through the parent. This is a behavioral
-restriction, not a shell sandbox. Concurrency/lifecycle and production-impact
-checks apply only when relevant to the changed paths. Reports distinguish
-inspection from execution, classify material risks as `covered`, `acceptable`,
-or `needs attention`, and end with `High`, `Medium`, or `Low` confidence plus
-what would raise lower confidence. The role must not recommend readiness with
-unresolved material blockers, unresolved high-impact risks, or missing essential
-verification, assume release authority, or waive a required independent
-`oracle` architectural review gate.
 
 ## Role-owned model candidates
 
@@ -144,11 +119,10 @@ The bundled roles use it as follows:
 | Role | Selection | Result with the default list |
 |---|---|---|
 | `oracle` | `modelSelection: frontier`, `require-other` | Other-vendor frontier candidates only for every parent; hidden when parent identity is missing or no cross-vendor candidate exists |
-| `delivery-review` | own `models` | Sol only; available to all parents |
 
 `economy: true` (or `PI_TOOLS_SUITE_ECONOMY=1`) excludes `expensive` frontier
 models from every role's automatic chain (including roles with their own
-`models`, such as `implement`) and rejects explicit task/CLI overrides to them.
+`models`, such as `implement-core`) and rejects explicit task/CLI overrides to them.
 Only the forced current parent model is exempt. The config is read on each spawn,
 so toggling takes effect without a restart. If nothing qualifies, spawn fails
 naming the excluded models, and a cross-vendor role that cannot resolve for the
@@ -172,12 +146,6 @@ parent model. `forParentModels` is an optional allow-list and
 fields accept model patterns such as `zai/*` and affect the parent catalog,
 explicit role validation, and automatic routing. They do not choose the child
 model; `models` and the provider policy do that.
-
-`requiresIndexedProject: true` is an independent project-context visibility
-gate. It requires `.indexer-cli/` at the project root resolved from the current
-cwd and affects the same parent catalog, explicit-role validation, and automatic
-routing surfaces. It deliberately checks only the project marker, not whether
-`idx` is currently executable, and never initializes the project.
 
 ## Project-local customization and compatibility
 
@@ -216,12 +184,13 @@ disabled built-in.
 
 ### Coding quality and acceptance
 
-Default to Luna for delegated implementation; choose Sol deliberately for core
-complexity or ambiguous bugs, not for every edit. GLM's coding role is mechanical
-work only. Research, verification, UI QA, docs-only knowledge auditing and the
-cross-vendor oracle retain their separate candidate policies; this is not a
-global ban on GLM or a change to frontier classification. Project replacements
-and explicit model overrides still follow the normal precedence rules.
+`implement-core` (Sol only) and `mechanical` (GLM-5.3 only) are the retained
+implementation roles. Mechanical is for prescribed behavior-preserving work
+large enough to amortize handoff overhead. Research, verification, UI QA,
+documentation maintenance and the cross-vendor oracle retain their separate
+candidate policies. Project replacements and explicit model overrides still
+follow the normal precedence rules. Bundled `implement` and `delivery-review`
+are retired without aliases; project-local profiles with those names remain valid.
 
 Give migrations coherent slices and an early affected typecheck plus focused
 regression before expanding the diff. Preserve regression meaning, negative
@@ -232,11 +201,11 @@ These are workflow instructions, not rollback or checkpoint guarantees: a hard
 timeout can still leave partial edits for the parent to inspect and rescope.
 Review compares old/new assertions and both sides of migrated interfaces.
 
-Judge cost per accepted verified change, including failed attempts, review and
-rework, rather than token price alone. Timeout alone does not establish model
-quality, and good Luna review results do not establish implementation quality on
-equivalent migrations. The role policy starts that comparison; it is not a
-measured quality/cost claim or a new accounting mechanism.
+Judge expected net savings per accepted verified change, including failures,
+review, rework, duplicated context, briefing and integration, rather than token
+price alone. Parallelism may reduce latency without reducing total cost. No
+matched savings benchmark is claimed; this is prompt guidance, not runtime
+cost/capability enforcement.
 
 Give workers a scope, acceptance criteria and the evidence needed to start.
 Read compact results first and inspect raw artifacts selectively. One noisy
@@ -247,4 +216,5 @@ current parent catalog: consequential subsystem boundaries, core interfaces, or
 cross-module lifecycle/persistence invariants. Routine features, local bug fixes,
 mechanical edits, large diffs alone, and role availability do not trigger this
 gate. The parent classifies scope; there is no runtime complexity classifier.
-Use `research` for focused evidence/review questions.
+Use `research` for focused evidence/review questions, including readiness
+evidence; the parent makes the readiness decision.

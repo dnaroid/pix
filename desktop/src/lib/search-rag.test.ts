@@ -4,7 +4,7 @@ import { linkRagCitations, ragAnswerParts, ragRequest, ragSource, retrieveRagHit
 import type { SearchHit } from "./universal-search";
 
 const code: SearchHit = { kind: "code", id: "code:src/a.ts:1-2", path: "src/a.ts", startLine: 1,
-  endLine: 2, score: 0.8, title: "src/a.ts", snippet: "IDX match", content: "line from index" };
+  endLine: 2, score: 0.8, title: "src/a.ts", snippet: "native match", content: "line from search" };
 const task: SearchHit = { kind: "tasks", id: "tasks:1", taskId: "1", title: "Implement search",
   snippet: "done", score: 0.7 };
 const commit: SearchHit = { kind: "commits", id: "commits:" + "a".repeat(40), hash: "a".repeat(40),
@@ -16,7 +16,7 @@ const session: SearchHit = { kind: "sessions", id: "sessions:1", sessionId: "1",
 describe("RAG client-side evidence and references", () => {
   it("preserves existing source identities and navigation targets across provider request", () => {
     expect(ragSource(code)).toMatchObject({ id: code.id, kind: "code", path: code.path, startLine: 1, endLine: 2,
-      content: "line from index" });
+      content: "line from search" });
     expect(ragSource(task)).toMatchObject({ id: task.id, kind: "tasks" });
     expect(ragSource(commit)).toMatchObject({ id: commit.id, hash: commit.hash });
     expect(ragSource(session)).toMatchObject({ id: session.id, sessionId: "1" });
@@ -48,8 +48,8 @@ describe("RAG client-side evidence and references", () => {
     const signal = new AbortController().signal;
     const updates: unknown[] = [];
     const selected = await retrieveRagHits(async onUpdate => {
-      onUpdate({ results: [code, task], idxAvailable: true, notices: [] });
-      return { results: [task], idxAvailable: true, notices: [] };
+      onUpdate({ results: [code, task], notices: [] });
+      return { results: [task], notices: [] };
     }, signal, result => updates.push(result));
     expect(selected).toEqual([code, task]);
     expect(updates).toHaveLength(1);

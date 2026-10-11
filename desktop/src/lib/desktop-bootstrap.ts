@@ -26,14 +26,6 @@ export interface DesktopBootstrapSnapshot {
     readonly oauthDetected: boolean;
     readonly authMode?: string;
   };
-  readonly idx: {
-    readonly available: boolean;
-    readonly installed: boolean;
-    readonly version?: string;
-    readonly entryPath?: string;
-    readonly toolsRoot: string;
-    readonly systemExecutable?: string;
-  };
 }
 
 export interface OpenCodeImportResult {
@@ -59,14 +51,6 @@ export interface CodexApiKeyImportResult {
   readonly targetProvider: "openai";
 }
 
-export interface IdxInstallResult {
-  readonly status: "installed" | "already-installed";
-  readonly installed: boolean;
-  readonly version?: string;
-  readonly entryPath?: string;
-  readonly toolsRoot: string;
-}
-
 export function inspectDesktopBootstrap(): Promise<DesktopBootstrapSnapshot> {
   return invoke("desktop_bootstrap_inspect");
 }
@@ -77,10 +61,6 @@ export function importOpenCodeCredentials(): Promise<OpenCodeImportResult> {
 
 export function importCodexApiKey(): Promise<CodexApiKeyImportResult> {
   return invoke("desktop_bootstrap_import_codex_api_key");
-}
-
-export function installManagedIdx(): Promise<IdxInstallResult> {
-  return invoke("desktop_bootstrap_install_idx");
 }
 
 export function importedOpenCodeProviders(result: OpenCodeImportResult): readonly string[] {

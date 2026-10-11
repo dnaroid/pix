@@ -20,9 +20,6 @@ export function buildSubagentCatalogPrompt(config: SubagentConfig, parentModelRe
 	const projectReplacementGuidance = activeProjectReplacements.length > 0
 		? `Project-local agent definitions replace same-named built-ins completely. Active project replacements of built-ins: ${activeProjectReplacements.join(", ")}.`
 		: undefined;
-	const knowledgeFinalizationGuidance = effectiveConfig.types["knowledge-auditor"]
-		? "After all implementation edits, delegate the final task-scoped repository-knowledge audit to `knowledge-auditor` with the behavior/result and exact project-relative changed paths. Before finalizing, obtain its result and close task-related escalations/unreviewed specs or report blockers. Close the audit todo when task-scoped review is complete; global knowledge dirty=yes alone must not keep it open. Report global dirty state separately; never acknowledge unrelated specs or claim the whole project is clean from task-scoped success. Later edits to reviewed specs/dependencies require re-review; spawning alone is not completion."
-		: undefined;
 
 	return [
 		'<available_subagent_types>',
@@ -30,7 +27,7 @@ export function buildSubagentCatalogPrompt(config: SubagentConfig, parentModelRe
 		"These names are valid explicit `subagentType` values. Project-local `.pi/agents/*.md` roles are included when enabled by the current config.",
 		SUBAGENT_TYPE_SELECTION_GUIDANCE,
 		...(projectReplacementGuidance ? [projectReplacementGuidance] : []),
-		...(knowledgeFinalizationGuidance ? [knowledgeFinalizationGuidance] : []),
+		...(effectiveConfig.types["knowledge-auditor"] ? ["Before completing an implementation task, run `knowledge-auditor` with the final behavior/result and exact task-changed paths to update affected documentation. Obtain its result and resolve concrete documentation questions in the parent. No knowledge dirty checks, acknowledgment or exhaustive dependency review is required."] : []),
 		...entries.map(([name, profile]) => `- ${escapePromptText(name)}: ${catalogDescription(profile.description)}`),
 		'</available_subagent_types>',
 	].join("\n");

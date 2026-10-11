@@ -5,17 +5,24 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Database } from "bun:sqlite";
 import { searchProject, type ProjectSearchServices, type SessionRecord } from "../src/project-search/engine.js";
-import { SEARCH_VECTOR_DIMENSIONS, SEARCH_VECTOR_MODEL } from "../src/project-search/semantic-provider.js";
 import { taskSemanticHash } from "../src/project-search/semantic-cache.js";
 import { embedSemanticQuery } from "../src/project-search/semantic-provider.js";
+import { cachedProjectSemantics } from "../src/project-search/semantic.js";
+import { syncSavedTaskVectors } from "../src/project-search/semantic-task-indexer.js";
+import { resetHistoryVectors } from "../src/project-search/semantic-reset.js";
+import { searchSemanticCommits } from "../src/project-search/semantic-commit-indexer.js";
 import { commitIdentity, type CommitEmbeddingConfig } from "../src/project-search/semantic-commit-provider.js";
-import { SEARCH_EMBEDDING_MODEL } from "../../../acp/src/search/contract.js";
-import { EMBEDDING_DIMENSIONS } from "../../../acp/src/search/embeddings.js";
 import { removeDirsWithRetry, renameWithRetry } from "./support/fs-retry.js";
 
 const scratch = fileURLToPath(new URL("../../../.pi/artifacts/project-search-semantic-tests/", import.meta.url));
 const roots: string[] = [];
 afterEach(() => removeDirsWithRetry(roots));
+const SEARCH_VECTOR_MODEL = "history/test-model";
+const SEARCH_VECTOR_DIMENSIONS = 4;
+const historyConfig: CommitEmbeddingConfig = {
+  provider: "openrouter", model: SEARCH_VECTOR_MODEL, dimension: SEARCH_VECTOR_DIMENSIONS,
+  queryPrefix: "", documentPrefix: "", baseUrl: "https://openrouter.ai/api/v1",
+};
 
 function fixture() {
   mkdirSync(scratch, { recursive: true });
@@ -32,11 +39,153 @@ function fixture() {
   const indexPath = path.join(root, ".pi/search/index.sqlite");
   return {
     root, prefs, auth, mapPath, indexPath,
-    consent(tasks = false, sessions = false) {
-      writeFileSync(prefs, `{\n // Opt in individually.\n "search": { "tasksSemanticEnabled": ${tasks}, "sessionTitlesEnabled": ${sessions} }\n}`);
+    config: undefined as CommitEmbeddingConfig | undefined,
+    configure(enabled = true) {
+      this.config = enabled ? { ...historyConfig } : undefined;
     },
   };
 }
+
+test("history configuration ignores project and Desktop legacy files without altering them", async () => {
+  const f = fixture();
+  const embedding = { embeddingProvider: "ollama", embeddingModel: "code", knowledgeEmbeddingModel: "docs", vectorSize: 4 };
+  mkdirSync(path.join(f.root, ".indexer-cli"));
+  const legacy = path.join(f.root, ".indexer-cli/config.json");
+  const original = JSON.stringify(embedding);
+  writeFileSync(legacy, original);
+  writeFileSync(path.join(f.root, ".pi/search/semantic.json"), JSON.stringify({ enabled: false, embedding }));
+  writeFileSync(f.prefs, JSON.stringify({ search: { tasksSemanticEnabled: true, sessionTitlesEnabled: true } }));
+  // Isolate HOME in a child so this test never consults the real user's config.
+  const script = `const { loadCommitConfig } = await import(${JSON.stringify(fileURLToPath(new URL("../src/project-search/semantic-commit-provider.ts", import.meta.url)))}); console.log(JSON.stringify(await loadCommitConfig(${JSON.stringify(f.root)}) ?? null));`;
+  const child = Bun.spawn([process.execPath, "-e", script], { env: { ...process.env, HOME: f.root }, stdout: "pipe", stderr: "pipe" });
+  expect(await new Response(child.stdout).text()).toBe("null\n");
+  expect(await child.exited).toBe(0);
+  expect(readFileSync(legacy, "utf8")).toBe(original);
+});
+
+test("global plain JSON enables Tasks, Sessions and Commits with the Knowledge model, endpoint and dimensions", async () => {
+  const f = fixture();
+  taskDb(f.root, [{ id: "central-task", title: "Shield mechanics" }]);
+  const name = "Engineering council";
+  const session = { id: "central-session", path: nativeSessionFile(f, "central-session", name), name, firstMessage: "Draft project" };
+  writeFileSync(f.mapPath, JSON.stringify({ version: 1, sessions: [
+    { sessionId: "acp-central", cwd: f.root, piSessionPath: session.path, title: name, namedTitle: name },
+  ] }));
+  writeFileSync(f.prefs, JSON.stringify({ search: { tasksSemanticEnabled: false, sessionTitlesEnabled: false } }));
+  const projectConfig = path.join(f.root, ".pi/search/semantic.json");
+  const legacy = JSON.stringify({ enabled: false, embedding: { embeddingProvider: "openrouter", embeddingModel: "legacy", vectorSize: 4 } });
+  writeFileSync(projectConfig, legacy);
+  const entry = (name: string) => JSON.stringify(fileURLToPath(new URL(`../src/project-search/${name}.ts`, import.meta.url)));
+  const script = `
+    import { mkdirSync, writeFileSync, existsSync } from "node:fs";
+    const { cachedProjectSemantics } = await import(${entry("semantic")});
+    const { syncSavedTaskVectors } = await import(${entry("semantic-task-indexer")});
+    const { semanticConfiguration } = await import(${entry("semantic-provider")});
+    const { searchSemanticCommits } = await import(${entry("semantic-commit-indexer")});
+    const root = ${JSON.stringify(f.root)};
+    const candidates = { tasks: [{ id: "central-task", title: "Shield mechanics" }], sessions: [${JSON.stringify(session)}] };
+    const options = { sessionMapPath: ${JSON.stringify(f.mapPath)} };
+    const configPath = root + "/.config/pi/pi-tools-suite.jsonc";
+    const commit = { hash: "${commitHash(501)}", shortHash: "0000000", title: "Original mechanics", author: "Author", date: "2026-10-10", message: "Original spells", paths: [] };
+    const requests = [];
+    globalThis.fetch = async (url, init) => {
+      const body = JSON.parse(init.body);
+      requests.push({ url: String(url), body, auth: init.headers.Authorization ?? null });
+      return new Response(JSON.stringify({ model: body.model, embeddings: body.input.map(() => [1, 0, 0, 0, 0, 0]) }));
+    };
+    async function run(bootstrap = false) {
+      const signal = new AbortController().signal;
+      const config = bootstrap ? await semanticConfiguration(options, signal) : undefined;
+      if (config) await syncSavedTaskVectors(root, undefined, options, signal, config);
+      const histories = await cachedProjectSemantics(root, "abstract concept", candidates, signal, options);
+      const commits = await searchSemanticCommits(root, [commit], "abstract concept", async () => commit.hash, signal);
+      return { tasks: [...histories.tasks.keys()], sessions: [...histories.sessions.keys()], commits: commits.hits.map(hit => hit.hash), notices: [...histories.notices, ...commits.notices] };
+    }
+    const absent = await run();
+    mkdirSync(root + "/.config/pi", { recursive: true });
+    writeFileSync(configPath, '{"search":{"embedding":{"embeddingProvider":"ollama","embeddingModel":"invalid","vectorSize":0}}}');
+    const invalid = await run();
+    const beforeConfigured = { calls: requests.length, index: existsSync(${JSON.stringify(f.indexPath)}) };
+    writeFileSync(configPath, JSON.stringify({ enabled: false, search: { embedding: { embeddingProvider: "ollama", embeddingModel: "code-model", knowledgeEmbeddingModel: "knowledge-model", vectorSize: 6, knowledgeEmbeddingQueryPrefix: "Q: ", knowledgeEmbeddingDocumentPrefix: "D: ", ollamaBaseUrl: "http://127.0.0.1:19999/custom" } } }));
+    const configured = await run(true);
+    const reused = await run();
+    console.log(JSON.stringify({ absent, invalid, beforeConfigured, configured, reused, requests }));
+  `;
+  const child = Bun.spawn([process.execPath, "-e", script], {
+    env: { ...process.env, HOME: f.root, PI_CODING_AGENT_DIR: path.join(f.root, ".pi/agent"), OPENROUTER_API_KEY: "" },
+    stdout: "pipe", stderr: "pipe",
+  });
+  const [stdout, stderr, exit] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+  expect({ exit, stderr }).toEqual({ exit: 0, stderr: "" });
+  const result = JSON.parse(stdout);
+  expect(result.absent).toEqual({ tasks: [], sessions: [], commits: [], notices: [] });
+  expect(result.invalid).toEqual(result.absent);
+  expect(result.beforeConfigured).toEqual({ calls: 0, index: false });
+  expect(result.configured).toEqual({ tasks: ["central-task"], sessions: ["central-session"], commits: [commitHash(501)], notices: [] });
+  expect(result.reused).toEqual(result.configured);
+  expect(result.requests).toHaveLength(6);
+  for (const request of result.requests) {
+    expect(request.url).toBe("http://127.0.0.1:19999/custom/api/embed");
+    expect(request.body.model).toBe("knowledge-model");
+    expect(request.auth).toBeNull();
+  }
+  expect(result.requests.flatMap((request: { body: { input: string[] } }) => request.body.input)).toEqual([
+    "D: Task title: Shield mechanics\nTask description: ", "D: Engineering council", "Q: abstract concept",
+    "D: Original mechanics\nAuthor\nOriginal spells", "Q: abstract concept", "Q: abstract concept",
+  ]);
+  const db = new Database(f.indexPath, { readonly: true });
+  try {
+    expect(db.query("SELECT length(vector) AS bytes FROM pix_task_vectors").get()?.bytes).toBe(24);
+    expect(db.query("SELECT length(vector) AS bytes FROM pix_session_vectors").get()?.bytes).toBe(24);
+    expect(db.query("SELECT vector FROM pix_commit_vectors").get()?.vector).toBe("[1,0,0,0,0,0]");
+  } finally { db.close(); }
+  expect(readFileSync(projectConfig, "utf8")).toBe(legacy);
+});
+
+test("history OpenRouter credentials come from the shared SDK store then environment, never Desktop/project config", async () => {
+  const f = fixture();
+  const directory = path.join(f.root, ".config/pi");
+  mkdirSync(directory, { recursive: true });
+  const configPath = path.join(directory, "pi-tools-suite.jsonc");
+  const original = JSON.stringify({ search: { embedding: { embeddingProvider: "openrouter", embeddingModel: "code-model", vectorSize: 4,
+    knowledgeEmbeddingModel: "history/test-model", knowledgeEmbeddingQueryPrefix: "Q: ", apiKey: "ignored-config-key" } } });
+  writeFileSync(configPath, original);
+  const provider = fileURLToPath(new URL("../src/project-search/semantic-commit-provider.ts", import.meta.url));
+  const semanticProvider = fileURLToPath(new URL("../src/project-search/semantic-provider.ts", import.meta.url));
+  const authDir = path.join(f.root, "private-sdk");
+  const script = `
+    import { mkdirSync, writeFileSync } from "node:fs";
+    const { loadCommitConfig, loadCommitKey } = await import(${JSON.stringify(provider)});
+    const { embedSemanticQuery } = await import(${JSON.stringify(semanticProvider)});
+    const config = await loadCommitConfig(${JSON.stringify(f.root)});
+    const absent = await loadCommitKey();
+    mkdirSync(${JSON.stringify(authDir)}, { recursive: true });
+    writeFileSync(${JSON.stringify(path.join(authDir, "auth.json"))}, JSON.stringify({ openrouter: { type: "api_key", key: "sdk-test-key" } }));
+    const sdk = await loadCommitKey();
+    const requests = [];
+    globalThis.fetch = async (url, init) => {
+      const body = JSON.parse(init.body);
+      requests.push({ url: String(url), body, auth: init.headers.Authorization });
+      return new Response(JSON.stringify({ object: "list", model: body.model, data: [{ object: "embedding", index: 0, embedding: [1,0,0,0] }] }));
+    };
+    await embedSemanticQuery("abstract concept", sdk, new AbortController().signal, config);
+    process.env.OPENROUTER_API_KEY = " env-test-key ";
+    const env = await loadCommitKey();
+    await embedSemanticQuery("abstract concept", env, new AbortController().signal, config);
+    console.log(JSON.stringify({ absent: absent ?? null, requests }));
+  `;
+  const child = Bun.spawn([process.execPath, "-e", script], { env: { ...process.env, HOME: f.root,
+    PI_CODING_AGENT_DIR: authDir, OPENROUTER_API_KEY: "" }, stdout: "pipe", stderr: "pipe" });
+  const [stdout, stderr, exit] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+  expect({ exit, stderr }).toEqual({ exit: 0, stderr: "" });
+  const result = JSON.parse(stdout);
+  expect(result.absent).toBeNull();
+  expect(result.requests).toEqual(["sdk-test-key", "env-test-key"].map(key => ({
+    url: "https://openrouter.ai/api/v1/embeddings", auth: `Bearer ${key}`,
+    body: { model: "history/test-model", input: ["Q: abstract concept"], encoding_format: "float" },
+  })));
+  expect(readFileSync(configPath, "utf8")).toBe(original);
+});
 
 function vector(index: number): Buffer {
   const data = Buffer.alloc(SEARCH_VECTOR_DIMENSIONS * 4);
@@ -57,7 +206,7 @@ function savedVectors(f: ReturnType<typeof fixture>, tasks: { id: string; title:
       CREATE TABLE IF NOT EXISTS pix_session_titles(session_id TEXT PRIMARY KEY,title TEXT NOT NULL,title_hash TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS pix_session_vectors(title_hash TEXT PRIMARY KEY,vector BLOB NOT NULL);`);
     for (const prefix of ["pix_task_index_meta", "pix_session_meta"]) {
-      for (const [key, value] of [["model", SEARCH_VECTOR_MODEL], ["dimensions", String(SEARCH_VECTOR_DIMENSIONS)], ["encoding", "float32le"]]) {
+      for (const [key, value] of [["identity", commitIdentity(f.config ?? historyConfig)], ["model", SEARCH_VECTOR_MODEL], ["dimensions", String(SEARCH_VECTOR_DIMENSIONS)], ["encoding", "float32le"]]) {
         db.prepare(`INSERT OR REPLACE INTO ${prefix}(key,value) VALUES(?,?)`).run(key, value);
       }
     }
@@ -101,12 +250,10 @@ function services(f: ReturnType<typeof fixture>, extra: Partial<ProjectSearchSer
   const documents: string[] = [];
   return {
     calls,
-    exec: async () => { throw Error("IDX may not be initialized or contacted by this test"); },
-    indexed: () => false,
     listSessions: async () => [],
     semantic: {
-      consentPath: f.prefs,
-      authPath: f.auth,
+      loadConfig: async () => f.config,
+      loadKey: async () => JSON.parse(readFileSync(f.auth, "utf8")).openrouter?.key,
       sessionMapPath: f.mapPath,
       embedQuery: async (query: string) => { calls.push(query); return queryVector(0); },
       embedTasks: async (input: readonly string[]) => { documents.push(...input); return input.map(() => queryVector(0)); },
@@ -117,6 +264,28 @@ function services(f: ReturnType<typeof fixture>, extra: Partial<ProjectSearchSer
 }
 
 type GitRecord = { hash: string; title: string; message: string; author?: string; date?: string };
+
+test("explicit history reset allows a changed model to rebuild without changing canonical tasks", async () => {
+  const f = fixture(); f.configure();
+  const task = { id: "reset-model", title: "Shield mechanics" };
+  taskDb(f.root, [task]);
+  const deps = services(f), options = deps.semantic!;
+  const sync = () => syncSavedTaskVectors(f.root, "fake-key", options, new AbortController().signal, f.config!);
+  const search = () => cachedProjectSemantics(f.root, "protective mechanics", { tasks: [task], sessions: [] }, new AbortController().signal, options);
+  await sync();
+  expect((await search()).tasks.get(task.id)).toBeGreaterThan(0);
+  expect(deps.documents).toHaveLength(1);
+  f.config = { ...historyConfig, model: "new-history-model" };
+  expect((await search()).tasks.size).toBe(0);
+  expect(deps.documents).toHaveLength(1);
+  expect(await resetHistoryVectors(f.root, new AbortController().signal)).toBe(1);
+  await sync();
+  expect((await search()).tasks.get(task.id)).toBeGreaterThan(0);
+  expect(deps.documents).toHaveLength(2);
+  const db = new Database(path.join(f.root, ".pi/tasks.sqlite"), { readonly: true });
+  try { expect(JSON.parse((db.query("SELECT payload FROM tasks").get() as { payload: string }).payload).title).toBe(task.title); }
+  finally { db.close(); }
+});
 
 const commitConfig: CommitEmbeddingConfig = {
   provider: "ollama", model: "embedding-test-model", dimension: SEARCH_VECTOR_DIMENSIONS,
@@ -156,10 +325,173 @@ function gitHarness(f: ReturnType<typeof fixture>, initial: GitRecord[], config:
 function commitHash(number: number) { return number.toString(16).padStart(40, "0"); }
 
 describe("project_search shared semantic cache", () => {
-  test("the independent TUI reader uses exactly the same vector model and dimensions as ACP", () => {
-    expect(SEARCH_VECTOR_MODEL).toBe(SEARCH_EMBEDDING_MODEL);
-    expect(SEARCH_VECTOR_DIMENSIONS).toBe(EMBEDDING_DIMENSIONS);
+  test("query cache keys include the full configured Knowledge identity", async () => {
+    const f = fixture();
+    const task = { id: "cache", title: "Shield mechanics", vectorIndex: 0 };
+    taskDb(f.root, [{ id: task.id, title: task.title }]);
+    f.configure();
+    savedVectors(f, [task]);
+    const deps = services(f);
+    delete deps.semantic!.embedQuery;
+    const oldFetch = globalThis.fetch;
+    const inputs: string[] = [];
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      inputs.push(...body.input);
+      return new Response(JSON.stringify({ object: "list", model: body.model,
+        data: [{ object: "embedding", index: 0, embedding: queryVector(0) }] }));
+    }) as typeof fetch;
+    try {
+      for (let i = 0; i < 2; i++) {
+        const result = await searchProject(f.root, { query: "abstract concept", sources: ["tasks"] }, deps);
+        expect(result.notices).toEqual([]);
+        expect(result.hits.map(hit => hit.taskId)).toEqual(["cache"]);
+      }
+      expect(inputs).toEqual(["abstract concept"]);
+      f.config = { ...historyConfig, queryPrefix: "Different query: ", documentPrefix: "Different document: ", baseUrl: "https://example.invalid/v2" };
+      // Simulate an independently produced compatible cache for the new identity.
+      // Production must neither reinterpret nor convert the old cache itself.
+      savedVectors(f, [task]);
+      expect((await searchProject(f.root, { query: "abstract concept", sources: ["tasks"] }, deps)).hits.map(hit => hit.taskId)).toEqual(["cache"]);
+      expect(inputs).toEqual(["abstract concept", "Different query: abstract concept"]);
+      expect(deps.documents).toEqual([]);
+    } finally { globalThis.fetch = oldFetch; }
   });
+
+  test("legacy, unidentified and differently configured history caches fail closed without deleting paid vectors", async () => {
+    for (const mode of ["legacy", "unidentified", "different"] as const) {
+      const f = fixture();
+      const task = { id: "paid", title: "Paid work", vectorIndex: 0 };
+      const name = "Engineering council";
+      const session: SessionRecord = { id: "native", path: nativeSessionFile(f, "native", name), cwd: f.root, name, firstMessage: "Draft project" };
+      taskDb(f.root, [{ id: task.id, title: task.title }]);
+      writeFileSync(f.mapPath, JSON.stringify({ version: 1, sessions: [
+        { sessionId: "acp", cwd: f.root, piSessionPath: session.path, title: name, namedTitle: name },
+      ] }));
+      f.configure();
+      savedVectors(f, [task], [{ acpId: "acp", title: name, vectorIndex: 0 }]);
+      const edit = new Database(f.indexPath);
+      try {
+        for (const table of ["pix_task_index_meta", "pix_session_meta"]) {
+          if (mode === "legacy") edit.exec(`DELETE FROM ${table} WHERE key='identity'`);
+          if (mode === "unidentified") edit.exec(`DELETE FROM ${table}`);
+        }
+      } finally { edit.close(); }
+      if (mode === "different") f.config = { ...historyConfig, documentPrefix: "changed: " };
+      const deps = services(f, { listSessions: async () => [session], readSession: async () => ({ firstText: "Background", finalText: "Outcome" }) });
+      const result = await searchProject(f.root, { query: "abstract concept", sources: ["tasks", "sessions"] }, deps);
+      expect(result.hits).toEqual([]);
+      expect(result.notices.join(" ")).toContain("incompatible");
+      expect(deps.calls).toEqual([]);
+      expect(deps.documents).toEqual([]);
+      const db = new Database(f.indexPath, { readonly: true });
+      try {
+        expect(db.query("SELECT content_hash,hex(vector) AS vector FROM pix_task_vectors").all()).toEqual([
+          { content_hash: taskSemanticHash(task), vector: vector(0).toString("hex").toUpperCase() },
+        ]);
+        expect(db.query("SELECT title_hash,hex(vector) AS vector FROM pix_session_vectors").all()).toEqual([
+          { title_hash: createHash("sha256").update(name).digest("hex"), vector: vector(0).toString("hex").toUpperCase() },
+        ]);
+        expect(db.query("SELECT COUNT(*) AS n FROM pix_task_documents").get()?.n).toBe(1);
+        expect(db.query("SELECT COUNT(*) AS n FROM pix_session_titles").get()?.n).toBe(1);
+      } finally { db.close(); }
+    }
+  });
+
+  test("full Knowledge identity changes during task/session upload discard completion and preserve prior paid work", async () => {
+    const changes: Partial<CommitEmbeddingConfig>[] = [
+      { model: "different-model" }, { dimension: 6 }, { queryPrefix: "query: " },
+      { documentPrefix: "document: " }, { baseUrl: "https://example.invalid/api" }, { provider: "ollama" },
+    ];
+    for (const source of ["tasks", "sessions"] as const) for (const change of changes) {
+      const f = fixture();
+      f.configure();
+      const task = { id: "new", title: "New work" };
+      const name = "New council";
+      const session: SessionRecord = { id: "native", path: nativeSessionFile(f, "native", name), cwd: f.root, name, firstMessage: "Draft project" };
+      taskDb(f.root, [task]);
+      writeFileSync(f.mapPath, JSON.stringify({ version: 1, sessions: [
+        { sessionId: "acp-new", cwd: f.root, piSessionPath: session.path, title: name, namedTitle: name },
+      ] }));
+      savedVectors(f, [{ id: "old", title: "Old paid work", vectorIndex: 0 }], [{ acpId: "acp-old", title: "Old council", vectorIndex: 0 }]);
+      const deps = services(f, { listSessions: async () => [session], readSession: async () => ({ firstText: "Background", finalText: "Outcome" }) });
+      let entered!: () => void, release!: () => void;
+      const started = new Promise<void>(resolve => entered = resolve);
+      const gate = new Promise<void>(resolve => release = resolve);
+      deps.semantic!.embedTasks = async texts => { entered(); await gate; return texts.map(() => queryVector(0)); };
+      const pending = source === "tasks"
+        ? syncSavedTaskVectors(f.root, "fake-key", deps.semantic!, new AbortController().signal, historyConfig)
+          .then(() => ({ hits: [], notices: [] as string[] }), () => ({ hits: [], notices: ["sync interrupted"] }))
+        : searchProject(f.root, { query: "abstract concept", sources: [source] }, deps);
+      await started;
+      f.config = { ...historyConfig, ...change };
+      release();
+      const result = await pending;
+      expect(result.hits).toEqual([]);
+      expect(result.notices.length).toBeGreaterThan(0);
+      expect(deps.calls).toEqual([]);
+      const db = new Database(f.indexPath, { readonly: true });
+      try {
+        expect(db.query("SELECT COUNT(*) AS n FROM pix_task_vectors").get()?.n).toBe(1);
+        expect(db.query("SELECT COUNT(*) AS n FROM pix_session_vectors").get()?.n).toBe(1);
+        expect(db.query("SELECT task_id FROM pix_task_documents").all()).toEqual([{ task_id: "old" }]);
+        expect(db.query("SELECT session_id FROM pix_session_titles").all()).toEqual([{ session_id: "acp-old" }]);
+      } finally { db.close(); }
+    }
+  });
+
+  test("configuration changes before document uploads prevent any provider call", async () => {
+    const f = fixture();
+    f.configure();
+    taskDb(f.root, [{ id: "volatile", title: "Volatile work" }]);
+    const deps = services(f);
+    let reads = 0;
+    deps.semantic!.loadConfig = async () => ++reads < 3 ? historyConfig : { ...historyConfig, baseUrl: "https://example.invalid/api" };
+    await expect(syncSavedTaskVectors(f.root, "fake-key", deps.semantic!, new AbortController().signal, historyConfig)).rejects.toThrow("Semantic configuration changed");
+    expect(deps.documents).toEqual([]);
+    expect(deps.calls).toEqual([]);
+  });
+
+  test("cancelled task/session uploads roll back late completion and release writer ownership for retry", async () => {
+    for (const source of ["tasks", "sessions"] as const) {
+      const f = fixture();
+      f.configure();
+      const task = { id: "new", title: "New work" };
+      const name = "New council";
+      const session = { id: "native", path: nativeSessionFile(f, "native", name), name, firstMessage: "Draft project" };
+      taskDb(f.root, [task]);
+      writeFileSync(f.mapPath, JSON.stringify({ version: 1, sessions: [
+        { sessionId: "acp-new", cwd: f.root, piSessionPath: session.path, title: name, namedTitle: name },
+      ] }));
+      savedVectors(f, [{ id: "old", title: "Old paid work", vectorIndex: 0 }], [{ acpId: "acp-old", title: "Old council", vectorIndex: 0 }]);
+      const deps = services(f);
+      const candidates = { tasks: source === "tasks" ? [task] : [], sessions: source === "sessions" ? [session] : [] };
+      let entered!: () => void, release!: () => void;
+      const started = new Promise<void>(resolve => entered = resolve);
+      const gate = new Promise<void>(resolve => release = resolve);
+      deps.semantic!.embedTasks = async texts => { entered(); await gate; return texts.map(() => queryVector(0)); };
+      const controller = new AbortController();
+      const pending = source === "tasks"
+        ? syncSavedTaskVectors(f.root, "fake-key", deps.semantic!, controller.signal, historyConfig)
+        : cachedProjectSemantics(f.root, "abstract concept", candidates, controller.signal, deps.semantic);
+      await started;
+      const failure = pending.then(() => undefined, error => error);
+      controller.abort(new Error("cancelled upload"));
+      release();
+      expect(await failure).toMatchObject({ message: "cancelled upload" });
+      const db = new Database(f.indexPath, { readonly: true });
+      try {
+        expect(db.query("SELECT COUNT(*) AS n FROM pix_task_vectors").get()?.n).toBe(1);
+        expect(db.query("SELECT COUNT(*) AS n FROM pix_session_vectors").get()?.n).toBe(1);
+      } finally { db.close(); }
+      deps.semantic!.embedTasks = async texts => texts.map(() => queryVector(0));
+      if (source === "tasks") await syncSavedTaskVectors(f.root, "fake-key", deps.semantic!, new AbortController().signal, historyConfig);
+      const retry = await cachedProjectSemantics(f.root, "abstract concept", candidates, new AbortController().signal, deps.semantic);
+      expect(retry[source].has(source === "tasks" ? task.id : session.id)).toBe(true);
+      expect(retry.notices).toEqual([]);
+    }
+  });
+
   test("reuses only current task hashes and returns semantic-only hits, waiting for the query vector", async () => {
     const f = fixture();
     const tasks = [
@@ -169,7 +501,7 @@ describe("project_search shared semantic cache", () => {
     ];
     taskDb(f.root, tasks.map(({ id, title, description }) => ({ id, title, description })));
     savedVectors(f, [tasks[0]!, tasks[1]!, { ...tasks[2]!, description: "Obsolete content" }]);
-    f.consent(true);
+    f.configure();
     let resume!: () => void;
     let entered!: () => void;
     const waiting = new Promise<void>(resolve => entered = resolve);
@@ -184,36 +516,44 @@ describe("project_search shared semantic cache", () => {
     expect(finished).toBe(false, "agent tool waits until semantic source finishes");
     resume();
     const result = await pending;
-    expect(result.hits.map(hit => hit.id).sort()).toEqual(["tasks:changed", "tasks:current"]);
+    expect(result.hits.map(hit => hit.id).sort()).toEqual(["tasks:current"]);
     expect(result.hits).toEqual(expect.arrayContaining([expect.objectContaining({ semantic: true, taskId: "current" })]));
     expect(deps.calls).toEqual(["conceptual redesign"]);
+    expect(deps.documents).toEqual([]);
+    expect(result.notices.join(" ")).toContain("1 task texts have no current cached vector");
+    await syncSavedTaskVectors(f.root, "fake-key", deps.semantic!, new AbortController().signal, historyConfig);
     expect(deps.documents).toEqual(["Task title: Improved shields\nTask description: New objective"]);
-    expect(result.notices).toEqual([]);
+    const refreshed = await searchProject(f.root, { query: "conceptual redesign", sources: ["tasks"] }, services(f));
+    expect(refreshed.hits.map(hit => hit.id).sort()).toEqual(["tasks:changed", "tasks:current"]);
   });
 
-  test("TUI and Desktop honor independent opt-ins; lexical mode never embeds and missing caches are built on demand", async () => {
+  test("central configuration enables histories; lexical never embeds and task queries never fill missing caches", async () => {
     const f = fixture();
     taskDb(f.root, [{ id: "T", title: "Mechanics", description: "Report balance" }]);
     savedVectors(f, [{ id: "T", title: "Mechanics", description: "Report balance", vectorIndex: 0 }]);
     const deps = services(f);
-    f.consent(false);
+    f.configure(false);
     expect((await searchProject(f.root, { query: "conceptual redesign", sources: ["tasks"] }, deps)).hits).toEqual([]);
     expect(deps.calls).toEqual([]);
-    f.consent(true);
+    f.configure();
     expect((await searchProject(f.root, { query: "conceptual redesign", sources: ["tasks"], indexMode: "lexical" }, deps)).hits).toEqual([]);
     expect(deps.calls).toEqual([]);
     expect((await searchProject(f.root, { query: "mechanics", sources: ["tasks"], indexMode: "lexical" }, deps)).hits.map(hit => hit.taskId)).toEqual(["T"]);
     expect(deps.calls).toEqual([]);
 
     const second = fixture();
-    second.consent(true);
+    second.configure();
     taskDb(second.root, [{ id: "T2", title: "Uncached objective" }]);
     const missing = services(second);
     const result = await searchProject(second.root, { query: "nonliteral concept", sources: ["tasks"] }, missing);
-    expect(result.hits.map(hit => hit.taskId)).toEqual(["T2"]);
+    expect(result.hits).toEqual([]);
+    expect(missing.calls).toEqual([]);
+    expect(missing.documents).toEqual([]);
+    expect(existsSync(second.indexPath)).toBe(false, "task search must not initialize or fill the shared cache");
+    await syncSavedTaskVectors(second.root, "fake-key", missing.semantic!, new AbortController().signal, historyConfig);
+    expect((await searchProject(second.root, { query: "nonliteral concept", sources: ["tasks"] }, missing)).hits.map(hit => hit.taskId)).toEqual(["T2"]);
     expect(missing.calls).toEqual(["nonliteral concept"]);
     expect(missing.documents).toEqual(["Task title: Uncached objective\nTask description: "]);
-    expect(existsSync(second.indexPath)).toBe(true, "explicit opted-in task search initializes the shared cache");
   });
 
   test("only session names proven by ACP map + native listing can be semantically matched", async () => {
@@ -240,7 +580,7 @@ describe("project_search shared semantic cache", () => {
       { acpId: "acp-old", title: "Old task title", vectorIndex: 0 },
       { acpId: "acp-fallback", title: "First user question", vectorIndex: 0 },
     ]);
-    f.consent(false, true);
+    f.configure();
     const deps = services(f, { listSessions: async () => sessions,
       readSession: async () => ({ firstText: "Native first", finalText: "Completed native answer" }) });
     const result = await searchProject(f.root, { query: "conceptual redesign", sources: ["sessions"] }, deps);
@@ -265,7 +605,7 @@ describe("project_search shared semantic cache", () => {
     savedVectors(f, [{ id: "task", title: "Magic overhaul", vectorIndex: 0 }], [
       { acpId: "acp", title: "Research laboratory", vectorIndex: 0 },
     ]);
-    f.consent(true, true);
+    f.configure();
     const deps = services(f, { listSessions: async () => [session],
       readSession: async () => ({ firstText: "First prompt", finalText: "Completed answer" }) });
     const result = await searchProject(f.root, { query: "conceptual redesign", sources: ["tasks", "sessions"] }, deps);
@@ -278,7 +618,7 @@ describe("project_search shared semantic cache", () => {
     const f = fixture();
     taskDb(f.root, [{ id: "work", title: "Magic overhaul" }]);
     savedVectors(f, [{ id: "work", title: "Magic overhaul", vectorIndex: 0 }]);
-    f.consent(true);
+    f.configure();
     const db = new Database(f.indexPath);
     try { db.prepare("UPDATE pix_task_index_meta SET value='wrong/model' WHERE key='model'").run(); }
     finally { db.close(); }
@@ -292,7 +632,7 @@ describe("project_search shared semantic cache", () => {
     const second = fixture();
     taskDb(second.root, [{ id: "ok", title: "Magic overhaul" }]);
     savedVectors(second, [{ id: "ok", title: "Magic overhaul", vectorIndex: 0 }]);
-    second.consent(true);
+    second.configure();
     writeFileSync(second.auth, "{}");
     const noCredential = services(second);
     expect((await searchProject(second.root, { query: "conceptual redesign", sources: ["tasks"] }, noCredential)).hits).toEqual([]);
@@ -303,7 +643,7 @@ describe("project_search shared semantic cache", () => {
     const f = fixture();
     taskDb(f.root, [{ id: "task", title: "Magic overhaul" }]);
     savedVectors(f, [{ id: "task", title: "Magic overhaul", vectorIndex: 0 }]);
-    f.consent(true, true);
+    f.configure();
     writeFileSync(f.mapPath, "{not JSON");
     const session: SessionRecord = { id: "native", path: nativeSessionFile(f, "native", "Visible session"),
       cwd: f.root, name: "Visible session", firstMessage: "First question" };
@@ -318,7 +658,7 @@ describe("project_search shared semantic cache", () => {
     const f = fixture();
     taskDb(f.root, [{ id: "same", title: "Magic focus" }]);
     savedVectors(f, [{ id: "same", title: "Magic focus", vectorIndex: 0 }]);
-    f.consent(true);
+    f.configure();
     const deps = services(f);
     const result = await searchProject(f.root, { query: "magic", sources: ["tasks"] }, deps);
     expect(result.hits).toHaveLength(1);
@@ -330,7 +670,7 @@ describe("project_search shared semantic cache", () => {
     const f = fixture();
     taskDb(f.root, [{ id: "volatile", title: "Ancient build", description: "Before changes" }]);
     savedVectors(f, [{ id: "volatile", title: "Ancient build", description: "Before changes", vectorIndex: 0 }]);
-    f.consent(true);
+    f.configure();
     let entered!: () => void;
     let resume!: () => void;
     const started = new Promise<void>(resolve => { entered = resolve; });
@@ -359,7 +699,7 @@ describe("project_search shared semantic cache", () => {
       sessionId: "acp-original", cwd: f.root, piSessionPath: session.path, title: firstName, namedTitle: firstName,
     }] }));
     savedVectors(f, [], [{ acpId: "acp-original", title: firstName, vectorIndex: 0 }]);
-    f.consent(false, true);
+    f.configure();
     let entered!: () => void;
     let resume!: () => void;
     const started = new Promise<void>(resolve => { entered = resolve; });
@@ -375,11 +715,11 @@ describe("project_search shared semantic cache", () => {
     expect((await pending).hits).toEqual([]);
   });
 
-  test("revoking task consent during an in-flight embedding discards semantic results", async () => {
+  test("removing central configuration during an in-flight embedding discards semantic results", async () => {
     const f = fixture();
     taskDb(f.root, [{ id: "task", title: "New magic" }]);
     savedVectors(f, [{ id: "task", title: "New magic", vectorIndex: 0 }]);
-    f.consent(true);
+    f.configure();
     let entered!: () => void;
     let resume!: () => void;
     const started = new Promise<void>(resolve => { entered = resolve; });
@@ -388,18 +728,18 @@ describe("project_search shared semantic cache", () => {
     deps.semantic!.embedQuery = async () => { entered(); await gate; return queryVector(0); };
     const pending = searchProject(f.root, { query: "conceptual redesign", sources: ["tasks"] }, deps);
     await started;
-    f.consent(false);
+    f.configure(false);
     resume();
     expect((await pending).hits).toEqual([]);
   });
 
-  test("symbol as well as lexical IDX modes do not enable cached task query embeddings", async () => {
+  test("lexical mode does not enable cached task query embeddings", async () => {
     const f = fixture();
     taskDb(f.root, [{ id: "safe", title: "New magic" }]);
     savedVectors(f, [{ id: "safe", title: "New magic", vectorIndex: 0 }]);
-    f.consent(true);
+    f.configure();
     const deps = services(f);
-    for (const indexMode of ["lexical", "symbol"] as const) {
+    for (const indexMode of ["lexical"] as const) {
       const result = await searchProject(f.root, { query: "conceptual redesign", sources: ["tasks"], indexMode }, deps);
       expect(result.hits).toEqual([]);
     }
@@ -410,7 +750,7 @@ describe("project_search shared semantic cache", () => {
     const f = fixture();
     taskDb(f.root, [{ id: "local", title: "Quest planning" }]);
     savedVectors(f, [{ id: "local", title: "Quest planning", vectorIndex: 0 }]);
-    f.consent(true);
+    f.configure();
     const deps = services(f);
     deps.semantic!.embedQuery = async () => { throw new Error("Bearer SECRET_API_KEY should not appear in tool output"); };
     const result = await searchProject(f.root, { query: "quest", sources: ["tasks"] }, deps);
@@ -423,7 +763,7 @@ describe("project_search shared semantic cache", () => {
     const f = fixture();
     taskDb(f.root, [{ id: "task", title: "Magic overhaul" }]);
     savedVectors(f, [{ id: "task", title: "Magic overhaul", vectorIndex: 0 }]);
-    f.consent(true);
+    f.configure();
     const redirect = fixture();
     const existing = path.join(f.root, ".pi/search");
         await renameWithRetry(existing, path.join(f.root, ".pi/original-search"));
@@ -435,7 +775,7 @@ describe("project_search shared semantic cache", () => {
     expect(result.notices.join(" ")).toContain("local project results remain available");
   });
 
-  test("actual embedding transport submits only a query and checks the pinned response model", async () => {
+  test("actual embedding transport submits only a query and checks the configured response model", async () => {
     const original = globalThis.fetch;
     const calls: Array<{url: string; authorization: string; payload: Record<string, unknown>}> = [];
     try {
@@ -446,7 +786,7 @@ describe("project_search shared semantic cache", () => {
           data: [{ object: "embedding", index: 0, embedding: queryVector(0) }] }),
         { headers: { "content-type": "application/json" } });
       };
-      const actual = await embedSemanticQuery("conceptual redesign", "fake-key", new AbortController().signal);
+      const actual = await embedSemanticQuery("conceptual redesign", "fake-key", new AbortController().signal, historyConfig);
       expect(actual).toEqual(queryVector(0));
       expect(calls).toEqual([{
         url: "https://openrouter.ai/api/v1/embeddings",
@@ -456,11 +796,13 @@ describe("project_search shared semantic cache", () => {
     } finally { globalThis.fetch = original; }
   });
 
-  test("opted-in agent task search creates vectors once and reindexes only changed semantic text", async () => {
+  test("configured saved-task catch-up creates vectors once and reindexes only changed semantic text without deleting paid vectors", async () => {
     const f = fixture();
     taskDb(f.root, [{ id: "work", title: "Shield tactics", description: "Initial armor" }]);
-    f.consent(true);
+    f.configure();
     const deps = services(f);
+    const sync = () => syncSavedTaskVectors(f.root, "fake-key", deps.semantic!, new AbortController().signal, historyConfig);
+    await sync();
     let result = await searchProject(f.root, { query: "conceptual redesign", sources: ["tasks"] }, deps);
     expect(result.hits.map(hit => hit.taskId)).toEqual(["work"]);
     expect(deps.documents).toEqual(["Task title: Shield tactics\nTask description: Initial armor"]);
@@ -474,12 +816,14 @@ describe("project_search shared semantic cache", () => {
     try {
       db.prepare("UPDATE tasks SET payload=json_set(payload,'$.priority','high','$.modelRef','provider/new:high') WHERE id='work'").run();
     } finally { db.close(); }
+    await sync();
     result = await searchProject(f.root, { query: "conceptual redesign", sources: ["tasks"] }, deps);
     expect(result.hits.map(hit => hit.taskId)).toEqual(["work"]);
     expect(deps.documents).toHaveLength(1);
     const changed = new Database(path.join(f.root, ".pi/tasks.sqlite"));
     try { changed.prepare("UPDATE tasks SET payload=json_set(payload,'$.description','Revised armor') WHERE id='work'").run(); }
     finally { changed.close(); }
+    await sync();
     result = await searchProject(f.root, { query: "conceptual redesign", sources: ["tasks"] }, deps);
     expect(result.hits.map(hit => hit.taskId)).toEqual(["work"]);
     expect(deps.documents).toEqual([
@@ -488,7 +832,7 @@ describe("project_search shared semantic cache", () => {
     ]);
     const final = new Database(f.indexPath, { readonly: true });
     try {
-      expect(final.query("SELECT COUNT(*) AS n FROM pix_task_vectors").get()?.n).toBe(1);
+      expect(final.query("SELECT COUNT(*) AS n FROM pix_task_vectors").get()?.n).toBe(2);
       expect(final.query("SELECT COUNT(*) AS n FROM pix_task_documents").get()?.n).toBe(1);
     } finally { final.close(); }
   });
@@ -496,33 +840,37 @@ describe("project_search shared semantic cache", () => {
   test("deleting the final task reconciles the semantic cache without new paid work", async () => {
     const f = fixture();
     taskDb(f.root, [{ id: "last", title: "Deleted objective" }]);
-    f.consent(true);
+    f.configure();
     const deps = services(f);
+    await syncSavedTaskVectors(f.root, "fake-key", deps.semantic!, new AbortController().signal, historyConfig);
     await searchProject(f.root, { query: "conceptual redesign", sources: ["tasks"] }, deps);
     const db = new Database(path.join(f.root, ".pi/tasks.sqlite"));
     try { db.prepare("DELETE FROM tasks WHERE id='last'").run(); }
     finally { db.close(); }
+    await syncSavedTaskVectors(f.root, "fake-key", deps.semantic!, new AbortController().signal, historyConfig);
     const after = await searchProject(f.root, { query: "conceptual redesign", sources: ["tasks"] }, deps);
     expect(after.hits).toEqual([]);
     expect(deps.documents).toHaveLength(1);
     const index = new Database(f.indexPath, { readonly: true });
     try {
       expect(index.query("SELECT COUNT(*) AS n FROM pix_task_documents").get()?.n).toBe(0);
-      expect(index.query("SELECT COUNT(*) AS n FROM pix_task_vectors").get()?.n).toBe(0);
+      expect(index.query("SELECT COUNT(*) AS n FROM pix_task_vectors").get()?.n).toBe(1);
     } finally { index.close(); }
   });
 
   test("unsafe task storage cannot authorize deleting a previously paid semantic cache", async () => {
     const f = fixture();
     taskDb(f.root, [{ id: "safe", title: "Canonical work" }]);
-    f.consent(true);
+    f.configure();
     const deps = services(f);
+    await syncSavedTaskVectors(f.root, "fake-key", deps.semantic!, new AbortController().signal, historyConfig);
     await searchProject(f.root, { query: "conceptual redesign", sources: ["tasks"] }, deps);
     const db = path.join(f.root, ".pi/tasks.sqlite");
     const alias = path.join(f.root, "database-hardlink-alias");
     const { linkSync, unlinkSync } = await import("node:fs");
     linkSync(db, alias);
     try {
+      await expect(syncSavedTaskVectors(f.root, "fake-key", deps.semantic!, new AbortController().signal, historyConfig)).rejects.toThrow("Unsafe task database");
       const result = await searchProject(f.root, { query: "conceptual redesign", sources: ["tasks"] }, deps);
       expect(result.hits).toEqual([]);
       expect(result.notices.join(" ")).toContain("invalid or unsafe SQLite");
@@ -532,40 +880,45 @@ describe("project_search shared semantic cache", () => {
     } finally { unlinkSync(alias); }
   });
 
-  test("concurrent agent searches share the SQLite writer lock and never pay twice for one task hash", async () => {
+  test("concurrent saved-task catch-ups share the SQLite writer lock and never pay twice for one task hash", async () => {
     const f = fixture();
     taskDb(f.root, [{ id: "shared", title: "Realtime magic" }]);
-    f.consent(true);
+    f.configure();
     const first = services(f), second = services(f);
     let entered!: () => void, release!: () => void;
     const started = new Promise<void>(resolve => entered = resolve);
     const gate = new Promise<void>(resolve => release = resolve);
     first.semantic!.embedTasks = async texts => { first.documents.push(...texts); entered(); await gate; return texts.map(() => queryVector(0)); };
-    const a = searchProject(f.root, { query: "conceptual redesign", sources: ["tasks"] }, first);
+    const a = syncSavedTaskVectors(f.root, "fake-key", first.semantic!, new AbortController().signal, historyConfig);
     await started;
-    const b = searchProject(f.root, { query: "conceptual redesign", sources: ["tasks"] }, second);
+    const b = syncSavedTaskVectors(f.root, "fake-key", second.semantic!, new AbortController().signal, historyConfig);
     await new Promise(resolve => setTimeout(resolve, 50));
     release();
-    const [aResult, bResult] = await Promise.all([a, b]);
+    await Promise.all([a, b]);
+    const [aResult, bResult] = await Promise.all([
+      searchProject(f.root, { query: "conceptual redesign", sources: ["tasks"] }, first),
+      searchProject(f.root, { query: "conceptual redesign", sources: ["tasks"] }, second),
+    ]);
     expect(aResult.hits.map(hit => hit.taskId)).toEqual(["shared"]);
     expect(bResult.hits.map(hit => hit.taskId)).toEqual(["shared"]);
     expect([...first.documents, ...second.documents]).toHaveLength(1);
     expect([...first.calls, ...second.calls]).toHaveLength(2);
   });
 
-  test("revoked consent or a changed task during document embedding rolls back the pending vector", async () => {
+  test("removed configuration rolls back pending task vectors; changed semantic text catches up without stale publication", async () => {
     for (const outcome of ["revoke", "edit"] as const) {
       const f = fixture();
       taskDb(f.root, [{ id: "volatile", title: "Volatile idea" }]);
-      f.consent(true);
+      f.configure();
       const deps = services(f);
       let entered!: () => void, release!: () => void;
       const started = new Promise<void>(resolve => entered = resolve);
       const gate = new Promise<void>(resolve => release = resolve);
       deps.semantic!.embedTasks = async texts => { deps.documents.push(...texts); entered(); await gate; return texts.map(() => queryVector(0)); };
-      const pending = searchProject(f.root, { query: "conceptual redesign", sources: ["tasks"] }, deps);
+      const pending = syncSavedTaskVectors(f.root, "fake-key", deps.semantic!, new AbortController().signal, historyConfig)
+        .then(() => undefined, error => error);
       await started;
-      if (outcome === "revoke") f.consent(false);
+      if (outcome === "revoke") f.configure(false);
       else {
         const db = new Database(path.join(f.root, ".pi/tasks.sqlite"));
         try { db.prepare("UPDATE tasks SET payload=json_set(payload,'$.title','A completely changed idea') WHERE id='volatile'").run(); }
@@ -573,11 +926,14 @@ describe("project_search shared semantic cache", () => {
       }
       release();
       const result = await pending;
-      expect(result.hits).toEqual([]);
+      if (outcome === "revoke") expect(result).toBeInstanceOf(Error);
+      else expect(result).toBeUndefined();
       const index = new Database(f.indexPath, { readonly: true });
       try {
         const exists = index.query("SELECT 1 AS present FROM sqlite_master WHERE type='table' AND name='pix_task_vectors'").get();
-        if (exists) expect(index.query("SELECT COUNT(*) AS n FROM pix_task_vectors").get()?.n).toBe(0);
+        if (exists) expect(index.query("SELECT COUNT(*) AS n FROM pix_task_vectors").get()?.n).toBe(outcome === "edit" ? 1 : 0);
+        if (outcome === "edit") expect(index.query("SELECT content_hash FROM pix_task_documents").get()?.content_hash).toBe(
+          taskSemanticHash({ id: "volatile", title: "A completely changed idea" }));
       }
       finally { index.close(); }
     }
@@ -594,7 +950,7 @@ describe("project_search shared semantic cache", () => {
       { sessionId: "acp", cwd: f.root, piSessionPath: session.path, title: name, namedTitle: name },
       { sessionId: "acp-fallback", cwd: f.root, piSessionPath: fallback.path, title: "First prompt", namedTitle: "First prompt" },
     ] }));
-    f.consent(false, true);
+    f.configure();
     const deps = services(f, { listSessions: async () => [session, fallback],
       readSession: async () => ({ firstText: "Background", finalText: "Agent result" }) });
     let result = await searchProject(f.root, { query: "conceptual redesign", sources: ["sessions"] }, deps);
@@ -618,20 +974,21 @@ describe("project_search shared semantic cache", () => {
     expect(deps.documents).toEqual([name, revisedName]);
     const again = new Database(f.indexPath, { readonly: true });
     try {
-      expect(again.query("SELECT COUNT(*) AS n FROM pix_session_vectors").get()?.n).toBe(1);
+      expect(again.query("SELECT COUNT(*) AS n FROM pix_session_vectors").get()?.n).toBe(2);
       expect(again.query("SELECT title FROM pix_session_titles WHERE session_id='acp'").get()?.title).toBe(revisedName);
     } finally { again.close(); }
   });
 
-  test("a 260-task backlog indexes at most 256 new texts per agent search and resumes later", { timeout: 20_000 }, async () => {
+  test("a 260-task backlog drains at startup rather than requiring repeated agent searches", { timeout: 20_000 }, async () => {
     const f = fixture();
     taskDb(f.root, Array.from({ length: 260 }, (_, index) => ({ id: `task-${index}`, title: `Task subject ${index}` })));
-    f.consent(true);
+    f.configure();
     const deps = services(f);
+    await syncSavedTaskVectors(f.root, "fake-key", deps.semantic!, new AbortController().signal, historyConfig);
     const first = await searchProject(f.root, { query: "conceptual redesign", sources: ["tasks"], limit: 10 }, deps);
     expect(first.hits).toHaveLength(10);
-    expect(deps.documents).toHaveLength(256);
-    expect(first.notices.join(" ")).toContain("4 task texts still await indexing");
+    expect(deps.documents).toHaveLength(260);
+    expect(first.notices).toEqual([]);
     const second = await searchProject(f.root, { query: "conceptual redesign", sources: ["tasks"], limit: 10 }, deps);
     expect(second.hits).toHaveLength(10);
     expect(deps.documents).toHaveLength(260);
@@ -644,7 +1001,7 @@ describe("project_search shared semantic cache", () => {
   test("explicit task search without a shared provider credential stays local and does not create an index", async () => {
     const f = fixture();
     taskDb(f.root, [{ id: "hidden", title: "Hidden plans" }]);
-    f.consent(true);
+    f.configure();
     writeFileSync(f.auth, "{}");
     const deps = services(f);
     const result = await searchProject(f.root, { query: "abstract topic", sources: ["tasks"] }, deps);
@@ -654,7 +1011,7 @@ describe("project_search shared semantic cache", () => {
     expect(existsSync(f.indexPath)).toBe(false);
   });
 
-  test("commit search creates missing vectors with the existing IDX provider identity and reuses them", async () => {
+  test("commit search creates missing vectors with the configured Knowledge identity and reuses them", async () => {
     const f = fixture();
     const commit = { hash: commitHash(42), title: "Magic rewrite", message: "Implement nested spell improvements" };
     const git = gitHarness(f, [commit]);
@@ -727,7 +1084,7 @@ describe("project_search shared semantic cache", () => {
     }
   });
 
-  test("changing the IDX embedding model while a commit query is in flight discards stale ranking", async () => {
+  test("changing the central embedding model while a commit query is in flight discards stale ranking", async () => {
     const f = fixture();
     const git = gitHarness(f, [{ hash: commitHash(91), title: "Original knowledge", message: "Technical notes" }]);
     let model = commitConfig;
@@ -747,6 +1104,102 @@ describe("project_search shared semantic cache", () => {
     const result = await pending;
     expect(result.hits).toEqual([]);
     expect(result.notices.join(" ")).toContain("configuration changed");
+  });
+
+  test("commit configuration changes before/after document upload cannot publish or replace paid vectors", async () => {
+    for (const moment of ["before", "during"] as const) {
+      const f = fixture();
+      const old = { hash: commitHash(601), title: "Old paid work", message: "Immutable notes" };
+      const next = { hash: commitHash(602), title: "New work", message: "Immutable research" };
+      const git = gitHarness(f, [old]);
+      await searchProject(f.root, { query: "abstract concept", sources: ["commits"] }, git.deps);
+      const read = new Database(f.indexPath, { readonly: true });
+      let vectors: unknown[];
+      try { vectors = read.query("SELECT hash,vector FROM pix_commit_vectors").all(); }
+      finally { read.close(); }
+      git.update([next, old]);
+      git.embedded.splice(0);
+      let config = commitConfig, reads = 0;
+      git.deps.commitSemantic!.loadConfig = async () => {
+        if (moment === "before" && ++reads === 2) config = { ...commitConfig, documentPrefix: "changed: " };
+        return config;
+      };
+      if (moment === "during") git.embedWith(async inputs => {
+        git.embedded.push(...inputs);
+        config = { ...commitConfig, baseUrl: "http://127.0.0.1:19999" };
+        return inputs.map(() => queryVector(0));
+      });
+      const result = await searchProject(f.root, { query: "abstract concept", sources: ["commits"] }, git.deps);
+      expect(result.hits).toEqual([]);
+      expect(result.notices.length).toBeGreaterThan(0);
+      expect(git.embedded).toHaveLength(moment === "before" ? 0 : 1);
+      const db = new Database(f.indexPath, { readonly: true });
+      try {
+        expect(db.query("SELECT hash,vector FROM pix_commit_vectors").all()).toEqual(vectors!);
+        expect(db.query("SELECT hash FROM pix_commit_documents").all()).toEqual([{ hash: old.hash }]);
+      } finally { db.close(); }
+    }
+  });
+
+  test("incompatible or unidentified paid commit caches stay intact and never trigger uploads", async () => {
+    for (const change of ["identity", "missing", "corrupt"] as const) {
+      const f = fixture();
+      const git = gitHarness(f, [{ hash: commitHash(701), title: "Original work", message: "Immutable notes" }]);
+      await searchProject(f.root, { query: "abstract concept", sources: ["commits"] }, git.deps);
+      const edit = new Database(f.indexPath);
+      let vectors: unknown[];
+      try {
+        if (change === "missing") edit.exec("DELETE FROM pix_commit_meta");
+        if (change === "corrupt") edit.exec("UPDATE pix_commit_vectors SET vector='[1,0]'");
+        vectors = edit.query("SELECT hash,vector FROM pix_commit_vectors").all();
+      } finally { edit.close(); }
+      if (change === "identity") git.deps.commitSemantic!.loadConfig = async () => ({ ...commitConfig, queryPrefix: "changed: " });
+      git.embedded.splice(0);
+      const result = await searchProject(f.root, { query: "abstract concept", sources: ["commits"] }, git.deps);
+      expect(result.hits).toEqual([]);
+      expect(result.notices.join(" ")).toContain("indexing unavailable");
+      expect(git.embedded).toEqual([]);
+      const db = new Database(f.indexPath, { readonly: true });
+      try { expect(db.query("SELECT hash,vector FROM pix_commit_vectors").all()).toEqual(vectors!); }
+      finally { db.close(); }
+    }
+  });
+
+  test("commit HEAD awaits cannot open a configuration race before upload, after upload or before ranking", async () => {
+    for (const moment of ["before-document", "after-document", "after-query"] as const) {
+      const f = fixture();
+      const old = { hash: commitHash(801), shortHash: "0000000", title: "Paid work", author: "Author", date: "2026-10-10", message: "Immutable notes", paths: [] };
+      const next = { ...old, hash: commitHash(802), title: "New work" };
+      const signal = new AbortController().signal;
+      const services = { loadConfig: async () => commitConfig, embed: async (inputs: readonly string[]) => inputs.map(() => queryVector(0)) };
+      await searchSemanticCommits(f.root, [old], "abstract concept", async () => old.hash, signal, services);
+      const read = new Database(f.indexPath, { readonly: true });
+      let paid: unknown[];
+      try { paid = read.query("SELECT hash,vector FROM pix_commit_vectors").all(); }
+      finally { read.close(); }
+      let config = commitConfig, headReads = 0, documentUploaded = false, queryUploaded = false;
+      const records = moment === "after-query" ? [old] : [next, old];
+      const result = await searchSemanticCommits(f.root, records, "abstract concept", async () => {
+        headReads++;
+        if ((moment === "before-document" && headReads === 2)
+          || (moment === "after-document" && documentUploaded)
+          || (moment === "after-query" && queryUploaded)) config = { ...commitConfig, queryPrefix: "changed: " };
+        return records[0]!.hash;
+      }, signal, {
+        loadConfig: async () => config,
+        embed: async inputs => {
+          if (inputs[0]!.startsWith(commitConfig.queryPrefix)) queryUploaded = true;
+          else documentUploaded = true;
+          return inputs.map(() => queryVector(0));
+        },
+      });
+      expect(result.hits).toEqual([]);
+      expect(documentUploaded).toBe(moment === "after-document");
+      expect(queryUploaded).toBe(moment === "after-query");
+      const db = new Database(f.indexPath, { readonly: true });
+      try { expect(db.query("SELECT hash,vector FROM pix_commit_vectors").all()).toEqual(paid!); }
+      finally { db.close(); }
+    }
   });
 
   test("commit semantic requests respect lexical mode and saved embedding configuration", async () => {

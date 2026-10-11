@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { validCommitVector } from "./commit-provider.js";
 
-/** Pix-owned namespace; IDX uses vec_chunks/vector_meta and is not modified. */
+/** Pix-owned namespace, separate from task/session embedding tables. */
 export const COMMIT_META = "pix_commit_meta";
 export const COMMIT_VECTORS = "pix_commit_vectors";
 export const COMMIT_DOCUMENTS = "pix_commit_documents";

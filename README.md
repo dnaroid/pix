@@ -51,7 +51,7 @@ Manual install/update/legacy cleanup:
 | Git | `/code-review`, `/commit-message` | full Source Control panel |
 | Tasks | durable suite todos | project task manager + session links |
 | Registry | — | dedicated Registry panel (Desktop only) |
-| IDX | repository tools / commands | IDX status, install/init, queries and Spec Wiki UI |
+| Repository search | native Code/Knowledge via `project_search` | native Code/Knowledge via `project_search` |
 | Shell | inline `!` and raw `!!` terminal | package scripts + interactive terminals |
 | Configuration | `pix.jsonc` | independent `pix-desktop.jsonc` |
 
@@ -80,7 +80,7 @@ ecosystem.
 
 Pix Desktop turns the same Pi/Pix runtime into an IDE-like native workbench.
 
-Assistant messages can include opt-in `pix-html` blocks: click **Run** to
+Assistant messages can include `pix-html` blocks that automatically
 preview self-contained HTML/JavaScript prototypes or Canvas games in a
 sandboxed iframe. Native form Submit and `window.pix.submit(json)` return
 data to the current ACP conversation without overwriting your draft.
@@ -106,8 +106,7 @@ The Activity Bar provides:
 - **Registry** — initialize `.pi`, configure private Git-backed resources and
   synchronize project tasks/plans/TODO;
 - **Package Scripts** — package-manager scripts and interactive terminals;
-- **IDX** — install managed IDX when missing, initialize a project index, query
-  code/knowledge and maintain Spec Wiki metadata;
+- **Search indexes** — inspect local stores and edit shared global semantic-search configuration;
 - **Settings** — Desktop-specific models, voice, editor and Git preferences.
 
 Desktop production releases use the signed native Tauri updater.
@@ -157,7 +156,7 @@ Pix ships with a bundled suite of repository and agent-workflow extensions.
 | Capability | Examples |
 | --- | --- |
 | Parallel work | async sub-agents, presets, fallback routing, `/ultrawork`, `/hyperplan` |
-| Repository intelligence | IDX architecture/structure/semantic/symbol/dependency tools |
+| Repository search | Native Code/Knowledge retrieval via `project_search` |
 | Structural changes | AST search/rewrite, LSP diagnostics, comment checks |
 | Durable work | hierarchical todos, session recovery, project resource Registry |
 | Context control | DCP compression/pruning |
@@ -165,6 +164,12 @@ Pix ships with a bundled suite of repository and agent-workflow extensions.
 
 Modules remain independently configurable; optional integrations activate only
 when their dependencies/credentials exist.
+
+Repository semantic search uses `search.embedding` in the shared `~/.config/pi/pi-tools-suite.jsonc`
+configuration across projects and sources. Configure it in ordinary Pi
+with `/search-semantic configure <embedding JSON>` or in Desktop Tools Suite → Search;
+no separate consent toggle or confirmation step is used. See the
+[native repository search contract](specs/native-repository-search.md).
 
 Suite configuration:
 
@@ -232,7 +237,7 @@ behavior.
 | [Pix Desktop](docs/desktop.md) | macOS Desktop features, configuration, updater and troubleshooting |
 | [Using Pix TUI](docs/usage.md) | prompts, shell, sessions, commands, bundled tools |
 | [Configuration and accounts](docs/configuration.md) | models, credentials, voice, tools-suite and project config |
-| [Troubleshooting](docs/troubleshooting.md) | fonts, clipboard, voice, providers, IDX and Desktop launch issues |
+| [Troubleshooting](docs/troubleshooting.md) | fonts, clipboard, voice, providers, search and Desktop launch issues |
 | [Extension authors](docs/extensions.md) | renderer SDK entry points and extension UI contract |
 | [Development](docs/development.md) | source checkout, tests/builds and project layout |
 | [Heads up evaluation](docs/heads-up-eval.md) | synthetic observer cases, opt-in live runs, metrics and manual review |

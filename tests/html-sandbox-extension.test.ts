@@ -32,9 +32,10 @@ function extensionHarness() {
 test("Desktop agent sees a concise capability note, without consuming the full guide", () => {
 	const { tools, beforeAgentStart } = extensionHarness();
 	assert.equal(tools.length, 1);
+	assert.equal(tools[0]!.name, "pix_html_guide");
 	const result = beforeAgentStart!({ systemPrompt: "You are a code agent." }, { mode: "rpc" }) as { systemPrompt: string };
 	assert.match(result.systemPrompt, /Pix Desktop interactive chat UI/);
-	assert.match(result.systemPrompt, /pix_html_sandbox_guide/);
+	assert.match(result.systemPrompt, /pix_html_guide/);
 	assert.match(result.systemPrompt, /pix-html/);
 	assert.match(result.systemPrompt, /in chat/);
 	assert.match(result.systemPrompt, /в чате/);
@@ -62,7 +63,7 @@ test("routing distinguishes working inline UI from files, static visuals and dis
 	const prompt = advertiseHtmlSandbox("Base");
 	assert.match(prompt, /use pix-html rather than creating a standalone file/);
 	assert.match(prompt, /unless they explicitly request a file\/project change/);
-	assert.match(prompt, /MUST call pix_html_sandbox_guide/);
+	assert.match(prompt, /MUST call pix_html_guide/);
 	assert.match(prompt, /If present, follow them directly and DO NOT call the guide again/);
 	assert.match(prompt, /Do not call the guide merely to discuss this capability/);
 	assert.match(prompt, /Prefer SVG for static visual explanations/);

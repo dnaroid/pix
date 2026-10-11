@@ -780,7 +780,7 @@ describe.serial("/todos command", () => {
 });
 
 describe.serial("todo extension lifecycle", () => {
-	test.serial("adds one repo knowledge reminder before the final active todo in repo-aware projects", async () => {
+	for (const action of ["update", "batch_update"] as const) test.serial(`completes ${action} without a knowledge-audit reminder in indexed projects`, async () => {
 		const extension = (await import("../src/todo/index.js")).default;
 		const { getTodos } = await import("../src/todo/todo.js");
 		const pi = new FakePi();
@@ -804,20 +804,14 @@ describe.serial("todo extension lifecycle", () => {
 			] }, undefined, undefined, ctx);
 			await tool.execute("todo-2", { action: "update", id: 1, status: "in_progress", activeForm: "implementing" }, undefined, undefined, ctx);
 
-			const completed = await tool.execute("todo-3", { action: "update", id: 1, status: "completed" }, undefined, undefined, ctx);
-			expect(completed.content[0].text).toContain("Before completing the final todo");
-			expect(completed.content[0].text).toContain("subagentType='knowledge-auditor'");
-			expect(completed.content[0].text).toContain("exact project-relative paths changed by this task");
-			expect(completed.content[0].text).toContain("Obtain its result");
-			expect(completed.content[0].text).toContain("escalations/unreviewed specs");
-			expect(completed.content[0].text).toContain("Close the audit todo when task-scoped review is complete");
-			expect(completed.content[0].text).toContain("global knowledge dirty=yes alone must not keep it open");
-			expect(completed.content[0].text).toContain("Report global dirty state separately");
-			expect(completed.content[0].text).toContain("without claiming the whole project is clean or acknowledging unrelated specs");
-			expect(completed.content[0].text).toContain("Spawning alone is not completion");
+			const params = action === "update"
+				? { action, id: 1, status: "completed" }
+				: { action, items: [{ id: 1, status: "completed" }] };
+			const completed = await tool.execute("todo-3", params, undefined, undefined, ctx);
+			expect(completed.isError).not.toBe(true);
+			expect(completed.content[0].text).not.toMatch(/knowledge-auditor|knowledge audit|knowledge dirty|acknowledge|Before completing the final todo/i);
+			expect(getTodos().find((task) => task.id === 1)?.status).toBe("completed");
 
-			// The reminder is advisory: closing the final todo does not require
-			// obtaining a project-wide knowledge verdict from idx.
 			const final = await tool.execute("todo-4", { action: "update", id: 2, status: "completed" }, undefined, undefined, ctx);
 			expect(final.isError).not.toBe(true);
 			expect(getTodos()).toHaveLength(0);

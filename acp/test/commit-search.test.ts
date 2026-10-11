@@ -18,7 +18,7 @@ const config: CommitEmbeddingConfig = { provider: "openrouter", model: "test/mod
 const signal = () => new AbortController().signal;
 const options = (embed: CommitEmbedder = async texts => texts.map(() => [1, 0, 0])) => ({ loadConfig: async () => config, loadKey: async () => "mock-key", embed });
 async function repository(t: { after: (fn: () => Promise<void>) => void }) {
-  const base = fileURLToPath(new URL("../../.pi/artifacts/commit-hybrid-backend/", import.meta.url)); await mkdir(base, { recursive: true });
+  const base = fileURLToPath(new URL("../../.pi/artifacts/central-semantics-acp/commit-fixtures/", import.meta.url)); await mkdir(base, { recursive: true });
   const cwd = await mkdtemp(join(base, "fixture-")); t.after(() => rm(cwd, { recursive: true, force: true }));
   const git = async (...args: string[]) => {
     const pending = exec("git", args, { cwd, env: { ...process.env, GIT_AUTHOR_NAME: "Test Author", GIT_AUTHOR_EMAIL: "test@example.invalid", GIT_COMMITTER_NAME: "Test Author", GIT_COMMITTER_EMAIL: "test@example.invalid" } });
@@ -51,6 +51,78 @@ test("strict allowlisted request parsing", () => {
   assert.deepEqual(parseCommitSearchRequest({ cwd: "/tmp/project", query: "word", secret: "discard" }), { cwd: "/tmp/project", query: "word", limit: 20 });
   for (const value of [null, [], { cwd: "relative", query: "x" }, { cwd: "/tmp\0", query: "x" }, { cwd: "/tmp", query: "x".repeat(2049) }, { cwd: "/tmp", query: "x", limit: 0 }, { cwd: "/tmp", query: "x", limit: 1.5 }, { cwd: "/tmp", query: "x", limit: 101 }]) assert.throws(() => parseCommitSearchRequest(value), e => typeof e === "object" && e !== null && "code" in e && e.code === -32602);
 });
+test("explicit commit pass bounds paid documents, never embeds queries, and Continue/restart reuse vectors", async t => {
+  const r = await repository(t); for (let i = 0; i < 130; i++) await r.commit(`corpus ${i}`);
+  const inputs: string[] = [];
+  const opts = options(async texts => { inputs.push(...texts); return texts.map(() => [1, 0, 0]); });
+  const a = service(t, opts), request = { cwd: r.cwd, source: "commits" as const };
+  const first = await a.index(request);
+  assert.equal(first.complete, false); assert.equal(first.indexed, 128); assert.equal(first.total, 130);
+  assert.equal(inputs.length, 128); assert.ok(inputs.every(text => text.startsWith("D:")));
+  await a.dispose(); const b = service(t, opts);
+  assert.deepEqual(await b.index(request), { source: "commits", complete: true, indexed: 130, total: 130 });
+  assert.equal(inputs.length, 130); await b.index(request); assert.equal(inputs.length, 130);
+  const db = new DatabaseSync(canonicalSearchIndexPath(r.cwd), { readOnly: true });
+  try {
+    assert.equal(db.prepare(`SELECT COUNT(*) n FROM ${COMMIT_DOCUMENTS}`).get()?.n, 130);
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE name IN ('documents','pix_task_vectors','pix_session_vectors')").get()?.n, 0);
+  } finally { db.close(); }
+});
+test("explicit commit provider failure reports partial truthfully and retry buys only missing documents", async t => {
+  const r = await repository(t); for (let i = 0; i < 20; i++) await r.commit(`corpus ${i}`);
+  let fail = true, calls = 0; const inputs: string[] = [];
+  const s = service(t, options(async texts => { inputs.push(...texts); if (++calls === 2 && fail) throw new Error("SECRET"); return texts.map(() => [1, 0, 0]); }));
+  const request = { cwd: r.cwd, source: "commits" as const };
+  const failed = await s.index(request);
+  assert.equal(failed.complete, false); assert.equal(failed.indexed, 16); assert.equal(failed.total, 20);
+  assert.doesNotMatch(JSON.stringify(failed), /SECRET/); assert.equal(snapshot(r.cwd).vectors.length, 16);
+  fail = false; const before = inputs.length;
+  assert.equal((await s.index(request)).complete, true); assert.equal(inputs.length - before, 4);
+  assert.ok(inputs.every(text => text.startsWith("D:")));
+});
+test("explicit commit duplicate clicks coalesce and cancellation belongs to each waiter", async t => {
+  const r = await repository(t); await r.commit("named corpus"); const g = gate(); let docs = 0;
+  const s = service(t, options(async texts => { docs += texts.length; g.entered(); await g.wait; return texts.map(() => [1, 0, 0]); }));
+  const request = { cwd: r.cwd, source: "commits" as const }, c = new AbortController();
+  const a = s.index(request, c.signal), b = s.index(request);
+  await g.start; c.abort(); await assert.rejects(a); g.release();
+  assert.equal((await b).complete, true); assert.equal(docs, 1); assert.equal(snapshot(r.cwd).vectors.length, 1);
+});
+for (const boundary of ["caller", "workspace", "dispose", "config"] as const) test(`explicit commit ${boundary} fences late purchased work`, async t => {
+  const r = await repository(t); await r.commit("named corpus"); const g = gate(); let current = config;
+  const s = service(t, { ...options(async texts => { g.entered(); await g.wait; return texts.map(() => [1, 0, 0]); }), loadConfig: async () => current });
+  const c = new AbortController(), request = { cwd: r.cwd, source: "commits" as const };
+  const pending = s.index(request, c.signal); await g.start;
+  let disposal: Promise<void> | undefined;
+  if (boundary === "caller") c.abort();
+  if (boundary === "workspace") s.changed(r.cwd);
+  if (boundary === "dispose") disposal = s.dispose();
+  if (boundary === "config") current = { ...config, model: "changed" };
+  const checked = boundary === "config" ? pending.then(result => assert.equal(result.complete, false)) : assert.rejects(pending);
+  g.release(); await checked; await disposal;
+  // Dispose waits for actual transport unwinding; caller cancellation itself is prompt.
+  if (boundary === "caller" || boundary === "workspace") await s.dispose();
+  assert.equal(snapshot(r.cwd).vectors.length, 0);
+});
+test("explicit commit pass detects changed HEAD, reconciles reachable metadata and retains purchased vectors", async t => {
+  const r = await repository(t), old = await r.commit("old corpus"); const g = gate(); let block = true;
+  const s = service(t, options(async texts => { if (block) { g.entered(); await g.wait; } return texts.map(() => [1, 0, 0]); }));
+  const request = { cwd: r.cwd, source: "commits" as const }, pending = s.index(request); await g.start;
+  const replacement = await r.commit("replacement corpus", ""); g.release();
+  const stale = await pending; assert.equal(stale.complete, false); block = false;
+  assert.deepEqual(await s.index(request), { source: "commits", complete: true, indexed: 1, total: 1 });
+  const db = new DatabaseSync(canonicalSearchIndexPath(r.cwd), { readOnly: true });
+  try { assert.deepEqual(db.prepare(`SELECT hash FROM ${COMMIT_DOCUMENTS}`).all().map(row => row.hash), [replacement]); }
+  finally { db.close(); }
+  assert.notEqual(replacement, old); assert.equal(snapshot(r.cwd).vectors.length, 2, "unreachable paid vectors are not reset");
+});
+test("explicit incompatible commit cache is retained and never re-purchased", async t => {
+  const r = await repository(t); await r.commit("corpus"); const request = { cwd: r.cwd, source: "commits" as const };
+  await service(t).index(request); const before = snapshot(r.cwd); let paid = 0;
+  const s = service(t, { ...options(async inputs => { paid += inputs.length; return inputs.map(() => [1, 0, 0]); }), loadConfig: async () => ({ ...config, model: "other" }) });
+  assert.equal((await s.index(request)).complete, false); assert.equal(paid, 0); assert.deepEqual(snapshot(r.cwd), before);
+});
+
 test("changed file paths are searchable metadata without changing saved vector hashes", async t => {
   const r = await repository(t);
   await mkdir(join(r.cwd, "src"), { recursive: true });
@@ -224,6 +296,9 @@ test("rewritten unreachable history excluded from lexical and semantic results",
 });
 test("missing config/key and unsupported provider retain lexical results and existing DB", async t => {
   const r = await repository(t); await r.commit("target"); await query(service(t), r.cwd); const before = snapshot(r.cwd);
+  const home = process.env.HOME;
+  process.env.HOME = r.cwd;
+  t.after(() => { if (home === undefined) delete process.env.HOME; else process.env.HOME = home; });
   for (const opts of [{ ...options(), loadConfig: async () => undefined }, { ...options(), loadKey: async () => undefined }]) {
     const response = await query(service(t, opts), r.cwd); assert.equal(response.results.length, 1); assert.equal(response.results[0]?.semantic, undefined); assert.equal(response.notices.length, 1);
     assert.deepEqual(snapshot(r.cwd), before);
@@ -231,12 +306,14 @@ test("missing config/key and unsupported provider retain lexical results and exi
   await mkdir(join(r.cwd, ".indexer-cli")); await writeFile(join(r.cwd, ".indexer-cli/config.json"), JSON.stringify({ embeddingProvider: "unsupported", embeddingModel: "x", vectorSize: 3 }));
   assert.equal(await loadCommitEmbeddingConfig(r.cwd), undefined);
 });
-test("model/dimension/prefix identity changes rebuild without mixed vectors", async t => {
+test("model/dimension/prefix identity changes retain purchased vectors and fail local-only", async t => {
   const r = await repository(t); await r.commit("target"); await query(service(t), r.cwd);
+  const before = snapshot(r.cwd);
   const changed = { ...config, model: "test/new", dimension: 2, queryPrefix: "question:" }; let count = 0;
   const s = service(t, { ...options(async texts => { count += texts.length; return texts.map(() => [0, 1]); }), loadConfig: async () => changed });
-  assert.deepEqual((await query(s, r.cwd)).notices, []); assert.equal(count, 2);
-  const snap = snapshot(r.cwd); assert.equal(snap.identity, embeddingIdentity(changed)); assert.ok(snap.vectors.every(v => JSON.parse(String(v.vector)).length === 2));
+  const result = await query(s, r.cwd);
+  assert.equal(result.notices.length, 1); assert.equal(result.results.length, 1); assert.equal(count, 0);
+  assert.deepEqual(snapshot(r.cwd), before);
 });
 test("incompatible config failure preserves prior index", async t => {
   const r = await repository(t); await r.commit("target"); await query(service(t), r.cwd); const before = snapshot(r.cwd);
@@ -352,16 +429,22 @@ test("nonrepository, unborn repository, empty query and disposed service are saf
   await mkdir(join(r.cwd, "notrepo")); assert.equal((await query(s, "/not/a/repository")).notices.length, 1);
   await s.dispose(); await assert.rejects(query(s, r.cwd));
 });
-test("saved IDX knowledge model/prefix/base URL and ENV/dotenv precedence", async t => {
-  const r = await repository(t); await mkdir(join(r.cwd, ".indexer-cli"));
-  const file = join(r.cwd, ".indexer-cli/config.json");
-  await writeFile(file, JSON.stringify({ embeddingProvider: "ollama", embeddingModel: "code-model", knowledgeEmbeddingModel: "knowledge-model", vectorSize: 4, knowledgeEmbeddingQueryPrefix: "query:", knowledgeEmbeddingDocumentPrefix: "doc:", ollamaBaseUrl: "http://localhost:11434" }));
+test("central knowledge model/prefix/base URL and environment-first shared credentials", async t => {
+  const r = await repository(t); await mkdir(join(r.cwd, ".config/pi"), { recursive: true });
+  const home = process.env.HOME, agent = process.env.PI_CODING_AGENT_DIR;
+  process.env.HOME = r.cwd; process.env.PI_CODING_AGENT_DIR = join(r.cwd, "agent");
+  t.after(() => { if (home === undefined) delete process.env.HOME; else process.env.HOME = home; if (agent === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = agent; });
+  const file = join(r.cwd, ".config/pi/pi-tools-suite.jsonc");
+  await writeFile(file, JSON.stringify({ search: { embedding: { embeddingProvider: "ollama", embeddingModel: "code-model", knowledgeEmbeddingModel: "knowledge-model", vectorSize: 4, knowledgeEmbeddingQueryPrefix: "query:", knowledgeEmbeddingDocumentPrefix: "doc:", ollamaBaseUrl: "http://localhost:11434" } } }));
   assert.deepEqual(await loadCommitEmbeddingConfig(r.cwd), { provider: "ollama", model: "knowledge-model", dimension: 4, queryPrefix: "query:", documentPrefix: "doc:", baseUrl: "http://localhost:11434" });
   await mkdir(join(r.cwd, ".config/idx"), { recursive: true }); await writeFile(join(r.cwd, ".config/idx/.env"), "OPENROUTER_API_KEY=mock-dotenv\n");
-  assert.equal(await loadCommitEmbeddingKey({ OPENROUTER_API_KEY: " mock-env " }, r.cwd), "mock-env");
-  assert.equal(await loadCommitEmbeddingKey({}, r.cwd), "mock-dotenv");
-  assert.equal(await loadCommitEmbeddingKey({}, join(r.cwd, "missing-home")), undefined);
+  assert.equal(await loadCommitEmbeddingKey({ OPENROUTER_API_KEY: " mock-env " }), "mock-env");
+  assert.equal(await loadCommitEmbeddingKey({ XDG_CONFIG_HOME: join(r.cwd, ".config") }), undefined);
   const contents = await readFile(file, "utf8"); assert.ok(!contents.includes("mock-env"));
+  await mkdir(join(r.cwd, ".indexer-cli"));
+  await writeFile(join(r.cwd, ".indexer-cli/config.json"), JSON.stringify(JSON.parse(contents).search.embedding));
+  await rm(file);
+  assert.equal(await loadCommitEmbeddingConfig(r.cwd), undefined);
 });
 test("HTTP model alias, vector validation, cancellation and secret-body redaction", async t => {
   const original = globalThis.fetch; t.after(() => { globalThis.fetch = original; });

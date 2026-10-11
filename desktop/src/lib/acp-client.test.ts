@@ -47,6 +47,30 @@ async function startedClient(transport: FakeTransport, overrides: Record<string,
 }
 
 describe("ACP JSON-RPC client", () => {
+  it("routes explicit per-source indexing separately from queries and forwards cancellation", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+    const abort = new AbortController();
+    const operation = client.searchIndex({ cwd: "/workspace", source: "tasks" }, abort.signal);
+    const rejected = expect(operation).rejects.toThrow();
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    expect(requestAt(transport, 1)).toMatchObject({ method: "pix/search/index", params: { cwd: "/workspace", source: "tasks" } });
+    abort.abort();
+    await rejected;
+    expect(requestAt(transport, 2)).toMatchObject({ method: "$/cancel_request", params: { requestId: requestAt(transport, 1).id } });
+    await client.dispose();
+  });
+  it("registers the settings catalogue without submitting a search", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+    const params = { cwd: "/workspace", settings: [] };
+    const operation = client.searchSync(params);
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    expect(requestAt(transport, 1)).toMatchObject({ method: "pix/search/sync", params });
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 1).id, result: { enabled: false, keyAvailable: false, indexing: false } });
+    await operation;
+    await client.dispose();
+  });
   it("routes only valid native session catalog change notifications", async () => {
     const transport = new FakeTransport();
     const onSessionCatalogChanged = vi.fn();

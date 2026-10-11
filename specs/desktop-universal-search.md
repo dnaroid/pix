@@ -9,13 +9,13 @@ status: active
 
 Desktop's UI retrieves and navigates these sources independently of the
 headless `project_search` agent tool. Both read the same canonical task,
-session and Git stores and existing IDX code/document index; the agent tool
+session and Git stores and the native Code/Knowledge engine; the agent tool
 provides compact evidence and IDs for the calling agent, without RAG inference
 or a separate persistent index. It can incrementally populate and reuse the
-same task and saved-session-name vectors after independent user-global
-consent, sending **title/description or saved name and bounded query** to
-OpenRouter. It also incrementally populates current Git commit metadata/message
-vectors using the configured IDX embedding provider and the shared
+same task and saved-session-name vectors with the explicit global embedding
+configuration, sending **title/description or saved name and bounded query** to
+that provider. It also incrementally populates current Git commit metadata/message
+vectors using the suite-owned configured embedding provider and the shared
 `pix_commit_*` tables. Unlike Desktop's progressively updated UI, the agent
 tool waits for
 the selected sources (up to 60 seconds) and returns one combined response. See
@@ -25,7 +25,7 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   Cmd+Shift+F (Ctrl+Shift+F on non-macOS hosts). Settings, Sessions, Tasks, Commits,
   Code and Knowledge are independently selectable. Results use a shared local
   field-weighted BM25 ranking over retrieved, deduplicated candidates, not fixed
-  source interleaving or comparison of unrelated vector/IDX scores. BM25 uses
+  source interleaving or comparison of unrelated vector scores. BM25 uses
   positive Robertson IDF, term-frequency saturation and field-length normalization
   (k1=1.2, b=0.75), with title scores weighted 3× relative to metadata.
   Exact titles win score ties. Case, punctuation, identifier word boundaries, ё/е,
@@ -39,17 +39,15 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   Metadata hits matching less than half of distinct meaningful terms are dropped.
   Authored setting synonyms, task IDs, commit changed-file paths and commit
   hash prefixes (at least seven hex digits) remain searchable. Code/Knowledge
-  requests include IDX's existing
-  matched-content excerpts, bounded before use in local BM25 and previews.
-  Missing/truncated IDX excerpts remain opaque candidates below lexical matches,
-  as are opt-in semantic settings/task candidates, first/final session-excerpt
+  requests include native bounded content for local BM25 and previews.
+  Missing/truncated excerpts remain opaque candidates below lexical matches,
+  as are configured semantic settings/task candidates, first/final session-excerpt
   matches, and semantic/full-message/patch commit candidates without visible
-  lexical evidence. Length-delimited IDX body output
-  is never parsed as new result headers.
+  lexical evidence.
   Source-local rank only breaks
   lexical ties; results remain capped at 60. Reranking adds no provider calls or
   on-demand file reads. Only Code/Knowledge retrieval uses the normalized technical
-  concept as its query (one call per selected IDX domain); settings and sessions
+  concept as its query (one shared native request for the selected domains); settings and sessions
   retain the original query. No general machine translation or extra source
   discovery is attempted.
 - Search runs only on Search or Enter in the input. Typing/changing types cancels
@@ -63,7 +61,7 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   `search | ask` choice. Only the entered query is sent; no workspace path,
   source results, transcripts, snippets or files are included in the request.
   Auto has a visible OpenRouter/cost disclosure and requires a saved OpenRouter
-  credential. It does not inherit semantic-settings/session-title consents.
+  credential. It is independent of semantic embedding configuration.
   No other model-routing tiers or provider fallback models are used.
   Jev is bounded to five seconds, uses no result cache, and missing credentials,
   invalid answers, provider failures or timeouts select Search, with a visible
@@ -75,7 +73,7 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   The selected mode is held in window-only memory; a new workspace defaults
   to Auto, with no automatic search or generation on reopen.
 - RAG retrieves from the existing selected Search sources (Settings, Sessions,
-  Tasks, Commits, Code and Knowledge), reusing IDX hybrid retrieval, the local
+  Tasks, Commits, Code and Knowledge), reusing native lexical repository retrieval, the local
   session excerpt FTS and commit metadata/semantics. Source ranking reuses the
   existing unified BM25 order, capped at 12 evidence items with at most four
   from each category. No duplicate vector index or full transcript/diff index
@@ -87,7 +85,7 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   Unavailable/unsafe files are omitted; empty evidence does not invoke an LLM.
   Retrieved source content and the question are explicitly sent to the chosen
   model provider for RAG generation, separately from the Jev query-only intent
-  classification and semantic-index consents. Provider charges may apply.
+  classification and semantic-index configuration. Provider charges may apply.
 - Generation runs in an isolated temporary Pi SDK ModelRuntime, without
   creating a Pi/ACP conversation/session or mutating project state. The private
   Desktop-only `pix/search/rag` request carries bounded evidence references,
@@ -108,7 +106,7 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   Off, Minimal, Low, Medium, High, Extra High and Max. The structured Assistant
   settings use the existing catalog-backed model selector and a thinking-level
   selector. These settings are distinct from modelRouting/Auto, semantic-search
-  consent flags and the currently active conversation model. Search mode and
+  embedding configuration and the currently active conversation model. Search mode and
   RAG generation do not automatically change the user's conversation.
 - The dialog uses a compact input/filter/results layout. A persistent live
   footer spinner and `Searching…` label remain while the initial request or any
@@ -123,8 +121,7 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   while the technical Jev/provider disclosure remains in the expanded details.
   The disclosure's long content remains scrollable without clipping.
   Timeout notices are not repeated as
-  warnings. IDX's routine `WARN no-results` suggestion is treated as an empty
-  result, not a provider failure or a UI warning. Completed empty searches remain
+  warnings. Completed empty searches remain
   distinct from pending/error states.
 - Result rows have visibly different pointer-hover, keyboard-focus and active-row
   treatments using semantic theme colors in light and dark modes. No result is
@@ -162,30 +159,31 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   The reveal/scroll operation rechecks workspace, connection and navigation
   ownership after rendering so a cancelled or superseded selection cannot scroll
   a different project's panel.
-- Task semantics require a third independent opt-in,
-  `search.tasksSemanticEnabled` (false by default), in Desktop Search Settings.
-  Enabling consent does not initiate an upload; **only an explicit Tasks search**
-  contacts the search service for optional embeddings. It can send the entered
-  query and only the task `title`+`description` (2,000-character combined cap
-  per task) to the existing pinned OpenRouter embedding model. Status, priority,
+- Task semantics use the global embedding configuration without a
+  task-specific toggle. While the workspace is connected, bootstrap and task-store
+  changes index task documents in the background, independently of searches.
+  Enabling/changing the global provider resynchronizes the workspace. Queries
+  rank existing document vectors and may send the entered query; background
+  indexing sends only the task `title`+`description` (2,000-character combined cap
+  per task) to the configured knowledge embedding model. Status, priority,
   IDs, hierarchy, links/paths, session/model assignment, attachment filenames
   and bytes are never included in the embedding input; existing user-authored
   description text remains eligible even if it itself contains paths.
-  Task data never uses IDX code/knowledge tables or the settings-only `documents`
+  Task data never uses repository-search tables or the settings-only `documents`
   table: `pix_task_index_meta`, `pix_task_documents` and `pix_task_vectors`
   are separate table families in `.pi/search/index.sqlite`. Only IDs, content
-  hashes and 1,024-dimensional float32 vectors persist, not the task text.
+  hashes and configured-dimension float32 vectors persist, not the task text.
   Embeddings are keyed by a hash of semantic text. Status/link/model changes
   reuse the same vector; description edits, renames and deletions reconcile
   changed IDs/hashes and prune unreferenced vectors. Queries validate returned
   hashes against the current SQLite corpus before surfacing any task hit.
   SQLite write ownership, revalidation and cancellation fence concurrent
-  writes, provider responses after consent revocation, and stale task payloads.
-  To bound first-use paid traffic, each submitted search indexes no more than
-  64 previously unindexed task texts (16 per provider batch), retaining partial
-  semantic results and reporting the unfinished index. Subsequent searches
-  continue indexing. Cached vectors are retained when disabled, but no further
-  provider requests are made without new consent.
+  writes, provider responses after configuration changes/removal, and stale task payloads.
+  Background workers drain changed/missing documents in bounded provider batches;
+  task database creation, replacement and WAL-backed edits are detected, including
+  external writers. Metadata-only edits reuse vectors; deletions reconcile references.
+  Queries do not initiate task-document embeddings. Cached vectors are retained when disabled, but no further
+  provider requests are made without valid global configuration.
   The ACP semantic task RPC returns bounded search hits, fused with the local
   task hits by stable task ID; a semantic-only hit is not discarded by lexical
   BM25 coverage rules. A disconnected, slow or failing ACP preserves fully
@@ -212,9 +210,7 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   and merges display their changes, with large patches visibly truncated.
   Navigating to a newer search result, closing the dialog, or switching
   projects invalidates a pending older commit reveal. Tasks-only searches
-  never invoke IDX, Git or provider APIs without task semantic consent; when
-  connected, Desktop may query ACP to check the independent task opt-in, but
-  the backend performs no task embedding without it. Missing Git or
+  never invoke Git, and task embedding requires the global provider configuration. Missing Git or
   malformed task storage reports a source-specific error without hiding other hits.
 - Explicit `patch:<literal>` with Commits selected uses a read-only Git
   pickaxe (`git log -G`, with the literal regex-escaped) over HEAD-reachable
@@ -226,13 +222,14 @@ the selected sources (up to 60 seconds) and returns one combined response. See
 - Commit history count is not capped. Hybrid indexing bounds individual Git fields to
   64 KiB, and semantic document input to 8,192 characters including the saved
   prefix and metadata; unusually large commit messages can therefore be truncated.
-- Hybrid commits use the existing project's saved IDX embedding provider and
-  knowledge embedding model, dimensions and prefixes; Desktop never switches the
-  provider, runs IDX setup or alters the code/knowledge index. The selected
+- Hybrid commits use the global `~/.config/pi/pi-tools-suite.jsonc` `search.embedding` provider,
+  knowledge embedding model, dimensions and prefixes; Desktop never selects or switches
+  the provider or alters the code/knowledge index. OpenRouter credentials come only
+  from `OPENROUTER_API_KEY`; legacy IDX configuration and credentials are not read. The selected
   provider may receive commit messages/metadata and search queries. The dialog
   discloses that the first search may index the entire current HEAD history and
-  incur provider costs. This is separate from the settings-only semantic opt-in;
-  that preference does not authorize other settings or session-history uploads.
+  incur provider costs. This uses the same global semantic configuration as repository
+  search; history-specific settings remain separate.
   Commit data and vectors live in the shared durable
   `.pi/search/index.sqlite`, in the namespaced `pix_commit_meta`,
   `pix_commit_documents`, and `pix_commit_vectors` tables. They reuse unchanged
@@ -244,6 +241,15 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   idempotently, and without provider calls; the legacy file is never unlinked or
   modified by migration. Existing settings data is not rewritten by the import.
   A changed incompatible embedding identity is never mixed with existing vectors.
+  A retained incompatible Settings cache blocks only settings-vector access, not
+  writes to the separate Task/Session namespaces. Compatibility errors report that
+  an explicit rebuild is required; normal indexing never silently replaces paid
+  vectors. Schema-2 settings reconciliation/pruning belongs to settings writes,
+  not unrelated namespace writes.
+  The global configuration editor explains recovery: run the suite's user-only
+  `/search-semantic reset-history` from the affected project to explicitly discard
+  derived history vectors. Canonical tasks, sessions and Git history remain intact;
+  subsequent semantic searches can rebuild the cache and incur embedding charges.
   Missing config/key/provider retains local BM25 results and durable caches.
   SQLite ownership precedes paid batches so concurrent searches cannot
   independently pay for the same missing documents.
@@ -268,7 +274,7 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   saved-conversation list, so already open tabs never reappear through search.
   Editing, connection/project changes and unmount cancel requests and ignore
   stale completions; unavailable ACP leaves local previews usable. Independent
-  settings/session-title semantic consent and provider disclosures still apply.
+  global semantic configuration and provider disclosures still apply.
 - Sessions search is local lexical lookup of the current project's session-list
   titles, deduplicated by stable session ID. The existing listing's display
   title (named title or first-message fallback) is used. On explicit session
@@ -287,10 +293,9 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   Sessions without a listing title are skipped. Queries observe renames/deletions.
   Selecting a result opens/activates and hydrates that session, without paging
   to or guessing a particular message. First/final excerpt retrieval remains
-  lexical and independent of the separate consent for semantic title search.
-- Explicitly saved session names may also be semantically indexed with a
-  **separate**, Desktop-wide opt-in (`search.sessionTitlesEnabled`, default
-  false). Names obtained from `session_info` that are identical to the first
+  lexical and independent of semantic embedding configuration.
+- Explicitly saved session names may also be semantically indexed with the
+  shared global provider configuration. Names obtained from `session_info` that are identical to the first
   user message remain local lexical fallback; only authenticated named titles
   are eligible. The session-map entry retains this title provenance so the
   search layer cannot accidentally embed the first-message display fallback.
@@ -302,12 +307,12 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   tables inside `.pi/search/index.sqlite`. Rename/delete reconciliation removes
   stale title rows and unused vectors; repeated identical names share the same
   content-hashed embedding. A name change cannot use a stale vector belonging
-  to the old title. Provider work occurs only with independent consent and a
-  valid OpenRouter key, is batched and serialized behind SQLite write ownership,
-  and can be canceled on revocation or project replacement. Background
+  to the old title. Provider work requires valid global configuration and any
+  required credentials, is batched and serialized behind SQLite write ownership,
+  and can be canceled on configuration change/removal or project replacement. Background
   indexing can continue after a query, while local lexical hits remain usable
-  immediately. Only the same pinned settings embedding model, 1024 float32
-  dimensions, is supported; session metadata is separate from settings/commit
+  immediately. The configured knowledge model, dimensions, prefixes and endpoint
+  apply; session metadata is separate from settings/commit
   model identity. Incompatible metadata fails closed instead of deleting
   previously paid vectors.
 - Session histories are never classified with JEV or embedded. There is no
@@ -317,68 +322,80 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   Obsolete `messageFilterEnabled` writes are rejected; legacy config keys are
   ignored. Opening search polls cheap status without discovering transcripts
   or rerunning queries.
-- Code/Knowledge require installed, initialized current-project IDX and explicitly
-  use hybrid mode for both code and document domains. The CLI uses each domain's
-  project-configured embedding provider; Desktop never switches it or runs setup.
-  Hybrid queries can auto-update the index and send indexed chunks and queries to
-  that provider. This is separate from opt-in semantic settings search; the dialog
-  discloses the hybrid provider/index-refresh behavior. There is no verified
-  hybrid-without-auto-index flag in the installed CLI. CLI lexical fallback
-  warnings are shown as bounded, redacted source notices, not hidden success.
-  IDX returns bounded matched content for both domains to enable content-aware
-  reranking without extra reads of project source files.
-  Invocations are serialized per workspace, including across superseded
-  searches: cancellation returns promptly but retains ownership until an already
-  invoked native operation finishes. Different projects remain independent.
-  Transient lock failures are retried at most twice with cancellable backoff;
-  persistent contention reports IDX busy/try again, without deleting locks.
-  Other errors retain bounded, redacted diagnostics. Local results survive.
-  Explicit IDX panel maintenance/search is unchanged.
-- Semantic settings search is explicit Desktop-wide opt-in, off by default.
-  Only authored settings metadata and settings-search queries may be sent to
-  OpenRouter by this consent; it never authorizes session names. With session
-  name consent off, sessions-only requests make no provider calls even if
-  settings consent is enabled. With name consent on, session-name embeddings and
-  explicitly submitted session search queries may be sent to OpenRouter. The
-  session-name opt-in does not enable settings semantic search. Sole embedding model:
-  perplexity/pplx-embed-v1-0.6b. The exact response identity
-  pplx-embed-v1-0.6b is also accepted; request/durable metadata stay qualified.
-  Other/missing identities are invalid; both aliases use strict float/base64
-  vector validation. Preferences display the fixed model/provider in read-only
-  rows and use a masked, write-only shared OpenRouter key input. Desktop config
-  contains only the separate consent flags, never the key. Missing consent,
-  key or provider leaves local lexical lookup usable.
-- ACP semantic-consent changes and native Desktop config saves share bounded
-  interprocess ownership over read/compare/edit/publication. Paused writers are
-  never evicted based on lock age; crash leftovers fail closed until their owners
-  are confirmed stopped. See [user-config editing](desktop-user-config-editing.md).
+- Code/Knowledge use [native lexical-first repository search](native-repository-search.md)
+  through the same packaged engine as agent `project_search`, without external indexing
+  tools, keys or an active ACP session for lexical search. Native results preserve paths, line ranges and bounded content
+  for navigation/reranking/RAG. Requests own cancellation and ignore stale completion;
+  concurrent publications use SQLite generation checks. No provider setup occurs.
+  A valid `search.embedding` object in `~/.config/pi/pi-tools-suite.jsonc` enables native
+  semantic enrichment across all projects and sources, configured in ordinary Pi with
+  `/search-semantic configure <embedding JSON>` or in Desktop Tools Suite → Search, with
+  the shared suite draft and top Save button. Configure in Settings from Search indices
+  opens and focuses the Embedding model field, including after asynchronous config loading. There is
+  no independent consent flag or confirmation step. The shared disclosure covers eligible
+  semantic inputs and possible costs. Lexical results publish before optional hybrid
+  enrichment, with bounded incremental coverage notices. Configuration changes cancel/restart
+  search; no active ACP session is needed to read/change the global configuration.
+  Native failure reports a source-specific notice without an external backend fallback.
+  Successful empty native results remain empty. Failed semantic enrichment retains
+  already-published lexical evidence; other local source results survive.
+  IDX panels, setup/update commands, installers and search adapters are removed;
+  existing user IDX data remains untouched.
+- Semantic settings search uses the same global configuration as all other sources.
+  Only authored settings metadata and submitted queries enter its embedding input.
+  Workspace startup registers `id`, `section`, `label`, `description` and `synonyms`
+  through `pix/search/sync`, independently of opening Settings or submitting a search.
+  The normalized catalogue fingerprint controls rebuilds: additions, removals and
+  semantic field metadata changes reconcile the index, reusing unchanged chunk hashes.
+  CSS/layout changes and user configuration values are not embedding inputs and do not
+  invalidate the catalogue. A new application build/startup catches catalogue changes;
+  no source-code filesystem watcher or rebuild of every field on each search is used.
+  Settings and Tasks report separate activity/errors; cancellation and source revision
+  checks prevent stale publications after edits, provider changes or teardown.
+  The provider, knowledge model, dimensions, prefixes and endpoint are configurable;
+  responses require matching identity and strict vector validation. Settings offers
+  a native global provider editor and an all-project/all-source upload/cost disclosure,
+  without source checkboxes or another confirmation. OpenRouter credentials resolve
+  from `OPENROUTER_API_KEY`, then static Pi SDK auth storage; Ollama needs no
+  OpenRouter key. Invalid/missing configuration, required credentials or provider
+  failure leaves local lexical lookup usable.
+- Pi and native Desktop config saves share a bounded configuration-file directory
+  lock, preserve unknown fields, compare original contents before atomic publication,
+  and reject unsafe/oversized files. Desktop revisions identify the full content,
+  including manual edits. Lock leftovers fail closed; active owners are not evicted
+  by age. ACP rejects obsolete per-source preference writes.
 - The project-owned `.pi/search/index.sqlite` is the canonical, shared,
-  non-disposable Pix vector database for every global-search domain. Its
+  non-disposable Pix vector database for settings and history search domains. Its
   existing `metadata`, `documents` and `vectors` tables remain settings-only
   (schema 2); other Pix sources use a `pix_<domain>_` table namespace, so
   adding commit data cannot pass through settings-only schema guards.
   The IDX code/document database is *not* migrated or modified here.
-  A future integration must coexist with IDX's `vec_chunks`, `vector_meta`,
-  `snapshots`, `chunks`, `files`, `knowledge_chunks`, and related sqlite-vec
-  tables, preserve embedding dimensions and project/snapshot identity, and
-  avoid table/index names used by Pix. Code/knowledge remain served by IDX
-  until such an integration is separately designed and approved.
+  Native Code/Knowledge uses a separate disposable `.pi/search/files.sqlite` FTS5
+  database; it never copies, migrates or deletes IDX tables or these vectors.
+  Configured repository vectors instead use `.pi/search/file-vectors.sqlite` with isolated
+  model identities and no automatic paid-vector deletion. Short token-leased publications
+  never hold a database writer lock over provider HTTP; see
+  [decision 0066](../docs/decisions/0066-native-repository-semantic-search.md).
+  The separate writer boundary avoids local refresh waiting behind embedding batches;
+  see [decision 0065](../docs/decisions/0065-native-repository-search.md).
   Session title vectors use `pix_session_*`, while the text-only first/final
   excerpts use separate `pix_session_boundary_*` SQLite FTS5 tables. No
   session message/body embeddings are created; those would need separate
   future authorization. IDX's database remains independent.
-  The settings schema's first activation migration remains limited to its
-  own tables and must not clear any other domain's data.
+  The settings schema's migration remains limited to its own tables and must
+  not clear any other domain's data. Read-only configuration/status polling
+  never migrates or repairs the store.
   The original settings-schema migration was introduced to replace a legacy
-  message-body index:
-  First activation migrates locally even without consent/key: removes old
+  message-body index. Explicit sync/query activation migrates locally even without
+  semantic configuration/key: it removes old
   message documents, their unreferenced vectors and all filter decisions, retaining
   authored settings and their valid vectors. Session files are never changed.
   Migration is transactional/idempotent; schema guards reject obsolete writers
   resetting it or adding message documents while an older Desktop is still alive.
-  Transient migration contention retains a separate warning and retries on later
-  requests/status polls, even with semantic search off; local title results remain
-  available. Consent changes cannot hide an unfinished migration.
+  Transient migration contention retains a separate warning; explicit sync or
+  query activation may retry it, even with semantic search off. Status polling
+  does not retry or write. Local title results remain available, and configuration
+  changes cannot hide an unfinished migration.
   SQLite secure_delete applies to removed rows, but this is not a forensic-erasure
   guarantee for old snapshots/backups/sidecars. Restart is required to replace
   already-running obsolete frontend/ACP code; it is not forced with a live draft.
@@ -393,17 +410,17 @@ the selected sources (up to 60 seconds) and returns one combined response. See
 
 - Desktop-only feature, scoped/labeled to the current project; not TUI global
   search. Session title *results* are computed from the current local session
-  map; explicitly named titles and their opt-in vectors plus bounded local
+  map; explicitly named titles and their configured vectors plus bounded local
   first/final excerpts may persist to project storage. Full-message and
   provider-backed conversation indexes remain forbidden.
-  Auth and distinct semantic consents remain Desktop-wide.
+  Embedding configuration and credentials are shared with ordinary Pi across projects.
 - Sources fail independently. Disconnected ACP retains authored settings lookup;
-  missing/busy IDX does not suppress settings/session results. Request failures
+  missing/busy repository search does not suppress settings/session results. Request failures
   never imply a disconnected backend. Unexpected exceptions stay opaque; known
   source failures are credential-free. Aborts publish no failure notices.
-- Initial source waiting is bounded to 20 seconds, including overview/queue
-  waiting and both sequential IDX domains together. Completed sources publish
-  immediately, including each IDX domain. Slow sources keep working and may
+- Initial source waiting is bounded to 20 seconds, including overview waiting
+  and the shared repository request. Completed sources publish immediately,
+  including lexical repository results before optional semantic enrichment. Slow sources keep working and may
   append/rerank results in the same open, current submission; a pending notice
   replaces endless blocking and is removed when that source completes. Authored
   settings fallback is available while its backend is pending and is replaced by
@@ -481,13 +498,14 @@ the selected sources (up to 60 seconds) and returns one combined response. See
 - `desktop/src/components/WorkspaceSidebarTasksPanel.svelte`
 - `desktop/src-tauri/src/git_operations.rs`
 - `desktop/src/lib/search-dialog-memory.ts`
-- `desktop/src/lib/snapshot-search-queue.ts`
 - `desktop/src/lib/search-dialog-controller.ts`
 - `desktop/src/lib/search-voice-controller.ts`
 - `desktop/src/lib/deepgram.ts`
 - `desktop/src/lib/settings-search-catalog.ts`
 - `desktop/src/app/search-navigation.ts`
 - `desktop/src/components/UniversalSearch.svelte`
+- `desktop/src/components/NativeRepositorySemanticConsent.svelte`
+- `desktop/src-tauri/src/native_repository_semantic_config.rs`
 - `desktop/src/components/DesktopTitlebar.svelte`
 - `desktop/src/components/DesktopSidebar.svelte`
 - `desktop/src/components/WorkspaceSidebar.svelte`
@@ -498,7 +516,6 @@ the selected sources (up to 60 seconds) and returns one combined response. See
 - `src/schemas/pix-desktop-schema.ts`
 - `schemas/pix-desktop.json`
 - `desktop/src/App.svelte`
-- `desktop/src-tauri/src/idx_snapshot_search.rs`
 - `desktop/src-tauri/src/lib.rs`
 
 ## Tests
@@ -522,7 +539,6 @@ the selected sources (up to 60 seconds) and returns one combined response. See
 - `desktop/src/lib/search-bm25.test.ts`
 - `desktop/src/lib/project-search.test.ts`
 - `desktop/src/lib/search-dialog-memory.test.ts`
-- `desktop/src/lib/snapshot-search-queue.test.ts`
 - `desktop/src/lib/search-dialog-controller.test.ts`
 - `desktop/src/lib/search-voice-controller.test.ts`
 - `desktop/src/lib/deepgram.test.ts`
@@ -532,7 +548,6 @@ the selected sources (up to 60 seconds) and returns one combined response. See
 - `desktop/src/lib/settings-search-catalog.test.ts`
 - `desktop/src/components/DesktopModalDialogs.test.ts`
 - `desktop/src/components/DesktopVisualRegressions.test.ts`
-- `desktop/src-tauri/src/idx_snapshot_search.rs`
 - `desktop/src-tauri/src/lib.rs`
 
 ## Verification
@@ -540,12 +555,12 @@ the selected sources (up to 60 seconds) and returns one combined response. See
 Run Desktop typecheck and focused search/queue/navigation/settings/modal tests,
 ACP typecheck/build/search/agent tests and schema generation/tests. Cover title
 boost, Robertson IDF, saturation, length normalization, explicit hybrid mode in
-both native domains, bounded/redacted fallback notices, and serialized IDX aborts.
+both native domains, bounded/redacted source-failure notices, and native request cancellation.
 Also cover title deduplication/scope/renames/deletions, no transcript reads/provider calls for
 sessions, transactional cleanup/settings-vector preservation/old-writer fencing,
 restart/hash reuse, contention, cancellation, revocation and stale completion.
 Real macOS QA checks explicit submit, Sessions labels, settings/file/session
-activation and busy IDX fallback, task reveal, commit metadata, and close/reopen
+activation and native-search failure isolation, task reveal, commit metadata, and close/reopen
 retention. Cover completed versus interrupted retention, scope/client changes,
 source isolation, task deletion, and stale task-navigation completions.
 Deterministic checks do not claim live UI QA.

@@ -1,9 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import subagentRepoDiscovery from "../../src/repo-discovery/subagent.js";
-import { REPO_DISCOVERY_TOOLS } from "../../src/tool-descriptions.js";
-import { installFakeIdxOnPath } from "../support/fake-idx.js";
+import projectSearch from "../../src/project-search/index.js";
 
 const scratchRoot = resolve(import.meta.dir, "../../../../.pi/artifacts/subagent-repo-tests");
 const workspaces: string[] = [];
@@ -14,21 +14,18 @@ afterEach(() => {
 function workspace(): string {
 	mkdirSync(scratchRoot, { recursive: true });
 	const root = mkdtempSync(join(scratchRoot, "run-"));
-	mkdirSync(join(root, ".git")); // Isolate discovery from the real ancestor index.
+	execFileSync("git", ["init", "--quiet", root]);
 	workspaces.push(root);
 	return root;
 }
 
-function harness(root: string, indexed: boolean, idxAvailable = true) {
-	if (indexed) mkdirSync(join(root, ".indexer-cli"));
+function harness(root: string) {
 	const oldCwd = process.cwd();
-	const restorePath = installFakeIdxOnPath(root);
 	const registered: any[] = [], commands: string[] = [], calls: any[] = [];
 	const handlers = new Map<string, Function>();
 	let active = ["read", "todo"];
 	try {
 		process.chdir(root);
-		if (!idxAvailable) process.env.PATH = join(root, "unavailable");
 		subagentRepoDiscovery({
 			registerTool: (tool: any) => registered.push(tool),
 			registerCommand: (name: string) => commands.push(name),
@@ -40,7 +37,6 @@ function harness(root: string, indexed: boolean, idxAvailable = true) {
 		} as any);
 	} finally {
 		process.chdir(oldCwd);
-		restorePath();
 	}
 	return { registered, commands, calls, active: () => active,
 		restrict: (tools: string[]) => { active = tools; },
@@ -49,79 +45,71 @@ function harness(root: string, indexed: boolean, idxAvailable = true) {
 	};
 }
 
-test("common repo facade replaces repo_search with restricted project_search, no setup or orchestration", () => {
-	const child = harness(workspace(), true);
-	expect(child.registered.map((tool) => tool.name)).toEqual([...REPO_DISCOVERY_TOOLS.map((tool) => tool.name), "project_search"]);
+test("common repo facade registers full project_search, no setup or orchestration", () => {
+	const child = harness(workspace());
+	expect(child.registered.map((tool) => tool.name)).toEqual(["project_search"]);
 	expect(child.registered.map((tool) => tool.name)).not.toContain("repo_search");
 	expect(child.commands).toEqual([]);
 	expect(child.calls).toEqual([]);
-	const audit = child.registered.find((tool) => tool.name === "repo_audit");
-	expect(audit.promptSnippet).not.toContain("knowledge-auditor");
-	expect(audit.promptGuidelines.join("\n")).toContain("do not delegate");
 	for (const event of ["session_start", "model_select"]) {
 		child.restrict(["read", "todo"]);
 		child.emit(event);
 		child.emit(event);
-		expect(child.active()).toEqual(["read", "todo", ...REPO_DISCOVERY_TOOLS.map((tool) => tool.name), "project_search"]);
+		expect(child.active()).toEqual(["read", "todo", "project_search"]);
 	}
 });
 
-for (const [indexed, idxAvailable] of [[false, true], [true, false]]) {
-	test(`missing prerequisite does not register tools or initialize (indexed=${indexed}, idx=${idxAvailable})`, () => {
+for (const legacyConfig of [false, true]) {
+    test(`native registration is independent of legacy files (legacyConfig=${legacyConfig})`, () => {
 		const root = workspace();
-		const child = harness(root, indexed, idxAvailable);
+		if (legacyConfig) mkdirSync(join(root, ".indexer-cli"));
+		const child = harness(root);
 		child.emit("session_start");
-		expect(child.registered).toEqual([]);
+        expect(child.registered.map(tool => tool.name)).toEqual(["project_search"]);
 		expect(child.commands).toEqual([]);
 		expect(child.calls).toEqual([]);
-		expect(child.active()).toEqual(["read", "todo"]);
-		expect(existsSync(join(root, ".indexer-cli"))).toBe(indexed);
+        expect(child.active()).toEqual(["read", "todo", "project_search"]);
+		expect(existsSync(join(root, ".indexer-cli"))).toBe(legacyConfig);
 	});
 }
 
-test("query adapters retain cancellation, explicit-root validation and read-only audit", async () => {
+test("child project_search shares the parent schema and permits all sources and patches", async () => {
 	const root = workspace();
-	const child = harness(root, true);
-	const abort = new AbortController();
-	abort.abort();
-	await child.execute("repo_context", { query: "contract" }, abort.signal);
-	expect(child.calls).toEqual([]);
-	const invalid = await child.execute("repo_context", { query: "contract", projectPath: join(root, "missing") });
-	expect(invalid.isError).toBe(true);
-	expect(child.calls).toEqual([]);
-	const restorePath = installFakeIdxOnPath(root);
-	try {
-		const signal = new AbortController().signal;
-		await child.execute("repo_context", { query: "contract" }, signal);
-		await child.execute("repo_audit", { paths: ["src/example.ts"], noSemantic: true }, signal);
-		expect(child.calls[0][0]).toBe("idx");
-		expect(child.calls[0][1].slice(0, 2)).toEqual(["context", "contract"]);
-		expect(child.calls[0][2]).toMatchObject({ cwd: root, signal });
-		expect(child.calls[1][1]).toEqual(["audit", "src/example.ts", "--no-semantic"]);
-		expect(process.cwd()).not.toBe(root);
-	} finally { restorePath(); }
-});
-
-test("child project_search exposes indexed Code/Knowledge only, not private sessions/tasks/commits or patches", async () => {
-	const root = workspace();
-	const child = harness(root, true);
+	writeFileSync(join(root, "example.ts"), "export const needle = true;\n");
+	execFileSync("git", ["add", "example.ts"], { cwd: root });
+	execFileSync("git", ["-c", "user.name=Search Fixture", "-c", "user.email=fixture@example.test", "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "search history fixture"], { cwd: root });
+	const child = harness(root);
 	const search = child.registered.find((tool) => tool.name === "project_search");
 	expect(search).toBeDefined();
-	expect(search.parameters.properties.sources.items.enum).toEqual(["code", "knowledge"]);
-	for (const sources of [["sessions"], ["tasks"], ["commits"], ["code", "sessions"], []]) {
-		const denied = await child.execute("project_search", { query: "search history", sources });
-		expect(denied.isError).toBe(true);
-		expect(denied.details).toMatchObject({ restricted: true });
+	let parentTool: any;
+	projectSearch({ registerTool: (tool: any) => { parentTool = tool; }, registerCommand: () => {} } as any);
+	expect(search.parameters).toEqual(parentTool.parameters);
+	expect(search.description).toEqual(parentTool.description);
+	expect(search.parameters.properties.sources.items.enum).toEqual(["sessions", "tasks", "commits", "code", "knowledge"]);
+	for (const sources of [["sessions"], ["tasks"], ["commits"], ["code", "sessions"]]) {
+		const result = await child.execute("project_search", { query: "search history", sources, indexMode: "lexical" });
+		expect(result.isError).toBeUndefined();
+		expect(result.details.sources).toEqual(sources);
 	}
-	const deniedPatch = await child.execute("project_search", { query: "patch:secret" });
-	expect(deniedPatch.isError).toBe(true);
-	expect(child.calls).toEqual([]);
+	const patch = await child.execute("project_search", { query: "patch:needle", indexMode: "lexical" });
+	expect(patch.isError).toBeUndefined();
+	expect(patch.details.sources).toEqual(["commits"]);
+	expect(patch.details.results).toContainEqual(expect.objectContaining({ kind: "commits", title: "search history fixture" }));
+	child.calls.length = 0;
 
-	const restorePath = installFakeIdxOnPath(root);
-	try {
-		const allowed = await child.execute("project_search", { query: "worker", sources: ["code"], indexMode: "lexical" });
-		expect(allowed.isError).toBeUndefined();
-		expect(child.calls).toHaveLength(1);
-		expect(child.calls[0][1]).toEqual(["search", "worker", "--domain", "code", "--mode", "lexical", "--max-files", "3"]);
-	} finally { restorePath(); }
+    const retired = await child.execute("project_search", { query: "worker", sources: ["code"], indexBackend: "idx" });
+    expect(retired.isError).toBe(true);
+    expect(child.calls).toEqual([]);
+});
+
+test("native child search works without IDX and keeps the shared default sources", async () => {
+    const root = workspace();
+    writeFileSync(join(root, "worker.ts"), "export const uniqueSemaphoreSignal = true;\n");
+    const child = harness(root);
+    const result = await child.execute("project_search", { query: "uniqueSemaphoreSignal", indexMode: "lexical" });
+    expect(result.isError).toBeUndefined();
+    expect(result.details.sources).toEqual(["sessions", "tasks", "commits", "code", "knowledge"]);
+    expect(result.details.results).toContainEqual(expect.objectContaining({ kind: "code", path: "worker.ts", startLine: 1 }));
+    expect(child.calls).toEqual([]);
+    expect(existsSync(join(root, ".indexer-cli"))).toBe(false);
 });

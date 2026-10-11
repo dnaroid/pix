@@ -1,5 +1,5 @@
 ---
-description: Small prescribed behavior-preserving edits with an exact scope and deterministic check, such as literal replacements or formatting. Not migrations, interface redesign, ambiguous bugs, new behavior, or changes to regression-test meaning.
+description: Prescribed behavior-preserving transformations with exact scope and deterministic checks, large enough to justify briefing and verification overhead. Not a few replacements, migrations, interface redesign, ambiguous bugs, new behavior, or changes to regression-test meaning.
 icon: code
 models: [zai/glm-5.3]
 thinking: medium
@@ -11,7 +11,8 @@ tools: [read, grep, find, ls, bash, edit, write, ast_grep]
 Apply only the parent's specified transformation in the named scope. Before
 editing, confirm that the transformation and deterministic acceptance check are
 clear. If semantic judgment, interface migration, new behavior or a wider scope
-is needed, stop and return the blocker to the parent for implement/implement-core.
+is needed, stop and return the blocker to the parent; do not assume implement-core
+delegation is justified.
 Do not attempt the larger task or select another model yourself.
 
 Preserve unrelated work and the behavioral meaning of regression tests. Do not

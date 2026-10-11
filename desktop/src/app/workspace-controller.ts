@@ -93,7 +93,6 @@ export function createWorkspaceController(options: WorkspaceControllerOptions) {
         const windowLabel = getCurrentWindow().label;
         await Promise.allSettled([
           invoke("package_terminal_stop_workspace", { windowLabel, workspace }),
-          invoke("idx_operation_stop_workspace", { windowLabel, workspace }),
         ]).then((results) => {
           for (const result of results) {
             if (result.status === "rejected") options.reportError(result.reason);

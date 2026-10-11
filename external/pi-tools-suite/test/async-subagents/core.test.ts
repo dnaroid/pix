@@ -537,7 +537,7 @@ describe.serial("subagent type config", () => {
 		expect(config.routing).toMatchObject({ maxRetries: 1, timeoutMs: 12_000 });
 		expect(isBlindModelRef("zai/glm-5.3", config)).toBe(true);
 		expect(isBlindModelRef("zai/glm-5.3-flash", config)).toBe(false);
-		expect(Object.keys(config.types).sort()).toEqual(["delivery-review", "implement", "implement-core", "knowledge-auditor", "mechanical", "oracle", "research", "ui-qa", "verify"]);
+		expect(Object.keys(config.types).sort()).toEqual(["implement-core", "knowledge-auditor", "mechanical", "oracle", "research", "ui-qa", "verify"]);
 		expect(config.types.research.description).toContain("review");
 		expect(config.types.oracle.modelSelection).toBe("frontier");
 		expect(config.types.oracle.parentProviderPolicy).toBe("require-other");
@@ -606,7 +606,7 @@ Research only this project.
 		});
 		for (const [subagentType, model, fallbackModels] of [
 			["research", "openai-codex/gpt-6-luna", ["zai/glm-5.3-flash"]],
-			["implement", "openai-codex/gpt-6-luna", ["openai-codex/gpt-6.1-sol"]],
+			["implement-core", "openai-codex/gpt-6.1-sol", []],
 			["verify", "openai-codex/gpt-6-luna", ["zai/glm-5.3-flash"]],
 		] as const) {
 			const role = resolveAgentTaskConfig({ id: subagentType, task: subagentType, subagentType }, config);
@@ -675,8 +675,6 @@ Research only this project.
 		const definitions = readAgentDefinitionsFromDir(definitionsDir);
 
 		expect(Object.keys(definitions).sort()).toEqual([
-			"delivery-review",
-			"implement",
 			"implement-core",
 			"knowledge-auditor",
 			"mechanical",
@@ -685,13 +683,11 @@ Research only this project.
 			"ui-qa",
 			"verify",
 		]);
-		expect(definitions.implement?.raw.description).toContain("code, docs, tests, or UI");
+		expect(definitions["implement-core"]?.raw.description).toContain("code/docs/tests/UI");
 		expect(definitions["oracle"]?.raw.forParentTier).toBeUndefined();
-		expect(definitions["delivery-review"]?.raw.tools).toEqual(["read", "grep", "bash"]);
-		expect(definitions["knowledge-auditor"]?.raw.requiresIndexedProject).toBe(true);
+		expect(definitions["knowledge-auditor"]?.raw.requiresIndexedProject).toBeUndefined();
 		expect(definitions["knowledge-auditor"]?.raw.tools).toEqual(["read", "grep", "bash", "edit", "write"]);
-		expect(definitions["delivery-review"]?.raw.promptAppend).toContain("End with confidence");
-		expect(definitions.implement?.raw.promptAppend).toContain("For UI work");
+		expect(definitions["implement-core"]?.raw.promptAppend).toContain("For UI work");
 		expect(definitions.oracle?.raw.promptAppend).toContain("# Oracle agent");
 		expect(definitions["ui-qa"]?.raw.tools).toEqual(["read", "grep", "bash"]);
 		expect(definitions.verify?.raw.promptAppend).toContain(".pi/artifacts/");
@@ -825,7 +821,7 @@ Research with stricter result bounds.
 
 		const config = loadSubagentConfig(cwd, {});
 		expect(config.maxConcurrent).toBe(5);
-		const base = resolveAgentTaskConfig({ id: "a", task: "base", subagentType: "implement" }, config);
+		const base = resolveAgentTaskConfig({ id: "a", task: "base", subagentType: "implement-core" }, config);
 		expect(base.retry).toEqual({ maxRetries: 0, backoffMs: 2000 });
 		expect(base.maxResultBytes).toBe(100_000);
 		const research = resolveAgentTaskConfig({ id: "r", task: "review", subagentType: "research" }, config);
@@ -999,7 +995,7 @@ Advise only.
 			// Built-in bundled agents ship icons.
 			const builtin = loadSubagentConfig(tempDir(), {});
 			expect(builtin.types.research?.icon).toBe("search");
-			expect(builtin.types.implement?.icon).toBe("code");
+			expect(builtin.types["implement-core"]?.icon).toBe("code");
 			expect(builtin.types.verify?.icon).toBe("flask");
 			expect(builtin.types["ui-qa"]?.icon).toBe("bug");
 			expect(builtin.types["knowledge-auditor"]?.icon).toBe("book-open");

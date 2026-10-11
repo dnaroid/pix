@@ -4,7 +4,6 @@ use super::*;
 fn delayed_destroy_cleanup_targets_only_captured_resources_after_label_reuse() {
     let lifecycle = AcpProcessState::default();
     let terminals = PackageTerminalState::default();
-    let idx = IdxOperationState::default();
     let old_slot = reserve_process_slot(&lifecycle, "reused", || true).unwrap();
     let terminal = |window_label: &str| PackageTerminalSession {
         window_label: window_label.into(),
@@ -21,19 +20,6 @@ fn delayed_destroy_cleanup_targets_only_captured_resources_after_label_reuse() {
         output: Vec::new(),
         running: None,
     };
-    let operation = |window_label: &str| IdxOperationRecord {
-        window_label: window_label.into(),
-        workspace: PathBuf::from("/workspace"),
-        kind: IdxMaintenanceKind::Index,
-        command: String::new(),
-        status: IdxOperationStatus::Succeeded,
-        output: String::new(),
-        started_at_ms: 0,
-        finished_at_ms: None,
-        exit_code: None,
-        stop_tx: None,
-        exited: Arc::new((Mutex::new(true), Condvar::new())),
-    };
     terminals
         .sessions
         .lock()
@@ -44,21 +30,10 @@ fn delayed_destroy_cleanup_targets_only_captured_resources_after_label_reuse() {
         .lock()
         .unwrap()
         .insert("other-terminal".into(), terminal("other"));
-    idx.operations
-        .lock()
-        .unwrap()
-        .insert("old-idx".into(), operation("reused"));
-    idx.operations
-        .lock()
-        .unwrap()
-        .insert("other-idx".into(), operation("other"));
-
-    let (removed, terminal_ids, idx_ids) =
-        capture_destroyed_window(&lifecycle, &terminals, &idx, "reused");
+    let (removed, terminal_ids) = capture_destroyed_window(&lifecycle, &terminals, "reused");
     assert!(Arc::ptr_eq(&removed.unwrap(), &old_slot));
     assert!(old_slot.cancelled.load(Ordering::Acquire));
     assert_eq!(terminal_ids, ["old-terminal"]);
-    assert_eq!(idx_ids, ["old-idx"]);
     // A new window publishes its own resources while the old worker is
     // blocked stopping ACP. Only captured IDs may be stopped or pruned.
     let replacement = reserve_process_slot(&lifecycle, "reused", || true).unwrap();
@@ -67,14 +42,8 @@ fn delayed_destroy_cleanup_targets_only_captured_resources_after_label_reuse() {
         .lock()
         .unwrap()
         .insert("new-terminal".into(), terminal("reused"));
-    idx.operations
-        .lock()
-        .unwrap()
-        .insert("new-idx".into(), operation("reused"));
     assert!(!terminal_ids.contains(&"new-terminal".into()));
-    assert!(!idx_ids.contains(&"new-idx".into()));
     remove_captured_ids(&mut terminals.sessions.lock().unwrap(), &terminal_ids);
-    remove_captured_ids(&mut idx.operations.lock().unwrap(), &idx_ids);
     assert!(!replacement.cancelled.load(Ordering::Acquire));
     assert_eq!(
         terminals
@@ -85,15 +54,6 @@ fn delayed_destroy_cleanup_targets_only_captured_resources_after_label_reuse() {
             .cloned()
             .collect::<HashSet<_>>(),
         HashSet::from(["new-terminal".into(), "other-terminal".into()])
-    );
-    assert_eq!(
-        idx.operations
-            .lock()
-            .unwrap()
-            .keys()
-            .cloned()
-            .collect::<HashSet<_>>(),
-        HashSet::from(["new-idx".into(), "other-idx".into()])
     );
 }
 
@@ -248,207 +208,6 @@ fn cancellation_before_startup_publication_does_not_lose_stop() {
         .insert("window".into(), replacement.clone());
     assert!(!replacement.cancelled.load(Ordering::Acquire));
     let _ = slot;
-}
-
-fn idx_start_record(window: &str, workspace: &str) -> IdxOperationRecord {
-    IdxOperationRecord {
-        window_label: window.into(),
-        workspace: workspace.into(),
-        kind: IdxMaintenanceKind::Index,
-        command: "idx index".into(),
-        status: IdxOperationStatus::Running,
-        output: String::new(),
-        started_at_ms: 0,
-        finished_at_ms: None,
-        exit_code: None,
-        stop_tx: None,
-        exited: Arc::new((Mutex::new(false), Condvar::new())),
-    }
-}
-
-#[test]
-fn idx_operation_args_add_openrouter_only_to_initialization_flows() {
-    assert_eq!(
-        idx_operation_args(IdxMaintenanceKind::Init, true),
-        vec!["init", "--embedding", "openrouter"]
-    );
-    assert_eq!(
-        idx_operation_args(IdxMaintenanceKind::Doctor, true),
-        vec!["doctor", "--force", "--embedding", "openrouter", "."]
-    );
-    assert_eq!(
-        idx_operation_args(IdxMaintenanceKind::FullIndex, true),
-        vec!["index", "--full"]
-    );
-    assert_eq!(
-        idx_operation_args(IdxMaintenanceKind::Init, false),
-        vec!["init"]
-    );
-}
-
-#[cfg(unix)]
-fn idx_test_child(pipes: bool) -> IdxStartupGuard {
-    use std::os::unix::process::CommandExt;
-    let mut command = Command::new("/bin/sh");
-    command.arg("-c").arg("exec sleep 30");
-    command.process_group(0);
-    if pipes {
-        command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    }
-    IdxStartupGuard(Some(command.spawn().unwrap()))
-}
-
-#[cfg(unix)]
-fn assert_idx_reaped(pid: u32) {
-    assert_eq!(unsafe { libc::kill(pid as i32, 0) }, -1);
-    assert_eq!(
-        std::io::Error::last_os_error().raw_os_error(),
-        Some(libc::ESRCH)
-    );
-}
-
-#[cfg(unix)]
-#[test]
-fn destroyed_window_rejects_pending_idx_child_without_touching_replacement() {
-    let lifecycle = Arc::new(AcpProcessState::default());
-    let terminals = PackageTerminalState::default();
-    let idx = Arc::new(IdxOperationState::default());
-    let old = reserve_process_slot(&lifecycle, "reused", || true).unwrap();
-    let (spawned_tx, spawned_rx) = mpsc::channel();
-    let (resume_tx, resume_rx) = mpsc::channel();
-    let worker_lifecycle = lifecycle.clone();
-    let worker_idx = idx.clone();
-    let worker = thread::spawn(move || {
-        let mut child = idx_test_child(true);
-        let pid = child.0.as_ref().unwrap().id();
-        let _pipes = take_idx_pipes(&mut child).unwrap();
-        spawned_tx.send(pid).unwrap();
-        resume_rx.recv().unwrap();
-        let result = publish_idx_operation(
-            &worker_lifecycle,
-            &old,
-            "reused",
-            true, // a replacement window already has the same visible label
-            &worker_idx,
-            "stale",
-            idx_start_record("reused", "/old"),
-        );
-        assert!(result.unwrap_err().contains("closed"));
-        drop(child);
-    });
-    let pid = spawned_rx.recv_timeout(Duration::from_secs(3)).unwrap();
-    let (removed, _, captured) = capture_destroyed_window(&lifecycle, &terminals, &idx, "reused");
-    assert!(removed.is_some());
-    assert!(captured.is_empty());
-    let replacement = reserve_process_slot(&lifecycle, "reused", || true).unwrap();
-    let snapshot = publish_idx_operation(
-        &lifecycle,
-        &replacement,
-        "reused",
-        true,
-        &idx,
-        "replacement",
-        idx_start_record("reused", "/new"),
-    )
-    .unwrap();
-    assert_eq!(snapshot.id, "replacement");
-    resume_tx.send(()).unwrap();
-    worker.join().unwrap();
-    assert_idx_reaped(pid);
-    let operations = idx.operations.lock().unwrap();
-    assert!(!operations.contains_key("stale"));
-    assert!(operations.contains_key("replacement"));
-}
-
-#[cfg(unix)]
-#[test]
-fn idx_startup_guard_reaps_pipe_and_registry_failures() {
-    let mut no_pipes = idx_test_child(false);
-    let pid = no_pipes.0.as_ref().unwrap().id();
-    assert!(take_idx_pipes(&mut no_pipes).is_err());
-    drop(no_pipes);
-    assert_idx_reaped(pid);
-
-    let lifecycle = AcpProcessState::default();
-    let idx = IdxOperationState::default();
-    let owner = reserve_process_slot(&lifecycle, "window", || true).unwrap();
-    let mut child = idx_test_child(true);
-    let pid = child.0.as_ref().unwrap().id();
-    assert!(publish_idx_operation(
-        &lifecycle,
-        &owner,
-        "window",
-        false,
-        &idx,
-        "missing",
-        idx_start_record("window", "/missing")
-    )
-    .is_err());
-    assert!(idx.operations.lock().unwrap().is_empty());
-    drop(child);
-    assert_idx_reaped(pid);
-
-    let conflict = idx_start_record("window", "/same");
-    idx.operations
-        .lock()
-        .unwrap()
-        .insert("existing".into(), conflict);
-    let child = idx_test_child(true);
-    let pid = child.0.as_ref().unwrap().id();
-    assert!(publish_idx_operation(
-        &lifecycle,
-        &owner,
-        "window",
-        true,
-        &idx,
-        "conflict",
-        idx_start_record("window", "/same")
-    )
-    .unwrap_err()
-    .contains("already running"));
-    drop(child);
-    assert_idx_reaped(pid);
-    lifecycle.exiting.store(true, Ordering::Release);
-    assert!(publish_idx_operation(
-        &lifecycle,
-        &owner,
-        "window",
-        true,
-        &idx,
-        "exiting",
-        idx_start_record("window", "/different")
-    )
-    .is_err());
-    lifecycle.exiting.store(false, Ordering::Release);
-    // Reject a stale owner even if its cancellation flag was not set (or
-    // visibility still resolves the newly created window under this label).
-    let replacement = Arc::new(ProcessSlot::default());
-    lifecycle
-        .slots
-        .lock()
-        .unwrap()
-        .insert("window".into(), replacement.clone());
-    assert!(publish_idx_operation(
-        &lifecycle,
-        &owner,
-        "window",
-        true,
-        &idx,
-        "replaced",
-        idx_start_record("window", "/different")
-    )
-    .is_err());
-    lifecycle.slots.lock().unwrap().remove("window");
-    assert!(publish_idx_operation(
-        &lifecycle,
-        &replacement,
-        "window",
-        true,
-        &idx,
-        "absent",
-        idx_start_record("window", "/different")
-    )
-    .is_err());
 }
 
 #[cfg(unix)]

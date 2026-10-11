@@ -10,6 +10,21 @@ import {
 import { parseSubagentCatalogState } from "../src/app/extensions/subagent-catalog-state.js";
 
 describe("reload context inventory", () => {
+	it("separates effective project resources, including role replacements", () => {
+		const runtime = fakeRuntime({ tools: ["read", "subagents"], skills: ["global", "local"], projectSkills: ["local"], model: { provider: "zai", id: "glm-5-turbo" }, thinkingLevel: "off" });
+		const inventory = createReloadContextInventory(runtime, { types: ["research", "verify"], projectTypes: ["research", "hidden"] });
+		assert.deepEqual(inventory.projectSkills, ["local"]);
+		assert.deepEqual(inventory.projectAgents, ["research"]);
+		assert.match(formatReloadContextInventory(inventory), /Skills \(global\): global\nSkills \(project\): local/);
+		assert.match(formatReloadContextInventory(inventory), /Agents \(global\): verify\nAgents \(project\): research/);
+	});
+	it("validates optional project catalog metadata without accepting hidden names", () => {
+		assert.deepEqual(parseSubagentCatalogState({ version: 1, types: [" research ", "verify"], projectTypes: ["research", "research", "hidden"] })?.projectTypes, ["research"]);
+		assert.equal(parseSubagentCatalogState({ version: 1, types: ["research"], projectTypes: [42] }), undefined);
+		assert.equal(parseSubagentCatalogState({ version: 1, types: ["research"], projectTypes: "research" }), undefined);
+		const runtime = fakeRuntime({ tools: ["read", "subagents"], skills: [], model: { provider: "zai", id: "glm-5-turbo" }, thinkingLevel: "off" });
+		assert.match(formatReloadContextInventory(createReloadContextInventory(runtime, { types: [], projectTypes: [] })), /Agents \(global\): \(none\)\nAgents \(project\): \(none\)/);
+	});
 	it("reports skills with lowercase file access tools plus active tools and model-gated agents", () => {
 		const runtime = fakeRuntime({
 			tools: ["repo_search", "read", "subagents", "read"],
@@ -27,7 +42,7 @@ describe("reload context inventory", () => {
 		assert.equal(inventory.model, "openai-codex/gpt-5.6-luna:high");
 		assert.deepEqual(inventory.contextFiles, ["/parent/AGENTS.md", "/project/AGENTS.override.md"]);
 		assert.match(formatReloadContextInventory(inventory), /Context files \(in context\):\n- \/parent\/AGENTS.md\n- \/project\/AGENTS.override.md/);
-		assert.match(formatReloadContextInventory(inventory), /Skills \(in context\): frontier-model-rollover, project-agent-creator/);
+		assert.match(formatReloadContextInventory(inventory), /Skills \(global\): frontier-model-rollover, project-agent-creator\nSkills \(project\): \(none\)/);
 		assert.match(formatReloadContextInventory(inventory), /Agents \(available\): frontier-review, research/);
 	});
 
@@ -41,7 +56,7 @@ describe("reload context inventory", () => {
 
 		assert.equal(inventory.skillsReadable, true);
 		assert.deepEqual(inventory.skills, ["frontier-model-rollover", "project-agent-creator"]);
-		assert.match(formatReloadContextInventory(inventory), /Skills \(in context\): frontier-model-rollover, project-agent-creator/);
+		assert.match(formatReloadContextInventory(inventory), /Skills \(global\): frontier-model-rollover, project-agent-creator/);
 	});
 
 	it("treats shell aliases as valid skill file access", () => {
@@ -118,6 +133,7 @@ describe("subagent catalog state", () => {
 function fakeRuntime(options: {
 	tools: string[];
 	skills: string[];
+	projectSkills?: string[];
 	model: { provider: string; id: string };
 	thinkingLevel: string;
 	contextFiles?: string[];
@@ -128,7 +144,7 @@ function fakeRuntime(options: {
 			thinkingLevel: options.thinkingLevel,
 			getActiveToolNames: () => options.tools,
 			resourceLoader: {
-				getSkills: () => ({ skills: options.skills.map((name) => ({ name })) }),
+				getSkills: () => ({ skills: options.skills.map((name) => ({ name, sourceInfo: { scope: options.projectSkills?.includes(name) ? "project" : "user" } })) }),
 				getAgentsFiles: () => ({ agentsFiles: (options.contextFiles ?? []).map((path) => ({ path, content: "private instructions" })) }),
 			},
 		},

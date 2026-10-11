@@ -588,6 +588,10 @@ Check the project conventions before approving changes.
 		expect(transformed).toMatchObject({ action: "transform" });
 		expect(transformed.text).toContain("Run ultrawork mode");
 		expect(routerCompleteMock).toHaveBeenCalledTimes(1);
+		const classifierRequest = JSON.stringify(routerCompleteMock.mock.calls);
+		expect(classifierRequest).toContain("Size, broad scope, parallelism, model tier and token price alone never justify implementation delegation");
+		expect(classifierRequest).toContain("multi-file implementation/refactors do not by themselves justify ultrawork");
+		expect(classifierRequest).not.toContain("broad repo investigation; architecture/root-cause/debugging");
 
 		routerResponseText = "hint";
 		expect(await handler({ type: "input", text: "fix another vague issue", source: "interactive" }, ctx)).toEqual({ action: "continue" });

@@ -51,33 +51,14 @@ npx @earendil-works/pi-coding-agent
 Use `/login`, exit Pi, then reload/restart Pix. Provider-supported environment
 keys also work.
 
-## Repository discovery tools are absent
+## Repository search tools are absent
 
-TUI repository discovery requires `indexer-cli` and a project-local
-`.indexer-cli` index.
-
-Run Pix from the project:
-
-```bash
-cd /path/to/project
-pix
-```
-
-Then use `/idx-init` and reload when required.
-
-Pix Desktop has a dedicated IDX panel. When `idx` is unavailable, the panel can
-install a managed copy into Pix's private tools directory. Project index
-initialization remains a separate explicit action.
-
-For a new project, `/idx-init` / `idx init` defaults to OpenRouter, not Ollama.
-Supply `OPENROUTER_API_KEY` in the environment or `~/.config/idx/.env`, or
-explicitly select local mode with `idx init --embedding local` (Ollama required,
-no key). Installing the CLI itself needs neither. Existing projects retain
-their saved provider without an override; do not use a mode switch as an
-unapproved repair. `idx doctor` checks saved providers, and failed prerequisites
-must stop before index deletion. See
-[IDX embedding providers](configuration.md#idx-embedding-providers), including
-the external-data disclosure and mixed-project doctor behavior.
+The bundled `project-search` module must be enabled in Pi tools-suite
+configuration. Code/Knowledge retrieval uses the native backend and does not
+require IDX installation or project initialization. Native semantic repository
+search additionally requires project consent/configuration in
+`.pi/search/semantic.json` and `OPENROUTER_API_KEY`; lexical retrieval does not.
+Legacy IDX data is left untouched and is not used as a fallback.
 
 ## TUI memory grows rapidly during model thinking
 

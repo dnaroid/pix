@@ -30,8 +30,11 @@ function ensureCommitSchema(db: SqlDatabase, config: CommitEmbeddingConfig): voi
     CREATE TABLE IF NOT EXISTS pix_commit_documents(hash TEXT PRIMARY KEY,content_hash TEXT NOT NULL,metadata TEXT NOT NULL,message TEXT NOT NULL)`);
   const identity = db.prepare("SELECT value FROM pix_commit_meta WHERE key='identity'").get()?.value;
   if (identity !== undefined && identity !== commitIdentity(config)) {
-    // Do not silently discard already paid vectors from another IDX model.
+    // Do not silently discard already paid vectors from another model.
     throw new Error("Commit embedding identity has changed");
+  }
+  if (identity === undefined && Number(db.prepare("SELECT COUNT(*) AS n FROM pix_commit_vectors").get()?.n)) {
+    throw new Error("Commit embedding identity is missing");
   }
 }
 
@@ -46,11 +49,11 @@ function cachedVectors(db: SqlDatabase, docs: readonly CommitSemanticDocument[],
     if (seen.has(doc.contentHash)) continue;
     seen.add(doc.contentHash);
     const encoded = get.get(doc.contentHash)?.vector;
-    if (typeof encoded !== "string") { missing.push(doc); continue; }
+    if (encoded === undefined) { missing.push(doc); continue; }
     let vector: unknown;
-    try { vector = JSON.parse(encoded); } catch { /* Invalid cache entry is missing. */ }
+    try { if (typeof encoded === "string") vector = JSON.parse(encoded); } catch { /* Fail closed below. */ }
     if (validCommitVector(vector, config.dimension)) present.set(doc.contentHash, vector);
-    else missing.push(doc);
+    else throw new Error("Commit embedding vector is incompatible");
   }
   return { present, missing };
 }
@@ -80,7 +83,7 @@ export async function searchSemanticCommits(root: string, records: readonly Comm
   let key: string | undefined;
   if (config.provider === "openrouter") {
     try { key = await (services.loadKey ?? loadCommitKey)(); } catch { /* Local Git fallback. */ }
-    if (!key) return { hits: [], notices: ["Semantic commits need a configured IDX OpenRouter credential; local Git results remain available."] };
+    if (!key) return { hits: [], notices: ["Semantic commits need an OpenRouter credential; local Git results remain available."] };
   }
   const owned = AbortSignal.any([signal, AbortSignal.timeout(DEADLINE_MS)]);
   const head = records[0]!.hash;
@@ -97,17 +100,21 @@ export async function searchSemanticCommits(root: string, records: readonly Comm
         if (!missing.length || batch === MAX_NEW_COMMIT_VECTORS / BATCH) return { indexed: 0, remaining: missing.length };
         const targets = missing.slice(0, BATCH);
         if ((await readHead(owned)).trim() !== head) throw new Error("Commit HEAD changed during indexing");
+        const before = await (services.loadConfig ?? loadCommitConfig)(root);
+        if (!before || commitIdentity(before) !== commitIdentity(config!)) throw new Error("Commit configuration changed before indexing");
+        owned.throwIfAborted();
         const input = targets.map(doc => (config!.documentPrefix + doc.record.title + "\n" + doc.record.author + "\n" + doc.record.message).slice(0, 8192));
         const vectors = await (services.embed ?? embedCommits)(input, config!, key, owned);
         owned.throwIfAborted();
         if (vectors.length !== targets.length || !vectors.every(v => validCommitVector(v, config!.dimension))) {
           throw new Error("Invalid commit embedding result");
         }
+        const currentHead = await readHead(owned);
         const current = await (services.loadConfig ?? loadCommitConfig)(root);
-        if (!current || commitIdentity(current) !== commitIdentity(config!) || (await readHead(owned)).trim() !== head) {
+        if (!current || commitIdentity(current) !== commitIdentity(config!) || currentHead.trim() !== head) {
           throw new Error("Commit configuration or HEAD changed during indexing");
         }
-        const add = db.prepare("INSERT INTO pix_commit_vectors(hash,vector) VALUES(?,?) ON CONFLICT(hash) DO UPDATE SET vector=excluded.vector");
+        const add = db.prepare("INSERT INTO pix_commit_vectors(hash,vector) VALUES(?,?) ON CONFLICT(hash) DO NOTHING");
         for (let i = 0; i < targets.length; i++) add.run(targets[i]!.contentHash, JSON.stringify(vectors[i]));
         const put = db.prepare(`INSERT INTO pix_commit_documents(hash,content_hash,metadata,message) VALUES(?,?,?,?)
           ON CONFLICT(hash) DO UPDATE SET content_hash=excluded.content_hash,metadata=excluded.metadata,message=excluded.message
@@ -137,9 +144,11 @@ export async function searchSemanticCommits(root: string, records: readonly Comm
   if (!saved.size || (await readHead(owned)).trim() !== head) return { hits: [], notices };
   const current = await (services.loadConfig ?? loadCommitConfig)(root);
   if (!current || commitIdentity(current) !== commitIdentity(config)) return { hits: [], notices };
+  owned.throwIfAborted();
   let queryVector: readonly number[];
   try {
     const vectors = await (services.embed ?? embedCommits)([(config.queryPrefix + query).slice(0, 8192)], config, key, owned);
+    owned.throwIfAborted();
     if (vectors.length !== 1 || !validCommitVector(vectors[0], config.dimension)) throw new Error("Invalid commit query embedding");
     queryVector = vectors[0]!;
   } catch (error) {
@@ -147,13 +156,15 @@ export async function searchSemanticCommits(root: string, records: readonly Comm
     notices.push("Semantic commit query unavailable; local Git matches remain available.");
     return { hits: [], notices };
   }
-  // IDX may have switched embedding model/provider while the query vector
+  // Central configuration may have switched embedding model/provider while the query vector
   // was in flight. Never combine a late old-model query with the new config.
+  const afterQueryHead = await readHead(owned);
   const afterQueryConfig = await (services.loadConfig ?? loadCommitConfig)(root);
   if (!afterQueryConfig || commitIdentity(afterQueryConfig) !== commitIdentity(config)) {
     return { hits: [], notices: [...notices, "Commit embedding configuration changed; search again."] };
   }
-  if ((await readHead(owned)).trim() !== head) return { hits: [], notices: [...notices, "Commit HEAD changed; retry with current history."] };
+  owned.throwIfAborted();
+  if (afterQueryHead.trim() !== head) return { hits: [], notices: [...notices, "Commit HEAD changed; retry with current history."] };
   const hits: ProjectSearchHit[] = [];
   for (const doc of docs) {
     const vector = saved.get(doc.contentHash);

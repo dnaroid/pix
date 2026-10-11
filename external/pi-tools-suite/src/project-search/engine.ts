@@ -1,24 +1,24 @@
 import { execFile } from "node:child_process";
-import { lstat, readFile, realpath } from "node:fs/promises";
+import { lstat, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { commandAvailable, findProjectRoot } from "../lib/project.js";
+import { findProjectRoot } from "../lib/project.js";
 import { withTaskDatabase } from "../project-tasks/storage.js";
 import { validateTaskDocument, type ProjectTask } from "../project-tasks/schema.js";
 import { cachedProjectSemantics, type SemanticSearchOptions } from "./semantic.js";
 import { searchSemanticCommits, type CommitSemanticServices } from "./semantic-commit-indexer.js";
 import type { CachedSessionCandidate } from "./semantic-cache.js";
 import { setImmediate as yieldToLoop } from "node:timers/promises";
+import { searchNativeProject } from "./native.js";
+import type { NativeSearchRequest, NativeSearchResponse } from "./native-contract.js";
 
 const exec = promisify(execFile);
 export const PROJECT_SEARCH_SOURCES = ["sessions", "tasks", "commits", "code", "knowledge"] as const;
 export type ProjectSearchSource = typeof PROJECT_SEARCH_SOURCES[number];
-export const INDEX_SEARCH_MODES = ["hybrid", "semantic", "lexical", "symbol"] as const;
+export const INDEX_SEARCH_MODES = ["hybrid", "semantic", "lexical"] as const;
 export type IndexSearchMode = typeof INDEX_SEARCH_MODES[number];
-export const INDEX_CHUNK_TYPES = ["types", "api", "impl", "tests", "imports"] as const;
-export type IndexChunkType = typeof INDEX_CHUNK_TYPES[number];
 
 export interface ProjectSearchParams {
   query: string;
@@ -26,16 +26,11 @@ export interface ProjectSearchParams {
   limit?: number;
   projectPath?: string;
   indexMode?: IndexSearchMode;
-  /** Options apply to indexed Code/Knowledge sources only. */
+  /** Options apply to Code/Knowledge sources only. */
   pathPrefix?: string;
   maxFiles?: number;
-  chunkTypes?: IndexChunkType[];
-  minScore?: number;
   includeContent?: boolean;
-  includeImports?: boolean;
   dedupeFile?: boolean;
-  dedupeSymbol?: boolean;
-  cluster?: boolean;
   excludeTests?: boolean;
   includeTests?: boolean;
 }
@@ -45,6 +40,7 @@ export interface ProjectSearchHit {
   id: string;
   title: string;
   snippet: string;
+  content?: string;
   score: number;
   /** Code/Knowledge: project-relative path and matching line range. */
   path?: string;
@@ -86,15 +82,12 @@ export interface SessionBoundary {
 }
 
 export interface ProjectSearchServices {
-  exec(command: string, args: string[], options: { cwd?: string; signal?: AbortSignal; timeout?: number }): Promise<{
-    stdout: string; stderr: string; code?: number | null;
-  }>;
   listSessions?(cwd: string, signal: AbortSignal): Promise<SessionRecord[]>;
   readSession?(path: string, signal: AbortSignal): Promise<SessionBoundary | undefined>;
   git?(cwd: string, args: string[], signal: AbortSignal): Promise<string>;
-  indexed?(cwd: string): boolean;
+  native?(cwd: string, request: NativeSearchRequest, signal: AbortSignal): Promise<NativeSearchResponse>;
   /** Optional test-only overrides; production uses shared read-only cache,
-   * saved Desktop consent and the already configured OpenRouter API key. */
+   * explicit global semantic provider configuration and shared credentials. */
   semantic?: SemanticSearchOptions;
   commitSemantic?: CommitSemanticServices;
 }
@@ -136,7 +129,7 @@ function preview(value: string, length = 380): string {
 function boundedLimit(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 1 && (value as number) <= 20;
 }
-function boundedIdxFiles(value: unknown): value is number {
+function boundedFiles(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 1 && (value as number) <= 50;
 }
 export type ParsedProjectSearchParams = Required<Pick<ProjectSearchParams, "query" | "sources" | "limit" | "indexMode">> & Omit<ProjectSearchParams, "query" | "sources" | "limit" | "indexMode">;
@@ -144,29 +137,23 @@ export function parseProjectSearchParams(value: unknown): { params?: ParsedProje
   const invalid = (message: string) => ({ error: `Invalid project_search request: ${message}` });
   if (!value || typeof value !== "object" || Array.isArray(value)) return invalid("expected an object");
   const p = value as Record<string, unknown>;
-  const flags = ["includeContent", "includeImports", "dedupeFile", "dedupeSymbol", "cluster", "excludeTests", "includeTests"] as const;
+  const flags = ["includeContent", "dedupeFile", "excludeTests", "includeTests"] as const;
   if (Object.keys(p).some(key => !["query", "sources", "limit", "projectPath", "indexMode",
-    "pathPrefix", "maxFiles", "chunkTypes", "minScore", ...flags].includes(key))) return invalid("unknown argument");
+    "pathPrefix", "maxFiles", ...flags].includes(key))) return invalid("unknown argument");
   if (typeof p.query !== "string" || !p.query.trim() || p.query.length > 2048 || p.query.includes("\0")) return invalid("query must be 1–2048 characters");
   if (p.query.trim().startsWith("-")) return invalid("query must not start with an option prefix");
   if (p.limit !== undefined && !boundedLimit(p.limit)) return invalid("limit must be an integer from 1 to 20");
   if (p.projectPath !== undefined && (typeof p.projectPath !== "string" || !p.projectPath.trim()
     || p.projectPath.includes("\0") || p.projectPath.length > 4096)) return invalid("invalid projectPath");
-  if (p.indexMode !== undefined && !INDEX_SEARCH_MODES.includes(p.indexMode as IndexSearchMode)) return invalid("indexMode must be hybrid, semantic, lexical or symbol");
+  if (p.indexMode !== undefined && !INDEX_SEARCH_MODES.includes(p.indexMode as IndexSearchMode)) return invalid("indexMode must be hybrid, semantic or lexical");
   if (p.pathPrefix !== undefined && (typeof p.pathPrefix !== "string" || !p.pathPrefix.trim()
     || p.pathPrefix.length > 1024 || p.pathPrefix.includes("\0")
     || p.pathPrefix.startsWith("/") || p.pathPrefix.startsWith("~") || p.pathPrefix.includes("\\")
     || p.pathPrefix.split("/").some(segment => !segment || segment === "." || segment === ".." || segment.startsWith("-")))) {
     return invalid("pathPrefix must be a safe project-relative path");
   }
-  if (p.maxFiles !== undefined && !boundedIdxFiles(p.maxFiles)) return invalid("maxFiles must be an integer from 1 to 50");
-  if (p.minScore !== undefined && (typeof p.minScore !== "number" || !Number.isFinite(p.minScore)
-    || p.minScore < 0 || p.minScore > 1)) return invalid("minScore must be between 0 and 1");
-  if (p.chunkTypes !== undefined && (!Array.isArray(p.chunkTypes) || !p.chunkTypes.length
-    || p.chunkTypes.length > INDEX_CHUNK_TYPES.length || !p.chunkTypes.every(item => typeof item === "string"
-      && INDEX_CHUNK_TYPES.includes(item as IndexChunkType))
-    || new Set(p.chunkTypes).size !== p.chunkTypes.length)) return invalid("chunkTypes must be distinct known IDX chunk types");
-  if (flags.some(flag => p[flag] !== undefined && typeof p[flag] !== "boolean")) return invalid("IDX flags must be booleans");
+  if (p.maxFiles !== undefined && !boundedFiles(p.maxFiles)) return invalid("maxFiles must be an integer from 1 to 50");
+  if (flags.some(flag => p[flag] !== undefined && typeof p[flag] !== "boolean")) return invalid("search flags must be booleans");
   if (p.includeTests === true && p.excludeTests === true) return invalid("includeTests and excludeTests are mutually exclusive");
   const sources = p.sources === undefined ? [...PROJECT_SEARCH_SOURCES] : p.sources;
   if (!Array.isArray(sources) || !sources.length || sources.length > PROJECT_SEARCH_SOURCES.length
@@ -178,8 +165,6 @@ export function parseProjectSearchParams(value: unknown): { params?: ParsedProje
     ...(typeof p.projectPath === "string" ? { projectPath: p.projectPath } : {}),
     ...(typeof p.pathPrefix === "string" ? { pathPrefix: p.pathPrefix } : {}),
     ...(p.maxFiles !== undefined ? { maxFiles: p.maxFiles as number } : {}),
-    ...(p.minScore !== undefined ? { minScore: p.minScore as number } : {}),
-    ...(Array.isArray(p.chunkTypes) ? { chunkTypes: p.chunkTypes as IndexChunkType[] } : {}),
     ...Object.fromEntries(flags.filter(flag => p[flag] !== undefined).map(flag => [flag, p[flag]])),
   } };
 }
@@ -407,95 +392,26 @@ async function searchCommits(root: string, query: string, queryTerms: readonly s
   return { hits, notices, records: commits };
 }
 
-/** Parse IDX's length-delimited body sections; never reinterpret a body line as a result header. */
-export function parseIdxHits(output: string, kind: "code" | "knowledge"): ProjectSearchHit[] {
-  const hits: ProjectSearchHit[] = [];
-  const seen = new Set<string>();
-  const lines = output.split(/\r?\n/u);
-  for (let i = 0; i < lines.length; i++) {
-    const match = /^(.+?):(\d+)-(\d+) \(score: ([0-9.]+), rank=[^,]+, domain=(code|document)(?:,.*)?\)$/u.exec(lines[i]!.trim());
-    if (!match) continue;
-    let content = "";
-    let marker = i + 1;
-    if (/^\s+kind=/u.test(lines[marker] ?? "")) marker++;
-    const count = /^Content: (\d+) lines$/u.exec(lines[marker] ?? "");
-    if (count) {
-      const length = Number(count[1]);
-      if (!Number.isSafeInteger(length) || length > 10_000 || marker + length >= lines.length) break;
-      if (length) content = lines.slice(marker + 1, marker + 1 + length).join("\n").slice(0, 700);
-      i = marker + length;
-    }
-    if (match[5] !== (kind === "code" ? "code" : "document")) continue;
-    const filename = match[1]!;
-    const startLine = Number(match[2]), endLine = Number(match[3]);
-    const score = Number(match[4]);
-    if (!filename || filename.startsWith("/") || filename.includes("\\") || filename.startsWith("~")
-      || filename.split("/").some(part => !part || part === "." || part === "..")
-      || !Number.isSafeInteger(startLine) || !Number.isSafeInteger(endLine) || startLine < 1 || endLine < startLine
-      || !Number.isFinite(score)) continue;
-    const id = `${kind}:${filename}:${startLine}-${endLine}`;
-    if (seen.has(id)) continue;
-    seen.add(id);
-    hits.push({ kind, id, path: filename, startLine, endLine, title: filename,
-      snippet: `Lines ${startLine}–${endLine}${content ? ` · ${preview(content)}` : ""}`, score: Math.max(0, Math.min(score, 1)) });
-  }
-  return hits;
-}
-
-async function indexedAvailable(root: string, deps: ProjectSearchServices): Promise<boolean> {
-  if (deps.indexed) return deps.indexed(root);
-  const info = await lstat(path.join(root, ".indexer-cli")).catch(() => undefined);
-  return Boolean(info?.isDirectory() && !info.isSymbolicLink() && commandAvailable("idx"));
-}
-
-/** Strongly typed IDX argument adapter; never accept arbitrary user argv. */
-export function indexSearchArgs(query: string, kind: "code" | "knowledge", params: Omit<ProjectSearchParams, "query">): string[] {
-  const args = ["search", query,
-    "--domain", kind === "code" ? "code" : "document",
-    "--mode", params.indexMode ?? "hybrid",
-    "--max-files", String(params.maxFiles ?? (params.includeContent ? 1 : 3))];
-  if (params.pathPrefix) args.push("--path-prefix", params.pathPrefix);
-  if (params.chunkTypes?.length) args.push("--chunk-types", params.chunkTypes.join(","));
-  if (params.minScore !== undefined) args.push("--min-score", String(params.minScore));
-  for (const [option, name] of [
-    ["includeContent", "--include-content"],
-    ["includeImports", "--include-imports"],
-    ["dedupeFile", "--dedupe-file"],
-    ["dedupeSymbol", "--dedupe-symbol"],
-    ["cluster", "--cluster"],
-    ["excludeTests", "--exclude-tests"],
-    ["includeTests", "--include-tests"],
-  ] as const) if (params[option]) args.push(name);
-  return args;
-}
-
-async function searchIdx(root: string, query: string, kinds: readonly ("code" | "knowledge")[], params: ProjectSearchParams,
+async function searchRepository(root: string, query: string, kinds: ("code" | "knowledge")[], params: ProjectSearchParams,
   signal: AbortSignal, deps: ProjectSearchServices): Promise<{ hits: ProjectSearchHit[]; notices: string[] }> {
-  if (!kinds.length) return { hits: [], notices: [] };
-  if (!await indexedAvailable(root, deps)) return { hits: [], notices: [
-    "Code/Knowledge skipped: this project needs an existing .indexer-cli index and idx executable. No initialization was performed.",
-  ] };
-  const hits: ProjectSearchHit[] = [], notices: string[] = [];
-  for (const kind of kinds) {
+  try {
+    const response = await (deps.native ?? searchNativeProject)(root, {
+      query, sources: kinds, mode: params.indexMode, limit: 100, pathPrefix: params.pathPrefix,
+      includeContent: params.includeContent, dedupeFile: params.dedupeFile,
+      excludeTests: params.excludeTests, includeTests: params.includeTests,
+    }, signal);
     signal.throwIfAborted();
-    try {
-      const response = await deps.exec("idx", indexSearchArgs(query, kind, params), { cwd: root, signal, timeout: 60_000 });
-      signal.throwIfAborted();
-      if ((response.code ?? 0) !== 0) {
-        notices.push(`${kind}: IDX query unavailable; existing local results remain available.`);
-        continue;
-      }
-      hits.push(...parseIdxHits(response.stdout.slice(0, 256 * 1024), kind));
-      if (response.stdout.length > 256 * 1024) notices.push(`${kind}: IDX response was truncated.`);
-    } catch {
-      signal.throwIfAborted();
-      notices.push(`${kind}: IDX query unavailable or timed out; existing local results remain available.`);
-    }
+    const cap = params.maxFiles ?? (params.includeContent ? 1 : 3);
+    if (!response.status.generation && !response.status.complete) throw new Error("Native snapshot unavailable");
+    const hits = kinds.flatMap(kind => response.hits.filter(hit => hit.kind === kind).slice(0, cap));
+    return { hits, notices: response.notices };
+  } catch {
+    signal.throwIfAborted();
+    return { hits: [], notices: ["Native Code/Knowledge unavailable; other local sources remain available."] };
   }
-  return { hits, notices };
 }
 
-/** Stateless federated retrieval. Uses the same session/tasks/Git stores and IDX index as Desktop. */
+/** Federated retrieval with the same native repository backend as Desktop. */
 export async function searchProject(
   cwd: string, params: ProjectSearchParams, deps: ProjectSearchServices,
   signal: AbortSignal = new AbortController().signal,
@@ -537,7 +453,7 @@ export async function searchProject(
   if (sessionSource) collect("Sessions", () => sessionSource);
   if ((taskSource || sessionSource) && ["hybrid", "semantic"].includes(parsed.params.indexMode)) {
     collect("Cached semantics", async () => {
-      // Wait for authoritative local snapshots, not for unrelated IDX/Git.
+      // Wait for authoritative local snapshots, not for unrelated repository/Git work.
       // Run only once, so Tasks and Sessions share the same query embedding.
       const [taskResult, sessionResult] = await Promise.allSettled([
         taskSource ?? Promise.resolve({ records: [] as ProjectTask[], safe: true }),
@@ -590,8 +506,8 @@ export async function searchProject(
       return searchSemanticCommits(root, result.records, query, readHead, deadline, deps.commitSemantic);
     });
   }
-  const idxKinds = wanted.filter((source): source is "code" | "knowledge" => source === "code" || source === "knowledge");
-  if (idxKinds.length) collect("IDX", () => searchIdx(root, query, idxKinds, parsed.params!, deadline, deps));
+  const repositoryKinds = wanted.filter((source): source is "code" | "knowledge" => source === "code" || source === "knowledge");
+  if (repositoryKinds.length) collect("Code/Knowledge", () => searchRepository(root, query, repositoryKinds, parsed.params!, deadline, deps));
   try {
     await Promise.race([
       Promise.allSettled(jobs),
@@ -632,7 +548,7 @@ export function formatProjectSearch(response: ProjectSearchResponse): string {
       : hit.sessionId ? `session ${hit.sessionId}` : hit.id;
     lines.push(`\n${index + 1}. [${hit.kind}] ${hit.title} (${target})`,
       `   Source ID: ${hit.id}`,
-      `   ${hit.snippet}`);
+      `   ${hit.content ?? hit.snippet}`);
   });
   if (response.notices.length) lines.push("\nNotices:", ...response.notices.map(n => `- ${n}`));
   let result = lines.join("\n");

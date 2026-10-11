@@ -4,7 +4,7 @@ import {
 	CLAUDE_ALIAS_TOOL_DESCRIPTIONS_WITH_REPO,
 	CODEX_ALIAS_TOOL_DESCRIPTIONS,
 	COMPRESS_TOOL_DESCRIPTION,
-	REPO_DISCOVERY_TOOLS,
+	REPOSITORY_DISCOVERY_GUIDELINES,
 	SESSION_TOOL_DESCRIPTION,
 	TODO_TOOL_DESCRIPTION,
 	asyncSubagentToolDescriptions,
@@ -69,82 +69,49 @@ describe("tool descriptions", () => {
 		expect(bash).toContain("Prefer Read/Edit/Write/Grep/Glob for file operations");
 	});
 
-	test("repo guidance selects another indexed project explicitly and preserves its root across calls", () => {
-		const context = REPO_DISCOVERY_TOOLS.find((tool) => tool.name === "repo_context")!;
-		const guidance = context.promptGuidelines.join("\n");
-		expect(guidance).toContain("For any repo_* tool, pass projectPath when the task targets another project");
-		expect(guidance).toContain("omit it for the current project");
-		expect(guidance).toContain("same selected root for related calls");
-		expect(guidance).toContain("targets, scopes and audit paths relative to it");
-		expect(guidance).toContain("absolute, session-cwd-relative or ~/ paths");
-		expect(guidance).toContain("requires .indexer-cli directly in that root");
-		expect(guidance).toContain("does not change cwd");
-		expect(guidance).toContain("do not run setup implicitly");
-		expect(guidance).toContain("Resolve returned file paths against that root when using read");
+	test("repository guidance uses available search without IDX-only tools", () => {
+		const prompt = REPOSITORY_DISCOVERY_GUIDELINES.join("\n");
+		expect(prompt).toContain("project_search");
+		expect(prompt).toContain("sources=['code','knowledge']");
+		expect(prompt).toContain("read the original files");
+		for (const retired of ["repo_context", "repo_inspect", "repo_audit"]) expect(prompt).not.toContain(retired);
 	});
 
-	test("project_search replaces repo_search with the same focused IDX search guidance", () => {
-		expect(REPO_DISCOVERY_TOOLS.map(tool => tool.name)).not.toContain("repo_search");
+	test("project_search preserves focused search guidance alongside the global configuration command", () => {
 		let registered: any;
-		projectSearch({ registerTool: (tool: any) => { registered = tool; } } as never);
+		const commands: string[] = [];
+		const events: string[] = [];
+		projectSearch({ registerTool: (tool: any) => { registered = tool; }, registerCommand: (name: string) => { commands.push(name); },
+			on: (name: string) => { events.push(name); } } as never);
+		expect(commands).toEqual(["search-semantic"]);
+		expect(events).toEqual(["session_start", "session_shutdown"]);
 		expect(registered.name).toBe("project_search");
 		expect(registered.promptSnippet).toContain("first pass maxFiles=3, no includeContent");
 		expect(registered.promptSnippet).toContain("Start focused code-path lookup or diagnosis with project_search");
-		expect(registered.promptSnippet).toContain("not as a preflight for focused search");
-		const context = REPO_DISCOVERY_TOOLS.find(tool => tool.name === "repo_context")!;
-		expect(context.promptSnippet.toLowerCase()).toContain("use project_search first for a focused code-path lookup or diagnosis");
 		const guidance = registered.promptGuidelines.join("\n");
+		expect(guidance).toContain("~/.config/pi/pi-tools-suite.jsonc");
+		expect(guidance).toContain("session startup and debounced task database changes");
+		expect(guidance).toContain("Task searches rank current cached vectors, never upload missing task texts");
+		expect(guidance).not.toContain("independent Desktop opt-ins");
+		expect(guidance).not.toContain("independent project consent");
 		expect(guidance).toContain("pathPrefix/dedupeFile");
 		expect(guidance).toContain("Exact identifiers: available Grep/grep or shell with rg");
 		expect(guidance).toContain("includeContent only for a narrow follow-up");
 		expect(guidance).toContain("maxFiles=1");
 		expect(guidance).toContain("Stop broad search");
-		expect(registered.parameters.properties.indexMode.enum).toEqual(["hybrid", "semantic", "lexical", "symbol"]);
+		expect(registered.parameters.properties.indexMode.enum).toEqual(["hybrid", "semantic", "lexical"]);
 		expect(registered.parameters.properties.includeContent.default).toBe(false);
 	});
 
-	test("repo_inspect exposes compact mode guidance without raw CLI arguments", () => {
-		const inspect = REPO_DISCOVERY_TOOLS.find((entry) => entry.name === "repo_inspect")!;
-		expect(inspect.command).toBe("inspect");
-		expect(inspect.promptSnippet).toContain("mode architecture");
-		expect(inspect.promptSnippet).toContain("start with mode architecture (not structure)");
-		expect(inspect.promptSnippet).toContain("a behavior reading guide starts with repo_context");
-		expect(inspect.promptSnippet).toContain("limit 20, depth 2");
-		expect(inspect.promptSnippet).toContain("depth 3, limit 40");
-		expect(inspect.promptSnippet).toContain("depth 1, direction callers/callees");
-		const guidance = inspect.promptGuidelines.join("\n");
-		expect(guidance).toContain("AST always returns an outline without source text");
-		expect(guidance).toContain("includeBody only");
-		expect(guidance).toContain("select modules, module-imports, calls or call-graph");
-		expect(inspect.targetDescription).toContain("Required for ast/explain/deps");
-		expect(guidance).not.toContain("--");
-	});
-
-	test("repo guidance fits within the pre-economy description budget", () => {
-		const existing = REPO_DISCOVERY_TOOLS.filter((tool) => tool.command === "inspect");
-		expect(REPO_DISCOVERY_TOOLS).toHaveLength(3);
-		expect(REPO_DISCOVERY_TOOLS.map((tool) => tool.name)).toEqual(["repo_context", "repo_audit", "repo_inspect"]);
-		const size = existing.reduce((total, tool) => total + [
-			tool.description, tool.promptSnippet, ...tool.promptGuidelines, tool.targetDescription ?? "",
-		].join("\n").length, 0);
-		expect(size).toBeLessThanOrEqual(3326);
-		for (const tool of REPO_DISCOVERY_TOOLS) expect(tool.promptGuidelines.length).toBeLessThanOrEqual(3);
-	});
-
-	test("repo guidance starts with context, routes contracts and changed paths, and omits removed wiki lifecycle", () => {
-		const names = REPO_DISCOVERY_TOOLS.map((tool) => tool.name);
-		expect(names.slice(0, 2)).toEqual(["repo_context", "repo_audit"]);
-		const text = REPO_DISCOVERY_TOOLS.flatMap((tool) => [tool.description, tool.promptSnippet, ...tool.promptGuidelines]).join("\n");
-		expect(text).toContain("general task discovery or authoritative contracts");
-		expect(text).toContain("start with repo_inspect mode=architecture instead");
-		expect(text).toContain("parent model");
+	test("repository guidance retains contracts and decision policy", () => {
+		const text = REPOSITORY_DISCOVERY_GUIDELINES.join("\n");
 		expect(text).toContain("material behavior change");
 		expect(text).toContain("knowledge-auditor");
 		expect(text).toContain("primary spec");
 		expect(text).toContain("semantic drift");
-		expect(text).toContain(".indexer-cli/spec-template.md");
+		expect(text).toContain("specs/TEMPLATE.md");
 		expect(text).toContain("kind: spec");
-		expect(text).toContain("ask before running setup");
+		expect(text).toContain("ask before creating one");
 		expect(text).toContain("read linked decision records");
 		expect(text).toContain("historical rationale is not the current contract");
 		expect(text).toContain("evidence vs assumptions");
@@ -161,37 +128,30 @@ describe("tool descriptions", () => {
 		expect(text).not.toContain("repo_ask");
 		expect(text).not.toMatch(/wiki|include-secondary|action=impact|receiptPath/);
 		for (const tool of [CLAUDE_ALIAS_TOOL_DESCRIPTIONS_WITH_REPO.Edit, CLAUDE_ALIAS_TOOL_DESCRIPTIONS_WITH_REPO.Write, codexAliasToolDescriptions(true).applyPatch]) {
-			expect(tool.description).toContain("repo_audit");
+			expect(tool.description).toContain("Keep the primary spec aligned");
+			expect(tool.description).not.toContain("repo_audit");
 			expect(tool.description).not.toContain("repo_knowledge");
 		}
 	});
 
-	test("knowledge finalization covers receipts and fallback without mechanical bypass or prompt bloat", () => {
-		const audit = REPO_DISCOVERY_TOOLS.find((tool) => tool.name === "repo_audit")!;
-		const text = [audit.promptSnippet, ...audit.promptGuidelines].join("\n");
-		expect(text).toContain("Obtain the result");
-		expect(text).toContain("missing review coverage");
-		expect(text).toContain("mechanical edits still need review-state checks");
-		expect(text).toContain("auditor (or parent fallback)");
-		expect(text).toContain("every declared Implementation/Tests dependency");
-		expect(text).toContain("idx knowledge acknowledge <spec-paths...>");
-		expect(text).toContain("then rechecks dirty");
-		expect(text).toContain("never bulk-acknowledge unrelated specs");
-		expect(text.length).toBeLessThan(2000);
+	test("documentation review stays task-scoped without mandatory audit receipts", () => {
+		const text = REPOSITORY_DISCOVERY_GUIDELINES.join("\n");
+		expect(text).toContain("Review affected documentation against final source and tests");
+		expect(text).toContain("no dirty check, acknowledgment or exhaustive dependency review is required");
+		expect(text).not.toMatch(/idx knowledge|every declared Implementation\/Tests dependency|Close the audit todo/);
 		for (const tool of [CLAUDE_ALIAS_TOOL_DESCRIPTIONS_WITH_REPO.Edit, CLAUDE_ALIAS_TOOL_DESCRIPTIONS_WITH_REPO.Write, codexAliasToolDescriptions(true).applyPatch]) {
-			expect(tool.description).toContain("repo_audit finalization guidance");
-			expect(tool.description).not.toContain("skip for mechanical");
+			expect(tool.description).toContain("Keep the primary spec aligned");
+			expect(tool.description).not.toMatch(/repo_audit|knowledge-auditor|dirty|acknowledge/);
 		}
 	});
 
-	test("task audit completion does not depend on global knowledge cleanliness", () => {
-		const audit = REPO_DISCOVERY_TOOLS.find((tool) => tool.name === "repo_audit")!;
-		const text = [audit.promptSnippet, ...audit.promptGuidelines].join("\n");
-		expect(text).toContain("Close the audit todo when task-scoped review is complete");
-		expect(text).toContain("global knowledge dirty=yes alone must not keep it open");
-		expect(text).toContain("task audit passed/blocked separately from global dirty yes/no/unknown");
-		expect(text).toContain("unclassified global dirtiness alone is not a task blocker");
-		expect(text).toContain("concurrent changes to reviewed specs/dependencies still require resolution");
+	test("subagent guidance requests documentation maintenance without knowledge-state gates", () => {
+		for (const repoAware of [true, false]) {
+			const tool = asyncSubagentToolDescriptions(repoAware).subagents;
+			const text = [tool.description, tool.promptSnippet, ...tool.promptGuidelines].join("\n");
+			expect(text).toContain("use the available knowledge-auditor to update affected documentation");
+			expect(text).not.toMatch(/knowledge-audit gates|idx knowledge/);
+		}
 	});
 
 	test("subagents descriptions and parent catalog agree on parent-first role selection", () => {
@@ -313,12 +273,18 @@ describe("tool descriptions", () => {
 
 		expect(promptText).toContain("delegate/parallelize/split work");
 		expect(promptText).toContain("Write code in the parent by default");
-		expect(promptText).toContain("substantial independent task that can run alongside useful parent work");
-		expect(promptText).toContain("Mandatory UI QA, review and knowledge-audit gates remain exceptions");
+		expect(promptText).toContain("a concrete capability gap");
+		expect(promptText).toContain("sufficiently large prescribed mechanical work with deterministic checks and an expected net saving");
+		expect(promptText).toContain("seek a bounded read-only oracle opinion first");
+		expect(promptText).toContain("Task size, parallelism, isolation, token price, or worker availability alone do not justify delegation");
+		expect(promptText).toContain("duplicated context, briefing and integration");
+		expect(promptText).not.toContain("substantial independent task that can run alongside useful parent work");
+		expect(promptText).not.toContain("prefer implement (Luna");
+		expect(promptText).toContain("Mandatory UI QA, architectural review and final documentation maintenance remain exceptions");
 		expect(promptText).not.toContain("sequential task qualifies");
 		expect(promptText).not.toContain("A substantive bounded edit can be delegated");
-		expect(promptText).toContain("do not let repo_* availability suppress delegation");
-		expect(promptText).toContain("general discovery");
+		expect(promptText).toContain("Delegate independent tracks/hypotheses/review axes");
+		expect(promptText).toContain("repository discovery");
 		expect(promptText).toContain("subagentType: \"ui-qa\"");
 		expect(promptText).toContain("generated `.pi/qa_auth.jsonc` template path");
 		expect(promptText).toContain("clickable screenshot, terminal capture, video, trace");
@@ -334,9 +300,9 @@ describe("tool descriptions", () => {
 		const tool = asyncSubagentToolDescriptions(false).subagents;
 		const promptText = [tool.description, tool.promptSnippet, ...tool.promptGuidelines].join("\n");
 
-		expect(promptText).toContain("repo_* tools are unavailable");
-		expect(promptText).toContain("incident-triage hypotheses");
-		expect(promptText).toContain("delegate scoped research");
-		expect(promptText).toContain("call action='spawn' as the first discovery step");
+		expect(promptText).toContain("For incident triage");
+		expect(promptText).toContain("separate hypotheses/review tracks");
+		expect(promptText).toContain("prefer focused agents");
+		expect(promptText).not.toContain("repo_context");
 	});
 });

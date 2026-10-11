@@ -38,9 +38,9 @@ type MessageSender = ExtensionAPI & {
 
 export const ULTRAWORK_PROMPT = `Run ultrawork mode for the current objective.
 
-Use subagents when a lower-cost worker or isolation of noisy evidence helps, including one bounded sequential task. Pick subagentType from the effective catalog: research for reading/review, implement for code/docs/tests/UI changes, verify for running checks, ui-qa for real UI testing across browsers, TUIs, and desktop GUIs, and oracle only for a deliberate strong independent opinion. Prefer an appropriate project-local specialist. Keep decisions and integration in the parent; do not create agents just to assign a discipline.
+Apply the delegation policy in the subagents tool description; this mode does not override it. An explicit user request for ultrawork authorizes scoped delegation, but an auto-classifier suggestion does not. Size, parallelism and token price alone are not implementation handoff grounds. Pick subagentType from the effective catalog: research for a named evidence/review question, implement-core for approved implementation handoffs, mechanical for sufficiently large prescribed transformations, verify for checks needing interpretation, ui-qa for real UI testing, and oracle for justified independent advice or architectural review. Prefer a matching project-local specialist. Keep decisions and integration in the parent.
 
-Keep parent context lean: spawn for broad parallel work, read results only when needed, and finish unless genuinely blocked.`;
+Keep parent context lean: send bounded briefs, read compact results only when needed, and avoid duplicating the worker's investigation.`;
 
 const HYPERPLAN_PROMPT = `Run hyperplan mode for the current objective.
 

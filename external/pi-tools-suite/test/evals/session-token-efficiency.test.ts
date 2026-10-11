@@ -107,7 +107,7 @@ describe("session token-efficiency analysis", () => {
 		expect(measured.components.compressDescription.estimatedTokens).toBeLessThanOrEqual(1203);
 		// Cheap explicit-summary delegation must not reintroduce a permanent
 		// control-plane tax. The complete post-follow-up envelope is currently
-		// 1,348 estimated tokens (the repo_inspect consolidation refined the
+		// 1,348 estimated tokens (the repository-discovery prompt consolidation refined the
 		// system-prompt and compress guidelines); keep that measured baseline
 		// as the hard ceiling and update it only deliberately.
 		expect(measured.staticSystemPlusToolEnvelope.estimatedTokens).toBeLessThanOrEqual(1348);

@@ -23,10 +23,11 @@ import type { AgentControlAction } from "./agent-control";
 import { isRecord, parseQueueState, parseQueuedUserMessage } from "./acp-response-parsers";
 import { AcpIncomingRequestError, AcpJsonRpcConnection } from "./acp-json-rpc";
 import { AcpPixExtensions } from "./acp-pix-extensions";
-import { SEARCH_CONFIG_METHOD, SEARCH_QUERY_METHOD, SEARCH_COMMITS_METHOD, SEARCH_INTENT_METHOD, SEARCH_TASKS_METHOD, type SearchIntentRequest, type SearchIntentResponse, type SearchConfigRequest, type SearchStatus, type SearchQueryRequest, type SearchQueryResponse, type SemanticTasksRequest, type SemanticTasksResponse } from "../../../acp/src/search/contract";
+import { SEARCH_CONFIG_METHOD, SEARCH_QUERY_METHOD, SEARCH_SYNC_METHOD, SEARCH_COMMITS_METHOD, SEARCH_INTENT_METHOD, SEARCH_TASKS_METHOD, type SearchIntentRequest, type SearchIntentResponse, type SearchConfigRequest, type SearchSyncRequest, type SearchStatus, type SearchQueryRequest, type SearchQueryResponse, type SemanticTasksRequest, type SemanticTasksResponse } from "../../../acp/src/search/contract";
 import { SEARCH_RAG_METHOD, SEARCH_RAG_DELTA_METHOD, type RagRequest, type RagResponse, type RagProgress } from "../../../acp/src/search/rag-contract";
 import { TASK_TYPE_CLASSIFY_METHOD, isClassifiedTaskType, type TaskTypeClassifyRequest, type TaskTypeClassifyResponse } from "../../../acp/src/tasks/type-classification-contract";
 import type { CommitSearchRequest, CommitSearchResponse } from "../../../acp/src/search/contract";
+import { SEARCH_INDEX_METHOD, type SearchIndexRequest, type SearchIndexResponse } from "../../../acp/src/search/contract";
 import type {
   AcpClientHandlers,
   AcpTransport,
@@ -405,6 +406,14 @@ export class AcpClient {
 
   searchQuery(request: SearchQueryRequest, signal?: AbortSignal): Promise<SearchQueryResponse> {
     return this.request(SEARCH_QUERY_METHOD, request, null, signal);
+  }
+
+  searchSync(request: SearchSyncRequest, signal?: AbortSignal): Promise<SearchStatus> {
+    return this.request(SEARCH_SYNC_METHOD, request, undefined, signal);
+  }
+
+  searchIndex(request: SearchIndexRequest, signal?: AbortSignal): Promise<SearchIndexResponse> {
+    return this.request(SEARCH_INDEX_METHOD, request, null, signal);
   }
 
   searchSemanticTasks(request: SemanticTasksRequest, signal?: AbortSignal): Promise<SemanticTasksResponse> {

@@ -1,4 +1,8 @@
-# Keep idx current at Pix startup
+# Retired: Keep idx current at Pix startup
+
+> Retired by the approved removal of the IDX integration. This document is
+> retained as historical context only; Pix no longer checks, installs, or
+> updates IDX at startup.
 
 <!-- markdownlint-disable MD013 -->
 
@@ -8,7 +12,7 @@ Change
 
 ## Lifecycle
 
-Active implemented contract.
+Retired historical contract; not an active Pix behavior.
 
 ## Goal
 

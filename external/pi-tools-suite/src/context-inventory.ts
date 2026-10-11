@@ -17,7 +17,9 @@ export interface ContextInventoryState {
 	thinking?: string;
 	tools: string[];
 	skills: string[];
+	projectSkills: string[];
 	agents?: string[];
+	projectAgents?: string[];
 }
 
 export function createContextInventoryState(
@@ -27,17 +29,19 @@ export function createContextInventoryState(
 ): ContextInventoryState {
 	const tools = unique(pi.getActiveTools());
 	const skillsReadable = tools.some(isSkillFileAccessTool);
+	const commands = skillsReadable ? pi.getCommands().filter((command) => command.source === "skill") : [];
 	const skills = skillsReadable
-		? unique(pi.getCommands()
-			.filter((command) => command.source === "skill")
+		? unique(commands
 			.map((command) => command.name.replace(/^skill:/u, "")))
 			.sort(compareText)
 		: [];
+	const projectSkills = unique(commands.filter((command) => command.sourceInfo?.scope === "project")
+		.map((command) => command.name.replace(/^skill:/u, ""))).sort(compareText);
 	const model = currentModelRef(ctx.model);
 	const thinking = typeof (ctx as { thinkingLevel?: unknown }).thinkingLevel === "string"
 		? (ctx as { thinkingLevel?: string }).thinkingLevel?.trim() || undefined
 		: undefined;
-	const agents = tools.includes("subagents") ? effectiveAgentTypes(ctx.cwd, model) : [];
+	const agents = tools.includes("subagents") ? effectiveAgentTypes(ctx.cwd, model) : { agents: [], projectAgents: [] };
 	const sessionId = safeSessionId(ctx.sessionManager);
 	const sessionFile = safeSessionFile(ctx.sessionManager);
 	return {
@@ -49,7 +53,8 @@ export function createContextInventoryState(
 		...(thinking ? { thinking } : {}),
 		tools,
 		skills,
-		...(agents === undefined ? {} : { agents }),
+		projectSkills,
+		...(agents === undefined ? {} : agents),
 	};
 }
 
@@ -76,10 +81,11 @@ export function isSkillFileAccessTool(toolName: string): boolean {
 	}
 }
 
-function effectiveAgentTypes(cwd: string, model: string | undefined): string[] | undefined {
+function effectiveAgentTypes(cwd: string, model: string | undefined): { agents: string[]; projectAgents: string[] } | undefined {
 	try {
 		const config = filterSubagentConfigForParentModel(loadSubagentConfig(cwd), model);
-		return Object.keys(config.types).sort(compareText);
+		const agents = Object.keys(config.types).sort(compareText);
+		return { agents, projectAgents: agents.filter((name) => config.projectAgentMetadata?.[name] !== undefined) };
 	} catch {
 		return undefined;
 	}

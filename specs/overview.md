@@ -43,7 +43,7 @@ Feature/contract specs stored in this directory, grouped by area. Filenames
 carry no numbers; ordering is by group. Additional behavioral documents may
 live beside the subsystem they describe (for example `docs/` or
 `external/pi-tools-suite/docs/`). This hand-maintained index intentionally does
-not duplicate those; IDX document retrieval can find them independently.
+not duplicate those; native project search indexes Code and Knowledge.
 
 **Suite / auth / tools**
 
@@ -71,7 +71,6 @@ not duplicate those; IDX document retrieval can find them independently.
 | [session-quota-wait](./session-quota-wait.md) | Session quota wait with automatic/manual scheduled continuation |
 | [heads-up-observer](./heads-up-observer.md) | Experimental opt-in TUI/Desktop observer: bounded tool-less checks, evidence, feedback and session-attributed usage |
 | [desktop-btw](./desktop-btw.md) | Temporary tool-less side chat: composer menu, current parent context, independent cancellation and no transcript persistence |
-| [idx-startup-update](./idx-startup-update.md) | Keep `idx` current at pix startup |
 | [reload-context-inventory](./reload-context-inventory.md) | Reload/resource context inventory and tool-alias capability checks |
 | [clickable-markdown-links](./clickable-markdown-links.md) | Clickable wrapped markdown links |
 | [markdown-soft-wrap-highlighting](./markdown-soft-wrap-highlighting.md) | Syntax highlighting across soft wraps |
@@ -118,7 +117,7 @@ not duplicate those; IDX document retrieval can find them independently.
 | [desktop-question-tool](./desktop-question-tool.md) | Desktop Question tool |
 | [desktop-text-selection](./desktop-text-selection.md) | Desktop text-selection scopes |
 | [desktop-user-config-editing](./desktop-user-config-editing.md) | Desktop JSONC user-config editing |
-| [desktop-idx-panel](./desktop-idx-panel.md) | Desktop IDX repository intelligence and task-scoped documentation audit |
+| [desktop-search-index-status](./desktop-search-index-status.md) | Desktop per-source local and semantic search-index status |
 | [desktop-sidebar-indicators](./desktop-sidebar-indicators.md) | Live semantic Activity Bar health and attention indicators |
 | [watch-all-desktop-assets](./watch-all-desktop-assets.md) | `watch:all` Desktop web-asset embedding and native rebuild invalidation |
 

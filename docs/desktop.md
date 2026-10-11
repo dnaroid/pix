@@ -38,8 +38,7 @@ The left Activity Bar exposes:
   review and safe repository tools;
 - **Registry** — private Git-backed skills/agents/project-state synchronization;
 - **Package Scripts** — project package scripts and interactive terminals;
-- **IDX** — repository index status, initialization, managed IDX installation,
-  typed code/knowledge queries and Spec Wiki maintenance;
+- **Search indexes** — local and semantic search-store status by source;
 - **Settings** — Desktop-specific model, voice, editor and Source Control
   preferences.
 
@@ -54,23 +53,15 @@ The first-run dialog verifies the bundled runtime and can optionally:
 - import supported OpenCode credentials without overwriting existing Pi
   credentials by default;
 - import a static Codex `OPENAI_API_KEY` when Pi has no OpenAI credential;
-- install managed `indexer-cli` into Pix's private tools directory.
+- configure optional native repository semantic search.
 
 ChatGPT/Codex OAuth refresh tokens are deliberately not copied between auth
 stores.
 
-IDX installation is separate from project indexing. Installing the CLI never
-creates `.indexer-cli` for a project automatically; initialize an individual
-project from the IDX panel when needed.
-
-New-project initialization defaults to OpenRouter and requires
-`OPENROUTER_API_KEY` (environment or `~/.config/idx/.env`), not Ollama. Code and
-document chunks and search queries leave the machine; the index itself stays
-local. Existing project providers are preserved unless explicitly overridden.
-For local Ollama initialization use `idx init --embedding local` in the CLI;
-an unchecked OpenRouter override in the panel is not a local-mode selector.
-See [IDX embedding providers](configuration.md#idx-embedding-providers) for
-models, setup and safe repair prerequisites.
+Code and Knowledge use native local search. Optional semantic retrieval requires
+explicit project consent/configuration in `.pi/search/semantic.json`; eligible
+chunks and queries may be sent externally using `OPENROUTER_API_KEY`. Existing
+IDX directories/configuration remain untouched and are not consulted.
 
 ## Project initialization states
 
@@ -83,11 +74,8 @@ panels:
 - Registry shows **Initialize project Registry** when `.pi` is absent. It
   initializes the project-owned SQLite task/plans/attachment scaffold without
   importing, reading or removing old JSONC task files.
-- IDX shows **Install IDX** when neither a system/login-shell `idx` nor Pix's
-  managed copy is available. After installation the panel refreshes
-  automatically.
-- When IDX exists but the project has not been indexed, **Initialize** creates
-  the project-local index explicitly.
+- Search indexes reports local/semantic store state without initializing or
+  repairing indexes.
 
 ## Configuration
 

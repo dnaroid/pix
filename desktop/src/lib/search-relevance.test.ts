@@ -102,7 +102,7 @@ describe("local search relevance", () => {
     expect(ranked.findIndex(hit => hit.id === "settings:auto-by-default")).toBeGreaterThan(1);
     expect(ranked.findIndex(hit => hit.kind === "commits")).toBeGreaterThan(1);
   });
-  it("uses the returned IDX body to rank an otherwise opaque matching file", () => {
+  it("uses returned native search content to rank an otherwise opaque matching file", () => {
     const matching: SearchHit = { ...file, id: "code:src/feature.ts:1", title: "src/feature.ts", score: 0.1, content: "Implement autocomplete requests and accept inline completions" };
     const unrelated: SearchHit = { ...file, id: "code:src/unrelated.ts:1", title: "src/unrelated.ts", score: 0.9 };
     expect(rankSearchHits([unrelated, matching], "autocomplete", [], false)[0]?.id).toBe(matching.id);

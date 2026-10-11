@@ -109,6 +109,7 @@
     "@mariozechner/clipboard": "^0.3.9",
     "@xterm/headless": "^6.0.0",
     "grok-mermaid": "0.2.3",
+    "ignore": "7.0.8",
     "jsonc-parser": "3.3.1",
     "katex": "0.16.47",
     "tar": "^7.5.22",

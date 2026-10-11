@@ -1,6 +1,8 @@
 /** Desktop-only search: authored settings metadata and local session titles. */
 export const SEARCH_QUERY_METHOD = "pix/search/query";
 export const SEARCH_CONFIG_METHOD = "pix/search/config";
+export const SEARCH_SYNC_METHOD = "pix/search/sync";
+export const SEARCH_INDEX_METHOD = "pix/search/index";
 export const SEARCH_COMMITS_METHOD = "pix/search/commits";
 export const SEARCH_INTENT_METHOD = "pix/search/intent";
 export const SEARCH_TASKS_METHOD = "pix/search/tasks";
@@ -14,6 +16,7 @@ export interface SearchIntentResponse {
   readonly fallback: boolean;
 }
 export const SEARCH_EMBEDDING_MODEL = "perplexity/pplx-embed-v1-0.6b";
+export const SEARCH_CACHE_REBUILD_REQUIRED = "Incompatible embedding cache; explicit rebuild required. Local search remains available";
 
 export interface CommitSearchRequest {
   readonly cwd: string;
@@ -63,13 +66,23 @@ export interface SearchQueryRequest {
 }
 export interface SearchConfigRequest {
   readonly cwd: string;
-  readonly enabled?: boolean;
-  /** Independent opt-in to send explicit session names (not first-message fallbacks) to OpenRouter. */
-  readonly sessionTitlesEnabled?: boolean;
-  /** Independent opt-in before title/description of project tasks can be uploaded. */
-  readonly tasksSemanticEnabled?: boolean;
-  /** Write-only; goes to the existing shared OpenRouter credential store. */
-  readonly apiKey?: string;
+}
+export interface SearchSyncRequest extends SearchConfigRequest {
+  readonly settings: readonly SearchSetting[];
+}
+export type SearchIndexSource = "settings" | "sessions" | "tasks" | "commits";
+export interface SearchIndexRequest {
+  readonly cwd: string;
+  readonly source: SearchIndexSource;
+  /** Required for settings, forbidden for every other source. Metadata only. */
+  readonly settings?: readonly SearchSetting[];
+}
+export interface SearchIndexResponse {
+  readonly source: SearchIndexSource;
+  readonly complete: boolean;
+  readonly indexed?: number;
+  readonly total?: number;
+  readonly message?: string;
 }
 export interface SearchStatus {
   readonly enabled: boolean;
@@ -77,6 +90,8 @@ export interface SearchStatus {
   readonly tasksSemanticEnabled?: boolean;
   readonly keyAvailable: boolean;
   readonly indexing: boolean;
+  readonly indexingSources?: { readonly settings: boolean; readonly tasks: boolean; readonly sessions: boolean };
+  readonly sourceErrors?: { readonly settings?: string; readonly tasks?: string; readonly sessions?: string };
   readonly error?: string;
   readonly warning?: string;
 }

@@ -6,7 +6,8 @@ import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
 import { DesktopSearchService } from "../src/search/service.js";
 import { SearchIndexStore, SearchIndexBusyError } from "../src/search/index-store.js";
-import { SearchPreferences, sharedSearchAuth, type SearchAuth } from "../src/search/config.js";
+import { sharedSearchAuth, type SearchAuth } from "../src/search/config.js";
+import { FixtureSearchPreferences as SearchPreferences } from "./central-semantics-fixture.js";
 import { SEARCH_EMBEDDING_MODEL, type SearchQueryRequest } from "../src/search/contract.js";
 import { decodeEmbeddings, embedOpenRouter, EMBEDDING_DIMENSIONS, EMBEDDING_ENDPOINT, type Embedder } from "../src/search/embeddings.js";
 import { hashText, settingsDocuments } from "../src/search/documents.js";
@@ -29,11 +30,11 @@ function rows(cwd: string, table: "documents" | "vectors" | "metadata" | "sqlite
 }
 const setting = { id: "theme", section: "appearance", label: "Theme", description: "Color scheme", synonyms: ["dark"] };
 async function fixture(t: TestContext) {
-  const artifacts = resolve(".pi/artifacts/session-title-search/fixtures");
+  const artifacts = resolve(".pi/artifacts/central-semantics-acp/session-fixtures");
   await mkdir(artifacts, { recursive: true });
   const cwd = await mkdtemp(join(artifacts, "run-"));
   const path = join(cwd, "session.jsonl");
-  const preferences = new SearchPreferences(join(cwd, "desktop.jsonc"));
+  const preferences = new SearchPreferences(join(cwd, "semantic-search.json"));
   const record: SessionMapRecord = { sessionId: "s1", piSessionPath: path, piSessionId: "pi1", cwd, title: "Модель для эмбеддинга", updatedAt: new Date().toISOString() };
   let records = [record];
   let key: string | undefined = "mock-only";
@@ -75,7 +76,7 @@ test("embedding decoder accepts only the pinned routing ID and its exact provide
 });
 
 test("session queries search only Unicode titles once per session, never body files or paid providers", async t => {
-  const f = await fixture(t); await f.preferences.setEnabled(true);
+  const f = await fixture(t); await f.preferences.configure();
   const body = "{malformed JSONL but private bodyOnly data}";
   await writeFile(f.path, body);
   f.setRecords([f.record, f.record, { ...f.record, sessionId: "foreign", cwd: join(f.cwd, "other") },
@@ -170,7 +171,9 @@ test("legacy migration clears only message documents/vectors/decisions, preserve
   db.prepare("INSERT INTO vectors VALUES (?,?)").run("body-hash", bytes);
   db.prepare("INSERT INTO filter_decisions VALUES (?,?)").run("body-hash", "KEEP"); db.close();
   await writeFile(f.path, "unchanged session contents");
-  const s = f.make(); await s.config({ cwd: f.cwd, enabled: false });
+  const s = f.make(); await s.config({ cwd: f.cwd });
+  assert.equal(rows(f.cwd, "metadata").find(row => row.key === "schema")?.value, "1", "status must not migrate");
+  await s.sync({ cwd: f.cwd, settings: [setting] });
   assert.deepEqual(rows(f.cwd, "documents").map(row => row.id), ["settings:theme"]);
   assert.deepEqual(rows(f.cwd, "vectors").map(row => row.hash), [hash]);
   assert.equal(rows(f.cwd, "sqlite_master").some(row => row.name === "filter_decisions"), false);
@@ -210,11 +213,14 @@ test("busy index does not prevent local titles and reports a controlled warning"
     await assert.rejects(store.write(f.cwd, signal(), async () => {}), SearchIndexBusyError);
     const result = await s.query(f.request("модель"));
     assert.equal(result.results.length, 1); assert.match(result.status.error!, /index busy/);
-    assert.match((await s.config({ cwd: f.cwd, enabled: false })).error!, /index busy/, "consent changes cannot hide pending migration");
+    assert.match((await s.config({ cwd: f.cwd })).error!, /index busy/, "status cannot hide pending migration");
   } finally { db.exec("ROLLBACK"); db.close(); }
   const attempts = writes.mock.callCount();
+  assert.match((await s.config({ cwd: f.cwd })).error!, /index busy/);
+  assert.equal(writes.mock.callCount(), attempts, "status polling never retries writes");
+  await s.sync({ cwd: f.cwd, settings: [] });
   assert.equal((await s.config({ cwd: f.cwd })).error, undefined);
-  assert.equal(writes.mock.callCount(), attempts + 1, "status polling retries local migration after contention");
+  assert.equal(writes.mock.callCount(), attempts + 1, "explicit sync retries local migration after contention");
   await s.config({ cwd: f.cwd });
   assert.equal(writes.mock.callCount(), attempts + 1, "successful migration is not rerun on every poll");
   assert.deepEqual(f.calls, [], "migration retries never call providers");
@@ -231,8 +237,8 @@ test("offline settings use authored metadata, not values; settings-only queries 
   assert.throws(() => parseSearchConfigRequest({ cwd: f.cwd, messageFilterEnabled: true }));
 });
 
-test("settings embeddings persist/reuse across restart and never embed session titles/bodies", async t => {
-  const f = await fixture(t); await f.preferences.setEnabled(true);
+test("settings embeddings persist/reuse across restart and never embed fallback session titles/bodies", async t => {
+  const f = await fixture(t); await f.preferences.configure();
   const request = f.request("", { types: ["settings", "sessions"], settings: [setting] });
   const first = f.make(); await first.query(request); await f.idle(first);
   assert.equal(rows(f.cwd, "vectors").length, 1); await first.dispose();
@@ -247,7 +253,7 @@ test("settings embeddings persist/reuse across restart and never embed session t
   assert.equal(f.calls.length, before, "sessions-only query remains local with populated settings cache");
 });
 
-test("separate session-title consent indexes named titles, not fallback prompts or history", async t => {
+test("central configuration indexes named titles, not fallback prompts or history", async t => {
   const f = await fixture(t);
   const privateMessage = "PRIVATE-FIRST-MESSAGE-NOT-A-TITLE";
   await writeFile(f.path, `USER: ${privateMessage}\nPRIVATE-HISTORY-TEXT\n`);
@@ -260,12 +266,12 @@ test("separate session-title consent indexes named titles, not fallback prompts 
   const before = await s.config({ cwd: f.cwd });
   assert.equal(before.sessionTitlesEnabled, false);
   await s.query(f.request("garden"));
-  assert.deepEqual(f.calls, [], "session titles are never uploaded without separate consent");
-  assert.deepEqual(rows(f.cwd, "pix_session_titles").map(row => row.session_id), ["s1"]);
+  assert.deepEqual(f.calls, [], "session titles are never uploaded without central configuration");
+  assert.deepEqual(rows(f.cwd, "pix_session_titles"), []);
   assert.deepEqual(rows(f.cwd, "pix_session_vectors"), []);
   assert.deepEqual(rows(f.cwd, "vectors"), []);
 
-  await s.config({ cwd: f.cwd, sessionTitlesEnabled: true });
+  await f.preferences.configure(); await s.config({ cwd: f.cwd });
   await f.idle(s);
   assert.deepEqual(f.calls, [], "consent alone does not upload an earlier title snapshot");
   await s.query(f.request(""));
@@ -280,7 +286,7 @@ test("separate session-title consent indexes named titles, not fallback prompts 
   await reopened.query(f.request(""));
   await f.idle(reopened);
   assert.equal(f.calls.length, 1, "the durable vector must be reused after restart");
-  await reopened.config({ cwd: f.cwd, sessionTitlesEnabled: false });
+  await f.preferences.configure(false); await reopened.config({ cwd: f.cwd });
   const calls = f.calls.length;
   await reopened.query(f.request("garden"));
   assert.equal(f.calls.length, calls, "revocation keeps the lexical search local");
@@ -290,7 +296,7 @@ test("separate session-title consent indexes named titles, not fallback prompts 
 test("session-title embeddings add non-lexical results without affecting settings or commits", async t => {
   const f = await fixture(t);
   f.setRecords([{ ...f.record, title: "Orchard maintenance", namedTitle: "Orchard maintenance" }]);
-  await f.preferences.setSessionTitlesEnabled(true);
+  await f.preferences.configure();
   const s = f.make();
   await s.query(f.request(""));
   await f.idle(s);
@@ -306,7 +312,7 @@ test("session-title embeddings add non-lexical results without affecting setting
 
 test("session title rename, delete, and duplicate names reconcile only session tables", async t => {
   const f = await fixture(t);
-  await f.preferences.setSessionTitlesEnabled(true);
+  await f.preferences.configure();
   f.setRecords([
     { ...f.record, title: "Historic overview", namedTitle: "Historic overview" },
     { ...f.record, sessionId: "s2", title: "Historic overview", namedTitle: "Historic overview" },
@@ -331,24 +337,24 @@ test("session title rename, delete, and duplicate names reconcile only session t
   assert.deepEqual(rows(f.cwd, "pix_session_vectors"), []);
 });
 
-test("settings consent never grants session-title embedding consent", async t => {
+test("one central configuration enables settings and explicit session titles together", async t => {
   const f = await fixture(t);
   f.setRecords([{ ...f.record, title: "Private stored name", namedTitle: "Private stored name" }]);
-  await f.preferences.setEnabled(true);
+  await f.preferences.configure();
   const s = f.make();
   const request = f.request("", { types: ["settings", "sessions"], settings: [setting] });
   await s.query(request);
   await f.idle(s);
   assert.equal(rows(f.cwd, "vectors").length, 1);
-  assert.equal(rows(f.cwd, "pix_session_vectors").length, 0);
-  assert.equal(f.calls.length, 1);
-  assert.doesNotMatch(JSON.stringify(f.calls), /Private stored name/);
+  assert.equal(rows(f.cwd, "pix_session_vectors").length, 1);
+  assert.equal(f.calls.length, 2);
+  assert.match(JSON.stringify(f.calls), /Private stored name/);
 });
 
 test("revoking session-title consent cancels an uncooperative paid batch before persistence", async t => {
   const f = await fixture(t);
   f.setRecords([{ ...f.record, title: "Named session", namedTitle: "Named session" }]);
-  await f.preferences.setSessionTitlesEnabled(true);
+  await f.preferences.configure();
   const started = gate<void>(), release = gate<void>();
   const s = f.make({ embed: async inputs => {
     if (inputs[0] === "Named session") { started.resolve(); await release.promise; }
@@ -356,7 +362,7 @@ test("revoking session-title consent cancels an uncooperative paid batch before 
   } });
   await s.query(f.request(""));
   await started.promise;
-  await s.config({ cwd: f.cwd, sessionTitlesEnabled: false });
+  await f.preferences.configure(false); await s.config({ cwd: f.cwd });
   release.resolve();
   await f.idle(s);
   assert.deepEqual(rows(f.cwd, "pix_session_vectors"), []);
@@ -367,7 +373,7 @@ test("revoking session-title consent cancels an uncooperative paid batch before 
 test("title-change notification stops an in-flight old title from being indexed", async t => {
   const f = await fixture(t);
   f.setRecords([{ ...f.record, title: "Previous name", namedTitle: "Previous name" }]);
-  await f.preferences.setSessionTitlesEnabled(true);
+  await f.preferences.configure();
   const started = gate<void>(), release = gate<void>();
   const s = f.make({ embed: async inputs => {
     if (inputs[0] === "Previous name") { started.resolve(); await release.promise; }
@@ -396,12 +402,14 @@ test("session title indexing cannot replace commit data or incompatible paid vec
   db.close();
   f.setRecords([{ ...f.record, title: "Named project", namedTitle: "Named project" }]);
   const s = f.make();
-  await s.query(f.request(""));
+  await f.preferences.configure();
+  // Establish metadata without buying vectors, then corrupt its identity.
+  await store.write(f.cwd, signal(), async tx => { tx.sessionTitles(); }, await f.preferences.embedding());
   assert.equal(rows(f.cwd, "pix_commit_vectors").length, 1);
   const unsafe = new DatabaseSync(store.path(f.cwd));
   unsafe.prepare("UPDATE pix_session_meta SET value='unknown-model' WHERE key='model'").run();
   unsafe.close();
-  await s.config({ cwd: f.cwd, sessionTitlesEnabled: true });
+  await s.config({ cwd: f.cwd });
   await s.query(f.request(""));
   await f.idle(s);
   assert.deepEqual(rows(f.cwd, "pix_session_vectors"), [], "incompatible identity fails closed");
@@ -411,7 +419,7 @@ test("session title indexing cannot replace commit data or incompatible paid vec
 });
 
 for (const change of ["delete", "rename"] as const) test(`mixed search revalidates session titles after provider failure and ${change}`, async t => {
-  const f = await fixture(t); await f.preferences.setEnabled(true);
+  const f = await fixture(t); await f.preferences.configure();
   const started = gate<void>(), release = gate<void>();
   const s = f.make({ embed: async inputs => {
     if (inputs[0] === "модель") { started.resolve(); await release.promise; throw new Error("private provider failure"); }
@@ -429,7 +437,7 @@ for (const change of ["delete", "rename"] as const) test(`mixed search revalidat
 });
 
 for (const providerFails of [false, true]) test(`mixed search propagates controlled rediscovery failure after provider ${providerFails ? "failure" : "success"}`, async t => {
-  const f = await fixture(t); await f.preferences.setEnabled(true);
+  const f = await fixture(t); await f.preferences.configure();
   let discoveries = 0;
   const s = f.make({
     discover: async () => { if (++discoveries > 1) throw new Error("private discovery failure"); return [f.record]; },
@@ -445,7 +453,7 @@ for (const providerFails of [false, true]) test(`mixed search propagates control
 });
 
 test("OpenRouter short response model recovers settings indexing with canonical metadata", async t => {
-  const f = await fixture(t); await f.preferences.setEnabled(true); let model = "wrong-model";
+  const f = await fixture(t); await f.preferences.configure(); let model = "wrong-model";
   t.mock.method(globalThis, "fetch", async (url: unknown, init?: RequestInit) => {
     assert.equal(url, EMBEDDING_ENDPOINT);
     const body = JSON.parse(String(init?.body)); assert.equal(body.model, SEARCH_EMBEDDING_MODEL);
@@ -455,14 +463,14 @@ test("OpenRouter short response model recovers settings indexing with canonical 
   await s.query(request); await f.idle(s);
   assert.match((await s.config({ cwd: f.cwd })).error!, /Semantic settings search unavailable/);
   assert.equal(rows(f.cwd, "vectors").length, 0);
-  model = "pplx-embed-v1-0.6b"; await s.query(request); await f.idle(s);
+  model = "pplx-embed-v1-0.6b"; await s.sync({ cwd: f.cwd, settings: [setting] }); await f.idle(s);
   assert.equal(rows(f.cwd, "vectors").length, 1);
   assert.equal((await s.config({ cwd: f.cwd })).error, undefined);
   assert.equal(rows(f.cwd, "metadata").find(row => row.key === "model")?.value, SEARCH_EMBEDDING_MODEL);
 });
 
 test("two services serialize the same settings batch without duplicate embeddings", async t => {
-  const f = await fixture(t); await f.preferences.setEnabled(true);
+  const f = await fixture(t); await f.preferences.configure();
   const started = gate<void>(), release = gate<void>(); let calls = 0;
   const embed: Embedder = async inputs => { calls++; started.resolve(); await release.promise; return inputs.map(vector); };
   const a = f.make({ embed }), b = f.make({ embed });
@@ -474,11 +482,11 @@ test("two services serialize the same settings batch without duplicate embedding
 });
 
 test("consent revocation aborts an uncooperative settings provider without persisting stale vectors", async t => {
-  const f = await fixture(t); await f.preferences.setEnabled(true);
+  const f = await fixture(t); await f.preferences.configure();
   const started = gate<void>(), release = gate<number[][]>(); let aborted = false;
   const s = f.make({ embed: async (_input, _key, owned) => { owned.addEventListener("abort", () => { aborted = true; }, { once: true }); started.resolve(); return release.promise; } });
   await s.query(f.request("", { types: ["settings"], settings: [setting] })); await started.promise;
-  await s.config({ cwd: f.cwd, enabled: false }); await f.idle(s);
+  await f.preferences.configure(false); await s.config({ cwd: f.cwd }); await f.idle(s);
   assert.equal(aborted, true); release.resolve([vector()]); await delay(10);
   assert.equal(rows(f.cwd, "vectors").length, 0);
 });
@@ -508,7 +516,7 @@ test("workspace switch and dispose cancel in-flight discovery before stale title
 test("shared credential store preserves other providers and supports write-only key removal", async t => {
   const f = await fixture(t); const path = join(f.cwd, "auth.json");
   await writeFile(path, '{\n "anthropic": { "type": "api_key", "key": "other" }\n}');
-  const auth = sharedSearchAuth(f.cwd); await auth.save("sk-or-mock-only", signal());
+  const auth = sharedSearchAuth(f.cwd, {}); await auth.save("sk-or-mock-only", signal());
   const contents = await readFile(path, "utf8"); assert.match(contents, /anthropic/);
   assert.equal(await auth.available(signal()), true); assert.equal(await auth.key(signal()), "sk-or-mock-only");
   await auth.save("", signal()); assert.equal(await auth.available(signal()), false);

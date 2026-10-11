@@ -6,7 +6,7 @@ export type SidebarIndicatorActionId =
   | "git.fetch" | "git.changes" | "git.push" | "git.incoming" | "git.commit-push"
   | "registry.refresh" | "registry.review" | "registry.sync" | "registry.push-project-resources"
   | "scripts.inspect" | "scripts.running"
-  | "idx.inspect" | "idx.review" | "idx.maintenance" | "idx.running"
+  | "search.inspect"
   | "settings.inspect";
 
 export interface SidebarIndicatorAction {
@@ -42,11 +42,8 @@ const ACTIONS: Record<SidebarIndicatorActionId, string> = {
   "registry.push-project-resources": "Sync project changes to Registry",
   "scripts.inspect": "Inspect terminal / launch errors",
   "scripts.running": "Show running terminals",
-  "idx.inspect": "Inspect IDX error",
-  "idx.review": "AI review",
-  "idx.maintenance": "Open index maintenance…",
-  "idx.running": "Show maintenance output",
   "settings.inspect": "Inspect configuration errors",
+  "search.inspect": "Inspect search indexes",
 };
 
 const REASON_ACTIONS: Record<SidebarIndicatorReasonId, readonly SidebarIndicatorActionId[]> = {
@@ -71,13 +68,10 @@ const REASON_ACTIONS: Record<SidebarIndicatorReasonId, readonly SidebarIndicator
   "scripts.error": ["scripts.inspect"],
   "scripts.failed": ["scripts.inspect"],
   "scripts.running": ["scripts.running"],
-  "idx.error": ["idx.inspect"],
-  "idx.failed": ["idx.inspect"],
-  "idx.unavailable": ["idx.inspect"],
-  "idx.dirty": ["idx.review"],
-  "idx.stale": ["idx.maintenance"],
-  "idx.running": ["idx.running"],
   "settings.error": ["settings.inspect"],
+  "search.error": ["search.inspect"],
+  "search.indexing": ["search.inspect"],
+  "search.pending": ["search.inspect"],
 };
 
 /** No generic section commands: the current reasons alone determine the menu. */

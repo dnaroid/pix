@@ -11,22 +11,10 @@ import { buildPromptPayload } from "./prompt-payload";
 import { materializeComposerTaskAttachments } from "./attachment-io";
 import { parseDesktopModelRef } from "./desktop-helpers";
 
-const KNOWLEDGE_REFRESH_PROMPT = [
-  "1. Restore the entire project knowledge base to verified clean state, not just Audit paths or one task's audit. Check idx knowledge dirty before review; dirty receipts alone do not prove documentation drift.",
-  "2. Use idx context / idx search to locate sources, then review monitored active specs against every declared Implementation/Tests dependency, including unchanged specs. Repair only proven documentation drift; escalate product decisions, not product code/tests/configuration changes. For uncovered behavior use .indexer-cli/spec-template.md; ask before setup if missing. Do not assume legacy behavior is supported without current requirements.",
-  "3. Perform all work yourself in this session: source review, documentation repairs, command checks, task audit and final acknowledgment. Do not invoke subagents or spawn/delegate to any agents, including knowledge-auditor, verify or research, even if general workflow instructions require delegation. This service-specific rule prevents concurrent knowledge-base updates and lock conflicts. Run knowledge-base operations sequentially, never in parallel; track dependency coverage, findings and gaps yourself.",
-  "4. Store disposable reports/logs in unique directories under the target project's .pi/artifacts/, never root artifacts/ or .artifacts/; retain harness evidence in .pi/subagents/. After documentation changes run idx audit <changed-paths...> for task-changed paths only and check relationships against sources; indexing/audit is not proof of review.",
-  "5. Run idx knowledge acknowledge <spec-paths...> yourself only for explicit specs fully reviewed against stable current dependencies with no unresolved drift; acknowledge accurate unchanged specs too. Never acknowledge unreviewed/incomplete/unstable work to clear dirtiness. Concurrent spec/dependency changes invalidate review: re-review stable sources, do not overwrite others' edits or assume unexplained dirtiness is unrelated.",
-  "6. Allow at most two review passes total: initial plus one corrective pass only for identified, safe, unblocked gaps. Run idx knowledge dirty after each pass; stop on verified no. Do not poll, repeat unchanged failed commands, launch replacement sessions or delegate cleanup loops to bypass the limit.",
-  "7. Escalate immediately and stop for unstable concurrent edits, missing sources, review-blocking failed/unsupported commands or product decisions; also stop if no safe corrective pass exists or dirty remains yes/unknown at the limit. Defer the global cleanup todo, end the turn, and resume only on explicit user instruction; no scheduled retries or waiting for agents.",
-  "8. Report global cleanup passed only on a final complete exit-0 idx knowledge dirty result of no; only then complete its todo. Otherwise report blocked, dirty yes/unknown (unknown for failed/incomplete checks), concrete blockers or explicitly unclassified dirtiness, reviewed/acknowledged paths, coverage gaps, command errors/exit codes and next user action. Report task-scoped audit success separately; it cannot override blocked global cleanup.",
-].join("\n\n");
-
 type ProjectActionsOptions = {
   client: () => AcpClient | null;
   workspace: () => string;
   canUseSession: () => boolean;
-  knowledgeReviewModelRef: () => Promise<string | undefined>;
   tasksSaving: () => boolean;
   taskLoadFailed: () => boolean;
   taskDocument: () => ProjectTaskDocument;
@@ -122,78 +110,6 @@ export function createProjectActions(options: ProjectActionsOptions) {
     ) {
       options.setPromptText("");
       options.invalidateAttachmentDraft();
-    }
-  }
-
-  async function refreshKnowledgeBase(): Promise<void> {
-    const requestClient = options.client();
-    if (!requestClient || !options.canUseSession()) return;
-    const requestWorkspace = options.workspace();
-    options.closeProjectSelector();
-    options.closeSessionSelector();
-    options.setOperationRunning(true);
-    options.setErrorMessage(null);
-    let createdSessionId: string | undefined;
-    let activated = false;
-    try {
-      const configuredModel = (await options.knowledgeReviewModelRef())?.trim();
-      if (requestClient !== options.client() || requestWorkspace !== options.workspace()) return;
-      const parsed = configuredModel ? parseDesktopModelRef(configuredModel) : undefined;
-      if (configuredModel && !parsed) {
-        throw new Error("Knowledge review model must use provider/model[:thinking] format.");
-      }
-      const response = parsed
-        ? await requestClient.newSession(requestWorkspace, {
-            modelRef: parsed.modelRef,
-            ...(parsed.thinking ? { thinkingLevel: parsed.thinking } : {}),
-          })
-        : await requestClient.newSession(requestWorkspace);
-      createdSessionId = response.sessionId;
-      if (requestClient !== options.client() || requestWorkspace !== options.workspace()) {
-        await requestClient.closeSession(response.sessionId).catch(() => undefined);
-        options.forgetRuntime(response.sessionId);
-        return;
-      }
-      await options.ensureRuntime(requestClient, response.sessionId, requestWorkspace);
-      if (requestClient !== options.client() || requestWorkspace !== options.workspace()) {
-        await requestClient.closeSession(response.sessionId).catch(() => undefined);
-        options.forgetRuntime(response.sessionId);
-        return;
-      }
-      if (!options.runtimeReady(response.sessionId)) {
-        await requestClient.closeSession(response.sessionId).catch(() => undefined);
-        options.forgetRuntime(response.sessionId);
-        options.setErrorMessage("Could not start a new session for updating the knowledge base.");
-        return;
-      }
-
-      options.activateSession(response.sessionId, requestWorkspace, true);
-      activated = true;
-      options.setOperationRunning(false);
-      const transcriptMessageId = options.appendUserMessage(
-        response.sessionId,
-        KNOWLEDGE_REFRESH_PROMPT,
-        [],
-      );
-      await options.scrollToLatest();
-      await options.runPrompt(
-        requestClient,
-        response.sessionId,
-        [{ type: "text", text: KNOWLEDGE_REFRESH_PROMPT }],
-        [],
-        transcriptMessageId,
-      );
-      void options.refreshSessions();
-    } catch (error) {
-      if (createdSessionId && !activated) {
-        await requestClient.closeSession(createdSessionId).catch(() => undefined);
-        options.forgetRuntime(createdSessionId);
-      }
-      if (requestClient === options.client() && requestWorkspace === options.workspace()) options.reportError(error);
-    } finally {
-      if (requestClient === options.client() && requestWorkspace === options.workspace()) {
-        options.setOperationRunning(false);
-      }
     }
   }
 
@@ -302,7 +218,6 @@ export function createProjectActions(options: ProjectActionsOptions) {
   return {
     get actionId() { return actionId; },
     createTaskFromComposer,
-    refreshKnowledgeBase,
     runTask,
     openTaskSession,
     reset,

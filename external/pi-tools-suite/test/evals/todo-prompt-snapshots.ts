@@ -42,7 +42,7 @@ export function createTodoPromptSnapshots(packageRoot: string, outputDir: string
 	const snapshots = path.join(outputDir, "snapshots");
 	if (fs.existsSync(snapshots)) throw new Error(`Snapshots already exist: ${snapshots}`);
 	const strengthened = path.join(snapshots, "strengthened");
-	const excluded = new Set(["node_modules", "test", ".pi", ".git", ".indexer-cli"]);
+	const excluded = new Set(["node_modules", "test", ".pi", ".git"]);
 	fs.cpSync(packageRoot, strengthened, {
 		recursive: true,
 		filter: (source) => source !== outputDir && !path.relative(packageRoot, source).split(path.sep).some((part) => excluded.has(part)),

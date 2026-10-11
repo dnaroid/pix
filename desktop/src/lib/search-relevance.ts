@@ -78,7 +78,7 @@ export function rankSearchHits(
     const metadataWords = matchTerms(normalized(metadata, partialQuery));
     if (hit.kind === "commits" && rawWords.length === 1 && /^[a-f0-9]{7,64}$/u.test(rawWords[0]!) && hit.hash.startsWith(rawWords[0]!)) metadataWords.push(words[0]!);
     const totalCoverage = coverage(words, [...title, ...metadataWords]);
-    // IDX exposes paths/ranges, not matching content. Do not reject body-only hits.
+    // Native search exposes paths/ranges independently of full source content.
     const opaque = hit.kind === "code" || hit.kind === "knowledge" || (hit.kind === "settings" && semanticSettings)
       || (hit.kind === "sessions" && (hit.boundaryMatch === true || hit.semantic === true))
       || (hit.kind === "tasks" && hit.semantic === true)

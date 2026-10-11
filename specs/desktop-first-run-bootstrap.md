@@ -17,7 +17,7 @@ Active implemented contract.
 
 ## Goal
 
-Make a packaged Pix Desktop usable on a clean computer without requiring a system Node.js/npm/Pi install, while offering explicit, non-destructive migration of compatible provider credentials and an optional IDX install.
+Make a packaged Pix Desktop usable on a clean computer without requiring a system Node.js/npm/Pi install, while offering explicit, non-destructive migration of compatible provider credentials.
 
 ## Runtime boundary
 
@@ -29,7 +29,7 @@ Make a packaged Pix Desktop usable on a clean computer without requiring a syste
 ## First-run behavior
 
 - Desktop shows the bootstrap dialog until the user presses **Continue**. Completion is stored in the Desktop webview profile as pix.desktop.bootstrap.v1.completed; normal launches after completion do not reopen it automatically.
-- The dialog reports bundled Pi/tools-suite readiness, the Pi agent directory and configured provider IDs, compatible OpenCode credential presence, Codex file-auth presence, and IDX availability. Inspection returns metadata only and never returns credential/token values.
+- The dialog reports bundled Pi/tools-suite readiness, the Pi agent directory and configured provider IDs, compatible OpenCode credential presence, and Codex file-auth presence. Inspection returns metadata only and never returns credential/token values.
 - Import/install actions are independent and optional. A failure stays in the dialog and does not mark setup complete.
 - A successful credential import reconnects Desktop ACP so newly available auth can be observed by a fresh runtime.
 
@@ -39,16 +39,6 @@ Make a packaged Pix Desktop usable on a clean computer without requiring a syste
 - **Codex API key:** when CODEX_HOME/auth.json (default ~/.codex/auth.json) contains a static OPENAI_API_KEY, first-run may copy it to Pi's openai credential only when Pi has no credential for that provider. Identical or existing Pi auth is preserved.
 - **Codex ChatGPT OAuth:** first-run may detect file-backed OAuth metadata but does not copy access/refresh tokens into Pi. Codex and Pi can refresh/rotate OAuth credentials independently, so duplicating the token record would create two mutable auth stores. Pi must authenticate that provider through its own supported auth flow until a shared-source bridge exists.
 - Bootstrap responses and UI messages may contain paths, provider IDs, import statuses, and versions, but never API keys, access tokens, or refresh tokens.
-
-## Optional managed IDX
-
-- IDX installation is user-triggered. First-run never initializes a project's .indexer-cli state; project initialization remains an explicit workspace action.
-- npm installation needs neither OpenRouter credentials nor Ollama and must not invoke `idx setup`, `init` or `doctor`. New-project initialization defaults to OpenRouter (external chunks/queries), while existing project configurations are preserved without an override; see [IDX embedding providers](../docs/configuration.md#idx-embedding-providers). Installation must not perform embedding prerequisite checks or switch a provider.
-- If idx is already resolvable from the Desktop/login-shell environment, Desktop keeps using that system installation and does not install a managed copy.
-- Otherwise **Install** runs the bundled Node plus bundled npm to install indexer-cli@latest under ~/.pi/pix-desktop-tools. It does not use npm install -g, administrator privileges, or a system npm.
-- ACP/Pi child PATH includes the managed package bin directory. Native Desktop IDX commands resolve system idx first, then the managed indexer-cli package entry.
-- Native Desktop launches a managed IDX JavaScript entry with Pix's bundled Node rather than its env-node wrapper. Native addons installed by npm therefore use the same Node ABI that executes IDX.
-- Managed-package metadata is treated as untrusted input: Desktop rejects absolute or parent-traversing bin.idx paths.
 
 ## Related files
 
@@ -66,9 +56,9 @@ Make a packaged Pix Desktop usable on a clean computer without requiring a syste
 ## Verification
 
 - Release bootstrap tests use isolated HOME/agent/OpenCode/Codex directories, verify OAuth secrets are absent from bootstrap output, exercise Codex API-key import, and exercise the real tools-suite OpenCode importer with non-overwrite assertions.
-- Rust tests verify managed IDX entry resolution/path confinement plus bundled/development runtime resolution.
+- Rust tests verify bundled/development runtime resolution.
 - Desktop typecheck and Vitest cover the surrounding frontend contracts; the full Desktop Rust suite remains the native gate.
-- Release packaging/smoke must continue to validate actual native artifacts on each supported target because bundled npm/native IDX dependencies are target-specific.
+- Release packaging/smoke must continue to validate actual native artifacts on each supported target.
 
 ## Implementation
 

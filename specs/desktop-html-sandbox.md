@@ -23,9 +23,17 @@ overwriting a user's unfinished composer draft.
 - A closed sandbox fence can be interleaved with normal explanatory Markdown.
   The iframe keeps its DOM/Canvas while the rest of the assistant message
   streams, unless that sandbox's source actually changes.
-- A prototype is **never executed automatically** during replay, scroll or
-  streaming. The user presses **Run** first, and can Stop/Restart, resize or
-  inspect its source.
+- Messages containing an HTML sandbox are excluded from transcript
+  `content-visibility: auto` rendering skips so live iframe surfaces remain
+  painted across scroll boundaries. Ordinary messages retain the optimization.
+- A closed prototype starts automatically when its component mounts, including
+  history replay, and restarts when its source changes. Unchanged source keeps
+  its running state during adjacent streaming updates. Stop remains effective
+  until manual Run, a source change or remount; users can also Restart, resize
+  or inspect its source. Incomplete fences do not execute.
+- Autorun ownership compares the HTML string through a scalar derived value,
+  not the identity of its Markdown segment object. Replacing a segment wrapper
+  with equal HTML must not run effect cleanup, remove the iframe, or undo Stop.
 - The sandbox measures the actual page's content height using a guest-side
   `ResizeObserver` plus window/load events and sends `content-size` to its
   containing Desktop component. Short pages fit naturally, while tall pages
@@ -44,6 +52,40 @@ overwriting a user's unfinished composer draft.
   including when the system light/dark appearance changes. This does not
   transmit arbitrary user content or allow guest JS to read parent DOM.
 
+## Scroll-triggered iframe reload regression
+
+The reported symptom was iframe recreation and a white flash when scrolling
+the transcript. Excluding sandbox messages from `content-visibility: auto`
+alone did not resolve it; keep that rendering safeguard, but do not treat it
+as sufficient protection against executable-document restarts.
+
+The autorun effect previously read the source prop directly. That getter could
+depend on a reactive Markdown segment object: replacing the object invalidated
+the effect even when its HTML string was unchanged. Effect cleanup called
+`stop()`, clearing `running` and `srcdoc` and removing the iframe before startup
+created a new document.
+
+`desktop/src/lib/html-sandbox-autorun.svelte.ts` now inserts a scalar
+`$derived(source())` boundary before the effect. Equal HTML suppresses effect
+cleanup and startup despite wrapper replacement. Startup is untracked so runtime
+state does not become an autorun dependency. Changed HTML still cleans up and
+restarts; component destruction still stops the run and cancels pending work.
+Manual Stop remains effective across equal-HTML wrapper updates.
+
+The compiled client-runes regressions in
+`desktop/src/lib/html-sandbox-autorun.test.ts` failed before this boundary was
+added and passed afterward. They cover repeated equal-HTML wrapper replacement,
+changed HTML, manual Stop, unrelated runtime updates and destruction cleanup.
+The user subsequently confirmed that the fix resolved the scrolling symptom.
+This is user-observed confirmation, not an automated native UI QA pass: the QA
+attempts did not reach the prototype conversation.
+
+For a future native regression check, scroll a running prototype out of view
+and back repeatedly and confirm its document and live state survive without
+white restart flashes. Stop it and repeat; it must stay stopped. Change its HTML
+and confirm that the new document starts. This fix does not promise preservation
+across actual component destruction/remount or tab switching.
+
 ## Desktop agent capability discovery
 
 - Pix Desktop advertises the feature **on every agent turn**, not just when
@@ -57,7 +99,7 @@ overwriting a user's unfinished composer draft.
   deliverable. Static visual explanations prefer SVG; mentioning "in chat"
   alone is not an interactive-UI trigger.
 - Before emitting `pix-html`, the agent must check whether the full guide is
-  available in the current conversation context: call `pix_html_sandbox_guide`
+  available in the current conversation context: call `pix_html_guide`
   if absent; otherwise follow it without calling again, including for another
   block or an edit to an earlier prototype.
   Capability discussions, HTML explanations, source examples, static
@@ -65,7 +107,7 @@ overwriting a user's unfinished composer draft.
   The tool description repeats these boundaries for tool-inventory discovery.
   Unsupported capabilities require an explanation and an offered alternative,
   not a silent file substitution or a claim that the sandbox supports them.
-- A dedicated, read-only `pix_html_sandbox_guide` tool returns the complete
+- A dedicated, read-only `pix_html_guide` tool returns the complete
   fenced-code syntax, JavaScript form-submit bridge, responsive layout
   requirements, examples and sandbox restrictions **only on request**. The
   guide ships with Pix and can be used in an arbitrary workspace; it does not
@@ -135,7 +177,7 @@ session history; it is not a live hidden system prompt.
   async or other attributes. Unknown canonical `pix:` engine names and nonempty
   declarations fail visibly. Duplicate requests load once; both are allowed.
 - Vite creates inert, encoded script strings in separate lazy chunks. Engines
-  are never evaluated in the privileged host. Only Run loads the requested
+  are never evaluated in the privileged host. Starting a prototype loads the requested
   packaged chunk; plain prototypes load neither. Encoding/bundling happens at
   build time rather than synchronously on the UI thread. Engine bytes are not
   part of the 200k authored-source limit.
@@ -199,12 +241,14 @@ session history; it is not a live hidden system prompt.
   `desktop/package.json`, `desktop/package-lock.json`: pinned offline bundles.
 - `desktop/src/lib/html-sandbox-engines.ts`: fixed marker allowlist and lazy imports.
 - `desktop/src/lib/html-sandbox-run.ts`: pending-run cancellation/ownership.
+- `desktop/src/lib/html-sandbox-autorun.svelte.ts`: HTML-value-owned autorun,
+  with untracked startup and cleanup only on changed HTML or destruction.
 - `desktop/src/lib/html-sandbox.ts`: fence extraction, CSP document,
   encoded guest scripts, scrollbar styling, guest height reporting, bounded
   submission parsing and ACP formatting.
 - `desktop/src/lib/html-sandbox-layout.ts`: validated content-size packets,
   bounded auto-fit height calculation and prototype-only agent viewport hint.
-- `desktop/src/components/HtmlSandbox.svelte`: Run/Stop/Restart UI and
+- `desktop/src/components/HtmlSandbox.svelte`: Automatic startup and Run/Stop/Restart UI with
   scoped message listener, theme syncing, width monitoring and auto-fit.
 - `desktop/src/components/MarkdownText.svelte`:
   opt-in content segmentation; raw HTML never enters the ordinary
@@ -234,16 +278,21 @@ session history; it is not a live hidden system prompt.
 - `node --import tsx --test tests/html-sandbox-extension.test.ts`
 - `node --import tsx --test acp/test/config.test.ts acp/test/agent.test.ts`
 - `npm --prefix desktop test -- src/lib/html-sandbox-engines.test.ts src/lib/html-sandbox-run.test.ts`
+- `npm --prefix desktop test -- src/lib/html-sandbox-autorun.test.ts src/components/HtmlSandbox.test.ts`
 - Native engine regression: run the guide's Phaser and Three.js examples offline,
   verify animation/input, resize, Stop/Restart, and that host globals remain absent.
   Check both engines together, a plain prototype, and blocked remote requests.
 - macOS native regression: launch Pix Desktop, ask for a `pix-html` form
-  and a Canvas game, Run, submit, confirm the ACP reply and queue behavior.
+  and a Canvas game, confirm automatic startup, Stop/Run/Restart, submit, confirm the ACP reply and queue behavior.
   Resize the Sidebar/main window, expand the sandbox, check the themed thin
   scrollbar, verify a growing and shrinking page's automatic height, and
   verify network and Pix IPC are not available inside the guest iframe.
 
 ## Tests
+
+- `desktop/src/lib/html-sandbox-autorun.test.ts`: compiled client-runes
+  regression for equal-HTML wrapper updates, changed HTML, manual Stop,
+  untracked runtime state and destruction cleanup.
 
 - `desktop/src/lib/html-sandbox.test.ts`
 - `desktop/src/lib/html-sandbox-engines.test.ts`

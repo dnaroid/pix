@@ -32,7 +32,7 @@ afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 describe("sidebar indicator menu lifecycle", () => {
   it("focuses the first enabled item and clamps the popup to the viewport", async () => {
     const f = fixture();
-    f.controller.open(f.event, "idx");
+    f.controller.open(f.event, "git");
     await vi.waitFor(() => expect(elements[1].focus).toHaveBeenCalled());
     expect(f.controller.state.position).toEqual({ left: 336, top: 272 });
     f.controller.dispose();
@@ -41,7 +41,7 @@ describe("sidebar indicator menu lifecycle", () => {
   it("supports arrows, Home/End and typeahead while skipping disabled commands", async () => {
     vi.useFakeTimers();
     const f = fixture();
-    f.controller.open(f.event, "idx");
+    f.controller.open(f.event, "git");
     await Promise.resolve(); await Promise.resolve();
     f.key("ArrowUp");
     expect(elements[2].focus).toHaveBeenCalled();
@@ -58,7 +58,7 @@ describe("sidebar indicator menu lifecycle", () => {
 
   it.each(["Escape", "Tab"])("dismisses on %s and returns focus to the trigger", (key) => {
     const f = fixture();
-    f.controller.open(f.event, "idx");
+    f.controller.open(f.event, "git");
     f.key(key);
     expect(f.controller.state.tab).toBeNull();
     expect(f.trigger.focus).toHaveBeenCalled();
@@ -66,7 +66,7 @@ describe("sidebar indicator menu lifecycle", () => {
 
   it("does not steal focus after close/dispose before the opening tick", async () => {
     const f = fixture();
-    f.controller.open(f.event, "idx");
+    f.controller.open(f.event, "git");
     f.controller.dispose();
     await Promise.resolve(); await Promise.resolve();
     expect(elements.every((element) => element.focus.mock.calls.length === 0)).toBe(true);
@@ -75,16 +75,16 @@ describe("sidebar indicator menu lifecycle", () => {
   it("suppresses the native menu but opens no popup without reasons", () => {
     const f = fixture();
     f.items.splice(0);
-    f.controller.open(f.event, "idx");
+    f.controller.open(f.event, "git");
     expect(f.controller.state.tab).toBeNull();
     expect(f.event.preventDefault).toHaveBeenCalled();
   });
 
   it("dismisses only on an outside pointer", () => {
     const f = fixture();
-    f.controller.open(f.event, "idx");
+    f.controller.open(f.event, "git");
     f.controller.outside({ target: elements[1] } as unknown as PointerEvent);
-    expect(f.controller.state.tab).toBe("idx");
+    expect(f.controller.state.tab).toBe("git");
     f.controller.outside({ target: new Element() } as unknown as PointerEvent);
     expect(f.controller.state.tab).toBeNull();
   });

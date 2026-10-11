@@ -53,6 +53,17 @@ describe("pi-tools-suite config schema", () => {
 		assert.equal("contextGateway" in PiToolsSuiteConfigSchema.properties, false);
 	});
 
+	it("models global semantic configuration without enabling it by default", () => {
+		assert.equal(Value.Check(PiToolsSuiteConfigSchema, { search: { embedding: {
+			embeddingProvider: "ollama", embeddingModel: "fixture/model", vectorSize: 3,
+		} } }), true);
+		assert.equal(Value.Check(PiToolsSuiteConfigSchema, { search: { embedding: {
+			embeddingProvider: "legacy", embeddingModel: "fixture/model", vectorSize: 3,
+		} } }), false);
+		const template = parse(DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC) as Record<string, unknown>;
+		assert.equal("search" in template, false);
+	});
+
 	it("accepts the shipped full default template", () => {
 		const template = parse(DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC) as Record<string, unknown>;
 		assert.equal(Value.Check(PiToolsSuiteConfigSchema, template), true);

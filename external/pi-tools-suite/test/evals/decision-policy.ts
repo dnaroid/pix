@@ -1,17 +1,14 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { REPO_DISCOVERY_TOOLS } from "../../src/tool-descriptions.js";
+import { REPOSITORY_DISCOVERY_GUIDELINES } from "../../src/tool-descriptions.js";
 import type { EvalCase, EvalRunResult } from "./harness/types.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE = path.join(HERE, "fixtures", "decision-policy");
 const EXISTING_RECORD = "docs/decisions/0002-local-snapshots.md";
 const BASELINE_DECISIONS = decisionFiles(FIXTURE);
-const parentPolicy = ["repo_context", "repo_audit"].map((name) => {
-	const tool = REPO_DISCOVERY_TOOLS.find((item) => item.name === name)!;
-	return tool.promptGuidelines[2];
-}).join("\n\n");
+const parentPolicy = REPOSITORY_DISCOVERY_GUIDELINES.join("\n\n");
 // Read the shipped role, not a frozen copy or an answer embedded in the user prompt.
 const auditorPolicy = fs.readFileSync(path.join(HERE, "../../src/async-subagents/agents/knowledge-auditor.md"), "utf8")
 	.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "");

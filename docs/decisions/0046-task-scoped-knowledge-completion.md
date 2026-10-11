@@ -1,13 +1,14 @@
 # 0046 — Task-scoped knowledge audit completion
 
-- Status: accepted
+- Status: superseded by [0067](0067-final-documentation-maintenance.md)
 - Recorded / decided: 2026-10-05
 - Owner / approval evidence: user approved the task/global separation in this
   conversation with “да, сделай это”.
 - Governing specs: [repository knowledge workflow](../../specs/repo-knowledge-agent-workflow.md),
   [todo finalization reminder](../../specs/todo-repo-knowledge-finalization.md)
-- Replaces / replaced by: none; clarifies completion without replacing the
-  decision-history policy in [0002](0002-agent-owned-decision-history.md).
+- Replaced by: [0067 — Final documentation maintenance without knowledge-state gates](0067-final-documentation-maintenance.md).
+  The historical rationale below is retained; the decision-history policy in
+  [0002](0002-agent-owned-decision-history.md) is unchanged.
 
 ## Context
 

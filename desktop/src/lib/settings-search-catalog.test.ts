@@ -5,27 +5,19 @@ import searchPreferencesSource from "../components/settings/SettingsSearchPrefer
 import { SETTINGS_SEARCH_CATALOG, settingsFieldId } from "./settings-search-catalog";
 
 describe("authored settings search catalogue", () => {
-  it("shows the shared embedding model and provider independently of connection or consent", () => {
-    const modelRow = searchPreferencesSource.indexOf("Embedding model:");
-    expect(modelRow).toBeGreaterThan(-1);
-    expect(searchPreferencesSource).toContain("{SEARCH_EMBEDDING_MODEL}");
-    expect(searchPreferencesSource).toContain("SEARCH_EMBEDDING_MODEL, type SearchConfigRequest, type SearchStatus");
-    expect(searchPreferencesSource).toContain("Provider: ");
-    expect(searchPreferencesSource).toContain("OpenRouter</dd>");
-    expect(modelRow).toBeLessThan(searchPreferencesSource.indexOf("{#if client}"));
+  it("keeps semantic provider configuration native and ACP-independent", () => {
+    expect(searchPreferencesSource).toContain("managed under Tools Suite → Search");
+    expect(searchPreferencesSource).toContain("every source and project");
+    expect(searchPreferencesSource).not.toContain("client");
   });
 
-  it("separates semantic-index consent from explicitly disclosed RAG evidence transfer", () => {
-    expect(searchPreferencesSource).toContain("Settings semantic search sends only authored settings labels/descriptions");
-    expect(searchPreferencesSource).toContain("Session titles and task descriptions each require their own separate opt-in");
-    expect(searchPreferencesSource).toContain("tasksSemanticEnabled");
-    expect(searchPreferencesSource).toContain("Enable semantic project-task search");
-    expect(searchPreferencesSource).toContain("Semantic indexing never uploads conversation history or attachments");
-    expect(searchPreferencesSource).toContain("session excerpts) and the question are sent to the selected RAG model provider");
+  it("removes independent semantic toggles but discloses separate RAG transfer", () => {
+    expect(searchPreferencesSource).toContain("RAG is separate");
+    expect(searchPreferencesSource).not.toContain("tasksSemanticEnabled");
+    expect(searchPreferencesSource).not.toContain("sessionTitlesEnabled");
+    expect(searchPreferencesSource).toContain("bounded retrieved source excerpts and the question are sent to the selected RAG model provider");
     expect(desktopEditorSource).toContain('label="RAG answer model"');
     expect(desktopEditorSource).toContain('label="RAG thinking effort"');
-    expect(searchPreferencesSource).toContain("sessionTitlesEnabled");
-    expect(searchPreferencesSource).toContain("Never sends first-message fallback titles");
     expect(searchPreferencesSource).not.toContain("SEARCH_FILTER_MODEL");
     expect(searchPreferencesSource).not.toContain("messageFilterEnabled");
     expect(SETTINGS_SEARCH_CATALOG.find(entry => entry.id === "message-noise-filter")).toBeUndefined();
@@ -41,8 +33,7 @@ describe("authored settings search catalogue", () => {
       expect(Array.isArray(entry.synonyms)).toBe(true);
     }
     expect(SETTINGS_SEARCH_CATALOG.some((entry) => entry.section === "desktop-assistant" && entry.label === "Recent messages")).toBe(true);
-    expect(SETTINGS_SEARCH_CATALOG.find(entry => entry.id === "semantic-search")?.description).toContain("Separate opt-ins");
-    expect(SETTINGS_SEARCH_CATALOG.find(entry => entry.id === "semantic-search")?.description).toContain("First-message fallback titles");
+    expect(SETTINGS_SEARCH_CATALOG.find(entry => entry.id === "embedding-model")?.section).toBe("pi-tools-suite-search");
     expect(SETTINGS_SEARCH_CATALOG.some((entry) => entry.section === "pi-tools-suite-dcp" && entry.label === "Automatic compression")).toBe(true);
   });
 

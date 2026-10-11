@@ -70,6 +70,16 @@ An existing explicit whitelist does not automatically include the provider's
 in the picker's management mode or explicitly add those refs to the corresponding
 user config; migration itself preserves visibility preferences.
 
+### Built-in plugin isolation
+
+The shared launch settings for provider requests and the visible web-search tool
+explicitly disable the built-in `agents-md` and `plugin-authoring` plugins.
+Claude Code 2.1.296 reports the latter as `cc-plugin-plugin-authoring`; both its
+legacy alias and canonical settings key are disabled. Empty setting sources
+alone do not suppress these built-ins. Initialization still fails closed on any
+plugin, skill or slash command that loads; no customization allowlist is added.
+This does not change the user's Claude Code settings outside Pix requests.
+
 ### Timeout diagnostics
 
 Content-free request metrics and the doctor's last-request report record the

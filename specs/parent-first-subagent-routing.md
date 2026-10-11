@@ -18,6 +18,8 @@ This delta supersedes the old silent `defaultType` fallback at the spawn boundar
 
 ## Contract
 
+Decision rationale: [0069 — Parent-owned implementation](../docs/decisions/0069-parent-owned-implementation.md).
+
 Prompt policy composition and deduplication are governed by
 [assistant prompt composition](assistant-prompt-composition.md).
 
@@ -25,8 +27,7 @@ Prompt policy composition and deduplication are governed by
    clearly matching role, prefer a matching project specialist, and preserve a
    user-requested role. Omission is allowed for uncertainty or a user request for
    automatic routing. Before prompt/routing, parent-model gates and project
-   capability gates remove unavailable roles. `requiresIndexedProject: true`
-   requires `.indexer-cli/` at the resolved project root. Real UI QA requires
+   capability gates remove unavailable roles. Real UI QA requires
    the explicit built-in `ui-qa` role; there is no `browser-qa` alias.
    The parent catalog also names active project-local replacements of bundled
    roles. A same-named project role is the complete effective profile; the
@@ -55,10 +56,17 @@ Prompt policy composition and deduplication are governed by
    research answers a named uncertainty, independent hypothesis, or noisy
    evidence question. An explicit user request to delegate/parallelize/split work
    remains a delegation trigger after this minimal scoping pass.
-8. The parent writes code by default. `implement` delegation requires an
-   explicit user request or a substantial independent task that can run
-   alongside useful parent work; task size, isolation, lower cost, or worker
-   availability alone are not sufficient. It still starts only after the parent
+8. The parent writes code by default. Implementation delegation requires an
+   explicit user request, a concrete capability gap in the implementation itself,
+   or sufficiently large prescribed mechanical work with deterministic checks
+   and expected net savings. Task size, parallelism, isolation, token price, or
+   worker availability alone are not sufficient. Difficult architecture calls
+   for bounded read-only oracle advice first when needed, not automatic coding
+   handoff. Approved handoffs use `implement-core` or `mechanical`, or a matching
+   project specialist. Bundled `implement` and `delivery-review` are removed
+   without aliases; projects may still define either name explicitly. Readiness
+   evidence review fits `research`; the parent decides readiness. Delegation
+   still starts only after the parent
    has settled the cause, desired behavior, and acceptance criteria; broad
    speculative cross-layer edits are not the default. Planning,
    product/UX decisions, integration, and the final answer remain parent-owned.

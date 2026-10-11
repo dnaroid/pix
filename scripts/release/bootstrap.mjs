@@ -1,9 +1,8 @@
 // @ts-nocheck
-import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -12,8 +11,6 @@ const appRoot = existsSync(join(scriptDir, "app", ".pix-portable.json"))
   : resolve(scriptDir, "../..");
 const home = homedir();
 const agentDir = process.env.PI_CODING_AGENT_DIR?.trim() || join(home, ".pi", "agent");
-const toolsRoot = process.env.PIX_DESKTOP_TOOLS_DIR?.trim() || join(home, ".pi", "pix-desktop-tools");
-const idxPackageRoot = join(toolsRoot, "node_modules", "indexer-cli");
 
 async function readJson(path) {
   try {
@@ -40,29 +37,6 @@ function opencodePaths() {
 
 function codexAuthPath() {
   return join(process.env.CODEX_HOME?.trim() || join(home, ".codex"), "auth.json");
-}
-
-function safeBinEntry(packageRoot, pkg) {
-  const bin = typeof pkg?.bin === "string"
-    ? pkg.bin
-    : pkg?.bin && typeof pkg.bin === "object"
-      ? pkg.bin.idx
-      : undefined;
-  if (typeof bin !== "string" || !bin.trim() || isAbsolute(bin)) return undefined;
-  const entry = resolve(packageRoot, bin);
-  const rel = relative(packageRoot, entry);
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel)) ? entry : undefined;
-}
-
-async function managedIdx() {
-  const pkg = await readJson(join(idxPackageRoot, "package.json"));
-  const entryPath = safeBinEntry(idxPackageRoot, pkg);
-  return {
-    installed: Boolean(entryPath && existsSync(entryPath)),
-    version: typeof pkg?.version === "string" ? pkg.version : undefined,
-    entryPath,
-    toolsRoot,
-  };
 }
 
 async function inspect() {
@@ -106,7 +80,6 @@ async function inspect() {
       ),
       authMode: typeof codexAuth?.auth_mode === "string" ? codexAuth.auth_mode : undefined,
     },
-    idx: await managedIdx(),
   };
 }
 
@@ -166,68 +139,11 @@ async function importCodexApiKey() {
   return { status, sourcePath, targetProvider: "openai" };
 }
 
-async function installIdx() {
-  // npm installation needs neither OpenRouter credentials nor Ollama. Keep
-  // setup/init/doctor separate: they select providers and may transmit project data.
-  const existing = await managedIdx();
-  if (existing.installed) return { status: "already-installed", ...existing };
-  const configuredNpmCli = process.env.PIX_BUNDLED_NPM_CLI?.trim();
-  const siblingNpmCli = join(dirname(process.execPath), "npm", "bin", "npm-cli.js");
-  const npmCli = configuredNpmCli || (existsSync(siblingNpmCli) ? siblingNpmCli : undefined);
-  if (configuredNpmCli && !existsSync(configuredNpmCli)) {
-    throw new Error("Bundled npm is unavailable; reinstall the complete Pix Desktop release.");
-  }
-  const installArgs = [
-    "install",
-    "--prefix", toolsRoot,
-    "--no-audit",
-    "--no-fund",
-    "--omit=dev",
-    "indexer-cli@latest",
-  ];
-
-  await new Promise((resolvePromise, rejectPromise) => {
-    const child = npmCli
-      ? spawn(process.execPath, [npmCli, ...installArgs], {
-          stdio: ["ignore", "ignore", "pipe"],
-          env: { ...process.env, npm_config_update_notifier: "false" },
-        })
-      : spawn(process.platform === "win32" ? "npm.cmd" : "npm", installArgs, {
-      stdio: ["ignore", "ignore", "pipe"],
-      env: { ...process.env, npm_config_update_notifier: "false" },
-        });
-    let stderr = "";
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      rejectPromise(new Error("indexer-cli installation timed out"));
-    }, 10 * 60_000);
-    child.stderr.on("data", (chunk) => {
-      stderr = (stderr + chunk.toString("utf8")).slice(-8_000);
-    });
-    child.once("error", (error) => {
-      clearTimeout(timer);
-      rejectPromise(error);
-    });
-    child.once("close", (code) => {
-      clearTimeout(timer);
-      if (code === 0) resolvePromise();
-      else rejectPromise(new Error(stderr.trim() || "npm exited with code " + (code ?? "unknown")));
-    });
-  });
-
-  const installed = await managedIdx();
-  if (!installed.installed) {
-    throw new Error("indexer-cli installation completed but the idx entry point is missing");
-  }
-  return { status: "installed", ...installed };
-}
-
 export async function runBootstrapAction(action) {
   switch (action) {
     case "inspect": return await inspect();
     case "import-opencode": return await importOpenCode();
     case "import-codex-api-key": return await importCodexApiKey();
-    case "install-idx": return await installIdx();
     default: throw new Error("Unknown Pix Desktop bootstrap action: " + action);
   }
 }

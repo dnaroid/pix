@@ -3,6 +3,7 @@ import type { SessionSearchResult } from "../session/session-search.js";
 import type { AppRequestHistory } from "../session/request-history.js";
 import type { ActivePopupMenu, AppOptions, Entry, ModelMenuValue, PixMenuItem, PixMenuOptions, PopupMenuPlacement, SessionModel, ThinkingMenuValue } from "../types.js";
 import type { ToastNotifier } from "../../ui.js";
+import type { ReloadAgentCatalog } from "./reload-context-inventory.js";
 
 export type DirectPopupMenu = Exclude<ActivePopupMenu, "slash">;
 
@@ -10,7 +11,7 @@ export type CommandControllerHost = {
 	readonly options: AppOptions;
 	runtime(): AgentSessionRuntime | undefined;
 	inputScopeKey?(): string | undefined;
-	subagentTypes?(runtime: AgentSessionRuntime): readonly string[] | undefined;
+	subagentTypes?(runtime: AgentSessionRuntime): ReloadAgentCatalog | undefined;
 	awaitCurrentSessionExtensions(runtime?: AgentSessionRuntime): Promise<void>;
 	requestHistory(): AppRequestHistory;
 	getInput(): string;

@@ -2,7 +2,6 @@ import { mkdir, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay, setImmediate as yieldTask } from "node:timers/promises";
-import { SEARCH_EMBEDDING_MODEL } from "./contract.js";
 import { hashText, type SearchDocument } from "./documents.js";
 import { EMBEDDING_DIMENSIONS, validVector } from "./embeddings.js";
 import { canonicalSearchIndexPath } from "./canonical-index.js";
@@ -12,18 +11,20 @@ import { readSessionBoundaryState, reconcileSessionBoundaries, sessionBoundaryHi
 import type { SessionSearchHit } from "./contract.js";
 import { verifySessionBoundaryIndexPath } from "./session-boundary-paths.js";
 import { readTaskVectors, taskIndexTransaction, type TaskIndexTransaction } from "./task-index.js";
+import type { SemanticEmbeddingConfig } from "./config.js";
+import { compatibleEmbeddingMetadata, embeddingMetadata, SearchCacheCompatibilityError } from "./embedding-cache.js";
 
 const VERSION = "2";
 export interface CachedIndex { vectors: Map<string, number[]>; hashes: Record<string, readonly string[]> }
 export const emptyIndex = (): CachedIndex => ({ vectors: new Map(), hashes: {} });
-async function loadConnection(connection: DatabaseSync, signal: AbortSignal): Promise<CachedIndex> {
+async function loadConnection(connection: DatabaseSync, signal: AbortSignal, dimension = EMBEDDING_DIMENSIONS): Promise<CachedIndex> {
   const cache = emptyIndex(); let n = 0;
   for (const row of connection.prepare("SELECT hash,vector FROM vectors").iterate()) {
     signal.throwIfAborted();
-    if (typeof row.hash === "string" && row.vector instanceof Uint8Array && row.vector.byteLength === EMBEDDING_DIMENSIONS * 4) {
+    if (typeof row.hash === "string" && row.vector instanceof Uint8Array && row.vector.byteLength === dimension * 4) {
       const buffer = Buffer.from(row.vector);
-      const vector = Array.from({ length: EMBEDDING_DIMENSIONS }, (_, i) => buffer.readFloatLE(i * 4));
-      if (validVector(vector)) cache.vectors.set(row.hash, vector);
+      const vector = Array.from({ length: dimension }, (_, i) => buffer.readFloatLE(i * 4));
+      if (validVector(vector, dimension)) cache.vectors.set(row.hash, vector);
     }
     if (++n % 32 === 0) await yieldTask();
   }
@@ -56,7 +57,7 @@ export class SearchIndexStore {
   constructor(private readonly retryBudgetMs = 600) {}
   path(cwd: string): string { return canonicalSearchIndexPath(cwd); }
   /** Read-only snapshot for restart/query visibility; never discovers sources or calls a provider. */
-  async read(cwd: string, signal: AbortSignal): Promise<CachedIndex> {
+  async read(cwd: string, signal: AbortSignal, config?: SemanticEmbeddingConfig): Promise<CachedIndex> {
     const path = this.path(cwd);
     try { await stat(path); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return emptyIndex(); throw error; }
     signal.throwIfAborted();
@@ -64,17 +65,16 @@ export class SearchIndexStore {
     try {
       db.exec("PRAGMA busy_timeout=5; BEGIN");
       if (!db.prepare("SELECT name FROM sqlite_master WHERE name='documents'").get()) return emptyIndex();
-      const cache = await loadConnection(db, signal);
+      const cache = await loadConnection(db, signal, config?.dimension);
       const get = db.prepare("SELECT value FROM metadata WHERE key=?");
       if (get.get("schema")?.value !== VERSION) throw new Error("Incompatible search index schema");
-      if (get.get("model")?.value !== SEARCH_EMBEDDING_MODEL || get.get("dimensions")?.value !== String(EMBEDDING_DIMENSIONS)
-        || get.get("encoding")?.value !== "float32le") cache.vectors.clear();
+      if (!compatibleEmbeddingMetadata(db, "metadata", config)) cache.vectors.clear();
       return cache;
     } finally { db.close(); }
   }
 
   /** Read the separately namespaced session vectors without changing settings state. */
-  async readSessionTitles(cwd: string, signal: AbortSignal): Promise<Map<string, StoredSessionVector>> {
+  async readSessionTitles(cwd: string, signal: AbortSignal, config?: SemanticEmbeddingConfig): Promise<Map<string, StoredSessionVector>> {
     const path = this.path(cwd);
     try { await stat(path); } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return new Map();
@@ -82,13 +82,13 @@ export class SearchIndexStore {
     }
     signal.throwIfAborted();
     const db = new DatabaseSync(path, { readOnly: true });
-    try { return await loadSessionTitleVectors(db, signal); }
+    try { return await loadSessionTitleVectors(db, signal, config); }
     finally { db.close(); }
   }
 
   /** Task vectors occupy their own namespace in the shared SQLite index.
    * Returning no vectors when absent does not create the namespace. */
-  async readTaskVectors(cwd: string, signal: AbortSignal): Promise<Map<string, number[]>> {
+  async readTaskVectors(cwd: string, signal: AbortSignal, config?: SemanticEmbeddingConfig): Promise<Map<string, number[]>> {
     const filename = this.path(cwd);
     try { await stat(filename); } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return new Map();
@@ -96,7 +96,7 @@ export class SearchIndexStore {
     }
     signal.throwIfAborted();
     const db = new DatabaseSync(filename, { readOnly: true });
-    try { return await readTaskVectors(db, signal); }
+    try { return await readTaskVectors(db, signal, config); }
     finally { db.close(); }
   }
 
@@ -131,7 +131,8 @@ export class SearchIndexStore {
    * reloads our committed hashes instead of duplicating that batch. SQLite is authoritative;
    * no stale in-memory corpus is allowed to replace another writer's reconciliation.
    */
-  async write<T>(cwd: string, signal: AbortSignal, operation: (tx: IndexTransaction) => Promise<T>): Promise<T> {
+  async write<T>(cwd: string, signal: AbortSignal, operation: (tx: IndexTransaction) => Promise<T>, config?: SemanticEmbeddingConfig): Promise<T> {
+    const dimension = config?.dimension ?? EMBEDDING_DIMENSIONS;
     const path = this.path(cwd);
     const acquisition = new AbortController();
     const timer = setTimeout(() => acquisition.abort(), this.retryBudgetMs);
@@ -176,25 +177,34 @@ export class SearchIndexStore {
         CREATE TABLE IF NOT EXISTS vectors (hash TEXT PRIMARY KEY, vector BLOB NOT NULL);
         CREATE TEMP TABLE live_documents (id TEXT PRIMARY KEY);
         CREATE TEMP TABLE live_hashes (hash TEXT PRIMARY KEY);`);
-      const metadata = { schema: VERSION, model: SEARCH_EMBEDDING_MODEL, dimensions: String(EMBEDDING_DIMENSIONS), encoding: "float32le" };
+      const metadata = { schema: VERSION, ...embeddingMetadata(config) };
       const get = db.prepare("SELECT value FROM metadata WHERE key=?");
       const schema = get.get("schema")?.value;
       if (schema && schema !== "1" && schema !== VERSION) throw new Error("Incompatible search index schema");
-      // Schema 2 fences old body-index writers and retains only settings-owned data.
-      db.exec("PRAGMA secure_delete=ON; DELETE FROM documents WHERE json_extract(hit, '$.kind') IS NOT 'settings'; DROP TABLE IF EXISTS filter_decisions");
-      const retainHash = db.prepare("INSERT OR IGNORE INTO live_hashes VALUES (?)");
-      let retained = 0;
-      for (const row of db.prepare("SELECT hashes FROM documents").iterate()) {
-        signal.throwIfAborted();
-        const hashes: unknown = typeof row.hashes === "string" ? JSON.parse(row.hashes) : [];
-        if (!Array.isArray(hashes) || !hashes.every(hash => typeof hash === "string")) throw new Error("Invalid search index hashes");
-        for (const hash of hashes) retainHash.run(hash);
-        if (++retained % 32 === 0) await yieldTask();
+      const hasIdentity = get.get("model") !== undefined;
+      const incompatibleSettings = config !== undefined && !compatibleEmbeddingMetadata(db, "metadata", config)
+        && Number(db.prepare("SELECT COUNT(*) AS n FROM vectors").get()?.n) > 0;
+      const checkSettings = () => { if (incompatibleSettings) throw new SearchCacheCompatibilityError(); };
+      // Schema 2 removes old body-index data, but unrelated writes must retain an incompatible settings cache.
+      if (schema !== VERSION) {
+        db.exec("PRAGMA secure_delete=ON; DELETE FROM documents WHERE json_extract(hit, '$.kind') IS NOT 'settings'; DROP TABLE IF EXISTS filter_decisions");
+        const retainHash = db.prepare("INSERT OR IGNORE INTO live_hashes VALUES (?)");
+        let retained = 0;
+        for (const row of db.prepare("SELECT hashes FROM documents").iterate()) {
+          signal.throwIfAborted();
+          const hashes: unknown = typeof row.hashes === "string" ? JSON.parse(row.hashes) : [];
+          if (!Array.isArray(hashes) || !hashes.every(hash => typeof hash === "string")) throw new Error("Invalid search index hashes");
+          for (const hash of hashes) retainHash.run(hash);
+          if (++retained % 32 === 0) await yieldTask();
+        }
+        db.exec("DELETE FROM vectors WHERE hash NOT IN (SELECT hash FROM live_hashes)");
       }
-      db.exec("DELETE FROM vectors WHERE hash NOT IN (SELECT hash FROM live_hashes)");
-      if (["model", "dimensions", "encoding"].some(key => get.get(key)?.value !== metadata[key as keyof typeof metadata])) db.exec("DELETE FROM vectors");
       const set = db.prepare("INSERT INTO metadata VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value");
-      for (const [key, value] of Object.entries(metadata)) set.run(key, value);
+      // Local FTS writes must not downgrade or overwrite a configured embedding identity.
+      // Other namespaces may write while an incompatible settings cache is retained.
+      for (const [key, value] of Object.entries(metadata)) {
+        if (key === "schema" || (!incompatibleSettings && (config || !hasIdentity))) set.run(key, value);
+      }
       // Older ACP processes may still be alive with a draft. Fence their schema reset transaction.
       db.exec(`CREATE TRIGGER IF NOT EXISTS settings_schema_update BEFORE UPDATE ON metadata
         WHEN NEW.key='schema' AND NEW.value!='2' BEGIN SELECT RAISE(ABORT, 'Search index requires session-title search'); END;
@@ -207,11 +217,12 @@ export class SearchIndexStore {
       const connection = db;
       const check = () => signal.throwIfAborted();
       const tx: IndexTransaction = {
-        sessionTitles: () => createSessionIndexTransaction(connection, signal),
+        sessionTitles: () => createSessionIndexTransaction(connection, signal, config),
         sessionBoundaries: (live, updates) => reconcileSessionBoundaries(connection, signal, live, updates),
-        tasks: () => taskIndexTransaction(connection),
-        load: () => loadConnection(connection, signal),
+        tasks: () => taskIndexTransaction(connection, config),
+        load: () => { checkSettings(); return loadConnection(connection, signal, dimension); },
         save: async (documents, vectors) => {
+          checkSettings();
           const upsert = connection.prepare("INSERT INTO documents VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET text=excluded.text,hit=excluded.hit,hashes=excluded.hashes WHERE documents.text!=excluded.text OR documents.hit!=excluded.hit OR documents.hashes!=excluded.hashes");
           const documentLive = connection.prepare("INSERT OR IGNORE INTO live_documents VALUES (?)");
           const hashLive = connection.prepare("INSERT OR IGNORE INTO live_hashes VALUES (?)");
@@ -227,8 +238,8 @@ export class SearchIndexStore {
             for (const hash of hashes) {
               hashLive.run(hash);
               const vector = vectors.get(hash);
-              if (vector && validVector(vector)) {
-                const buffer = Buffer.alloc(EMBEDDING_DIMENSIONS * 4);
+              if (vector && validVector(vector, dimension)) {
+                const buffer = Buffer.alloc(dimension * 4);
                 vector.forEach((v, i) => buffer.writeFloatLE(v, i * 4));
                 vectorSet.run(hash, buffer);
               }

@@ -4,7 +4,7 @@ const allowed = new Set([...COUNCIL_RESEARCH_TOOLS, "Read", "Grep", "todo", "com
 
 /** Explicitly loaded in council children, never the whole suite. */
 export default function councilResearch(pi: ExtensionAPI): void {
-	// Common spawn owns both gated repo queries and the requested tools-only
+	// Common spawn owns repository search and the requested tools-only
 	// web capabilities. This extension owns only the stricter council guard.
 
 	const select = () => {

@@ -51,7 +51,6 @@ const KNOWN_FRONTMATTER_KEYS = new Set([
 	"forParentModels",
 	"notForParentModels",
 	"forParentTier",
-	"requiresIndexedProject",
 	"parentProviderPolicy",
 	"requireDifferentProvider",
 	"thinking",

@@ -1,146 +1,112 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { mkdir, mkdtemp, open, readFile, rename, rm, rmdir, stat, symlink, utimes, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { setTimeout as delay } from "node:timers/promises";
-import { parse } from "jsonc-parser";
-import { publishAtomically, SearchPreferences } from "../src/search/config.js";
+import { link, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
+import { loadSemanticEmbeddingConfig, semanticSearchConfigPath, SearchPreferences, sharedSearchAuth } from "../src/search/config.js";
+import { loadCommitEmbeddingConfig, loadCommitEmbeddingKey } from "../src/search/commit-provider.js";
+import { parseSearchConfigRequest } from "../src/search/request.js";
 
+const embedding = { embeddingProvider: "ollama", embeddingModel: "code-model", vectorSize: 4,
+  knowledgeEmbeddingModel: "knowledge-model", knowledgeEmbeddingQueryPrefix: "query:", knowledgeEmbeddingDocumentPrefix: "doc:", ollamaBaseUrl: "http://localhost:11434" };
 async function fixture(t: TestContext) {
-  const artifacts = fileURLToPath(new URL("../../.pi/artifacts/search-preferences-tests/", import.meta.url));
+  const artifacts = resolve(".pi/artifacts/central-semantics-acp/preferences-fixtures");
   await mkdir(artifacts, { recursive: true });
   const root = await mkdtemp(join(artifacts, "run-"));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const path = join(root, "config", "pix-desktop.jsonc");
+  const path = join(root, ".config/pi/pi-tools-suite.jsonc");
+  await mkdir(dirname(path), { recursive: true });
   return { root, path, preferences: new SearchPreferences(path) };
 }
 
-test("consent writes preserve JSONC comments and unrelated native settings", async t => {
-  const { path, preferences } = await fixture(t);
-  await mkdir(dirname(path));
-  await writeFile(path, '{\n  // Keep authored comments.\n  "visibleModels": ["native/model"],\n  "search": { "legacyUnknown": 42 },\n}\n');
-  await preferences.setEnabled(true);
-  const saved = await readFile(path, "utf8");
-  assert.ok(saved.includes("// Keep authored comments."));
-  assert.deepEqual(parse(saved), { visibleModels: ["native/model"], search: { legacyUnknown: 42, semanticEnabled: true } });
-  await preferences.setEnabled(false);
-  assert.equal(await preferences.enabled(), false);
-  assert.equal(parse(await readFile(path, "utf8")).search.legacyUnknown, 42);
-  await assert.rejects(stat(`${path}.search.lock`), { code: "ENOENT" });
+test("valid central configuration itself enables every semantic source without consent flags", async t => {
+  const f = await fixture(t);
+  assert.equal(await f.preferences.enabled(), false);
+  const source = JSON.stringify({ enabled: false, search: { embedding, semanticEnabled: false, sessionTitlesEnabled: false, tasksSemanticEnabled: false } });
+  await writeFile(f.path, source);
+  assert.equal(await f.preferences.enabled(), true);
+  assert.equal(await f.preferences.sessionTitlesEnabled(), true);
+  assert.equal(await f.preferences.tasksSemanticEnabled(), true);
+  assert.deepEqual(await f.preferences.embedding(), { provider: "ollama", model: "knowledge-model", dimension: 4, queryPrefix: "query:", documentPrefix: "doc:", baseUrl: "http://localhost:11434" });
+  assert.equal(await readFile(f.path, "utf8"), source, "ACP is read-only");
+  await rm(f.path);
+  assert.equal(await f.preferences.tasksSemanticEnabled(), false);
 });
 
-test("session title consent is an independent, opt-in JSONC flag", async t => {
-  const { path, preferences } = await fixture(t);
-  assert.equal(await preferences.sessionTitlesEnabled(), false);
-  assert.equal(await preferences.enabled(), false);
-  await preferences.setSessionTitlesEnabled(true);
-  assert.equal(await preferences.sessionTitlesEnabled(), true);
-  assert.equal(await preferences.enabled(), false);
-  await preferences.setEnabled(true);
-  await preferences.setSessionTitlesEnabled(false);
-  assert.equal(await preferences.enabled(), true);
-  assert.equal(await preferences.sessionTitlesEnabled(), false);
-  const document = parse(await readFile(path, "utf8"));
-  assert.deepEqual(document, { search: { sessionTitlesEnabled: false, semanticEnabled: true } });
-  await assert.rejects(stat(`${path}.search.lock`), { code: "ENOENT" });
+test("malformed, absent, obsolete and invalid central settings fail closed without repair", async t => {
+  const f = await fixture(t);
+  const invalid = ["{", "[]", "null", '{// jsonc\n"embedding":{}}', JSON.stringify({ embedding }), JSON.stringify({ search: { semanticEnabled: true } }),
+    ...[{ embeddingProvider: "idx" }, { embeddingModel: "" }, { knowledgeEmbeddingModel: "" }, { vectorSize: 0 }, { vectorSize: 8193 },
+      { vectorSize: 1.5 }, { knowledgeEmbeddingQueryPrefix: 42 }, { knowledgeEmbeddingDocumentPrefix: "x".repeat(513) },
+      { ollamaBaseUrl: "file:///tmp" }, { ollamaBaseUrl: "http://user:secret@localhost" }, { ollamaBaseUrl: "http://localhost?key=secret" }]
+      .map(change => JSON.stringify({ search: { embedding: { ...embedding, ...change } } })), " ".repeat(8193)];
+  for (const source of invalid) {
+    await writeFile(f.path, source);
+    assert.equal(await f.preferences.embedding(), undefined);
+    assert.equal(await f.preferences.enabled(), false);
+    assert.equal(await readFile(f.path, "utf8"), source);
+  }
 });
 
-test("task-semantic consent is a third independent flag and preserves unrelated configuration", async t => {
-  const { path, preferences } = await fixture(t);
-  assert.equal(await preferences.tasksSemanticEnabled(), false);
-  await mkdir(dirname(path));
-  await writeFile(path, '{\n  // Keep visible choices.\n  "visibleModels": ["owner/model"],\n  "search": { "semanticEnabled": true, "sessionTitlesEnabled": false }\n}\n');
-  await preferences.setTasksSemanticEnabled(true);
-  assert.equal(await preferences.tasksSemanticEnabled(), true);
-  assert.equal(await preferences.enabled(), true);
-  assert.equal(await preferences.sessionTitlesEnabled(), false);
-  assert.match(await readFile(path, "utf8"), /Keep visible choices/);
-  await preferences.setTasksSemanticEnabled(false);
-  assert.deepEqual(parse(await readFile(path, "utf8")), {
-    visibleModels: ["owner/model"], search: { semanticEnabled: true, sessionTitlesEnabled: false, tasksSemanticEnabled: false },
-  });
-  await assert.rejects(stat(`${path}.search.lock`), { code: "ENOENT" });
+test("central file rejects symlinks, linked ancestors and hardlinks", async t => {
+  const f = await fixture(t);
+  const real = join(f.root, "real.json");
+  await writeFile(real, JSON.stringify({ search: { embedding } }));
+  await symlink(real, f.path);
+  assert.equal(await loadSemanticEmbeddingConfig(f.path), undefined);
+  await rm(f.path); await link(real, f.path);
+  assert.equal(await loadSemanticEmbeddingConfig(f.path), undefined);
+  await rm(f.path); await rm(real);
+  await rm(dirname(f.path), { recursive: true }); await mkdir(join(f.root, "elsewhere"));
+  await symlink(join(f.root, "elsewhere"), dirname(f.path), "dir");
+  await writeFile(f.path, JSON.stringify({ search: { embedding } }));
+  assert.equal(await loadSemanticEmbeddingConfig(f.path), undefined);
 });
 
-test("native mkdir ownership is respected even with an old mtime; consent rereads after release", async t => {
-  const { path, preferences } = await fixture(t);
-  await mkdir(dirname(path));
-  const original = '{ "search": { "semanticEnabled": true } }\n';
-  await writeFile(path, original);
-  // This is precisely native UserConfigFileLock's ownership operation. No
-  // heartbeat is needed: time alone cannot establish that its owner exited.
-  const lockPath = `${path}.search.lock`;
-  await mkdir(lockPath);
-  await utimes(lockPath, new Date(0), new Date(0));
-  await assert.rejects(preferences.setEnabled(false), /config busy or unavailable/);
-  assert.equal(await readFile(path, "utf8"), original);
-  assert.ok((await stat(lockPath)).isDirectory());
-  assert.equal((await stat(lockPath)).mtimeMs, 0);
-
-  // Native publishes an unrelated edit while owning the shared lock, then
-  // releases. A subsequent ACP write must modify that fresh document.
-  const native = '{\n // Native edit survives.\n "theme": "dark", "search": { "semanticEnabled": true }\n}\n';
-  await writeFile(`${path}.native.tmp`, native);
-  await rename(`${path}.native.tmp`, path);
-  await rmdir(lockPath);
-  await preferences.setEnabled(false);
-  const saved = await readFile(path, "utf8");
-  assert.ok(saved.includes("// Native edit survives."));
-  assert.deepEqual(parse(saved), { theme: "dark", search: { semanticEnabled: false } });
+test("HOME central path is shared by commits and history; legacy project and Desktop flags do not authorize", async t => {
+  const f = await fixture(t); const previous = process.env.HOME;
+  process.env.HOME = f.root;
+  t.after(() => { if (previous === undefined) delete process.env.HOME; else process.env.HOME = previous; });
+  assert.equal(semanticSearchConfigPath(), f.path);
+  await writeFile(join(dirname(f.path), "pix-desktop.jsonc"), JSON.stringify({ search: { semanticEnabled: true } }));
+  await mkdir(join(f.root, ".pi/search"), { recursive: true });
+  await writeFile(join(f.root, ".pi/search/semantic.json"), JSON.stringify({ enabled: true, embedding }));
+  assert.equal(await loadCommitEmbeddingConfig(f.root), undefined);
+  await writeFile(f.path, JSON.stringify({ search: { embedding } }));
+  assert.ok(await f.preferences.embedding(), "canonical global suite configuration is authorized");
+  assert.deepEqual(await loadCommitEmbeddingConfig("/unrelated/project"), await f.preferences.embedding());
 });
 
-test("failed JSONC updates release ownership without replacing the source", async t => {
-  const { path, preferences } = await fixture(t);
-  await mkdir(dirname(path));
-  await writeFile(path, "{ malformed private source");
-  await assert.rejects(preferences.setEnabled(true), /Search preferences could not be saved/);
-  assert.equal(await readFile(path, "utf8"), "{ malformed private source");
-  await assert.rejects(stat(`${path}.search.lock`), { code: "ENOENT" });
-  await writeFile(path, "{}\n");
-  await preferences.setEnabled(true);
-  assert.equal(await preferences.enabled(), true);
+test("obsolete ACP writes are rejected, including false and credential-removal values", async () => {
+  assert.deepEqual(parseSearchConfigRequest({ cwd: "/project" }), { cwd: "/project" });
+  for (const field of ["enabled", "sessionTitlesEnabled", "tasksSemanticEnabled", "messageFilterEnabled", "apiKey", "embedding"])
+    for (const value of [true, false, "", undefined]) assert.throws(() => parseSearchConfigRequest({ cwd: "/project", [field]: value }));
 });
 
-test("a missing config and symlinked parent share the same native lock namespace", async t => {
-  const { root, path } = await fixture(t);
-  await mkdir(dirname(path));
-  const alias = join(root, "alias");
-  await symlink(dirname(path), alias, "dir");
-  const preferences = new SearchPreferences(join(alias, "pix-desktop.jsonc"));
-  assert.equal(await preferences.enabled(), false);
-  await mkdir(`${path}.search.lock`);
-  await assert.rejects(preferences.setEnabled(true), /config busy or unavailable/);
-  await assert.rejects(stat(path), { code: "ENOENT" });
-  await rmdir(`${path}.search.lock`);
-  await preferences.setEnabled(true);
-  assert.equal(parse(await readFile(path, "utf8")).search.semanticEnabled, true);
+test("environment credential takes precedence over shared SDK auth and commits use the same fallback", async t => {
+  const f = await fixture(t);
+  const agent = join(f.root, "agent"); await mkdir(agent);
+  await writeFile(join(agent, "auth.json"), JSON.stringify({ openrouter: { type: "api_key", key: "stored-only" } }));
+  assert.equal(await sharedSearchAuth(agent, {}).key(new AbortController().signal), "stored-only");
+  assert.equal(await sharedSearchAuth(agent, { OPENROUTER_API_KEY: " env-only " }).key(new AbortController().signal), "env-only");
+  const previous = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = agent;
+  t.after(() => { if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previous; });
+  assert.equal(await loadCommitEmbeddingKey({}), "stored-only");
+  assert.equal(await loadCommitEmbeddingKey({ OPENROUTER_API_KEY: " env-only " }), "env-only");
 });
 
-test("atomic publish retries transient rename contention and fails on real errors", async () => {
-  const contention = (code: string) => Object.assign(new Error(`operation failed: ${code}`), { code });
-  let calls = 0;
-  await publishAtomically("from", "to", async () => { if (++calls < 3) throw contention("EPERM"); });
-  assert.equal(calls, 3);
-  await assert.rejects(publishAtomically("from", "to", async () => { throw contention("ENOENT"); }), /ENOENT/);
-  let persistent = 0;
-  await assert.rejects(publishAtomically("from", "to", async () => { persistent++; throw contention("EACCES"); }), /EACCES/);
-  assert.equal(persistent, 21);
-});
-
-test("consent updates tolerate a concurrent reader holding the config open", async t => {
-  const { path, preferences } = await fixture(t);
-  await mkdir(dirname(path));
-  await writeFile(path, '{ "search": { "semanticEnabled": true } }\n');
-  // Mirrors an in-flight consent check re-reading the document while a config
-  // update publishes: on Windows the open handle blocks rename until released.
-  // Real readers close within the bounded retry budget, so release promptly.
-  const held = await open(path, "r");
-  const releasing = delay(100).then(() => held.close());
-  try {
-    await preferences.setEnabled(false);
-    assert.equal(await preferences.enabled(), false);
-  } finally { await releasing.catch(() => {}); await held.close().catch(() => {}); }
-  assert.deepEqual(parse(await readFile(path, "utf8")), { search: { semanticEnabled: false } });
-  await assert.rejects(stat(`${path}.search.lock`), { code: "ENOENT" });
+test("shared credential reads reject linked, oversized and malformed storage without repair", async t => {
+  const f = await fixture(t);
+  const agent = join(f.root, "agent"); await mkdir(agent);
+  const path = join(agent, "auth.json");
+  for (const value of ["{", " ".repeat(512 * 1024 + 1), JSON.stringify({ openrouter: { type: "oauth", key: "not-static" } })]) {
+    await writeFile(path, value);
+    assert.equal(await sharedSearchAuth(agent, {}).key(new AbortController().signal), undefined);
+    assert.equal(await readFile(path, "utf8"), value);
+  }
+  await rm(path);
+  const target = join(f.root, "credentials.json");
+  await writeFile(target, JSON.stringify({ openrouter: { type: "api_key", key: "linked" } }));
+  await symlink(target, path);
+  assert.equal(await sharedSearchAuth(agent, {}).key(new AbortController().signal), undefined);
 });

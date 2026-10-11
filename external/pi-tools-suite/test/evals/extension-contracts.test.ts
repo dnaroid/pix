@@ -8,7 +8,6 @@ import { MODULES } from "../../src/index.js";
 import {
 	CODEX_ALIAS_TOOL_DESCRIPTIONS,
 	COMPRESS_TOOL_DESCRIPTION,
-	REPO_DISCOVERY_TOOLS,
 	SESSION_TOOL_DESCRIPTION,
 	TODO_TOOL_DESCRIPTION,
 	WEB_SEARCH_TOOL_DESCRIPTIONS,
@@ -100,7 +99,6 @@ function allModelFacingToolNames(): string[] {
 	const add = (items: Array<{ name: string }>) => items.forEach((item) => names.add(item.name));
 	add(Object.values(astGrepToolDescriptions(1_000, "1MB")));
 	add(Object.values(asyncSubagentToolDescriptions(false)));
-	add(REPO_DISCOVERY_TOOLS);
 	names.add("project_search");
 	names.add("project_tasks");
 	add([TODO_TOOL_DESCRIPTION, SESSION_TOOL_DESCRIPTION, COMPRESS_TOOL_DESCRIPTION]);

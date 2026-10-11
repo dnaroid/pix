@@ -9,6 +9,7 @@ export const SETTINGS_GROUPS = {
   ] },
   "pi-tools-suite": { label: "Tools Suite", sections: [
     { id: "general", label: "General" }, { id: "subagents", label: "Sub-agents" },
+    { id: "search", label: "Search" },
     { id: "automation", label: "Automation" }, { id: "dcp", label: "DCP" },
     { id: "context", label: "Context" }, { id: "integrations", label: "Integrations" },
     { id: "advanced", label: "Advanced" },

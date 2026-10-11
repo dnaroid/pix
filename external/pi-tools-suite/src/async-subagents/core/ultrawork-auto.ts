@@ -19,7 +19,7 @@ export interface UltraworkAutoContext {
 
 export const ULTRAWORK_AUTO_HINT = [
 	"Auto-ultrawork hint:",
-	"If this task turns out to be broad, multi-file, high-risk, or benefits from independent parallel tracks, adopt ultrawork mode: spawn focused subagents and keep the parent context lean. Otherwise solve it directly.",
+	"Follow the delegation policy in the subagents tool description. Keep implementation in the parent unless an explicit user request, concrete implementation capability gap, or sufficiently large deterministic mechanical transformation justifies a handoff. Broad scope or parallelism alone is not enough; use bounded research only for a named unresolved question.",
 ].join(" ");
 
 const TRUE_ENV_PATTERN = /^(1|true|yes|on|auto)$/i;
@@ -28,8 +28,9 @@ const CLASSIFIER_SYSTEM_PROMPT = [
 	"You classify the FIRST user message for Pi ultrawork mode.",
 	"This is a weak-model routing task: be conservative and follow the labels exactly.",
 	"Return exactly one lowercase word: ultrawork, hint, or none.",
-	"ultrawork = clearly broad/complex/parallel work that should spawn subagents immediately.",
-	"hint = not enough detail, but it may become broad/complex; tell the parent agent to switch only if complexity appears.",
+	"ultrawork = an explicit user request to delegate or split independent tracks, or real UI QA requiring its dedicated agent.",
+	"hint = possible named uncertainty or capability gap, or a vague bug/feature request needing scope assessment; the parent must establish valid delegation grounds first.",
+	"Size, broad scope, parallelism, model tier and token price alone never justify implementation delegation.",
 	"none = simple chat, one known file, exact lookup, trivial edit, or narrow question.",
 	"When uncertain between ultrawork and hint, choose hint. When uncertain between hint and none, choose none.",
 ].join("\n");
@@ -137,8 +138,8 @@ export function parseUltraworkAutoDecision(raw: string): UltraworkAutoDecision {
 function buildClassifierPrompt(userText: string): string {
 	return [
 		"Choose one label for this first user message.",
-		"Use ultrawork for: explicit parallel/subagents/delegate; broad repo investigation; architecture/root-cause/debugging across modules; code review/audit/security/perf/release/test strategy; multi-file implementation/refactor.",
-		"Use hint for: vague but potentially complex requests like 'fix this bug', 'implement feature', 'improve the project', 'investigate issue' with no scope yet.",
+		"Use ultrawork for: explicit requests to delegate or split independent tracks; real UI QA requiring its dedicated agent.",
+		"Use hint for: a possible named uncertainty or implementation capability gap that still needs the parent's assessment, or an unscoped request like 'Fix this bug.' Broad investigations and multi-file implementation/refactors do not by themselves justify ultrawork.",
 		"Use none for: simple question, exact string/file lookup, known one-file edit, typo, formatting, command request, or casual chat.",
 		"First user message:",
 		`<<<${truncate(userText, 4000)}>>>`,

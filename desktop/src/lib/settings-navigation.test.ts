@@ -19,7 +19,8 @@ describe("continuous settings navigation", () => {
 
   it("includes both files with unique stable chapter identities", () => {
     const ids = Object.entries(SETTINGS_GROUPS).flatMap(([kind, group]) => group.sections.map((section) => `${kind}-${section.id}`));
-    expect(ids).toHaveLength(15);
+    expect(ids).toHaveLength(16);
+    expect(ids).toContain("pi-tools-suite-search");
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids).toContain("pi-tools-suite-subagents");
     expect(ids).toContain("desktop-source-control");

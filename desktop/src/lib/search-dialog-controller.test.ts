@@ -4,7 +4,7 @@ import { emptySearchDialogState, SearchDialogController, searchStatusLabel, type
 import type { SearchStatus } from "../../../acp/src/search/contract";
 import type { UnifiedSearchResult } from "./universal-search";
 
-const result = (id: string): UnifiedSearchResult => ({ idxAvailable: false, notices: [], results: [
+const result = (id: string): UnifiedSearchResult => ({ notices: [], results: [
   { kind: "settings", id, title: id, snippet: "", score: 1, section: "desktop-assistant", fieldId: id },
 ] });
 const status: SearchStatus = { enabled: false, keyAvailable: true, indexing: false };
@@ -25,18 +25,18 @@ function setup(search = vi.fn().mockResolvedValue(result("first")), readStatus =
 afterEach(() => { controllers.splice(0).forEach(controller => controller.dispose()); vi.useRealTimers(); });
 
 describe("explicit search dialog requests", () => {
-  it("semantic status identifies each independent consent without claiming all session titles are sent", () => {
+  it("semantic status reflects ACP-computed source flags under one global config", () => {
     const label = searchStatusLabel({ ...status, enabled: true });
-    expect(label).toBe("Semantic settings search enabled · session titles require separate opt-in");
-    expect(label).not.toContain("settings stay local");
+    expect(label).toBe("Semantic settings search active · global embedding configuration");
     expect(searchStatusLabel({ ...status, sessionTitlesEnabled: true }))
-      .toBe("Semantic session-title search enabled · conversation history stays local");
+      .toBe("Semantic session-title search active · global embedding configuration");
     expect(searchStatusLabel({ ...status, enabled: true, sessionTitlesEnabled: true }))
-      .toBe("Semantic settings + session-title search enabled · history stays local");
+      .toBe("Semantic settings and session-title search active · global embedding configuration");
     expect(searchStatusLabel({ ...status, tasksSemanticEnabled: true }))
-      .toBe("Semantic task search enabled · task titles/descriptions require separate consent");
+      .toBe("Semantic task search active · global embedding configuration");
     expect(searchStatusLabel({ ...status, tasksSemanticEnabled: true, keyAvailable: false }))
-      .toContain("key unavailable");
+      .toContain("OpenRouter key missing");
+    expect(searchStatusLabel(status)).toBe("Local search · no valid global embedding configuration");
   });
 
   it("opening, editing and polling status never submit search", async () => {
@@ -136,7 +136,7 @@ describe("explicit search dialog requests", () => {
     await vi.advanceTimersByTimeAsync(100);
     expect(s.search).toHaveBeenCalledTimes(1);
     expect(s.state().result).toEqual(result("first"));
-    expect(searchStatusLabel(s.state().status)).toContain("Local search · semantic search is opt-in");
+    expect(searchStatusLabel(s.state().status)).toContain("Local search · no valid global embedding configuration");
   });
 
   it("teardown aborts both requests and ignores delayed status and query", async () => {
