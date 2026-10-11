@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { realpath, stat } from "node:fs/promises";
-import { createReadToolDefinition, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { createReadToolDefinition, ModelRegistry, ModelRuntime, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Check, Errors } from "typebox/value";
 import { Type } from "typebox";
 import { detectModelProfile, selectSuitableToolsForModel, type ModelProfile } from "../lib/tool-args.js";
@@ -54,6 +54,28 @@ type RegisteredTool = {
 
 const MUTATING_TOOLS = new Set(["shell", "apply_patch", "ast_apply", "todo", "subagents"]);
 type HostSession = { getSessionId(): string; getSessionFile(): undefined };
+
+/**
+ * UI QA and image-backed tasks require confirmed vision-capable model metadata.
+ * The ordinary headless host has no parent Pi session/modelRegistry; initialize
+ * the SDK's real, locally configured runtime only for those spawn requests.
+ * Do not start an agent session, fire Pi prompt hooks or refresh remote catalogs.
+ */
+export function needsHeadlessModelRegistry(name: string, args: Record<string, unknown>): boolean {
+	if (name !== "subagents" || args.action !== "spawn" || !Array.isArray(args.tasks)) return false;
+	return args.tasks.some((entry: unknown) => {
+		if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
+		const task = entry as { subagentType?: unknown; imagePaths?: unknown };
+		return task.subagentType === "ui-qa" || (Array.isArray(task.imagePaths) && task.imagePaths.length > 0);
+	});
+}
+
+export async function createHeadlessModelRegistry(signal?: AbortSignal): Promise<ModelRegistry> {
+	signal?.throwIfAborted();
+	const runtime = await ModelRuntime.create({ allowModelNetwork: false, signal });
+	signal?.throwIfAborted();
+	return new ModelRegistry(runtime);
+}
 
 /** Replace two Pi-parent promises that do not hold for ChatGPT MCP headless. */
 export function headlessSubagentsDescription(source: string): string {
@@ -295,11 +317,14 @@ export async function createHeadlessToolApi(options: HeadlessApiOptions): Promis
 			}
 			await constrainArgs(name, params, root);
 			signal.throwIfAborted();
+			const modelRegistry = needsHeadlessModelRegistry(name, params)
+				? await createHeadlessModelRegistry(signal) : undefined;
 			const normalizedModel = typeof model === "string"
 				? { provider: model.split("/")[0] ?? "openai", id: model.split("/").slice(1).join("/") || model }
 				: model;
 			const invoke = () => tool.execute("headless", params, signal, () => {}, {
 				cwd: root, hasUI: false, sessionManager,
+				...(modelRegistry ? { modelRegistry } : {}),
 				model: { ...normalizedModel, input: ["text", "image"] },
 			} as any);
 			if (name === "todo") {

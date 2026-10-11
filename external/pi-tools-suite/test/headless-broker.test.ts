@@ -21,6 +21,13 @@ test("detached Pix subagents broker owns RPC pipes after CLI responds (offline f
 			"This is the project's own specialized role.", "",
 		].join("\n"));
 		await mkdir(binaryDir);
+		const agentDir = path.join(scratch, "pi-agent-test-config");
+		await mkdir(agentDir);
+		// Offline fixture credentials only: model metadata/availability are
+		// resolved locally, and the fake child executable never calls a provider.
+		await writeFile(path.join(agentDir, "auth.json"), JSON.stringify({
+			zai: { type: "api_key", key: "OFFLINE_FIXTURE_DO_NOT_SEND" },
+		}), { mode: 0o600 });
 		const pi = path.join(binaryDir, "pi");
 		await writeFile(pi, [
 			"#!/usr/bin/env node",
@@ -46,6 +53,7 @@ test("detached Pix subagents broker owns RPC pipes after CLI responds (offline f
 			PATH: `${binaryDir}:${process.env.PATH ?? ""}`,
 			HOME: scratch,
 			XDG_CONFIG_HOME: path.join(scratch, "config"),
+			PI_CODING_AGENT_DIR: agentDir,
 		};
 		async function call(tool: string, args: Record<string, unknown>) {
 			const encoded = Buffer.from(JSON.stringify({ operation: "call", cwd: workspace, readOnly: false,
@@ -78,6 +86,26 @@ test("detached Pix subagents broker owns RPC pipes after CLI responds (offline f
 		const result = await call("subagents", { action: "result", agentId: "mock-agent", runDir });
 		expect(result.isError).not.toBe(true);
 		expect(result.content[0]?.text).toContain("MOCK_PI_COMPLETED");
+
+		// Previously this always failed with "No configured candidate is
+		// available with confirmed image support": headless omitted the
+		// modelRegistry. Test the same CLI/broker path with offline SDK
+		// metadata, fake credentials and fake child executable.
+		const visual = await call("subagents", { action: "spawn", slug: "offline-ui-qa", tasks: [{
+			id: "mock-ui-qa", task: "Validate offline visual model selection only", subagentType: "ui-qa",
+		}] });
+		expect(visual.isError).not.toBe(true);
+		expect(visual.content[0]?.text).toContain("Scheduled 1 agent");
+		const visualRun = (visual.details as { runDir: string }).runDir;
+		expect(await readFile(path.join(visualRun, "mock-ui-qa", "model"), "utf8")).toBe("zai/glm-5.3-flash");
+		let visualStatus = "";
+		for (let attempt = 0; attempt < 30; attempt++) {
+			const status = await call("subagents", { action: "status", runDir: visualRun });
+			visualStatus = (status.details as { agents?: Array<{ status: string }> } | undefined)?.agents?.[0]?.status ?? "missing";
+			if (["done", "failed", "stopped"].includes(visualStatus)) break;
+			await new Promise((resolve) => setTimeout(resolve, 200));
+		}
+		expect(visualStatus).toBe("done");
 	} finally {
 		await rm(scratch, { recursive: true, force: true });
 	}

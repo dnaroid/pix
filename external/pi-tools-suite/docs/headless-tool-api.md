@@ -107,9 +107,20 @@ Pix `subagents` supports its original `spawn`, `status`, `wait`, `result`,
 `stop`, and `cleanup` actions. `subagents_catalog` reads the current
 project's `.pi/agents/*.md` definitions alongside built-in roles; pass
 the intended role in `tasks[].subagentType` for `action: "spawn"`. The
-headless parent intentionally has no Pi model registry, so automatic
+headless parent has no interactive Pi session or model router, so automatic
 LLM-based selection of missing roles is not supported; use an explicit
 subagent type and let its configured models/fallbacks select the child.
+
+For explicit `ui-qa` roles or spawn tasks with image attachments, Pix's
+model selector needs a registry with verified image-capable models.
+Headless now lazily initializes the SDK's **local ModelRuntime registry**
+for these spawn requests only, using the usual Pi model and credential
+configuration with network catalog refresh disabled. It passes the
+real available-model metadata to Pix before a child process can launch,
+and still requires the role's ordered model candidates to have confirmed
+image support. Ordinary nonvisual calls do not initialize that registry;
+the bridge never starts a parent Pi agent or assumes every configured
+model is vision-capable. Model selection failure never launches a child.
 
 Sub-agent spawns run in a detached **broker process**. The broker calls
 the original Pix `subagents(action=spawn)` implementation and keeps Pi RPC

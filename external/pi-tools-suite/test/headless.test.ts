@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { CHATGPT_HEADLESS_MODEL, assertHeadlessSubagentSpawn, createHeadlessToolApi, headlessSubagentsDescription } from "../src/headless/api.js";
+import { CHATGPT_HEADLESS_MODEL, assertHeadlessSubagentSpawn, createHeadlessToolApi, headlessSubagentsDescription, needsHeadlessModelRegistry, createHeadlessModelRegistry } from "../src/headless/api.js";
 import { TODO_TOOL_DESCRIPTION } from "../src/tool-descriptions.js";
 
 async function workspace(run: (root: string, outside: string) => Promise<void>): Promise<void> {
@@ -21,6 +21,27 @@ async function workspace(run: (root: string, outside: string) => Promise<void>):
 }
 
 describe("headless Pix tool API", () => {
+	test("loads model availability for visual spawns only, without a parent Pi agent", async () => {
+		expect(needsHeadlessModelRegistry("subagents", { action: "spawn", tasks: [
+			{ task: "Visual QA", subagentType: "ui-qa" },
+		] })).toBe(true);
+		expect(needsHeadlessModelRegistry("subagents", { action: "spawn", tasks: [
+			{ task: "Inspect image", subagentType: "research", imagePaths: ["test.png"] },
+		] })).toBe(true);
+		expect(needsHeadlessModelRegistry("subagents", { action: "spawn", tasks: [
+			{ task: "Investigate", subagentType: "research" },
+		] })).toBe(false);
+		expect(needsHeadlessModelRegistry("subagents", { action: "status", tasks: [
+			{ subagentType: "ui-qa" },
+		] })).toBe(false);
+		expect(needsHeadlessModelRegistry("todo", { action: "create", tasks: [
+			{ subagentType: "ui-qa" },
+		] })).toBe(false);
+		const controller = new AbortController();
+		controller.abort();
+		await expect(createHeadlessModelRegistry(controller.signal)).rejects.toThrow();
+	});
+
 	test("publishes original Pix descriptions, with only headless subagent caveats adapted", async () => workspace(async (root) => {
 		const api = await createHeadlessToolApi({ cwd: root, readOnly: false });
 		const inventory = api.inventory();
