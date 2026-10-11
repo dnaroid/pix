@@ -8,6 +8,7 @@ import { createConversationBranchActions } from "./conversation-branch-actions";
 import { createConversationNavigation } from "./conversation-navigation";
 import { createConversationSessionActions } from "./conversation-session-actions";
 import type { DesktopSessionServices } from "./desktop-session-services";
+import type { ConversationBranchActionsOptions } from "./conversation-branch-options";
 
 type SessionTabsRef = {
   closeSessionSelector: () => void;
@@ -19,6 +20,8 @@ type SessionCoordinatorRef = {
 };
 
 type DesktopConversationServicesOptions = {
+  requestMessageEdit?: ConversationBranchActionsOptions["requestMessageEdit"];
+  prepareEditedMessage?: ConversationBranchActionsOptions["prepareEditedMessage"];
   client: () => AcpClient | null;
   state: ActiveSessionState;
   workspace: () => string;
@@ -74,6 +77,8 @@ export function createDesktopConversationServices(options: DesktopConversationSe
   });
 
   const branches = createConversationBranchActions({
+    requestMessageEdit: options.requestMessageEdit,
+    prepareEditedMessage: options.prepareEditedMessage,
     client: options.client,
     state: options.state,
     workspace: options.workspace,

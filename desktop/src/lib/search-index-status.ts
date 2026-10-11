@@ -1,7 +1,7 @@
 import { SEARCH_CACHE_REBUILD_REQUIRED } from "../../../acp/src/search/contract";
 
 /** Pure mapping from read-only search-store diagnostics to per-source rows. Unknown is never shown as ready. */
-export type SearchStoreId = "files" | "vectors" | "history";
+export type SearchStoreId = SearchSourceId;
 export interface SearchStoreStatus {
   readonly id: SearchStoreId;
   readonly state: "absent" | "present" | "error";
@@ -10,14 +10,15 @@ export interface SearchStoreStatus {
   readonly generation?: number | null;
   readonly completedAt?: string | null;
   readonly counts: Readonly<Record<string, number>>;
-  readonly legacySources?: readonly SearchSourceId[];
+  readonly incompatibleSources?: readonly SearchSourceId[];
   readonly error?: string | null;
 }
-export interface SearchIndexStatus { readonly stores: readonly SearchStoreStatus[] }
+export interface SearchIndexStatus { readonly stores: readonly SearchStoreStatus[]; readonly commitsEmpty?: boolean | null }
 export interface SemanticConsent { readonly configured: boolean; readonly provider: string | null; readonly model: string | null; readonly vectorSize: number | null; readonly keyAvailable: boolean }
 
 export type SearchSourceId = "code" | "knowledge" | "settings" | "sessions" | "tasks" | "commits";
 export interface SearchIndexActivity {
+  readonly sessionsEmpty?: boolean;
   readonly indexingSources?: { readonly settings: boolean; readonly tasks: boolean; readonly sessions: boolean };
   readonly sourceErrors?: { readonly settings?: string; readonly tasks?: string; readonly sessions?: string };
 }
@@ -26,6 +27,7 @@ export type SearchLocalState = "ready" | "incomplete" | "missing" | "on-demand" 
 export type SearchSemanticState = "disabled" | "unavailable" | "no-vectors" | "vectors" | "incompatible" | "error" | "unknown";
 
 export interface SearchSourceRow {
+  readonly empty?: boolean;
   readonly id: SearchSourceId;
   readonly label: string;
   readonly local: SearchLocalState;
@@ -68,12 +70,11 @@ export function buildSearchSourceRows(
   settingsCount?: number,
 ): SearchSourceRow[] {
   const store = (id: SearchStoreId) => status?.stores.find(item => item.id === id);
-  const files = store("files");
-  const vectors = store("vectors");
-  const history = store("history");
   const rows: SearchSourceRow[] = [];
 
   for (const id of ["code", "knowledge"] as const) {
+    const files = store(id);
+    const vectors = files;
     let local: SearchLocalState;
     let localDetail: string;
     const chunks = files?.counts[id === "code" ? "codeChunks" : "knowledgeChunks"];
@@ -87,10 +88,13 @@ export function buildSearchSourceRows(
   }
 
   for (const [id, docKey, vecKey] of [["settings", "settingsDocuments", "settingsVectors"], ["sessions", "sessionTitles", "sessionVectors"], ["tasks", "taskDocuments", "taskVectors"], ["commits", "commitDocuments", "commitVectors"]] as const) {
+    const history = store(id);
     let local: SearchLocalState;
     let localDetail: string;
     const docs = history?.counts[docKey];
-    if (id === "settings" && settingsCount !== undefined) { local = "ready"; localDetail = `${n(settingsCount)} authored fields, available locally; semantic metadata updates on catalogue changes`; }
+    const empty = id === "sessions" ? activity?.sessionsEmpty === true : id === "commits" && status?.commitsEmpty === true;
+    if (empty) { local = "ready"; localDetail = "No source documents available to index"; }
+    else if (id === "settings" && settingsCount !== undefined) { local = "ready"; localDetail = `${n(settingsCount)} authored fields, available locally; semantic metadata updates on catalogue changes`; }
     else if (!status || !history) { local = "unknown"; localDetail = "Status not read"; }
     else if (history.state === "error") { local = "error"; localDetail = history.error ?? "Index unreadable"; }
     else if (docs === undefined) { local = "on-demand"; localDetail = "No local semantic index for this source; lexical search reads the source directly"; }
@@ -98,9 +102,9 @@ export function buildSearchSourceRows(
     const sem = semanticFor(history, consent, history?.counts[vecKey], true);
     const semanticActive = id !== "commits" && activity?.indexingSources?.[id] === true;
     const sourceError = id !== "commits" ? activity?.sourceErrors?.[id] : undefined;
-    const incompatible = consent?.configured && (history?.legacySources?.includes(id) || sourceError === SEARCH_CACHE_REBUILD_REQUIRED);
-    rows.push({ id, label: LABELS[id], local, localDetail,
-      localSummary: local === "ready" ? `${n(id === "settings" ? settingsCount ?? docs : docs)} items` : undefined,
+    const incompatible = consent?.configured && (history?.incompatibleSources?.includes(id) || sourceError === SEARCH_CACHE_REBUILD_REQUIRED);
+    rows.push({ id, label: LABELS[id], local, localDetail, empty,
+      localSummary: local === "ready" ? `${n(empty ? 0 : id === "settings" ? settingsCount ?? docs : docs)} items` : undefined,
       semantic: incompatible ? "incompatible" : sourceError ? "error" : sem.state,
       semanticDetail: semanticActive ? "Indexing this source" : incompatible ? SEARCH_CACHE_REBUILD_REQUIRED : sourceError ?? sem.detail, semanticActive });
   }

@@ -45,6 +45,15 @@ function childCli(executable: string, root: string, query: string) {
 }
 
 describe("independent native Code/Knowledge search", () => {
+  test("indexes Godot source, scene and resource formats but excludes generated .godot data", async () => {
+    const root = await fixture();
+    const names = ["player.gd", "level.tscn", "theme.tres", "project.godot", "water.gdshader", "shared.gdshaderinc"];
+    for (const name of names) await put(root, name, "GodotSearchNeedle\n");
+    await put(root, ".godot/imported/generated.gd", "GodotSearchNeedle\n");
+    const result = await searchNative(root, request("GodotSearchNeedle", { limit: 20 }));
+    expect(result.hits.map(hit => hit.path).sort()).toEqual(names.sort());
+    expect(result.hits.every(hit => hit.kind === "code")).toBe(true);
+  });
   test("overlong source lines are excluded without blocking healthy files or stale-row removal", async () => {
     const root = await fixture();
     await put(root, "healthy.ts", "export const healthyNeedle = true;");
@@ -78,11 +87,11 @@ describe("independent native Code/Knowledge search", () => {
     const root = await fixture();
     const headings = Array.from({ length: SCAN_LIMITS.chunks - 10 }, (_, i) => i ? `## heading-${i}` : "# retainedSentinel").join("\n");
     await put(root, "dense.md", headings);
-    const initial = await searchNative(root, request("retainedSentinel"));
+    const initial = await searchNative(root, request("retainedSentinel", { sources: ["knowledge"] }));
     expect(initial.status.complete).toBe(true);
     await put(root, "new.md", Array.from({ length: 20 }, (_, i) => `## new-${i}`).join("\n"));
     for (let attempt = 0; attempt < 2; attempt++) {
-      const result = await searchNative(root, request("retainedSentinel"));
+      const result = await searchNative(root, request("retainedSentinel", { sources: ["knowledge"] }));
       expect(result.status.generation).toBe(initial.status.generation);
       expect(result.status.stale).toBe(true);
       expect(result.hits).toEqual(initial.hits);
@@ -243,15 +252,20 @@ describe("independent native Code/Knowledge search", () => {
     expect(capped.notices.some(notice => notice.includes("candidate limit"))).toBe(true);
   });
 
-  test("incomplete scanning retains the prior atomic snapshot and reports staleness", async () => {
+  test("incomplete Knowledge scanning retains its snapshot while Code independently updates", async () => {
     const root = await fixture();
     await put(root, "valid.ts", "oldNeedle");
+    await put(root, "retained.md", "retainedKnowledgeNeedle");
     await searchNative(root, request("old needle"));
     await put(root, "valid.ts", "newNeedle");
     await put(root, "overflow.md", Array.from({ length: SCAN_LIMITS.chunks }, (_, i) => `# section-${i}`).join("\n"));
-    const result = await searchNative(root, request("old needle"));
+    const result = await searchNative(root, request("needle"));
     expect(result.status.complete).toBe(false); expect(result.status.stale).toBe(true);
-    expect(result.hits[0].path).toBe("valid.ts"); expect(result.status.generation).toBe(1);
+    expect(result.hits.map(hit => hit.path)).toContain("valid.ts");
+    expect(result.hits.map(hit => hit.path)).toContain("retained.md");
+    const code = await searchNative(root, request("new needle", { sources: ["code"] }));
+    expect(code.status.complete).toBe(true);
+    expect(code.hits[0].path).toBe("valid.ts");
     expect(result.notices.some(notice => notice.includes("previous snapshot retained"))).toBe(true);
     const store = await openStore(root);
     try {
@@ -261,7 +275,7 @@ describe("independent native Code/Knowledge search", () => {
   });
 
   test("storage rejects directory/database/sidecar symlinks and hard links without overwriting targets", async () => {
-    for (const destination of [".pi", ".pi/search", ".pi/search/files.sqlite", ".pi/search/files.sqlite-wal", ".pi/search/files.sqlite-shm", ".pi/search/files.sqlite-journal"]) {
+    for (const destination of [".pi", ".pi/search", ".pi/search/code.sqlite", ".pi/search/code.sqlite-wal", ".pi/search/code.sqlite-shm", ".pi/search/code.sqlite-journal"]) {
       const root = await fixture(), outside = await fixture();
       const directory = destination === ".pi" || destination === ".pi/search";
       const target = directory ? outside : path.join(outside, "target");
@@ -276,7 +290,7 @@ describe("independent native Code/Knowledge search", () => {
       const root = await fixture(), outside = await fixture();
       await put(outside, "target", "DO NOT OVERWRITE");
       await mkdir(path.join(root, ".pi/search"), { recursive: true });
-      await link(path.join(outside, "target"), path.join(root, `.pi/search/files.sqlite${suffix}`));
+      await link(path.join(outside, "target"), path.join(root, `.pi/search/code.sqlite${suffix}`));
       const result = await searchNative(root, request("anything"));
       expect(result.status.complete).toBe(false);
       expect(await readFile(path.join(outside, "target"), "utf8")).toBe("DO NOT OVERWRITE");
@@ -304,7 +318,7 @@ describe("independent native Code/Knowledge search", () => {
   test("unknown schema/version fails closed; valid namespaced schema preserves unrelated rows", async () => {
     const root = await fixture();
     await mkdir(path.join(root, ".pi/search"), { recursive: true });
-    const filename = path.join(root, ".pi/search/files.sqlite");
+    const filename = path.join(root, ".pi/search/code.sqlite");
     const unknown = new Database(filename, { create: true });
     unknown.exec("CREATE TABLE paid_vectors(value TEXT); INSERT INTO paid_vectors VALUES('keep'); PRAGMA user_version=37;");
     unknown.close();
@@ -313,7 +327,7 @@ describe("independent native Code/Knowledge search", () => {
     expect(digest(await readFile(filename))).toBe(before);
     const valid = await fixture(); await put(valid, "a.ts", "needle");
     await searchNative(valid, request("needle"));
-    const db = new Database(path.join(valid, ".pi/search/files.sqlite"));
+    const db = new Database(path.join(valid, ".pi/search/code.sqlite"));
     db.exec("CREATE TABLE unrelated(value TEXT); INSERT INTO unrelated VALUES('keep');");
     expect((await searchNative(valid, request("needle"))).status.complete).toBe(true);
     expect(db.query("SELECT value FROM unrelated").get()).toEqual({ value: "keep" });

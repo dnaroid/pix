@@ -118,7 +118,7 @@ File: `desktop/src/app/workspace-controller.ts`
 
 `select()` currently keeps `operationRunning` while it:
 
-1. stops package terminals and IDX operations;
+1. stops package terminals;
 2. closes workspace sessions;
 3. resets all workspace-scoped stores;
 4. loads the new startup session, tasks, documents, preferences, and Registry

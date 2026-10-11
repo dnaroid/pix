@@ -40,7 +40,7 @@ function fixture(count = 1) {
   return {
     root,
     edit(sql: string) { const db = new Database(filename); try { db.exec(sql); } finally { db.close(); } },
-    rows(sql: string) { const db = new Database(join(root, ".pi/search/index.sqlite"), { readonly: true });
+    rows(sql: string) { const db = new Database(join(root, ".pi/search/tasks.sqlite"), { readonly: true });
       try { return db.query(sql).all() as Record<string, unknown>[]; } finally { db.close(); } },
   };
 }
@@ -74,7 +74,7 @@ test("bootstrap drains more than 64 saved tasks in bounded batches without a que
 test("task creation between empty bootstrap snapshot and writer recheck still drains immediately", async () => {
   const f = fixture(0);
   mkdirSync(join(f.root, ".pi/search"));
-  const db = new Database(join(f.root, ".pi/search/index.sqlite"));
+  const db = new Database(join(f.root, ".pi/search/tasks.sqlite"));
   db.exec("CREATE TABLE unrelated(value TEXT)"); db.close();
   let checks = 0;
   const h = harness(f.root, { loadConfig: async () => {
@@ -128,7 +128,7 @@ test("unconfigured provider and missing credential never activate paid work or c
     { loadConfig: async () => ({ ...config, provider: "openrouter" as const }), loadKey: async () => undefined }]) {
     const f = fixture(), h = harness(f.root, options);
     await h.worker.settled(); h.changed(); await h.tick();
-    expect(h.batches).toEqual([]); expect(existsSync(join(f.root, ".pi/search/index.sqlite"))).toBe(false);
+    expect(h.batches).toEqual([]); expect(existsSync(join(f.root, ".pi/search/tasks.sqlite"))).toBe(false);
   }
 });
 
@@ -154,7 +154,7 @@ test("revoked configuration during automatic upload rolls back without a retry l
   const h = harness(f.root, { loadConfig: async () => selected,
     embedTasks: async texts => { entered(); await gate; return texts.map(() => [1, 0, 0, 0]); } });
   await start; selected = undefined; release(); await h.worker.settled();
-  expect(f.rows("SELECT name FROM sqlite_master WHERE name='pix_task_vectors'")).toEqual([]);
+  expect(f.rows("SELECT * FROM pix_task_vectors")).toEqual([]);
   expect(h.timers.size).toBe(0);
   await h.worker.stop(); expect(h.timers.size).toBe(0);
 });
@@ -201,19 +201,25 @@ test("task edited/deleted during upload cannot publish stale hash and catches up
   }
 });
 
-test("teardown cancels ignoring provider, releases writer lock, rejects late completion and all owned callbacks", async () => {
+test("teardown retains ownership until ignoring provider settles and rejects late completion and callbacks", async () => {
   const f = fixture();
   let entered!: () => void, release!: () => void;
   const start = new Promise<void>(resolve => entered = resolve), gate = new Promise<void>(resolve => release = resolve);
   const h = harness(f.root, { embedTasks: async texts => { entered(); await gate; return texts.map(() => [1, 0, 0, 0]); } });
   await start; h.changed();
   const staleTimer = [...h.timers.keys()][0]!;
-  await h.worker.stop(); staleTimer();
+  let stopped = false;
+  const stopping = h.worker.stop().then(() => { stopped = true; });
+  staleTimer();
+  await Promise.resolve();
+  expect(stopped).toBe(false);
+  expect(f.rows("SELECT token FROM pix_search_work WHERE token != ''")).toHaveLength(1);
+  release(); await stopping;
+  expect(f.rows("SELECT * FROM pix_task_vectors")).toEqual([]);
   expect(h.closes()).toBe(1); expect(h.timers.size).toBe(0);
   h.changed(); expect(h.timers.size).toBe(0);
   const retry = harness(f.root); await retry.worker.settled();
   expect(retry.batches).toHaveLength(1);
-  release(); await Promise.resolve();
   expect(f.rows("SELECT COUNT(*) AS n FROM pix_task_vectors")).toEqual([{ n: 1 }]);
   await h.worker.stop(); expect(h.closes()).toBe(1);
 });

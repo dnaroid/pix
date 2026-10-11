@@ -13,16 +13,13 @@
 ## Context
 
 The approved native repository slice must support semantic retrieval as well as lexical
-search. Existing provider choices and paid IDX/history vectors must survive unchanged.
-The shared suite must work in ordinary Pi as well as Desktop, without an active ACP
-session or IDX executable.
+search. Existing provider choices and paid history vectors must survive unchanged.
+The shared suite must work in ordinary Pi as well as Desktop, without an active ACP session.
 
 ## Observations and sources
 
 - [0065](0065-native-repository-search.md) records the existing history writer's long
   transaction spanning provider work; sharing it would couple local search to that lifecycle.
-- The saved provider reader in `acp/src/search/commit-provider.ts` demonstrates read-only
-  compatibility with `.indexer-cli/config.json`; it does not require invoking IDX.
 - User requirements above are conversation-only evidence, not a claim of a separate signed plan.
 - Assumption: bounded, explicit-search indexing with visible coverage is useful before a
   persistent indexing service exists. Deterministic embeddings test mechanics, not real-model recall.
@@ -34,8 +31,8 @@ vectors in `.pi/search/file-vectors.sqlite`, keyed by exact provider/configurati
 and input hash. Preserve all existing databases/configuration and unreferenced paid vectors.
 Reuse the saved provider rather than choose a replacement. Keep per-project repository
 transmission consent separate from history/settings consent.
-Own provider configuration in the suite's consent file, while reusing existing saved
-IDX settings read-only when no native configuration exists. Expose consent as a Pi
+Own provider configuration in the suite's consent file. Historical external-configuration
+fallback clauses have been removed. Expose consent as a Pi
 user command as well as Desktop UI, not as a model-callable mutation tool.
 
 Use short token-leased SQLite publications, never HTTP inside writer transactions. Bound
@@ -46,14 +43,14 @@ coverage. Revalidate consent/configuration/generation and reject stale completio
 
 - Extend the shared history vector database: avoids a third file, but requires changing
   existing writers/schema guards and coordinating their lifecycle; defer that migration.
-- Reuse the IDX vector database directly: avoids duplicate embeddings but couples native
-  storage to IDX internals and risks existing paid data; retain explicit IDX access instead.
+- Reuse another product's vector database directly: avoids duplicate embeddings but couples native
+  storage to that product's internals and risks existing paid data.
 - A persistent background indexer: improves large-repository coverage latency, but adds
   consent, scheduling, process ownership and cost-control lifecycles beyond this request.
 
 ## Consequences
 
-Users may pay to embed repository content again; no claim of IDX vector reuse is made.
+Users may pay to embed repository content again; no claim of vector reuse is made.
 Large projects need multiple explicit searches to reach full scoped coverage. Retaining old
 vectors consumes bounded disk space; exhaustion degrades visibly rather than erasing data.
 Current provider quality, cold latency and real semantic recall remain unverified without

@@ -108,7 +108,6 @@ errors, not invent or approve decisions.
 - [0047 — Remove the Desktop Session inspector](0047-remove-session-inspector.md)
 - [0048 — Status-bar click popups](0048-status-bar-click-popups.md)
 - [0049 — Nonmodal model picker](0049-nonmodal-model-picker.md)
-- [0050 — Bounded global AI knowledge cleanup](0050-bounded-global-knowledge-cleanup.md)
 - [0051 — Read-only Claude reset grants](0051-claude-reset-grants.md)
 - [0052 — Owned LSP control in Desktop and TUI](0052-owned-lsp-control.md)
 - [0053 — Repository-only commit author in Source Control](0053-repository-commit-author.md)

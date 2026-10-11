@@ -296,6 +296,10 @@ export class AppPopupActionController {
 				await this.workspaceActions.forkFromUserMessageInNewTab(selected.entryId);
 				return true;
 			}
+			if (selected.value === "edit") {
+				await this.workspaceActions.editUserMessage(selected.entryId);
+				return true;
+			}
 			await this.workspaceActions.undoChangesFromUserMessage(selected.entryId);
 			return true;
 		} catch (error) {

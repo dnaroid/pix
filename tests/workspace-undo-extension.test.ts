@@ -8,6 +8,7 @@ import workspaceUndoBridge, {
 	WORKSPACE_MUTATION_ENTRY_TYPE,
 	WORKSPACE_UNDO_RESULT_CHANNEL,
 	WORKSPACE_UNDO_RPC_COMMAND,
+	MESSAGE_REWIND_RPC_COMMAND,
 	WORKSPACE_UNDO_RPC_ENV,
 	workspaceMutationsAfterEntry,
 } from "../src/bundled-extensions/workspace-undo/index.js";
@@ -142,6 +143,31 @@ function tempRoot(): string {
 	return root;
 }
 
+describe("message rewind ACP bridge", () => {
+	for (const cancelled of [false, true]) it(`rewinds history without reverting files (cancelled=${cancelled})`, async () => {
+		const cwd = tempRoot();
+		writeFileSync(join(cwd, "changed.txt"), "after\n");
+		const bridge = loadBridge(MESSAGE_REWIND_RPC_COMMAND);
+		const branch = [
+			{ id: "user", parentId: null, type: "message", message: { role: "user", content: "edit me" } },
+			{ id: "mutation", type: "custom", customType: WORKSPACE_MUTATION_ENTRY_TYPE,
+				data: { userEntryId: "user", mutation: { type: "write", path: "changed.txt", beforeContent: "before\n", afterContent: "after\n" } } },
+		];
+		let leaf: string | null = "answer";
+		let result: any;
+		await bridge.command(JSON.stringify({ requestId: "edit-1", targetEntryId: "user" }), {
+			cwd,
+			sessionManager: { getBranch: () => branch, getLeafId: () => leaf },
+			navigateTree: async (id: string) => { assert.equal(id, "user"); if (!cancelled) leaf = null; return { cancelled }; },
+			ui: { setWidget: (_key: string, lines: string[]) => { result = JSON.parse(lines[1]!); } },
+		});
+		assert.equal(result.status, cancelled ? "cancelled" : "ok");
+		assert.equal(leaf, cancelled ? "answer" : null);
+		assert.equal(readFileSync(join(cwd, "changed.txt"), "utf8"), "after\n");
+		assert.equal(branch.length, 2, "old branch entries remain available");
+	});
+});
+
 function mutationContext(cwd: string, userEntryIds: string[] = ["user-1"]) {
 	return {
 		cwd,
@@ -155,7 +181,7 @@ function mutationContext(cwd: string, userEntryIds: string[] = ["user-1"]) {
 	};
 }
 
-function loadBridge() {
+function loadBridge(commandName: string = WORKSPACE_UNDO_RPC_COMMAND) {
 	const previous = process.env[WORKSPACE_UNDO_RPC_ENV];
 	process.env[WORKSPACE_UNDO_RPC_ENV] = "1";
 	const events = new Map<string, EventHandler>();
@@ -165,8 +191,7 @@ function loadBridge() {
 		workspaceUndoBridge({
 			on: (name: string, handler: EventHandler) => { events.set(name, handler); },
 			registerCommand: (name: string, definition: { handler: CommandHandler }) => {
-				assert.equal(name, WORKSPACE_UNDO_RPC_COMMAND);
-				command = definition.handler;
+				if (name === commandName) command = definition.handler;
 			},
 			appendEntry: (customType: string, data: unknown) => { entries.push({ customType, data }); },
 		} as any);

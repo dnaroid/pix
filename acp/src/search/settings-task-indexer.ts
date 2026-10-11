@@ -31,6 +31,7 @@ interface Options {
 const fingerprintTasks = (tasks: readonly TaskSemanticDocument[]) => hashText(JSON.stringify(
   tasks.map(task => [task.id, task.hash]).sort((a, b) => a[0]!.localeCompare(b[0]!))));
 class CorpusChanged extends Error {}
+// Background sources share the writer with provider-backed batches, not just short local writes.
 
 /** Workspace-owned, change-driven indexing. A failed fingerprint is not retried
  * by status reads, queries or a timer. Explicit sync can retry once. */
@@ -90,7 +91,7 @@ export class SettingsTaskIndexer {
       }
       revision = work.revision;
       const signal = AbortSignal.any([lifetime, work.controller.signal]);
-      await this.drain(source, signal, 8);
+      await this.drain(source, signal, true);
       signal.throwIfAborted();
       delete work.error;
       this.options.completed?.(source);
@@ -172,9 +173,8 @@ export class SettingsTaskIndexer {
     });
     work.worker = operation;
   }
-  private async drain(source: Source, signal: AbortSignal, batches = Infinity): Promise<void> {
-    // Separate bounded transactions let the other namespaces make progress.
-    while (!this.closed && batches-- > 0) {
+  private async drain(source: Source, signal: AbortSignal, retry = false): Promise<void> {
+    while (!this.closed) {
       signal.throwIfAborted();
       if (!await this.options.authorized(signal)) return;
       let pending = false;
@@ -190,7 +190,7 @@ export class SettingsTaskIndexer {
           const batch = [...missing].slice(0, 16);
           pending = batch.length > 0;
           if (pending) {
-            const vectors = await this.options.embed(batch.map(([, text]) => text), signal, source);
+            const vectors = await tx.outside(() => this.options.embed(batch.map(([, text]) => text), signal, source));
             signal.throwIfAborted();
             if (!await this.options.authorized(signal)) throw new Error("Search authorization revoked");
             batch.forEach(([hash], index) => cache.vectors.set(hash, vectors[index]!));
@@ -204,7 +204,7 @@ export class SettingsTaskIndexer {
           const batch = index.missing(16);
           pending = batch.length > 0;
           if (pending) {
-            const vectors = await this.options.embed(batch.map(task => task.text), signal, source);
+            const vectors = await tx.outside(() => this.options.embed(batch.map(task => task.text), signal, source));
             signal.throwIfAborted();
             if (!await this.options.authorized(signal)) throw new Error("Search authorization revoked");
             const latest = await readTaskSemanticCorpus(this.options.cwd, signal);
@@ -212,7 +212,8 @@ export class SettingsTaskIndexer {
             index.save(new Map(batch.map((task, position) => [task.hash, vectors[position]!] as const)));
           }
         }
-      }, this.options.config);
+      }, this.options.config, { source, retry });
+      retry = false;
       if (!pending) return;
       await yieldTask(undefined, { signal });
     }

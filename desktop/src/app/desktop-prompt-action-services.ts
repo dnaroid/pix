@@ -11,6 +11,7 @@ import type { DesktopSessionServices } from "./desktop-session-services";
 import type { DesktopSessionTransitionServices } from "./desktop-session-transition-services";
 import { createPromptQueueActions } from "./prompt-queue-actions.svelte";
 import { createPromptSubmit } from "./prompt-submit";
+import { createEditedMessageSubmit } from "./edited-message-submit";
 
 type AttachmentDrafts = ReturnType<typeof createAttachmentDraftController>;
 
@@ -95,6 +96,19 @@ export function createDesktopPromptActionServices(options: DesktopPromptActionSe
       && command._meta?.["pix.commandSource"] === "extension");
   };
 
+  function appendUserMessage(text: string, id: string, attachments: readonly Attachment[]) {
+    const sessionId = options.state.sessionId;
+    const previous = options.state.transcript;
+    const next = appendLocalUserMessage(previous, text, id, attachments);
+    if (sessionId) options.state.setActiveTranscriptForSession(sessionId, next);
+    else options.state.setTranscript(next);
+    return () => {
+      if (options.state.transcript !== next) return;
+      options.state.setTranscript(previous);
+      if (sessionId && options.state.sessionId === sessionId) options.state.setSessionTranscript(sessionId, previous);
+    };
+  }
+
   const submit = createPromptSubmit({
     client: options.client,
     sessionMutationRunning: options.sessionMutationRunning,
@@ -146,20 +160,7 @@ export function createDesktopPromptActionServices(options: DesktopPromptActionSe
     htmlSandboxViewport: options.htmlSandboxViewport,
     invalidateAttachmentDraft: options.attachments.invalidate,
     nextLocalMessageId: options.nextLocalMessageId,
-    appendUserMessage: (text, id, attachments) => {
-      const sessionId = options.state.sessionId;
-      const previous = options.state.transcript;
-      const next = appendLocalUserMessage(previous, text, id, attachments);
-      if (sessionId) options.state.setActiveTranscriptForSession(sessionId, next);
-      else options.state.setTranscript(next);
-      return () => {
-        if (options.state.transcript !== next) return;
-        options.state.setTranscript(previous);
-        if (sessionId && options.state.sessionId === sessionId) {
-          options.state.setSessionTranscript(sessionId, previous);
-        }
-      };
-    },
+    appendUserMessage,
     scrollToLatest: options.scrollToLatest,
     prompts: options.prompt.runtime,
     refreshAutocompleteSettings: options.sessions.autocomplete.refresh,
@@ -168,7 +169,19 @@ export function createDesktopPromptActionServices(options: DesktopPromptActionSe
     reportError: options.reportError,
   });
 
-  return { queue, submit };
+  const prepareEditedMessage = createEditedMessageSubmit({
+    client: options.client,
+    sessionId: () => options.state.sessionId,
+    prompts: options.prompt.runtime,
+    imagePromptSupported: options.imagePromptSupported,
+    nextLocalMessageId: options.nextLocalMessageId,
+    appendUserMessage,
+    scrollToLatest: options.scrollToLatest,
+    refreshSessions: options.sessions.catalog.refresh,
+    reportError: options.reportError,
+  });
+
+  return { queue, submit, prepareEditedMessage };
 }
 
 export type DesktopPromptActionServices = ReturnType<typeof createDesktopPromptActionServices>;

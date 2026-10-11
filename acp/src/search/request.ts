@@ -18,8 +18,9 @@ function cwd(value: unknown): string {
 }
 export function parseSearchConfigRequest(value: unknown): SearchConfigRequest {
   const p = record(value);
-  if (Object.keys(p).some(key => key !== "cwd")) return invalid();
-  return { cwd: cwd(p.cwd) };
+  if (Object.keys(p).some(key => !["cwd", "includeSourceStatus"].includes(key))) return invalid();
+  if (p.includeSourceStatus !== undefined && typeof p.includeSourceStatus !== "boolean") return invalid();
+  return { cwd: cwd(p.cwd), ...(p.includeSourceStatus !== undefined ? { includeSourceStatus: p.includeSourceStatus } : {}) };
 }
 export function parseSearchSyncRequest(value: unknown): SearchSyncRequest {
   const p = record(value);

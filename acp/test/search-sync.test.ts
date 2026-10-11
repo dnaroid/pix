@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { access, mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
@@ -57,7 +58,9 @@ async function fixture(t: TestContext) {
     finally { db.close(); } notify();
   };
   const rows = (table: string, workspace = cwd): Array<Record<string, unknown>> => {
-    const db = new DatabaseSync(join(workspace, ".pi/search/index.sqlite"), { readOnly: true });
+    const source = table.startsWith("pix_session_") ? "sessions" : table.startsWith("pix_task_") ? "tasks" : "settings";
+    if (!existsSync(join(workspace, `.pi/search/${source}.sqlite`))) return [];
+    const db = new DatabaseSync(join(workspace, `.pi/search/${source}.sqlite`), { readOnly: true });
     try { return db.prepare(`SELECT * FROM ${table}`).all(); } catch { return []; } finally { db.close(); }
   };
   const idle = (service: DesktopSearchService, workspace = cwd) => until(async () => !(await service.config({ cwd: workspace })).indexing);
@@ -109,7 +112,7 @@ test("explicit retry recovers only the selected failed automatic source", async 
   assert.equal(f.calls.length, before + 2); assert.equal((await s.config({ cwd: f.cwd })).error, undefined);
 });
 
-for (const source of ["settings", "tasks"] as const) test(`explicit ${source} pass is bounded, truthful and Continue reuses purchased vectors`, async t => {
+for (const source of ["settings", "tasks"] as const) test(`explicit ${source} pass drains beyond 128 and reuses purchased vectors`, async t => {
   const f = await fixture(t), s = f.make();
   const settings = Array.from({ length: 130 }, (_, i) => setting(String(i)));
   if (source === "tasks") {
@@ -119,9 +122,9 @@ for (const source of ["settings", "tasks"] as const) test(`explicit ${source} pa
   }
   const request = source === "settings" ? { cwd: f.cwd, source, settings } : { cwd: f.cwd, source };
   const first = await s.index(request);
-  assert.equal(first.complete, false); assert.equal(first.indexed, 128); assert.equal(first.total, 130);
-  assert.match(first.message ?? "", /continue/); assert.equal(f.calls.flat().length, 128);
-  await delay(20); assert.equal(f.calls.flat().length, 128, "no unbounded follow-up worker");
+  assert.equal(first.complete, true); assert.equal(first.indexed, 130); assert.equal(first.total, 130);
+  assert.equal(f.calls.flat().length, 130);
+  assert.ok(f.calls.every(batch => batch.length <= 16));
   assert.deepEqual(await s.index(request), { source, complete: true, indexed: 130, total: 130 });
   assert.equal(f.calls.flat().length, 130); await s.index(request); assert.equal(f.calls.flat().length, 130);
 });
@@ -144,12 +147,16 @@ for (const boundary of ["caller", "workspace", "config", "dispose"] as const) te
   const controller = new AbortController();
   const operation = s.index({ cwd: f.cwd, source: "tasks" }, controller.signal);
   const rejected = assert.rejects(operation); await started.promise;
-  if (boundary === "caller") controller.abort();
-  if (boundary === "workspace") { const other = join(f.cwd, "other"); await mkdir(other); await s.config({ cwd: other }); }
-  if (boundary === "config") { await f.configure(false); await s.config({ cwd: f.cwd }); }
-  if (boundary === "dispose") await s.dispose();
-  await rejected; await until(() => providerSignal!.aborted);
-  release.resolve(); await delay(20);
+  const cancellation = (async () => {
+    if (boundary === "caller") controller.abort();
+    if (boundary === "workspace") { const other = join(f.cwd, "other"); await mkdir(other); await s.config({ cwd: other }); }
+    if (boundary === "config") { await f.configure(false); await s.config({ cwd: f.cwd }); }
+    if (boundary === "dispose") await s.dispose();
+  })();
+  try { await until(() => providerSignal!.aborted); }
+  finally { release.resolve(); }
+  // Config/dispose must retain ownership until the noncooperative transport ends.
+  await cancellation; await rejected; await s.dispose();
   assert.equal(f.rows("pix_task_vectors").length, 0); assert.equal(f.calls.length, 1); assert.equal(f.listeners.size, 0);
 });
 
@@ -199,10 +206,37 @@ test("sessions click discovers saved names only, reuses names and reports change
   assert.doesNotMatch(JSON.stringify(f.calls), /SECRET/);
 });
 
+test("explicit sessions pass drains 130 names in batches of at most 16 and reuses them", async t => {
+  const f = await fixture(t);
+  const records = Array.from({ length: 130 }, (_, i) => ({ sessionId: `s${i}`, piSessionId: `s${i}`,
+    piSessionPath: join(f.cwd, `s${i}.jsonl`), cwd: f.cwd, title: `Saved name ${i}`, namedTitle: `Saved name ${i}`,
+    updatedAt: "2026-10-10T00:00:00Z" }));
+  const s = f.make({ discover: async () => records });
+  assert.deepEqual(await s.index({ cwd: f.cwd, source: "sessions" }), { source: "sessions", complete: true, indexed: 130, total: 130 });
+  assert.equal(f.calls.flat().length, 130);
+  assert.ok(f.calls.every(batch => batch.length <= 16));
+  await s.index({ cwd: f.cwd, source: "sessions" });
+  assert.equal(f.calls.flat().length, 130);
+});
+
+test("Sessions Continue resets exhausted ownership before reconciling saved names", async t => {
+  const f = await fixture(t);
+  let title = "First saved name";
+  const s = f.make({ discover: async () => [{ sessionId: "named", piSessionId: "named",
+    piSessionPath: join(f.cwd, "named.jsonl"), cwd: f.cwd, title, namedTitle: title,
+    updatedAt: "2026-10-10T00:00:00Z" }] });
+  assert.equal((await s.index({ cwd: f.cwd, source: "sessions" })).complete, true);
+  const db = new DatabaseSync(join(f.cwd, ".pi/search/sessions.sqlite"));
+  db.exec("UPDATE pix_search_work SET failures=2,expires=0,token=''"); db.close();
+  title = "Changed saved name";
+  assert.equal((await s.index({ cwd: f.cwd, source: "sessions" })).complete, true);
+  assert.equal(f.calls.length, 2);
+});
+
 test("explicit incompatible settings cache is retained while task-only click still succeeds", async t => {
   const f = await fixture(t), s = f.make(); await f.put(task("a"));
   await s.index({ cwd: f.cwd, source: "settings", settings: [setting("old")] });
-  const db = new DatabaseSync(join(f.cwd, ".pi/search/index.sqlite"));
+  const db = new DatabaseSync(join(f.cwd, ".pi/search/settings.sqlite"));
   db.prepare("UPDATE metadata SET value=? WHERE key='identity'").run("other-provider"); db.close();
   const tables = ["metadata", "documents", "vectors"], before = tables.map(table => f.rows(table));
   const result = await s.index({ cwd: f.cwd, source: "settings", settings: [setting("new")] });
@@ -227,7 +261,7 @@ for (const source of ["settings", "tasks", "sessions"] as const) test(`explicit 
   const table = source === "settings" ? "vectors" : source === "tasks" ? "pix_task_vectors" : "pix_session_vectors";
   preferences.embedding = async () => {
     const config = await read();
-    const exists = await access(join(f.cwd, ".pi/search/index.sqlite")).then(() => true, () => false);
+    const exists = await access(join(f.cwd, `.pi/search/${source}.sqlite`)).then(() => true, () => false);
     if (hold && coverageRead && exists && f.rows(table).length) { hold = false; entered.resolve(); await release.promise; }
     return config;
   };
@@ -273,7 +307,7 @@ test("config never activates watchers/provider; sync returns source status witho
 for (const legacy of [true, false]) test(`incompatible settings ${legacy ? "legacy" : "configured"} vectors do not block task indexing`, async t => {
   const f = await fixture(t), seed = f.make();
   await seed.sync({ cwd: f.cwd, settings: [setting("old")] }); await f.idle(seed); await seed.dispose();
-  const db = new DatabaseSync(join(f.cwd, ".pi/search/index.sqlite"));
+  const db = new DatabaseSync(join(f.cwd, ".pi/search/settings.sqlite"));
   try {
     if (legacy) db.exec("DELETE FROM metadata WHERE key='identity'");
     else db.prepare("UPDATE metadata SET value=? WHERE key='identity'").run("different-provider-identity");
@@ -298,7 +332,7 @@ for (const legacy of [true, false]) test(`incompatible settings ${legacy ? "lega
 test("an incompatible task namespace does not block changed settings", async t => {
   const f = await fixture(t); await f.put(task("a"));
   const seed = f.make(); await seed.sync({ cwd: f.cwd, settings: [] }); await f.idle(seed); await seed.dispose();
-  const db = new DatabaseSync(join(f.cwd, ".pi/search/index.sqlite"));
+  const db = new DatabaseSync(join(f.cwd, ".pi/search/tasks.sqlite"));
   try { db.exec("DELETE FROM pix_task_index_meta WHERE key='identity'"); } finally { db.close(); }
   const tables = ["pix_task_index_meta", "pix_task_documents", "pix_task_vectors"];
   const retained = tables.map(table => f.rows(table)); f.calls.length = 0;
@@ -390,13 +424,16 @@ test("a status-only task write during a batch neither cancels nor re-embeds", as
 test("catalogue replacement fences uncooperative old settings output and indexes the new revision", async t => {
   const f = await fixture(t), started = gate<void>(), release = gate<void>();
   const old = setting("a", "old"), next = setting("a", "new");
-  const s = f.make({ embed: async inputs => {
-    f.calls.push([...inputs]); if (inputs.some(text => text.includes("\nold\n"))) { started.resolve(); await release.promise; }
+  let providerSignal: AbortSignal | undefined;
+  const s = f.make({ embed: async (inputs, _key, signal) => {
+    f.calls.push([...inputs]); if (inputs.some(text => text.includes("\nold\n"))) { providerSignal = signal; started.resolve(); await release.promise; }
     return inputs.map(() => [1, 0, 0]);
   } });
   await s.sync({ cwd: f.cwd, settings: [old] }); await started.promise;
-  await s.sync({ cwd: f.cwd, settings: [next] }); await f.idle(s);
-  release.resolve(); await delay(15);
+  await s.sync({ cwd: f.cwd, settings: [next] });
+  try { await until(() => providerSignal!.aborted); assert.equal(f.calls.length, 1); }
+  finally { release.resolve(); }
+  await f.idle(s);
   assert.deepEqual(f.rows("vectors").map(row => row.hash), [hashText(settingsDocuments([next])[0]!.chunks[0]!)]);
   assert.equal(f.calls.length, 2);
 });
@@ -436,6 +473,31 @@ test("workspace switch, revocation and dispose release watchers/timers and rejec
   assert.equal(f.listeners.size, 1); await s.dispose(); assert.equal(f.listeners.size, 0); assert.equal(f.closed(), 3);
 });
 
+test("tasks finish independently while Settings is blocked in the provider", async t => {
+  const f = await fixture(t), started = gate<void>(), release = gate<void>();
+  const s = f.make({ embed: async inputs => {
+    f.calls.push([...inputs]);
+    if (inputs.some(input => input.includes("Label slow"))) { started.resolve(); await release.promise; }
+    return inputs.map(() => [1, 0, 0]);
+  } });
+  await s.sync({ cwd: f.cwd, settings: [] }); await f.idle(s);
+  await s.sync({ cwd: f.cwd, settings: [setting("slow")] }); await started.promise;
+  try {
+    await f.put(task("a"));
+    await until(async () => f.rows("pix_task_vectors").length === 1 && !(await s.config({ cwd: f.cwd })).indexingSources?.tasks);
+    const waiting = await s.config({ cwd: f.cwd });
+    assert.equal(waiting.indexingSources?.tasks, false);
+    assert.equal(waiting.indexingSources?.settings, true);
+    assert.equal(waiting.sourceErrors?.tasks, undefined);
+    assert.equal(f.calls.length, 2, "Tasks can finish without waiting for Settings; status reads cannot restart provider work");
+  } finally { release.resolve(); }
+  await f.idle(s);
+  const recovered = await s.config({ cwd: f.cwd });
+  assert.equal(recovered.sourceErrors, undefined); assert.equal(recovered.indexing, false);
+  assert.equal(f.calls.length, 2);
+  assert.equal(f.rows("vectors").length, 1); assert.equal(f.rows("pix_task_vectors").length, 1);
+});
+
 test("same-store background task writers serialize provider work and reuse the committed batch", async t => {
   const f = await fixture(t); await f.put(task("a"));
   const started = gate<void>(), release = gate<void>();
@@ -450,25 +512,31 @@ test("same-store background task writers serialize provider work and reuse the c
 test("deletion during a noncooperative batch rolls back old task output and automatically prunes", async t => {
   const f = await fixture(t); await f.put(task("a"));
   const started = gate<void>(), release = gate<void>();
-  const s = f.make({ embed: async inputs => { f.calls.push([...inputs]); started.resolve(); await release.promise; return inputs.map(() => [1, 0, 0]); } });
+  let providerSignal: AbortSignal | undefined;
+  const s = f.make({ embed: async (inputs, _key, signal) => { f.calls.push([...inputs]); providerSignal = signal; started.resolve(); await release.promise; return inputs.map(() => [1, 0, 0]); } });
   await s.sync({ cwd: f.cwd, settings: [] }); await started.promise;
   const db = await f.openTasks(); db.prepare("DELETE FROM tasks WHERE id='a'").run(); db.close(); f.notify();
-  await f.idle(s); release.resolve(); await delay(15);
+  try { await until(() => providerSignal!.aborted); }
+  finally { release.resolve(); }
+  await f.idle(s);
   assert.equal(f.calls.length, 1); assert.deepEqual(f.rows("pix_task_documents"), []); assert.deepEqual(f.rows("pix_task_vectors"), []);
 });
 
 test("invalid change during a batch cancels old output without repeatedly scheduling the old corpus", async t => {
   const f = await fixture(t); await f.put(task("a"));
   const started = gate<void>(), release = gate<void>(); let first = true;
-  const s = f.make({ embed: async inputs => {
-    f.calls.push([...inputs]); if (first) { first = false; started.resolve(); await release.promise; }
+  let providerSignal: AbortSignal | undefined;
+  const s = f.make({ embed: async (inputs, _key, signal) => {
+    f.calls.push([...inputs]); if (first) { providerSignal = signal; first = false; started.resolve(); await release.promise; }
     return inputs.map(() => [1, 0, 0]);
   } });
   await s.sync({ cwd: f.cwd, settings: [] }); await started.promise;
   const db = await f.openTasks();
   db.prepare("UPDATE tasks SET payload=? WHERE id='a'").run(JSON.stringify({ ...task("a"), parentId: "missing" })); db.close(); f.notify();
+  try { await until(() => providerSignal!.aborted); }
+  finally { release.resolve(); }
   await f.idle(s); assert.match((await s.config({ cwd: f.cwd })).sourceErrors?.tasks ?? "", /Task corpus unavailable/);
-  release.resolve(); f.notify(); await delay(15); await f.idle(s);
+  f.notify(); await delay(15); await f.idle(s);
   assert.equal(f.calls.length, 1); assert.deepEqual(f.rows("pix_task_vectors"), []);
   await f.put(task("a", "valid again")); await f.idle(s);
   assert.equal(f.calls.length, 2); assert.equal(f.rows("pix_task_vectors").length, 1);

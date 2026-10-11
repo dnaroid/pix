@@ -38,13 +38,7 @@ stdio failure paths reap the child. A spawned PTY child is owned by a startup
 guard until its supervisor takes ownership; all setup and registry rejection
 paths kill and reap it. Native terminal startup reserves the same window lifetime
 and serializes registry publication with window destruction; it rejects missing
-or destroyed owners. IDX maintenance startup reserves that lifetime before
-workspace/launcher preparation or spawn, then publishes only while the original
-slot still owns the label and the window is available and not exiting. Its
-slots-to-operations publication lock excludes synchronous destruction capture;
-pipe failures, conflicts, and rejected publication kill and reap the guarded
-child outside registry locks. Window destruction captures the exact terminal
-and IDX
+or destroyed owners. Window destruction captures the exact terminal
 operation IDs (including completed history) while cancelling the old lifetime;
 delayed stop and pruning touch only those captured IDs, not resources published
 by a replacement window using the same label. Workspace cleanup and application
@@ -53,7 +47,7 @@ exit still stop resources in their existing scopes.
 LSP onboarding package-manager commands are a separate transient class rather
 than a long-lived per-window runtime. `install_lsp_server` runs its fixed,
 user-approved command on Tauri's blocking pool and waits for that child to exit
-before returning bounded output; it does not publish an ACP/PTY/IDX process
+before returning bounded output; it does not publish an ACP/PTY process
 slot. Workspace/session invalidation therefore suppresses stale registration/UI
 continuations but does not cancel a package-manager command that is already
 running. See [desktop-lsp-onboarding.md](./desktop-lsp-onboarding.md).
@@ -97,8 +91,6 @@ fetches objects or mutates Git refs, the index, or the working tree.
 - `desktop/src-tauri/src/lib.rs::start_process`
 - `desktop/src-tauri/src/lib.rs::stop_process_slot`
 - `desktop/src-tauri/src/lib.rs::spawn_package_terminal`
-- `desktop/src-tauri/src/lib.rs::start_idx_operation`
-- `desktop/src-tauri/src/lib.rs::publish_idx_operation`
 - `desktop/src-tauri/src/lib.rs::capture_destroyed_window`
 - `desktop/src-tauri/src/lsp_install.rs::install_lsp_server`
 - `desktop/src-tauri/src/git_ci.rs` (`GitCiProcessState`, bounded CLI runner)
@@ -114,8 +106,7 @@ fetches objects or mutates Git refs, the index, or the working tree.
 - `desktop/src-tauri/src/native_lifecycle_tests.rs` (command-level admission,
   invalid JSON isolation, writer failure acknowledgement drain, startup/stop
   publication cancellation, same-label replacement resource isolation,
-  natural exit with inherited pipe, PTY and IDX startup guards,
-  pending IDX destruction/replacement publication)
+  natural exit with inherited pipe and PTY startup guards)
 - `desktop/src-tauri/src/lib.rs` (destroyed reservation, isolated force-stop,
   bounded/read-only remote-Git update probe)
 - `desktop/src-tauri/src/native_process/windows.rs` (Windows job descendants

@@ -16,9 +16,9 @@ export function searchIndexIndicatorReasons(view?: SearchIndexViewState): Sideba
     if (action?.running || row.semanticActive) active.push(row.label);
     if (action?.error && !action.cancelled) errors.push(`${row.label}: ${action.error}`);
     else if (row.local === "error" || row.semantic === "error") errors.push(`${row.label}: ${row.local === "error" ? row.localDetail : row.semanticDetail}`);
-    if (row.local === "missing" || row.local === "incomplete" || row.semantic === "incompatible"
+    if (!row.empty && (row.local === "missing" || row.local === "incomplete" || row.semantic === "incompatible"
       || row.semantic === "unavailable" || (snapshot.stores && row.semantic === "no-vectors" && row.localSummary !== "0 items" && row.localSummary !== "0 chunks")
-      || action?.result?.complete === false || action?.cancelled) pending.push(row.label);
+      || action?.result?.complete === false || action?.cancelled)) pending.push(row.label);
   }
   const reasons: SidebarIndicatorReason[] = [];
   if (errors.length) reasons.push({ id: "search.error", tone: "error", reason: errors.join("; ") });

@@ -1,6 +1,7 @@
 import { constants } from "node:fs";
 import { lstat, mkdir, open, realpath } from "node:fs/promises";
 import path from "node:path";
+import { sourcePath } from "./source-work.mjs";
 
 export const MAX_DATABASE_BYTES = 256 * 1024 * 1024;
 const definitions = new Map([
@@ -48,13 +49,13 @@ function validate(db, root) {
     || !Number.isSafeInteger(meta[0].generation) || meta[0].generation < 0) throw new Error("Unknown native search identity");
 }
 
-export async function openStore(root) {
+export async function openStore(root, source = "code") {
   if (await realpath(root) !== root) throw new Error("Unsafe project root");
   const rootInfo = await lstat(root);
   if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw new Error("Unsafe project root");
   await safeDirectory(path.join(root, ".pi"));
   await safeDirectory(path.join(root, ".pi/search"));
-  const filename = path.join(root, ".pi/search/files.sqlite");
+  const filename = sourcePath(root, source);
   await checkStorage(root, filename);
   try {
     const handle = await open(filename, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600);
@@ -85,7 +86,7 @@ export async function openStore(root) {
     const maxPages = Math.floor(MAX_DATABASE_BYTES / db.prepare("PRAGMA page_size").get().page_size);
     db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA max_page_count=${maxPages}`);
     await checkStorage(root, filename);
-    return { db, root, filename, close: () => db.close() };
+    return { db, root, filename, source, close: () => db.close() };
   } catch (e) { db.close(); throw e; }
 }
 

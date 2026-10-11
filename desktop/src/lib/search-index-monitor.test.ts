@@ -82,7 +82,7 @@ describe("read-only index monitor", () => {
     await monitor.refresh();
     expect(signal.aborted).toBe(true);
     const calls = onChange.mock.calls.length;
-    stale.resolve({ stores: [{ id: "files", state: "error", counts: {} }] });
+    stale.resolve({ stores: [{ id: "code", state: "error", counts: {} }] });
     await vi.advanceTimersByTimeAsync(0);
     expect(onChange).toHaveBeenCalledTimes(calls);
     monitor.dispose();

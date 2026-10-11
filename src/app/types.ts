@@ -598,7 +598,7 @@ export type ModelThinkingMenuState = {
 	visibilityMode: boolean;
 };
 
-export type UserMessageMenuValue = "copy" | "fork" | "fork-new-tab" | "undo";
+export type UserMessageMenuValue = "copy" | "fork" | "fork-new-tab" | "edit" | "undo";
 export type UserMessageJumpMenuValue = { entryId?: string; sessionEntryId?: string; text?: string; userIndex?: number; userCount?: number };
 export type QueueMessageMenuValue = "cancel" | "edit" | "send-now";
 export type ResumeMenuValue = { kind: "new" } | { kind: "session"; session: SessionInfo };

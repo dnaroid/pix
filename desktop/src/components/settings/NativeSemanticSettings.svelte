@@ -3,6 +3,7 @@
   import TaskFieldSelect from "../TaskFieldSelect.svelte";
   import SettingsFieldRow from "./SettingsFieldRow.svelte";
   import SettingsNumberInput from "./SettingsNumberInput.svelte";
+  import SearchExtensionSettings from "./SearchExtensionSettings.svelte";
 
   let { source, onChange }: { source: string; onChange: (source: string) => void } = $props();
   const parsed = $derived(parseSettingsSource(source).value);
@@ -28,6 +29,7 @@
   }
 </script>
 
+<SearchExtensionSettings {source} {onChange} />
 <div class="px-2.5 py-2.5">
   <h2 class="text-sm font-semibold text-foreground">Semantic search</h2>
   <p class="mt-1 text-xs leading-4 text-muted-foreground">This edits <code>~/.config/pi/pi-tools-suite.jsonc</code> at <code>search.embedding</code>. Use Save above. One valid saved configuration enables semantic search across all sources, projects, Pi and Desktop. Saving can upload eligible code/document chunks, paths/headings, task titles/descriptions, saved session names, commit metadata, settings metadata and search queries; charges may apply. Conversation bodies and attachments are not embedded. Local search remains available. Removing configuration stops new embedding work but retains existing vectors.</p>

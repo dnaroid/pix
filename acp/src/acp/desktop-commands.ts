@@ -321,7 +321,7 @@ export interface ForkMessagesResponse {
 	readonly messages: readonly ForkMessage[];
 }
 
-export type DesktopUserMessageAction = "copy" | "undo";
+export type DesktopUserMessageAction = "copy" | "undo" | "rewind";
 
 export interface DesktopUserMessageActionRequest extends DesktopSessionRequest {
 	readonly entryId: string;
@@ -648,9 +648,9 @@ export function parseDesktopUserMessageActionRequest(value: unknown): DesktopUse
 		!isRecord(value)
 		|| typeof value.entryId !== "string"
 		|| value.entryId.length === 0
-		|| (value.action !== "copy" && value.action !== "undo")
+		|| (value.action !== "copy" && value.action !== "undo" && value.action !== "rewind")
 	) {
-		throw new RequestError(ERROR_INVALID_PARAMS, "user-message action requires entryId and action copy|undo");
+		throw new RequestError(ERROR_INVALID_PARAMS, "user-message action requires entryId and action copy|undo|rewind");
 	}
 	return { ...session, entryId: value.entryId, action: value.action };
 }

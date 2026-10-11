@@ -3,8 +3,9 @@ import { lstat, mkdir, open } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { canonicalSearchIndexPath } from "./canonical-index.js";
+import { claimWork } from "./source-work.js";
 import {
-  COMMIT_DOCUMENTS, COMMIT_META, COMMIT_VECTORS, createCommitTables, importLegacyCommitVectors,
+  COMMIT_DOCUMENTS, COMMIT_META, COMMIT_VECTORS, createCommitTables,
 } from "./commit-storage.js";
 import { setTimeout as delay } from "node:timers/promises";
 import { commitHead, patchSearchTerm, rankCommits, readCommitCorpus, readPatchMatches } from "./commit-corpus.js";
@@ -53,7 +54,7 @@ async function commitIndexPath(root: string): Promise<string> {
     const entry = await lstat(directory);
     if (entry.isSymbolicLink() || !entry.isDirectory()) throw new Error(SEMANTIC_NOTICE);
   }
-  const file = canonicalSearchIndexPath(root);
+  const file = canonicalSearchIndexPath(root, "commits");
   for (const candidate of [file, `${file}-wal`, `${file}-shm`, `${file}-journal`]) {
     const entry = await lstat(candidate).catch(error => {
       if (error.code !== "ENOENT") throw error;
@@ -71,7 +72,7 @@ async function commitIndexPath(root: string): Promise<string> {
 async function run() {
   let head: string | undefined;
   let docs;
-  try { if (indexOnly) head = await commitHead(data.root, signal); docs = await readCommitCorpus(data.root, signal); }
+  try { head = await commitHead(data.root, signal); docs = await readCommitCorpus(data.root, signal); }
   catch { signal.throwIfAborted(); return indexOnly ? { source: "commits", complete: false, message: "Commit history unavailable (repository may have no HEAD)." }
     : { results: [], notices: ["Commit history unavailable (repository may have no HEAD)."] }; }
   const patchTerm = "query" in data.request ? patchSearchTerm(data.request.query) : undefined;
@@ -91,7 +92,6 @@ async function run() {
   }
   const vectors = new Map<string, number[]>(); const notices: string[] = [];
   let queryVector: number[] | undefined;
-  let budget = indexOnly ? 128 : Infinity;
   if (data.config && docs.length) {
     let db: DatabaseSync | undefined;
     try {
@@ -102,12 +102,14 @@ async function run() {
       try {
         createCommitTables(db);
         if (indexOnly) db.exec("CREATE TEMP TABLE pix_live_commit_ids (hash TEXT PRIMARY KEY)");
-        await importLegacyCommitVectors(db, data.root, signal);
         db.exec("COMMIT");
       } catch (e) { db.exec("ROLLBACK"); throw e; }
       for (let offset = 0; offset < docs.length; offset += 16) {
-        signal.throwIfAborted(); await lock(db);
+        signal.throwIfAborted();
+        const work = await claimWork(db, signal, { retry: indexOnly && offset === 0 });
+        let writing = false, success = false;
         try {
+          await lock(db); writing = true;
           if (!(await rpc("validate"))) throw new Error(SEMANTIC_NOTICE);
           const saved = db.prepare(`SELECT value FROM ${COMMIT_META} WHERE key='identity'`).get()?.value;
           if (saved !== undefined && (typeof saved !== "string" || JSON.parse(saved)[0] !== 1)) throw new Error(SEMANTIC_NOTICE);
@@ -124,9 +126,13 @@ async function run() {
             return true;
           });
           // Never destructively reinterpret purchased vectors under another identity.
-          const selected = missing.slice(0, budget);
+          const selected = missing;
+          if (selected.length) work.network(db);
+          db.exec("COMMIT"); writing = false;
           const embedded = selected.length ? await embed(selected.map(d => (c.documentPrefix + d.commit.subject + "\n" + d.commit.author + "\n" + d.message).slice(0, 8192)), c) : [];
-          budget -= selected.length;
+          if (head !== await commitHead(data.root, signal)) throw new Error("Commit history changed during indexing");
+          await lock(db); writing = true; work.assert(db);
+          if (!(await rpc("validate"))) throw new Error(SEMANTIC_NOTICE);
           signal.throwIfAborted();
           if (!same) db.prepare(`INSERT INTO ${COMMIT_META} VALUES ('identity',?)`).run(identity);
           for (let i = 0; i < selected.length; i++) {
@@ -135,9 +141,12 @@ async function run() {
           }
           for (const d of batch) db.prepare(`INSERT INTO ${COMMIT_DOCUMENTS} VALUES (?,?,?,?) ON CONFLICT(hash) DO UPDATE SET content_hash=excluded.content_hash, metadata=excluded.metadata, message=excluded.message WHERE ${COMMIT_DOCUMENTS}.content_hash!=excluded.content_hash OR ${COMMIT_DOCUMENTS}.metadata!=excluded.metadata OR ${COMMIT_DOCUMENTS}.message!=excluded.message`).run(d.commit.hash, d.contentHash, JSON.stringify(d.commit), d.message);
           if (indexOnly) for (const d of batch) db.prepare("INSERT OR IGNORE INTO pix_live_commit_ids VALUES (?)").run(d.commit.hash);
-          db.exec("COMMIT");
+          db.exec("COMMIT"); writing = false; success = true;
           for (const [hash, vector] of purchased) vectors.set(hash, vector);
-        } catch (e) { db.exec("ROLLBACK"); throw e; }
+        } finally {
+          if (writing) { try { db.exec("ROLLBACK"); } catch {} }
+          try { await work.release(success); } catch { /* Lease expiry recovers after a crash. */ }
+        }
         await delay(0, undefined, { signal });
       }
       if (indexOnly && docs.length) {

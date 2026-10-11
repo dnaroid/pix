@@ -55,10 +55,10 @@ keys also work.
 
 The bundled `project-search` module must be enabled in Pi tools-suite
 configuration. Code/Knowledge retrieval uses the native backend and does not
-require IDX installation or project initialization. Native semantic repository
+require an external search installation or project initialization. Native semantic repository
 search additionally requires project consent/configuration in
 `.pi/search/semantic.json` and `OPENROUTER_API_KEY`; lexical retrieval does not.
-Legacy IDX data is left untouched and is not used as a fallback.
+Legacy external-search data is left untouched and is not used as a fallback.
 
 ## TUI memory grows rapidly during model thinking
 

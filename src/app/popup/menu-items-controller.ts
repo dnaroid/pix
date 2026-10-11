@@ -151,6 +151,7 @@ export class AppMenuItemsController {
 			{ value: "fork", label: "Fork", description: "Create a new session before this message" },
 			{ value: "fork-new-tab", label: "Fork in new tab", description: "Create a fork in a new tab" },
 			{ value: "undo", label: "Undo changes", description: "Revert recorded commands and cut session here" },
+			{ value: "edit", label: "Edit and resend", description: "Resend here without reverting files" },
 		];
 	}
 

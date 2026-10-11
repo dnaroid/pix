@@ -1,4 +1,5 @@
 import { Worker } from "node:worker_threads";
+import { withProviderSlot } from "./source-work.js";
 import { realpath } from "node:fs/promises";
 import { commitProjectRoot } from "./commit-corpus.js";
 import { parseCommitSearchRequest, type CommitSearchRequest, type CommitSearchResponse } from "./commit-contract.js";
@@ -117,7 +118,12 @@ export class DesktopCommitSearchService {
             if (p.type !== "embed" || !Array.isArray(p.input)) throw new Error(SEMANTIC_NOTICE);
             const cacheKey = embeddingIdentity(config) + "\0" + p.input[0];
             let vectors = p.query ? this.queryCache.get(cacheKey) : undefined;
-            if (!vectors) vectors = await (this.options.embed ?? embedCommitHTTP)(p.input, config, key, signal);
+            if (!vectors) vectors = await withProviderSlot(signal, async () => {
+              const queued = await this.config(root);
+              signal.throwIfAborted();
+              if (!queued || embeddingIdentity(queued) !== embeddingIdentity(config)) throw new Error(SEMANTIC_NOTICE);
+              return (this.options.embed ?? embedCommitHTTP)(p.input, config, key, signal);
+            });
             signal.throwIfAborted();
             const after = await this.config(root);
             if (!after || embeddingIdentity(after) !== embeddingIdentity(config) || vectors.length !== p.input.length || !vectors.every(v => validCommitVector(v, config.dimension))) throw new Error(SEMANTIC_NOTICE);

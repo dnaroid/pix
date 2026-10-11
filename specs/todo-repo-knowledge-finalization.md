@@ -24,7 +24,7 @@ maintenance belongs to the parent/subagent workflow, not todo result hooks.
 
 - Neither `update` nor `batch_update` completion appends a knowledge-audit,
   dirty-state or acknowledgment reminder, including in initialized projects.
-- Closing the final todo remains independent of IDX and documentation receipts.
+- Closing the final todo remains independent of repository search and documentation receipts.
 - Todo lifecycle, reporting reminders, persistence and automatic clearing of
   completed plans are unchanged.
 - File mutation results likewise have no knowledge checkpoint hook.
@@ -36,7 +36,7 @@ maintenance belongs to the parent/subagent workflow, not todo result hooks.
 ## Non-goals
 
 - Changing repository retrieval behavior.
-- Running IDX, reading specs or spawning subagents from todo mutations.
+- Running external search services, reading specs or spawning subagents from todo mutations.
 - Changing explicit Desktop knowledge-management commands.
 
 ## Decision history

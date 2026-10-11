@@ -4,6 +4,16 @@ import { observeSearchIndexEvents } from "./search-index-events";
 import { emptySearchIndexView } from "./search-index-controller";
 
 describe("bounded index activity history", () => {
+  it("records a start once without inventing an intermediate completion", () => {
+    const history = createSearchIndexHistory();
+    const observer = observeSearchIndexEvents(history, "/a");
+    observer.actions({ knowledge: { running: true } });
+    observer.actions({ knowledge: { running: true } });
+    observer.actions({ knowledge: { running: false, result: { source: "knowledge", complete: true } } });
+    expect(history.entries("/a").map(e => e.message)).toEqual([
+      "Manual indexing started", "Manual indexing complete",
+    ]);
+  });
   it("keeps newest 200 events in memory, scoped to workspace, with bounded messages", () => {
     const history = createSearchIndexHistory(() => 42);
     for (let i = 0; i < 205; i++) history.append(i % 2 ? "/a" : "/b", "tasks", "info", "x".repeat(400));
@@ -44,8 +54,8 @@ describe("bounded index activity history", () => {
     const snapshot = { ...emptySearchIndexView().snapshot, activityError: "secret" };
     observer.snapshot(snapshot);
     observer.snapshot({ ...snapshot });
-    observer.snapshot({ ...snapshot, activityError: "", stores: { stores: [{ id: "history", state: "present", counts: { taskVectors: 3 } }] } });
-    expect(history.entries("/a").map(e => e.message)).toEqual(["Search activity unavailable", "Search activity restored", "history store: present", "history counts: taskVectors: 3"]);
+    observer.snapshot({ ...snapshot, activityError: "", stores: { stores: [{ id: "tasks", state: "present", counts: { taskVectors: 3 } }] } });
+    expect(history.entries("/a").map(e => e.message)).toEqual(["Search activity unavailable", "Search activity restored", "tasks store: present", "tasks counts: taskVectors: 3"]);
   });
   it("does not relabel a manually observed operation as background work", () => {
     const history = createSearchIndexHistory();

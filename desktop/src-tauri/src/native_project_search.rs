@@ -24,7 +24,8 @@ impl SearchState {
             return Err("Invalid search request identity".into());
         }
         let mut requests = self.0.lock().map_err(|_| "Search state unavailable")?;
-        requests.retain(|_, (time, _)| time.elapsed() < Duration::from_secs(60));
+        // Active requests can outlive the tombstone TTL while indexing.
+        requests.retain(|_, (time, token)| Arc::strong_count(token) > 1 || time.elapsed() < Duration::from_secs(60));
         if requests.len() >= 128 && !requests.contains_key(id) {
             return Err("Too many native search requests".into());
         }
@@ -122,10 +123,10 @@ fn run(
         .expect("piped stdin")
         .write_all(&input)
         .is_ok();
-    let deadline = Instant::now() + Duration::from_secs(45);
+    let deadline = request_deadline(&request.query);
     let mut failed = !wrote;
     loop {
-        if cancelled.load(Ordering::Acquire) || Instant::now() >= deadline {
+        if cancelled.load(Ordering::Acquire) || deadline.is_some_and(|time| Instant::now() >= time) {
             failed = true;
         }
         if failed {
@@ -166,6 +167,11 @@ fn run(
     serde_json::from_slice(&bytes).map_err(|_| "Invalid native search response".into())
 }
 
+fn request_deadline(query: &serde_json::Value) -> Option<Instant> {
+    (query.get("operation").and_then(|value| value.as_str()) != Some("index"))
+        .then(|| Instant::now() + Duration::from_secs(45))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -187,5 +193,25 @@ mod tests {
         assert!(state.token("overflow").is_err());
         state.finish("0");
         assert!(state.token("new").is_ok());
+    }
+    #[test]
+    fn long_indexing_keeps_its_cancellation_token() {
+        let state = SearchState::default();
+        let active = state.token("long-index").unwrap();
+        state.token("expired-tombstone").unwrap();
+        for (time, _) in state.0.lock().unwrap().values_mut() {
+            *time = Instant::now() - Duration::from_secs(120);
+        }
+        state.token("other").unwrap();
+        assert!(!state.0.lock().unwrap().contains_key("expired-tombstone"));
+        state.token("long-index").unwrap().store(true, Ordering::Release);
+        assert!(active.load(Ordering::Acquire));
+    }
+    #[test]
+    fn only_indexing_is_exempt_from_the_overall_deadline() {
+        assert!(request_deadline(&serde_json::json!({"operation":"index"})).is_none());
+        let deadline = request_deadline(&serde_json::json!({"query":"needle"})).unwrap();
+        assert!(deadline > Instant::now() + Duration::from_secs(40));
+        assert!(deadline <= Instant::now() + Duration::from_secs(45));
     }
 }

@@ -46,6 +46,8 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
   desktop("assistant", "Prompt token budget", "Maximum input prompt tokens sent to autocomplete.", "input tokens"),
   desktop("assistant", "Recent messages", "Conversation messages included as autocomplete context.", "history", "conversation context"),
   tools("search", "Embedding provider", "Global semantic search provider across sources, projects, Pi and Desktop.", "semantic search", "OpenRouter", "Ollama"),
+  tools("search", "Code extensions", "Complete Code indexing extensions in the suite config.", "indexing", "file extensions"),
+  tools("search", "Knowledge extensions", "Complete Knowledge indexing extensions in the suite config.", "indexing", "file extensions"),
   tools("search", "Embedding model", "Global semantic search embedding model; saving enables uploads and may incur charges.", "semantic search", "embeddings"),
   tools("search", "Vector dimension", "Embedding vector size.", "semantic search", "dimensions"),
   tools("search", "Ollama endpoint", "Local embedding provider URL.", "semantic search"),

@@ -7,6 +7,71 @@ function deferred<T>() {
   return { resolve, promise };
 }
 describe("explicit per-source indexing", () => {
+  it("starts Code and Knowledge concurrently with independent outcomes", async () => {
+    const code = deferred<IndexResult>(), knowledge = deferred<IndexResult>();
+    const run = vi.fn((source: IndexResult["source"]) => source === "code" ? code.promise : knowledge.promise);
+    let state: IndexActions = {};
+    const actions = createSearchIndexActions({ run, onChange: next => state = next, onSettled: () => {} });
+    const first = actions.start("code"), second = actions.start("knowledge");
+    expect(run.mock.calls.map(([source]) => source)).toEqual(["code", "knowledge"]);
+    expect(state).toEqual({ code: { running: true }, knowledge: { running: true } });
+    knowledge.resolve({ source: "knowledge", complete: false, indexed: 128, total: 200 });
+    await second;
+    expect(state.code?.running).toBe(true);
+    expect(state.knowledge?.result?.complete).toBe(false);
+    code.resolve({ source: "code", complete: true });
+    await first;
+    expect(state.code?.result?.complete).toBe(true);
+    actions.dispose();
+  });
+  it("cancels only its source and deduplicates it until transport settlement", async () => {
+    const code = deferred<IndexResult>(), knowledge = deferred<IndexResult>();
+    const signals = new Map<string, AbortSignal>();
+    const run = vi.fn((source: IndexResult["source"], signal: AbortSignal) => {
+      signals.set(source, signal);
+      return source === "code" ? code.promise : knowledge.promise;
+    });
+    let state: IndexActions = {};
+    const actions = createSearchIndexActions({ run, onChange: next => state = next, onSettled: () => {} });
+    const first = actions.start("code"), second = actions.start("knowledge");
+    actions.cancel("code");
+    await actions.start("code");
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(signals.get("code")?.aborted).toBe(true);
+    expect(signals.get("knowledge")?.aborted).toBe(false);
+    knowledge.resolve({ source: "knowledge", complete: true });
+    await second;
+    expect(state.knowledge?.result?.complete).toBe(true);
+    code.resolve({ source: "code", complete: true });
+    await first;
+    expect(state.code).toMatchObject({ running: false, cancelled: true });
+    expect(state.code?.result).toBeUndefined();
+    await actions.start("code");
+    expect(run).toHaveBeenCalledTimes(3);
+    actions.dispose();
+  });
+  it("resets both concurrent runs without stale results or premature same-source restarts", async () => {
+    const code = deferred<IndexResult>(), knowledge = deferred<IndexResult>();
+    const run = vi.fn((source: IndexResult["source"], _signal: AbortSignal) => source === "code" ? code.promise : knowledge.promise);
+    const onChange = vi.fn();
+    const actions = createSearchIndexActions({ run, onChange, onSettled: () => {} });
+    const first = actions.start("code"), second = actions.start("knowledge");
+    actions.reset();
+    expect(run.mock.calls.every(([, signal]) => signal.aborted)).toBe(true);
+    await actions.start("code");
+    await actions.start("knowledge");
+    expect(run).toHaveBeenCalledTimes(2);
+    code.resolve({ source: "code", complete: true });
+    knowledge.resolve({ source: "knowledge", complete: true });
+    await Promise.all([first, second]);
+    expect(onChange.mock.lastCall?.[0]).toEqual({});
+    run.mockRejectedValueOnce(new Error("failed"));
+    await actions.start("code");
+    await actions.start("knowledge");
+    expect(onChange.mock.lastCall?.[0].code.error).toContain("unavailable");
+    expect(onChange.mock.lastCall?.[0].knowledge.result.complete).toBe(true);
+    actions.dispose();
+  });
   it("does no work until clicked, isolates sources, and deduplicates repeated clicks", async () => {
     const code = deferred<IndexResult>();
     const states: IndexActions[] = [];

@@ -497,6 +497,15 @@ export class PiUiExtendApp {
 			render: () => this.scheduleRender(),
 		});
 		this.workspaceActions = new AppWorkspaceActionsController({
+			messageEditUi: () => this.extensionUiController.createExtensionUIContext(),
+			canEditUserMessage: () => Boolean(this.runtime && this.queuedMessages.canEditUserMessage(this.runtime.session)),
+			reserveMessageEdit: (runtime) => this.queuedMessages.reserveMessageEdit(runtime.session),
+			resendEditedUserMessage: (runtime, edit) => {
+				const message = this.queuedMessages.createSubmittedUserMessage(edit.text, edit.text, edit.images);
+				void this.queuedMessages.sendUserMessageToSession(message, {}, runtime.session).catch((error: unknown) => {
+					if (this.runtime === runtime) this.showToast(error instanceof Error ? error.message : String(error), "error");
+				});
+			},
 			entries: this.entries,
 			allEntries: () => this.sessionEvents.allEntries(),
 			runtime: () => this.runtime,
@@ -916,7 +925,10 @@ export class PiUiExtendApp {
 			scrollByLines: (delta) => this.scrollController.scrollByLines(delta),
 			scrollByPage: (delta) => this.scrollController.scrollByPage(delta as -1 | 1),
 			handleMouse: (event) => this.mouseController.handleMouse(event),
-			handleEnter: () => this.inputActions.handleEnter(),
+			handleEnter: () => {
+				if (this.workspaceActions.messageEditRunning) return;
+				this.inputActions.handleEnter();
+			},
 			handleInterrupt: () => this.inputActions.handleInterrupt(),
 			handleEscape: () => this.inputActions.handleEscape(),
 			handleDirectPopupInput: (char) => this.popupMenus.handleDirectPopupInput(char),

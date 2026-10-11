@@ -21,6 +21,7 @@ export type DesktopCommandId =
   | "message.copy"
   | "message.fork"
   | "message.forkNewTab"
+  | "message.edit"
   | "message.undo";
 
 export interface DesktopShortcut {
@@ -182,6 +183,13 @@ const DEFINITIONS: Record<DesktopCommandId, DesktopCommandDefinition> = {
     description: "Fork this message into a new conversation tab",
     scope: "message",
     keywords: ["branch", "conversation", "tab"],
+  },
+  "message.edit": {
+    id: "message.edit",
+    label: "Edit and resend",
+    description: "Resend from this point without reverting files",
+    scope: "message",
+    keywords: ["edit", "resend"],
   },
   "message.undo": {
     id: "message.undo",

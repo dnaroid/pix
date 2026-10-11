@@ -1,17 +1,23 @@
 <script lang="ts">
   import Check from "@lucide/svelte/icons/check";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import X from "@lucide/svelte/icons/x";
+  import type { Attachment } from "../lib/attachments";
   import type { ElicitationField } from "../lib/elicitation";
   import { activateModalDialog } from "../lib/modal-dialog";
 
   let {
     message,
     field,
+    editAttachments,
+    onRemoveAttachment,
     onValueChange,
     onAnswer,
   }: {
     message: string;
     field: ElicitationField;
+    editAttachments?: readonly Attachment[];
+    onRemoveAttachment?: (id: string) => void;
     onValueChange: (value: string | boolean) => void;
     onAnswer: (accepted: boolean) => void;
   } = $props();
@@ -38,7 +44,7 @@
   oncancel={(event) => { event.preventDefault(); onAnswer(false); }}
   onclick={(event) => { if (event.target === event.currentTarget) onAnswer(false); }}
 >
-  <form class="w-[min(520px,100%)] rounded-lg border border-border bg-popover p-5 text-popover-foreground shadow-md" onsubmit={submit}>
+  <form class="max-h-[90vh] w-[min(520px,100%)] overflow-auto rounded-lg border border-border bg-popover p-5 text-popover-foreground shadow-md" onsubmit={submit}>
     <span class="text-xs font-semibold tracking-[0.08em] text-primary uppercase">Pix needs your input</span>
     <h2 id="elicitation-title" class="mt-2 mb-4 text-sm leading-snug font-medium whitespace-pre-wrap text-foreground">{message}</h2>
     <label class="grid gap-1.5">
@@ -91,6 +97,15 @@
         />
       {/if}
     </label>
+    {#if editAttachments}
+      <p class="mt-3 text-xs text-muted-foreground">Resends in this conversation from this point. Later messages leave the active branch; files are not reverted.</p>
+      {#each editAttachments as attachment (attachment.id)}
+        <div class="mt-2 flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-xs">
+          <span class="min-w-0 flex-1 truncate">{attachment.name}</span>
+          <button type="button" class="grid size-6 place-items-center rounded-sm hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring" aria-label={`Remove ${attachment.name}`} onclick={() => onRemoveAttachment?.(attachment.id)}><X class="size-3.5" aria-hidden="true" /></button>
+        </div>
+      {/each}
+    {/if}
     <div class="mt-5 flex justify-end gap-2">
       <button
         class="h-8 rounded-md px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
@@ -100,7 +115,8 @@
       <button
         class="inline-flex h-8 min-w-20 items-center justify-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         type="submit"
-      >Continue</button>
+        disabled={editAttachments !== undefined && !String(field.value).trim() && editAttachments.length === 0}
+      >{editAttachments !== undefined ? "Save and resend" : "Continue"}</button>
     </div>
   </form>
 </dialog>

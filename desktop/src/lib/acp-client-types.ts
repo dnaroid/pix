@@ -66,7 +66,7 @@ export interface DraftSessionConfig {
   readonly thinkingLevel?: string;
 }
 
-export type UserMessageAction = "copy" | "undo";
+export type UserMessageAction = "copy" | "undo" | "rewind";
 
 export interface UserMessageActionResult {
   readonly status: "ok" | "warning" | "cancelled";

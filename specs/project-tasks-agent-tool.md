@@ -13,7 +13,7 @@ status: active
   `tasks.json`, `tasks.d/`, Markdown task lists or old attachment markers.
   Files left by older versions remain untouched and are **never consulted**.
 - `project-tasks` is a default-enabled pi-tools-suite module, independent
-  of IDX. The `project_tasks` tool and user-invoked `/tasks`/`/task`
+  of repository search. The `project_tasks` tool and user-invoked `/tasks`/`/task`
   commands use the same validated SQLite storage layer.
 - Tasks returned to a model enter that model's context. Reads do not copy
   attachment bytes into context or trigger another model/network call.

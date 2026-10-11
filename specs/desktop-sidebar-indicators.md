@@ -21,7 +21,7 @@ Make the Workspace Activity Bar a compact live health/status rail. Every activit
 
 ## Scope
 
-- Centralize Activity Bar indicator policy for Project, Tasks, Source Control, Registry, Package Scripts, Search indexes (formerly IDX), and Settings.
+- Centralize Activity Bar indicator policy for Project, Tasks, Source Control, Registry, Package Scripts, Search indexes, and Settings.
 - Use a cheap workspace poll for filesystem/config/local-Git/runtime state that exists outside the currently mounted panel, plus a separate sparse remote-Git freshness probe that never turns the fast poll into network work.
 - Reuse already-pushed remote Registry state and backend terminal events; detect local Registry dirtiness inside the shared indicator service without running Registry Git/network work. Search indexes reuse their workspace-owned read-only monitor.
 - Distinguish persistent conditions from unseen failure events.
@@ -237,7 +237,7 @@ Decision: [0027 — Cause-specific sidebar quick actions](../docs/decisions/0027
 
 - TypeScript tests cover severity precedence, Git dirty/conflict semantics, remote-upstream attention before fetch, local Registry sync attention, unstable Registry-sample retention, runtime failure precedence, output-event throttling, and healthy/error Project/Settings states.
 - Rust tests cover the lightweight dirty-Git indicator, rename-record parsing, a real bare-remote advance detected by `ls-remote` without mutating local tracking refs, local Registry tracked/local-only detection and hash compatibility, and JSONC/schema-invalid user-config health.
-- Deterministic tests cover planned-task/CI/explicit IDX policy, workspace-stale responses, coalescing, late subscription teardown, sparse focus cadence and mounted IDX reuse. Rust tests cover Registry cache churn, explicit knowledge verdicts, conservative revision mismatch and inherited-pipe descendant cleanup.
+- Deterministic tests cover planned-task/CI/search-index policy, workspace-stale responses, coalescing, late subscription teardown, sparse focus cadence and mounted search-index reuse. Rust tests cover Registry cache churn, explicit knowledge verdicts, conservative revision mismatch and inherited-pipe descendant cleanup.
 - Quick-action tests cover all reason mappings, simultaneous reasons, no healthy-state menu, capability disabling, focus navigation/typeahead/dismissal and late-open cancellation.
 - Activation tests reject workspace-stale, cleared-reason and newly disabled commands; review invokes the existing callback, while inspection uses reveal, not toggle.
 - Run `npm --prefix desktop test`, `npm --prefix desktop run check`, `npm --prefix desktop run build:web`, and the Desktop Tauri Rust unit tests.
@@ -245,7 +245,7 @@ Decision: [0027 — Cause-specific sidebar quick actions](../docs/decisions/0027
 ## Evidence
 
 - Confirmed by code: the Activity Bar consumes one indicator map and one shared dot component rather than tab-specific badge markup.
-- Confirmed by code: fast polling uses one typed Tauri command, while terminal/IDX events and existing ACP/session state provide push invalidation where available.
+- Confirmed by code: fast polling uses one typed Tauri command, while terminal events and existing ACP/session state provide push invalidation where available.
 - Confirmed by tests: frontend policy helpers and backend polling helpers cover the highest-risk severity, unseen-failure, Git-cost, and config-validation behavior.
 
 ## Decision

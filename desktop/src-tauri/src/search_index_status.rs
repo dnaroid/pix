@@ -20,7 +20,7 @@ pub(crate) struct SearchStoreStatus {
     generation: Option<i64>,
     completed_at: Option<String>,
     counts: BTreeMap<&'static str, u64>,
-    legacy_sources: Vec<&'static str>,
+    incompatible_sources: Vec<&'static str>,
     error: Option<String>,
 }
 
@@ -28,6 +28,7 @@ pub(crate) struct SearchStoreStatus {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SearchIndexStatus {
     stores: Vec<SearchStoreStatus>,
+    commits_empty: Option<bool>,
 }
 
 #[tauri::command]
@@ -44,51 +45,39 @@ fn read_status(workspace: &str) -> Result<SearchIndexStatus, String> {
         .map(|m| m.file_type().is_dir() && !m.file_type().is_symlink())
         .unwrap_or(false);
     let stores = [
-        (
-            "files",
-            "files.sqlite",
-            &[
-                ("files", "SELECT count(*) FROM pix_native_files"),
-                (
-                    "codeChunks",
-                    "SELECT count(*) FROM pix_native_chunks WHERE kind='code'",
-                ),
-                (
-                    "knowledgeChunks",
-                    "SELECT count(*) FROM pix_native_chunks WHERE kind='knowledge'",
-                ),
-            ][..],
-        ),
-        (
-            "vectors",
-            "file-vectors.sqlite",
-            &[("vectors", "SELECT count(*) FROM vectors")][..],
-        ),
-        (
-            "history",
-            "index.sqlite",
-            &[
-                (
-                    "settingsDocuments",
-                    "SELECT count(*) FROM documents WHERE json_extract(hit, '$.kind')='settings'",
-                ),
-                ("settingsVectors", "SELECT count(*) FROM vectors"),
-                ("sessionTitles", "SELECT count(*) FROM pix_session_titles"),
-                ("sessionVectors", "SELECT count(*) FROM pix_session_vectors"),
-                ("taskDocuments", "SELECT count(*) FROM pix_task_documents"),
-                ("taskVectors", "SELECT count(*) FROM pix_task_vectors"),
-                (
-                    "commitDocuments",
-                    "SELECT count(*) FROM pix_commit_documents",
-                ),
-                ("commitVectors", "SELECT count(*) FROM pix_commit_vectors"),
-            ][..],
-        ),
+        ("code", "code.sqlite", &[("files", "SELECT count(*) FROM pix_native_files"), ("codeChunks", "SELECT count(*) FROM pix_native_chunks WHERE kind='code'"), ("vectors", "SELECT count(*) FROM vectors")][..]),
+        ("knowledge", "knowledge.sqlite", &[("files", "SELECT count(*) FROM pix_native_files"), ("knowledgeChunks", "SELECT count(*) FROM pix_native_chunks WHERE kind='knowledge'"), ("vectors", "SELECT count(*) FROM vectors")][..]),
+        ("settings", "settings.sqlite", &[("settingsDocuments", "SELECT count(*) FROM documents WHERE json_extract(hit, '$.kind')='settings'"), ("settingsVectors", "SELECT count(*) FROM vectors")][..]),
+        ("sessions", "sessions.sqlite", &[("sessionTitles", "SELECT count(*) FROM pix_session_titles"), ("sessionVectors", "SELECT count(*) FROM pix_session_vectors")][..]),
+        ("tasks", "tasks.sqlite", &[("taskDocuments", "SELECT count(*) FROM pix_task_documents"), ("taskVectors", "SELECT count(*) FROM pix_task_vectors")][..]),
+        ("commits", "git-commits.sqlite", &[("commitDocuments", "SELECT count(*) FROM pix_commit_documents"), ("commitVectors", "SELECT count(*) FROM pix_commit_vectors")][..]),
     ]
     .into_iter()
     .map(|(id, file, queries)| inspect_store(id, usable_dir.then(|| search.join(file)), queries))
     .collect();
-    Ok(SearchIndexStatus { stores })
+    Ok(SearchIndexStatus {
+        stores,
+        commits_empty: commits_empty(&root),
+    })
+}
+
+fn commits_empty(root: &Path) -> Option<bool> {
+    let head = crate::git_output_raw(root, &["rev-parse", "--verify", "HEAD^{commit}"]).ok()?;
+    if head.status.success() {
+        return Some(false);
+    }
+    // Only an absent symbolic branch proves an unborn history. Git failures or
+    // a broken existing reference must not hide the recovery action.
+    let head_ref = crate::git_output_raw(root, &["symbolic-ref", "-q", "HEAD"]).ok()?;
+    if !head_ref.status.success() {
+        return None;
+    }
+    let name = std::str::from_utf8(&head_ref.stdout).ok()?.trim();
+    if !name.starts_with("refs/heads/") {
+        return None;
+    }
+    let branch = crate::git_output_raw(root, &["show-ref", "--verify", "--quiet", name]).ok()?;
+    (branch.status.code() == Some(1)).then_some(true)
 }
 
 fn inspect_store(
@@ -104,7 +93,7 @@ fn inspect_store(
         generation: None,
         completed_at: None,
         counts: BTreeMap::new(),
-        legacy_sources: Vec::new(),
+        incompatible_sources: Vec::new(),
         error: None,
     };
     let Some(path) = path else { return status };
@@ -154,7 +143,7 @@ fn query_store(
         row.get::<_, i64>(0)
     })
     .map_err(|_| "Store is not a readable SQLite database".to_string())?;
-    if id == "files" {
+    if matches!(id, "code" | "knowledge") {
         let meta: Result<(i64, Option<String>), _> = db.query_row(
             "SELECT generation, completed_at FROM pix_native_meta WHERE singleton=1",
             [],
@@ -175,12 +164,14 @@ fn query_store(
             status.counts.insert(key, count.max(0) as u64);
         }
     }
-    if id == "history" {
+    if matches!(id, "settings" | "sessions" | "tasks" | "commits") {
         for (source, count, table) in [
             ("settings", "settingsVectors", "metadata"),
             ("sessions", "sessionVectors", "pix_session_meta"),
             ("tasks", "taskVectors", "pix_task_index_meta"),
+            ("commits", "commitVectors", "pix_commit_meta"),
         ] {
+            if id != source { continue; }
             if status.counts.get(count).copied().unwrap_or(0) == 0 {
                 continue;
             }
@@ -190,7 +181,7 @@ fn query_store(
                 |row| row.get(0),
             );
             if !identity.is_ok_and(|value| !value.is_empty()) {
-                status.legacy_sources.push(source);
+                status.incompatible_sources.push(source);
             }
         }
     }
@@ -210,6 +201,42 @@ mod tests {
     }
 
     #[test]
+    fn distinguishes_unborn_history_from_uncached_commits_and_broken_refs() {
+        let root = temp_root();
+        assert!(crate::git_output_raw(&root, &["init", "-b", "main"])
+            .unwrap()
+            .status
+            .success());
+        assert_eq!(commits_empty(&root), Some(true));
+        assert!(crate::git_output_raw(
+            &root,
+            &[
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "Initial"
+            ]
+        )
+        .unwrap()
+        .status
+        .success());
+        assert_eq!(
+            read_status(root.to_str().unwrap()).unwrap().commits_empty,
+            Some(false)
+        );
+        assert!(!root.join(".pi/search/index.sqlite").exists());
+        fs::write(root.join(".git/refs/heads/main"), "not-an-object\n").unwrap();
+        assert_eq!(commits_empty(&root), None);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn missing_stores_are_absent_not_created() {
         let root = temp_root();
         let status = read_status(root.to_str().unwrap()).unwrap();
@@ -219,9 +246,34 @@ mod tests {
     }
 
     #[test]
+    fn source_databases_are_isolated_and_polling_never_migrates() {
+        let root = temp_root();
+        let tasks = root.join(".pi/search/tasks.sqlite");
+        let db = Connection::open(&tasks).unwrap();
+        db.execute_batch("CREATE TABLE pix_task_vectors(hash TEXT); INSERT INTO pix_task_vectors VALUES('paid');").unwrap();
+        drop(db);
+        let legacy = root.join(".pi/search/index.sqlite");
+        fs::write(&legacy, b"preserve legacy bytes").unwrap();
+        fs::write(root.join(".pi/search/settings.sqlite"), b"invalid source").unwrap();
+        let before = fs::read(&tasks).unwrap();
+        for _ in 0..2 {
+            let status = read_status(root.to_str().unwrap()).unwrap();
+            let source = |id| status.stores.iter().find(|s| s.id == id).unwrap();
+            assert_eq!(status.stores.len(), 6);
+            assert_eq!(source("settings").state, "error");
+            assert_eq!(source("tasks").counts.get("taskVectors"), Some(&1));
+            assert_eq!(source("sessions").state, "absent");
+        }
+        assert_eq!(fs::read(&tasks).unwrap(), before);
+        assert_eq!(fs::read(&legacy).unwrap(), b"preserve legacy bytes");
+        assert!(!root.join(".pi/search/sessions.sqlite").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn reads_settings_counts_without_creating_other_tables() {
         let root = temp_root();
-        let path = root.join(".pi/search/index.sqlite");
+        let path = root.join(".pi/search/settings.sqlite");
         let db = Connection::open(&path).unwrap();
         db.execute_batch("CREATE TABLE documents (hit TEXT); CREATE TABLE vectors (hash TEXT); INSERT INTO documents VALUES ('{\"kind\":\"settings\"}'), ('{\"kind\":\"legacy\"}'); INSERT INTO vectors VALUES ('one');").unwrap();
         drop(db);
@@ -229,7 +281,7 @@ mod tests {
         let history = &status.stores[2];
         assert_eq!(history.counts.get("settingsDocuments"), Some(&1));
         assert_eq!(history.counts.get("settingsVectors"), Some(&1));
-        assert_eq!(history.legacy_sources, vec!["settings"]);
+        assert_eq!(history.incompatible_sources, vec!["settings"]);
         assert!(!history.counts.contains_key("taskDocuments"));
         let db = Connection::open(&path).unwrap();
         let tables: i64 = db
@@ -245,29 +297,18 @@ mod tests {
     }
 
     #[test]
-    fn legacy_identity_is_reported_per_namespace_without_modifying_vectors() {
+    fn missing_identity_is_reported_only_for_its_source_without_modification() {
         let root = temp_root();
-        let path = root.join(".pi/search/index.sqlite");
+        let path = root.join(".pi/search/settings.sqlite");
         let db = Connection::open(&path).unwrap();
-        db.execute_batch("CREATE TABLE metadata (key TEXT, value TEXT);
-            INSERT INTO metadata VALUES ('model','old');
-            CREATE TABLE vectors (hash TEXT); INSERT INTO vectors VALUES ('settings');
-            CREATE TABLE pix_session_meta (key TEXT, value TEXT);
-            CREATE TABLE pix_session_vectors (hash TEXT); INSERT INTO pix_session_vectors VALUES ('session');
-            CREATE TABLE pix_task_index_meta (key TEXT, value TEXT);
-            INSERT INTO pix_task_index_meta VALUES ('identity','configured');
-            CREATE TABLE pix_task_vectors (hash TEXT); INSERT INTO pix_task_vectors VALUES ('task');").unwrap();
+        db.execute_batch("CREATE TABLE metadata(key TEXT,value TEXT); CREATE TABLE vectors(hash TEXT); INSERT INTO vectors VALUES('paid');").unwrap();
         let before = fs::read(&path).unwrap();
         let status = read_status(root.to_str().unwrap()).unwrap();
-        let history = &status.stores[2];
-        assert_eq!(history.legacy_sources, vec!["settings", "sessions"]);
-        assert_eq!(history.counts.get("taskVectors"), Some(&1));
+        assert_eq!(status.stores[2].incompatible_sources, vec!["settings"]);
+        assert!(status.stores[3].incompatible_sources.is_empty());
         assert_eq!(fs::read(&path).unwrap(), before);
-        db.execute_batch("DELETE FROM vectors; DELETE FROM pix_session_vectors")
-            .unwrap();
-        assert!(read_status(root.to_str().unwrap()).unwrap().stores[2]
-            .legacy_sources
-            .is_empty());
+        db.execute_batch("DELETE FROM vectors").unwrap();
+        assert!(read_status(root.to_str().unwrap()).unwrap().stores[2].incompatible_sources.is_empty());
         drop(db);
         fs::remove_dir_all(root).unwrap();
     }
@@ -275,7 +316,7 @@ mod tests {
     #[test]
     fn reads_native_counts_and_flags_malformed_store() {
         let root = temp_root();
-        let db = Connection::open(root.join(".pi/search/files.sqlite")).unwrap();
+        let db = Connection::open(root.join(".pi/search/code.sqlite")).unwrap();
         db.execute_batch(
             "CREATE TABLE pix_native_meta (singleton INTEGER PRIMARY KEY, version INTEGER, root TEXT, generation INTEGER, completed_at TEXT);
              INSERT INTO pix_native_meta VALUES(1,1,'/r',3,'2026-01-01');
@@ -285,13 +326,14 @@ mod tests {
         )
         .unwrap();
         drop(db);
-        fs::write(root.join(".pi/search/index.sqlite"), b"not a database").unwrap();
+        fs::write(root.join(".pi/search/settings.sqlite"), b"not a database").unwrap();
         let status = read_status(root.to_str().unwrap()).unwrap();
         let files = &status.stores[0];
         assert_eq!(files.state, "present");
         assert_eq!(files.generation, Some(3));
         assert_eq!(files.counts.get("codeChunks"), Some(&1));
-        assert_eq!(files.counts.get("knowledgeChunks"), Some(&1));
+        assert_eq!(files.counts.get("knowledgeChunks"), None);
+        assert_eq!(status.stores[1].state, "absent");
         assert_eq!(status.stores[2].state, "error");
         fs::remove_dir_all(root).unwrap();
     }

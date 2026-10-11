@@ -27,7 +27,6 @@ const DEFAULT_MODES = [
 	"direct-read-grep",
 	"ast-structural",
 	"project-search-hybrid",
-	"repo-discovery",
 	"subagent-search",
 	"unrestricted-suite",
 ] as const;
@@ -49,17 +48,6 @@ type BenchmarkResult = {
 		toolCallNumber?: number;
 		toolName?: string;
 		tokensAtEvidence?: number;
-	};
-	idxCalls: string[][];
-	preparation?: {
-		elapsedMs: number;
-		idxInit?: {
-			skipped: boolean;
-			fake: boolean;
-			elapsedMs: number;
-			stdoutBytes?: number;
-			stderrBytes?: number;
-		};
 	};
 	sessionArtifacts?: {
 		pathsRetained: boolean;
@@ -105,16 +93,6 @@ type BenchmarkReport = {
 	fixture: string;
 	prompt: string;
 	benchmarkGuidance?: string;
-	fakeIdx: boolean;
-	preflight?: {
-		idxUpdate?: {
-			skipped: boolean;
-			reason?: string;
-			elapsedMs?: number;
-			stdoutBytes?: number;
-			stderrBytes?: number;
-		};
-	};
 	results: BenchmarkResult[];
 };
 
@@ -138,16 +116,7 @@ describe("hard-to-find locate benchmark live e2e", () => {
 		if (hybridRepoSearch) {
 			expect(hybridRepoSearch.toolCalls).toContain("project_search");
 			expect(hybridRepoSearch.firstCorrectEvidence?.found, "project-search-hybrid should record first correct evidence").toBe(true);
-			if (report.fakeIdx) {
-				expect(hybridRepoSearch.idxCalls.some((args) => args[0] === "search")).toBe(true);
-				expect(hybridRepoSearch.preparation?.idxInit?.fake).toBe(true);
-			} else {
-				expect(hybridRepoSearch.preparation?.idxInit?.skipped).toBe(false);
-			}
 		}
-
-		const repoDiscovery = report.results.find((result) => result.mode === "repo-discovery");
-		if (repoDiscovery) expect(repoDiscovery.toolCalls.some((name) => name.startsWith("repo_"))).toBe(true);
 
 		const subagentSearch = report.results.find((result) => result.mode === "subagent-search");
 		if (subagentSearch) {
@@ -178,7 +147,6 @@ async function runLocateBenchmark(): Promise<BenchmarkReport> {
 		PI_LOCATE_BENCH_MODEL: E2E_MODEL,
 		PI_LOCATE_BENCH_MODES: selectedModes().join(","),
 		PI_LOCATE_BENCH_TIMEOUT_MS: String(MODE_TIMEOUT_MS),
-		PI_LOCATE_BENCH_FAKE_IDX: process.env.PI_LOCATE_BENCH_FAKE_IDX ?? "1",
 		PI_LOCATE_BENCH_REPORT: reportPath,
 		PI_LOCATE_BENCH_REPORT_DIR: reportDir,
 		PI_LOCATE_BENCH_EXPORT_SESSIONS: process.env.PI_LOCATE_BENCH_EXPORT_SESSIONS ?? "0",

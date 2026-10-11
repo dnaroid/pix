@@ -47,7 +47,7 @@ Let Pix Desktop users view and edit its independent JSONC application profile (`
 - The editor keeps one in-memory draft per kind (source, saved source, parsed schema); filtering or remounting the panel preserves drafts, but restarting the app discards them. Both files load independently on mount and keep separate reload/save actions and lifecycle guards. Updating one file's cache entry merges against the latest cache so another mounted editor's draft cannot be overwritten.
 - Field edits and resets apply through JSONC-aware path modification so comments elsewhere in the file survive. Booleans use switches; bounded enums use selects; numbers use constrained number inputs; secrets use password inputs. Desktop model fields and fallback lists consume the same ACP session model catalog as the existing Model & Thinking picker instead of requiring `provider/model` text entry. Existing configured refs that are absent from the current catalog remain representable and are never rewritten merely because the catalog changed. The Git section includes a **CI fix model** selector for `desktop.git.ciFixModelRef`; leaving it unset intentionally means “use the normal default model” rather than introducing a second hard-coded default.
 - `visibleModels` is edited as an explicit “limit model picker” switch plus a model checklist; omitting the key means every catalog model is visible. Internal `thinkingByModel` memory is not exposed in the normal settings UI because Desktop maintains it automatically; it remains visible/editable only through the full JSONC editor launched from `Advanced`.
-- Assistant features includes **Knowledge review model**, a catalog-backed model/optional-thinking selector for `desktop.knowledge.reviewModelRef`. Reset/empty selection removes the override so knowledge-base AI review uses the normal new-session default; saved changes apply to the next review, not existing sessions. Project-local Desktop config can override the global value. This setting is separate from the `knowledge-auditor` role; see [Desktop IDX panel](desktop-idx-panel.md).
+- Assistant features includes **Knowledge review model**, a catalog-backed model/optional-thinking selector for `desktop.knowledge.reviewModelRef`. Reset/empty selection removes the override so knowledge-base AI review uses the normal new-session default; saved changes apply to the next review, not existing sessions. Project-local Desktop config can override the global value. This setting is separate from the `knowledge-auditor` role.
 - Assistant features includes explicit-opt-in **Semantic search**, plus a masked,
   write-only shared OpenRouter key input when credentials are missing. The key
   is never stored in the Desktop JSONC document. The control discloses sending
@@ -72,6 +72,14 @@ Let Pix Desktop users view and edit its independent JSONC application profile (`
   stores that role name in `disabledBuiltinAgents`. Unknown configured names are
   preserved. Project-local `.pi/agents/<name>.md` roles are unaffected by this
   user-level bundled-role visibility control.
+- Tools Suite → Search includes compact Code and Knowledge extension-list editors
+  before semantic-search settings. These edit the global `search.codeExtensions` and
+  `search.knowledgeExtensions` lists through the shared suite-config draft and normal
+  Save action. Lists replace the built-in defaults rather than adding to them: a missing
+  key uses the displayed defaults, while an explicit empty list disables that category.
+  The searchable extension catalog supports editing; overlapping effective lists block
+  Save. Saving does not start repository indexing or embeddings; the next explicit search
+  or manual indexing applies reclassification. Existing safety exclusions still apply.
 - Pi Tools Suite module enablement is edited as one bundled-module checklist
   rather than exposing `enabledModules`, `disabledModules`, or the `modules`
   object as raw controls. The checklist consumes the suite's ordered

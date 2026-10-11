@@ -4,6 +4,15 @@ Local all-in-one Pi extension package.
 
 This package keeps shared Pi tools as ordinary source folders under `src/` and registers them through one entrypoint.
 
+The opt-in [Headless Tool API](docs/headless-tool-api.md) executes the
+original Pi SDK read and Pix model-specific shell/patch tools alongside
+standalone extension tools, without a second Pi/ACP model session. ChatGPT
+selects the GPT/Codex profile, not Claude's aliases. The host controls
+workspace scope, read-only mode and approvals. The bridge also exposes the
+original Pix `todo` tool with session-scoped persisted state and the original
+async `subagents` actions through a detached broker, including project-local
+roles from `.pi/agents/*.md` (`subagents_catalog` lists them).
+
 - `src/claude-code-provider` — maintained local Claude Code subscription adapter,
   derived from upstream 0.5.0 with Pix image-count/recovery fixes. See
   [origin and updates](src/claude-code-provider/UPSTREAM.md). Before switching
@@ -36,7 +45,7 @@ This package keeps shared Pi tools as ordinary source folders under `src/` and r
 
 - `src/project-tasks` — default-enabled `project_tasks` reads and edits saved
   cwd `.pi/tasks.sqlite` tasks (`list`, `get`, `update`, `create`),
-  independently of IDX. Updates are scoped to a single row and protected by
+  independently of repository search. Updates are scoped to a single row and protected by
   SQLite transactions plus optimistic task revisions. The agent tool cannot
   delete or write SQL; user-invoked `/tasks list`, `/task get|add|update|delete`
   and `/task attach` perform validated user operations. Stored attachments
@@ -62,7 +71,7 @@ saved-provider safeguards.
 
 `index.ts` is intentionally only a thin auto-discovery shim that re-exports `src/index.ts`. There is no `pi.extensions` manifest here, so local Pi auto-discovery loads the suite once via `~/.pi/agent/extensions/pi-tools-suite/index.ts` and does not double-register tools. `src/module-catalog.ts` is the ordered single source of truth for bundled module names, defaults, descriptions, and host policy; runtime registration derives each conventional `src/<module-name>/index.ts` loader from that catalog, and Desktop Settings consumes the same metadata without importing runtime modules.
 
-Registration order is preserved by the ordered catalog in `src/module-catalog.ts`. `project_search` uses native search and has no IDX setup, fallback or project-state gate. Repository and history semantics are enabled across sources/projects when the global `~/.config/pi/pi-tools-suite.jsonc` contains a valid `search.embedding` object; eligible semantic inputs may be sent to its configured endpoint. Project overrides and the former standalone semantic configuration do not authorize uploads and are not migrated. `/search-semantic configure` preserves JSONC comments and unrelated settings; Desktop edits the same configuration under Tools Suite → Search using the shared top Save button. See [project-search-agent-tool](../../specs/project-search-agent-tool.md). Independently of the catalog, `src/index.ts` registers an unconditional guard (see [provider-web-search-policy](../../specs/provider-web-search-policy.md)) that removes and blocks the Claude provider's metered `pi_claude_code_provider_web_search` tool in parent sessions while keeping the provider itself and the suite's own `web_search` available. Sub-agents exclude that tool through their separate tool guard.
+Registration order is preserved by the ordered catalog in `src/module-catalog.ts`. `project_search` uses native search and without external-backend setup or fallback. Repository and history semantics are enabled across sources/projects when the global `~/.config/pi/pi-tools-suite.jsonc` contains a valid `search.embedding` object; eligible semantic inputs may be sent to its configured endpoint. Project overrides and the former standalone semantic configuration do not authorize uploads and are not migrated. `/search-semantic configure` preserves JSONC comments and unrelated settings; Desktop edits the same configuration under Tools Suite → Search using the shared top Save button. See [project-search-agent-tool](../../specs/project-search-agent-tool.md). Independently of the catalog, `src/index.ts` registers an unconditional guard (see [provider-web-search-policy](../../specs/provider-web-search-policy.md)) that removes and blocks the Claude provider's metered `pi_claude_code_provider_web_search` tool in parent sessions while keeping the provider itself and the suite's own `web_search` available. Sub-agents exclude that tool through their separate tool guard.
 
 ### Native repository embedding setup and privacy
 
@@ -72,16 +81,54 @@ saves the embedding object and authorizes semantic retrieval for all sources/pro
 `/search-semantic off` removes it. `/search-semantic reset-history` is an explicit
 user-only recovery command for incompatible history caches in the current project: it
 clears only recognized derived task/session/commit/settings vectors and identity metadata
-from `.pi/search/index.sqlite`, preserving canonical tasks, sessions and Git history,
-settings documents/schema and the commit legacy-import marker. Repository vectors in
-`.pi/search/file-vectors.sqlite`, global settings, and canonical source data are unchanged.
+from their source-local databases (`tasks.sqlite`, `sessions.sqlite`, `git-commits.sqlite`,
+and `settings.sqlite`), preserving canonical tasks, sessions and Git history. Repository
+vectors live alongside source chunks in `code.sqlite` and `knowledge.sqlite`; they are
+unchanged by this history reset. Legacy databases are not read, imported or migrated.
+Schema-1 Settings caches are rejected without mutation. Status inspection never repairs
+stores. Stop and restart every
+older Pi/ACP/Desktop client before using split stores; old clients do not honor the new
+work protocol and mixed-version writes are unsupported. A separate global
+`~/.config/pi/search-provider-work.sqlite` coordinates at most four concurrent provider
+leases; after a crash or partition this cannot prove the count of remote provider
+executions. Source/provider leases renew every 30 seconds and expire after 90 seconds.
+Queued sources keep their claim renewed and recheck after acquiring a slot; cancellation
+retains ownership until tracked transport settles, and lost owners cannot publish. After
+two failed/interrupted network attempts (initial plus one automatic retry), explicit
+Continue is required; success resets failures, and Continue clears the exhausted budget
+before reconciliation. A short failed-work cooldown applies. Crashes after transmission
+can still result in duplicate provider billing; this is not exactly-once delivery. See
+[decision 0070](../../docs/decisions/0070-search-source-work-recovery.md).
 The next search can re-embed and incur charges. Busy, unsafe, redirected or unrecognized
 storage fails closed without a reset. Desktop Settings Search edits the same global file
 without ACP. No independent consent flag or confirmation step is used. Old
 `.pi/search/semantic.json` and Desktop semantic booleans are ignored; keys/caches alone
 never activate semantics. OpenRouter credentials use `OPENROUTER_API_KEY`, then shared
-Pi auth storage (`PI_CODING_AGENT_DIR` or `~/.pi/agent`); Ollama needs no key. IDX
-configuration and `.env` are not read, migrated or modified.
+Pi auth storage (`PI_CODING_AGENT_DIR` or `~/.pi/agent`); Ollama needs no key.
+
+To configure file suffixes for native repository search, set `search.codeExtensions`
+and/or `search.knowledgeExtensions` arrays in the global
+`~/.config/pi/pi-tools-suite.jsonc` settings. For example:
+
+```jsonc
+{
+  "search": {
+    "codeExtensions": [".gdshaderinc", "mydsl"],
+    "knowledgeExtensions": [".guide"]
+  }
+}
+```
+
+Each configured list replaces the full built-in list for that category; lists are not
+additive. An explicit empty list disables the category, while an omitted list uses its
+built-in defaults. Only configured suffixes are indexed; filenames such as `Dockerfile`
+and `Makefile` have no special handling. Entries are simple 1–32 character suffixes
+(letters, digits, `_`, `+` or `-`), with optional leading dots; matching is
+case-insensitive. Each source accepts at most 128 entries, and the effective Code and
+Knowledge lists must not overlap. Unsupported paths/globs and invalid or overlapping
+settings are rejected. Normal ignore, binary, size and link exclusions still apply.
+Changes take effect on the next explicit search/index scan; saving settings alone does
+not scan or trigger embeddings. Project-local settings do not override these lists.
 
 The [Codex reasoning replay spec](../../specs/codex-reasoning-fix.md) owns the
 last suite hook's narrow wire-only contract, evidence, and known cached
@@ -172,7 +219,7 @@ model-facing contract is:
    against relevant source/tests, makes small proven fixes and returns substantial
    or ambiguous discrepancies to the parent. Obtain the result and resolve concrete
    documentation questions. If the role is unavailable, maintain the docs directly.
-   This needs no IDX, knowledge dirty check, acknowledgment, index refresh or full
+   This needs no knowledge dirty check, acknowledgment, index refresh or full
    traversal of declared dependencies. Accurate documentation needs no edit;
    do not expand into unrelated work.
 
@@ -216,7 +263,7 @@ check if the auditor is absent.
 This is a prompt/workflow contract, not automatic enforcement or measurement.
 
 Mechanical edits do not require invented documentation changes or review receipts.
-The documentation specialist is available without IDX or initialized project state. Todo completion and
+The documentation specialist is available without initialized project state. Todo completion and
 file mutation results emit no knowledge-state reminders. The parent/catalog guidance
 owns the final documentation handoff.
 
@@ -674,7 +721,7 @@ handoffs), `mechanical` (GLM for sufficiently large prescribed behavior-preservi
 edits with deterministic checks), `research` (read-only evidence, focused review,
 and readiness evidence), `verify` (run checks and diagnose logs without fixing
 files), `ui-qa` (real browser, terminal/TUI, and desktop-GUI verification),
-`knowledge-auditor` (final affected-documentation maintenance without IDX or
+`knowledge-auditor` (final affected-documentation maintenance without search setup or
 knowledge-state receipts), and `oracle` (bounded second opinion and complex
 architectural review). The parent owns readiness decisions. Bundled `implement`
 and `delivery-review` are removed without aliases; project-local profiles under
@@ -1069,12 +1116,12 @@ credentials/fallback and is for public evidence only, never secrets/private repo
 data; missing prerequisites are reported to the parent. Council shares web
 registration but retains its stricter guard and does not gain AST.
 
-Every role also gets the full `project_search` tool without requiring IDX.
+Every role also gets the full `project_search` tool without external search setup.
 Common spawn loads only the tools-only entrypoint, never setup/update commands
 or the full suite. Restricted/empty tool lists and exclusions retain private
 todo and `project_search`, not other work tools. All five sources and `patch:`
 are available, with the same consent, provider and cancellation safeguards as
-ordinary Pi. No implicit IDX setup is attempted.
+ordinary Pi. No implicit external-backend setup is attempted.
 
 Sub-agent runs are stored in the current project's `.pi/subagents/` directory and survive main-session shutdown. Each spawn updates `.pi/subagents/registry.json` with the latest run and `agentId -> runDir` mappings. Because of that, `subagents({ action: "status" })`, `wait`, and `stop` can omit `runDir` to target the latest run, and `subagents({ action: "result", agentId: "..." })` can resolve the run from the registry even if the exact `runDir` was lost during compaction or the session closed. Result reads always return a summary-first response with artifact paths; raw `result.md` and `stderr.log` are not inlined, which avoids IPC/socket buffer overflows. Include `runDir` when you need an older or non-latest run, and use `cleanup` with `delete=true` to remove collected old runs. On normal main-session shutdown, Pi stops that session's sub-agents but preserves run files, reports, attachments and registry pointers; reload and fork shutdowns also skip stopping. Desktop's separate 72-hour background TTL and immediate manual Clean remain unchanged. The draft macOS owned launcher prevents explicit cleanup while containment or either UUID launchd service's retirement is uncertain; stopping the bridge alone never authorizes deletion. This candidate remains gated on G1/T3 acceptance (see `specs/async-subagents.md` in the Pix repository).
 

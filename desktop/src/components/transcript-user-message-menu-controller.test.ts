@@ -17,7 +17,7 @@ describe("running-session user-message actions", () => {
     const f = fixture();
     expect(f.controller.canMutate).toBe(false);
     expect(f.controller.canForkNewTab).toBe(true);
-    for (const action of ["fork", "undo", "fork-new-tab", "copy"] as const) {
+    for (const action of ["fork", "undo", "edit", "fork-new-tab", "copy"] as const) {
       await f.controller.runAction(f.message, action);
     }
     expect(f.options.onAction.mock.calls.map((call) => call[1])).toEqual(["fork-new-tab", "copy"]);

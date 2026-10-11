@@ -26,10 +26,26 @@ describe("headless Pix tool API", () => {
 		expect(inventory.model).toEqual(CHATGPT_HEADLESS_MODEL);
 		expect(inventory.profile).toBe("codex");
 		expect(inventory.nativeTools).toEqual(["read", "shell", "apply_patch"]);
-		expect(inventory.tools.map((tool) => tool.name)).toEqual(["ast_grep", "project_search", "project_tasks"]);
+		expect(inventory.tools.map((tool) => tool.name)).toEqual([
+			"ast_grep", "project_search", "project_tasks", "todo", "subagents_catalog", "read",
+		]);
 		expect(inventory.tools.every((tool) => tool.readOnly)).toBe(true);
 		expect(inventory.tools.find((tool) => tool.name === "project_tasks")?.inputSchema.properties?.op.enum)
 			.toEqual(["list", "get"]);
+		expect((await api.execute("read", { path: "test.ts" })).content[0]).toMatchObject({
+			type: "text", text: expect.stringContaining("hello"),
+		});
+		// macOS can supply an equivalent absolute /var path while cwd has been
+		// canonicalized to /private/var. Both must resolve to the selected root.
+		expect((await api.execute("read", { path: path.join(root, "test.ts") })).content[0]).toMatchObject({
+			type: "text", text: expect.stringContaining("hello"),
+		});
+		await expect(api.execute("read", { path: "../outside.ts" }))
+			.rejects.toThrow("escapes selected workspace");
+		await expect(api.execute("read", { path: "linked.ts" }))
+			.rejects.toThrow("escapes selected workspace");
+		await expect(api.execute("shell", { command: "echo hi" }))
+			.rejects.toThrow("not available");
 		const claude = await createHeadlessToolApi({ cwd: root, model: { provider: "anthropic", id: "claude-sonnet" } });
 		expect(claude.inventory().profile).toBe("claude");
 		expect(claude.inventory().nativeTools).toContain("Read");
@@ -47,12 +63,42 @@ describe("headless Pix tool API", () => {
 		await expect(api.execute("project_tasks", { op: "create", type: "todo", title: "no" }))
 			.rejects.toThrow("read-only");
 		await expect(api.execute("ast_grep", { pattern: "secret", lang: "ts", paths: [outside] }))
-			.rejects.toThrow("escapes selected project");
+			.rejects.toThrow("escapes selected workspace");
 		await expect(api.execute("ast_grep", { pattern: "secret", lang: "ts", paths: ["linked.ts"] }))
-			.rejects.toThrow("escapes selected project");
+			.rejects.toThrow("escapes selected workspace");
 		await expect(api.execute("ast_grep", { pattern: "hello", lang: "ts", follow: true }))
 			.rejects.toThrow("--follow");
 		expect(await readFile(path.join(root, "test.ts"), "utf8")).toContain("return 42");
+	}));
+
+	test("executes Pix's actual GPT shell/apply_patch tools with the selected cwd", async () => workspace(async (root, outside) => {
+		const api = await createHeadlessToolApi({ cwd: root, readOnly: false });
+		expect(api.inventory().tools.map((tool) => tool.name)).toEqual([
+			"ast_grep", "ast_apply", "project_search", "project_tasks", "todo", "subagents", "subagents_catalog",
+			"read", "shell", "apply_patch",
+		]);
+		const shell = await api.execute("shell", { command: "pwd" });
+		expect(shell.isError).not.toBe(true);
+		expect(shell.content[0]).toMatchObject({ type: "text", text: expect.stringContaining(root) });
+		const patch = await api.execute("apply_patch", { input: [
+			"*** Begin Patch", "*** Update File: test.ts", "@@",
+			"-function hello() { return 42; }", "+function hello() { return 43; }",
+			"*** End Patch",
+		].join("\n") });
+		expect(patch.isError).not.toBe(true);
+		expect(await readFile(path.join(root, "test.ts"), "utf8")).toContain("return 43");
+		await expect(api.execute("apply_patch", { input: [
+			"*** Begin Patch", "*** Update File: linked.ts", "@@",
+			"-function secret() { return 1; }", "+function secret() { return 2; }",
+			"*** End Patch",
+		].join("\n") })).rejects.toThrow("escapes selected workspace");
+		await expect(api.execute("apply_patch", { input: [
+			"--- a/../outside.ts", "+++ b/../outside.ts", "@@ -1 +1 @@",
+			"-function secret() { return 1; }", "+function secret() { return 2; }",
+		].join("\n") })).rejects.toThrow("escapes selected workspace");
+		expect(await readFile(outside, "utf8")).toContain("return 1");
+		await expect(api.execute("project_tasks", { op: "update", id: "123", status: "done" }))
+			.rejects.toThrow("read-only");
 	}));
 
 	test("project_search cannot escape workspace through projectPath", async () => workspace(async (root) => {

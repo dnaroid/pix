@@ -3,6 +3,7 @@ import type { CommitRecord, ProjectSearchHit } from "./engine.js";
 import { commitIdentity, embedCommits, loadCommitConfig, loadCommitKey, validCommitVector,
   type CommitEmbeddingConfig } from "./semantic-commit-provider.js";
 import { withSearchIndexWriter, type SqlDatabase } from "./semantic-index-writer.js";
+import { withProviderSlot } from "./source-work.mjs";
 
 const MAX_NEW_COMMIT_VECTORS = 256;
 const BATCH = 16;
@@ -104,7 +105,7 @@ export async function searchSemanticCommits(root: string, records: readonly Comm
         if (!before || commitIdentity(before) !== commitIdentity(config!)) throw new Error("Commit configuration changed before indexing");
         owned.throwIfAborted();
         const input = targets.map(doc => (config!.documentPrefix + doc.record.title + "\n" + doc.record.author + "\n" + doc.record.message).slice(0, 8192));
-        const vectors = await (services.embed ?? embedCommits)(input, config!, key, owned);
+        const vectors = await db.outside(() => withProviderSlot(owned, () => (services.embed ?? embedCommits)(input, config!, key, owned)));
         owned.throwIfAborted();
         if (vectors.length !== targets.length || !vectors.every(v => validCommitVector(v, config!.dimension))) {
           throw new Error("Invalid commit embedding result");
@@ -126,7 +127,7 @@ export async function searchSemanticCommits(root: string, records: readonly Comm
         }
         db.prepare("INSERT INTO pix_commit_meta(key,value) VALUES('identity',?) ON CONFLICT(key) DO NOTHING").run(commitIdentity(config!));
         return { indexed: targets.length, remaining: missing.length - targets.length };
-      });
+      }, "commits");
       indexed += result.indexed;
       remaining = result.remaining;
       if (!remaining || !result.indexed) break;
@@ -140,14 +141,14 @@ export async function searchSemanticCommits(root: string, records: readonly Comm
   const saved = await withSearchIndexWriter(root, owned, async db => {
     ensureCommitSchema(db, config!);
     return cachedVectors(db, docs, config!).present;
-  }).catch(() => new Map<string, number[]>());
+  }, "commits").catch(() => new Map<string, number[]>());
   if (!saved.size || (await readHead(owned)).trim() !== head) return { hits: [], notices };
   const current = await (services.loadConfig ?? loadCommitConfig)(root);
   if (!current || commitIdentity(current) !== commitIdentity(config)) return { hits: [], notices };
   owned.throwIfAborted();
   let queryVector: readonly number[];
   try {
-    const vectors = await (services.embed ?? embedCommits)([(config.queryPrefix + query).slice(0, 8192)], config, key, owned);
+    const vectors = await withProviderSlot(owned, () => (services.embed ?? embedCommits)([(config!.queryPrefix + query).slice(0, 8192)], config!, key, owned));
     owned.throwIfAborted();
     if (vectors.length !== 1 || !validCommitVector(vectors[0], config.dimension)) throw new Error("Invalid commit query embedding");
     queryVector = vectors[0]!;

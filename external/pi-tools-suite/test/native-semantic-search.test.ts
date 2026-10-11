@@ -38,6 +38,16 @@ function fakeProvider() {
 afterEach(async () => { if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome; for (const root of roots.splice(0)) await rm(root, { force: true, recursive: true }); });
 
 describe("native semantic repository retrieval", () => {
+  test("split Code and Knowledge share the original 128-document upload budget", async () => {
+    const root = await fixture(), provider = fakeProvider();
+    for (let i = 0; i < 130; i++) {
+      await put(root, `code/item${i}.ts`, `export const token${i} = 'renewCredentials';`);
+      await put(root, `docs/item${i}.md`, `# Token rotation ${i}\nUnique document ${i}`);
+    }
+    await searchNative(root, request(), provider);
+    const documents = provider.calls.flatMap(call => call.inputs).filter(input => !input.endsWith(request().query));
+    expect(documents).toHaveLength(128);
+  });
   test("suite-owned provider configuration needs no IDX directory and never silently falls back", async () => {
     const root = await fixture(), provider = fakeProvider();
     await put(root, "../.config/pi/pi-tools-suite.jsonc", JSON.stringify({ enabled: true, search: { embedding: config } }));
@@ -61,7 +71,9 @@ describe("native semantic repository retrieval", () => {
     const local = await searchNative(root, request({ mode: "lexical", query: "renewCredentials" }), provider);
     expect(local.hits[0].path).toBe("auth.ts");
     expect(provider.calls).toEqual([]);
-    expect(await readFile(join(root, ".pi/search/file-vectors.sqlite")).catch(() => undefined)).toBeUndefined();
+    const db = new Database(join(root, ".pi/search/code.sqlite"), { readonly: true });
+    try { expect(db.query("SELECT name FROM sqlite_master WHERE name='vectors'").get()).toBeNull(); }
+    finally { db.close(); }
   });
 
   test("project overrides and legacy top-level embedding never authorize uploads", async () => {
@@ -111,7 +123,7 @@ describe("native semantic repository retrieval", () => {
     expect((await searchNative(root, request(), provider)).hits[0].path).toBe("renamed.ts");
     await rm(join(root, "renamed.ts"));
     expect((await searchNative(root, request(), provider)).hits).toEqual([]);
-    const db = new Database(join(root, ".pi/search/file-vectors.sqlite"), { readonly: true });
+    const db = new Database(join(root, ".pi/search/code.sqlite"), { readonly: true });
     try { expect((db.query("SELECT count(*) AS n FROM vectors").get() as any).n).toBe(4); }
     finally { db.close(); }
   });
@@ -171,7 +183,7 @@ describe("native semantic repository retrieval", () => {
     const stale = await pending;
     expect(stale.status.semantic.state).toBe("unavailable");
     expect(stale.hits).toEqual([]);
-    const db = new Database(join(root, ".pi/search/file-vectors.sqlite"), { readonly: true });
+    const db = new Database(join(root, ".pi/search/code.sqlite"), { readonly: true });
     try { expect((db.query("SELECT COUNT(*) AS n FROM vectors").get() as any).n).toBe(0); }
     finally { db.close(); }
   });
@@ -215,10 +227,12 @@ describe("native semantic repository retrieval", () => {
       expect(b.acquire("model")).toBeUndefined();
       b.release("model", "wrong-token");
       expect(b.acquire("model")).toBeUndefined();
-      const db = new Database(join(root, ".pi/search/file-vectors.sqlite"));
+      const db = new Database(join(root, ".pi/search/code.sqlite"));
       db.exec("UPDATE leases SET expires=0"); db.close();
+      expect(() => a.renew("model", token)).toThrow("Vector lease lost");
       const replacement = b.acquire("model");
       expect(replacement).not.toBe(token);
+      expect(() => a.renew("model", token)).toThrow("Vector lease lost");
       expect(() => a.put("model", token, [{ digest: "a", vector: [1, 0, 0] }], 3)).toThrow();
       a.release("model", token);
       b.put("model", replacement, [{ digest: "a", vector: [1, 0, 0] }], 3);
@@ -235,7 +249,8 @@ describe("native semantic repository retrieval", () => {
     await searchNative(root, request(), provider);
     expect(provider.calls).toEqual([]);
     await put(outside, "cache", "unchanged");
-    await symlink(join(outside, "cache"), join(root, ".pi/search/file-vectors.sqlite"));
+    await rm(join(root, ".pi/search/code.sqlite"));
+    await symlink(join(outside, "cache"), join(root, ".pi/search/code.sqlite"));
     await expect(openVectorStore(root)).rejects.toThrow();
     expect(await readFile(join(outside, "cache"), "utf8")).toBe("unchanged");
   });

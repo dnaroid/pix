@@ -30,19 +30,18 @@ maintenance, without treating generated answers as semantic proof.
 
 - `repo_context`, `repo_inspect`, `repo_audit`, and `repo_search` are removed.
   Code and Knowledge use native `project_search` across Pi/TUI/ACP/Desktop;
-  there is no IDX fallback, setup/update command, panel, provider migration or
+  there is no external-backend fallback, setup/update command, panel, provider migration or
   repository-search gate. See [Project-wide agent search](project-search-agent-tool.md).
 - Native lexical retrieval needs no embedding credentials. Opt-in repository and
   commit embeddings use the project `.pi/search/semantic.json` `embedding` object
-  and `OPENROUTER_API_KEY`; chunks/queries may be transmitted externally. IDX
-  config and `.env` files are never read or migrated.
+  and `OPENROUTER_API_KEY`; chunks/queries may be transmitted externally.
 - The primary bundled extension exposes `project_search` with its full schema to
   ordinary Pi, ACP, and every async child/provider child/council. Every caller has
   the same sources (`sessions`, `tasks`, `commits`, `code`, `knowledge`), options,
   and `patch:<literal>` behavior; there is no child restriction or reduced facade.
   Children still omit suite setup commands and parent orchestration/delegation
   guidance, and retain their normal work-tool restrictions. `project_search` does
-  not initialize or update IDX. External repository embeddings retain independent
+  not initialize or update external search services. External repository embeddings retain independent
   consent and saved-provider safeguards. See [decision 0060](../docs/decisions/0060-subagent-read-only-repo-tools.md)
   and [project search](project-search-agent-tool.md).
 - `project_search` is the single project retrieval tool. It defaults to all five
@@ -85,13 +84,13 @@ maintenance, without treating generated answers as semantic proof.
   returns substantial or ambiguous discrepancies to the parent. Accurate
   documentation needs no edit. If the role is unavailable, the parent maintains
   affected documentation directly.
-- Documentation maintenance does not require IDX or `.indexer-cli/`. The bundled
+- Documentation maintenance does not require search setup. The bundled
   role has no indexed-project visibility gate. Search and direct reads are
   sufficient; retrieval results are not evidence of semantic correctness.
 - Do not require `idx knowledge dirty`, `idx knowledge acknowledge`, index
   refreshes, review receipts, a global clean verdict, or exhaustive traversal of
   every declared Implementation/Tests dependency. Read only the evidence needed
-  to resolve the task's documentation questions. Missing IDX and unrelated
+  to resolve the task's documentation questions. Unrelated
   knowledge state do not block this work.
 - The same role accepts an explicitly assigned **spec-review** with exact
   documentation paths and a review goal. This is bounded documentation work,

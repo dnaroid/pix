@@ -66,8 +66,9 @@ export interface SearchQueryRequest {
 }
 export interface SearchConfigRequest {
   readonly cwd: string;
+  readonly includeSourceStatus?: boolean;
 }
-export interface SearchSyncRequest extends SearchConfigRequest {
+export interface SearchSyncRequest extends Pick<SearchConfigRequest, "cwd"> {
   readonly settings: readonly SearchSetting[];
 }
 export type SearchIndexSource = "settings" | "sessions" | "tasks" | "commits";
@@ -85,6 +86,7 @@ export interface SearchIndexResponse {
   readonly message?: string;
 }
 export interface SearchStatus {
+  readonly sessionsEmpty?: boolean;
   readonly enabled: boolean;
   readonly sessionTitlesEnabled?: boolean;
   readonly tasksSemanticEnabled?: boolean;

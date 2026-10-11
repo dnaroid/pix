@@ -7,6 +7,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { onDestroy, onMount, untrack } from "svelte";
   import { SETTINGS_GROUPS } from "../../lib/settings-navigation";
+  import type { AcpClient } from "../../lib/acp-client";
   import {
     cacheSettingsDraft,
     parseSettingsSchema,
@@ -37,7 +38,7 @@
     onOpenUserConfig: (kind: SettingsConfigKind) => void;
     onIndicatorChange?: (error: string | null) => void;
     workspace?: string;
-    searchClient?: { searchConfig: (cwd: string, changes?: { enabled?: boolean; apiKey?: string }, signal?: AbortSignal) => Promise<import("../../../../acp/src/search/contract").SearchStatus> };
+    searchClient?: Pick<AcpClient, "searchConfig">;
   } = $props();
 
   const initialCache = settingsEditorCache();

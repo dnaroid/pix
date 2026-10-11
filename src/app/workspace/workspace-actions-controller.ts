@@ -2,6 +2,7 @@ import { getAgentDir, type AgentSessionRuntime } from "@earendil-works/pi-coding
 import { copyTextToClipboard } from "../screen/clipboard.js";
 import { createId } from "../id.js";
 import type { Entry } from "../types.js";
+import { editUserMessageInSession, type EditedUserMessage, type MessageEditUi } from "./user-message-edit.js";
 import {
 	loadWorkspaceUndoIndex,
 	prepareWorkspaceMutation,
@@ -16,6 +17,10 @@ import {
 } from "./workspace-undo.js";
 
 export type AppWorkspaceActionsControllerHost = {
+	messageEditUi?(): MessageEditUi;
+	canEditUserMessage?(): boolean;
+	reserveMessageEdit?(runtime: AgentSessionRuntime): () => void;
+	resendEditedUserMessage?(runtime: AgentSessionRuntime, edit: EditedUserMessage): void;
 	readonly entries: Entry[];
 	allEntries?(): readonly Entry[];
 	runtime(): AgentSessionRuntime | undefined;
@@ -36,9 +41,33 @@ export type AppWorkspaceActionsControllerHost = {
 };
 
 export class AppWorkspaceActionsController {
+	messageEditRunning = false;
 	private readonly workspaceUndoIndex = loadWorkspaceUndoIndex(getAgentDir());
 
 	constructor(private readonly host: AppWorkspaceActionsControllerHost) {}
+
+	async editUserMessage(entryId: string): Promise<void> {
+		if (this.messageEditRunning) return;
+		const runtime = this.getIdleRuntimeForAction("Edit and resend");
+		const visible = this.host.findUserEntry(entryId);
+		if (!runtime || !visible || !this.host.messageEditUi || !this.host.reserveMessageEdit || !this.host.resendEditedUserMessage) return;
+		const sessionEntryId = this.resolveUserSessionEntryId(visible);
+		if (!sessionEntryId) throw new Error("This message is not backed by a Pi session entry.");
+		await this.host.awaitCurrentSessionExtensions(runtime);
+		if (this.messageEditRunning) return;
+		const isCurrent = () => this.host.isRunning() && this.host.runtime() === runtime
+			&& !runtime.session.isStreaming && !runtime.session.isCompacting && (this.host.canEditUserMessage?.() ?? true);
+		if (!isCurrent()) throw new Error("Edit and resend is unavailable while the session is busy or has queued messages.");
+		this.messageEditRunning = true;
+		try {
+			await editUserMessageInSession({
+				runtime, entryId: sessionEntryId, isCurrent, ui: this.host.messageEditUi(),
+				reserve: () => this.host.reserveMessageEdit!(runtime),
+				reloadHistory: () => { this.host.resetSessionView(); this.host.loadSessionHistory(); },
+				resend: (edit) => this.host.resendEditedUserMessage!(runtime, edit),
+			});
+		} finally { this.messageEditRunning = false; this.host.render(); }
+	}
 
 	prepareWorkspaceMutation(toolName: string, args: unknown): WorkspaceMutationPreparation | undefined {
 		const runtime = this.host.runtime();
@@ -194,6 +223,7 @@ export class AppWorkspaceActionsController {
 		this.host.setStatus("truncating session");
 		this.host.render();
 		const session = runtime.session;
+		if (this.messageEditRunning) throw new Error("A message edit is in progress.");
 		const result = await session.navigateTree(sessionEntryId);
 		if (!this.isSessionActive(runtime, session)) return;
 		if (result.aborted) {
@@ -294,6 +324,7 @@ export class AppWorkspaceActionsController {
 	}
 
 	private getIdleRuntimeForAction(actionName: string): AgentSessionRuntime | undefined {
+		if (this.messageEditRunning) throw new Error("A message edit is in progress.");
 		const runtime = this.host.runtime();
 		if (!runtime) {
 			this.host.addEntry({ id: createId("error"), kind: "error", text: "Runtime is not initialized" });

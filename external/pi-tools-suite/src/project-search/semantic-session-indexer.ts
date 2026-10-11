@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { withProviderSlot } from "./source-work.mjs";
 import { freshSemanticCandidates, sessionLinks, type CachedSessionCandidate } from "./semantic-cache.js";
 import { embedTaskTexts, requireSemanticIdentity, validSearchVector,
   type SemanticSearchOptions } from "./semantic-provider.js";
@@ -50,16 +51,18 @@ export async function indexMissingSessionVectors(root: string, candidates: reado
       const put = db.prepare(`INSERT INTO pix_session_titles(session_id,title,title_hash) VALUES(?,?,?)
         ON CONFLICT(session_id) DO UPDATE SET title=excluded.title,title_hash=excluded.title_hash
         WHERE title!=excluded.title OR title_hash!=excluded.title_hash`);
-      for (const title of live) put.run(title.sessionId, title.title, title.hash);
       // Discovery is bounded. Retain older titles and all purchased vectors;
       // matching still requires a current authenticated saved-name/hash pair.
       const has = db.prepare("SELECT 1 AS found FROM pix_session_vectors WHERE title_hash=?");
       const unique = new Set<string>();
       const missing = live.filter(title => !has.get(title.hash) && !unique.has(title.hash) && (unique.add(title.hash), true));
-      if (!missing.length || batch === MAX_PER_QUERY / BATCH) return { remaining: missing.length, indexed: 0 };
+      if (!missing.length || batch === MAX_PER_QUERY / BATCH) {
+        for (const title of live) put.run(title.sessionId, title.title, title.hash);
+        return { remaining: missing.length, indexed: 0 };
+      }
       const targets = missing.slice(0, BATCH);
       await requireSemanticIdentity(options, config, owned);
-      const vectors = await (options.embedTasks ?? embedTaskTexts)(targets.map(item => item.title), key, owned, config);
+      const vectors = await db.outside(() => withProviderSlot(owned, () => (options.embedTasks ?? embedTaskTexts)(targets.map(item => item.title), key, owned, config)));
       owned.throwIfAborted();
       await requireSemanticIdentity(options, config, owned);
       if (vectors.length !== targets.length || !vectors.every(v => validSearchVector(v, config.dimension))) throw new Error("Invalid session title embedding batch");
@@ -76,6 +79,7 @@ export async function indexMissingSessionVectors(root: string, candidates: reado
       }
       await requireSemanticIdentity(options, config, owned);
       const add = db.prepare("INSERT INTO pix_session_vectors(title_hash,vector) VALUES(?,?) ON CONFLICT(title_hash) DO NOTHING");
+      for (const title of live) put.run(title.sessionId, title.title, title.hash);
       for (let i = 0; i < targets.length; i++) {
         const bytes = Buffer.alloc(config.dimension * 4);
         vectors[i]!.forEach((value, index) => bytes.writeFloatLE(value, index * 4));

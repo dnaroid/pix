@@ -110,7 +110,7 @@ export class AppPopupMenuController {
 	private readonly slashCommandMenu = new PopupMenu<SlashCommandMenuValue>({ maxVisibleRows: SLASH_COMMAND_MENU_MAX_ROWS });
 	private readonly modelMenu = new PopupMenu<ModelPopupMenuValue>({ maxVisibleRows: SLASH_COMMAND_MENU_MAX_ROWS });
 	private readonly resumeMenu = new PopupMenu<ResumePopupMenuValue>({ maxVisibleRows: RESUME_MENU_MAX_ROWS });
-	private readonly userMessageMenu = new PopupMenu<UserMessagePopupMenuValue>({ maxVisibleRows: 4 });
+	private readonly userMessageMenu = new PopupMenu<UserMessagePopupMenuValue>({ maxVisibleRows: 5 });
 	private readonly userMessageJumpMenu = new PopupMenu<UserMessageJumpPopupMenuValue>({ maxVisibleRows: RESUME_MENU_MAX_ROWS });
 	private readonly queueMessageMenu = new PopupMenu<QueueMessagePopupMenuValue>({ maxVisibleRows: 4 });
 	private readonly sdkMenu = new PopupMenu<SdkPopupMenuValue>({ maxVisibleRows: SLASH_COMMAND_MENU_MAX_ROWS });

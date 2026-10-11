@@ -5,6 +5,18 @@ import sidebarSource from "./WorkspaceSidebar.svelte?raw";
 import sidebarViewModelSource from "../app/desktop-sidebar-view-model.svelte.ts?raw";
 
 describe("PackageScriptsPanel saved launch commands", () => {
+  it("uses accessible icon actions for adding, editing, and deleting commands", () => {
+    for (const icon of ["Plus", "Pencil", "Trash2"]) {
+      expect(editorSource).toContain(`<${icon} class="h-3.5 w-3.5" aria-hidden="true"`);
+    }
+    expect(editorSource).toContain('title="Add launch command" aria-label="Add launch command"');
+    for (const action of ["Edit", "Delete"]) {
+      expect(editorSource).toContain(`title={\`${action} \${item.name}\`} aria-label={\`${action} \${item.name}\`}`);
+      expect(editorSource).not.toContain(`>${action}</button>`);
+    }
+    expect(editorSource).not.toContain('>Add</button>');
+  });
+
   it("supports project-scoped command CRUD and running without requiring package scripts", () => {
     expect(source).toContain("controller.launchCommands");
     expect(source).toContain('onSave={controller.saveLaunchCommand}');

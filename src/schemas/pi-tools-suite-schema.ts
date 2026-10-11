@@ -5,6 +5,7 @@
  * The generated JSON Schema includes `"additionalProperties": true`.
  */
 import { Type, Static } from "typebox";
+import { codeDefaults, knowledgeDefaults } from "../../external/pi-tools-suite/src/project-search/source-extension-settings.mjs";
 
 // ---------------------------------------------------------------------------
 // Shared primitives
@@ -293,8 +294,10 @@ const SearchEmbeddingConfig = Type.Object({
 }, { description: "Explicit global authorization for semantic search across projects and sources; never populated by shipped defaults." });
 
 const SearchConfig = Type.Object({
+	codeExtensions: Type.Optional(Type.Array(Type.String({ pattern: "^\\.?[A-Za-z0-9][A-Za-z0-9_+-]{0,31}(?![\\s\\S])" }), { maxItems: 128, default: codeDefaults, description: "Complete Code file extensions. Empty disables this category. Omitted uses the displayed defaults. Optional leading dot; case-insensitive. Must not overlap Knowledge extensions. Applied on the next explicit scan; saving does not start embeddings." })),
+	knowledgeExtensions: Type.Optional(Type.Array(Type.String({ pattern: "^\\.?[A-Za-z0-9][A-Za-z0-9_+-]{0,31}(?![\\s\\S])" }), { maxItems: 128, default: knowledgeDefaults, description: "Complete Knowledge file extensions. Empty disables this category. Omitted uses the displayed defaults. Optional leading dot; case-insensitive. Must not overlap Code extensions. Paths/globs are not supported; normal ignore and safety rules still apply." })),
 	embedding: Type.Optional(SearchEmbeddingConfig),
-}, { description: "Global semantic-search configuration in ~/.config/pi/pi-tools-suite.jsonc." });
+}, { description: "Global search configuration in ~/.config/pi/pi-tools-suite.jsonc." });
 
 // ---------------------------------------------------------------------------
 // Top-level schema

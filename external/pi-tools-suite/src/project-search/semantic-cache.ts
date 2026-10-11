@@ -29,7 +29,7 @@ async function regularFile(path: string, maxBytes: number): Promise<boolean> {
 
 /** Reuse ACP's project-owned index, but never create an index, tables, blobs,
  * or a new task/session entry in this read-only agent tool. */
-async function openCachedIndex(root: string): Promise<ReadonlyDatabase | undefined> {
+async function openCachedIndex(root: string, source: "tasks" | "sessions"): Promise<ReadonlyDatabase | undefined> {
   for (const folder of [join(root, ".pi"), join(root, ".pi", "search")]) {
     const info = await lstat(folder).catch(error => {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
@@ -38,7 +38,7 @@ async function openCachedIndex(root: string): Promise<ReadonlyDatabase | undefin
     if (!info) return;
     if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("Unsafe search index directory");
   }
-  const filename = join(root, ".pi", "search", "index.sqlite");
+  const filename = join(root, ".pi", "search", `${source}.sqlite`);
   if (!await regularFile(filename, 512 * 1024 * 1024)) return;
   for (const suffix of ["-wal", "-shm", "-journal"]) {
     const sidecar = await lstat(`${filename}${suffix}`).catch(error => {
@@ -178,9 +178,23 @@ export async function freshSemanticCandidates(root: string, inputs: {
 export async function readCachedProjectVectors(root: string, inputs: {
   tasks: readonly CachedTaskCandidate[]; sessions: readonly CachedSessionCandidate[];
 }, options: SemanticSearchOptions, signal: AbortSignal, config: CommitEmbeddingConfig): Promise<CachedProjectVectors> {
+  const isolated = async (source: "tasks" | "sessions") => {
+    const scoped = { tasks: source === "tasks" ? inputs.tasks : [], sessions: source === "sessions" ? inputs.sessions : [] };
+    try { return await readSourceVectors(root, scoped, options, signal, config); }
+    catch {
+      signal.throwIfAborted();
+      return { tasks: new Map<string, number[]>(), sessions: new Map<string, number[]>(), uncachedTasks: scoped.tasks.length, uncachedSessions: scoped.sessions.length };
+    }
+  };
+  const [tasks, sessions] = await Promise.all([isolated("tasks"), isolated("sessions")]);
+  return { tasks: tasks.tasks, sessions: sessions.sessions, uncachedTasks: tasks.uncachedTasks, uncachedSessions: sessions.uncachedSessions };
+}
+async function readSourceVectors(root: string, inputs: {
+  tasks: readonly CachedTaskCandidate[]; sessions: readonly CachedSessionCandidate[];
+}, options: SemanticSearchOptions, signal: AbortSignal, config: CommitEmbeddingConfig): Promise<CachedProjectVectors> {
   const result: CachedProjectVectors = { tasks: new Map(), sessions: new Map(), uncachedTasks: 0, uncachedSessions: 0 };
   if (!inputs.tasks.length && !inputs.sessions.length) return result;
-  const db = await openCachedIndex(root);
+  const db = await openCachedIndex(root, inputs.tasks.length ? "tasks" : "sessions");
   if (!db) return { ...result, uncachedTasks: inputs.tasks.length, uncachedSessions: inputs.sessions.length };
   try {
     db.exec("PRAGMA busy_timeout=200; BEGIN");

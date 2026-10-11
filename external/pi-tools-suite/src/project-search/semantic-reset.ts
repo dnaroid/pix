@@ -1,6 +1,6 @@
 import { lstat } from "node:fs/promises";
-import { join } from "node:path";
 import { withSearchIndexWriter, type SqlDatabase } from "./semantic-index-writer.js";
+import { sourcePath } from "./source-work.mjs";
 
 const namespaces = [
   { meta: "pix_task_index_meta", vectors: "pix_task_vectors", columns: "content_hash:TEXT,vector:BLOB" },
@@ -22,15 +22,21 @@ function validateTable(db: SqlDatabase, table: string, columns: string): boolean
   return true;
 }
 
-/** Explicit user command only. Never unlink the shared index or canonical history. */
+/** Explicit user command only. Only current source caches are opened; canonical history is retained. */
 export async function resetHistoryVectors(root: string, signal: AbortSignal): Promise<number> {
-  const exists = await lstat(join(root, ".pi/search/index.sqlite")).catch(error => {
+  let count = 0;
+  for (const source of ["settings", "sessions", "tasks", "commits"] as const) count += await resetSource(root, source, signal);
+  return count;
+}
+async function resetSource(root: string, source: "settings" | "sessions" | "tasks" | "commits", signal: AbortSignal): Promise<number> {
+  const exists = await lstat(sourcePath(root, source)).catch(error => {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;
   });
   if (!exists) return 0;
   return withSearchIndexWriter(root, signal, async db => {
-    const present = namespaces.filter(namespace => {
+    const table = { settings: "metadata", sessions: "pix_session_meta", tasks: "pix_task_index_meta", commits: "pix_commit_meta" }[source];
+    const present = namespaces.filter(namespace => namespace.meta === table).filter(namespace => {
       const meta = validateTable(db, namespace.meta, "key:TEXT,value:TEXT");
       const vectors = validateTable(db, namespace.vectors, namespace.columns);
       if (meta !== vectors) throw new Error("Incomplete semantic cache schema");
@@ -58,5 +64,5 @@ export async function resetHistoryVectors(root: string, signal: AbortSignal): Pr
       } else db.exec(`DELETE FROM ${namespace.meta}`);
     }
     return count;
-  });
+  }, source);
 }

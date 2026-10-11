@@ -37,7 +37,7 @@ function service(t: { after: (fn: () => Promise<void>) => void }, opts: CommitSe
 }
 const query = (s: DesktopCommitSearchService, cwd: string, text = "target") => s.query({ cwd, query: text, limit: 20 }, signal());
 function snapshot(cwd: string) {
-  const db = new DatabaseSync(canonicalSearchIndexPath(cwd));
+  const db = new DatabaseSync(canonicalSearchIndexPath(cwd, "commits"));
   try { return { identity: db.prepare(`SELECT value FROM ${COMMIT_META} WHERE key='identity'`).get()?.value, vectors: db.prepare(`SELECT * FROM ${COMMIT_VECTORS} ORDER BY hash`).all() }; }
   finally { db.close(); }
 }
@@ -51,18 +51,18 @@ test("strict allowlisted request parsing", () => {
   assert.deepEqual(parseCommitSearchRequest({ cwd: "/tmp/project", query: "word", secret: "discard" }), { cwd: "/tmp/project", query: "word", limit: 20 });
   for (const value of [null, [], { cwd: "relative", query: "x" }, { cwd: "/tmp\0", query: "x" }, { cwd: "/tmp", query: "x".repeat(2049) }, { cwd: "/tmp", query: "x", limit: 0 }, { cwd: "/tmp", query: "x", limit: 1.5 }, { cwd: "/tmp", query: "x", limit: 101 }]) assert.throws(() => parseCommitSearchRequest(value), e => typeof e === "object" && e !== null && "code" in e && e.code === -32602);
 });
-test("explicit commit pass bounds paid documents, never embeds queries, and Continue/restart reuse vectors", async t => {
+test("explicit commit pass drains beyond 128, never embeds queries, and restart reuses vectors", async t => {
   const r = await repository(t); for (let i = 0; i < 130; i++) await r.commit(`corpus ${i}`);
   const inputs: string[] = [];
-  const opts = options(async texts => { inputs.push(...texts); return texts.map(() => [1, 0, 0]); });
+  const opts = options(async texts => { assert.ok(texts.length <= 16); inputs.push(...texts); return texts.map(() => [1, 0, 0]); });
   const a = service(t, opts), request = { cwd: r.cwd, source: "commits" as const };
   const first = await a.index(request);
-  assert.equal(first.complete, false); assert.equal(first.indexed, 128); assert.equal(first.total, 130);
-  assert.equal(inputs.length, 128); assert.ok(inputs.every(text => text.startsWith("D:")));
+  assert.equal(first.complete, true); assert.equal(first.indexed, 130); assert.equal(first.total, 130);
+  assert.equal(inputs.length, 130); assert.ok(inputs.every(text => text.startsWith("D:")));
   await a.dispose(); const b = service(t, opts);
   assert.deepEqual(await b.index(request), { source: "commits", complete: true, indexed: 130, total: 130 });
   assert.equal(inputs.length, 130); await b.index(request); assert.equal(inputs.length, 130);
-  const db = new DatabaseSync(canonicalSearchIndexPath(r.cwd), { readOnly: true });
+  const db = new DatabaseSync(canonicalSearchIndexPath(r.cwd, "commits"), { readOnly: true });
   try {
     assert.equal(db.prepare(`SELECT COUNT(*) n FROM ${COMMIT_DOCUMENTS}`).get()?.n, 130);
     assert.equal(db.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE name IN ('documents','pix_task_vectors','pix_session_vectors')").get()?.n, 0);
@@ -105,13 +105,16 @@ for (const boundary of ["caller", "workspace", "dispose", "config"] as const) te
   assert.equal(snapshot(r.cwd).vectors.length, 0);
 });
 test("explicit commit pass detects changed HEAD, reconciles reachable metadata and retains purchased vectors", async t => {
-  const r = await repository(t), old = await r.commit("old corpus"); const g = gate(); let block = true;
+  const r = await repository(t), old = await r.commit("old corpus"); const g = gate(); let block = false;
   const s = service(t, options(async texts => { if (block) { g.entered(); await g.wait; } return texts.map(() => [1, 0, 0]); }));
-  const request = { cwd: r.cwd, source: "commits" as const }, pending = s.index(request); await g.start;
+  const request = { cwd: r.cwd, source: "commits" as const };
+  await s.index(request); // Previously published paid work must survive a later stale completion.
+  await r.commit("in-flight corpus"); block = true;
+  const pending = s.index(request); await g.start;
   const replacement = await r.commit("replacement corpus", ""); g.release();
   const stale = await pending; assert.equal(stale.complete, false); block = false;
   assert.deepEqual(await s.index(request), { source: "commits", complete: true, indexed: 1, total: 1 });
-  const db = new DatabaseSync(canonicalSearchIndexPath(r.cwd), { readOnly: true });
+  const db = new DatabaseSync(canonicalSearchIndexPath(r.cwd, "commits"), { readOnly: true });
   try { assert.deepEqual(db.prepare(`SELECT hash FROM ${COMMIT_DOCUMENTS}`).all().map(row => row.hash), [replacement]); }
   finally { db.close(); }
   assert.notEqual(replacement, old); assert.equal(snapshot(r.cwd).vectors.length, 2, "unreachable paid vectors are not reset");
@@ -144,14 +147,14 @@ test("changed file paths are searchable metadata without changing saved vector h
   }));
   assert.equal((await query(s, r.cwd, "widgetController")).results[0]?.hash, hash);
   assert.equal(paidDocuments, 1);
-  const db = new DatabaseSync(canonicalSearchIndexPath(r.cwd));
+  const db = new DatabaseSync(canonicalSearchIndexPath(r.cwd, "commits"));
   try {
     assert.deepEqual(JSON.parse(String(db.prepare("SELECT metadata FROM pix_commit_documents WHERE hash=?").get(hash)?.metadata)).changedPaths,
       ["src/widgetController.ts"]);
     db.prepare("UPDATE pix_commit_documents SET metadata=? WHERE hash=?").run(JSON.stringify(base), hash);
   } finally { db.close(); }
   await query(s, r.cwd, "widgetController");
-  const refreshed = new DatabaseSync(canonicalSearchIndexPath(r.cwd), { readOnly: true });
+  const refreshed = new DatabaseSync(canonicalSearchIndexPath(r.cwd, "commits"), { readOnly: true });
   try {
     assert.deepEqual(JSON.parse(String(refreshed.prepare("SELECT metadata FROM pix_commit_documents WHERE hash=?").get(hash)?.metadata)).changedPaths,
       ["src/widgetController.ts"]);
@@ -209,79 +212,35 @@ test("restart reuses document vectors; incremental commit embeds only addition",
   await r.commit("new target"); await query(b, r.cwd); assert.equal(docs, 2); assert.equal(queries, 2);
   assert.equal(snapshot(r.cwd).vectors.length, 2);
 });
-test("imports a legacy commit index into canonical SQLite without paying again or changing either source database", async t => {
-  const r = await repository(t);
-  await r.commit("target from legacy");
-  const [doc] = await readCommitCorpus(r.cwd, signal());
-  assert.ok(doc);
-  const directory = join(r.cwd, ".pi", "search");
-  await mkdir(directory, { recursive: true });
-  const oldPath = join(directory, "commits.sqlite");
-  const old = new DatabaseSync(oldPath);
-  old.exec("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE vectors (hash TEXT PRIMARY KEY, vector TEXT NOT NULL); CREATE TABLE commits (hash TEXT PRIMARY KEY, content_hash TEXT NOT NULL, metadata TEXT NOT NULL, message TEXT NOT NULL)");
-  old.prepare("INSERT INTO meta VALUES ('identity', ?)").run(embeddingIdentity(config));
-  old.prepare("INSERT INTO vectors VALUES (?, ?)").run(doc.contentHash, JSON.stringify([1, 0, 0]));
-  old.prepare("INSERT INTO commits VALUES (?, ?, ?, ?)").run(doc.commit.hash, doc.contentHash, JSON.stringify(doc.commit), doc.message);
-  old.close();
-  const oldBytes = await readFile(oldPath);
-
-  // A pre-existing settings schema, with its own vector representation,
-  // must survive migration unmodified (same SQLite file, separate tables).
-  const canonical = new DatabaseSync(canonicalSearchIndexPath(r.cwd));
-  canonical.exec("CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE documents (id TEXT PRIMARY KEY, text TEXT, hit TEXT, hashes TEXT); CREATE TABLE vectors (hash TEXT PRIMARY KEY, vector BLOB NOT NULL)");
-  canonical.prepare("INSERT INTO vectors VALUES ('settings-hash', ?)").run(Buffer.from([12, 34, 56]));
-  canonical.close();
-  let docs = 0, queries = 0;
-  const opts = options(async inputs => {
-    if (inputs[0]?.startsWith("D:")) docs += inputs.length;
-    else queries += inputs.length;
-    return inputs.map(() => [1, 0, 0]);
-  });
-  const s = service(t, opts);
-  const found = await query(s, r.cwd);
-  assert.equal(found.results[0]?.hash, doc.commit.hash);
-  assert.equal(docs, 0, "the existing vector must not trigger paid re-embedding");
-  assert.equal(queries, 1);
-  assert.deepEqual(snapshot(r.cwd).vectors.map(row => row.hash), [doc.contentHash]);
-  const shared = new DatabaseSync(canonicalSearchIndexPath(r.cwd), { readOnly: true });
-  assert.deepEqual([...shared.prepare("SELECT vector FROM vectors WHERE hash='settings-hash'").get()!.vector as Uint8Array], [12, 34, 56]);
-  assert.equal(shared.prepare(`SELECT COUNT(*) n FROM ${COMMIT_DOCUMENTS}`).get()!.n, 1);
-  shared.close();
-  assert.deepEqual(await readFile(oldPath), oldBytes, "legacy database is retained byte-for-byte");
-  await query(s, r.cwd);
-  assert.equal(docs, 0, "the next invocation reuses the migrated vector");
-});
-
-test("legacy vector migration never mixes incompatible embedding models", async t => {
+test("obsolete commit databases are ignored without importing paid vectors", async t => {
   const r = await repository(t); await r.commit("target");
-  const [doc] = await readCommitCorpus(r.cwd, signal());
-  assert.ok(doc);
   await mkdir(join(r.cwd, ".pi/search"), { recursive: true });
   const path = join(r.cwd, ".pi/search/commits.sqlite");
   const old = new DatabaseSync(path);
-  old.exec("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE vectors (hash TEXT PRIMARY KEY, vector TEXT NOT NULL); CREATE TABLE commits (hash TEXT PRIMARY KEY, content_hash TEXT NOT NULL, metadata TEXT NOT NULL, message TEXT NOT NULL)");
-  old.prepare("INSERT INTO meta VALUES ('identity', ?)").run(embeddingIdentity({ ...config, model: "unrelated" }));
-  old.prepare("INSERT INTO vectors VALUES (?, ?)").run(doc.contentHash, JSON.stringify([1, 0, 0]));
-  old.close();
-  const canonical = new DatabaseSync(canonicalSearchIndexPath(r.cwd));
-  canonical.exec(`CREATE TABLE ${COMMIT_META} (key TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE ${COMMIT_VECTORS} (hash TEXT PRIMARY KEY, vector TEXT NOT NULL); CREATE TABLE ${COMMIT_DOCUMENTS} (hash TEXT PRIMARY KEY, content_hash TEXT NOT NULL, metadata TEXT NOT NULL, message TEXT NOT NULL)`);
-  canonical.prepare(`INSERT INTO ${COMMIT_META} VALUES ('identity', ?)`).run(embeddingIdentity(config));
-  canonical.close();
+  old.exec("CREATE TABLE vectors(hash TEXT PRIMARY KEY, vector TEXT); INSERT INTO vectors VALUES('obsolete', '[1,0,0]')");
+  old.close(); const before = await readFile(path);
   let embedded = 0;
-  await query(service(t, options(async inputs => { if (inputs[0]!.startsWith("D:")) embedded++; return inputs.map(() => [1, 0, 0]); })), r.cwd);
-  assert.equal(embedded, 1, "an incompatible old vector must not be reused");
-  assert.equal(snapshot(r.cwd).identity, embeddingIdentity(config));
+  const s = service(t, options(async inputs => {
+    if (inputs[0]?.startsWith("D:")) embedded += inputs.length;
+    return inputs.map(() => [1, 0, 0]);
+  }));
+  assert.equal((await s.index({ cwd: r.cwd, source: "commits" })).complete, true);
+  assert.equal(embedded, 1);
+  assert.equal(snapshot(r.cwd).vectors.length, 1);
+  assert.notEqual(snapshot(r.cwd).vectors[0]?.hash, "obsolete");
+  assert.deepEqual(await readFile(path), before);
+  await s.index({ cwd: r.cwd, source: "commits" }); assert.equal(embedded, 1);
 });
 test("canonical commit namespace leaves future IDX table names untouched", async t => {
   const r = await repository(t); await r.commit("target");
   await mkdir(join(r.cwd, ".pi/search"), { recursive: true });
-  const db = new DatabaseSync(canonicalSearchIndexPath(r.cwd));
+  const db = new DatabaseSync(canonicalSearchIndexPath(r.cwd, "commits"));
   // These stand-ins only reserve IDX's existing table names; they do not
   // require sqlite-vec or change a real IDX project.
   db.exec("CREATE TABLE vec_chunks (marker TEXT NOT NULL); CREATE TABLE vector_meta (marker TEXT NOT NULL); CREATE TABLE snapshots (id TEXT PRIMARY KEY); INSERT INTO vec_chunks VALUES ('preserve'); INSERT INTO vector_meta VALUES ('preserve'); INSERT INTO snapshots VALUES ('preserve');");
   db.close();
   await query(service(t), r.cwd);
-  const verify = new DatabaseSync(canonicalSearchIndexPath(r.cwd), { readOnly: true });
+  const verify = new DatabaseSync(canonicalSearchIndexPath(r.cwd, "commits"), { readOnly: true });
   try {
     assert.equal(verify.prepare("SELECT marker FROM vec_chunks").get()?.marker, "preserve");
     assert.equal(verify.prepare("SELECT marker FROM vector_meta").get()?.marker, "preserve");
@@ -347,13 +306,13 @@ test("separate processes cannot duplicate paid document batches", async t => {
 });
 test("bounded SQLite contention gives lexical fallback without deleting lock/index", async t => {
   const r = await repository(t); await r.commit("target"); await query(service(t), r.cwd); const before = snapshot(r.cwd);
-  const db = new DatabaseSync(canonicalSearchIndexPath(r.cwd)); db.exec("BEGIN IMMEDIATE");
+  const db = new DatabaseSync(canonicalSearchIndexPath(r.cwd, "commits")); db.exec("BEGIN IMMEDIATE");
   try { const result = await query(service(t, { ...options(), lockWaitMs: 50 }), r.cwd); assert.equal(result.results.length, 1); assert.match(result.notices[0]!, /busy/); }
   finally { db.exec("ROLLBACK"); db.close(); }
   assert.deepEqual(snapshot(r.cwd), before);
 });
-test("redirected legacy and canonical commit-index paths and sidecars cannot redirect writes", async t => {
-  for (const kind of ["directory", "legacy-database", "legacy-wal", "legacy-shm", "legacy-journal", "canonical-database", "canonical-wal", "canonical-shm", "canonical-journal"]) {
+test("redirected source commit-index paths and sidecars cannot redirect writes", async t => {
+  for (const kind of ["directory", "canonical-database", "canonical-wal", "canonical-shm", "canonical-journal"]) {
     const r = await repository(t); await r.commit("protected history");
     const outside = await repository(t);
     const protectedFile = join(outside.cwd, "commits.sqlite");
@@ -364,9 +323,9 @@ test("redirected legacy and canonical commit-index paths and sidecars cannot red
     if (kind === "directory") await symlink(outside.cwd, join(r.cwd, ".pi", "search"));
     else {
       await mkdir(join(r.cwd, ".pi", "search"));
-      const [location, part] = kind.split("-");
+      const [, part] = kind.split("-");
       const suffix = part === "database" ? "" : `-${part}`;
-      const filename = location === "canonical" ? "index.sqlite" : "commits.sqlite";
+      const filename = "git-commits.sqlite";
       await symlink(protectedFile, join(r.cwd, ".pi", "search", `${filename}${suffix}`));
     }
     let calls = 0;

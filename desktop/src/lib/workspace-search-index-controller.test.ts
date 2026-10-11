@@ -21,7 +21,7 @@ describe("workspace search indicator transport", () => {
     const controller = createWorkspaceSearchIndexController("/selected", client, onChange);
     await vi.advanceTimersByTimeAsync(0);
     expect(invoke).toHaveBeenCalledWith("search_index_status", { workspace: "/selected" });
-    expect(client.searchConfig).toHaveBeenCalledWith("/selected", {}, expect.any(AbortSignal));
+    expect(client.searchConfig).toHaveBeenCalledWith("/selected", { includeSourceStatus: true }, expect.any(AbortSignal));
     expect(client.searchIndex).not.toHaveBeenCalled();
     expect(indexNativeRepository).not.toHaveBeenCalled();
     controller.start("settings");

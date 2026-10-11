@@ -41,11 +41,17 @@ describe("SearchIndexPanel source contract", () => {
     expect(history).toContain('aria-label="Recent index events"');
     expect(history).toContain("events.length}/200");
   });
-  it("omits details and spins only the source currently indexing, not every cell on refresh", () => {
+  it("collapses last runs and spins only active sources, not refreshed cells", () => {
     expect(panel).toContain("<table");
-    expect(panel).not.toContain("<details");
+    expect(panel).toContain('<details class="group');
+    expect(panel).not.toMatch(/<details[^>]*\bopen\b/);
+    expect(panel).toContain("<ChevronRight");
+    expect(panel).toContain("group-open:rotate-90");
+    expect(panel).toContain("Last runs");
+    expect(panel).toContain("{#if !row.empty || action?.running}");
     expect(panel).not.toContain("{#if loading}");
     expect(panel).toContain("row.semanticActive || action?.running");
+    expect(panel).not.toContain("action?.queued");
     expect(panel).toContain("{#if active}");
     expect(panel.match(/<LoaderCircle/g)).toHaveLength(1);
     expect(panel).toContain("<LoaderCircle");

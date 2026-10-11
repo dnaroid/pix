@@ -1,6 +1,13 @@
+import { codeDefaults, knowledgeDefaults } from "./project-search/source-extension-settings.mjs";
+
 // Default user config written when pi-tools-suite.jsonc is missing.
 export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   "$schema": "https://unpkg.com/pi-ui-extend/schemas/pi-tools-suite.json",
+  // Complete extension lists. Empty arrays disable the corresponding category.
+  "search": {
+    "codeExtensions": ${JSON.stringify(codeDefaults)},
+    "knowledgeExtensions": ${JSON.stringify(knowledgeDefaults)}
+  },
   "disabledModules": [
     // "ast-grep",
     // "dcp"

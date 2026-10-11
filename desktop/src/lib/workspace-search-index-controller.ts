@@ -16,7 +16,7 @@ export function createWorkspaceSearchIndexController(
     workspace, history,
     readStores: () => invoke<SearchIndexStatus>("search_index_status", { workspace }),
     readConsent: () => invoke<SemanticConsent>("native_repository_semantic_config"),
-    readActivity: client ? signal => client.searchConfig(workspace, {}, signal) : undefined,
+    readActivity: client ? signal => client.searchConfig(workspace, { includeSourceStatus: true }, signal) : undefined,
     run: (source, signal) => {
       if (source === "code" || source === "knowledge") return indexNativeRepository(invoke, workspace, source, signal);
       if (!client) return Promise.reject(new Error("Search connection unavailable"));

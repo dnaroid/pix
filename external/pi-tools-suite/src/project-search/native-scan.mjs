@@ -5,24 +5,18 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createHash } from "node:crypto";
 import ignore from "ignore";
+import { readSourceExtensions, sourceKind } from "./native-source-config.mjs";
 
 const exec = promisify(execFile);
 export const SCAN_LIMITS = Object.freeze({ files: 10000, entries: 50000, fileBytes: 1024 * 1024,
   totalBytes: 32 * 1024 * 1024, chunks: 20000, chunkChars: 8000, deadlineMs: 30000, gitBytes: 4 * 1024 * 1024 });
-const excluded = new Set([".pi", ".git", ".indexer-cli", "node_modules", "dist", "build", "target", "coverage",
+const excluded = new Set([".pi", ".git", ".godot", ".indexer-cli", "node_modules", "dist", "build", "target", "coverage",
   ".next", ".nuxt", ".svelte-kit", ".output", "out", ".turbo", ".parcel-cache", ".cache", ".artifacts",
   "vendor", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".venv", "venv", ".tox", ".gradle", "obj"]);
-const codeExtensions = new Set("ts tsx mts cts js jsx mjs cjs py rs go java kt kts swift c h cpp hpp cc cs rb php sh bash zsh fish vue svelte css scss sass less html xml sql lua ex exs erl clj cljs scala dart r toml yaml yml json jsonc ini cfg proto graphql gql cmake make asm s pl pm diff patch".split(" "));
-const knowledgeExtensions = new Set(["md", "mdx", "markdown", "rst", "txt", "adoc"]);
 const decoder = new TextDecoder("utf-8", { fatal: true });
 const inside = (root, filename) => filename.startsWith(root + path.sep);
 const safePath = name => !!name && !name.includes("\0") && !name.includes("\\") && !name.startsWith("/")
   && !name.split("/").some(part => !part || part === "." || part === ".." || excluded.has(part));
-function kindFor(name) {
-  const ext = path.extname(name).slice(1).toLowerCase();
-  if (knowledgeExtensions.has(ext)) return "knowledge";
-  if (codeExtensions.has(ext) || /^(Dockerfile|Makefile|Justfile|Gemfile|CMakeLists\.txt)$/i.test(path.basename(name))) return "code";
-}
 const identity = info => `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`;
 
 /** Reject linked ancestors as well as leaf files. Open with NOFOLLOW and verify
@@ -105,7 +99,8 @@ export async function validateMissingSources(root, names, deadline) {
   return true;
 }
 
-export async function scanProject(root, previous, deadline = Date.now() + SCAN_LIMITS.deadlineMs, signal) {
+export async function scanProject(root, previous, deadline = Date.now() + SCAN_LIMITS.deadlineMs, signal, source) {
+  const extensions = await readSourceExtensions();
   const files = new Map(), notices = [], validations = [], missing = [];
   let complete = true, entries = 0, totalBytes = 0, chunkCount = 0, skipped = 0, updatedFiles = 0;
   const bounded = () => {
@@ -116,16 +111,20 @@ export async function scanProject(root, previous, deadline = Date.now() + SCAN_L
     return true;
   };
   async function consume(name) {
-    if (!safePath(name) || !kindFor(name)) return;
+    if (!safePath(name)) return;
+    const kind = sourceKind(name, extensions);
+    if (!kind || (source && kind !== source)) return;
     try {
       const file = await readSafeFile(root, name);
       totalBytes += file.bytes;
       if (totalBytes > SCAN_LIMITS.totalBytes) { complete = false; return; }
-      const changed = previous.files.get(name) !== file.hash;
-      const chunks = changed ? chunksFor(name, kindFor(name), file.text) : undefined;
-      chunkCount += chunks?.length ?? previous.chunkCounts?.get(name) ?? chunksFor(name, kindFor(name), file.text).length;
+      // Classification changes must rechunk even when the source bytes are unchanged.
+      const hash = createHash("sha256").update(`${kind}:${file.hash}`).digest("hex");
+      const changed = previous.files.get(name) !== hash;
+      const chunks = changed ? chunksFor(name, kind, file.text) : undefined;
+      chunkCount += chunks?.length ?? previous.chunkCounts?.get(name) ?? chunksFor(name, kind, file.text).length;
       if (chunkCount > SCAN_LIMITS.chunks) { complete = false; return; }
-      files.set(name, { hash: file.hash, chunks });
+      files.set(name, { hash, chunks });
       validations.push([name, file.identity]);
       if (changed) updatedFiles++;
     } catch (e) {
@@ -215,6 +214,10 @@ export async function scanProject(root, previous, deadline = Date.now() + SCAN_L
     catch { complete = false; }
   }
   signal?.throwIfAborted();
+  if ((await readSourceExtensions()).signature !== extensions.signature) {
+    complete = false;
+    notices.push("Source extension settings changed during scanning; retry to use the current classification.");
+  }
   if (!complete) notices.push("Native scan incomplete (I/O, concurrent edit or scan limit); previous snapshot retained.");
   if (skipped) notices.push(`Excluded ${skipped} unsupported, linked, binary or oversized source files.`);
   return { files, notices: [...new Set(notices)].slice(0, 10), complete, updatedFiles, scannedFiles: files.size };

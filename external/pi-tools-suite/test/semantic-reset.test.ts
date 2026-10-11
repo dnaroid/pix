@@ -12,7 +12,7 @@ async function fixture() {
   await mkdir(artifacts, { recursive: true });
   const root = await mkdtemp(join(artifacts, "semantic-reset-")); roots.push(root);
   await mkdir(join(root, ".pi/search"), { recursive: true });
-  return { root, file: join(root, ".pi/search/index.sqlite") };
+  return { root, file: join(root, ".pi/search/sessions.sqlite"), files: ["settings", "sessions", "tasks", "git-commits"].map(name => join(root, `.pi/search/${name}.sqlite`)) };
 }
 function populate(file: string) {
   const db = new Database(file);
@@ -28,7 +28,6 @@ function populate(file: string) {
       INSERT INTO ${vectors} VALUES ('paid-vector',X'0000803f');`);
   }
   db.exec(`INSERT INTO metadata VALUES ('schema','2'),('model','old'),('dimensions','1'),('encoding','f32le');
-    INSERT INTO pix_commit_meta VALUES ('legacy_stamp','already-imported');
     CREATE TABLE documents(id TEXT PRIMARY KEY,body TEXT);
     INSERT INTO documents VALUES ('setting','local document');
     CREATE TABLE unrelated(id TEXT PRIMARY KEY,body TEXT);
@@ -37,42 +36,54 @@ function populate(file: string) {
 }
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { force: true, recursive: true }); });
 
-test("explicit reset removes only history vectors and identity metadata, preserving canonical files and legacy markers", async () => {
-  const f = await fixture(); populate(f.file);
+test("explicit reset removes only history vectors and identity metadata, preserving canonical files and ignoring obsolete stores", async () => {
+  const f = await fixture(); for (const file of f.files) populate(file);
+  const legacy = join(f.root, ".pi/search/index.sqlite"); populate(legacy);
+  const legacyBefore = await readFile(legacy);
   const tasks = join(f.root, ".pi/tasks.sqlite"); await writeFile(tasks, "canonical task bytes");
-  const repository = join(f.root, ".pi/search/file-vectors.sqlite"); await writeFile(repository, "repository vectors");
+  const repository = join(f.root, ".pi/search/code.sqlite"); await writeFile(repository, "repository vectors");
   expect(await resetHistoryVectors(f.root, signal())).toBe(4);
-  const db = new Database(f.file);
-  try {
-    for (const table of ["pix_task_vectors", "pix_session_vectors", "pix_commit_vectors", "vectors", "pix_task_index_meta", "pix_session_meta"]) {
+  for (const [i, table] of ["vectors", "pix_session_vectors", "pix_task_vectors", "pix_commit_vectors"].entries()) {
+    const db = new Database(f.files[i]);
+    try {
       expect(db.query(`SELECT COUNT(*) AS count FROM ${table}`).get()).toEqual({ count: 0 });
-    }
-    expect(db.query("SELECT * FROM metadata").all()).toEqual([{ key: "schema", value: "2" }]);
-    expect(db.query("SELECT * FROM pix_commit_meta").all()).toEqual([{ key: "legacy_stamp", value: "already-imported" }]);
-    expect(db.query("SELECT body FROM documents").get()).toEqual({ body: "local document" });
-    expect(db.query("SELECT body FROM unrelated").get()).toEqual({ body: "untouched" });
-  } finally { db.close(); }
+      if (i === 0) expect(db.query("SELECT * FROM metadata").all()).toEqual([{ key: "schema", value: "2" }]);
+      if (i === 3) expect(db.query("SELECT * FROM pix_commit_meta").all()).toEqual([]);
+      expect(db.query("SELECT body FROM documents").get()).toEqual({ body: "local document" });
+      expect(db.query("SELECT body FROM unrelated").get()).toEqual({ body: "untouched" });
+      // Even unexpected co-located namespaces are outside this source's reset.
+      const untouched = i === 1 ? "vectors" : "pix_session_vectors";
+      expect(db.query(`SELECT COUNT(*) AS count FROM ${untouched}`).get()).toEqual({ count: 1 });
+    } finally { db.close(); }
+  }
+  expect(await readFile(legacy)).toEqual(legacyBefore);
   expect(await readFile(tasks, "utf8")).toBe("canonical task bytes");
   expect(await readFile(repository, "utf8")).toBe("repository vectors");
   expect(await resetHistoryVectors(f.root, signal())).toBe(0);
 });
 
-test("unknown schema or deletion dependencies fail atomically before touching purchased vectors", async () => {
+test("unknown schema or deletion dependencies fail before touching the affected source's paid vectors", async () => {
   for (const mutation of [
     "ALTER TABLE pix_session_vectors ADD COLUMN unexpected TEXT",
     "CREATE TRIGGER dangerous AFTER DELETE /* hidden boundary */ ON pix_session_vectors BEGIN DELETE FROM unrelated; END",
-    "CREATE TABLE dependent(id TEXT REFERENCES pix_task_vectors(content_hash) ON DELETE CASCADE)",
-    "UPDATE metadata SET value='future-version' WHERE key='schema'",
+    "CREATE TABLE dependent(id TEXT REFERENCES pix_session_vectors(title_hash) ON DELETE CASCADE)",
   ]) {
     const f = await fixture(); populate(f.file);
     const before = new Database(f.file); before.exec(mutation); before.close();
     await expect(resetHistoryVectors(f.root, signal())).rejects.toThrow();
     const db = new Database(f.file);
     try {
-      expect(db.query("SELECT COUNT(*) AS count FROM pix_task_vectors").get()).toEqual({ count: 1 });
+      expect(db.query("SELECT COUNT(*) AS count FROM pix_session_vectors").get()).toEqual({ count: 1 });
       expect(db.query("SELECT COUNT(*) AS count FROM unrelated").get()).toEqual({ count: 1 });
     } finally { db.close(); }
   }
+  const f = await fixture(); populate(f.files[0]);
+  const db = new Database(f.files[0]);
+  try {
+    db.exec("UPDATE metadata SET value='future-version' WHERE key='schema'");
+    await expect(resetHistoryVectors(f.root, signal())).rejects.toThrow();
+    expect(db.query("SELECT COUNT(*) AS count FROM vectors").get()).toEqual({ count: 1 });
+  } finally { db.close(); }
 });
 
 test("missing index is a no-op; cancellation and redirected storage fail closed", async () => {

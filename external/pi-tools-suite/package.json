@@ -17,8 +17,6 @@
     "README.md"
   ],
   "scripts": {
-    "benchmark:search": "node benchmarks/repository-search/run.mjs",
-    "benchmark:search:test": "node --test benchmarks/repository-search/metrics.test.mjs",
     "smoke:explicit": "PI_OFFLINE=1 pi --no-extensions --extension ./index.ts --no-session --no-tools -p \"ping\"",
     "smoke:auto": "PI_OFFLINE=1 pi --no-session --no-tools -p \"ping\"",
     "smoke:tools": "PI_OFFLINE=1 pi --no-session -p \"ping\"",

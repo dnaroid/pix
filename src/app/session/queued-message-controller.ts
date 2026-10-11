@@ -35,6 +35,25 @@ export class AppQueuedMessageController {
 
 	private readonly promptSubmissionsInFlight = new Set<AgentSession>();
 	private immediateSendInProgress = false;
+	private readonly messageEditReservations = new Set<AgentSession>();
+
+	canEditUserMessage(session: AgentSession): boolean {
+		return (!this.promptSubmissionsInFlight.has(session) || this.messageEditReservations.has(session)) && !this.immediateSendInProgress
+			&& this.totalQueuedMessageCount() === 0;
+	}
+
+	reserveMessageEdit(session: AgentSession): () => void {
+		if (!this.canEditUserMessage(session) || this.messageEditReservations.has(session)) throw new Error("The session is busy.");
+		this.messageEditReservations.add(session);
+		this.promptSubmissionsInFlight.add(session);
+		let released = false;
+		return () => {
+			if (released) return;
+			released = true;
+			this.messageEditReservations.delete(session);
+			this.promptSubmissionsInFlight.delete(session);
+		};
+	}
 
 	constructor(private readonly host: AppQueuedMessageControllerHost) {}
 
@@ -42,6 +61,7 @@ export class AppQueuedMessageController {
 		this.autoUserMessages.length = 0;
 		this.deferredUserMessages.length = 0;
 		this.promptSubmissionsInFlight.clear();
+		this.messageEditReservations.clear();
 	}
 
 	captureAutoUserMessages(): SubmittedUserMessage[] {
@@ -76,6 +96,7 @@ export class AppQueuedMessageController {
 
 	async submitUserMessage(message: SubmittedUserMessage, session?: AgentSession): Promise<void> {
 		const targetSession = session ?? this.host.requireRuntime().session;
+		if (this.messageEditReservations.has(targetSession)) throw new Error("A message edit is in progress.");
 		if (targetSession.isStreaming) {
 			await this.sendUserMessageToSession(message, { streamingBehavior: "steer" }, targetSession);
 			return;
@@ -96,6 +117,7 @@ export class AppQueuedMessageController {
 	): Promise<void> {
 		const targetSession = session ?? this.host.requireRuntime().session;
 		const markInFlight = !targetSession.isStreaming;
+		if (this.messageEditReservations.has(targetSession)) throw new Error("A message edit is in progress.");
 		if (markInFlight) this.promptSubmissionsInFlight.add(targetSession);
 		this.host.setSessionActivity("running");
 

@@ -5,14 +5,38 @@ import { SEARCH_CACHE_REBUILD_REQUIRED } from "../../../acp/src/search/contract"
 const consent = (over: Partial<SemanticConsent> = {}): SemanticConsent => ({ configured: false, provider: "openrouter", model: "m", vectorSize: 768, keyAvailable: true, ...over });
 const status = (files: Partial<SearchIndexStatus["stores"][number]>, history: Partial<SearchIndexStatus["stores"][number]> = {}): SearchIndexStatus => ({
   stores: [
-    { id: "files", state: "present", counts: { codeChunks: 5, knowledgeChunks: 2 }, completedAt: "t", generation: 1, ...files },
-    { id: "vectors", state: "absent", counts: {} },
-    { id: "history", state: "absent", counts: {}, ...history },
+    ...(["code", "knowledge"] as const).map(id => ({ id, state: "present" as const, counts: { codeChunks: 5, knowledgeChunks: 2 }, completedAt: "t", generation: 1, ...files })),
+    ...(["settings", "sessions", "tasks", "commits"] as const).map(id => ({ id, state: "absent" as const, counts: {}, ...history })),
   ],
 });
 const row = (rows: ReturnType<typeof buildSearchSourceRows>, id: string) => rows.find(r => r.id === id)!;
 
 describe("buildSearchSourceRows", () => {
+  it("isolates source databases instead of substituting legacy aggregate counts", () => {
+    const snapshot: SearchIndexStatus = { stores: [
+      { id: "settings", state: "error", counts: {}, error: "broken settings" },
+      { id: "tasks", state: "present", counts: { taskDocuments: 2, taskVectors: 2 } },
+      { id: "sessions", state: "absent", counts: {} },
+      { id: "code", state: "present", counts: { codeChunks: 3, vectors: 3 }, completedAt: "t" },
+      { id: "knowledge", state: "error", counts: {}, error: "broken knowledge" },
+    ] };
+    const rows = buildSearchSourceRows(snapshot, consent({ configured: true }));
+    expect(row(rows, "settings").semantic).toBe("error");
+    expect(row(rows, "tasks")).toMatchObject({ semantic: "vectors", localSummary: "2 items" });
+    expect(row(rows, "sessions").semantic).toBe("no-vectors");
+    expect(row(rows, "code").local).toBe("ready");
+    expect(row(rows, "knowledge").local).toBe("error");
+  });
+  it("hides actions only for confirmed empty source histories, never an empty cache", () => {
+    const absent = status({});
+    const unknown = buildSearchSourceRows(absent, consent());
+    expect(row(unknown, "sessions").empty).toBe(false);
+    expect(row(unknown, "commits").empty).toBe(false);
+    const empty = buildSearchSourceRows({ ...absent, commitsEmpty: true }, consent(), { sessionsEmpty: true });
+    for (const id of ["sessions", "commits"]) expect(row(empty, id)).toMatchObject({ empty: true, local: "ready", localSummary: "0 items" });
+    const populated = buildSearchSourceRows({ ...absent, commitsEmpty: false }, consent(), { sessionsEmpty: false });
+    for (const id of ["sessions", "commits"]) expect(row(populated, id).empty).toBe(false);
+  });
   it("lists all six sources and treats missing status as unknown", () => {
     const rows = buildSearchSourceRows(null, null);
     expect(rows.map(r => r.id)).toEqual(["code", "knowledge", "settings", "sessions", "tasks", "commits"]);
@@ -40,8 +64,8 @@ describe("buildSearchSourceRows", () => {
     expect(row(buildSearchSourceRows(status({}), consent()), "knowledge").local).toBe("ready");
     expect(row(buildSearchSourceRows(status({ state: "error", error: "bad" }), consent()), "code")).toMatchObject({ local: "error", localDetail: "bad" });
   });
-  it("reports legacy caches and source compatibility errors as needing rebuild, not cached or generic failure", () => {
-    const snapshot = status({}, { state: "present", counts: { settingsVectors: 102, sessionVectors: 500, taskVectors: 3 }, legacySources: ["settings", "sessions"] });
+  it("reports incompatible caches and source compatibility errors as needing rebuild", () => {
+    const snapshot = status({}, { state: "present", counts: { settingsVectors: 102, sessionVectors: 500, taskVectors: 3 }, incompatibleSources: ["settings", "sessions"] });
     const rows = buildSearchSourceRows(snapshot, consent({ configured: true }));
     expect(row(rows, "settings")).toMatchObject({ semantic: "incompatible", semanticDetail: SEARCH_CACHE_REBUILD_REQUIRED });
     expect(row(rows, "sessions").semantic).toBe("incompatible");

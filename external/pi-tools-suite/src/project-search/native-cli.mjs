@@ -2,7 +2,7 @@ let request;
 const failed = notice => request?.operation === "index"
   ? { source: request.source === "knowledge" ? "knowledge" : "code", complete: false, message: notice }
   : { hits: [], notices: [notice], status: { backend: "native", complete: false, stale: true } };
-// A process-level ceiling bounds requests independently of the Node/Bun caller.
+// Bound input/retrieval, but explicit indexing drains until completion or cancellation.
 const timer = setTimeout(() => {
   process.stdout.write(JSON.stringify(failed(request?.operation === "index"
     ? "Native indexing timed out; coverage is unverified. Cached embeddings are retained."
@@ -17,6 +17,7 @@ try {
     chunks.push(chunk);
   }
   request = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  if (request?.operation === "index") clearTimeout(timer);
   const { searchNative, indexNative } = await import("./native-engine.mjs");
   const response = await (request?.operation === "index" ? indexNative : searchNative)(process.argv[2], request);
   clearTimeout(timer);

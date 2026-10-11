@@ -24,6 +24,7 @@ Expose project-root package scripts, project-defined launch commands, and window
 - The same PTY/session primitives back two independent Desktop surfaces: the Launch Commands left-sidebar terminal area and the top-level Terminal workbench tab used by composer `!!` commands. Closing the top-level workbench tab removes that UI surface without implicitly stopping its backend PTYs; reopening it restores the window/workspace terminal list, while terminal-level Close/Stop controls retain their existing process semantics.
 - Existing window/workspace terminals are restored when the panel loads. The most recent running terminal is preferred as the active tab, otherwise the most recent terminal is selected.
 - Workspace loads are generation/workspace guarded so stale package/terminal snapshots cannot overwrite a newer workspace.
+- Background updates to unrelated sidebar props must not reload the Launch Commands panel when the workspace path is unchanged, toggle its loading state, or cancel an in-flight terminal action. A real workspace change and the shared header's explicit Refresh still reload the panel.
 - Launch, restart, close, and focus continuations retain their originating workspace/lifecycle. A late restart or initial shell command cannot move to a newly selected project. A launch that completes after its panel/workspace owner has been invalidated is stopped and forgotten by its exact terminal id rather than adopted by the new view.
 - Terminal output arrives as base64 byte chunks. A per-terminal streaming `TextDecoder` preserves split UTF-8 sequences; the decoder is flushed on exit. Retained frontend output is bounded to 512,000 characters, backend retained PTY output is bounded to 512 KiB, and xterm live scrollback is bounded to 5,000 lines.
 - Output for the active terminal is written incrementally into the mounted terminal surface while the same text is retained in terminal state for tab switches/remounts.
@@ -61,6 +62,7 @@ Expose project-root package scripts, project-defined launch commands, and window
 - `desktop/src/lib/terminal-input.ts`
 - `desktop/src/lib/terminal-input.test.ts`
 - `desktop/src/components/package-scripts-controller.test.ts`
+- `desktop/src/components/package-scripts-reactivity.test.ts`
 - `desktop/src-tauri/src/lib.rs`
 - `desktop/src-tauri/tauri.conf.json`
 - `desktop/src/lib/desktop-asset-csp.test.ts`
@@ -72,6 +74,7 @@ Expose project-root package scripts, project-defined launch commands, and window
 - Desktop visual/source regressions cover the shared full xterm surface, native block/outline cursor behavior, Geist Mono 10 px terminal font and bundled Nerd fallback, standard ANSI palette retention, color-capable PTY environment, explicit 5,000-line xterm scrollback, visible scrollbar styling, and name-only script rows. The font tests check actual bundled cmap coverage for representative BMP and supplementary Nerd glyphs, the full license in the public assets copied into the Desktop frontend, and guarded DOM width-cache invalidation/repaint on late font loads.
 - Terminal lifetime tests use controlled animation frames and link promises to check unmount cancellation, late success/failure suppression, and normal initial/resize/link behavior.
 - Input tests use controlled acknowledgements to check ordering, independent terminals, Unicode boundaries, and recovery after failed writes. Controller tests cover workspace changes during launch/restart, initial shell-command ownership, launch reservation, and teardown.
+- Client-runes reactivity tests replace spread sidebar props at an unchanged workspace during a launch and initial load; they check that unrelated updates do not reload/cancel work, while real workspace changes still load and reject stale completions.
 - Launch-command tests cover JSONC round-tripping alongside other project settings, create/update/delete conflict handling, stale workspace completion, and the UI lifecycle for edit/delete/launch.
 - `npm --prefix desktop run check`
 - `npm --prefix desktop test`

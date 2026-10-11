@@ -17,7 +17,7 @@ and other causes should offer their own relevant actions.
 
 Verified: the [indicator policy](../../desktop/src/lib/sidebar-indicator-policy.ts)
 already enumerates causes; existing owners expose AI review, Git, task and Registry
-callbacks. IDX operation state remains owned by its mounted panel. The existing
+callbacks. Panel operation state remains owned by its mounted panel. The existing
 Project Explorer uses a component-owned WebView menu and shared keyboard helpers.
 Native visual verification is separate from deterministic tests, not assumed here.
 
@@ -27,19 +27,19 @@ Retain all current causes with stable reason IDs while preserving the existing
 strongest-dot/tooltip contract. Offer a component-owned menu only when causes exist,
 grouping commands by cause rather than parsing tooltip text. Reuse existing command
 owners and capability guards; inspection reveals existing controls without toggling
-them closed. In particular, stale-index maintenance reveals IDX controls instead of
-automatically starting an index operation; dirty knowledge invokes AI review.
+them closed. Clauses specific to the removed external index integration have been
+removed from this historical record; the general cause-specific menu policy remains.
 
 Recheck workspace, cause and eligibility at activation. Close the menu on context
 loss and teardown; keep keyboard navigation/typeahead consistent with other menus.
-Background polling remains read-only; opening a menu never acknowledges knowledge.
+Background polling remains read-only.
 
 ## Alternatives
 
 - Generic section menus: rejected by the user because they do not address the dot.
 - Only the strongest cause: hides actionable lower-priority concurrent causes.
 - Parse tooltip text: couples behavior to copy and loses stable command identity.
-- Lift IDX operation state into the sidebar: unnecessary ownership expansion for a
+- Lift panel operation state into the sidebar: unnecessary ownership expansion for a
   maintenance-navigation command; existing controls retain operation safeguards.
 
 ## Consequences
@@ -107,4 +107,4 @@ resources or project artifacts in the same bulk operation.
 
 New indicator causes or command-owner eligibility rules are introduced, native QA
 finds focus/menu conflicts, or users need a dedicated safe immediate maintenance
-command rather than navigation to IDX controls.
+command rather than navigation to panel controls.

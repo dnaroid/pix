@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
@@ -9,7 +10,7 @@ import type { SearchAuth } from "../src/search/config.js";
 import { FixtureSearchPreferences as SearchPreferences } from "./central-semantics-fixture.js";
 import { TASK_SCHEMA } from "../src/registry/task-database.js";
 import { parseSemanticTasksRequest, parseSearchConfigRequest } from "../src/search/request.js";
-import { SEARCH_EMBEDDING_MODEL } from "../src/search/contract.js";
+import { SEARCH_CACHE_REBUILD_REQUIRED, SEARCH_EMBEDDING_MODEL } from "../src/search/contract.js";
 import { EMBEDDING_DIMENSIONS, type Embedder } from "../src/search/embeddings.js";
 import { hashText } from "../src/search/documents.js";
 
@@ -57,7 +58,8 @@ async function fixture(t: TestContext) {
     for (const listener of listeners) listener();
   };
   const rows = (table: string): Array<Record<string, unknown>> => {
-    const db = new DatabaseSync(join(cwd, ".pi/search/index.sqlite"), { readOnly: true });
+    if (!existsSync(join(cwd, ".pi/search/tasks.sqlite"))) return [];
+    const db = new DatabaseSync(join(cwd, ".pi/search/tasks.sqlite"), { readOnly: true });
     try { return db.prepare(`SELECT * FROM ${table}`).all() as Array<Record<string, unknown>>; }
     catch { return []; }
     finally { db.close(); }
@@ -223,11 +225,11 @@ test("incompatible task embedding metadata fails closed without deleting paid ve
   await service.queryTasks({ cwd: f.cwd, query: f.query, limit: 20 });
   const before = f.rows("pix_task_vectors");
   assert.equal(before.length, 1);
-  const db = new DatabaseSync(join(f.cwd, ".pi/search/index.sqlite"));
+  const db = new DatabaseSync(join(f.cwd, ".pi/search/tasks.sqlite"));
   try { db.prepare("UPDATE pix_task_index_meta SET value='unrelated/model' WHERE key='model'").run(); }
   finally { db.close(); }
   f.put(f.task("original", { description: "Changed" })); await f.idle(service);
-  assert.match((await service.config({ cwd: f.cwd })).sourceErrors?.tasks ?? "", /unavailable/i);
+  assert.equal((await service.config({ cwd: f.cwd })).sourceErrors?.tasks, SEARCH_CACHE_REBUILD_REQUIRED);
   assert.deepEqual((await service.queryTasks({ cwd: f.cwd, query: f.query, limit: 20 })).results, []);
   assert.deepEqual(f.rows("pix_task_vectors"), before);
   assert.equal(f.rows("pix_task_index_meta").find(row => row.key === "model")?.value, "unrelated/model");

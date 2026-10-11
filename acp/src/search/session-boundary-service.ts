@@ -39,5 +39,5 @@ export async function synchronizeSessionBoundaries(
   signal.throwIfAborted();
   if (changed.length === 0 && saved.size === live.length) return;
   await verifySessionBoundaryIndexPath(cwd);
-  await store.write(cwd, signal, async tx => tx.sessionBoundaries(live, changed));
+  await store.write(cwd, signal, async tx => tx.sessionBoundaries(live, changed), undefined, { source: "sessions" });
 }

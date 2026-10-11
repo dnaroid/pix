@@ -1298,6 +1298,103 @@
     "search": {
       "type": "object",
       "properties": {
+        "codeExtensions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^\\.?[A-Za-z0-9][A-Za-z0-9_+-]{0,31}(?![\\s\\S])"
+          },
+          "maxItems": 128,
+          "default": [
+            "ts",
+            "tsx",
+            "mts",
+            "cts",
+            "js",
+            "jsx",
+            "mjs",
+            "cjs",
+            "py",
+            "rs",
+            "go",
+            "java",
+            "kt",
+            "kts",
+            "swift",
+            "c",
+            "h",
+            "cpp",
+            "hpp",
+            "cc",
+            "cs",
+            "rb",
+            "php",
+            "sh",
+            "bash",
+            "zsh",
+            "fish",
+            "vue",
+            "svelte",
+            "css",
+            "scss",
+            "sass",
+            "less",
+            "html",
+            "xml",
+            "sql",
+            "lua",
+            "ex",
+            "exs",
+            "erl",
+            "clj",
+            "cljs",
+            "scala",
+            "dart",
+            "r",
+            "toml",
+            "yaml",
+            "yml",
+            "json",
+            "jsonc",
+            "ini",
+            "cfg",
+            "proto",
+            "graphql",
+            "gql",
+            "cmake",
+            "make",
+            "asm",
+            "s",
+            "pl",
+            "pm",
+            "diff",
+            "patch",
+            "gd",
+            "tscn",
+            "tres",
+            "godot",
+            "gdshader",
+            "gdshaderinc"
+          ],
+          "description": "Complete Code file extensions. Empty disables this category. Omitted uses the displayed defaults. Optional leading dot; case-insensitive. Must not overlap Knowledge extensions. Applied on the next explicit scan; saving does not start embeddings."
+        },
+        "knowledgeExtensions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^\\.?[A-Za-z0-9][A-Za-z0-9_+-]{0,31}(?![\\s\\S])"
+          },
+          "maxItems": 128,
+          "default": [
+            "md",
+            "mdx",
+            "markdown",
+            "rst",
+            "txt",
+            "adoc"
+          ],
+          "description": "Complete Knowledge file extensions. Empty disables this category. Omitted uses the displayed defaults. Optional leading dot; case-insensitive. Must not overlap Code extensions. Paths/globs are not supported; normal ignore and safety rules still apply."
+        },
         "embedding": {
           "type": "object",
           "required": [
@@ -1354,7 +1451,7 @@
           "description": "Explicit global authorization for semantic search across projects and sources; never populated by shipped defaults."
         }
       },
-      "description": "Global semantic-search configuration in ~/.config/pi/pi-tools-suite.jsonc."
+      "description": "Global search configuration in ~/.config/pi/pi-tools-suite.jsonc."
     },
     "lsp": {
       "type": "object",

@@ -46,6 +46,7 @@ export function createSearchIndexActions(options: {
         if (current()) publish(source, { running: false, cancelled: controller.signal.aborted, error: controller.signal.aborted
           ? "Indexing stopped. Saved batches are retained." : "Indexing unavailable. Try again; saved batches are retained." });
       } finally {
+        // Deduplicate this source until its transport settles, even after abort.
         active.delete(source);
         if (!closed) options.onSettled();
       }

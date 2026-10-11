@@ -1,8 +1,11 @@
 import { chunkHit, checkStorage } from "./native-store.mjs";
 import { openVectorStore } from "./native-vector-store.mjs";
+import { beginWrite, withProviderSlot } from "./source-work.mjs";
+import { readSafeFile } from "./native-scan.mjs";
+import { readSourceExtensions, sourceKind } from "./native-source-config.mjs";
 import { digest, repositoryEmbeddingSettings, repositoryEmbeddingKey, embedRepository } from "./native-embedding-provider.mjs";
 
-const MAX_CHUNKS_PER_SEARCH = 128;
+export const MAX_CHUNKS_PER_SEARCH = 128;
 function cosine(a, b) {
   let dot = 0, aa = 0, bb = 0;
   for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; aa += a[i] ** 2; bb += b[i] ** 2; }
@@ -49,9 +52,10 @@ async function semanticPass(store, request, generation, dependencies, documentOn
   const settings = await repositoryEmbeddingSettings(store.root);
   if (!settings) return { hits: [], notices: documentOnly || request.mode === "semantic" ? ["Native semantics is off or its saved provider configuration is unavailable."] : [],
     status: { enabled: false, complete: false, state: "disabled" } };
-  const signal = AbortSignal.any([dependencies.signal ?? new AbortController().signal, AbortSignal.timeout(22000)]);
+  const caller = dependencies.signal ?? new AbortController().signal;
+  const signal = documentOnly ? caller : AbortSignal.any([caller, AbortSignal.timeout(22000)]);
   const started = Date.now(), notices = [], hits = [];
-  let vectors, indexed = 0, total = 0, uploaded = 0;
+  let vectors, activeLease, indexed = 0, total = 0, uploaded = 0;
   const current = async () => {
     signal.throwIfAborted();
     await checkStorage(store.root, store.filename);
@@ -59,6 +63,20 @@ async function semanticPass(store, request, generation, dependencies, documentOn
     if ((await repositoryEmbeddingSettings(store.root))?.signature !== settings.signature
       || store.db.prepare("SELECT generation FROM pix_native_meta WHERE singleton=1").get().generation !== generation) throw new Error("Search context changed");
     signal.throwIfAborted();
+    if (activeLease) vectors.renew(activeLease.identity, activeLease.token);
+  };
+  const publication = db => {
+    dependencies.work?.assert(db);
+    if (db.prepare("SELECT generation FROM pix_native_meta WHERE singleton=1").get()?.generation !== generation) throw new Error("Native index changed before publication");
+  };
+  const currentDocuments = async batch => {
+    const extensions = await readSourceExtensions();
+    for (const name of new Set(batch.map(item => item.row.path))) {
+      const file = await readSafeFile(store.root, name);
+      const kind = sourceKind(name, extensions);
+      const expected = store.db.prepare("SELECT hash FROM pix_native_files WHERE path=?").get(name)?.hash;
+      if (kind !== store.source || digest(`${kind}:${file.hash}`) !== expected) throw new Error("Native content changed during embedding");
+    }
   };
   const embed = async (inputs, config, key) => {
     await current();
@@ -70,7 +88,16 @@ async function semanticPass(store, request, generation, dependencies, documentOn
       void current().catch(() => { if (!closed) controller.abort(); }).finally(() => { checking = false; });
     }, 200);
     try {
-      const result = await (dependencies.embed ?? embedRepository)(inputs, config, key, AbortSignal.any([signal, controller.signal]));
+      const request = () => withProviderSlot(signal, async () => {
+        await current();
+        if (dependencies.work) {
+          await beginWrite(store.db, signal);
+          try { dependencies.work.network(store.db); store.db.exec("COMMIT"); }
+          catch (error) { store.db.exec("ROLLBACK"); throw error; }
+        }
+        return (dependencies.embed ?? embedRepository)(inputs, config, key, AbortSignal.any([signal, controller.signal]));
+      });
+      const result = await (dependencies.work ? dependencies.work.run(request) : request());
       await current();
       controller.signal.throwIfAborted();
       return result;
@@ -81,10 +108,12 @@ async function semanticPass(store, request, generation, dependencies, documentOn
     const chunks = scopedChunks(store, request);
     total = chunks.length;
     if (!total) return { hits, notices, status: { enabled: true, complete: true, state: "ready", indexed: 0, total: 0 } };
-    vectors = await openVectorStore(store.root);
+    vectors = await openVectorStore(store.root, store.source, signal);
     const key = await (dependencies.key ?? repositoryEmbeddingKey)();
     const activeKinds = request.sources.filter(kind => chunks.some(chunk => chunk.row.kind === kind));
-    const domainBudget = Math.floor(MAX_CHUNKS_PER_SEARCH / activeKinds.length);
+    const limit = documentOnly ? Infinity : MAX_CHUNKS_PER_SEARCH;
+    const domainBudget = Math.floor(limit / activeKinds.length);
+    const uploadBudget = documentOnly ? { remaining: Infinity } : dependencies.uploadBudget ?? { remaining: limit };
     for (const kind of request.sources) {
       await current();
       const config = settings.configs[kind], selected = chunks.filter(chunk => chunk.row.kind === kind);
@@ -96,21 +125,29 @@ async function semanticPass(store, request, generation, dependencies, documentOn
       const canEmbed = config.provider !== "openrouter" || Boolean(key);
       let token;
       try {
-        if (canEmbed && ((!documentOnly && !queryVector) || missing.length) && Date.now() - started < 18000) token = vectors.acquire(config.identity);
+        if (canEmbed && ((!documentOnly && !queryVector) || missing.length) && (documentOnly || Date.now() - started < 18000)) token = vectors.acquire(config.identity);
         if (token) {
+          activeLease = { identity: config.identity, token };
           if (!documentOnly && !queryVector) {
             [queryVector] = await embed([queryText], config, key);
-            vectors.put(config.identity, token, [{ digest: queryDigest, vector: queryVector }], config.dimension);
+            vectors.put(config.identity, token, [{ digest: queryDigest, vector: queryVector }], config.dimension, publication);
           }
-          for (let offset = 0; offset < missing.length && offset < domainBudget && uploaded < MAX_CHUNKS_PER_SEARCH && Date.now() - started < 18000; offset += 16) {
-            const batch = missing.slice(offset, offset + Math.min(16, domainBudget - offset, MAX_CHUNKS_PER_SEARCH - uploaded));
+          for (let offset = 0; offset < missing.length && offset < domainBudget && uploaded < limit && (documentOnly || Date.now() - started < 18000); offset += 16) {
+            const count = Math.min(16, missing.length - offset, domainBudget - offset, limit - uploaded, uploadBudget.remaining);
+            if (count <= 0) break;
+            // Reserve synchronously before either source can await HTTP or file validation.
+            uploadBudget.remaining -= count;
+            const batch = missing.slice(offset, offset + count);
+            await currentDocuments(batch);
             const result = await embed(batch.map(chunk => config.documentPrefix + chunk.text), config, key);
+            await currentDocuments(batch);
+            await current();
             if (result.length !== batch.length) throw new Error("Embedding count mismatch");
-            vectors.put(config.identity, token, batch.map((chunk, i) => ({ digest: chunk.digest, vector: result[i] })), config.dimension);
+            vectors.put(config.identity, token, batch.map((chunk, i) => ({ digest: chunk.digest, vector: result[i] })), config.dimension, publication);
             uploaded += batch.length;
           }
         }
-      } finally { if (token) vectors.release(config.identity, token); }
+      } finally { activeLease = undefined; if (token) vectors.release(config.identity, token); }
       for (const chunk of selected) {
         signal.throwIfAborted();
         const vector = vectors.get(config.identity, chunk.digest, config.dimension);
@@ -125,7 +162,7 @@ async function semanticPass(store, request, generation, dependencies, documentOn
     await current();
     const complete = indexed === total && !notices.length;
     if (!complete) notices.push(documentOnly
-      ? `Native semantic coverage: ${indexed}/${total} scoped chunks. Select Continue to index up to 128 more missing chunks (requires configured provider credentials; another indexer may be active).`
+      ? `Native semantic coverage: ${indexed}/${total} scoped chunks. Check provider credentials or an active indexer, then retry; cached embeddings are retained.`
       : `Native semantic coverage: ${indexed}/${total} scoped chunks. Indexes up to 128 new chunks per search; search again to continue (requires configured provider credentials).`);
     hits.sort((a, b) => b.score - a.score || (a.path < b.path ? -1 : a.path > b.path ? 1 : a.startLine - b.startLine));
     return { hits: hits.slice(0, 200), notices, status: { enabled: true, complete, state: complete ? "ready" : "partial", indexed, total } };

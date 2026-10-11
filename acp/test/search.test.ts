@@ -23,9 +23,10 @@ async function until(check: () => boolean | Promise<boolean>, message = "conditi
   while (!await check()) { assert.ok(Date.now() < end, `Timed out waiting for ${message}`); await delay(10); }
 }
 function rows(cwd: string, table: "documents" | "vectors" | "metadata" | "sqlite_master"
-  | "pix_session_titles" | "pix_session_vectors" | "pix_session_meta" | "pix_commit_vectors") {
+  | "pix_session_titles" | "pix_session_vectors" | "pix_session_meta" | "pix_commit_vectors",
+  source = table.startsWith("pix_session_") ? "sessions" : table.startsWith("pix_commit_") ? "git-commits" : "settings") {
   let db: DatabaseSync | undefined;
-  try { db = new DatabaseSync(join(cwd, ".pi/search/index.sqlite"), { readOnly: true }); return db.prepare(`SELECT * FROM ${table}`).all(); }
+  try { db = new DatabaseSync(join(cwd, `.pi/search/${source}.sqlite`), { readOnly: true }); return db.prepare(`SELECT * FROM ${table}`).all(); }
   catch { return []; } finally { db?.close(); }
 }
 const setting = { id: "theme", section: "appearance", label: "Theme", description: "Color scheme", synonyms: ["dark"] };
@@ -121,7 +122,7 @@ test("local session index uses first user and last completed assistant on active
   for (const query of ["obsoletebranchfinal", "intermediate", "первый окончательный"]) {
     assert.deepEqual((await s.query(f.request(query))).results, [], query);
   }
-  const indexed = rows(f.cwd, "sqlite_master").map(row => row.name);
+  const indexed = rows(f.cwd, "sqlite_master", "sessions").map(row => row.name);
   assert.ok(indexed.includes("pix_session_boundary_fts"));
   assert.deepEqual(f.calls, [], "local boundary FTS never sends messages or queries to a provider");
   assert.equal(rows(f.cwd, "documents").length, 0, "settings-only legacy tables stay protected");
@@ -131,7 +132,7 @@ test("local session index uses first user and last completed assistant on active
   assert.equal((await s.query(f.request("исправленныйfinal"))).results.length, 1);
   f.setRecords([]);
   assert.deepEqual((await s.query(f.request("исправленныйfinal"))).results, []);
-  const db = new DatabaseSync(join(f.cwd, ".pi/search/index.sqlite"), { readOnly: true });
+  const db = new DatabaseSync(join(f.cwd, ".pi/search/sessions.sqlite"), { readOnly: true });
   try { assert.equal(db.prepare("SELECT COUNT(*) AS n FROM pix_session_boundary_fts").get()?.n, 0); }
   finally { db.close(); }
 });
@@ -159,38 +160,22 @@ test("explicit queries see title renames/deletions and missing body files withou
   assert.equal((await s.query(f.request("заголовок"))).results.length, 0);
 });
 
-test("legacy migration clears only message documents/vectors/decisions, preserves settings and fences old writers", async t => {
-  const f = await fixture(t);
-  const store = new SearchIndexStore();
+test("obsolete schema is rejected rather than migrated or rewritten", async t => {
+  const f = await fixture(t), store = new SearchIndexStore();
   const docs = settingsDocuments([setting]); const hash = hashText(docs[0]!.chunks[0]!);
   await store.write(f.cwd, signal(), tx => tx.save(docs, new Map([[hash, vector()]])));
   const db = new DatabaseSync(store.path(f.cwd));
-  const bytes = Buffer.alloc(4096); bytes.writeFloatLE(1);
-  db.exec("DROP TRIGGER settings_schema_insert; DROP TRIGGER settings_schema_update; DROP TRIGGER settings_document_insert; DROP TRIGGER settings_document_update; UPDATE metadata SET value='1' WHERE key='schema'; CREATE TABLE filter_decisions (hash TEXT PRIMARY KEY, decision TEXT NOT NULL)");
-  db.prepare("INSERT INTO documents VALUES (?,?,?,?)").run("sessions:s1:u", "private message text", JSON.stringify({ kind: "sessions" }), JSON.stringify(["body-hash", hash]));
-  db.prepare("INSERT INTO vectors VALUES (?,?)").run("body-hash", bytes);
-  db.prepare("INSERT INTO filter_decisions VALUES (?,?)").run("body-hash", "KEEP"); db.close();
-  await writeFile(f.path, "unchanged session contents");
-  const s = f.make(); await s.config({ cwd: f.cwd });
-  assert.equal(rows(f.cwd, "metadata").find(row => row.key === "schema")?.value, "1", "status must not migrate");
-  await s.sync({ cwd: f.cwd, settings: [setting] });
-  assert.deepEqual(rows(f.cwd, "documents").map(row => row.id), ["settings:theme"]);
+  db.exec("DROP TRIGGER settings_schema_insert; DROP TRIGGER settings_schema_update; UPDATE metadata SET value='1' WHERE key='schema'");
+  db.close();
+  await assert.rejects(store.write(f.cwd, signal(), async () => {}), /Incompatible search index schema/);
+  assert.equal(rows(f.cwd, "metadata").find(row => row.key === "schema")?.value, "1");
   assert.deepEqual(rows(f.cwd, "vectors").map(row => row.hash), [hash]);
-  assert.equal(rows(f.cwd, "sqlite_master").some(row => row.name === "filter_decisions"), false);
-  assert.equal(rows(f.cwd, "metadata").find(row => row.key === "schema")?.value, "2");
-  assert.equal(await readFile(f.path, "utf8"), "unchanged session contents");
+  assert.deepEqual(rows(f.cwd, "documents").map(row => row.id), ["settings:theme"]);
+  const obsolete = join(f.cwd, ".pi/search/index.sqlite");
+  await writeFile(obsolete, "invalid obsolete database");
+  const s = f.make(); assert.equal((await s.query(f.request("модель"))).results.length, 1);
+  assert.equal(await readFile(obsolete, "utf8"), "invalid obsolete database");
   assert.deepEqual(f.calls, []);
-  const oldWriter = new DatabaseSync(store.path(f.cwd));
-  try {
-    oldWriter.exec("BEGIN IMMEDIATE; DELETE FROM documents; DELETE FROM vectors");
-    assert.throws(() => oldWriter.exec("INSERT OR REPLACE INTO metadata VALUES ('schema','1')"), /Search index requires session-title search/);
-    oldWriter.exec("ROLLBACK");
-    assert.throws(() => oldWriter.prepare("INSERT INTO documents VALUES (?,?,?,?)").run("sessions:stale", "private body", JSON.stringify({ kind: "sessions" }), "[]"), /Only settings may be indexed/);
-  } finally { oldWriter.close(); }
-  assert.equal(rows(f.cwd, "documents").length, 1);
-  assert.equal(rows(f.cwd, "vectors").length, 1);
-  await s.dispose(); await f.make().config({ cwd: f.cwd });
-  assert.equal(rows(f.cwd, "documents").length, 1);
 });
 
 test("store refuses to persist session rows and rolls back rejected/canceled transactions", async t => {
@@ -203,7 +188,7 @@ test("store refuses to persist session rows and rolls back rejected/canceled tra
   assert.equal(rows(f.cwd, "documents").length, 1);
 });
 
-test("busy index does not prevent local titles and reports a controlled warning", async t => {
+test("busy settings index does not block independent local session titles", async t => {
   const f = await fixture(t); const store = new SearchIndexStore(60);
   await store.write(f.cwd, signal(), async () => {});
   const db = new DatabaseSync(store.path(f.cwd)); db.exec("BEGIN IMMEDIATE");
@@ -212,18 +197,18 @@ test("busy index does not prevent local titles and reports a controlled warning"
   try {
     await assert.rejects(store.write(f.cwd, signal(), async () => {}), SearchIndexBusyError);
     const result = await s.query(f.request("модель"));
-    assert.equal(result.results.length, 1); assert.match(result.status.error!, /index busy/);
-    assert.match((await s.config({ cwd: f.cwd })).error!, /index busy/, "status cannot hide pending migration");
+    assert.equal(result.results.length, 1); assert.equal(result.status.error, undefined);
+    assert.equal((await s.config({ cwd: f.cwd })).error, undefined);
   } finally { db.exec("ROLLBACK"); db.close(); }
   const attempts = writes.mock.callCount();
-  assert.match((await s.config({ cwd: f.cwd })).error!, /index busy/);
+  assert.equal((await s.config({ cwd: f.cwd })).error, undefined);
   assert.equal(writes.mock.callCount(), attempts, "status polling never retries writes");
   await s.sync({ cwd: f.cwd, settings: [] });
   assert.equal((await s.config({ cwd: f.cwd })).error, undefined);
-  assert.equal(writes.mock.callCount(), attempts + 1, "explicit sync retries local migration after contention");
+  assert.equal(writes.mock.callCount(), attempts, "unconfigured sync has no startup migration writes");
   await s.config({ cwd: f.cwd });
-  assert.equal(writes.mock.callCount(), attempts + 1, "successful migration is not rerun on every poll");
-  assert.deepEqual(f.calls, [], "migration retries never call providers");
+  assert.equal(writes.mock.callCount(), attempts, "status remains read-only");
+  assert.deepEqual(f.calls, []);
 });
 
 test("offline settings use authored metadata, not values; settings-only queries never discover sessions", async t => {
@@ -396,7 +381,7 @@ test("session title indexing cannot replace commit data or incompatible paid vec
   const f = await fixture(t);
   const store = new SearchIndexStore();
   await store.write(f.cwd, signal(), () => Promise.resolve());
-  const db = new DatabaseSync(store.path(f.cwd));
+  const db = new DatabaseSync(join(f.cwd, ".pi/search/git-commits.sqlite"));
   db.exec("CREATE TABLE pix_commit_vectors (hash TEXT PRIMARY KEY, vector TEXT NOT NULL)");
   db.prepare("INSERT INTO pix_commit_vectors VALUES (?,?)").run("commit-hash", "[1,0,0]");
   db.close();
@@ -404,9 +389,9 @@ test("session title indexing cannot replace commit data or incompatible paid vec
   const s = f.make();
   await f.preferences.configure();
   // Establish metadata without buying vectors, then corrupt its identity.
-  await store.write(f.cwd, signal(), async tx => { tx.sessionTitles(); }, await f.preferences.embedding());
+  await store.write(f.cwd, signal(), async tx => { tx.sessionTitles(); }, await f.preferences.embedding(), { source: "sessions" });
   assert.equal(rows(f.cwd, "pix_commit_vectors").length, 1);
-  const unsafe = new DatabaseSync(store.path(f.cwd));
+  const unsafe = new DatabaseSync(store.path(f.cwd, "sessions"));
   unsafe.prepare("UPDATE pix_session_meta SET value='unknown-model' WHERE key='model'").run();
   unsafe.close();
   await s.config({ cwd: f.cwd });

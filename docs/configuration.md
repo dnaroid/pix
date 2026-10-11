@@ -193,7 +193,7 @@ from semantic settings/session-title/task consent preferences.
 Task search is always available locally from `.pi/tasks.sqlite`, including
 task titles, descriptions, parent/related tasks, file and artifact paths,
 attachment names, status, priority, linked session and assigned model.
-Neither a saved OpenRouter key nor an IDX index is required for those matches.
+Neither a saved OpenRouter key nor a repository-search index is required for those matches.
 
 Under Desktop Settings → Search, `search.tasksSemanticEnabled` is a separate,
 **off-by-default** opt-in. When enabled, an explicit Tasks search can send
@@ -383,7 +383,7 @@ microphone permission.
 - **Repository search:** Code and Knowledge search is native across Pi, TUI,
   ACP and Desktop. Optional repository embeddings use the `embedding` object in
   project `.pi/search/semantic.json` and `OPENROUTER_API_KEY`; chunks/queries may
-  be transmitted externally. Legacy IDX data/configuration is not read, migrated,
+  be transmitted externally. Legacy external-search data/configuration is not read, migrated,
   deleted or modified by this integration.
 
 ## Ignoring legacy context files

@@ -33,6 +33,9 @@ interface PackageScriptsControllerOptions {
 }
 
 export function createPackageScriptsController(options: PackageScriptsControllerOptions) {
+  // Sidebar polling replaces its spread props even when the project is unchanged.
+  // Compare the path before the owning effect, not the whole upstream props object.
+  const workspace = $derived(options.workspace());
   const windowLabel = getCurrentWindow().label;
   const terminalDecoders = new Map<string, TextDecoder>();
   let snapshot = $state<PackageScriptsSnapshot | undefined>();
@@ -57,7 +60,7 @@ export function createPackageScriptsController(options: PackageScriptsController
   });
 
   $effect(() => {
-    const requestWorkspace = options.workspace();
+    const requestWorkspace = workspace;
     if (requestWorkspace !== launchWorkspace) {
       launchWorkspace = requestWorkspace;
       launchCommands = [];

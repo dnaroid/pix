@@ -22,7 +22,7 @@ policy, not a price oracle.
   worker escalation. Every parent requires another vendor, including fallbacks.
   The duplicate bundled `frontier-review` role has been removed.
 - `knowledge-auditor`: economical docs-only role run before completion to update
-  task-affected documentation, without IDX, dirty-state checks or review receipts.
+  task-affected documentation, without search setup, dirty-state checks or review receipts.
 
 Task-specific discipline belongs in the brief or `promptAppend`. A new project
 agent is warranted when it adds a durable contract, capabilities or resources,

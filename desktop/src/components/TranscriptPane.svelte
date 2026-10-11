@@ -9,6 +9,7 @@
   import Pause from "@lucide/svelte/icons/pause";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import Undo2 from "@lucide/svelte/icons/undo-2";
+  import Pencil from "@lucide/svelte/icons/pencil";
   import { onDestroy, tick } from "svelte";
   import type { Attachment } from "../lib/attachments";
   import { agentPauseJustTriggered, type AgentControlState } from "../lib/agent-control";
@@ -124,6 +125,7 @@
   const forkMessageCommand = userMessageMenuCommands.fork;
   const forkNewTabCommand = userMessageMenuCommands.forkNewTab;
   const undoMessageCommand = userMessageMenuCommands.undo;
+  const editMessageCommand = userMessageMenuCommands.edit;
   const activeUserMessageMenu = $derived(userMessageMenuState.activeId);
   const userMessageMenuPosition = $derived(userMessageMenuState.position);
   const canMutateUserMessages = $derived(userMessageMenuController.canMutate);
@@ -401,6 +403,12 @@
       >
         <Undo2 class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
         <span>{undoMessageCommand.label}</span>
+      </button>
+      <button type="button" role="menuitem" class="message-action-item"
+        disabled={!canMutateUserMessages || activeUserMessage.localOnly}
+        onclick={() => void runUserMessageAction(activeUserMessage, "edit")}>
+        <Pencil class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <span>{editMessageCommand.label}</span>
       </button>
     </div>
   {/if}

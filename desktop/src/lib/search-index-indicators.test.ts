@@ -9,10 +9,12 @@ function stored(): SearchIndexViewState {
   return { actions: {}, history: [], snapshot: { reading: false, error: "", activity: null,
     consent: { configured: true, provider: "ollama", model: "m", vectorSize: 3, keyAvailable: true },
     stores: { stores: [
-      { id: "files", state: "present", completedAt: "now", counts: { codeChunks: 100, knowledgeChunks: 20 } },
-      { id: "vectors", state: "present", counts: { vectors: 1 } },
-      { id: "history", state: "present", counts: { settingsDocuments: 100, settingsVectors: 1,
-        sessionTitles: 500, sessionVectors: 1, taskDocuments: 3, taskVectors: 1, commitDocuments: 99, commitVectors: 1 } },
+      { id: "code", state: "present", completedAt: "now", counts: { codeChunks: 100, vectors: 1 } },
+      { id: "knowledge", state: "present", completedAt: "now", counts: { knowledgeChunks: 20, vectors: 1 } },
+      { id: "settings", state: "present", counts: { settingsDocuments: 100, settingsVectors: 1 } },
+      { id: "sessions", state: "present", counts: { sessionTitles: 500, sessionVectors: 1 } },
+      { id: "tasks", state: "present", counts: { taskDocuments: 3, taskVectors: 1 } },
+      { id: "commits", state: "present", counts: { commitDocuments: 99, commitVectors: 1 } },
     ] },
   } };
 }
@@ -30,12 +32,12 @@ describe("search indexing sidebar reasons", () => {
   it("warns for absent local indexes even with semantics off", () => {
     const view = stored();
     view.snapshot.consent = { ...view.snapshot.consent!, configured: false };
-    view.snapshot.stores = { stores: [{ id: "files", state: "absent", counts: {} }] };
+    view.snapshot.stores = { stores: [{ id: "code", state: "absent", counts: {} }, { id: "knowledge", state: "absent", counts: {} }] };
     expect(indicator(view)).toMatchObject({ tone: "warning", reason: expect.stringContaining("Code, Knowledge") });
   });
   it("warns for missing vectors, not empty corpora or disabled semantics", () => {
     const view = stored();
-    view.snapshot.stores = { stores: view.snapshot.stores!.stores.map(store => store.id === "history"
+    view.snapshot.stores = { stores: view.snapshot.stores!.stores.map(store => ["tasks", "sessions"].includes(store.id)
       ? { ...store, counts: { ...store.counts, taskDocuments: 0, taskVectors: 0, sessionVectors: 0 } } : store) };
     expect(indicator(view)?.reason).toBe("Search indexes need attention: Sessions");
     view.snapshot.consent = { ...view.snapshot.consent!, configured: false };
@@ -49,6 +51,17 @@ describe("search indexing sidebar reasons", () => {
     expect(searchIndexIndicatorReasons(view).map(reason => reason.id)).toEqual(["search.indexing", "search.pending"]);
     view.actions.code = { running: false, error: "Failed" };
     expect(indicator(view)).toEqual({ tone: "error", reason: "Code: Failed" });
+  });
+  it("suppresses missing-index warnings only for confirmed empty sessions and Git history", () => {
+    const view = stored();
+    view.snapshot.stores = { commitsEmpty: true, stores: view.snapshot.stores!.stores.map(store => ["sessions", "commits"].includes(store.id)
+      ? { ...store, counts: { ...store.counts, sessionVectors: 0, commitVectors: 0 } } : store) };
+    view.snapshot.activity = { sessionsEmpty: true };
+    expect(indicator(view)).toBeUndefined();
+    view.snapshot.activity = { sessionsEmpty: false };
+    expect(indicator(view)?.reason).toBe("Search indexes need attention: Sessions");
+    view.snapshot.stores = { ...view.snapshot.stores, commitsEmpty: undefined };
+    expect(indicator(view)?.reason).toBe("Search indexes need attention: Sessions, Git commits");
   });
   it("retains manual incomplete and stopped outcomes, clearing them on successful retry", () => {
     const view = stored();
@@ -67,8 +80,8 @@ describe("search indexing sidebar reasons", () => {
     view.snapshot.activityError = "Search activity could not be read";
     expect(indicator(view)).toMatchObject({ tone: "error" });
     view.snapshot.activityError = "";
-    view.snapshot.stores = { stores: view.snapshot.stores!.stores.map(store => store.id === "history"
-      ? { ...store, legacySources: ["sessions"] } : store) };
+    view.snapshot.stores = { stores: view.snapshot.stores!.stores.map(store => store.id === "sessions"
+      ? { ...store, incompatibleSources: ["sessions"] } : store) };
     expect(indicator(view)).toMatchObject({ tone: "warning", reason: expect.stringContaining("Sessions") });
   });
   it("wires accessible dot and cause-specific navigation to the shared manager", () => {

@@ -13,6 +13,7 @@ import { verifySessionBoundaryIndexPath } from "./session-boundary-paths.js";
 import { readTaskVectors, taskIndexTransaction, type TaskIndexTransaction } from "./task-index.js";
 import type { SemanticEmbeddingConfig } from "./config.js";
 import { compatibleEmbeddingMetadata, embeddingMetadata, SearchCacheCompatibilityError } from "./embedding-cache.js";
+import { beginWrite, claimWork } from "./source-work.js";
 
 const VERSION = "2";
 export interface CachedIndex { vectors: Map<string, number[]>; hashes: Record<string, readonly string[]> }
@@ -46,6 +47,7 @@ function busy(error: unknown): boolean {
   return error instanceof Error && /database (?:is )?(?:locked|busy)/i.test(error.message);
 }
 export interface IndexTransaction {
+  outside<T>(operation: () => Promise<T>): Promise<T>;
   load(): Promise<CachedIndex>;
   save(documents: readonly SearchDocument[], vectors: ReadonlyMap<string, number[]>): Promise<void>;
   sessionTitles(): SessionIndexTransaction;
@@ -55,7 +57,7 @@ export interface IndexTransaction {
 /** Project-owned durable database. No reset, rename, unlink or cache-directory override. */
 export class SearchIndexStore {
   constructor(private readonly retryBudgetMs = 600) {}
-  path(cwd: string): string { return canonicalSearchIndexPath(cwd); }
+  path(cwd: string, source: "settings" | "sessions" | "tasks" = "settings"): string { return canonicalSearchIndexPath(cwd, source); }
   /** Read-only snapshot for restart/query visibility; never discovers sources or calls a provider. */
   async read(cwd: string, signal: AbortSignal, config?: SemanticEmbeddingConfig): Promise<CachedIndex> {
     const path = this.path(cwd);
@@ -75,7 +77,7 @@ export class SearchIndexStore {
 
   /** Read the separately namespaced session vectors without changing settings state. */
   async readSessionTitles(cwd: string, signal: AbortSignal, config?: SemanticEmbeddingConfig): Promise<Map<string, StoredSessionVector>> {
-    const path = this.path(cwd);
+    const path = this.path(cwd, "sessions");
     try { await stat(path); } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return new Map();
       throw error;
@@ -86,10 +88,10 @@ export class SearchIndexStore {
     finally { db.close(); }
   }
 
-  /** Task vectors occupy their own namespace in the shared SQLite index.
+  /** Task vectors occupy their own source database.
    * Returning no vectors when absent does not create the namespace. */
   async readTaskVectors(cwd: string, signal: AbortSignal, config?: SemanticEmbeddingConfig): Promise<Map<string, number[]>> {
-    const filename = this.path(cwd);
+    const filename = this.path(cwd, "tasks");
     try { await stat(filename); } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return new Map();
       throw error;
@@ -102,7 +104,7 @@ export class SearchIndexStore {
 
   async readSessionBoundaryState(cwd: string, signal: AbortSignal): Promise<Map<string, SessionBoundaryState>> {
     await verifySessionBoundaryIndexPath(cwd);
-    const path = this.path(cwd);
+    const path = this.path(cwd, "sessions");
     try { await stat(path); } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return new Map();
       throw error;
@@ -115,7 +117,7 @@ export class SearchIndexStore {
 
   async searchSessionBoundaries(cwd: string, query: string, signal: AbortSignal): Promise<SessionSearchHit[]> {
     await verifySessionBoundaryIndexPath(cwd);
-    const path = this.path(cwd);
+    const path = this.path(cwd, "sessions");
     try { await stat(path); } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
       throw error;
@@ -126,16 +128,17 @@ export class SearchIndexStore {
     finally { db.close(); }
   }
 
-  /** Queue and SQLite lock are acquired BEFORE paying for settings embeddings.
-   * BEGIN IMMEDIATE remains owned across a bounded embedding batch, so another process
-   * reloads our committed hashes instead of duplicating that batch. SQLite is authoritative;
-   * no stale in-memory corpus is allowed to replace another writer's reconciliation.
+  /** A durable source claim coordinates paid work across processes. outside() releases
+   * the planning transaction before HTTP, then fences publication in a fresh write
+   * transaction. Other sources use independent queues and SQLite files.
    */
-  async write<T>(cwd: string, signal: AbortSignal, operation: (tx: IndexTransaction) => Promise<T>, config?: SemanticEmbeddingConfig): Promise<T> {
+  async write<T>(cwd: string, signal: AbortSignal, operation: (tx: IndexTransaction) => Promise<T>, config?: SemanticEmbeddingConfig,
+    options: { acquisitionTimeoutMs?: number; source?: "settings" | "sessions" | "tasks"; retry?: boolean } = {}): Promise<T> {
     const dimension = config?.dimension ?? EMBEDDING_DIMENSIONS;
-    const path = this.path(cwd);
+    const source = options.source ?? "settings";
+    const path = this.path(cwd, source);
     const acquisition = new AbortController();
-    const timer = setTimeout(() => acquisition.abort(), this.retryBudgetMs);
+    const timer = setTimeout(() => acquisition.abort(), options.acquisitionTimeoutMs ?? this.retryBudgetMs);
     const bounded = AbortSignal.any([signal, acquisition.signal]);
     const previous = queues.get(path) ?? Promise.resolve();
     let release!: () => void;
@@ -144,6 +147,8 @@ export class SearchIndexStore {
     queues.set(path, tail);
     let db: DatabaseSync | undefined;
     let transaction = false;
+    let work: Awaited<ReturnType<typeof claimWork>> | undefined;
+    let success = false;
     try {
       // Even cancelled waiters remain in the chain until their predecessor finishes.
       await new Promise<void>((resolve, reject) => {
@@ -156,6 +161,8 @@ export class SearchIndexStore {
       await mkdir(join(resolve(cwd), ".pi", "search"), { recursive: true, mode: 0o700 });
       bounded.throwIfAborted();
       db = new DatabaseSync(path);
+      clearTimeout(timer);
+      work = await claimWork(db, signal, { retry: options.retry });
       // Keep main-thread stalls tiny; all longer waits happen in cancellable async timers.
       db.exec("PRAGMA busy_timeout=5");
       while (true) {
@@ -180,25 +187,11 @@ export class SearchIndexStore {
       const metadata = { schema: VERSION, ...embeddingMetadata(config) };
       const get = db.prepare("SELECT value FROM metadata WHERE key=?");
       const schema = get.get("schema")?.value;
-      if (schema && schema !== "1" && schema !== VERSION) throw new Error("Incompatible search index schema");
+      if (schema && schema !== VERSION) throw new Error("Incompatible search index schema");
       const hasIdentity = get.get("model") !== undefined;
       const incompatibleSettings = config !== undefined && !compatibleEmbeddingMetadata(db, "metadata", config)
         && Number(db.prepare("SELECT COUNT(*) AS n FROM vectors").get()?.n) > 0;
       const checkSettings = () => { if (incompatibleSettings) throw new SearchCacheCompatibilityError(); };
-      // Schema 2 removes old body-index data, but unrelated writes must retain an incompatible settings cache.
-      if (schema !== VERSION) {
-        db.exec("PRAGMA secure_delete=ON; DELETE FROM documents WHERE json_extract(hit, '$.kind') IS NOT 'settings'; DROP TABLE IF EXISTS filter_decisions");
-        const retainHash = db.prepare("INSERT OR IGNORE INTO live_hashes VALUES (?)");
-        let retained = 0;
-        for (const row of db.prepare("SELECT hashes FROM documents").iterate()) {
-          signal.throwIfAborted();
-          const hashes: unknown = typeof row.hashes === "string" ? JSON.parse(row.hashes) : [];
-          if (!Array.isArray(hashes) || !hashes.every(hash => typeof hash === "string")) throw new Error("Invalid search index hashes");
-          for (const hash of hashes) retainHash.run(hash);
-          if (++retained % 32 === 0) await yieldTask();
-        }
-        db.exec("DELETE FROM vectors WHERE hash NOT IN (SELECT hash FROM live_hashes)");
-      }
       const set = db.prepare("INSERT INTO metadata VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value");
       // Local FTS writes must not downgrade or overwrite a configured embedding identity.
       // Other namespaces may write while an incompatible settings cache is retained.
@@ -217,6 +210,15 @@ export class SearchIndexStore {
       const connection = db;
       const check = () => signal.throwIfAborted();
       const tx: IndexTransaction = {
+        outside: async operation => {
+          work!.network(connection);
+          connection.exec("COMMIT"); transaction = false;
+          const result = await work!.run(operation);
+          await beginWrite(connection, signal);
+          transaction = true;
+          work!.assert(connection);
+          return result;
+        },
         sessionTitles: () => createSessionIndexTransaction(connection, signal, config),
         sessionBoundaries: (live, updates) => reconcileSessionBoundaries(connection, signal, live, updates),
         tasks: () => taskIndexTransaction(connection, config),
@@ -253,8 +255,10 @@ export class SearchIndexStore {
       };
       const result = await operation(tx);
       check();
+      work.assert(db);
       db.exec("COMMIT");
       transaction = false;
+      success = true;
       return result;
     } catch (error) {
       if (!signal.aborted && ((!transaction && bounded.aborted) || busy(error))) throw new SearchIndexBusyError();
@@ -262,6 +266,7 @@ export class SearchIndexStore {
     } finally {
       clearTimeout(timer);
       if (transaction) { try { db?.exec("ROLLBACK"); } catch {} }
+      if (work) { try { await work.release(success); } catch { /* Expiry preserves crash recovery. */ } }
       db?.close();
       release();
       void tail.finally(() => { if (queues.get(path) === tail) queues.delete(path); });

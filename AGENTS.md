@@ -5,11 +5,10 @@
   the quick root check, not the full CI gate. A local pass does not prove other
   operating-system matrix legs; report any blocked or incomplete checks.
 
-- IDX removal: ordinary Pi/TUI/ACP/Desktop Code and Knowledge search uses the
-  native backend. Do not reintroduce IDX fallback, setup/update commands, panels,
-  settings, or repository-search gates. Repository semantic/commit embeddings
-  use `OPENROUTER_API_KEY`; never read IDX config or `.env`, migrate providers,
-  or modify existing IDX user data as part of removal.
+- Ordinary Pi/TUI/ACP/Desktop Code and Knowledge search uses the native backend.
+  Do not add fallback search providers or repository-search setup gates.
+  Repository semantic/commit embeddings use `OPENROUTER_API_KEY`; do not read
+  unrelated legacy configuration or migrate providers as part of search.
 
 - Store disposable task output (test logs, scratch reports, mockups, captures)
   in unique run/task directories under the current project's `.pi/artifacts/`.

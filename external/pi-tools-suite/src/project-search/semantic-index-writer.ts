@@ -1,6 +1,5 @@
-import { lstat, mkdir, open } from "node:fs/promises";
 import { join } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
+import { beginWrite, claimWork, openDatabase, safeDirectory, sourcePath } from "./source-work.mjs";
 
 export interface SqlStatement {
   run(...args: unknown[]): unknown;
@@ -12,83 +11,42 @@ export interface SqlDatabase {
   prepare(sql: string): SqlStatement;
   close(): void;
 }
+export interface SourceWriter extends SqlDatabase {
+  outside<T>(operation: () => Promise<T>): Promise<T>;
+}
 
-const MAX_INDEX_BYTES = 512 * 1024 * 1024;
-// A Desktop or TUI writer may hold BEGIN IMMEDIATE during an outbound
-// 9-second embedding batch. Do not give up on another selected source after
-// only a few seconds; the caller's shorter indexing/deadline AbortSignal
-// still bounds the wait and cancellation releases ownership.
-const SQLITE_LOCK_WAIT_MS = 35_000;
-
-/** Existing Desktop uses SQLite BEGIN IMMEDIATE during embedding calls.
- * Use that same lock to avoid double-billing across TUI/Desktop processes.
- * Never use a bespoke process lock, delete a database, or replace a WAL file.
- */
+/** Durable per-source claim spans planning/HTTP/publication, not a write lock.
+ * Publication verifies the claim inside its own short SQLite transaction. */
 export async function withSearchIndexWriter<T>(root: string, signal: AbortSignal,
-  operation: (db: SqlDatabase) => Promise<T>): Promise<T> {
+  operation: (db: SourceWriter) => Promise<T>, source: "tasks" | "sessions" | "commits" | "settings" = "sessions"): Promise<T> {
   signal.throwIfAborted();
-  const pi = join(root, ".pi");
-  try { await mkdir(pi, { mode: 0o700 }); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
-  const piStat = await lstat(pi);
-  if (!piStat.isDirectory() || piStat.isSymbolicLink()) throw new Error("Unsafe project storage");
-  const dir = join(pi, "search");
-  try { await mkdir(dir, { mode: 0o700 }); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
-  const dirStat = await lstat(dir);
-  if (!dirStat.isDirectory() || dirStat.isSymbolicLink()) throw new Error("Unsafe search index directory");
-  const filename = join(dir, "index.sqlite");
-  const created = await open(filename, "wx", 0o600).catch(error => {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") return undefined;
-    throw error;
-  });
-  await created?.close();
-  const stat = await lstat(filename);
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size > MAX_INDEX_BYTES) {
-    throw new Error("Unsafe project search index");
-  }
-  for (const suffix of ["-wal", "-shm", "-journal"]) {
-    const sidecar = await lstat(filename + suffix).catch(error => {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-      throw error;
-    });
-    if (sidecar && (!sidecar.isFile() || sidecar.isSymbolicLink() || sidecar.nlink > 1)) {
-      throw new Error("Unsafe search index sidecar");
-    }
-  }
-  let db: SqlDatabase;
-  if ("Bun" in globalThis) {
-    const driver = "bun:sqlite";
-    const { Database } = await import(driver);
-    db = new Database(filename, { readwrite: true, create: false }) as unknown as SqlDatabase;
-  } else {
-    const { DatabaseSync } = await import("node:sqlite");
-    db = new DatabaseSync(filename, { readOnly: false }) as unknown as SqlDatabase;
-  }
-  let inTransaction = false;
+  await safeDirectory(join(root, ".pi"));
+  await safeDirectory(join(root, ".pi/search"));
+  const db = await openDatabase(sourcePath(root, source));
+  let inTransaction = false, success = false;
+  let work: Awaited<ReturnType<typeof claimWork>> | undefined;
   try {
-    db.exec("PRAGMA busy_timeout=5");
-    const until = Date.now() + SQLITE_LOCK_WAIT_MS;
-    while (true) {
-      signal.throwIfAborted();
-      try {
-        db.exec("PRAGMA journal_mode=WAL; BEGIN IMMEDIATE");
-        inTransaction = true;
-        break;
-      } catch (error) {
-        if (!(error instanceof Error) || !/locked|busy/i.test(error.message) || Date.now() >= until) {
-          throw error;
-        }
-        await delay(30, undefined, { signal });
-      }
-    }
-    const result = await operation(db);
-    signal.throwIfAborted();
-    db.exec("COMMIT");
-    inTransaction = false;
+    work = await claimWork(db, signal);
+    await beginWrite(db, signal); inTransaction = true;
+    const writer: SourceWriter = {
+      exec: sql => db.exec(sql), prepare: sql => db.prepare(sql) as unknown as SqlStatement,
+      close: () => { throw new Error("Writer lifetime belongs to source storage"); },
+      outside: async operation => {
+        work!.network(db);
+        db.exec("COMMIT"); inTransaction = false;
+        const result = await work!.run(operation);
+        await beginWrite(db, signal); inTransaction = true;
+        work!.assert(db);
+        return result;
+      },
+    };
+    const result = await operation(writer);
+    work.assert(db);
+    db.exec("COMMIT"); inTransaction = false; success = true;
     return result;
-  } catch (error) {
-    if (inTransaction) { try { db.exec("ROLLBACK"); } catch { /* Preserve original error. */ } }
-    throw error;
-  } finally { db.close(); }
+  } finally {
+    if (inTransaction) { try { db.exec("ROLLBACK"); } catch {} }
+    if (work) { try { await work.release(success); } catch { /* Bounded expiry recovers ownership. */ } }
+    db.close();
+  }
 }

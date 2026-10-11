@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import { existsSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,9 +39,15 @@ function provider() {
   } };
 }
 function cached(root: string) {
-  const db = new Database(join(root, ".pi/search/file-vectors.sqlite"), { readonly: true });
-  try { return (db.query("SELECT COUNT(*) AS n FROM vectors").get() as any).n as number; }
-  finally { db.close(); }
+  return ["code", "knowledge"].reduce((count, source) => {
+    const filename = join(root, `.pi/search/${source}.sqlite`);
+    if (!existsSync(filename)) return count;
+    const db = new Database(filename, { readonly: true });
+    try {
+      return count + (db.query("SELECT name FROM sqlite_master WHERE name='vectors'").get()
+        ? (db.query("SELECT COUNT(*) AS n FROM vectors").get() as any).n : 0);
+    } finally { db.close(); }
+  }, 0);
 }
 async function child(root: string, payload: any, executable = "node", preload?: string): Promise<NativeIndexResponse> {
   return new Promise((resolve, reject) => {
@@ -83,17 +90,16 @@ describe("explicit native document indexing", () => {
     expect(fake.calls).toEqual([{ inputs: ["question: rotation"], model: "fixture/docs" }]);
   });
 
-  test("one pass is bounded to 128 missing chunks and repeated clicks reuse compatible vectors", async () => {
+  test("one pass drains beyond 128 missing chunks and repeated clicks reuse compatible vectors", async () => {
     const root = await fixture(), fake = provider();
     for (let i = 0; i < 130; i++) await put(root, `f${i}.ts`, "needle");
     const first = await indexNative(root, request(), fake);
-    expect(first).toMatchObject({ source: "code", complete: false, indexed: 128, total: 130 });
-    expect(first.message).toContain("Continue");
-    expect(fake.calls.flatMap(call => call.inputs)).toHaveLength(128);
+    expect(first).toMatchObject({ source: "code", complete: true, indexed: 130, total: 130 });
+    expect(fake.calls.flatMap(call => call.inputs)).toHaveLength(130);
     expect(fake.calls.every(call => call.inputs.length <= 16)).toBe(true);
     fake.calls.length = 0;
     expect(await indexNative(root, request(), fake)).toEqual({ source: "code", complete: true, indexed: 130, total: 130 });
-    expect(fake.calls.flatMap(call => call.inputs)).toHaveLength(2);
+    expect(fake.calls.flatMap(call => call.inputs)).toHaveLength(0);
     fake.calls.length = 0;
     expect((await indexNative(root, request(), fake)).complete).toBe(true);
     expect(fake.calls).toEqual([]);
@@ -169,14 +175,14 @@ describe("explicit native document indexing", () => {
     await symlink(join(root, "../outside.json"), settingsFile(root));
     expect((await indexNative(root, request(), fake)).complete).toBe(false);
     expect(fake.calls).toEqual([]);
-    expect(await readFile(join(root, ".pi/search/file-vectors.sqlite")).catch(() => undefined)).toBeUndefined();
+    expect(cached(root)).toBe(0);
   });
 
   test("unsafe cache paths cannot be replaced or reported complete", async () => {
     const root = await fixture(), fake = provider();
     await put(root, "a.ts", "needle");
     await put(root, ".pi/search/outside", "untouched");
-    await symlink(join(root, ".pi/search/outside"), join(root, ".pi/search/file-vectors.sqlite"));
+    await symlink(join(root, ".pi/search/outside"), join(root, ".pi/search/code.sqlite"));
     expect((await indexNative(root, request(), fake)).complete).toBe(false);
     expect(fake.calls).toEqual([]);
     expect(await readFile(join(root, ".pi/search/outside"), "utf8")).toBe("untouched");
@@ -237,11 +243,11 @@ describe("explicit native document indexing", () => {
 
   test("incomplete source discovery cannot label retained paid coverage as current", async () => {
     const root = await fixture(), fake = provider();
-    await put(root, "a.ts", "needle");
-    expect((await indexNative(root, request(), fake)).complete).toBe(true);
+    await put(root, "a.md", "needle");
+    expect((await indexNative(root, request("knowledge"), fake)).complete).toBe(true);
     fake.calls.length = 0;
     await put(root, "dense.md", Array.from({ length: 20001 }, (_, i) => `## h${i}`).join("\n"));
-    const result = await indexNative(root, request(), fake);
+    const result = await indexNative(root, request("knowledge"), fake);
     expect(result.complete).toBe(false);
     expect(result.message).toContain("freshness is unverified");
     expect(result).not.toHaveProperty("indexed");
@@ -270,7 +276,7 @@ describe("explicit native document indexing", () => {
       controller.abort();
       expect((await pending).complete).toBe(false);
       expect(fake.calls).toEqual([]);
-      expect(await readFile(join(root, ".pi/search/file-vectors.sqlite")).catch(() => undefined)).toBeUndefined();
+      expect(cached(root)).toBe(0);
     } finally {
       controller.abort(); await pending;
       if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath;
@@ -304,7 +310,7 @@ describe("explicit native document indexing", () => {
       expect(JSON.stringify(result)).not.toContain("fixture secret");
       expect(cached(root)).toBe(0);
       const vectors = await openVectorStore(root);
-      const db = new Database(join(root, ".pi/search/file-vectors.sqlite"), { readonly: true });
+      const db = new Database(join(root, ".pi/search/code.sqlite"), { readonly: true });
       try { expect((db.query("SELECT COUNT(*) AS n FROM leases").get() as any).n).toBe(0); }
       finally { db.close(); vectors.close(); }
     }
@@ -352,19 +358,42 @@ describe("explicit native document indexing", () => {
     }
   });
 
-  test("CLI process deadline returns an index-shaped safe result after parsing", async () => {
+  test("manual indexing renews leases and passes the old overall deadlines", async () => {
+    const root = await fixture(), fake = provider();
+    for (let i = 0; i < 130; i++) await put(root, `f${i}.ts`, `const item${i} = ${i};`);
+    const start = Date.now(); let now = start;
+    const clock = spyOn(Date, "now").mockImplementation(() => now);
+    try {
+      const result = await indexNative(root, request(), { ...fake, embed: async (inputs: string[], cfg: any) => {
+        now += 10_000;
+        expect(inputs.length).toBeLessThanOrEqual(16);
+        return fake.embed(inputs, cfg);
+      } });
+      expect(result).toMatchObject({ complete: true, indexed: 130, total: 130 });
+      expect(now - start).toBeGreaterThan(60_000);
+      expect(cached(root)).toBe(130);
+    } finally { clock.mockRestore(); }
+  });
+
+  test("CLI clears the overall timer for index requests but keeps the search timer", async () => {
     const root = await fixture();
     const preload = join(root, "../timeout-preload.mjs");
-    await writeFile(preload, `const original = globalThis.setTimeout;
+    await writeFile(preload, `const original = globalThis.setTimeout, cancel = globalThis.clearTimeout;
+let deadline;
 globalThis.setTimeout = (callback, delay, ...args) => {
   if (delay === 40000) {
-    process.stdin.once('end', () => setImmediate(callback));
-    return original(() => {}, delay);
+    const token = deadline = original(() => {}, delay);
+    process.stdin.once('end', () => setImmediate(() => { if (deadline === token) callback(); }));
+    return token;
   }
   return original(callback, delay, ...args);
-};`);
+};
+globalThis.clearTimeout = token => { if (deadline === token) deadline = undefined; return cancel(token); };`);
     expect(await child(root, request("knowledge"), "node", preload)).toEqual({
-      source: "knowledge", complete: false, message: "Native indexing timed out; coverage is unverified. Cached embeddings are retained.",
+      source: "knowledge", complete: true, indexed: 0, total: 0,
+    });
+    expect(await child(root, { query: "needle", sources: ["code"], mode: "lexical" }, "node", preload)).toMatchObject({
+      notices: ["Native search timed out; results are incomplete."],
     });
   });
 });

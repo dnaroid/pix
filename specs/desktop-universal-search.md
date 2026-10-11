@@ -21,6 +21,8 @@ tool waits for
 the selected sources (up to 60 seconds) and returns one combined response. See
 [project-wide agent search](project-search-agent-tool.md).
 
+- Source ownership and uncertain-work recovery are specified in
+  [decision 0070](../docs/decisions/0070-search-source-work-recovery.md).
 - Desktop provides one current-project dialog, opened from the titlebar or
   Cmd+Shift+F (Ctrl+Shift+F on non-macOS hosts). Settings, Sessions, Tasks, Commits,
   Code and Knowledge are independently selectable. Results use a shared local
@@ -171,7 +173,7 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   description text remains eligible even if it itself contains paths.
   Task data never uses repository-search tables or the settings-only `documents`
   table: `pix_task_index_meta`, `pix_task_documents` and `pix_task_vectors`
-  are separate table families in `.pi/search/index.sqlite`. Only IDs, content
+  are separate table families in `.pi/search/tasks.sqlite`. Only IDs, content
   hashes and configured-dimension float32 vectors persist, not the task text.
   Embeddings are keyed by a hash of semantic text. Status/link/model changes
   reuse the same vector; description edits, renames and deletions reconcile
@@ -225,21 +227,22 @@ the selected sources (up to 60 seconds) and returns one combined response. See
 - Hybrid commits use the global `~/.config/pi/pi-tools-suite.jsonc` `search.embedding` provider,
   knowledge embedding model, dimensions and prefixes; Desktop never selects or switches
   the provider or alters the code/knowledge index. OpenRouter credentials come only
-  from `OPENROUTER_API_KEY`; legacy IDX configuration and credentials are not read. The selected
+  from `OPENROUTER_API_KEY`; unrelated legacy configuration and credentials are not read. The selected
   provider may receive commit messages/metadata and search queries. The dialog
   discloses that the first search may index the entire current HEAD history and
   incur provider costs. This uses the same global semantic configuration as repository
   search; history-specific settings remain separate.
-  Commit data and vectors live in the shared durable
-  `.pi/search/index.sqlite`, in the namespaced `pix_commit_meta`,
+  Commit data and vectors live in `.pi/search/git-commits.sqlite`, in the
+  `pix_commit_meta`,
   `pix_commit_documents`, and `pix_commit_vectors` tables. They reuse unchanged
   commit hashes, content and compatible vectors across restarts and append new
   commits. Reachability filtering excludes commits no longer on current HEAD.
   Provider/model/dimension/prefix identity fences incompatible vectors; the
   settings and commits vector tables may use distinct dimensions/encodings.
-  A pre-unification `.pi/search/commits.sqlite` is imported transactionally,
-  idempotently, and without provider calls; the legacy file is never unlinked or
-  modified by migration. Existing settings data is not rewritten by the import.
+  Legacy databases are not read, imported or migrated. Settings, Sessions and Tasks
+  use `settings.sqlite`, `sessions.sqlite` and `tasks.sqlite`. Stop and restart older
+  Pi/ACP/Desktop clients before using source-local stores: mixed-version writers
+  do not honor the new ownership protocol and are unsupported.
   A changed incompatible embedding identity is never mixed with existing vectors.
   A retained incompatible Settings cache blocks only settings-vector access, not
   writes to the separate Task/Session namespaces. Compatibility errors report that
@@ -251,8 +254,17 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   derived history vectors. Canonical tasks, sessions and Git history remain intact;
   subsequent semantic searches can rebuild the cache and incur embedding charges.
   Missing config/key/provider retains local BM25 results and durable caches.
-  SQLite ownership precedes paid batches so concurrent searches cannot
-  independently pay for the same missing documents.
+  Durable source-local ownership precedes paid batches. The publication fence is
+  same-file only; there is no cross-database atomic transaction. The global
+  `~/.config/pi/search-provider-work.sqlite` coordinates at most four valid local provider
+  leases across projects/processes; after a crash or partition it cannot prove the count of
+  remote provider executions. Source/provider leases renew every 30 seconds and expire
+  after 90 seconds. A queued source renews its claim and rechecks it after acquiring a slot;
+  cancellation retains ownership until tracked transport settles, and lost ownership cannot
+  publish. After two failed/interrupted network attempts (initial plus one automatic retry),
+  explicit Continue is required; success resets failures, and Continue clears the exhausted
+  budget before reconciliation. A short failed-work cooldown applies. Crashes after
+  transmission can still duplicate provider billing.
   Contention is bounded; cancellation preserves committed batches and does not
   evict live owners or delete the index. Query/filter edits and closing cancel
   provider work and invalidate late publication. Session transcripts, task
@@ -286,7 +298,7 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   bounded to 4,096 / 6,144 characters for first/final respectively. Oversized
   message lines (over 1 MiB) and sessions (over 64 MiB) are skipped.
   A local SQLite FTS5 index in `pix_session_boundary_*` tables in
-  `.pi/search/index.sqlite` matches query terms without embedding or
+  `.pi/search/sessions.sqlite` matches query terms without embedding or
   uploading messages. Per-file size/mtime fingerprints skip unchanged JSONL.
   Changed, deleted and unmapped sessions are reconciled on later searches;
   no per-message results or automatic background full-history indexing exist.
@@ -304,7 +316,7 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   or branch histories are read or sent by this index.
   Explicit names are synchronized locally to the dedicated
   `pix_session_meta`, `pix_session_titles` and `pix_session_vectors`
-  tables inside `.pi/search/index.sqlite`. Rename/delete reconciliation removes
+  tables inside `.pi/search/sessions.sqlite`. Rename/delete reconciliation removes
   stale title rows and unused vectors; repeated identical names share the same
   content-hashed embedding. A name change cannot use a stale vector belonging
   to the old title. Provider work requires valid global configuration and any
@@ -339,8 +351,8 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   Native failure reports a source-specific notice without an external backend fallback.
   Successful empty native results remain empty. Failed semantic enrichment retains
   already-published lexical evidence; other local source results survive.
-  IDX panels, setup/update commands, installers and search adapters are removed;
-  existing user IDX data remains untouched.
+  Legacy search panels, setup/update commands, installers and adapters are absent;
+  existing user data is not modified.
 - Semantic settings search uses the same global configuration as all other sources.
   Only authored settings metadata and submitted queries enter its embedding input.
   Workspace startup registers `id`, `section`, `label`, `description` and `synonyms`
@@ -352,6 +364,12 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   no source-code filesystem watcher or rebuild of every field on each search is used.
   Settings and Tasks report separate activity/errors; cancellation and source revision
   checks prevent stale publications after edits, provider changes or teardown.
+  Settings/Tasks indexing waits asynchronously for the source-local writer for up to
+  90 seconds, remaining active while queued. Cancellation interrupts this
+  wait; expiration reports a source-specific busy error without invoking the batch's
+  provider work. Other local writes retain the short 600 ms acquisition budget.
+  Status polling does not schedule writes or retries. A successful indexing pass clears
+  that source's error.
   The provider, knowledge model, dimensions, prefixes and endpoint are configurable;
   responses require matching identity and strict vector validation. Settings offers
   a native global provider editor and an all-project/all-source upload/cost disclosure,
@@ -364,41 +382,22 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   and reject unsafe/oversized files. Desktop revisions identify the full content,
   including manual edits. Lock leftovers fail closed; active owners are not evicted
   by age. ACP rejects obsolete per-source preference writes.
-- The project-owned `.pi/search/index.sqlite` is the canonical, shared,
-  non-disposable Pix vector database for settings and history search domains. Its
-  existing `metadata`, `documents` and `vectors` tables remain settings-only
-  (schema 2); other Pix sources use a `pix_<domain>_` table namespace, so
-  adding commit data cannot pass through settings-only schema guards.
-  The IDX code/document database is *not* migrated or modified here.
-  Native Code/Knowledge uses a separate disposable `.pi/search/files.sqlite` FTS5
-  database; it never copies, migrates or deletes IDX tables or these vectors.
-  Configured repository vectors instead use `.pi/search/file-vectors.sqlite` with isolated
-  model identities and no automatic paid-vector deletion. Short token-leased publications
-  never hold a database writer lock over provider HTTP; see
-  [decision 0066](../docs/decisions/0066-native-repository-semantic-search.md).
-  The separate writer boundary avoids local refresh waiting behind embedding batches;
-  see [decision 0065](../docs/decisions/0065-native-repository-search.md).
-  Session title vectors use `pix_session_*`, while the text-only first/final
-  excerpts use separate `pix_session_boundary_*` SQLite FTS5 tables. No
-  session message/body embeddings are created; those would need separate
-  future authorization. IDX's database remains independent.
-  The settings schema's migration remains limited to its own tables and must
-  not clear any other domain's data. Read-only configuration/status polling
-  never migrates or repairs the store.
-  The original settings-schema migration was introduced to replace a legacy
-  message-body index. Explicit sync/query activation migrates locally even without
-  semantic configuration/key: it removes old
-  message documents, their unreferenced vectors and all filter decisions, retaining
-  authored settings and their valid vectors. Session files are never changed.
-  Migration is transactional/idempotent; schema guards reject obsolete writers
-  resetting it or adding message documents while an older Desktop is still alive.
-  Transient migration contention retains a separate warning; explicit sync or
-  query activation may retry it, even with semantic search off. Status polling
-  does not retry or write. Local title results remain available, and configuration
-  changes cannot hide an unfinished migration.
-  SQLite secure_delete applies to removed rows, but this is not a forensic-erasure
-  guarantee for old snapshots/backups/sidecars. Restart is required to replace
-  already-running obsolete frontend/ACP code; it is not forced with a live draft.
+- Search uses six source-local databases under `.pi/search/`: `settings.sqlite`,
+  `sessions.sqlite`, `tasks.sqlite`, `git-commits.sqlite`, `code.sqlite` and
+  `knowledge.sqlite`. Settings owns schema-2 `metadata`, `documents` and `vectors`;
+  history sources own their respective `pix_<domain>_*` tables. Native chunks,
+  lexical indexes and compatible paid vectors coexist in each native source store.
+  Short token-leased publications never hold a database writer lock over provider
+  HTTP; see [decision 0070](../docs/decisions/0070-search-source-work-recovery.md).
+  Session title vectors use `pix_session_*`, while text-only first/final excerpts
+  use `pix_session_boundary_*` FTS5 tables in `sessions.sqlite`. No session body
+  embeddings are created.
+  Legacy stores are not read, imported, migrated or repaired. Schema-1 Settings
+  caches are rejected without mutation; explicit recovery is separate from normal
+  indexing. Read-only status/configuration polling never writes or repairs stores.
+  Obsolete running clients must be restarted separately; restart is not forced
+  while a live draft is present. Source-local indexes do not modify canonical
+  task storage, session files or Git history.
 - Settings hashes/vectors and model metadata survive restarts and reuse unchanged
   content. SQLite/in-process writer queues acquire ownership before paid settings
   batches, use bounded contention waits and do not reset/unlink the database.
@@ -477,6 +476,8 @@ the selected sources (up to 60 seconds) and returns one combined response. See
 - `acp/src/search/session-boundary-paths.ts`
 - `acp/src/search/embeddings.ts`
 - `acp/src/search/index-store.ts`
+- `acp/src/search/source-work.js`
+- `external/pi-tools-suite/src/project-search/source-work.mjs`
 - `acp/src/search/request.ts`
 - `acp/src/search/service.ts`
 - `acp/src/acp/pix-acp-agent.ts`
@@ -557,7 +558,7 @@ ACP typecheck/build/search/agent tests and schema generation/tests. Cover title
 boost, Robertson IDF, saturation, length normalization, explicit hybrid mode in
 both native domains, bounded/redacted source-failure notices, and native request cancellation.
 Also cover title deduplication/scope/renames/deletions, no transcript reads/provider calls for
-sessions, transactional cleanup/settings-vector preservation/old-writer fencing,
+sessions, obsolete-schema rejection without mutation, source-local vector preservation,
 restart/hash reuse, contention, cancellation, revocation and stale completion.
 Real macOS QA checks explicit submit, Sessions labels, settings/file/session
 activation and native-search failure isolation, task reveal, commit metadata, and close/reopen

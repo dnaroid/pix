@@ -4169,6 +4169,31 @@ test("Desktop user-message copy and undo use the selected Pi entry id without mo
 	});
 });
 
+test("Pix Desktop edit rewind uses the history-only bridge, never workspace undo", async () => {
+	const harness = createTestAdapter();
+	await connectAs(harness.adapter, "pix-desktop", async (cx) => {
+		const created = await cx.request("session/new", { cwd: "/tmp/edit-actions", mcpServers: [] }) as { sessionId: string };
+		const pi = harness.clients[0]!;
+		pi.entriesState = { entries: [
+			{ type: "message", id: "user-1", parentId: null, timestamp: "0", message: { role: "user", content: [{ type: "text", text: "original" }] } },
+			{ type: "message", id: "assistant-1", parentId: "user-1", timestamp: "1", message: { role: "assistant", content: [] } },
+		], leafId: "assistant-1" };
+		pi.getCommands = async () => [{ name: "__pix-message-rewind", source: "extension" }];
+		const originalPrompt = pi.prompt.bind(pi);
+		pi.prompt = async (message, images, streamingBehavior) => {
+			await originalPrompt(message, images, streamingBehavior);
+			assert.match(message, /^\/__pix-message-rewind /u);
+			const payload = JSON.parse(message.slice(message.indexOf(" ") + 1)) as { requestId: string; targetEntryId: string };
+			assert.equal(payload.targetEntryId, "user-1");
+			pi.emit({ type: "extension_ui_request", id: "rewind-result", method: "setWidget", widgetKey: "pix.session-state",
+				widgetLines: ["pix.workspace-undo-result", JSON.stringify({ requestId: payload.requestId, targetEntryId: payload.targetEntryId, status: "ok", editorText: "original" })] } as unknown as JsonAgentSessionEvent);
+		};
+		const result = await cx.request("pix/session/user_message_action", { sessionId: created.sessionId, entryId: "user-1", action: "rewind" });
+		assert.deepEqual(result, { status: "ok", editorText: "original" });
+		assert.equal(pi.promptCalls.length, 1);
+	});
+});
+
 test("Pix Desktop bash bridge forwards context flags even while an agent turn is running", async () => {
 	const harness = createTestAdapter();
 	const notifications: SessionNotification[] = [];

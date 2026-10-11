@@ -35,6 +35,14 @@ function assertTemplateKeysAreModeled(value: unknown, rawSchema: any, path = "$"
 }
 
 describe("pi-tools-suite config schema", () => {
+	it("models bounded additive source extensions", () => {
+		assert.equal(Value.Check(PiToolsSuiteConfigSchema, { search: { codeExtensions: [".ZIG", "c++"], knowledgeExtensions: ["org"] } }), true);
+		for (const value of [null, "gd", [1], [""], ["*.gd"], ["a/b"], ["a.b"], Array(129).fill("x")]) {
+			for (const key of ["codeExtensions", "knowledgeExtensions"]) {
+				assert.equal(Value.Check(PiToolsSuiteConfigSchema, { search: { [key]: value } }), false);
+			}
+		}
+	});
 	it("models the explicit brainstorm roster and bounded round settings", () => {
 		assert.equal(Value.Check(PiToolsSuiteConfigSchema, { brainstorm: { models: ["one/a", "two/b"], thinking: "high", timeoutSeconds: 600 } }), true);
 		for (const brainstorm of [
@@ -61,7 +69,7 @@ describe("pi-tools-suite config schema", () => {
 			embeddingProvider: "legacy", embeddingModel: "fixture/model", vectorSize: 3,
 		} } }), false);
 		const template = parse(DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC) as Record<string, unknown>;
-		assert.equal("search" in template, false);
+		assert.equal("embedding" in (template.search as Record<string, unknown>), false);
 	});
 
 	it("accepts the shipped full default template", () => {

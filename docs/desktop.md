@@ -61,7 +61,7 @@ stores.
 Code and Knowledge use native local search. Optional semantic retrieval requires
 explicit project consent/configuration in `.pi/search/semantic.json`; eligible
 chunks and queries may be sent externally using `OPENROUTER_API_KEY`. Existing
-IDX directories/configuration remain untouched and are not consulted.
+Legacy search directories/configuration are not consulted.
 
 ## Project initialization states
 

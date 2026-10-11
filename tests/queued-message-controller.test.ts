@@ -5,6 +5,21 @@ import type { AgentSession, AgentSessionRuntime } from "@earendil-works/pi-codin
 import { AppQueuedMessageController, type AppQueuedMessageControllerHost } from "../src/app/session/queued-message-controller.js";
 
 describe("AppQueuedMessageController", () => {
+	it("rejects competing submits before they can queue during reserved edit navigation", async () => {
+		const calls: string[] = [];
+		const sdkQueue = { steering: [] as string[], followUp: [] as string[] };
+		const session = fakeSession(sdkQueue, { calls });
+		const controller = new AppQueuedMessageController(createHost(session, createHostState("draft")));
+		const release = controller.reserveMessageEdit(session);
+		const message = { id: "competitor", promptText: "competing", displayText: "competing", images: [] };
+		await assert.rejects(controller.submitUserMessage(message, session), /message edit is in progress/i);
+		assert.equal(controller.totalQueuedMessageCount(), 0);
+		assert.deepEqual(sdkQueue, { steering: [], followUp: [] });
+		assert.deepEqual(calls, []);
+		release();
+		await controller.submitUserMessage(message, session);
+		assert.deepEqual(calls, ["prompt:competing"]);
+	});
 	it("retains automatic messages while a scheduled quota wait owns the session", async () => {
 		const calls: string[] = [];
 		const session = fakeSession({ steering: [], followUp: [] }, { calls });

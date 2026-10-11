@@ -327,6 +327,7 @@ type ClientCaller = {
 const ERROR_SERVER = -32000;
 const ERROR_INVALID_PARAMS = -32602;
 const WORKSPACE_UNDO_RPC_COMMAND = "__pix-workspace-undo";
+const MESSAGE_REWIND_RPC_COMMAND = "__pix-message-rewind";
 const WORKSPACE_UNDO_RESULT_CHANNEL = "pix.workspace-undo-result";
 let requestHistorySaveChain: Promise<void> = Promise.resolve();
 
@@ -1041,6 +1042,21 @@ export class PixAcpAgent {
 	): Promise<DesktopUserMessageActionResponse> {
 		if (params.action !== "copy") await this.assertBrainstormWritable(params.sessionId);
 		const session = this.requireDesktopSession(params.sessionId);
+		if (params.action === "copy") return this.performDesktopUserMessageAction(session, params);
+		if (session.activeRun || session.builtinRunning) throw new RequestError(ERROR_SERVER, "message actions are unavailable while the agent is running");
+		if (params.action === "rewind" && (session.autoUserMessages.length || session.deferredUserMessages.length)) {
+			throw new RequestError(ERROR_SERVER, "editing is unavailable with queued messages");
+		}
+		// Claim before any RPC awaits: another submission must not race navigation.
+		session.builtinRunning = true;
+		try { return await this.performDesktopUserMessageAction(session, params); }
+		finally { session.builtinRunning = false; }
+	}
+
+	private async performDesktopUserMessageAction(
+		session: AgentSessionState,
+		params: DesktopUserMessageActionRequest,
+	): Promise<DesktopUserMessageActionResponse> {
 		const messages = branchUserMessagesFromEntries(await session.pi.getEntries());
 		const selected = messages.find((message) => message.entryId === params.entryId);
 		if (!selected) {
@@ -1052,7 +1068,7 @@ export class PixAcpAgent {
 			return { status: "ok" };
 		}
 
-		if (session.activeRun || session.builtinRunning) {
+		if (session.activeRun) {
 			throw new RequestError(ERROR_SERVER, "undo changes is unavailable while the agent is running");
 		}
 		const state = await session.pi.getState();
@@ -1060,16 +1076,20 @@ export class PixAcpAgent {
 			throw new RequestError(ERROR_SERVER, "undo changes is unavailable while the session is busy");
 		}
 
+		const bridgeCommand = params.action === "rewind" ? MESSAGE_REWIND_RPC_COMMAND : WORKSPACE_UNDO_RPC_COMMAND;
+		if (params.action === "rewind" && ((state.pendingMessageCount ?? 0) > 0
+			|| session.steeringQueue.length > 0 || session.followUpQueue.length > 0)) {
+			throw new RequestError(ERROR_SERVER, "edit is unavailable while messages are queued");
+		}
 		const commands = await session.pi.getCommands();
-		if (!commands.some((command) => normalizedRuntimeCommandName(command.name) === WORKSPACE_UNDO_RPC_COMMAND)) {
+		if (!commands.some((command) => normalizedRuntimeCommandName(command.name) === bridgeCommand)) {
 			throw new RequestError(ERROR_SERVER, "workspace undo bridge is unavailable in this session");
 		}
 
 		const requestId = randomUUID();
 		session.workspaceUndoResults.delete(requestId);
-		session.builtinRunning = true;
 		try {
-			await session.pi.prompt(`/${WORKSPACE_UNDO_RPC_COMMAND} ${JSON.stringify({ requestId, targetEntryId: params.entryId })}`);
+			await session.pi.prompt(`/${bridgeCommand} ${JSON.stringify({ requestId, targetEntryId: params.entryId })}`);
 			// Extension-ui events precede the matching RPC prompt response on pi's
 			// stdout stream. Yield once as a defensive guard for injected/mock clients.
 			await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -1090,7 +1110,6 @@ export class PixAcpAgent {
 				...(result.error ? { warning: result.error } : {}),
 			};
 		} finally {
-			session.builtinRunning = false;
 			session.workspaceUndoResults.delete(requestId);
 		}
 	}
@@ -3714,6 +3733,7 @@ export class PixAcpAgent {
 					|| names.has(key)
 					|| rendererCommandName(`/${name}`)
 					|| normalizedRuntimeCommandName(name) === WORKSPACE_UNDO_RPC_COMMAND
+					|| normalizedRuntimeCommandName(name) === MESSAGE_REWIND_RPC_COMMAND
 				) continue;
 				names.add(key);
 				if (command.source === "extension") runtimeExtensionCommands.add(key);

@@ -65,7 +65,7 @@ export async function cachedProjectSemantics(root: string, query: string,
     let queryVector = options.embedQuery ? undefined : queryCache.get(cacheKey);
     if (!queryVector) {
       await requireSemanticIdentity(options, config, signal);
-      queryVector = [...await (options.embedQuery ?? embedSemanticQuery)(query, key, signal, config)];
+      queryVector = [...await withProviderSlot(signal, () => (options.embedQuery ?? embedSemanticQuery)(query, key, signal, config))];
       if (!validSearchVector(queryVector, config.dimension)) throw new Error("Invalid query vector");
       await requireSemanticIdentity(options, config, signal);
       if (!options.embedQuery) {
@@ -103,3 +103,4 @@ export async function cachedProjectSemantics(root: string, query: string,
   }
   return result;
 }
+import { withProviderSlot } from "./source-work.mjs";

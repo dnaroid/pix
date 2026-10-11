@@ -43,7 +43,7 @@ test("relocated native CLI uses only release-root dependencies without IDX or AC
   const workspace = join(directory, "workspace");
   await mkdir(engine, { recursive: true });
   await mkdir(workspace);
-  for (const name of ["cli", "engine", "scan", "store", "semantic", "vector-store", "embedding-provider"]) {
+  for (const name of ["cli", "engine", "scan", "store", "semantic", "vector-store", "embedding-provider", "source-config"]) {
     assert.ok(packedPaths.has(`external/pi-tools-suite/src/project-search/native-${name}.mjs`));
     await cp(join(suite, `src/project-search/native-${name}.mjs`), join(engine, `native-${name}.mjs`));
   }
@@ -51,6 +51,12 @@ test("relocated native CLI uses only release-root dependencies without IDX or AC
   const dependency = join(app, "node_modules/ignore");
   await cp(join(root, "node_modules/ignore"), dependency, { recursive: true });
   await cp(join(root, "node_modules/jsonc-parser"), join(app, "node_modules/jsonc-parser"), { recursive: true });
+  assert.ok(packedPaths.has("external/pi-tools-suite/src/project-search/source-extension-settings.mjs"));
+  await cp(join(suite, "src/project-search/source-extension-settings.mjs"), join(engine, "source-extension-settings.mjs"));
+  for (const name of ["source-work"]) {
+    assert.ok(packedPaths.has(`external/pi-tools-suite/src/project-search/${name}.mjs`));
+    await cp(join(suite, `src/project-search/${name}.mjs`), join(engine, `${name}.mjs`));
+  }
   const entry = join(engine, "native-cli.mjs");
   assert.equal(dirname(createRequire(entry).resolve("ignore/package.json")), dependency);
   await writeFile(join(workspace, "owner.ts"), "export const NativeReleaseProbe = 42;\n");

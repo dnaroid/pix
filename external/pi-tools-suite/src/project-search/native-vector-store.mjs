@@ -1,9 +1,9 @@
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
-import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { checkStorage, MAX_DATABASE_BYTES } from "./native-store.mjs";
 import { validVector } from "./native-embedding-provider.mjs";
+import { sourcePath } from "./source-work.mjs";
 
 const definitions = [
   "CREATE TABLE meta (singleton INTEGER PRIMARY KEY CHECK(singleton=1), version INTEGER NOT NULL, root TEXT NOT NULL)",
@@ -13,10 +13,11 @@ const definitions = [
 const normalize = sql => sql.replace(/[\s;"`\[\]]/g, "").toLowerCase();
 const MAX_VECTORS = 50000;
 
-/** Separate optional vector cache: no migration of paid history or lexical tables.
+/** Optional vectors in the current source database; no import of obsolete stores.
  * Expiring leases serialize provider work without holding SQLite locks over HTTP. */
-export async function openVectorStore(root) {
-  const filename = join(root, ".pi/search/file-vectors.sqlite");
+export async function openVectorStore(root, source = "code", signal = new AbortController().signal) {
+  signal.throwIfAborted();
+  const filename = sourcePath(root, source);
   await checkStorage(root, filename);
   try {
     const file = await open(filename, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600);
@@ -29,12 +30,12 @@ export async function openVectorStore(root) {
   try {
     db.exec("PRAGMA busy_timeout=100; BEGIN IMMEDIATE");
     try {
-      let objects = db.prepare("SELECT sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").all();
+      let objects = db.prepare("SELECT sql FROM sqlite_master WHERE name IN ('meta','vectors','leases')").all();
       if (!objects.length) {
         if (db.prepare("PRAGMA user_version").get().user_version !== 0 || db.prepare("PRAGMA application_id").get().application_id !== 0) throw new Error("Unknown vector schema");
         for (const sql of definitions) db.exec(sql);
         db.prepare("INSERT INTO meta VALUES(1,1,?)").run(root);
-        objects = db.prepare("SELECT sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").all();
+        objects = db.prepare("SELECT sql FROM sqlite_master WHERE name IN ('meta','vectors','leases')").all();
       }
       if (objects.length !== definitions.length || definitions.some(sql => !objects.some(row => normalize(row.sql || "") === normalize(sql)))) throw new Error("Unknown vector schema");
       const meta = db.prepare("SELECT * FROM meta").all();
@@ -71,9 +72,18 @@ export async function openVectorStore(root) {
           return token;
         } catch (error) { db.exec("ROLLBACK"); throw error; }
       },
-      put(identity, token, entries, dimension) {
+      renew(identity, token) {
+        const now = Date.now(), current = lease.get(identity);
+        if (current?.token !== token || current.expires <= now) throw new Error("Vector lease lost");
+        if (current.expires - now < 30000) {
+          const updated = db.prepare("UPDATE leases SET expires=? WHERE identity=? AND token=? AND expires>?").run(now + 60000, identity, token, now);
+          if (!updated.changes) throw new Error("Vector lease lost");
+        }
+      },
+      put(identity, token, entries, dimension, validate = () => {}) {
         db.exec("BEGIN IMMEDIATE");
         try {
+          validate(db);
           const current = lease.get(identity);
           if (current?.token !== token || current.expires <= Date.now()) throw new Error("Vector lease lost");
           if (db.prepare("SELECT COUNT(*) AS count FROM vectors").get().count + entries.length > MAX_VECTORS) throw new Error("Vector cache full");

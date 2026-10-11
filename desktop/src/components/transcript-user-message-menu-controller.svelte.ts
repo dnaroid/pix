@@ -9,7 +9,7 @@ import {
 } from "../lib/keyboard-navigation";
 import type { MessageItem, TranscriptDisplayItem } from "../lib/transcript";
 
-export type UserMessageAction = "copy" | "fork" | "fork-new-tab" | "undo";
+export type UserMessageAction = "copy" | "fork" | "fork-new-tab" | "edit" | "undo";
 
 interface TranscriptUserMessageMenuControllerOptions {
   readonly items: () => readonly TranscriptDisplayItem[];
@@ -22,7 +22,7 @@ interface TranscriptUserMessageMenuControllerOptions {
 }
 
 const MENU_WIDTH = 192;
-const MENU_HEIGHT = 164;
+const MENU_HEIGHT = 196;
 const MENU_GAP = 6;
 const MENU_MARGIN = 8;
 
@@ -30,6 +30,7 @@ export const userMessageMenuCommands = {
   copy: desktopCommandDefinition("message.copy"),
   fork: desktopCommandDefinition("message.fork"),
   forkNewTab: desktopCommandDefinition("message.forkNewTab"),
+  edit: desktopCommandDefinition("message.edit"),
   undo: desktopCommandDefinition("message.undo"),
 } as const;
 
@@ -73,6 +74,7 @@ export function createTranscriptUserMessageMenuController(options: TranscriptUse
       { label: userMessageMenuCommands.fork.label, disabled: mutationDisabled },
       { label: userMessageMenuCommands.forkNewTab.label, disabled: !canForkNewTab() || Boolean(activeMessage()?.localOnly) },
       { label: userMessageMenuCommands.undo.label, disabled: mutationDisabled },
+      { label: userMessageMenuCommands.edit.label, disabled: mutationDisabled },
     ];
   }
 

@@ -2,8 +2,10 @@ import path from "node:path";
 import { lstat, realpath } from "node:fs/promises";
 import { openStore, snapshot, publish, queryStore, checkStorage } from "./native-store.mjs";
 import { scanProject } from "./native-scan.mjs";
-import { searchSemantic, indexSemantic, fuseRepositoryHits } from "./native-semantic.mjs";
+import { searchSemantic, indexSemantic, fuseRepositoryHits, MAX_CHUNKS_PER_SEARCH } from "./native-semantic.mjs";
 import { repositoryEmbeddingSettings } from "./native-embedding-provider.mjs";
+import { SourceExtensionConfigurationError } from "./native-source-config.mjs";
+import { claimWork } from "./source-work.mjs";
 
 function validateRequest(request) {
   if (!request || typeof request !== "object" || Array.isArray(request)
@@ -34,7 +36,7 @@ async function canonicalRoot(root) {
 async function refreshSnapshot(store, signal) {
   signal?.throwIfAborted();
   const previous = snapshot(store);
-  const scan = await scanProject(store.root, previous, undefined, signal);
+  const scan = await scanProject(store.root, previous, undefined, signal, store.source);
   signal?.throwIfAborted();
   await checkStorage(store.root, store.filename);
   signal?.throwIfAborted();
@@ -42,25 +44,29 @@ async function refreshSnapshot(store, signal) {
   return { previous, scan, published };
 }
 
-/** Explicit bounded document-only pass; no query embedding or ranking.
+/** Explicit document-only drain; no query embedding or ranking.
  * @returns {Promise<import('./native-contract.js').NativeIndexResponse>}
  */
 export async function indexNative(root, request, dependencies = {}) {
   let store;
+  let work;
+  let success = false;
   const source = request?.source === "knowledge" ? "knowledge" : "code";
-  const signal = AbortSignal.any([dependencies.signal ?? new AbortController().signal, AbortSignal.timeout(35000)]);
+  const signal = dependencies.signal ?? new AbortController().signal;
   try {
     if (!request || typeof request !== "object" || Array.isArray(request) || request.operation !== "index"
       || !["code", "knowledge"].includes(request.source)
       || Object.keys(request).some(key => !["operation", "source"].includes(key))) throw new Error("Invalid index request");
     signal.throwIfAborted();
-    store = await openStore(await canonicalRoot(root));
+    store = await openStore(await canonicalRoot(root), source);
+    work = await claimWork(store.db, signal, { retry: true });
     const { previous, scan, published } = await refreshSnapshot(store, signal);
     const generation = previous.generation + 1;
     if (!published || store.db.prepare("SELECT generation FROM pix_native_meta WHERE singleton=1").get().generation !== generation) {
       return { source, complete: false, message: "Native snapshot freshness is unverified; retry indexing. " + scan.notices.join(" ") };
     }
-    const result = await indexSemantic(store, source, generation, { ...dependencies, signal });
+    const result = await indexSemantic(store, source, generation, { ...dependencies, signal, work });
+    success = result.status.state !== "unavailable";
     signal.throwIfAborted();
     if (store.db.prepare("SELECT generation FROM pix_native_meta WHERE singleton=1").get().generation !== generation) {
       return { source, complete: false, message: "Native snapshot changed during indexing; retry to verify current coverage. Cached embeddings are retained." };
@@ -69,23 +75,47 @@ export async function indexNative(root, request, dependencies = {}) {
     return { source, complete: verified && result.status.complete,
       ...(verified ? { indexed: result.status.indexed, total: result.status.total } : {}),
       ...(result.notices.length ? { message: result.notices.join(" ") } : {}) };
-  } catch {
+  } catch (error) {
+    if (error instanceof SourceExtensionConfigurationError) return { source, complete: false, message: error.message };
     return { source, complete: false, message: "Native indexing unavailable (invalid request, cancellation or unsafe storage); cached embeddings are retained." };
-  } finally { store?.close(); }
+  } finally { if (work) await work.release(success).catch(() => {}); store?.close(); }
 }
 
 /** Shared lexical-first engine; globally configured semantic enrichment, no SDK.
  * @returns {Promise<import('./native-contract.js').NativeSearchResponse>}
  */
 export async function searchNative(root, request, dependencies = {}) {
+  try { validateRequest(request); }
+  catch { return { hits: [], notices: ["Invalid native search request"], status: { backend: "native", complete: false, stale: true } }; }
+  if (request.sources.length === 1) return searchSource(root, request, dependencies);
+  const uploadBudget = { remaining: MAX_CHUNKS_PER_SEARCH };
+  const results = await Promise.all(request.sources.map(source => searchSource(root, { ...request, sources: [source], limit: 100 }, { ...dependencies, uploadBudget })));
+  const hits = results.flatMap(result => result.hits).sort((a, b) => b.score - a.score || a.path.localeCompare(b.path) || a.startLine - b.startLine);
+  const seen = new Set();
+  const semantic = results.map(result => result.status.semantic).filter(Boolean);
+  const combinedSemantic = semantic.length ? { ...semantic[0],
+    complete: semantic.every(status => status.complete),
+    state: semantic.some(status => status.state === "unavailable") ? "unavailable"
+      : semantic.every(status => status.state === "ready") ? "ready"
+      : semantic.every(status => status.state === "disabled") ? "disabled" : "partial",
+    indexed: semantic.reduce((n, status) => n + (status.indexed ?? 0), 0), total: semantic.reduce((n, status) => n + (status.total ?? 0), 0) } : undefined;
+  return { hits: hits.filter(hit => { if (request.dedupeFile && seen.has(hit.path)) return false; seen.add(hit.path); return true; }).slice(0, request.limit ?? 10),
+    notices: [...new Set(results.flatMap(result => result.notices))],
+    status: { ...results[0].status, ...(combinedSemantic ? { semantic: combinedSemantic } : {}), complete: results.every(result => result.status.complete), stale: results.some(result => result.status.stale),
+      scannedFiles: results.reduce((n, result) => n + (result.status.scannedFiles ?? 0), 0), updatedFiles: results.reduce((n, result) => n + (result.status.updatedFiles ?? 0), 0) } };
+}
+async function searchSource(root, request, dependencies = {}) {
   let store;
+  let work;
+  let success = false;
   const started = Date.now();
   const notices = [];
   try {
     validateRequest(request);
     request = { ...request, mode: request.mode ?? "hybrid", limit: request.limit ?? 10 };
     root = await canonicalRoot(root);
-    store = await openStore(root);
+    store = await openStore(root, request.sources[0]);
+    if (request.mode !== "lexical") work = await claimWork(store.db, dependencies.signal ?? new AbortController().signal);
     const { previous, scan, published } = await refreshSnapshot(store, dependencies.signal);
     notices.push(...scan.notices);
     let complete = !!published;
@@ -99,7 +129,7 @@ export async function searchNative(root, request, dependencies = {}) {
     if (result.capped) { complete = false; notices.push("Native query candidate limit reached; results are partial."); }
     let semantic;
     if (request.mode !== "lexical" && !stale) {
-      semantic = await searchSemantic(store, request, result.meta.generation, { ...dependencies,
+      semantic = await searchSemantic(store, request, result.meta.generation, { ...dependencies, work,
         signal: AbortSignal.any([dependencies.signal ?? new AbortController().signal, AbortSignal.timeout(Math.max(1, 35000 - (Date.now() - started)))]) });
       notices.push(...semantic.notices);
       if (semantic.status.enabled || request.mode === "semantic") complete &&= semantic.status.complete;
@@ -125,9 +155,11 @@ export async function searchNative(root, request, dependencies = {}) {
       notices.push("Native output limit reached; results are partial.");
       while (response.hits.length && Buffer.byteLength(JSON.stringify(response)) > 480 * 1024) response.hits.pop();
     }
+    success = semantic?.status.state !== "unavailable";
     return response;
-  } catch {
+  } catch (error) {
+    if (error instanceof SourceExtensionConfigurationError) notices.push(error.message);
     return { hits: [], notices: [...notices, "Native search unavailable (invalid request, unsafe storage or scan/query failure); results are incomplete."],
       status: { backend: "native", complete: false, stale: true } };
-  } finally { store?.close(); }
+  } finally { if (work) await work.release(success).catch(() => {}); store?.close(); }
 }

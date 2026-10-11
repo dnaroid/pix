@@ -7,6 +7,7 @@ import {
 } from "../../../external/pi-tools-suite/src/dcp/defaults.js";
 import { DEFAULT_DESKTOP_CONFIG_JSONC } from "./default-desktop-config";
 import { frontierBadges } from "./frontier-model-badges";
+import { resolveSourceExtensions } from "../../../external/pi-tools-suite/src/project-search/source-extension-settings.mjs";
 
 export type SettingsConfigKind = "desktop" | "pi-tools-suite";
 
@@ -221,7 +222,12 @@ export function settingsSourceIssues(source: string, schema: SettingsSchema): st
   const parsed = parse(source, errors, { allowTrailingComma: true, disallowComments: false }) as unknown;
   if (errors.length > 0) return errors.map((error) => `JSONC parse error at offset ${error.offset}`);
   if (!isRecord(parsed)) return ["Config root must be a JSON object"];
-  return validateSettingsValue(parsed, schema, "$", 20);
+  const issues = validateSettingsValue(parsed, schema, "$", 20);
+  if (schema.properties?.search?.properties?.codeExtensions) {
+    try { resolveSourceExtensions(isRecord(parsed.search) ? parsed.search : {}); }
+    catch (error) { issues.push(error instanceof Error ? error.message : String(error)); }
+  }
+  return issues;
 }
 
 function validateSettingsValue(

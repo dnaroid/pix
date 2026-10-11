@@ -49,7 +49,7 @@ async function fileEvidence(root: string, source: RagSource, signal: AbortSignal
 
 async function sessionEvidence(root: string, id: string, signal: AbortSignal): Promise<string | undefined> {
   await verifySessionBoundaryIndexPath(root);
-  const path = canonicalSearchIndexPath(root);
+  const path = canonicalSearchIndexPath(root, "sessions");
   const info = await stat(path).catch(() => undefined);
   if (!info?.isFile()) return undefined;
   signal.throwIfAborted();

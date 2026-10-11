@@ -16,7 +16,7 @@ Show live execution Plan, Subagents, and brainstorm activity for the active sess
 
 ## Scope
 
-- Keep session activity out of the workspace Activity Bar; Project, Tasks, Source Control, Registry, Package Scripts, Search indexes, and Settings remain workspace/tool destinations. The Legacy IDX panel remains accessible from Search indexes.
+- Keep session activity out of the workspace Activity Bar; Project, Tasks, Source Control, Registry, Package Scripts, Search indexes, and Settings remain workspace/tool destinations.
 - Give every visible session tab a compact semantic status icon derived from that session's own snapshots, prompt-running state, input attention, and unseen successful completion.
 - Keep **Session activity** at the far-right edge of the status bar only when it conveys live Plan/Subagent activity. A compact summary shows active agents' configured icons and completed/total Plan progress; each activity popup is independently accessible from the status bar.
 - Do not mount or persist a Session inspector. HUD availability depends only on active-session activity; no prior pane preference can hide it.

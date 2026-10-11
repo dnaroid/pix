@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
 import { DesktopSearchService } from "../src/search/service.js";
+import { SearchIndexStore } from "../src/search/index-store.js";
 import { SearchPreferences, type SearchAuth, type SemanticEmbeddingConfig } from "../src/search/config.js";
 import { embedOpenRouter, type Embedder } from "../src/search/embeddings.js";
 import type { SessionMapRecord } from "../src/acp/session-map.js";
@@ -42,7 +43,7 @@ async function fixture(t: TestContext) {
     return input.map(() => Array.from({ length: config!.dimension }, (_, i) => i === 0 ? 1 : 0));
   };
   const services: DesktopSearchService[] = [];
-  const make = (options: ConstructorParameters<typeof DesktopSearchService>[0] = {}) => {
+  const make = (options: Partial<ConstructorParameters<typeof DesktopSearchService>[0]> = {}) => {
     const service = new DesktopSearchService({ preferences, auth: noAuth, embed, discover: async () => [record], ...options });
     services.push(service); return service;
   };
@@ -50,7 +51,8 @@ async function fixture(t: TestContext) {
     ({ cwd, query, types, settings: [setting], limit: 20 });
   const idle = (service: DesktopSearchService) => until(async () => !(await service.config({ cwd })).indexing);
   const rows = (table: string) => {
-    const db = new DatabaseSync(join(cwd, ".pi/search/index.sqlite"), { readOnly: true });
+    const source = table.startsWith("pix_session_") ? "sessions" : table.startsWith("pix_task_") ? "tasks" : "settings";
+    const db = new DatabaseSync(join(cwd, `.pi/search/${source}.sqlite`), { readOnly: true });
     try { return db.prepare(`SELECT * FROM ${table}`).all(); } finally { db.close(); }
   };
   t.after(async () => { await Promise.all(services.map(service => service.dispose())); await rm(cwd, { recursive: true, force: true }); });
@@ -106,6 +108,18 @@ test("ACP accepts only suite search.embedding; suite enabled:false and project/l
   }`);
   const status = await f.make().config({ cwd: f.cwd });
   assert.equal(status.enabled, true, "the explicitly configured global embedding authorizes independently of unrelated suite switches");
+});
+
+test("a settings cache read failure does not discard the healthy session query vector", async t => {
+  const f = await fixture(t); await f.configure();
+  const initial = f.make();
+  await initial.query(f.request()); await f.idle(initial);
+  await initial.dispose();
+  const store = new SearchIndexStore();
+  store.read = async () => { throw new Error("settings fixture unavailable"); };
+  const service = f.make({ store });
+  const result = await service.query(f.request("unrelated semantic meaning"));
+  assert.ok(result.results.some(hit => hit.kind === "sessions" && hit.semantic));
 });
 
 test("identity changes invalidate query reuse and retain incompatible purchased settings/session vectors", async t => {

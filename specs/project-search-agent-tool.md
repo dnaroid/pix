@@ -12,8 +12,8 @@ through a single bounded `project_search` tool. Use the same project data
 sources and project-owned search-cache tables as Desktop Universal Search,
 without duplicating a persistent index or invoking a second answer LLM/Jev.
 Authoritative project task/session/Git state remains read-only; explicit
-semantic searches may update `.pi/search/index.sqlite` under explicit global provider configuration.
-Native Code/Knowledge uses a separate disposable local `files.sqlite` cache;
+semantic searches may update source-local SQLite stores under explicit global provider configuration.
+Native Code/Knowledge uses disposable `.pi/search/code.sqlite` and `.pi/search/knowledge.sqlite` stores;
 see [native repository search](native-repository-search.md) and [0065](../docs/decisions/0065-native-repository-search.md).
 
 ## Behavior
@@ -62,7 +62,7 @@ see [native repository search](native-repository-search.md) and [0065](../docs/d
   `tasks:<id>` identities.
 - **Incremental semantics for Tasks and saved Session names**: On an explicit
   `project_search` in `hybrid` or `semantic` mode reuses existing vectors in
-  the project-owned `.pi/search/index.sqlite` under
+  the project-owned source-local history databases under
   `pix_task_*` and `pix_session_*`, using the global
   `~/.config/pi/pi-tools-suite.jsonc` `search.embedding` configuration. These use the
   same provider identity and vectors as Desktop Global Search, without
@@ -98,7 +98,7 @@ see [native repository search](native-repository-search.md) and [0065](../docs/d
   rolls back the current batch. A missing cache is initialized only by an
   active task synchronization or an explicitly submitted session search with valid configuration.
   Index identity mismatches fail closed without
-  deleting previously paid vectors. No implicit IDX setup, user-config edits,
+  deleting previously paid vectors. No implicit external-backend setup, user-config edits,
   shared-credential writes or full-transcript indexing occur.
   `indexMode:"lexical"` never triggers semantic
   provider calls or indexing. The
@@ -123,14 +123,14 @@ see [native repository search](native-repository-search.md) and [0065](../docs/d
   `HEAD` and embedding configuration are rechecked before committing paid
   batches and before publishing matches. Rewritten/unreachable commits are
   excluded from the current results. Missing config/key/provider leaves
-  local Git matches intact. This does not create or migrate IDX code indexes.
+  local Git matches intact. This does not create or migrate legacy code indexes.
 - Code and Knowledge default to the shared [native lexical/semantic backend](native-repository-search.md),
-  without IDX or credentials, incrementally updating `.pi/search/files.sqlite`.
+  without credentials, incrementally updating the source-local native search stores.
   Results include safe project-relative paths, inclusive line ranges and bounded excerpts.
-  No IDX setup, fallback, provider migration or IDX indexing is allowed. Native `hybrid`/`semantic`
+  No external search setup, fallback, or provider migration is allowed. Native `hybrid`/`semantic`
   may embed scoped chunks and queries only when `~/.config/pi/pi-tools-suite.jsonc`
   contains a valid `search.embedding` object, using the shared provider configuration and
-  `.pi/search/file-vectors.sqlite`.
+  source-local Code/Knowledge stores.
   Up to 128 new chunks per search are indexed; incomplete coverage is reported and later
   searches resume. Provider failures retain local results with a notice. `lexical` makes
   no embedding calls. Symbol ranking is not supported.
@@ -140,8 +140,7 @@ see [native repository search](native-repository-search.md) and [0065](../docs/d
   Desktop's native Settings Search editor saves/removes the same file without ACP.
   Legacy `.pi/search/semantic.json` and Desktop semantic booleans are ignored; credentials
   and caches alone never activate semantics. OpenRouter credentials use
-  `OPENROUTER_API_KEY`, then shared Pi auth storage; Ollama requires no key. No IDX
-  configuration or credential file is read. `pathPrefix` is a safe project-relative
+  `OPENROUTER_API_KEY`, then shared Pi auth storage; Ollama requires no key. `pathPrefix` is a safe project-relative
   directory/file scope.
   `maxFiles` (1–50) limits candidates per domain,
   defaulting to three with no inline content or one when `includeContent`
@@ -187,11 +186,11 @@ see [native repository search](native-repository-search.md) and [0065](../docs/d
 - Global semantic configuration applies across projects and sources (including eligible
   code/document chunks, paths/headings and queries) in Desktop/TUI/ACP and ordinary Pi.
   Removing/changing it suppresses stale work; incompatible paid vectors remain local-only.
-  History stores remain separately owned; no IDX data/settings are migrated.
+  History stores remain separately owned; legacy data/settings are not migrated.
 - No new full-transcript index, historical secret index or Git patch index is
   maintained. The tool does not read attachments, execute repository code,
-  read or change Git config, or create IDX project setup files. A configured
-  semantic search may create the project-owned `.pi/search/index.sqlite`
+  read or change Git config, or create external search setup files. A configured
+  semantic search may create the corresponding source-local database
   and its namespace tables, but never changes `.pi/tasks.sqlite`.
 - Input schemas bound result counts, paths and request size. Git subprocesses
   run without a shell and without inherited `GIT_*` overrides; external

@@ -3,16 +3,16 @@
 - Status: superseded
 - Recorded: 2026-10-10
 - Decided: 2026-10-10
-- Owner / approval evidence: implementation decision within the user's explicit mandate to deliver an autonomous native lexical-first vertical slice while retaining IDX fallback; not approval of the earlier handoff architecture.
+- Owner / approval evidence: implementation decision within the user's explicit mandate to deliver an autonomous native lexical-first vertical slice; not approval of the earlier handoff architecture. Historical fallback clauses below were later removed.
 - Governing spec: [Native repository search](../../specs/native-repository-search.md)
-- Replaces / replaced by: [0066](0066-native-repository-semantic-search.md) adds opt-in native semantics while retaining the lexical storage/process boundary. Originally narrowed the IDX prerequisite of [0060](0060-subagent-read-only-repo-tools.md) for `project_search` only, not `repo_*`.
+- Replaces / replaced by: [0066](0066-native-repository-semantic-search.md) adds opt-in native semantics while retaining the lexical storage/process boundary. This decision originally narrowed the external search prerequisite of [0060](0060-subagent-read-only-repo-tools.md) for `project_search` only, not `repo_*`.
 
 ## Context
 
-Desktop and agent Code/Knowledge search previously depended on separate IDX adapters.
-The handoff proposed `.pi/search/index.sqlite` as a likely shared native index. The
-first slice must work without IDX, API keys or an active Desktop chat session, preserve
-existing vectors and indexes, and avoid copying IDX's AST/semantic/knowledge subsystem.
+Desktop and agent Code/Knowledge search previously depended on separate external
+adapters. The handoff proposed `.pi/search/index.sqlite` as a likely shared native index.
+The first slice must work without API keys or an active Desktop chat session, preserve
+existing vectors and indexes, and avoid copying unrelated search capabilities.
 
 ## Observations and sources
 
@@ -24,7 +24,7 @@ existing vectors and indexes, and avoid copying IDX's AST/semantic/knowledge sub
 - `desktop/src-tauri/src/backend_runtime.rs` resolves the relocated tools-suite extension
   in both development and packaged runtimes, providing a session-independent process boundary.
 - Independent repository checks confirmed that commit embedding configuration, repo context,
-  AST/dependency views and knowledge dirty/acknowledge are separate remaining IDX capabilities.
+  AST/dependency views and knowledge dirty/acknowledge were outside the first slice.
 - Assumption: bounded lexical retrieval is useful without semantic/AST parity. Its quality and
   large-repository limits must be measured, not inferred from FTS5 availability.
 
@@ -35,13 +35,13 @@ an owned child process; Desktop invokes the same packaged entry through a small 
 transport, independent of ACP sessions. Parsing/hashing/SQLite never run on the UI thread.
 
 Store only local file chunks/FTS5 metadata in `.pi/search/files.sqlite`, a disposable,
-strictly owned schema. Leave `index.sqlite`, `.indexer-cli` and provider settings untouched.
+strictly owned schema. Leave `index.sqlite` and provider settings untouched.
 Refresh on explicit search, using short atomic generation-checked publications. Retain the
 prior complete snapshot on failed scans. Do not introduce background watchers or daemons.
 
-Native lexical search is the default. An explicit `indexBackend=idx` preserves IDX
-semantic/AST access. Native unavailability may fall back to an existing read-only lexical
-IDX snapshot, never implicit setup, paid embeddings or provider migration.
+Native lexical search is the default. [Later integration-removal work removed the
+alternative-backend fallback clauses from this historical decision; they do not describe
+current behavior.]
 
 ## Alternatives
 
@@ -50,8 +50,9 @@ IDX snapshot, never implicit setup, paid embeddings or provider migration.
 - Put retrieval in ACP: reuses Node, but would require a new headless service lifecycle or
   couple Universal Search to an active session. A bounded standalone process is simpler here.
 - Separate Rust and TypeScript engines: duplicates ranking, chunking, safety and schema rules.
-- Copy IDX or immediately remove it: much larger migration and loses unverified structural,
-  semantic and knowledge-review capabilities. Retain those until measured replacements exist.
+- Immediately remove the alternative backend: at the time, this was considered a larger
+  migration that could lose unverified structural, semantic and knowledge-review capabilities.
+  [This historical alternative was later superseded; it is not current capability guidance.]
 
 ## Consequences
 

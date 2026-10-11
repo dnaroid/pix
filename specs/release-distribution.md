@@ -263,7 +263,7 @@ The same resource root contains the Desktop first-run bootstrap helper. The
 checksum-verified Node archive contributes both the Node executable and its npm
 package; npm stays inside pix-runtime/runtime for explicit app-managed tool
 installation and is not exposed as a global prerequisite. See
-desktop-first-run-bootstrap.md for credential migration and managed IDX rules.
+desktop-first-run-bootstrap.md for credential migration and managed tool-installation rules.
 
 Without this feature, existing development/watch workflows retain source paths
 and explicit `PIX_ACP_*` overrides. The base Tauri config stays unbundled for

@@ -5,7 +5,7 @@ import { canonicalSearchIndexPath } from "./canonical-index.js";
 /** Never write private session excerpts through redirected search directories/db files. */
 export async function verifySessionBoundaryIndexPath(cwd: string): Promise<void> {
   const root = resolve(cwd);
-  const file = canonicalSearchIndexPath(root);
+  const file = canonicalSearchIndexPath(root, "sessions");
   for (const [path, directory] of [
     [join(root, ".pi"), true],
     [join(root, ".pi", "search"), true],

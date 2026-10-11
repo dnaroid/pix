@@ -15,6 +15,7 @@ import {
 
 export { WORKSPACE_MUTATION_ENTRY_TYPE } from "../../app/workspace/workspace-undo.js";
 export const WORKSPACE_UNDO_RPC_COMMAND = "__pix-workspace-undo";
+export const MESSAGE_REWIND_RPC_COMMAND = "__pix-message-rewind";
 export const WORKSPACE_UNDO_RESULT_CHANNEL = "pix.workspace-undo-result";
 export const WORKSPACE_UNDO_RPC_ENV = "PIX_ACP_WORKSPACE_UNDO_BRIDGE";
 
@@ -134,6 +135,36 @@ export default function workspaceUndoBridge(pi: ExtensionAPI): void {
 				emitResult(ctx, {
 					requestId: request.requestId,
 					status: "error",
+					error: error instanceof Error ? error.message : String(error),
+				});
+			}
+		},
+	});
+	pi.registerCommand(MESSAGE_REWIND_RPC_COMMAND, {
+		description: "Internal Pix message rewind (without workspace rollback)",
+		handler: async (args, ctx) => {
+			const request = parseWorkspaceUndoBridgeRequest(args);
+			if (!request) return;
+			try {
+				const target = ctx.sessionManager.getBranch().find((entry) => entry.id === request.targetEntryId);
+				if (!target || target.type !== "message" || target.message.role !== "user") {
+					throw new Error("This user message is no longer on the active branch.");
+				}
+				if (ctx.sessionManager.getLeafId() === target.id) {
+					throw new Error("This message has no response yet. Wait for the response before editing it.");
+				}
+				const navigation = await ctx.navigateTree(target.id);
+				if (navigation.cancelled) {
+					emitResult(ctx, { requestId: request.requestId, status: "cancelled" });
+					return;
+				}
+				if (ctx.sessionManager.getLeafId() !== target.parentId) {
+					throw new Error("The conversation did not rewind to the selected message.");
+				}
+				emitResult(ctx, { requestId: request.requestId, status: "ok" });
+			} catch (error) {
+				emitResult(ctx, {
+					requestId: request.requestId, status: "error",
 					error: error instanceof Error ? error.message : String(error),
 				});
 			}

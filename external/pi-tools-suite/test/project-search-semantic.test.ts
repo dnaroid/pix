@@ -36,9 +36,11 @@ function fixture() {
   const auth = path.join(root, "auth.json");
   const mapPath = path.join(root, "acp-sessions.json");
   writeFileSync(auth, JSON.stringify({ openrouter: { type: "api_key", key: "test-key-not-networked" } }));
-  const indexPath = path.join(root, ".pi/search/index.sqlite");
+  const indexPath = path.join(root, ".pi/search/tasks.sqlite");
+  const sessionsPath = path.join(root, ".pi/search/sessions.sqlite");
+  const commitsPath = path.join(root, ".pi/search/git-commits.sqlite");
   return {
-    root, prefs, auth, mapPath, indexPath,
+    root, prefs, auth, mapPath, indexPath, sessionsPath, commitsPath,
     config: undefined as CommitEmbeddingConfig | undefined,
     configure(enabled = true) {
       this.config = enabled ? { ...historyConfig } : undefined;
@@ -134,11 +136,13 @@ test("global plain JSON enables Tasks, Sessions and Commits with the Knowledge m
     "D: Original mechanics\nAuthor\nOriginal spells", "Q: abstract concept", "Q: abstract concept",
   ]);
   const db = new Database(f.indexPath, { readonly: true });
+  const sessionDb = new Database(f.sessionsPath, { readonly: true });
+  const commitDb = new Database(f.commitsPath, { readonly: true });
   try {
     expect(db.query("SELECT length(vector) AS bytes FROM pix_task_vectors").get()?.bytes).toBe(24);
-    expect(db.query("SELECT length(vector) AS bytes FROM pix_session_vectors").get()?.bytes).toBe(24);
-    expect(db.query("SELECT vector FROM pix_commit_vectors").get()?.vector).toBe("[1,0,0,0,0,0]");
-  } finally { db.close(); }
+    expect(sessionDb.query("SELECT length(vector) AS bytes FROM pix_session_vectors").get()?.bytes).toBe(24);
+    expect(commitDb.query("SELECT vector FROM pix_commit_vectors").get()?.vector).toBe("[1,0,0,0,0,0]");
+  } finally { db.close(); sessionDb.close(); commitDb.close(); }
   expect(readFileSync(projectConfig, "utf8")).toBe(legacy);
 });
 
@@ -197,17 +201,19 @@ const queryVector = (index: number) => Array.from({ length: SEARCH_VECTOR_DIMENS
 function savedVectors(f: ReturnType<typeof fixture>, tasks: { id: string; title: string; description?: string; vectorIndex: number }[],
   sessions: { acpId: string; title: string; vectorIndex: number }[] = []) {
   const db = new Database(f.indexPath, { create: true });
+  const sessionDb = new Database(f.sessionsPath, { create: true });
   try {
     db.exec(`PRAGMA journal_mode=WAL;
       CREATE TABLE IF NOT EXISTS pix_task_index_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS pix_task_documents(task_id TEXT PRIMARY KEY,content_hash TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS pix_task_vectors(content_hash TEXT PRIMARY KEY,vector BLOB NOT NULL);
+      CREATE TABLE IF NOT EXISTS pix_task_vectors(content_hash TEXT PRIMARY KEY,vector BLOB NOT NULL);`);
+    sessionDb.exec(`PRAGMA journal_mode=WAL;
       CREATE TABLE IF NOT EXISTS pix_session_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS pix_session_titles(session_id TEXT PRIMARY KEY,title TEXT NOT NULL,title_hash TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS pix_session_vectors(title_hash TEXT PRIMARY KEY,vector BLOB NOT NULL);`);
     for (const prefix of ["pix_task_index_meta", "pix_session_meta"]) {
       for (const [key, value] of [["identity", commitIdentity(f.config ?? historyConfig)], ["model", SEARCH_VECTOR_MODEL], ["dimensions", String(SEARCH_VECTOR_DIMENSIONS)], ["encoding", "float32le"]]) {
-        db.prepare(`INSERT OR REPLACE INTO ${prefix}(key,value) VALUES(?,?)`).run(key, value);
+        (prefix === "pix_session_meta" ? sessionDb : db).prepare(`INSERT OR REPLACE INTO ${prefix}(key,value) VALUES(?,?)`).run(key, value);
       }
     }
     for (const task of tasks) {
@@ -217,10 +223,10 @@ function savedVectors(f: ReturnType<typeof fixture>, tasks: { id: string; title:
     }
     for (const session of sessions) {
       const hash = createHash("sha256").update(session.title).digest("hex");
-      db.prepare("INSERT OR REPLACE INTO pix_session_titles VALUES(?,?,?)").run(session.acpId, session.title, hash);
-      db.prepare("INSERT OR REPLACE INTO pix_session_vectors VALUES(?,?)").run(hash, vector(session.vectorIndex));
+      sessionDb.prepare("INSERT OR REPLACE INTO pix_session_titles VALUES(?,?,?)").run(session.acpId, session.title, hash);
+      sessionDb.prepare("INSERT OR REPLACE INTO pix_session_vectors VALUES(?,?)").run(hash, vector(session.vectorIndex));
     }
-  } finally { db.close(); }
+  } finally { db.close(); sessionDb.close(); }
 }
 
 function taskDb(root: string, rows: { id: string; title: string; description?: string }[]) {
@@ -370,13 +376,13 @@ describe("project_search shared semantic cache", () => {
       ] }));
       f.configure();
       savedVectors(f, [task], [{ acpId: "acp", title: name, vectorIndex: 0 }]);
-      const edit = new Database(f.indexPath);
-      try {
-        for (const table of ["pix_task_index_meta", "pix_session_meta"]) {
+      for (const [filename, table] of [[f.indexPath, "pix_task_index_meta"], [f.sessionsPath, "pix_session_meta"]]) {
+        const edit = new Database(filename);
+        try {
           if (mode === "legacy") edit.exec(`DELETE FROM ${table} WHERE key='identity'`);
           if (mode === "unidentified") edit.exec(`DELETE FROM ${table}`);
-        }
-      } finally { edit.close(); }
+        } finally { edit.close(); }
+      }
       if (mode === "different") f.config = { ...historyConfig, documentPrefix: "changed: " };
       const deps = services(f, { listSessions: async () => [session], readSession: async () => ({ firstText: "Background", finalText: "Outcome" }) });
       const result = await searchProject(f.root, { query: "abstract concept", sources: ["tasks", "sessions"] }, deps);
@@ -385,16 +391,17 @@ describe("project_search shared semantic cache", () => {
       expect(deps.calls).toEqual([]);
       expect(deps.documents).toEqual([]);
       const db = new Database(f.indexPath, { readonly: true });
+      const sessionDb = new Database(f.sessionsPath, { readonly: true });
       try {
         expect(db.query("SELECT content_hash,hex(vector) AS vector FROM pix_task_vectors").all()).toEqual([
           { content_hash: taskSemanticHash(task), vector: vector(0).toString("hex").toUpperCase() },
         ]);
-        expect(db.query("SELECT title_hash,hex(vector) AS vector FROM pix_session_vectors").all()).toEqual([
+        expect(sessionDb.query("SELECT title_hash,hex(vector) AS vector FROM pix_session_vectors").all()).toEqual([
           { title_hash: createHash("sha256").update(name).digest("hex"), vector: vector(0).toString("hex").toUpperCase() },
         ]);
         expect(db.query("SELECT COUNT(*) AS n FROM pix_task_documents").get()?.n).toBe(1);
-        expect(db.query("SELECT COUNT(*) AS n FROM pix_session_titles").get()?.n).toBe(1);
-      } finally { db.close(); }
+        expect(sessionDb.query("SELECT COUNT(*) AS n FROM pix_session_titles").get()?.n).toBe(1);
+      } finally { db.close(); sessionDb.close(); }
     }
   });
 
@@ -431,12 +438,13 @@ describe("project_search shared semantic cache", () => {
       expect(result.notices.length).toBeGreaterThan(0);
       expect(deps.calls).toEqual([]);
       const db = new Database(f.indexPath, { readonly: true });
+      const sessionDb = new Database(f.sessionsPath, { readonly: true });
       try {
         expect(db.query("SELECT COUNT(*) AS n FROM pix_task_vectors").get()?.n).toBe(1);
-        expect(db.query("SELECT COUNT(*) AS n FROM pix_session_vectors").get()?.n).toBe(1);
+        expect(sessionDb.query("SELECT COUNT(*) AS n FROM pix_session_vectors").get()?.n).toBe(1);
         expect(db.query("SELECT task_id FROM pix_task_documents").all()).toEqual([{ task_id: "old" }]);
-        expect(db.query("SELECT session_id FROM pix_session_titles").all()).toEqual([{ session_id: "acp-old" }]);
-      } finally { db.close(); }
+        expect(sessionDb.query("SELECT session_id FROM pix_session_titles").all()).toEqual([{ session_id: "acp-old" }]);
+      } finally { db.close(); sessionDb.close(); }
     }
   });
 
@@ -480,10 +488,11 @@ describe("project_search shared semantic cache", () => {
       release();
       expect(await failure).toMatchObject({ message: "cancelled upload" });
       const db = new Database(f.indexPath, { readonly: true });
+      const sessionDb = new Database(f.sessionsPath, { readonly: true });
       try {
         expect(db.query("SELECT COUNT(*) AS n FROM pix_task_vectors").get()?.n).toBe(1);
-        expect(db.query("SELECT COUNT(*) AS n FROM pix_session_vectors").get()?.n).toBe(1);
-      } finally { db.close(); }
+        expect(sessionDb.query("SELECT COUNT(*) AS n FROM pix_session_vectors").get()?.n).toBe(1);
+      } finally { db.close(); sessionDb.close(); }
       deps.semantic!.embedTasks = async texts => texts.map(() => queryVector(0));
       if (source === "tasks") await syncSavedTaskVectors(f.root, "fake-key", deps.semantic!, new AbortController().signal, historyConfig);
       const retry = await cachedProjectSemantics(f.root, "abstract concept", candidates, new AbortController().signal, deps.semantic);
@@ -772,7 +781,7 @@ describe("project_search shared semantic cache", () => {
     const result = await searchProject(f.root, { query: "conceptual redesign", sources: ["tasks"] }, deps);
     expect(result.hits).toEqual([]);
     expect(deps.calls).toEqual([]);
-    expect(result.notices.join(" ")).toContain("local project results remain available");
+    expect(result.notices.join(" ")).toContain("local search was used");
   });
 
   test("actual embedding transport submits only a query and checks the configured response model", async () => {
@@ -956,7 +965,7 @@ describe("project_search shared semantic cache", () => {
     let result = await searchProject(f.root, { query: "conceptual redesign", sources: ["sessions"] }, deps);
     expect(result.hits.map(hit => hit.sessionId)).toEqual(["native"]);
     expect(deps.documents).toEqual([name]);
-    const index = new Database(f.indexPath, { readonly: true });
+    const index = new Database(f.sessionsPath, { readonly: true });
     try {
       expect(index.query("SELECT session_id,title FROM pix_session_titles").all()).toEqual([{ session_id: "acp", title: name }]);
     } finally { index.close(); }
@@ -972,7 +981,7 @@ describe("project_search shared semantic cache", () => {
     result = await searchProject(f.root, { query: "conceptual redesign", sources: ["sessions"] }, deps);
     expect(result.hits.map(hit => hit.sessionId)).toEqual(["native"]);
     expect(deps.documents).toEqual([name, revisedName]);
-    const again = new Database(f.indexPath, { readonly: true });
+    const again = new Database(f.sessionsPath, { readonly: true });
     try {
       expect(again.query("SELECT COUNT(*) AS n FROM pix_session_vectors").get()?.n).toBe(2);
       expect(again.query("SELECT title FROM pix_session_titles WHERE session_id='acp'").get()?.title).toBe(revisedName);
@@ -1022,7 +1031,7 @@ describe("project_search shared semantic cache", () => {
       `search_document: ${commit.title}\nProject author\n${commit.message}`,
       "search_query: conceptual redesign",
     ]);
-    const db = new Database(f.indexPath, { readonly: true });
+    const db = new Database(f.commitsPath, { readonly: true });
     try {
       expect(db.query("SELECT value FROM pix_commit_meta WHERE key='identity'").get()?.value).toBe(commitIdentity(commitConfig));
       expect(db.query("SELECT COUNT(*) AS n FROM pix_commit_vectors").get()?.n).toBe(1);
@@ -1075,7 +1084,7 @@ describe("project_search shared semantic cache", () => {
       const result = await pending;
       expect(result.hits).toEqual([]);
       if (moment === "document") {
-        const db = new Database(f.indexPath, { readonly: true });
+        const db = new Database(f.commitsPath, { readonly: true });
         try {
           const exists = db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='pix_commit_vectors'").get();
           if (exists) expect(db.query("SELECT COUNT(*) AS n FROM pix_commit_vectors").get()?.n).toBe(0);
@@ -1113,7 +1122,7 @@ describe("project_search shared semantic cache", () => {
       const next = { hash: commitHash(602), title: "New work", message: "Immutable research" };
       const git = gitHarness(f, [old]);
       await searchProject(f.root, { query: "abstract concept", sources: ["commits"] }, git.deps);
-      const read = new Database(f.indexPath, { readonly: true });
+      const read = new Database(f.commitsPath, { readonly: true });
       let vectors: unknown[];
       try { vectors = read.query("SELECT hash,vector FROM pix_commit_vectors").all(); }
       finally { read.close(); }
@@ -1133,7 +1142,7 @@ describe("project_search shared semantic cache", () => {
       expect(result.hits).toEqual([]);
       expect(result.notices.length).toBeGreaterThan(0);
       expect(git.embedded).toHaveLength(moment === "before" ? 0 : 1);
-      const db = new Database(f.indexPath, { readonly: true });
+      const db = new Database(f.commitsPath, { readonly: true });
       try {
         expect(db.query("SELECT hash,vector FROM pix_commit_vectors").all()).toEqual(vectors!);
         expect(db.query("SELECT hash FROM pix_commit_documents").all()).toEqual([{ hash: old.hash }]);
@@ -1146,7 +1155,7 @@ describe("project_search shared semantic cache", () => {
       const f = fixture();
       const git = gitHarness(f, [{ hash: commitHash(701), title: "Original work", message: "Immutable notes" }]);
       await searchProject(f.root, { query: "abstract concept", sources: ["commits"] }, git.deps);
-      const edit = new Database(f.indexPath);
+      const edit = new Database(f.commitsPath);
       let vectors: unknown[];
       try {
         if (change === "missing") edit.exec("DELETE FROM pix_commit_meta");
@@ -1159,7 +1168,7 @@ describe("project_search shared semantic cache", () => {
       expect(result.hits).toEqual([]);
       expect(result.notices.join(" ")).toContain("indexing unavailable");
       expect(git.embedded).toEqual([]);
-      const db = new Database(f.indexPath, { readonly: true });
+      const db = new Database(f.commitsPath, { readonly: true });
       try { expect(db.query("SELECT hash,vector FROM pix_commit_vectors").all()).toEqual(vectors!); }
       finally { db.close(); }
     }
@@ -1173,7 +1182,7 @@ describe("project_search shared semantic cache", () => {
       const signal = new AbortController().signal;
       const services = { loadConfig: async () => commitConfig, embed: async (inputs: readonly string[]) => inputs.map(() => queryVector(0)) };
       await searchSemanticCommits(f.root, [old], "abstract concept", async () => old.hash, signal, services);
-      const read = new Database(f.indexPath, { readonly: true });
+      const read = new Database(f.commitsPath, { readonly: true });
       let paid: unknown[];
       try { paid = read.query("SELECT hash,vector FROM pix_commit_vectors").all(); }
       finally { read.close(); }
@@ -1196,7 +1205,7 @@ describe("project_search shared semantic cache", () => {
       expect(result.hits).toEqual([]);
       expect(documentUploaded).toBe(moment === "after-document");
       expect(queryUploaded).toBe(moment === "after-query");
-      const db = new Database(f.indexPath, { readonly: true });
+      const db = new Database(f.commitsPath, { readonly: true });
       try { expect(db.query("SELECT hash,vector FROM pix_commit_vectors").all()).toEqual(paid!); }
       finally { db.close(); }
     }

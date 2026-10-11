@@ -20,7 +20,7 @@ export function observeSearchIndexEvents(history: SearchIndexHistory, workspace:
           background.delete(source);
           add(source, "info", "Manual indexing started");
         }
-        else if (before?.running) {
+        else if (before?.running && !after?.running) {
           if (!after || after.cancelled) add(source, "warning", "Manual indexing stopped; saved batches retained");
           else if (after.error) add(source, "error", "Manual indexing failed; saved batches retained");
           else if (after.result) {

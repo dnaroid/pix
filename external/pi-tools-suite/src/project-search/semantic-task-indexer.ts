@@ -7,6 +7,7 @@ import { lstat } from "node:fs/promises";
 import { join } from "node:path";
 import { setImmediate as yieldToHost } from "node:timers/promises";
 import { readSemanticTaskCorpus } from "./semantic-task-corpus.js";
+import { withProviderSlot } from "./source-work.mjs";
 
 const BATCH_SIZE = 16;
 
@@ -27,9 +28,9 @@ function ensureTaskSchema(db: SqlDatabase, config: CommitEmbeddingConfig): void 
 
 /** Reconcile full current corpus in the existing ACP schema and compute which
  * hashes have not yet been paid for, under the same SQLite writer lock. */
-async function reconcile(db: SqlDatabase, tasks: readonly CachedTaskCandidate[], signal: AbortSignal): Promise<CachedTaskCandidate[]> {
-  db.exec("CREATE TEMP TABLE IF NOT EXISTS pix_agent_task_live(id TEXT PRIMARY KEY); DELETE FROM pix_agent_task_live");
-  const live = db.prepare("INSERT OR IGNORE INTO pix_agent_task_live VALUES(?)");
+async function reconcile(db: SqlDatabase, tasks: readonly CachedTaskCandidate[], signal: AbortSignal, publish = true): Promise<CachedTaskCandidate[]> {
+  if (publish) db.exec("CREATE TEMP TABLE IF NOT EXISTS pix_agent_task_live(id TEXT PRIMARY KEY); DELETE FROM pix_agent_task_live");
+  const live = publish ? db.prepare("INSERT OR IGNORE INTO pix_agent_task_live VALUES(?)") : undefined;
   const put = db.prepare("INSERT INTO pix_task_documents(task_id,content_hash) VALUES(?,?) ON CONFLICT(task_id) DO UPDATE SET content_hash=excluded.content_hash WHERE content_hash!=excluded.content_hash");
   // Retain paid vectors, including hashes no longer referenced by current tasks.
   const has = db.prepare("SELECT 1 AS present FROM pix_task_vectors WHERE content_hash=?");
@@ -39,13 +40,12 @@ async function reconcile(db: SqlDatabase, tasks: readonly CachedTaskCandidate[],
     if (index % 128 === 0) { signal.throwIfAborted(); await yieldToHost(undefined, { signal }); }
     const task = tasks[index]!;
     const hash = taskSemanticHash(task);
-    live.run(task.id);
-    put.run(task.id, hash);
+    if (publish) { live!.run(task.id); put.run(task.id, hash); }
     if (seen.has(hash) || has.get(hash)) continue;
     seen.add(hash);
     missing.push(task);
   }
-  db.exec("DELETE FROM pix_task_documents WHERE task_id NOT IN (SELECT id FROM pix_agent_task_live)");
+  if (publish) db.exec("DELETE FROM pix_task_documents WHERE task_id NOT IN (SELECT id FROM pix_agent_task_live)");
   return missing;
 }
 
@@ -63,7 +63,7 @@ async function cancellable<T>(work: Promise<T>, signal: AbortSignal): Promise<T>
 }
 
 /** Bootstrap/change catch-up drains the entire backlog in short committed
- * batches. Re-read under ACP's shared writer lock: concurrent hosts never pay
+ * batches. Re-read under the source's durable work claim: concurrent hosts coordinate
  * twice for a hash, and each batch uses current canonical tasks, not a query's
  * captured candidates. Never writes canonical tasks.sqlite. */
 export async function syncSavedTaskVectors(root: string, key: string | undefined,
@@ -75,21 +75,22 @@ export async function syncSavedTaskVectors(root: string, key: string | undefined
     // Do not initialize an index just to record a project with no tasks.
     if (!(await readSemanticTaskCorpus(root, signal)).length) {
       if (!await pruneEmptyTaskIndex(root, signal, options, config)) return { indexed };
-      // Tasks created while waiting for the shared lock still drain now,
+      // Tasks created while waiting for the source claim still drain now,
       // without depending on delivery of a later filesystem notification.
     }
     const response = await withSearchIndexWriter(root, signal, async db => {
       await requireSemanticIdentity(options, config, signal);
       const tasks = await readSemanticTaskCorpus(root, signal);
       ensureTaskSchema(db, config);
-      const missing = await reconcile(db, tasks, signal);
+      const missing = await reconcile(db, tasks, signal, false);
       if (missing.length === 0) {
         await requireSemanticIdentity(options, config, signal);
+        await reconcile(db, tasks, signal);
         return { remaining: 0, indexed: 0 };
       }
       const targets = missing.slice(0, BATCH_SIZE);
       await requireSemanticIdentity(options, config, signal);
-      const vectors = await cancellable((options.embedTasks ?? embedTaskTexts)(targets.map(taskSemanticText), key, signal, config), signal);
+      const vectors = await db.outside(() => cancellable(withProviderSlot(signal, () => (options.embedTasks ?? embedTaskTexts)(targets.map(taskSemanticText), key, signal, config)), signal));
       signal.throwIfAborted();
       await requireSemanticIdentity(options, config, signal);
       if (vectors.length !== targets.length || !vectors.every(v => validSearchVector(v, config.dimension))) throw new Error("Invalid task semantic embedding batch");
@@ -108,7 +109,7 @@ export async function syncSavedTaskVectors(root: string, key: string | undefined
       const remaining = (await reconcile(db, current, signal)).length;
       await requireSemanticIdentity(options, config, signal);
       return { remaining, indexed: added };
-    });
+    }, "tasks");
     indexed += response.indexed;
     if (!response.remaining) return { indexed };
     await yieldToHost(undefined, { signal });
@@ -120,7 +121,7 @@ export async function syncSavedTaskVectors(root: string, key: string | undefined
  * fresh index just to record an empty corpus. */
 export async function pruneEmptyTaskIndex(root: string, signal: AbortSignal,
   options: SemanticSearchOptions, config: CommitEmbeddingConfig): Promise<boolean> {
-  const filename = join(root, ".pi", "search", "index.sqlite");
+  const filename = join(root, ".pi", "search", "tasks.sqlite");
   const present = await lstat(filename).catch(error => {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;
@@ -136,5 +137,5 @@ export async function pruneEmptyTaskIndex(root: string, signal: AbortSignal,
     await reconcile(db, tasks, signal);
     await requireSemanticIdentity(options, config, signal);
     return false;
-  });
+  }, "tasks");
 }

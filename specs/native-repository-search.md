@@ -9,13 +9,14 @@ title: Native repository Code and Knowledge search
 ## Goal / scope
 
 One native Code/Knowledge backend for ordinary Pi/TUI/ACP/Desktop `project_search`,
-with no IDX dependency, fallback, command, install/update, panel, or settings. Native
+with no external-backend dependency, fallback, command, install/update, panel, or settings. Native
 lexical retrieval needs no credentials. Explicit global provider configuration itself
 authorizes semantic retrieval for every project and source. Credentials use
-`OPENROUTER_API_KEY`, then the shared Pi auth store. This does not migrate or modify pre-existing IDX data.
+`OPENROUTER_API_KEY`, then the shared Pi auth store. Existing legacy configuration is not migrated or modified.
 Persistence/process rationale: [0066](../docs/decisions/0066-native-repository-semantic-search.md),
 building on [0065](../docs/decisions/0065-native-repository-search.md). Global authorization:
-[0068](../docs/decisions/0068-global-semantic-configuration.md).
+[0068](../docs/decisions/0068-global-semantic-configuration.md). Source ownership and
+uncertain-work recovery: [0070](../docs/decisions/0070-search-source-work-recovery.md).
 
 ## Canonical behavior
 
@@ -28,18 +29,42 @@ building on [0065](../docs/decisions/0065-native-repository-search.md). Global a
   Release payloads include the engine source and its `ignore` parser as a locked root
   production dependency: the standalone CLI must not rely on the checkout's suite-local
   node_modules or a dependency nested inside the SDK.
-- Native lexical search has no network work or credential requirement. It refreshes
-  `.pi/search/files.sqlite` (and SQLite sidecars). Optional semantics uses a separate
-  `.pi/search/file-vectors.sqlite`; existing `.pi/search/index.sqlite`, legacy IDX
-  databases/configuration and canonical source files are never migrated or modified.
+- Native lexical search has no network work or credential requirement. Code and Knowledge
+  refresh separate `.pi/search/code.sqlite` and `.pi/search/knowledge.sqlite` stores
+  (and SQLite sidecars); semantic vectors are published in those same source-local stores.
+  The six source databases are `code.sqlite`, `knowledge.sqlite`, `settings.sqlite`,
+  `sessions.sqlite`, `tasks.sqlite` and `git-commits.sqlite`. Legacy `index.sqlite`,
+  `files.sqlite`, `file-vectors.sqlite` and `commits.sqlite` are not imported, migrated,
+  or used as fallbacks. On first use, only those four legacy database files and their
+  SQLite sidecars are physically removed from this project; the six source databases
+  are preserved. Schema-1 Settings configuration is rejected without mutation.
 - Files are enumerated under the selected root, using Git's tracked/unignored file list
   where available and a bounded walker with nested `.gitignore` otherwise. Internal caches,
-  `.pi`, `.git`, `.indexer-cli`, dependency/build directories, linked/nonregular files,
+  `.pi`, `.git`, `.indexer-cli` (protected legacy-data exclusion), dependency/build directories, linked/nonregular files,
   binary/invalid-UTF8 and oversized sources are excluded. Search is not a secret detector;
   eligible tracked text is searchable. Generated text not covered by ignores remains eligible.
 - Recognized source/config formats become Code; Markdown/plain documentation formats become
   Knowledge, without mandatory frontmatter. Markdown headings define section boundaries;
   code and large sections use bounded overlapping line chunks. These are not AST symbols.
+  Godot `.gd`, `.tscn`, `.tres`, `.godot`, `.gdshader`, and `.gdshaderinc` files are Code;
+  the generated `.godot/` cache directory is excluded even when not ignored by Git.
+- The global suite config `~/.config/pi/pi-tools-suite.jsonc` accepts optional
+  `search.codeExtensions` and `search.knowledgeExtensions` arrays (at most 128 entries
+  each). When present, each list completely replaces that category's built-in list;
+  there are no automatic filename special cases. An explicit empty list disables that
+  category, while an omitted list uses built-in defaults. Each entry is a simple suffix of
+  1–32 letters/digits/underscore/plus/hyphen, starting with a letter/digit, with an
+  optional leading dot. Case and dots are normalized; duplicates within a source are
+  harmless. Paths, globs and compound suffixes are not supported. Cross-source
+  overlap between the effective Code and Knowledge lists is an actionable configuration
+  error, not a precedence rule. Invalid/unsafe settings retain the previous local snapshot
+  without publication.
+  Project-local config does not override these lists. All ignore, binary, size and
+  link exclusions still apply. Changes take effect on the next explicit search/index
+  scan: newly eligible files are added, removed suffixes disappear, and moving a
+  custom suffix between sources rechunks unchanged bytes. Reordering equivalent
+  lists does not cause rechunking. A mid-scan classification change prevents publication.
+  Saving lists alone does not scan, clear purchased vectors or trigger embeddings.
 - FTS5 tokenization normalizes case, Unicode, camel-case and punctuation. User text is
   tokenized and safely quoted rather than interpreted as raw FTS syntax. File/heading terms
   carry extra BM25 weight. Stable path/line ties, source filters, test filters, file dedupe,
@@ -55,14 +80,14 @@ building on [0065](../docs/decisions/0065-native-repository-search.md). Global a
   chunk-budget overflow retains searchable prior rows rather than failing publication.
   Paths observed missing during reads, including ignore files, are rechecked before
   marking the scan complete; delete/recreate races invalidate freshness.
-- Native search has no IDX fallback. Empty results and failures are reported as native
+- Native search has no external fallback. Empty results and failures are reported as native
   results/notices; no legacy index is queried.
 - Every Pi caller, including async/provider/council children, receives the same
   unrestricted `project_search` schema and execution across sessions, tasks,
   commits, code and knowledge, including `patch:`. Children suppress suite setup
   commands and parent orchestration guidance only. Repository semantic embeddings
-  use the same explicitly configured global provider. IDX setup/update commands and
-  removed `repo_*` tools are not part of ordinary search.
+  use the same explicitly configured global provider. Removed `repo_*` tools are not
+  part of ordinary search.
 
 ## Optional semantic retrieval
 
@@ -82,12 +107,12 @@ building on [0065](../docs/decisions/0065-native-repository-search.md). Global a
 - Read the optional `search.embedding` object in the global file: `embeddingProvider`,
   `embeddingModel`, optional `knowledgeEmbeddingModel`, `vectorSize`, `ollamaBaseUrl`,
   and `knowledgeEmbeddingQueryPrefix` / `knowledgeEmbeddingDocumentPrefix`. Do not read
-  `.indexer-cli/config.json` or IDX `.env`, migrate settings, or select a provider
+  legacy `.indexer-cli/config.json` or `.env`; do not migrate settings or select a provider
   automatically. OpenRouter credentials use `OPENROUTER_API_KEY`, then an API key in
   shared Pi `auth.json` (`PI_CODING_AGENT_DIR`, otherwise `~/.pi/agent`); missing/invalid
   config/key/provider leaves local matches.
   Semantic mode needs saved compatible provider configuration, but neither mode requires
-  a `.indexer-cli` directory. Existing IDX configuration is never consulted.
+  a legacy `.indexer-cli` directory. Legacy configuration is never consulted.
 - `/search-semantic status|configure <embedding JSON>|off|reset-history` is a suite user command in
   ordinary Pi and Pix TUI. `configure` saves the explicitly supplied provider/model/dimension
   and displays the upload/cost disclosure without another consent question. Desktop offers
@@ -100,9 +125,9 @@ building on [0065](../docs/decisions/0065-native-repository-search.md). Global a
   repairing it. `off` removes the embedding object and retains vectors. `reset-history` is an
   explicit user-only recovery action for incompatible preserved history caches: it clears
   recognized derived task/session/commit/settings vectors and their identity metadata in only
-  the current project's `.pi/search/index.sqlite`. It preserves canonical tasks, sessions and
-  Git history, settings documents/schema, the commit legacy-import marker, repository
-  `.pi/search/file-vectors.sqlite`, and global settings. The next background Settings/Tasks
+  the current project's source-local history databases. It preserves canonical tasks,
+  sessions and Git history, settings documents/schema, repository `code.sqlite` and
+  `knowledge.sqlite`, and global settings. The next background Settings/Tasks
   synchronization or search-driven indexing of other sources can re-embed and incur charges.
   Busy, redirected, unsafe or unrecognized storage fails closed without committing a
   reset. No automatic provider choice. Child repository tools inherit configuration but do
@@ -126,7 +151,21 @@ building on [0065](../docs/decisions/0065-native-repository-search.md). Global a
   identities. The cache is bounded to 50,000 vectors and 256 MiB; exhaustion is visible and
   never triggers destructive repair or automatic purchased-vector eviction.
 - Expiring, token-owned per-identity leases prevent concurrent provider publishers.
-  HTTP never runs inside SQLite write transactions. Snapshot generation and the exact
+  Native vector identity leases expire after 60 seconds and renew when less than
+  30 seconds remain; expired or replaced tokens cannot renew or publish.
+  Source and provider leases renew every 30 seconds with a 90-second expiry. HTTP never runs
+  inside SQLite write transactions. A same-database publication fence validates ownership
+  when each short transaction commits; lost ownership cannot be renewed or used to publish,
+  and this does not provide atomic commits across source-local databases. A queued source
+  keeps renewing its claim and rechecks it after acquiring a provider slot. Cancellation
+  retains claims/slots until the tracked transport actually settles. After two failed or
+  interrupted network attempts (the initial attempt plus one automatic retry), work requires
+  explicit Continue; success resets the failure count. Continue clears the exhausted budget
+  before reconciliation. A failed-work cooldown limits immediate retries, but a crash after
+  transmission can still cause duplicate provider billing. A separate global provider-work
+  database coordinates at most four valid local leases across projects/processes; after a
+  crash or partition this cannot prove the count of remote provider executions. Snapshot
+  generation and the exact
   global configuration signature are checked before uploads, after responses and before final
   publication; in-flight work observes revocation via cancellation. Already transmitted
   bytes cannot be recalled. Lost/expired lease owners cannot publish or release successors.
@@ -145,6 +184,11 @@ building on [0065](../docs/decisions/0065-native-repository-search.md). Global a
 - File enumeration, bytes, chunks, time, output and SQL candidates are bounded. Reaching a
   cap or losing a freshness race must be reported, not called a complete index. This version
   rehashes eligible files on warm search; incremental writes do not imply O(changes) reads.
+- Explicit manual indexing is separate from search-driven enrichment: it drains all
+  eligible missing documents in batches of at most 16, with no overall 128-document cap
+  or overall native CLI/Rust/semantic timeout. Per-HTTP-request timeouts, cancellation
+  and storage safety bounds remain. Search-driven Code/Knowledge uploads retain the shared
+  128-chunk cap and search deadlines.
 - File references describe an observed snapshot, not an immutable checkout. Consumers must
   re-read before editing or using evidence. No portable whole-filesystem atomic snapshot or
   defence against a hostile actor replacing ancestor directories at every syscall is promised.
@@ -158,9 +202,11 @@ whole-scan failure. Other eligible files remain searchable.
 ## Implementation
 
 - `external/pi-tools-suite/src/project-search/native-contract.ts`
+- `external/pi-tools-suite/src/project-search/native-source-config.mjs`
 - `external/pi-tools-suite/src/project-search/native-engine.mjs`
 - `external/pi-tools-suite/src/project-search/native-scan.mjs`
 - `external/pi-tools-suite/src/project-search/native-store.mjs`
+- `external/pi-tools-suite/src/project-search/source-work.mjs`
 - `external/pi-tools-suite/src/project-search/native-semantic.mjs`
 - `external/pi-tools-suite/src/project-search/native-vector-store.mjs`
 - `external/pi-tools-suite/src/project-search/native-embedding-provider.mjs`
@@ -188,7 +234,9 @@ whole-scan failure. Other eligible files remain searchable.
 
 ## Tests
 
+- `external/pi-tools-suite/test/native-source-config.test.ts`
 - `external/pi-tools-suite/test/native-project-search.test.ts`
+- `external/pi-tools-suite/test/source-work.test.mjs`
 - `external/pi-tools-suite/test/native-semantic-search.test.ts`
 - `external/pi-tools-suite/test/native-semantic-command.test.ts`
 - `external/pi-tools-suite/test/semantic-reset.test.ts`
@@ -206,10 +254,8 @@ whole-scan failure. Other eligible files remain searchable.
 
 ## Verification
 
-Use deterministic no-key/no-IDX fixtures for file/line correctness, incremental deletion,
-ignore changes, storage rejection, competing generations and cancellation. Compare identical
-queries against existing IDX lexical snapshots without auto-index or paid embeddings; do not
-claim semantic parity from that comparison. Run the host `npm run check:ci` gate and report
+Use deterministic no-key fixtures for file/line correctness, incremental deletion,
+ignore changes, storage rejection, competing generations and cancellation. Run the host `npm run check:ci` gate and report
 blocked/incomplete legs. Real Desktop evidence is separate from unit-test success.
 Semantic regressions use deterministic injected embeddings/HTTP responses, never paid
 requests: no-token-overlap matches, incrementality, model isolation, scope/privacy,

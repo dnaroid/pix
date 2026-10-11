@@ -367,7 +367,10 @@
     workspace: () => workspace,
     operationRunning: () => operationRunning,
     setOperationRunning: (running) => operationRunning = running,
-    promptRunning: () => promptRunning,
+    promptRunning: () => {
+      const id = activeSessionState.sessionId;
+      return promptRunning || Boolean(id && promptRuntime.queueItemsBySession.get(id)?.some((item) => item.source === "auto" || item.source === "deferred"));
+    },
     sessionHistoryLoading: () => sessionHistoryLoading,
     sessions: sessionServices,
     sessionTabs: () => sessionTabController,
@@ -376,6 +379,8 @@
     clearCommandPicker: () => desktopCommands.setPicker(null),
     setCommandPicker: (picker) => desktopCommands.setPicker(picker),
     requestLocalTextInput: (message, title) => elicitationStore.requestLocalTextInput(message, title),
+    requestMessageEdit: (text, attachments) => elicitationStore.requestMessageEdit(text, attachments),
+    prepareEditedMessage: (sessionId, edit) => promptActionServices.prepareEditedMessage(sessionId, edit),
     promptText: () => promptText,
     setPromptText: (text) => promptText = text,
     setPromptAttachments: (attachments) => promptAttachments = attachments,

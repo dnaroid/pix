@@ -152,7 +152,7 @@ the current sub-agent profile merge pipeline.
   deterministic filename order. Spec 29 supersedes silent spawn-error fallback
   with parent-first role selection and recoverable routing errors.
 - The bundled `knowledge-auditor` is an economical docs-only role that updates
-  affected documentation from relevant implementation/tests without IDX or
+  affected documentation from relevant implementation/tests without search setup or
   knowledge-state checks; it fixes small proven drift and returns substantial
   discrepancies to the parent.
 - Runtime-only invariants stay in runtime code. All async sub-agents disable
