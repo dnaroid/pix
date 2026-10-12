@@ -4,6 +4,9 @@
   the native-host prerequisites in `docs/development.md`. `npm run check` is only
   the quick root check, not the full CI gate. A local pass does not prove other
   operating-system matrix legs; report any blocked or incomplete checks.
+- For CI failures, flaky tests, cross-platform portability, workflow changes,
+  or CI regressions, read `.agents/skills/ci-reliability/SKILL.md` before diagnosis.
+  Treat `specs/ci-release.md` and current CI scripts as the executable contract.
 
 - Ordinary Pi/TUI/ACP/Desktop Code and Knowledge search uses the native backend.
   Do not add fallback search providers or repository-search setup gates.
