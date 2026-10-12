@@ -10,6 +10,8 @@ test("preflight selects actual cross-platform lifecycle regressions, not the ful
   assert.deepEqual(ids("win32"), ["test-contracts", "windows-lifecycle", "windows-sqlite", "windows-pty"]);
   assert.deepEqual(ids("linux"), ["test-contracts", "linux-ast", "linux-lsp"]);
   assert.deepEqual(ids("darwin"), ["test-contracts", "macos-process-cleanup"]);
+  assert.ok(preflightPlan("win32").slice(1).every(step => step.command === "bun"),
+    "Windows Bun tests must use CI's cmd.exe command resolution");
   assert.throws(() => preflightPlan("solaris" as NodeJS.Platform), /Unsupported CI host/);
   for (const platform of ["win32", "linux", "darwin"] as const) {
     const plan = preflightPlan(platform);

@@ -75,6 +75,9 @@ ownership on Linux,
 native SQLite, detached broker and PTY exit handling on Windows, and
 Claude Code process-group cleanup on macOS. Both stages retain individual logs
 and summaries under `.pi/artifacts`, which CI uploads even on failure.
+On Windows, the shared gate launches the npm-installed Bun command through
+`cmd.exe` because npm exposes `bun.cmd`, which Node's direct `spawn("bun")`
+cannot resolve. This is covered by `tests/ci-gate.test.ts`.
 
 Install the root and ACP dependencies first (`npm ci --ignore-scripts`,
 `npm ci --prefix acp --ignore-scripts`), plus Desktop dependencies on macOS

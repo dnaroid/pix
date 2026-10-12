@@ -28,6 +28,11 @@ export function ciPlan(platform = process.platform) {
 }
 
 export function resolveCommand(step, env, platform = process.platform) {
+  // npm -g bun installs a bun.cmd shim on Windows, which Node spawn() cannot
+  // execute directly. Use the same cmd.exe indirection as npm scripts.
+  if (step.command === "bun" && platform === "win32") {
+    return [env.ComSpec || "cmd.exe", ["/d", "/s", "/c", "bun", ...step.args]];
+  }
   if (step.command !== "npm") return [step.command, step.args];
   // npm scripts provide the selected npm CLI: no npm.cmd spawn or shell quoting needed.
   if (env.npm_execpath) return [process.execPath, [env.npm_execpath, ...step.args]];

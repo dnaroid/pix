@@ -135,6 +135,9 @@ remain true when CI or UI-QA tests change.
 - Node child-process helpers resolve npm from PATH. On Windows, helpers that cannot
   spawn `npm.cmd` directly invoke `npm` through `cmd.exe /c` while preserving
   PATH selection.
+- CI preflight uses the same `cmd.exe` shim resolution for an npm-installed Bun
+  command on Windows; direct `spawn("bun")` is not equivalent to invoking an
+  npm script on that host.
 
 ## Standalone release-smoke invariants
 

@@ -39,6 +39,10 @@ test("npm resolution preserves the caller-selected CLI and handles direct Window
     [process.execPath, ["/path with spaces/npm-cli.js", "run", "check:acp"]]);
   assert.deepEqual(resolveCommand(step, {}, "win32"), ["cmd.exe", ["/d", "/s", "/c", "npm", "run", "check:acp"]]);
   assert.deepEqual(resolveCommand(step, {}, "linux"), ["npm", ["run", "check:acp"]]);
+  assert.deepEqual(resolveCommand({ command: "bun", args: ["test", "fixture.test.ts"] }, {}, "win32"),
+    ["cmd.exe", ["/d", "/s", "/c", "bun", "test", "fixture.test.ts"]]);
+  assert.deepEqual(resolveCommand({ command: "bun", args: ["--version"] }, {}, "linux"),
+    ["bun", ["--version"]]);
   assert.deepEqual(resolveCommand({ command: "cargo", args: ["check"] }, {}, "darwin"), ["cargo", ["check"]]);
 });
 
