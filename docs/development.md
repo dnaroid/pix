@@ -57,6 +57,8 @@ This avoids reusing native addons built for a different Node ABI.
 Before pushing, run:
 
 ```bash
+npm run check:ci:preflight -- --list  # inspect platform-specific smoke tests
+npm run check:ci:preflight            # quick lifecycle/portability regressions
 npm run check:ci -- --list  # inspect the native-host plan without running tests
 npm run check:ci
 ```
@@ -66,6 +68,13 @@ stdio smoke), and the tools-suite tests on all three supported TUI platforms;
 Desktop frontend checks/tests and Rust fmt/check/backend-runtime tests on macOS;
 browser mock-page E2E on Linux. A successful native gate does not prove the other
 OS matrix legs or release smoke. It does not install dependencies or act as a Git hook.
+The CI workflow runs the preflight first, **then** the unchanged full gate;
+the smoke result is never a substitute for the complete platform matrix.
+Preflight verifies test contracts on every OS, AST CLI availability and LSP
+ownership on Linux,
+native SQLite, detached broker and PTY exit handling on Windows, and
+Claude Code process-group cleanup on macOS. Both stages retain individual logs
+and summaries under `.pi/artifacts`, which CI uploads even on failure.
 
 Install the root and ACP dependencies first (`npm ci --ignore-scripts`,
 `npm ci --prefix acp --ignore-scripts`), plus Desktop dependencies on macOS
@@ -89,6 +98,42 @@ Full per-step output and a machine-readable result (including
 steps not run) are written to a unique `.pi/artifacts/check-ci-*/` directory.
 CI uploads the logs and summary even on failure. Scratch evidence is disposable;
 export it if you need durable retention.
+
+### Keeping tests deterministic
+
+`npm run check` and the CI preflight run
+`node scripts/ci-test-contracts.mjs --check`. This analyzes checked-in test
+sources for new wall-clock success assertions, path-suffix comparisons that
+assume POSIX separators, and direct recursive cleanup in SQLite fixture hooks.
+The existing 17 occurrences are recorded in
+`scripts/ci-test-contract-baseline.json` and remain visible; introducing a
+new expression or another copy fails. Review and fix a new occurrence instead
+of auto-updating the baseline. Use
+`node scripts/ci-test-contracts.mjs --report` to inspect the remaining debt,
+and `--baseline` only when explicitly reviewing changes to that allowlist.
+This checker is an early warning, not a substitute for runtime ownership tests.
+
+For clean-SHA verification without disturbing another working session, create
+a separate checkout with `git worktree add --detach <scratch-path> <sha>`,
+install its locked dependencies, and run the pinned native gate there.
+Keep the scratch worktree under `.pi/artifacts/` (and remove it with
+`git worktree remove` after verification). Never stash or reset someone else's
+unfinished source changes merely to obtain a clean CI run.
+
+To review recurring failures across downloaded GitHub Actions artifacts:
+
+```bash
+gh run download <run-id> -D .pi/artifacts/ci-history/<run-id>
+npm run ci:history -- .pi/artifacts/ci-history
+```
+
+The report separates preflight and full-gate runs, then groups failed test
+names, error-code signatures, and observed Bun suite durations by OS.
+It does not infer GitHub job status from a
+successful gate summary: check the GitHub run separately for cancelled jobs
+or post-job timeouts. It also cannot prove flakiness from a single failure;
+repeat a focused lifecycle regression on its native OS with Bun 1.4.2 rather
+than repeatedly running the entire CI matrix.
 
 ## TUI development
 

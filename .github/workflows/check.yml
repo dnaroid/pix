@@ -46,6 +46,8 @@ jobs:
       - name: Install desktop frontend
         if: runner.os == 'macOS'
         run: npm ci --prefix desktop --ignore-scripts
+      - name: Run cross-platform CI preflight
+        run: npm run check:ci:preflight
       - name: Install Chromium for browser QA E2E
         if: matrix.os == 'ubuntu-latest'
         run: npx playwright install --with-deps chromium
@@ -61,4 +63,6 @@ jobs:
           path: |
             .pi/artifacts/check-ci-*/summary.json
             .pi/artifacts/check-ci-*/*.log
+            .pi/artifacts/ci-preflight-runs/check-ci-*/summary.json
+            .pi/artifacts/ci-preflight-runs/check-ci-*/*.log
           if-no-files-found: ignore

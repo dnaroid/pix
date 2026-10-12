@@ -18,6 +18,10 @@ remain true when CI or UI-QA tests change.
   and `master` pushes only. Each job uses the `node` and `npm` already selected
   in the runner's system PATH. Release tags do not repeat this matrix.
 - Browser QA E2E runs once on the Ubuntu job.
+- A native-host preflight runs before the full gate on each matrix leg. It
+  checks deterministic test contracts on all hosts and platform-specific
+  lifecycle/portability regressions. It is additive, not an alternative to
+  `check:ci`, and its failure artifacts are retained.
 - `publish.yml` runs only for `v*` tags or manual dispatch. It has a lightweight
   `release-contract` gate and the three-target native release matrix.
 - GitHub-owned checkout/artifact actions use current Node 24-compatible majors
@@ -65,6 +69,11 @@ remain true when CI or UI-QA tests change.
 - `npm run check` remains a root-only quick check. `npm run check:ci` is the
   shared native-host verification entrypoint used locally and by `check.yml`.
   `-- --list` prints the host plan without executing checks.
+- `npm run check:ci:preflight` is a short, independently reported gate using
+  the same isolated test HOME and log/summary protocol. Linux checks the real
+  AST binary and LSP broker ownership; Windows checks SQLite fixture cleanup, detached broker receipts
+  and PTY-exit timers; macOS checks process-group exit races. The full
+  `check:ci` always follows if preflight passes.
 - Every supported host runs root checks, ACP checks (including stdio smoke),
   and tools-suite tests. macOS additionally runs Desktop frontend checks/tests
   and Rust fmt/check/locked backend-runtime tests. Linux additionally runs
@@ -109,6 +118,15 @@ remain true when CI or UI-QA tests change.
   fake `kind`/`options`/`schema` wrappers are test mocks, not a supported TypeBox
   representation to normalize. The schema regression guards its real JSON Schema
   shape even when mock-owning files run earlier.
+- `scripts/ci-test-contracts.mjs --check` rejects new fragile success
+  assertions based on elapsed wall time, hardcoded platform path suffixes,
+  and direct recursive SQLite fixture removal from cleanup hooks. Its
+  fingerprint baseline enumerates existing debt; changes require an explicit
+  baseline review instead of quietly weakening the detector.
+- Historical gate artifacts can be summarized with
+  `npm run ci:history -- <artifact-directory>`. Error signatures, repeated
+  test failures and Bun suite durations are reported per platform; reports
+  are diagnostic and do not automatically waive a failure.
 
 ## Windows process invariants
 
@@ -137,6 +155,9 @@ remain true when CI or UI-QA tests change.
 - `external/pi-tools-suite/test/evals/session-token-efficiency.ts`
 - `.github/workflows/publish.yml`
 - `scripts/release/smoke.mjs`
+- `scripts/ci-preflight.mjs`
+- `scripts/ci-test-contracts.mjs`
+- `scripts/ci-history-report.mjs`
 - `scripts/release/smoke-desktop.mjs`
 - `package.json`
 - `acp/package.json`
@@ -157,6 +178,8 @@ remain true when CI or UI-QA tests change.
 ## Verification
 
 - `node --import tsx --test tests/ci-gate.test.ts`
+- `node --import tsx --test tests/ci-preflight.test.ts tests/ci-test-contracts.test.ts tests/ci-history-report.test.ts`
+- `npm run check:ci:preflight`
 - `npm run check:ci` (after installing native-host prerequisites)
 - `node --import tsx --test tests/node-version.test.ts`
 - `npm run check`
@@ -168,6 +191,9 @@ remain true when CI or UI-QA tests change.
 
 - `scripts/release/test/workflow.test.mjs`
 - `tests/ci-gate.test.ts`
+- `tests/ci-preflight.test.ts`
+- `tests/ci-test-contracts.test.ts`
+- `tests/ci-history-report.test.ts`
 - `external/pi-tools-suite/test/evals/compress-schema.test.ts`
 - `external/pi-tools-suite/test/comment-checker.test.ts`
 - `external/pi-tools-suite/test/evals/session-token-efficiency.test.ts`

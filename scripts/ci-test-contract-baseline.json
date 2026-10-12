@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "allowed": [
+    {
+      "path": "acp/test/commit-search.test.ts",
+      "rule": "sqlite-direct-fixture-removal",
+      "expression": "rm(cwd, { recursive: true, force: true })",
+      "count": 1
+    },
+    {
+      "path": "acp/test/commit-search.test.ts",
+      "rule": "sqlite-direct-fixture-removal",
+      "expression": "rm(providerHome, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 })",
+      "count": 1
+    },
+    {
+      "path": "acp/test/registry.test.ts",
+      "rule": "sqlite-direct-fixture-removal",
+      "expression": "fs.rmSync(root, { recursive: true, force: true })",
+      "count": 1
+    },
+    {
+      "path": "acp/test/search-central-semantics.test.ts",
+      "rule": "sqlite-direct-fixture-removal",
+      "expression": "rm(cwd, { recursive: true, force: true })",
+      "count": 1
+    },
+    {
+      "path": "acp/test/search-index-write.test.ts",
+      "rule": "sqlite-direct-fixture-removal",
+      "expression": "rm(cwd, { recursive: true, force: true })",
+      "count": 1
+    },
+    {
+      "path": "acp/test/search-sync.test.ts",
+      "rule": "sqlite-direct-fixture-removal",
+      "expression": "rm(cwd, { recursive: true, force: true })",
+      "count": 1
+    },
+    {
+      "path": "acp/test/search-sync.test.ts",
+      "rule": "sqlite-direct-fixture-removal",
+      "expression": "rm(providerHome, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 })",
+      "count": 1
+    },
+    {
+      "path": "acp/test/search-task-semantic.test.ts",
+      "rule": "sqlite-direct-fixture-removal",
+      "expression": "rm(cwd, { recursive: true, force: true })",
+      "count": 1
+    },
+    {
+      "path": "acp/test/search.test.ts",
+      "rule": "sqlite-direct-fixture-removal",
+      "expression": "rm(cwd, { recursive: true, force: true })",
+      "count": 1
+    },
+    {
+      "path": "external/pi-tools-suite/test/async-subagents/browser-qa-runner.test.ts",
+      "rule": "elapsed-time-assertion",
+      "expression": "expect(Date.now() - startedAt).toBeLessThan(2_500)",
+      "count": 1
+    },
+    {
+      "path": "external/pi-tools-suite/test/async-subagents/browser-qa-runner.test.ts",
+      "rule": "elapsed-time-assertion",
+      "expression": "expect(Date.now() - startedAt).toBeLessThan(7000)",
+      "count": 1
+    },
+    {
+      "path": "external/pi-tools-suite/test/async-subagents/provider-native-boundaries.test.ts",
+      "rule": "elapsed-time-assertion",
+      "expression": "expect(Date.now() - cliAt).toBeLessThan(12_000)",
+      "count": 1
+    },
+    {
+      "path": "external/pi-tools-suite/test/async-subagents/provider-native-boundaries.test.ts",
+      "rule": "elapsed-time-assertion",
+      "expression": "expect(Date.now() - leafAt).toBeLessThan(14_000)",
+      "count": 1
+    },
+    {
+      "path": "external/pi-tools-suite/test/async-subagents/provider-native-owner-loss.test.ts",
+      "rule": "elapsed-time-assertion",
+      "expression": "expect(Date.now() - killedAt).toBeLessThan(4_000)",
+      "count": 1
+    },
+    {
+      "path": "external/pi-tools-suite/test/async-subagents/ui-qa-runner.test.ts",
+      "rule": "elapsed-time-assertion",
+      "expression": "expect(Date.now() - started).toBeLessThan(7_500)",
+      "count": 1
+    },
+    {
+      "path": "external/pi-tools-suite/test/async-subagents/ui-qa-runner.test.ts",
+      "rule": "elapsed-time-assertion",
+      "expression": "expect(Date.now() - started).toBeLessThan(8_000)",
+      "count": 1
+    },
+    {
+      "path": "external/pi-tools-suite/test/dcp-auto-compression-projection.test.ts",
+      "rule": "elapsed-time-assertion",
+      "expression": "expect(Date.now() - started).toBeLessThan(2_000)",
+      "count": 1
+    }
+  ]
+}
