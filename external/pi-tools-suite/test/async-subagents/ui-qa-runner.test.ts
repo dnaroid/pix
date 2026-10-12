@@ -919,14 +919,18 @@ setTimeout(() => process.exit(7), 50);
 			target: { command: { argv: [nodeExecutable, "exit-fixture.mjs"] } },
 			steps: [
 				{ action: "waitForText", text: "exiting" },
-				{ action: "assertProcessExited", exitCode: 7, timeoutMs: 5_000 },
+				// Give slow Windows CI/ConPTY process startup headroom while retaining
+				// a wide gap between actual exit and an accidentally leaked timer.
+				{ action: "assertProcessExited", exitCode: 7, timeoutMs: 10_000 },
 			],
 		});
 		const started = Date.now();
-		const result = invoke(project, agentDir, ["run", "--flow", "exit.jsonc", "--run-id", "exit", "--runner-timeout-ms", "6000"], 10_000);
+		const result = invoke(project, agentDir, ["run", "--flow", "exit.jsonc", "--run-id", "exit", "--runner-timeout-ms", "14000"], 18_000);
 		expect(result.status).toBe(0);
 		expect(result.payload.status).toBe("PASSED");
-		expect(Date.now() - started).toBeLessThan(3_000);
+		// A retained 10s exit assertion timer must still fail this check, while
+		// cold Node startup and Windows ConPTY teardown may take >3s by themselves.
+		expect(Date.now() - started).toBeLessThan(7_500);
 	});
 
 	test("cleanup terminates its PTY but leaves an unrelated process alive", () => {

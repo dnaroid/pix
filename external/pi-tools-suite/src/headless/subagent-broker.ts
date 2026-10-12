@@ -47,8 +47,12 @@ export async function launchSubagentsBroker(
 			? ["--import", import.meta.resolve("tsx")] : [];
 		const stderr = openSync(log, "a", 0o600);
 		try {
+			// Windows libuv assigns non-detached children to a kill-on-parent-exit
+			// Job Object. unref() only releases the event-loop reference: it does
+			// not let the broker survive the initiating CLI. Detach on every OS;
+			// the broker still owns its agents and their RPC pipes until settlement.
 			proc = spawn(process.execPath, [...loader, process.argv[1]!, encodedRequest, "--allow-write", "--broker", file], {
-				cwd, env: process.env, detached: process.platform !== "win32", stdio: ["ignore", "ignore", stderr],
+				cwd, env: process.env, detached: true, windowsHide: true, stdio: ["ignore", "ignore", stderr],
 			});
 		} finally {
 			closeSync(stderr);

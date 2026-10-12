@@ -9,6 +9,13 @@ const execFile = promisify(execFileCallback);
 const CLI = path.resolve(import.meta.dir, "../src/headless/cli.ts");
 const SUITE_ROOT = path.resolve(import.meta.dir, "../../..");
 
+test("broker detaches from the initiating CLI on every platform, including Windows", async () => {
+	const fixture = path.join(import.meta.dir, "fixtures/headless-broker-detachment.mjs");
+	for (const platform of ["win32", "linux", "darwin"]) {
+		await execFile("node", ["--import", "tsx", fixture, platform], { cwd: SUITE_ROOT, timeout: 5_000 });
+	}
+});
+
 test("detached Pix subagents broker owns RPC pipes after CLI responds (offline fixture)", async () => {
 	const artifacts = path.join(SUITE_ROOT, ".pi", "artifacts");
 	await mkdir(artifacts, { recursive: true });
@@ -115,6 +122,8 @@ test("detached Pix subagents broker owns RPC pipes after CLI responds (offline f
 		// execFile has returned only after the initiating CLI exited. Release
 		// the child now, rather than racing that exit against a 350ms timer.
 		expect(await readFile(path.join(runDir, "mock-agent", "result.md"), "utf8").catch(() => undefined)).toBeUndefined();
+		const beforeRelease = await call("subagents", { action: "status", runDir });
+		expect(beforeRelease.details.agents.find((agent: { id: string }) => agent.id === "mock-agent")?.status).toBe("running");
 		await writeFile(releaseFile, "release");
 		await waitForAgent(runDir, "mock-agent");
 		const childDiagnostics = await readFile(path.join(runDir, "mock-agent", "stderr.log"), "utf8");
