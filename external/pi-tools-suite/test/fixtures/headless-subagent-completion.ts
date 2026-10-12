@@ -20,7 +20,11 @@ export async function waitForHeadlessSubagentCompletion(
 		latest = await status();
 		if (receipt !== undefined && ["done", "failed", "stopped"].includes(latest)) return latest;
 		if (Date.now() >= deadline) {
-			throw new Error(`Subagent ${agentId} did not finalize: status=${latest}, exit_code=${receipt ?? "missing"}, runDir=${runDir}`);
+			const diagnostics = await Promise.all([
+				["headless-broker.log", path.join(runDir, "headless-broker.log")],
+				...["pid", "stderr.log", "progress.jsonl", "events.jsonl", "result.md"].map((file) => [file, path.join(runDir, agentId, file)]),
+			].map(async ([label, file]) => `${label}: ${(await readFile(file!, "utf8").catch(() => "missing")).slice(-2000)}`));
+			throw new Error(`Subagent ${agentId} did not finalize: status=${latest}, exit_code=${receipt ?? "missing"}, runDir=${runDir}\n${diagnostics.join("\n")}`);
 		}
 		await new Promise((resolve) => setTimeout(resolve, options.intervalMs ?? 250));
 	}

@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
-import { appendFile, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { HeadlessToolApi, HeadlessResult } from "./api.js";
@@ -77,7 +77,7 @@ export async function launchSubagentsBroker(
 
 /** Broker process entrypoint: actual Pix spawn + lifecycle ownership. */
 export async function runSubagentsBroker(
-	api: HeadlessToolApi,
+	api: Pick<HeadlessToolApi, "execute">,
 	params: unknown,
 	file: string,
 ): Promise<void> {
@@ -90,18 +90,54 @@ export async function runSubagentsBroker(
 		return;
 	}
 	if (result.isError) return;
-	const details = result.details as { runDir?: unknown } | undefined;
+	const details = result.details as { runDir?: unknown; tasks?: Array<{ id: string }> } | undefined;
 	if (typeof details?.runDir !== "string") return;
 	const runDir = details.runDir;
 	// `wait` is the original Pix tool and reads durable run artifacts. The broker
-	// keeps all live spawn completion handlers, pipes and timeouts alive.
-	try {
-		while (true) {
+	// must not confuse its dead-PID `stopped` fallback with a final receipt.
+	// In particular, Windows taskkill can release the last child/pipe handle
+	// before Pix's UNREFERENCED drain/finalization timers commit exit_code.
+	// Keep a referenced poll alive until every scheduled agent has both a
+	// terminal state and a receipt, including when wait returns immediately.
+	// IDs can be omitted or normalized by Pix. Its resolved task previews are
+	// authoritative, including queued tasks missing from a transient status.
+	const tasks = details.tasks ?? [];
+	const log = (text: string) => appendFile(path.join(runDir, "headless-broker.log"),
+		`${new Date().toISOString()}: broker_pid=${process.pid} ${text}\n`).catch(() => {});
+	let lastDiagnostic = "";
+	while (true) {
+		try {
+			// External cleanup must not retain an otherwise idle broker forever.
+			if (!await stat(runDir).catch((error: NodeJS.ErrnoException) => {
+				if (error.code === "ENOENT") return undefined;
+				throw error;
+			})) return;
+			// Read receipts BEFORE status. Otherwise a stopped snapshot can be
+			// paired with a new failed receipt whose callback has already queued
+			// a retry, causing us to abandon its unreferenced backoff timer.
+			const receipts = await Promise.all(tasks.map(async (task) => {
+				const receipt = await readFile(path.join(runDir, task.id, "exit_code"), "utf8").catch((error: NodeJS.ErrnoException) => {
+					if (error.code === "ENOENT") return undefined;
+					throw error;
+				});
+				return { task, receipt };
+			}));
 			const status = await api.execute("subagents", { action: "wait", runDir, timeout: 300, interval: 2 });
-			const agents = (status.details as { agents?: Array<{ status: string }> } | undefined)?.agents;
-			if (!agents?.some((agent) => ["planned", "running", "retrying"].includes(agent.status))) break;
+			const agents = (status.details as { agents?: Array<{ id: string; status: string }> } | undefined)?.agents ?? [];
+			const pending = receipts.map(({ task, receipt }) => {
+				const agent = agents.find((entry) => entry.id === task.id);
+				if (receipt?.trim() && agent && ["done", "failed", "stopped"].includes(agent.status)) return undefined;
+				return `${task.id}:status=${agent?.status ?? "missing"},exit_code=${receipt?.trim() || "missing"}`;
+			});
+			const outstanding = pending.filter((entry) => entry !== undefined);
+			if (tasks.length > 0 && outstanding.length === 0) return;
+			const diagnostic = `awaiting completion receipts: ${outstanding.join("; ") || "missing scheduled tasks"}`;
+			if (diagnostic !== lastDiagnostic) { lastDiagnostic = diagnostic; await log(diagnostic); }
+		} catch (error) {
+			// A transient status/read failure must not abandon owned callbacks.
+			const diagnostic = `completion poll failed: ${message(error)}`;
+			if (diagnostic !== lastDiagnostic) { lastDiagnostic = diagnostic; await log(diagnostic); }
 		}
-	} catch (error) {
-		await appendFile(path.join(runDir, "headless-broker.log"), `${new Date().toISOString()}: ${message(error)}\n`).catch(() => {});
+		await new Promise((resolve) => setTimeout(resolve, 250));
 	}
 }

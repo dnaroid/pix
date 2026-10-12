@@ -9,6 +9,7 @@ import { indexNative, searchNative } from "../src/project-search/native-engine.m
 import { openVectorStore } from "../src/project-search/native-vector-store.mjs";
 import { repositoryEmbeddingSettings } from "../src/project-search/native-embedding-provider.mjs";
 import type { NativeIndexRequest, NativeIndexResponse } from "../src/project-search/native-contract.ts";
+import { removeDirsWithRetry } from "./support/fs-retry.js";
 
 const artifacts = fileURLToPath(new URL("../../../.pi/artifacts/", import.meta.url));
 const cli = fileURLToPath(new URL("../src/project-search/native-cli.mjs", import.meta.url));
@@ -67,8 +68,7 @@ async function child(root: string, payload: any, executable = "node", preload?: 
 }
 afterEach(async () => {
   if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome;
-  // Windows scanners/SQLite can briefly retain NTFS handles after a connection closes.
-  for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 });
+  await removeDirsWithRetry(roots);
 });
 
 describe("explicit native document indexing", () => {

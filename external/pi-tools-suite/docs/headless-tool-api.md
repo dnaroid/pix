@@ -139,6 +139,20 @@ Its offline child is released only after that CLI exits, and the test waits
 for the broker's durable `exit_code` receipt before asserting final status:
 a dead child PID can briefly report `stopped` while RPC stdout is draining
 and completion callbacks are still pending (notably after Windows `taskkill`).
+The broker itself keeps a **referenced** completion poll until every scheduled
+agent has a terminal status **and** a nonempty `exit_code` receipt. Agent IDs
+come from Pix's resolved task previews, not optional/raw request IDs. This is
+necessary because Pix's drain/finalization and retry timers are unreferenced:
+without the broker poll, the last Windows process/pipe handle can disappear
+before those callbacks write the result. A stale failed receipt during retry
+backoff is not completion. Transient poll failures do not abandon ownership;
+external deletion of the run directory ends the poll. Pending receipts and
+poll errors are diagnosed in `<runDir>/headless-broker.log` with the broker PID.
+The offline fixture logs its runtime, stdin requests and release to its own
+scratch log as well as each agent's `stderr.log`; timeout failures include
+those logs plus RPC event tails, even before buffered stderr is flushed.
+`headless-broker-lifecycle.test.ts` deterministically reproduces the
+no-referenced-handles window using a Node subprocess, on every CI platform.
 
 ## Boundaries
 

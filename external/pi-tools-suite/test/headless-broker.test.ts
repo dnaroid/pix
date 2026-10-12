@@ -16,6 +16,7 @@ test("detached Pix subagents broker owns RPC pipes after CLI responds (offline f
 	const workspace = path.join(scratch, "project");
 	const binaryDir = path.join(scratch, "bin");
 	const releaseFile = path.join(scratch, "release-fixture");
+	const fixtureLog = path.join(scratch, "offline-fixture.log");
 	try {
 		await mkdir(workspace);
 		await mkdir(path.join(workspace, ".pi", "agents"), { recursive: true });
@@ -33,19 +34,24 @@ test("detached Pix subagents broker owns RPC pipes after CLI responds (offline f
 		}), { mode: 0o600 });
 		const fakePiSource = [
 			"#!/usr/bin/env node",
-			"import { existsSync } from 'node:fs';",
+			"import { appendFileSync, existsSync } from 'node:fs';",
+			`const diagnostic = text => { appendFileSync(${JSON.stringify(fixtureLog)}, text + '\\n'); console.error(text); };`,
+			"diagnostic('MOCK_PI_STARTED ' + JSON.stringify({ pid:process.pid, platform:process.platform, bun:process.versions.bun, release:process.env.PIX_HEADLESS_FIXTURE_RELEASE }));",
 			"let buffer = '';",
 			"process.stdin.setEncoding('utf8');",
+			"process.stdin.on('end', () => diagnostic('MOCK_PI_STDIN_END'));",
 			"process.stdin.on('data', chunk => {",
 			"  buffer += chunk;",
 			"  while (buffer.includes('\\n')) {",
 			"    const index = buffer.indexOf('\\n'); const line = buffer.slice(0,index); buffer = buffer.slice(index+1);",
 			"    const request = JSON.parse(line);",
+			"    diagnostic('MOCK_PI_REQUEST ' + request.type);",
 			"    if (request.type === 'get_state') console.log(JSON.stringify({ type: 'response', id: request.id, command: 'get_state', success: true, data: {} }));",
 			"    if (request.type === 'prompt') { const timer = setInterval(() => {",
 			`      if (!existsSync(${JSON.stringify(scratch)})) process.exit(1);`,
 			"      if (!existsSync(process.env.PIX_HEADLESS_FIXTURE_RELEASE)) return;",
 			"      clearInterval(timer);",
+			"      diagnostic('MOCK_PI_RELEASED');",
 			"      const message = { role:'assistant', content: [{type:'text',text:'MOCK_PI_COMPLETED'}], stopReason:'stop' };",
 			"      console.log(JSON.stringify({ type:'message_end', message }));",
 			"      console.log(JSON.stringify({ type:'agent_end', messages: [message] }));",
@@ -66,7 +72,11 @@ test("detached Pix subagents broker owns RPC pipes after CLI responds (offline f
 			XDG_CONFIG_HOME: path.join(scratch, "config"),
 			PI_CODING_AGENT_DIR: agentDir,
 			PIX_HEADLESS_FIXTURE_RELEASE: releaseFile,
+			ASYNC_SUBAGENTS_DEBUG_LOGS: "1",
 		};
+		// Windows env keys are case-insensitive, but a spread is not. Avoid
+		// passing both inherited `Path` and fixture `PATH` to a subprocess.
+		for (const key of Object.keys(env)) if (key !== "PATH" && key.toUpperCase() === "PATH") delete env[key];
 		async function call(tool: string, args: Record<string, unknown>) {
 			const encoded = Buffer.from(JSON.stringify({ operation: "call", cwd: workspace, readOnly: false,
 				model: { provider: "openai", id: "gpt-6" }, tool, args }), "utf8").toString("base64url");
@@ -82,6 +92,10 @@ test("detached Pix subagents broker owns RPC pipes after CLI responds (offline f
 				const status = await call("subagents", { action: "status", runDir });
 				const agents = (status.details as { agents?: Array<{ id: string; status: string }> } | undefined)?.agents;
 				return agents?.find((agent) => agent.id === agentId)?.status ?? "missing";
+			}).catch(async (error) => {
+				// stderr is buffered by Pix until finalization. This fixture-owned
+				// log survives even if a broker crashes before flushing it.
+				throw new Error(`${error.message}\nOffline fixture: ${(await readFile(fixtureLog, "utf8").catch(() => "never started")).slice(-4000)}`, { cause: error });
 			});
 			const diagnostics = finalStatus === "done" ? "" : await Promise.all(
 				["exit_code", "stderr.log", "progress.jsonl", "events.jsonl"].map(async (file) =>
@@ -103,6 +117,10 @@ test("detached Pix subagents broker owns RPC pipes after CLI responds (offline f
 		expect(await readFile(path.join(runDir, "mock-agent", "result.md"), "utf8").catch(() => undefined)).toBeUndefined();
 		await writeFile(releaseFile, "release");
 		await waitForAgent(runDir, "mock-agent");
+		const childDiagnostics = await readFile(path.join(runDir, "mock-agent", "stderr.log"), "utf8");
+		expect(childDiagnostics).toContain("MOCK_PI_STARTED");
+		expect(childDiagnostics).toContain("MOCK_PI_REQUEST prompt");
+		expect(childDiagnostics).toContain("MOCK_PI_RELEASED");
 		const result = await call("subagents", { action: "result", agentId: "mock-agent", runDir });
 		expect(result.isError).not.toBe(true);
 		expect(result.content[0]?.text).toContain("MOCK_PI_COMPLETED");

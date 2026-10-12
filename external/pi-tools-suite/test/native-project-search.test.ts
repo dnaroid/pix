@@ -9,6 +9,7 @@ import { searchNative } from "../src/project-search/native-engine.mjs";
 import { scanProject, SCAN_LIMITS, validateMissingSources } from "../src/project-search/native-scan.mjs";
 import { openStore, snapshot, publish, queryStore } from "../src/project-search/native-store.mjs";
 import { indexNativeProject, searchNativeProject } from "../src/project-search/native.ts";
+import { removeDirsWithRetry } from "./support/fs-retry.js";
 
 const artifactRoot = fileURLToPath(new URL("../../../.pi/artifacts/", import.meta.url));
 const roots: string[] = [];
@@ -26,7 +27,7 @@ async function put(root: string, name: string, value: string | Uint8Array) {
   await writeFile(path.join(root, name), value);
 }
 const digest = (buffer: Uint8Array) => createHash("sha256").update(buffer).digest("hex");
-afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 }); });
+afterEach(async () => { await removeDirsWithRetry(roots); });
 
 function childCli(executable: string, root: string, query: string) {
   return new Promise<any>((resolve, reject) => {
