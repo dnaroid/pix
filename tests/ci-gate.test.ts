@@ -26,6 +26,8 @@ test("workflow and npm entrypoint use the shared gate", () => {
   assert.ok(suite.scripts.test.startsWith("bun test --isolate --timeout 20000 test &&"));
   const workflow = readFileSync(join(repoRoot, ".github/workflows/check.yml"), "utf8");
   assert.match(workflow, /run: npm run check:ci/);
+  const timeoutMinutes = Number(workflow.match(/timeout-minutes:\s*(\d+)/)?.[1]);
+  assert.ok(timeoutMinutes >= 30, "native macOS CI needs headroom for artifacts and job cleanup");
   assert.match(workflow, /include-hidden-files: true/);
   assert.doesNotMatch(workflow, /run: npm run check\s*$/m);
   assert.match(workflow, /check-ci-\*\/summary.json/);
