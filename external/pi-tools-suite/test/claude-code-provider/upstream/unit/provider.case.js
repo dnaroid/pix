@@ -1999,13 +1999,31 @@ process.stdin.on("end", () => {
   for (const record of ${JSON.stringify(records)}) process.stdout.write(record + "\\n");
   process.stdout.write("", () => process.exit(0));
 });`);
+    let terminatedAfterExit = false;
     try {
-        const stream = createClaudeStream({ executable: fake.executable, version: "test", subscriptionType: "pro" })(model, context, { reasoning: "medium" });
+        const stream = createClaudeStream({ executable: fake.executable, version: "test", subscriptionType: "pro" }, {
+            supervise(child, options) {
+                const supervisor = superviseProcess(child, {
+                    ...options,
+                    async terminate(ownedChild) {
+                        // Establish this test's ordering instead of racing the
+                        // parent's JSONL parsing against the child's natural exit.
+                        const result = await supervisor.wait();
+                        assert.equal(result.code, 0);
+                        assert.equal(ownedChild.exitCode, 0);
+                        terminatedAfterExit = true;
+                        await terminateProcessGroup(ownedChild);
+                    },
+                });
+                return supervisor;
+            },
+        })(model, context, { reasoning: "medium" });
         const events = [];
         for await (const event of stream)
             events.push(event.type);
         const result = await stream.result();
         assert.equal(result.stopReason, "length", result.errorMessage);
+        assert.equal(terminatedAfterExit, true);
         assert.equal(events.at(-1), "done");
         // Only the response Pi asked for is published; the continuation turn's
         // blocks were latched out of the stream.

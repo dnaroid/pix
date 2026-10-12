@@ -189,6 +189,10 @@ export async function terminateProcessGroup(
       await terminateDirectChild(child, graceMs);
       return;
     }
+    // macOS can report EPERM while the last group member is exiting, before
+    // Node observes child.exitCode. Accept only a subsequent ESRCH for the
+    // exact owned group: leader exit or continued EPERM cannot prove tree death.
+    if (isPermissionDenied(error) && await waitForProcessGroupExit(pid, graceMs, killProcess)) return;
     throw processGroupCleanupError(pid, "SIGTERM", child, error);
   }
 
@@ -197,6 +201,7 @@ export async function terminateProcessGroup(
     killProcess(-pid, "SIGKILL");
   } catch (error) {
     if (isMissingProcess(error)) return;
+    if (isPermissionDenied(error) && await waitForProcessGroupExit(pid, graceMs, killProcess)) return;
     throw processGroupCleanupError(pid, "SIGKILL", child, error);
   }
   if (!(await waitForProcessGroupExit(pid, graceMs, killProcess))) {
@@ -287,7 +292,8 @@ async function waitForProcessGroupExit(
       if (isMissingProcess(error)) return true;
       // POSIX signal 0 performs an existence/permission probe. EPERM therefore
       // means the group may still exist, not that cleanup itself was denied.
-      // Keep polling; actual SIGTERM/SIGKILL permission failures remain fatal.
+      // Keep polling; signal permission failures remain fatal unless a later
+      // ESRCH positively establishes that the owned group disappeared.
       if (!isPermissionDenied(error)) throw processGroupProbeError(pid, error);
     }
     await new Promise<void>((resolve) => setTimeout(resolve, 10));

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- On macOS, process-group termination no longer treats a transient `EPERM` while an owned group is disappearing as proof of cleanup. It accepts termination only after a subsequent `ESRCH` probe confirms that exact group is gone; otherwise cleanup remains an error.
+
 ## [0.5.0] - 2026-09-24
 
 ### Changed

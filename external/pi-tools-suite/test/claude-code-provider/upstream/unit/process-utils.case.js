@@ -163,6 +163,43 @@ test("process-group termination reports signal permission failures with context"
         await new Promise((resolve) => child.once("close", resolve));
     }
 });
+for (const phase of ["SIGTERM", "SIGKILL"]) {
+    test(`process-group ${phase} EPERM accepts only confirmed group disappearance`, { skip: process.platform === "win32" }, async () => {
+        // Node has not observed the leader's exit yet. Model macOS's transient
+        // EPERM during group teardown without racing a real OS signal delivery.
+        const child = { pid: 43210, exitCode: null, signalCode: null };
+        let denied = false;
+        let probes = 0;
+        const killProcess = (pid, signal) => {
+            assert.equal(pid, -child.pid);
+            if (signal === phase) {
+                denied = true;
+                throw Object.assign(new Error("synthetic signal EPERM"), { code: "EPERM" });
+            }
+            if (signal === 0 && denied) {
+                probes += 1;
+                throw Object.assign(new Error("synthetic group teardown"), { code: "ESRCH" });
+            }
+            assert.equal(denied, false, "must not signal again after permission denial");
+            return true;
+        };
+        await terminateProcessGroup(child, 30, killProcess);
+        assert.equal(denied, true);
+        assert.equal(probes, 1, "permission denial alone is not proof of group death");
+        assert.equal(child.exitCode, null, "cleanup must use group evidence, not leader exit");
+    });
+}
+for (const probe of ["live", "EPERM", "EIO"]) {
+    test(`process-group signal EPERM fails closed after leader exit with ${probe} group probe`, { skip: process.platform === "win32" }, async () => {
+        const child = { pid: 43210, exitCode: 0, signalCode: null };
+        const killProcess = (pid, signal) => {
+            assert.equal(pid, -child.pid);
+            if (signal === 0 && probe === "live") return true;
+            throw Object.assign(new Error("synthetic group uncertainty"), { code: signal === 0 ? probe : "EPERM" });
+        };
+        await assert.rejects(terminateProcessGroup(child, 30, killProcess), /cleanup failed|status probe failed/);
+    });
+}
 test("process-group termination removes a descendant after its leader exits", { skip: process.platform === "win32" }, async () => {
     const body = `const {spawn}=require("node:child_process"); const child=spawn(process.execPath,["-e","setInterval(()=>{},1000)"],{stdio:"ignore"}); child.unref(); process.stdout.write(String(child.pid)+"\\n");`;
     const parent = spawn(process.execPath, nodeFixtureArgs(["-e", body]), { detached: true, stdio: ["ignore", "pipe", "ignore"] });
