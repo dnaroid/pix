@@ -15,6 +15,7 @@
   import { agentPauseJustTriggered, type AgentControlState } from "../lib/agent-control";
   import type { LspMissingSuggestion } from "../lib/lsp-onboarding";
   import type { ProjectFileLineRange } from "../lib/project-files";
+  import { transcriptNotice } from "../lib/transcript-notice";
   import {
     formatTranscriptDuration,
     groupTranscriptItems,
@@ -288,11 +289,13 @@
               </button>
             </div>
           {:else if item.role === "system"}
-            {#if item.messageId?.startsWith("pix-system:error:")}
-              <article class={["transcript-entry flex min-w-0 gap-2.5 rounded-sm border-l-[3px] border-tool-error bg-panel-strong px-3 py-2 text-xs", gapClass]} data-transcript-entry-id={item.id} role="alert">
-                <TriangleAlert class="mt-0.5 h-4 w-4 shrink-0 text-tool-error" aria-hidden="true" />
+            {@const notice = transcriptNotice(item.messageId, item.text)}
+            {#if notice}
+              <article class={["transcript-entry flex min-w-0 gap-2.5 rounded-sm border-l-[3px] bg-panel-strong px-3 py-2 text-xs", notice.severity === "warning" ? "border-tool-warning" : "border-tool-error", gapClass]} data-transcript-entry-id={item.id} role={notice.severity === "warning" ? "status" : "alert"}>
+                <TriangleAlert class={["mt-0.5 h-4 w-4 shrink-0", notice.severity === "warning" ? "text-tool-warning" : "text-tool-error"]} aria-hidden="true" />
                 <div class="min-w-0 flex-1">
-                  <div class="font-semibold text-foreground">Agent stopped with an error</div>
+                  <div class="font-semibold text-foreground">{notice.title}</div>
+                  <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
                   <p class="mt-1 whitespace-pre-wrap break-words font-mono text-muted-foreground">{item.text}</p>
                 </div>
               </article>

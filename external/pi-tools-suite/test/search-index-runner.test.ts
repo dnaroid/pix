@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runSourceIndex, type IndexServices } from "../src/project-search/index-runner.js";
@@ -60,17 +60,22 @@ function canonicalRows(path: string) {
   try { return db.query("SELECT * FROM tasks ORDER BY id").all(); } finally { db.close(); }
 }
 
-test("manual sessions drain beyond 256 using native saved names without ACP mapping, and search reuses them", async () => {
+test("manual sessions drain names and public chunks beyond 256, and reuse both namespaces", async () => {
   const f = fixture(), candidates = sessions(f.root, 270);
+  for (const [n, candidate] of candidates.entries()) appendFileSync(candidate.path, JSON.stringify({
+    type: "message", id: `message-${n}`, parentId: `info-${n}`,
+    message: { role: "user", content: [{ type: "text", text: `Public message ${n}` }] },
+  }) + "\n");
   f.services.sessions = async () => candidates;
   expect(await runSourceIndex(f.root, "sessions", signal(), f.services)).toMatchObject({ complete: true, indexed: 270 });
-  expect(f.batches.flat()).toHaveLength(270);
+  expect(f.batches.flat()).toHaveLength(540);
   expect(f.batches.every(batch => batch.length <= 16)).toBe(true);
   expect(count(f.root, "sessions", "pix_session_vectors")).toBe(270);
+  expect(count(f.root, "sessions", "pix_session_chunk_vectors")).toBe(270);
   const cached = await readCachedProjectVectors(f.root, { tasks: [], sessions: candidates }, f.services.semantic!, signal(), config);
   expect(cached.sessions.size).toBe(270);
-  expect(await runSourceIndex(f.root, "sessions", signal(), f.services)).toMatchObject({ complete: true, indexed: 0 });
-  expect(f.batches.flat()).toHaveLength(270);
+  expect(await runSourceIndex(f.root, "sessions", signal(), f.services)).toMatchObject({ complete: true, indexed: 270 });
+  expect(f.batches.flat()).toHaveLength(540);
 }, 30_000);
 
 test("ordinary session search retains its 256-vector budget", async () => {
@@ -89,7 +94,8 @@ test("native saved names reject first-message fallbacks, wrong headers and stale
   writeFileSync(f.services.semantic!.sessionMapPath!, JSON.stringify({ version: 1, sessions: [{ cwd: f.root,
     sessionId: "desktop", piSessionPath: candidates[3]!.path, namedTitle: "Stale name", title: "Stale name" }] }));
   f.services.sessions = async () => candidates;
-  expect(await runSourceIndex(f.root, "sessions", signal(), f.services)).toMatchObject({ complete: true, indexed: 0 });
+  expect(await runSourceIndex(f.root, "sessions", signal(), f.services)).toMatchObject({ complete: false, indexed: 0,
+    message: "Public user/assistant text chunks: 0/0; unreadable sessions: 2." });
   expect(f.batches).toHaveLength(0);
 });
 

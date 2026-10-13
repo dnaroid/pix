@@ -32,7 +32,9 @@ render as clickable inline previews in Desktop (see
 [Desktop Markdown rendering](desktop-markdown-rendering.md)). Existing evidence
 locations, including `.pi/subagents/`, are preserved; media outside the project
 use absolute paths or absolute `file://` Markdown destinations. Video links expose
-inline playback controls.
+inline playback controls. Every new or updated image must use a unique filename;
+previously linked images must not be overwritten because Desktop caches images by
+path.
 
 The six eval report entrypoints, including the paired Todo prompt runner, share
 one resolver. It starts from cwd, uses

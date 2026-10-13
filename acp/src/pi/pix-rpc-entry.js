@@ -217,12 +217,14 @@ const records = new WeakMap();
 function sessionInternals(session) {
 	const internals = session;
 	if (typeof internals._handlePostAgentRun !== "function"
+		|| typeof internals._finishCancelledRetry !== "function"
 		|| typeof internals._runBeforeSettleBoundary !== "function"
 		|| typeof internals._flushPendingBashMessages !== "function"
 		|| typeof internals._flushPendingCustomMessages !== "function"
 		|| typeof internals._emitAgentSettled !== "function"
 		|| typeof internals._isAgentRunActive !== "boolean"
 		|| typeof internals._agentRunAbortRequested !== "boolean"
+		|| !("_failedResponse" in internals)
 		|| !("_runSystemPromptOptions" in internals)) {
 		throw new Error("Agent pause is incompatible with this pi SDK version");
 	}
@@ -293,6 +295,9 @@ function bindPause(session) {
 			clearPauseRequest(record);
 			return false;
 		}
+		// Preserve the scheduled retry instead of losing its failed response when
+		// _startRun settles. Defer the requested Pause to the next turn boundary.
+		if (shouldContinue && internals._failedResponse !== undefined) return true;
 		if (pauseBoundaryReached || record.state === "pause-requested") {
 			// Keep the irreversible decision locked through before-settle awaits.
 			record.pauseBoundaryReached = true;
@@ -380,35 +385,46 @@ function assertCanContinue(session) {
 
 /** @param {AgentSession} session */
 async function continueSession(session, record, isCurrent = () => true) {
-
 	record.state = "resuming";
-	await record.pauseSettled;
-	if (!isCurrent()) {
-		record.state = "paused";
-		return;
-	}
-	const internals = sessionInternals(session);
-	internals._isAgentRunActive = true;
-	internals._agentRunAbortRequested = false;
 	try {
-		await session.agent.continue();
-		while (true) {
-			const shouldContinue = await internals._handlePostAgentRun();
-			if (shouldContinue) {
+		await record.pauseSettled;
+		if (!isCurrent()) {
+			record.state = "paused";
+			return;
+		}
+		if (session.isStreaming || session.agent.state.isStreaming) {
+			throw new Error("another agent run started before continuation");
+		}
+		const internals = sessionInternals(session);
+		internals._isAgentRunActive = true;
+		internals._agentRunAbortRequested = false;
+		try {
+			await session.agent.continue();
+			while (!internals._agentRunAbortRequested) {
+				const shouldContinue = await internals._handlePostAgentRun();
+				if (shouldContinue) {
+					if (internals._agentRunAbortRequested) break;
+					await session.agent.continue();
+					continue;
+				}
+				if (internals._agentRunAbortRequested || !await internals._runBeforeSettleBoundary()) break;
 				if (internals._agentRunAbortRequested) break;
 				await session.agent.continue();
-				continue;
 			}
-			if (internals._agentRunAbortRequested || !await internals._runBeforeSettleBoundary()) break;
-			await session.agent.continue();
+		} finally {
+			if (internals._agentRunAbortRequested) internals._finishCancelledRetry();
+			internals._failedResponse = undefined;
+			internals._runSystemPromptOptions = undefined;
+			internals._flushPendingBashMessages();
+			internals._flushPendingCustomMessages();
+			await internals._emitAgentSettled();
 		}
-	} finally {
-		internals._runSystemPromptOptions = undefined;
-		internals._flushPendingBashMessages();
-		internals._flushPendingCustomMessages();
-		await internals._emitAgentSettled();
+		if (record.state === "resuming") record.state = "idle";
+	} catch (error) {
+		// Do not leave quota-control stuck in the transient resuming state.
+		if (record.state === "resuming") record.state = "paused";
+		throw error;
 	}
-	if (record.state === "resuming") record.state = "idle";
 }
 
 // --- Quota-wait hidden control messages -----------------------------------

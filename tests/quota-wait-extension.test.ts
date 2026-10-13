@@ -9,11 +9,13 @@ function fixture(query: () => Promise<QuotaCheck> = async () => ({ kind: "unknow
 	const commands = new Map<string, (args: string, ctx: ExtensionContext) => Promise<void>>();
 	const entries: any[] = []; const messages: any[] = []; const events: any[] = [];
 	const controls: string[] = [];
+	const statuses: Array<{ key: string; text: string | undefined }> = [];
+	const widgets: Array<{ key: string; lines: string[] | undefined }> = [];
 	let continuable = false;
 	let aborts = 0;
 	const ctx = { mode: "rpc", hasUI: true, model: { provider: "unsupported", id: "model" }, thinkingLevel: "off",
 		sessionManager: { getBranch: () => branch, getSessionId: () => "session-1" }, isIdle: () => true,
-		abort: () => { aborts++; }, ui: { setWidget() {}, setStatus() {}, notify() {} },
+		abort: () => { aborts++; }, ui: { setWidget(key: string, lines: string[] | undefined) { widgets.push({ key, lines }); }, setStatus(key: string, text: string | undefined) { statuses.push({ key, text }); }, notify() {} },
 	} as unknown as ExtensionContext;
 	quotaWait({ on: (name: string, fn: any) => { handlers.set(name, fn); }, registerCommand: (name: string, command: any) => commands.set(name, command.handler),
 		appendEntry: (type: string, data: any) => entries.push({ type: "custom", customType: type, data }),
@@ -25,7 +27,7 @@ function fixture(query: () => Promise<QuotaCheck> = async () => ({ kind: "unknow
 			} else messages.push(message);
 		}, events: { emit: (channel: string, data: any) => events.push({ channel, data }) },
 	} as unknown as ExtensionAPI, query);
-	return { ctx, entries, messages, events, controls, setContinuable: (value: boolean) => { continuable = value; }, get aborts() { return aborts; },
+	return { ctx, entries, messages, events, controls, statuses, widgets, setContinuable: (value: boolean) => { continuable = value; }, get aborts() { return aborts; },
 		emit: async (name: string, event: any = {}) => await handlers.get(name)?.(event, ctx),
 		command: async (args: string) => await commands.get("wait")!(args, ctx),
 		state: () => entries.at(-1)?.data.state,
@@ -35,6 +37,40 @@ const error = (errorMessage: string) => ({ messages: [{ role: "assistant", stopR
 const flush = async () => { await new Promise<void>((resolve) => setImmediate(resolve)); };
 
 describe("quota wait bundled extension", () => {
+	it("pushes terminal Claude rejection on the private rate-limit channel without quota I/O", async () => {
+		let queries = 0;
+		const f = fixture(async () => { queries++; return { kind: "unknown" }; });
+		Object.assign(f.ctx, { model: { provider: "pi-claude-code-provider", id: "opus" } });
+		await f.emit("session_start");
+		const now = Date.now();
+		const reset = new Date(now + 3600_000);
+		const hour = reset.getUTCHours();
+		const clock = `${hour % 12 || 12}:${String(reset.getUTCMinutes()).padStart(2, "0")}${hour >= 12 ? "pm" : "am"}`;
+		const message = { role: "assistant", provider: "pi-claude-code-provider", model: "opus", stopReason: "error", timestamp: now,
+			errorMessage: `Claude Code request failed (429): You've hit your session limit · resets ${clock} (UTC)` };
+		await f.emit("message_end", { message });
+		const sample = f.events.find((event) => event.channel === "pix:claude-code:rate-limit")?.data;
+		assert.equal(sample?.status, "rejected");
+		assert.equal(sample?.sessionId, "session-1");
+		assert.equal(sample?.resetsAt, Math.floor(reset.getTime() / 60_000) * 60_000);
+		assert.deepEqual(f.widgets.find((widget) => widget.lines?.[0] === "pix:claude-code:rate-limit")?.lines,
+			["pix:claude-code:rate-limit", JSON.stringify(sample)]);
+		assert.equal(queries, 0);
+		const count = f.events.length;
+		await f.emit("message_end", { message: { ...message, model: "sonnet" } });
+		await f.emit("message_end", { message: { ...message, timestamp: 0 } });
+		await f.emit("session_shutdown");
+		await f.emit("message_end", { message });
+		assert.equal(f.events.length, count);
+	});
+	it("publishes only a compact /wait footer label and clears it on shutdown", async () => {
+		const f = fixture(); await f.emit("session_start");
+		await f.command("1h20m");
+		assert.match(f.statuses.at(-1)?.text ?? "", /1h20m · \/wait$/u);
+		assert.equal(f.statuses.at(-1)?.key, "quota-wait");
+		await f.emit("session_shutdown");
+		assert.deepEqual(f.statuses.at(-1), { key: "quota-wait", text: undefined });
+	});
 	it("schedules an absolute time without changing its timestamp", async () => {
 		const f = fixture(); await f.emit("session_start");
 		try {

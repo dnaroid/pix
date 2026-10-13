@@ -681,7 +681,9 @@ For historical comparison only,
 0.5.0 snapshot; absent/malformed sources or mismatched original process/cleanup
 hashes fail. The staging helper copies manifest, entrypoints, `src`, `extensions`
 and `bridge`, verifies copied source hashes and records a private snapshot
-manifest. Local SDK peers are symlinked without installing or fetching.
+manifest. Local SDK peers and the vendored provider's explicitly declared
+`jsonc-parser` dependency are symlinked without installing or fetching; external
+historical snapshots do not inherit undeclared dependencies.
 
 Each run has a fresh private HOME, agent directory, cwd, settings and temp root.
 The Node executable is resolved locally from the runner executable or PATH,
@@ -1152,7 +1154,7 @@ runtime is unchanged.
 - Concurrent `recordSubagentRun` and registry cleanup updates preserve unrelated
   run and agent mappings. `[confirmed by code and core.test.ts]`
 - Sub-agents never receive the `subagents` tool → recursive spawning is impossible. `[confirmed by code, tool-guard.ts]`
-- Sub-agents never keep the Claude provider's `pi_claude_code_provider_web_search` tool active (approved policy: no provider web search in any child). The provider registers it in its own `session_start`; the tool guard, loaded last, removes it from the active set, restricted `--tools` lists drop it, and a `tool_call` handler blocks every denied tool at execution as defense in depth. The opt-in real-Pi test checks the inventory actually handed to the provider for default, restricted and no-tools roles. `[confirmed by code, tool-guard.ts; confirmed by tests, provider-child-inventory.test.ts]`
+- Sub-agents never keep the Claude provider's `pi_claude_code_provider_web_search` tool active (approved policy: no provider web search in any child). The Pix-maintained provider no longer registers it, even during `session_start`; the tool guard still excludes or blocks a copy exposed by a legacy provider as defense in depth. Restricted `--tools` lists also drop it. The opt-in real-Pi test checks the inventory actually handed to the provider for default, restricted and no-tools roles. `[confirmed by code, pi-claude-code-provider.ts and tool-guard.ts; confirmed by tests, extension.case.js and provider-child-inventory.test.ts]`
 - Semaphore is project-wide (keyed by resolved cwd). `[confirmed by code]`
 - `ui-qa` tests the requested user-facing surface through the capability-first
   runner: browser delegates to the trusted backend, TUI uses a real PTY plus

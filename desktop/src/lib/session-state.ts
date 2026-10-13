@@ -4,6 +4,7 @@ export const PIX_DCP_TOKENS_SAVED_CHANNEL = "dcp-tokens-saved";
 export const PIX_DCP_CONTEXT_MAP_CHANNEL = "dcp-context-map";
 /** Pushed Anthropic API-key response-header usage (already parsed by ACP). */
 export const PIX_MODEL_USAGE_CHANNEL = "model-usage";
+export const PIX_CLAUDE_CODE_USAGE_CHANNEL = "claude-code-usage";
 
 export interface SessionStateNotification {
   readonly sessionId: string;

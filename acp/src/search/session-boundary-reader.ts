@@ -1,6 +1,7 @@
 import { createReadStream } from "node:fs";
 import { lstat } from "node:fs/promises";
 import { createInterface } from "node:readline";
+import { excludeSessionAttachments, SESSION_TEXT_VERSION } from "./session-text.js";
 
 const MAX_FILE_BYTES = 64 * 1024 * 1024;
 const MAX_MESSAGE_LINE = 1024 * 1024;
@@ -17,14 +18,14 @@ export async function sessionFileFingerprint(path: string): Promise<string | und
   if (!path.endsWith(".jsonl")) return undefined;
   const stats = await lstat(path).catch(() => undefined);
   if (!stats?.isFile() || stats.isSymbolicLink() || stats.size > MAX_FILE_BYTES) return undefined;
-  return `${stats.size}:${stats.mtimeMs}`;
+  return `${SESSION_TEXT_VERSION}:${stats.size}:${stats.mtimeMs}`;
 }
 
 function messageText(content: unknown, limit: number): string {
   const blocks = typeof content === "string" ? [content] : Array.isArray(content)
     ? content.filter(item => item && typeof item === "object" && item.type === "text" && typeof item.text === "string")
       .map(item => item.text as string) : [];
-  return blocks.join("\n").replace(/\s+/gu, " ").trim().slice(0, limit);
+  return excludeSessionAttachments(blocks.join("\n")).replace(/\s+/gu, " ").trim().slice(0, limit);
 }
 
 interface BoundaryNode {

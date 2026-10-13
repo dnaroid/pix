@@ -52,6 +52,23 @@ function writeSearchTasks(root: string, records: Array<Record<string, unknown>>)
 }
 
 describe("project_search shared store lookup", () => {
+  test("sandbox attachments do not leak through boundaries or first-message fallbacks", async () => {
+    const root = fixture(), filename = path.join(root, "sandbox.jsonl");
+    const text = "Request\n```pix-html\nsecretneedle\n```\nordinaryprose";
+    writeFileSync(filename, [
+      { type: "session", version: 3, id: "sandbox", cwd: root, timestamp: "2026-01-01T00:00:00Z" },
+      { type: "message", id: "u", parentId: null, message: { role: "user", content: text } },
+      { type: "message", id: "a", parentId: "u", message: { role: "assistant", stopReason: "stop", content: text } },
+    ].map(row => JSON.stringify(row)).join("\n") + "\n");
+    expect(await readSessionBoundary(filename, signal())).toEqual({ firstText: "Request\nordinaryprose", finalText: "Request\nordinaryprose" });
+    const deps: ProjectSearchServices = { listSessions: async () => [{ id: "sandbox", path: filename, cwd: root, firstMessage: text }],
+      readSession: async () => undefined };
+    const hidden = await searchProject(root, { query: "secretneedle", sources: ["sessions"], indexMode: "lexical" }, deps);
+    expect(hidden.hits).toHaveLength(0);
+    const visible = await searchProject(root, { query: "ordinaryprose", sources: ["sessions"], indexMode: "lexical" }, deps);
+    expect(visible.hits).toHaveLength(1);
+    expect(JSON.stringify(visible.hits)).not.toContain("secretneedle");
+  });
   test("native JSONL lookup follows the active branch and ignores tool-use outputs and abandoned answers", async () => {
     const root = fixture();
     const filename = path.join(root, "example.jsonl");
@@ -355,7 +372,7 @@ describe("project_search registration in Pix Desktop and TUI", () => {
       on: (event: string) => { events.push(event); },
     } as never);
     expect(registered.map(t => t.name)).toEqual(["project_search"]);
-    expect(events).toEqual(["session_start", "session_shutdown", "session_start", "session_shutdown"]);
+    expect(events).toEqual(["session_start", "session_shutdown", "session_start", "turn_end", "message_end", "session_tree", "session_shutdown", "session_start", "session_shutdown"]);
     expect(registered[0]?.promptSnippet).toContain("No second LLM");
     const ok = await registered[0]!.execute("1", { query: "scheduler", sources: ["tasks"] },
       signal(), undefined, { cwd: root });

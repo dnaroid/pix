@@ -10,6 +10,27 @@ import type { SessionModel } from "../src/app/types.js";
 const FIXED_NOW = Date.parse("2025-07-01T12:00:00.000Z");
 
 describe("model usage controller", () => {
+	it("renders streamed Claude quota immediately and keeps it across an in-flight endpoint reply", async () => {
+		const session = sessionWithModel("pi-claude-code-provider", "opus");
+		let resolve!: (value: ModelUsageStatus | undefined) => void;
+		const promise = new Promise<ModelUsageStatus | undefined>((done) => { resolve = done; });
+		let renders = 0;
+		const controller = new AppModelUsageController({ runtimeSession: () => session, render: () => { renders++; } }, () => promise);
+		controller.observeSession(session);
+		const now = Date.now();
+		assert.equal(controller.observeClaudeCodeRateLimit({ version: 1, sessionId: session.sessionId,
+			modelRef: "pi-claude-code-provider/opus", rateLimitType: "five_hour", status: "rejected",
+			resetsAt: now + 3600_000, observedAt: now }), true);
+		assert.match(controller.statusLabel(), /^0%/u);
+		assert.ok(renders > 0);
+		resolve({ provider: "anthropic", modelKey: "pi-claude-code-provider/opus", updatedAt: now,
+			hourly: { remainingPercent: 9, resetAt: now + 3600_000, windowSeconds: 18000 } });
+		await settlePromises();
+		assert.match(controller.statusLabel(), /^0%/u);
+		controller.forgetSessionSamples(session.sessionId);
+		assert.match(controller.statusLabel(), /^9%/u);
+	});
+
 	it("polls Claude Code quota independently of Pi Anthropic API-key classification", async () => {
 		const activeSession = sessionWithModel("pi-claude-code-provider", "claude-opus-5-5");
 		let queries = 0;

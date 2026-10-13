@@ -268,6 +268,35 @@ export interface DesktopSessionUsageReport {
 	readonly totals: DesktopSessionUsageTotals;
 	readonly providers: readonly DesktopSessionUsageProvider[];
 	readonly unattributed: DesktopSessionUsageTotals;
+	readonly subagents?: DesktopSessionSubagentUsageReport;
+}
+
+export interface DesktopSessionSubagentUsage {
+	key: string;
+	agentId: string;
+	runDir?: string;
+	task?: string;
+	scope?: string;
+	subagentType?: string;
+	icon?: string;
+	configuredModel?: string;
+	status?: string;
+	totals: DesktopSessionUsageTotals;
+	usageRecorded: boolean;
+	tools?: { name: string; count: number }[];
+	models: { provider: string; model: string; totals: DesktopSessionUsageTotals }[];
+}
+
+export interface DesktopSessionSubagentUsageReport {
+	main: DesktopSessionUsageTotals;
+	other: DesktopSessionUsageTotals;
+	totals: DesktopSessionUsageTotals;
+	unattributed: DesktopSessionUsageTotals;
+	agents: DesktopSessionSubagentUsage[];
+	changes?: {
+		files: { path: string; operation: "write" | "edit" | "create" | "delete" | "move" | "modify"; previousPath?: string }[];
+		gaps: string[];
+	};
 }
 
 export interface DesktopSessionUsageResponse {

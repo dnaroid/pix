@@ -229,7 +229,7 @@ describe("model usage status", () => {
 		assert.equal(sonnet?.weekly?.remainingPercent, 70);
 
 		const unused = anthropicUsageStatusFromResponse({ five_hour: { utilization: 0, resets_at: null } }, "anthropic/claude-haiku-4-5", now);
-		assert.deepEqual(unused?.hourly, { remainingPercent: 100, resetAt: now + 5 * 60 * 60 * 1000, windowSeconds: 5 * 60 * 60, hasKnownWindowDuration: true });
+		assert.deepEqual(unused?.hourly, { remainingPercent: 100, resetAt: now + 5 * 60 * 60 * 1000, resetAtEstimated: true, windowSeconds: 5 * 60 * 60, hasKnownWindowDuration: true });
 		assert.equal(unused?.weekly, undefined);
 		assert.equal(anthropicUsageStatusFromResponse({}, "anthropic/claude-opus-4-7", now), undefined);
 	});

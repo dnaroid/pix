@@ -128,30 +128,37 @@ function renderDialogToastOverlay(
 
 	const maxDialogWidth = Math.max(1, Math.min(width - 4, 72));
 	const closeLabel = `[${APP_ICONS.close}]`;
-	const actionLabel = compactToastActionLabel(state);
+	const actionLabels = (state.actions ?? (state.action ? [state.action] : []))
+		.map(({ label }) => stripToastAnsi(sanitizeToastText(label)).split("\n", 1)[0]?.trim())
+		.filter((label): label is string => Boolean(label))
+		.map((label) => "[" + label + "]");
 	const wrappedLines = dialogMessageLines(state.message, Math.max(1, maxDialogWidth - 4));
 	const requiredWidth = Math.max(
 		16,
 		stringDisplayWidth(closeLabel) + 4,
-		...(actionLabel ? [stringDisplayWidth(actionLabel) + 4] : []),
+		...actionLabels.map((label) => stringDisplayWidth(label) + 4),
 		...wrappedLines.map((line) => stringDisplayWidth(line) + 4),
 	);
 	const dialogWidth = Math.min(maxDialogWidth, Math.max(16, requiredWidth));
 	const bodyWidth = Math.max(1, dialogWidth - 4);
 	const bodyLines = dialogMessageLines(state.message, bodyWidth);
-	const includeAction = actionLabel !== undefined && maxRows >= 4;
-	const bodyRows = Math.max(0, maxRows - 2 - (includeAction ? 1 : 0));
-	const visibleBodyLines = bodyLines.slice(0, bodyRows);
+	const visibleActions = actionLabels.slice(0, Math.max(0, maxRows - 3));
+	const bodyRows = Math.max(0, maxRows - 2 - visibleActions.length);
+	const scrollOffset = Math.min(Math.max(0, state.scrollOffset ?? 0), Math.max(0, bodyLines.length - bodyRows));
+	const visibleBodyLines = bodyLines.slice(scrollOffset, scrollOffset + bodyRows);
 	const includeBottom = maxRows > 1;
 	const innerWidth = Math.max(0, dialogWidth - 4);
-	const renderedActionLabel = actionLabel ? padOrTrimPlain(actionLabel, innerWidth).trimEnd() : "";
-	const actionWidth = stringDisplayWidth(renderedActionLabel);
-	const actionLeftPadding = includeAction ? Math.max(0, innerWidth - actionWidth) : 0;
-	const actionContent = includeAction ? `${" ".repeat(actionLeftPadding)}${renderedActionLabel}` : "";
 	const dialogRows = [
 		{ ...toastRow(dialogTopLine(closeLabel, dialogWidth)), action: "close" as const },
 		...visibleBodyLines.map((line) => ({ ...toastRow(`│ ${padOrTrimPlain(line, bodyWidth)} │`, `│ ${padOrTrimPlain(stripToastAnsi(line), bodyWidth)} │`), action: "body" as const })),
-		...(includeAction ? [{ ...toastRow(`│ ${padOrTrimPlain(actionContent, innerWidth)} │`), action: "action" as const }] : []),
+		...visibleActions.map((label, index) => {
+			const rendered = padOrTrimPlain(label, innerWidth).trimEnd();
+			const offset = Math.max(0, innerWidth - stringDisplayWidth(rendered));
+			return {
+				...toastRow(`│ ${padOrTrimPlain(" ".repeat(offset) + rendered, innerWidth)} │`),
+				action: "action" as const, actionIndex: index, actionStart: offset, actionWidth: stringDisplayWidth(rendered),
+			};
+		}),
 		...(includeBottom ? [{ ...toastRow(`╰${"─".repeat(Math.max(0, dialogWidth - 2))}╯`), action: "body" as const }] : []),
 	].slice(0, maxRows);
 	const leftWidth = Math.max(0, width - dialogWidth - 2);
@@ -166,10 +173,12 @@ function renderDialogToastOverlay(
 		column,
 		text: row.text,
 		output: colorToastLine(row.output, dialogWidth, { ...style, bold: true }),
-		target: row.action === "close"
+			target: row.action === "close"
 			? { kind: "toast", id: state.id, action: "close", startColumn: closeStartColumn, endColumn: closeEndColumn }
 			: row.action === "action"
-				? { kind: "toast", id: state.id, action: "action", startColumn: column + 2 + actionLeftPadding, endColumn: column + 2 + actionLeftPadding + actionWidth }
+				? { kind: "toast", id: state.id, action: "action", actionIndex: "actionIndex" in row ? row.actionIndex : 0,
+					startColumn: column + 2 + ("actionStart" in row ? row.actionStart : 0),
+					endColumn: column + 2 + ("actionStart" in row ? row.actionStart : 0) + ("actionWidth" in row ? row.actionWidth : 0) }
 				: { kind: "toast", id: state.id, action: "body", startColumn: column, endColumn: column + dialogWidth },
 	}));
 }

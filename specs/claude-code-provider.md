@@ -24,6 +24,105 @@ load only the suite-relative standalone module entrypoint, not the whole suite
 and not a user/project npm package. Existing owned-launch, tool-guard and
 provider-web-search policies continue to apply.
 
+### Multiple Claude subscription profiles
+
+Opt-in `claudeCodeProvider` settings live **only** in the user-level
+`~/.config/pi/pi-tools-suite.jsonc`, shared by Pix Desktop/ACP and TUI. A
+workspace's project config cannot supply OAuth paths. Desktop Settings → Tools
+Suite → Claude Accounts edits this file through the existing validated settings
+editor; no login tokens are read, copied, stored, or displayed by Pix. The
+account editor supports naming, ordering, adding, removing and copying CLI
+commands to log in/check status with a separate `CLAUDE_CONFIG_DIR`. The toggle
+is disabled until at least two profiles are listed. Saving changes takes effect
+on the next provider request; an existing in-flight request keeps its snapshot.
+
+Desktop Session usage, when the active model is Claude Code or the session
+has recorded Claude Code calls, includes a
+compact account selector between `Session usage` and `Subagents`. It reads
+only the user-level Tools Suite config when opened. `Default` with rotation
+off uses the ordinary Claude CLI login; `Auto` with rotation on clears the
+manual preference. Choosing a named profile writes `selectedAccount` under
+`claudeCodeProvider` via a compare-and-swap JSONC edit that preserves other
+settings and detects concurrent saves. This is a global **preferred account
+for the next model request**, not a change to an in-flight call; it also works
+while automatic rotation is off. With rotation enabled, the selected account
+is attempted first, and its quota rejection still triggers the bounded
+fallback and optional pause. Explicit preference changes clear only that
+account's process-local cooldown once; no account is retried twice in one
+request. Renaming/removing the preferred profile in Settings clears it, and an
+invalid stale name in manually edited JSONC falls back instead of blocking
+the provider.
+
+Each attempt publishes only a profile label and timestamp through the
+session-owned `claude-code-account` event, allowing Desktop to show
+`Last: <label>`. This identifies an attempted account, not a confirmed
+successful login. The selector does not automatically refresh subscription
+usage or relabel existing quota bars: previously displayed quotas may belong
+to the prior login. The UI displays no OAuth tokens or private config paths.
+All file reads/writes are asynchronous and scoped to the lifetime of the
+popup, and a concurrent-file conflict does not overwrite newer settings.
+
+Example (each directory must first be authenticated with Claude Code CLI):
+
+```jsonc
+"claudeCodeProvider": {
+  "autoRotate": true,
+  "rotationDelaySeconds": 60,
+  "accounts": [
+    { "name": "Personal", "configDir": "~/.claude-personal" },
+    { "name": "Work", "configDir": "~/.claude-work" }
+  ]
+}
+```
+
+When disabled or absent, Claude Code retains its original single-profile login
+behavior. With rotation enabled, startup checks the first configured profile,
+not the implicit default `~/.claude`. Per-request model subprocesses receive
+a pinned `CLAUDE_CONFIG_DIR`; neither mutates `process.env` nor forwards an
+OAuth token. The provider-specific `pi_claude_code_provider_web_search` tool
+is not registered or used; the suite's separate `web_search`/`web_fetch`
+tools are unchanged.
+Two profiles with the same
+resolved path or duplicate names are invalid; the backend rejects malformed
+configuration rather than silently choosing the wrong login.
+
+Only a **structured** `rate_limit_event` with `status: rejected` and
+`rateLimitType` of `five_hour` or `seven_day` qualifies for failover. A request
+starts at the selected available account and visits each configured account at
+most once; rate-limited accounts enter a shared process-wide cooldown until
+their reported reset time (or two minutes when unknown), capped at eight days.
+Concurrent requests may already be using the same account when a rejection
+arrives; subsequent selections honor the cooldown. A profile becomes eligible
+again after its reset. No implicit rotation happens for auth, transport,
+overload, cancellation, or other errors, nor after any model content or tool
+call has started streaming. Pre-output rejections discard the abandoned
+attempt's start/error events, preserving a single logical Pi stream. Retries
+reuse the remaining request deadline, not a fresh timeout per profile.
+
+After a confirmed quota rejection, the provider waits
+`claudeCodeProvider.rotationDelaySeconds` seconds before attempting another
+eligible account. This is a **non-blocking, abortable pause**, with an integer
+setting of 0–300 seconds and a 60-second default; omitting the setting still
+waits 60 seconds, while explicit 0 disables the pause. It is never applied to
+the first attempt, ordinary errors or an already-exhausted account pool.
+Before the wait, the session receives a warning naming the rejected account and
+duration. The selected next profile is re-evaluated after the wait, because
+another concurrent request may exhaust that profile in the meantime. The
+wait consumes the same overall request timeout; if there is insufficient time
+for the configured pause, the provider returns a terminal timeout error rather
+than launching another process or waiting indefinitely. Cancellation clears
+the timer and aborts the request without switching. The additional delay is a
+user-experience safety bound, **not** a guarantee of compliance with Anthropic's
+account or rate-limit terms.
+
+If every profile is blocked or has rejected this request, stop with one normal
+provider error that identifies the exhaustion and (when known) the earliest
+reset; do not recursively requeue or spin. The existing quota-wait extension
+may handle the final exhausted error after the turn as before. Automatic
+switches emit a session-scoped warning that names the two profile labels (never
+credential material). Quota telemetry from Claude Code remains scoped to the
+active Pi model/session and is **not** a combined balance across accounts.
+
 Claude Code is optional. When `claude` is absent from PATH and no nonblank
 `PI_CLAUDE_CODE_PROVIDER_PATH` is configured, initialization quietly leaves the
 provider, models and search tool unregistered: normal session startup has no
@@ -49,6 +148,14 @@ without requiring an active prompt. Slash-command feedback still delivers all
 levels; background informational notifications stay quiet. This is conversation
 feedback, not an OS notification. Notices are live feedback, not persisted Pi
 history.
+ACP preserves warning/error severity in `pix-system:notification:warning:` and
+`pix-system:notification:error:` ids. Desktop shows these as compact inline
+cards with a Lucide warning icon, a severity-colored left border, and the
+original notice text. Warning cards use the warning color and do not claim the
+agent stopped. Extension errors are titled `Extension error`; only actual
+`pix-system:error:` provider-failure rows say `Agent stopped with an error`.
+Rate-limit rows already received from older ACP hosts also use warning cards.
+Ordinary command feedback keeps its existing plain system-row presentation.
 Desktop retains early startup rows when a draft becomes a real session, as
 specified in [draft optimistic submit](desktop-draft-optimistic-submit.md).
 
@@ -72,7 +179,7 @@ user config; migration itself preserves visibility preferences.
 
 ### Built-in plugin isolation
 
-The shared launch settings for provider requests and the visible web-search tool
+The shared launch settings for provider requests and the dormant web-search implementation
 explicitly disable the built-in `agents-md` and `plugin-authoring` plugins.
 Claude Code 2.1.296 reports the latter as `cc-plugin-plugin-authoring`; both its
 legacy alias and canonical settings key are disabled. Empty setting sources

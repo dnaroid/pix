@@ -76,7 +76,7 @@ test("embedding decoder accepts only the pinned routing ID and its exact provide
   for (const model of [undefined, null, 42, "", "pplx-embed-v1-4b", "perplexity/pplx-embed-v1-4b", "other/pplx-embed-v1-0.6b", "pplx-embed-v1-0.6b ", "PPLX-EMBED-V1-0.6B"]) assert.throws(() => decodeEmbeddings(response(model), 1));
 });
 
-test("session queries search only Unicode titles once per session, never body files or paid providers", async t => {
+test("malformed transcripts remain local with Unicode title fallback and no provider calls", async t => {
   const f = await fixture(t); await f.preferences.configure();
   const body = "{malformed JSONL but private bodyOnly data}";
   await writeFile(f.path, body);
@@ -135,6 +135,30 @@ test("local session index uses first user and last completed assistant on active
   const db = new DatabaseSync(join(f.cwd, ".pi/search/sessions.sqlite"), { readOnly: true });
   try { assert.equal(db.prepare("SELECT COUNT(*) AS n FROM pix_session_boundary_fts").get()?.n, 0); }
   finally { db.close(); }
+});
+
+test("boundary refresh invalidates pre-projection cache and excludes sandbox source", async t => {
+  const f = await fixture(t);
+  f.setRecords([{ ...f.record, title: "Game discussion" }]);
+  const entry = (id: string, parentId: string | null, role: string, text: string) =>
+    JSON.stringify({ type: "message", id, parentId, message: { role, stopReason: "stop", content: text } });
+  await writeFile(f.path, [JSON.stringify({ type: "session", id: "pi1", cwd: f.cwd }),
+    entry("u", null, "user", "Request\n```pix-html\nusersecret\n```\nfirstprose"),
+    entry("a", "u", "assistant", "Ready\n```pix-html\nassistantsecret\n```\nfinalprose"),
+  ].join("\n") + "\n");
+  const store = new SearchIndexStore();
+  await synchronizeSessionBoundaries(store, f.cwd, [f.record], signal());
+  const db = new DatabaseSync(join(f.cwd, ".pi/search/sessions.sqlite"));
+  try {
+    const stats = await (await import("node:fs/promises")).stat(f.path);
+    db.prepare("UPDATE pix_session_boundary_meta SET fingerprint=?").run(`${stats.size}:${stats.mtimeMs}`);
+    db.exec("UPDATE pix_session_boundary_fts SET final_text='assistantsecret',first_text='usersecret'");
+    await synchronizeSessionBoundaries(store, f.cwd, [f.record], signal());
+    assert.doesNotMatch(JSON.stringify(db.prepare("SELECT * FROM pix_session_boundary_fts").all()), /usersecret|assistantsecret/);
+    const s = f.make();
+    assert.equal((await s.query(f.request("finalprose"))).results.length, 1);
+    for (const query of ["assistantsecret", "usersecret"]) assert.deepEqual((await s.query(f.request(query))).results, []);
+  } finally { db.close(); }
 });
 
 test("private session excerpts refuse redirected SQLite index directories", async t => {
@@ -222,7 +246,7 @@ test("offline settings use authored metadata, not values; settings-only queries 
   assert.throws(() => parseSearchConfigRequest({ cwd: f.cwd, messageFilterEnabled: true }));
 });
 
-test("settings embeddings persist/reuse across restart and never embed fallback session titles/bodies", async t => {
+test("settings embeddings persist/reuse across restart and absent transcripts do not trigger session query embeddings", async t => {
   const f = await fixture(t); await f.preferences.configure();
   const request = f.request("", { types: ["settings", "sessions"], settings: [setting] });
   const first = f.make(); await first.query(request); await f.idle(first);
@@ -439,6 +463,7 @@ for (const providerFails of [false, true]) test(`mixed search propagates control
 
 test("OpenRouter short response model recovers settings indexing with canonical metadata", async t => {
   const f = await fixture(t); await f.preferences.configure(); let model = "wrong-model";
+  f.setRecords([]);
   t.mock.method(globalThis, "fetch", async (url: unknown, init?: RequestInit) => {
     assert.equal(url, EMBEDDING_ENDPOINT);
     const body = JSON.parse(String(init?.body)); assert.equal(body.model, SEARCH_EMBEDDING_MODEL);

@@ -331,7 +331,21 @@ describe("AppMouseController", () => {
 		assert.equal(newTabCount, 1);
 	});
 
-	it("shows token-only model-level session usage, including subagent calls, when clicking Usage", async () => {
+	it("never opens conversation links through a dialog toast overlay", () => {
+		let linksOpened = 0;
+		const controller = new AppMouseController(
+			fakeHost({ openFileLink: () => { linksOpened++; return true; } }),
+			fakePopupMenus(), fakePopupActions(), fakeScrollController(), fakeCommandController(),
+		);
+		controller.renderedRowTexts.set(5, "https://example.com");
+		controller.renderedLinks.set(5, [{ start: 0, end: 19, url: "https://example.com" }]);
+		controller.renderedTargets.set(5, { kind: "toast", id: 1, action: "body", startColumn: 1, endColumn: 40 });
+		controller.handleMouse({ button: 0, x: 5, y: 5, released: false });
+		controller.handleMouse({ button: 0, x: 5, y: 5, released: true });
+		assert.equal(linksOpened, 0);
+	});
+
+	it("shows on-demand session model spend with costs, including subagent calls, when clicking Usage", async () => {
 		let toast: { message: string; kind: string; variant?: string } | undefined;
 		const session = {
 			sessionManager: {
@@ -371,11 +385,10 @@ describe("AppMouseController", () => {
 		assert.equal(toast?.kind, "info");
 		assert.equal(toast?.variant, "dialog");
 		const plain = (toast?.message ?? "").replace(/\x1b\[[\d;:]*m/gu, "");
-		assert.match(plain, /Session usage\n400 tokens/);
-		assert.match(plain, /anthropic\n\s+claude-sonnet\s+250/);
-		assert.match(plain, /openai-codex\n\s+gpt-5\.6-sol\s+150/);
-		assert.doesNotMatch(plain, /\$/);
-		assert.doesNotMatch(plain, /agents|of session|quota|remaining|used/i);
+		assert.match(plain, /Session usage\n400 tokens\s+\$0\.20/);
+		assert.match(plain, /anthropic\n\s+claude-sonnet\s+250 \/ \$0\.15/);
+		assert.match(plain, /openai-codex\n\s+gpt-5\.6-sol\s+150 \/ \$0\.05/);
+		assert.doesNotMatch(plain, /Limits|remaining|used/i);
 		assert.match(toast?.message ?? "", /\x1b\[[\d;]*38;2;/u);
 	});
 

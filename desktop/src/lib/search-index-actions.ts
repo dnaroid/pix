@@ -1,6 +1,7 @@
 import type { SearchSourceId } from "./search-index-status";
 
 export interface IndexResult {
+  diagnostics?: readonly { sessionId: string; path: string; reason: string; line?: number; code?: string; entryId?: string; parentId?: string }[];
   source: SearchSourceId;
   complete: boolean;
   indexed?: number;

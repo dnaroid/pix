@@ -105,6 +105,21 @@ describe("AppStatusController", () => {
 });
 
 describe("StatusLineRenderer", () => {
+	it("renders a compact quota-wait timer beside the model without obscuring the workspace or usage", () => {
+		const label = `${APP_ICONS.timerSand} 1h12m · /wait`;
+		const renderer = statusLineRenderer({
+			widgetText: "",
+			voiceActive: false,
+			currentStatus: "provider/model · high 42%",
+			quotaWaitStatusLabel: label,
+			workspaceLabel: "game-tactical",
+			modelUsageLabel: "Usage",
+		});
+		const layout = renderer.layout(120);
+		assert.equal(layout.quotaWaitStatusLabel, label);
+		assert.ok(layout.text.includes(`42% ${label} game-tactical Usage`));
+		assert.equal(renderer.layout(120).text, layout.text);
+	});
 	it("exposes draft model and thinking click targets without a runtime session", () => {
 		const modelLabel = "openai-codex/gpt-5.5";
 		const thinkingLabel = "high";
@@ -811,7 +826,7 @@ function widgetsText(...parts: string[]): string {
 	return parts.filter((part) => part.length > 0).join(" ");
 }
 
-function statusLineRenderer(options: { widgetText: string; voiceActive: boolean; promptWidgetText?: string; promptActive?: boolean; promptEnabled?: boolean; terminalBellWidgetText?: string; terminalBellSoundEnabled?: boolean; agentPauseWidgetText?: string; agentPauseActive?: boolean; sessionActivity?: "idle" | "running" | "thinking"; statusDotBright?: boolean; workspaceLabel?: string; workspaceGitBranchLabel?: string; modelUsageLabel?: string; session?: AgentSession; currentStatus?: string; thinkingLabel?: string; modelLabel?: string; draftModelStatus?: { modelLabel: string; thinkingLabel?: string }; modelColors?: ModelColorsConfig; userMessageJumpMenuActive?: boolean; queueableInputActive?: boolean; internalClipboardActive?: boolean; allThinkingExpandedActive?: boolean; superCompactToolsActive?: boolean; quickScroll?: { up: boolean; down: boolean } }): StatusLineRenderer {
+function statusLineRenderer(options: { widgetText: string; voiceActive: boolean; promptWidgetText?: string; promptActive?: boolean; promptEnabled?: boolean; terminalBellWidgetText?: string; terminalBellSoundEnabled?: boolean; agentPauseWidgetText?: string; agentPauseActive?: boolean; sessionActivity?: "idle" | "running" | "thinking"; statusDotBright?: boolean; workspaceLabel?: string; workspaceGitBranchLabel?: string; modelUsageLabel?: string; quotaWaitStatusLabel?: string; session?: AgentSession; currentStatus?: string; thinkingLabel?: string; modelLabel?: string; draftModelStatus?: { modelLabel: string; thinkingLabel?: string }; modelColors?: ModelColorsConfig; userMessageJumpMenuActive?: boolean; queueableInputActive?: boolean; internalClipboardActive?: boolean; allThinkingExpandedActive?: boolean; superCompactToolsActive?: boolean; quickScroll?: { up: boolean; down: boolean } }): StatusLineRenderer {
 	return new StatusLineRenderer({
 		theme: THEMES.dark,
 		screenStyler: new ScreenStyler({ theme: THEMES.dark, mouseSelection: undefined }),
@@ -821,6 +836,7 @@ function statusLineRenderer(options: { widgetText: string; voiceActive: boolean;
 		sessionActivity: options.sessionActivity ?? "idle",
 		statusDotBright: options.statusDotBright ?? false,
 		currentStatus: () => options.currentStatus ?? "ready",
+		quotaWaitStatusLabel: () => options.quotaWaitStatusLabel,
 		statusWorkspaceLabel: () => options.workspaceLabel ?? "workspace",
 		statusWorkspaceGitBranchLabel: () => options.workspaceGitBranchLabel,
 		statusModelLabel: () => options.modelLabel ?? "model",

@@ -39,7 +39,7 @@ Give Pix Desktop the same turn-boundary pause/continue workflow as the TUI and e
 - Run controls remain hidden in embedded editors and questionnaire mode; questionnaire activity can still show `Waiting for input`. Status announcements contain only status text, not the adjacent action buttons. Long status text truncates without shrinking the controls.
 - Explicit Stop/cancel clears the continuation affordance; cancellation is not treated as pause.
 - Desktop's deferred/auto queue does not consume another message while the session is `pause-requested`, `paused`, `continuable`, or `resuming`; advancing past those boundaries requires Continue or a new explicit user prompt.
-- Continue invokes `Agent.continue()` through the Pix RPC shim and then uses Pi's normal post-run retry, compaction, queue-draining, and settlement bookkeeping.
+- Continue invokes `Agent.continue()` through the Pix RPC shim and then uses Pi's normal post-run retry, compaction, queue-draining, and settlement bookkeeping. A requested Pause remains pending through a scheduled retry rather than losing its failed response. If a newer run takes ownership before continuation, the stale continuation fails closed; a failed continuation does not leave ACP stuck in `resuming`.
 - While continuation is active, Desktop treats the session as running, so Stop can cancel it and Pause can be requested again after the resumed run starts.
 - `resuming` denotes continuation startup only and disables Pause. An extension-originated run that has emitted `agent_start` (including automatic continuation after question recovery) publishes `running`: Desktop adopts its busy owner while leaving Pause enabled. `running` is not a settlement signal and does not allow the deferred/auto queue to advance.
 - Extension-originated runs (including timed continuations and todo nudges) are also owned as active ACP runs and signal Desktop's running indicator. If an extension starts again while the prior settlement is awaiting RPC snapshots or notifications, the existing busy owner spans that restart: the stale settlement cannot publish an idle/paused state or resolve the owning request. Stop reasons and cancellation from the previous SDK run do not leak into the restarted run.
@@ -63,6 +63,7 @@ colors in both light and dark mode.
 ## Related files
 
 - `src/app/session/agent-pause-controller.ts`
+- `src/bundled-extensions/question/recovery.ts` (third private SDK continuation mirror)
 - `acp/src/pi/pix-rpc-entry.js`
 - `acp/src/pi/pi-rpc-client.ts`
 - `acp/src/acp/desktop-commands.ts`
@@ -105,5 +106,5 @@ colors in both light and dark mode.
 
 ## Risks / compatibility
 
-- The turn-boundary implementation intentionally relies on private `AgentSession` bookkeeping because the pinned Pi RPC API does not expose pause/continue. The adapter mirrors `_runAgentPrompt`, including `_runSystemPromptOptions`, pending custom-message flushing, cancellation, and `agent_before_settle`; its private surface must be reviewed when the Pi SDK is upgraded. The pinned Pi RPC runtime's preflight response uses `handled`/`started` dispositions rather than boolean acknowledgements. The SDK's `_runAgentPrompt` also has retry cancellation bookkeeping (`_finishCancelledRetry`) that the custom continuation loop does not mirror; cancellation during a resumed turn needs dedicated validation before claiming full parity.
+- The turn-boundary implementation intentionally relies on private `AgentSession` bookkeeping because the Pi RPC API does not expose pause/continue. The adapters mirror Pi 1.2's `_startRun` **post-run** lifecycle without inserting a new prompt, including retry-cancellation/failure cleanup (`_finishCancelledRetry`, `_failedResponse`), `_runSystemPromptOptions`, pending custom-message flushing, and `agent_before_settle`. They must be reviewed again on every Pi SDK bump; preparation/compaction before a new prompt is not part of continuation. The Pi RPC runtime's preflight response uses `handled`/`started` dispositions rather than boolean acknowledgements. Cancellation during resumed turns is regression-tested but still depends on these private implementation details.
 - Provider `max_tokens` responses that end on an assistant message are not considered resumable by `Agent.continue()` and therefore do not show Continue; the resumable limit case is the agent-loop turn/request boundary that leaves a user/tool-result tail or queued message.

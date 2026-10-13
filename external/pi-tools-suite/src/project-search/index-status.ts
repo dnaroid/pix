@@ -6,7 +6,7 @@ import type { SqlDatabase } from "./semantic-index-writer.js";
 
 const tables: Record<IndexSource, readonly [string, string]> = {
   code: ["pix_native_chunks", "vectors"], knowledge: ["pix_native_chunks", "vectors"],
-  sessions: ["pix_session_titles", "pix_session_vectors"], tasks: ["pix_task_documents", "pix_task_vectors"],
+  sessions: ["pix_session_chunks", "pix_session_chunk_vectors"], tasks: ["pix_task_documents", "pix_task_vectors"],
   commits: ["pix_commit_documents", "pix_commit_vectors"],
 };
 

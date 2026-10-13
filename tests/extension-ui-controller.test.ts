@@ -85,6 +85,39 @@ describe("ExtensionUiController custom UI", () => {
 		assert.equal(statuses.restored, 4);
 	});
 
+	it("keeps the quota-wait countdown in scoped status chrome without repeated toasts or renders", () => {
+		const { controller, activeScope, renders, toasts, statuses } = createController();
+		activeScope.value = "tab-a";
+		const tabA = controller.createExtensionUIContext("tab-a");
+		const tabB = controller.createExtensionUIContext("tab-b");
+
+		tabA.setStatus("quota-wait", "⏳ 1h12m · /wait");
+		assert.equal(controller.quotaWaitStatusLabel(), "⏳ 1h12m · /wait");
+		assert.equal(renders.count, 1);
+		tabA.setStatus("quota-wait", "⏳ 1h12m · /wait");
+		assert.equal(renders.count, 1, "unchanged countdown must not repaint on every second");
+
+		tabB.setStatus("quota-wait", "⏳ 45m · /wait");
+		assert.equal(renders.count, 1, "background tabs must not render in the foreground");
+		assert.equal(controller.quotaWaitStatusLabel(), "⏳ 1h12m · /wait");
+		activeScope.value = "tab-b";
+		assert.equal(controller.quotaWaitStatusLabel(), "⏳ 45m · /wait");
+
+		tabA.setStatus("quota-wait", "⏳ 1h11m · /wait");
+		activeScope.value = "tab-a";
+		assert.equal(controller.quotaWaitStatusLabel(), "⏳ 1h11m · /wait");
+		tabA.setStatus("quota-wait", undefined);
+		assert.equal(controller.quotaWaitStatusLabel(), undefined);
+
+		tabA.setStatus("quota-wait", "⏳ 2m · /wait");
+		controller.clearWidgets("tab-a");
+		assert.equal(controller.quotaWaitStatusLabel(), undefined);
+		tabA.setStatus("quota-wait", "⏳ stale · /wait");
+		assert.equal(controller.quotaWaitStatusLabel(), undefined, "a disposed extension must not revive stale status");
+		assert.deepEqual(toasts, []);
+		assert.equal(statuses.restored, 0);
+	});
+
 	it("renders after extensions update the terminal title", () => {
 		const { controller, renders } = createController();
 		const ctx = controller.createExtensionUIContext();

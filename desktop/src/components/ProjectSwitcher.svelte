@@ -50,6 +50,7 @@
   let textSlot = $state<HTMLSpanElement | null>(null);
   let chevronSlot = $state<HTMLSpanElement | null>(null);
   let open = $state(false);
+  let windowFocused = $state(true);
   let reportedMinimumWidth = 0;
   let menu = $state<HTMLDivElement | null>(null);
   let menuTypeaheadQuery = "";
@@ -73,6 +74,7 @@
   });
 
   onMount(() => {
+    windowFocused = document.hasFocus();
     reportMinimumWidth();
     const observer = typeof ResizeObserver === "undefined"
       ? undefined
@@ -217,7 +219,13 @@
   }
 </script>
 
-<svelte:window onclick={handleWindowClick} onfocusin={handleWindowFocusin} onkeydown={handleWindowKeydown} />
+<svelte:window
+  onclick={handleWindowClick}
+  onfocusin={handleWindowFocusin}
+  onkeydown={handleWindowKeydown}
+  onfocus={() => windowFocused = true}
+  onblur={() => windowFocused = false}
+/>
 
 <div
   class={variant === "titlebar"
@@ -237,6 +245,7 @@
       aria-haspopup="menu"
       aria-expanded={open}
       data-project-badge
+      data-window-inactive={!windowFocused}
       onclick={toggle}
       onkeydown={handleTriggerKeydown}
     >{projectAbbreviation(workspace)}</button>
@@ -352,13 +361,20 @@
 
 <style>
   .project-titlebar-badge {
-    background-color: var(--project-titlebar-color, oklch(0.62 0.15 var(--project-titlebar-hue)));
+    --project-titlebar-identity: var(--project-titlebar-color, oklch(0.62 0.15 var(--project-titlebar-hue)));
+    background-color: var(--project-titlebar-identity);
     color: var(--primary-foreground);
+  }
+
+  .project-titlebar-badge[data-window-inactive="true"] {
+    background-color: transparent;
+    border-color: var(--project-titlebar-identity);
+    color: var(--project-titlebar-identity);
   }
 
   @media (prefers-color-scheme: dark) {
     .project-titlebar-badge {
-      background-color: var(--project-titlebar-color, oklch(0.74 0.13 var(--project-titlebar-hue)));
+      --project-titlebar-identity: var(--project-titlebar-color, oklch(0.74 0.13 var(--project-titlebar-hue)));
     }
   }
 </style>

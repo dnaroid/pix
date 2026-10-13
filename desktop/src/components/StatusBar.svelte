@@ -33,6 +33,7 @@
     sessionUsageFailed,
     sessionUsageAvailable,
     claudeCodeRoute = false,
+    lastClaudeAccountAttempt,
     claudeLimitsRefreshing = false,
     claudeLimitsFailed = false,
     sessionActivity,
@@ -45,6 +46,7 @@
     onSetConfig,
     onOpenModelThinking,
     onOpenSessionUsage,
+    subagentPathNavigation,
     onRefreshClaudeLimits = () => {},
     onClearTodos,
   }: {
@@ -72,6 +74,7 @@
     sessionUsageFailed: boolean;
     sessionUsageAvailable: boolean;
     claudeCodeRoute?: boolean;
+    lastClaudeAccountAttempt?: string;
     claudeLimitsRefreshing?: boolean;
     claudeLimitsFailed?: boolean;
     sessionActivity: SessionActivitySummary;
@@ -84,6 +87,7 @@
     onSetConfig: (option: SessionConfigOption, value: string | boolean) => void;
     onOpenModelThinking: () => void;
     onOpenSessionUsage: () => void;
+    subagentPathNavigation?: import("../lib/project-path-navigation").ProjectPathNavigation;
     onRefreshClaudeLimits?: () => void;
     onClearTodos: () => Promise<boolean>;
   } = $props();
@@ -153,10 +157,12 @@
       {sessionUsageFailed}
       {sessionUsageAvailable}
       {claudeCodeRoute}
+      {lastClaudeAccountAttempt}
       {claudeLimitsRefreshing}
       {claudeLimitsFailed}
       {quotaWaitIndicator}
       onOpenSessionUsage={onOpenSessionUsage}
+      {subagentPathNavigation}
       onRefreshClaudeLimits={onRefreshClaudeLimits}
     />
     {/key}

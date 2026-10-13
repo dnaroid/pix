@@ -104,6 +104,25 @@ describe("renderToastOverlays", () => {
 		assert.equal(action.text.slice(localStart, localEnd), "[Compress]");
 	});
 
+	it("targets each dialog action and supports scrolling long body text independently", () => {
+		const state: AppToastEntry = {
+			...toast("top\nmiddle\nbottom\nlast", "dialog"),
+			actions: [{ label: "Subagents" }, { label: "Refresh" }],
+			scrollOffset: 2,
+		};
+		const rows = renderToastOverlays([state], 80, 6, THEMES.dark);
+		assert.ok(rows.some((row) => row.text.includes("bottom")));
+		assert.ok(rows.some((row) => row.text.includes("last")));
+		assert.ok(!rows.some((row) => row.text.includes("top")));
+		const actions = rows.filter((row) => row.target?.action === "action");
+		assert.equal(actions.length, 2);
+		assert.deepEqual(actions.map((row) => row.target?.actionIndex), [0, 1]);
+		assert.deepEqual(actions.map((row) => row.text.slice(
+			(row.target?.startColumn ?? row.column) - row.column,
+			(row.target?.endColumn ?? row.column) - row.column,
+		)), ["[Subagents]", "[Refresh]"]);
+	});
+
 	it("keeps uncolored text readable in ANSI-rich dialog toasts", () => {
 		for (const theme of [THEMES.dark, THEMES.light]) {
 			const overlays = renderToastOverlays([

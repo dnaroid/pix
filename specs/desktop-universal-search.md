@@ -81,8 +81,14 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   from each category. No duplicate vector index or full transcript/diff index
   is created. Code/Knowledge source files are reread by the ACP backend with
   realpath, regular-file and symlink checks, project-root containment, bounded
-  file sizes (2 MiB), and cited line windows. Session evidence comes from the
-  local first/final FTS excerpt index; commit messages are reread only for
+  file sizes (2 MiB), and cited line windows. Session evidence is reread from the
+  authenticated canonical transcript, starting one message before the matched
+  message through the last persisted branch head (or the whole branch when no
+  message anchor exists). It preserves chronology and short user reversals.
+  Missing/stale message anchors never fall back to client snippets. If the entire
+  suffix cannot fit the remaining 30,000-character total / 28,000-character
+  session budget, generation fails explicitly rather than dropping late turns.
+  Commit messages are reread only for
   HEAD-reachable commits. Other source types use bounded search-result metadata.
   Unavailable/unsafe files are omitted; empty evidence does not invoke an LLM.
   Retrieved source content and the question are explicitly sent to the chosen
@@ -91,17 +97,26 @@ the selected sources (up to 60 seconds) and returns one combined response. See
 - Generation runs in an isolated temporary Pi SDK ModelRuntime, without
   creating a Pi/ACP conversation/session or mutating project state. The private
   Desktop-only `pix/search/rag` request carries bounded evidence references,
-  and `pix/search/rag_delta` sends incremental text and the exact set of
+  and `pix/search/rag_delta` sends validated text and the exact set of
   verified source IDs; request IDs prevent cross-query notification leaks.
   Source excerpts are untrusted data in the model prompt. The model must cite
-  only supplied evidence as [1], [2], etc., and report missing evidence
-  instead of inventing facts. The output is displayed as Markdown in the
+  only supplied evidence as `[1]`, `[2]`, etc., and report missing evidence
+  instead of inventing facts. Generation buffers text until citation syntax and
+  bounds are checked and session revisions are revalidated. Missing, malformed or
+  out-of-range references fail closed before answer text is exposed. This checks
+  citation syntax/source identity, not semantic entailment. The prompt distinguishes
+  proposals, authorization, promises, reported execution and independently verified
+  outcomes; assistant reports are not filesystem proof. The output is displayed as Markdown in the
   existing search dialog with inline clickable citations and a source list.
   Each source reuses the same navigation as a normal Search hit (code line,
   knowledge line, commit diff, session, task or setting). Unknown citation
   numbers are inert. Generation supports cancellation and an owned 90-second
   deadline; stale completion after close/edit/filter/project change is ignored.
-  A provider error displays an opaque message, never raw provider secrets.
+  RAG failures display the complete originating error message as plain text,
+  including provider stream errors and backend validation/configuration failures,
+  rather than an opaque availability notice. Line breaks are preserved and long
+  messages wrap without truncation. Stack traces and arbitrary request/auth objects
+  are not serialized for display. Cancellation and stale-request suppression remain unchanged.
 - Desktop user settings at `search.ragModelRef` and `search.ragThinking` own
   the independent answer model and reasoning effort. Empty model reference
   means the normal Desktop default model; effort defaults to medium and supports
@@ -113,15 +128,19 @@ the selected sources (up to 60 seconds) and returns one combined response. See
 - The dialog uses a compact input/filter/results layout. A persistent live
   footer spinner and `Searching…` label remain while the initial request or any
   late source is pending, including alongside partial results. Result-region
-  busy semantics cover both states. Technical index/ranking/status information,
-  real source warnings and provider/cost disclosures remain accessible in a
+  busy semantics cover both states. Real source warnings, a compact semantic
+  configuration status and brief provider/cost disclosures remain accessible in a
   collapsed `Search details` section with an explicit rotating Lucide chevron.
   The six result-type filter chips and the `Search settings` action live inside
-  this disclosure, not in always-visible toolbar/footer rows. A redundant
+  this disclosure, not in always-visible toolbar/footer rows. This is the only
+  settings action in the dialog; the semantic status does not repeat it.
+  Static implementation explanations (ranking, index mechanics, vector dimensions,
+  query syntax and healthy backend diagnostics) are not shown here. A redundant
   `Current project` label is not shown; the dialog is already project-scoped.
   The mode switcher remains always visible and says only `Auto / Search / RAG`,
-  while the technical Jev/provider disclosure remains in the expanded details.
-  The disclosure's long content remains scrollable without clipping.
+  with a short query/excerpt transmission notice for Auto/RAG. Expanded details
+  disclose embedding-provider transmission/costs when configured and microphone
+  transmission when supported. Warnings remain scrollable without clipping.
   Timeout notices are not repeated as
   warnings. Completed empty searches remain
   distinct from pending/error states.
@@ -267,8 +286,10 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   transmission can still duplicate provider billing.
   Contention is bounded; cancellation preserves committed batches and does not
   evict live owners or delete the index. Query/filter edits and closing cancel
-  provider work and invalidate late publication. Session transcripts, task
-  attachments, diffs and file contents are never sent by this source. Provider
+  provider work and invalidate late publication. Public user/assistant session
+  text and eligible saved titles may be sent for semantic indexing; tool outputs,
+  thinking, attachments, task attachments, diffs and file contents are not sent
+  by this source. Provider
   failures are opaque and credential-free; native/local hits remain available.
 - Settings search uses authored labels, descriptions and synonyms, never
   configured values, credentials or unrelated settings files. A result opens
@@ -298,10 +319,11 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   bounded to 4,096 / 6,144 characters for first/final respectively. Oversized
   message lines (over 1 MiB) and sessions (over 64 MiB) are skipped.
   A local SQLite FTS5 index in `pix_session_boundary_*` tables in
-  `.pi/search/sessions.sqlite` matches query terms without embedding or
-  uploading messages. Per-file size/mtime fingerprints skip unchanged JSONL.
-  Changed, deleted and unmapped sessions are reconciled on later searches;
-  no per-message results or automatic background full-history indexing exist.
+  `.pi/search/sessions.sqlite` matches first/final excerpts lexically without embedding.
+  Public-message chunks have a separate local lexical index and may also be embedded
+  as described below. Per-file size/mtime and text-projection-version fingerprints
+  skip unchanged JSONL; projection changes refresh existing first/final excerpts.
+  Changed, deleted and unmapped sessions are reconciled on later searches.
   Sessions without a listing title are skipped. Queries observe renames/deletions.
   Selecting a result opens/activates and hydrates that session, without paging
   to or guessing a particular message. First/final excerpt retrieval remains
@@ -311,9 +333,10 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   user message remain local lexical fallback; only authenticated named titles
   are eligible. The session-map entry retains this title provenance so the
   search layer cannot accidentally embed the first-message display fallback.
-  Sessions without an eligible name never produce an embedding, and no
-  conversation history, message bodies, attachment names/contents, transcripts,
-  or branch histories are read or sent by this index.
+  This title namespace remains separate from the public-message chunk namespace below;
+  unnamed sessions are eligible for message indexing. A valid global provider
+  configuration authorizes uploading existing and new public user/assistant text;
+  without it, local lexical retrieval remains available.
   Explicit names are synchronized locally to the dedicated
   `pix_session_meta`, `pix_session_titles` and `pix_session_vectors`
   tables inside `.pi/search/sessions.sqlite`. Rename/delete reconciliation removes
@@ -327,10 +350,60 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   apply; session metadata is separate from settings/commit
   model identity. Incompatible metadata fails closed instead of deleting
   previously paid vectors.
-- Session histories are never classified with JEV or embedded. There is no
-  per-message progress/count, message-filter option, or background **full**
-  history scan. Only bounded first/final excerpts are parsed locally on a
-  changed-session search; tool bodies are never parsed into the index.
+- Session search additionally covers all public user/assistant text on the last
+  persisted parent-linked JSONL branch, including short approvals/reversals and
+  assistant commentary labelled with its stop reason. It excludes tool bodies,
+  thinking blocks, attachments and abandoned branches; it does not classify messages
+  with JEV. Native session ID and header cwd must match the discovered source.
+  Top-level `pix-html` fences (including the `html-sandbox` alias) are attachments:
+  their fence and source are excluded from both roles' public text before chunking,
+  embedding, first/final excerpt extraction and RAG evidence budgeting. Prose before
+  and after them remains searchable. Backtick/tilde fences and case-insensitive
+  language tags follow Desktop fence recognition; an unclosed attachment excludes
+  the remaining text. Ordinary code fences, nested Markdown examples and inline
+  mentions remain text. Attachment-only messages retain ancestry but produce no
+  chunks. Offsets refer to the projected text, not the original message source.
+  The canonical JSONL is unchanged. A projection-version change invalidates cached
+  chunk revisions even for unchanged files; normal synchronization replaces old
+  text rows, and live retrieval never ranks removed source via cached vectors.
+  Unchanged prose hashes continue to reuse compatible paid embeddings.
+  Corrupt, incomplete, redirected, oversized or cyclic transcripts fail closed.
+  For this public-message reader, the file cap remains 64 MiB; the per-record
+  text cap is 1,048,576 UTF-16 characters of combined public text, not raw JSONL
+  size. Large image/tool/thinking records are fully validated in a cancellable
+  worker with a 30-second deadline per large record, retaining ancestry and public text only.
+  Ordinary small records parse locally. Invalid JSON, worker failures/timeouts
+  and oversized public text reject the session without truncation. These rules
+  do not change the separate first/final boundary reader's raw-line cap.
+  Missing parent links remain fail-closed; physical file order never repairs them.
+  UTF-16-safe chunks are at most 1,600 characters and retain message ID, offsets,
+  role, ordinal and content hash. Results remain one per session; the best chunk
+  supplies a snippet and message identity for RAG, while navigation opens the session.
+  Startup and debounced message/turn changes automatically refresh the local index.
+  With a valid global provider configuration and credentials, existing and new
+  public text is uploaded in batches of 16; unchanged hashes reuse paid vectors.
+  Automatic/manual synchronization drains remaining work; query enrichment is
+  bounded to 256 new chunk vectors / 40 seconds and reports incomplete coverage.
+  Failures do not create a paid polling loop; explicit Continue retries interrupted work.
+  Skipped transcripts produce local metadata-only diagnostic records (session ID,
+  path, stable reason, optional line number and OS error code; missing parents
+  also carry the child entry ID and missing parent ID), never transcript
+  text or raw exception/provider bodies. Both hosts write best-effort JSONL to
+  `.pi/artifacts/search-diagnostics-<pid>-<uuid>/events.jsonl`, capped at 4 MiB per
+  process log and subject to ordinary artifact cleanup. Manual indexing returns
+  at most 100 skip diagnostics for the existing bounded Activity history; its
+  300-character entries may shorten paths, while the file log retains full paths.
+  Background search diagnostics and search-command output do not create chat
+  notifications. Failed diagnostic writes do not fail indexing or notify chat.
+  Message-index passes log start, five-second progress heartbeats (including
+  provider waits), and terminal status with per-pass IDs, phase, elapsed time,
+  session/chunk/cache/save/request counters as specified in
+  [the shared search contract](project-search-agent-tool.md#behavior).
+  These heartbeats are file-log-only, not live Activity updates.
+  Source leases are shared with Pi/TUI; publication rechecks transcript revision and
+  provider authorization. Workspace replacement/disposal aborts owned work.
+  Local lexical message search is available without embeddings. There is no
+  message-filter setting or relation graph.
   Obsolete `messageFilterEnabled` writes are rejected; legacy config keys are
   ignored. Opening search polls cheap status without discovering transcripts
   or rerunning queries.
@@ -390,8 +463,11 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   Short token-leased publications never hold a database writer lock over provider
   HTTP; see [decision 0070](../docs/decisions/0070-search-source-work-recovery.md).
   Session title vectors use `pix_session_*`, while text-only first/final excerpts
-  use `pix_session_boundary_*` FTS5 tables in `sessions.sqlite`. No session body
-  embeddings are created.
+  use `pix_session_boundary_*` FTS5 tables in `sessions.sqlite`. Public-message
+  chunks, transcript revisions and provider-namespaced vectors use the shared
+  `pix_session_chunks`, `pix_session_chunk_fts`, `pix_session_chunk_meta` and
+  `pix_session_chunk_vectors` tables. Searches validate fresh live-branch chunks;
+  retained vectors alone never authorize a stale session result.
   Legacy stores are not read, imported, migrated or repaired. Schema-1 Settings
   caches are rejected without mutation; explicit recovery is separate from normal
   indexing. Read-only status/configuration polling never writes or repairs stores.
@@ -407,11 +483,9 @@ the selected sources (up to 60 seconds) and returns one combined response. See
 
 ## Constraints and failure cases
 
-- Desktop-only feature, scoped/labeled to the current project; not TUI global
-  search. Session title *results* are computed from the current local session
-  map; explicitly named titles and their configured vectors plus bounded local
-  first/final excerpts may persist to project storage. Full-message and
-  provider-backed conversation indexes remain forbidden.
+- The Desktop search interface and RAG are Desktop-only. Session message indexing
+  is shared with Pi/TUI `project_search`, scoped to the current project. Public text
+  and its configured embeddings may persist in the source-local search store.
   Embedding configuration and credentials are shared with ordinary Pi across projects.
 - Sources fail independently. Disconnected ACP retains authored settings lookup;
   missing/busy repository search does not suppress settings/session results. Request failures
@@ -469,6 +543,14 @@ the selected sources (up to 60 seconds) and returns one combined response. See
 - `acp/src/search/rag-request.ts`
 - `acp/src/search/rag-evidence.ts`
 - `acp/src/search/rag-service.ts`
+- `acp/src/search/rag-citations.ts`
+- `acp/src/search/session-chunk-service.ts`
+- `acp/src/search/session-transcript.js`
+- `acp/src/search/session-chunks.js`
+- `acp/src/search/session-chunk-sync.js`
+- `external/pi-tools-suite/src/project-search/session-transcript.mjs`
+- `external/pi-tools-suite/src/project-search/session-chunks.mjs`
+- `external/pi-tools-suite/src/project-search/session-chunk-sync.mjs`
 - `acp/src/acp/openrouter-jev.ts`
 - `acp/src/search/session-boundary-reader.ts`
 - `acp/src/search/session-boundary-index.ts`
@@ -525,6 +607,8 @@ the selected sources (up to 60 seconds) and returns one combined response. See
 - `acp/test/search.test.ts`
 - `acp/test/search-intent.test.ts`
 - `acp/test/search-rag.test.ts`
+- `acp/test/session-chunks.test.ts`
+- `acp/test/session-attachments.test.ts`
 - `acp/test/commit-search.test.ts`
 - `acp/test/search-preferences.test.ts`
 - `acp/test/agent.test.ts`

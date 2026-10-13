@@ -8,6 +8,8 @@ import { findProjectRoot } from "../lib/project.js";
 import { withTaskDatabase } from "../project-tasks/storage.js";
 import { validateTaskDocument, type ProjectTask } from "../project-tasks/schema.js";
 import { cachedProjectSemantics, type SemanticSearchOptions } from "./semantic.js";
+import { searchSessionChunks } from "./session-chunks.mjs";
+import { excludeSessionAttachments } from "./session-text.mjs";
 import { searchSemanticCommits, type CommitSemanticServices } from "./semantic-commit-indexer.js";
 import type { CachedSessionCandidate } from "./semantic-cache.js";
 import { setImmediate as yieldToLoop } from "node:timers/promises";
@@ -183,10 +185,10 @@ async function defaultSessionList(cwd: string, signal: AbortSignal): Promise<Ses
   return SessionManager.list(cwd, undefined, undefined, signal);
 }
 function messageText(content: unknown): string {
-  if (typeof content === "string") return content.slice(0, 4096);
+  if (typeof content === "string") return excludeSessionAttachments(content).slice(0, 4096);
   if (!Array.isArray(content)) return "";
-  return content.flatMap(block => block && typeof block === "object" && block.type === "text"
-    && typeof block.text === "string" ? [block.text] : []).join(" ").slice(0, 4096);
+  return excludeSessionAttachments(content.flatMap(block => block && typeof block === "object" && block.type === "text"
+    && typeof block.text === "string" ? [block.text] : []).join("\n")).slice(0, 4096);
 }
 /** Same first/last completed assistant boundaries as the Desktop search index. */
 export async function readSessionBoundary(pathname: string, signal: AbortSignal): Promise<SessionBoundary | undefined> {
@@ -221,7 +223,8 @@ async function searchSessions(root: string, queryTerms: readonly string[], signa
   let unreadable = 0;
   for (const [index, session] of items.entries()) {
     signal.throwIfAborted();
-    const title = (session.name?.trim() || session.firstMessage.trim().slice(0, 140) || session.id).slice(0, 240);
+    const firstMessage = excludeSessionAttachments(session.firstMessage);
+    const title = (session.name?.trim() || firstMessage.trim().slice(0, 140) || session.id).slice(0, 240);
     let content: SessionBoundary | undefined;
     try {
       content = await (deps.readSession ?? readSessionBoundary)(session.path, signal);
@@ -229,7 +232,7 @@ async function searchSessions(root: string, queryTerms: readonly string[], signa
       signal.throwIfAborted();
       unreadable++;
     }
-    const first = content?.firstText ?? session.firstMessage.slice(0, 4096);
+    const first = content?.firstText ?? firstMessage.slice(0, 4096);
     const last = content?.finalText ?? "";
     records.push({ ...session, snippet: preview(`First: ${first.slice(0, 180)}\nFinal: ${last.slice(0, 180)}`) });
     if (index % 32 === 31) await yieldToLoop();
@@ -243,6 +246,14 @@ async function searchSessions(root: string, queryTerms: readonly string[], signa
   }
   const notices: string[] = [];
   if (relevant.length > MAX_SESSIONS) notices.push(`Sessions: inspected the ${MAX_SESSIONS.toLocaleString("en-US")} most recent sessions; narrow the query if older history is needed.`);
+  for(const chunk of await searchSessionChunks(root,records,queryTerms.join(" "),signal)) {
+    const session = records.find(record=>record.id===chunk.id)!;
+    const position = hits.findIndex(hit=>hit.id===`sessions:${chunk.id}`);
+    const hit: ProjectSearchHit = {kind:"sessions",id:`sessions:${chunk.id}`,sessionId:chunk.id,sessionPath:session.path,
+      title:session.name?.trim() || excludeSessionAttachments(session.firstMessage).slice(0,140) || session.id,
+      snippet:chunk.snippet,score:chunk.score};
+    if(position<0) hits.push(hit);else hits[position]=hit;
+  }
   if (unreadable) notices.push(`Sessions: ${unreadable} session files could not be read.`);
   return { hits, notices, records };
 }
@@ -483,9 +494,9 @@ export async function searchProject(
       for (const session of sessions) {
         const similarity = semantic.sessions.get(session.id);
         if (similarity === undefined) continue;
-        const title = (session.name?.trim() || session.firstMessage.trim().slice(0, 140) || session.id).slice(0, 240);
+        const title = (session.name?.trim() || excludeSessionAttachments(session.firstMessage).trim().slice(0, 140) || session.id).slice(0, 240);
         hits.push({ kind: "sessions", id: `sessions:${session.id}`, sessionId: session.id,
-          sessionPath: session.path, title, snippet: session.snippet ?? "Saved session name",
+          sessionPath: session.path, title, snippet: semantic.chunks.get(session.id)?.snippet ?? session.snippet ?? "Saved session name",
           score: 0.2 + similarity * 0.8, semantic: true });
       }
       return { hits, notices: semantic.notices };

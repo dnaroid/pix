@@ -251,6 +251,28 @@ function nativeSessionFile(f: ReturnType<typeof fixture>, nativeId: string, titl
   return filename;
 }
 
+test("unnamed sessions retrieve middle public messages and reuse shared vectors", async () => {
+  const f = fixture(); f.configure();
+  const file = path.join(f.root, "unnamed.jsonl");
+  writeFileSync(file, [
+    { type: "session", version: 3, id: "unnamed", cwd: f.root },
+    { type: "message", id: "u", parentId: null, message: { role: "user", content: "Start" } },
+    { type: "message", id: "a", parentId: "u", message: { role: "assistant", content: [{ type: "text", text: "Middle evidence" }], stopReason: "stop" } },
+    { type: "message", id: "t", parentId: "a", message: { role: "toolResult", content: "PRIVATE" } },
+    { type: "message", id: "v", parentId: "t", message: { role: "user", content: "No, keep rows" } },
+  ].map(row => JSON.stringify(row)).join("\n") + "\n");
+  const session: SessionRecord = { id: "unnamed", path: file, cwd: f.root, firstMessage: "Start" };
+  const deps = services(f, { listSessions: async () => [session], readSession: async () => ({ firstText: "Start", finalText: "" }) });
+  const local = await searchProject(f.root, { query: "keep rows", sources: ["sessions"], indexMode: "lexical" }, deps);
+  expect(local.hits[0]?.snippet).toContain("keep rows");
+  expect(deps.documents).toEqual([]); expect(deps.calls).toEqual([]);
+  const semantic = await searchProject(f.root, { query: "conceptual redesign", sources: ["sessions"] }, deps);
+  expect(semantic.hits[0]?.sessionId).toBe("unnamed");
+  expect(deps.documents).toEqual(["Start", "Middle evidence", "No, keep rows"]);
+  await searchProject(f.root, { query: "another concept", sources: ["sessions"] }, deps);
+  expect(deps.documents).toHaveLength(3);
+});
+
 function services(f: ReturnType<typeof fixture>, extra: Partial<ProjectSearchServices> = {}): ProjectSearchServices & { calls: string[]; documents: string[] } {
   const calls: string[] = [];
   const documents: string[] = [];

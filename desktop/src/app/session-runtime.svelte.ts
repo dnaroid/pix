@@ -27,6 +27,7 @@ export function createSessionRuntimeStore(options: SessionRuntimeStoreOptions) {
 
   return {
     get statuses() { return status.statuses; },
+    get claudeAccountAttempts() { return status.claudeAccountAttempts; },
     get modelUsageRefreshing() { return status.modelUsageRefreshing; },
     get dcpStatsRefreshing() { return status.dcpStatsRefreshing; },
     get sessionUsageBySession() { return status.sessionUsageBySession; },

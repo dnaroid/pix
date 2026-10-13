@@ -73,6 +73,14 @@ describe("Desktop visual prompt", () => {
 		expect(next.systemPromptOptions.sections.desktop_visual_guidance).not.toContain("/project-a");
 	});
 
+	test("requires unique filenames for new and updated images to avoid stale cached previews", () => {
+		const input = event();
+		harness("desktop").run(input);
+		expect(input.systemPromptOptions.sections.desktop_visual_guidance).toContain(
+			"Every new or updated image MUST use a unique filename; never overwrite a previously linked image, because Desktop caches images by path.",
+		);
+	});
+
 	test("preserves earlier opaque overrides without duplicating guidance", () => {
 		const hook = harness("desktop");
 		const result = hook.run(event("/project-a", "Earlier forced prompt"));

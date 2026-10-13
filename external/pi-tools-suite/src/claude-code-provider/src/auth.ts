@@ -71,7 +71,7 @@ export function parseAuthStatus(stdout: string): ClaudeSubscriptionType {
   return subscription as ClaudeSubscriptionType;
 }
 
-export async function inspectClaudeInstallation(): Promise<ClaudeInstallation> {
+export async function inspectClaudeInstallation(claudeConfigDir?: string): Promise<ClaudeInstallation> {
   const executable = await resolveExecutable(claudeExecutable());
 
   try {
@@ -86,7 +86,7 @@ export async function inspectClaudeInstallation(): Promise<ClaudeInstallation> {
   try {
     const [{ stdout: versionOutput }, { stdout: authOutput }, { stdout: helpOutput }] = await Promise.all([
       execClaudeFile(executable, ["--version"]),
-      execClaudeAuthStatus(executable),
+      execClaudeAuthStatus(executable, claudeConfigDir),
       execClaudeFile(executable, ["--help"]),
     ]);
     const version = versionOutput.trim().match(/\d+\.\d+\.\d+/)?.[0];
@@ -107,9 +107,9 @@ export async function inspectClaudeInstallation(): Promise<ClaudeInstallation> {
   }
 }
 
-async function execClaudeAuthStatus(executable: string): Promise<{ stdout: string }> {
+async function execClaudeAuthStatus(executable: string, claudeConfigDir?: string): Promise<{ stdout: string }> {
   try {
-    return await execClaudeFile(executable, ["auth", "status"]);
+    return await execClaudeFile(executable, ["auth", "status"], claudeConfigDir);
   } catch (error) {
     // Claude exits 1 for loggedIn:false. Only that explicit structured result
     // is a login failure; malformed output, timeouts and other failures remain
@@ -135,11 +135,11 @@ export function claudeLaunch(executable: string, args: readonly string[]): Scrip
   return { command: executable, args: [...args], env: {} };
 }
 
-async function execClaudeFile(executable: string, args: readonly string[]) {
+async function execClaudeFile(executable: string, args: readonly string[], claudeConfigDir?: string) {
   const launch = claudeLaunch(executable, args);
   return execFileAsync(launch.command, launch.args, {
     timeout: 10_000,
-    env: buildClaudeEnvironment(launch.env),
+    env: buildClaudeEnvironment({ ...launch.env, ...(claudeConfigDir ? { CLAUDE_CONFIG_DIR: claudeConfigDir } : {}) }),
   });
 }
 

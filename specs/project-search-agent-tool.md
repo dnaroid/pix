@@ -17,36 +17,77 @@ Native Code/Knowledge uses disposable `.pi/search/code.sqlite` and `.pi/search/k
 see [native repository search](native-repository-search.md) and [0065](../docs/decisions/0065-native-repository-search.md).
 
 ## Behavior
+Search diagnostics stay out of the conversation: background session indexing
+and `/search-index` / `/search-semantic` command output write to the local
+`.pi/artifacts/search-diagnostics-<pid>-<uuid>/events.jsonl` log instead of UI
+notifications. The indexing status bar remains available. Skipped transcript
+records contain session ID, full path, a stable reason and optional line/OS code;
+missing-parent failures also identify the child entry and absent parent ID,
+not message contents or raw provider exceptions. Writes are best-effort, capped
+at 4 MiB per process log, and subject to artifact cleanup; retain needed evidence
+outside disposable storage. Automatic/manual indexing reports up to 100 skip
+diagnostics in its result for Desktop Activity, while logging each skip until
+the file cap is reached.
+Each message-index pass also logs `session_index_progress` at start, every five
+seconds while active (including provider waits), and at termination. A unique
+`runId` groups a pass. Metadata reports `phase` (`waiting_for_lease`, `reading`,
+`checking_cache`, `provider`, `saving`), elapsed milliseconds, current session ID,
+total/checked/skipped sessions, discovered chunks, cache-hit chunks, newly committed
+vectors, and started/completed embedding requests. Chunk totals grow as transcripts
+are read; saved-vector counts deduplicate identical text, so these are not percentages.
+Completed requests mean resolved embedding calls, not successful validation/publication.
+Terminal status is `completed`, `incomplete`, `failed`, or `cancelled`; no provider
+error bodies or message text are included. Slow writes drop intervening heartbeats
+instead of queuing them; teardown stops the timer and drains its pending write before
+the terminal event. This is file-log progress, not streamed Desktop Activity updates.
+
 
 - `project-search` is a default-enabled module in the bundled pi-tools-suite
   catalog. It registers one `project_search` tool in ordinary Pi with the suite, the main Pix TUI and
   Desktop agent extension runtimes, without a project-index registration gate.
   No external index setup commands, RAG generation or writes
   to canonical task/session/Git data occur. Search-cache writes are limited
-  to selected semantic sources and the native file cache at explicit search time, never background work.
+  to source-local caches. Tasks and public session messages also synchronize in the background.
 - Required `query` is a nonempty string of at most 2,048 characters.
   `sources` optionally selects unique values from `sessions`, `tasks`,
   `commits`, `code`, and `knowledge` (all five by default).
   `limit` is 1–20 (default 10). `indexMode` is `hybrid` (default),
   `semantic`, or `lexical`. Code and Knowledge always use the native backend.
   `hybrid`/`semantic` additionally permit creating and querying missing
-  task/session-name/commit vectors under the shared global provider
+  task/session-name/session-message/commit vectors under the shared global provider
   prerequisites. `lexical` disables **all** embedding calls/writes, but not native file-index refresh,
   and a search call never changes configuration.
   Optional `projectPath` names an explicit alternate project directory,
   resolved relative to session cwd (also accepting absolute and `~/` paths);
   it does not change session cwd. The project directory must exist.
 - Sessions use Pi SDK native session listing for the selected project's
-  history, and read only the first user message and most recent completed
-  assistant answer (`stopReason: "stop"`) on the active JSONL branch.
-  Tool outputs, thinking and abandoned branches are not included in returned
-  excerpts. Return native session ID and session file path for follow-up
-  navigation. Up to **1,000** sessions are inspected per request, individual
-  JSONL files larger than 4 MiB are skipped for excerpt reading, and snippets are
-  shortened before delivery. The SDK session listing may internally read
-  more JSONL data; there is no new full-transcript index or automatic upload.
-  Desktop's existing FTS index is not duplicated: this tool performs a bounded
-  on-demand read, independent of Desktop SQLite availability in the TUI.
+  history. In addition to saved titles and first/final excerpts, search covers
+  public user/assistant text on the last persisted parent-linked JSONL branch.
+  Tool outputs, thinking, attachments and abandoned branches are excluded.
+  `pix-html` fences and their `html-sandbox` alias count as attachments in both
+  user and assistant text: remove the fence/source before chunking, embedding and
+  first/final excerpt extraction. Keep surrounding prose, ordinary code fences,
+  nested Markdown examples and inline mentions. Unclosed attachment fences exclude
+  the remaining message text. Attachment-only messages preserve ancestry but have
+  no chunks; UTF-16 offsets refer to the projected text. Desktop RAG uses this same
+  projection before evidence budgeting. Canonical transcripts are never rewritten.
+  Projection-versioned revisions refresh existing cached text on synchronization;
+  live retrieval cannot reuse removed chunks, while unchanged prose hashes reuse
+  compatible paid vectors.
+  Native header ID and project cwd authenticate each file; unsafe/corrupt files
+  fail closed. Message chunks are UTF-16-safe, at most 1,600 characters, with
+  message ID, role, order and offsets. Up to **1,000** sessions are inspected per
+  query; full-message reading skips files over 64 MiB or records whose combined
+  public text exceeds 1,048,576 UTF-16 characters (never truncated). Large JSONL
+  records containing images, thinking or tool data are parsed fully in a cancellable
+  worker (30-second deadline per large record), retaining only ancestry and public text; the excluded
+  payload is not indexed or embedded. Small records parse locally. Malformed JSON,
+  worker failures/timeouts, cycles and missing parents still fail closed. Missing
+  parents are never repaired by assuming the preceding physical line is the parent.
+  Results remain session-level with native ID/path and a bounded matching snippet.
+  Local lexical retrieval does not require a database or provider. The common
+  chunk/vector namespace in `.pi/search/sessions.sqlite` is shared with Desktop,
+  not duplicated into a TUI-only store.
 - Tasks are read from the same `.pi/tasks.sqlite` store used by Desktop Tasks,
   including completed items. Search title, description, stable ID, status,
   type, priority, file/artifact link paths, parent and related task titles/IDs,
@@ -60,10 +101,10 @@ see [native repository search](native-repository-search.md) and [0065](../docs/d
   `.pi` directories/database files are rejected. The SQLite schema and task
   payloads are strictly validated; legacy JSONC files are not read. Results use
   `tasks:<id>` identities.
-- **Incremental semantics for Tasks and saved Session names**: On an explicit
+- **Incremental semantics for Tasks, Session names and public messages**: An explicit
   `project_search` in `hybrid` or `semantic` mode reuses existing vectors in
   the project-owned source-local history databases under
-  `pix_task_*` and `pix_session_*`, using the global
+  `pix_task_*`, `pix_session_*` and session-chunk tables, using the global
   `~/.config/pi/pi-tools-suite.jsonc` `search.embedding` configuration. These use the
   same provider identity and vectors as Desktop Global Search, without
   another TUI preference, source opt-ins or a duplicate index.
@@ -88,7 +129,7 @@ see [native repository search](native-repository-search.md) and [0065](../docs/d
   task-document embeddings. Explicit session-name vectors may still be generated
   on demand, followed by one query embedding reused for both. Such content and the query
   are sent to that provider and may incur fees. Status, priority, task/session
-  IDs, links, model assignments, transcript bodies and attachment metadata or
+  IDs, links, model assignments and attachment metadata or
   bytes are not independently embedded. Existing task descriptions may of
   course contain user-authored sensitive text. Query-driven session indexing uses
   batches of 16, up to 256 explicitly named-session vectors per request, and a
@@ -101,12 +142,22 @@ see [native repository search](native-repository-search.md) and [0065](../docs/d
   active task synchronization, explicit manual indexing or an explicitly submitted session search with valid configuration.
   Index identity mismatches fail closed without
   deleting previously paid vectors. No implicit external-backend setup, user-config edits,
-  shared-credential writes or full-transcript indexing occur.
+  shared-credential writes occur.
   `indexMode:"lexical"` never triggers semantic
   provider calls or indexing. The
   global configuration also applies when an agent runs the tool in ordinary Pi or Pix TUI.
   The calling agent may still send returned excerpts to
   its own language model as part of normal operation.
+- Public session messages automatically synchronize on session startup and
+  debounced public-message/turn/branch changes. A configured provider authorizes upload of both
+  existing and new public text, including unnamed sessions. Tool/thinking/image
+  blocks are excluded. Shared source leases and model/content hashes prevent
+  duplicate paid chunk work across hosts; revisions and authorization are checked
+  again after provider latency. Automatic/manual indexing drains work in batches
+  of 16; query indexing is bounded to 256 chunks / 40 seconds and reports remaining
+  work. Failed background work does not spin; `/search-index sessions` explicitly
+  continues it. Configuration removal, session replacement and shutdown
+  invalidate old work. These caches do not modify canonical JSONL files.
 - Commits search **HEAD ancestors**, not unrelated branches or all working-tree
   changes. Match subject, author, message, hash and changed file paths; report
   full hash for the existing Git Diff navigation. Results have bounded previews
@@ -174,11 +225,12 @@ see [native repository search](native-repository-search.md) and [0065](../docs/d
 ## Privacy and security
 
 - Local lexical sources never call a network model on their own. With an
-  explicitly configured global provider, task/session semantics may upload their **title and
-  description or explicit saved name** as well as the search query; commit
+  explicitly configured global provider, task/session semantics may upload task **title and
+  description**, explicit saved session names and public user/assistant session-message text,
+  as well as the search query; commit
   semantics may upload **commit subject, author and message** to that provider
-  on an explicit Git search. No transcript bodies, task
-  attachments, unrelated task metadata, patches or file contents are sent by
+  on an explicit Git search. Tool outputs, thinking blocks, attachments, unrelated
+  task metadata, patches or file contents are not sent by
   these semantic sources. `indexMode:"lexical"` is the no-embedding opt-out.
   The **calling agent**
   may nevertheless send returned excerpts to its selected model provider as
@@ -237,10 +289,19 @@ see [native repository search](native-repository-search.md) and [0065](../docs/d
 - Completed batches survive cancellation/failure; unchanged text reuses paid
   vectors. Explicit reruns reset the interrupted-provider failure budget and
   continue missing work. Identity mismatches remain fail-closed, retaining cached
-  vectors. One source failure does not cancel other requested sources.
+  vectors. Session indexing includes public user/assistant message chunks as well
+  as eligible saved names; its stored item count is not current transcript coverage.
+  One source failure does not cancel other requested sources.
 
 ## Implementation
 
+- `external/pi-tools-suite/src/project-search/session-index-progress.mjs`
+- `external/pi-tools-suite/src/project-search/session-index-progress.d.mts`
+- `external/pi-tools-suite/src/project-search/session-chunks.mjs`
+- `acp/src/search/session-index-progress.js`
+- `acp/src/search/session-index-progress.d.ts`
+- `acp/src/search/session-chunks.js`
+- `acp/src/search/session-chunks.d.ts`
 - `external/pi-tools-suite/src/project-search/index.ts`
 - `external/pi-tools-suite/src/project-search/index-command.ts`
 - `external/pi-tools-suite/src/project-search/index-runner.ts`
@@ -264,6 +325,8 @@ see [native repository search](native-repository-search.md) and [0065](../docs/d
 
 ## Tests
 
+- `acp/test/session-index-progress.test.ts`
+- `acp/test/session-chunks.test.ts`
 - `external/pi-tools-suite/test/project-search.test.ts`
 - `external/pi-tools-suite/test/search-index-command.test.ts`
 - `external/pi-tools-suite/test/search-index-runner.test.ts`

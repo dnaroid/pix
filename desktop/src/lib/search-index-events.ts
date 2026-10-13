@@ -27,6 +27,9 @@ export function observeSearchIndexEvents(history: SearchIndexHistory, workspace:
             const { complete, indexed, total } = after.result;
             const counts = Number.isFinite(indexed) && Number.isFinite(total) ? ` (${indexed}/${total})` : "";
             add(source, complete ? "success" : "warning", `${complete ? "Manual indexing complete" : "Manual pass incomplete; Continue available"}${counts}`);
+            for (const d of after.result.diagnostics ?? []) {
+              add(source, "warning", `Skipped ${d.sessionId}: ${d.reason}${d.code ? ` (${d.code})` : ""}${d.line ? `, line ${d.line}` : ""}; ${d.path}`);
+            }
           }
         }
       }

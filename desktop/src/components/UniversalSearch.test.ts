@@ -4,6 +4,11 @@ import consentSource from "./NativeRepositorySemanticConsent.svelte?raw";
 import { SEARCH_KINDS } from "../lib/universal-search";
 
 describe("search category presentation", () => {
+  it("renders originating RAG errors as wrapping multiline plain text", () => {
+    expect(source).toContain("ragError = ragErrorMessage(error)");
+    expect(source).toContain('class="whitespace-pre-wrap [overflow-wrap:anywhere] text-xs text-tool-error" role="alert">{ragError}');
+    expect(source).not.toContain("RAG generation unavailable. Check");
+  });
   it("distinguishes a successful empty search from sources with warnings or errors", () => {
     expect(source).toContain("'No results.'");
     expect(source).toContain("!result.results.length && notices.length");
@@ -11,7 +16,6 @@ describe("search category presentation", () => {
     expect(source).toContain("busy || intentBusy || ragActive || !!result.pendingSources?.length");
     expect(source).toContain("aria-busy={searching}");
     expect(source).toContain('"git_search_history", { workspace, query }');
-    expect(source).toContain("all ancestors of current HEAD");
     expect(source).not.toContain("latest 30");
     expect(source).toContain("No results. Check search details.");
   });
@@ -82,21 +86,16 @@ describe("search category presentation", () => {
     expect(insideDetails).toContain("group-open/search-details:rotate-90");
     expect(insideDetails).toContain("motion-reduce:transition-none");
     expect(insideDetails).toContain('aria-hidden="true"');
-    expect(source).toContain("Jev receives only the question");
+    expect(source).toContain("Submitted query sent to OpenRouter");
   });
-  it("uses native repository search without IDX fallback and discloses the commit provider", () => {
+  it("uses native repository search without IDX fallback", () => {
     expect(source).toContain("queryNativeRepository(invoke, workspace, query, signal)");
     expect(source).not.toMatch(/idx_overview|idx_query|snapshotOnly/);
-    expect(source).toContain("Local Code/Knowledge FTS5");
-    expect(source).toContain("no external index fallback");
     expect(source).toContain("requestClient.searchCommits({ cwd, query, limit: 20 }, signal)");
-    expect(source).toContain("Commits: BM25 + optional semantic search");
-    expect(source).toContain("Optional semantic commit search may send commit messages and search queries to the configured provider.");
   });
   it("exposes global semantic status and settings navigation, refreshing stale searches after changes", () => {
-    expect(source).toContain("<NativeRepositorySemanticConsent {workspace} onSettings={onPreferences} onChanged={repositoryConsentChanged} />");
+    expect(source).toContain("<NativeRepositorySemanticConsent {workspace} onChanged={repositoryConsentChanged} />");
     expect(consentSource).toContain("native_repository_semantic_config");
-    expect(consentSource).toContain("Configure in Settings");
     expect(consentSource).not.toContain("type=\"checkbox\"");
     expect(source).toContain("requests?.submit(query, types)");
     expect(source).toContain("existing controller");
@@ -104,8 +103,25 @@ describe("search category presentation", () => {
   it("uses global config change events to refresh and restart searches", () => {
     expect(consentSource).toContain("pix-semantic-config-changed");
     expect(consentSource).toContain("removeEventListener");
-    expect(consentSource).toContain("Not configured; semantic search is off");
-    expect(source).toContain("Native semantic provider configuration is shown above");
+    expect(consentSource).toContain("Semantic search off · local search available");
+  });
+  it("keeps one settings action and concise privacy notices without a technical manual", () => {
+    expect(source.match(/onclick=\{onPreferences\}/g)).toHaveLength(1);
+    expect(consentSource).not.toContain("<button");
+    expect(consentSource).not.toContain("Configure in Settings");
+    expect(consentSource).not.toContain("dimensions");
+    expect(source).not.toContain("Auto uses OpenRouter Jev Latest");
+    expect(source).not.toContain("RAG reuses the selected project search sources");
+    expect(source).not.toContain("Session excerpts: first user message");
+    expect(source).not.toContain("patch:sessionWorker");
+    expect(source).not.toContain("searchStatusLabel");
+    expect(source).toContain("{#if view.statusError}");
+    expect(source).toContain("{#if status?.error}");
+    expect(source).toContain("{#if status?.warning}");
+    expect(source).toContain("{#each notices as notice}");
+    expect(consentSource).toContain("Queries and indexed source text may be sent");
+    expect(consentSource).toContain("provider charges may apply");
+    expect(source).toContain("Microphone audio is sent to Deepgram.");
   });
   it("shares theme-aware category colors between filters and result badges", () => {
     expect(source).toContain("data-search-kind={kind}");

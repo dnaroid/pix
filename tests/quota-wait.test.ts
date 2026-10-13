@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { isQuotaCandidate, isQuotaExhaustion, parseQuotaWait, parseWaitDuration, parseWaitDeadline, quotaFromError, quotaRetryDelay, QuotaWaitController, type QuotaCheck, type QuotaWaitState } from "../src/app/session/quota-wait.js";
-import { quotaWaitLabel } from "../src/bundled-extensions/quota-wait/popup.js";
+import { quotaWaitLabel, quotaWaitStatusLabel } from "../src/bundled-extensions/quota-wait/popup.js";
+import { APP_ICONS } from "../src/app/icons.js";
 
 function fixture(check: () => Promise<QuotaCheck> = async () => ({ kind: "unknown" })) {
 	let now = 1_000_000;
@@ -15,6 +16,17 @@ function fixture(check: () => Promise<QuotaCheck> = async () => ({ kind: "unknow
 const flush = async () => { await new Promise<void>((resolve) => setImmediate(resolve)); };
 
 describe("quota wait", () => {
+	it("formats a concise minute-resolution footer timer for waiting, checking and cancellation", () => {
+		const f = fixture(); f.controller.wait("p/m", "limit", { kind: "unknown" });
+		const state = f.controller.state!;
+		const sample = { ...state, nextCheckAt: 4_320_000 };
+		assert.equal(quotaWaitStatusLabel(sample, 0), `${APP_ICONS.timerSand} 1h12m · /wait`);
+		assert.equal(quotaWaitStatusLabel(sample, 1), `${APP_ICONS.timerSand} 1h12m · /wait`);
+		assert.equal(quotaWaitStatusLabel(sample, 60_000), `${APP_ICONS.timerSand} 1h11m · /wait`);
+		assert.equal(quotaWaitStatusLabel({ ...state, phase: "checking" }), `${APP_ICONS.timerSand} checking · /wait`);
+		assert.equal(quotaWaitStatusLabel({ ...state, phase: "resuming" }), `${APP_ICONS.timerSand} resuming · /wait`);
+		assert.equal(quotaWaitStatusLabel({ ...state, autoResume: false }), `${APP_ICONS.timerSand} paused · /wait`);
+	});
 	it("accepts future zoned timestamps without shifting the absolute deadline", () => {
 		const now = Date.parse("2026-02-01T00:00:00Z");
 		assert.equal(parseWaitDeadline("until 2026-02-01T03:20:00+03:00", now), now + 1_200_000);

@@ -49,6 +49,11 @@ export function parseRagRequest(value: unknown): RagRequest {
       sourceProperty(source, "hash", hash);
     }
     if (s.sessionId !== undefined) sourceProperty(source, "sessionId", text(s.sessionId, 256));
+    if (s.messageId !== undefined) {
+      const messageId = text(s.messageId,256);
+      if (!messageId || kind !== "sessions") return invalid();
+      sourceProperty(source,"messageId",messageId);
+    }
     if ((kind === "code" || kind === "knowledge") && (!source.path || source.startLine === undefined)) return invalid();
     if (kind === "commits" && !source.hash) return invalid();
     if (kind === "sessions" && !source.sessionId) return invalid();

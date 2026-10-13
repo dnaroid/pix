@@ -15,7 +15,9 @@ describe("global semantic settings contract", () => {
     expect(source).toContain("~/.config/pi/pi-tools-suite.jsonc");
     expect(source).toContain("search.embedding");
     expect(source).toContain("task titles/descriptions, saved session names, commit metadata, settings metadata");
-    expect(source).toContain("Conversation bodies and attachments are not embedded");
+    expect(source).toContain("Public user/assistant message text on saved session branches is automatically indexed");
+    expect(source).toContain("including existing history");
+    expect(source).toContain("Tool results, thinking blocks and attachments are excluded");
     expect(source).not.toContain("confirm(");
     for (const legacy of ["tasksSemanticEnabled", "sessionTitlesEnabled", "settingsEnabled"]) {
       expect(preferences).not.toContain(legacy);

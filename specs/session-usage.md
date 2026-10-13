@@ -53,13 +53,26 @@ percentages with spend attributable to one conversation.
 - Every finalized child assistant `message_end` carries provider/model/usage.
   The async-subagents runner mirrors that usage into the originating parent
   session through Pi's durable `appendUsage` entry with kind `async-subagent` and
-  an agent-id note.
+  a versioned JSON note containing `runDir` and `agentId`. Legacy `agent:<id>`
+  notes remain readable.
 - The originating parent session manager is captured by the tool invocation and
   owns the usage append. A background agent finishing after a tab/session switch
   must never charge the newly active session.
 - Retries and model/provider fallbacks are intentionally counted per finalized
   child assistant call; each provider call was billable even if a later retry or
   fallback ultimately produced the accepted result.
+- The runner also appends version-1 `pi-tools-suite:subagent-statistics` custom
+  entries on that captured parent manager: task preview (id, role, icon, requested
+  model, task and scope), tool execution starts (name), and terminal state.
+  Optional telemetry failures must not interrupt execution or billing. No tool
+  arguments/results or child transcript are copied. Tool counts are starts,
+  including failed/cancelled calls, not successful completions.
+- Durable statistics group by `(runDir, agentId)` rather than agent id alone.
+  Earlier spawn tool-result previews may recover task metadata. Legacy id-only
+  usage matches a unique known run, or remains a legacy id row when no run is
+  known. Ambiguous/missing notes are included in child-unattributed totals;
+  missing billing and tool telemetry are shown as unknown, never invented zeros.
+  Status/lookups of other runs do not make those runs part of this session.
 
 ## UI behavior
 
@@ -76,17 +89,84 @@ questions/answers. Cancelled or discarded results still count when the provider
 returns usage; calls without usage cannot be reconstructed. An accounting failure
 blocks further BTW inference until reload rather than silently losing known spend.
 
-- In Pix TUI, clicking `Usage` opens session usage. Desktop opens it only on
+- In Pix TUI, clicking `Usage` opens a session-owned dialog with on-demand
+  loading, guarded refresh and retryable errors; repeat activation closes it.
+  Desktop opens it only on
   button activation (click, Enter or Space), not hover or mere focus. Neither
   forces a provider quota refresh. See [status-bar click popups](../docs/decisions/0048-status-bar-click-popups.md).
   Desktop keeps the panel open after pointer departure. Repeat activation closes
   it without another spend request; Escape, outside pointer interaction or focus
   leaving the trigger/panel region also dismiss it. Escape restores trigger focus.
-- The session detail remains intentionally compact and does not split parent-agent
+- The compact session detail remains intentionally compact and does not split parent-agent
   and sub-agent consumption into separate presentation rows; both are one session.
   Desktop keeps recorded cost in its on-demand detail popover, but does not show a
-  dollar amount inline in the status bar. TUI shows token totals only and does not
-  render monetary prices.
+  dollar amount inline in the status bar. TUI also keeps money out of the status
+  bar, but now shows recorded costs in its on-demand breakdown (with compact
+  text bars for token shares when several models contributed).
+  Its separately labelled, account-wide Limits section uses only cached
+  hourly/weekly quota windows and reset-credit metadata; opening Usage never
+  polls the provider. `Provider pages` offers the same allowlisted external
+  destinations as Desktop. `Refresh limits` on Claude Code is an explicit
+  quota-only refresh, distinct from `Refresh spend`.
+  Desktop adds a `Subagents` button at the right of the Session usage header,
+  enabled after a spend snapshot loads when the runtime supplies the optional
+  breakdown. It opens a separate native modal with
+  rotating-chevron task disclosures, role icons, requested/recorded models,
+  tool-start counts, exact token categories and per-run token/cost totals.
+  Between `Session usage` and `Subagents`, active Claude Code routes or sessions
+  with recorded Claude Code calls additionally
+  show a compact OAuth-account select populated from the user-level
+  `pi-tools-suite.jsonc`. A named selection saves the preferred profile for
+  **future** model requests using a compare-and-swap JSONC write, without
+  changing any currently streaming request. `Default` or `Auto` clears that
+  preference depending on rotation mode. `Last: <name>` indicates the
+  profile most recently attempted in this session; it is not a billing/quota
+  attribution guarantee. Saved quota rows may still reflect a prior login,
+  and merely selecting a profile never triggers network quota polling.
+  Sessions without active or recorded Claude Code calls do not render this
+  selector. With no configured OAuth
+  profiles, the selector and last-attempted-account label are entirely hidden;
+  configuration remains in Tools Suite Settings. Details of profile selection
+  and bounded fallback belong in
+  [Claude Code provider](./claude-code-provider.md).
+  The modal shows the list of subagent calls and their expandable details,
+  without run statuses, session-wide totals, main-agent comparisons or explanatory
+  banners/footer. The role icon sits directly before the role name in a fixed
+  semantic blue, independent of status or primary accent. Recognized providers
+  use shared provider logos before recorded/configured model labels in the summary;
+  expanded details do not repeat model labels or a model table. Unknown providers
+  keep text labels without an empty icon slot. Tool calls appear as a list of
+  names/counts only when nonempty, without a heading or unknown/empty-tool text.
+  The Run path is immediately clickable when project navigation is available,
+  without an existence check while rendering. Only activation validates that the
+  directory exists inside the current workspace; a valid target closes the modal
+  and reveals the folder in Project Files. Missing or inaccessible targets remain
+  plain text after a failed activation. Session/workspace changes and teardown
+  invalidate stale completions. Changed files and their coverage gaps are not
+  displayed in this modal; optional durable changes data remains available in
+  the usage protocol independently of presentation.
+  Completed runs remain visible; no active-only HUD or child-file
+  traversal is used. Old runtimes without the optional breakdown show an
+  unavailable message. Refresh uses the same guarded spend request, never quota
+  refresh or model inference, and retains the last snapshot on failure.
+  Escape/backdrop/close dismiss only the modal and return focus to its invoker;
+  the underlying Usage panel remains open, and session teardown removes both.
+  Backend accounting still conserves main, subagent, side-call and unattributed
+  usage independently of this list-only presentation. Estimated per-run costs
+  in this modal use `~` for API-equivalent pricing.
+  TUI exposes the same persisted child-run breakdown with a `Subagents (n)`
+  action, a keyboard-searchable selector and a separate per-run dialog.
+  It displays role icons, recorded/configured models, task/scope, available
+  tool-start counts, exact input/output/cache counters, per-run tokens/costs,
+  and run identity; unknown telemetry stays explicitly unknown. Estimated
+  child costs use `~`. As on Desktop, it omits statuses, main-agent comparisons,
+  explanatory banners and change-coverage summaries. `Open run` validates
+  existence and canonical containment in the current workspace only when
+  activated; failed targets cease to be actionable. The dialog can scroll
+  using the mouse wheel; leaving the selector returns to Usage, while a valid
+  opened run returns to its session summary. PageUp/PageDown also scroll
+  longer dialog details from the keyboard. Session/tab changes prevent
+  stale reads, menus and run validation from resurfacing an old popup.
   Desktop displays monetary values without an approximation prefix; estimated
   model values explain in an accessible label that these are original-model API rates, not
   subscription charges. `costEstimated` propagates from calls to model, provider
@@ -103,7 +183,8 @@ blocks further BTW inference until reload rather than silently losing known spen
   shared provider glyph beside each recognized provider heading.
 - Desktop loads the spend report on demand through `pix/session/usage`; TUI reads
   the owning session's complete persisted entries on demand. Opening the popup
-  does not start a model request and does not refresh provider quota.
+  does not start a model request and does not refresh provider quota. TUI
+  retains the last successful report after an explicit spend refresh fails.
 - For an active Claude Code provider session, Desktop also offers an explicit
   `Refresh limits` action in this popover. This action is separate from opening
   Usage and from recorded session spend; it nudges a bounded headless Claude
@@ -173,9 +254,12 @@ blocks further BTW inference until reload rather than silently losing known spen
 
 - `src/app/session/session-usage.ts`
 - `src/app/session/session-usage-pricing.ts`
+- `src/app/session/session-subagent-usage.ts`
+- `src/app/session/session-subagent-changes.ts`
 - `src/app/screen/mouse-controller.ts`
 - `src/app/model/model-usage-controller.ts`
 - `external/pi-tools-suite/src/async-subagents/core/usage.ts`
+- `external/pi-tools-suite/src/async-subagents/core/statistics.ts`
 - `external/pi-tools-suite/src/async-subagents/tools/spawn.ts`
 - `acp/src/acp/desktop-commands.ts`
 - `acp/src/acp/pix-acp-agent.ts`
@@ -183,17 +267,30 @@ blocks further BTW inference until reload rather than silently losing known spen
 - `desktop/src/lib/acp-client-types.ts`
 - `desktop/src/lib/acp-response-parsers.ts`
 - `desktop/src/lib/session-usage.ts`
+- `desktop/src/lib/subagent-usage.ts`
+- `desktop/src/lib/subagent-usage-parser.ts`
+- `desktop/src/lib/project-path-navigation.ts`
+- `desktop/src/lib/validated-project-path.ts`
 - `desktop/src/app/session-runtime-status.svelte.ts`
 - `desktop/src/components/RuntimeStatusBarItems.svelte`
+- `desktop/src/components/SubagentUsageDialog.svelte`
+- `desktop/src/components/ValidatedProjectPath.svelte`
 
 ## Tests
 
 - `tests/session-usage.test.ts`
+- `tests/session-subagent-usage.test.ts`
+- `tests/session-subagent-changes.test.ts`
 - `tests/mouse-controller.test.ts`
 - `external/pi-tools-suite/test/async-subagents-usage.test.ts`
+- `external/pi-tools-suite/test/async-subagents-statistics.test.ts`
 - `acp/test/agent.test.ts`
 - `desktop/src/lib/acp-client.test.ts`
 - `desktop/src/lib/session-usage.test.ts`
+- `desktop/src/lib/subagent-usage.test.ts`
+- `desktop/src/lib/project-path-navigation.test.ts`
+- `desktop/src/lib/validated-project-path.test.ts`
+- `desktop/src/components/SubagentUsageDialog.test.ts`
 - `desktop/src/app/session-runtime-status.test.ts`
 - `desktop/src/components/StatusBarHover.test.ts`
 
@@ -208,7 +305,13 @@ blocks further BTW inference until reload rather than silently losing known spen
   contains no monetary price, agent/subagent split, session-share percentage, or
   quota block.
 - Async-subagents tests validate child `message_end` extraction and durable usage
-  append on the captured parent manager.
+  append on the captured parent manager; statistics tests cover captured-parent
+  task/tool/state telemetry and session aggregation, including ambiguous legacy
+  identities and missing telemetry.
+- Root subagent usage tests cover aggregation and conservation. Desktop tests
+  cover parsing and formatting; dialog source-contract tests pin content,
+  dismissal wiring and disclosure affordances, not rendered interactions.
+  Native UI behavior requires separate UI QA.
 - Desktop ACP-client and runtime lifecycle tests cover the independent usage
   request and stale forget/reset completion handling.
 - Desktop source-contract tests pin click-only popup activation, dismissal and

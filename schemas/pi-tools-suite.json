@@ -1295,6 +1295,57 @@
       },
       "description": "Private Git-backed registry for reusable skills/agents and project-scoped tasks/plans state."
     },
+    "claudeCodeProvider": {
+      "type": "object",
+      "properties": {
+        "autoRotate": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically use another Claude Code OAuth profile after a structured subscription rate-limit rejection. Each profile is tried at most once per request; disabled by default."
+        },
+        "selectedAccount": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Preferred OAuth profile name from accounts. Manual selection applies to the next Claude Code model request, even when automatic rotation is off. If the profile is removed, falls back to the default."
+        },
+        "rotationDelaySeconds": {
+          "type": "integer",
+          "default": 60,
+          "minimum": 0,
+          "maximum": 300,
+          "description": "Non-blocking pause (seconds) before trying another OAuth profile after an explicit subscription quota rejection. Defaults to 60; 0 skips the pause. Cancel stops waiting; the pause counts toward the request timeout."
+        },
+        "accounts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "configDir"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "description": "Friendly label for this OAuth subscription profile."
+              },
+              "configDir": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Absolute path or ~/ path to a separate Claude Code configuration directory. Authenticate using CLAUDE_CONFIG_DIR=... claude auth login."
+              }
+            },
+            "additionalProperties": false
+          },
+          "maxItems": 12,
+          "description": "Ordered OAuth profiles; auto-rotation requires at least two unique names and directories."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Claude Code subscription failover. Only the user-level file is trusted; OAuth tokens stay in Claude Code's own store."
+    },
     "search": {
       "type": "object",
       "properties": {

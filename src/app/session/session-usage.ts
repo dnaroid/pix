@@ -1,5 +1,6 @@
 import type { AgentSession, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { estimateClaudeCodeCost } from "./session-usage-pricing.js";
+import { aggregateSubagentUsage, type SessionSubagentUsageReport, type SessionUsageCall } from "./session-subagent-usage.js";
 
 export type SessionUsageTotals = {
 	input: number;
@@ -26,6 +27,7 @@ export type SessionUsageReport = {
 	totals: SessionUsageTotals;
 	providers: SessionUsageProviderBreakdown[];
 	unattributed: SessionUsageTotals;
+	subagents?: SessionSubagentUsageReport;
 };
 
 export type FormatSessionUsageOptions = {
@@ -65,6 +67,7 @@ export function aggregateSessionUsage(entries: readonly unknown[]): SessionUsage
 	const totals = zeroUsage();
 	const unattributed = zeroUsage();
 	const providers = new Map<string, { models: Map<string, SessionUsageTotals>; totals: SessionUsageTotals }>();
+	const calls: SessionUsageCall[] = [];
 
 	for (const rawEntry of entries) {
 		if (!isRecord(rawEntry)) continue;
@@ -74,6 +77,7 @@ export function aggregateSessionUsage(entries: readonly unknown[]): SessionUsage
 			const usage = usageValue(rawEntry.usage, provider, model);
 			if (!usage) continue;
 			addAttributedUsage(provider, model, usage, totals, unattributed, providers);
+			calls.push({ entry: rawEntry, totals: usage });
 			continue;
 		}
 
@@ -90,6 +94,7 @@ export function aggregateSessionUsage(entries: readonly unknown[]): SessionUsage
 				addUsage(totals, usage);
 				addUsage(unattributed, usage);
 			}
+			if (message.role === "assistant" || message.role === "toolResult") calls.push({ entry: rawEntry, totals: usage });
 			continue;
 		}
 
@@ -98,6 +103,7 @@ export function aggregateSessionUsage(entries: readonly unknown[]): SessionUsage
 			if (!usage) continue;
 			addUsage(totals, usage);
 			addUsage(unattributed, usage);
+			calls.push({ entry: rawEntry, totals: usage });
 		}
 	}
 
@@ -113,6 +119,7 @@ export function aggregateSessionUsage(entries: readonly unknown[]): SessionUsage
 			}))
 			.sort((a, b) => b.totals.cost - a.totals.cost || b.totals.totalTokens - a.totals.totalTokens || a.provider.localeCompare(b.provider)),
 		unattributed,
+		subagents: aggregateSubagentUsage(entries, calls),
 	};
 }
 

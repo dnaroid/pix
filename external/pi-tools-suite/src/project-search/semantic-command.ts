@@ -5,8 +5,9 @@ import { randomUUID } from "node:crypto";
 import { applyEdits, modify } from "jsonc-parser";
 import { parseEmbeddingSettings, parseSemanticConfiguration, semanticConfigurationPath, semanticConfigurationText } from "./native-embedding-provider.mjs";
 import { resetHistoryVectors } from "./semantic-reset.js";
+import { logSearchDiagnostic as writeDiagnostic } from "./search-diagnostics.mjs";
 
-const disclosure = "Saving provider configuration authorizes semantic search for all projects and sources in Pi and Desktop. Saved task titles/descriptions are embedded automatically on session startup and task changes; searches may send eligible code/document chunks, paths/headings, saved session names, commit metadata, settings metadata and queries to that provider and incur charges. Conversation bodies and attachments are not embedded. Repository indexing is bounded to 128 missing chunks per search. Local lexical search makes no embedding calls.";
+const disclosure = "Saving provider configuration authorizes semantic search for all projects and sources in Pi and Desktop. Saved task titles/descriptions and public user/assistant session text chunks are embedded automatically on startup and changes; searches may send code/document chunks, paths/headings, saved session names, commit metadata, settings metadata and queries and incur charges. Tool payloads, thinking and attachments are excluded. Automatic session indexing drains remaining work; query enrichment is bounded to 256 missing chunks per pass. Use /search-index sessions to retry incomplete indexing. Repository indexing is bounded to 128 missing chunks per search. Local lexical search makes no embedding calls.";
 
 async function saveConfiguration(embedding: unknown | undefined): Promise<void> {
   const file = semanticConfigurationPath();
@@ -36,26 +37,26 @@ async function saveConfiguration(embedding: unknown | undefined): Promise<void> 
 }
 
 /** User command only: never exposed as a model-callable configuration mutation. */
-export function registerSemanticConsentCommand(pi: ExtensionAPI, refreshTasks: () => void = () => {}): void {
+export function registerSemanticConsentCommand(pi: ExtensionAPI, refreshTasks: () => void = () => {}, logSearchDiagnostic = writeDiagnostic): void {
   pi.registerCommand("search-semantic", {
     description: "Global semantics: status | configure <embedding JSON> | off | reset-history. Reset explicitly deletes current-project history vectors, not canonical history.",
     handler: async (args, ctx) => {
       const input = args.trim();
       const action = input.split(/\s+/, 1)[0] || "status";
       if (!["status", "configure", "off", "reset-history"].includes(action)) {
-        ctx.ui.notify(`Usage: /search-semantic status | configure {"embeddingProvider":"…","embeddingModel":"…","vectorSize":…} | off | reset-history. ${disclosure}`, "warning"); return;
+        void logSearchDiagnostic(ctx.cwd, { event: "search_command", message: `Usage: /search-semantic status | configure {"embeddingProvider":"…","embeddingModel":"…","vectorSize":…} | off | reset-history. ${disclosure}`, reason: "warning" }); return;
       }
       try {
         if (action === "reset-history") {
           if (input !== action) throw new Error("Unexpected reset arguments");
           const count = await resetHistoryVectors(ctx.cwd, AbortSignal.timeout(40_000));
           refreshTasks();
-          ctx.ui.notify(`Removed ${count} derived history/settings vectors in ${ctx.cwd}. Canonical tasks, sessions, Git history, local documents and repository vectors are unchanged. Saved tasks catch up automatically; other histories rebuild on the next semantic search with the configured model and may incur charges.`, "info"); return;
+          void logSearchDiagnostic(ctx.cwd, { event: "search_command", message: `Removed ${count} derived history/settings vectors in ${ctx.cwd}. Canonical tasks, sessions, Git history, local documents and repository vectors are unchanged. Saved tasks catch up automatically; other histories rebuild on the next semantic search with the configured model and may incur charges.`, reason: "info" }); return;
         }
         if (action === "status") {
           const settings = parseEmbeddingSettings(await semanticConfigurationText());
           const identity = settings ? [...new Set(Object.values(settings.configs).map(config => `${config.provider}/${config.model}`))].join(", ") : "not configured (local-only)";
-          ctx.ui.notify(`Global semantics: ${identity}. Settings: ${semanticConfigurationPath()}. ${disclosure}`, "info"); return;
+          void logSearchDiagnostic(ctx.cwd, { event: "search_command", message: `Global semantics: ${identity}. Settings: ${semanticConfigurationPath()}. ${disclosure}`, reason: "info" }); return;
         }
         let embedding: unknown;
         if (action === "configure") {
@@ -64,11 +65,11 @@ export function registerSemanticConsentCommand(pi: ExtensionAPI, refreshTasks: (
         }
         await saveConfiguration(embedding);
         refreshTasks();
-        ctx.ui.notify(action === "configure" ? `Global semantic provider saved. ${disclosure}` : "Global semantics disabled. Cached vectors retained; local search remains available.", "info");
+        void logSearchDiagnostic(ctx.cwd, { event: "search_command", message: action === "configure" ? `Global semantic provider saved. ${disclosure}` : "Global semantics disabled. Cached vectors retained; local search remains available.", reason: "info" });
       } catch {
-        ctx.ui.notify(action === "reset-history"
+        void logSearchDiagnostic(ctx.cwd, { event: "search_command", message: action === "reset-history"
           ? "Could not reset history vectors: storage is busy, unsafe or unrecognized. No reset was committed."
-          : "Could not change global semantic settings. Check provider/model/dimensions and malformed, redirected, locked or concurrently changed storage. Existing settings were not replaced.", "warning");
+          : "Could not change global semantic settings. Check provider/model/dimensions and malformed, redirected, locked or concurrently changed storage. Existing settings were not replaced.", reason: "warning" });
       }
     },
   });

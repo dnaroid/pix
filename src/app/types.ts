@@ -242,6 +242,7 @@ export type ToastLineTarget = {
 	kind: "toast";
 	id: number;
 	action?: "toast" | "body" | "close" | "action";
+	actionIndex?: number;
 	startColumn?: number;
 	endColumn?: number;
 };
@@ -277,6 +278,7 @@ export type StatusLineLayout = {
 	inputBorderWidgetStartColumn?: number;
 	modelUsageLabel?: string;
 	contextBarLabel?: string;
+	quotaWaitStatusLabel?: string;
 	quickScrollUpWidget?: StatusQuickScrollWidgetLayout;
 	quickScrollDownWidget?: StatusQuickScrollWidgetLayout;
 	userJumpWidget?: StatusUserJumpWidgetLayout;

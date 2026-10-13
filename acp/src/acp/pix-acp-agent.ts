@@ -31,6 +31,7 @@ import { DesktopTaskTypeClassifier, parseTaskTypeClassifyRequest } from "../task
 import { SEARCH_RAG_METHOD, SEARCH_RAG_DELTA_METHOD } from "../search/rag-contract.js";
 import { parseRagRequest } from "../search/rag-request.js";
 import { DesktopRagService } from "../search/rag-service.js";
+import { collectRagEvidence } from "../search/rag-evidence.js";
 import { BrainstormHost, BRAINSTORM_CHANNEL, type BrainstormLink } from "./brainstorm-host.js";
 import { NativeSessionCatalog } from "./native-session-catalog.js";
 import { PIX_SESSION_CATALOG_CHANGED_METHOD } from "./session-catalog-contract.js";
@@ -303,6 +304,7 @@ import {
 	sessionStateEnvelopeFromUiRequest,
 	type PixSessionStateNotification,
 } from "./session-state-bridge.js";
+import { CLAUDE_CODE_RATE_LIMIT_EVENT, CLAUDE_CODE_USAGE_CHANNEL, loadClaudeCodeRateLimitCache, type ClaudeCodeRateLimitCache } from "./claude-code-rate-limits.js";
 import {
 	CONTEXT_INVENTORY_EVENT,
 	formatReloadContextInventory,
@@ -396,6 +398,7 @@ interface AgentSessionState {
 	headerUsage: DesktopModelUsageStatus | undefined;
 	/** Guards model-usage pushes against session replacement and bursts. */
 	modelUsagePushGeneration: number;
+	claudeRateLimitGeneration: number;
 	/** Runtime extension slash command names (without slash), lower-cased. */
 	runtimeExtensionCommands: Set<string>;
 	/** An extension slash command is executing outside the run lifecycle. */
@@ -514,6 +517,7 @@ export class PixAcpAgent {
 	private readonly modelUsageRefreshes = new Map<string, Promise<ModelUsageRefreshResult>>();
 	/** Last successful quota snapshot per Claude Code route, resent as `stale` cache while the credential is absent. */
 	private readonly claudeCodeQuotaCache = new Map<string, DesktopModelUsageStatus>();
+	private claudeRateLimits: Promise<ClaudeCodeRateLimitCache | undefined> | undefined;
 	/** Single-flight headless Claude CLI login nudge; at most one child at a time. */
 	private claudeLoginNudgeInFlight: Promise<boolean> | undefined;
 	/** Deduplicates concurrent manual Claude Code quota refreshes per session. */
@@ -556,6 +560,11 @@ export class PixAcpAgent {
 		this.searchIntentService = options.searchIntentService ?? new DesktopSearchIntentService();
 		this.taskTypeClassifier = options.taskTypeClassifier ?? new DesktopTaskTypeClassifier();
 		this.ragService = options.ragService ?? new DesktopRagService({
+			collect: (request, signal) => collectRagEvidence(request, signal, async id => {
+				const record = await this.sessionMap.get(id);
+				return record && resolve(record.cwd) === resolve(request.cwd)
+					? { id: record.piSessionId, path: record.piSessionPath } : undefined;
+			}),
 			createRuntime: (cwd) => {
 				const extensionPath = desktopToolsSuiteExtensionPath({
 					...(options.agentDir ? { agentDir: options.agentDir } : {}),
@@ -714,7 +723,7 @@ export class PixAcpAgent {
 					}, ctx.signal);
 				} catch (error) {
 					if (ctx.signal.aborted) throw error;
-					throw new RequestError(ERROR_SERVER, "RAG generation unavailable. Check the selected model, credentials and source availability.");
+					throw new RequestError(ERROR_SERVER, error instanceof Error ? error.message : String(error));
 				}
 			})
 			.onRequest(SEARCH_QUERY_METHOD, parseSearchQueryRequest, async (ctx) => {
@@ -2178,6 +2187,7 @@ export class PixAcpAgent {
 			configOptionsPushGeneration: 0,
 			headerUsage: undefined,
 			modelUsagePushGeneration: 0,
+			claudeRateLimitGeneration: 0,
 			runtimeExtensionCommands: new Set(),
 			extensionCommandRunning: 0,
 			quotaWaitStateRequested: false,
@@ -2366,7 +2376,8 @@ export class PixAcpAgent {
 			&& typeof event.pixForkSessionPath === "string" && event.pixForkLeafId !== undefined) {
 			session.forks.boundary({ sessionPath: event.pixForkSessionPath, leafId: event.pixForkLeafId, cwd: session.cwd });
 		}
-		if (event.type === "turn_end" || event.type === "compaction_end" || event.type === "agent_settled") {
+		if (event.type === "turn_end" || event.type === "compaction_end" || event.type === "agent_settled"
+			|| (event.type === "message_end" && (event.message.role === "user" || event.message.role === "assistant"))) {
 			this.searchService.changed(session.cwd);
 		}
 
@@ -2576,6 +2587,10 @@ export class PixAcpAgent {
 	private async handleExtensionUiRequest(session: AgentSessionState, request: RpcExtensionUIRequest): Promise<void> {
 		const state = sessionStateEnvelopeFromUiRequest(request);
 		if (state) {
+			if (state.channel === CLAUDE_CODE_RATE_LIMIT_EVENT) {
+				await this.observeClaudeCodeRateLimit(session, state.data);
+				return;
+			}
 			if (state.channel === WORKSPACE_UNDO_RESULT_CHANNEL) {
 				const result = parseWorkspaceUndoBridgeResult(state.data);
 				if (result) session.workspaceUndoResults.set(result.requestId, result);
@@ -2624,7 +2639,7 @@ export class PixAcpAgent {
 			// ACP has no toast equivalent. Keep command feedback and background
 			// warnings/errors (including startup preflight failures) visible as
 			// system rows, even when no prompt is running.
-			await this.notifyAgentMessage(session, request.message);
+			await this.notifyAgentMessage(session, request.message, request.notifyType);
 			return;
 		}
 		const elicitation = toElicitationRequest(request, {
@@ -3075,14 +3090,59 @@ export class PixAcpAgent {
 		const existing = this.modelUsageRefreshes.get(key);
 		if (existing) return existing;
 
-		const pending = this.queryModelUsage(state).then((result) => {
-			this.rememberClaudeCodeQuota(model, result);
-			return result;
+		const pending = this.queryModelUsage(state).then(async (queried) => {
+			// Account polling is route-wide; streamed samples stay session-owned.
+			this.rememberClaudeCodeQuota(model, queried);
+			return this.mergeObservedClaudeCodeUsage(sessionId, model, queried);
 		}).finally(() => {
 			if (this.modelUsageRefreshes.get(key) === pending) this.modelUsageRefreshes.delete(key);
 		});
 		this.modelUsageRefreshes.set(key, pending);
 		return pending;
+	}
+
+	private rateLimitCache(): Promise<ClaudeCodeRateLimitCache | undefined> {
+		return this.claudeRateLimits ??= loadClaudeCodeRateLimitCache().catch((error: unknown) => {
+			this.options.logger.warn(`Claude Code quota telemetry unavailable: ${stringifyUnknown(error)}`);
+			return undefined;
+		});
+	}
+
+	private async mergeObservedClaudeCodeUsage(
+		sessionId: string, model: PiSessionState["model"], result: ModelUsageRefreshResult,
+	): Promise<ModelUsageRefreshResult> {
+		if (!isClaudeCodeRoute(model) || !this.claudeRateLimits) return result;
+		const cache = await this.rateLimitCache();
+		if (!cache) return result;
+		const key = claudeCodeRouteKey(model);
+		// Without a live sample, retain the endpoint's ordinary failure and
+		// credential-pending semantics rather than reviving an old cache.
+		if (!cache.merge(undefined, sessionId, key)) return result;
+		const status = cache.merge(result.status ?? this.claudeCodeQuotaCache.get(key), sessionId, key);
+		return status ? { refresh: "ready", status } : result;
+	}
+
+	private async observeClaudeCodeRateLimit(session: AgentSessionState, value: unknown): Promise<void> {
+		const generation = session.claudeRateLimitGeneration;
+		try {
+			const cache = await this.rateLimitCache();
+			if (!cache) return;
+			const state = await session.pi.getState();
+			if (this.sessions.get(session.acpSessionId) !== session
+				|| session.claudeRateLimitGeneration !== generation || !isClaudeCodeRoute(state.model)) return;
+			const key = claudeCodeRouteKey(state.model);
+			if (!isRecord(value) || value.modelRef !== key || value.sessionId !== state.sessionId) return;
+			// The private widget's transport owner, not a supplied ACP id, owns
+			// the sample. Runtime samples use the Pi id; ACP uses its stable id.
+			if (!cache.observe({ ...value, sessionId: session.acpSessionId })) return;
+			const status = cache.merge(this.claudeCodeQuotaCache.get(key), session.acpSessionId, key);
+			if (!status) return;
+			await session.client.notify(PIX_SESSION_STATE_METHOD, {
+				sessionId: session.acpSessionId, channel: CLAUDE_CODE_USAGE_CHANNEL, data: status,
+			});
+		} catch (error) {
+			this.options.logger.warn(`Claude Code quota telemetry failed: ${stringifyUnknown(error)}`);
+		}
 	}
 
 	/** Keep the last successful quota per Claude Code route for stale-cache resend. */
@@ -3157,14 +3217,15 @@ export class PixAcpAgent {
 		if (!isClaudeCodeRoute(state.model) || claudeCodeRouteKey(state.model) !== claudeCodeRouteKey(initialRoute)) {
 			throw new RequestError(ERROR_INVALID_PARAMS, "claude quota refresh requires an active pi-claude-code-provider model");
 		}
-		const result = await this.queryModelUsage(state);
+		const queried = await this.queryModelUsage(state);
+		const result = await this.mergeObservedClaudeCodeUsage(session.acpSessionId, state.model, queried);
 		// An account/model switch during the endpoint request invalidates its
 		// reply just as a switch during the headless nudge does.
 		if (this.sessions.get(session.acpSessionId) !== session
 			|| claudeCodeRouteKey((await session.pi.getState()).model) !== claudeCodeRouteKey(state.model)) {
 			throw new RequestError(ERROR_SERVER, "Claude Code route changed while refreshing limits");
 		}
-		this.rememberClaudeCodeQuota(state.model, result);
+		this.rememberClaudeCodeQuota(state.model, queried);
 		return {
 			sessionId: session.acpSessionId,
 			launched,
@@ -3781,12 +3842,16 @@ export class PixAcpAgent {
 	}
 
 	/** Emit one agent_message_chunk update (used for built-in feedback). */
-	private async notifyAgentMessage(session: AgentSessionState, text: string): Promise<void> {
+	private async notifyAgentMessage(session: AgentSessionState, text: string, notifyType?: string): Promise<void> {
+		// Extension errors do not imply the agent stopped. Keep their namespace
+		// distinct from the provider-failure pix-system:error: rows.
+		const prefix = notifyType === "warning" || notifyType === "error"
+			? `pix-system:notification:${notifyType}:` : "pix-system:";
 		const notification: SessionNotification = {
 			sessionId: session.acpSessionId,
 			update: {
 				sessionUpdate: "agent_message_chunk",
-				messageId: `pix-system:${randomUUID()}`,
+				messageId: `${prefix}${randomUUID()}`,
 				content: { type: "text", text },
 			},
 		};
@@ -3864,6 +3929,8 @@ export class PixAcpAgent {
 	}
 
 	private unsubscribeSessionEvents(session: AgentSessionState): void {
+		session.claudeRateLimitGeneration++;
+		void this.claudeRateLimits?.then((cache) => cache?.forget(session.acpSessionId));
 		session.unsubscribeExit?.();
 		session.unsubscribeExit = undefined;
 		const unsubscribe = session.unsubscribeEvents;

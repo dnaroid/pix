@@ -1,4 +1,5 @@
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import { ClaudeCodeRateLimitCache } from "./claude-code-rate-limits.js";
 import { MODEL_USAGE_CREDENTIAL_RETRY_MS, MODEL_USAGE_POLL_INTERVAL_MS, MODEL_USAGE_STATUS_TICK_MS } from "../constants.js";
 import { parseModelRef } from "./model-ref.js";
 import {
@@ -48,6 +49,7 @@ function descriptorCacheKey(descriptor: ModelUsageDescriptor | undefined): strin
 export class AppModelUsageController {
 	private activeModelKey: string | undefined;
 	private readonly statuses = new Map<string, ModelUsageStatus>();
+	private readonly claudeRateLimits = new ClaudeCodeRateLimitCache();
 	// Anthropic API-key usage is captured from real Messages response headers,
 	// so each sample belongs to exactly one session/model route and must never
 	// leak into another session's status (accounts and models can differ per tab).
@@ -90,6 +92,13 @@ export class AppModelUsageController {
 	observeSession(session: AgentSession | undefined): void {
 		const changed = this.syncActiveModel(session);
 		if (changed && this.activeModelKey) this.refresh();
+	}
+
+	observeClaudeCodeRateLimit(value: unknown): boolean {
+		const sample = this.claudeRateLimits.observe(value);
+		if (!sample) return false;
+		if (this.host.runtimeSession()?.sessionId === sample.sessionId) this.host.render();
+		return true;
 	}
 
 	/**
@@ -136,6 +145,7 @@ export class AppModelUsageController {
 	 * other, concurrently open sessions are preserved.
 	 */
 	forgetSessionSamples(sessionId: string): void {
+		this.claudeRateLimits.forget(sessionId);
 		if (this.pendingResponseHeaders?.payload.sessionId === sessionId) {
 			this.pendingResponseHeaders = undefined;
 		}
@@ -153,6 +163,11 @@ export class AppModelUsageController {
 
 	statusLabel(): string {
 		return formatModelUsageStatusLabel(this.activeStatus());
+	}
+
+	/** Read the latest cached account window without issuing a quota request. */
+	currentStatus(): ModelUsageStatus | undefined {
+		return this.activeStatus();
 	}
 
 	refreshNow(): ModelUsageRefreshStart {
@@ -372,7 +387,8 @@ export class AppModelUsageController {
 			const headerStatus = this.headerStatuses.get(headerStatusKey(session.sessionId, this.activeModelKey));
 			if (headerStatus) return headerStatus;
 		}
-		return this.statuses.get(this.activeModelKey);
+		const status = this.statuses.get(this.activeModelKey);
+		return session ? this.claudeRateLimits.merge(status, session.sessionId, this.activeModelKey) : status;
 	}
 
 	private isActiveHeaderStatus(sessionId: string, cacheKey: string): boolean {

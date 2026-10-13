@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { access, chmod, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { normalizeContext } from "@earendil-works/pi-ai";
-import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, DefaultPackageManager, SettingsManager, formatSize } from "@earendil-works/pi-coding-agent";
+import { DefaultPackageManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import initializePiClaudeCodeProvider from "../../../../src/claude-code-provider/extensions/index.ts";
 import implementation from "../../../../src/claude-code-provider/extensions/pi-claude-code-provider.ts";
 import { VERIFIED_VERSIONS, platformStatus } from "../../../../src/claude-code-provider/src/compatibility.ts";
@@ -67,7 +67,7 @@ function sessionContext(cwd, ui) {
     return { cwd, ui, sessionManager: { getSessionId: () => sessionId } };
 }
 
-async function createFakeClaude(searchResult = "ok", { searchDelayMs = 0, rateLimitInfo, reportCwd = false, providerTools = [], holdProviderUntilInput = false, authStatus = ELIGIBLE_CLAUDE_AUTH, authExitCode = 0 } = {}) {
+async function createFakeClaude(searchResult = "ok", { searchDelayMs = 0, rateLimitInfo, resultError = false, reportCwd = false, reportConfigDir = false, providerTools = [], holdProviderUntilInput = false, authStatus = ELIGIBLE_CLAUDE_AUTH, authExitCode = 0 } = {}) {
     const directory = await mkdtemp(join(tmpdir(), "pi-claude-code-provider-extension-"));
     const executable = join(directory, process.platform === "win32" ? "claude.cjs" : "claude");
     const rateLimitEvents = Array.isArray(rateLimitInfo) ? rateLimitInfo : rateLimitInfo ? [rateLimitInfo] : [];
@@ -92,7 +92,7 @@ else {
   const send = () => {
     process.stdout.write(JSON.stringify(providerMode ? ${JSON.stringify(providerInit)} : ${JSON.stringify(init)}) + "\\n");
     for (const rateLimitInfo of ${JSON.stringify(rateLimitEvents)}) process.stdout.write(JSON.stringify({type:"rate_limit_event",rate_limit_info:rateLimitInfo}) + "\\n");
-    process.stdout.write(JSON.stringify({type:"result",is_error:false,result:${reportCwd ? "providerMode ? process.cwd() : " : ""}${JSON.stringify(searchResult)}}) + "\\n");
+    process.stdout.write(JSON.stringify({type:"result",is_error:${resultError},result:${reportConfigDir ? "process.env.CLAUDE_CONFIG_DIR ?? ''" : reportCwd ? "providerMode ? process.cwd() : " + JSON.stringify(searchResult) : JSON.stringify(searchResult)}}) + "\\n");
   };
   if (providerMode && ${holdProviderUntilInput}) {
     process.stdin.resume();
@@ -234,6 +234,67 @@ test("routes rate-limit warnings to the active Pi UI and launches nothing before
         else process.env.PI_CLAUDE_CODE_PROVIDER_PATH = original.executable;
         if (original.metrics === undefined) delete process.env.PI_CLAUDE_CODE_PROVIDER_METRICS_LOG;
         else process.env.PI_CLAUDE_CODE_PROVIDER_METRICS_LOG = original.metrics;
+        await rm(directory, { recursive: true, force: true });
+    }
+});
+
+test("publishes owned structured quota before a rejected stream and independently of warning dedup", async () => {
+    const warning = { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.99, resetsAt: 1_800_000_000 };
+    const { directory, executable } = await createFakeClaude("Rate limit reached", { resultError: true, rateLimitInfo: [warning, warning,
+        { status: "rejected", rateLimitType: "five_hour", resetsAt: 1_800_000_000 }] });
+    const original = process.env.PI_CLAUDE_CODE_PROVIDER_PATH;
+    process.env.PI_CLAUDE_CODE_PROVIDER_PATH = executable;
+    let shutdown;
+    try {
+        const pi = fakePi();
+        const events = [];
+        const widgets = [];
+        const notices = [];
+        pi.api.events = { emit(name, data) { events.push({ name, data }); } };
+        await piClaudeCodeProvider(pi.api);
+        shutdown = pi.handlers.get("session_shutdown")[0];
+        const ctx = sessionContext(tmpdir(), {
+            notify(message, level) { notices.push({ message, level }); },
+            setWidget(key, lines) { widgets.push({ key, lines }); },
+        });
+        ctx.mode = "rpc";
+        pi.handlers.get("session_start")[0]({}, ctx);
+        const provider = pi.providers.get("pi-claude-code-provider");
+        const model = { ...provider.models.find((candidate) => candidate.id === "sonnet"),
+            provider: "pi-claude-code-provider", api: "pi-claude-code-provider-headless", baseUrl: "pi-claude-code-provider://local" };
+        const result = await provider.streamSimple(model, providerContext()).result();
+        assert.equal(result.stopReason, "error");
+        assert.equal(events.length, 3, "UI text dedup must not suppress telemetry");
+        assert.equal(widgets.length, 3);
+        assert.equal(notices.filter(({ message }) => message.includes("rate limit warning")).length, 1);
+        for (let i = 0; i < events.length; i++) {
+            assert.equal(events[i].name, "pix:claude-code:rate-limit");
+            assert.equal(events[i].data.version, 1);
+            assert.equal(events[i].data.sessionId, ctx.sessionManager.getSessionId());
+            assert.equal(events[i].data.modelRef, "pi-claude-code-provider/sonnet");
+            assert.equal(events[i].data.resetsAt, 1_800_000_000_000);
+            assert.ok(Number.isFinite(events[i].data.observedAt));
+            assert.equal(widgets[i].key, "pix.session-state");
+            assert.equal(widgets[i].lines[0], "pix:claude-code:rate-limit");
+            assert.deepEqual(JSON.parse(widgets[i].lines[1]), events[i].data);
+        }
+        assert.equal(events[2].data.status, "rejected");
+        const oldSink = sessionRegistry().get(ctx.sessionManager.getSessionId()).onRateLimitNotice;
+        const nextCtx = { ...sessionContext(tmpdir(), ctx.ui), mode: "rpc", model };
+        pi.handlers.get("session_start")[0]({}, nextCtx);
+        const notice = { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.99, resetsAt: 1_800_000_000_000 };
+        oldSink(notice, "pi-claude-code-provider/sonnet");
+        assert.equal(events.length, 3, "old request cannot publish under replacement session");
+        const nextSink = sessionRegistry().get(nextCtx.sessionManager.getSessionId()).onRateLimitNotice;
+        nextSink(notice, "pi-claude-code-provider/sonnet");
+        assert.equal(events[3].data.sessionId, nextCtx.sessionManager.getSessionId());
+        await shutdown({}, {});
+        nextSink(notice, "pi-claude-code-provider/sonnet");
+        assert.equal(events.length, 4, "late request cannot publish after shutdown");
+    } finally {
+        if (shutdown) await shutdown({}, {});
+        if (original === undefined) delete process.env.PI_CLAUDE_CODE_PROVIDER_PATH;
+        else process.env.PI_CLAUDE_CODE_PROVIDER_PATH = original;
         await rm(directory, { recursive: true, force: true });
     }
 });
@@ -502,8 +563,73 @@ test("explicit missing Claude path retains the doctor and reports one session er
     }
 });
 
-test("truncated web-search output is retained only for the session", async () => {
-    const { directory, executable } = await createFakeClaude("x".repeat(60 * 1024));
+test("a manually selected subscription profile routes new Claude requests without reloading", async () => {
+    const home = await mkdtemp(join(tmpdir(), "pix-claude-manual-profile-"));
+    const { directory, executable } = await createFakeClaude("unused", { reportConfigDir: true });
+    const originalHome = process.env.HOME;
+    const originalPath = process.env.PI_CLAUDE_CODE_PROVIDER_PATH;
+    process.env.HOME = home;
+    process.env.PI_CLAUDE_CODE_PROVIDER_PATH = executable;
+    const selectedDirs = [join(home, "personal"), join(home, "work")];
+    const settings = join(home, ".config", "pi", "pi-tools-suite.jsonc");
+    try {
+        await mkdir(dirname(settings), { recursive: true });
+        const savePreference = async (selectedAccount) => writeFile(settings, JSON.stringify({
+            claudeCodeProvider: {
+                autoRotate: false,
+                accounts: [
+                    { name: "Personal", configDir: selectedDirs[0] },
+                    { name: "Work", configDir: selectedDirs[1] },
+                ],
+                selectedAccount,
+            },
+        }));
+        await savePreference("Work");
+        const pi = fakePi();
+        await piClaudeCodeProvider(pi.api);
+        const registered = pi.providers.get("pi-claude-code-provider");
+        assert.ok(registered, "a selected profile must allow preflight without the default ~/.claude login");
+        const model = {
+            ...registered.models.find((candidate) => candidate.id === "sonnet"),
+            provider: "pi-claude-code-provider", api: "pi-claude-code-provider-headless",
+            baseUrl: "pi-claude-code-provider://local",
+        };
+        const accountEvents = [];
+        const context = {
+            ...sessionContext(home, {
+                notify() {},
+                setWidget(id, lines) { accountEvents.push({ id, lines }); },
+            }),
+            mode: "rpc",
+        };
+        pi.handlers.get("session_start")[0]({}, context);
+        const request = async () => {
+            const result = await registered.streamSimple(model, providerContext(), {
+                reasoning: "medium", sessionId: context.sessionManager.getSessionId(),
+            }).result();
+            assert.equal(result.stopReason, "stop", result.errorMessage);
+            return result.content.find((part) => part.type === "text")?.text;
+        };
+        assert.equal(await request(), selectedDirs[1]);
+        await savePreference("Personal");
+        assert.equal(await request(), selectedDirs[0]);
+        assert.deepEqual(accountEvents.map((event) => {
+            assert.equal(event.id, "pix.session-state");
+            assert.equal(event.lines[0], "claude-code-account");
+            return JSON.parse(event.lines[1]).name;
+        }), ["Work", "Personal"]);
+        await pi.handlers.get("session_shutdown")[0]({}, {});
+    } finally {
+        if (originalHome === undefined) delete process.env.HOME;
+        else process.env.HOME = originalHome;
+        if (originalPath === undefined) delete process.env.PI_CLAUDE_CODE_PROVIDER_PATH;
+        else process.env.PI_CLAUDE_CODE_PROVIDER_PATH = originalPath;
+        await Promise.all([home, directory].map((path) => rm(path, { recursive: true, force: true })));
+    }
+});
+
+test("provider never registers subscription web search and preserves the separate web_search tool", async () => {
+    const { directory, executable } = await createFakeClaude();
     const original = process.env.PI_CLAUDE_CODE_PROVIDER_PATH;
     process.env.PI_CLAUDE_CODE_PROVIDER_PATH = executable;
     try {
@@ -516,19 +642,16 @@ test("truncated web-search output is retained only for the session", async () =>
         assert.equal(sessionStart.length, 1);
         sessionStart[0]({}, sessionContext(tmpdir(), { notify(message, level) { notices.push({ message, level }); } }));
         assert.equal(pi.tools.get("web_search"), existingWebSearch);
+        assert.equal(pi.tools.has("pi_claude_code_provider_web_search"), false);
+        assert.equal(pi.tools.size, 1);
         assert.equal(notices.some(({ message }) => /(?:Pi|Claude Code) .*unverified/.test(message)), false);
         assert.equal(notices.every(({ message }) => message.startsWith("[pi-claude-code-provider]")), true);
-        const search = pi.tools.get("pi_claude_code_provider_web_search");
-        assert.ok(search);
-        assert.match(search.description, new RegExp(`${formatSize(DEFAULT_MAX_BYTES)} or ${DEFAULT_MAX_LINES} lines`));
-        const result = await search.execute("call", { query: "query" }, undefined);
-        assert.equal(result.details.truncated, true);
-        assert.ok(result.details.fullOutputPath);
-        await access(result.details.fullOutputPath);
         const shutdown = pi.handlers.get("session_shutdown") ?? [];
         assert.equal(shutdown.length, 1);
         await shutdown[0]({}, {});
-        await assert.rejects(access(result.details.fullOutputPath));
+        sessionStart[0]({}, sessionContext(tmpdir(), { notify() {} }));
+        assert.equal(pi.tools.has("pi_claude_code_provider_web_search"), false);
+        await shutdown[0]({}, {});
     }
     finally {
         if (original === undefined) delete process.env.PI_CLAUDE_CODE_PROVIDER_PATH;
@@ -537,37 +660,7 @@ test("truncated web-search output is retained only for the session", async () =>
     }
 });
 
-test("web-search output finishing after shutdown is not retained", async () => {
-    const { directory, executable } = await createFakeClaude("x".repeat(60 * 1024), { searchDelayMs: 50 });
-    const original = process.env.PI_CLAUDE_CODE_PROVIDER_PATH;
-    process.env.PI_CLAUDE_CODE_PROVIDER_PATH = executable;
-    const outputDirectories = async () => (await readdir(tmpdir(), { withFileTypes: true }))
-        .filter((entry) => entry.isDirectory() && entry.name.startsWith("pi-claude-code-provider-search-output-"))
-        .map((entry) => entry.name)
-        .sort();
-    const before = await outputDirectories();
-    try {
-        const pi = fakePi();
-        await piClaudeCodeProvider(pi.api);
-        pi.handlers.get("session_start")[0]({}, sessionContext(tmpdir(), { notify() { } }));
-        const search = pi.tools.get("pi_claude_code_provider_web_search");
-        const pending = search.execute("call", { query: "query" }, undefined);
-        await pi.handlers.get("session_shutdown")[0]({}, {});
-        const result = await pending;
-        assert.equal(result.details.truncated, true);
-        assert.equal(result.details.fullOutputPath, undefined);
-        assert.doesNotMatch(result.content[0].text, /Full output:/);
-        const after = await outputDirectories();
-        assert.deepEqual(after.filter((name) => !before.includes(name)), []);
-    }
-    finally {
-        if (original === undefined) delete process.env.PI_CLAUDE_CODE_PROVIDER_PATH;
-        else process.env.PI_CLAUDE_CODE_PROVIDER_PATH = original;
-        await rm(directory, { recursive: true, force: true });
-    }
-});
-
-test("an occupied permanent web-search name is preserved with a prefixed warning", async () => {
+test("the provider neither replaces nor advertises a legacy subscription web-search tool", async () => {
     const { directory, executable } = await createFakeClaude();
     const original = process.env.PI_CLAUDE_CODE_PROVIDER_PATH;
     process.env.PI_CLAUDE_CODE_PROVIDER_PATH = executable;
@@ -580,10 +673,7 @@ test("an occupied permanent web-search name is preserved with a prefixed warning
         assert.equal(sessionStart.length, 1);
         sessionStart[0]({}, sessionContext(tmpdir(), { notify(message, level) { notices.push({ message, level }); } }));
         assert.equal(pi.tools.get("pi_claude_code_provider_web_search"), existingSearch);
-        const collision = notices.find(({ message }) => message.includes("tool name is already occupied"));
-        assert.ok(collision);
-        assert.equal(collision.level, "warning");
-        assert.match(collision.message, /^\[pi-claude-code-provider\]/);
+        assert.equal(notices.some(({ message }) => message.includes("tool name is already occupied")), false);
         await pi.handlers.get("session_shutdown")[0]({}, {});
         const later = [];
         sessionStart[0]({}, sessionContext(tmpdir(), { notify(message, level) { later.push({ message, level }); } }));

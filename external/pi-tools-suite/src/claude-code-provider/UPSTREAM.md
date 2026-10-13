@@ -56,6 +56,14 @@ Maintained differences:
 8. `extensions/pi-claude-code-provider.ts`: default suite autoload is quiet when
    the optional Claude CLI is absent from PATH. The doctor remains registered;
    explicit path and other preflight failures still report startup errors.
+9. `extensions/pi-claude-code-provider.ts`: the metered
+   `pi_claude_code_provider_web_search` tool is intentionally never registered
+   in Pix; the separate suite's `web_search` and `web_fetch` stay available.
+   A host-level guard still denies any legacy/third-party registration.
+10. `package.json`: explicitly declares the runtime `jsonc-parser` import used
+    by account rotation. Pi 1.2's isolated extension loading requires staged
+    offline test copies to link this declared dependency in addition to SDK peers;
+    the staging allowlist does not expose ambient dependencies to other snapshots.
 
 `DESIGN.md`, `SECURITY.md` and `CHANGELOG.md` are retained upstream reference
 documents, **not** current Pix contracts. Upstream command/install instructions

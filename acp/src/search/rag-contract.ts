@@ -13,6 +13,7 @@ export interface RagSource {
   readonly endLine?: number;
   readonly hash?: string;
   readonly sessionId?: string;
+  readonly messageId?: string;
 }
 export interface RagRequest {
   readonly requestId: string;
@@ -34,4 +35,3 @@ export interface RagResponse {
   /** Source IDs corresponding to numbered evidence [1], [2], ... in request order. */
   readonly sourceIds: readonly string[];
 }
-

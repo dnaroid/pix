@@ -115,6 +115,26 @@ describe("real stream generation from retrieved evidence", () => {
     assert.equal(disposed, 1);
   });
 
+  it("preserves provider error details, publishes no partial answer, and disposes the runtime", async () => {
+    for (const detail of ["Provider HTTP 429\nRate limit exceeded; retry after 60 seconds", undefined]) {
+      let disposed = 0;
+      const runtime = { getModel: () => ({ maxTokens: 8000 }), streamSimple: () => (async function* () {
+        yield { type: "text_delta", delta: "Unverified partial answer [1]" };
+        yield { type: "error", error: { errorMessage: detail } };
+      })() } as unknown as ModelRuntime;
+      const service = new DesktopRagService({
+        collect: async () => evidence,
+        loadPreferences: async () => ({ modelRef: "openai/mock", thinking: "off" }),
+        createRuntime: async () => ({ modelRuntime: runtime, dispose: () => { disposed++; } }),
+      });
+      const updates: unknown[] = [];
+      await assert.rejects(service.generate(request(), async update => { updates.push(update); }, signal()),
+        { message: detail ?? "RAG generation failed (provider returned no error details)" });
+      assert.deepEqual(updates, [{ sourceIds: [evidence[0]!.id] }]);
+      assert.equal(disposed, 1);
+    }
+  });
+
   it("does not call any model if retrieval returned no evidence", async () => {
     const service = new DesktopRagService({
       collect: async () => [],
@@ -126,6 +146,34 @@ describe("real stream generation from retrieved evidence", () => {
     assert.equal(result.sourceIds.length, 0);
     assert.match(result.answer, /No relevant project evidence/);
     assert.deepEqual(messages, [{ sourceIds: [] }]);
+  });
+
+  it("does not publish invalid citations or an answer against a changed session", async () => {
+    for (const [answer, current] of [["Unsupported [Source 1,msg4]", true], ["Old decision [1]", false]] as const) {
+      let disposed = 0;
+      const runtime = { getModel: () => ({ maxTokens: 8000 }), streamSimple: () => (async function* () {
+        yield { type: "text_delta", delta: answer };
+      })() } as unknown as ModelRuntime;
+      const service = new DesktopRagService({
+        collect: async () => [{ ...evidence[0]!, current: async () => current }],
+        loadPreferences: async () => ({ modelRef: "openai/mock", thinking: "off" }),
+        createRuntime: async () => ({ modelRuntime: runtime, dispose: () => { disposed++; } }),
+      });
+      const updates: unknown[] = [];
+      await assert.rejects(service.generate(request(), async update => { updates.push(update); }, signal()),
+        current ? /citations/ : /Session changed/);
+      assert.deepEqual(updates, [{ sourceIds: [evidence[0]!.id] }]);
+      assert.equal(disposed, 1);
+    }
+  });
+
+  it("refuses incomplete chronological context before creating a paid runtime", async () => {
+    const service = new DesktopRagService({
+      collect: async () => [{ ...evidence[0]!, incomplete: true }],
+      loadPreferences: async () => { throw new Error("Should not load model preferences"); },
+      createRuntime: async () => { throw new Error("Should not create runtime"); },
+    });
+    await assert.rejects(service.generate(request(), async () => {}, signal()), /context|budget/i);
   });
 
   it("honors Off effort and cancellation while an uncooperative stream is pending", async () => {

@@ -87,6 +87,13 @@ without blocking desktop interactions.
 - The titlebar badge and recent-project badges use a stable fallback hue
   derived from the normalized full project path rather than only its basename.
   Windows drive and UNC identities are compared case-insensitively.
+- When the window loses focus, only its titlebar project badge switches from
+  a filled square to a transparent square with a project-colored border and
+  project-colored letters. Regaining focus restores the filled appearance.
+  The initial state follows document focus on mount; window focus/blur events
+  update it, and component teardown removes the window listeners. Both light
+  and dark fallback hues and custom project colors apply to the outline state.
+  Recent-project menu badges, the titlebar tint, tabs and other chrome are unchanged.
 - A project may override the fallback identity color in `.pi/workspace.jsonc`:
 
   ```jsonc

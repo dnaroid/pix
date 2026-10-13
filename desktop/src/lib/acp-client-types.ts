@@ -208,6 +208,7 @@ export interface SessionUsageReport {
   readonly totals: SessionUsageTotals;
   readonly providers: readonly SessionUsageProvider[];
   readonly unattributed: SessionUsageTotals;
+  readonly subagents?: import("../../../acp/src/acp/desktop-commands").DesktopSessionSubagentUsageReport;
 }
 
 export interface SessionUsageStatus {

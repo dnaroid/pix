@@ -40,6 +40,7 @@ export type InputControllerHost = {
 	navigateRequestHistory(delta: number): boolean;
 	scrollByLines(delta: number): void;
 	scrollByPage(delta: number): void;
+	scrollDialogByPage?(delta: number): boolean;
 	handleMouse(event: MouseEvent): void;
 	handleEnter(): void;
 	handleInterrupt(): Promise<void>;
@@ -265,8 +266,8 @@ export class AppInputController {
 			["\x1b[27;2;9~", () => { this.host.toggleModelVisibilityMode(); }],
 			["\x1b[13u", () => this.host.handleEnter()],
 			["\x1b[13;1u", () => this.host.handleEnter()],
-			["\x1b[5~", () => this.host.scrollByPage(-1)],
-			["\x1b[6~", () => this.host.scrollByPage(1)],
+			["\x1b[5~", () => { if (!this.host.scrollDialogByPage?.(-1)) this.host.scrollByPage(-1); }],
+			["\x1b[6~", () => { if (!this.host.scrollDialogByPage?.(1)) this.host.scrollByPage(1); }],
 			["\x1b[A", () => this.handleArrowUp()],
 			["\x1b[B", () => this.handleArrowDown()],
 			["\x1b[C", () => this.handleArrowRight()],

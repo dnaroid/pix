@@ -2,6 +2,10 @@
   import { onMount } from "svelte";
   import Hourglass from "@lucide/svelte/icons/hourglass";
   import ExternalLink from "@lucide/svelte/icons/external-link";
+  import Users from "@lucide/svelte/icons/users";
+  import SubagentUsageDialog from "./SubagentUsageDialog.svelte";
+  import ClaudeAccountSwitcher from "./ClaudeAccountSwitcher.svelte";
+  import type { ProjectPathNavigation } from "../lib/project-path-navigation";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import AlarmClock from "@lucide/svelte/icons/alarm-clock";
@@ -45,11 +49,13 @@
     sessionUsageFailed = false,
     sessionUsageAvailable = false,
     claudeCodeRoute = false,
+    lastClaudeAccountAttempt,
     claudeLimitsRefreshing = false,
     claudeLimitsFailed = false,
     quotaWaitIndicator = null,
     onOpenSessionUsage,
     onRefreshClaudeLimits = () => {},
+    subagentPathNavigation,
   }: {
     status?: RuntimeStatus;
     sessionUsage?: SessionUsageReport;
@@ -58,16 +64,19 @@
     sessionUsageAvailable?: boolean;
     /** Active session model routes through pi-claude-code-provider. */
     claudeCodeRoute?: boolean;
+    lastClaudeAccountAttempt?: string;
     claudeLimitsRefreshing?: boolean;
     claudeLimitsFailed?: boolean;
     quotaWaitIndicator?: { label: string; onReopen: () => void } | null;
     onOpenSessionUsage: () => void;
     onRefreshClaudeLimits?: () => void;
+    subagentPathNavigation?: ProjectPathNavigation;
   } = $props();
 
   let root = $state<HTMLDivElement | null>(null);
   let contextOpen = $state(false);
   let usageOpen = $state(false);
+  let subagentUsageOpen = $state(false);
   let now = $state(Date.now());
   let usageLinkFailed = $state(false);
   let usageLinkRequest = 0;
@@ -92,6 +101,11 @@
   // quota left over from a previous model) must not stay hidden behind it.
   const modelUsage = $derived(displayModelUsage(status, now));
   const usageAccountLabel = $derived(shortModelUsageAccountLabel(modelUsage?.accountEmail));
+  // Usage can contain Claude calls after the user switches back to another
+  // provider. Leave subscription account selection available in that case.
+  const showClaudeAccountSwitcher = $derived(claudeCodeRoute || Boolean(
+    sessionUsage?.providers.some((provider) => provider.provider === "pi-claude-code-provider"),
+  ));
   const usageWindowItems = $derived(usageWindows());
   // Account quota rows show remaining balances; the weekly row integrates
   // the cycle's dates and time marker. Header-derived rate windows remain
@@ -113,12 +127,14 @@
   });
 
   function closeOutside(event: PointerEvent): void {
+    if (subagentUsageOpen) return;
     if ((!contextOpen && !usageOpen) || root?.contains(event.target as Node)) return;
     contextOpen = false;
     usageOpen = false;
   }
 
   function handleKeydown(event: KeyboardEvent): void {
+    if (subagentUsageOpen) return;
     if (event.key === "Escape" && (contextOpen || usageOpen)) {
       event.preventDefault();
       const panel = root?.querySelector<HTMLElement>(contextOpen ? '[data-context-region] button' : '[data-usage-region] button');
@@ -147,6 +163,7 @@
   }
 
   function leaveDetails(event: FocusEvent, panel: "context" | "usage"): void {
+    if (subagentUsageOpen) return;
     const region = event.currentTarget as HTMLElement;
     if (event.relatedTarget instanceof Node && region.contains(event.relatedTarget)) return;
     if (panel === "context") contextOpen = false;
@@ -492,7 +509,15 @@
           >
             <div class="flex max-h-[max(0px,calc(100dvh-70px))] flex-col overflow-y-auto rounded-lg border border-border bg-popover text-popover-foreground shadow-md">
               <header class="shrink-0 border-b border-border px-3 py-2">
-                <div class="text-xs font-medium text-foreground">Session usage</div>
+                <div class="flex items-center justify-between gap-2">
+                  <div class="shrink-0 text-xs font-medium text-foreground">Session usage</div>
+                  {#if showClaudeAccountSwitcher}
+                    <ClaudeAccountSwitcher lastAttemptedAccount={lastClaudeAccountAttempt} />
+                  {/if}
+                  <button type="button" class="flex h-6 items-center gap-1 rounded-md px-1.5 text-xs text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" aria-label="Show subagent statistics" disabled={!sessionUsage} onclick={() => subagentUsageOpen = true}>
+                    <Users class="h-3.5 w-3.5" aria-hidden="true" /> Subagents
+                  </button>
+                </div>
                 {#if usageAccountLabel}
                   <div class="truncate text-xs text-muted-foreground">{usageAccountLabel}</div>
                 {/if}
@@ -616,6 +641,10 @@
       </div>
     {/if}
   </div>
+
+{#if subagentUsageOpen && sessionUsage}
+  <SubagentUsageDialog usage={sessionUsage} loading={loadingSessionUsage} failed={sessionUsageFailed} pathNavigation={subagentPathNavigation} onRefresh={onOpenSessionUsage} onClose={() => subagentUsageOpen = false} />
+{/if}
 
 <style>
   .runtime-status-layout {

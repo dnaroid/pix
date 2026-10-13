@@ -799,6 +799,8 @@ test("startup and idle extension warnings/errors reach system rows without a pro
 	assert.deepEqual(feedback.map((item) => (item.update as { content: { text: string } }).content.text), [
 		"Claude Code provider is unavailable: Run `claude auth login`, then /reload", "Idle warning",
 	]);
+	assert.match((feedback[0]!.update as { messageId: string }).messageId, /^pix-system:notification:error:/);
+	assert.match((feedback[1]!.update as { messageId: string }).messageId, /^pix-system:notification:warning:/);
 	assert.deepEqual(pi.uiResponses, []);
 });
 
@@ -2114,7 +2116,7 @@ function headerUsageFromRecord(record: { modelKey: string; headers: Record<strin
 	};
 }
 
-function registerHeaderUsageSink(notifications: HeaderUsageNotification[]) {
+function registerHeaderUsageSink(notifications: HeaderUsageNotification[], channel = PIX_MODEL_USAGE_CHANNEL) {
 	return (app: ReturnType<typeof client>) => {
 		const customNotifications = app as unknown as {
 			onNotification(
@@ -2127,11 +2129,69 @@ function registerHeaderUsageSink(notifications: HeaderUsageNotification[]) {
 			PIX_SESSION_STATE_METHOD,
 			(params) => params as HeaderUsageNotification,
 			(ctx) => {
-				if (ctx.params.channel === PIX_MODEL_USAGE_CHANNEL) notifications.push(ctx.params);
+				if (ctx.params.channel === channel) notifications.push(ctx.params);
 			},
 		);
 	};
 }
+
+test("Pix Desktop updates saved Claude quota from structured warnings without quota I/O", async () => {
+	const notifications: HeaderUsageNotification[] = [];
+	let quotaQueries = 0;
+	let credentialPending = false;
+	const now = Math.floor(Date.now() / 1000) * 1000;
+	const modelKey = "pi-claude-code-provider/opus";
+	const previous: NonNullable<DesktopRuntimeStatusResponse["modelUsage"]> = {
+		provider: "anthropic", modelKey, updatedAt: now - 1000,
+		hourly: { remainingPercent: 9, resetAt: now + 3600_743, windowSeconds: 18000 },
+		weekly: { remainingPercent: 54, resetAt: now + 7 * 86400_000, windowSeconds: 604800 },
+		resetCreditsAvailableCount: 1,
+	};
+	const { adapter, clients } = createTestAdapter({ queryModelUsage: async () => {
+		quotaQueries++;
+		if (credentialPending) return { refresh: "unavailable", credentialPending: true };
+		return { refresh: "ready", status: previous };
+	} });
+	await connect(adapter, async (cx) => {
+		const session = await cx.buildSession("/tmp/claude-streamed-quota").start();
+		const pi = clients[0]!;
+		await pi.setModel("pi-claude-code-provider", "opus");
+		await cx.request(PIX_RUNTIME_STATUS_METHOD, { sessionId: session.sessionId, refreshModelUsage: true });
+		const emit = (overrides: Record<string, unknown> = {}) => pi.emit({
+			type: "extension_ui_request", id: "quota", method: "setWidget", widgetKey: "pix.session-state",
+			widgetLines: ["pix:claude-code:rate-limit", JSON.stringify({ version: 1, sessionId: pi.state.sessionId,
+				modelRef: modelKey, status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.99,
+				resetsAt: now + 3600_000, observedAt: now, ...overrides })],
+		});
+		emit();
+		await waitFor(() => notifications.length === 1);
+		const pushed = notifications[0]!.data as typeof previous;
+		assert.ok(Math.abs(pushed.hourly!.remainingPercent - 1) < 0.001);
+		assert.deepEqual(pushed.weekly, previous.weekly);
+		assert.equal(pushed.resetCreditsAvailableCount, 1);
+		assert.equal(notifications[0]!.sessionId, session.sessionId);
+		assert.equal(quotaQueries, 1, "streamed warning does not query credentials or quota endpoint");
+		emit({ status: "rejected", utilization: undefined, observedAt: now + 1 });
+		await waitFor(() => notifications.length === 2);
+		assert.equal((notifications[1]!.data as typeof previous).hourly!.remainingPercent, 0);
+		const result = await cx.request(PIX_RUNTIME_STATUS_METHOD, { sessionId: session.sessionId, refreshModelUsage: true }) as DesktopRuntimeStatusResponse;
+		assert.equal(result.modelUsage?.hourly?.remainingPercent, 0, "lagging endpoint cannot restore consumed quota");
+		emit({ sessionId: "wrong-owner" });
+		emit({ modelRef: "pi-claude-code-provider/sonnet" });
+		emit({ rateLimitType: "overage" });
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		assert.equal(notifications.length, 2);
+		await pi.setModel("pi-claude-code-provider", "sonnet");
+		const switched = await cx.request(PIX_RUNTIME_STATUS_METHOD, { sessionId: session.sessionId, refreshModelUsage: false }) as DesktopRuntimeStatusResponse;
+		assert.equal(switched.modelUsage, undefined, "sample does not cross model routes");
+		credentialPending = true;
+		const other = await cx.buildSession("/tmp/claude-streamed-quota-other").start();
+		await clients[1]!.setModel("pi-claude-code-provider", "opus");
+		const otherStatus = await cx.request(PIX_RUNTIME_STATUS_METHOD, { sessionId: other.sessionId, refreshModelUsage: true }) as DesktopRuntimeStatusResponse;
+		assert.equal(otherStatus.modelUsage?.hourly?.remainingPercent, 9, "session telemetry must not contaminate route-wide stale endpoint cache");
+		assert.equal(otherStatus.modelUsage?.stale, true);
+	}, registerHeaderUsageSink(notifications, "claude-code-usage"));
+});
 
 test("Pix Desktop pushes Anthropic API-key header usage immediately without quota I/O", async () => {
 	const notifications: HeaderUsageNotification[] = [];
@@ -3338,6 +3398,28 @@ test("Desktop RAG streams source identities and answer text without starting a P
 		await assert.rejects(cx.request(SEARCH_RAG_METHOD, request), /Desktop search unavailable/);
 	});
 	assert.deepEqual(runs, ["What was completed?"]);
+	assert.equal(harness.adapter.sessionCount, 0);
+});
+
+test("Desktop RAG forwards the complete backend error message", async t => {
+	const detail = "Provider HTTP 429\nRate limit exceeded; retry after 60 seconds";
+	const harness = createTestAdapter({
+		ragService: { generate: async () => { throw new Error(detail); } },
+		createPiClient: () => { throw new Error("RAG cannot start Pi"); },
+	});
+	t.after(() => harness.adapter.dispose());
+	await connectAs(harness.adapter, "pix-desktop", async cx => {
+		await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, clientInfo: { name: "pix-desktop", version: "test" } });
+		await assert.rejects(cx.request(SEARCH_RAG_METHOD, {
+			cwd: resolve("."), requestId: "rag-error-123", query: "Why?",
+			sources: [{ id: "tasks:1", kind: "tasks", title: "Task", snippet: "Evidence" }],
+		}), error => {
+			assert.ok(error instanceof RequestError);
+			assert.equal(error.code, -32000);
+			assert.equal(error.message, detail);
+			return true;
+		});
+	});
 	assert.equal(harness.adapter.sessionCount, 0);
 });
 

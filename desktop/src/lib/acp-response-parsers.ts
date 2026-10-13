@@ -19,6 +19,7 @@ import type {
 } from "./acp-client-types";
 
 import { parseDcpContextMap } from "./dcp-context-map";
+import { parseSubagentUsageReport } from "./subagent-usage-parser";
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -123,6 +124,7 @@ function parseSessionUsageReport(value: unknown): SessionUsageReport {
     totals: parseSessionUsageTotals(value.totals),
     providers: value.providers.map(parseSessionUsageProvider),
     unattributed: parseSessionUsageTotals(value.unattributed),
+    ...(value.subagents !== undefined ? { subagents: parseSubagentUsageReport(value.subagents, parseSessionUsageTotals) } : {}),
   };
 }
 

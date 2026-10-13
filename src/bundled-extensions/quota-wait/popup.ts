@@ -1,6 +1,17 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { PixExtensionUIContext, PixMenuOptions } from "../../app/types.js";
 import type { QuotaWaitState } from "../../app/session/quota-wait.js";
+import { APP_ICONS } from "../../app/icons.js";
+
+export function quotaWaitStatusLabel(state: QuotaWaitState, now = Date.now()): string {
+	const prefix = APP_ICONS.timerSand;
+	if (!state.autoResume) return `${prefix} paused · /wait`;
+	if (state.phase === "checking") return `${prefix} checking · /wait`;
+	if (state.phase === "resuming") return `${prefix} resuming · /wait`;
+	const minutes = Math.max(0, Math.ceil((state.nextCheckAt - now) / 60_000));
+	const hours = Math.floor(minutes / 60);
+	return `${prefix} ${hours ? `${hours}h` : ""}${minutes % 60}m · /wait`;
+}
 
 export function quotaWaitLabel(state: QuotaWaitState, now = Date.now()): string {
 	if (!state.autoResume) return "Quota wait · auto-resume cancelled";
@@ -21,7 +32,7 @@ export class QuotaWaitPopup {
 		this.ctx = ctx;
 		if (this.options && !state) this.close();
 		if (this.options && state) this.options.title = quotaWaitLabel(state);
-		ctx.ui.setStatus("quota-wait", state ? `${quotaWaitLabel(state)} · /wait` : undefined);
+		ctx.ui.setStatus("quota-wait", state ? quotaWaitStatusLabel(state) : undefined);
 	}
 	async show(ctx: ExtensionContext, state: QuotaWaitState, action: (value: string) => void): Promise<void> {
 		if (this.options || ctx.mode !== "tui" || !ctx.hasUI) return;

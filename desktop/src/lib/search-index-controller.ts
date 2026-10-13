@@ -49,6 +49,11 @@ export function createSearchIndexController(options: Omit<Parameters<typeof moni
       publish({});
     },
     refresh: () => { void monitor.refresh(); },
+    clearHistory: () => {
+      if (disposed) return;
+      history.clear(workspace);
+      publish({});
+    },
     start: (source: Parameters<typeof indexing.start>[0]) => { void indexing.start(source); void monitor.refresh(true); },
     cancel: indexing.cancel,
     // Closing the panel still stops manual work, but does not erase its outcome

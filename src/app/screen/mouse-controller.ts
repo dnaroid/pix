@@ -4,8 +4,8 @@ import type { ConversationViewport } from "../rendering/conversation-viewport.js
 import type { EditorLayoutRenderer } from "../rendering/editor-layout-renderer.js";
 import type { ImageContent, InputEditor } from "../../input-editor.js";
 import type { ToastEntry, ToastVariant } from "../../ui.js";
-import { colorize, type Theme } from "../../theme.js";
-import { resolveColor, resolveModelColor, type ModelColorsConfig } from "../../config.js";
+import type { Theme } from "../../theme.js";
+import type { ModelColorsConfig } from "../../config.js";
 import { stringifyUnknown } from "../rendering/message-content.js";
 import type { AppPopupActionController } from "../popup/popup-action-controller.js";
 import type { AppPopupMenuController } from "../popup/popup-menu-controller.js";
@@ -41,8 +41,10 @@ import type {
 	StatusVoiceMicTarget,
 } from "../types.js";
 import { loadDcpStatsDialog } from "../rendering/dcp-stats.js";
-import { formatSessionUsageText, loadSessionUsageReport } from "../session/session-usage.js";
-import { modelProviderThemeColor } from "../rendering/status-line-renderer.js";
+import { UsagePopupController } from "./usage-popup-controller.js";
+import type { ModelUsageStatus } from "../model/model-usage-status.js";
+import type { ModelUsageRefreshStart } from "../model/model-usage-controller.js";
+import type { AppToastAction } from "../rendering/toast-controller.js";
 import { detectFileLinks, type RenderedLink } from "./file-links.js";
 import { openFileLink as openDetectedFileLink } from "./file-link-opener.js";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
@@ -90,6 +92,8 @@ export type AppMouseControllerHost = {
 	setStatus(status: string): void;
 	runtimeSession(): AgentSession | undefined;
 	tabsLifecycleGeneration(): number;
+	modelUsageStatus?(): ModelUsageStatus | undefined;
+	refreshModelUsage?(): ModelUsageRefreshStart;
 	theme(): Theme;
 	modelColors(): ModelColorsConfig;
 	cwd(): string | undefined;
@@ -102,9 +106,10 @@ export type AppMouseControllerHost = {
 	switchToTab(tabId: string): void;
 	closeTab(tabId: string): void;
 	toastEntry(toastId: number): ToastEntry | undefined;
-	showToast(message: string, kind: "success" | "error" | "warning" | "info", options?: { durationMs?: number; variant?: ToastVariant; action?: { label: string; onSelect: () => void } }): void;
+	showToast(message: string, kind: "success" | "error" | "warning" | "info", options?: { durationMs?: number; variant?: ToastVariant; action?: AppToastAction; actions?: readonly AppToastAction[] }): number | void;
 	dismissToast(toastId: number): void;
-	activateToastAction(toastId: number): boolean;
+	activateToastAction(toastId: number, index?: number): boolean;
+	scrollToastDialog?(toastId: number, delta: number): boolean;
 	refreshUserMessageJumpMenuItems?(): Promise<void>;
 	queueInputFromStatus?(): void | Promise<void>;
 	pasteInternalClipboard?(): void;
@@ -157,7 +162,7 @@ export class AppMouseController {
 	private clickFlashTimer: ReturnType<typeof setTimeout> | undefined;
 	private clickFlashDirty = false;
 	private dcpStatsDialogRequestGeneration = 0;
-	private sessionUsageDialogRequestGeneration = 0;
+	private readonly usagePopup: UsagePopupController;
 	private renderedConversationFrame: {
 		bodyHeight: number;
 		topRow: number;
@@ -170,11 +175,37 @@ export class AppMouseController {
 		private readonly popupActions: AppPopupActionController,
 		private readonly scrollController: AppScrollController,
 		private readonly commandController: AppCommandController,
-	) {}
+	) {
+		this.usagePopup = new UsagePopupController(host, popupMenus);
+	}
 
 	handleMouse(event: MouseEvent): void {
 		if (this.handleInputScrollBar(event)) return;
 		this.showClickFlashOnPress(event);
+		const target = this.renderedTargets.get(event.y);
+		if (event.button === 0 && event.released) {
+			this.usagePopup.dismissOnOutsideClick(
+				this.statusTargetContains(this.statusModelUsageTarget, event),
+				target?.kind === "toast" ? target.id : undefined,
+			);
+		}
+		// Overlays own their rows: underlying conversation links/selections must
+		// never activate through a dialog (especially an unvalidated run path).
+		if (event.button === 0 && target?.kind === "toast") {
+			if (!event.released || !toastTargetContainsEvent(target, event)) return;
+			if (target.action === "body") return;
+			if (target.action === "action") {
+				if (this.host.activateToastAction(target.id, target.actionIndex)) this.showClickFlashForEvent(event);
+				return;
+			}
+			if (this.copyErrorToast(target.id)) {
+				this.showClickFlashForEvent(event);
+				return;
+			}
+			this.host.dismissToast(target.id);
+			this.showClickFlashForEvent(event);
+			return;
+		}
 		if (event.button === 0 && !event.released && this.handleInputBorderStatusClick(event)) return;
 		if (event.button === 0 && !event.released && this.fileLinkAt(event)) return;
 		if (this.handleMouseSelection(event)) return;
@@ -189,9 +220,9 @@ export class AppMouseController {
 		if (event.button === 0 && this.withClickFlash(event, () => this.handleStatusSessionClick(event))) return;
 		if (event.button === 0 && this.withClickFlash(event, () => this.handleExtensionInputClick(event))) return;
 		if (event.button === 0 && this.withClickFlash(event, () => this.handleInputClick(event))) return;
-		const target = this.renderedTargets.get(event.y);
 
 		if (event.button === 64) {
+			if (target?.kind === "toast" && this.host.scrollToastDialog?.(target.id, -3)) return;
 			if (target?.kind === "popup-menu") {
 				this.popupMenus.scrollActivePopupMenu(-3);
 				return;
@@ -201,6 +232,7 @@ export class AppMouseController {
 			return;
 		}
 		if (event.button === 65) {
+			if (target?.kind === "toast" && this.host.scrollToastDialog?.(target.id, 3)) return;
 			if (target?.kind === "popup-menu") {
 				this.popupMenus.scrollActivePopupMenu(3);
 				return;
@@ -210,22 +242,6 @@ export class AppMouseController {
 			return;
 		}
 		if (event.button !== 0) return;
-
-		if (target?.kind === "toast") {
-			if (!toastTargetContainsEvent(target, event)) return;
-			if (target.action === "body") return;
-			if (target.action === "action") {
-				if (this.host.activateToastAction(target.id)) this.showClickFlashForEvent(event);
-				return;
-			}
-			if (this.copyErrorToast(target.id)) {
-				this.showClickFlashForEvent(event);
-				return;
-			}
-			this.host.dismissToast(target.id);
-			this.showClickFlashForEvent(event);
-			return;
-		}
 
 		if (target?.kind === "popup-menu") {
 			const active = this.popupMenus.selectActivePopupMenuIndex(target.index);
@@ -657,38 +673,7 @@ export class AppMouseController {
 
 	private handleStatusModelUsageClick(event: MouseEvent): boolean {
 		if (!this.statusTargetContains(this.statusModelUsageTarget, event)) return false;
-		const session = this.host.runtimeSession();
-		if (!session) {
-			this.host.showToast("Session usage\nNo session has started yet.", "info", { variant: "dialog" });
-			return true;
-		}
-		const requestGeneration = ++this.sessionUsageDialogRequestGeneration;
-		const lifecycleGeneration = this.host.tabsLifecycleGeneration();
-		const manager = session.sessionManager;
-		const sessionId = manager.getSessionId?.();
-		void loadSessionUsageReport(session).then((report) => {
-			if (requestGeneration !== this.sessionUsageDialogRequestGeneration
-				|| this.host.tabsLifecycleGeneration() !== lifecycleGeneration
-				|| this.host.runtimeSession() !== session
-				|| session.sessionManager !== manager
-				|| manager.getSessionId?.() !== sessionId) return;
-			const theme = this.host.theme();
-			const modelColors = this.host.modelColors();
-			this.host.showToast(formatSessionUsageText(report, {
-				formatModel: (provider, model) => {
-					const configured = resolveModelColor(`${provider}/${model}`, modelColors);
-					const foreground = configured
-						? resolveColor(configured, theme.colors)
-						: modelProviderThemeColor(provider, theme.colors);
-					return colorize(model, { foreground, bold: true });
-				},
-			}), "info", { variant: "dialog" });
-		}, () => {
-			if (requestGeneration !== this.sessionUsageDialogRequestGeneration
-				|| this.host.tabsLifecycleGeneration() !== lifecycleGeneration
-				|| this.host.runtimeSession() !== session) return;
-			this.host.showToast("Session usage is unavailable.", "warning", { variant: "dialog" });
-		});
+		this.usagePopup.toggle();
 		return true;
 	}
 

@@ -1,6 +1,14 @@
 import type { RagRequest, RagSource } from "../../../acp/src/search/rag-contract";
 import type { SearchHit, SearchKind, UnifiedSearchResult } from "./universal-search";
 
+/** Preserve diagnostic messages without dumping stacks or arbitrary request objects. */
+export function ragErrorMessage(error: unknown): string {
+  let message = "";
+  if (error instanceof Error) message = error.message;
+  else if (typeof error === "string") message = error;
+  return message.trim() ? message : "RAG generation failed (no error details available)";
+}
+
 /** Diversity cap prevents a large run of commits/settings crowding out code and docs. */
 export function selectRagHits(hits: readonly SearchHit[], limit = 12): SearchHit[] {
   const count = new Map<SearchKind, number>();
@@ -22,7 +30,8 @@ export function ragSource(hit: SearchHit): RagSource {
       ...(hit.content ? { content: hit.content.slice(0, 4096) } : {}) };
   }
   if (hit.kind === "commits") return { ...source, hash: hit.hash };
-  if (hit.kind === "sessions") return { ...source, sessionId: hit.sessionId };
+  if (hit.kind === "sessions") return { ...source, sessionId: hit.sessionId,
+    ...(hit.messageId ? { messageId:hit.messageId } : {}) };
   return source;
 }
 

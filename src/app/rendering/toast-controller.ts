@@ -3,6 +3,8 @@ import { TOAST_DURATION_MS } from "../constants.js";
 
 export type AppToastEntry = ToastEntry & {
 	action?: { label: string };
+	actions?: readonly { label: string }[];
+	scrollOffset?: number;
 };
 
 export type AppToastAction = {
@@ -15,6 +17,7 @@ export type AppToastOptions = {
 	variant?: ToastVariant;
 	scopeKey?: string;
 	action?: AppToastAction;
+	actions?: readonly AppToastAction[];
 };
 
 export type AppToastControllerHost = {
@@ -25,19 +28,20 @@ export type AppToastControllerHost = {
 export class AppToastController {
 	private readonly toastsByScope = new Map<string, Toast>();
 	private readonly timers = new Map<string, Map<number, ReturnType<typeof setTimeout>>>();
-	private readonly actions = new Map<string, Map<number, AppToastAction>>();
+	private readonly actions = new Map<string, Map<number, readonly AppToastAction[]>>();
+	private readonly scrollOffsets = new Map<string, Map<number, number>>();
 
 	constructor(private readonly host: AppToastControllerHost) {}
 
-	showToast(message: string, kind: ToastKind = "info", options: AppToastOptions = {}): void {
+	showToast(message: string, kind: ToastKind = "info", options: AppToastOptions = {}): number {
 		const scopeKey = this.normalizeScopeKey(options.scopeKey ?? this.host.activeScope?.());
 		const toast = this.toastForScope(scopeKey);
-		const action = options.action;
+		const actions = options.actions ?? (options.action ? [options.action] : []);
 		const toastId = toast.show(message, kind, options.variant ? { variant: options.variant } : {});
-		if (action) this.actionsForScope(scopeKey).set(toastId, action);
+		if (actions.length) this.actionsForScope(scopeKey).set(toastId, actions);
 		if (kind === "error" || options.variant === "dialog") {
 			this.host.render();
-			return;
+			return toastId;
 		}
 		const durationMs = typeof options.durationMs === "number" && Number.isFinite(options.durationMs) && options.durationMs > 0
 			? Math.floor(options.durationMs)
@@ -53,6 +57,7 @@ export class AppToastController {
 		this.timersForScope(scopeKey).set(toastId, timer);
 		timer.unref();
 		this.host.render();
+		return toastId;
 	}
 
 	dismissToast(toastId: number, scopeKey = this.normalizeScopeKey(this.host.activeScope?.())): void {
@@ -63,18 +68,39 @@ export class AppToastController {
 			timers?.delete(toastId);
 		}
 		this.toastsByScope.get(scopeKey)?.hide(toastId);
+		const scrolls = this.scrollOffsets.get(scopeKey);
+		scrolls?.delete(toastId);
+		if (scrolls?.size === 0) this.scrollOffsets.delete(scopeKey);
 		this.removeAction(scopeKey, toastId);
 		this.deleteScopeIfEmpty(scopeKey);
 		this.host.render();
 	}
 
-	activateAction(toastId: number, scopeKey = this.normalizeScopeKey(this.host.activeScope?.())): boolean {
-		const action = this.actions.get(scopeKey)?.get(toastId);
+	activateAction(toastId: number, index = 0, scopeKey = this.normalizeScopeKey(this.host.activeScope?.())): boolean {
+		const action = this.actions.get(scopeKey)?.get(toastId)?.[index];
 		if (!action) return false;
 
 		this.dismissToast(toastId, scopeKey);
 		action.onSelect();
 		return true;
+	}
+
+	scrollDialog(toastId: number, delta: number, scopeKey = this.normalizeScopeKey(this.host.activeScope?.())): boolean {
+		const state = this.toastsByScope.get(scopeKey)?.entry(toastId);
+		if (state?.variant !== "dialog") return false;
+		let offsets = this.scrollOffsets.get(scopeKey);
+		if (!offsets) {
+			offsets = new Map();
+			this.scrollOffsets.set(scopeKey, offsets);
+		}
+		offsets.set(toastId, Math.max(0, (offsets.get(toastId) ?? 0) + delta));
+		this.host.render();
+		return true;
+	}
+
+	scrollActiveDialog(delta: number): boolean {
+		const active = [...this.visibleStates()].reverse().find((toast) => toast.variant === "dialog");
+		return active ? this.scrollDialog(active.id, delta) : false;
 	}
 
 	dismissActiveDialog(scopeKey = this.normalizeScopeKey(this.host.activeScope?.())): boolean {
@@ -96,10 +122,16 @@ export class AppToastController {
 	visibleStates(scopeKey = this.normalizeScopeKey(this.host.activeScope?.())): readonly AppToastEntry[] {
 		const states = this.toastsByScope.get(scopeKey)?.visibleStates ?? [];
 		const actions = this.actions.get(scopeKey);
-		if (!actions || actions.size === 0) return states;
+		const offsets = this.scrollOffsets.get(scopeKey);
+		if ((!actions || actions.size === 0) && (!offsets || offsets.size === 0)) return states;
 		return states.map((state) => {
-			const action = actions.get(state.id);
-			return action ? { ...state, action: { label: action.label } } : state;
+			const choices = actions?.get(state.id);
+			const scrollOffset = offsets?.get(state.id);
+			return {
+				...state,
+				...(choices ? { action: { label: choices[0]!.label }, actions: choices.map(({ label }) => ({ label })) } : {}),
+				...(scrollOffset === undefined ? {} : { scrollOffset }),
+			};
 		});
 	}
 
@@ -113,6 +145,7 @@ export class AppToastController {
 		}
 		this.timers.clear();
 		this.actions.clear();
+		this.scrollOffsets.clear();
 		for (const toast of this.toastsByScope.values()) toast.hide();
 		this.toastsByScope.clear();
 	}
@@ -135,10 +168,10 @@ export class AppToastController {
 		return timers;
 	}
 
-	private actionsForScope(scopeKey: string): Map<number, AppToastAction> {
+	private actionsForScope(scopeKey: string): Map<number, readonly AppToastAction[]> {
 		let actions = this.actions.get(scopeKey);
 		if (!actions) {
-			actions = new Map();
+			actions = new Map<number, readonly AppToastAction[]>();
 			this.actions.set(scopeKey, actions);
 		}
 		return actions;

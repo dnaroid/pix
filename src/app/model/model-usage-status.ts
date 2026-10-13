@@ -76,6 +76,8 @@ export type ModelUsageLimitWindow = {
 	readonly remainingPercent: number;
 	readonly resetAt: number;
 	readonly windowSeconds: number;
+	/** Placeholder for an unused subscription window; not evidence of a new reset. */
+	readonly resetAtEstimated?: boolean;
 	readonly hasKnownWindowDuration?: boolean;
 	/** Short display label for header-derived windows, e.g. `RPM`/`TPM`. */
 	readonly label?: string;
@@ -741,6 +743,7 @@ function anthropicUsageWindow(
 	return {
 		remainingPercent: clampPercent(Math.round(100 - window.utilization)),
 		resetAt,
+		...(!window.resets_at ? { resetAtEstimated: true } : {}),
 		windowSeconds,
 		hasKnownWindowDuration: true,
 	};

@@ -153,4 +153,16 @@ describe("Status bar click surfaces", () => {
     expect(runtime.match(/Refreshing…/g)).toHaveLength(1);
     expect(runtime).toContain("Could not refresh Claude Code limits. Retry or check your Claude Code login.");
   });
+
+  it("places the Claude account selector in the Usage header without changing Subagents or other provider routes", () => {
+    const runtime = source("RuntimeStatusBarItems");
+    const start = runtime.indexOf('>Session usage</div>');
+    const selector = runtime.indexOf('<ClaudeAccountSwitcher lastAttemptedAccount={lastClaudeAccountAttempt} />');
+    const subagents = runtime.indexOf('aria-label="Show subagent statistics"');
+    expect(start).toBeGreaterThan(0);
+    expect(selector).toBeGreaterThan(start);
+    expect(selector).toBeLessThan(subagents);
+    expect(runtime.slice(start, subagents)).toContain('{#if showClaudeAccountSwitcher}');
+    expect(runtime).toContain('provider.provider === "pi-claude-code-provider"');
+  });
 });

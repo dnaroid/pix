@@ -6,6 +6,9 @@ export interface SessionEntry {
   cwd: string;
   imageStore: SessionImageStore;
   onRateLimitNotice: RateLimitNoticeSink;
+  onAccountAttempt?: (name: string) => void;
+  onAccountPause?: (previous: string, seconds: number) => void;
+  onAccountSwitch?: (previous: string, next: string) => void;
 }
 
 /** Where the working directory came from, recorded in metrics. */

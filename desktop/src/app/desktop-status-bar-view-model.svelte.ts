@@ -12,6 +12,7 @@ import {
 import { modelThinkingConfigState } from "../lib/model-thinking";
 import { sessionTabModelDisplayOptions } from "../lib/session-tab-model";
 import type { createSessionTabsState } from "./session-tabs-state.svelte";
+import { scopedProjectPathNavigation, type ProjectPathNavigation } from "../lib/project-path-navigation";
 
 type StatusBarProps = ComponentProps<typeof DesktopStatusBar>["props"];
 
@@ -42,6 +43,7 @@ export function createDesktopStatusBarViewModel(options: {
   headsUp: HeadsUpStore;
   openObserverSettings: () => void;
   openBrainstormParticipant?: (sessionId: string) => void;
+  subagentPathNavigation?: ProjectPathNavigation;
 }) {
   const props = $derived.by<StatusBarProps>(() => {
     const sessionId = options.activeSessionId();
@@ -126,6 +128,7 @@ export function createDesktopStatusBarViewModel(options: {
       claudeCodeRoute: !!sessionId
         && !draft
         && modelThinkingConfigState(liveConfigOptions).currentModel?.provider === "pi-claude-code-provider",
+      lastClaudeAccountAttempt: sessionId && !draft ? options.runtime.claudeAccountAttempts.get(sessionId)?.name : undefined,
       claudeLimitsRefreshing: sessionId ? options.runtime.claudeLimitsRefreshing.has(sessionId) : false,
       claudeLimitsFailed: sessionId ? options.runtime.claudeLimitsFailed.has(sessionId) : false,
       sessionActivity,
@@ -138,6 +141,11 @@ export function createDesktopStatusBarViewModel(options: {
       onSetConfig: (option, value) => void options.modelConfig.setConfig(option, value),
       onOpenModelThinking: options.modelConfig.openPicker,
       onOpenSessionUsage: () => void options.sessionCoordinator.refreshActiveSessionUsage(),
+      subagentPathNavigation: options.subagentPathNavigation ? scopedProjectPathNavigation(
+        workspace,
+        () => options.workspace() === workspace && options.activeSessionId() === sessionId,
+        options.subagentPathNavigation,
+      ) : undefined,
       onRefreshClaudeLimits: () => void options.sessionCoordinator.refreshActiveClaudeLimits(),
       onClearTodos: () => sessionId ? options.clearSessionTodos(sessionId) : Promise.resolve(false),
     };

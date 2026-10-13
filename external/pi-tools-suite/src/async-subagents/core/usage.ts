@@ -31,12 +31,14 @@ export function recordSubagentUsage(
 	manager: object,
 	event: RpcEventRecord,
 	agentId: string,
+	runDir?: string,
 ): boolean {
 	const billable = subagentUsageFromRpcEvent(event);
 	if (!billable) return false;
 	const writable = manager as UsageWritableSessionManager;
 	if (typeof writable.appendUsage !== "function") return false;
-	writable.appendUsage("async-subagent", billable.provider, billable.model, billable.usage, `agent:${agentId}`);
+	const note = runDir ? JSON.stringify({ version: 1, runDir, agentId }) : `agent:${agentId}`;
+	writable.appendUsage("async-subagent", billable.provider, billable.model, billable.usage, note);
 	return true;
 }
 

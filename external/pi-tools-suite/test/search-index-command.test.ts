@@ -12,9 +12,10 @@ function fixture() {
   let reads = 0;
   const pi = { registerCommand: (name: string, value: unknown) => { expect(name).toBe("search-index"); command = value; },
     on: (name: string, callback: () => Promise<void>) => events.set(name, callback) } as unknown as ExtensionAPI;
-  const ctx = { cwd: "/fixture", ui: { notify: (text: string) => notifications.push(text),
+  const ctx = { cwd: "/fixture", ui: { notify: () => { throw new Error("Search diagnostics must not enter chat"); },
     setStatus: (_key: string, text: string | undefined) => statuses.push(text) } } as unknown as ExtensionContext;
   registerSearchIndexCommand(pi, {
+    log: async (_root, diagnostic) => { notifications.push(diagnostic.message ?? ""); },
     run: (_root, source, signal) => new Promise((resolve, reject) => runs.push({ source, signal, finish: resolve, fail: () => reject(new Error("SECRET")) })),
     status: async () => { reads++; return ["code: 2 stored items, 1 stored vectors"]; },
   });

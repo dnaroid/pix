@@ -43,6 +43,15 @@ uses the hidden continuation-message fallback.
 Countdowns in Desktop and TUI show hours and minutes, rounded up to the next
 minute, without seconds (zero minutes once due).
 
+In TUI, an active wait displays a compact, minute-resolution countdown in the
+bottom status bar (`⏳ 1h12m · /wait`, with the active icon theme), immediately
+after the model/context status and before workspace details. Checking, resuming,
+and cancellation use short status labels instead of a countdown. Background-tab
+waits retain their own status without changing the active tab. Repeated updates
+with an unchanged minute do not trigger repaints or create informational toasts.
+The status clears when the wait finishes or its session is disposed/replaced;
+`/wait` still opens the full interactive popup.
+
 The centered popup shows
 the exhausted window and a live countdown to the reset check, or to the next
 availability check when reset time is unknown. It offers **Try now**, **Cancel

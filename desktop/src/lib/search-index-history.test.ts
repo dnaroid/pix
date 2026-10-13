@@ -4,6 +4,24 @@ import { observeSearchIndexEvents } from "./search-index-events";
 import { emptySearchIndexView } from "./search-index-controller";
 
 describe("bounded index activity history", () => {
+  it("clears only the selected workspace and keeps new event identities unique", () => {
+    const history = createSearchIndexHistory();
+    history.append("/a", "code", "info", "Old");
+    history.append("/b", "tasks", "info", "Retained");
+    history.clear("/a");
+    expect(history.entries("/a")).toEqual([]);
+    expect(history.entries("/b").map(event => event.message)).toEqual(["Retained"]);
+    history.append("/a", "code", "info", "New");
+    expect(history.entries("/a")[0]?.id).toBe(3);
+  });
+  it("records skipped session identity, reason, line and path in activity only", () => {
+    const history = createSearchIndexHistory();
+    const observer = observeSearchIndexEvents(history, "/a");
+    observer.actions({ sessions: { running: true } });
+    const result = { source: "sessions" as const, complete: false, diagnostics: [{ sessionId: "s1", path: "/a/s.jsonl", reason: "invalid_json", line: 7 }] };
+    observer.actions({ sessions: { running: false, result } });
+    expect(history.entries("/a").at(-1)?.message).toBe("Skipped s1: invalid_json, line 7; /a/s.jsonl");
+  });
   it("records a start once without inventing an intermediate completion", () => {
     const history = createSearchIndexHistory();
     const observer = observeSearchIndexEvents(history, "/a");

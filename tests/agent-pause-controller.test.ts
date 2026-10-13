@@ -119,6 +119,72 @@ describe("AgentPauseController", () => {
 		assert.equal(fixture.controller.state(fixture.session), "idle");
 	});
 
+	it("keeps a requested Pause pending through an SDK retry", async () => {
+		const fixture = pauseFixture({ postRunResult: true });
+		fixture.controller.bind(fixture.session);
+		await fixture.controller.toggle(fixture.session);
+		fixture.internals._failedResponse = { role: "assistant" };
+
+		assert.equal(await fixture.internals._handlePostAgentRun(), true);
+		assert.equal(fixture.controller.state(fixture.session), "pause-requested");
+		assert.deepEqual(fixture.internals._failedResponse, { role: "assistant" });
+	});
+
+	it("does not resume into a newer active agent run", async () => {
+		const fixture = pauseFixture();
+		fixture.controller.bind(fixture.session);
+		await fixture.controller.toggle(fixture.session);
+		await fixture.agent.finishTurn?.({ message: { stopReason: "stop" }, toolResults: [{}] } as never, new AbortController().signal);
+		await fixture.internals._handlePostAgentRun();
+		await fixture.internals._runBeforeSettleBoundary();
+		await fixture.internals._emitAgentSettled();
+		fixture.internals._isAgentRunActive = true;
+		(fixture.agent.state as { isStreaming: boolean }).isStreaming = true;
+
+		await fixture.controller.toggle(fixture.session);
+
+		assert.equal(fixture.continueCalls(), 0);
+		assert.equal(fixture.controller.state(fixture.session), "paused");
+		assert.ok(fixture.toasts.some((toast) => toast.kind === "error" && toast.message.includes("another agent run")));
+	});
+
+	it("continues the current background run after a tab switch", async () => {
+		const fixture = pauseFixture();
+		fixture.controller.bind(fixture.session);
+		await fixture.controller.toggle(fixture.session);
+		await fixture.agent.finishTurn?.({ message: { stopReason: "stop" }, toolResults: [{}] } as never, new AbortController().signal);
+		await fixture.internals._handlePostAgentRun();
+		await fixture.internals._runBeforeSettleBoundary();
+		await fixture.internals._emitAgentSettled();
+		(fixture.agent as unknown as { continue: () => Promise<void> }).continue = async () => { fixture.setCurrentSession(false); };
+
+		await fixture.controller.toggle(fixture.session);
+
+		assert.equal(fixture.postRunCalls(), 2);
+		assert.equal(fixture.controller.state(fixture.session), "idle");
+	});
+
+	it("cleans retry state when an SDK continuation is aborted", async () => {
+		const fixture = pauseFixture();
+		fixture.controller.bind(fixture.session);
+		await fixture.controller.toggle(fixture.session);
+		await fixture.agent.finishTurn?.({ message: { stopReason: "stop" }, toolResults: [{}] } as never, new AbortController().signal);
+		await fixture.internals._handlePostAgentRun();
+		await fixture.internals._runBeforeSettleBoundary();
+		await fixture.internals._emitAgentSettled();
+		fixture.internals._failedResponse = "pending retry";
+		(fixture.agent as unknown as { continue: () => Promise<void> }).continue = async () => {
+			fixture.internals._agentRunAbortRequested = true;
+		};
+
+		await fixture.controller.toggle(fixture.session);
+
+		assert.equal(fixture.cancelledRetries(), 1);
+		assert.equal(fixture.internals._failedResponse, undefined);
+		assert.equal(fixture.internals._runSystemPromptOptions, undefined);
+		assert.equal(fixture.controller.state(fixture.session), "idle");
+	});
+
 	it("does not continue before the paused run reaches session post-run bookkeeping", async () => {
 		const fixture = pauseFixture();
 		fixture.controller.bind(fixture.session);
@@ -188,6 +254,7 @@ function pauseFixture(options: { existingFinish?: "continue" | "end"; continueEr
 	let continueCalls = 0;
 	let postRunCalls = 0;
 	let settledCalls = 0;
+	let cancelledRetries = 0;
 	let currentSession = true;
 	const listeners: Array<(event: never) => void> = [];
 	const toasts: Array<{ message: string; kind: string }> = [];
@@ -214,7 +281,9 @@ function pauseFixture(options: { existingFinish?: "continue" | "end"; continueEr
 		},
 		_isAgentRunActive: false,
 		_agentRunAbortRequested: false,
+		_failedResponse: undefined as unknown,
 		_runSystemPromptOptions: undefined,
+		_finishCancelledRetry: () => { cancelledRetries += 1; },
 		_handlePostAgentRun: async () => {
 			postRunCalls += 1;
 			return options.postRunResult ?? false;
@@ -225,6 +294,7 @@ function pauseFixture(options: { existingFinish?: "continue" | "end"; continueEr
 		_emitAgentSettled: async () => {
 			settledCalls += 1;
 			internals._isAgentRunActive = false;
+			(agent.state as { isStreaming: boolean }).isStreaming = false;
 			for (const listener of listeners) listener({ type: "agent_settled" } as never);
 		},
 	};
@@ -244,6 +314,7 @@ function pauseFixture(options: { existingFinish?: "continue" | "end"; continueEr
 		continueCalls: () => continueCalls,
 		postRunCalls: () => postRunCalls,
 		settledCalls: () => settledCalls,
+		cancelledRetries: () => cancelledRetries,
 		setCurrentSession: (current: boolean) => { currentSession = current; },
 	};
 }

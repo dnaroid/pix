@@ -227,6 +227,32 @@ export function settingsSourceIssues(source: string, schema: SettingsSchema): st
     try { resolveSourceExtensions(isRecord(parsed.search) ? parsed.search : {}); }
     catch (error) { issues.push(error instanceof Error ? error.message : String(error)); }
   }
+  if (schema.properties?.claudeCodeProvider && isRecord(parsed.claudeCodeProvider)) {
+    issues.push(...claudeCodeAccountIssues(parsed.claudeCodeProvider));
+  }
+  return issues;
+}
+
+function claudeCodeAccountIssues(config: Record<string, unknown>): string[] {
+  const accounts = config.accounts;
+  if (config.autoRotate === true && (!Array.isArray(accounts) || accounts.length < 2)) {
+    return ["Claude account rotation requires at least two OAuth profiles"];
+  }
+  if (!Array.isArray(accounts)) return [];
+  if (accounts.length > 12) return ["Claude account rotation supports at most 12 profiles"];
+  const names = new Set<string>();
+  const paths = new Set<string>();
+  const issues: string[] = [];
+  accounts.forEach((raw, index) => {
+    if (!isRecord(raw)) return;
+    const name = typeof raw.name === "string" ? raw.name.trim() : "";
+    const path = typeof raw.configDir === "string" ? raw.configDir.trim() : "";
+    if (!name || /[\r\n]/.test(name)) issues.push(`Claude account ${index + 1} needs a valid name`);
+    if (!path.startsWith("/") && !path.startsWith("~/")) issues.push(`Claude account ${index + 1} needs an absolute or ~/ configuration path`);
+    if (names.has(name.toLowerCase()) || paths.has(path.replace(/\/+$/u, ""))) issues.push(`Claude account ${index + 1} has a duplicate name or path`);
+    names.add(name.toLowerCase());
+    paths.add(path.replace(/\/+$/u, ""));
+  });
   return issues;
 }
 

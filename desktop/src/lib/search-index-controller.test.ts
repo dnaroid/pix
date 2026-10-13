@@ -21,6 +21,26 @@ function fixture(run = vi.fn(async (): Promise<IndexResult> => ({ source: "code"
 afterEach(() => vi.useRealTimers());
 
 describe("workspace-owned search index controller", () => {
+  it("clears published history without stopping work or replaying unchanged polls", async () => {
+    vi.useFakeTimers();
+    const pending = deferred<IndexResult>();
+    const f = fixture(vi.fn(() => pending.promise));
+    await vi.advanceTimersByTimeAsync(0);
+    f.controller.start("code");
+    expect(f.state().history.length).toBeGreaterThan(0);
+    f.controller.clearHistory();
+    expect(f.state().history).toEqual([]);
+    expect(f.state().actions.code?.running).toBe(true);
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(f.state().history).toEqual([]);
+    pending.resolve({ source: "code", complete: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.state().history.map(event => event.message)).toEqual(["Manual indexing complete"]);
+    f.controller.dispose();
+    const count = f.onChange.mock.calls.length;
+    f.controller.clearHistory();
+    expect(f.onChange).toHaveBeenCalledTimes(count);
+  });
   it("shares one read-only timer while the panel is closed and does not index implicitly", async () => {
     vi.useFakeTimers();
     const f = fixture();

@@ -14,13 +14,17 @@ function pauseFixture() {
 		isStreaming = true;
 		_isAgentRunActive = true;
 		_agentRunAbortRequested = false;
+		_failedResponse: unknown = "pending retry";
 		_runSystemPromptOptions = undefined;
+		cancelledRetries = 0;
 		prompts = 0;
 		agent = {
 			state: { isStreaming: true, messages: [{ role: "toolResult" }] },
 			finishTurn: async (_turn: unknown, _signal?: unknown): Promise<{ action: string } | undefined> => undefined,
+			continue: async () => {},
 			hasQueuedMessages: () => false,
 		};
+		_finishCancelledRetry() { this.cancelledRetries++; }
 		subscribe() { return () => {}; }
 		async _handlePostAgentRun() { return postRun(); }
 		async _runBeforeSettleBoundary() { return beforeSettle(); }
@@ -37,11 +41,12 @@ function pauseFixture() {
 	vm.runInContext(source.slice(source.indexOf("const records = new WeakMap();"),
 		source.indexOf("// --- Quota-wait hidden control messages"))
 		+ source.slice(source.indexOf("const originalPrompt = AgentSession.prototype.prompt;"), source.indexOf("const { main } ="))
-		+ "\nglobalThis.control = { bindPause, requestPause, cancelPause };", sandbox);
+		+ "\nglobalThis.control = { bindPause, requestPause, cancelPause, continueSession };", sandbox);
 	const control = sandbox.control as {
 		bindPause(session: Session): { state: string; pauseBoundaryReached: boolean };
 		requestPause(session: Session): void;
 		cancelPause(session: Session): void;
+		continueSession(session: Session, record: { state: string; pauseBoundaryReached: boolean }): Promise<void>;
 	};
 	return { session: new Session(), control,
 		setPostRun(hook: () => Promise<boolean>) { postRun = hook; },
@@ -98,6 +103,80 @@ test("cancellation during uncommitted post-run work preserves its continuation d
 	release(true);
 	assert.equal(await postRun, true);
 	assert.equal(record.state, "idle");
+});
+
+test("SDK 1.2 continuation clears retry state on abort before post-run work", async () => {
+	const { session, control, setPostRun } = pauseFixture();
+	const record = control.bindPause(session);
+	session.isStreaming = false;
+	session.agent.state.isStreaming = false;
+	let postRuns = 0;
+	setPostRun(async () => { postRuns++; return false; });
+	session.agent.continue = async () => { session._agentRunAbortRequested = true; };
+
+	await control.continueSession(session, record);
+
+	assert.equal(postRuns, 0);
+	assert.equal(session.cancelledRetries, 1);
+	assert.equal(session._failedResponse, undefined);
+	assert.equal(record.state, "idle");
+});
+
+test("SDK continuation does not start another turn after abort during before-settle", async () => {
+	const { session, control, setBeforeSettle } = pauseFixture();
+	const record = control.bindPause(session);
+	session.isStreaming = false;
+	session.agent.state.isStreaming = false;
+	let continued = 0;
+	session.agent.continue = async () => { continued++; };
+	setBeforeSettle(async () => {
+		session._agentRunAbortRequested = true;
+		return true;
+	});
+
+	await control.continueSession(session, record);
+
+	assert.equal(continued, 1);
+	assert.equal(session.cancelledRetries, 1);
+});
+
+test("continuation failure restores the paused state and permits retry", async () => {
+	const { session, control, setBeforeSettle } = pauseFixture();
+	const record = control.bindPause(session);
+	session.isStreaming = false;
+	session.agent.state.isStreaming = false;
+	session.agent.continue = async () => { throw new Error("provider failure"); };
+
+	await assert.rejects(control.continueSession(session, record), /provider failure/);
+	assert.equal(record.state, "paused");
+
+	session.agent.continue = async () => {};
+	setBeforeSettle(async () => false);
+	await control.continueSession(session, record);
+	assert.equal(record.state, "idle");
+});
+
+test("a new run prevents stale continuation from claiming session ownership", async () => {
+	const { session, control } = pauseFixture();
+	const record = control.bindPause(session);
+	let continued = 0;
+	session.agent.continue = async () => { continued++; };
+
+	await assert.rejects(control.continueSession(session, record), /another agent run/);
+	assert.equal(continued, 0);
+	assert.equal(record.state, "paused");
+});
+
+test("a scheduled retry stays active until the requested Pause can settle", async () => {
+	const { session, control, setPostRun } = pauseFixture();
+	const record = control.bindPause(session);
+	control.requestPause(session);
+	session._failedResponse = { role: "assistant", stopReason: "error" };
+	setPostRun(async () => true);
+
+	assert.equal(await session._handlePostAgentRun(), true);
+	assert.equal(record.state, "pause-requested");
+	assert.deepEqual(session._failedResponse, { role: "assistant", stopReason: "error" });
 });
 
 test("Pi cancellation transport uses a private sentinel and propagates boundary failures", async () => {

@@ -61,6 +61,18 @@ describe("ProjectSwitcher project opening actions", () => {
     expect(triggerSource).not.toContain("folderSlot");
   });
 
+  it("outlines only the titlebar badge when its window is inactive", () => {
+    expect(switcherSource).toContain("windowFocused = document.hasFocus()");
+    expect(switcherSource).toContain("onfocus={() => windowFocused = true}");
+    expect(switcherSource).toContain("onblur={() => windowFocused = false}");
+    expect(switcherSource.match(/data-window-inactive=\{!windowFocused\}/g)).toHaveLength(1);
+    const inactiveStyle = switcherSource.match(/\.project-titlebar-badge\[data-window-inactive="true"\] \{([^}]+)\}/)?.[1];
+    expect(inactiveStyle).toContain("background-color: transparent");
+    expect(inactiveStyle).toContain("border-color: var(--project-titlebar-identity)");
+    expect(inactiveStyle).toContain("color: var(--project-titlebar-identity)");
+    expect(switcherSource.match(/--project-titlebar-identity: var\(--project-titlebar-color,/g)).toHaveLength(2);
+  });
+
   it("keeps a visible chevron affordance on the active project row", () => {
     expect(switcherSource).toContain("ChevronDown");
     expect(switcherSource).toContain("border-sidebar-border bg-background/55");

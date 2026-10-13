@@ -79,6 +79,7 @@ export interface SearchIndexRequest {
   readonly settings?: readonly SearchSetting[];
 }
 export interface SearchIndexResponse {
+  readonly diagnostics?: readonly { sessionId: string; path: string; reason: string; line?: number; code?: string; entryId?: string; parentId?: string }[];
   readonly source: SearchIndexSource;
   readonly complete: boolean;
   readonly indexed?: number;
@@ -127,6 +128,7 @@ export interface SettingsSearchHit extends SearchHitBase {
   readonly fieldId: string;
 }
 export interface SessionSearchHit extends SearchHitBase {
+  readonly messageId?: string;
   readonly kind: "sessions";
   readonly sessionId: string;
   /** Local FTS evidence from the session's first user / last completed assistant message. */

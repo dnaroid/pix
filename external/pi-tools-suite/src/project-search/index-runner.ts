@@ -4,6 +4,7 @@ import { parseGitHistory, safeGit } from "./engine.js";
 import { indexNativeProject } from "./native.js";
 import { semanticConfiguration, semanticKey, type SemanticSearchOptions } from "./semantic-provider.js";
 import { indexMissingSessionVectors } from "./semantic-session-indexer.js";
+import { syncSessionChunks } from "./semantic-session-chunks.js";
 import { syncSavedTaskVectors } from "./semantic-task-indexer.js";
 import { indexCommitVectors, type CommitSemanticServices } from "./semantic-commit-indexer.js";
 
@@ -35,9 +36,10 @@ export async function runSourceIndex(root: string, source: IndexSource, signal: 
     const candidates = (await (services.sessions ?? SessionManager.list)(root, undefined, undefined, signal))
       .filter(session => resolve(session.cwd) === root);
     signal.throwIfAborted();
-    const result = await indexMissingSessionVectors(root, candidates, key, options, signal, config, true);
-    return { complete: result.remaining === 0, indexed: result.indexed,
-      message: "Eligible explicit saved names only; transcript bodies are not embedded." };
+    await indexMissingSessionVectors(root, candidates, key, options, signal, config, true);
+    const result = await syncSessionChunks(root,candidates,signal,options,true);
+    return { complete:result.complete,indexed:result.indexed,
+      message:`Public user/assistant text chunks: ${result.indexed}/${result.total}; unreadable sessions: ${result.skipped}.` };
   }
   const git = services.git ?? safeGit;
   const readHead = (s: AbortSignal) => git(root, ["rev-parse", "--verify", "HEAD"], s);

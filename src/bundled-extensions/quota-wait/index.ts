@@ -3,6 +3,8 @@ import { isQuotaCandidate, isQuotaExhaustion, parseQuotaWait, parseWaitDuration,
 import { checkQuota } from "./usage.js";
 import { QuotaWaitPopup } from "./popup.js";
 import { requestQuotaWaitControl } from "../../app/session/quota-wait-control.js";
+import { claudeCodeErrorRateLimit } from "../../app/model/claude-code-error-rate-limit.js";
+import { CLAUDE_CODE_RATE_LIMIT_EVENT } from "../../app/model/claude-code-rate-limits.js";
 
 const ENTRY = "pix-quota-wait";
 const CHANNEL = "pix:quota-wait";
@@ -15,6 +17,8 @@ export default function quotaWait(pi: ExtensionAPI, query = checkQuota): void {
 	let intent = 0;
 	let pending: { reason: string; check: QuotaCheck } | undefined;
 	let lastPersisted = "";
+	let evidenceSince = 0;
+	let sessionId: string | undefined;
 	const popup = new QuotaWaitPopup();
 	const publish = (state: QuotaWaitState | undefined): void => {
 		const ctx = context;
@@ -40,13 +44,17 @@ export default function quotaWait(pi: ExtensionAPI, query = checkQuota): void {
 		timer = undefined;
 		controller?.dispose();
 		controller = undefined;
+		if (context) popup.update(context, undefined);
 		popup.close();
 		pending = undefined;
 		context = undefined;
+		sessionId = undefined;
 	};
 	pi.on("session_start", (_event, ctx) => {
 		teardown();
 		context = ctx;
+		sessionId = ctx.sessionManager.getSessionId();
+		evidenceSince = Date.now();
 		lastPersisted = "";
 		const owner = epoch;
 		controller = new QuotaWaitController({
@@ -75,9 +83,10 @@ export default function quotaWait(pi: ExtensionAPI, query = checkQuota): void {
 		timer.unref?.();
 	});
 	pi.on("session_shutdown", teardown);
-	pi.on("model_select", (_event, ctx) => { intent++; context = ctx; pending = undefined; controller?.clear(); });
+	pi.on("model_select", (_event, ctx) => { intent++; evidenceSince = Date.now(); context = ctx; pending = undefined; controller?.clear(); });
 	pi.on("input", (_event, ctx) => {
 		intent++;
+		evidenceSince = Date.now();
 		context = ctx;
 		// A new explicit user task supersedes the failed task, but our hidden resume does not use input.
 		if (controller?.state) controller.clear();
@@ -86,7 +95,19 @@ export default function quotaWait(pi: ExtensionAPI, query = checkQuota): void {
 		// A direct Continue/new prompt supersedes the scheduled action.
 		if (controller?.state && controller.state.phase !== "resuming") { intent++; controller.clear(); }
 	});
-	pi.on("message_end", (event) => {
+	pi.on("message_end", (event, ctx) => {
+		const message = event.message;
+		if (sessionId && context && ctx.sessionManager.getSessionId() === sessionId
+			&& message.role === "assistant" && message.timestamp >= evidenceSince
+			&& ctx.model && message.provider === ctx.model.provider && message.model === ctx.model.id) {
+			const sample = claudeCodeErrorRateLimit(message, sessionId);
+			if (sample) {
+				try { pi.events.emit(CLAUDE_CODE_RATE_LIMIT_EVENT, sample); } catch { /* Advisory telemetry. */ }
+				if (ctx.mode === "rpc") {
+					try { ctx.ui.setWidget("pix.session-state", [CLAUDE_CODE_RATE_LIMIT_EVENT, JSON.stringify(sample)]); } catch { /* Optional host. */ }
+				}
+			}
+		}
 		if (controller?.state?.phase === "resuming" && event.message.role === "assistant"
 			&& event.message.stopReason !== "error" && event.message.stopReason !== "aborted") controller.clear();
 	});

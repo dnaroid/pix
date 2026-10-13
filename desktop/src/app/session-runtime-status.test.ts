@@ -43,6 +43,48 @@ function usageStatus(cost: number): SessionUsageStatus {
 }
 
 describe("runtime status lifecycle", () => {
+	it("keeps the last attempted Claude account scoped to a live session and clears it on forget/reset", () => {
+		const { store, setReady } = setup();
+		const now = Date.now();
+		const observe = (name: string, observedAt: number, sessionId = "a") =>
+			store.handleSessionState({ sessionId, channel: "claude-code-account",
+				data: { version: 1, name, observedAt } });
+		expect(observe("Personal", now)).toBe(true);
+		expect(store.claudeAccountAttempts.get("a")?.name).toBe("Personal");
+		observe("Work", now - 100);
+		expect(store.claudeAccountAttempts.get("a")?.name).toBe("Personal");
+		observe("Work", now + 1);
+		expect(store.claudeAccountAttempts.get("a")?.name).toBe("Work");
+		setReady(false);
+		observe("Other", now + 2);
+		expect(store.claudeAccountAttempts.get("a")?.name).toBe("Work");
+		store.forget("a");
+		expect(store.claudeAccountAttempts.has("a")).toBe(false);
+		store.reset();
+		expect(store.claudeAccountAttempts.size).toBe(0);
+	});
+	it("streamed Claude limits win over automatic and manual in-flight quota replies", async () => {
+		const { store, requests, limits } = setup();
+		const automatic = store.refreshStatus("a", true);
+		const manual = store.refreshClaudeLimits("a");
+		const now = Date.now();
+		const usage = { provider: "anthropic" as const, modelKey: "pi-claude-code-provider/opus", updatedAt: now,
+			hourly: { remainingPercent: 0, resetAt: now + 3600_000, windowSeconds: 18000 } };
+		expect(store.handleSessionState({ sessionId: "a", channel: "claude-code-usage", data: usage })).toBe(true);
+		expect(store.statuses.get("a")?.modelUsage?.hourly?.remainingPercent).toBe(0);
+		expect(store.statuses.get("a")?.headerUsage).toBeUndefined();
+		const old = { ...usage, hourly: { ...usage.hourly, remainingPercent: 9 } };
+		requests[0]!.resolve({ ...status(20), modelUsageRefresh: "ready", modelUsage: old });
+		limits[0]!.resolve({ sessionId: "a", launched: true, refresh: "ready", modelUsage: old });
+		await Promise.all([automatic, manual]);
+		expect(store.statuses.get("a")?.context?.tokens).toBe(20);
+		expect(store.statuses.get("a")?.modelUsage?.hourly?.remainingPercent).toBe(0);
+		expect(store.claudeLimitsRefreshing.has("a")).toBe(false);
+		store.forget("a");
+		expect(store.handleSessionState({ sessionId: "a", channel: "claude-code-usage", data: usage })).toBe(true);
+		expect(store.statuses.has("a")).toBe(false);
+	});
+
   it("carries credits-only ACP snapshots through selection/rendering and rejects disposed refreshes", async () => {
     const { store, requests } = setup();
     const now = Date.UTC(2026, 9, 4);

@@ -200,15 +200,16 @@ test("cancelled catalogue replacement cannot inherit an old automatic worker's u
   assert.equal(f.calls.length, 2);
 });
 
-test("sessions click discovers saved names only, reuses names and reports changed discovery as partial", async t => {
+test("sessions click reuses saved names and reports changed discovery as partial", async t => {
   const f = await fixture(t); await f.put(task("a")); let calls = 0, renameAfterEmbed = false;
+  await writeFile(join(f.cwd,"named.jsonl"),JSON.stringify({type:"session",id:"named",cwd:f.cwd})+"\n");
   const named = (title: string) => ({ sessionId: "named", piSessionId: "named", piSessionPath: join(f.cwd, "named.jsonl"), cwd: f.cwd,
     title, namedTitle: title, updatedAt: "2026-10-10T00:00:00Z" });
   let title = "Explicit title";
   const s = f.make({ discover: async () => { calls++; return [named(title), { ...named("First message SECRET"), sessionId: "unnamed", namedTitle: undefined }]; },
     embed: async inputs => { f.calls.push([...inputs]); if (renameAfterEmbed) title = "New saved name"; return inputs.map(() => [1, 0, 0]); } });
   assert.deepEqual(await s.index({ cwd: f.cwd, source: "sessions" }), { source: "sessions", complete: true, indexed: 1, total: 1 });
-  assert.equal(calls, 2); assert.deepEqual(f.calls.flat(), ["search_document: Explicit title"]);
+  assert.equal(calls, 3); assert.deepEqual(f.calls.flat(), ["search_document: Explicit title"]);
   assert.equal(f.rows("pix_task_vectors").length, 0); assert.equal(f.rows("vectors").length, 0); assert.equal(f.listeners.size, 0);
   await s.index({ cwd: f.cwd, source: "sessions" }); assert.equal(f.calls.length, 1);
   title = "Changed saved name"; renameAfterEmbed = true;
@@ -224,6 +225,7 @@ test("explicit sessions pass drains 130 names in batches of at most 16 and reuse
     piSessionPath: join(f.cwd, `s${i}.jsonl`), cwd: f.cwd, title: `Saved name ${i}`, namedTitle: `Saved name ${i}`,
     updatedAt: "2026-10-10T00:00:00Z" }));
   const s = f.make({ discover: async () => records });
+  for(const r of records) await writeFile(r.piSessionPath,JSON.stringify({type:"session",id:r.piSessionId,cwd:f.cwd})+"\n");
   assert.deepEqual(await s.index({ cwd: f.cwd, source: "sessions" }), { source: "sessions", complete: true, indexed: 130, total: 130 });
   assert.equal(f.calls.flat().length, 130);
   assert.ok(f.calls.every(batch => batch.length <= 16));
@@ -233,6 +235,7 @@ test("explicit sessions pass drains 130 names in batches of at most 16 and reuse
 
 test("Sessions Continue resets exhausted ownership before reconciling saved names", async t => {
   const f = await fixture(t);
+  await writeFile(join(f.cwd,"named.jsonl"),JSON.stringify({type:"session",id:"named",cwd:f.cwd})+"\n");
   let title = "First saved name";
   const s = f.make({ discover: async () => [{ sessionId: "named", piSessionId: "named",
     piSessionPath: join(f.cwd, "named.jsonl"), cwd: f.cwd, title, namedTitle: title,

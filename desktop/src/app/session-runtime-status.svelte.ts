@@ -1,4 +1,5 @@
 import type { ContextUsageStatus, RuntimeStatus, SessionUsageReport } from "../lib/acp-client";
+import { PIX_CLAUDE_CODE_ACCOUNT_CHANNEL, parseClaudeAccountAttempt, type ClaudeAccountAttempt } from "../lib/claude-account-event";
 import { parseContextUsageStatus, parseModelUsageStatus } from "../lib/acp-response-parsers";
 import { newerDcpContextMap, parseDcpContextMap } from "../lib/dcp-context-map";
 import {
@@ -17,6 +18,7 @@ import {
   PIX_DCP_TOKENS_SAVED_CHANNEL,
   PIX_DCP_CONTEXT_MAP_CHANNEL,
   PIX_MODEL_USAGE_CHANNEL,
+  PIX_CLAUDE_CODE_USAGE_CHANNEL,
   type SessionStateNotification,
 } from "../lib/session-state";
 import type { SessionRuntimeStoreOptions } from "./session-runtime-options";
@@ -28,6 +30,7 @@ type SessionRuntimeStatusOptions = Pick<SessionRuntimeStoreOptions, "client"> & 
 
 export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions) {
   let statuses = $state<Map<string, RuntimeStatus>>(new Map());
+  let claudeAccountAttempts = $state<Map<string, ClaudeAccountAttempt>>(new Map());
   let modelUsageRefreshing = $state<Set<string>>(new Set());
   let dcpStatsRefreshing = $state<Set<string>>(new Set());
   let sessionUsageBySession = $state<Map<string, SessionUsageReport>>(new Map());
@@ -43,6 +46,7 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
     claudeLimits: number;
     startupQuotaChecked?: boolean;
     headerPushSnapshotGeneration?: number;
+    claudePushSnapshotGeneration?: number;
   };
   const owners = new Map<string, StatusOwner>();
   const quotaRecovery = createRuntimeQuotaRecovery((sessionId) => { void refreshStatus(sessionId, true); });
@@ -92,8 +96,7 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
       // pushed API-key header snapshot. Evaluated at settlement so pushes that
       // land while the request is in flight count too.
       const quotaPredatesHeaderPush = request.quotaGeneration !== undefined
-        && owner.headerPushSnapshotGeneration !== undefined
-        && request.snapshotGeneration < owner.headerPushSnapshotGeneration;
+        && request.snapshotGeneration < Math.max(owner.headerPushSnapshotGeneration ?? 0, owner.claudePushSnapshotGeneration ?? 0);
       const merged = mergeRuntimeStatusResponse(
         statuses.get(sessionId),
         next,
@@ -158,6 +161,17 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
   }
 
   function handleSessionState(notification: SessionStateNotification): boolean {
+    if (notification.channel === PIX_CLAUDE_CODE_ACCOUNT_CHANNEL) {
+      if (!options.isReady(notification.sessionId)) return true;
+      const attempt = parseClaudeAccountAttempt(notification.data);
+      if (!attempt) return true;
+      const prior = claudeAccountAttempts.get(notification.sessionId);
+      if (prior && prior.observedAt > attempt.observedAt) return true;
+      const next = new Map(claudeAccountAttempts);
+      next.set(notification.sessionId, attempt);
+      claudeAccountAttempts = next;
+      return true;
+    }
     if (notification.channel === PIX_DCP_CONTEXT_MAP_CHANNEL) {
       if (!options.isReady(notification.sessionId)) return true;
       const incoming = parseDcpContextMap(notification.data);
@@ -231,6 +245,23 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
         notification.sessionId,
         mergePushedModelUsage(statuses.get(notification.sessionId), notification.sessionId, headerUsage),
       );
+      statuses = nextStatuses;
+      return true;
+    }
+    if (notification.channel === PIX_CLAUDE_CODE_USAGE_CHANNEL) {
+      if (!options.isReady(notification.sessionId)) return true;
+      const owner = owners.get(notification.sessionId);
+      if (!owner) return true;
+      let modelUsage: RuntimeStatus["modelUsage"];
+      try { modelUsage = parseModelUsageStatus(notification.data); } catch { return true; }
+      if (!modelUsage.modelKey.startsWith("pi-claude-code-provider/") || modelUsage.provider !== "anthropic") return true;
+      const previous = statuses.get(notification.sessionId);
+      if (previous?.modelUsage && previous.modelUsage.modelKey !== modelUsage.modelKey) return true;
+      // Invalidate pre-push quota replies, not their independent context/DCP
+      // snapshot. The next request receives this snapshot generation.
+      owner.claudePushSnapshotGeneration = owner.generations.snapshot + 1;
+      const nextStatuses = new Map(statuses);
+      nextStatuses.set(notification.sessionId, mergeClaudeQuotaRefresh(previous, notification.sessionId, { refresh: "ready", modelUsage }));
       statuses = nextStatuses;
       return true;
     }
@@ -366,6 +397,7 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
     // manual attempt with another automatic CLI launch for this owner.
     owner.startupQuotaChecked = true;
     const generation = ++owner.claudeLimits;
+    const pushGeneration = owner.claudePushSnapshotGeneration;
     // Discard quota responses begun before the login/credential change.
     owner.generations = { ...owner.generations, quota: owner.generations.quota + 1 };
     clearModelUsageCredentialRetry(sessionId);
@@ -388,7 +420,9 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
         || next.sessionId !== sessionId
       ) return;
       const nextStatuses = new Map(statuses);
-      nextStatuses.set(sessionId, mergeClaudeQuotaRefresh(statuses.get(sessionId), sessionId, next));
+      if (pushGeneration === owner.claudePushSnapshotGeneration) {
+        nextStatuses.set(sessionId, mergeClaudeQuotaRefresh(statuses.get(sessionId), sessionId, next));
+      }
       statuses = nextStatuses;
       if (next.refresh !== "ready" || !next.launched) {
         const nextFailed = new Set(claudeLimitsFailed);
@@ -440,6 +474,11 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
     // different owner even when its local counters start from one again.
     owners.delete(sessionId);
     quotaRecovery.forget(sessionId);
+    if (claudeAccountAttempts.has(sessionId)) {
+      const next = new Map(claudeAccountAttempts);
+      next.delete(sessionId);
+      claudeAccountAttempts = next;
+    }
     if (statuses.has(sessionId)) {
       const next = new Map(statuses);
       next.delete(sessionId);
@@ -487,6 +526,7 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
     quotaRecovery.reset();
     owners.clear();
     statuses = new Map();
+    claudeAccountAttempts = new Map();
     modelUsageRefreshing = new Set();
     dcpStatsRefreshing = new Set();
     sessionUsageBySession = new Map();
@@ -499,6 +539,7 @@ export function createSessionRuntimeStatus(options: SessionRuntimeStatusOptions)
   return {
     get ownedSessionCount() { return owners.size; },
     get statuses() { return statuses; },
+    get claudeAccountAttempts() { return claudeAccountAttempts; },
     get modelUsageRefreshing() { return modelUsageRefreshing; },
     get dcpStatsRefreshing() { return dcpStatsRefreshing; },
     get sessionUsageBySession() { return sessionUsageBySession; },

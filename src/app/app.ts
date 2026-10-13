@@ -75,6 +75,7 @@ import {
 	MODEL_USAGE_RESPONSE_HEADERS_EVENT,
 	parseModelUsageResponseHeadersPayload,
 } from "./model/anthropic-header-usage.js";
+import { CLAUDE_CODE_RATE_LIMIT_EVENT } from "./model/claude-code-rate-limits.js";
 import {
 	parseSubagentCatalogState,
 	SUBAGENTS_CATALOG_STATE_EVENT,
@@ -413,7 +414,8 @@ export class PiUiExtendApp {
 			modelColors: this.pixConfig.modelColors,
 			get sessionActivity() { return app.statusController.sessionActivity; },
 			get statusDotBright() { return app.statusController.statusDotBright; },
-            currentStatus: () => this.workspaceActions?.messageEditActive ? "Editing · Enter resend · Esc cancel" : this.statusController.currentStatus(),
+			currentStatus: () => this.workspaceActions?.messageEditActive ? "Editing · Enter resend · Esc cancel" : this.statusController.currentStatus(),
+			quotaWaitStatusLabel: () => this.extensionUiController.quotaWaitStatusLabel(),
 			statusWorkspaceLabel: () => this.statusController.statusWorkspaceLabel(),
 			statusWorkspaceGitBranchLabel: () => this.statusController.statusWorkspaceGitBranchLabel(),
 			statusModelLabel: (session) => this.statusController.statusModelLabel(session),
@@ -784,6 +786,8 @@ export class PiUiExtendApp {
 				setStatus: (status) => this.setStatus(status),
 				runtimeSession: () => this.runtime?.session,
 				tabsLifecycleGeneration: () => this.tabsController.lifecycleGeneration,
+				modelUsageStatus: () => this.modelUsageController.currentStatus(),
+				refreshModelUsage: () => this.modelUsageController.refreshNow(),
 				theme: () => this.theme,
 				modelColors: () => this.pixConfig.modelColors,
 				cwd: () => this.runtime?.cwd ?? this.options.cwd,
@@ -806,7 +810,8 @@ export class PiUiExtendApp {
 				toastEntry: (toastId) => this.toastController.entry(toastId),
 				showToast: (message, kind, options) => this.showToast(message, kind, options),
 				dismissToast: (toastId) => this.toastController.dismissToast(toastId),
-				activateToastAction: (toastId) => this.toastController.activateAction(toastId),
+				activateToastAction: (toastId, index) => this.toastController.activateAction(toastId, index),
+				scrollToastDialog: (toastId, delta) => this.toastController.scrollDialog(toastId, delta),
 				refreshUserMessageJumpMenuItems: () => this.menuItems.refreshUserMessageJumpMenuItems(),
 				queueInputFromStatus: () => {
 					void this.inputActions.queueInputFromEditor().catch((error) => {
@@ -936,6 +941,7 @@ export class PiUiExtendApp {
 			navigateRequestHistory: (delta) => this.requestHistory.navigate(delta as -1 | 1),
 			scrollByLines: (delta) => this.scrollController.scrollByLines(delta),
 			scrollByPage: (delta) => this.scrollController.scrollByPage(delta as -1 | 1),
+			scrollDialogByPage: (delta) => !this.popupMenus.syncActivePopupMenu() && this.toastController.scrollActiveDialog(delta * 7),
 			handleMouse: (event) => this.mouseController.handleMouse(event),
 			handleEnter: () => {
 				if (this.workspaceActions.messageEditRunning) return;
@@ -1366,6 +1372,7 @@ export class PiUiExtendApp {
 				if (catalog?.sessionId) this.subagentCatalogBySessionId.set(catalog.sessionId, catalog);
 			}
 			if (channel === TODO_STATE_EVENT) this.todoWidgetController.observeLiveState(data);
+			if (channel === CLAUDE_CODE_RATE_LIMIT_EVENT) this.modelUsageController.observeClaudeCodeRateLimit(data);
 			if (channel === MODEL_USAGE_RESPONSE_HEADERS_EVENT) {
 				// Anthropic usage captured from live Messages response headers;
 				// the payload identifies its own session/model route so samples
@@ -1653,9 +1660,9 @@ export class PiUiExtendApp {
 		}
 	}
 
-	private showToast(message: string, kind: ToastKind = "info", options?: AppToastOptions): void {
+	private showToast(message: string, kind: ToastKind = "info", options?: AppToastOptions): number | undefined {
 		if (!this.running) return;
-		this.toastController.showToast(message, kind, options);
+		return this.toastController.showToast(message, kind, options);
 	}
 
 	private toastNotifierForScope(scopeKey: string | undefined): ToastNotifier {

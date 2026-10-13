@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { renderMarkdown } from "./markdown";
-import { linkRagCitations, ragAnswerParts, ragRequest, ragSource, retrieveRagHits, selectRagHits } from "./search-rag";
+import { linkRagCitations, ragAnswerParts, ragErrorMessage, ragRequest, ragSource, retrieveRagHits, selectRagHits } from "./search-rag";
 import type { SearchHit } from "./universal-search";
 
 const code: SearchHit = { kind: "code", id: "code:src/a.ts:1-2", path: "src/a.ts", startLine: 1,
@@ -14,6 +14,14 @@ const session: SearchHit = { kind: "sessions", id: "sessions:1", sessionId: "1",
   snippet: "First and last", score: 0.5 };
 
 describe("RAG client-side evidence and references", () => {
+  it("preserves complete multiline error messages without exposing stacks or request objects", () => {
+    const detail = `Provider HTTP 429\n${"Retry after 60 seconds. ".repeat(1000)}`;
+    expect(ragErrorMessage(new Error(detail))).toBe(detail);
+    expect(ragErrorMessage(detail)).toBe(detail);
+    for (const error of [new Error(""), " ", undefined, { token: "secret" }]) {
+      expect(ragErrorMessage(error)).toBe("RAG generation failed (no error details available)");
+    }
+  });
   it("preserves existing source identities and navigation targets across provider request", () => {
     expect(ragSource(code)).toMatchObject({ id: code.id, kind: "code", path: code.path, startLine: 1, endLine: 2,
       content: "line from search" });

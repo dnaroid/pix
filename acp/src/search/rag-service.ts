@@ -8,6 +8,7 @@ import { desktopSearchConfigPath } from "./config.js";
 import { bounded } from "./bounded.js";
 import { collectRagEvidence, ragPrompt, type RagEvidence } from "./rag-evidence.js";
 import type { RagRequest, RagResponse, RagProgress } from "./rag-contract.js";
+import { validateRagCitations } from "./rag-citations.js";
 
 export const RAG_DEADLINE_MS = 90_000;
 const MAX_RAG_CHARS = 32_000;
@@ -59,6 +60,7 @@ export class DesktopRagService {
       const evidence = await (this.options.collect ?? collectRagEvidence)(request, owned);
       owned.throwIfAborted();
       const sourceIds = evidence.map(source => source.id);
+      if(evidence.some(source=>source.incomplete)) throw new Error("Session context exceeds the RAG budget. Narrow the question/session; a final decision cannot be established safely.");
       await progress({ sourceIds });
       owned.throwIfAborted();
       if (!evidence.length) return { answer: "No relevant project evidence found. Try another query or include additional sources.", modelRef: "", sourceIds };
@@ -89,23 +91,27 @@ export class DesktopRagService {
           timeoutMs: RAG_DEADLINE_MS,
           maxTokens,
         });
-        let answer = "", error = false;
+        let answer = "";
         for await (const event of stream) {
           owned.throwIfAborted();
-          if (event.type === "error") { error = true; break; }
+          if (event.type === "error") throw new Error(event.error.errorMessage || "RAG generation failed (provider returned no error details)");
           const delta = event.type === "text_delta" ? event.delta
             : event.type === "done" && !answer ? finalText(event.message) : "";
           if (!delta) continue;
-          const permitted = delta.slice(0, Math.max(0, MAX_RAG_CHARS - answer.length));
+          if(answer.length + delta.length > MAX_RAG_CHARS) throw new Error("RAG answer exceeded the output budget");
+          const permitted = delta;
           if (!permitted) break;
           answer += permitted;
-          for (let offset = 0; offset < permitted.length; offset += 1500) {
-            owned.throwIfAborted();
-            await progress({ text: permitted.slice(offset, offset + 1500) });
-          }
         }
         owned.throwIfAborted();
-        if (error || !answer.trim()) throw new Error("RAG generation failed");
+        if (!answer.trim()) throw new Error("RAG generation failed: model returned an empty answer");
+        validateRagCitations(answer,sourceIds.length);
+        for(const source of evidence) {
+          if(source.current && !await source.current(owned)) throw new Error("Session changed during RAG generation; run the question again");
+        }
+        for(let offset=0;offset<answer.length;offset+=1500) {
+          owned.throwIfAborted(); await progress({text:answer.slice(offset,offset+1500)});
+        }
         return { answer, modelRef, sourceIds };
       } finally { handle.dispose(); }
     });

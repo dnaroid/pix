@@ -26,9 +26,9 @@ function command(root: string) {
   const notices: string[] = [];
   registerSemanticConsentCommand({ registerCommand: (name: string, options: any) => {
     expect(name).toBe("search-semantic"); handler = options.handler;
-  } } as never, () => { refreshes++; });
+  } } as never, () => { refreshes++; }, async (_root, diagnostic) => { notices.push(diagnostic.message ?? ""); });
   return { notices, refreshes: () => refreshes, run: (args: string) => handler(args, { cwd: root, hasUI: false,
-    ui: { confirm: () => { throw new Error("Configuration must not ask for another consent"); }, notify: (text: string) => notices.push(text) } }) };
+    ui: { confirm: () => { throw new Error("Configuration must not ask for another consent"); }, notify: () => { throw new Error("Search diagnostics must not enter chat"); } } }) };
 }
 afterEach(async () => {
   for (const [key, value] of Object.entries(original)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }

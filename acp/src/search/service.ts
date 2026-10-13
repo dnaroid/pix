@@ -16,6 +16,8 @@ import { withProviderSlot } from "./source-work.js";
 import type { TaskChangeWatcher } from "./task-watcher.js";
 import { SearchCacheCompatibilityError } from "./embedding-cache.js";
 import { IndexActions } from "./index-actions.js";
+import { DesktopSessionChunks, sessionChunkHits, transcriptCandidates } from "./session-chunk-service.js";
+import { hasSessionChunkVectors } from "./session-chunks.js";
 
 const PROVIDER_WARNING = "Semantic settings search unavailable; local search remains available";
 const SESSION_PROVIDER_WARNING = "Semantic session-title search unavailable; local search remains available";
@@ -34,6 +36,7 @@ interface Workspace {
   sourceStatusAt?: number;
   background?: SettingsTaskIndexer;
   sessionWorker?: Promise<void>;
+  chunks?: DesktopSessionChunks;
   queryVectors: Map<string, number[]>;
   indexError?: string;
   error?: string;
@@ -48,7 +51,7 @@ export interface SearchServiceOptions {
   watchTasks?: TaskChangeWatcher;
   taskDebounceMs?: number;
 }
-/** Only explicit session names may be persisted/embedded; history stays local. */
+/** Session public-text chunks and saved names share source-owned caches. */
 export class DesktopSearchService {
   private readonly preferences: SearchPreferences;
   private readonly auth: SearchAuth;
@@ -84,6 +87,10 @@ export class DesktopSearchService {
         const operation = this.workspace.background.dispose().finally(() => this.retired.delete(operation));
         this.retired.add(operation); delete this.workspace.background;
       }
+      if (this.workspace.chunks) {
+        const operation = this.workspace.chunks.dispose().finally(() => this.retired.delete(operation));
+        this.retired.add(operation); delete this.workspace.chunks;
+      }
     }
   }
   private current(w: Workspace, epoch = this.epoch): boolean {
@@ -91,7 +98,7 @@ export class DesktopSearchService {
   }
   private status(): SearchStatus {
     const sources = { settings: this.workspace?.background?.indexing.settings ?? false,
-      tasks: this.workspace?.background?.indexing.tasks ?? false, sessions: Boolean(this.workspace?.sessionWorker) };
+      tasks: this.workspace?.background?.indexing.tasks ?? false, sessions: Boolean(this.workspace?.sessionWorker || this.workspace?.chunks?.indexing) };
     const sourceErrors = { ...this.workspace?.background?.errors,
       ...(this.workspace?.indexError ? { sessions: this.workspace.indexError } : {}) };
     const error = this.workspace?.indexError ?? sourceErrors.settings ?? sourceErrors.tasks ?? this.workspace?.error;
@@ -197,6 +204,7 @@ export class DesktopSearchService {
     if (revision !== this.catalogueRevision) return this.status();
     w.settings = settingsDocuments(request.settings);
     this.background(w)?.sync(request.settings);
+    this.chunkIndexer(w).changed();
     return this.status();
   }
   /** Explicit document-only indexing. This is deliberately not a search query or sync. */
@@ -222,6 +230,7 @@ export class DesktopSearchService {
       const epoch = this.epoch;
       try {
         let indexed = 0, total = 0;
+        let diagnostics: SearchIndexResponse["diagnostics"];
         let namedRevision: number | undefined;
         if (source === "settings" || source === "tasks") {
           if (source === "settings") {
@@ -254,9 +263,11 @@ export class DesktopSearchService {
             await this.indexSessions(w, epoch, owned, true);
             // Refresh discovery so a rename/deletion during the pass cannot be reported current.
             await this.reconcileSessions(w, await this.discover(w, owned), owned, false);
-            const saved = await this.store.readSessionTitles(w.cwd, owned, config);
-            total = w.namedSessions.length;
-            indexed = w.namedSessions.filter(title => saved.get(title.sessionId)?.hash === title.hash).length;
+            const chunks = await this.chunkIndexer(w).index(owned, true);
+            diagnostics = chunks.diagnostics;
+            const titles = await this.store.readSessionTitles(w.cwd,owned,config);
+            total = w.namedSessions.length + chunks.total + chunks.skipped;
+            indexed = chunks.indexed + w.namedSessions.filter(title=>titles.get(title.sessionId)?.hash===title.hash).length;
             namedRevision = w.namedRevision;
           })();
           const worker = operation.catch(error => {
@@ -284,6 +295,7 @@ export class DesktopSearchService {
         if (!this.current(w, epoch)) throw new SearchUnavailableError("Search authorization changed");
         owned.throwIfAborted();
         return { source, complete: indexed === total, indexed, total,
+          ...(diagnostics ? { diagnostics } : {}),
           ...(indexed < total ? { message: "Indexing pass finished; continue to index remaining documents" } : {}) };
       } catch (error) {
         owned.throwIfAborted();
@@ -302,6 +314,20 @@ export class DesktopSearchService {
       });
       w.refresh = operation.catch(() => {});
       return operation;
+    });
+  }
+  private chunkIndexer(w: Workspace): DesktopSessionChunks {
+    return w.chunks ??= new DesktopSessionChunks(w.cwd, {
+      signal: AbortSignal.any([w.controller.signal,this.network.signal]),
+      discover: signal => this.discover(w,signal),
+      embedding: async signal => {
+        if (!await this.consent(signal) || !this.embeddingConfig) return undefined;
+        const config = this.embeddingConfig, epoch = this.epoch;
+        return { identity:semanticEmbeddingIdentity(config),dimension:config.dimension,
+          authorized: async owned => await this.consent(owned) && this.current(w,epoch),
+          embed:(inputs,owned) => this.vectors(inputs,owned,"sessions") };
+      },
+      failed: () => { if(this.current(w)) w.indexError = "Session chunk indexing incomplete or unavailable; use Continue"; },
     });
   }
   private async vectors(inputs: readonly string[], signal: AbortSignal, domain: "settings" | "sessions" | "tasks" = "settings", query = false): Promise<number[][]> {
@@ -459,7 +485,9 @@ export class DesktopSearchService {
     let queryVector: number[] | undefined;
     const query = request.query.trim();
     const semanticSettings = authorized && wantsSettings && w.settings.length > 0 && this.enabled;
-    const semanticSessions = authorized && wantsSessions && w.namedSessions.length > 0 && this.sessionTitlesEnabled;
+    const semanticSessions = authorized && wantsSessions && this.sessionTitlesEnabled && (w.namedSessions.length > 0
+      || (this.embeddingConfig && await hasSessionChunkVectors(w.cwd,transcriptCandidates(records),signal,
+        {identity:semanticEmbeddingIdentity(this.embeddingConfig),dimension:this.embeddingConfig.dimension}).catch(()=>{signal.throwIfAborted();return false;})));
     if (query && (semanticSettings || semanticSessions) && this.keyAvailable && this.current(w, epoch)) {
       const owned = AbortSignal.any([signal, this.network.signal]);
       try {
@@ -545,6 +573,20 @@ export class DesktopSearchService {
         if (this.current(w, epoch)) w.indexError = "Session title index unavailable; local search remains available";
       }
     }
+    if (wantsSessions && query) {
+      try {
+        const chunks = await sessionChunkHits(w.cwd,records,query,signal,this.embeddingConfig,queryVector);
+        if (!await this.consent(signal) || !this.current(w,epoch)) {
+          chunks.splice(0,chunks.length,...await sessionChunkHits(w.cwd,records,query,signal));
+        }
+        for (const hit of chunks) {
+          const position = results.findIndex(item => item.id === hit.id);
+          if(position < 0) results.push(hit);
+          else results[position] = {...hit,score:Math.max(hit.score,results[position]!.score)};
+        }
+        this.chunkIndexer(w).changed();
+      } catch { signal.throwIfAborted(); if(this.current(w)) w.indexError = "Session chunk search unavailable"; }
+    }
     if (wantsSettings && query) for (const document of settings) {
       let score = lexicalScore(document.text, query);
       if (queryVector) for (const text of document.chunks) {
@@ -564,11 +606,13 @@ export class DesktopSearchService {
       // A rename/delete invalidates the captured title set. An in-flight
       // provider must not retry embedding an old title before rediscovery.
       this.workspace.namedSessions = [];
+      this.chunkIndexer(this.workspace).changed();
     }
   }
   async dispose(): Promise<void> {
     this.disposed = true; this.workspace?.controller.abort(); this.revoke();
     await this.workspace?.background?.dispose();
+    await this.workspace?.chunks?.dispose();
     await Promise.allSettled([...this.retired]);
     await this.workspace?.sessionWorker;
     await this.workspace?.refresh.catch(() => {});

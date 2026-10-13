@@ -20,7 +20,7 @@ export interface RateLimitNotice {
   isUsingOverage?: boolean;
 }
 
-export type RateLimitNoticeSink = (notice: RateLimitNotice) => void;
+export type RateLimitNoticeSink = (notice: RateLimitNotice, modelRef?: string) => void;
 
 /** Failure text for a rate limit that rejected a provider or web-search request. */
 export function rateLimitRejectionMessage(notice: RateLimitNotice): string {

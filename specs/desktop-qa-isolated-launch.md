@@ -24,9 +24,15 @@ QA recovery inspects direct `pix-watch-all-*` children of the canonical Node
 system temp root (on macOS, not necessarily `/tmp`), identifies the exact live
 owner for the checkout, and retries with `--state`. It does not raise safety
 limits, recursively scan temporary files, or start another watcher. First-run
-onboarding in the disposable QA profile is ordinary setup: QA may continue
+onboarding in the disposable QA profile is mandatory ordinary setup: QA must continue
 through the enabled Continue action and skip optional integrations without
-asking the user to prepare the instance.
+asking the user to prepare the instance. An empty workspace or absent history
+likewise requires authorized disposable test-state preparation, not a blocked
+report. A genuine blocker must identify a correctly formed attempted action,
+its concrete failure and retained evidence; invalid runner arguments must be
+corrected and retried. The parent rejects onboarding-only blocked reports and
+rescopes `ui-qa` to continue, explicitly requiring it to read the Desktop QA
+skill because child skill discovery is disabled.
 
 Preparation copies the published `.app`, not mutable Cargo output, into a new
 private run under `.pi/subagents/`. An explicit new `--run-dir` may be inside

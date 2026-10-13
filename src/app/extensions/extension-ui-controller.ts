@@ -87,6 +87,7 @@ export type ExtensionUiControllerHost = {
 
 export class ExtensionUiController {
 	private readonly extensionWidgets = new Map<string, ScopedWidgetRegistration>();
+	private readonly quotaWaitStatuses = new Map<string, { label: string | undefined }>();
 	private readonly terminalInputHandlers = new Set<ScopedTerminalInputHandler>();
 	private readonly activeCustomUis = new Map<string, ActiveCustomUi>();
 	constructor(private readonly host: ExtensionUiControllerHost) {}
@@ -98,6 +99,10 @@ export class ExtensionUiController {
 				.filter(([, widget]) => widget.scopeKey === activeScopeKey)
 				.map(([scopedKey, widget]) => [this.unscopedWidgetKey(scopedKey, widget.scopeKey), widget]),
 		);
+	}
+
+	quotaWaitStatusLabel(): string | undefined {
+		return this.quotaWaitStatuses.get(this.activeScopeKey())?.label;
 	}
 
 	createExtensionTheme(): ExtensionWidgetTheme {
@@ -152,6 +157,7 @@ export class ExtensionUiController {
 
 	clearWidgets(scopeKey?: string, options: { cancelCustomUi?: boolean } = {}): void {
 		const normalizedScopeKey = this.normalizeScopeKey(scopeKey);
+		this.quotaWaitStatuses.delete(normalizedScopeKey);
 		if (options.cancelCustomUi !== false) this.cancelActiveCustomUi(normalizedScopeKey);
 		for (const [key, widget] of this.extensionWidgets.entries()) {
 			if (widget.scopeKey !== normalizedScopeKey) continue;
@@ -252,6 +258,12 @@ export class ExtensionUiController {
 
 	createExtensionUIContext(scopeKey?: string): PixExtensionUIContext {
 		const contextScopeKey = this.normalizeScopeKey(scopeKey);
+		let quotaWaitStatus = this.quotaWaitStatuses.get(contextScopeKey);
+		if (!quotaWaitStatus) {
+			quotaWaitStatus = { label: undefined };
+			this.quotaWaitStatuses.set(contextScopeKey, quotaWaitStatus);
+		}
+		const ownedQuotaWaitStatus = quotaWaitStatus;
 		const scopedToastNotifier = this.host.toastNotifierForScope?.(contextScopeKey) ?? this.host.toastNotifier;
 		const notify = (message: string, type?: ToastKind | string): void => {
 			this.host.showToast(message, isToastKind(type) ? type : "info", { scopeKey: contextScopeKey });
@@ -289,7 +301,15 @@ export class ExtensionUiController {
 					this.terminalInputHandlers.delete(terminalInputHandler);
 				};
 			},
-			setStatus: (_key, text) => {
+			setStatus: (key, text) => {
+				if (key === "quota-wait") {
+					// A repeating countdown belongs in status chrome, not in transient toasts.
+					// Contexts invalidated by a session rebind cannot update its replacement.
+					if (this.quotaWaitStatuses.get(contextScopeKey) !== ownedQuotaWaitStatus || ownedQuotaWaitStatus.label === text) return;
+					ownedQuotaWaitStatus.label = text;
+					renderIfRunning();
+					return;
+				}
 				if (!this.isScopeActive(contextScopeKey)) return;
 				if (text) this.host.showToast(text, "info", { scopeKey: contextScopeKey });
 				this.host.restoreSessionStatus();

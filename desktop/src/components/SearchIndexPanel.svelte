@@ -1,7 +1,6 @@
 <script lang="ts">
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Database from "@lucide/svelte/icons/database";
-  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import Play from "@lucide/svelte/icons/play";
   import StepForward from "@lucide/svelte/icons/step-forward";
   import Square from "@lucide/svelte/icons/square";
@@ -80,8 +79,11 @@
               <td class="py-3" title={detail} aria-busy={active ?? false}>
                 <span class="flex h-4 min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap leading-4" aria-live="polite">
                   {#if active}
-                    <LoaderCircle class="h-3 w-3 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
-                    <span class="truncate text-muted-foreground">Indexing…</span>
+                    <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                      <circle class="text-muted-foreground/30" cx="8" cy="8" r="6" stroke="currentColor" stroke-width="2" />
+                      <circle class="origin-center animate-spin text-tool-search motion-reduce:animate-none" cx="8" cy="8" r="6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="10 28" />
+                    </svg>
+                    <span class="sr-only">Indexing {row.label}…</span>
                   {:else}
                     <span class={["truncate", action?.error ? "text-tool-error" : action?.result && !action.result.complete ? "text-tool-warning" : tone(row.semantic)]}>
                       {indexOutcomeLabel(action) ?? SEARCH_SEMANTIC_LABEL[row.semantic]}
@@ -127,6 +129,6 @@
           </details>
         {/if}
       </div>
-      <SearchIndexHistory events={view.history} />
+      <SearchIndexHistory events={view.history} onClear={controller ? () => controller.clearHistory() : undefined} />
   </div>
 </section>

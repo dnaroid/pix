@@ -97,3 +97,29 @@ test("AppToastController removes actions when their toast is dismissed or cleare
 	controller.clearToastTimers();
 	assert.equal(controller.activateAction(clearedId), false);
 });
+
+test("AppToastController supports separately targeted actions and dialog scrolling", () => {
+	const invoked: string[] = [];
+	const controller = new AppToastController({ render: () => undefined });
+	const id = controller.showToast("Session usage", "info", {
+		variant: "dialog",
+		actions: [
+			{ label: "Subagents", onSelect: () => invoked.push("subagents") },
+			{ label: "Refresh", onSelect: () => invoked.push("refresh") },
+		],
+	});
+	assert.deepEqual(controller.visibleStates()[0]?.actions, [{ label: "Subagents" }, { label: "Refresh" }]);
+	assert.equal(controller.scrollDialog(id, 3), true);
+	assert.equal(controller.visibleStates()[0]?.scrollOffset, 3);
+	assert.equal(controller.scrollActiveDialog(7), true);
+	assert.equal(controller.visibleStates()[0]?.scrollOffset, 10);
+	assert.equal(controller.scrollDialog(id, -5), true);
+	assert.equal(controller.visibleStates()[0]?.scrollOffset, 5);
+	assert.equal(controller.scrollActiveDialog(-10), true);
+	assert.equal(controller.visibleStates()[0]?.scrollOffset, 0);
+	assert.equal(controller.activateAction(id, 1), true);
+	assert.deepEqual(invoked, ["refresh"]);
+	assert.equal(controller.activateAction(id, 0), false);
+	assert.equal(controller.scrollDialog(id, 3), false);
+	assert.deepEqual(controller.visibleStates(), []);
+});

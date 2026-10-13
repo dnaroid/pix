@@ -42,6 +42,7 @@ export type StatusLineRendererHost = {
 	readonly sessionActivity: SessionActivity;
 	readonly statusDotBright: boolean;
 	currentStatus(): string;
+	quotaWaitStatusLabel?(): string | undefined;
 	statusWorkspaceLabel(): string;
 	statusWorkspaceGitBranchLabel(): string | undefined;
 	statusModelLabel(session: AgentSession): string;
@@ -81,8 +82,11 @@ export class StatusLineRenderer {
 			? Math.max(0, widgetsLayout.inputBorderWidgetStartColumn - 2)
 			: contentWidth;
 		const fullWorkspaceDetailsLabel = modelUsageLabel ? `${workspaceLabel} ${modelUsageLabel}` : workspaceLabel;
-		const contextBarLabel = this.contextBarLabel(baseStatus, leftWidth, fullWorkspaceDetailsLabel);
-		const status = contextBarLabel ? `${baseStatus} ${contextBarLabel}` : baseStatus;
+		const quotaWaitStatusLabel = this.host.quotaWaitStatusLabel?.();
+		const reservedDetails = quotaWaitStatusLabel ? `${quotaWaitStatusLabel} ${fullWorkspaceDetailsLabel}` : fullWorkspaceDetailsLabel;
+		const contextBarLabel = this.contextBarLabel(baseStatus, leftWidth, reservedDetails);
+		const statusBeforeWait = contextBarLabel ? `${baseStatus} ${contextBarLabel}` : baseStatus;
+		const status = quotaWaitStatusLabel ? `${statusBeforeWait} ${quotaWaitStatusLabel}` : statusBeforeWait;
 		const sessionLabel = "";
 		const fittedWorkspaceLabel = this.fitWorkspaceLabel(statusDot, status, workspaceLabel, modelUsageLabel, leftWidth);
 		const workspaceDetailsLabel = modelUsageLabel
@@ -102,6 +106,7 @@ export class StatusLineRenderer {
 			workspaceLabel: fittedWorkspaceLabel,
 			...(modelUsageLabel ? { modelUsageLabel } : {}),
 			...(contextBarLabel ? { contextBarLabel } : {}),
+			...(quotaWaitStatusLabel ? { quotaWaitStatusLabel } : {}),
 		};
 	}
 
@@ -414,6 +419,9 @@ export class StatusLineRenderer {
 		this.pushStatusWidgetSegments(segments, statusText, layout);
 		this.pushWorkspaceSegments(segments, statusText, layout.workspaceLabel);
 		if (layout.modelUsageLabel) this.pushModelUsageSegments(segments, statusText, layout.modelUsageLabel);
+		if (layout.quotaWaitStatusLabel) {
+			this.pushSegment(segments, statusText.indexOf(layout.quotaWaitStatusLabel), layout.quotaWaitStatusLabel.length, this.host.theme.colors.warning);
+		}
 
 		const session = this.host.session;
 		if (!session) {

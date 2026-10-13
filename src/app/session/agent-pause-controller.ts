@@ -16,7 +16,9 @@ type FinishTurnArgs = Parameters<FinishTurn>;
 type AgentSessionInternals = {
 	_isAgentRunActive: boolean;
 	_agentRunAbortRequested: boolean;
+	_failedResponse?: unknown;
 	_runSystemPromptOptions?: unknown;
+	_finishCancelledRetry(): void;
 	_handlePostAgentRun(): Promise<boolean>;
 	_runBeforeSettleBoundary(): Promise<boolean>;
 	_flushPendingBashMessages(): void;
@@ -38,7 +40,7 @@ type SessionPauseRecord = {
  *
  * The pinned SDK exposes Agent.finishTurn and Agent.continue(), but not a
  * session-level continuation method. The small private adapter below mirrors the
- * AgentSession 0.87 _runAgentPrompt lifecycle so resumed runs retain retries,
+ * AgentSession 1.2 _startRun post-run lifecycle so resumed runs retain retries,
  * compaction, before-settle extensions, queue draining, and settlement behavior.
  */
 export class AgentPauseController {
@@ -105,6 +107,9 @@ export class AgentPauseController {
 				this.clearPauseRequest(record);
 				return false;
 			}
+			// A retry remains part of the current turn. Do not settle until Pi
+			// consumes _failedResponse and reaches a resumable retry boundary.
+			if (shouldContinue && internals._failedResponse !== undefined) return true;
 			if (pauseBoundaryReached || record.state === "pause-requested") {
 				record.pauseBoundaryReached = false;
 				if (shouldContinue) {
@@ -217,7 +222,7 @@ export class AgentPauseController {
 	}
 
 	/**
-	 * Continue exactly as AgentSession._runAgentPrompt would. Throws on failure
+	 * Continue through AgentSession._startRun's post-run lifecycle. Throws on failure
 	 * so both the Continue button (via {@link toggle}) and the hidden quota
 	 * wait control (via {@link handleQuotaWaitControl}) observe it.
 	 */
@@ -236,13 +241,17 @@ export class AgentPauseController {
 			if (!this.host.isCurrentSession(session)) {
 				throw new Error("agent session changed before it could continue");
 			}
+			if (session.isStreaming || session.agent.state.isStreaming) {
+				throw new Error("another agent run started before continuation");
+			}
 			const internals = this.sessionInternals(session);
 			internals._isAgentRunActive = true;
 			internals._agentRunAbortRequested = false;
 			try {
-				// Continue exactly as AgentSession._runAgentPrompt would.
+				// Continue without inserting a new prompt, then mirror SDK post-run cleanup.
 				await session.agent.continue();
-				while (this.host.isCurrentSession(session)) {
+				// After startup, background runs continue across tab switches as in Pi.
+				while (!internals._agentRunAbortRequested) {
 					const shouldContinue = await internals._handlePostAgentRun();
 					if (shouldContinue) {
 						if (internals._agentRunAbortRequested) break;
@@ -250,16 +259,20 @@ export class AgentPauseController {
 						continue;
 					}
 					if (internals._agentRunAbortRequested || !await internals._runBeforeSettleBoundary()) break;
+					if (internals._agentRunAbortRequested) break;
 					await session.agent.continue();
 				}
 			} finally {
+				if (internals._agentRunAbortRequested) internals._finishCancelledRetry();
+				internals._failedResponse = undefined;
 				internals._runSystemPromptOptions = undefined;
 				internals._flushPendingBashMessages();
 				internals._flushPendingCustomMessages();
 				await internals._emitAgentSettled();
 			}
 		} catch (error) {
-			this.setState(record, "paused");
+			// A newer agent_start may have already replaced this continuation owner.
+			if (record.state === "resuming") this.setState(record, "paused");
 			throw error instanceof Error ? error : new Error(errorMessage(error));
 		}
 		if (record.state === "resuming") this.setState(record, "idle");
@@ -302,12 +315,14 @@ export class AgentPauseController {
 	private sessionInternals(session: AgentSession): AgentSessionInternals {
 		const internals = session as unknown as Partial<AgentSessionInternals>;
 		if (typeof internals._handlePostAgentRun !== "function"
+			|| typeof internals._finishCancelledRetry !== "function"
 			|| typeof internals._runBeforeSettleBoundary !== "function"
 			|| typeof internals._flushPendingBashMessages !== "function"
 			|| typeof internals._flushPendingCustomMessages !== "function"
 			|| typeof internals._emitAgentSettled !== "function"
 			|| typeof internals._isAgentRunActive !== "boolean"
 			|| typeof internals._agentRunAbortRequested !== "boolean"
+			|| !("_failedResponse" in internals)
 			|| !("_runSystemPromptOptions" in internals)) {
 			throw new Error("Agent pause is incompatible with this pi SDK version");
 		}

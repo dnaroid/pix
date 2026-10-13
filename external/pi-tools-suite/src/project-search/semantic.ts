@@ -3,6 +3,8 @@ import { embedSemanticQuery, semanticConfiguration, requireSemanticIdentity, sem
   type SemanticSearchOptions } from "./semantic-provider.js";
 import { commitIdentity } from "./semantic-commit-provider.js";
 import { indexMissingSessionVectors } from "./semantic-session-indexer.js";
+import { syncSessionChunks } from "./semantic-session-chunks.js";
+import { hasSessionChunkVectors, searchSessionChunks, type ChunkHit } from "./session-chunks.mjs";
 
 export type { SemanticSearchOptions } from "./semantic-provider.js";
 
@@ -10,6 +12,7 @@ export interface CachedSemanticScores {
   tasks: Map<string, number>;
   sessions: Map<string, number>;
   notices: string[];
+  chunks: Map<string,ChunkHit>;
 }
 
 function cosine(a: readonly number[], b: readonly number[]): number {
@@ -32,7 +35,7 @@ const queryCache = new Map<string, number[]>();
 export async function cachedProjectSemantics(root: string, query: string,
   candidates: { tasks: readonly CachedTaskCandidate[]; sessions: readonly CachedSessionCandidate[]; tasksSelected?: boolean; tasksSafe?: boolean },
   signal: AbortSignal, options: SemanticSearchOptions = {}): Promise<CachedSemanticScores> {
-  const result: CachedSemanticScores = { tasks: new Map(), sessions: new Map(), notices: [] };
+  const result: CachedSemanticScores = { tasks: new Map(), sessions: new Map(), notices: [], chunks:new Map() };
   signal.throwIfAborted();
   try {
     const config = await semanticConfiguration(options, signal);
@@ -44,6 +47,8 @@ export async function cachedProjectSemantics(root: string, query: string,
         try {
           const outcome = await indexMissingSessionVectors(root, candidates.sessions, key, options, signal, config);
           if (outcome.remaining) result.notices.push(`Semantic Sessions: ${outcome.remaining} saved names still await indexing; search again to continue.`);
+          const chunks = await syncSessionChunks(root,candidates.sessions,signal,options);
+          if(!chunks.complete) result.notices.push(`Session chunks: ${chunks.indexed}/${chunks.total} indexed; ${chunks.skipped} unreadable. Use /search-semantic index sessions to continue.`);
         } catch (error) {
           signal.throwIfAborted();
           result.notices.push("Semantic session-name indexing unavailable or interrupted; local matches remain available.");
@@ -52,7 +57,9 @@ export async function cachedProjectSemantics(root: string, query: string,
     }
     await requireSemanticIdentity(options, config, signal);
     const cached = await readCachedProjectVectors(root, candidates, options, signal, config);
-    if (!cached.tasks.size && !cached.sessions.size) {
+    const messageVectors = candidates.sessions.length > 0 && await hasSessionChunkVectors(root,candidates.sessions,signal,
+      {identity:commitIdentity(config),dimension:config.dimension}).catch(()=>{signal.throwIfAborted();return false;});
+    if (!cached.tasks.size && !cached.sessions.size && !messageVectors) {
       if (cached.uncachedTasks || cached.uncachedSessions) result.notices.push(
         "Semantic task/session vectors are unavailable or incompatible with the configured identity; local search was used. Check central embedding configuration and credentials.");
       return result;
@@ -91,6 +98,13 @@ export async function cachedProjectSemantics(root: string, query: string,
       if (!fresh.sessions.has(id)) continue;
       const similarity = cosine(queryVector, vector);
       if (similarity >= 0.25) result.sessions.set(id, similarity);
+    }
+    const chunks = await searchSessionChunks(root,candidates.sessions,query,signal,
+      {identity:commitIdentity(config),dimension:config.dimension,query:queryVector});
+    await requireSemanticIdentity(options,config,signal);
+    for(const chunk of chunks) {
+      result.chunks.set(chunk.id,chunk);
+      result.sessions.set(chunk.id,Math.max(result.sessions.get(chunk.id)??0,chunk.score));
     }
     if (cached.uncachedTasks) result.notices.push(
       `Semantic Tasks: ${cached.uncachedTasks} task texts have no current cached vector; local matches remain available.`);

@@ -1,10 +1,8 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, VERSION, formatSize, truncateHead } from "@earendil-works/pi-coding-agent";
-import { rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { Type } from "typebox";
+import { VERSION } from "@earendil-works/pi-coding-agent";
 import { inspectClaudeInstallation } from "../src/auth.ts";
+import { loadClaudeAccountRotationConfig } from "../src/account-rotation.ts";
 import { providerModels as catalogModels } from "../src/catalog.ts";
 import { bridgeArgv } from "../src/claude-args.ts";
 import { readClaudeModelAliases } from "../src/claude-models.ts";
@@ -13,20 +11,26 @@ import { writeDiagnosticReport } from "../src/diagnostics.ts";
 import { errorCode, errorText, normalizeClaudeOverflow } from "../src/errors.ts";
 import { formatDoctorSummary, probeBridge } from "../src/doctor.ts";
 import { flushMetricsLog, getLastRequestMetrics, getLastSearchMetrics, getMetricsLogError } from "../src/metrics.ts";
-import { createClaudeStream } from "../src/provider.ts";
-import { cleanupStaleRuntimeDirectories, createRuntimeDirectory } from "../src/runtime-directories.ts";
+import { createRotatingClaudeStream } from "../src/rotating-stream.ts";
+import { cleanupStaleRuntimeDirectories } from "../src/runtime-directories.ts";
 import { SessionImageStore } from "../src/session-image-store.ts";
 import { resolveSession, sessionRegistry, type SessionEntry } from "../src/session-registry.ts";
-import { searchWithClaude } from "../src/web-search.ts";
-import type { RateLimitNotice } from "../src/claude-protocol.ts";
+import type { RateLimitNotice, RateLimitNoticeSink } from "../src/claude-protocol.ts";
 import type { RuntimeCleanupResult } from "../src/runtime-directories.ts";
 import type { ClaudeInstallation } from "../src/types.ts";
 
 const PROVIDER = "pi-claude-code-provider";
 const API = "pi-claude-code-provider-headless";
-const SEARCH_TOOL = "pi_claude_code_provider_web_search";
 const NOTICE_PREFIX = "[pi-claude-code-provider]";
 const MAX_TRACKED_RATE_LIMIT_NOTICES = 64;
+
+/** Preflight and doctor must inspect the same configured subscription login. */
+async function inspectConfiguredClaudeInstallation(): Promise<ClaudeInstallation> {
+  const config = loadClaudeAccountRotationConfig();
+  const selected = config.accounts.find((account) => account.name === config.selectedAccount);
+  const configDir = selected?.configDir ?? (config.enabled ? config.accounts[0]?.configDir : undefined);
+  return inspectClaudeInstallation(configDir);
+}
 
 export default async function piClaudeCodeProvider(pi: ExtensionAPI): Promise<void> {
   const runtimeCleanup = await cleanupStaleRuntimeDirectories();
@@ -34,7 +38,7 @@ export default async function piClaudeCodeProvider(pi: ExtensionAPI): Promise<vo
 
   let installation: ClaudeInstallation;
   try {
-    installation = await inspectClaudeInstallation();
+    installation = await inspectConfiguredClaudeInstallation();
   } catch (error) {
     // The suite enables this optional adapter by default, including on clean
     // machines. An absent CLI is not a broken setup unless a path was explicit.
@@ -46,10 +50,8 @@ export default async function piClaudeCodeProvider(pi: ExtensionAPI): Promise<vo
   }
   const providerModels = catalogModels();
   const currentPlatform = platformStatus();
-  const searchOutputs = createSearchOutputOwner();
   const imageStore = new SessionImageStore();
-  let searchRegistrationAttempted = false;
-  let activeRateLimitNotify: ((notice: RateLimitNotice) => void) | undefined;
+  let activeRateLimitNotify: RateLimitNoticeSink | undefined;
   // Sessions are registered process-wide, not in this closure: Pi re-runs this
   // factory for every new, resumed, forked or cloned session, and a host can hold
   // several live sessions that share these instances. A request must resolve its
@@ -68,7 +70,16 @@ export default async function piClaudeCodeProvider(pi: ExtensionAPI): Promise<vo
     ownSessionEntry = undefined;
   };
 
-  const streamSimple = createClaudeStream(installation, {
+  const streamSimple = createRotatingClaudeStream(installation, {
+    onAccountAttempt: (name, sessionId) => {
+      if (sessionId) sessions.get(sessionId)?.onAccountAttempt?.(name);
+    },
+    onPause: (previous, seconds, sessionId) => {
+      if (sessionId) sessions.get(sessionId)?.onAccountPause?.(previous, seconds);
+    },
+    onSwitch: (previous, next, sessionId) => {
+      if (sessionId) sessions.get(sessionId)?.onAccountSwitch?.(previous, next);
+    },
     resolveSession: (request) => resolveSession(sessions, {
       ...request,
       allowBorrowSoleDirectory: process.env.PI_CLAUDE_CODE_PROVIDER_BORROW_SOLE_DIRECTORY?.trim() === "on",
@@ -103,14 +114,34 @@ export default async function piClaudeCodeProvider(pi: ExtensionAPI): Promise<vo
   serveApiRegistry();
 
   pi.on("session_start", (_event, ctx) => {
-    searchOutputs.open();
     imageStore.open();
     // Another session reloading clears Pi-AI's registry for every extension in
     // the process, so ownership is re-asserted rather than claimed once.
     serveApiRegistry();
     // The provider starts a process per tool round-trip; session scope prevents
     // Claude's repeated notice from surfacing throughout one Pi turn.
-    activeRateLimitNotify = createRateLimitNotifier((message) => ctx.ui.notify(message, "warning"));
+    const notifyRateLimit = createRateLimitNotifier((message) => ctx.ui.notify(message, "warning"));
+    const sessionId = ctx.sessionManager.getSessionId();
+    const rateLimitNotify: RateLimitNoticeSink = (notice, modelRef) => {
+      if (activeRateLimitNotify !== rateLimitNotify) return;
+      // Publish structured quota telemetry even when the visible warning is
+      // deduplicated. Only subscription windows describe the quota popup.
+      const route = modelRef;
+      if (route && (notice.rateLimitType === "five_hour" || notice.rateLimitType === "seven_day")
+          && notice.resetsAt !== undefined
+          && (notice.status === "rejected" || notice.utilization !== undefined)) {
+        const sample = { version: 1, sessionId, modelRef: route, status: notice.status,
+          rateLimitType: notice.rateLimitType, ...(notice.utilization === undefined ? {} : { utilization: notice.utilization }),
+          resetsAt: notice.resetsAt, observedAt: Date.now() };
+        // Telemetry is advisory and must never terminate paid model traffic.
+        try { pi.events.emit("pix:claude-code:rate-limit", sample); } catch { /* Optional host. */ }
+        if (ctx.mode === "rpc") {
+          try { ctx.ui.setWidget("pix.session-state", ["pix:claude-code:rate-limit", JSON.stringify(sample)]); } catch { /* Optional UI. */ }
+        }
+      }
+      notifyRateLimit(notice);
+    };
+    activeRateLimitNotify = rateLimitNotify;
     // Pi's session directory, not process.cwd(): a resumed session takes its cwd
     // from the session file, and Pi's tools resolve paths against that one.
     //
@@ -124,20 +155,20 @@ export default async function piClaudeCodeProvider(pi: ExtensionAPI): Promise<vo
     ownSessionEntry = {
       cwd: ctx.cwd,
       imageStore,
-      onRateLimitNotice: (notice) => activeRateLimitNotify?.(notice),
+      onRateLimitNotice: rateLimitNotify,
+      onAccountAttempt: (name) => {
+        if (ctx.mode === "rpc") {
+          try {
+            ctx.ui.setWidget("pix.session-state", ["claude-code-account", JSON.stringify({ version: 1, name, observedAt: Date.now() })]);
+          } catch { /* Optional UI telemetry. */ }
+        }
+      },
+      onAccountPause: (previous, seconds) => ctx.ui.notify(`${NOTICE_PREFIX} OAuth profile ${previous} reached its limit; waiting ${seconds}s before trying another profile`, "warning"),
+      onAccountSwitch: (previous, next) => ctx.ui.notify(`${NOTICE_PREFIX} OAuth profile ${previous} reached its limit; continuing with ${next}`, "warning"),
     };
     sessions.set(ownSessionId, ownSessionEntry);
     const platformWarning = startupPlatformWarning(currentPlatform);
     if (platformWarning) ctx.ui.notify(`${NOTICE_PREFIX} ${platformWarning}`, "warning");
-    if (searchRegistrationAttempted) return;
-    searchRegistrationAttempted = true;
-    registerWebSearchTool(
-      pi,
-      installation,
-      searchOutputs.retain,
-      (notice) => activeRateLimitNotify?.(notice),
-      (message) => ctx.ui.notify(message, "warning"),
-    );
   });
 
   pi.on("session_shutdown", async () => {
@@ -148,7 +179,7 @@ export default async function piClaudeCodeProvider(pi: ExtensionAPI): Promise<vo
     // is withdrawn only once no session is left to serve.
     if (sessions.size === 0) compat?.unregisterApiProviders(PROVIDER);
     try {
-      await Promise.all([searchOutputs.close(), imageStore.close()]);
+      await imageStore.close();
     } finally {
       await flushMetricsLog();
     }
@@ -188,7 +219,7 @@ function registerDoctorCommand(pi: ExtensionAPI, runtimeCleanup: RuntimeCleanupR
         if (command === "report") {
           let current: ClaudeInstallation | undefined;
           let preflightError: unknown;
-          try { current = await inspectClaudeInstallation(); } catch (error) { preflightError = error; }
+          try { current = await inspectConfiguredClaudeInstallation(); } catch (error) { preflightError = error; }
           const modelVersions = current ? await readClaudeModelAliases(current).catch(() => undefined) : undefined;
           const path = await writeDiagnosticReport({
             platformStatus: currentPlatform,
@@ -209,7 +240,7 @@ function registerDoctorCommand(pi: ExtensionAPI, runtimeCleanup: RuntimeCleanupR
           );
           return;
         }
-        const current = await inspectClaudeInstallation();
+        const current = await inspectConfiguredClaudeInstallation();
         const claudeStatus = versionStatus("Claude Code", current.version, VERIFIED_VERSIONS.claudeCode, MINIMUM_VERSIONS.claudeCode);
         ctx.ui.notify(formatDoctorSummary({
           platformStatus: currentPlatform,
@@ -247,92 +278,6 @@ function createRateLimitNotifier(notify: (message: string) => void): (notice: Ra
     emitted.add(message);
     notify(message);
   };
-}
-
-function createSearchOutputOwner() {
-  let closing = true;
-  const retained = new Set<string>();
-  const pending = new Set<Promise<{ directory: string; path: string } | undefined>>();
-  const retain = (result: string): Promise<{ directory: string; path: string } | undefined> => {
-    if (closing) return Promise.resolve(undefined);
-    const retention = (async () => {
-      const directory = await createRuntimeDirectory("web_search_output");
-      const path = join(directory, "result.md");
-      try {
-        await writeFile(path, result, { mode: 0o600, flag: "wx" });
-        if (closing) {
-          await rm(directory, { recursive: true, force: true });
-          return undefined;
-        }
-        retained.add(directory);
-        return { directory, path };
-      } catch (error) {
-        await rm(directory, { recursive: true, force: true });
-        throw error;
-      }
-    })();
-    // Track before awaiting anything so shutdown owns a directory whose
-    // asynchronous creation has begun but has not completed.
-    pending.add(retention);
-    void retention.finally(() => pending.delete(retention)).catch(() => undefined);
-    return retention;
-  };
-  return {
-    open: () => { closing = false; },
-    retain,
-    async close(): Promise<void> {
-      closing = true;
-      await Promise.allSettled([...pending]);
-      while (retained.size > 0) {
-        const directories = [...retained];
-        retained.clear();
-        await Promise.all(directories.map((directory) => rm(directory, { recursive: true, force: true })));
-      }
-    },
-  };
-}
-
-function registerWebSearchTool(
-  pi: ExtensionAPI,
-  installation: ClaudeInstallation,
-  retainOutput: (result: string) => Promise<{ directory: string; path: string } | undefined>,
-  onRateLimitNotice: (notice: RateLimitNotice) => void,
-  notify: (message: string) => void,
-): void {
-  if (pi.getAllTools().some((tool) => tool.name === SEARCH_TOOL)) {
-    notify(`${NOTICE_PREFIX} ${SEARCH_TOOL} was not registered because that tool name is already occupied`);
-    return;
-  }
-  pi.registerTool({
-    name: SEARCH_TOOL,
-    label: "Web Search",
-    description: `Search the current web through Claude Code and return a concise synthesis with source URLs. Output is truncated to ${formatSize(DEFAULT_MAX_BYTES)} or ${DEFAULT_MAX_LINES} lines.`,
-    promptSnippet: "Search the current web and return sourced results",
-    promptGuidelines: [`Use ${SEARCH_TOOL} when current external information or online sources are required.`],
-    parameters: Type.Object({
-      query: Type.String({ minLength: 1, description: "Search query" }),
-      focus: Type.Optional(Type.String({ description: "Optional guidance about what to prioritize" })),
-    }),
-    async execute(_toolCallId, params, signal, onUpdate) {
-      onUpdate?.({ content: [{ type: "text", text: `Searching the web for: ${params.query}` }], details: { status: "searching" } });
-      const result = await searchWithClaude(
-        installation,
-        { query: params.query, focus: params.focus, signal },
-        { onRateLimitNotice },
-      );
-      const truncated = truncateHead(result, { maxBytes: DEFAULT_MAX_BYTES, maxLines: DEFAULT_MAX_LINES });
-      let text = truncated.content;
-      let fullOutputPath: string | undefined;
-      if (truncated.truncated) {
-        const output = await retainOutput(result);
-        if (output) {
-          fullOutputPath = output.path;
-          text += `\n\n[Web-search output truncated to ${truncated.outputLines} of ${truncated.totalLines} lines (${formatSize(truncated.outputBytes)} of ${formatSize(truncated.totalBytes)}). Full output: ${fullOutputPath}]`;
-        }
-      }
-      return { content: [{ type: "text", text }], details: { truncated: truncated.truncated, fullOutputPath } };
-    },
-  });
 }
 
 /**

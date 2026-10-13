@@ -86,6 +86,17 @@ export function stageSnapshot(snapshot: string, work: string, pinned = true): st
 		mkdirSync(dirname(link), { recursive: true });
 		symlinkSync(installed, link, "dir");
 	}
+	// Pi 1.2 resolves imports from the isolated extension package itself rather
+	// than making the Pi CLI's dependency tree available to this staged copy.
+	// Only the trusted vendored provider's explicitly declared JSONC dependency
+	// is linked; external historical snapshots are not granted ambient packages.
+	if (manifest.dependencies?.["jsonc-parser"]) {
+		const installed = join(root, "node_modules", "jsonc-parser");
+		if (!existsSync(installed)) throw new Error("Required local provider dependency missing: jsonc-parser");
+		const link = join(target, "node_modules", "jsonc-parser");
+		mkdirSync(dirname(link), { recursive: true });
+		symlinkSync(installed, link, "dir");
+	}
 	// The public standalone entry is what production children load; fall back to
 	// the declared entrypoint only for snapshots without one.
 	return standalone ? join(target, "index.ts") : join(target, "extensions/index.ts");

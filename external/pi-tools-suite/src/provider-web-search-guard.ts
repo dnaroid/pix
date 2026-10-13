@@ -16,8 +16,9 @@ export function registerProviderWebSearchGuard(pi: ExtensionAPI): void {
 		}
 	};
 
-	// The provider registers search during session_start, possibly after our own
-	// handler. before_agent_start catches either extension load order.
+	// Pix never registers this tool, but an independently installed legacy
+	// provider can add it during session_start after our handler runs.
+	// before_agent_start catches either extension load order.
 	pi.on("session_start", removeSearch);
 	pi.on("model_select", removeSearch);
 	pi.on("before_agent_start", removeSearch);

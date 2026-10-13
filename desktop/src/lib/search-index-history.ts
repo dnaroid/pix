@@ -16,6 +16,9 @@ export function createSearchIndexHistory(now: () => number = Date.now) {
   let sequence = 0;
   return {
     entries: (workspace: string) => events.filter(event => event.workspace === workspace),
+    clear(workspace: string) {
+      events = events.filter(event => event.workspace !== workspace);
+    },
     append(workspace: string, source: SearchIndexEvent["source"], level: SearchIndexEvent["level"], message: string) {
       events = [...events, { id: ++sequence, time: now(), workspace, source, level, message: message.slice(0, 300) }]
         .slice(-SEARCH_INDEX_HISTORY_LIMIT);

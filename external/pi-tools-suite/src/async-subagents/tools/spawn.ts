@@ -30,6 +30,7 @@ import {
 } from "../lib.js";
 import { spawnAgentWithRetry } from "../core/retry.js";
 import { recordSubagentUsage } from "../core/usage.js";
+import { recordSubagentTaskStatistics, recordSubagentStateStatistics, recordSubagentToolStatistics } from "../core/statistics.js";
 import { ensureOwnedLaunchBinaries, maySelectOwnedProvider } from "../core/owned-launch-integration.js";
 import { ownedArtifactsPresentSync, ownedSlotReleasedSync } from "../core/owned-retirement.js";
 import { DEFAULT_SPAWN_WATCH_SECONDS, DEFAULT_UPDATE_INTERVAL_SECONDS, INLINE_RENDERING } from "../constants.js";
@@ -308,6 +309,7 @@ export function registerSpawnTool(
 				// Materialize prompts up front so queued agents appear as planned in status/wait
 				// output before their semaphore slot opens.
 				for (const task of tasks) writePromptFile(runDir, task);
+				for (const preview of taskPreviews) recordSubagentTaskStatistics(parentSessionManager, runDir, preview);
 				const liveRun = getLiveRun(liveAgents, runDir);
 				const reservation = completionDelivery?.begin(parentSession);
 				let deliveredState: RunState | undefined;
@@ -334,6 +336,7 @@ export function registerSpawnTool(
 							signal: signal ?? undefined,
 							onResult: (result) => results.push({ id: task.id, pid: result.pid, agentDir: result.agentDir }),
 							onComplete: (completion) => {
+								recordSubagentStateStatistics(parentSessionManager, runDir, task.id, completion.state.status);
 								reportCompletion?.(completion);
 								resolveCompleted();
 								handleAgentCompletion(completion);
@@ -343,6 +346,7 @@ export function registerSpawnTool(
 								stopAgents(runDir, [task.id], { signal: "SIGTERM" });
 								resolveCompleted();
 								const state = getAgentState(runDir, task.id, { includeLineCounts: false }) ?? { id: task.id, status: "stopped" as const };
+								recordSubagentStateStatistics(parentSessionManager, runDir, task.id, state.status);
 								handleAgentCompletion({ runDir, agentId: task.id, agentDir: path.join(runDir, task.id), exitCode: 0, state });
 							},
 							onLaunchError: (error) => {
@@ -359,6 +363,7 @@ export function registerSpawnTool(
 								capture?.cancel();
 								resolveCompleted();
 								const state = getAgentState(runDir, task.id, { includeLineCounts: false }) ?? { id: task.id, status: "failed" as const, exitCode: 1 };
+								recordSubagentStateStatistics(parentSessionManager, runDir, task.id, state.status);
 								handleAgentCompletion({ runDir, agentId: task.id, agentDir: path.join(runDir, task.id), exitCode: 1, state });
 							},
 							onUpdate: () => {
@@ -375,7 +380,8 @@ export function registerSpawnTool(
 								});
 							},
 						onRpcEvent: (event) => {
-							recordSubagentUsage(parentSessionManager, event, task.id);
+							recordSubagentUsage(parentSessionManager, event, task.id, runDir);
+							recordSubagentToolStatistics(parentSessionManager, event, runDir, task.id);
 							onAgentRpcEvent?.(runDir, task.id, event);
 						},
 						});

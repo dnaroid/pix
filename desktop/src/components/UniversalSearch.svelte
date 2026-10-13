@@ -12,7 +12,7 @@
   import { pendingSearchNotice } from "../lib/search-source-deadline";
   import { activateModalDialog } from "../lib/modal-dialog";
   import { queryUniversalSearch, SEARCH_KINDS, SEARCH_LABELS, type SearchHit, type SearchKind } from "../lib/universal-search";
-  import { SearchDialogController, emptySearchDialogState, searchStatusLabel } from "../lib/search-dialog-controller";
+  import { SearchDialogController, emptySearchDialogState } from "../lib/search-dialog-controller";
   import { SETTINGS_SEARCH_CATALOG } from "../lib/settings-search-catalog";
   import type { AcpClient } from "../lib/acp-client";
   import { queryNativeRepository } from "../lib/native-repository-search";
@@ -20,7 +20,7 @@
   import type { GitHistoryEntry } from "../lib/git-workflow";
   import type { SearchDialogMemory } from "../lib/search-dialog-memory";
   import { SearchIntentController } from "../lib/search-intent-controller";
-  import { linkRagCitations, ragRequest, retrieveRagHits } from "../lib/search-rag";
+  import { linkRagCitations, ragErrorMessage, ragRequest, retrieveRagHits } from "../lib/search-rag";
   import MarkdownText from "./MarkdownText.svelte";
   import NativeRepositorySemanticConsent from "./NativeRepositorySemanticConsent.svelte";
   import type { SearchSources, UnifiedSearchResult } from "../lib/universal-search";
@@ -243,9 +243,9 @@
       ragSourceIds = [...response.sourceIds];
       ragModel = response.modelRef;
       ragPhase = "done";
-    } catch {
+    } catch (error) {
       if (!active()) return;
-      ragError = "RAG generation unavailable. Check the selected model, credentials and search sources.";
+      ragError = ragErrorMessage(error);
       ragPhase = "error";
     } finally {
       if (ragController === owner) ragController = undefined;
@@ -383,7 +383,7 @@
               <MarkdownText text={ragMarkdown} compact dense headingAnchors />
             </div>
           {/if}
-          {#if ragError}<p class="text-xs text-tool-error" role="alert">{ragError}</p>{/if}
+          {#if ragError}<p class="whitespace-pre-wrap [overflow-wrap:anywhere] text-xs text-tool-error" role="alert">{ragError}</p>{/if}
           {#if ragPhase === "stopped"}<p class="text-xs text-muted-foreground" role="status">Generation stopped.</p>{/if}
           {#if ragReferences.length}
             <div class="border-t border-border pt-2" aria-label="RAG sources">
@@ -446,19 +446,11 @@
           <div class="space-y-1">
           {#each notices as notice}<p>{notice}</p>{/each}
           {#if result.pendingSources?.length}<p>Waiting for {result.pendingSources.join(", ")}.</p>{/if}
-          {#if intentNotice}<p>{intentNotice}</p>{/if}
-          <p>Auto uses OpenRouter Jev Latest for intent classification on explicit submission only. Jev receives only the question, never source excerpts. Missing credentials or Jev failures fall back to Search.</p>
-          <p>RAG reuses the selected project search sources, retrieves bounded source excerpts and sends the question and those excerpts to your configured RAG model provider. This may incur charges and share code, documentation and session excerpts with that provider. Results have navigable source references, but model-generated claims still require verification.</p>
-          {#if types.includes("commits")}<p>Commits: BM25 + optional semantic search · all ancestors of current HEAD · changed file paths</p>
-            <p>Use <code>patch:sessionWorker</code> to search changed Git lines on demand (literal text, read-only, limited to 50 matches / 8 seconds). Patch text is never indexed or sent to an embedding provider.</p>
-            <p>Optional semantic commit search may send commit messages and search queries to the configured provider. The first search may index the full HEAD history.</p>{/if}
-          <p>{view.statusError ?? (status ? searchStatusLabel(status) : client ? 'Search status: loading…' : 'Session search: backend disconnected')}</p>
+          {#if view.statusError}<p>{view.statusError}</p>{/if}
           {#if status?.error}<p>{status.error}</p>{/if}
           {#if status?.warning}<p>{status.warning}</p>{/if}
-          {#if types.includes("sessions")}<p>Session excerpts: first user message and last completed assistant reply on the current branch. Indexed locally (FTS5), never sent to an embedding provider. A valid global embedding configuration also applies to semantic session-title search.</p>{/if}
-          <p>Local Code/Knowledge FTS5 · Native semantic provider configuration is shown above; ACP history search status is {status?.enabled && status.keyAvailable ? "active" : "inactive"} · no external index fallback</p>
-          <NativeRepositorySemanticConsent {workspace} onSettings={onPreferences} onChanged={repositoryConsentChanged} />
-          {#if voiceSupported}<p>Voice input sends microphone audio to Deepgram. It fills the query; press Search or Enter to search.</p>{/if}
+          <NativeRepositorySemanticConsent {workspace} onChanged={repositoryConsentChanged} />
+          {#if voiceSupported}<p>Microphone audio is sent to Deepgram.</p>{/if}
           </div>
         </div>
       </details>

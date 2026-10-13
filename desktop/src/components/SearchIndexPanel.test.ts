@@ -19,6 +19,18 @@ describe("SearchIndexPanel source contract", () => {
     expect(history).toContain("resize.observe(list)");
     expect(history).toContain("resize.disconnect()");
   });
+  it("opts the activity log into native text selection and copy", () => {
+    expect(history).toMatch(/<div[^>]*class="select-text [^"]*"[^>]*aria-label="Recent index events"/);
+    expect(history).not.toContain("oncopy=");
+    expect(history).not.toContain("onselectstart=");
+  });
+  it("wires an accessible icon-only clear button to workspace history", () => {
+    expect(history).toContain('aria-label="Clear index activity log"');
+    expect(history).toContain('title="Clear index activity log"');
+    expect(history).toContain('<Trash2 class="h-3.5 w-3.5" aria-hidden="true" />');
+    expect(history).toContain('disabled={!onClear || events.length === 0} onclick={onClear}');
+    expect(panel).toContain('onClear={controller ? () => controller.clearHistory() : undefined}');
+  });
   it("is mounted as the native search status tab", () => {
     expect(sidebar).toContain("<SearchIndexPanel");
     expect(sidebar).not.toContain("<IdxPanel");
@@ -53,14 +65,22 @@ describe("SearchIndexPanel source contract", () => {
     expect(panel).toContain("row.semanticActive || action?.running");
     expect(panel).not.toContain("action?.queued");
     expect(panel).toContain("{#if active}");
-    expect(panel.match(/<LoaderCircle/g)).toHaveLength(1);
-    expect(panel).toContain("<LoaderCircle");
+    expect(panel).not.toContain("LoaderCircle");
     expect(panel.match(/flex h-4 min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap leading-4/g)).toHaveLength(2);
     expect(panel).not.toContain("inline-flex");
     expect(transport).toContain('window.removeEventListener("pix-semantic-config-changed", controller.configChanged)');
     expect(controller).toContain("monitor.dispose()");
     expect(panel).toContain("$effect(() =>");
     expect(panel).not.toContain("States below are unknown");
+  });
+  it("shows a compact indeterminate ring without visible indexing text or invented percentages", () => {
+    expect(panel).toContain('viewBox="0 0 16 16" fill="none" aria-hidden="true"');
+    expect(panel).toContain('class="text-muted-foreground/30"');
+    expect(panel).toContain('origin-center animate-spin text-tool-search motion-reduce:animate-none');
+    expect(panel).toContain('stroke-linecap="round" stroke-dasharray="10 28"');
+    expect(panel).toContain('<span class="sr-only">Indexing {row.label}…</span>');
+    expect(panel).not.toContain('>Indexing…</span>');
+    expect(panel).not.toContain('aria-valuenow');
   });
   it("syncs the authored catalogue for the workspace even while Settings is closed", () => {
     expect(owner).toContain("startSearchIndexSync(connection, selected, SETTINGS_SEARCH_CATALOG");

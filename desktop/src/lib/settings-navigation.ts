@@ -11,7 +11,7 @@ export const SETTINGS_GROUPS = {
     { id: "general", label: "General" }, { id: "subagents", label: "Sub-agents" },
     { id: "search", label: "Search" },
     { id: "automation", label: "Automation" }, { id: "dcp", label: "DCP" },
-    { id: "context", label: "Context" }, { id: "integrations", label: "Integrations" },
+    { id: "context", label: "Context" }, { id: "claude", label: "Claude Accounts" }, { id: "integrations", label: "Integrations" },
     { id: "advanced", label: "Advanced" },
   ] },
 } as const satisfies Record<SettingsConfigKind, { label: string; sections: readonly { id: string; label: string }[] }>;

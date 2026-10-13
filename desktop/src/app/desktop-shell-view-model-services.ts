@@ -3,6 +3,7 @@ import { createDesktopStatusBarViewModel } from "./desktop-status-bar-view-model
 import type { DesktopViewModelServicesOptions } from "./desktop-view-model-service-options";
 import type { createSessionTodoActions } from "./session-todo-actions";
 import { createBrainstormSessionOpener } from "./desktop-brainstorm-navigation";
+import { invoke } from "@tauri-apps/api/core";
 
 export function createDesktopShellViewModelServices(
   options: DesktopViewModelServicesOptions,
@@ -56,6 +57,12 @@ export function createDesktopShellViewModelServices(
     openObserverSettings: options.openObserverSettings,
     openBrainstormParticipant: (sessionId) => {
       void openBrainstormSession(sessionId).catch(options.errors.report);
+    },
+    subagentPathNavigation: {
+      validate: (path, kind) => kind === "directory"
+        ? invoke<boolean>("project_directory_exists", { workspace: options.workspace(), path })
+        : options.project.preview.validateProjectFile(path),
+      open: (path) => options.project.preview.openProjectFile(path, "push"),
     },
   });
 
