@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { resolve } from "node:path";
 import type { Api, AssistantMessageEvent, Model } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { ClaudeAccountRotationState, parseClaudeAccountRotationConfig, type ClaudeAccount } from "../../src/claude-code-provider/src/account-rotation.ts";
@@ -64,7 +65,9 @@ describe("Claude subscription account rotation", () => {
       { name: "Personal", configDir: "~/.claude-a" },
       { name: "Work", configDir: "/tmp/.claude-b" },
     ] }, "/my-home");
-    expect(value.accounts[0]?.configDir).toBe("/my-home/.claude-a");
+    // Node resolves rooted paths against the current drive on Windows.
+    expect(value.accounts[0]?.configDir).toBe(resolve("/my-home", ".claude-a"));
+    expect(value.accounts[1]?.configDir).toBe(resolve("/tmp/.claude-b"));
     expect(value.enabled).toBe(true);
     expect(value.rotationDelaySeconds).toBe(60);
     expect(parseClaudeAccountRotationConfig({ rotationDelaySeconds: 90 }).rotationDelaySeconds).toBe(90);
