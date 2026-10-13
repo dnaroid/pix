@@ -1,13 +1,13 @@
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, link, symlink, unlink } from "node:fs/promises";
 import { fork } from "node:child_process";
 import { Worker } from "node:worker_threads";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { claimWork, beginWrite, withProviderSlot } from "../src/project-search/source-work.mjs";
+import { claimWork, beginWrite, withProviderSlot, safeFile } from "../src/project-search/source-work.mjs";
 import { removeDirsWithRetry } from "./support/fs-retry.mjs";
 
 const signal = () => new AbortController().signal;
@@ -59,6 +59,17 @@ test("killed process work is recoverable after deterministic expiry", { timeout:
   const db = new DatabaseSync(filename); db.exec("UPDATE pix_search_work SET expires=0"); db.close();
   const recovery = worker(t, "work", filename); await recovery.event("acquired");
   recovery.child.send("finish"); await recovery.event("done"); await recovery.exited;
+});
+test("provider storage rejects hard-linked databases and symlinked SQLite journals", async t => {
+  const root = await fixture(t), filename = join(root, "guard.sqlite"), other = join(root, "other.sqlite");
+  await writeFile(filename, "");
+  await link(filename, other);
+  await assert.rejects(safeFile(filename), /Unsafe search storage/);
+  await unlink(other);
+  await safeFile(filename);
+  await writeFile(other, "");
+  await symlink(other, filename + "-journal");
+  await assert.rejects(safeFile(filename), /Unsafe search storage/);
 });
 test("global provider capacity applies across six independent processes", { timeout: 10000 }, async t => {
   const root = await fixture(t), workers = Array.from({ length: 6 }, () => worker(t, "slot", root));

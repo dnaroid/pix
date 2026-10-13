@@ -33,11 +33,21 @@ export function sourcePath(root, source) {
   if (!Object.hasOwn(SOURCE_FILES, source)) throw new Error("Unknown search source");
   return join(resolve(root), ".pi/search", SOURCE_FILES[source]);
 }
+async function fileInfo(filename) {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const info = await lstat(filename).catch(e => { if (e.code !== "ENOENT") throw e; });
+    // SQLite can unlink a short-lived journal while lstat still holds its
+    // inode. Linux may report nlink=0 for that otherwise unreachable file.
+    // Recheck the pathname instead of mistaking the unlink race for a hardlink.
+    if (!info || info.nlink !== 0 || attempt === 3) return info;
+    await delay(5);
+  }
+}
 export async function safeFile(filename) {
   for (const suffix of ["", "-wal", "-shm", "-journal"]) {
-    const info = await lstat(filename + suffix).catch(e => { if (e.code !== "ENOENT") throw e; });
+    const info = await fileInfo(filename + suffix);
     if (info && (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || info.size > 512 * 1024 * 1024)) {
-      throw new Error("Unsafe search storage");
+      throw new Error(`Unsafe search storage (${suffix || "database"}: ${info.isSymbolicLink() ? "symlink" : !info.isFile() ? "not a file" : `links=${info.nlink}, size=${info.size}`})`);
     }
   }
 }

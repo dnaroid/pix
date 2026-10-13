@@ -50,8 +50,11 @@ test("skipped transcripts have metadata-only diagnostics in the local log",async
   const base=join(f.root,".pi/artifacts");
   const dirs=await readdir(base);
   const logs=(await Promise.all(dirs.map(d=>readFile(join(base,d,"events.jsonl"),"utf8")))).join("");
-  assert.match(logs,/invalid_json/);assert.match(logs,/ENOENT/);
-  assert.ok(logs.includes(f.candidate.path));assert.doesNotMatch(logs,/PRIVATE MALFORMED TEXT/);
+  const events=logs.trim().split(/\r?\n/u).map(line=>JSON.parse(line) as {event?:string;path?:string;reason?:string;line?:number;code?:string});
+  assert.ok(events.some(e=>e.event==="session_transcript_skipped"&&e.path===f.candidate.path&&e.reason==="invalid_json"&&e.line===7));
+  assert.ok(events.some(e=>e.event==="session_transcript_skipped"&&e.reason==="stat_failed"&&e.code==="ENOENT"));
+  // Compare decoded JSON fields: Windows escapes backslashes in the on-disk log.
+  assert.doesNotMatch(logs,/PRIVATE MALFORMED TEXT/);
 });
 test("reader distinguishes validation failures without treating cancellation as a skip",async t=>{
   const f=await fixture(t);
