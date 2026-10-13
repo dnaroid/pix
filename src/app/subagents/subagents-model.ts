@@ -62,7 +62,14 @@ export function isSubagentAgentState(value: unknown): value is SubagentAgentStat
 		if (typeof value.lastActivity.label !== "string" || !value.lastActivity.label.trim()) return false;
 		if (typeof value.lastActivity.at !== "string" || !value.lastActivity.at.trim()) return false;
 	}
+	if (value.todoProgress !== undefined && !isSubagentTodoProgress(value.todoProgress)) return false;
 	return true;
+}
+
+export function isSubagentTodoProgress(value: unknown): value is NonNullable<SubagentAgentState["todoProgress"]> {
+	return isRecord(value) && typeof value.completed === "number" && typeof value.total === "number"
+		&& Number.isSafeInteger(value.completed) && Number.isSafeInteger(value.total)
+		&& value.completed >= 0 && value.total >= value.completed;
 }
 
 export function isSubagentTaskPreview(value: unknown): value is SubagentTaskPreview {

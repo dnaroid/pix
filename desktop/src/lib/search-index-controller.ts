@@ -3,11 +3,13 @@ import { monitorSearchIndexes, type SearchIndexSnapshot } from "./search-index-m
 import { createSearchIndexHistory, type SearchIndexEvent, type SearchIndexHistory } from "./search-index-history";
 import { observeSearchIndexEvents } from "./search-index-events";
 import type { SearchSyncEvent } from "./search-index-sync";
+import type { SourcePolicy, SearchSource } from "./search-source-selection";
 
 export interface SearchIndexViewState {
   snapshot: SearchIndexSnapshot;
   actions: IndexActions;
   history: SearchIndexEvent[];
+  savingSource?: SearchSource;
 }
 
 export function emptySearchIndexView(): SearchIndexViewState {
@@ -17,12 +19,14 @@ export function emptySearchIndexView(): SearchIndexViewState {
 /** One workspace-owned diagnostic lane shared by the panel and Activity Bar. */
 export function createSearchIndexController(options: Omit<Parameters<typeof monitorSearchIndexes>[0], "onChange" | "isIndexing"> & {
   run: Parameters<typeof createSearchIndexActions>[0]["run"];
+  setSource?: (source: SearchSource, enabled: boolean, signal: AbortSignal) => Promise<SourcePolicy>;
   onChange(state: SearchIndexViewState): void;
   workspace?: string;
   history?: SearchIndexHistory;
 }) {
   let state = emptySearchIndexView();
   let disposed = false;
+  const selectionOwner = new AbortController();
   const history = options.history ?? createSearchIndexHistory();
   const workspace = options.workspace ?? "";
   const events = observeSearchIndexEvents(history, workspace);
@@ -54,7 +58,22 @@ export function createSearchIndexController(options: Omit<Parameters<typeof moni
       history.clear(workspace);
       publish({});
     },
-    start: (source: Parameters<typeof indexing.start>[0]) => { void indexing.start(source); void monitor.refresh(true); },
+    start: (source: Parameters<typeof indexing.start>[0]) => {
+      if (options.readSelection && !state.snapshot.selection?.enabled[source]) return;
+      void indexing.start(source); void monitor.refresh(true);
+    },
+    setSource: async (source: SearchSource, enabled: boolean) => {
+      if (disposed || state.savingSource || !options.setSource) return;
+      indexing.cancel(source);
+      publish({ savingSource: source });
+      try {
+        const selection = await options.setSource(source, enabled, selectionOwner.signal);
+        publish({ snapshot: { ...state.snapshot, selection, selectionError: selection.error ?? "" } });
+        await monitor.refresh(true);
+      } catch (error) {
+        if (!disposed) publish({ snapshot: { ...state.snapshot, selectionError: error instanceof Error ? error.message : "Could not save source selection" } });
+      } finally { publish({ savingSource: undefined }); }
+    },
     cancel: indexing.cancel,
     // Closing the panel still stops manual work, but does not erase its outcome
     // or the independent background activity used by the Activity Bar.
@@ -69,7 +88,7 @@ export function createSearchIndexController(options: Omit<Parameters<typeof moni
     },
     dispose: () => {
       events.actions({});
-      disposed = true; monitor.dispose(); indexing.dispose();
+      disposed = true; selectionOwner.abort(); monitor.dispose(); indexing.dispose();
     },
   };
 }

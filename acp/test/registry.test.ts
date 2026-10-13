@@ -226,6 +226,56 @@ function item(snapshot: RegistryUiSnapshot, id: string): RegistryUiItem {
 	return found;
 }
 
+test("installed agent model choices are isolated from authored files and publication, and reset uses current original", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
+	const { project, seed, h } = await scopeFixture();
+	const svc = service();
+	const installed = await act(project, { action: "install", type: "agent", name: "reviewer" }, h.ctx, svc);
+	assert.equal(installed.error, undefined);
+	assert.deepEqual(item(installed, "agent:reviewer").agentModel, { original: "test/model", parentAware: false });
+	const file = path.join(project, ".pi", "agents", "reviewer.md");
+	const authored = fs.readFileSync(file, "utf8");
+	const published = git(seed, ["rev-parse", "HEAD"]);
+	const changed = await svc.action({ cwd: project, action: "set-agent-model", type: "agent", name: "reviewer", model: "chosen/model:high" }, h.ctx);
+	assert.equal(changed.error, undefined);
+	assert.equal(item(changed, "agent:reviewer").status, "up-to-date");
+	assert.equal(item(changed, "agent:reviewer").agentModel?.override, "chosen/model:high");
+	assert.equal(fs.readFileSync(file, "utf8"), authored);
+	assert.equal(git(seed, ["rev-parse", "HEAD"]), published);
+	assert.equal(item(await act(project, { action: "refresh" }, h.ctx, service()), "agent:reviewer").agentModel?.override, "chosen/model:high");
+	const independent = path.join(project, "other");
+	fs.mkdirSync(independent);
+	assert.equal((await act(independent, { action: "refresh" }, { ...h.ctx, cwd: independent }, service())).items.some((entry) => entry.agentModel?.override), false);
+	fs.writeFileSync(file, authored.replace("test/model", "updated/model"));
+	const reset = await svc.action({ cwd: project, action: "reset-agent-model", type: "agent", name: "reviewer" }, h.ctx);
+	assert.equal(reset.error, undefined);
+	assert.deepEqual(item(reset, "agent:reviewer").agentModel, { original: "updated/model", parentAware: false });
+	assert.deepEqual(JSON.parse(fs.readFileSync(path.join(project, ".pi", "agent-model-overrides.json"), "utf8")).models, {});
+});
+
+test("model metadata hides automatic and uninstalled agents; serialized writes preserve separate choices", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
+	const root = tempRoot();
+	isolate(root);
+	const project = path.join(root, "project");
+	const agents = path.join(project, ".pi", "agents");
+	fs.mkdirSync(agents, { recursive: true });
+	for (const [name, config] of Object.entries({ first: "models: [test/first]", second: "model: test/second", auto: "description: Automatic", frontier: "modelSelection: frontier" })) {
+		fs.writeFileSync(path.join(agents, `${name}.md`), `---\n${config}\n---\nAgent\n`);
+	}
+	const svc = service();
+	const h = harness(project);
+	const initial = await act(project, { action: "refresh" }, h.ctx, svc);
+	assert.equal(item(initial, "agent:auto").agentModel, undefined);
+	assert.equal(item(initial, "agent:frontier").agentModel, undefined);
+	const results = await Promise.all(["first", "second"].map((name) => svc.action({ cwd: project, action: "set-agent-model", type: "agent", name, model: `chosen/${name}` }, h.ctx)));
+	assert.ok(results.every((result) => !result.error));
+	const models = JSON.parse(fs.readFileSync(path.join(project, ".pi", "agent-model-overrides.json"), "utf8")).models;
+	assert.deepEqual(models, { first: "chosen/first", second: "chosen/second" });
+	for (const name of ["auto", "frontier", "missing", "../bad"]) {
+		assert.ok((await svc.action({ cwd: project, action: "set-agent-model", type: "agent", name, model: "chosen/primary" }, h.ctx)).error);
+	}
+	assert.ok((await svc.action({ cwd: project, action: "set-agent-model", type: "agent", name: "first", model: "pix:auto" }, h.ctx)).error);
+});
+
 test("moves publication scope without publishing local edits, hides it from other projects, and syncs only scoped tags", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
 	const { root, project, seed, h } = await scopeFixture();
 	assert.equal((await act(project, { action: "install", type: "skill", name: "demo" }, h.ctx)).error, undefined);

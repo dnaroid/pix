@@ -12,6 +12,7 @@ function projectRecord(line) {
   catch { return { reason: "invalid_json" }; }
   if (!entry || typeof entry !== "object" || Array.isArray(entry)) return { reason: "invalid_entry" };
   const record = { type: entry.type, id: entry.id, parentId: entry.parentId, cwd: entry.cwd };
+  if (entry.type === "session_info" && typeof entry.name === "string") record.name = entry.name.length <= 2000 ? entry.name : "";
   // Bound retained metadata too; never return arbitrary objects from a worker.
   for (const value of Object.values(record)) {
     if (value !== undefined && value !== null && (typeof value !== "string" || value.length > 4096)) {

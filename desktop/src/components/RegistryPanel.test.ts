@@ -9,8 +9,22 @@ import sidebarSource from "./WorkspaceSidebar.svelte?raw";
 import sidebarViewModelSource from "../app/desktop-sidebar-view-model.svelte.ts?raw";
 import navigationSource from "../app/desktop-navigation-view-model-services.ts?raw";
 import registrySource from "../lib/registry.ts?raw";
+import modelRowSource from "./RegistryAgentModel.svelte?raw";
 
 describe("RegistryPanel orchestrator", () => {
+  it("offers project-local model selection only for eligible installed agent cards", () => {
+    expect(catalogSource).toContain("<RegistryAgentModel {item} models={agentModels}");
+    expect(modelRowSource).toContain('item.type === "agent" && item.local && state');
+    expect(modelRowSource).toContain('model.ref !== "pix:auto"');
+    expect(modelRowSource).toContain("<SettingsModelSelect");
+    expect(modelRowSource).toContain('action: "set-agent-model"');
+    expect(modelRowSource).toContain('action: "reset-agent-model"');
+    expect(modelRowSource).toContain("disabled={disabled || !state.override}");
+    expect(modelRowSource).toContain("state.override ?? state.original");
+    expect(modelRowSource).toContain("Model · new launches");
+    expect(panelSource).toContain("{agentModels}");
+    expect(sidebarSource).toContain("agentModels={modelThinkingConfigState(settingsConfigOptions).models}");
+  });
   it("composes project status, catalog and diff view without owning their markup", () => {
     expect(panelSource).toContain("<RegistryProjectStatus");
     expect(panelSource).toContain("<RegistryCatalog");

@@ -1,8 +1,9 @@
 <script lang="ts">
   import { tick, type Snippet } from "svelte";
 
-  let { label, trigger, children, onOpen = () => {} }: {
+  let { label, trigger, children, fillHeight = false, onOpen = () => {} }: {
     label: string;
+    fillHeight?: boolean;
     trigger: Snippet<[{ open: boolean; toggle: (event: MouseEvent) => void; id: string }]>;
     children: Snippet;
     onOpen?: () => void;
@@ -47,7 +48,7 @@
 
 <svelte:window onpointerdown={outside} onkeydown={keydown} />
 
-<div bind:this={root} class="relative shrink-0" role="group" aria-label={label} onfocusout={focusout}>
+<div bind:this={root} class={["relative shrink-0", fillHeight && "grid h-full items-center"]} role="group" aria-label={label} onfocusout={focusout}>
   {@render trigger({ open, toggle, id })}
   <div {id} hidden={!open} role="dialog" aria-label={label} tabindex="0"
     class="absolute right-0 bottom-full z-40 max-h-[max(0px,calc(100dvh-70px))] w-80 max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain">

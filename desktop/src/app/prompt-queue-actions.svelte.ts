@@ -8,6 +8,7 @@ import type {
 import type { createPromptRuntime } from "./prompt-runtime.svelte";
 import type { HtmlSandboxViewport } from "../lib/html-sandbox-layout";
 import { buildPromptPayload } from "./prompt-payload";
+import { queuedMessageBlocks } from "./prompt-queue-runtime.svelte";
 
 type PromptRuntime = ReturnType<typeof createPromptRuntime>;
 
@@ -155,8 +156,11 @@ export function createPromptQueueActions(options: PromptQueueActionsOptions) {
     if (!requestClient || !sessionId || actionRunning) return;
     actionRunning = true;
     options.setErrorMessage(null);
+    const releaseAutoQueue = action === "send-now" ? options.promptRuntime.holdAutoQueue(sessionId) : undefined;
+    let unsentMessage: QueuedUserMessage | undefined;
     try {
       const result = await requestClient.queueAction(sessionId, item, action);
+      if (action === "send-now") unsentMessage = result.message;
       if (requestClient !== options.client() || sessionId !== options.activeSessionId()) return;
       if (action === "edit") {
         if (!result.message) throw new Error("Queued message is no longer available.");
@@ -175,21 +179,26 @@ export function createPromptQueueActions(options: PromptQueueActionsOptions) {
       await options.promptRuntime.runPromptRequest(
         requestClient,
         sessionId,
-        [
-          ...(result.message.promptText ? [{ type: "text" as const, text: result.message.promptText }] : []),
-          ...result.message.images.map((image) => ({
-            type: "image" as const,
-            data: image.data,
-            mimeType: image.mimeType,
-          })),
-        ],
+        queuedMessageBlocks(result.message),
         [],
         transcriptMessageId,
       );
+      unsentMessage = undefined;
       void options.refreshSessions();
     } catch (error) {
       if (requestClient === options.client() && sessionId === options.activeSessionId()) options.reportError(error);
     } finally {
+      if (unsentMessage) {
+        try {
+          await requestClient.deferMessage(sessionId, queuedMessageBlocks(unsentMessage), unsentMessage.displayText);
+        } catch (error) {
+          if (requestClient === options.client() && sessionId === options.activeSessionId()) {
+            options.restoreQueuedMessage(unsentMessage);
+            options.reportError(error);
+          }
+        }
+      }
+      releaseAutoQueue?.();
       actionRunning = false;
     }
   }

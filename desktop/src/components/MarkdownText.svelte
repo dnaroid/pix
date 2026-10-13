@@ -255,11 +255,23 @@
   }
   /* The action restores known natural dimensions before a streaming rerender
      paints. Unknown images keep the compact loading fallback. */
+  .markdown-text :global(.markdown-media[data-project-media="image"]),
+  .markdown-text :global(.markdown-media[data-local-media="image"]),
+  .markdown-text :global(.markdown-media[data-project-media="video"]),
+  .markdown-text :global(.markdown-media[data-local-media="video"]) {
+    width: var(--chat-media-width, min(100%, 48rem));
+  }
+  .markdown-text :global(.markdown-media[data-project-media="video"] .markdown-media-frame),
+  .markdown-text :global(.markdown-media[data-local-media="video"] .markdown-media-frame),
+  .markdown-text :global(video.markdown-media-content) {
+    max-height: var(--chat-media-max-height, 28rem);
+  }
   .markdown-text :global(.markdown-media[data-project-media="image"] .markdown-media-frame),
   .markdown-text :global(.markdown-media[data-local-media="image"] .markdown-media-frame) {
     box-sizing: border-box;
     min-height: 0;
     flex-shrink: 0;
+    max-height: var(--chat-media-max-height, 28rem);
   }
   .markdown-text :global(.markdown-media[data-project-media="image"] .markdown-media-content),
   .markdown-text :global(.markdown-media[data-local-media="image"] .markdown-media-content) {
@@ -268,6 +280,7 @@
     min-width: 0;
     min-height: 0;
     object-fit: contain;
+    max-height: var(--chat-media-max-height, 28rem);
   }
   .markdown-text :global(a.markdown-media-frame:hover) {
     border-color: var(--input);

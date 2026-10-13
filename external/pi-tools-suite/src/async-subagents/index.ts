@@ -34,6 +34,7 @@ import type { AgentState } from "./core/types.js";
 import { publishRpcSessionState } from "../lib/rpc-session-state.js";
 import { clearSubagentsNativeWidget, updateSubagentsNativeWidget } from "./native-tui.js";
 import { ownedArtifactsPresentSync } from "./core/owned-retirement.js";
+import { todoProgressFromRpcEvent } from "./core/todo-progress.js";
 
 function isTerminalAgentStatus(status: AgentState["status"]): boolean {
 	return status === "done" || status === "failed" || status === "stopped";
@@ -236,10 +237,11 @@ export default function (pi: ExtensionAPI) {
 
 	function handleAgentRpcEvent(runDir: string, agentId: string, event: RpcEventRecord): void {
 		const activity = activityFromRpcEvent(event);
-		if (!activity) return;
+		const todoProgress = todoProgressFromRpcEvent(event);
+		if (!activity && !todoProgress) return;
 		const liveAgent = liveAgents.get(runDir)?.get(agentId);
 		if (!liveAgent) return;
-		liveAgent.lastActivity = activity;
+		if (activity) liveAgent.lastActivity = activity;
 		refreshSubagentOverlay();
 	}
 

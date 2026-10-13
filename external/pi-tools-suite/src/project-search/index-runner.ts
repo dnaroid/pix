@@ -1,12 +1,15 @@
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { listSearchSessions } from "./session-list.js";
 import { resolve } from "node:path";
 import { parseGitHistory, safeGit } from "./engine.js";
 import { indexNativeProject } from "./native.js";
-import { semanticConfiguration, semanticKey, type SemanticSearchOptions } from "./semantic-provider.js";
+import { requireSemanticIdentity, semanticConfiguration, semanticKey, type SemanticSearchOptions } from "./semantic-provider.js";
 import { indexMissingSessionVectors } from "./semantic-session-indexer.js";
 import { syncSessionChunks } from "./semantic-session-chunks.js";
 import { syncSavedTaskVectors } from "./semantic-task-indexer.js";
 import { indexCommitVectors, type CommitSemanticServices } from "./semantic-commit-indexer.js";
+import { commitIdentity } from "./semantic-commit-provider.js";
+import { beginSessionSweep, completeSessionSweep } from "./session-watermark.mjs";
 
 export const INDEX_SOURCES = ["code", "knowledge", "sessions", "tasks", "commits"] as const;
 export type IndexSource = typeof INDEX_SOURCES[number];
@@ -22,6 +25,13 @@ export interface IndexServices {
 /** Explicit document-only adapters; never manufacture a search query. */
 export async function runSourceIndex(root: string, source: IndexSource, signal: AbortSignal,
   services: IndexServices = {}): Promise<IndexResult> {
+  return withSourcePolicy(root, signal, async owned => {
+    await requireSourceEnabled(root, source, owned);
+    return runEnabledSourceIndex(root, source, owned, services);
+  });
+}
+async function runEnabledSourceIndex(root: string, source: IndexSource, signal: AbortSignal,
+  services: IndexServices): Promise<IndexResult> {
   if (source === "code" || source === "knowledge") return (services.native ?? indexNativeProject)(root, source, signal);
   const options = services.semantic ?? {};
   const config = await semanticConfiguration(options, signal);
@@ -33,12 +43,19 @@ export async function runSourceIndex(root: string, source: IndexSource, signal: 
     return { complete: true, indexed: result.indexed };
   }
   if (source === "sessions") {
-    const candidates = (await (services.sessions ?? SessionManager.list)(root, undefined, undefined, signal))
+    const pass = await beginSessionSweep(root,commitIdentity(config),signal);
+    const candidates = (await (services.sessions ? services.sessions(root, undefined, undefined, signal) : listSearchSessions(root, signal, true)))
       .filter(session => resolve(session.cwd) === root);
     signal.throwIfAborted();
-    await indexMissingSessionVectors(root, candidates, key, options, signal, config, true);
+    const titles = await indexMissingSessionVectors(root, candidates, key, options, signal, config, true);
     const result = await syncSessionChunks(root,candidates,signal,options,true);
-    return { complete:result.complete,indexed:result.indexed,
+    const complete = result.complete && titles.remaining === 0;
+    if (complete) {
+      await requireSemanticIdentity(options,config,signal);
+      await requireSourceEnabled(root,"sessions",signal);
+      await completeSessionSweep(root,pass,signal);
+    }
+    return { complete,indexed:result.indexed,
       message:`Public user/assistant text chunks: ${result.indexed}/${result.total}; unreadable sessions: ${result.skipped}.` };
   }
   const git = services.git ?? safeGit;
@@ -59,3 +76,4 @@ export async function runSourceIndex(root: string, source: IndexSource, signal: 
     if (records.length < 256) return { complete: true, indexed };
   }
 }
+import { requireSourceEnabled, withSourcePolicy } from "./source-policy.mjs";

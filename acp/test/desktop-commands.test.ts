@@ -117,6 +117,15 @@ test("desktop LSP monitoring rejects process and trust controls", () => {
 });
 
 test("desktop registry actions are workspace-scoped and validate resource/project targets", () => {
+	for (const action of ["set-agent-model", "reset-agent-model"]) {
+		const request = { cwd: "/workspace", action, type: "agent", name: "reviewer", ...(action === "set-agent-model" ? { model: "openai/model:high" } : {}) };
+		assert.deepEqual(parseDesktopRegistryActionRequest(request), request);
+		assert.throws(() => parseDesktopRegistryActionRequest({ ...request, type: "skill" }));
+		assert.throws(() => parseDesktopRegistryActionRequest({ ...request, name: "../bad" }));
+	}
+	for (const model of ["pix:auto", "", "bad ref/model", "provider/model:invalid", null]) {
+		assert.throws(() => parseDesktopRegistryActionRequest({ cwd: "/workspace", action: "set-agent-model", type: "agent", name: "reviewer", model }));
+	}
 	assert.equal(PIX_REGISTRY_ACTION_METHOD, "pix/registry/action");
 	assert.deepEqual(parseDesktopRegistryActionRequest({ cwd: "/workspace", action: "refresh", sessionId: "ignored" }), {
 		cwd: "/workspace",

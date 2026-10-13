@@ -37,7 +37,7 @@ export interface SavedTaskEmbeddingSync {
  * migration or query-triggered task uploads. */
 export function startSavedTaskEmbeddingSync(root: string, options: SemanticSearchOptions = {},
   services: TaskSyncServices = {}): SavedTaskEmbeddingSync {
-  const owner = new AbortController();
+  let owner = new AbortController();
   const defer = services.schedule ?? schedule;
   let running: Promise<void> | undefined;
   let cancelTimer: (() => void) | undefined;
@@ -62,12 +62,14 @@ export function startSavedTaskEmbeddingSync(root: string, options: SemanticSearc
   function launch(): void {
     if (stopped || running) return;
     dirty = false;
-    running = Promise.resolve().then(async () => {
-      const config = await semanticConfiguration(options, owner.signal);
+    const signal = owner.signal;
+    running = withSourcePolicy(root, signal, async signal => {
+      if (!await sourceEnabled(root, "tasks")) return;
+      const config = await semanticConfiguration(options, signal);
       if (!config) return;
-      const key = config.provider === "openrouter" ? await semanticKey(options, owner.signal) : undefined;
+      const key = config.provider === "openrouter" ? await semanticKey(options, signal) : undefined;
       if (config.provider === "openrouter" && !key) return;
-      await syncSavedTaskVectors(root, key, options, owner.signal, config);
+      await syncSavedTaskVectors(root, key, options, signal, config);
     }).catch(() => {
       if (!stopped) {
         // A later content/configuration change may retry; never loop paid failures.
@@ -79,6 +81,11 @@ export function startSavedTaskEmbeddingSync(root: string, options: SemanticSearc
     });
   }
   const unwatch = (services.watch ?? watchTaskFiles)(root, refresh);
+  const unwatchPolicy = watchSourcePolicy(root, () => {
+    owner.abort(new Error("Search source selection changed"));
+    owner = new AbortController();
+    refresh();
+  });
   // Install ownership before starting bootstrap; the factory itself is inert.
   launch();
   return {
@@ -91,6 +98,7 @@ export function startSavedTaskEmbeddingSync(root: string, options: SemanticSearc
         owner.abort(new Error("Saved-task embedding sync stopped"));
         cancelTimer?.(); cancelTimer = undefined;
         unwatch();
+        unwatchPolicy();
       }
       await running;
     },
@@ -121,3 +129,4 @@ export function registerSavedTaskEmbeddingSync(pi: ExtensionAPI, options: Semant
   });
   return () => active?.refresh();
 }
+import { sourceEnabled, watchSourcePolicy, withSourcePolicy } from "./source-policy.mjs";

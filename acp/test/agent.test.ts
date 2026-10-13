@@ -22,6 +22,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { PixAcpAgent } from "../src/acp/pix-acp-agent.js";
 import { DesktopSearchService } from "../src/search/service.js";
+import { enableSearchSources } from "./search-sources-fixture.js";
 import { SearchPreferences } from "../src/search/config.js";
 import { SEARCH_QUERY_METHOD, SEARCH_CONFIG_METHOD, SEARCH_SYNC_METHOD, SEARCH_INDEX_METHOD, SEARCH_INTENT_METHOD, SEARCH_TASKS_METHOD, type SearchQueryResponse, type SemanticTasksResponse } from "../src/search/contract.js";
 import { TASK_TYPE_CLASSIFY_METHOD } from "../src/tasks/type-classification-contract.js";
@@ -3506,6 +3507,7 @@ test("Pix Desktop search preserves controlled source errors across ACP without l
 	const artifacts = resolve(".pi/artifacts/search-backend-locked/agent");
 	await mkdir(artifacts, { recursive: true });
 	const cwd = mkdtempSync(join(artifacts, "run-"));
+	await enableSearchSources(cwd);
 	let failing = true;
 	const sourceSignals: AbortSignal[] = [];
 	const harness = createTestAdapter({
@@ -3539,6 +3541,7 @@ test("Pix Desktop title discovery does not resurrect a session deleted while nat
   const root = resolve(".pi/artifacts/session-title-search/agent-race");
   await mkdir(root, { recursive: true });
   const cwd = mkdtempSync(join(root, "run-"));
+  await enableSearchSources(cwd);
   const path = join(cwd, "session.jsonl");
   await writeFile(path, "session body never read by title search");
   let start!: () => void, finish!: () => void;
@@ -4744,7 +4747,7 @@ test("Pix Desktop auto queue waits while Pi is idle-but-admitted and can be take
 	});
 });
 
-test("Pix Desktop send-now interrupts the active run before returning the selected paused message", async () => {
+for (const source of ["deferred", "sdk-steering"] as const) test(`Pix Desktop send-now interrupts the active run before returning the selected ${source} message`, async () => {
 	const harness = createTestAdapter({
 		loadDesktopQueues: async () => ({ auto: [], deferred: [] }),
 		saveDesktopQueues: async () => {},
@@ -4759,16 +4762,23 @@ test("Pix Desktop send-now interrupts the active run before returning the select
 		});
 		await waitFor(() => pi.promptCalls.length === 1);
 		pi.emit({ type: "agent_start" } as PiEvent);
-		pi.abortSettles = true;
+		pi.state = { ...pi.state, isStreaming: true };
+		pi.abort = async () => {
+			pi.aborts++;
+			pi.emit({ type: "message_end", message: { role: "assistant", content: [], stopReason: "error", errorMessage: "This operation was aborted" } } as unknown as PiEvent);
+			pi.emit({ type: "agent_end", messages: [{ role: "assistant", content: [], stopReason: "error" }] } as unknown as PiEvent);
+			pi.state = { ...pi.state, isStreaming: false, isCompacting: false };
+			pi.emit({ type: "agent_settled" } as PiEvent);
+		};
 
-		await cx.request(PIX_DEFER_MESSAGE_METHOD, {
+		await cx.request(source === "deferred" ? PIX_DEFER_MESSAGE_METHOD : PIX_QUEUE_MESSAGE_METHOD, {
 			sessionId: created.sessionId,
 			prompt: [{ type: "text", text: "send this now" }],
 			displayText: "send this now",
 		});
 		const result = await cx.request(PIX_QUEUE_ACTION_METHOD, {
 			sessionId: created.sessionId,
-			source: "deferred",
+			source,
 			index: 0,
 			text: "send this now",
 			action: "send-now",
@@ -4776,7 +4786,34 @@ test("Pix Desktop send-now interrupts the active run before returning the select
 
 		assert.equal(pi.aborts, 1);
 		assert.equal(result.message?.displayText, "send this now");
-		assert.equal((await running).stopReason, "end_turn");
+		assert.equal((await running).stopReason, "cancelled");
+		const replacement = cx.request("session/prompt", { sessionId: created.sessionId, prompt: [{ type: "text", text: result.message!.promptText }] });
+		await waitFor(() => pi.promptCalls.length === 2);
+		assert.equal(pi.promptCalls[1]?.message, "send this now");
+		pi.emit({ type: "agent_start" } as PiEvent);
+		pi.state = { ...pi.state, isStreaming: false };
+		pi.emit({ type: "agent_settled" } as PiEvent);
+		assert.equal((await replacement).stopReason, "end_turn");
+	});
+});
+
+for (const failure of ["abort", "clearQueue"] as const) test(`Pix Desktop send-now preserves the selected payload on ${failure} rejection`, async () => {
+	let persisted: { auto: DesktopQueuedUserMessage[]; deferred: DesktopQueuedUserMessage[] } = { auto: [], deferred: [] };
+	const harness = createTestAdapter({ loadDesktopQueues: async () => persisted, saveDesktopQueues: async (_cwd, _path, queues) => { persisted = queues; } });
+	await connectAs(harness.adapter, "pix-desktop", async (cx) => {
+		const created = await cx.request("session/new", { cwd: "/tmp/queue-send-failure", mcpServers: [] }) as { sessionId: string };
+		const pi = harness.clients[0]!;
+		const running = cx.request("session/prompt", { sessionId: created.sessionId, prompt: [{ type: "text", text: "current" }] });
+		await waitFor(() => pi.promptCalls.length === 1);
+		await cx.request(PIX_DEFER_MESSAGE_METHOD, { sessionId: created.sessionId, prompt: [{ type: "text", text: "keep me" }], displayText: "keep me" });
+		pi[failure] = async () => { throw new Error(`${failure} failed`); };
+		await assert.rejects(cx.request(PIX_QUEUE_ACTION_METHOD, { sessionId: created.sessionId, source: "deferred", index: 0, text: "keep me", action: "send-now" }), /Internal error/u);
+		assert.equal(persisted.deferred.length, 1);
+		assert.equal(persisted.deferred[0]?.displayText, "keep me");
+		pi.emit({ type: "agent_start" } as PiEvent);
+		pi.state = { ...pi.state, isStreaming: false };
+		pi.emit({ type: "agent_settled" } as PiEvent);
+		assert.equal((await running).stopReason, "end_turn", "failed cancellation must not mark an ongoing run cancelled");
 	});
 });
 

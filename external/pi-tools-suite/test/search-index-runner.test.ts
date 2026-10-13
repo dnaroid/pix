@@ -22,6 +22,7 @@ function fixture() {
   const root = mkdtempSync(join(dir, "tui-index-fixture-")); roots.push(root);
   process.env.HOME = root;
   mkdirSync(join(root, ".pi"));
+  enableSearchSources(root);
   const batches: string[][] = [];
   const services: IndexServices = { semantic: { loadConfig: async () => config,
     sessionMapPath: join(root, "absent-map.json"), embedQuery: async () => { throw new Error("No query allowed"); },
@@ -160,14 +161,14 @@ test("configuration switch during a batch cannot publish incompatible vectors", 
 
 test("status never creates storage; rejects redirected caches and shows stored—not coverage—counts", async () => {
   const f = fixture();
-  expect(await readIndexStatus(f.root)).toHaveLength(5);
+  expect(await readIndexStatus(f.root)).toHaveLength(6);
   expect(existsSync(join(f.root, ".pi/search"))).toBe(false);
   taskCorpus(f.root, 1); await runSourceIndex(f.root, "tasks", signal(), f.services);
   const before = f.batches.length;
   expect((await readIndexStatus(f.root)).join(" ")).toContain("tasks: 1 stored items, 1 stored vectors");
   expect(f.batches).toHaveLength(before);
   symlinkSync(join(f.root, ".pi/search/tasks.sqlite"), join(f.root, ".pi/search/code.sqlite"));
-  expect((await readIndexStatus(f.root))[0]).toBe("code: stored index unavailable");
+  expect(await readIndexStatus(f.root)).toContain("code: stored index unavailable");
 });
 
 test("unconfigured histories do not initialize caches; native commands pass only document requests", async () => {
@@ -181,3 +182,4 @@ test("unconfigured histories do not initialize caches; native commands pass only
   };
   for (const source of ["code", "knowledge"] as const) expect(await runSourceIndex(f.root, source, signal(), f.services)).toMatchObject({ source, complete: true });
 });
+import { enableSearchSources } from "./support/search-sources.js";

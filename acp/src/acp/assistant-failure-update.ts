@@ -8,11 +8,14 @@ export const ASSISTANT_FAILURE_MESSAGE_PREFIX = "pix-system:error:";
  * message in a clearly identified system row instead of losing it at `message_end`.
  * Both live events and persisted history use this conversion.
  */
-export function assistantFailureUpdate(message: unknown, fallbackId = "unknown"): SessionUpdate | undefined {
+export function assistantFailureUpdate(message: unknown, fallbackId = "unknown", cancellationRequested = false): SessionUpdate | undefined {
 	if (!message || typeof message !== "object") return undefined;
 	const record = message as Record<string, unknown>;
 	if (record.role !== "assistant" || record.stopReason !== "error") return undefined;
 	const detail = typeof record.errorMessage === "string" ? record.errorMessage.trim() : "";
+	// Some providers report caller cancellation as `error`, not `aborted`.
+	// Only a known cancellation on this run can suppress that diagnostic.
+	if (cancellationRequested && /^(?:AbortError:\s*)?(?:This operation was aborted|The operation was aborted|Request was aborted|Operation aborted)\.?$/iu.test(detail)) return undefined;
 	const timestamp = record.timestamp;
 	const id = typeof timestamp === "number" && Number.isFinite(timestamp) && timestamp > 0
 		? String(timestamp)

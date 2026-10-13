@@ -14,6 +14,8 @@ export interface PiToolsSuiteConfig {
 	enabled: boolean;
 	disabledModules: string[];
 	disabledBuiltinAgents: string[];
+	/** Primary model overrides for explicit-model bundled roles; project replacements are unaffected. */
+	builtinAgentModels: Record<string, string>;
 	todoThinking: boolean;
 	todoThinkingOverrides: Record<string, TodoThinkingPolicy>;
 	/** Vision-capable model used by the coding-discipline lookup tool; unset disables lookup. */
@@ -41,6 +43,7 @@ type MutableConfig = {
 	enabled: boolean;
 	disabledModules: Set<string>;
 	disabledBuiltinAgents: Set<string>;
+	builtinAgentModels: Map<string, string>;
 	todoThinking: boolean;
 	todoThinkingOverrides: Map<string, TodoThinkingPolicy>;
 	lookupModel: string | undefined;
@@ -147,6 +150,20 @@ function mergeTodoThinkingOverrides(config: MutableConfig, raw: unknown): void {
 	}
 }
 
+function mergeBuiltinAgentModels(config: MutableConfig, raw: unknown): void {
+	if (!isRecord(raw)) return;
+	for (const [name, value] of Object.entries(raw)) {
+		if (!/^[a-z0-9][a-z0-9_-]*$/u.test(name)) continue;
+		if (value === null) {
+			config.builtinAgentModels.delete(name);
+			continue;
+		}
+		if (typeof value !== "string") continue;
+		const ref = value.trim();
+		if (/^[^\s/:]+\/[^\s:]+(?::(?:off|minimal|low|medium|high|xhigh|max))?$/u.test(ref)) config.builtinAgentModels.set(name, ref);
+	}
+}
+
 function boolFromEnv(value: string | undefined): boolean | undefined {
 	if (value === undefined) return undefined;
 	const normalized = value.trim().toLowerCase();
@@ -220,6 +237,7 @@ function mergeConfigLayer(config: MutableConfig, raw: Record<string, unknown>, k
 	if (typeof raw.enabled === "boolean") config.enabled = raw.enabled;
 	if (typeof raw.todoThinking === "boolean") config.todoThinking = raw.todoThinking;
 	mergeTodoThinkingOverrides(config, raw.todoThinkingOverrides);
+	mergeBuiltinAgentModels(config, raw.builtinAgentModels);
 	if (Object.prototype.hasOwnProperty.call(raw, "lookupModel")) config.lookupModel = normalizeLookupModel(raw.lookupModel);
 	if (Object.prototype.hasOwnProperty.call(raw, "lookupFallbackModels")) config.lookupFallbackModels = normalizeModelList(raw.lookupFallbackModels);
 	if (Object.prototype.hasOwnProperty.call(raw, "frontierModels")) {
@@ -300,6 +318,7 @@ export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: 
 		enabled: true,
 		disabledModules: new Set([...DEFAULT_DISABLED_MODULES].filter((name) => knownModules.has(name))),
 		disabledBuiltinAgents: new Set(),
+		builtinAgentModels: new Map(),
 		todoThinking: false,
 		todoThinkingOverrides: new Map([...DEFAULT_TODO_THINKING_OVERRIDES].map(([key, range]) => [key, { ...range }])),
 		lookupModel: undefined,
@@ -327,6 +346,7 @@ export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: 
 		enabled: config.enabled,
 		disabledModules: [...config.disabledModules].sort(),
 		disabledBuiltinAgents: [...config.disabledBuiltinAgents].sort(),
+		builtinAgentModels: Object.fromEntries(config.builtinAgentModels),
 		todoThinking: config.todoThinking,
 		todoThinkingOverrides: Object.fromEntries(config.todoThinkingOverrides),
 		...(config.lookupModel ? { lookupModel: config.lookupModel } : {}),

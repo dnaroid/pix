@@ -10,6 +10,7 @@ export interface IndexResult {
 }
 export interface IndexActionState {
   running: boolean;
+  stopping?: boolean;
   result?: IndexResult;
   error?: string;
   cancelled?: boolean;
@@ -52,7 +53,12 @@ export function createSearchIndexActions(options: {
         if (!closed) options.onSettled();
       }
     },
-    cancel(source: SearchSourceId) { active.get(source)?.abort(); },
+    cancel(source: SearchSourceId) {
+      const controller = active.get(source);
+      if (!controller || controller.signal.aborted) return;
+      controller.abort();
+      if (!closed && state[source]?.running) publish(source, { ...state[source]!, stopping: true });
+    },
     reset() {
       generation++;
       for (const controller of active.values()) controller.abort();
@@ -65,7 +71,7 @@ export function createSearchIndexActions(options: {
 
 export function indexActionLabel(action?: IndexActionState): string {
   if (action?.running) return "Stop";
-  if (action?.result && !action.result.complete) return "Continue";
+  if (action?.cancelled || (action?.result && !action.result.complete)) return "Continue";
   return "Index";
 }
 
@@ -77,6 +83,7 @@ export function indexOutcomeLabel(action?: IndexActionState): string | undefined
 }
 
 export function indexResultDetail(action?: IndexActionState): string | undefined {
+  if (action?.stopping) return "Stopping this run; waiting for its transport to finish. Saved batches are retained.";
   if (action?.running) return "Indexing this source; closing the panel stops this manual run";
   if (action?.error) return action.error;
   const result = action?.result;

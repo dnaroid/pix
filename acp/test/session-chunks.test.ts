@@ -27,7 +27,7 @@ const config = (embed:(texts:string[],signal:AbortSignal)=>Promise<number[][]>) 
   ({identity:"mock-v1",dimension:2,authorized:async()=>true,embed});
 
 test("shared protocol twins stay byte-identical apart from module extension",async()=>{
-  for(const name of ["session-transcript","session-record","session-text","session-chunks","session-chunk-sync","search-diagnostics","session-index-progress"]) {
+  for(const name of ["session-transcript","session-record","session-text","session-chunks","session-chunk-sync","search-diagnostics","session-index-progress","session-idle","source-policy","session-discovery","session-revisions","session-index-revision"]) {
     for(const [a,b] of [[".mjs",".js"],[".d.mts",".d.ts"]]) {
       const source=await readFile(new URL(`../../external/pi-tools-suite/src/project-search/${name}${a}`,import.meta.url),"utf8");
       assert.equal(await readFile(new URL(`../src/search/${name}${b}`,import.meta.url),"utf8"),source.replaceAll('.mjs"','.js"'));

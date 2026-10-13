@@ -9,6 +9,18 @@ import { loadRegistryConfig } from "./config-reader.js";
 import { loadRuntimeConfig } from "./config.js";
 import { resolvePublicationProjectKey, samePublication } from "./publication-location.js";
 import { localTasksExist } from "./task-database.js";
+import { readAgentModelOverrides, readAgentModelState } from "./agent-models.js";
+
+async function withAgentModels(cwd: string, statuses: RegistryStatus[], items: RegistryUiItem[]): Promise<RegistryUiItem[]> {
+	const overrides = await readAgentModelOverrides(cwd);
+	const paths = new Map(statuses.filter((status) => status.type === "agent" && status.local)
+		.map((status) => [status.name, status.local!.path]));
+	return Promise.all(items.map(async (item) => {
+		const file = item.type === "agent" ? paths.get(item.name) : undefined;
+		const agentModel = file ? await readAgentModelState(file, overrides[item.name]) : undefined;
+		return agentModel ? { ...item, agentModel } : item;
+	}));
+}
 
 export async function collectStatuses(executor: RegistryExecutor, project: ProjectContext, runtime: RegistryRuntime): Promise<RegistryStatus[]> {
 	const projectKey = await resolvePublicationProjectKey(executor, project);
@@ -306,7 +318,7 @@ export async function collectRegistryUiSnapshot(
 			version: 1,
 			configured: false,
 			branch: config.branch,
-			items: registryUiItems(statuses, undefined, false),
+			items: await withAgentModels(cwd, statuses, registryUiItems(statuses, undefined, false)),
 			checkedAt,
 			...(error ? { error } : {}),
 		};
@@ -326,7 +338,7 @@ export async function collectRegistryUiSnapshot(
 		branch: runtime.branch,
 		...(projectStatus.projectKey ? { projectKey: projectStatus.projectKey } : {}),
 		...(projectStatus.issue ? { projectIssue: projectStatus.issue } : {}),
-		items: registryUiItems(statuses, projectStatus),
+		items: await withAgentModels(cwd, statuses, registryUiItems(statuses, projectStatus)),
 		checkedAt,
 		...(snapshotError ? { error: snapshotError } : {}),
 	};

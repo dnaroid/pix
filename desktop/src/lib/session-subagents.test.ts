@@ -37,6 +37,7 @@ describe("desktop session subagents", () => {
         id: "review",
         status: "running",
         pid: 42,
+        todoProgress: { completed: 1, total: 5 },
         lastActivity: { label: "Grep", at: "2026-01-01T00:01:02Z" },
       }],
       tasks: [{ id: "review", task: "Review transport", subagentType: "frontier-review", model: "openai/gpt-5" }],
@@ -83,6 +84,14 @@ describe("desktop session subagents", () => {
     const preview = sessionSubagentTaskPreview(runs[0]!, "agent-1");
     expect(preview?.task).toBe("Inspect API");
     expect(sessionSubagentModelLabel(preview)).toBe("model-a");
+  });
+
+  it("validates optional child-local plan counters", () => {
+    for (const progress of [{ completed: -1, total: 5 }, { completed: 6, total: 5 }, { completed: 1.5, total: 5 }, { completed: 0, total: Infinity }, { completed: 0, total: 9007199254740992 }]) {
+      expect(sessionSubagentSnapshot(notification(snapshot([{ runDir: "/run", agents: [{ id: "worker", status: "running", todoProgress: progress }] }])))).toBeUndefined();
+    }
+    const empty = snapshot([{ runDir: "/run", agents: [{ id: "worker", status: "running", todoProgress: { completed: 0, total: 0 } }] }]);
+    expect(sessionSubagentSnapshot(notification(empty))).toBeDefined();
   });
 
   it("accepts role and icon fields on task previews and rejects invalid metadata", () => {

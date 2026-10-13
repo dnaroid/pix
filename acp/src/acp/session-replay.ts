@@ -94,7 +94,8 @@ export async function replaySessionHistory(
 }
 
 /**
- * Build the Desktop history payload without embedding tool inputs/results.
+ * Build the Desktop history payload without embedding ordinary tool inputs/results.
+ * Question input/results stay eager because they form visible transcript messages.
  * Tool rows stay fully identifiable and keep their final status, while their
  * heavy payload is retained separately for lazy retrieval when expanded.
  */
@@ -165,6 +166,11 @@ export function deferredSessionHistoryFromMessages(
 			const failure = assistantFailureUpdate(message, messageId);
 			if (failure) updates.push(failure);
 		} else if (message.role === "toolResult") {
+			if ((message as { toolName?: unknown }).toolName === "question") {
+				const notification = toolResultNotification(context, message);
+				if (notification) updates.push(notification.update);
+				continue;
+			}
 			const record = message as { toolCallId?: unknown; isError?: unknown };
 			if (typeof record.toolCallId !== "string") continue;
 			const toolCallId = record.toolCallId;
@@ -281,7 +287,7 @@ function toolCallNotification(
 		title: toolTitle(name || "tool", args),
 		kind: toolKind(name || "tool") as ToolKind,
 		status: "in_progress",
-		...(includeRawInput ? { rawInput: args } : {}),
+		...(includeRawInput || name === "question" ? { rawInput: args } : {}),
 		locations: toolLocations(context, name, args),
 	} as SessionUpdate, timing);
 	return { sessionId: context.sessionId, update };

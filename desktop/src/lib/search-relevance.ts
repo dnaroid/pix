@@ -34,7 +34,7 @@ function coverage(words: readonly string[], text: readonly string[]): number {
 /** BM25 uses indexed result content when supplied, but no extra file reads. */
 export function rankSearchHits(
   hits: readonly SearchHit[], query: string, settings: readonly SearchSetting[], semanticSettings: boolean,
-  partialQuery = false,
+  partialQuery = false, limit = 60,
 ): SearchHit[] {
   const rawWords = tokens(patchSearchTerm(query) ?? query, partialQuery);
   const meaningful = rawWords.filter(word => !STOP_WORDS.has(word));
@@ -91,5 +91,5 @@ export function rankSearchHits(
   const ranked = documents.map((document, index) => ({ ...document, bm25: scores[index]! })).filter(document => document.eligible);
   ranked.sort((a, b) => b.bm25 - a.bm25 || Number(b.exact) - Number(a.exact)
     || a.rank - b.rank || kinds.indexOf(a.hit.kind) - kinds.indexOf(b.hit.kind) || a.hit.id.localeCompare(b.hit.id));
-  return ranked.slice(0, 60).map(({ hit }) => hit);
+  return ranked.slice(0, limit).map(({ hit }) => hit);
 }

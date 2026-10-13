@@ -10,6 +10,8 @@ import { openVectorStore } from "../src/project-search/native-vector-store.mjs";
 import { repositoryEmbeddingSettings } from "../src/project-search/native-embedding-provider.mjs";
 import type { NativeIndexRequest, NativeIndexResponse } from "../src/project-search/native-contract.ts";
 import { removeDirsWithRetry } from "./support/fs-retry.js";
+import { enableSearchSources } from "./support/search-sources.js";
+import { writeSourcePolicy } from "../src/project-search/source-policy.mjs";
 
 const artifacts = fileURLToPath(new URL("../../../.pi/artifacts/", import.meta.url));
 const cli = fileURLToPath(new URL("../src/project-search/native-cli.mjs", import.meta.url));
@@ -29,6 +31,7 @@ async function fixture() {
   roots.push(home); process.env.HOME = home;
   const root = join(home, "project");
   await mkdir(root);
+  enableSearchSources(root);
   await put(root, "../.config/pi/pi-tools-suite.jsonc", JSON.stringify({ search: { embedding: config } }));
   return root;
 }
@@ -279,9 +282,23 @@ describe("explicit native document indexing", () => {
       expect(fake.calls).toEqual([]);
       expect(cached(root)).toBe(0);
     } finally {
-      controller.abort(); await pending;
-      if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath;
+      try { controller.abort(); await pending?.catch(() => {}); }
+      finally { if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath; }
     }
+  });
+
+  test("source-policy revocation returns an incomplete index result without publishing late vectors", async () => {
+    const root = await fixture(), fake = provider();
+    await put(root, "a.ts", "needle");
+    const result = await indexNative(root, request(), { ...fake, embed: async (inputs: string[], cfg: any) => {
+      await writeSourcePolicy(root, "code", false);
+      await writeSourcePolicy(root, "code", true);
+      return fake.embed(inputs, cfg);
+    } });
+    expect(result).toMatchObject({ source: "code", complete: false, message: expect.any(String) });
+    expect(result).not.toHaveProperty("indexed");
+    expect(cached(root)).toBe(0);
+    expect((await indexNative(root, request(), fake)).complete).toBe(true);
   });
 
   test("cancellation/revocation abort owned work, release leases, and reject late vectors", async () => {

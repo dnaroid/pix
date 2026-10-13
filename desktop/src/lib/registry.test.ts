@@ -24,6 +24,26 @@ import {
 } from "./registry";
 
 describe("registry session state", () => {
+  it("retains installed agent model metadata without changing status and rejects malformed metadata", () => {
+    const agent = {
+      id: "agent:reviewer", type: "agent", name: "reviewer", status: "up-to-date",
+      statusLabel: "SYNCED", icon: "✓", local: true, remote: true, actions: ["uninstall"],
+      agentModel: { original: "original/model", override: "chosen/model", parentAware: true },
+    };
+    const parse = (item: unknown) => registrySnapshotFromSessionState({
+      sessionId: "session-1", channel: REGISTRY_STATE_CHANNEL,
+      data: { version: 1, configured: false, branch: "main", checkedAt: "now", items: [item] },
+    });
+    expect(parse(agent)?.items[0]?.agentModel).toEqual(agent.agentModel);
+    expect(parse(agent)?.items[0]?.status).toBe("up-to-date");
+    for (const agentModel of [null, { original: "" }, { original: "a/b", parentAware: "yes" }, { original: "a/b", parentAware: false, override: 42 }]) {
+      expect(parse({ ...agent, agentModel })).toBeUndefined();
+    }
+    expect(parse({ ...agent, type: "skill" })).toBeUndefined();
+    expect(parse({ ...agent, local: false })).toBeUndefined();
+    const { agentModel: _model, ...ordinary } = agent;
+    expect(parse(ordinary)?.items[0]?.agentModel).toBeUndefined();
+  });
   it("marks only exact active skill commands and suppresses duplicate project installation", () => {
     const skill: RegistryItem = {
       id: "skill:pdf", type: "skill", name: "pdf", status: "not-installed",

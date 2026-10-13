@@ -1,4 +1,5 @@
 <script lang="ts">
+  import SubagentTodoProgress from "./SubagentTodoProgress.svelte";
   import Brain from "@lucide/svelte/icons/brain";
   import CheckCircle2 from "@lucide/svelte/icons/check-circle-2";
   import Circle from "@lucide/svelte/icons/circle";
@@ -127,7 +128,7 @@
 
 {#if visible}
   <div
-    class="flex shrink-0 items-center gap-0.5"
+    class="flex h-full shrink-0 items-center gap-0.5"
     role="group"
     aria-label={"Session activity. " + activityLabel}
     data-session-activity-summary
@@ -139,11 +140,11 @@
       {@const AgentIcon = agentIcon(indicator.preview?.icon)}
       {@const task = indicator.preview?.task?.trim() || indicator.preview?.scope?.trim() || "Task unavailable"}
       {@const role = indicator.preview?.subagentType?.trim() || "auto"}
-      <StatusBarPopover label={"Subagent " + indicator.agent.id}>
+      <StatusBarPopover label={"Subagent " + indicator.agent.id} fillHeight>
         {#snippet trigger({ open, toggle, id })}
         <button
           class={[
-            "grid h-6 w-6 place-items-center rounded-sm bg-transparent transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring",
+            "relative grid h-full w-6 place-items-center rounded-sm bg-transparent transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring",
             subagentStatusTone(indicator.agent.status),
           ]}
           type="button"
@@ -153,6 +154,20 @@
           aria-controls={id}
           onclick={toggle}
         >
+          {#if indicator.agent.todoProgress && indicator.agent.todoProgress.total > indicator.agent.todoProgress.completed}
+            <span
+              class="pointer-events-none absolute top-[1px] right-0.5 left-0.5 h-[2px] overflow-hidden rounded-full bg-muted-foreground/25"
+              role="progressbar"
+              aria-label={"Subagent " + indicator.agent.id + " plan"}
+              aria-valuemin="0"
+              aria-valuemax={indicator.agent.todoProgress.total}
+              aria-valuenow={indicator.agent.todoProgress.completed}
+              data-session-subagent-status-progress
+            ><span
+                class="block h-full bg-tool-info"
+                style:width={`${indicator.agent.todoProgress.completed / indicator.agent.todoProgress.total * 100}%`}
+              ></span></span>
+          {/if}
           <AgentIcon
             class={[
               "h-3.5 w-3.5",
@@ -184,8 +199,9 @@
                   {formatSessionSubagentElapsed(indicator.agent.startedAt, subagentSnapshot?.checkedAt ?? Date.now())}
                 </span>
               </div>
-              <div class="mt-0.5 shrink-0 truncate font-mono text-xs text-foreground" aria-label={`${indicator.agent.id} · ${indicator.runDir}`} data-session-subagent-name>
-                {indicator.agent.id}
+              <div class="mt-0.5 flex min-w-0 shrink-0 items-center justify-between gap-2 font-mono text-xs text-foreground" aria-label={`${indicator.agent.id} · ${indicator.runDir}`} data-session-subagent-name>
+                <span class="min-w-0 truncate">{indicator.agent.id}</span>
+                <SubagentTodoProgress progress={indicator.agent.todoProgress} />
               </div>
               <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard access to scrollable task details) -->
               <div
@@ -246,7 +262,10 @@
                 <span class={subagentStatusTone(indicator.agent.status)}>{subagentStatusLabel(indicator.agent.status)}</span>
                 <span>{formatSessionSubagentElapsed(indicator.agent.startedAt, subagentSnapshot?.checkedAt ?? Date.now())}</span>
               </div>
-              <div class="break-words font-mono text-xs">{indicator.agent.id}</div>
+              <div class="flex min-w-0 items-center justify-between gap-2 font-mono text-xs">
+                <span class="min-w-0 break-words">{indicator.agent.id}</span>
+                <SubagentTodoProgress progress={indicator.agent.todoProgress} />
+              </div>
               <p class="break-words text-xs text-muted-foreground">{indicator.preview?.task?.trim() || indicator.preview?.scope?.trim() || "Task unavailable"}</p>
               <div class="flex items-center gap-1 text-xs">
                 <ModelProviderIcon provider={indicator.preview?.model ?? ""} />

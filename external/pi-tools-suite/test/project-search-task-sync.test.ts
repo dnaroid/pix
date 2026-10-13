@@ -12,6 +12,7 @@ import { searchProject } from "../src/project-search/engine.js";
 import type { SemanticSearchOptions } from "../src/project-search/semantic-provider.js";
 import type { CommitEmbeddingConfig } from "../src/project-search/semantic-commit-provider.js";
 import { removeDirsWithRetry } from "./support/fs-retry.js";
+import { enableSearchSources } from "./support/search-sources.js";
 
 const config: CommitEmbeddingConfig = { provider: "ollama", model: "fake/task-sync", dimension: 4,
   queryPrefix: "", documentPrefix: "", baseUrl: "http://127.0.0.1:19999" };
@@ -25,6 +26,7 @@ function fixture(count = 1) {
   const root = mkdtempSync(join(scratch, "run-"));
   roots.push(root);
   mkdirSync(join(root, ".git")); mkdirSync(join(root, ".pi"));
+  enableSearchSources(root);
   const filename = join(root, ".pi/tasks.sqlite");
   const db = new Database(filename);
   db.exec(`PRAGMA journal_mode=WAL;

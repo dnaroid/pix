@@ -224,7 +224,7 @@ describe("Markdown natural image reservation", () => {
     image.naturalWidth = 1600;
     image.naturalHeight = 400;
     image.listeners.get("load")!();
-    const style = "width: min(100%, 1600px, 112rem); aspect-ratio: 1600 / 400;";
+    const style = "width: min(100%, 1600px, calc(var(--chat-media-max-height, 28rem) * 4)); aspect-ratio: 1600 / 400;";
     expect(first.children[0]!.getAttribute("style")).toBe(style);
 
     for (let i = 0; i < 4; i++) {
@@ -292,7 +292,7 @@ describe("Markdown natural image reservation", () => {
     // A late intrinsic measurement may be reused by a newer generation, but
     // never touches obsolete nodes or a destroyed action.
     expect(next.children[0]!.getAttribute("style")).toBe(operation === "destroy" ? null
-      : "width: min(100%, 100px, 56rem); aspect-ratio: 100 / 50;");
+      : "width: min(100%, 100px, calc(var(--chat-media-max-height, 28rem) * 2)); aspect-ratio: 100 / 50;");
     action.destroy();
   });
 

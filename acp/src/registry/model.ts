@@ -155,6 +155,7 @@ export type ProjectStatusBundle = {
 export type RegistryUiAction = "install" | "update" | "push" | "pull" | "uninstall" | "remove" | "make-local" | "tags" | "toggle-scope";
 
 export interface RegistryUiItem {
+	agentModel?: { original: string; override?: string; parentAware: boolean };
 	readonly id: string;
 	readonly type: ResourceType | "project";
 	readonly name: string;

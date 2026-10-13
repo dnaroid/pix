@@ -12,6 +12,9 @@ import type { DesktopSessionTransitionServices } from "./desktop-session-transit
 import { createPromptQueueActions } from "./prompt-queue-actions.svelte";
 import { createPromptSubmit } from "./prompt-submit";
 import { createEditedMessageSubmit } from "./edited-message-submit";
+import { invoke } from "@tauri-apps/api/core";
+import type { ProjectFilePreview } from "../lib/project-files";
+import { createSessionHandoff } from "./session-handoff.svelte";
 
 type AttachmentDrafts = ReturnType<typeof createAttachmentDraftController>;
 
@@ -41,6 +44,8 @@ type DesktopPromptActionServicesOptions = {
   prompt: DesktopPromptServices;
   attachments: AttachmentDrafts;
   sessionMutationRunning: () => boolean;
+  handoffAllowed: () => boolean;
+  retargetSessionAnchors: (sourceId: string, targetId: string) => void;
   attachmentDraftKey: () => string;
   promptText: () => string;
   promptAttachments: () => Attachment[];
@@ -187,7 +192,60 @@ export function createDesktopPromptActionServices(options: DesktopPromptActionSe
     reportError: options.reportError,
   });
 
-  return { queue, submit, prepareEditedMessage };
+  const handoff = createSessionHandoff({
+    client: options.client,
+    workspace: options.workspace,
+    sessionId: () => options.state.sessionId,
+    canStart: () => options.handoffAllowed() && !options.sessionMutationRunning()
+      && !options.sessions.history.loading && !submit.editActive
+      && !!options.state.sessionId && options.sessions.runtime.isReady(options.state.sessionId)
+      && !options.prompt.runtime.isRunning(options.state.sessionId)
+      && options.prompt.runtime.agentState(options.state.sessionId) === "idle"
+      && !(options.prompt.runtime.queueItemsBySession.get(options.state.sessionId)?.length),
+    captureOwnership: () => {
+      const historyGeneration = options.sessions.history.generation;
+      const ownsRuntime = options.sessions.runtime.captureOwnership(options.state.sessionId!);
+      return () => ownsRuntime() && historyGeneration === options.sessions.history.generation;
+    },
+    isIdle: (sessionId) => !options.prompt.runtime.isRunning(sessionId)
+      && options.prompt.runtime.agentState(sessionId) === "idle"
+      && !(options.prompt.runtime.queueItemsBySession.get(sessionId)?.length),
+    holdAutoQueue: options.prompt.runtime.holdAutoQueue,
+    runPrompt: (client, sessionId, text) => {
+      const id = options.nextLocalMessageId();
+      appendUserMessage(text, id, []);
+      void options.scrollToLatest();
+      return options.prompt.runtime.runPromptRequestWithResult(client, sessionId,
+        [{ type: "text", text }], id);
+    },
+    readHandoff: async (workspace, path) => {
+      const result = await invoke<{ kind: "text"; file: ProjectFilePreview } | { kind: "external" }>(
+        "read_preview_file", { workspace, path },
+      );
+      if (result.kind !== "text") throw new Error(`Handoff file cannot be read: ${path}. The current session was kept.`);
+      return result.file.content;
+    },
+    commitSession: (sourceId, newId, config) => {
+      options.state.saveActiveTranscript(sourceId);
+      options.transitions.composerDrafts.switchTo(sourceId, newId);
+      options.state.setSessionId(newId);
+      options.state.initializeActiveConversation(newId, config, true);
+      options.sessions.runtime.markReady(newId, config);
+      // The fresh session has no history to hydrate; retire prior requests
+      // without leaving the live composer in a history-loading state.
+      options.sessions.history.cancel();
+      options.sessions.history.markFullyLoaded(newId);
+      options.sessions.catalog.ensureProvisional(newId, options.workspace());
+      options.sessions.tabs.replace(sourceId, newId);
+      options.sessions.tabs.rememberActive(options.workspace(), newId);
+      options.retargetSessionAnchors(sourceId, newId);
+      void options.sessions.catalog.refresh();
+    },
+    discardSession: options.sessions.runtime.forget,
+    reportError: options.reportError,
+  });
+
+  return { queue, submit, prepareEditedMessage, handoff };
 }
 
 export type DesktopPromptActionServices = ReturnType<typeof createDesktopPromptActionServices>;

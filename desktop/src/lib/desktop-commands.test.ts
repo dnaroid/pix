@@ -13,6 +13,9 @@ describe("desktop commands", () => {
       scope: "session",
     });
     expect(isDesktopCommandId("message.undo")).toBe(true);
+    expect(desktopCommandDefinition("composer.handoff")).toMatchObject({
+      scope: "composer",
+    });
     expect(desktopCommandDefinition("editor.close")).toMatchObject({
       label: "Close Active Editor",
       scope: "editor",

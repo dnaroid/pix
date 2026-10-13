@@ -3,6 +3,29 @@ import type { AcpClient } from "../lib/acp-client";
 import { createPromptRunLifecycle } from "./prompt-run-lifecycle.svelte";
 
 describe("prompt run notification lifecycle", () => {
+  it.each(["current", "cancel", "clear", "reset", "client", "new run"] as const)(
+    "exposes completion ownership for handoff (%s)", async (change) => {
+      let finish!: (value: { stopReason: "end_turn" }) => void;
+      const pending = new Promise<{ stopReason: "end_turn" }>((resolve) => { finish = resolve; });
+      const client = { prompt: vi.fn(() => pending), cancel: vi.fn().mockResolvedValue(undefined) } as unknown as AcpClient;
+      let activeClient = client;
+      const runs = createPromptRunLifecycle({
+        client: () => activeClient, activeSessionId: () => "source", reportError: vi.fn(),
+        bindPromptSessionEntry: vi.fn(), finalizeTranscriptActivity: vi.fn(), flushAutoQueue: vi.fn(),
+      });
+      const result = runs.runPromptRequestWithResult(client, "source", []);
+      await vi.waitFor(() => expect(client.prompt).toHaveBeenCalledOnce());
+      if (change === "cancel") await runs.cancelActivePrompt();
+      if (change === "clear") runs.clearSession("source");
+      if (change === "reset") runs.reset();
+      if (change === "client") activeClient = {} as AcpClient;
+      finish({ stopReason: "end_turn" });
+      const completion = await result;
+      if (change === "new run") runs.beginRun("source");
+      expect(completion?.isCurrent() ?? false).toBe(change === "current");
+      if (change === "current") expect(completion?.stopReason).toBe("end_turn");
+    },
+  );
   it.each(["current", "clear session", "reset", "replace client"] as const)(
     "binds the submitted prompt rather than the final steering entry (%s)",
     async (transition) => {

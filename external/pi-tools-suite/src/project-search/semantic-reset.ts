@@ -6,7 +6,6 @@ const namespaces = [
   { meta: "pix_task_index_meta", vectors: "pix_task_vectors", columns: "content_hash:TEXT,vector:BLOB" },
   { meta: "pix_session_meta", vectors: "pix_session_vectors", columns: "title_hash:TEXT,vector:BLOB" },
   { meta: "pix_commit_meta", vectors: "pix_commit_vectors", columns: "hash:TEXT,vector:TEXT" },
-  { meta: "metadata", vectors: "vectors", columns: "hash:TEXT,vector:BLOB" },
 ] as const;
 
 function validateTable(db: SqlDatabase, table: string, columns: string): boolean {
@@ -22,28 +21,24 @@ function validateTable(db: SqlDatabase, table: string, columns: string): boolean
   return true;
 }
 
-/** Explicit user command only. Only current source caches are opened; canonical history is retained. */
+/** Project-local reset must not delete the shared Settings cache or canonical history. */
 export async function resetHistoryVectors(root: string, signal: AbortSignal): Promise<number> {
   let count = 0;
-  for (const source of ["settings", "sessions", "tasks", "commits"] as const) count += await resetSource(root, source, signal);
+  for (const source of ["sessions", "tasks", "commits"] as const) count += await resetSource(root, source, signal);
   return count;
 }
-async function resetSource(root: string, source: "settings" | "sessions" | "tasks" | "commits", signal: AbortSignal): Promise<number> {
+async function resetSource(root: string, source: "sessions" | "tasks" | "commits", signal: AbortSignal): Promise<number> {
   const exists = await lstat(sourcePath(root, source)).catch(error => {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;
   });
   if (!exists) return 0;
   return withSearchIndexWriter(root, signal, async db => {
-    const table = { settings: "metadata", sessions: "pix_session_meta", tasks: "pix_task_index_meta", commits: "pix_commit_meta" }[source];
+    const table = { sessions: "pix_session_meta", tasks: "pix_task_index_meta", commits: "pix_commit_meta" }[source];
     const present = namespaces.filter(namespace => namespace.meta === table).filter(namespace => {
       const meta = validateTable(db, namespace.meta, "key:TEXT,value:TEXT");
       const vectors = validateTable(db, namespace.vectors, namespace.columns);
       if (meta !== vectors) throw new Error("Incomplete semantic cache schema");
-      if (meta && namespace.meta === "metadata"
-        && db.prepare("SELECT value FROM metadata WHERE key='schema'").get()?.value !== "2") {
-        throw new Error("Unknown settings cache schema");
-      }
       return meta;
     });
     const targets = new Set<string>(present.flatMap(namespace => [namespace.meta, namespace.vectors]));
@@ -57,9 +52,7 @@ async function resetSource(root: string, source: "settings" | "sessions" | "task
     for (const namespace of present) {
       count += Number(db.prepare(`SELECT COUNT(*) AS count FROM ${namespace.vectors}`).get()?.count ?? 0);
       db.exec(`DELETE FROM ${namespace.vectors}`);
-      if (namespace.meta === "metadata") {
-        db.exec("DELETE FROM metadata WHERE key IN ('identity','model','dimensions','encoding')");
-      } else if (namespace.meta === "pix_commit_meta") {
+      if (namespace.meta === "pix_commit_meta") {
         db.exec("DELETE FROM pix_commit_meta WHERE key='identity'");
       } else db.exec(`DELETE FROM ${namespace.meta}`);
     }

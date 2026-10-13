@@ -51,6 +51,7 @@
     "!**/*.pyc"
   ],
   "scripts": {
+    "search:index": "node --import tsx scripts/search-index.ts",
     "predev": "npm run link:pix --silent",
     "dev": "tsx src/main.ts",
     "start": "tsx src/main.ts",
@@ -61,6 +62,7 @@
     "watch:pix": "npm run link:pix --silent && node scripts/watch-pix.mjs",
     "watch:all": "node scripts/watch-all.mjs",
     "qa:desktop": "node scripts/qa-desktop.mjs",
+    "qa:sandbox": "node scripts/qa-sandbox.mjs",
     "rebuild:all": "npm run build:desktop",
     "check": "npm run check:inner",
     "check:ci": "node scripts/check-ci.mjs",

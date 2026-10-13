@@ -58,6 +58,7 @@ export function createDesktopWorkbenchViewModelServices(
       conversationActions: options.conversation.actions,
       openHistoryPicker: options.conversation.navigation.openHistoryPicker,
       promptSubmit: options.promptActions.submit,
+      handoff: options.promptActions.handoff,
       projectActions: options.projectActions.actions,
       attachments: options.interactions.attachments,
       elicitation: options.interactions.elicitation,

@@ -83,9 +83,9 @@ test("maps text, thinking, tool arguments, usage, and tool termination", async (
     ]);
 });
 
-test("rejects unqualified Edit with safe catalog diagnostics; another request can execute qualified Edit", () => {
-    const offered = new Set(["mcp__pi__Edit"]);
-    const names = new Map([["mcp__pi__Edit", "Edit"]]);
+test("rejects bare alias-only Edit with safe diagnostics; exact catalog lookup still works", () => {
+    const offered = new Set(["mcp__pi__Edit_1"]);
+    const names = new Map([["mcp__pi__Edit_1", "Edit"]]);
     const rejectedOutput = createOutput(model);
     const mapper = makeMapper(createAssistantMessageEventStream(), rejectedOutput, offered, names, () => {});
     mapper.accept(initRecord([...offered], [{ name: "pi", status: "connected" }]));
@@ -95,7 +95,7 @@ test("rejects unqualified Edit with safe catalog diagnostics; another request ca
     assert.deepEqual(mapper.toolNameMismatch, {
         proposedName: "Edit",
         classification: "unqualified_active",
-        expectedTransportName: "mcp__pi__Edit",
+        expectedTransportName: "mcp__pi__Edit_1",
         catalogSize: 1,
         catalogFingerprint: mapper.toolNameMismatch.catalogFingerprint,
         initializationValidated: true,
@@ -106,7 +106,7 @@ test("rejects unqualified Edit with safe catalog diagnostics; another request ca
     const next = makeMapper(createAssistantMessageEventStream(), output, offered, names, () => {});
     next.accept(initRecord([...offered], [{ name: "pi", status: "connected" }]));
     next.accept({ type: "stream_event", event: { type: "message_start", message: { id: "msg_good", model: "claude-sonnet-5", usage: {} } } });
-    next.accept({ type: "stream_event", event: { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "toolu_good", name: "mcp__pi__Edit", input: {} } } });
+    next.accept({ type: "stream_event", event: { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "toolu_good", name: "mcp__pi__Edit_1", input: {} } } });
     assert.equal(output.content[0]?.type, "toolCall");
     assert.equal(output.content[0]?.name, "Edit");
     assert.equal(next.toolNameMismatch, undefined);

@@ -6,6 +6,7 @@ import {
 	activateTodoStateScope,
 	appendTodoStateSnapshot,
 	DEFAULT_PROMPT_GUIDELINES,
+	publishTodoState,
 	registerTodoTool,
 } from "./todo.js";
 
@@ -37,11 +38,13 @@ export default function subagentTodo(pi: ExtensionAPI): void {
 		activateTodoStateScope(ctx);
 		replaceState(replayFromBranch(ctx));
 		enableTodo();
+		publishTodoState(pi, ctx);
 	});
 	pi.on("model_select", enableTodo);
 	pi.on("session_tree", (_event, ctx) => {
 		activateTodoStateScope(ctx);
 		replaceState(replayFromBranch(ctx));
+		publishTodoState(pi, ctx);
 	});
 	// Compaction does not change the branch: retain the live list and write a
 	// fresh snapshot so pruning old tool results cannot lose unfinished tasks.

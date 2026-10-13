@@ -92,7 +92,7 @@ fn run(
         return Err("Search workspace is not a directory".into());
     }
     let input = serde_json::to_vec(&request.query).map_err(|_| "Invalid search request")?;
-    if input.len() > 16 * 1024 {
+    if input.len() > request_input_limit(&request.query) {
         return Err("Search request too large".into());
     }
     let resources = app
@@ -175,6 +175,15 @@ fn request_deadline(query: &serde_json::Value) -> Option<Instant> {
         .then(|| Instant::now() + Duration::from_secs(45))
 }
 
+fn request_input_limit(query: &serde_json::Value) -> usize {
+    if query.get("operation").and_then(|value| value.as_str()) == Some("rerank") {
+        // Bounded documents can require three UTF-8 bytes per JS character.
+        4 * 1024 * 1024
+    } else {
+        16 * 1024
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,5 +228,12 @@ mod tests {
         let deadline = request_deadline(&serde_json::json!({"query":"needle"})).unwrap();
         assert!(deadline > Instant::now() + Duration::from_secs(40));
         assert!(deadline <= Instant::now() + Duration::from_secs(45));
+    }
+    #[test]
+    fn only_federated_rerank_allows_bounded_utf8_documents() {
+        assert_eq!(request_input_limit(&serde_json::json!({"operation":"rerank"})), 4 * 1024 * 1024);
+        for query in [serde_json::json!({"operation":"rerank-prepare"}), serde_json::json!({"operation":"index"}), serde_json::json!({"query":"needle"})] {
+            assert_eq!(request_input_limit(&query), 16 * 1024);
+        }
     }
 }

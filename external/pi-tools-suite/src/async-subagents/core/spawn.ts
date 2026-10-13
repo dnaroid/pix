@@ -26,6 +26,8 @@ import {
 	type InstalledPackageLocator,
 } from "./provider-extensions.js";
 import { fenceOwnedLaunchRunAsync, ownedLaunchClaimProtocolSync, readOwnedLaunchClaimSync } from "./owned-launch/marker.js";
+import { RPC_SESSION_STATE_ENV } from "../../lib/rpc-session-state.js";
+import { TODO_PROGRESS_FILE, todoProgressFromRpcEvent, writeTodoProgress } from "./todo-progress.js";
 
 export interface SpawnAgentOptions {
 	parentSession?: string;
@@ -105,6 +107,8 @@ export function spawnAgent(
 		"result.md",
 		"result.json",
 		"events.jsonl",
+		TODO_PROGRESS_FILE,
+		`${TODO_PROGRESS_FILE}.tmp`,
 		"stderr.log",
 		"session_dir",
 		"image_paths",
@@ -495,6 +499,8 @@ export function spawnAgent(
 		}
 		try {
 			const event = JSON.parse(line) as RpcEventRecord;
+			const todoProgress = todoProgressFromRpcEvent(event);
+			if (todoProgress) writeTodoProgress(agentDir, todoProgress);
 			const storedEvent = compactRpcEventForTranscript(event, Buffer.byteLength(line, "utf8"));
 			if (storedEvent) transcriptStream.write(serializeJsonLine(storedEvent));
 			const progressEvent = compactRpcEventForProgress(event);
@@ -974,6 +980,7 @@ function subagentEnvironment(env: NodeJS.ProcessEnv, agentDir?: string): NodeJS.
 		...env,
 		PI_MODEL_SUITABLE_TOOLS_PRESERVE_SELECTION: "1",
 		PI_TERMINAL_BELL_DISABLED: "1",
+		[RPC_SESSION_STATE_ENV]: "1",
 		PI_TOOLS_SUITE_DISABLED_MODULES: appendEnvList(env.PI_TOOLS_SUITE_DISABLED_MODULES, [
 			"async-subagents",
 			"coding-discipline",

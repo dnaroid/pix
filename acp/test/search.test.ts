@@ -1,3 +1,4 @@
+import { canonicalSearchIndexPath } from "../src/search/canonical-index.js";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { mkdir, mkdtemp, writeFile, readFile, rm, symlink } from "node:fs/promises";
@@ -14,6 +15,7 @@ import { hashText, settingsDocuments } from "../src/search/documents.js";
 import { parseSearchQueryRequest, parseSearchConfigRequest } from "../src/search/request.js";
 import type { SessionMapRecord } from "../src/acp/session-map.js";
 import { synchronizeSessionBoundaries } from "../src/search/session-boundary-service.js";
+import { enableSearchSources, isolateSearchHome } from "./search-sources-fixture.js";
 
 const signal = () => new AbortController().signal;
 const vector = () => Array.from({ length: EMBEDDING_DIMENSIONS }, (_, i) => i === 0 ? 1 : 0);
@@ -24,9 +26,9 @@ async function until(check: () => boolean | Promise<boolean>, message = "conditi
 }
 function rows(cwd: string, table: "documents" | "vectors" | "metadata" | "sqlite_master"
   | "pix_session_titles" | "pix_session_vectors" | "pix_session_meta" | "pix_commit_vectors",
-  source = table.startsWith("pix_session_") ? "sessions" : table.startsWith("pix_commit_") ? "git-commits" : "settings") {
+  source: "sessions" | "commits" | "settings" = table.startsWith("pix_session_") ? "sessions" : table.startsWith("pix_commit_") ? "commits" : "settings") {
   let db: DatabaseSync | undefined;
-  try { db = new DatabaseSync(join(cwd, `.pi/search/${source}.sqlite`), { readOnly: true }); return db.prepare(`SELECT * FROM ${table}`).all(); }
+  try { db = new DatabaseSync(canonicalSearchIndexPath(cwd, source), { readOnly: true }); return db.prepare(`SELECT * FROM ${table}`).all(); }
   catch { return []; } finally { db?.close(); }
 }
 const setting = { id: "theme", section: "appearance", label: "Theme", description: "Color scheme", synonyms: ["dark"] };
@@ -34,6 +36,8 @@ async function fixture(t: TestContext) {
   const artifacts = resolve(".pi/artifacts/central-semantics-acp/session-fixtures");
   await mkdir(artifacts, { recursive: true });
   const cwd = await mkdtemp(join(artifacts, "run-"));
+  const restoreHome = await isolateSearchHome(cwd);
+  await enableSearchSources(cwd);
   const path = join(cwd, "session.jsonl");
   const preferences = new SearchPreferences(join(cwd, "semantic-search.json"));
   const record: SessionMapRecord = { sessionId: "s1", piSessionPath: path, piSessionId: "pi1", cwd, title: "Модель для эмбеддинга", updatedAt: new Date().toISOString() };
@@ -47,9 +51,12 @@ async function fixture(t: TestContext) {
     const service = new DesktopSearchService({ discover: async () => records, preferences, auth, embed, ...overrides });
     services.push(service); return service;
   };
-  t.after(async () => { await Promise.all(services.map(s => s.dispose())); await rm(cwd, { recursive: true, force: true }); });
+  t.after(async () => { await Promise.all(services.map(s => s.dispose())); await rm(cwd, { recursive: true, force: true }); restoreHome(); });
   const request = (query = "", extra = {}): SearchQueryRequest => ({ cwd, query, types: ["sessions"], settings: [], limit: 30, ...extra });
-  const idle = async (s: DesktopSearchService) => until(async () => !(await s.config({ cwd })).indexing, "index idle");
+  const idle = async (s: DesktopSearchService) => until(async () => {
+    const status = await s.config({ cwd });
+    return !status.indexing && !status.checkingSources?.tasks;
+  }, "index idle");
   return { cwd, path, preferences, record, calls, make, request, idle,
     setRecords: (value: SessionMapRecord[]) => { records = value; }, setKey: (value?: string) => { key = value; } };
 }
@@ -196,6 +203,7 @@ test("obsolete schema is rejected rather than migrated or rewritten", async t =>
   assert.deepEqual(rows(f.cwd, "vectors").map(row => row.hash), [hash]);
   assert.deepEqual(rows(f.cwd, "documents").map(row => row.id), ["settings:theme"]);
   const obsolete = join(f.cwd, ".pi/search/index.sqlite");
+  await mkdir(join(f.cwd, ".pi/search"), { recursive: true });
   await writeFile(obsolete, "invalid obsolete database");
   const s = f.make(); assert.equal((await s.query(f.request("модель"))).results.length, 1);
   assert.equal(await readFile(obsolete, "utf8"), "invalid obsolete database");
@@ -285,6 +293,8 @@ test("central configuration indexes named titles, not fallback prompts or histor
   assert.deepEqual(f.calls, [], "consent alone does not upload an earlier title snapshot");
   await s.query(f.request(""));
   await f.idle(s);
+  assert.deepEqual(f.calls, [], "queries do not upload session documents");
+  await s.index({ cwd: f.cwd, source: "sessions" });
   assert.deepEqual(f.calls, [["Garden planning"]], "only actual names may be embedded");
   assert.equal(rows(f.cwd, "pix_session_vectors").length, 1);
   assert.doesNotMatch(JSON.stringify(f.calls), /PRIVATE|Old name|эмбеддинга/);
@@ -307,7 +317,7 @@ test("session-title embeddings add non-lexical results without affecting setting
   f.setRecords([{ ...f.record, title: "Orchard maintenance", namedTitle: "Orchard maintenance" }]);
   await f.preferences.configure();
   const s = f.make();
-  await s.query(f.request(""));
+  await s.index({ cwd: f.cwd, source: "sessions" });
   await f.idle(s);
   const response = await s.query(f.request("agricultural hydration"));
   assert.deepEqual(response.results.map(hit => hit.id), ["sessions:s1"]);
@@ -327,14 +337,14 @@ test("session title rename, delete, and duplicate names reconcile only session t
     { ...f.record, sessionId: "s2", title: "Historic overview", namedTitle: "Historic overview" },
   ]);
   const s = f.make();
-  await s.query(f.request(""));
+  await s.index({ cwd: f.cwd, source: "sessions" });
   await f.idle(s);
   assert.equal(rows(f.cwd, "pix_session_titles").length, 2);
   assert.equal(rows(f.cwd, "pix_session_vectors").length, 1, "same title shares a single embedding");
   const existing = rows(f.cwd, "pix_session_vectors")[0]!.title_hash;
   f.setRecords([{ ...f.record, sessionId: "s2", title: "New topic", namedTitle: "New topic" }]);
   s.changed(f.cwd);
-  await s.query(f.request(""));
+  await s.index({ cwd: f.cwd, source: "sessions" });
   await f.idle(s);
   assert.deepEqual(rows(f.cwd, "pix_session_titles").map(row => row.session_id), ["s2"]);
   assert.ok(rows(f.cwd, "pix_session_vectors").every(row => row.title_hash !== existing));
@@ -354,6 +364,7 @@ test("one central configuration enables settings and explicit session titles tog
   const request = f.request("", { types: ["settings", "sessions"], settings: [setting] });
   await s.query(request);
   await f.idle(s);
+  await s.index({ cwd: f.cwd, source: "sessions" });
   assert.equal(rows(f.cwd, "vectors").length, 1);
   assert.equal(rows(f.cwd, "pix_session_vectors").length, 1);
   assert.equal(f.calls.length, 2);
@@ -369,10 +380,11 @@ test("revoking session-title consent cancels an uncooperative paid batch before 
     if (inputs[0] === "Named session") { started.resolve(); await release.promise; }
     return inputs.map(vector);
   } });
-  await s.query(f.request(""));
+  const pending = s.index({ cwd: f.cwd, source: "sessions" }).catch(error => error);
   await started.promise;
   await f.preferences.configure(false); await s.config({ cwd: f.cwd });
   release.resolve();
+  await pending;
   await f.idle(s);
   assert.deepEqual(rows(f.cwd, "pix_session_vectors"), []);
   assert.equal(rows(f.cwd, "pix_session_titles").length, 1, "local title mapping remains intact");
@@ -388,14 +400,15 @@ test("title-change notification stops an in-flight old title from being indexed"
     if (inputs[0] === "Previous name") { started.resolve(); await release.promise; }
     return inputs.map(vector);
   } });
-  await s.query(f.request(""));
+  const pending = s.index({ cwd: f.cwd, source: "sessions" });
   await started.promise;
   f.setRecords([{ ...f.record, title: "New name", namedTitle: "New name" }]);
   s.changed(f.cwd);
   release.resolve();
+  await pending;
   await f.idle(s);
   assert.deepEqual(rows(f.cwd, "pix_session_vectors"), [], "old-title upload cannot persist after change");
-  await s.query(f.request(""));
+  await s.index({ cwd: f.cwd, source: "sessions" });
   await f.idle(s);
   assert.deepEqual(rows(f.cwd, "pix_session_titles").map(row => row.title), ["New name"]);
   assert.equal(rows(f.cwd, "pix_session_vectors").length, 1);
@@ -405,6 +418,7 @@ test("session title indexing cannot replace commit data or incompatible paid vec
   const f = await fixture(t);
   const store = new SearchIndexStore();
   await store.write(f.cwd, signal(), () => Promise.resolve());
+  await mkdir(join(f.cwd, ".pi/search"), { recursive: true });
   const db = new DatabaseSync(join(f.cwd, ".pi/search/git-commits.sqlite"));
   db.exec("CREATE TABLE pix_commit_vectors (hash TEXT PRIMARY KEY, vector TEXT NOT NULL)");
   db.prepare("INSERT INTO pix_commit_vectors VALUES (?,?)").run("commit-hash", "[1,0,0]");

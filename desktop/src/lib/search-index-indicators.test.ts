@@ -7,6 +7,7 @@ import activityBar from "../components/WorkspaceSidebarActivityBar.svelte?raw";
 
 function stored(): SearchIndexViewState {
   return { actions: {}, history: [], snapshot: { reading: false, error: "", activity: null,
+    selection: { enabled: { code: true, knowledge: true, settings: true, sessions: true, tasks: true, commits: true } },
     consent: { configured: true, provider: "ollama", model: "m", vectorSize: 3, keyAvailable: true },
     stores: { stores: [
       { id: "code", state: "present", completedAt: "now", counts: { codeChunks: 100, vectors: 1 } },
@@ -24,6 +25,22 @@ function indicator(searchIndexes: SearchIndexViewState) {
 }
 
 describe("search indexing sidebar reasons", () => {
+  it("does not animate the search icon for local task checks", () => {
+    const view = stored();
+    view.snapshot.activity = {
+      indexingSources: { tasks: false, settings: false, sessions: false }, checkingSources: { tasks: true },
+    };
+    expect(indicator(view)).toBeUndefined();
+  });
+  it("ignores disabled-source work and retained cache errors, but surfaces selection failures", () => {
+    const view = stored();
+    view.snapshot.selection!.enabled.tasks = false;
+    view.actions.tasks = { running: true };
+    view.snapshot.activity = { sourceErrors: { tasks: "retained failure" }, indexingSources: { settings: false, tasks: true, sessions: false } };
+    expect(indicator(view)).toBeUndefined();
+    view.snapshot.selectionError = "Source selection unavailable";
+    expect(indicator(view)).toMatchObject({ tone: "error", reason: "Source selection unavailable" });
+  });
   it("does not infer missing coverage from unknown status or retained vector counts", () => {
     expect(searchIndexIndicatorReasons()).toEqual([]);
     expect(indicator(emptySearchIndexView())).toBeUndefined();

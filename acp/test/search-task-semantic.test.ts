@@ -21,6 +21,8 @@ async function fixture(t: TestContext) {
   await mkdir(artifacts, { recursive: true });
   const cwd = await mkdtemp(join(artifacts, "run-"));
   await mkdir(join(cwd, ".pi"));
+  const restoreHome = await isolateSearchHome(cwd);
+  await enableSearchSources(cwd);
   const taskDb = join(cwd, ".pi", "tasks.sqlite");
   const db = new DatabaseSync(taskDb);
   db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; ${TASK_SCHEMA}`);
@@ -39,7 +41,7 @@ async function fixture(t: TestContext) {
   };
   t.after(async () => {
     await Promise.all(services.map(service => service.dispose()));
-    await rm(cwd, { recursive: true, force: true });
+    await rm(cwd, { recursive: true, force: true }); restoreHome();
   });
   const task = (id: string, extra: Record<string, unknown> = {}) => ({
     id, title: `Magic ${id}`, description: "Elemental casting notes", type: "feature", status: "todo", priority: "medium",
@@ -66,7 +68,11 @@ async function fixture(t: TestContext) {
   };
   const idle = async (service: DesktopSearchService) => {
     const end = Date.now() + 5000;
-    while ((await service.config({ cwd })).indexing) { assert.ok(Date.now() < end, "index idle timeout"); await delay(5); }
+    while (true) {
+      const status = await service.config({ cwd });
+      if (!status.indexing && !status.checkingSources?.tasks) return;
+      assert.ok(Date.now() < end, "index idle timeout"); await delay(5);
+    }
   };
   const sync = async (service: DesktopSearchService) => { await service.sync({ cwd, settings: [] }); await idle(service); };
   return { cwd, task, put, drop, rows, make, preferences, calls, query: "Magical philosophy", taskDb, idle, sync };
@@ -245,3 +251,4 @@ test("a malformed task hierarchy is rejected before any provider call", async t 
   assert.deepEqual(f.calls, []);
   assert.deepEqual(f.rows("pix_task_documents"), []);
 });
+import { enableSearchSources, isolateSearchHome } from "./search-sources-fixture.js";

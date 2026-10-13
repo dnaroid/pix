@@ -1,12 +1,15 @@
 import { afterEach, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resetHistoryVectors } from "../src/project-search/semantic-reset.js";
+import { withSearchIndexWriter } from "../src/project-search/semantic-index-writer.js";
+import { sourcePath } from "../src/project-search/source-work.mjs";
 import { removeDirsWithRetry } from "./support/fs-retry.js";
 
 const roots: string[] = [];
+const originalHome = process.env.HOME;
 const artifacts = fileURLToPath(new URL("../../../.pi/artifacts/", import.meta.url));
 const signal = () => new AbortController().signal;
 async function fixture() {
@@ -35,7 +38,30 @@ function populate(file: string) {
     INSERT INTO unrelated VALUES ('canonical','untouched');`);
   db.close();
 }
-afterEach(() => removeDirsWithRetry(roots));
+afterEach(async () => {
+  if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome;
+  await removeDirsWithRetry(roots);
+});
+
+test("project history reset preserves shared Settings and writer creates only its global ancestry", async () => {
+  const f = await fixture(); process.env.HOME = f.root;
+  const project = join(f.root, "other"); await mkdir(project);
+  await withSearchIndexWriter(project, signal(), async db => {
+    db.exec("CREATE TABLE vectors(hash TEXT PRIMARY KEY,vector BLOB); INSERT INTO vectors VALUES('paid',X'0000803f')");
+  }, "settings");
+  const filename = sourcePath(project, "settings"), before = await readFile(filename);
+  expect(await resetHistoryVectors(project, signal())).toBe(0);
+  expect(await readFile(filename)).toEqual(before);
+  expect(await stat(join(project, ".pi")).catch(() => undefined)).toBeUndefined();
+});
+
+test("Settings writer rejects a redirected global ancestor before creating a database", async () => {
+  const f = await fixture(); process.env.HOME = f.root;
+  const target = join(f.root, "target"); await mkdir(target);
+  await symlink(target, join(f.root, ".config"));
+  await expect(withSearchIndexWriter(f.root, signal(), async () => {}, "settings")).rejects.toThrow();
+  expect(await stat(join(target, "pi")).catch(() => undefined)).toBeUndefined();
+});
 
 test("explicit reset removes only history vectors and identity metadata, preserving canonical files and ignoring obsolete stores", async () => {
   const f = await fixture(); for (const file of f.files) populate(file);
@@ -43,12 +69,12 @@ test("explicit reset removes only history vectors and identity metadata, preserv
   const legacyBefore = await readFile(legacy);
   const tasks = join(f.root, ".pi/tasks.sqlite"); await writeFile(tasks, "canonical task bytes");
   const repository = join(f.root, ".pi/search/code.sqlite"); await writeFile(repository, "repository vectors");
-  expect(await resetHistoryVectors(f.root, signal())).toBe(4);
+  expect(await resetHistoryVectors(f.root, signal())).toBe(3);
   for (const [i, table] of ["vectors", "pix_session_vectors", "pix_task_vectors", "pix_commit_vectors"].entries()) {
     const db = new Database(f.files[i]);
     try {
-      expect(db.query(`SELECT COUNT(*) AS count FROM ${table}`).get()).toEqual({ count: 0 });
-      if (i === 0) expect(db.query("SELECT * FROM metadata").all()).toEqual([{ key: "schema", value: "2" }]);
+      expect(db.query(`SELECT COUNT(*) AS count FROM ${table}`).get()).toEqual({ count: i === 0 ? 1 : 0 });
+      if (i === 0) expect(db.query("SELECT COUNT(*) AS count FROM metadata").get()).toEqual({ count: 5 });
       if (i === 3) expect(db.query("SELECT * FROM pix_commit_meta").all()).toEqual([]);
       expect(db.query("SELECT body FROM documents").get()).toEqual({ body: "local document" });
       expect(db.query("SELECT body FROM unrelated").get()).toEqual({ body: "untouched" });
@@ -82,7 +108,7 @@ test("unknown schema or deletion dependencies fail before touching the affected 
   const db = new Database(f.files[0]);
   try {
     db.exec("UPDATE metadata SET value='future-version' WHERE key='schema'");
-    await expect(resetHistoryVectors(f.root, signal())).rejects.toThrow();
+    expect(await resetHistoryVectors(f.root, signal())).toBe(0);
     expect(db.query("SELECT COUNT(*) AS count FROM vectors").get()).toEqual({ count: 1 });
   } finally { db.close(); }
 });

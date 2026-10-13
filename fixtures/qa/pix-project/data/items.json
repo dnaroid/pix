@@ -1,0 +1,5 @@
+[
+  { "id": "alpha", "label": "QA_SEARCH_ALPHA", "state": "ready" },
+  { "id": "beta", "label": "QA_SEARCH_BETA", "state": "pending" },
+  { "id": "unicode", "label": "безопасная песочница", "state": "ready" }
+]

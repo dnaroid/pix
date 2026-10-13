@@ -22,6 +22,7 @@ export interface SessionSubagentAgent {
   readonly eventLines?: number;
   readonly retryCount?: number;
   readonly lastActivity?: SessionSubagentActivity;
+  readonly todoProgress?: { readonly completed: number; readonly total: number };
 }
 
 export interface SessionSubagentTaskPreview {
@@ -196,6 +197,13 @@ function isSessionSubagentAgent(value: unknown): value is SessionSubagentAgent {
     if (!isRecord(value.lastActivity)) return false;
     if (typeof value.lastActivity.label !== "string" || !value.lastActivity.label.trim()) return false;
     if (typeof value.lastActivity.at !== "string" || !value.lastActivity.at.trim()) return false;
+  }
+  if (value.todoProgress !== undefined) {
+    if (!isRecord(value.todoProgress)
+      || !isNonNegativeInteger(value.todoProgress.completed)
+      || !isNonNegativeInteger(value.todoProgress.total)
+      || !Number.isSafeInteger(value.todoProgress.total)
+      || value.todoProgress.completed > value.todoProgress.total) return false;
   }
   return true;
 }

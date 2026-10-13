@@ -79,6 +79,8 @@ export interface RequestMetrics {
   errorCategory?: string;
   /** Bounded, content-free detail for a rejected tool name. No arguments or paths. */
   toolNameMismatch?: ToolNameMismatch;
+  /** Bare names normalized at proposal start, including requests that later fail. */
+  toolNameNormalizationCount?: number;
   exitCode?: number | null;
   exitSignal?: NodeJS.Signals | null;
   terminationExpected: boolean;

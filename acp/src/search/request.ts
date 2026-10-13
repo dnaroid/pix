@@ -18,9 +18,11 @@ function cwd(value: unknown): string {
 }
 export function parseSearchConfigRequest(value: unknown): SearchConfigRequest {
   const p = record(value);
-  if (Object.keys(p).some(key => !["cwd", "includeSourceStatus"].includes(key))) return invalid();
+  if (Object.keys(p).some(key => !["cwd", "includeSourceStatus", "includeSessionSnapshot"].includes(key))) return invalid();
   if (p.includeSourceStatus !== undefined && typeof p.includeSourceStatus !== "boolean") return invalid();
-  return { cwd: cwd(p.cwd), ...(p.includeSourceStatus !== undefined ? { includeSourceStatus: p.includeSourceStatus } : {}) };
+  if (p.includeSessionSnapshot !== undefined && typeof p.includeSessionSnapshot !== "boolean") return invalid();
+  return { cwd: cwd(p.cwd), ...(p.includeSourceStatus !== undefined ? { includeSourceStatus: p.includeSourceStatus } : {}),
+    ...(p.includeSessionSnapshot !== undefined ? { includeSessionSnapshot: p.includeSessionSnapshot } : {}) };
 }
 export function parseSearchSyncRequest(value: unknown): SearchSyncRequest {
   const p = record(value);

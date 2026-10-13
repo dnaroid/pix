@@ -185,6 +185,19 @@ JSONC/task overlay import or fallback.
     Routine local project changes display automatic background sync rather
     than a manual review/push prompt; actual conflicts, missing keys, remote
     changes and errors retain review actions and diagnostics.
+    Installed agent cards with an explicit `models` entry, legacy `model`, or
+    `modelByParent` mapping expose a selector backed by the existing searchable
+    model catalog. Automatic and `modelSelection: frontier` profiles are
+    excluded. Choices and per-agent resets live separately in
+    `.pi/agent-model-overrides.json` as version 1 project state with a `models`
+    map; it is independent of authored agent content and Registry
+    synchronization, hashing and publishing. Reset removes that agent's choice
+    and restores the current authored profile/parent mapping. A chosen primary
+    applies only to fresh launches and preserves authored profile and branch
+    fallback candidates. Explicit task, CLI, global and environment choices
+    retain higher priority; economy and vendor policies continue to apply.
+    Malformed or unsafe state fails closed during runtime loading and is refused
+    for Registry writes. Canonical project cleanup preserves this file.
 19. Foreground Registry actions (refresh/install/update/push/pull/uninstall/
     remove) use Registry-local busy state and do not take Pix Desktop's global
     operation-running lock. The rest of the workbench remains interactive while

@@ -237,7 +237,7 @@ process.stdin.on("end", () => {
     }
 });
 
-test("provider records a safe unqualified Edit mismatch from a fake Claude stream", async () => {
+test("provider rejects a case-mismatched edit and records safe diagnostics", async () => {
     const editTool = { name: "Edit", description: "replace text", parameters: { type: "object", properties: { file_path: { type: "string" } } } };
     const editInit = { ...toolInit, tools: ["mcp__pi__Edit"] };
     const fake = await fakeClaude(`
@@ -245,7 +245,7 @@ process.stdin.resume();
 process.stdin.on("end", () => {
   process.stdout.write(JSON.stringify(${JSON.stringify(editInit)}) + "\\n");
   process.stdout.write(JSON.stringify({type:"stream_event",event:{type:"message_start",message:{id:"msg_unqualified",model:"claude-sonnet-5",usage:{}}}}) + "\\n");
-  process.stdout.write(JSON.stringify({type:"stream_event",event:{type:"content_block_start",index:0,content_block:{type:"tool_use",id:"toolu_unqualified",name:"Edit",input:{file_path:"hidden"}}}}) + "\\n");
+  process.stdout.write(JSON.stringify({type:"stream_event",event:{type:"content_block_start",index:0,content_block:{type:"tool_use",id:"toolu_unqualified",name:"edit",input:{file_path:"hidden"}}}}) + "\\n");
   setInterval(() => {}, 1000);
 });`);
     try {
@@ -254,13 +254,14 @@ process.stdin.on("end", () => {
         );
         const result = await stream.result();
         assert.equal(result.stopReason, "error");
-        assert.match(result.errorMessage ?? "", /unknown tool: Edit/);
+        assert.match(result.errorMessage ?? "", /unknown tool: edit/);
         assert.ok(!result.content.some((block) => block.type === "toolCall"));
         const metrics = await waitForRequestMetrics((entry) => entry.errorCategory === "tool_unknown");
         assert.equal(metrics.adapterSource, "pi-tools-suite-vendored");
-        assert.equal(metrics.toolNameMismatch?.proposedName, "Edit");
-        assert.equal(metrics.toolNameMismatch?.classification, "unqualified_active");
-        assert.equal(metrics.toolNameMismatch?.expectedTransportName, "mcp__pi__Edit");
+        assert.equal(metrics.toolNameMismatch?.proposedName, "<unrecognized>");
+        assert.equal(metrics.toolNameMismatch?.classification, "unrecognized");
+        assert.equal(metrics.toolNameMismatch?.expectedTransportName, undefined);
+        assert.equal(metrics.toolNameNormalizationCount, 0);
         assert.equal(metrics.toolNameMismatch?.initializationValidated, true);
         assert.doesNotMatch(JSON.stringify(metrics), /file_path|hidden/);
     } finally {
@@ -944,7 +945,8 @@ test("provider accepts Node's maximum timer delay and rejects the next milliseco
         await Promise.all([fake.dir, root].map((directory) => rm(directory, { recursive: true, force: true })));
     }
 });
-test("provider rejects tool calls against its private transport directory", async () => {
+for (const proposedName of ["mcp__pi__read", "read"]) {
+test(`provider rejects private transport calls via ${proposedName}`, async () => {
     const fake = await fakeClaude(`
 process.on("SIGTERM", () => {
   process.stdout.write(JSON.stringify(${JSON.stringify(toolTerminationResult)}) + "\\n", () => process.exit(143));
@@ -953,7 +955,7 @@ process.stdin.resume();
 process.stdin.on("end", () => {
   process.stdout.write(JSON.stringify(${JSON.stringify(toolInit)}) + "\\n");
   process.stdout.write(JSON.stringify({type:"stream_event",event:{type:"message_start",message:{id:"msg_private",model:"claude-sonnet-5",usage:{input_tokens:0,output_tokens:0}}}}) + "\\n");
-  process.stdout.write(JSON.stringify({type:"stream_event",event:{type:"content_block_start",index:0,content_block:{type:"tool_use",id:"toolu_private",name:"mcp__pi__read",input:{}}}}) + "\\n");
+  process.stdout.write(JSON.stringify({type:"stream_event",event:{type:"content_block_start",index:0,content_block:{type:"tool_use",id:"toolu_private",name:${JSON.stringify(proposedName)},input:{}}}}) + "\\n");
   process.stdout.write(JSON.stringify({type:"stream_event",event:{type:"content_block_delta",index:0,delta:{type:"input_json_delta",partial_json:JSON.stringify({path:require("node:path").dirname(process.argv[process.argv.indexOf("--system-prompt-file") + 1]) + "/request.json"})}}}) + "\\n");
   process.stdout.write(JSON.stringify({type:"stream_event",event:{type:"content_block_stop",index:0}}) + "\\n");
   process.stdout.write(JSON.stringify({type:"stream_event",event:{type:"message_delta",delta:{stop_reason:"tool_use"}}}) + "\\n");
@@ -976,7 +978,7 @@ process.stdin.on("end", () => {
 // These cases start the real MCP bridge. Restricted sandboxes can drop live
 // stdin to nested Node children, which makes readiness time out independently
 // of provider behavior; run this integration coverage outside the sandbox.
-test("provider checks MCP execution violations after tool-use termination", async () => {
+test(`provider checks MCP execution violations after ${proposedName} termination`, async () => {
     const fake = await fakeClaude(`
 const violationConfigIndex = process.argv.indexOf("--mcp-config");
 const violationConfig = JSON.parse(process.argv[violationConfigIndex + 1]);
@@ -989,7 +991,7 @@ else process.on("SIGTERM", () => {
 process.stdin.resume();
 process.stdin.on("end", () => {
   process.stdout.write(JSON.stringify(${JSON.stringify(toolInit)}) + "\\n");
-  for (const record of ${JSON.stringify(toolUseEvents({ messageId: "msg_violation", toolUseId: "toolu_violation" }))}) process.stdout.write(JSON.stringify(record) + "\\n");
+  for (const record of ${JSON.stringify(toolUseEvents({ messageId: "msg_violation", toolUseId: "toolu_violation", name: proposedName }))}) process.stdout.write(JSON.stringify(record) + "\\n");
   setInterval(() => {}, 1000);
 });`);
     try {
@@ -1001,6 +1003,7 @@ process.stdin.on("end", () => {
         await rm(fake.dir, { recursive: true, force: true });
     }
 });
+}
 test("provider preserves MCP violation diagnostics when private cleanup also fails", async () => {
     const fake = await fakeClaude(`
 const violationConfigIndex = process.argv.indexOf("--mcp-config");
@@ -1083,7 +1086,8 @@ process.stdin.on("end", () => {
     }
 });
 
-test("provider accepts the captured Claude tool-handoff acknowledgement after cleanup", { skip: process.platform === "win32" }, async () => {
+for (const proposedName of ["mcp__pi__read", "read"]) {
+test(`provider accepts ${proposedName} handoff acknowledgement after cleanup`, { skip: process.platform === "win32" }, async () => {
     const fake = await fakeClaude(`
 process.on("SIGTERM", () => {
   process.stdout.write(JSON.stringify(${JSON.stringify(toolTerminationResult)}) + "\\n", () => process.exit(143));
@@ -1092,7 +1096,7 @@ process.stdin.resume();
 process.stdin.on("end", () => {
   process.stdout.write(JSON.stringify(${JSON.stringify(toolInit)}) + "\\n");
   process.stdout.write(JSON.stringify({type:"stream_event",event:{type:"message_start",message:{id:"msg_tool",model:"claude-sonnet-5",usage:{input_tokens:0,output_tokens:0}}}}) + "\\n");
-  process.stdout.write(JSON.stringify({type:"stream_event",event:{type:"content_block_start",index:0,content_block:{type:"tool_use",id:require("node:path").dirname(process.argv[process.argv.indexOf("--system-prompt-file") + 1]),name:"mcp__pi__read",input:{}}}}) + "\\n");
+  process.stdout.write(JSON.stringify({type:"stream_event",event:{type:"content_block_start",index:0,content_block:{type:"tool_use",id:require("node:path").dirname(process.argv[process.argv.indexOf("--system-prompt-file") + 1]),name:${JSON.stringify(proposedName)},input:{}}}}) + "\\n");
   process.stdout.write(JSON.stringify({type:"stream_event",event:{type:"content_block_delta",index:0,delta:{type:"input_json_delta",partial_json:'{"path":"README.md"}'}}}) + "\\n");
   process.stdout.write(JSON.stringify({type:"stream_event",event:{type:"content_block_stop",index:0}}) + "\\n");
   process.stdout.write(JSON.stringify({type:"stream_event",event:{type:"message_delta",delta:{stop_reason:"tool_use"}}}) + "\\n");
@@ -1104,10 +1108,15 @@ process.stdin.on("end", () => {
             version: CAPTURED_CLAUDE_VERSION,
             subscriptionType: "pro",
         })(model, toolContext, { reasoning: "medium" });
+        const events = [];
+        for await (const event of stream) events.push(event.type);
         const result = await stream.result();
         assert.equal(result.stopReason, "toolUse");
+        assert.equal(events.filter((type) => type === "done" || type === "error").length, 1);
         const toolCall = result.content.find((block) => block.type === "toolCall");
         assert.ok(toolCall);
+        assert.equal(toolCall.name, "read");
+        assert.deepEqual(toolCall.arguments, { path: "README.md" });
         await assert.rejects(access(toolCall.id));
         const metrics = await waitForRequestMetrics((entry) => entry.stopReason === "toolUse");
         assert.equal(result.usage.totalTokens, 6);
@@ -1116,12 +1125,14 @@ process.stdin.on("end", () => {
         assert.equal(metrics.exitCode, 143);
         assert.equal(metrics.exitSignal, null);
         assert.equal(metrics.cleanupComplete, true);
+        assert.equal(metrics.toolNameNormalizationCount, proposedName === "read" ? 1 : 0);
+        assert.equal(metrics.toolNameMismatch, undefined);
     }
     finally {
         await rm(fake.dir, { recursive: true, force: true });
     }
 });
-test("provider settles and retains marked state when tool-handoff termination fails", { skip: process.platform === "win32" }, async () => {
+test(`provider retains marked state when ${proposedName} termination fails`, { skip: process.platform === "win32" }, async () => {
     const root = await mkdtemp(join(tmpdir(), "provider-tool-cleanup-failure-"));
     const originalTmpdir = process.env.TMPDIR;
     process.env.TMPDIR = root;
@@ -1129,7 +1140,7 @@ test("provider settles and retains marked state when tool-handoff termination fa
 process.stdin.resume();
 process.stdin.on("end", () => {
   process.stdout.write(JSON.stringify(${JSON.stringify(toolInit)}) + "\\n");
-  for (const record of ${JSON.stringify(toolUseEvents({ messageId: "msg_tool_cleanup", toolUseId: "toolu_cleanup", partialJson: '{"path":"package.json"}', messageStop: true }))}) process.stdout.write(JSON.stringify(record) + "\\n");
+  for (const record of ${JSON.stringify(toolUseEvents({ messageId: "msg_tool_cleanup", toolUseId: "toolu_cleanup", name: proposedName, partialJson: '{"path":"package.json"}', messageStop: true }))}) process.stdout.write(JSON.stringify(record) + "\\n");
   setInterval(() => {}, 1000);
 });`);
     let capturedChild;
@@ -1177,6 +1188,7 @@ process.stdin.on("end", () => {
         await rm(fake.dir, { recursive: true, force: true });
     }
 });
+}
 test("provider accepts an exit-143 tool handoff when Claude emits no acknowledgement", { skip: process.platform === "win32" }, async () => {
     const fake = await fakeClaude(`
 process.on("SIGTERM", () => process.exit(143));
@@ -1261,7 +1273,8 @@ process.stdin.on("end", () => {
         await rm(fake.dir, { recursive: true, force: true });
     }
 });
-test("caller abort wins after a tool proposal and before acknowledgement", { skip: process.platform === "win32" }, async () => {
+for (const proposedName of ["mcp__pi__read", "read"]) {
+test(`caller abort wins after ${proposedName} proposal and before acknowledgement`, { skip: process.platform === "win32" }, async () => {
     const markerDirectory = await mkdtemp(join(tmpdir(), "provider-tool-abort-"));
     const marker = join(markerDirectory, "tool-proposed");
     const fake = await fakeClaude(`
@@ -1272,7 +1285,7 @@ process.on("SIGTERM", () => {
 process.stdin.resume();
 process.stdin.on("end", () => {
   process.stdout.write(JSON.stringify(${JSON.stringify(toolInit)}) + "\\n");
-  for (const record of ${JSON.stringify(toolUseEvents({ messageId: "msg_abort_ack", toolUseId: "toolu_abort_ack", partialJson: '{"path":"package.json"}' }))}) process.stdout.write(JSON.stringify(record) + "\\n");
+  for (const record of ${JSON.stringify(toolUseEvents({ messageId: "msg_abort_ack", toolUseId: "toolu_abort_ack", name: proposedName, partialJson: '{"path":"package.json"}' }))}) process.stdout.write(JSON.stringify(record) + "\\n");
   setInterval(() => {}, 1000);
 });`);
     try {
@@ -1299,6 +1312,7 @@ process.stdin.on("end", () => {
         await Promise.all([fake.dir, markerDirectory].map((directory) => rm(directory, { recursive: true, force: true })));
     }
 });
+}
 test("provider reports malformed JSONL and early MCP exit without hanging", async () => {
     const malformed = await fakeClaude(`process.stdin.resume(); process.stdin.on("end", () => process.stdout.write("{bad\\n"));`);
     try {

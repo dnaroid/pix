@@ -14,6 +14,7 @@ import { embedCommitHTTP, embeddingIdentity, loadCommitEmbeddingConfig, loadComm
 import { patchSearchTerm, rankCommits, readCommitCorpus, readPatchMatches, type CommitDocument } from "../src/search/commit-corpus.js";
 import { canonicalSearchIndexPath } from "../src/search/canonical-index.js";
 import { COMMIT_DOCUMENTS, COMMIT_META, COMMIT_VECTORS } from "../src/search/commit-storage.js";
+import { enableSearchSources } from "./search-sources-fixture.js";
 
 const exec = promisify(execFile);
 // Other Node test files run in parallel. Give this file its own provider-slot
@@ -31,6 +32,7 @@ const options = (embed: CommitEmbedder = async texts => texts.map(() => [1, 0, 0
 async function repository(t: { after: (fn: () => Promise<void>) => void }) {
   const base = fileURLToPath(new URL("../../.pi/artifacts/central-semantics-acp/commit-fixtures/", import.meta.url)); await mkdir(base, { recursive: true });
   const cwd = await mkdtemp(join(base, "fixture-")); t.after(() => rm(cwd, { recursive: true, force: true }));
+  await enableSearchSources(cwd);
   const git = async (...args: string[]) => {
     const pending = exec("git", args, { cwd, env: { ...process.env, GIT_AUTHOR_NAME: "Test Author", GIT_AUTHOR_EMAIL: "test@example.invalid", GIT_COMMITTER_NAME: "Test Author", GIT_COMMITTER_EMAIL: "test@example.invalid" } });
     pending.child.stdin?.end(); return (await pending).stdout.trim();
@@ -341,7 +343,7 @@ test("redirected source commit-index paths and sidecars cannot redirect writes",
     const db = new DatabaseSync(protectedFile);
     db.exec("CREATE TABLE sentinel (value TEXT); INSERT INTO sentinel VALUES ('unchanged')"); db.close();
     const before = await readFile(protectedFile);
-    await mkdir(join(r.cwd, ".pi"));
+    await mkdir(join(r.cwd, ".pi"), { recursive: true });
     if (kind === "directory") await symlink(outside.cwd, join(r.cwd, ".pi", "search"));
     else {
       await mkdir(join(r.cwd, ".pi", "search"));
@@ -407,7 +409,8 @@ test("nonrepository, unborn repository, empty query and disposed service are saf
   const r = await repository(t); const s = service(t);
   assert.deepEqual(await query(s, r.cwd, " "), { results: [], notices: [] });
   assert.equal((await query(s, r.cwd)).notices.length, 1);
-  await mkdir(join(r.cwd, "notrepo")); assert.equal((await query(s, "/not/a/repository")).notices.length, 1);
+  // Missing/nonproject paths have commits off by default: no Git probe or unavailable notice.
+  await mkdir(join(r.cwd, "notrepo")); assert.equal((await query(s, "/not/a/repository")).notices.length, 0);
   await s.dispose(); await assert.rejects(query(s, r.cwd));
 });
 test("central knowledge model/prefix/base URL and environment-first shared credentials", async t => {

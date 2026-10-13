@@ -16,11 +16,18 @@ type PromptRunLifecycleOptions = Pick<
   flushAutoQueue: (sessionId: string) => void | Promise<void>;
 };
 
+export type PromptRunCompletion = {
+  stopReason: StopReason;
+  /** False after cancellation, client replacement, teardown, or a newer run. */
+  isCurrent: () => boolean;
+};
+
 export function createPromptRunLifecycle(options: PromptRunLifecycleOptions) {
   let runningSessionIds = $state<Set<string>>(new Set());
   const promptRunsBySessionId = new Map<string, Promise<void>>();
   const promptEndedAtBySessionId = new Map<string, number>();
   const runGenerationBySessionId = new Map<string, number>();
+  const cancelledRunGenerations = new Set<number>();
   // Never reuse an owner generation after clearSession/reset while old requests settle.
   let nextRunGeneration = 0;
 
@@ -81,6 +88,7 @@ export function createPromptRunLifecycle(options: PromptRunLifecycleOptions) {
     blocks: ContentBlock[],
     fileImages: readonly PromptFileImage[] = [],
     transcriptMessageId?: string,
+    onCompletion?: (completion: PromptRunCompletion) => void,
   ): Promise<void> {
     if (promptRunsBySessionId.has(sessionId)) {
       return Promise.reject(new Error("A prompt is already running for this conversation."));
@@ -116,18 +124,37 @@ export function createPromptRunLifecycle(options: PromptRunLifecycleOptions) {
       }
     })()
       .finally(() => {
+        const cancelled = cancelledRunGenerations.delete(runGeneration);
         if (promptRunsBySessionId.get(sessionId) !== tracked) return;
         promptRunsBySessionId.delete(sessionId);
         finishRunAndFlush(sessionId, runGeneration, stopReason);
+        if (stopReason !== undefined) onCompletion?.({
+          stopReason,
+          isCurrent: () => !cancelled && generation(sessionId) === runGeneration
+            && requestClient === options.client(),
+        });
       });
     promptRunsBySessionId.set(sessionId, tracked);
     return tracked;
+  }
+
+  async function runPromptRequestWithResult(
+    requestClient: AcpClient,
+    sessionId: string,
+    blocks: ContentBlock[],
+    transcriptMessageId?: string,
+  ): Promise<PromptRunCompletion | undefined> {
+    let completion: PromptRunCompletion | undefined;
+    await runPromptRequest(requestClient, sessionId, blocks, [], transcriptMessageId,
+      (result) => { completion = result; });
+    return completion;
   }
 
   async function cancelActivePrompt(): Promise<void> {
     const requestClient = options.client();
     const sessionId = options.activeSessionId();
     if (!requestClient || !sessionId || !runningSessionIds.has(sessionId)) return;
+    cancelledRunGenerations.add(generation(sessionId));
     try {
       await requestClient.cancel(sessionId);
     } catch (error) {
@@ -152,6 +179,7 @@ export function createPromptRunLifecycle(options: PromptRunLifecycleOptions) {
   }
 
   function clearSession(sessionId: string): void {
+    cancelledRunGenerations.delete(generation(sessionId));
     if (runningSessionIds.has(sessionId)) {
       const next = new Set(runningSessionIds);
       next.delete(sessionId);
@@ -160,6 +188,7 @@ export function createPromptRunLifecycle(options: PromptRunLifecycleOptions) {
     promptRunsBySessionId.delete(sessionId);
     promptEndedAtBySessionId.delete(sessionId);
     runGenerationBySessionId.delete(sessionId);
+    // Any late result is already invalidated by deleting its generation.
   }
 
   function reset(): void {
@@ -167,6 +196,7 @@ export function createPromptRunLifecycle(options: PromptRunLifecycleOptions) {
     promptRunsBySessionId.clear();
     promptEndedAtBySessionId.clear();
     runGenerationBySessionId.clear();
+    cancelledRunGenerations.clear();
   }
 
   return {
@@ -178,6 +208,7 @@ export function createPromptRunLifecycle(options: PromptRunLifecycleOptions) {
     finishRun,
     finishRunAndFlush,
     runPromptRequest,
+    runPromptRequestWithResult,
     cancelActivePrompt,
     endedAt,
     clearEndedAt,

@@ -1,5 +1,4 @@
-import { mkdir, stat } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { lstat, stat } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay, setImmediate as yieldTask } from "node:timers/promises";
 import { hashText, type SearchDocument } from "./documents.js";
@@ -13,14 +12,20 @@ import { verifySessionBoundaryIndexPath } from "./session-boundary-paths.js";
 import { readTaskVectors, taskIndexTransaction, type TaskIndexTransaction } from "./task-index.js";
 import type { SemanticEmbeddingConfig } from "./config.js";
 import { compatibleEmbeddingMetadata, embeddingMetadata, SearchCacheCompatibilityError } from "./embedding-cache.js";
-import { beginWrite, claimWork } from "./source-work.js";
+import { beginWrite, claimWork, safeDirectory, safeFile, sourceDirectories } from "./source-work.js";
+import { importLegacySettings } from "./settings-migration.js";
 
 const VERSION = "2";
 export interface CachedIndex { vectors: Map<string, number[]>; hashes: Record<string, readonly string[]> }
 export const emptyIndex = (): CachedIndex => ({ vectors: new Map(), hashes: {} });
-async function loadConnection(connection: DatabaseSync, signal: AbortSignal, dimension = EMBEDDING_DIMENSIONS): Promise<CachedIndex> {
+async function loadConnection(connection: DatabaseSync, signal: AbortSignal, dimension = EMBEDDING_DIMENSIONS,
+  documents?: readonly SearchDocument[]): Promise<CachedIndex> {
   const cache = emptyIndex(); let n = 0;
-  for (const row of connection.prepare("SELECT hash,vector FROM vectors").iterate()) {
+  const get = connection.prepare("SELECT hash,vector FROM vectors WHERE hash=?");
+  const hashes = documents && new Set(documents.flatMap(document => document.chunks.map(hashText)));
+  const rows = hashes ? (function* () { for (const hash of hashes) { const row = get.get(hash); if (row) yield row; } })()
+    : connection.prepare("SELECT hash,vector FROM vectors").iterate();
+  for (const row of rows) {
     signal.throwIfAborted();
     if (typeof row.hash === "string" && row.vector instanceof Uint8Array && row.vector.byteLength === dimension * 4) {
       const buffer = Buffer.from(row.vector);
@@ -28,6 +33,10 @@ async function loadConnection(connection: DatabaseSync, signal: AbortSignal, dim
       if (validVector(vector, dimension)) cache.vectors.set(row.hash, vector);
     }
     if (++n % 32 === 0) await yieldTask();
+  }
+  if (documents) {
+    for (const document of documents) cache.hashes[document.hit.id] = document.chunks.map(hashText);
+    return cache;
   }
   for (const row of connection.prepare("SELECT id,hashes FROM documents").iterate()) {
     signal.throwIfAborted();
@@ -48,26 +57,32 @@ function busy(error: unknown): boolean {
 }
 export interface IndexTransaction {
   outside<T>(operation: () => Promise<T>): Promise<T>;
-  load(): Promise<CachedIndex>;
+  load(documents?: readonly SearchDocument[]): Promise<CachedIndex>;
   save(documents: readonly SearchDocument[], vectors: ReadonlyMap<string, number[]>): Promise<void>;
   sessionTitles(): SessionIndexTransaction;
   sessionBoundaries(live: readonly string[], updates: readonly SessionBoundaryRow[]): void;
   tasks(): TaskIndexTransaction;
 }
-/** Project-owned durable database. No reset, rename, unlink or cache-directory override. */
+/** Source-owned durable databases. Settings is shared across projects. */
 export class SearchIndexStore {
   constructor(private readonly retryBudgetMs = 600) {}
   path(cwd: string, source: "settings" | "sessions" | "tasks" = "settings"): string { return canonicalSearchIndexPath(cwd, source); }
   /** Read-only snapshot for restart/query visibility; never discovers sources or calls a provider. */
-  async read(cwd: string, signal: AbortSignal, config?: SemanticEmbeddingConfig): Promise<CachedIndex> {
+  async read(cwd: string, signal: AbortSignal, config?: SemanticEmbeddingConfig, documents?: readonly SearchDocument[]): Promise<CachedIndex> {
     const path = this.path(cwd);
+    for (const directory of sourceDirectories(cwd, "settings")) {
+      const info = await lstat(directory).catch(error => { if (error.code !== "ENOENT") throw error; });
+      if (!info) return emptyIndex();
+      if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("Unsafe search directory");
+    }
+    await safeFile(path);
     try { await stat(path); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return emptyIndex(); throw error; }
     signal.throwIfAborted();
     const db = new DatabaseSync(path, { readOnly: true });
     try {
       db.exec("PRAGMA busy_timeout=5; BEGIN");
       if (!db.prepare("SELECT name FROM sqlite_master WHERE name='documents'").get()) return emptyIndex();
-      const cache = await loadConnection(db, signal, config?.dimension);
+      const cache = await loadConnection(db, signal, config?.dimension, documents);
       const get = db.prepare("SELECT value FROM metadata WHERE key=?");
       if (get.get("schema")?.value !== VERSION) throw new Error("Incompatible search index schema");
       if (!compatibleEmbeddingMetadata(db, "metadata", config)) cache.vectors.clear();
@@ -158,7 +173,8 @@ export class SearchIndexStore {
         previous.then(resolve, reject).finally(() => bounded.removeEventListener("abort", abort));
       });
       bounded.throwIfAborted();
-      await mkdir(join(resolve(cwd), ".pi", "search"), { recursive: true, mode: 0o700 });
+      for (const directory of sourceDirectories(cwd, source)) await safeDirectory(directory);
+      await safeFile(path);
       bounded.throwIfAborted();
       db = new DatabaseSync(path);
       clearTimeout(timer);
@@ -208,6 +224,10 @@ export class SearchIndexStore {
         CREATE TRIGGER IF NOT EXISTS settings_document_update BEFORE UPDATE ON documents
         WHEN json_extract(NEW.hit, '$.kind') IS NOT 'settings' BEGIN SELECT RAISE(ABORT, 'Only settings may be indexed'); END;`);
       const connection = db;
+      if (source === "settings") {
+        checkSettings();
+        await importLegacySettings(connection, cwd, signal, config);
+      }
       const check = () => signal.throwIfAborted();
       const tx: IndexTransaction = {
         outside: async operation => {
@@ -222,7 +242,7 @@ export class SearchIndexStore {
         sessionTitles: () => createSessionIndexTransaction(connection, signal, config),
         sessionBoundaries: (live, updates) => reconcileSessionBoundaries(connection, signal, live, updates),
         tasks: () => taskIndexTransaction(connection, config),
-        load: () => { checkSettings(); return loadConnection(connection, signal, dimension); },
+        load: documents => { checkSettings(); return loadConnection(connection, signal, dimension, documents); },
         save: async (documents, vectors) => {
           checkSettings();
           const upsert = connection.prepare("INSERT INTO documents VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET text=excluded.text,hit=excluded.hit,hashes=excluded.hashes WHERE documents.text!=excluded.text OR documents.hit!=excluded.hit OR documents.hashes!=excluded.hashes");
@@ -249,7 +269,9 @@ export class SearchIndexStore {
             }
             if (++n % 32 === 0) await yieldTask();
           }
-          connection.exec("DELETE FROM documents WHERE id NOT IN (SELECT id FROM live_documents); DELETE FROM vectors WHERE hash NOT IN (SELECT hash FROM live_hashes)");
+          // Other windows/app versions may still use an older authored catalogue.
+          // Query and index planning select only the caller's content hashes.
+          if (source !== "settings") connection.exec("DELETE FROM documents WHERE id NOT IN (SELECT id FROM live_documents); DELETE FROM vectors WHERE hash NOT IN (SELECT hash FROM live_hashes)");
           check();
         },
       };

@@ -42,6 +42,21 @@ export function queuedMessageBlocks(message: QueuedUserMessage): ContentBlock[] 
 export function createPromptQueueRuntime(options: PromptQueueRuntimeOptions) {
   let queueItemsBySession = $state<Map<string, QueueState["items"]>>(new Map());
   const autoFlushInProgress = new Set<string>();
+  const explicitSendHolds = new Map<string, Set<symbol>>();
+
+  /** Hold the idle gap while a selected queued message replaces the current run. */
+  function holdAutoQueue(sessionId: string): () => void {
+    const holds = explicitSendHolds.get(sessionId) ?? new Set<symbol>();
+    const token = Symbol("explicit queued send");
+    holds.add(token);
+    explicitSendHolds.set(sessionId, holds);
+    return () => {
+      if (explicitSendHolds.get(sessionId) !== holds || !holds.delete(token)) return;
+      if (holds.size > 0) return;
+      explicitSendHolds.delete(sessionId);
+      void flushAutoQueue(sessionId);
+    };
+  }
 
   function handleQueueState(state: QueueState): void {
     const next = new Map(queueItemsBySession);
@@ -67,7 +82,8 @@ export function createPromptQueueRuntime(options: PromptQueueRuntimeOptions) {
   }
 
   function autoQueueSuppressed(sessionId: string): boolean {
-    return options.suppressAutoQueue?.(sessionId) === true
+    return explicitSendHolds.has(sessionId)
+      || options.suppressAutoQueue?.(sessionId) === true
       || !agentControlAllowsAutoQueue(options.agentState(sessionId));
   }
 
@@ -92,6 +108,12 @@ export function createPromptQueueRuntime(options: PromptQueueRuntimeOptions) {
       ) {
         const message = await requestClient.takeAutoMessage(sessionId);
         if (!message) return;
+        if (autoQueueSuppressed(sessionId)) {
+          // An explicit send can acquire ownership while this request is in
+          // flight. Preserve the removed payload without racing its prompt.
+          await requestClient.deferMessage(sessionId, queuedMessageBlocks(message), message.displayText);
+          return;
+        }
         const transcriptMessageId = options.appendQueuedMessage(sessionId, message);
         try {
           await options.runPromptRequest(
@@ -124,11 +146,13 @@ export function createPromptQueueRuntime(options: PromptQueueRuntimeOptions) {
       queueItemsBySession = next;
     }
     autoFlushInProgress.delete(sessionId);
+    explicitSendHolds.delete(sessionId);
   }
 
   function reset(): void {
     queueItemsBySession = new Map();
     autoFlushInProgress.clear();
+    explicitSendHolds.clear();
   }
 
   return {
@@ -137,6 +161,7 @@ export function createPromptQueueRuntime(options: PromptQueueRuntimeOptions) {
     handleQueueConsumed,
     refreshQueueState,
     flushAutoQueue,
+    holdAutoQueue,
     clearSession,
     reset,
   };

@@ -63,6 +63,7 @@
     onFork,
     onCreateTask,
     onScheduleContinuation,
+    onHandoff,
     onPause = () => {},
     onContinue = () => {},
     onCancel,
@@ -102,6 +103,7 @@
     onFork?: () => void | Promise<void>;
     onCreateTask?: () => void | Promise<void>;
     onScheduleContinuation?: () => void | Promise<void>;
+    onHandoff?: () => void | Promise<void>;
     onPause?: () => void | Promise<void>;
     onContinue?: () => void | Promise<void>;
     onCancel: () => void | Promise<void>;
@@ -117,6 +119,7 @@
   const createTaskCommand = desktopCommandDefinition("composer.createTask");
   const deferCommand = desktopCommandDefinition("composer.defer");
   const scheduleContinuationCommand = desktopCommandDefinition("composer.scheduleContinuation");
+  const handoffCommand = desktopCommandDefinition("composer.handoff");
 
   let composerForm = $state<HTMLFormElement | undefined>();
   let textarea = $state<HTMLTextAreaElement | undefined>();
@@ -230,6 +233,10 @@
       && !!onScheduleContinuation
       && !!activeSessionId
       && ready,
+  );
+  const canHandoff = $derived(
+    !editorMode && !questionMode && !!onHandoff && !!activeSessionId && ready
+      && !promptRunning && !messageEditActive && voiceController.state === "idle",
   );
   const promptAssistiveStatus = $derived.by(() => {
     if (promptEnhancing) return "Improving prompt…";
@@ -367,6 +374,12 @@
     void onScheduleContinuation();
   }
 
+  function handoffFromMenu(): void {
+    composerMenuOpen = false;
+    composerMenuTrigger?.focus();
+    if (canHandoff) void onHandoff?.();
+  }
+
   async function openPromptHistory(): Promise<void> {
     composerMenuOpen = false;
     if (!canOpenPromptHistory || !onOpenHistory) return;
@@ -410,6 +423,7 @@
       { label: deferCommand.label, disabled: !activeSessionId || !ready || !hasQueueableDraft },
       { label: "Send to fork", disabled: !canFork },
       { label: scheduleContinuationCommand.label, disabled: !canScheduleContinuation },
+      { label: handoffCommand.label, disabled: !canHandoff },
     ];
   }
 
@@ -629,6 +643,9 @@
     onDefer={() => void deferWithVoiceStop()}
     onFork={() => void forkWithVoiceStop()}
     onScheduleContinuation={scheduleContinuation}
+    handoffLabel={handoffCommand.label}
+    {canHandoff}
+    onHandoff={handoffFromMenu}
     onKeydown={handleComposerMenuKeydown}
   />
 {/if}

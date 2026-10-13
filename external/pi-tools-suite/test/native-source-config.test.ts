@@ -8,6 +8,7 @@ import { searchNative, indexNative } from "../src/project-search/native-engine.m
 import { openStore, snapshot } from "../src/project-search/native-store.mjs";
 import { scanProject } from "../src/project-search/native-scan.mjs";
 import { removeDirsWithRetry } from "./support/fs-retry.js";
+import { enableSearchSources } from "./support/search-sources.js";
 
 const artifacts = fileURLToPath(new URL("../../../.pi/artifacts/", import.meta.url));
 const originalHome = process.env.HOME;
@@ -25,6 +26,7 @@ async function fixture() {
   const config = path.join(home, ".config/pi/pi-tools-suite.jsonc");
   await mkdir(path.dirname(config), { recursive: true });
   await mkdir(workspace);
+  enableSearchSources(workspace);
   process.env.HOME = home;
   const save = (search: object) => writeFile(config, JSON.stringify({ search }));
   const put = (name: string, content = "ExtensionNeedle\n") => writeFile(path.join(workspace, name), content);
@@ -89,7 +91,7 @@ test("custom suffixes do not bypass ignores, generated directories, binary or li
   await symlink(path.join(f.workspace, "visible.custom"), path.join(f.workspace, "link.custom"));
   await mkdir(path.join(f.workspace, ".godot"));
   await f.put(".godot/generated.custom");
-  await mkdir(path.join(f.workspace, ".pi"));
+  await mkdir(path.join(f.workspace, ".pi"), { recursive: true });
   await f.put(".pi/pi-tools-suite.jsonc", '{"search":{"knowledgeExtensions":["custom"]}}');
   expect((await f.query()).hits.map(hit => [hit.path, hit.kind])).toEqual([["visible.custom", "code"]]);
 });

@@ -154,6 +154,7 @@ export type SubagentAgentState = {
 	eventLines?: number;
 	retryCount?: number;
 	lastActivity?: SubagentActivity;
+	todoProgress?: { completed: number; total: number };
 };
 
 export type SubagentTaskPreview = {

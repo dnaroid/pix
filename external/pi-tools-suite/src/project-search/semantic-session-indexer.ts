@@ -5,6 +5,9 @@ import { embedTaskTexts, requireSemanticIdentity, validSearchVector,
   type SemanticSearchOptions } from "./semantic-provider.js";
 import { commitIdentity, type CommitEmbeddingConfig } from "./semantic-commit-provider.js";
 import { withSearchIndexWriter, type SqlDatabase } from "./semantic-index-writer.js";
+import type { TranscriptCandidate } from "./session-transcript.mjs";
+import { SessionIndexDeferred } from "./session-idle.mjs";
+import { ensureSessionRevision } from "./session-index-revision.mjs";
 
 const BATCH = 16;
 const MAX_PER_QUERY = 256;
@@ -15,6 +18,7 @@ function ensureSessionSchema(db: SqlDatabase, config: CommitEmbeddingConfig): vo
     CREATE TABLE IF NOT EXISTS pix_session_titles(session_id TEXT PRIMARY KEY,title TEXT NOT NULL,title_hash TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS pix_session_vectors(title_hash TEXT PRIMARY KEY,vector BLOB NOT NULL);
     CREATE INDEX IF NOT EXISTS pix_session_titles_by_hash ON pix_session_titles(title_hash)`);
+  ensureSessionRevision(db);
   const count = Number(db.prepare("SELECT COUNT(*) AS n FROM pix_session_meta").get()?.n ?? 0);
   const expected = [["identity", commitIdentity(config)], ["model", config.model], ["dimensions", String(config.dimension)], ["encoding", "float32le"]] as const;
   const read = db.prepare("SELECT value FROM pix_session_meta WHERE key=?");
@@ -29,12 +33,19 @@ function ensureSessionSchema(db: SqlDatabase, config: CommitEmbeddingConfig): vo
 /** The cache indexes explicit saved titles only, never first-message fallbacks,
  * first/final transcript boundaries or generated session labels. */
 export async function indexMissingSessionVectors(root: string, candidates: readonly CachedSessionCandidate[], key: string | undefined,
-  options: SemanticSearchOptions, signal: AbortSignal, config: CommitEmbeddingConfig, drain = false): Promise<{ remaining: number; indexed: number }> {
+  options: SemanticSearchOptions, signal: AbortSignal, config: CommitEmbeddingConfig, drain = false,
+  eligible?: (candidate: TranscriptCandidate, signal: AbortSignal) => Promise<boolean>, retry = drain): Promise<{ remaining: number; indexed: number }> {
   if (!candidates.length) return { remaining: 0, indexed: 0 };
   const owned = drain ? signal : AbortSignal.any([signal, AbortSignal.timeout(DEADLINE_MS)]);
   let remaining = 0, indexed = 0;
   for (let batch = 0; drain || batch <= MAX_PER_QUERY / BATCH; batch++) {
     owned.throwIfAborted();
+    if (eligible) {
+      const admitted = await Promise.all(candidates.map(c => eligible(c,owned)));
+      candidates = candidates.filter((_c,i) => admitted[i]);
+      if (!candidates.length) return {remaining:0,indexed};
+    }
+    await requireSourceEnabled(root, "sessions", owned);
     await requireSemanticIdentity(options, config, owned);
     const verified = await freshSemanticCandidates(root, { tasks: [], sessions: candidates }, options, owned);
     const linked = await sessionLinks(root, candidates, options, owned);
@@ -62,9 +73,22 @@ export async function indexMissingSessionVectors(root: string, candidates: reado
       }
       const targets = missing.slice(0, BATCH);
       await requireSemanticIdentity(options, config, owned);
-      const vectors = await db.outside(() => withProviderSlot(owned, () => (options.embedTasks ?? embedTaskTexts)(targets.map(item => item.title), key, owned, config)));
+      if (eligible && !(await Promise.all(candidates.filter(c=>targets.some(t=>t.nativeId===c.id)).map(c=>eligible(c,owned)))).every(Boolean)) return {remaining:missing.length,indexed:0};
+      let vectors;
+      try {
+        vectors = await db.outside(() => withProviderSlot(owned, async () => {
+          await requireSourceEnabled(root, "sessions", owned);
+          if (eligible && !(await Promise.all(candidates.filter(c=>targets.some(t=>t.nativeId===c.id)).map(c=>eligible(c,owned)))).every(Boolean)) throw new SessionIndexDeferred();
+          return (options.embedTasks ?? embedTaskTexts)(targets.map(item => item.title), key, owned, config);
+        }));
+      } catch (error) {
+        if (!(error instanceof SessionIndexDeferred)) throw error;
+        return {remaining:missing.length,indexed:0};
+      }
       owned.throwIfAborted();
+      await requireSourceEnabled(root, "sessions", owned);
       await requireSemanticIdentity(options, config, owned);
+      if (eligible && !(await Promise.all(candidates.filter(c=>targets.some(t=>t.nativeId===c.id)).map(c=>eligible(c,owned)))).every(Boolean)) return {remaining:missing.length,indexed:0};
       if (vectors.length !== targets.length || !vectors.every(v => validSearchVector(v, config.dimension))) throw new Error("Invalid session title embedding batch");
       const fresh = await freshSemanticCandidates(root, {
         tasks: [], sessions: candidates.filter(session => targets.some(target => target.nativeId === session.id)),
@@ -79,6 +103,8 @@ export async function indexMissingSessionVectors(root: string, candidates: reado
       }
       await requireSemanticIdentity(options, config, owned);
       const add = db.prepare("INSERT INTO pix_session_vectors(title_hash,vector) VALUES(?,?) ON CONFLICT(title_hash) DO NOTHING");
+      await requireSourceEnabled(root, "sessions", owned);
+      if (eligible && !(await Promise.all(candidates.filter(c=>targets.some(t=>t.nativeId===c.id)).map(c=>eligible(c,owned)))).every(Boolean)) return {remaining:missing.length,indexed:0};
       for (const title of live) put.run(title.sessionId, title.title, title.hash);
       for (let i = 0; i < targets.length; i++) {
         const bytes = Buffer.alloc(config.dimension * 4);
@@ -86,10 +112,11 @@ export async function indexMissingSessionVectors(root: string, candidates: reado
         add.run(targets[i]!.hash, bytes);
       }
       return { remaining: missing.length - targets.length, indexed: targets.length };
-    }, "sessions", drain && batch === 0);
+    }, "sessions", retry && batch === 0);
     indexed += response.indexed;
     remaining = response.remaining;
     if (!remaining || !response.indexed) break;
   }
   return { remaining, indexed };
 }
+import { requireSourceEnabled } from "./source-policy.mjs";

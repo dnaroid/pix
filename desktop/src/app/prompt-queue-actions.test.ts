@@ -21,7 +21,7 @@ function pending() {
 
 function setup() {
   let sessionId = "session-1";
-  const client = { queueAction: vi.fn().mockResolvedValue({ message }) };
+  const client = { queueAction: vi.fn().mockResolvedValue({ message }), deferMessage: vi.fn().mockResolvedValue({ itemId: message.id }) };
   let currentClient: AcpClient | null = client as unknown as AcpClient;
   const pane = { scrollTop: 100, scrollHeight: 1000, clientHeight: 300 };
   const scroll = createTranscriptScrollController({
@@ -41,6 +41,7 @@ function setup() {
     imagePromptSupported: () => true,
     promptRuntime: {
       promptRun: vi.fn(), runPromptRequest: vi.fn().mockResolvedValue(undefined),
+      holdAutoQueue: vi.fn(() => vi.fn()),
     } as unknown as Options["promptRuntime"],
     appendQueuedMessage: vi.fn(() => { pane.scrollHeight = 1300; return "queued:queued-1"; }),
     restoreQueuedMessage: vi.fn(), focusComposer: vi.fn(),
@@ -58,7 +59,7 @@ describe("queued send latest-content intent", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it("scrolls fully down after append and resumes following before starting the prompt", async () => {
-    const { actions, options, pane, scroll } = setup();
+    const { actions, options, client, pane, scroll } = setup();
     expect(scroll.followsLatest).toBe(false);
     vi.mocked(options.promptRuntime.runPromptRequest).mockImplementation(async () => {
       expect(pane.scrollTop).toBe(1300);
@@ -68,6 +69,7 @@ describe("queued send latest-content intent", () => {
     expect(options.appendQueuedMessage).toHaveBeenCalledWith("session-1", message);
     expect(options.scrollToLatest).toHaveBeenCalledOnce();
     expect(options.promptRuntime.runPromptRequest).toHaveBeenCalledOnce();
+    expect(client.deferMessage).not.toHaveBeenCalled();
   });
 
   it.each(["edit", "cancel"] as const)("does not scroll for %s", async (action) => {
@@ -103,6 +105,57 @@ describe("queued send latest-content intent", () => {
     vi.mocked(options.scrollToLatest).mockImplementation(async () => { switchSession(); });
     await actions.actOnQueuedMessage(item, "send-now");
     expect(options.promptRuntime.runPromptRequest).not.toHaveBeenCalled();
+    expect(actions.actionRunning).toBe(false);
+  });
+});
+
+describe("queued send recovery", () => {
+  it.each(["request", "scroll"])("manually requeues after a %s failure before releasing auto dispatch", async (failure) => {
+    const { actions, options, client } = setup();
+    const error = new Error("send failed");
+    const release = vi.fn();
+    vi.mocked(options.promptRuntime.holdAutoQueue).mockReturnValue(release);
+    client.queueAction.mockImplementation(async () => {
+      expect(options.promptRuntime.holdAutoQueue).toHaveBeenCalledWith("session-1");
+      return { message };
+    });
+    if (failure === "request") vi.mocked(options.promptRuntime.runPromptRequest).mockRejectedValue(error);
+    else vi.mocked(options.scrollToLatest).mockRejectedValue(error);
+    client.deferMessage.mockImplementation(async () => {
+      expect(release).not.toHaveBeenCalled();
+      return { itemId: message.id };
+    });
+    await actions.actOnQueuedMessage(item, "send-now");
+    expect(client.deferMessage).toHaveBeenCalledWith("session-1", [{ type: "text", text: "Continue" }], "Continue");
+    expect(options.reportError).toHaveBeenCalledWith(error);
+    expect(release).toHaveBeenCalledOnce();
+    expect(actions.actionRunning).toBe(false);
+  });
+
+  it("holds automatic dispatch through the replacement prompt", async () => {
+    const { actions, options } = setup();
+    const release = vi.fn();
+    vi.mocked(options.promptRuntime.holdAutoQueue).mockReturnValue(release);
+    vi.mocked(options.promptRuntime.runPromptRequest).mockImplementation(async () => { expect(release).not.toHaveBeenCalled(); });
+    await actions.actOnQueuedMessage(item, "send-now");
+    expect(release).toHaveBeenCalledOnce();
+  });
+
+  it("preserves the removed payload when navigation occurs during queueAction", async () => {
+    const { actions, options, client, switchSession } = setup();
+    client.queueAction.mockImplementation(async () => { switchSession(); return { message }; });
+    await actions.actOnQueuedMessage(item, "send-now");
+    expect(client.deferMessage).toHaveBeenCalledWith("session-1", [{ type: "text", text: "Continue" }], "Continue");
+    expect(options.promptRuntime.runPromptRequest).not.toHaveBeenCalled();
+    expect(options.restoreQueuedMessage).not.toHaveBeenCalled();
+  });
+
+  it("restores the active composer's payload when requeue fails", async () => {
+    const { actions, options, client } = setup();
+    vi.mocked(options.promptRuntime.runPromptRequest).mockRejectedValue(new Error("send failed"));
+    client.deferMessage.mockRejectedValue(new Error("requeue failed"));
+    await actions.actOnQueuedMessage(item, "send-now");
+    expect(options.restoreQueuedMessage).toHaveBeenCalledWith(message);
     expect(actions.actionRunning).toBe(false);
   });
 });

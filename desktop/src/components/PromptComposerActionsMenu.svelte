@@ -1,5 +1,6 @@
 <script lang="ts">
   import CalendarClock from "@lucide/svelte/icons/calendar-clock";
+  import FileOutput from "@lucide/svelte/icons/file-output";
   import History from "@lucide/svelte/icons/history";
   import MessagesSquare from "@lucide/svelte/icons/messages-square";
   import GitFork from "@lucide/svelte/icons/git-fork";
@@ -17,6 +18,9 @@
     createTaskLabel,
     deferLabel,
     scheduleContinuationLabel,
+    handoffLabel,
+    canHandoff,
+    onHandoff,
     canOpenHistory,
     canEnhance,
     canCreateTask,
@@ -41,6 +45,9 @@
     createTaskLabel: string;
     deferLabel: string;
     scheduleContinuationLabel: string;
+    handoffLabel: string;
+    canHandoff: boolean;
+    onHandoff: () => void;
     canOpenHistory: boolean;
     canEnhance: boolean;
     canCreateTask: boolean;
@@ -154,5 +161,13 @@
   >
     <CalendarClock class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
     <span>{scheduleContinuationLabel}</span>
+  </button>
+  <button
+    class="flex min-h-8 w-full items-center gap-2 rounded-sm px-2 py-1 text-left text-xs text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+    type="button" role="menuitem" tabindex="-1" disabled={!canHandoff}
+    onclick={onHandoff} data-composer-menu-handoff
+  >
+    <FileOutput class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+    <span>{handoffLabel}</span>
   </button>
 </div>

@@ -10,6 +10,7 @@ export function runSearchSource(
   operation: (signal: AbortSignal) => Promise<void>,
   onSlow: () => void,
   onComplete: (error?: unknown) => void,
+  timeoutMs = SEARCH_SOURCE_TIMEOUT_MS,
 ): Promise<"completed" | "pending" | "cancelled"> {
   if (signal.aborted) return Promise.resolve("cancelled");
   return new Promise((resolve, reject) => {
@@ -27,7 +28,7 @@ export function runSearchSource(
       if (finished || signal.aborted) return;
       try { onSlow(); resolve("pending"); }
       catch (error) { reject(error); }
-    }, SEARCH_SOURCE_TIMEOUT_MS);
+    }, timeoutMs);
     const complete = (error?: unknown) => {
       if (finished) return;
       finished = true;

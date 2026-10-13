@@ -6,6 +6,7 @@ import { hashText } from "./documents.js";
 import { EMBEDDING_DIMENSIONS, validVector } from "./embeddings.js";
 import type { SemanticEmbeddingConfig } from "./config.js";
 import { compatibleEmbeddingMetadata, initializeEmbeddingMetadata } from "./embedding-cache.js";
+import { ensureSessionRevision } from "./session-index-revision.js";
 
 /** Separate schema/embedding identity from settings and commits. */
 export const SESSION_META = "pix_session_meta";
@@ -36,7 +37,8 @@ export function namedSessionTitles(records: readonly SessionMapRecord[], cwd: st
 
 export interface SessionIndexTransaction {
   reconcile(records: readonly NamedSessionTitle[]): void;
-  missing(limit: number): NamedSessionTitle[];
+  reconcileOne(sessionId: string, title?: NamedSessionTitle): void;
+  missing(limit: number, sessionId?: string): NamedSessionTitle[];
   save(vectors: ReadonlyMap<string, number[]>): void;
 }
 
@@ -50,6 +52,7 @@ export function createSessionIndexTransaction(db: DatabaseSync, signal: AbortSig
     CREATE TABLE IF NOT EXISTS ${SESSION_TITLES} (session_id TEXT PRIMARY KEY, title TEXT NOT NULL, title_hash TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS ${SESSION_VECTORS} (title_hash TEXT PRIMARY KEY, vector BLOB NOT NULL);
     CREATE INDEX IF NOT EXISTS pix_session_titles_by_hash ON ${SESSION_TITLES}(title_hash);`);
+  ensureSessionRevision(db);
   initializeEmbeddingMetadata(db, SESSION_META, config);
   db.exec("CREATE TEMP TABLE IF NOT EXISTS pix_live_session_ids (session_id TEXT PRIMARY KEY)");
   const saveTitle = db.prepare(`INSERT INTO ${SESSION_TITLES} (session_id,title,title_hash) VALUES (?,?,?)
@@ -59,6 +62,12 @@ export function createSessionIndexTransaction(db: DatabaseSync, signal: AbortSig
   const addVector = db.prepare(`INSERT INTO ${SESSION_VECTORS} VALUES (?,?)
     ON CONFLICT(title_hash) DO NOTHING`);
   return {
+    reconcileOne(sessionId, title): void {
+      signal.throwIfAborted();
+      if (title) saveTitle.run(title.sessionId, title.title, title.hash);
+      else db.prepare(`DELETE FROM ${SESSION_TITLES} WHERE session_id=?`).run(sessionId);
+      // A partial idle discovery must never prune another session's paid cache.
+    },
     reconcile(records): void {
       db.exec("DELETE FROM pix_live_session_ids");
       for (const record of records) {
@@ -69,11 +78,12 @@ export function createSessionIndexTransaction(db: DatabaseSync, signal: AbortSig
       db.exec(`DELETE FROM ${SESSION_TITLES} WHERE session_id NOT IN (SELECT session_id FROM pix_live_session_ids);
         DELETE FROM ${SESSION_VECTORS} WHERE title_hash NOT IN (SELECT title_hash FROM ${SESSION_TITLES});`);
     },
-    missing(limit): NamedSessionTitle[] {
+    missing(limit, sessionId): NamedSessionTitle[] {
       const rows: NamedSessionTitle[] = [];
       for (const row of db.prepare(`SELECT t.session_id,t.title,t.title_hash FROM ${SESSION_TITLES} t
         LEFT JOIN ${SESSION_VECTORS} v ON v.title_hash=t.title_hash
-        WHERE v.title_hash IS NULL GROUP BY t.title_hash ORDER BY t.session_id LIMIT ?`).iterate(limit)) {
+        WHERE v.title_hash IS NULL AND (? IS NULL OR t.session_id=?)
+        GROUP BY t.title_hash ORDER BY t.session_id LIMIT ?`).iterate(sessionId ?? null, sessionId ?? null, limit)) {
         signal.throwIfAborted();
         if (typeof row.session_id === "string" && typeof row.title === "string" && typeof row.title_hash === "string") {
           rows.push({ sessionId: row.session_id, title: row.title, hash: row.title_hash });

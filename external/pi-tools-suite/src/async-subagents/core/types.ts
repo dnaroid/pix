@@ -41,6 +41,8 @@ export interface AgentState {
 	retryCount?: number;
 	/** Most recent user-visible activity observed from the sub-agent RPC stream. */
 	lastActivity?: AgentActivity;
+	/** Counts from this child attempt's private todo plan; not elapsed-time progress. */
+	todoProgress?: { completed: number; total: number };
 }
 
 export interface AgentActivity {

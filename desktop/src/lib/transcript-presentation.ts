@@ -1,5 +1,6 @@
 import type { ToolCallStatus } from "@agentclientprotocol/sdk";
 import { toolPresentationName } from "./tool-presentation";
+import { questionTranscriptMessages } from "./transcript-question";
 import type {
   ActivityEntry,
   ActivityGroupItem,
@@ -26,6 +27,11 @@ export function groupTranscriptItems(items: readonly TranscriptItem[]): Transcri
     const entry = item as ActivityEntry;
     if (entries) entries.push(entry);
     else entries = [entry];
+    const questionMessages = item.type === "tool" ? questionTranscriptMessages(item) : [];
+    if (questionMessages.length > 0) {
+      grouped.push(buildActivityGroup(entries), ...questionMessages);
+      entries = undefined;
+    }
   }
 
   if (entries) grouped.push(buildActivityGroup(entries));

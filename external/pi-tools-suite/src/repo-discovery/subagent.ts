@@ -14,9 +14,9 @@ export default function subagentRepoDiscovery(pi: ExtensionAPI): void {
 				// Keep the shared schema and execution, but omit parent-only workflow guidance.
 				pi.registerTool({
 					...tool,
-					promptSnippet: "Use project_search for repository evidence and project session/task/commit history. For code and documents select sources=['code','knowledge']; first pass maxFiles=3 without includeContent. Use patch:<literal> for explicit Git changed-line search.",
+					promptSnippet: "Use project_search only for enabled sources listed in its current schema; first pass maxFiles=3 without includeContent. Select code/knowledge or patch:<literal> only when those sources are enabled.",
 					promptGuidelines: [
-						"All shared project_search sources are available. Native lexical search needs no key. Hybrid/semantic uses explicit global provider configuration and reports partial coverage; never configure providers for the user.",
+						"Project selection controls both search and indexing. Global provider configuration does not enable disabled sources. Native lexical search needs no key; never configure providers for the user. Session queries rank cached vectors and do not embed session documents.",
 						"Use lexical mode to avoid provider embedding calls; scope with pathPrefix/dedupeFile and read returned file ranges for evidence.",
 					],
 				});

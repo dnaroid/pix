@@ -1,3 +1,4 @@
+import { canonicalSearchIndexPath } from "../src/search/canonical-index.js";
 import assert from "node:assert/strict";
 import { after, before, test, type TestContext } from "node:test";
 import { mkdtempSync } from "node:fs";
@@ -15,6 +16,9 @@ import { TASK_SCHEMA } from "../src/registry/task-database.js";
 import type { Embedder } from "../src/search/embeddings.js";
 import { SEARCH_CACHE_REBUILD_REQUIRED, type SearchSetting } from "../src/search/contract.js";
 import { SearchIndexStore } from "../src/search/index-store.js";
+import { SettingsTaskIndexer } from "../src/search/settings-task-indexer.js";
+import { enableSearchSources, isolateSearchHome } from "./search-sources-fixture.js";
+import { writeSourcePolicy } from "../src/search/source-policy.js";
 
 // Separate file-level provider quotas: Node's test runner executes other test
 // files in parallel, and those must not exhaust this suite's mock-provider slots.
@@ -42,6 +46,8 @@ async function until(check: () => boolean | Promise<boolean>) {
 async function fixture(t: TestContext) {
   const base = resolve(".pi/artifacts/acp-change-indexing/fixtures"); await mkdir(base, { recursive: true });
   const cwd = await mkdtemp(join(base, "run-"));
+  const restoreHome = await isolateSearchHome(cwd);
+  await enableSearchSources(cwd);
   const configPath = join(cwd, "pi-tools-suite.jsonc");
   const preferences = new SearchPreferences(configPath);
   const configure = async (enabled = true) => writeFile(configPath, JSON.stringify({ search: { embedding: enabled
@@ -71,14 +77,96 @@ async function fixture(t: TestContext) {
   };
   const rows = (table: string, workspace = cwd): Array<Record<string, unknown>> => {
     const source = table.startsWith("pix_session_") ? "sessions" : table.startsWith("pix_task_") ? "tasks" : "settings";
-    if (!existsSync(join(workspace, `.pi/search/${source}.sqlite`))) return [];
-    const db = new DatabaseSync(join(workspace, `.pi/search/${source}.sqlite`), { readOnly: true });
+    if (!existsSync(canonicalSearchIndexPath(workspace, source))) return [];
+    const db = new DatabaseSync(canonicalSearchIndexPath(workspace, source), { readOnly: true });
     try { return db.prepare(`SELECT * FROM ${table}`).all(); } catch { return []; } finally { db.close(); }
   };
-  const idle = (service: DesktopSearchService, workspace = cwd) => until(async () => !(await service.config({ cwd: workspace })).indexing);
-  t.after(async () => { await Promise.all(services.map(service => service.dispose())); await rm(cwd, { recursive: true, force: true }); });
+  const idle = (service: DesktopSearchService, workspace = cwd) => until(async () => {
+    const status = await service.config({ cwd: workspace });
+    return !status.indexing && !status.checkingSources?.tasks;
+  });
+  t.after(async () => { await Promise.all(services.map(service => service.dispose())); await rm(cwd, { recursive: true, force: true }); restoreHome(); });
   return { cwd, configPath, configure, make, calls, listeners, notify, closed: () => closed, tasksPath, openTasks, put, rows, idle };
 }
+
+test("missing project policy excludes Tasks/Sessions from background, manual and query paths", async t => {
+  const f = await fixture(t); await f.put(task("a"));
+  await rm(join(f.cwd, ".pi/search-sources.json"));
+  let discovery = 0;
+  const s = f.make({ discover: async () => { discovery++; return []; } });
+  await s.sync({ cwd: f.cwd, settings: [] }); await f.idle(s);
+  await s.config({ cwd: f.cwd, includeSourceStatus: true });
+  assert.deepEqual(await s.queryTasks({ cwd: f.cwd, query: "a", limit: 5 }), { results: [], pendingIndex: false });
+  assert.deepEqual((await s.query({ cwd: f.cwd, query: "a", types: ["sessions"], settings: [], limit: 5 })).results, []);
+  await assert.rejects(s.index({ cwd: f.cwd, source: "tasks" }), /disabled/);
+  assert.equal(discovery, 0); assert.equal(f.calls.length, 0); assert.equal(f.listeners.size, 0);
+  await writeSourcePolicy(f.cwd, "tasks", true);
+  await until(() => f.calls.length === 1); await f.idle(s);
+  assert.equal(f.rows("pix_task_vectors").length, 1);
+  await writeSourcePolicy(f.cwd, "tasks", false);
+  await until(() => f.listeners.size === 0);
+  assert.equal(f.rows("pix_task_vectors").length, 1, "disabling retains the purchased cache");
+  assert.deepEqual((await s.queryTasks({ cwd: f.cwd, query: "a", limit: 5 })).results, []);
+});
+
+test("source toggle aborts a noncooperative background batch without publishing its vectors", async t => {
+  const f = await fixture(t); await f.put(task("a"));
+  const started = gate<void>(), release = gate<void>(); let providerSignal: AbortSignal | undefined;
+  const s = f.make({ embed: async (inputs, _key, signal) => {
+    providerSignal = signal; started.resolve(); await release.promise; return inputs.map(() => [1, 0, 0]);
+  } });
+  await s.sync({ cwd: f.cwd, settings: [] }); await started.promise;
+  try {
+    await writeSourcePolicy(f.cwd, "tasks", false);
+    await until(() => Boolean(providerSignal?.aborted));
+  } finally { release.resolve(); }
+  await f.idle(s);
+  assert.deepEqual(f.rows("pix_task_vectors"), []);
+});
+
+test("invalid source policy reports a diagnostic while all source paths fail closed", async t => {
+  const f = await fixture(t); let discoveries = 0;
+  await writeFile(join(f.cwd, ".pi/search-sources.json"), "{");
+  const s = f.make({ discover: async () => { discoveries++; return []; } });
+  const status = await s.config({ cwd: f.cwd, includeSourceStatus: true });
+  assert.match(status.error ?? "", /search-sources\.json/);
+  assert.deepEqual((await s.query({ cwd: f.cwd, query: "a", types: ["settings", "sessions"], settings: [], limit: 5 })).results, []);
+  assert.equal(discoveries, 0); assert.equal(f.calls.length, 0);
+});
+
+test("source-policy ABA rejects in-flight vectors even before the watcher observes either edit", async t => {
+  const f = await fixture(t); await f.put(task("a"));
+  const started = gate<void>(), release = gate<void>();
+  const s = f.make({ watchSourcePolicy: () => () => {}, embed: async inputs => {
+    started.resolve(); await release.promise; return inputs.map(() => [1, 0, 0]);
+  } });
+  const operation = s.index({ cwd: f.cwd, source: "tasks" });
+  await started.promise;
+  try {
+    await writeSourcePolicy(f.cwd, "tasks", false);
+    await writeSourcePolicy(f.cwd, "tasks", true);
+  } finally { release.resolve(); }
+  assert.equal((await operation).complete, false);
+  assert.deepEqual(f.rows("pix_task_vectors"), []);
+});
+
+test("a status read before the policy watcher retains the catalogue and its resync owner", async t => {
+  const f = await fixture(t);
+  const listeners = new Set<() => void>();
+  const s = f.make({ watchSourcePolicy: (_cwd, changed) => {
+    listeners.add(changed); return () => { listeners.delete(changed); };
+  } });
+  await s.sync({ cwd: f.cwd, settings: [setting("retained")] }); await f.idle(s);
+  const before = f.calls.length;
+  await writeSourcePolicy(f.cwd, "code", false);
+  await s.config({ cwd: f.cwd });
+  assert.equal(f.calls.length, before, "status reads do not start provider work");
+  assert.equal(listeners.size, 1, "the project policy observer survives activation replacement");
+  for (const changed of [...listeners]) changed();
+  await until(() => f.listeners.size === 1); await f.idle(s);
+  assert.deepEqual(f.rows("documents").map(row => row.id), ["settings:retained"]);
+  assert.equal(f.calls.length, before, "resync reuses the retained catalogue vectors");
+});
 
 test("explicit index parser strictly isolates sources, metadata and configuration", () => {
   const cwd = resolve(".");
@@ -251,7 +339,7 @@ test("Sessions Continue resets exhausted ownership before reconciling saved name
 test("explicit incompatible settings cache is retained while task-only click still succeeds", async t => {
   const f = await fixture(t), s = f.make(); await f.put(task("a"));
   await s.index({ cwd: f.cwd, source: "settings", settings: [setting("old")] });
-  const db = new DatabaseSync(join(f.cwd, ".pi/search/settings.sqlite"));
+  const db = new DatabaseSync(canonicalSearchIndexPath(f.cwd));
   db.prepare("UPDATE metadata SET value=? WHERE key='identity'").run("other-provider"); db.close();
   const tables = ["metadata", "documents", "vectors"], before = tables.map(table => f.rows(table));
   const result = await s.index({ cwd: f.cwd, source: "settings", settings: [setting("new")] });
@@ -276,7 +364,7 @@ for (const source of ["settings", "tasks", "sessions"] as const) test(`explicit 
   const table = source === "settings" ? "vectors" : source === "tasks" ? "pix_task_vectors" : "pix_session_vectors";
   preferences.embedding = async () => {
     const config = await read();
-    const exists = await access(join(f.cwd, `.pi/search/${source}.sqlite`)).then(() => true, () => false);
+    const exists = await access(canonicalSearchIndexPath(f.cwd, source)).then(() => true, () => false);
     if (hold && coverageRead && exists && f.rows(table).length) { hold = false; entered.resolve(); await release.promise; }
     return config;
   };
@@ -312,17 +400,65 @@ test("config never activates watchers/provider; sync returns source status witho
   await assert.rejects(access(join(f.cwd, ".pi/search")), { code: "ENOENT" });
   const result = await s.sync({ cwd: f.cwd, settings: [setting("a")] });
   assert.equal(result.indexing, true); assert.equal(result.indexingSources?.settings, true);
-  assert.equal(result.indexingSources?.tasks, true); assert.equal(f.listeners.size, 1);
+  assert.equal(result.indexingSources?.tasks, false); assert.equal(result.checkingSources?.tasks, true);
+  assert.equal(f.listeners.size, 1);
   await started.promise;
   assert.equal((await s.config({ cwd: f.cwd })).indexing, true);
   release.resolve(); await f.idle(s);
   assert.equal(f.rows("vectors").length, 1); assert.equal(f.rows("pix_task_vectors").length, 1);
 });
 
+test("task debounce and unchanged corpus scans are checks, not indexing", async t => {
+  const f = await fixture(t); await f.put(task("a"));
+  let changed!: () => void;
+  let release = gate<void>();
+  const indexer = new SettingsTaskIndexer({ cwd: f.cwd, signal: new AbortController().signal,
+    config: { provider: "ollama", model: "fake", dimension: 3, queryPrefix: "", documentPrefix: "", baseUrl: "http://127.0.0.1:1" },
+    store: new SearchIndexStore(), authorized: async () => true, enabled: source => source === "tasks",
+    debounceMs: 1000, watchTasks: (_cwd, listener) => { changed = listener; return () => {}; },
+    embed: async inputs => { f.calls.push([...inputs]); await release.promise; return inputs.map(() => [1, 0, 0]); },
+  });
+  const idle = () => until(() => !indexer.indexing.tasks && !indexer.checking.tasks);
+  const check = () => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    try {
+      changed(); changed();
+      assert.equal(indexer.checking.tasks, true, "debounce is a local check");
+      assert.equal(indexer.indexing.tasks, false);
+      t.mock.timers.tick(1000);
+      assert.equal(indexer.checking.tasks, true, "the asynchronous scan is still a check");
+      assert.equal(indexer.indexing.tasks, false);
+    } finally { t.mock.timers.reset(); }
+  };
+  try {
+    indexer.sync([]);
+    assert.equal(indexer.checking.tasks, true);
+    assert.equal(indexer.indexing.tasks, false);
+    await until(() => f.calls.length === 1);
+    assert.equal(indexer.indexing.tasks, true, "provider-backed index work is visible");
+    release.resolve(); await idle();
+    for (let i = 0; i < 3; i++) { check(); await idle(); }
+    await f.put({ ...task("a"), status: "done" });
+    check(); await idle();
+    assert.equal(f.calls.length, 1, "duplicate file events and nonsemantic edits do not upload vectors");
+    release = gate<void>();
+    await f.put(task("a", "Changed semantic description"));
+    check();
+    await until(() => f.calls.length === 2);
+    assert.equal(indexer.indexing.tasks, true);
+    release.resolve(); await idle();
+    check();
+    await indexer.dispose();
+    assert.equal(indexer.checking.tasks, false, "teardown clears pending check activity");
+    assert.equal(indexer.indexing.tasks, false);
+    assert.equal(f.calls.length, 2);
+  } finally { release.resolve(); await indexer.dispose(); }
+});
+
 for (const legacy of [true, false]) test(`incompatible settings ${legacy ? "legacy" : "configured"} vectors do not block task indexing`, async t => {
   const f = await fixture(t), seed = f.make();
   await seed.sync({ cwd: f.cwd, settings: [setting("old")] }); await f.idle(seed); await seed.dispose();
-  const db = new DatabaseSync(join(f.cwd, ".pi/search/settings.sqlite"));
+  const db = new DatabaseSync(canonicalSearchIndexPath(f.cwd));
   try {
     if (legacy) db.exec("DELETE FROM metadata WHERE key='identity'");
     else db.prepare("UPDATE metadata SET value=? WHERE key='identity'").run("different-provider-identity");
@@ -360,7 +496,7 @@ test("an incompatible task namespace does not block changed settings", async t =
   assert.equal(f.calls.flat().length, 1);
 });
 
-test("settings catalogue metadata alone drives no-ops, reuse, changes and deletion", async t => {
+test("settings catalogue changes retain shared vectors without exposing removed fields", async t => {
   const f = await fixture(t), s = f.make();
   const original = [setting("a"), setting("b")];
   await s.sync({ cwd: f.cwd, settings: original }); await f.idle(s);
@@ -370,10 +506,11 @@ test("settings catalogue metadata alone drives no-ops, reuse, changes and deleti
   await s.sync(reordered); await f.idle(s); assert.equal(f.calls.flat().length, 2);
   // A different field id can share a purchased metadata vector.
   await s.sync({ cwd: f.cwd, settings: [{ ...setting("a"), id: "renamed" }, setting("b", "Edited description")] }); await f.idle(s);
-  assert.equal(f.calls.flat().length, 3); assert.equal(f.rows("vectors").length, 2);
-  assert.deepEqual(f.rows("documents").map(row => row.id).sort(), ["settings:b", "settings:renamed"]);
+  assert.equal(f.calls.flat().length, 3); assert.equal(f.rows("vectors").length, 3);
+  assert.deepEqual(f.rows("documents").map(row => row.id).sort(), ["settings:a", "settings:b", "settings:renamed"]);
   await s.sync({ cwd: f.cwd, settings: [] }); await f.idle(s);
-  assert.deepEqual(f.rows("documents"), []); assert.deepEqual(f.rows("vectors"), []);
+  assert.equal(f.rows("documents").length, 3); assert.equal(f.rows("vectors").length, 3);
+  assert.deepEqual((await s.query({ cwd: f.cwd, query: "", types: ["settings"], settings: [], limit: 5 })).results, []);
   assert.equal(f.calls.flat().length, 3);
 });
 
@@ -396,7 +533,7 @@ test("late older sync/query consent cannot replace a newer authored catalogue", 
   const olderQuery = s.query({ cwd: f.cwd, query: "", types: ["settings"], settings: [setting("older-query")], limit: 5 }); await entered.promise;
   await s.sync({ cwd: f.cwd, settings: [setting("newest")] }); await f.idle(s);
   release.resolve(); await olderQuery; await f.idle(s);
-  assert.deepEqual(f.rows("documents").map(row => row.id), ["settings:newest"]);
+  assert.deepEqual(f.rows("documents").map(row => row.id).sort(), ["settings:newer", "settings:newest"]);
   assert.equal(f.calls.flat().length, 2, "obsolete catalogue requests never reach the provider");
 });
 
@@ -411,7 +548,7 @@ test("restart bootstrap catches offline task/catalogue edits, reuses unchanged a
   await second.sync({ cwd: f.cwd, settings: [setting("keep"), setting("edit", "offline revised")] }); await f.idle(second);
   assert.equal(f.calls.flat().length, before + 2);
   assert.deepEqual(f.rows("pix_task_documents").map(row => row.task_id).sort(), ["edit", "keep"]);
-  assert.equal(f.rows("vectors").length, 2); assert.equal(f.rows("pix_task_vectors").length, 2);
+  assert.equal(f.rows("vectors").length, 4); assert.equal(f.rows("pix_task_vectors").length, 2);
 });
 
 test("settings and task corpora drain beyond 64 in bounded batches without queries", async t => {
@@ -478,6 +615,7 @@ test("workspace switch, revocation and dispose release watchers/timers and rejec
   await s.sync({ cwd: f.cwd, settings: [] }); await started.promise;
   f.notify(); // Own a pending debounce timer at the workspace boundary.
   const other = join(f.cwd, "other"); await mkdir(other);
+  await enableSearchSources(other);
   blocked = false; await s.sync({ cwd: other, settings: [setting("other")] }); await f.idle(s, other);
   assert.equal(f.closed(), 1); assert.equal(f.listeners.size, 1);
   release.resolve(); await delay(20); assert.deepEqual(f.rows("pix_task_vectors"), []);
@@ -578,6 +716,8 @@ test("native directory watcher sees task database creation, external WAL updates
   // to exercise recreation too, not just initial bootstrap.
   await s.sync({ cwd: f.cwd, settings: [] }); await f.idle(s);
   await rm(join(f.cwd, ".pi"), { recursive: true, force: true });
+  // Directory recreation must explicitly restore the source opt-in too.
+  await enableSearchSources(f.cwd);
   const db = await f.openTasks();
   db.prepare("INSERT INTO tasks(id,payload) VALUES(?,?)").run("a", JSON.stringify(task("a")));
   try {

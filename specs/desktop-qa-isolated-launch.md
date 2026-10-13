@@ -38,7 +38,13 @@ Preparation copies the published `.app`, not mutable Cargo output, into a new
 private run under `.pi/subagents/`. An explicit new `--run-dir` may be inside
 `.pi/subagents/` or `.pi/artifacts/` in the checkout. It rereads watcher state
 after copying and retries publication/pruning races without deleting or pinning
-anything in the watcher's own directory. The result includes `manifestPath`.
+anything in the watcher's own directory. By default, prepare seeds a fresh
+copy of `fixtures/qa/pix-project` into its owned workspace; the result and
+manifest include `workspace` and `projectSeed`, and the result also returns
+`manifestPath`. Pass
+`--empty-workspace` for onboarding/empty-project checks. This synthetic default
+never overrides an explicitly requested project/path/URL or real-data
+requirement; use the requested target or report why it cannot safely be tested.
 Every run gets its own profile UUID, HOME and disposable workspace.
 
 The unified UI-QA runner launches the project script directly:
@@ -167,6 +173,10 @@ window title alone, static checks or browser preview cannot turn them into a pas
 - `scripts/qa-desktop/paths.mjs`
 - `scripts/qa-desktop/seed.mjs`
 - `scripts/qa-desktop/launch.mjs`
+- `scripts/qa-workspace.mjs`
+- `scripts/qa-sandbox.mjs`
+- `fixtures/qa/pix-project/`
+- `docs/qa-sandbox.md`
 - `desktop/src-tauri/src/qa_profile.rs`
 - `desktop/src-tauri/src/startup_theme.rs`
 - `desktop/src-tauri/src/lib.rs`
@@ -177,6 +187,7 @@ window title alone, static checks or browser preview cannot turn them into a pas
 - `tests/qa-desktop-doctor.test.ts`
 - `tests/qa-desktop-prepare.test.ts`
 - `tests/qa-desktop-launch.test.ts`
+- `scripts/release/test/qa-workspace.test.mjs`
 - `desktop/src-tauri/src/qa_profile.rs` (unit tests)
 
 Run the focused Node tests and native profile/lifecycle tests. Native acceptance

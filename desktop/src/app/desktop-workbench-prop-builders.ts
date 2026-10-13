@@ -20,6 +20,7 @@ import type { createProjectWorkspaceStore } from "./project-workspace.svelte";
 import type { createPromptQueueActions } from "./prompt-queue-actions.svelte";
 import type { createPromptRuntime } from "./prompt-runtime.svelte";
 import type { createPromptSubmit } from "./prompt-submit";
+import type { createSessionHandoff } from "./session-handoff.svelte";
 import type { createQuestionImageController } from "./question-images";
 import type { createSessionHistory } from "./session-history.svelte";
 import type { createSessionTabController } from "./session-tab-controller";
@@ -81,6 +82,7 @@ export type WorkbenchConversationBuilderOptions = {
   conversationActions: ReturnType<typeof createConversationSessionActions>;
   openHistoryPicker: (query: string) => void | Promise<void>;
   promptSubmit: ReturnType<typeof createPromptSubmit>;
+  handoff?: ReturnType<typeof createSessionHandoff>;
   projectActions: ReturnType<typeof createProjectActions>;
   attachments: ReturnType<typeof createAttachmentDraftController>;
   elicitation: ReturnType<typeof createElicitationStore>;
@@ -131,6 +133,7 @@ export function buildWorkbenchConversationProps(
   options: WorkbenchConversationBuilderOptions,
 ): Pick<DesktopWorkbenchSurfaceViewProps, "transcript" | "queue" | "composer" | "managedCouncil"> {
   const sessionId = options.activeSessionId();
+  const handoffBusy = !!sessionId && options.handoff?.busySessionId === sessionId;
   const link = options.brainstormLink?.();
   const pending = options.pendingElicitation();
   const transcript = options.transcript();
@@ -158,7 +161,7 @@ export function buildWorkbenchConversationProps(
       workspace: options.workspace(),
       promptRunning: options.promptRunning(),
       agentControlState: options.activeAgentControlState(),
-      operationRunning: options.operationRunning() || link?.owned === true,
+      operationRunning: options.operationRunning() || handoffBusy || link?.owned === true,
       historyLoading: options.sessionHistoryLoading(),
       showScrollToBottom: !options.transcriptScroll.followsLatest,
       scrollRestoring: options.transcriptScroll.restoring,
@@ -185,7 +188,7 @@ export function buildWorkbenchConversationProps(
     },
     queue: {
       items: sessionId ? (options.promptRuntime.queueItemsBySession.get(sessionId) ?? []) : [],
-      disabled: options.operationRunning() || options.promptQueue.actionRunning || link?.owned === true,
+      disabled: options.operationRunning() || handoffBusy || options.promptQueue.actionRunning || link?.owned === true,
       onAction: (item, action) => void options.promptQueue.actOnQueuedMessage(item, action),
     },
     composer: {
@@ -235,6 +238,7 @@ export function buildWorkbenchConversationProps(
       activeSessionId: sessionId,
       draftSession: options.draft.active,
       ready: options.statusReady()
+        && (!handoffBusy || !!questionMode)
         && !options.conversationActions.promptEnhancing
         && !link?.owned
         && !options.sessionMutationRunning()
@@ -255,6 +259,10 @@ export function buildWorkbenchConversationProps(
       onFork: options.promptSubmit.editActive ? undefined : options.promptQueue.forkCurrentDraft,
       onCreateTask: options.projectActions.createTaskFromComposer,
       onScheduleContinuation: sessionId ? () => options.quotaWait.openSchedule(sessionId) : undefined,
+      onHandoff: sessionId && !options.handoff?.busySessionId && options.activeSessionRuntimeReady()
+        && options.activeAgentControlState() === "idle" && !options.sessionHistoryLoading()
+        && !(options.promptRuntime.queueItemsBySession.get(sessionId)?.length)
+        ? options.handoff?.start : undefined,
       onPause: options.promptRuntime.pauseActiveAgent,
       onContinue: options.promptRuntime.continueActiveAgent,
       onCancel: options.promptRuntime.cancelActivePrompt,

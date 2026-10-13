@@ -634,6 +634,9 @@ Research only this project.
 		expect(instructions).not.toContain("playwright-cli");
 		expect(instructions).not.toMatch(/SKILL\.md|references\//);
 		expect(instructions).toContain("actual user-facing surface requested by the task");
+		expect(instructions).toContain("An explicitly named project, path, URL");
+		expect(instructions).toContain("Never silently redirect that check to a sandbox");
+		expect(instructions).toContain("docs/qa-sandbox.md");
 		// The bundled role is a thin common contract plus a deterministic
 		// guide-routing workflow; backend specifics load via `guide` at runtime.
 		expect(instructions.length).toBeLessThan(5_000);
@@ -689,6 +692,11 @@ Research only this project.
 		expect(definitions["knowledge-auditor"]?.raw.tools).toEqual(["read", "grep", "bash", "edit", "write"]);
 		expect(definitions["implement-core"]?.raw.promptAppend).toContain("For UI work");
 		expect(definitions.oracle?.raw.promptAppend).toContain("# Oracle agent");
+		expect(definitions.oracle?.raw.promptAppend).toContain("# Review scope and budget");
+		expect(definitions.oracle?.raw.promptAppend).toContain("exclude unrelated");
+		expect(definitions.oracle?.raw.promptAppend).toContain("explicit coverage gaps");
+		expect(definitions.oracle?.raw.promptAppend).toContain("Stop at an evidence-backed verdict");
+		expect(definitions.oracle?.raw.timeoutSeconds).toBeUndefined();
 		expect(definitions["ui-qa"]?.raw.tools).toEqual(["read", "grep", "bash"]);
 		expect(definitions.verify?.raw.promptAppend).toContain(".pi/artifacts/");
 		expect(definitions.verify?.raw.promptAppend).not.toContain("Keep noisy output in artifacts");
@@ -1589,6 +1597,35 @@ setTimeout(() => {}, 1000);
 			expect(fs.statSync(path.join(agentDir, "ui-qa", "browser")).mode & 0o777).toBe(0o700);
 			expect(fs.statSync(path.join(agentDir, "ui-qa", "browser", "flows")).mode & 0o777).toBe(0o700);
 		}
+	});
+
+	test.serial("streams child todo counts before live callbacks and resets old attempt counts", async () => {
+		const cwd = tempDir();
+		const runDir = createRunDir(cwd, "todo-progress");
+		const agentDir = path.join(runDir, "worker");
+		fs.mkdirSync(agentDir);
+		writeFile(path.join(agentDir, "todo-progress.json"), '{"completed":4,"total":5}');
+		const piScript = path.join(tempDir(), "pi.js");
+		writeFile(piScript, `
+if (process.env.PIX_ACP_SESSION_STATE_BRIDGE !== "1") process.exit(1);
+process.stdin.on("data", () => {
+  console.log(JSON.stringify({ type: "extension_ui_request", method: "setWidget", widgetKey: "pix.session-state",
+    widgetLines: ["pi-tools-suite:todo:state", JSON.stringify({ version: 1, details: { tasks: [{ status: "completed" }, { status: "pending" }] } })] }));
+  console.log(JSON.stringify({ type: "agent_end", messages: [] }));
+  setTimeout(() => process.exit(0), 0);
+});
+setTimeout(() => {}, 1000);
+`);
+		process.argv[1] = piScript;
+		let observed: unknown;
+		await withTimeout(new Promise<any>((resolve) => {
+			spawnAgent(runDir, { id: "worker", task: "Work" }, cwd, [], (event) => {
+				if (event.type === "extension_ui_request") observed = getAgentState(runDir, "worker")?.todoProgress;
+			}, resolve);
+			expect(fs.existsSync(path.join(agentDir, "todo-progress.json"))).toBe(false);
+		}), "Timed out waiting for todo progress spawn");
+		expect(observed).toEqual({ completed: 1, total: 2 });
+		expect(getAgentState(runDir, "worker")).toMatchObject({ status: "done", todoProgress: { completed: 1, total: 2 } });
 	});
 
 	test.serial("writes metadata, captures agent_end output, and notifies completion", async () => {

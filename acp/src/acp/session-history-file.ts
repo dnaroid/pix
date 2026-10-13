@@ -282,7 +282,9 @@ function parseEntryLine(lineBuffer: Buffer, offset: number, byteLength: number):
 		}
 	}
 
-	if (looksLikeToolResult(line)) {
+	// Question answers are conversation content, not expandable telemetry.
+	// Keep their authoritative result available during initial transcript replay.
+	if (looksLikeToolResult(line) && jsonStringField(line, "toolName") !== "question") {
 		const toolCallId = jsonStringField(line, "toolCallId");
 		const entryId = jsonStringField(line, "id");
 		if (!toolCallId) return undefined;

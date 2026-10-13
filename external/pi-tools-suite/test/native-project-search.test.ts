@@ -10,6 +10,7 @@ import { scanProject, SCAN_LIMITS, validateMissingSources } from "../src/project
 import { openStore, snapshot, publish, queryStore } from "../src/project-search/native-store.mjs";
 import { indexNativeProject, searchNativeProject } from "../src/project-search/native.ts";
 import { removeDirsWithRetry } from "./support/fs-retry.js";
+import { enableSearchSources } from "./support/search-sources.js";
 
 const artifactRoot = fileURLToPath(new URL("../../../.pi/artifacts/", import.meta.url));
 const roots: string[] = [];
@@ -20,6 +21,7 @@ const request = (query: string, extra = {}) => ({ query, sources: ["code", "know
 async function fixture() {
   await mkdir(artifactRoot, { recursive: true });
   const root = await mkdtemp(path.join(artifactRoot, "native-search-fixture-"));
+  enableSearchSources(root);
   roots.push(root); return root;
 }
 async function put(root: string, name: string, value: string | Uint8Array) {
@@ -281,6 +283,7 @@ describe("independent native Code/Knowledge search", () => {
       const directory = destination === ".pi" || destination === ".pi/search";
       const target = directory ? outside : path.join(outside, "target");
       if (!directory) await writeFile(target, "DO NOT OVERWRITE");
+      if (destination === ".pi") await rm(path.join(root, ".pi"), { recursive: true, force: true });
       await mkdir(path.dirname(path.join(root, destination)), { recursive: true });
       await symlink(target, path.join(root, destination));
       const result = await searchNative(root, request("anything"));

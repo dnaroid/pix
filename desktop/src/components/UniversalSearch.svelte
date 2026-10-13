@@ -15,7 +15,7 @@
   import { SearchDialogController, emptySearchDialogState } from "../lib/search-dialog-controller";
   import { SETTINGS_SEARCH_CATALOG } from "../lib/settings-search-catalog";
   import type { AcpClient } from "../lib/acp-client";
-  import { queryNativeRepository } from "../lib/native-repository-search";
+  import { queryNativeRepository, prepareNativeRerank, queryNativeRerank } from "../lib/native-repository-search";
   import { parseTaskDocument } from "../lib/project-tasks";
   import type { GitHistoryEntry } from "../lib/git-workflow";
   import type { SearchDialogMemory } from "../lib/search-dialog-memory";
@@ -24,6 +24,8 @@
   import MarkdownText from "./MarkdownText.svelte";
   import NativeRepositorySemanticConsent from "./NativeRepositorySemanticConsent.svelte";
   import type { SearchSources, UnifiedSearchResult } from "../lib/universal-search";
+  import { readSearchSourceSelection, SEARCH_SOURCE_SELECTION_CHANGED } from "../lib/search-source-selection";
+  import { createSearchIndexReadLane } from "../lib/search-index-read-lane";
 
   let { workspace, client, memory, onSelect, onPreferences, onClose }: {
     workspace: string;
@@ -54,9 +56,11 @@
     return hit ? [hit] : [];
   }));
   const ragMarkdown = $derived(linkRagCitations(ragAnswer, ragReferences.length));
-  let types = $state<SearchKind[]>([...SEARCH_KINDS]);
+  let types = $state<SearchKind[]>(["settings", "code"]);
+  let availableTypes = $state<SearchKind[]>([]);
   let view = $state(emptySearchDialogState());
-  const result = $derived(view.result);
+  // Restored memory is not visible until this workspace's policy is known.
+  const result = $derived({ ...view.result, results: view.result.results.filter(hit => availableTypes.includes(hit.kind)) });
   const busy = $derived(view.busy);
   const status = $derived(view.status ?? result.status);
   const ragActive = $derived(ragPhase === "retrieving" || ragPhase === "generating");
@@ -108,7 +112,10 @@
     const restored = untrack(() => requestMemory.restore(requestWorkspace, requestClient));
     let latestState = restored.view;
     const searchSources: SearchSources = {
+        selection: readSearchSourceSelection,
         repository: (workspace, query, signal) => queryNativeRepository(invoke, workspace, query, signal),
+        prepareRerank: (workspace, sources, signal) => prepareNativeRerank(invoke, workspace, sources, signal),
+        rerank: (workspace, request, signal) => queryNativeRerank(invoke, workspace, request, signal),
         local: requestClient ? (request, signal) => requestClient.searchQuery(request, signal) : undefined,
         tasks: async workspace => parseTaskDocument(await invoke<unknown>("read_project_tasks", { workspace })),
         taskAttachmentNames: workspace => invoke<Record<string, string[]>>("read_project_task_attachment_names", { workspace }),
@@ -131,13 +138,65 @@
       }), 1500, restored.view);
     requests = next;
     untrack(() => {
+      availableTypes = [];
       query = restored.query; types = restored.types; view = restored.view;
       mode = restored.mode ?? "auto";
       intentNotice = restored.intentNotice ?? "";
       active = restored.active >= 0 && restored.active < restored.view.result.results.length ? restored.active : -1;
       navigationError = ""; next.start();
     });
+    const selectionOwner = new AbortController();
+    const readSelection = createSearchIndexReadLane(signal => readSearchSourceSelection(requestWorkspace, signal), 5000);
+    let selectionRequest: AbortController | undefined;
+    let selectionTimer: ReturnType<typeof setTimeout> | undefined;
+    let selectionRevision = 0;
+    let selectionLoaded = false;
+    let policyRevision: string | undefined;
+    const refreshSelection = async (changed = false) => {
+      clearTimeout(selectionTimer);
+      selectionRequest?.abort();
+      selectionRequest = new AbortController();
+      const signal = AbortSignal.any([selectionOwner.signal, selectionRequest.signal]);
+      const revision = ++selectionRevision;
+      if (changed) untrack(() => invalidate());
+      try {
+        const policy = await readSelection(signal);
+        if (signal.aborted || revision !== selectionRevision) return;
+        if (policy.error) throw new Error(policy.error);
+        untrack(() => {
+          const previous = availableTypes;
+          const enabled = SEARCH_KINDS.filter(kind => policy.enabled[kind]);
+          const selectionChanged = previous.join() !== enabled.join();
+          if (selectionLoaded && (selectionChanged || policyRevision !== policy.revision)) invalidate();
+          policyRevision = policy.revision;
+          availableTypes = enabled;
+          types = types.filter(kind => policy.enabled[kind]);
+          if (changed || (selectionLoaded && selectionChanged)) types = [...new Set([...types, ...availableTypes.filter(kind => !previous.includes(kind))])];
+          selectionLoaded = true;
+          if (view.result.results.some(hit => !policy.enabled[hit.kind])) invalidate();
+        });
+      } catch {
+        if (!signal.aborted && revision === selectionRevision) untrack(() => {
+          availableTypes = []; types = []; invalidate();
+        });
+      } finally {
+        if (!selectionOwner.signal.aborted && revision === selectionRevision) {
+          selectionTimer = setTimeout(() => { void refreshSelection(); }, 3000);
+        }
+      }
+    };
+    const selectionChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ workspace?: string; global?: boolean }>).detail;
+      if (detail?.global || detail?.workspace === requestWorkspace) void refreshSelection(true);
+    };
+    window.addEventListener(SEARCH_SOURCE_SELECTION_CHANGED, selectionChanged);
+    void refreshSelection();
+    // File edits from Pi/ACP do not emit a browser event. Queries independently
+    // gate immediately; this bounded poll also keeps an open filter bar current.
     return () => {
+      selectionOwner.abort();
+      clearTimeout(selectionTimer);
+      window.removeEventListener(SEARCH_SOURCE_SELECTION_CHANGED, selectionChanged);
       submissionGeneration++;
       submitting = false;
       intentController.cancel();
@@ -434,7 +493,7 @@
         <div class="space-y-2 pt-2">
           <div class="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2">
             <div class="flex flex-wrap items-center gap-1.5" role="group" aria-label="Result types">
-              {#each SEARCH_KINDS as kind}
+              {#each availableTypes as kind}
                 <button type="button" aria-pressed={types.includes(kind)} onclick={() => toggle(kind)}
                   data-search-kind={kind}
                   class="search-category-filter rounded border px-2 py-1 text-xs font-medium focus-visible:outline-2 focus-visible:outline-ring">{SEARCH_LABELS[kind]}</button>

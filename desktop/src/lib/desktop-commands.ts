@@ -18,6 +18,7 @@ export type DesktopCommandId =
   | "composer.createTask"
   | "composer.defer"
   | "composer.scheduleContinuation"
+  | "composer.handoff"
   | "message.copy"
   | "message.fork"
   | "message.forkNewTab"
@@ -163,6 +164,13 @@ const DEFINITIONS: Record<DesktopCommandId, DesktopCommandDefinition> = {
     description: "Pause the session and continue it automatically later",
     scope: "composer",
     keywords: ["wait", "timer", "quota", "resume", "schedule", "later"],
+  },
+  "composer.handoff": {
+    id: "composer.handoff",
+    label: "Handoff to fresh session",
+    description: "Save a handoff and continue in a fresh session in this tab",
+    scope: "composer",
+    keywords: ["handoff", "context", "fresh", "continue"],
   },
   "message.copy": {
     id: "message.copy",

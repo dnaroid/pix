@@ -99,10 +99,10 @@ export async function validateMissingSources(root, names, deadline) {
   return true;
 }
 
-export async function scanProject(root, previous, deadline = Date.now() + SCAN_LIMITS.deadlineMs, signal, source) {
+export async function scanProject(root, previous, deadline = Date.now() + SCAN_LIMITS.deadlineMs, signal, source, contentOnly = false) {
   const extensions = await readSourceExtensions();
   const files = new Map(), notices = [], validations = [], missing = [];
-  let complete = true, entries = 0, totalBytes = 0, chunkCount = 0, skipped = 0, updatedFiles = 0;
+  let complete = true, entries = 0, totalBytes = 0, chunkCount = 0, skipped = 0, updatedFiles = 0, hashedFiles = 0;
   const bounded = () => {
     signal?.throwIfAborted();
     if (Date.now() >= deadline || entries >= SCAN_LIMITS.entries || files.size >= SCAN_LIMITS.files) {
@@ -115,16 +115,33 @@ export async function scanProject(root, previous, deadline = Date.now() + SCAN_L
     const kind = sourceKind(name, extensions);
     if (!kind || (source && kind !== source)) return;
     try {
+      if (previous.stamps) {
+        const filename = path.join(root, name);
+        const info = await lstat(filename);
+        if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1) throw new Error("Linked or nonregular source");
+        if (await realpath(filename) !== filename) throw new Error("Redirected source");
+        const stamp = identity(info);
+        const cached = previous.stamps?.get(name);
+        if (cached?.kind === kind && cached.stamp === stamp && cached.hash === previous.files.get(name)) {
+          totalBytes += info.size;
+          chunkCount += previous.chunkCounts?.get(name) ?? 0;
+          if (totalBytes > SCAN_LIMITS.totalBytes || chunkCount > SCAN_LIMITS.chunks) { complete = false; return; }
+          files.set(name, { hash: cached.hash, kind, identity: stamp });
+          validations.push([name, stamp]);
+          return;
+        }
+      }
       const file = await readSafeFile(root, name);
+      hashedFiles++;
       totalBytes += file.bytes;
       if (totalBytes > SCAN_LIMITS.totalBytes) { complete = false; return; }
       // Classification changes must rechunk even when the source bytes are unchanged.
       const hash = createHash("sha256").update(`${kind}:${file.hash}`).digest("hex");
       const changed = previous.files.get(name) !== hash;
-      const chunks = changed ? chunksFor(name, kind, file.text) : undefined;
+      const chunks = changed || contentOnly ? chunksFor(name, kind, file.text) : undefined;
       chunkCount += chunks?.length ?? previous.chunkCounts?.get(name) ?? chunksFor(name, kind, file.text).length;
       if (chunkCount > SCAN_LIMITS.chunks) { complete = false; return; }
-      files.set(name, { hash, chunks });
+      files.set(name, { hash, kind, identity: file.identity, ...(contentOnly ? {} : { chunks }) });
       validations.push([name, file.identity]);
       if (changed) updatedFiles++;
     } catch (e) {
@@ -220,5 +237,5 @@ export async function scanProject(root, previous, deadline = Date.now() + SCAN_L
   }
   if (!complete) notices.push("Native scan incomplete (I/O, concurrent edit or scan limit); previous snapshot retained.");
   if (skipped) notices.push(`Excluded ${skipped} unsupported, linked, binary or oversized source files.`);
-  return { files, notices: [...new Set(notices)].slice(0, 10), complete, updatedFiles, scannedFiles: files.size };
+  return { files, notices: [...new Set(notices)].slice(0, 10), complete, updatedFiles, scannedFiles: files.size, hashedFiles };
 }

@@ -23,6 +23,8 @@ import { parseDesktopBtwRequest } from "../btw/request.js";
 import { SEARCH_QUERY_METHOD, SEARCH_CONFIG_METHOD, SEARCH_SYNC_METHOD, SEARCH_INDEX_METHOD, SEARCH_COMMITS_METHOD, SEARCH_INTENT_METHOD, SEARCH_TASKS_METHOD } from "../search/contract.js";
 import { parseSearchQueryRequest, parseSearchConfigRequest, parseSearchSyncRequest, parseSearchIndexRequest, parseSemanticTasksRequest } from "../search/request.js";
 import { DesktopSearchService, SearchUnavailableError } from "../search/service.js";
+import { BackgroundSessionDiscovery, hydrateBackgroundTitle } from "../search/background-session-discovery.js";
+import { SessionSearchActivity } from "../search/session-activity.js";
 import { parseCommitSearchRequest } from "../search/commit-contract.js";
 import { DesktopCommitSearchService } from "../search/commit-service.js";
 import { parseSearchIntentRequest, DesktopSearchIntentService } from "../search/intent.js";
@@ -37,7 +39,7 @@ import { NativeSessionCatalog } from "./native-session-catalog.js";
 import { PIX_SESSION_CATALOG_CHANGED_METHOD } from "./session-catalog-contract.js";
 import { brainstormParticipantOptions, freshParticipantAnswer } from "./brainstorm-participant.js";
 import { spawn } from "node:child_process";
-import { access, copyFile, mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, parse, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setText as copyTextToClipboard } from "@mariozechner/clipboard";
@@ -527,6 +529,11 @@ export class PixAcpAgent {
 	private readonly sessionMap: SessionMapStore;
 	private readonly nativeSessionCatalog: NativeSessionCatalog;
 	private readonly searchService: DesktopSearchService;
+	private readonly backgroundSearchSessions: BackgroundSessionDiscovery;
+	private readonly searchActivity = new SessionSearchActivity(
+		id => this.sessionMap.get(id),
+		(cwd, id, running) => this.searchService.sessionActivity(cwd, id, running),
+	);
 	private readonly commitSearchService: Pick<DesktopCommitSearchService, "query" | "index" | "dispose">;
 	private readonly searchIntentService: Pick<DesktopSearchIntentService, "classify">;
 	private readonly taskTypeClassifier: Pick<DesktopTaskTypeClassifier, "classify">;
@@ -590,21 +597,19 @@ export class PixAcpAgent {
 			(error) => this.options.logger.warn(`native session discovery failed: ${stringifyUnknown(error)}`),
 			options.nativeSessionRevision,
 		);
+		const backgroundSessions = new BackgroundSessionDiscovery(cwd => this.sessionMap.list(cwd));
+		this.backgroundSearchSessions = backgroundSessions;
 		this.searchService = options.searchService ?? new DesktopSearchService({
-			discover: async (cwd, signal) => {
-				const native = await this.listPiSessions(cwd, signal);
-				signal.throwIfAborted();
-				await this.sessionMap.mergeByPiSessionPath(native.flatMap(info => {
-					const record = nativeSessionRecord(info, cwd);
-					return record ? [record] : [];
-        }), { requireExistingFiles: true, keepNewerTitles: true });
-        signal.throwIfAborted();
-        const records = await this.sessionMap.list(cwd);
-        const present = await Promise.all(records.map(async record => {
-          try { await access(record.piSessionPath); return record; } catch { return undefined; }
-        }));
-        signal.throwIfAborted();
-        return present.filter((record): record is SessionMapRecord => record !== undefined);
+			discoverBackground: (cwd, signal) => backgroundSessions.list(cwd, signal),
+			sessionSnapshot: (cwd, signal) => backgroundSessions.snapshot(cwd, signal),
+			discover: async (cwd, signal, strict) => {
+				const records: SessionMapRecord[] = [];
+				for (const record of await backgroundSessions.list(cwd, signal)) {
+                    const hydrated = await hydrateBackgroundTitle(cwd, record, signal);
+					if (!hydrated && strict) throw new Error("Session title could not be read");
+					if (hydrated) records.push(hydrated.record);
+				}
+				return records;
 			},
 		});
 		this.brainstormHost = new BrainstormHost({
@@ -904,8 +909,10 @@ export class PixAcpAgent {
 	 * orphaned child processes cannot keep the adapter process alive.
 	 */
 	async dispose(): Promise<void> {
+		this.backgroundSearchSessions.dispose();
 		this.disposed = true;
 		await this.nativeSessionCatalog.dispose();
+		await this.searchActivity.dispose();
 		await Promise.all([this.searchService.dispose(), this.commitSearchService.dispose()]);
 		await this.brainstormHost.dispose();
 		this.claudeCodeQuotaCache.clear();
@@ -1375,9 +1382,21 @@ export class PixAcpAgent {
 			const candidate = source[params.index];
 			if (!candidate || candidate.displayText !== params.text) throw queueItemMissingError();
 			removed = source.splice(params.index, 1)[0]!;
-			await this.persistDesktopQueues(session);
+			try {
+				await this.persistDesktopQueues(session);
+			} catch (error) {
+				source.splice(params.index, 0, removed);
+				throw error;
+			}
 			if (interruptRequired) {
-				const queued = await session.pi.clearQueue();
+				let queued: Awaited<ReturnType<typeof session.pi.clearQueue>>;
+				try {
+					queued = await session.pi.clearQueue();
+				} catch (error) {
+					source.splice(params.index, 0, removed);
+					await this.persistDesktopQueues(session);
+					throw error;
+				}
 				session.sdkQueueRestoreAfterInterrupt = {
 					steering: [...queued.steering],
 					followUp: [...queued.followUp],
@@ -1412,7 +1431,16 @@ export class PixAcpAgent {
 		await this.notifyDesktopQueueState(session);
 		if (params.action === "cancel") return {};
 		if (params.action === "send-now" && interruptRequired) {
-			await this.interruptForQueuedSend(session);
+			try {
+				await this.interruptForQueuedSend(session);
+			} catch (error) {
+				// The client never received this payload. Keep it manually queued
+				// instead of losing it (or automatically retrying an uncertain send).
+				session.deferredUserMessages.push(removed);
+				await this.persistDesktopQueues(session);
+				await this.notifyDesktopQueueState(session);
+				throw error;
+			}
 		}
 		return {
 			message: cloneQueuedUserMessage(removed),
@@ -1420,8 +1448,16 @@ export class PixAcpAgent {
 	}
 
 	private async interruptForQueuedSend(session: AgentSessionState): Promise<void> {
-		const hadActiveRun = Boolean(session.activeRun);
-		await session.pi.abort();
+		const run = session.activeRun;
+		const hadActiveRun = Boolean(run);
+		const wasCancelled = run?.cancelled;
+		if (run) run.cancelled = true;
+		try {
+			await session.pi.abort();
+		} catch (error) {
+			if (run && session.activeRun === run && !run.settlement) run.cancelled = wasCancelled ?? false;
+			throw error;
+		}
 		const deadline = Date.now() + 5_000;
 		while (Date.now() < deadline) {
 			const state = await session.pi.getState();
@@ -2749,7 +2785,13 @@ export class PixAcpAgent {
 	}
 
 	private dispatchSessionEvent(session: AgentSessionState, event: JsonAgentSessionEvent): void {
-		for (const notification of session.translator.translate(event)) {
+		if (event.type === "agent_start" || event.type === "agent_settled" || event.type === "message_end") {
+			const running = event.type !== "agent_settled" && (event.type === "agent_start" || Boolean(session.activeRun));
+			void this.searchActivity.update(session.acpSessionId, running).catch(() => {
+				this.options.logger.warn("Search session activity could not be persisted");
+			});
+		}
+		for (const notification of session.translator.translate(event, session.activeRun?.cancelled === true)) {
 			void session.client.notify("session/update", notification).catch((error: unknown) => {
 				this.options.logger.warn(`session/update failed: ${stringifyUnknown(error)}`);
 			});
@@ -3924,6 +3966,9 @@ export class PixAcpAgent {
 		}
 		await session.pi.stop().catch((error: unknown) => {
 			this.options.logger.warn(`pi stop failed: ${stringifyUnknown(error)}`);
+		});
+		await this.searchActivity.update(session.acpSessionId, false, true).catch(() => {
+			this.options.logger.warn("Search session activity could not be persisted during teardown");
 		});
 		this.unsubscribeSessionEvents(session);
 	}

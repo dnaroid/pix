@@ -1,13 +1,36 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionInfo } from "@agentclientprotocol/sdk";
 import type { SearchQueryResponse } from "../../../acp/src/search/contract";
 import { previewInlineSearch, queryInlineSearch } from "./inline-search";
 import type { InlineSearchClient } from "./inline-search";
+import { readSearchSourceSelection } from "./search-source-selection";
+
+vi.mock("./search-source-selection", () => ({ readSearchSourceSelection: vi.fn() }));
+const enabled = { settings: true, sessions: true, tasks: false, code: true, knowledge: false, commits: false };
+beforeEach(() => {
+  vi.mocked(readSearchSourceSelection).mockReset().mockResolvedValue({ enabled: { ...enabled } });
+});
 
 const status = { enabled: false, sessionTitlesEnabled: false, keyAvailable: false, indexing: false };
 const session = (sessionId: string, title: string): SessionInfo => ({ sessionId, title, cwd: "/workspace", updatedAt: "2026-10-10T01:00:00Z" });
 
 describe("inline reuse of universal search", () => {
+  it("uses the selected project's policy instead of permanently falling back to Settings/Code defaults", async () => {
+    const client: InlineSearchClient = { searchQuery: vi.fn(async () => ({ status, results: [] })) };
+    const signal = new AbortController().signal;
+    await queryInlineSearch("sessions", client, "/workspace", "SDK", signal);
+    expect(readSearchSourceSelection).toHaveBeenCalledWith("/workspace", expect.any(AbortSignal));
+    expect(client.searchQuery).toHaveBeenCalledTimes(1);
+    vi.mocked(client.searchQuery).mockClear();
+    vi.mocked(readSearchSourceSelection).mockResolvedValueOnce({ enabled: { ...enabled, sessions: false } });
+    const result = await queryInlineSearch("sessions", client, "/workspace", "SDK", signal);
+    expect(client.searchQuery).not.toHaveBeenCalled();
+    expect(result.results).toEqual([]);
+    expect(result.notices).toContain("Selected search sources are disabled for this project.");
+    vi.mocked(readSearchSourceSelection).mockRejectedValueOnce(new Error("unavailable"));
+    expect((await queryInlineSearch("sessions", client, "/workspace", "SDK", signal)).notices.join(" ")).toContain("selection unavailable");
+    expect(client.searchQuery).not.toHaveBeenCalled();
+  });
   it("previews authored settings with global BM25 synonyms and partial Russian terms, without config values", () => {
     expect(previewInlineSearch("settings", "авто-пополн").some(hit => hit.fieldId === "autocomplete-model")).toBe(true);
     expect(previewInlineSearch("settings", "AGENTS").some(hit => hit.fieldId === "ignore-context-files")).toBe(true);

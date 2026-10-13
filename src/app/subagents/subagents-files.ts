@@ -1,7 +1,7 @@
 import { open, readFile, readdir, realpath, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { SUBAGENT_PARENT_SESSION_FILE, SUBAGENTS_REGISTRY_FILE, SUBAGENTS_RUN_ROOT } from "../constants.js";
-import { isSubagentRegistry } from "./subagents-model.js";
+import { isSubagentRegistry, isSubagentTodoProgress } from "./subagents-model.js";
 import type { SubagentAgentState, SubagentRegistry } from "../types.js";
 
 const LAST_ACTIVITY_TAIL_BYTES = 64 * 1024;
@@ -116,6 +116,15 @@ async function readSubagentAgentState(
 	if (finishedAt) state.finishedAt = finishedAt;
 	const lastActivity = await readLastActivity(join(agentDir, "progress.jsonl"));
 	if (lastActivity) state.lastActivity = lastActivity;
+	try {
+		const file = join(agentDir, "todo-progress.json");
+		if ((await stat(file)).size <= 256) {
+			const progress: unknown = JSON.parse(await readFile(file, "utf8"));
+			if (isSubagentTodoProgress(progress)) state.todoProgress = progress;
+		}
+	} catch {
+		// Old runs and children without a plan have no progress snapshot.
+	}
 
 	const retryPending = await fileExists(join(agentDir, "retry_pending"));
 	const stopRequested = await fileExists(join(agentDir, "stop_requested"));

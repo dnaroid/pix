@@ -2,8 +2,6 @@ import { freshSemanticCandidates, readCachedProjectVectors, type CachedTaskCandi
 import { embedSemanticQuery, semanticConfiguration, requireSemanticIdentity, semanticKey, validSearchVector,
   type SemanticSearchOptions } from "./semantic-provider.js";
 import { commitIdentity } from "./semantic-commit-provider.js";
-import { indexMissingSessionVectors } from "./semantic-session-indexer.js";
-import { syncSessionChunks } from "./semantic-session-chunks.js";
 import { hasSessionChunkVectors, searchSessionChunks, type ChunkHit } from "./session-chunks.mjs";
 
 export type { SemanticSearchOptions } from "./semantic-provider.js";
@@ -37,24 +35,16 @@ export async function cachedProjectSemantics(root: string, query: string,
   signal: AbortSignal, options: SemanticSearchOptions = {}): Promise<CachedSemanticScores> {
   const result: CachedSemanticScores = { tasks: new Map(), sessions: new Map(), notices: [], chunks:new Map() };
   signal.throwIfAborted();
+  const requireSources = async () => {
+    if (candidates.tasks.length) await requireSourceEnabled(root, "tasks", signal);
+    if (candidates.sessions.length) await requireSourceEnabled(root, "sessions", signal);
+  };
+  await requireSources();
   try {
     const config = await semanticConfiguration(options, signal);
     if (!config) return result;
     if (candidates.tasks.length === 0 && candidates.sessions.length === 0) return result;
     const key = config.provider === "openrouter" ? await semanticKey(options, signal) : undefined;
-    if (key || config.provider === "ollama") {
-      if (candidates.sessions.length) {
-        try {
-          const outcome = await indexMissingSessionVectors(root, candidates.sessions, key, options, signal, config);
-          if (outcome.remaining) result.notices.push(`Semantic Sessions: ${outcome.remaining} saved names still await indexing; search again to continue.`);
-          const chunks = await syncSessionChunks(root,candidates.sessions,signal,options);
-          if(!chunks.complete) result.notices.push(`Session chunks: ${chunks.indexed}/${chunks.total} indexed; ${chunks.skipped} unreadable. Use /search-semantic index sessions to continue.`);
-        } catch (error) {
-          signal.throwIfAborted();
-          result.notices.push("Semantic session-name indexing unavailable or interrupted; local matches remain available.");
-        }
-      }
-    }
     await requireSemanticIdentity(options, config, signal);
     const cached = await readCachedProjectVectors(root, candidates, options, signal, config);
     const messageVectors = candidates.sessions.length > 0 && await hasSessionChunkVectors(root,candidates.sessions,signal,
@@ -72,7 +62,10 @@ export async function cachedProjectSemantics(root: string, query: string,
     let queryVector = options.embedQuery ? undefined : queryCache.get(cacheKey);
     if (!queryVector) {
       await requireSemanticIdentity(options, config, signal);
-      queryVector = [...await withProviderSlot(signal, () => (options.embedQuery ?? embedSemanticQuery)(query, key, signal, config))];
+      queryVector = [...await withProviderSlot(signal, async () => {
+        await requireSources();
+        return (options.embedQuery ?? embedSemanticQuery)(query, key, signal, config);
+      })];
       if (!validSearchVector(queryVector, config.dimension)) throw new Error("Invalid query vector");
       await requireSemanticIdentity(options, config, signal);
       if (!options.embedQuery) {
@@ -82,6 +75,7 @@ export async function cachedProjectSemantics(root: string, query: string,
       }
     }
     signal.throwIfAborted();
+    await requireSources();
     // Removed/changed central configuration invalidates even cached queries.
     await requireSemanticIdentity(options, config, signal);
     const fresh = await freshSemanticCandidates(root, {
@@ -118,3 +112,4 @@ export async function cachedProjectSemantics(root: string, query: string,
   return result;
 }
 import { withProviderSlot } from "./source-work.mjs";
+import { requireSourceEnabled } from "./source-policy.mjs";

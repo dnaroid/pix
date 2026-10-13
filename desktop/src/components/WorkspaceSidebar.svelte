@@ -14,6 +14,7 @@
   import { openExternalHref } from "../lib/external-links";
   import { invoke } from "@tauri-apps/api/core";
   import { windowLayoutKey } from "../lib/window-layout-storage";
+  import { modelThinkingConfigState } from "../lib/model-thinking";
   import { onMount, tick } from "svelte";
   import { createWorkspaceSearchIndexOwner } from "../lib/workspace-search-index-owner.svelte";
   import {
@@ -1069,6 +1070,7 @@
         <div id="workspace-registry-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Registry">
           <RegistryPanel
             contextCommands={registryContextCommands}
+            agentModels={modelThinkingConfigState(settingsConfigOptions).models}
             snapshot={registrySnapshot}
             backgroundSync={registryBackgroundSync}
             projectInitialized={registryProjectInitialized}

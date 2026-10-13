@@ -563,6 +563,9 @@
   const taskActionId = $derived(projectActions.actionId);
 
   const promptActionServices = createDesktopPromptActionServices({
+    handoffAllowed: () => status === "ready" && !activePendingElicitation
+      && !presentationState.activeBrainstormLink?.owned,
+    retargetSessionAnchors: (sourceId, targetId) => workbenchController.retargetSessionAnchors(sourceId, targetId),
     submitMessageEdit: () => messageEdit.submit(),
     messageEditActive: () => messageEdit.active,
     cancelMessageEdit: () => messageEdit.cancel(),

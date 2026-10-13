@@ -17,6 +17,7 @@ import { publishResourceTags } from "./tag-publication.js";
 import { selectPublicationRuntime } from "./publication-location.js";
 import { togglePublicationScope } from "./publication-scope.js";
 import { pushProjectResourceChanges, syncProjectResources } from "./project-resource-sync.js";
+import { setAgentModelOverride } from "./agent-models.js";
 
 async function configure(ctx: RegistryContext): Promise<void> {
 	const current = loadRegistryConfig(ctx.cwd);
@@ -88,6 +89,8 @@ export class DesktopRegistryService {
 		return withRegistryCache(async () => {
 			try {
 				switch (request.action) {
+					case "set-agent-model": await setAgentModelOverride(ctx.cwd, request.name, request.model); break;
+					case "reset-agent-model": await setAgentModelOverride(ctx.cwd, request.name); break;
 					case "push-project-resources": await pushProjectResourceChanges(this.executor, ctx); break;
 					case "install": await installResource(this.executor, ctx, request.type, request.name); break;
 					case "update": await updateResource(this.executor, ctx, request.type, request.name); break;

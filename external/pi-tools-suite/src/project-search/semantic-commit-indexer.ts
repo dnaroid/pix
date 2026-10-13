@@ -4,6 +4,7 @@ import { commitIdentity, embedCommits, loadCommitConfig, loadCommitKey, validCom
   type CommitEmbeddingConfig } from "./semantic-commit-provider.js";
 import { withSearchIndexWriter, type SqlDatabase } from "./semantic-index-writer.js";
 import { withProviderSlot } from "./source-work.mjs";
+import { requireSourceEnabled } from "./source-policy.mjs";
 
 const MAX_NEW_COMMIT_VECTORS = 256;
 const BATCH = 16;
@@ -74,6 +75,7 @@ export async function indexCommitVectors(root: string, records: readonly CommitR
   readHead: (signal: AbortSignal) => Promise<string>, owned: AbortSignal,
   config: CommitEmbeddingConfig, key: string | undefined, services: CommitSemanticServices = {},
   limit = Infinity, retry = false): Promise<{ indexed: number; remaining: number }> {
+  await requireSourceEnabled(root, "commits", owned);
   const docs = records.map(candidate);
   let indexed = 0, remaining = 0;
   for (let batch = 0; batch <= limit / BATCH; batch++) {
@@ -88,8 +90,12 @@ export async function indexCommitVectors(root: string, records: readonly CommitR
       if (!before || commitIdentity(before) !== commitIdentity(config)) throw new Error("Commit configuration changed before indexing");
       owned.throwIfAborted();
       const input = targets.map(doc => (config.documentPrefix + doc.record.title + "\n" + doc.record.author + "\n" + doc.record.message).slice(0, 8192));
-      const vectors = await db.outside(() => withProviderSlot(owned, () => (services.embed ?? embedCommits)(input, config, key, owned)));
+      const vectors = await db.outside(() => withProviderSlot(owned, async () => {
+        await requireSourceEnabled(root, "commits", owned);
+        return (services.embed ?? embedCommits)(input, config, key, owned);
+      }));
       owned.throwIfAborted();
+      await requireSourceEnabled(root, "commits", owned);
       if (vectors.length !== targets.length || !vectors.every(v => validCommitVector(v, config.dimension))) {
         throw new Error("Invalid commit embedding result");
       }
@@ -99,6 +105,7 @@ export async function indexCommitVectors(root: string, records: readonly CommitR
         throw new Error("Commit configuration or HEAD changed during indexing");
       }
       const add = db.prepare("INSERT INTO pix_commit_vectors(hash,vector) VALUES(?,?) ON CONFLICT(hash) DO NOTHING");
+      await requireSourceEnabled(root, "commits", owned);
       for (let i = 0; i < targets.length; i++) add.run(targets[i]!.contentHash, JSON.stringify(vectors[i]));
       const put = db.prepare(`INSERT INTO pix_commit_documents(hash,content_hash,metadata,message) VALUES(?,?,?,?)
         ON CONFLICT(hash) DO UPDATE SET content_hash=excluded.content_hash,metadata=excluded.metadata,message=excluded.message
@@ -124,6 +131,7 @@ export async function indexCommitVectors(root: string, records: readonly CommitR
 export async function searchSemanticCommits(root: string, records: readonly CommitRecord[], query: string,
   readHead: (signal: AbortSignal) => Promise<string>, signal: AbortSignal,
   services: CommitSemanticServices = {}): Promise<{ hits: ProjectSearchHit[]; notices: string[] }> {
+  await requireSourceEnabled(root, "commits", signal);
   if (!records.length) return { hits: [], notices: [] };
   const notices: string[] = [];
   let config: CommitEmbeddingConfig | undefined;
@@ -160,8 +168,12 @@ export async function searchSemanticCommits(root: string, records: readonly Comm
   owned.throwIfAborted();
   let queryVector: readonly number[];
   try {
-    const vectors = await withProviderSlot(owned, () => (services.embed ?? embedCommits)([(config!.queryPrefix + query).slice(0, 8192)], config!, key, owned));
+    const vectors = await withProviderSlot(owned, async () => {
+      await requireSourceEnabled(root, "commits", owned);
+      return (services.embed ?? embedCommits)([(config!.queryPrefix + query).slice(0, 8192)], config!, key, owned);
+    });
     owned.throwIfAborted();
+    await requireSourceEnabled(root, "commits", owned);
     if (vectors.length !== 1 || !validCommitVector(vectors[0], config.dimension)) throw new Error("Invalid commit query embedding");
     queryVector = vectors[0]!;
   } catch (error) {
@@ -178,6 +190,7 @@ export async function searchSemanticCommits(root: string, records: readonly Comm
   }
   owned.throwIfAborted();
   if (afterQueryHead.trim() !== head) return { hits: [], notices: [...notices, "Commit HEAD changed; retry with current history."] };
+  await requireSourceEnabled(root, "commits", owned);
   const hits: ProjectSearchHit[] = [];
   for (const doc of docs) {
     const vector = saved.get(doc.contentHash);

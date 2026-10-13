@@ -110,6 +110,21 @@ without ACP. No independent consent flag or confirmation step is used. Old
 never activate semantics. OpenRouter credentials use `OPENROUTER_API_KEY`, then shared
 Pi auth storage (`PI_CODING_AGENT_DIR` or `~/.pi/agent`); Ollama needs no key.
 
+Optional `search.rerankerModel` in the same global suite JSONC enables OpenRouter
+one merged rerank of selected Sessions/Tasks/Commits/Code/Knowledge results, independently of
+`search.embedding`. For example, `"rerankerModel": "voyageai/rerank-3-lite"`.
+Saving a nonempty model authorizes sending queries and bounded candidate text
+across projects; charges may apply. Missing/empty values disable it; credentials
+alone do not enable it. Pure lexical agent/native search and indexing never invoke reranking.
+Desktop publishes local results first, then optionally reranks once all sources finish.
+Settings remain local. History sends bounded titles/snippets, not entire sessions/diffs;
+the source-balanced 100-candidate pass precedes final result limits.
+Desktop's **Reranker model** field uses the same draft and normal Save; clearing
+it removes the key. `/search-semantic off` only removes embeddings, not a separately
+configured reranker. Provider failure/timeout retains original ranking. See
+[native repository search](../../specs/native-repository-search.md#optional-reranking)
+for limits, filtering and lifecycle safeguards.
+
 To configure file suffixes for native repository search, set `search.codeExtensions`
 and/or `search.knowledgeExtensions` arrays in the global
 `~/.config/pi/pi-tools-suite.jsonc` settings. For example:
@@ -816,6 +831,20 @@ This filter applies only to bundled definitions. A project-local
 effective role, so disabling a bundled role does not reserve or blacklist that
 name. Disabled bundled roles disappear from the parent catalog, explicit spawn
 validation, and automatic routing.
+
+`builtinAgentModels` selects the primary model for bundled roles whose Markdown
+profile declares an explicit model. Values are `provider/model` refs, optionally
+with a `:thinking` suffix. User and project suite-config layers merge entries
+by role; `null` clears an inherited choice and restores the current bundled
+default. Fallback order and model-selection policies remain in force. Unknown,
+disabled, and automatic/frontier roles are ignored; configure frontier roles
+through `frontierModels`. Project-local full replacements are unaffected and
+continue to use the project Registry override file. Explicit task/CLI/forced,
+global, and per-role environment priorities remain authoritative, as do economy
+and vendor policies. Fresh launches load changed settings; running children
+are unchanged. Desktop's searchable Sub-agents pickers derive eligible roles
+from bundled profiles, retain unknown stored model refs, and Reset removes the
+current layer's choice so inherited user settings or the suite default applies.
 
 A project can ship sub-agent roles as individual Markdown files in
 `<project>/.pi/agents/`. The first such directory found walking up from the

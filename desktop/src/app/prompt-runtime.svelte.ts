@@ -1,5 +1,5 @@
 import { createPromptAgentControl } from "./prompt-agent-control.svelte";
-import { createPromptQueueRuntime, queuedMessageBlocks } from "./prompt-queue-runtime.svelte";
+import { createPromptQueueRuntime } from "./prompt-queue-runtime.svelte";
 import { createPromptRunLifecycle } from "./prompt-run-lifecycle.svelte";
 import type { PromptRuntimeOptions } from "./prompt-runtime-options";
 
@@ -70,7 +70,9 @@ export function createPromptRuntime(options: PromptRuntimeOptions) {
     handleQueueConsumed: queue.handleQueueConsumed,
     refreshQueueState: queue.refreshQueueState,
     runPromptRequest: runs.runPromptRequest,
+    runPromptRequestWithResult: runs.runPromptRequestWithResult,
     flushAutoQueue: queue.flushAutoQueue,
+    holdAutoQueue: queue.holdAutoQueue,
     cancelActivePrompt: runs.cancelActivePrompt,
     pauseActiveAgent: agent.pauseActiveAgent,
     continueActiveAgent: agent.continueActiveAgent,

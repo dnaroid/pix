@@ -1,9 +1,15 @@
 # Engineering guardrails
 
-- Before pushing implementation changes, run `npm run check:ci` after installing
-  the native-host prerequisites in `docs/development.md`. `npm run check` is only
-  the quick root check, not the full CI gate. A local pass does not prove other
-  operating-system matrix legs; report any blocked or incomplete checks.
+- Run the full local `npm run check:ci` only when preparing a release or when
+  the user explicitly asks to push everything ("запушить всё"). For ordinary
+  implementation, review and bug-fix tasks, run focused regression tests and
+  the relevant typechecks/builds for the changed code; do not run the full gate
+  or reproduce it by invoking every stage separately. A focused preflight does
+  not authorize a full run. When the full gate is required, use the native-host
+  prerequisites in `docs/development.md`. `npm run check` is root-only, not the
+  full CI gate. Report verification scope and blocked/incomplete checks; a local
+  pass does not prove other operating-system matrix legs. This local policy does
+  not change automatic GitHub Actions triggers.
 - For CI failures, flaky tests, cross-platform portability, workflow changes,
   or CI regressions, read `.agents/skills/ci-reliability/SKILL.md` before diagnosis.
   Treat `specs/ci-release.md` and current CI scripts as the executable contract.

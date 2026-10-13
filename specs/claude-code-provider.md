@@ -203,9 +203,19 @@ diagnostics do not add a new always-on log or startup write.
 ### Unknown tool name diagnostics
 
 Pi tool names are exposed to Claude Code only as qualified MCP names
-(`mcp__pi__Edit` for Pi's `Edit`). The provider continues to fail closed on a
-tool proposal that does not exactly match the request's catalog. When that
-occurs, the existing per-request metrics / optional metrics log / doctor's
+(`mcp__pi__Edit` for Pi's `Edit`). Exact catalog lookup takes precedence. A
+bare Pi name `N` is also accepted only when it uses 1–48 ASCII letters, digits,
+underscores or hyphens, does not start with `mcp__`, and the current catalog
+contains exactly `mcp__pi__N -> N` with no other entry mapping to `N`.
+This compatibility rule never guesses case, strips foreign namespaces, resolves
+hashed/collision aliases, repairs arguments, enables Claude built-ins, or retries.
+Tool IDs and arguments are preserved; initialization, Pi argument validation,
+process termination, cancellation, private-path and cleanup checks are unchanged.
+The content-free `toolNameNormalizationCount` metric counts normalized proposal
+starts with valid IDs, even if a later check fails; it is not an execution count.
+
+All other name mismatches fail closed. The existing per-request metrics /
+optional metrics log / doctor's
 last-request report additionally retain: the safely constrained proposed name,
 whether it matches an active but unqualified Pi tool, its expected qualified
 name when available, catalog count and sorted-name fingerprint, validated
@@ -213,7 +223,7 @@ initialization status, and `pi-tools-suite-vendored` adapter provenance.
 Never record tool arguments, request payloads, private paths, the complete
 catalog, or arbitrary unvalidated tool-name strings in these diagnostics.
 The absence of a persisted metrics log does not turn this into raw protocol
-tracing. No name-rewriting compatibility fallback is enabled.
+tracing.
 
 ### Native image transport
 

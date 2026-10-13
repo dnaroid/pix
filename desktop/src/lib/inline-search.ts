@@ -4,6 +4,7 @@ import type { AcpClient } from "./acp-client";
 import { rankSearchHits } from "./search-relevance";
 import { SETTINGS_SEARCH_CATALOG } from "./settings-search-catalog";
 import { queryUniversalSearch, type UnifiedSearchResult } from "./universal-search";
+import { readSearchSourceSelection } from "./search-source-selection";
 
 export const INLINE_SEARCH_SETTINGS: readonly SearchSetting[] = SETTINGS_SEARCH_CATALOG.map(entry => ({
   ...entry, description: entry.description ?? "",
@@ -32,11 +33,12 @@ export function previewInlineSearch(kind: InlineSearchKind, query: string, sessi
 }
 
 /** Explicit search: reuses Universal Search's ACP source and unified reranking.
- * Semantic requests follow the same independent consent flags as the dialog. */
+ * Project source selection and global embedding authorization match the dialog. */
 export function queryInlineSearch(
   kind: InlineSearchKind, client: InlineSearchClient, workspace: string, query: string, signal: AbortSignal,
   onUpdate?: (result: UnifiedSearchResult) => void,
 ): Promise<UnifiedSearchResult> {
-  return queryUniversalSearch({ local: (request, owner) => client.searchQuery(request, owner) },
+  return queryUniversalSearch({ selection: readSearchSourceSelection,
+    local: (request, owner) => client.searchQuery(request, owner) },
     workspace, query, [kind], INLINE_SEARCH_SETTINGS, signal, onUpdate);
 }

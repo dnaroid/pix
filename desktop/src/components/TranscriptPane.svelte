@@ -27,6 +27,7 @@
   import MarkdownText from "./MarkdownText.svelte";
   import TranscriptActivityGroup from "./TranscriptActivityGroup.svelte";
   import { createTranscriptHistoryPager } from "./transcript-history-pager";
+  import { transcriptMediaViewport } from "./transcript-media-viewport";
   import {
     createTranscriptUserMessageMenuController,
     userMessageMenuCommands,
@@ -220,7 +221,7 @@
 <svelte:window onclick={handleWindowClick} onkeydown={handleWindowKeydown} onresize={handleWindowResize} />
 
 <div class="relative row-start-2 min-h-0 min-w-0">
-  <div class="transcript-pane h-full min-h-0 overflow-auto" bind:this={pane} aria-live="polite" onscroll={handleTranscriptPaneScroll}>
+  <div class="transcript-pane h-full min-h-0 overflow-auto" bind:this={pane} use:transcriptMediaViewport style="--chat-media-width: 100%" aria-live="polite" onscroll={handleTranscriptPaneScroll}>
   {#if !activeSessionId && !workspace}
     <section class="grid h-full place-items-center content-center p-10 text-center">
       <div class="mb-[18px] grid h-11 w-11 place-items-center rounded-md border border-border bg-panel-strong font-semibold text-primary">P</div>

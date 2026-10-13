@@ -514,9 +514,11 @@
                   {#if showClaudeAccountSwitcher}
                     <ClaudeAccountSwitcher lastAttemptedAccount={lastClaudeAccountAttempt} />
                   {/if}
-                  <button type="button" class="flex h-6 items-center gap-1 rounded-md px-1.5 text-xs text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" aria-label="Show subagent statistics" disabled={!sessionUsage} onclick={() => subagentUsageOpen = true}>
-                    <Users class="h-3.5 w-3.5" aria-hidden="true" /> Subagents
-                  </button>
+                  {#if sessionUsage?.subagents?.agents.length}
+                    <button type="button" class="flex h-6 items-center gap-1 rounded-md px-1.5 text-xs text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" aria-label="Show subagent statistics" onclick={() => subagentUsageOpen = true}>
+                      <Users class="h-3.5 w-3.5" aria-hidden="true" /> Subagents
+                    </button>
+                  {/if}
                 </div>
                 {#if usageAccountLabel}
                   <div class="truncate text-xs text-muted-foreground">{usageAccountLabel}</div>

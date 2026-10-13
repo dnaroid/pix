@@ -55,6 +55,10 @@ test("prepare pins native and embedded contents into separate private profile/wo
  assert.equal(m.pinScope, "native-and-embedded-web; development ACP resolves from checkout");
  assert.notEqual(m.executable, f.target); assert.equal(await readFile(m.executable, "utf8"), "fake native");
  assert.equal(m.profileDir, join(m.runDir, "profile")); assert.equal(m.workspace, join(m.runDir, "workspace"));
+ assert.equal(result.workspace, m.workspace);
+ assert.deepEqual(result.projectSeed, m.projectSeed);
+ assert.equal(m.projectSeed.kind, "pix-qa-sandbox");
+ assert.match(await readFile(join(m.workspace, "docs/notes.md"), "utf8"), /QA_SEARCH_ALPHA/);
  assert.equal((await json(join(m.profileDir, "profile.json"))).id, m.profileId);
  for (const path of [m.runDir, m.profileDir, m.workspace]) assert.equal((await stat(path)).mode & 0o777, 0o700);
  for (const path of [result.manifestPath, join(m.profileDir, "profile.json")]) assert.equal((await stat(path)).mode & 0o777, 0o600);
@@ -63,6 +67,15 @@ test("prepare pins native and embedded contents into separate private profile/wo
  assert.deepEqual(await readFile(f.target), before[2]); assert.equal((await stat(f.target)).mtimeMs, before[3].mtimeMs);
  assert.deepEqual((await readdir(m.runDir)).sort(), ["manifest.json", "native", "profile", "workspace"]);
  });
+
+test("prepare can explicitly keep its owned workspace empty", { skip: skipWindows }, async (t) => {
+ const f = await fixture(t);
+ const result = await prepareDesktop({ ...f.options, emptyWorkspace: true }, f.dependencies);
+ const m = await json(result.manifestPath);
+ assert.equal(result.projectSeed, null);
+ assert.equal(m.projectSeed, null);
+ assert.deepEqual(await readdir(result.workspace), []);
+});
 
 for (const status of ["queued", "building"]) test(`prepare waits for ${status} then pins idle`, { skip: skipWindows }, async (t) => {
  const f = await fixture(t); await f.publish(status); let waits = 0;

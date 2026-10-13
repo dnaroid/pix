@@ -60,18 +60,22 @@ relevant sections before acting.
 Read current scripts from `package.json` and source instead of copying
 the precise invocation or selected tests into this skill:
 
-- Run the short **cross-platform preflight** before the full native gate. The
-  preflight is *additive* and checks known platform-specific lifecycle failures;
-  it never replaces the complete suite.
+- Follow the local verification scope in `AGENTS.md`: full local CI only for
+  release preparation or an explicit request to push everything. Otherwise use
+  focused regression tests and relevant typechecks/builds, not all gate stages
+  separately. Run the short **cross-platform preflight** before an authorized
+  full native gate. A focused preflight can run independently and does not
+  authorize the full gate; it never replaces the complete suite.
 - Keep `ci-test-contracts` passing. Its baseline is a reviewed inventory of
   preexisting risky assertions/cleanup patterns, **not** a knob to automatically
   regenerate when new code fails. Fix new warnings first.
 - Use `ci-history-report` on saved action artifacts to locate repeated test
   signatures and platform/runtime trends. Aggregate observations are not proof
   that a specific failure is nondeterministic.
-- Execute the package's native-host `check:ci` with the versions and
-  prerequisites from current `docs/development.md` (including isolated
-  test HOME). A local host can only validate its own native leg.
+- When the full local gate is authorized, execute the package's native-host
+  `check:ci` with the versions and prerequisites from current
+  `docs/development.md` (including isolated test HOME). A local host can only
+  validate its own native leg.
 - After pushing, require all intended GitHub matrix jobs to complete with
   `success`. For an unavailable platform, explicitly report what is unverified
   rather than claiming a green matrix.

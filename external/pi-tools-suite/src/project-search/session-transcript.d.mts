@@ -6,5 +6,5 @@ export const CHUNK_CHARS: number;
 export function messageChunks(text: string): Pick<TranscriptChunk, "start" | "end" | "text" | "hash">[];
 export interface TranscriptSkip { sessionId: string; path: string; reason: string; line?: number; code?: string; entryId?: string; parentId?: string }
 export function readSessionTranscript(root: string, candidate: TranscriptCandidate, signal: AbortSignal, onSkip?: (diagnostic: TranscriptSkip) => void): Promise<TranscriptSnapshot | undefined>;
-export function transcriptUnchanged(snapshot: TranscriptSnapshot, signal: AbortSignal): Promise<boolean>;
+export function transcriptUnchanged(snapshot: { path: string; fileStamp: string }, signal: AbortSignal): Promise<boolean>;
 export function sessionContext(snapshot: TranscriptSnapshot, messageId?: string, budget?: number): string | undefined;

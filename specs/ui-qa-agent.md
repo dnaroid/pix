@@ -38,7 +38,8 @@ providers' credential, isolation, evidence, and cleanup protections.
   the requested document. Guides are not discoverable agent roles.
 - The shared loader turns the thin body into `promptAppend`; only the short
   `description` reaches parent/router catalogs. No QA-specific prompt injection
-  or extra skill read is required.
+  is required. Project-specific setup may explicitly route to a local document
+  or skill file for manual reading; this does not enable skill auto-loading.
 - The capability-first runner and its browser/TUI/desktop backends live under
   `agents/ui-qa/`. The trusted Playwright browser runner, vendor
   dependency/license, and browser JSONC assets are grouped under
@@ -49,6 +50,25 @@ providers' credential, isolation, evidence, and cleanup protections.
   assets, not additional instructions.
 - The old skill and separate design/scaffold documents are removed. Ordinary
   `.pi/agents` discovery remains non-recursive, so assets cannot become roles.
+
+## Default project selection
+
+An explicit project, path, URL or real-data requirement takes precedence.
+The agent must not silently redirect an explicit target to synthetic data.
+When the application is known but no data project is specified, prefer its
+documented disposable QA project rather than the user's working projects.
+This substitutes project data only, never a mock application or UI surface.
+An unclear application or unsafe required target remains `BLOCKED`.
+
+In the Pix source checkout, the common role routes to `docs/qa-sandbox.md`.
+Desktop preparation seeds a fresh owned workspace by default; an explicit
+`--empty-workspace` supports empty-project scenarios. For TUI/manual setup,
+`npm run qa:sandbox` creates a fresh copy under `.pi/artifacts/`. Each seeded
+copy gets a separate empty Git repository, with no commits, remotes or template
+hooks, and no real credentials, sessions or tasks database. Report the actual
+project and coverage limits; sandbox success does not prove real-data behavior.
+Pix Desktop setup explicitly reads the local QA skill; the launcher still
+forces `--no-skills` and does not inject project skills.
 
 ## Runtime behavior
 

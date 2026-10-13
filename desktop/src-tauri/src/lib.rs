@@ -115,6 +115,7 @@ const PROJECT_PI_CANONICAL_DIRECTORIES: &[&str] = &[
     "tasks.d",
 ];
 const PROJECT_PI_CANONICAL_FILES: &[&str] = &[
+    "agent-model-overrides.json",
     "TODO.md",
     "pi-tools-suite.jsonc",
     "pix-desktop.jsonc",
@@ -11953,6 +11954,7 @@ mod tests {
             .expect("write QA auth config");
         for canonical_file in [
             "TODO.md",
+            "agent-model-overrides.json",
             "pi-tools-suite.jsonc",
             "pix-desktop.jsonc",
             "pix.jsonc",
@@ -12022,6 +12024,7 @@ mod tests {
         assert!(workspace.join(".pi/qa_auth.jsonc").is_file());
         for canonical_file in [
             "TODO.md",
+            "agent-model-overrides.json",
             "pi-tools-suite.jsonc",
             "pix-desktop.jsonc",
             "pix.jsonc",

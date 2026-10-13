@@ -7,7 +7,7 @@ import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { claimWork, beginWrite, withProviderSlot, safeFile } from "../src/project-search/source-work.mjs";
+import { claimWork, beginWrite, withProviderSlot, safeFile, automaticWorkPaused, SearchWorkNeedsContinueError } from "../src/project-search/source-work.mjs";
 import { removeDirsWithRetry } from "./support/fs-retry.mjs";
 
 const signal = () => new AbortController().signal;
@@ -143,6 +143,28 @@ test("provider queue rechecks source ownership before sending paid work", async 
   db.exec("UPDATE pix_search_work SET expires=0");
   await assert.rejects(work.run(() => withProviderSlot(signal(), () => assert.fail("lost owner must not send"), { directory: root })), /expired/);
   await work.release(); db.close();
+});
+test("automatic preflight observes Continue without claiming work and manual retry clears it", async () => {
+  const root = await fixture();
+  assert.equal(await automaticWorkPaused(root, "sessions", signal()), false);
+  const db = new DatabaseSync(join(root, ".pi/search/sessions.sqlite"));
+  try {
+    const work = await claimWork(db, signal());
+    await work.release(true);
+    db.exec("UPDATE pix_search_work SET failures=2, expires=0");
+    const before = db.prepare("SELECT * FROM pix_search_work").get();
+    assert.equal(await automaticWorkPaused(root, "sessions", signal()), true);
+    assert.deepEqual(db.prepare("SELECT * FROM pix_search_work").get(), before);
+    await assert.rejects(claimWork(db, signal()), SearchWorkNeedsContinueError);
+    const retry = await claimWork(db, signal(), { retry: true });
+    await retry.release(true);
+    assert.equal(await automaticWorkPaused(root, "sessions", signal()), false);
+    db.exec("UPDATE pix_search_work SET token='dead', network=1, failures=1, expires=0");
+    assert.equal(await automaticWorkPaused(root, "sessions", signal()), true);
+    db.exec("UPDATE pix_search_work SET expires=9007199254740991");
+    assert.equal(await automaticWorkPaused(root, "sessions", signal()), false);
+    await assert.rejects(automaticWorkPaused(root, "sessions", AbortSignal.abort()));
+  } finally { db.close(); }
 });
 test("ACP protocol copy matches the standalone suite", async () => {
   for (const name of ["source-work"]) {

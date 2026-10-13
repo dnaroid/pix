@@ -37,7 +37,9 @@ uncertain-work recovery: [0070](../docs/decisions/0070-search-source-work-recove
   `files.sqlite`, `file-vectors.sqlite` and `commits.sqlite` are not imported, migrated,
   or used as fallbacks. On first use, only those four legacy database files and their
   SQLite sidecars are physically removed from this project; the six source databases
-  are preserved. Schema-1 Settings configuration is rejected without mutation.
+  are preserved. The shared Settings writer validates/creates only its global
+  `~/.config/pi/search` ancestor directories and never scaffolds project `.pi` directories.
+  Schema-1 Settings configuration is rejected without mutation.
 - Files are enumerated under the selected root, using Git's tracked/unignored file list
   where available and a bounded walker with nested `.gitignore` otherwise. Internal caches,
   `.pi`, `.git`, `.indexer-cli` (protected legacy-data exclusion), dependency/build directories, linked/nonregular files,
@@ -89,6 +91,47 @@ uncertain-work recovery: [0070](../docs/decisions/0070-search-source-work-recove
   use the same explicitly configured global provider. Removed `repo_*` tools are not
   part of ordinary search.
 
+## Optional reranking
+
+- The canonical global suite JSONC accepts optional `search.rerankerModel`, an OpenRouter
+  reranker model ID (for example `voyageai/rerank-3-lite`). Empty/omitted or invalid values
+  disable it. Project overrides, an API key alone, and legacy config do not enable it.
+  Desktop's **Reranker model** field edits this same global draft and uses its normal Save;
+  clearing the field removes the key. New default configs document it without enabling uploads.
+- Saving a nonempty model authorizes sending the query and bounded eligible Code/Knowledge
+  text plus Sessions/Tasks/Commits titles and snippets across projects in Pi/TUI/ACP/Desktop. Charges may
+  apply. Credentials use `OPENROUTER_API_KEY`, then shared Pi auth. This permission is
+  independent of `search.embedding`: hybrid/semantic queries can rerank local candidates
+  without embeddings. Removing embeddings does not disable a separately configured reranker.
+  Settings are excluded from remote reranking.
+- Pure lexical agent/native queries and document indexing never invoke reranking.
+  Desktop publishes local results first, then optionally reranks the merged selected
+  Sessions/Tasks/Commits/Code/Knowledge results after all source operations complete,
+  including late source replies. Embedding configuration is not required for this pass.
+  `project_search` hybrid/semantic queries likewise use one shared pass before final limits.
+  Up to 100 source-balanced candidates are sent once to
+  `https://openrouter.ai/api/v1/rerank`. History uploads contain only titles (512 characters)
+  and snippets (4096), never full sessions or diffs; native candidate content is capped
+  at 7500 characters, with provider documents capped at 8192 overall.
+  Candidate filters, deduplication and source policy apply before upload; native per-domain
+  caps and the requested final result limit apply after reranking. Returned relevance order
+  is preserved rather than re-sorted by local BM25. Desktop Settings retain their local slots.
+  Standalone native requests retain their Code/Knowledge pass; federated callers set
+  `skipRerank` and carry native freshness context to avoid double provider calls. Content upload does not
+  depend on `includeContent`; that flag controls only the returned payload.
+- Reranking has a four-second verification/slot/transport budget, bounded response size, no redirected
+  provider requests and strict index/score validation. Missing credentials, timeout,
+  provider errors and malformed responses retain original ranking with a redacted notice.
+  Global provider concurrency slots span transport lifetime. Source policy, configured
+  model, history source snapshots, native generation and current candidate bytes are checked around network work;
+  stale snapshots are not reranked, changed context rejects late ranking, caller cancellation
+  rejects the search. Periodic configuration/policy/generation checks cancel in-flight work;
+  no native SQLite handle is retained across reranker transport. History snapshots are
+  captured before retrieval and rechecked before upload and after transport. Desktop bounds
+  preparation to four seconds and the final request to 4.5 seconds, discarding late replies
+  even when an adapter ignores cancellation. CLI/Tauri `rerank` input is capped at 4 MiB
+  for bounded Unicode documents; other operations retain their 16 KiB input cap.
+
 ## Optional semantic retrieval
 
 - The sole provider configuration is `~/.config/pi/pi-tools-suite.jsonc` (`HOME`, then
@@ -124,10 +167,11 @@ uncertain-work recovery: [0070](../docs/decisions/0070-search-source-work-recove
   non-stealable writer lock, and reject malformed/oversized/redirected storage rather than
   repairing it. `off` removes the embedding object and retains vectors. `reset-history` is an
   explicit user-only recovery action for incompatible preserved history caches: it clears
-  recognized derived task/session/commit/settings vectors and their identity metadata in only
-  the current project's source-local history databases. It preserves canonical tasks,
-  sessions and Git history, settings documents/schema, repository `code.sqlite` and
-  `knowledge.sqlite`, and global settings. The next background Settings/Tasks
+  recognized derived task/session/commit vectors and their identity metadata in only
+  the current project's source-local history databases. It does not reset the shared
+  all-project Settings cache. It preserves canonical tasks, sessions and Git history,
+  settings documents/schema, repository `code.sqlite` and `knowledge.sqlite`, and global
+  Settings vectors. The next background Tasks
   synchronization or search-driven indexing of other sources can re-embed and incur charges.
   Busy, redirected, unsafe or unrecognized storage fails closed without committing a
   reset. No automatic provider choice. Child repository tools inherit configuration but do
@@ -135,7 +179,12 @@ uncertain-work recovery: [0070](../docs/decisions/0070-search-source-work-recove
 - `lexical` never embeds. `hybrid` (native default) uses reciprocal-rank fusion of BM25
   and cosine-ranked current chunk vectors; `semantic` uses semantic matches when available,
   falling back visibly to lexical on unavailability. Symbol ranking is unsupported.
-  Desktop publishes the lexical stage first and enriches only when the global provider is configured.
+  Code/Knowledge semantic candidates require raw cosine similarity **>= 0.25** before
+  test-file ranking penalties and RRF. This fixed retrieval threshold does not filter
+  BM25 matches or require reindexing; cached vectors use the same threshold. The fused
+  RRF score is not a cosine similarity.
+  When configured, the optional reranker replaces final hit scores with relevance scores.
+  Desktop publishes the lexical stage first and enriches when global embeddings or a reranker are configured.
   The agent awaits its one bounded final response. Pure retrieval uses no answer LLM.
 - On explicit search, embed at most 128 missing scoped chunks in batches of 16, shared
   across nonempty domains. Each request is bounded to eight seconds; enrichment has a

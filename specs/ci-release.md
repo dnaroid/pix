@@ -66,14 +66,21 @@ remain true when CI or UI-QA tests change.
 
 ## Local CI gate
 
+- Full local CI is reserved for release preparation or an explicit user request
+  to push everything ("запушить всё"). Ordinary implementation, review and
+  bug-fix tasks use focused regression tests and relevant typechecks/builds,
+  not the full gate or an equivalent run of every stage separately. A focused
+  preflight does not authorize a full run. Automatic GitHub Actions triggers
+  remain unchanged.
 - `npm run check` remains a root-only quick check. `npm run check:ci` is the
   shared native-host verification entrypoint used locally and by `check.yml`.
   `-- --list` prints the host plan without executing checks.
 - `npm run check:ci:preflight` is a short, independently reported gate using
   the same isolated test HOME and log/summary protocol. Linux checks the real
   AST binary and LSP broker ownership; Windows checks SQLite fixture cleanup, detached broker receipts
-  and PTY-exit timers; macOS checks process-group exit races. The full
-  `check:ci` always follows if preflight passes.
+  and PTY-exit timers; macOS checks process-group exit races. In GitHub CI and
+  authorized full local runs, `check:ci` follows a successful preflight; a
+  focused local preflight can run on its own.
 - Every supported host runs root checks, ACP checks (including stdio smoke),
   and tools-suite tests. macOS additionally runs Desktop frontend checks/tests
   and Rust fmt/check/locked backend-runtime tests. Linux additionally runs

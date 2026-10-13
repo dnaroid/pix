@@ -1,5 +1,6 @@
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadProjectModelOverrides } from "./project-model-overrides.js";
 import { loadPiToolsSuiteConfig } from "../../config.js";
 import { readAgentDefinitionsFromDir, readProjectAgentDefinitions, type AgentDefinition } from "./agents-dir.js";
 import {
@@ -113,6 +114,10 @@ export interface SubagentVisionConfig {
 }
 
 export interface SubagentConfig {
+	/** Suite config primary choices for bundled explicit-model roles only. */
+	builtinModelOverrides?: Record<string, string>;
+	/** Project-only primary model choices; authored profile/fallback chains remain untouched. */
+	projectModelOverrides?: Record<string, string>;
 	/** Ambiguous-task router hint and legacy resolver default; never a spawn error fallback. */
 	defaultType?: string;
 	types: Record<string, SubagentTypeConfig>;
@@ -238,6 +243,14 @@ export function loadSubagentConfig(cwd: string, env?: NodeJS.ProcessEnv): Subage
 	// source of role/profile configuration and are loaded fresh on every call.
 	// Same-named project roles replace built-ins completely.
 	applyProjectAgentTypes(config, projectAgentTypes(cwd));
+	config.builtinModelOverrides = Object.fromEntries(Object.entries(suiteConfig.builtinAgentModels).filter(([name]) => {
+		const profile = config.types[name];
+		return Object.prototype.hasOwnProperty.call(BUILTIN_CONFIG.types, name)
+			&& !Object.prototype.hasOwnProperty.call(config.projectAgentMetadata ?? {}, name)
+			&& profile?.modelSelection !== "frontier"
+			&& Boolean(profile?.models?.length || profile?.model || profile?.modelByParent);
+	}));
+	config.projectModelOverrides = loadProjectModelOverrides(cwd, config);
 	applyEnvModelOverrides(config, runtimeEnv);
 	applyEnvRoutingOverrides(config, runtimeEnv);
 	applyEnvRuntimeOverrides(config, runtimeEnv);
@@ -310,19 +323,20 @@ export function resolveAgentTaskConfig(
 	const profileModel = profileModels[0];
 	const usedParentMatch = Boolean(parentMatchModel) && !forcedModel && !taskModel
 		&& !globalModel;
-	const primaryModel = forcedModel || taskModel || (usedParentMatch ? parentMatchModel : undefined)
-		|| globalModel || profileModel;
+	const roleModel = selectedType ? config.projectModelOverrides?.[selectedType] || config.builtinModelOverrides?.[selectedType] : undefined;
+	const selectedModel = forcedModel || taskModel || globalModel || roleModel
+		|| (usedParentMatch ? parentMatchModel : undefined) || profileModel;
 	const configuredFallbacks = forcedModel || taskModel
 		? []
 		: usedParentMatch && parentMatch?.fallbackModels !== undefined
 			? parentMatch.fallbackModels
-			: resolveFallbackModels({ model: primaryModel, profileModels, profile });
+			: resolveFallbackModels({ model: selectedModel, profileModels, profile });
 	const extraArgs = forcedModel
 		? stripModelArgs([...profileExtraArgs, ...taskExtraArgs, ...globalExtraArgs])
 		: [...profileExtraArgs, ...taskExtraArgs, ...globalExtraArgs];
 	const cliModel = modelFromArgs(extraArgs);
 	const explicitModel = forcedModel || cliModel || taskModel;
-	let candidates = modelList(explicitModel || primaryModel, explicitModel ? [] : configuredFallbacks) ?? [];
+	let candidates = modelList(explicitModel || selectedModel, explicitModel ? [] : configuredFallbacks) ?? [];
 
 	// Economy mode governs automatic and parent-requested choices; the forced
 	// current model is already running as the parent and stays exempt.
@@ -767,6 +781,8 @@ function applyEnvModelOverrides(config: SubagentConfig, env: NodeJS.ProcessEnv):
 		const key = typeEnvKey(name);
 		const model = trimString(env[`ASYNC_SUBAGENTS_${key}_MODEL`] || env[`PI_SUBAGENTS_${key}_MODEL`]);
 		if (model) {
+			if (config.projectModelOverrides) delete config.projectModelOverrides[name];
+			if (config.builtinModelOverrides) delete config.builtinModelOverrides[name];
 			config.types[name] = mergeTypeProfile(config.types[name] ?? {}, { model });
 		}
 	}

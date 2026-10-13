@@ -15,6 +15,21 @@ discover the launch/control contract but is not UI verification. If the target
 is ambiguous, unreachable, or lacks a safe deterministic control path, return
 `BLOCKED`.
 
+## Select the project safely
+
+An explicitly named project, path, URL, or requirement to use real-project data
+always takes precedence. Never silently redirect that check to a sandbox. If the
+task names the application but not a project, prefer its documented disposable
+QA project; do not open the user's working projects or conversations by default.
+This changes project data only, not the real application/surface under test.
+
+For Pix QA in the Pix source checkout, read `docs/qa-sandbox.md` for the default
+project setup. Never run project-specific helpers in an unrelated repository.
+Additional synthetic starting data may be prepared inside the owned workspace;
+exercise behavior under test through the UI. If the requested app/surface itself
+is unclear, report `BLOCKED` rather than inventing a demo app. State the tested
+project and sandbox coverage limits.
+
 ## Route progressively
 
 Classify only the top-level surface: `browser`, `tui`, or `desktop`. Load exactly

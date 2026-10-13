@@ -18,6 +18,12 @@ import { SearchCacheCompatibilityError } from "./embedding-cache.js";
 import { IndexActions } from "./index-actions.js";
 import { DesktopSessionChunks, sessionChunkHits, transcriptCandidates } from "./session-chunk-service.js";
 import { hasSessionChunkVectors } from "./session-chunks.js";
+import { SessionIdlePolicy, SessionIndexDeferred } from "./session-idle.js";
+import { readSourcePolicy, sourceEnabled, requireSourceEnabled, watchSourcePolicy, type SourceSelection } from "./source-policy.js";
+import type { SearchSetting } from "./contract.js";
+import { BackgroundSessionDiscovery, hydrateBackgroundTitle, type BackgroundSessionRecord } from "./background-session-discovery.js";
+import { transcriptUnchanged } from "./session-transcript.js";
+import { beginSessionSweep, completeSessionSweep } from "./session-watermark.js";
 
 const PROVIDER_WARNING = "Semantic settings search unavailable; local search remains available";
 const SESSION_PROVIDER_WARNING = "Semantic session-title search unavailable; local search remains available";
@@ -25,6 +31,11 @@ const TASK_PROVIDER_WARNING = "Semantic task search unavailable; local task sear
 const DISCOVERY_ERROR = "Session title discovery timed out or failed";
 export class SearchUnavailableError extends Error {}
 interface Workspace {
+  enabled: SourceSelection;
+  policyRevision?: string;
+  policyError?: string;
+  catalogue?: SearchSetting[];
+  unwatchPolicy(): void;
   cwd: string;
   controller: AbortController;
   cache: CachedIndex;
@@ -34,6 +45,7 @@ interface Workspace {
   refresh: Promise<unknown>;
   sessionsEmpty?: boolean;
   sourceStatusAt?: number;
+  statusDiscovery?: Promise<readonly SessionMapRecord[]>;
   background?: SettingsTaskIndexer;
   sessionWorker?: Promise<void>;
   chunks?: DesktopSessionChunks;
@@ -42,13 +54,16 @@ interface Workspace {
   error?: string;
 }
 export interface SearchServiceOptions {
-  discover(cwd: string, signal: AbortSignal): Promise<readonly SessionMapRecord[]>;
+  discover(cwd: string, signal: AbortSignal, strict?: boolean): Promise<readonly SessionMapRecord[]>;
+  discoverBackground?(cwd: string, signal: AbortSignal): Promise<readonly BackgroundSessionRecord[]>;
+  sessionSnapshot?(cwd: string, signal: AbortSignal): Promise<string>;
   preferences?: SearchPreferences;
   auth?: SearchAuth;
   discoveryTimeoutMs?: number;
   store?: SearchIndexStore;
   embed?: Embedder;
   watchTasks?: TaskChangeWatcher;
+  watchSourcePolicy?: typeof watchSourcePolicy;
   taskDebounceMs?: number;
 }
 /** Session public-text chunks and saved names share source-owned caches. */
@@ -58,6 +73,8 @@ export class DesktopSearchService {
   private readonly store: SearchIndexStore;
   private readonly embed: Embedder;
   private workspace: Workspace | undefined;
+  private activationPath: string | undefined;
+  private activationRevision = 0;
   private epoch = 0;
   private network = new AbortController();
   private enabled = false;
@@ -71,6 +88,19 @@ export class DesktopSearchService {
   private disposed = false;
   private configQueue: Promise<void> = Promise.resolve();
   private readonly retired = new Set<Promise<void>>();
+  private readonly activity = new Map<string, SessionIdlePolicy>();
+  private readonly statusCatalog = new BackgroundSessionDiscovery(async () => []);
+  private idlePolicy(cwd: string): SessionIdlePolicy {
+    const root = resolve(cwd);
+    let policy = this.activity.get(root);
+    if (!policy) { policy = new SessionIdlePolicy(root); this.activity.set(root,policy); }
+    return policy;
+  }
+  async sessionActivity(cwd: string, nativeId: string, running: boolean): Promise<void> {
+    if (this.disposed) return;
+    await this.idlePolicy(cwd).observe(nativeId,running);
+    if (this.workspace?.cwd === resolve(cwd) && this.workspace.enabled.sessions) this.chunkIndexer(this.workspace).changed();
+  }
   private readonly indexActions = new IndexActions<SearchIndexResponse>();
   constructor(private readonly options: SearchServiceOptions) {
     this.preferences = options.preferences ?? new SearchPreferences();
@@ -101,9 +131,10 @@ export class DesktopSearchService {
       tasks: this.workspace?.background?.indexing.tasks ?? false, sessions: Boolean(this.workspace?.sessionWorker || this.workspace?.chunks?.indexing) };
     const sourceErrors = { ...this.workspace?.background?.errors,
       ...(this.workspace?.indexError ? { sessions: this.workspace.indexError } : {}) };
-    const error = this.workspace?.indexError ?? sourceErrors.settings ?? sourceErrors.tasks ?? this.workspace?.error;
+    const error = this.workspace?.policyError ?? this.workspace?.indexError ?? sourceErrors.settings ?? sourceErrors.tasks ?? this.workspace?.error;
     return { enabled: this.enabled, sessionTitlesEnabled: this.sessionTitlesEnabled, tasksSemanticEnabled: this.tasksSemanticEnabled,
       keyAvailable: this.keyAvailable, indexing: Object.values(sources).some(Boolean), indexingSources: sources,
+      checkingSources: this.workspace?.background?.checking ?? { tasks: false },
       ...(this.workspace?.sessionsEmpty !== undefined ? { sessionsEmpty: this.workspace.sessionsEmpty } : {}),
       ...(Object.keys(sourceErrors).length ? { sourceErrors } : {}), ...(error ? { error } : {}) };
   }
@@ -138,15 +169,34 @@ export class DesktopSearchService {
   private async activate(cwd: string): Promise<Workspace> {
     if (this.disposed) throw new SearchUnavailableError("Search unavailable");
     const path = resolve(cwd);
+    if (this.activationPath !== path) { this.activationPath = path; this.activationRevision++; }
+    const revision = this.activationRevision;
+    const policy = await readSourcePolicy(path);
+    if (this.disposed || revision !== this.activationRevision) throw new SearchUnavailableError("Search workspace changed");
     if (this.workspace?.cwd === path) {
       const w = this.workspace;
-      w.controller.signal.throwIfAborted();
-      return w;
+      if (w.policyRevision === policy.revision && JSON.stringify(w.enabled) === JSON.stringify(policy.enabled)) {
+        w.controller.signal.throwIfAborted();
+        return w;
+      }
     }
-    this.workspace?.controller.abort(); this.revoke();
+    const previous = this.workspace;
+    const sameProject = previous?.cwd === path;
+    if (!sameProject) previous?.unwatchPolicy();
+    previous?.controller.abort(); this.revoke();
     const w: Workspace = { cwd: path, controller: new AbortController(), cache: emptyIndex(), settings: [],
-      namedSessions: [], namedRevision: 0, refresh: Promise.resolve(), queryVectors: new Map() };
+      namedSessions: [], namedRevision: 0, refresh: Promise.resolve(), queryVectors: new Map(), enabled: policy.enabled,
+      ...(policy.revision !== undefined ? { policyRevision: policy.revision } : {}),
+      ...(policy.error ? { policyError: policy.error } : {}),
+      ...(sameProject ? { settings: previous.settings, ...(previous.catalogue ? { catalogue: previous.catalogue } : {}) } : {}),
+      unwatchPolicy: sameProject ? previous.unwatchPolicy : () => {} };
     this.workspace = w;
+    if (!sameProject) w.unwatchPolicy = (this.options.watchSourcePolicy ?? watchSourcePolicy)(path, () => {
+      const current = this.workspace;
+      if (current?.cwd !== path || this.disposed) return;
+      current.unwatchPolicy(); current.controller.abort(); this.revoke(); this.workspace = undefined;
+      void this.sync({ cwd: path, settings: current.catalogue ?? [] }).catch(() => {});
+    });
     w.controller.signal.throwIfAborted();
     return w;
   }
@@ -164,9 +214,18 @@ export class DesktopSearchService {
         throw new SearchUnavailableError("Search configuration unavailable");
       }
       // Reading status/config never starts provider work.
-      if (request.includeSourceStatus && (w.sourceStatusAt === undefined || Date.now() - w.sourceStatusAt >= 30_000)) {
+      if (w.enabled.sessions && request.includeSourceStatus && (w.sourceStatusAt === undefined || Date.now() - w.sourceStatusAt >= 30_000)) {
         try {
-          const records = await this.discover(w, owned);
+          // Activity polling must not hydrate every transcript via SDK discovery.
+          // An optional empty-source hint has a smaller budget than the UI read.
+          if (w.statusDiscovery) throw new Error("Previous status discovery is still settling");
+          const records = await bounded(owned, 1000, metadataSignal => {
+            const pending = Promise.resolve().then(() => this.options.discoverBackground?.(w.cwd, metadataSignal)
+              ?? this.statusCatalog.list(w.cwd, metadataSignal));
+            w.statusDiscovery = pending;
+            void pending.finally(() => { if (w.statusDiscovery === pending) delete w.statusDiscovery; }).catch(() => {});
+            return pending;
+          });
           owned.throwIfAborted();
           w.sessionsEmpty = records.length === 0;
         } catch {
@@ -179,6 +238,11 @@ export class DesktopSearchService {
     this.configQueue = operation;
     await operation;
     signal.throwIfAborted();
+    if (request.includeSessionSnapshot) {
+      const sessionSnapshot = await bounded(signal, 1500, owned =>
+        this.options.sessionSnapshot?.(request.cwd, owned) ?? this.statusCatalog.snapshot(request.cwd, owned));
+      return { ...this.status(), sessionSnapshot };
+    }
     return this.status();
   }
   private background(w: Workspace): SettingsTaskIndexer | undefined {
@@ -186,7 +250,9 @@ export class DesktopSearchService {
     return w.background ??= new SettingsTaskIndexer({ cwd: w.cwd,
       signal: AbortSignal.any([w.controller.signal, this.network.signal]), config: this.embeddingConfig,
       store: this.store, embed: (inputs, signal, domain) => this.vectors(inputs, signal, domain),
-      authorized: signal => this.consent(signal), watchTasks: this.options.watchTasks, debounceMs: this.options.taskDebounceMs,
+      enabled: source => w.enabled[source],
+      authorized: async (signal, source) => await sourceEnabled(w.cwd, source, w.policyRevision) && await this.consent(signal),
+      watchTasks: this.options.watchTasks, debounceMs: this.options.taskDebounceMs,
       completed: source => {
         if (this.current(w) && source === "settings" && w.error === PROVIDER_WARNING) delete w.error;
       } });
@@ -204,7 +270,8 @@ export class DesktopSearchService {
     if (revision !== this.catalogueRevision) return this.status();
     w.settings = settingsDocuments(request.settings);
     this.background(w)?.sync(request.settings);
-    this.chunkIndexer(w).changed();
+    w.catalogue = [...request.settings];
+    if (w.enabled.sessions) this.chunkIndexer(w).changed();
     return this.status();
   }
   /** Explicit document-only indexing. This is deliberately not a search query or sync. */
@@ -217,6 +284,7 @@ export class DesktopSearchService {
     const revision = request.source === "settings" ? ++this.catalogueRevision : this.catalogueRevision;
     if (request.source === "settings") this.indexCatalogue = { revision, fingerprint };
     const w = await this.activate(request.cwd);
+    await requireSourceEnabled(w.cwd, request.source, caller, w.policyRevision);
     const key = JSON.stringify([w.cwd, request.source, fingerprint]);
     // Coalesce before consent as well: two first-use clicks must not supersede
     // one another's authorization reads and return a fictitious missing config.
@@ -229,6 +297,7 @@ export class DesktopSearchService {
       const config = this.embeddingConfig!;
       const epoch = this.epoch;
       try {
+        const sweep = source === "sessions" ? await beginSessionSweep(w.cwd,semanticEmbeddingIdentity(config),owned) : undefined;
         let indexed = 0, total = 0;
         let diagnostics: SearchIndexResponse["diagnostics"];
         let namedRevision: number | undefined;
@@ -243,7 +312,7 @@ export class DesktopSearchService {
           await background.index(source, request.settings ?? [], owned);
           if (source === "settings") {
             if (settingsFingerprint(w.settings) !== fingerprint) throw new SearchUnavailableError("Settings catalogue changed; retry indexing");
-            const cache = await this.store.read(w.cwd, owned, config);
+            const cache = await this.store.read(w.cwd, owned, config, documents);
             total = documents.length;
             indexed = documents.filter(document => document.chunks.every(chunk => cache.vectors.has(hashText(chunk)))).length;
             if (this.current(w, epoch)) w.cache = cache;
@@ -258,11 +327,11 @@ export class DesktopSearchService {
           let previousSettled = !previous;
           const operation = (async () => {
             await bounded(owned, undefined, () => previous?.finally(() => { previousSettled = true; }) ?? Promise.resolve());
-            const records = await this.discover(w, owned);
+            const records = await this.discover(w, owned, true);
             await this.reconcileSessions(w, records, owned, false, true);
             await this.indexSessions(w, epoch, owned, true);
             // Refresh discovery so a rename/deletion during the pass cannot be reported current.
-            await this.reconcileSessions(w, await this.discover(w, owned), owned, false);
+            await this.reconcileSessions(w, await this.discover(w, owned, true), owned, false);
             const chunks = await this.chunkIndexer(w).index(owned, true);
             diagnostics = chunks.diagnostics;
             const titles = await this.store.readSessionTitles(w.cwd,owned,config);
@@ -286,6 +355,7 @@ export class DesktopSearchService {
         if (!await this.consent(owned) || !this.current(w, epoch)) throw new SearchUnavailableError("Search authorization changed");
         if (source === "settings" && settingsFingerprint(w.settings) !== fingerprint) throw new SearchUnavailableError("Settings catalogue changed; retry indexing");
         if (source === "sessions" && namedRevision !== w.namedRevision) throw new SearchUnavailableError("Saved session names changed; retry indexing");
+        if (sweep) await completeSessionSweep(w.cwd,sweep,owned);
         if (source === "tasks") {
           // Canonical tasks may change during the final authorization read.
           const tasks = await readTaskSemanticCorpus(w.cwd, owned);
@@ -293,6 +363,7 @@ export class DesktopSearchService {
           total = tasks.length; indexed = tasks.filter(task => saved.has(task.hash)).length;
         }
         if (!this.current(w, epoch)) throw new SearchUnavailableError("Search authorization changed");
+        await requireSourceEnabled(w.cwd, source, owned, w.policyRevision);
         owned.throwIfAborted();
         return { source, complete: indexed === total, indexed, total,
           ...(diagnostics ? { diagnostics } : {}),
@@ -304,12 +375,12 @@ export class DesktopSearchService {
       }
     });
   }
-  private async discover(w: Workspace, signal: AbortSignal): Promise<readonly SessionMapRecord[]> {
+  private async discover(w: Workspace, signal: AbortSignal, strict = false): Promise<readonly SessionMapRecord[]> {
     return bounded(signal, undefined, async owned => {
       const previous = w.refresh;
       const operation = bounded(owned, undefined, async queued => {
         await bounded(queued, undefined, () => previous.catch(() => {}));
-        try { return await bounded(queued, this.options.discoveryTimeoutMs ?? 15000, source => this.options.discover(w.cwd, source)); }
+        try { return await bounded(queued, this.options.discoveryTimeoutMs ?? 15000, source => this.options.discover(w.cwd, source, strict)); }
         catch { queued.throwIfAborted(); throw new SearchUnavailableError(DISCOVERY_ERROR); }
       });
       w.refresh = operation.catch(() => {});
@@ -317,20 +388,34 @@ export class DesktopSearchService {
     });
   }
   private chunkIndexer(w: Workspace): DesktopSessionChunks {
+    if (w.chunks) return w.chunks;
+    const background = this.statusCatalog;
     return w.chunks ??= new DesktopSessionChunks(w.cwd, {
       signal: AbortSignal.any([w.controller.signal,this.network.signal]),
-      discover: signal => this.discover(w,signal),
+      discover: signal => this.discover(w,signal,true),
+      discoverBackground: signal => this.options.discoverBackground?.(w.cwd,signal) ?? background.list(w.cwd,signal),
+      policy: this.idlePolicy(w.cwd),
+      titles: async (record, signal) => {
+        const title = await hydrateBackgroundTitle(w.cwd,record,signal);
+        if (!title) throw new Error("Session title could not be read");
+        await this.indexSessions(w,this.epoch,signal,false,title.record,
+          () => transcriptUnchanged(title.snapshot,signal));
+      },
       embedding: async signal => {
         if (!await this.consent(signal) || !this.embeddingConfig) return undefined;
         const config = this.embeddingConfig, epoch = this.epoch;
         return { identity:semanticEmbeddingIdentity(config),dimension:config.dimension,
-          authorized: async owned => await this.consent(owned) && this.current(w,epoch),
-          embed:(inputs,owned) => this.vectors(inputs,owned,"sessions") };
+          authorized: async owned => await sourceEnabled(w.cwd,"sessions",w.policyRevision) && await this.consent(owned) && this.current(w,epoch),
+          embed:(inputs,owned,beforeSend) => this.vectors(inputs,owned,"sessions",false,beforeSend) };
       },
       failed: () => { if(this.current(w)) w.indexError = "Session chunk indexing incomplete or unavailable; use Continue"; },
     });
   }
-  private async vectors(inputs: readonly string[], signal: AbortSignal, domain: "settings" | "sessions" | "tasks" = "settings", query = false): Promise<number[][]> {
+  private async vectors(inputs: readonly string[], signal: AbortSignal, domain: "settings" | "sessions" | "tasks" = "settings", query = false, beforeSend?: () => Promise<void>): Promise<number[][]> {
+    const workspace = this.workspace;
+    if (!workspace) throw new SearchUnavailableError("Search unavailable");
+    const root = workspace.cwd;
+    await requireSourceEnabled(root, domain, signal, workspace.policyRevision);
     return bounded(signal, 10000, async owned => {
       if (!await this.consent(owned)) throw new Error(PROVIDER_WARNING);
       if (!(domain === "sessions" ? this.sessionTitlesEnabled : domain === "tasks" ? this.tasksSemanticEnabled : this.enabled) || !this.keyAvailable) {
@@ -345,16 +430,21 @@ export class DesktopSearchService {
       if (epoch !== this.epoch || !this.embeddingConfig || semanticEmbeddingIdentity(config) !== semanticEmbeddingIdentity(this.embeddingConfig)) throw new Error(PROVIDER_WARNING);
       if (config.provider === "openrouter" && !key) throw new Error(domain === "sessions" ? SESSION_PROVIDER_WARNING : domain === "tasks" ? TASK_PROVIDER_WARNING : PROVIDER_WARNING);
       const prefix = query ? config.queryPrefix : config.documentPrefix;
-      const vectors = await withProviderSlot(owned, () => this.embed(inputs.map(text => (prefix + text).slice(0, 8192)), key ?? "", owned, config));
+      const vectors = await withProviderSlot(owned, async () => {
+        await requireSourceEnabled(root, domain, owned, workspace.policyRevision);
+        await beforeSend?.();
+        return this.embed(inputs.map(text => (prefix + text).slice(0, 8192)), key ?? "", owned, config);
+      });
       if (!await this.consent(owned)) throw new Error(PROVIDER_WARNING);
       owned.throwIfAborted();
       if (epoch !== this.epoch || !this.embeddingConfig || semanticEmbeddingIdentity(config) !== semanticEmbeddingIdentity(this.embeddingConfig)
         || vectors.length !== inputs.length || !vectors.every(vector => validVector(vector, config.dimension))) throw new Error(PROVIDER_WARNING);
+      await requireSourceEnabled(root, domain, owned, workspace.policyRevision);
       return vectors;
     });
   }
   /** Reconcile only explicitly named titles, never first-message display fallbacks. */
-  private async reconcileSessions(w: Workspace, records: readonly SessionMapRecord[], signal: AbortSignal, schedule = true, retry = false): Promise<void> {
+  private async reconcileSessions(w: Workspace, records: readonly SessionMapRecord[], signal: AbortSignal, schedule = true, retry = false, strict = false): Promise<void> {
     const current = namedSessionTitles(records, w.cwd);
     const changed = current.length !== w.namedSessions.length || current.some((title, index) =>
       title.sessionId !== w.namedSessions[index]?.sessionId || title.hash !== w.namedSessions[index]?.hash);
@@ -364,17 +454,18 @@ export class DesktopSearchService {
     }
     if (!this.embeddingConfig) return;
     try {
+      await requireSourceEnabled(w.cwd, "sessions", signal, w.policyRevision);
       await this.store.write(w.cwd, signal, async tx => tx.sessionTitles().reconcile(current), this.embeddingConfig, { source: "sessions", retry });
       delete w.indexError;
     } catch (error) {
       signal.throwIfAborted();
-      if (!schedule) throw error;
+      if (strict || retry) throw error;
       if (this.current(w)) {
         w.indexError = error instanceof SearchIndexBusyError || error instanceof SearchCacheCompatibilityError
           ? error.message : "Session title index unavailable; local search remains available";
       }
     }
-    if (schedule) this.scheduleSessions(w);
+    if (schedule) this.chunkIndexer(w).changed();
   }
 
   private async refreshSessionBoundaries(w: Workspace, records: readonly SessionMapRecord[], signal: AbortSignal): Promise<void> {
@@ -387,51 +478,55 @@ export class DesktopSearchService {
     }
   }
 
-  private scheduleSessions(w: Workspace): void {
-    if (w.sessionWorker || !this.current(w) || !this.sessionTitlesEnabled || !this.keyAvailable || !w.namedSessions.length) return;
-    const epoch = this.epoch;
-    const revision = w.namedRevision;
-    const signal = AbortSignal.any([w.controller.signal, this.network.signal]);
-    const worker = this.indexSessions(w, epoch, signal).catch(error => {
-      if (this.current(w, epoch) && !signal.aborted) {
-        w.indexError = error instanceof SearchIndexBusyError || error instanceof SearchCacheCompatibilityError ? error.message : SESSION_PROVIDER_WARNING;
-      }
-    }).finally(() => {
-      if (w.sessionWorker === worker) delete w.sessionWorker;
-      if (this.current(w) && (epoch !== this.epoch || revision !== w.namedRevision)) this.scheduleSessions(w);
-    });
-    w.sessionWorker = worker;
-  }
-
   /** One SQLite-owned batch at a time, with durable hashes reused across restarts. */
-  private async indexSessions(w: Workspace, epoch: number, signal: AbortSignal, retry = false): Promise<void> {
+  private async indexSessions(w: Workspace, epoch: number, signal: AbortSignal, retry = false, automatic?: SessionMapRecord,
+    unchanged?: () => Promise<boolean>): Promise<void> {
     const config = this.embeddingConfig;
     if (!config) return;
-    while (this.current(w, epoch) && this.sessionTitlesEnabled && w.namedSessions.length) {
+    while (this.current(w, epoch) && this.sessionTitlesEnabled && (automatic || w.namedSessions.length)) {
+      const eligible = async () => !automatic || (await this.idlePolicy(w.cwd).eligible(
+        {id:automatic.piSessionId,path:automatic.piSessionPath},signal) && (!unchanged || await unchanged()));
+      if (!await eligible()) throw new SessionIndexDeferred();
       let pending = false;
       await this.store.write(w.cwd, signal, async tx => {
         const revision = w.namedRevision;
         const index = tx.sessionTitles();
-        index.reconcile(w.namedSessions);
-        const missing = index.missing(16);
+        if (automatic) index.reconcileOne(automatic.sessionId,namedSessionTitles([automatic],w.cwd)[0]);
+        else index.reconcile(w.namedSessions);
+        const missing = index.missing(16,automatic?.sessionId);
         if (!missing.length) return;
+        if (!await eligible()) throw new SessionIndexDeferred();
         pending = true;
-        const vectors = await tx.outside(() => this.vectors(missing.map(entry => entry.title), signal, "sessions"));
+        let vectors: number[][];
+        try {
+          vectors = await tx.outside(() => this.vectors(missing.map(entry => entry.title), signal, "sessions", false, async () => {
+            if (!await eligible()) throw new SessionIndexDeferred();
+          }));
+        } catch (error) {
+          if (!(error instanceof SessionIndexDeferred)) throw error;
+          if (automatic) throw error;
+          pending = false; return;
+        }
+        if (!await eligible()) throw new SessionIndexDeferred();
         // Preferences can also be edited by a second Desktop process while
         // the provider is in flight. Revalidate before committing paid output.
         if (!await this.consent(signal) || !this.sessionTitlesEnabled || !this.keyAvailable || !this.current(w, epoch) || revision !== w.namedRevision) {
           throw new Error("Session title index changed during provider request");
         }
+        if (!await eligible()) throw new SessionIndexDeferred();
+        await requireSourceEnabled(w.cwd, "sessions", signal, w.policyRevision);
         index.save(new Map(missing.map((entry, position) => [entry.hash, vectors[position]!])));
       }, config, { source: "sessions", retry });
       retry = false;
       if (!pending) break;
     }
+    if (automatic && (!this.current(w, epoch) || !this.sessionTitlesEnabled)) throw new SessionIndexDeferred();
   }
   /** Rank already indexed canonical hashes; a query never creates missing task vectors. */
   async queryTasks(request: SemanticTasksRequest, caller = new AbortController().signal): Promise<SemanticTasksResponse> {
     caller.throwIfAborted();
     const w = await this.activate(request.cwd);
+    if (!w.enabled.tasks) return { results: [], pendingIndex: false };
     const signal = AbortSignal.any([caller, w.controller.signal]);
     if (!await this.consent(signal) || !this.tasksSemanticEnabled || !this.keyAvailable) return { results: [], pendingIndex: false };
     const config = this.embeddingConfig!;
@@ -460,13 +555,14 @@ export class DesktopSearchService {
         snippet: task.snippet, score: similarity, semantic: true });
     }
     results.sort((a, b) => b.score - a.score || a.taskId.localeCompare(b.taskId));
+    await requireSourceEnabled(w.cwd, "tasks", owned, w.policyRevision);
     return { results: results.slice(0, request.limit), pendingIndex: currentDocuments.some(task => !saved.has(task.hash)) };
   }
   async query(request: SearchQueryRequest, caller = new AbortController().signal): Promise<SearchQueryResponse> {
     caller.throwIfAborted();
-    const wantsSettings = request.types.includes("settings");
-    const catalogueRevision = wantsSettings ? ++this.catalogueRevision : undefined;
     const w = await this.activate(request.cwd);
+    const wantsSettings = w.enabled.settings && request.types.includes("settings");
+    const catalogueRevision = wantsSettings ? ++this.catalogueRevision : undefined;
     const signal = AbortSignal.any([caller, w.controller.signal]);
     let authorized = await this.consent(signal);
     signal.throwIfAborted();
@@ -474,11 +570,11 @@ export class DesktopSearchService {
     if (catalogueRevision !== undefined && catalogueRevision !== this.catalogueRevision) return { results: [], status: this.status() };
     const epoch = this.epoch;
     const settings = wantsSettings ? settingsDocuments(request.settings) : [];
-    if (wantsSettings) { w.settings = settings; this.background(w)?.catalogue(request.settings); }
-    const wantsSessions = request.types.includes("sessions");
+    if (wantsSettings) { w.settings = settings; w.catalogue = [...request.settings]; this.background(w)?.catalogue(request.settings); }
+    const wantsSessions = w.enabled.sessions && request.types.includes("sessions");
     let records = wantsSessions ? await this.discover(w, signal) : [];
     if (wantsSessions) {
-      await this.reconcileSessions(w, records, signal);
+      await this.reconcileSessions(w, records, signal, false);
       await this.refreshSessionBoundaries(w, records, signal);
     }
     authorized = await this.consent(signal);
@@ -501,7 +597,7 @@ export class DesktopSearchService {
         }
         if (this.current(w, epoch) && semanticSettings) {
           try {
-            const cache = await this.store.read(w.cwd, owned, this.embeddingConfig);
+            const cache = await this.store.read(w.cwd, owned, this.embeddingConfig, w.settings);
             if (this.current(w, epoch)) w.cache = cache;
           } catch {
             owned.throwIfAborted();
@@ -584,7 +680,6 @@ export class DesktopSearchService {
           if(position < 0) results.push(hit);
           else results[position] = {...hit,score:Math.max(hit.score,results[position]!.score)};
         }
-        this.chunkIndexer(w).changed();
       } catch { signal.throwIfAborted(); if(this.current(w)) w.indexError = "Session chunk search unavailable"; }
     }
     if (wantsSettings && query) for (const document of settings) {
@@ -596,6 +691,8 @@ export class DesktopSearchService {
       if (score > 0) results.push({ ...document.hit, score });
     }
     results.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+    if (wantsSettings) await requireSourceEnabled(w.cwd, "settings", signal, w.policyRevision);
+    if (wantsSessions) await requireSourceEnabled(w.cwd, "sessions", signal, w.policyRevision);
     return { results: results.slice(0, request.limit), status: this.status() };
   }
   changed(cwd: string): void {
@@ -606,13 +703,19 @@ export class DesktopSearchService {
       // A rename/delete invalidates the captured title set. An in-flight
       // provider must not retry embedding an old title before rediscovery.
       this.workspace.namedSessions = [];
-      this.chunkIndexer(this.workspace).changed();
+      const w = this.workspace;
+      if (w.enabled.sessions) void sourceEnabled(w.cwd, "sessions").then(enabled => {
+        if (enabled && this.current(w)) this.chunkIndexer(w).changed();
+      });
     }
   }
   async dispose(): Promise<void> {
-    this.disposed = true; this.workspace?.controller.abort(); this.revoke();
+    this.statusCatalog.dispose();
+    this.disposed = true; this.workspace?.unwatchPolicy(); this.workspace?.controller.abort(); this.revoke();
     await this.workspace?.background?.dispose();
     await this.workspace?.chunks?.dispose();
+    await Promise.allSettled([...this.activity.values()].map(policy=>policy.dispose()));
+    this.activity.clear();
     await Promise.allSettled([...this.retired]);
     await this.workspace?.sessionWorker;
     await this.workspace?.refresh.catch(() => {});

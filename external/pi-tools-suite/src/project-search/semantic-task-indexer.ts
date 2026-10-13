@@ -68,6 +68,7 @@ async function cancellable<T>(work: Promise<T>, signal: AbortSignal): Promise<T>
  * captured candidates. Never writes canonical tasks.sqlite. */
 export async function syncSavedTaskVectors(root: string, key: string | undefined,
   options: SemanticSearchOptions, signal: AbortSignal, config: CommitEmbeddingConfig, retry = false): Promise<{ indexed: number }> {
+  await requireSourceEnabled(root, "tasks", signal);
   let indexed = 0;
   while (true) {
     signal.throwIfAborted();
@@ -90,13 +91,18 @@ export async function syncSavedTaskVectors(root: string, key: string | undefined
       }
       const targets = missing.slice(0, BATCH_SIZE);
       await requireSemanticIdentity(options, config, signal);
-      const vectors = await db.outside(() => cancellable(withProviderSlot(signal, () => (options.embedTasks ?? embedTaskTexts)(targets.map(taskSemanticText), key, signal, config)), signal));
+      const vectors = await db.outside(() => cancellable(withProviderSlot(signal, async () => {
+        await requireSourceEnabled(root, "tasks", signal);
+        return (options.embedTasks ?? embedTaskTexts)(targets.map(taskSemanticText), key, signal, config);
+      }), signal));
       signal.throwIfAborted();
+      await requireSourceEnabled(root, "tasks", signal);
       await requireSemanticIdentity(options, config, signal);
       if (vectors.length !== targets.length || !vectors.every(v => validSearchVector(v, config.dimension))) throw new Error("Invalid task semantic embedding batch");
       const current = await readSemanticTaskCorpus(root, signal);
       const freshHashes = new Set(current.map(taskSemanticHash));
       const add = db.prepare("INSERT INTO pix_task_vectors(content_hash,vector) VALUES(?,?) ON CONFLICT(content_hash) DO NOTHING");
+      await requireSourceEnabled(root, "tasks", signal);
       let added = 0;
       for (let i = 0; i < targets.length; i++) {
         // Never publish the completion of a deleted/edited semantic projection.
@@ -140,3 +146,4 @@ export async function pruneEmptyTaskIndex(root: string, signal: AbortSignal,
     return false;
   }, "tasks", retry);
 }
+import { requireSourceEnabled } from "./source-policy.mjs";

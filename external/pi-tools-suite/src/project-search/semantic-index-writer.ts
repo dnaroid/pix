@@ -1,5 +1,4 @@
-import { join } from "node:path";
-import { beginWrite, claimWork, openDatabase, safeDirectory, sourcePath } from "./source-work.mjs";
+import { beginWrite, claimWork, openDatabase, safeDirectory, sourceDirectories, sourcePath } from "./source-work.mjs";
 
 export interface SqlStatement {
   run(...args: unknown[]): unknown;
@@ -20,8 +19,7 @@ export interface SourceWriter extends SqlDatabase {
 export async function withSearchIndexWriter<T>(root: string, signal: AbortSignal,
   operation: (db: SourceWriter) => Promise<T>, source: "tasks" | "sessions" | "commits" | "settings" = "sessions", retry = false): Promise<T> {
   signal.throwIfAborted();
-  await safeDirectory(join(root, ".pi"));
-  await safeDirectory(join(root, ".pi/search"));
+  for (const directory of sourceDirectories(root, source)) await safeDirectory(directory);
   const db = await openDatabase(sourcePath(root, source));
   let inTransaction = false, success = false;
   let work: Awaited<ReturnType<typeof claimWork>> | undefined;

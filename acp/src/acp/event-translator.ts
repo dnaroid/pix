@@ -50,17 +50,17 @@ export class EventTranslator {
 
 	constructor(private readonly context: TranslateContext) {}
 
-	translate(event: JsonAgentSessionEvent): SessionNotification[] {
-		const updates = this.eventToUpdates(event);
+	translate(event: JsonAgentSessionEvent, cancellationRequested = false): SessionNotification[] {
+		const updates = this.eventToUpdates(event, cancellationRequested);
 		return updates.map((update) => ({ sessionId: this.context.sessionId, update }));
 	}
 
-	private eventToUpdates(event: JsonAgentSessionEvent): SessionUpdate[] {
+	private eventToUpdates(event: JsonAgentSessionEvent, cancellationRequested: boolean): SessionUpdate[] {
 		switch (event.type) {
 			case "message_update":
 				return this.messageUpdateToUpdates(event.assistantMessageEvent);
 			case "message_end": {
-				const error = assistantFailureUpdate(event.message);
+				const error = assistantFailureUpdate(event.message, "unknown", cancellationRequested);
 				return error ? [error] : [];
 			}
 			case "tool_execution_start":

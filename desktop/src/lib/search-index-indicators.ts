@@ -8,16 +8,17 @@ export function searchIndexIndicatorReasons(view?: SearchIndexViewState): Sideba
   if (!view) return [];
   const { snapshot, actions } = view;
   const rows = buildSearchSourceRows(snapshot.stores, snapshot.consent, snapshot.activity, SETTINGS_SEARCH_CATALOG.length);
-  const errors = [snapshot.error, snapshot.consentError, snapshot.activityError].filter((error): error is string => Boolean(error));
+  const errors = [snapshot.error, snapshot.consentError, snapshot.activityError, snapshot.selectionError].filter((error): error is string => Boolean(error));
   const active: string[] = [];
   const pending: string[] = [];
   for (const row of rows) {
+    if (!snapshot.selection?.enabled[row.id]) continue;
     const action = actions[row.id];
     if (action?.running || row.semanticActive) active.push(row.label);
     if (action?.error && !action.cancelled) errors.push(`${row.label}: ${action.error}`);
     else if (row.local === "error" || row.semantic === "error") errors.push(`${row.label}: ${row.local === "error" ? row.localDetail : row.semanticDetail}`);
     if (!row.empty && (row.local === "missing" || row.local === "incomplete" || row.semantic === "incompatible"
-      || row.semantic === "unavailable" || (snapshot.stores && row.semantic === "no-vectors" && row.localSummary !== "0 items" && row.localSummary !== "0 chunks")
+      || row.semantic === "unavailable" || (snapshot.stores && row.semantic === "no-vectors" && !row.localSummary?.startsWith("0 "))
       || action?.result?.complete === false || action?.cancelled)) pending.push(row.label);
   }
   const reasons: SidebarIndicatorReason[] = [];

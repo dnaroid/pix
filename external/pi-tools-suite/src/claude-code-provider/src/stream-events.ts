@@ -3,6 +3,7 @@ import type { AssistantMessageEventStream, ToolCall } from "@earendil-works/pi-a
 import { TRANSCRIPT_BREAKPOINT_ENV } from "./claude-args.ts";
 import { ClaudeCodeError } from "./errors.ts";
 import { diagnoseToolNameMismatch } from "./tool-name-diagnostics.ts";
+import { resolveToolName } from "./tool-name-resolution.ts";
 import {
   isCacheBreakpointLimit,
   parseRateLimitNotice,
@@ -94,6 +95,7 @@ export class ClaudeEventMapper {
   private readonly onResponseAnnouncement: ResponseAnnouncementSink;
   private assistantDiagnostic: string | undefined;
   private rejectedToolName: ToolNameMismatch | undefined;
+  private normalizedToolNames = 0;
   private readonly privatePaths: readonly string[];
 
   constructor(options: ClaudeEventMapperOptions) {
@@ -114,6 +116,10 @@ export class ClaudeEventMapper {
 
   get toolNameMismatch(): ToolNameMismatch | undefined {
     return this.rejectedToolName;
+  }
+
+  get toolNameNormalizationCount(): number {
+    return this.normalizedToolNames;
   }
 
   get hasSuccessfulResult(): boolean {
@@ -360,17 +366,18 @@ export class ClaudeEventMapper {
       });
       this.stream.push({ type: "thinking_start", contentIndex, partial: this.output });
     } else if (source.type === "tool_use") {
-      const qualifiedName = typeof source.name === "string" ? source.name : "";
-      const name = this.toolNames.get(qualifiedName);
-      if (!name) {
-        this.rejectedToolName = diagnoseToolNameMismatch(qualifiedName, this.toolNames);
-        throw new ClaudeCodeError("tool_unknown", `Claude proposed an unknown tool: ${qualifiedName}`);
+      const proposedName = typeof source.name === "string" ? source.name : "";
+      const resolved = resolveToolName(proposedName, this.toolNames);
+      if (!resolved) {
+        this.rejectedToolName = diagnoseToolNameMismatch(proposedName, this.toolNames);
+        throw new ClaudeCodeError("tool_unknown", `Claude proposed an unknown tool: ${proposedName}`);
       }
       if (typeof source.id !== "string" || source.id.length === 0) throw new ClaudeCodeError("tool_id", "Claude emitted a tool without an ID");
+      if (resolved.normalized) this.normalizedToolNames++;
       const initial = source.input && typeof source.input === "object" && !Array.isArray(source.input)
         ? source.input as ToolCall["arguments"]
         : {};
-      this.output.content.push({ type: "toolCall", id: source.id, name, arguments: initial });
+      this.output.content.push({ type: "toolCall", id: source.id, name: resolved.name, arguments: initial });
       this.stream.push({ type: "toolcall_start", contentIndex, partial: this.output });
     } else {
       this.blocks.delete(sourceIndex);

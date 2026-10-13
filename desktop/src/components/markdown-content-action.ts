@@ -170,7 +170,7 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
         const scope = preview.dataset.projectFile ? "project" : "local";
         const kind = preview.dataset.projectMedia ?? preview.dataset.localMedia;
         const frame = preview.querySelector<HTMLElement>(".markdown-media-frame");
-        const style = imagePreviewStyle(mediaDimensions.get(`${scope}:${path}`), 28);
+        const style = imagePreviewStyle(mediaDimensions.get(`${scope}:${path}`));
         if (kind === "image" && frame && style) frame.setAttribute("style", style);
       }
       const render = (preview: HTMLElement) => {
@@ -249,7 +249,7 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
             mediaDimensions.set(cacheKey, dimensions);
             if (!isCurrent()) return;
             const currentFrame = preview.querySelector<HTMLElement>(".markdown-media-frame");
-            const style = imagePreviewStyle(dimensions, 28);
+            const style = imagePreviewStyle(dimensions);
             if (currentFrame && style) currentFrame.setAttribute("style", style);
           }, { once: true });
           media = image;

@@ -274,6 +274,7 @@ function createClaudeAttempt(
         const promptTokens = metrics.inputTokens + metrics.cacheRead + metrics.cacheWrite;
         metrics.cacheHitPercent = promptTokens > 0 ? Math.round((metrics.cacheRead * 10_000) / promptTokens) / 100 : undefined;
         metrics.stopReason = output.stopReason;
+        metrics.toolNameNormalizationCount = mapper?.toolNameNormalizationCount ?? 0;
         metrics.errorCategory = errorCategory ?? (
           mapper?.cacheBreakpointLimit
             ? "cache_breakpoint_limit"

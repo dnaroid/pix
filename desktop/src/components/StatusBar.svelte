@@ -202,7 +202,7 @@
     {/each}
   </div>
 
-  <div class="flex shrink-0 items-center gap-0.5" data-status-right>
+  <div class="flex h-full shrink-0 items-center gap-0.5" data-status-right>
   {#key observer?.sessionId}
   <SessionBrainstormStatus
     snapshot={sessionBrainstormSnapshot}

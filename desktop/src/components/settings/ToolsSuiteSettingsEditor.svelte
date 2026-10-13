@@ -28,6 +28,7 @@
     updateToolsSuiteModuleSource,
   } from "../../lib/tools-suite-module-visibility";
   import SettingsBuiltinAgentVisibility from "./SettingsBuiltinAgentVisibility.svelte";
+  import SettingsBuiltinAgentModels from "./SettingsBuiltinAgentModels.svelte";
   import SettingsClaudeAccounts from "./SettingsClaudeAccounts.svelte";
   import SettingsFieldRow from "./SettingsFieldRow.svelte";
   import SettingsFrontierModels from "./SettingsFrontierModels.svelte";
@@ -212,11 +213,14 @@
 {:else if section === "subagents"}
   <div class="px-2.5 py-2.5">
     <h2 class="text-sm font-semibold text-foreground">Sub-agents</h2>
-    <p class="mt-0.5 text-xs leading-4 text-muted-foreground">Frontier models for the oracle and review roles, and the economy switch for every role.</p>
+    <p class="mt-0.5 text-xs leading-4 text-muted-foreground">Models for bundled agents, frontier models for review roles, and the economy switch for every role.</p>
   </div>
   <div class="border-y border-sidebar-border/70 bg-panel">
     <SettingsFieldRow label="Economy mode" description="Skip frontier models marked Expensive for every sub-agent role, including explicit model overrides. Applies to the next spawn without a restart." explicit={has(["economy"])} defaultLabel={defaultLabel(["economy"])} onReset={() => reset(["economy"])}>
       <SettingsSwitch value={bool(["economy"])} onChange={(value) => set(["economy"], value)} />
+    </SettingsFieldRow>
+    <SettingsFieldRow label="Built-in agent models" description="Choose a primary model per bundled explicit-model role. Automatic/frontier roles use the shared Frontier models list below." explicit={has(["builtinAgentModels"])} defaultLabel="Default / inherited · bundled profiles" onReset={() => reset(["builtinAgentModels"])}>
+      <SettingsBuiltinAgentModels {source} {models} {onChange} />
     </SettingsFieldRow>
     <SettingsFieldRow label="Frontier models" description="Preference order for oracle, frontier-review, and delivery-review. A frontier parent gets an oracle from another vendor; add a new frontier release here instead of editing agent files." explicit={has(["frontierModels"])} defaultLabel="Default · built-in list" onReset={() => reset(["frontierModels"])}>
       <SettingsFrontierModels

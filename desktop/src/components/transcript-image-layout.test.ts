@@ -72,4 +72,23 @@ describe("transcript image layout reservation", () => {
       expect(imageDimensions(200, value)).toBeUndefined();
     }
   });
+
+  it.each([[1600, 400, 4], [400, 1600, 0.25], [100, 100, 1]])(
+    "reserves %sx%s within live chat height without upscaling", (width, height, ratio) => {
+      expect(imagePreviewStyle(imageDimensions(width, height))).toBe(
+        `width: min(100%, ${width}px, calc(var(--chat-media-max-height, 28rem) * ${ratio})); aspect-ratio: ${width} / ${height};`,
+      );
+    },
+  );
+
+  it("gives project/local images and videos full chat width and viewport height with Preview fallbacks", () => {
+    for (const scope of ["project", "local"]) {
+      for (const kind of ["image", "video"]) {
+        expect(markdownSource).toContain(`.markdown-media[data-${scope}-media="${kind}"]`);
+        expect(markdownSource).toContain(`.markdown-media[data-${scope}-media="${kind}"] .markdown-media-frame`);
+      }
+    }
+    expect(markdownSource).toContain("width: var(--chat-media-width, min(100%, 48rem));");
+    expect(markdownSource).toContain("max-height: var(--chat-media-max-height, 28rem);");
+  });
 });

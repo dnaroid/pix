@@ -8,6 +8,14 @@ import owner from "../lib/workspace-search-index-owner.svelte.ts?raw";
 import history from "./SearchIndexHistory.svelte?raw";
 
 describe("SearchIndexPanel source contract", () => {
+  it("keeps Settings last with a global checkbox and project-local controls for other sources", () => {
+    expect(panel).toContain('.sort((a, b) => Number(a.id === "settings") - Number(b.id === "settings"))');
+    expect(panel).toContain('Include Settings in indexing and search for all projects');
+    expect(panel).toContain('controller?.setSource(row.id, event.currentTarget.checked)');
+    expect(panel).not.toContain('{#if row.id === "settings"}');
+    expect(panel).not.toContain('Counts show cached entities');
+    expect(panel).not.toContain('Last pass coverage and source changes are separate');
+  });
   it("fills available height and follows chronological events without pulling readers from history", () => {
     expect(panel).toContain('flex min-h-0 min-w-0 flex-col overflow-y-auto');
     expect(history).toContain("min-h-32 min-w-0 flex-1 flex-col");
@@ -64,23 +72,35 @@ describe("SearchIndexPanel source contract", () => {
     expect(panel).not.toContain("{#if loading}");
     expect(panel).toContain("row.semanticActive || action?.running");
     expect(panel).not.toContain("action?.queued");
-    expect(panel).toContain("{#if active}");
+    expect(panel).toContain("{:else if active}");
     expect(panel).not.toContain("LoaderCircle");
-    expect(panel.match(/flex h-4 min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap leading-4/g)).toHaveLength(2);
+    expect(panel).toContain("flex h-8 min-w-0 flex-col justify-center overflow-hidden leading-4");
     expect(panel).not.toContain("inline-flex");
-    expect(transport).toContain('window.removeEventListener("pix-semantic-config-changed", controller.configChanged)');
+    expect(transport).toContain('window.removeEventListener("pix-semantic-config-changed", configChanged)');
     expect(controller).toContain("monitor.dispose()");
     expect(panel).toContain("$effect(() =>");
     expect(panel).not.toContain("States below are unknown");
   });
-  it("shows a compact indeterminate ring without visible indexing text or invented percentages", () => {
+  it("shows visible indexing/stopping and retained counts without inventing coverage", () => {
     expect(panel).toContain('viewBox="0 0 16 16" fill="none" aria-hidden="true"');
     expect(panel).toContain('class="text-muted-foreground/30"');
     expect(panel).toContain('origin-center animate-spin text-tool-search motion-reduce:animate-none');
     expect(panel).toContain('stroke-linecap="round" stroke-dasharray="10 28"');
-    expect(panel).toContain('<span class="sr-only">Indexing {row.label}…</span>');
-    expect(panel).not.toContain('>Indexing…</span>');
+    expect(panel).toContain('action?.stopping || sharedState === "stopping" ? "Stopping" : "Indexing"');
+    expect(panel).toContain('row.storedVectors.toLocaleString("en-US")} stored');
+    expect(panel).toContain('retained cache, not proof of current coverage');
+    expect(panel).not.toContain('<span class="sr-only">Indexing');
     expect(panel).not.toContain('aria-valuenow');
+  });
+  it("distinguishes startup, stale counts and missing manual history", () => {
+    expect(panel).toContain('!snapshot.stores && snapshot.reading && !snapshot.error');
+    expect(panel).toContain('Checking…');
+    expect(panel).toContain('snapshot.error && snapshot.stores');
+    expect(panel).toContain('Showing last read counts');
+    expect(panel).toContain('Retrying automatically.');
+    expect(panel).toContain('No recorded pass');
+    expect(panel).not.toContain('Coverage unknown');
+    expect(panel).toContain('selectionKnown && !enabled');
   });
   it("syncs the authored catalogue for the workspace even while Settings is closed", () => {
     expect(owner).toContain("startSearchIndexSync(connection, selected, SETTINGS_SEARCH_CATALOG");

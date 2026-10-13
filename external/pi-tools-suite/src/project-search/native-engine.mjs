@@ -5,7 +5,10 @@ import { scanProject } from "./native-scan.mjs";
 import { searchSemantic, indexSemantic, fuseRepositoryHits, MAX_CHUNKS_PER_SEARCH } from "./native-semantic.mjs";
 import { repositoryEmbeddingSettings } from "./native-embedding-provider.mjs";
 import { SourceExtensionConfigurationError } from "./native-source-config.mjs";
+import { repositoryRerankerSettings, rerankNativeHits, MAX_RERANK_CANDIDATES } from "./native-reranker.mjs";
+import { verifyRerankerCandidates } from "./native-reranker-context.mjs";
 import { claimWork } from "./source-work.mjs";
+import { sourceEnabled, readSourcePolicy, requireSourceEnabled, withSourcePolicy } from "./source-policy.mjs";
 
 function validateRequest(request) {
   if (!request || typeof request !== "object" || Array.isArray(request)
@@ -13,13 +16,13 @@ function validateRequest(request) {
     || !Array.isArray(request.sources) || !request.sources.length || request.sources.length > 2
     || !request.sources.every(source => source === "code" || source === "knowledge")
     || new Set(request.sources).size !== request.sources.length) throw new Error("Invalid request");
-  if (Object.keys(request).some(key => !["query", "sources", "mode", "limit", "pathPrefix", "includeContent", "dedupeFile", "excludeTests", "includeTests"].includes(key))) throw new Error("Unknown request argument");
+  if (Object.keys(request).some(key => !["query", "sources", "mode", "limit", "pathPrefix", "includeContent", "dedupeFile", "excludeTests", "includeTests", "skipRerank"].includes(key))) throw new Error("Unknown request argument");
   if (request.mode !== undefined && !["lexical", "hybrid", "semantic"].includes(request.mode)) throw new Error("Invalid mode");
   if (request.limit !== undefined && (!Number.isInteger(request.limit) || request.limit < 1 || request.limit > 100)) throw new Error("Invalid limit");
   if (request.pathPrefix !== undefined && (typeof request.pathPrefix !== "string" || !request.pathPrefix || request.pathPrefix.length > 1024
     || request.pathPrefix.includes("\\") || request.pathPrefix.includes("\0") || request.pathPrefix.startsWith("~")
     || request.pathPrefix.split("/").some(part => !part || part === "." || part === ".." || part.startsWith("-")))) throw new Error("Invalid path");
-  for (const flag of ["includeContent", "dedupeFile", "excludeTests", "includeTests"]) {
+  for (const flag of ["includeContent", "dedupeFile", "excludeTests", "includeTests", "skipRerank"]) {
     if (request[flag] !== undefined && typeof request[flag] !== "boolean") throw new Error("Invalid flag");
   }
   if (request.includeTests && request.excludeTests) throw new Error("Conflicting flags");
@@ -37,17 +40,33 @@ async function refreshSnapshot(store, signal) {
   signal?.throwIfAborted();
   const previous = snapshot(store);
   const scan = await scanProject(store.root, previous, undefined, signal, store.source);
+  await requireSourceEnabled(store.root, store.source, signal);
   signal?.throwIfAborted();
   await checkStorage(store.root, store.filename);
   signal?.throwIfAborted();
   const published = scan.complete && publish(store, previous, scan);
-  return { previous, scan, published };
+  const changed = previous.files.size !== scan.files.size || [...scan.files].some(([name, file]) => previous.files.get(name) !== file.hash);
+  return { previous, scan, published, generation: previous.generation + (changed ? 1 : 0) };
 }
 
 /** Explicit document-only drain; no query embedding or ranking.
  * @returns {Promise<import('./native-contract.js').NativeIndexResponse>}
  */
 export async function indexNative(root, request, dependencies = {}) {
+  try {
+    return await withSourcePolicy(root, dependencies.signal ?? new AbortController().signal, signal =>
+      indexEnabledNative(root, request, { ...dependencies, signal }));
+  } catch {
+    // The policy fence runs outside the store's try/finally as well. Cancellation
+    // or a changed policy must still use the document-index response contract,
+    // without reporting stale coverage or exposing raw errors.
+    return unavailableIndex(request?.source === "knowledge" ? "knowledge" : "code");
+  }
+}
+function unavailableIndex(source) {
+  return { source, complete: false, message: "Native indexing unavailable (invalid request, cancellation or unsafe storage); cached embeddings are retained." };
+}
+async function indexEnabledNative(root, request, dependencies) {
   let store;
   let work;
   let success = false;
@@ -58,10 +77,11 @@ export async function indexNative(root, request, dependencies = {}) {
       || !["code", "knowledge"].includes(request.source)
       || Object.keys(request).some(key => !["operation", "source"].includes(key))) throw new Error("Invalid index request");
     signal.throwIfAborted();
-    store = await openStore(await canonicalRoot(root), source);
+    root = await canonicalRoot(root);
+    if (!await sourceEnabled(root, source)) return { source, complete: false, message: "Search source is disabled for this project" };
+    store = await openStore(root, source);
     work = await claimWork(store.db, signal, { retry: true });
-    const { previous, scan, published } = await refreshSnapshot(store, signal);
-    const generation = previous.generation + 1;
+    const { scan, published, generation } = await refreshSnapshot(store, signal);
     if (!published || store.db.prepare("SELECT generation FROM pix_native_meta WHERE singleton=1").get().generation !== generation) {
       return { source, complete: false, message: "Native snapshot freshness is unverified; retry indexing. " + scan.notices.join(" ") };
     }
@@ -77,7 +97,7 @@ export async function indexNative(root, request, dependencies = {}) {
       ...(result.notices.length ? { message: result.notices.join(" ") } : {}) };
   } catch (error) {
     if (error instanceof SourceExtensionConfigurationError) return { source, complete: false, message: error.message };
-    return { source, complete: false, message: "Native indexing unavailable (invalid request, cancellation or unsafe storage); cached embeddings are retained." };
+    return unavailableIndex(source);
   } finally { if (work) await work.release(success).catch(() => {}); store?.close(); }
 }
 
@@ -85,8 +105,47 @@ export async function indexNative(root, request, dependencies = {}) {
  * @returns {Promise<import('./native-contract.js').NativeSearchResponse>}
  */
 export async function searchNative(root, request, dependencies = {}) {
+  return withSourcePolicy(root, dependencies.signal ?? new AbortController().signal, signal =>
+    searchEnabledNative(root, request, { ...dependencies, signal }));
+}
+async function searchEnabledNative(root, request, dependencies) {
   try { validateRequest(request); }
   catch { return { hits: [], notices: ["Invalid native search request"], status: { backend: "native", complete: false, stale: true } }; }
+  const reranker = await repositoryRerankerSettings();
+  const reranking = !!reranker && request.mode !== "lexical" && !request.skipRerank;
+  const sourceStates = new Map();
+  const retrievalRequest = reranking ? { ...request, limit: MAX_RERANK_CANDIDATES, dedupeFile: false, includeContent: true } : request;
+  dependencies = { ...dependencies, sourceStates };
+  const response = await retrieveSources(root, retrievalRequest, dependencies);
+  response.status.rerankerEnabled = !!reranker;
+  if (reranking && !response.status.stale) {
+    const candidates = response.hits.slice(0, MAX_RERANK_CANDIDATES);
+    const checkCurrent = (signal, verifyContent) => verifyRerankerCandidates(root, candidates, sourceStates, signal, verifyContent);
+    const ranked = await rerankNativeHits(request.query, response.hits, reranker, dependencies, checkCurrent);
+    response.hits = ranked.hits;
+    response.notices.push(...ranked.notices);
+    if (ranked.notices.some(notice => notice.includes("candidate limit"))) response.status.complete = false;
+  }
+  const seen = new Set();
+  response.hits = response.hits.filter(hit => {
+    if (request.dedupeFile && seen.has(hit.path)) return false;
+    seen.add(hit.path); return true;
+  }).slice(0, request.limit ?? 10).map(hit => {
+    if (request.includeContent) return hit;
+    const { content, ...compact } = hit; return compact;
+  });
+  if (request.skipRerank && !response.status.stale) {
+    response.rerankContext = Object.fromEntries([...sourceStates].map(([source, state]) => [source,
+      { generation: state.generation, hashes: Object.fromEntries([...state.hashes].filter(([name]) => response.hits.some(hit => hit.kind === source && hit.path === name))) }]));
+  }
+  if (Buffer.byteLength(JSON.stringify(response)) > 480 * 1024) {
+    response.status.complete = false;
+    response.notices.push("Native output limit reached; results are partial.");
+    while (response.hits.length && Buffer.byteLength(JSON.stringify(response)) > 480 * 1024) response.hits.pop();
+  }
+  return response;
+}
+async function retrieveSources(root, request, dependencies) {
   if (request.sources.length === 1) return searchSource(root, request, dependencies);
   const uploadBudget = { remaining: MAX_CHUNKS_PER_SEARCH };
   const results = await Promise.all(request.sources.map(source => searchSource(root, { ...request, sources: [source], limit: 100 }, { ...dependencies, uploadBudget })));
@@ -114,9 +173,13 @@ async function searchSource(root, request, dependencies = {}) {
     validateRequest(request);
     request = { ...request, mode: request.mode ?? "hybrid", limit: request.limit ?? 10 };
     root = await canonicalRoot(root);
+    const policy = await readSourcePolicy(root);
+    if (policy.error) return { hits: [], notices: [policy.error], status: { backend: "native", complete: false, stale: true } };
+    if (!policy.enabled[request.sources[0]]) return { hits: [], notices: [`${request.sources[0]}: disabled for this project`],
+      status: { backend: "native", complete: true } };
     store = await openStore(root, request.sources[0]);
     if (request.mode !== "lexical") work = await claimWork(store.db, dependencies.signal ?? new AbortController().signal);
-    const { previous, scan, published } = await refreshSnapshot(store, dependencies.signal);
+    const { scan, published, generation } = await refreshSnapshot(store, dependencies.signal);
     notices.push(...scan.notices);
     let complete = !!published;
     if (scan.complete && !published) {
@@ -124,7 +187,7 @@ async function searchSource(root, request, dependencies = {}) {
     }
     const candidateRequest = request.mode === "lexical" ? request : { ...request, dedupeFile: false, limit: 100 };
     let result = queryStore(store, candidateRequest);
-    const stale = !published || result.meta.generation !== previous.generation + 1;
+    const stale = !published || result.meta.generation !== generation;
     if (published && stale) { complete = false; notices.push("Native snapshot changed before query; freshness is unverified."); }
     if (result.capped) { complete = false; notices.push("Native query candidate limit reached; results are partial."); }
     let semantic;
@@ -150,11 +213,8 @@ async function searchSource(root, request, dependencies = {}) {
       mode: usableSemantic ? request.mode : "lexical", ...(semantic ? { semantic: semantic.status } : {}),
       generation: result.meta.generation, completedAt: result.meta.completed_at || undefined,
       scannedFiles: scan.scannedFiles, updatedFiles: scan.updatedFiles } };
-    if (Buffer.byteLength(JSON.stringify(response)) > 480 * 1024) {
-      response.status.complete = false;
-      notices.push("Native output limit reached; results are partial.");
-      while (response.hits.length && Buffer.byteLength(JSON.stringify(response)) > 480 * 1024) response.hits.pop();
-    }
+    dependencies.sourceStates?.set(request.sources[0], { generation: result.meta.generation,
+      hashes: new Map(hits.map(hit => [hit.path, store.db.prepare("SELECT hash FROM pix_native_files WHERE path=?").get(hit.path)?.hash])) });
     success = semantic?.status.state !== "unavailable";
     return response;
   } catch (error) {

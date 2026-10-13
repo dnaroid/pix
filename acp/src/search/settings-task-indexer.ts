@@ -23,7 +23,8 @@ interface Options {
   config: SemanticEmbeddingConfig;
   store: SearchIndexStore;
   embed(inputs: readonly string[], signal: AbortSignal, domain: Source): Promise<number[][]>;
-  authorized(signal: AbortSignal): Promise<boolean>;
+  authorized(signal: AbortSignal, source: Source): Promise<boolean>;
+  enabled?(source: Source): boolean;
   completed?(source: Source): void;
   watchTasks?: TaskChangeWatcher | undefined;
   debounceMs?: number | undefined;
@@ -54,7 +55,10 @@ export class SettingsTaskIndexer {
     if (options.signal.aborted) this.stop();
   }
   get indexing(): { settings: boolean; tasks: boolean } {
-    return { settings: Boolean(this.work.settings.worker), tasks: Boolean(this.work.tasks.worker || this.scans.size || this.timer) };
+    return { settings: Boolean(this.work.settings.worker), tasks: Boolean(this.work.tasks.worker) };
+  }
+  get checking(): { tasks: boolean } {
+    return { tasks: !this.closed && Boolean(this.scans.size || this.timer) };
   }
   get errors(): { settings?: string; tasks?: string } {
     return { ...(this.work.settings.error ? { settings: this.work.settings.error } : {}),
@@ -62,6 +66,7 @@ export class SettingsTaskIndexer {
   }
   /** Query compatibility supplies settings only; it never starts task ownership. */
   catalogue(settings: readonly SearchSetting[], retry = false, schedule = true): void {
+    if (this.options.enabled?.("settings") === false) return;
     const documents = settingsDocuments(settings);
     const hash = settingsFingerprint(documents);
     if (hash !== this.settingsHash) {
@@ -72,6 +77,7 @@ export class SettingsTaskIndexer {
   }
   /** One selected-source pass. No watcher bootstrap and no other-source retry. */
   async index(source: Source, settings: readonly SearchSetting[], caller: AbortSignal): Promise<void> {
+    if (this.options.enabled?.(source) === false) throw new Error("Search source disabled");
     if (source === "settings") this.catalogue(settings, false, false);
     const work = this.work[source];
     const previous = work.worker;
@@ -113,6 +119,7 @@ export class SettingsTaskIndexer {
   sync(settings: readonly SearchSetting[]): void {
     if (this.closed) return;
     this.catalogue(settings, true);
+    if (this.options.enabled?.("tasks") === false) return;
     if (!this.stopWatch) {
       let failed = false;
       this.watchError = undefined;
@@ -136,7 +143,7 @@ export class SettingsTaskIndexer {
     this.timer.unref();
   }
   private refreshTasks(retry = false): void {
-    if (this.closed) return;
+    if (this.closed || this.options.enabled?.("tasks") === false) return;
     const revision = ++this.scanRevision;
     const operation = readTaskSemanticCorpus(this.options.cwd, this.options.signal).then(documents => {
       if (this.closed || revision !== this.scanRevision) return;
@@ -176,12 +183,12 @@ export class SettingsTaskIndexer {
   private async drain(source: Source, signal: AbortSignal, retry = false): Promise<void> {
     while (!this.closed) {
       signal.throwIfAborted();
-      if (!await this.options.authorized(signal)) return;
+      if (!await this.options.authorized(signal, source)) return;
       let pending = false;
       await this.options.store.write(this.options.cwd, signal, async tx => {
         if (source === "settings") {
           const documents = this.settings;
-          const cache = await tx.load();
+          const cache = await tx.load(documents);
           const missing = new Map<string, string>();
           for (const document of documents) for (const chunk of document.chunks) {
             const hash = hashText(chunk);
@@ -192,10 +199,10 @@ export class SettingsTaskIndexer {
           if (pending) {
             const vectors = await tx.outside(() => this.options.embed(batch.map(([, text]) => text), signal, source));
             signal.throwIfAborted();
-            if (!await this.options.authorized(signal)) throw new Error("Search authorization revoked");
+            if (!await this.options.authorized(signal, source)) throw new Error("Search authorization revoked");
             batch.forEach(([hash], index) => cache.vectors.set(hash, vectors[index]!));
           }
-          await tx.save(documents, cache.vectors); // Includes pruning an empty catalogue.
+          await tx.save(documents, cache.vectors);
         } else {
           const documents = await readTaskSemanticCorpus(this.options.cwd, signal);
           if (fingerprintTasks(documents) !== this.tasksHash) throw new CorpusChanged();
@@ -206,7 +213,7 @@ export class SettingsTaskIndexer {
           if (pending) {
             const vectors = await tx.outside(() => this.options.embed(batch.map(task => task.text), signal, source));
             signal.throwIfAborted();
-            if (!await this.options.authorized(signal)) throw new Error("Search authorization revoked");
+            if (!await this.options.authorized(signal, source)) throw new Error("Search authorization revoked");
             const latest = await readTaskSemanticCorpus(this.options.cwd, signal);
             if (fingerprintTasks(latest) !== this.tasksHash) throw new CorpusChanged();
             index.save(new Map(batch.map((task, position) => [task.hash, vectors[position]!] as const)));

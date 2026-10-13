@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { realpath } from "node:fs/promises";
+import { realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Database } from "bun:sqlite";
 import { DefaultResourceLoader, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { removeDirsWithRetry } from "./support/fs-retry.js";
+import { enableSearchSources } from "./support/search-sources.js";
 import projectSearchExtension from "../src/project-search/index.js";
 import {
   formatProjectSearch, parseGitHistory, parseProjectSearchParams, readSessionBoundary,
@@ -31,6 +32,7 @@ afterEach(async () => {
 const fixture = () => {
   const root = mkdtempSync(path.join(tmpdir(), "pix-project-search-"));
   directories.push(root);
+  enableSearchSources(root);
   return root;
 };
 const signal = () => new AbortController().signal;
@@ -121,7 +123,7 @@ describe("project_search shared store lookup", () => {
 
   test("searches saved project tasks and session first/final excerpts, never tool bodies", async () => {
     const root = fixture();
-    mkdirSync(path.join(root, ".pi"));
+    mkdirSync(path.join(root, ".pi"), { recursive: true });
     writeSearchTasks(root, [
       { id: "TASK-42", title: "Resolve semaphore race", description: "Cancel pending requests",
         status: "done", type: "bug", priority: "high" },
@@ -184,8 +186,8 @@ describe("project_search shared store lookup", () => {
   test("an explicitly selected alternate project changes scope but never the session cwd", async () => {
     const sessionRoot = fixture();
     const other = fixture();
-    mkdirSync(path.join(sessionRoot, ".pi"));
-    mkdirSync(path.join(other, ".pi"));
+    mkdirSync(path.join(sessionRoot, ".pi"), { recursive: true });
+    mkdirSync(path.join(other, ".pi"), { recursive: true });
     writeSearchTasks(sessionRoot, [{ id: "OLD", title: "Existing client", type: "feature", status: "done", priority: "low" }]);
     writeSearchTasks(other, [{ id: "NEW", title: "Alternate project target", type: "bug", status: "todo", priority: "high" }]);
     const response = await searchProject(sessionRoot, {
@@ -201,9 +203,10 @@ describe("project_search shared store lookup", () => {
 
   test("rejects redirected task storage and continues searching other sources without reading it", async () => {
     const root = fixture(), external = fixture();
-    mkdirSync(path.join(external, ".pi"));
+    mkdirSync(path.join(external, ".pi"), { recursive: true });
     writeSearchTasks(external, [{ id: "secret", title: "Secret Access", status: "todo", type: "feature", priority: "medium" }]);
     const { symlinkSync } = await import("node:fs");
+    await rm(path.join(root, ".pi"), { recursive: true, force: true });
     symlinkSync(path.join(external, ".pi"), path.join(root, ".pi"));
     const response = await searchProject(root, { query: "secret", sources: ["tasks", "sessions"] },
       { ...services, listSessions: async () => [] });
@@ -212,7 +215,7 @@ describe("project_search shared store lookup", () => {
 
   test("native repository search coexists with local history without external setup", async () => {
     const root = fixture();
-    mkdirSync(path.join(root, ".pi"));
+    mkdirSync(path.join(root, ".pi"), { recursive: true });
     writeSearchTasks(root, [{ id: "ID-1", title: "Fix signal timeout", status: "done", type: "bug", priority: "high" }]);
     const result = await searchProject(root, { query: "signal timeout", sources: ["tasks", "code", "knowledge"] }, services);
     expect(result.hits.map(hit => hit.id)).toEqual(["tasks:ID-1"]);
@@ -362,7 +365,7 @@ describe("project_search shared store lookup", () => {
 describe("project_search registration in Pix Desktop and TUI", () => {
   test("registers unconditionally, returns safe text + structured source references, and validates parameters", async () => {
     const root = fixture();
-    mkdirSync(path.join(root, ".pi"));
+    mkdirSync(path.join(root, ".pi"), { recursive: true });
     writeSearchTasks(root, [{ id: "T-1", title: "Fix scheduler", type: "bug", status: "done", priority: "high" }]);
     const registered: Array<{ name: string; execute: Function; promptSnippet: string; parameters: Record<string, unknown> }> = [];
     const events: string[] = [];
@@ -372,7 +375,7 @@ describe("project_search registration in Pix Desktop and TUI", () => {
       on: (event: string) => { events.push(event); },
     } as never);
     expect(registered.map(t => t.name)).toEqual(["project_search"]);
-    expect(events).toEqual(["session_start", "session_shutdown", "session_start", "turn_end", "message_end", "session_tree", "session_shutdown", "session_start", "session_shutdown"]);
+    expect(events).toEqual(["session_start", "session_shutdown", "session_start", "agent_start", "agent_end", "turn_end", "message_end", "session_tree", "session_shutdown", "session_start", "session_shutdown", "session_start", "session_shutdown"]);
     expect(registered[0]?.promptSnippet).toContain("No second LLM");
     const ok = await registered[0]!.execute("1", { query: "scheduler", sources: ["tasks"] },
       signal(), undefined, { cwd: root });

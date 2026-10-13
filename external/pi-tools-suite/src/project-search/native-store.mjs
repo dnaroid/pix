@@ -2,6 +2,8 @@ import { constants } from "node:fs";
 import { lstat, mkdir, open, realpath } from "node:fs/promises";
 import path from "node:path";
 import { sourcePath } from "./source-work.mjs";
+import { searchTokens, queryTerms, queryIdentifiers, preferDistinctFiles } from "./native-ranking.mjs";
+export { searchTokens } from "./native-ranking.mjs";
 
 export const MAX_DATABASE_BYTES = 256 * 1024 * 1024;
 const definitions = new Map([
@@ -13,6 +15,7 @@ const definitions = new Map([
 ]);
 const normalize = sql => sql.replace(/[\s;"`\[\]]/g, "").toLowerCase();
 const shadows = new Set(["data", "idx", "content", "docsize", "config"].map(s => `pix_native_fts_${s}`));
+const stampsSchema = "CREATE TABLE pix_native_stamps (path TEXT PRIMARY KEY, hash TEXT NOT NULL, stamp TEXT NOT NULL)";
 
 async function safeDirectory(folder) {
   try { await mkdir(folder, { mode: 0o700 }); } catch (e) { if (e.code !== "EEXIST") throw e; }
@@ -32,21 +35,26 @@ export async function checkStorage(root, filename) {
     } catch (e) { if (e.code !== "ENOENT") throw e; }
   }
 }
-function validate(db, root) {
+export function validateNativeStore(db, root) {
   const objects = db.prepare("SELECT type,name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").all();
   for (const [name, sql] of definitions) {
     if (!objects.some(row => row.name === name && row.type === (sql.startsWith("CREATE INDEX") ? "index" : "table") && normalize(row.sql || "") === normalize(sql))) {
       throw new Error("Unknown native search schema");
     }
   }
-  if (objects.some(row => row.name.startsWith("pix_native_") && !definitions.has(row.name) && !shadows.has(row.name))) {
+  if (objects.some(row => row.name.startsWith("pix_native_") && !definitions.has(row.name) && !shadows.has(row.name) && row.name !== "pix_native_stamps")) {
     throw new Error("Unknown native search schema");
   }
   // Triggers could mutate unrelated data or replace the publishing protocol.
   if (objects.some(row => row.type === "trigger" && /pix_native_/i.test(row.sql || ""))) throw new Error("Unknown native search trigger");
   const meta = db.prepare("SELECT * FROM pix_native_meta").all();
-  if (meta.length !== 1 || meta[0].singleton !== 1 || meta[0].version !== 1 || meta[0].root !== root
+  if (meta.length !== 1 || meta[0].singleton !== 1 || ![1, 2].includes(meta[0].version) || meta[0].root !== root
     || !Number.isSafeInteger(meta[0].generation) || meta[0].generation < 0) throw new Error("Unknown native search identity");
+  const stamps = objects.find(row => row.name === "pix_native_stamps");
+  if (meta[0].version === 1 ? Boolean(stamps) : stamps?.type !== "table" || normalize(stamps.sql || "") !== normalize(stampsSchema)) {
+    throw new Error("Unknown native stamp schema");
+  }
+  return meta[0];
 }
 
 export async function openStore(root, source = "code") {
@@ -80,7 +88,10 @@ export async function openStore(root, source = "code") {
         for (const sql of definitions.values()) db.exec(sql);
         db.prepare("INSERT INTO pix_native_meta VALUES(1,1,?,0,NULL)").run(root);
       }
-      validate(db, root);
+      if (validateNativeStore(db, root).version === 1) {
+        db.exec(stampsSchema);
+        db.exec("UPDATE pix_native_meta SET version=2 WHERE singleton=1");
+      }
       db.exec("COMMIT");
     } catch (e) { db.exec("ROLLBACK"); throw e; }
     const maxPages = Math.floor(MAX_DATABASE_BYTES / db.prepare("PRAGMA page_size").get().page_size);
@@ -100,15 +111,12 @@ export function snapshot(store) {
     if (files.size > 10000) throw new Error("Native index exceeds file cap");
     if (db.prepare("SELECT COUNT(*) AS count FROM (SELECT 1 FROM pix_native_chunks LIMIT 20001)").get().count > 20000) throw new Error("Native index exceeds chunk cap");
     const chunkCounts = new Map(db.prepare("SELECT path,COUNT(*) AS count FROM pix_native_chunks GROUP BY path").all().map(row => [row.path, row.count]));
+    const stamps = new Map(db.prepare("SELECT path,hash,stamp FROM pix_native_stamps ORDER BY path LIMIT 10001").all()
+      .map(row => [row.path, { hash: row.hash, stamp: row.stamp, kind: store.source }]));
+    if (stamps.size > 10000) throw new Error("Native stamp cap");
     db.exec("COMMIT");
-    return { ...meta, files, chunkCounts };
+    return { ...meta, files, chunkCounts, stamps };
   } catch (e) { db.exec("ROLLBACK"); throw e; }
-}
-
-export function searchTokens(text) {
-  return text.normalize("NFKC").replace(/([\p{Ll}\d])([\p{Lu}])/gu, "$1 $2")
-    .replace(/([\p{Lu}])([\p{Lu}][\p{Ll}])/gu, "$1 $2").toLowerCase().replace(/ё/g, "е")
-    .match(/[\p{L}\p{N}]+/gu) || [];
 }
 
 /** CAS protects against a slow scan replacing a newer completed generation. */
@@ -116,7 +124,7 @@ export function publish(store, previous, scan) {
   const { db } = store;
   db.exec("BEGIN IMMEDIATE");
   try {
-    validate(db, store.root);
+    validateNativeStore(db, store.root);
     const current = db.prepare("SELECT generation FROM pix_native_meta WHERE singleton=1").get().generation;
     if (current !== previous.generation) { db.exec("ROLLBACK"); return false; }
     const removeChunks = db.prepare("DELETE FROM pix_native_chunks WHERE path=?");
@@ -125,10 +133,14 @@ export function publish(store, previous, scan) {
     const upsertFile = db.prepare("INSERT INTO pix_native_files(path,hash) VALUES(?,?) ON CONFLICT(path) DO UPDATE SET hash=excluded.hash");
     const insertChunk = db.prepare("INSERT INTO pix_native_chunks VALUES(?,?,?,?,?,?,?,?)");
     const insertFts = db.prepare("INSERT INTO pix_native_fts(id,label,body) VALUES(?,?,?)");
+    // Publish hash/stamp pairs in the same CAS transaction as their content.
+    db.exec("DELETE FROM pix_native_stamps");
+    const insertStamp = db.prepare("INSERT INTO pix_native_stamps VALUES(?,?,?)");
     for (const name of previous.files.keys()) {
       if (!scan.files.has(name)) { removeFts.run(name); removeChunks.run(name); removeFile.run(name); }
     }
     for (const [name, file] of scan.files) {
+      if (file.identity) insertStamp.run(name, file.hash, file.identity);
       if (previous.files.get(name) === file.hash) continue;
       removeFts.run(name); removeChunks.run(name); upsertFile.run(name, file.hash);
       for (const chunk of file.chunks) {
@@ -137,7 +149,11 @@ export function publish(store, previous, scan) {
       }
     }
     if (db.prepare("SELECT COUNT(*) AS count FROM pix_native_chunks").get().count > 20000) throw new Error("Native index exceeds chunk cap");
-    db.prepare("UPDATE pix_native_meta SET generation=generation+1,completed_at=? WHERE singleton=1").run(new Date().toISOString());
+    const changed = previous.files.size !== scan.files.size || [...scan.files].some(([name, file]) => previous.files.get(name) !== file.hash);
+    if (changed || !previous.completed_at) {
+      db.prepare("UPDATE pix_native_meta SET generation=generation+?,completed_at=? WHERE singleton=1")
+        .run(changed ? 1 : 0, new Date().toISOString());
+    }
     db.exec("COMMIT");
     return true;
   } catch (e) { db.exec("ROLLBACK"); throw e; }
@@ -157,7 +173,7 @@ export function chunkHit(row, score, request) {
 }
 
 export function queryStore(store, request) {
-  const terms = [...new Set(searchTokens(request.query))].slice(0, 12);
+  const terms = queryTerms(request.query);
   const { db } = store;
   db.exec("BEGIN");
   try {
@@ -165,7 +181,9 @@ export function queryStore(store, request) {
     let rows = [];
     if (terms.length) {
       const where = ["pix_native_fts MATCH ?", `c.kind IN (${request.sources.map(() => "?").join(",")})`];
-      const params = [terms.map(term => `"${term}"*`).join(" OR "), ...request.sources];
+      const broadQuery = terms.map(term => `"${term}"*`).join(" OR ");
+      const phrases = queryIdentifiers(request.query).map(word => `"${searchTokens(word).join(" ")}"`);
+      const params = [broadQuery, ...request.sources];
       if (request.pathPrefix) {
         where.push("(c.path=? OR substr(c.path,1,?)=?)");
         params.push(request.pathPrefix, request.pathPrefix.length + 1, request.pathPrefix + "/");
@@ -175,11 +193,20 @@ export function queryStore(store, request) {
       rows = db.prepare(`SELECT c.*,${rank} AS rank FROM pix_native_fts
         JOIN pix_native_chunks c ON c.id=pix_native_fts.id WHERE ${where.join(" AND ")}
         ORDER BY rank ASC,c.path COLLATE BINARY ASC,c.start_line ASC LIMIT 200`).all(...params);
+      // Reserve retrieval space for full identifiers, not only their common parts.
+      if (phrases.length) {
+        const exact = db.prepare(`SELECT c.*,${rank} AS rank FROM pix_native_fts
+          JOIN pix_native_chunks c ON c.id=pix_native_fts.id WHERE ${where.join(" AND ")}
+          ORDER BY rank ASC,c.path COLLATE BINARY ASC,c.start_line ASC LIMIT 100`)
+          .all(phrases.join(" OR "), ...params.slice(1));
+        const ids = new Set(exact.map(row => row.id));
+        rows = [...exact, ...rows.filter(row => !ids.has(row.id))];
+      }
     }
     db.exec("COMMIT");
     const seen = new Set();
     const hits = [];
-    for (const row of rows) {
+    for (const row of preferDistinctFiles(rows.map(row => ({ ...row, kind: row.kind })))) {
       if (request.dedupeFile && seen.has(row.path)) continue;
       seen.add(row.path);
       hits.push(chunkHit(row, Math.min(1, Math.max(0, -row.rank / (1 - row.rank))), request));

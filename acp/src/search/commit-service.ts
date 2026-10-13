@@ -62,7 +62,11 @@ export class DesktopCommitSearchService {
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) controller.abort();
     this.active.set(controller, { requested: request.cwd });
-    const job = this.perform(request, controller).finally(() => {
+    const job = withSourcePolicy(request.cwd, controller.signal, signal => {
+      const abortPolicy = () => controller.abort(signal.reason);
+      signal.addEventListener("abort", abortPolicy, { once: true });
+      return this.perform(request, controller).finally(() => signal.removeEventListener("abort", abortPolicy));
+    }).finally(() => {
       signal.removeEventListener("abort", abort); this.active.delete(controller); this.jobs.delete(job);
     });
     this.jobs.add(job); return job;
@@ -72,6 +76,9 @@ export class DesktopCommitSearchService {
   }
   private async perform(request: Request, controller: AbortController): Promise<Response> {
     const signal = controller.signal; signal.throwIfAborted();
+    if (!await sourceEnabled(request.cwd, "commits")) return indexing(request)
+      ? { source: "commits", complete: false, message: "Git commits disabled for this project" }
+      : { results: [], notices: [] };
     if (!indexing(request) && !request.query.trim()) return { results: [], notices: [] };
     let root: string;
     try { root = await realpath(await commitProjectRoot(request.cwd, signal)); }
@@ -83,6 +90,7 @@ export class DesktopCommitSearchService {
     const work = previous.catch(() => {}).then(async () => {
       signal.throwIfAborted();
       const config = await this.config(root);
+      await requireSourceEnabled(request.cwd, "commits", signal);
       let key: string | undefined;
       try { if (config?.provider === "openrouter") key = await (this.options.loadKey ?? loadCommitEmbeddingKey)(); } catch { /* Local fallback. */ }
       const usable = config && (config.provider === "ollama" || (config.provider === "openrouter" && key)) ? config : undefined;
@@ -113,12 +121,14 @@ export class DesktopCommitSearchService {
           try {
             signal.throwIfAborted();
             const current = await this.config(root);
+            await requireSourceEnabled(request.cwd, "commits", signal);
             if (!config || !current || embeddingIdentity(config) !== embeddingIdentity(current)) throw new Error(SEMANTIC_NOTICE);
             if (p.type === "validate") { worker.postMessage({ id: p.id, ok: true, value: true }); return; }
             if (p.type !== "embed" || !Array.isArray(p.input)) throw new Error(SEMANTIC_NOTICE);
             const cacheKey = embeddingIdentity(config) + "\0" + p.input[0];
             let vectors = p.query ? this.queryCache.get(cacheKey) : undefined;
             if (!vectors) vectors = await withProviderSlot(signal, async () => {
+              await requireSourceEnabled(request.cwd, "commits", signal);
               const queued = await this.config(root);
               signal.throwIfAborted();
               if (!queued || embeddingIdentity(queued) !== embeddingIdentity(config)) throw new Error(SEMANTIC_NOTICE);
@@ -126,6 +136,7 @@ export class DesktopCommitSearchService {
             });
             signal.throwIfAborted();
             const after = await this.config(root);
+            await requireSourceEnabled(request.cwd, "commits", signal);
             if (!after || embeddingIdentity(after) !== embeddingIdentity(config) || vectors.length !== p.input.length || !vectors.every(v => validCommitVector(v, config.dimension))) throw new Error(SEMANTIC_NOTICE);
             if (p.query) {
               this.queryCache.delete(cacheKey); this.queryCache.set(cacheKey, vectors);
@@ -148,3 +159,4 @@ export class DesktopCommitSearchService {
     });
   }
 }
+import { sourceEnabled, requireSourceEnabled, withSourcePolicy } from "./source-policy.js";

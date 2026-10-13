@@ -8,11 +8,14 @@ import { searchProject, type ProjectSearchServices, type SessionRecord } from ".
 import { taskSemanticHash } from "../src/project-search/semantic-cache.js";
 import { embedSemanticQuery } from "../src/project-search/semantic-provider.js";
 import { cachedProjectSemantics } from "../src/project-search/semantic.js";
+import { indexMissingSessionVectors } from "../src/project-search/semantic-session-indexer.js";
+import { syncSessionChunks } from "../src/project-search/semantic-session-chunks.js";
 import { syncSavedTaskVectors } from "../src/project-search/semantic-task-indexer.js";
 import { resetHistoryVectors } from "../src/project-search/semantic-reset.js";
 import { searchSemanticCommits } from "../src/project-search/semantic-commit-indexer.js";
 import { commitIdentity, type CommitEmbeddingConfig } from "../src/project-search/semantic-commit-provider.js";
 import { removeDirsWithRetry, renameWithRetry } from "./support/fs-retry.js";
+import { enableSearchSources } from "./support/search-sources.js";
 
 const scratch = fileURLToPath(new URL("../../../.pi/artifacts/project-search-semantic-tests/", import.meta.url));
 const roots: string[] = [];
@@ -32,6 +35,7 @@ function fixture() {
   // a separate project so findProjectRoot cannot climb to the host checkout.
   mkdirSync(path.join(root, ".git"));
   mkdirSync(path.join(root, ".pi/search"), { recursive: true });
+  enableSearchSources(root);
   const prefs = path.join(root, "pix-desktop.jsonc");
   const auth = path.join(root, "auth.json");
   const mapPath = path.join(root, "acp-sessions.json");
@@ -82,6 +86,7 @@ test("global plain JSON enables Tasks, Sessions and Commits with the Knowledge m
     import { mkdirSync, writeFileSync, existsSync } from "node:fs";
     const { cachedProjectSemantics } = await import(${entry("semantic")});
     const { syncSavedTaskVectors } = await import(${entry("semantic-task-indexer")});
+    const { indexMissingSessionVectors } = await import(${entry("semantic-session-indexer")});
     const { semanticConfiguration } = await import(${entry("semantic-provider")});
     const { searchSemanticCommits } = await import(${entry("semantic-commit-indexer")});
     const root = ${JSON.stringify(f.root)};
@@ -99,6 +104,7 @@ test("global plain JSON enables Tasks, Sessions and Commits with the Knowledge m
       const signal = new AbortController().signal;
       const config = bootstrap ? await semanticConfiguration(options, signal) : undefined;
       if (config) await syncSavedTaskVectors(root, undefined, options, signal, config);
+      if (config) await indexMissingSessionVectors(root, candidates.sessions, undefined, options, signal, config, true);
       const histories = await cachedProjectSemantics(root, "abstract concept", candidates, signal, options);
       const commits = await searchSemanticCommits(root, [commit], "abstract concept", async () => commit.hash, signal);
       return { tasks: [...histories.tasks.keys()], sessions: [...histories.sessions.keys()], commits: commits.hits.map(hit => hit.hash), notices: [...histories.notices, ...commits.notices] };
@@ -267,7 +273,11 @@ test("unnamed sessions retrieve middle public messages and reuse shared vectors"
   expect(local.hits[0]?.snippet).toContain("keep rows");
   expect(deps.documents).toEqual([]); expect(deps.calls).toEqual([]);
   const semantic = await searchProject(f.root, { query: "conceptual redesign", sources: ["sessions"] }, deps);
-  expect(semantic.hits[0]?.sessionId).toBe("unnamed");
+  expect(semantic.hits).toEqual([]);
+  expect(deps.documents).toEqual([]);
+  await syncSessionChunks(f.root, [session], new AbortController().signal, deps.semantic, true);
+  const indexed = await searchProject(f.root, { query: "conceptual redesign", sources: ["sessions"] }, deps);
+  expect(indexed.hits[0]?.sessionId).toBe("unnamed");
   expect(deps.documents).toEqual(["Start", "Middle evidence", "No, keep rows"]);
   await searchProject(f.root, { query: "another concept", sources: ["sessions"] }, deps);
   expect(deps.documents).toHaveLength(3);
@@ -451,7 +461,8 @@ describe("project_search shared semantic cache", () => {
       const pending = source === "tasks"
         ? syncSavedTaskVectors(f.root, "fake-key", deps.semantic!, new AbortController().signal, historyConfig)
           .then(() => ({ hits: [], notices: [] as string[] }), () => ({ hits: [], notices: ["sync interrupted"] }))
-        : searchProject(f.root, { query: "abstract concept", sources: [source] }, deps);
+        : indexMissingSessionVectors(f.root, [session], "fake-key", deps.semantic!, new AbortController().signal, historyConfig, true)
+          .then(() => ({ hits: [], notices: [] as string[] }), () => ({ hits: [], notices: ["sync interrupted"] }));
       await started;
       f.config = { ...historyConfig, ...change };
       release();
@@ -503,7 +514,7 @@ describe("project_search shared semantic cache", () => {
       const controller = new AbortController();
       const pending = source === "tasks"
         ? syncSavedTaskVectors(f.root, "fake-key", deps.semantic!, controller.signal, historyConfig)
-        : cachedProjectSemantics(f.root, "abstract concept", candidates, controller.signal, deps.semantic);
+        : indexMissingSessionVectors(f.root, [session], "fake-key", deps.semantic!, controller.signal, historyConfig, true);
       await started;
       const failure = pending.then(() => undefined, error => error);
       controller.abort(new Error("cancelled upload"));
@@ -517,6 +528,7 @@ describe("project_search shared semantic cache", () => {
       } finally { db.close(); sessionDb.close(); }
       deps.semantic!.embedTasks = async texts => texts.map(() => queryVector(0));
       if (source === "tasks") await syncSavedTaskVectors(f.root, "fake-key", deps.semantic!, new AbortController().signal, historyConfig);
+      else await indexMissingSessionVectors(f.root, [session], "fake-key", deps.semantic!, new AbortController().signal, historyConfig, true);
       const retry = await cachedProjectSemantics(f.root, "abstract concept", candidates, new AbortController().signal, deps.semantic);
       expect(retry[source].has(source === "tasks" ? task.id : session.id)).toBe(true);
       expect(retry.notices).toEqual([]);
@@ -970,7 +982,7 @@ describe("project_search shared semantic cache", () => {
     }
   });
 
-  test("saved session title search creates missing vectors, skips first-message fallbacks and respects renames", async () => {
+  test("saved session title search reads cache only, skips first-message fallbacks and respects renames", async () => {
     const f = fixture();
     const name = "Engineering council";
     const session: SessionRecord = { id: "native", path: nativeSessionFile(f, "native", name),
@@ -985,6 +997,10 @@ describe("project_search shared semantic cache", () => {
     const deps = services(f, { listSessions: async () => [session, fallback],
       readSession: async () => ({ firstText: "Background", finalText: "Agent result" }) });
     let result = await searchProject(f.root, { query: "conceptual redesign", sources: ["sessions"] }, deps);
+    expect(result.hits).toEqual([]);
+    expect(deps.documents).toEqual([]);
+    await indexMissingSessionVectors(f.root, [session, fallback], "fake-key", deps.semantic!, new AbortController().signal, historyConfig, true);
+    result = await searchProject(f.root, { query: "conceptual redesign", sources: ["sessions"] }, deps);
     expect(result.hits.map(hit => hit.sessionId)).toEqual(["native"]);
     expect(deps.documents).toEqual([name]);
     const index = new Database(f.sessionsPath, { readonly: true });
@@ -1000,6 +1016,10 @@ describe("project_search shared semantic cache", () => {
     writeFileSync(f.mapPath, JSON.stringify({ version: 1, sessions: [
       { sessionId: "acp", cwd: f.root, piSessionPath: session.path, title: revisedName, namedTitle: revisedName },
     ] }));
+    result = await searchProject(f.root, { query: "conceptual redesign", sources: ["sessions"] }, deps);
+    expect(result.hits).toEqual([]);
+    expect(deps.documents).toEqual([name]);
+    await indexMissingSessionVectors(f.root, [session], "fake-key", deps.semantic!, new AbortController().signal, historyConfig, true);
     result = await searchProject(f.root, { query: "conceptual redesign", sources: ["sessions"] }, deps);
     expect(result.hits.map(hit => hit.sessionId)).toEqual(["native"]);
     expect(deps.documents).toEqual([name, revisedName]);

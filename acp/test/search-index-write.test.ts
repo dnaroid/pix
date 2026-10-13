@@ -1,3 +1,4 @@
+import { isolateSearchHome } from "./search-sources-fixture.js";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
@@ -15,7 +16,8 @@ async function fixture(t: TestContext) {
   const base = resolve(".pi/artifacts/search-index-write");
   await mkdir(base, { recursive: true });
   const cwd = await mkdtemp(join(base, "run-"));
-  t.after(() => rm(cwd, { recursive: true, force: true }));
+  const restoreHome = await isolateSearchHome(cwd);
+  t.after(async () => { await rm(cwd, { recursive: true, force: true }); restoreHome(); });
   return { cwd, store: new SearchIndexStore(1), signal: new AbortController().signal };
 }
 

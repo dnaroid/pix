@@ -11,14 +11,18 @@ async function fixture(t: TestContext, discover: SearchServiceOptions["discover"
   const base = resolve("../.pi/artifacts/search-source-status");
   await mkdir(base, { recursive: true });
   const cwd = await mkdtemp(join(base, "run-"));
+  const restoreHome = await isolateSearchHome(cwd);
+  await enableSearchSources(cwd);
   const config = join(cwd, "config.jsonc");
   await writeFile(config, JSON.stringify({ search: { embedding: {
     embeddingProvider: "ollama", embeddingModel: "fake", vectorSize: 3,
   } } }));
-  const service = new DesktopSearchService({ discover, preferences: new SearchPreferences(config),
+  const service = new DesktopSearchService({
+    discover: async () => { assert.fail("Status must never hydrate transcripts through interactive SDK discovery"); },
+    discoverBackground: discover, preferences: new SearchPreferences(config),
     embed: async () => { assert.fail("Status must never request embeddings"); },
     watchTasks: () => { assert.fail("Status must never start indexing watchers"); } });
-  t.after(async () => { await service.dispose(); await rm(cwd, { recursive: true, force: true }); });
+  t.after(async () => { await service.dispose(); await rm(cwd, { recursive: true, force: true }); restoreHome(); });
   return { cwd, service, status: () => service.config({ cwd, includeSourceStatus: true }) };
 }
 
@@ -72,3 +76,31 @@ test("cancelled discovery cannot publish a stale empty status", async t => {
   assert.equal((await f.service.config({ cwd: f.cwd })).sessionsEmpty, undefined);
   await assert.rejects(access(join(f.cwd, ".pi/search")));
 });
+
+test("slow metadata cannot block activity or duplicate unsettled discovery", async t => {
+  let started!: () => void, finish!: (records: SessionMapRecord[]) => void;
+  const ready = new Promise<void>(resolve => { started = resolve; });
+  const discovery = new Promise<SessionMapRecord[]>(resolve => { finish = resolve; });
+  let calls = 0;
+  let signal: AbortSignal | undefined;
+  const f = await fixture(t, async (_cwd, owned) => { calls++; signal = owned; started(); return discovery; });
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1000 });
+  const pending = f.status();
+  await ready;
+  t.mock.timers.tick(1000);
+  const status = await pending;
+  assert.equal(status.sessionsEmpty, undefined);
+  assert.equal(status.indexingSources?.sessions, false);
+  assert.equal(signal?.aborted, true);
+  t.mock.timers.tick(30_000);
+  assert.equal((await f.status()).sessionsEmpty, undefined);
+  assert.equal(calls, 1, "retain the discovery slot until the underlying read settles");
+  finish([]);
+  await discovery;
+  assert.equal((await f.service.config({ cwd: f.cwd })).sessionsEmpty, undefined, "late completion must not publish empty");
+  t.mock.timers.tick(30_000);
+  assert.equal((await f.status()).sessionsEmpty, true);
+  assert.equal(calls, 2);
+  await assert.rejects(access(join(f.cwd, ".pi/search")));
+});
+import { enableSearchSources, isolateSearchHome } from "./search-sources-fixture.js";

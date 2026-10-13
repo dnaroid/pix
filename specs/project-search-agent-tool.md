@@ -49,13 +49,23 @@ the terminal event. This is file-log progress, not streamed Desktop Activity upd
   to canonical task/session/Git data occur. Search-cache writes are limited
   to source-local caches. Tasks and public session messages also synchronize in the background.
 - Required `query` is a nonempty string of at most 2,048 characters.
-  `sources` optionally selects unique values from `sessions`, `tasks`,
-  `commits`, `code`, and `knowledge` (all five by default).
+  Project-local source selection is shared with Desktop through
+  `.pi/search-sources.json` (version 1, full boolean `enabled` map). A missing
+  file enables **Code only** among the five project sources; malformed or unsafe policy fails
+  closed. The tool's available-source description, prompt guidance and parameter
+  schema track the enabled sources dynamically. `sources` optionally selects
+  unique enabled values from `sessions`, `tasks`, `commits`, `code`, and
+  `knowledge` (all enabled tool sources by default, initially Code only).
+  Settings is a Desktop-only source, never a tool parameter choice. Explicit
+  requests for disabled sources are skipped without dispatch. Disabling a source cancels/rejects stale work and
+  retains its caches for reuse if re-enabled. Global embedding configuration
+  remains unchanged and cannot override project selection.
   `limit` is 1–20 (default 10). `indexMode` is `hybrid` (default),
   `semantic`, or `lexical`. Code and Knowledge always use the native backend.
-  `hybrid`/`semantic` additionally permit creating and querying missing
-  task/session-name/session-message/commit vectors under the shared global provider
-  prerequisites. `lexical` disables **all** embedding calls/writes, but not native file-index refresh,
+  `hybrid`/`semantic` additionally permit querying maintained task/session-name/session-message
+  vectors and bounded creation/querying of commit and native repository vectors under
+  the shared global provider prerequisites and project source policy. Task/session
+  queries never backfill missing document vectors. `lexical` disables **all** embedding calls/writes, but not native file-index refresh,
   and a search call never changes configuration.
   Optional `projectPath` names an explicit alternate project directory,
   resolved relative to session cwd (also accepting absolute and `~/` paths);
@@ -107,7 +117,8 @@ the terminal event. This is file-log progress, not streamed Desktop Activity upd
   `pix_task_*`, `pix_session_*` and session-chunk tables, using the global
   `~/.config/pi/pi-tools-suite.jsonc` `search.embedding` configuration. These use the
   same provider identity and vectors as Desktop Global Search, without
-  another TUI preference, source opt-ins or a duplicate index.
+  another TUI-only preference or duplicate index. The shared project source-selection
+  policy still applies independently of global embedding authorization.
   Task input is precisely the title+description projection capped at 2,000
   characters. Only current task ID + text-content-hash matches are eligible.
   Saved session titles require the current Pi `session_info` name plus matching
@@ -126,20 +137,20 @@ the terminal event. This is file-log progress, not streamed Desktop Activity upd
   semantics retains cached vectors and stops new provider calls; failed provider
   work does not spin in an automatic retry loop.
   Task queries rank current matching cached vectors, never initiate missing
-  task-document embeddings. Explicit session-name vectors may still be generated
-  on demand, followed by one query embedding reused for both. Such content and the query
+  task-document embeddings. Session queries likewise rank existing title/message
+  vectors without generating missing document vectors; one query embedding is
+  reused across eligible sources. Indexed session content and the query
   are sent to that provider and may incur fees. Status, priority, task/session
   IDs, links, model assignments and attachment metadata or
   bytes are not independently embedded. Existing task descriptions may of
-  course contain user-authored sensitive text. Query-driven session indexing uses
-  batches of 16, up to 256 explicitly named-session vectors per request, and a
-  40-second indexing ceiling. A further search continues incomplete session
-  indexing and reports remaining work. Renewable source claims own each bounded
+  course contain user-authored sensitive text. Automatic and manual session indexing
+  use batches of at most 16. Renewable source claims own each bounded
   embedding batch so concurrent Desktop/agent searches do not pay for the same
   missing vector; SQLite write transactions do not span provider latency. Completed batches survive subsequent
   failures, while removed/changed configuration, changed task text or a session rename
   rolls back the current batch. A missing cache is initialized only by an
-  active task synchronization, explicit manual indexing or an explicitly submitted session search with valid configuration.
+  active task synchronization, eligible idle-session synchronization or explicit
+  manual indexing with valid configuration.
   Index identity mismatches fail closed without
   deleting previously paid vectors. No implicit external-backend setup, user-config edits,
   shared-credential writes occur.
@@ -148,16 +159,66 @@ the terminal event. This is file-log progress, not streamed Desktop Activity upd
   global configuration also applies when an agent runs the tool in ordinary Pi or Pix TUI.
   The calling agent may still send returned excerpts to
   its own language model as part of normal operation.
-- Public session messages automatically synchronize on session startup and
-  debounced public-message/turn/branch changes. A configured provider authorizes upload of both
+- All production session discovery (search, manual and background) admits a
+  session only at least **24 hours from creation**. Creation time is the native
+  filename timestamp, else a bounded imported-session header timestamp, then
+  filesystem birthtime; modification time is never an age fallback. Young entries
+  retain only minimal age metadata and are not hydrated for title/body. Automatic
+  saved-title and public-message indexing additionally waits for **one hour of
+  inactivity per session**. Transcript modification time and persisted runtime
+  activity determine eligibility; new activity restarts only that session's delay.
+  A running agent blocks its session, with renewable cross-host running leases.
+  Startup resumes from persisted activity rather than starting a fresh hour;
+  metadata-only checks run approximately every 30 seconds. Automatic discovery
+  uses directory/file metadata and a bounded 16 KiB native identity header read
+  for new or changed files, not SDK full-transcript listing. Unchanged files reuse
+  their header cache; title/body hydration occurs only after idle revision selection.
+  The shared source's exhausted retry budget pauses discovery until Continue;
+  a budget exhausted during a sweep stops the remaining candidates.
+  Other idle sessions
+  remain eligible while one session is active. Existing matching cached vectors
+  remain searchable during the delay; queries do not bypass it or initiate
+  document embeddings. Manual `/search-index sessions` bypasses the idle delay
+  only, not the 24-hour creation minimum. Mature-file changes use directory events
+  coalesced into dirty paths, bootstrap plus bounded five-minute missed-event
+  reconciliation, and maturity deadlines that admit sessions even without events.
+  One-shot CLI discovery fully reconciles. Optional ACP snapshot requests can
+  warm the digest from a bounded 1.5-second session snapshot; ACP reconnect falls
+  back to native metadata. Source digests cover mature file revisions and mature
+  mapped title/id aliases. Session-index logical revision is trigger-maintained
+  and commit-coupled across title, metadata, chunk and vector content tables; work
+  heartbeat, FTS, WAL and VACUUM changes do not affect it. Legacy caches remain
+  read-only during status, with a bounded metadata fingerprint until a writer
+  installs tracking. Shared CLI/Desktop receipts use the updated fingerprint;
+  old receipts require a new pass.
+  A configured provider authorizes upload of both
   existing and new public text, including unnamed sessions. Tool/thinking/image
   blocks are excluded. Shared source leases and model/content hashes prevent
   duplicate paid chunk work across hosts; revisions and authorization are checked
-  again after provider latency. Automatic/manual indexing drains work in batches
-  of 16; query indexing is bounded to 256 chunks / 40 seconds and reports remaining
-  work. Failed background work does not spin; `/search-index sessions` explicitly
+  again after provider latency, including idle eligibility before publication.
+  Automatic/manual indexing drains work in batches of 16.
+  Failed unchanged background revisions do not spin; `/search-index sessions` explicitly
   continues it. Configuration removal, session replacement and shutdown
   invalidate old work. These caches do not modify canonical JSONL files.
+- Session background sweeps persist one successful **start-time watermark** in
+  `pix_session_sweep` inside `.pi/search/sessions.sqlite`, not a per-file manifest.
+  Only a fully successful title/chunk pass advances it; failed, cancelled,
+  unreadable or deferred work cannot be certified by suppressing its retry.
+  After restart, automatic selection skips old unchanged transcript bodies using
+  file mtime/ctime, activity, mapped-title update time and the creation + 24-hour
+  admission deadline, with a two-second conservative timestamp overlap.
+  Discovery/query candidate lists remain complete; only indexing work is filtered.
+  Metadata enumeration, bounded identity headers and eligibility checks still run.
+  The checkpoint is bound to embedding identity and logical cache incarnation/revision;
+  mismatch or a backwards clock forces a full eligible sweep. Partial cache writes
+  may invalidate the prior cutoff, conservatively requiring another sweep.
+  Manual Index/Continue remains a full repair path and seeds the same watermark
+  only on full success. One pending mature session can hold back the whole scalar
+  watermark; successful unchanged attempts are reused in memory meanwhile.
+- Native Code/Knowledge search failures report source-specific notices without
+  suggesting that an external backend or repository-index setup is required.
+  Semantic Tasks with no matching indexed vectors remain pending for manual
+  indexing; a query never backfills task documents.
 - Commits search **HEAD ancestors**, not unrelated branches or all working-tree
   changes. Match subject, author, message, hash and changed file paths; report
   full hash for the existing Git Diff navigation. Results have bounded previews
@@ -195,15 +256,22 @@ the terminal event. This is file-log progress, not streamed Desktop Activity upd
   and caches alone never activate semantics. OpenRouter credentials use
   `OPENROUTER_API_KEY`, then shared Pi auth storage; Ollama requires no key. `pathPrefix` is a safe project-relative
   directory/file scope.
-  `maxFiles` (1–50) limits candidates per domain,
+  `maxFiles` (1–50) limits returned native hits per domain,
   defaulting to three with no inline content or one when `includeContent`
   is enabled. Combined final results remain capped at 20. Native supports
   `dedupeFile`, `excludeTests`, `includeTests`, and `includeContent`; test filters
   are mutually exclusive. `chunkTypes`, `minScore`, `includeImports`,
   `dedupeSymbol`, and `cluster` are not supported tool options.
+- Optional global `search.rerankerModel` enables one shared rerank of up to 100
+  source-balanced Sessions/Tasks/Commits/Code/Knowledge candidates for nonlexical searches,
+  before native per-domain caps and the final result limit. Settings are not included.
+  History sends bounded titles/snippets, not whole sessions or diffs. Pure lexical requests
+  remain local; provider failure retains original ranking with a redacted notice.
+  See [reranking safeguards](native-repository-search.md#optional-reranking).
 - Federation isolates missing/unavailable sources with short controlled
   notices, never raw provider diagnostics. Work is bounded to a 60-second
-  overall deadline with cancellation ownership. The agent receives **one final
+  retrieval deadline with cancellation ownership, plus bounded reranker preparation/finalization
+  when configured. The agent receives **one final
   response**, not a stream of early results. Concurrent local and indexed
   source jobs are awaited, including cached semantic Tasks and on-demand Sessions/Commits when
   eligible; a slow source is omitted only at the deadline or on failure.
@@ -237,10 +305,24 @@ the terminal event. This is file-log progress, not streamed Desktop Activity upd
   part of the ongoing conversation. Tool descriptions disclose this.
   The globally configured provider handles permitted semantic requests;
   lexical mode is the opt-out for embedding calls.
+- Global Settings search is a Desktop-only source backed by
+  `~/.config/pi/search/settings.sqlite`; the headless `project_search` tool does
+  not expose Settings. Its enable flag is shared across projects, defaults true,
+  and is stored separately in `settings-enabled.json`. Settings catalogue values
+  are never indexed; only the authored metadata catalogue is eligible for the
+  shared index. Settings run coordination is global, while this tool's other five
+  source caches and manual-run records remain project-local. Compatible schema-2
+  legacy project Settings vectors may be imported only in an owned transaction
+  after configured identity validation; read-only legacy stores are never changed
+  or deleted, incompatible identity/schema is skipped, and corrupt compatible
+  data aborts atomically. Global Settings vectors persist by content hash across
+  catalogue versions, with retrieval filtered against each caller's authored
+  catalogue.
 - Global semantic configuration applies across projects and sources (including eligible
   code/document chunks, paths/headings and queries) in Desktop/TUI/ACP and ordinary Pi.
   Removing/changing it suppresses stale work; incompatible paid vectors remain local-only.
-  History stores remain separately owned; legacy data/settings are not migrated.
+  History stores remain separately owned; no legacy data is migrated except the
+  compatible project-local schema-2 Settings-vector import described above.
 - No new full-transcript index, historical secret index or Git patch index is
   maintained. The tool does not read attachments, execute repository code,
   read or change Git config, or create external search setup files. A configured
@@ -250,7 +332,9 @@ the terminal event. This is file-log progress, not streamed Desktop Activity upd
   run without a shell and without inherited `GIT_*` overrides; external
   errors and secrets are not returned in source notices.
 - All callers, including async/provider/council children, receive the same full
-  schema and execution. There is no child-only source or query restriction.
+  schema and execution, subject to the same project-enabled source choices; the
+  schema does not expose disabled sources. There is no additional child-only
+  source or query restriction.
   Children suppress suite setup commands and parent orchestration guidance only;
   ordinary work-tool restrictions remain independent.
   Repository embeddings use the shared global configuration and provider.
@@ -262,6 +346,19 @@ the terminal event. This is file-log progress, not streamed Desktop Activity upd
 - [Async subagent tool access](async-subagents.md)
 
 ## Manual indexing in Pi/TUI
+
+For a standalone shell (no Desktop or running Pi session), use
+`npm run search:index -- <status|check|index|continue|stop> [source|all] [--project PATH]`
+from the checkout. This separate controller supports all six sources, including
+Settings, and shares manual run results/freshness with Desktop through
+  project-local manual-run records in `.pi/search/manual-runs.sqlite` (Settings
+  run records and source-work coordination are global). Index/continue require an explicit target and
+may incur configured provider charges; `all` runs enabled sources sequentially.
+Status/check are local read-only diagnostics. `enable <source>` and
+`disable <source>` explicitly change the existing project source policy without
+indexing. See [standalone control](desktop-search-index-status.md#standalone-control)
+for cancellation, lease, exit-code and freshness semantics. The session-owned
+slash commands below retain their existing lifetime and parallel behavior.
 
 - `/search-index code|knowledge|sessions|tasks|commits` starts document-only
   indexing for that source in the current project, returning immediately so the
@@ -284,8 +381,9 @@ the terminal event. This is file-log progress, not streamed Desktop Activity upd
   drains missing vectors in batches of at most 16 without the query-only 128/256
   vector limits or overall search deadline. Provider HTTP and individual Git
   command deadlines remain. Commits page the full pinned HEAD ancestry, checking
-  HEAD before/after paid batches. Sessions index eligible explicit saved names,
-  never transcript bodies. Tasks use the canonical title/description projection.
+  HEAD before/after paid batches. Sessions index eligible explicit saved names and
+  projected public user/assistant message chunks, never tool outputs, thinking or
+  attachment bodies. Tasks use the canonical title/description projection.
 - Completed batches survive cancellation/failure; unchanged text reuses paid
   vectors. Explicit reruns reset the interrupted-provider failure budget and
   continue missing work. Identity mismatches remain fail-closed, retaining cached

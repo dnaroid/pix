@@ -1,10 +1,6 @@
-import { join, resolve } from "node:path";
+import { sourcePath } from "./source-work.js";
 
-/** One durable, project-owned SQLite file for Pix search domains.
- *
- * Namespaced table families keep settings/commits/sessions separate.
- * Project Clean and the background TTL preserve this entire directory.
- */
+/** Settings metadata is user-global; project content stays project-owned. */
 export function canonicalSearchIndexPath(cwd: string, source: "settings" | "sessions" | "tasks" | "commits" = "settings"): string {
-  return join(resolve(cwd), ".pi", "search", source === "commits" ? "git-commits.sqlite" : `${source}.sqlite`);
+  return sourcePath(cwd, source);
 }

@@ -1,3 +1,4 @@
+import { canonicalSearchIndexPath } from "../src/search/canonical-index.js";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -30,6 +31,8 @@ async function fixture(t: TestContext) {
   const base = resolve(".pi/artifacts/central-semantics-acp/configured-fixtures");
   await mkdir(base, { recursive: true });
   const cwd = await mkdtemp(join(base, "run-"));
+  const restoreHome = await isolateSearchHome(cwd);
+  await enableSearchSources(cwd);
   const path = join(cwd, "pi-tools-suite.jsonc");
   const preferences = new SearchPreferences(path);
   const session = join(cwd, "session.jsonl");
@@ -49,13 +52,16 @@ async function fixture(t: TestContext) {
   };
   const request = (query = "", types: Array<"settings" | "sessions"> = ["settings", "sessions"]) =>
     ({ cwd, query, types, settings: [setting], limit: 20 });
-  const idle = (service: DesktopSearchService) => until(async () => !(await service.config({ cwd })).indexing);
+  const idle = (service: DesktopSearchService) => until(async () => {
+    const status = await service.config({ cwd });
+    return !status.indexing && !status.checkingSources?.tasks;
+  });
   const rows = (table: string) => {
     const source = table.startsWith("pix_session_") ? "sessions" : table.startsWith("pix_task_") ? "tasks" : "settings";
-    const db = new DatabaseSync(join(cwd, `.pi/search/${source}.sqlite`), { readOnly: true });
+    const db = new DatabaseSync(canonicalSearchIndexPath(cwd, source), { readOnly: true });
     try { return db.prepare(`SELECT * FROM ${table}`).all(); } finally { db.close(); }
   };
-  t.after(async () => { await Promise.all(services.map(service => service.dispose())); await rm(cwd, { recursive: true, force: true }); });
+  t.after(async () => { await Promise.all(services.map(service => service.dispose())); await rm(cwd, { recursive: true, force: true }); restoreHome(); });
   return { cwd, path, configure, calls, embed, make, request, idle, rows, record };
 }
 
@@ -66,6 +72,7 @@ test("configured knowledge identity, prefixes, dimensions and endpoint apply to 
   assert.equal(status.enabled, true); assert.equal(status.sessionTitlesEnabled, true); assert.equal(status.tasksSemanticEnabled, true);
   assert.equal(status.keyAvailable, true); assert.deepEqual(f.calls, []);
   await service.query(f.request()); await f.idle(service);
+  await service.index({ cwd: f.cwd, source: "sessions" });
   const response = await service.query(f.request("unrelated meaning"));
   assert.ok(response.results.some(hit => hit.kind === "settings"));
   assert.ok(response.results.some(hit => hit.kind === "sessions" && hit.semantic));
@@ -114,6 +121,7 @@ test("a settings cache read failure does not discard the healthy session query v
   const f = await fixture(t); await f.configure();
   const initial = f.make();
   await initial.query(f.request()); await f.idle(initial);
+  await initial.index({ cwd: f.cwd, source: "sessions" });
   await initial.dispose();
   const store = new SearchIndexStore();
   store.read = async () => { throw new Error("settings fixture unavailable"); };
@@ -125,6 +133,7 @@ test("a settings cache read failure does not discard the healthy session query v
 test("identity changes invalidate query reuse and retain incompatible purchased settings/session vectors", async t => {
   const f = await fixture(t); await f.configure();
   const service = f.make(); await service.query(f.request()); await f.idle(service);
+  await service.index({ cwd: f.cwd, source: "sessions" });
   await service.query(f.request("shared lookup")); await f.idle(service);
   const snapshot = ["metadata", "vectors", "pix_session_meta", "pix_session_vectors"].map(table => f.rows(table));
   assert.equal(f.calls.filter(call => call.input.includes("Q: shared lookup")).length, 1);
@@ -168,6 +177,7 @@ test("revocation during discovery suppresses a previously cached semantic query"
   const started = gate<void>(); const release = gate<void>(); let paused = false;
   const service = f.make({ discover: async () => { if (paused) { started.resolve(); await release.promise; } return [f.record]; } });
   await service.query(f.request()); await f.idle(service);
+  await service.index({ cwd: f.cwd, source: "sessions" });
   assert.ok((await service.query(f.request("semantic meaning", ["sessions"]))).results.some(hit => hit.kind === "sessions" && hit.semantic));
   const count = f.calls.length; paused = true;
   const query = service.query(f.request("semantic meaning", ["sessions"])); await started.promise;
@@ -197,3 +207,4 @@ test("configured HTTP transports use the knowledge model, custom dimensions and 
   assert.deepEqual(await embedOpenRouter(inputs, "mock-only", new AbortController().signal,
     { ...config, provider: "openrouter", model: "provider/history-model", baseUrl: "https://openrouter.ai/api/v1" }), [[1, 0, 0]]);
 });
+import { enableSearchSources, isolateSearchHome } from "./search-sources-fixture.js";

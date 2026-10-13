@@ -85,6 +85,7 @@ describe("subagents widget controller", () => {
 			const runDir = await writeRun(cwd, "owned-run", "owned-agent", currentSession);
 			const agentDir = join(runDir, "owned-agent");
 			await writeFile(join(agentDir, "pid"), String(process.pid), "utf8");
+			await writeFile(join(agentDir, "todo-progress.json"), JSON.stringify({ completed: 1, total: 5 }), "utf8");
 			await writeFile(join(agentDir, "progress.jsonl"), [
 				JSON.stringify({ at: "2026-09-08T12:00:00.000Z", stage: "rpc_event", type: "message_start", role: "assistant" }),
 				JSON.stringify({ at: "2026-09-08T12:00:03.000Z", stage: "rpc_event", type: "tool_execution_start", toolName: "Grep" }),
@@ -98,6 +99,7 @@ describe("subagents widget controller", () => {
 
 			const agent = controller.widgetState?.agents.find((item) => item.id === "owned-agent");
 			assert.equal(agent?.status, "running");
+			assert.deepEqual(agent?.todoProgress, { completed: 1, total: 5 });
 			assert.deepEqual(agent?.lastActivity, { label: "Grep", at: "2026-09-08T12:00:03.000Z" });
 			controller.stopPolling();
 		} finally {

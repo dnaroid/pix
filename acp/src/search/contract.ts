@@ -67,6 +67,7 @@ export interface SearchQueryRequest {
 export interface SearchConfigRequest {
   readonly cwd: string;
   readonly includeSourceStatus?: boolean;
+  readonly includeSessionSnapshot?: boolean;
 }
 export interface SearchSyncRequest extends Pick<SearchConfigRequest, "cwd"> {
   readonly settings: readonly SearchSetting[];
@@ -87,6 +88,7 @@ export interface SearchIndexResponse {
   readonly message?: string;
 }
 export interface SearchStatus {
+  readonly sessionSnapshot?: string;
   readonly sessionsEmpty?: boolean;
   readonly enabled: boolean;
   readonly sessionTitlesEnabled?: boolean;
@@ -94,6 +96,8 @@ export interface SearchStatus {
   readonly keyAvailable: boolean;
   readonly indexing: boolean;
   readonly indexingSources?: { readonly settings: boolean; readonly tasks: boolean; readonly sessions: boolean };
+  /** Local change detection (including debounce), not index work or provider activity. */
+  readonly checkingSources?: { readonly tasks: boolean };
   readonly sourceErrors?: { readonly settings?: string; readonly tasks?: string; readonly sessions?: string };
   readonly error?: string;
   readonly warning?: string;

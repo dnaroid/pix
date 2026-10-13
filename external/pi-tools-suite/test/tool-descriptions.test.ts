@@ -84,21 +84,23 @@ describe("tool descriptions", () => {
 		projectSearch({ registerTool: (tool: any) => { registered = tool; }, registerCommand: (name: string) => { commands.push(name); },
 			on: (name: string) => { events.push(name); } } as never);
 		expect(commands).toEqual(["search-semantic", "search-index"]);
-		// Saved tasks, session chunks and the index command each own their
-		// registration lifecycle. Session text also updates at turn/message/tree boundaries.
+		// Saved tasks, session chunks, manual indexing and source metadata each
+		// own a lifecycle; running-agent events also fence idle session indexing.
 		expect(events).toEqual([
 			"session_start", "session_shutdown",
-			"session_start", "turn_end", "message_end", "session_tree", "session_shutdown",
+			"session_start", "agent_start", "agent_end", "turn_end", "message_end", "session_tree", "session_shutdown",
+			"session_start", "session_shutdown",
 			"session_start", "session_shutdown",
 		]);
 		expect(registered.name).toBe("project_search");
-		expect(registered.promptSnippet).toContain("first pass maxFiles=3, no includeContent");
-		expect(registered.promptSnippet).toContain("Start focused code-path lookup or diagnosis with project_search");
+		expect(registered.promptSnippet).toContain("First pass maxFiles=3, no includeContent");
+		expect(registered.promptSnippet).toContain("Start focused lookup with project_search using only enabled sources");
+		expect(registered.parameters.properties.sources.items.enum).toEqual(["code"]);
 		const guidance = registered.promptGuidelines.join("\n");
-		expect(guidance).toContain("~/.config/pi/pi-tools-suite.jsonc");
-		expect(guidance).toContain("saved tasks and public session message chunks are embedded automatically on startup and changes");
-		expect(guidance).toContain("Task searches rank current cached vectors.");
-		expect(guidance).toContain("Session searches can fill missing chunk vectors");
+		expect(guidance).toContain("Only enabled project sources may be searched or indexed");
+		expect(guidance).toContain("Global embedding configuration authorizes uploads but does not override the project selection");
+		expect(guidance).toContain("Never configure providers on the user’s behalf");
+		expect(guidance).not.toContain("Session searches can fill missing chunk vectors");
 		expect(guidance).not.toContain("independent Desktop opt-ins");
 		expect(guidance).not.toContain("independent project consent");
 		expect(guidance).toContain("pathPrefix/dedupeFile");
@@ -301,6 +303,19 @@ describe("tool descriptions", () => {
 		expect(promptText).toContain("known target URL/app/command, actions to perform, expected observable outcome, and requested evidence");
 		expect(promptText).toContain("Do not turn it into a repository investigation plan");
 		expect(promptText).toContain("invent a mock/synthetic target");
+	});
+
+	test("oracle guidance bounds scope without inventing short watchdog caps in either tool mode", () => {
+		for (const repoAware of [false, true]) {
+			const prompt = asyncSubagentToolDescriptions(repoAware).subagents.description;
+			expect(prompt).toContain("Bound scope instead: one question/invariant");
+			expect(prompt).toContain("omit spawn-level and task-level timeoutSeconds");
+			expect(prompt).toContain("30 minutes by default");
+			expect(prompt).toContain("unless the user explicitly requests a shorter budget");
+			expect(prompt).toContain("exact task diff/paths and exclusions, not a repository-wide audit");
+			expect(prompt).toContain("A watchdog timeout means incomplete work");
+			expect(prompt).toContain("not proof of a provider stall; do not switch models automatically");
+		}
 	});
 
 	test("subagents prompt prioritizes broad fallback delegation when repo tools are unavailable", () => {

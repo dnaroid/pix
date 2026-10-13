@@ -58,7 +58,13 @@ auto-discovered `ci-reliability` skill in `.agents/skills/ci-reliability/SKILL.m
 before modifying tests or workflows.
 
 `npm run check` is the quick **root-only** check, not the complete CI gate.
-Before pushing, run:
+For ordinary implementation, review and bug-fix tasks, run focused regression
+tests and relevant typechecks/builds for the changed code. Do not routinely run
+the full gate, or reproduce it by running all its stages separately.
+
+Run the full local CI only when preparing a release or when the user explicitly
+asks to push everything ("запушить всё"). A focused preflight does not by itself
+authorize a full run. For those release/push-everything tasks, run:
 
 ```bash
 npm run check:ci:preflight -- --list  # inspect platform-specific smoke tests
@@ -73,7 +79,8 @@ Desktop frontend checks/tests and Rust fmt/check/backend-runtime tests on macOS;
 browser mock-page E2E on Linux. A successful native gate does not prove the other
 OS matrix legs or release smoke. It does not install dependencies or act as a Git hook.
 The CI workflow runs the preflight first, **then** the unchanged full gate;
-the smoke result is never a substitute for the complete platform matrix.
+the smoke result is never a substitute for the complete platform matrix. This
+local verification policy does not change automatic GitHub Actions triggers.
 Preflight verifies test contracts on every OS, AST CLI availability and LSP
 ownership on Linux,
 native SQLite, detached broker and PTY exit handling on Windows, and
@@ -229,7 +236,11 @@ With the existing `watch:all` running, prepare an isolated test copy:
 npm run qa:desktop -- prepare
 ```
 
-Use its returned manifest path with
+By default, `prepare` seeds the fresh owned workspace with the synthetic
+`fixtures/qa/pix-project` template and returns `workspace`, `projectSeed` and
+`manifestPath`. Use `--empty-workspace` for an onboarding/empty-project check.
+An explicit project/path/URL or real-data requirement takes precedence; do not
+substitute this template for it. Use its returned manifest path with
 `npm run qa:desktop -- launch --manifest <manifestPath>` for a manual launch.
 The `ui-qa` subagent instead gives the unified runner a direct project-script
 launch target; `.pi/skills/pix-desktop-qa/SKILL.md` contains that workflow.
@@ -243,6 +254,14 @@ watcher. Use `--state <desktop-watch-state.json>` to disambiguate watchers and
 API keys only; it does not copy OAuth tokens, sessions or an entire home. Do not
 export the private profile with screenshots. UI-only tests need no credentials.
 See `specs/desktop-qa-isolated-launch.md` for identity, cleanup and failure rules.
+
+For TUI/manual QA without an explicit data project, `npm run qa:sandbox` creates
+a unique `.pi/artifacts/pix-qa-sandbox-*/workspace` and prints its path. It only
+creates project data: it does not launch Pix, install dependencies or configure
+providers. The sample's `npm test` runs with Node without installation. Use the
+real requested Pix UI in that workspace; explicit project/path/URL or real-data
+requirements always win. See [Pix QA Sandbox](qa-sandbox.md) for contents,
+fixtures and coverage limits.
 
 ## Release builds
 

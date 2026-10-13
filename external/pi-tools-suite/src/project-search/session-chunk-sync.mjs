@@ -1,4 +1,4 @@
-/** Event-driven coalescing, one owned operation and one dirty follow-up. No paid polling. */
+/** Event-driven coalescing, one owned operation and one dirty follow-up. */
 export class SessionChunkSync {
   constructor(run, signal, failed = () => {}) {
     this.run = run; this.signal = signal; this.failed = failed;
@@ -19,6 +19,11 @@ export class SessionChunkSync {
     this.worker = this.run(this.signal).catch(e=>{if(!this.signal.aborted)this.failed(e);}).finally(()=>{
       this.worker = undefined;
       if(this.dirty) this.changed();
+      else if (!this.stopped && !this.signal.aborted) {
+        // Recheck persisted inactivity across hosts without paying for unchanged revisions.
+        this.timer = setTimeout(() => { this.dirty = true; this.start(); }, 30_000);
+        this.timer.unref?.();
+      }
     });
   }
   async dispose() {

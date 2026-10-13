@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { activityFromProgressRecord } from "./activity.js";
+import { readTodoProgress } from "./todo-progress.js";
 import { hasLaunchedAgentPrompt, isDir } from "./paths.js";
 import { readStructuredResult } from "./structured-result.js";
 import type { AgentResult, AgentState, RpcEventRecord, RunState } from "./types.js";
@@ -107,6 +108,8 @@ export function getAgentState(
 
 	const lastActivity = readLastActivity(path.join(agentDir, "progress.jsonl"));
 	if (lastActivity) state.lastActivity = lastActivity;
+	const todoProgress = readTodoProgress(agentDir);
+	if (todoProgress) state.todoProgress = todoProgress;
 
 	const retryPendingFile = path.join(agentDir, "retry_pending");
 	const stopRequestedFile = path.join(agentDir, "stop_requested");

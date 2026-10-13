@@ -14,13 +14,16 @@ afterEach(() => {
 	for (const cwd of workspaces.splice(0)) rmSync(cwd, { recursive: true, force: true });
 });
 
-function harness(cwd: string, sessionId: string, active: string[] = []) {
+function harness(cwd: string, sessionId: string, active: string[] = [], rpc = false) {
 	let tools = [...active];
 	const registered: any[] = [];
 	const branch: any[] = [];
+	const widgets: Array<{ key: string; lines: string[] }> = [];
 	const handlers = new Map<string, Array<(event: any, ctx: ExtensionContext) => unknown>>();
 	const ctx = {
 		cwd,
+		mode: rpc ? "rpc" : "tui",
+		ui: { setWidget: (key: string, lines: string[]) => widgets.push({ key, lines }) },
 		sessionManager: { getSessionId: () => sessionId, getBranch: () => branch },
 	} as unknown as ExtensionContext;
 	const pi = {
@@ -37,6 +40,7 @@ function harness(cwd: string, sessionId: string, active: string[] = []) {
 	subagentTodo(pi as unknown as ExtensionAPI);
 	return {
 		branch,
+		widgets,
 		registered,
 		handlers,
 		active: () => tools,
@@ -117,4 +121,31 @@ test("compaction retains unfinished tasks with a fresh branch snapshot; tree cha
 	child.branch.length = 0; // switch to an unrelated branch
 	await child.emit("session_tree");
 	expect((await child.execute({ action: "list" })).details.tasks).toEqual([]);
+});
+
+test("RPC child publishes start, mutations and branch restoration without parent-plan state", async () => {
+	const original = process.env.PIX_ACP_SESSION_STATE_BRIDGE;
+	process.env.PIX_ACP_SESSION_STATE_BRIDGE = "1";
+	try {
+		const child = harness(workspace(), "rpc-child", [], true);
+		function tasks() {
+			const widget = child.widgets.at(-1)!;
+			expect(widget.key).toBe("pix.session-state");
+			expect(widget.lines[0]).toBe("pi-tools-suite:todo:state");
+			return JSON.parse(widget.lines[1]).details.tasks;
+		}
+		await child.emit("session_start");
+		expect(tasks()).toEqual([]);
+		await child.execute({ action: "create", subject: "Child step" });
+		expect(tasks()).toMatchObject([{ status: "pending", subject: "Child step" }]);
+		child.branch.length = 0;
+		await child.emit("session_tree");
+		expect(tasks()).toEqual([]);
+		await child.execute({ action: "create", subject: "New step" });
+		await child.execute({ action: "update", id: 1, status: "completed" });
+		expect(tasks()).toEqual([]); // auto-clear follows the completed snapshot
+	} finally {
+		if (original === undefined) delete process.env.PIX_ACP_SESSION_STATE_BRIDGE;
+		else process.env.PIX_ACP_SESSION_STATE_BRIDGE = original;
+	}
 });

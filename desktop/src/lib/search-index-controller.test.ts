@@ -21,6 +21,31 @@ function fixture(run = vi.fn(async (): Promise<IndexResult> => ({ source: "code"
 afterEach(() => vi.useRealTimers());
 
 describe("workspace-owned search index controller", () => {
+  it("blocks disabled sources, serializes saves, cancels that manual source and retains selection on save error", async () => {
+    vi.useFakeTimers();
+    let state = emptySearchIndexView();
+    const enabled = { settings: true, code: true, knowledge: false, tasks: false, sessions: false, commits: false };
+    const write = deferred<{ enabled: typeof enabled }>();
+    const setSource = vi.fn(() => write.promise);
+    const run = vi.fn<Parameters<typeof createSearchIndexController>[0]["run"]>(async (_source, signal) => {
+      await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true }));
+      return { source: "code", complete: true };
+    });
+    const controller = createSearchIndexController({ readStores: async () => ({ stores: [] }),
+      readConsent: async () => ({ configured: false, keyAvailable: false, provider: "openrouter", model: "", vectorSize: 0 }), readSelection: async () => ({ enabled }),
+      setSource, run, onChange: next => { state = next; } });
+    await vi.advanceTimersByTimeAsync(0);
+    controller.start("knowledge"); expect(run).not.toHaveBeenCalled();
+    controller.start("code"); await vi.advanceTimersByTimeAsync(0);
+    const saving = controller.setSource("code", false);
+    await controller.setSource("tasks", true);
+    expect(setSource).toHaveBeenCalledTimes(1); expect(state.savingSource).toBe("code");
+    enabled.code = false; write.resolve({ enabled }); await saving;
+    expect(state.actions.code?.result).toBeUndefined(); expect(state.snapshot.selection?.enabled.code).toBe(false);
+    setSource.mockRejectedValueOnce(new Error("save failed")); await controller.setSource("tasks", true);
+    expect(state.snapshot.selection?.enabled.tasks).toBe(false); expect(state.snapshot.selectionError).toBe("save failed");
+    controller.dispose();
+  });
   it("clears published history without stopping work or replaying unchanged polls", async () => {
     vi.useFakeTimers();
     const pending = deferred<IndexResult>();

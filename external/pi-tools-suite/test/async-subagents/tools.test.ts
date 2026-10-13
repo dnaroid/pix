@@ -383,6 +383,38 @@ process.stdin.on("data", (data) => {
 		});
 	});
 
+	test.serial("RPC live state restores independent child plan snapshots and reflects clear", async () => {
+		const { default: registerExtension } = await import("../../src/async-subagents/index.js");
+		const { createRunDir } = await import("../../src/async-subagents/lib.js");
+		const cwd = tempDir();
+		const parentSession = path.join(cwd, "sessions", "parent.jsonl");
+		const runDir = createRunDir(cwd, "child-todos");
+		const first = createAgent(runDir, "first", { pid: String(process.pid), parent_session: parentSession });
+		const second = createAgent(runDir, "second", { pid: String(process.pid), parent_session: parentSession });
+		writeFile(path.join(first, "todo-progress.json"), '{"completed":1,"total":5}');
+		writeFile(path.join(second, "todo-progress.json"), '{"completed":2,"total":3}');
+		const widgets: Array<{ key: string; lines: string[] | undefined }> = [];
+		process.env.PIX_ACP_SESSION_STATE_BRIDGE = "1";
+		const pi = new FakePi();
+		registerExtension(pi as any);
+		const ctx = { cwd, mode: "rpc", sessionManager: { getSessionFile: () => parentSession },
+			ui: { setWidget: (key: string, lines: string[] | undefined) => widgets.push({ key, lines }) } };
+		const latest = () => JSON.parse(widgets.filter((widget) => widget.lines?.[0] === "pi-tools-suite:async-subagents:live-state").at(-1)?.lines?.[1] ?? "null");
+		await pi.events.get("session_start")![0]({}, ctx);
+		try {
+			expect(latest()).toMatchObject({ count: 2, runs: [{ agents: [
+				{ id: "first", todoProgress: { completed: 1, total: 5 } },
+				{ id: "second", todoProgress: { completed: 2, total: 3 } },
+			] }] });
+			writeFile(path.join(first, "todo-progress.json"), '{"completed":0,"total":0}');
+			await pi.events.get("tool_execution_end")![0]({ toolName: "subagents" });
+			expect(latest().runs[0].agents[0].todoProgress).toEqual({ completed: 0, total: 0 });
+			expect(latest().runs[0].agents[1].todoProgress).toEqual({ completed: 2, total: 3 });
+		} finally {
+			await pi.events.get("session_shutdown")![0]({ reason: "reload" }, ctx);
+		}
+	});
+
 	test.serial("injects model-specific orchestration and escalation strategy prompts", async () => {
 		const { default: registerExtension } = await import("../../src/async-subagents/index.js");
 		const pi = new FakePi();

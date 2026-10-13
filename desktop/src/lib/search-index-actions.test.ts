@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createSearchIndexActions, indexResultDetail, type IndexActions, type IndexResult } from "./search-index-actions";
+import { createSearchIndexActions, indexActionLabel, indexResultDetail, type IndexActions, type IndexResult } from "./search-index-actions";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -35,6 +35,9 @@ describe("explicit per-source indexing", () => {
     const actions = createSearchIndexActions({ run, onChange: next => state = next, onSettled: () => {} });
     const first = actions.start("code"), second = actions.start("knowledge");
     actions.cancel("code");
+    expect(state.code).toMatchObject({ running: true, stopping: true });
+    expect(indexResultDetail(state.code)).toContain("waiting for its transport");
+    expect(indexActionLabel(state.code)).toBe("Stop");
     await actions.start("code");
     expect(run).toHaveBeenCalledTimes(2);
     expect(signals.get("code")?.aborted).toBe(true);
@@ -45,6 +48,7 @@ describe("explicit per-source indexing", () => {
     code.resolve({ source: "code", complete: true });
     await first;
     expect(state.code).toMatchObject({ running: false, cancelled: true });
+    expect(indexActionLabel(state.code)).toBe("Continue");
     expect(state.code?.result).toBeUndefined();
     await actions.start("code");
     expect(run).toHaveBeenCalledTimes(3);

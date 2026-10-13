@@ -29,9 +29,48 @@ export const SOURCE_FILES = Object.freeze({ code: "code.sqlite", knowledge: "kno
   settings: "settings.sqlite", sessions: "sessions.sqlite", tasks: "tasks.sqlite", commits: "git-commits.sqlite" });
 export const WORK_TTL_MS = 90_000;
 export const PROVIDER_CONCURRENCY = 4;
+export class SearchWorkNeedsContinueError extends Error {
+  constructor() {
+    super("Search work needs Continue after repeated interrupted provider requests");
+    this.code = "SEARCH_WORK_NEEDS_CONTINUE";
+  }
+}
+function needsContinue(row, now = Date.now()) {
+  return Boolean(row && row.expires <= now &&
+    row.failures + (row.token && row.network ? 1 : 0) >= 2);
+}
+/** Advisory metadata-only gate before automatic discovery. claimWork remains
+ * authoritative, including when another owner fails after this check. */
+export async function automaticWorkPaused(root, source, signal) {
+  signal.throwIfAborted();
+  const filename = sourcePath(root, source);
+  for (const directory of sourceDirectories(root, source)) {
+    const info = await lstat(directory).catch(e => { if (e.code !== "ENOENT") throw e; });
+    if (!info) return false;
+    if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("Unsafe search directory");
+  }
+  if (!await fileInfo(filename)) return false;
+  const db = await openDatabase(filename, { readOnly: true });
+  try {
+    signal.throwIfAborted();
+    if (!db.prepare("SELECT 1 FROM sqlite_master WHERE name='pix_search_work'").get()) return false;
+    return needsContinue(db.prepare("SELECT * FROM pix_search_work WHERE id='documents'").get());
+  } finally { db.close(); }
+}
 export function sourcePath(root, source) {
   if (!Object.hasOwn(SOURCE_FILES, source)) throw new Error("Unknown search source");
+  if (source === "settings") return join(globalSearchDirectory(), SOURCE_FILES.settings);
   return join(resolve(root), ".pi/search", SOURCE_FILES[source]);
+}
+export function globalSearchDirectory() {
+  return join(process.env.HOME?.trim() || homedir(), ".config/pi/search");
+}
+export function sourceDirectories(root, source) {
+  if (source === "settings") {
+    const home = process.env.HOME?.trim() || homedir();
+    return [join(home, ".config"), join(home, ".config/pi"), globalSearchDirectory()];
+  }
+  return [join(resolve(root), ".pi"), join(resolve(root), ".pi/search")];
 }
 async function fileInfo(filename) {
   for (let attempt = 0; attempt < 4; attempt++) {
@@ -56,8 +95,12 @@ export async function safeDirectory(directory) {
   const info = await lstat(directory);
   if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("Unsafe search directory");
 }
-export async function openDatabase(filename) {
+export async function openDatabase(filename, { readOnly = false } = {}) {
   await safeFile(filename);
+  if (readOnly) {
+    if ("Bun" in globalThis) { const { Database } = await import("bun:sqlite"); return new Database(filename, { readonly: true }); }
+    const { DatabaseSync } = await import("node:sqlite"); return new DatabaseSync(filename, { readOnly: true });
+  }
   try {
     const handle = await open(filename, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600);
     await handle.close();
@@ -97,7 +140,7 @@ export async function claimWork(db, signal, options = {}) {
       const now = Date.now();
       if (!row || row.expires <= now) {
         const failures = (row?.failures ?? 0) + (row?.token && row.network ? 1 : 0);
-        if (failures >= 2 && !options.retry) throw new Error("Search work needs Continue after repeated interrupted provider requests");
+        if (failures >= 2 && !options.retry) throw new SearchWorkNeedsContinueError();
         token = randomUUID();
         db.prepare(`INSERT INTO pix_search_work VALUES(?,?,?,?,0) ON CONFLICT(id)
           DO UPDATE SET token=excluded.token,expires=excluded.expires,failures=excluded.failures,network=0`)

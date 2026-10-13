@@ -6,6 +6,15 @@ import type { SessionUpdate } from "@agentclientprotocol/sdk";
 
 const CONTEXT = { sessionId: "s1", cwd: "/work/repo" };
 
+test("only known cancellation suppresses an abort-shaped provider error", () => {
+	const translator = new EventTranslator(CONTEXT);
+	const event = (errorMessage: string) => ({ type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage } }) as unknown as JsonAgentSessionEvent;
+	assert.equal(translator.translate(event("This operation was aborted")).length, 1);
+	assert.deepEqual(translator.translate(event("This operation was aborted"), true), []);
+	assert.equal(translator.translate(event("HTTP 401: invalid API key"), true).length, 1);
+	assert.equal(translator.translate(event("This operation was aborted")).length, 1, "cancellation must not leak into the next run");
+});
+
 type ToolCall = Extract<SessionUpdate, { sessionUpdate: "tool_call" }>;
 type ToolCallUpdated = Extract<SessionUpdate, { sessionUpdate: "tool_call_update" }>;
 

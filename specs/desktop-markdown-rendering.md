@@ -122,8 +122,14 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
   Ordinary absolute text/file paths remain validation candidates, and paths in
   fenced code or Markdown link labels do not create nested previews.
 - Project/local Markdown images reserve their known intrinsic proportions through
-  loading, errors, and streaming rerenders, bounded by the existing 28rem height
-  cap and available width without cropping or upscaling. Unknown dimensions use
+  loading, errors, and streaming rerenders. In chat they use the full available
+  content width, bounded by the scroll pane's visible height and intrinsic image
+  width, without cropping or upscaling. The height bound updates on pane resize
+  (including composer resizing); hidden panes retain their last positive height.
+  Inline project/local videos use the same content-width and viewport-height
+  bounds, keeping natural proportions and native playback controls. Outside chat
+  the existing 48rem container and 28rem height caps remain. Remote images and
+  attachment thumbnails are unchanged. Unknown image dimensions use
   a compact fallback until first load, not a fixed square.
   See [Desktop transcript scrolling](desktop-transcript-scrolling.md).
 - Unchanged project/local image previews retain their actual DOM subtree across

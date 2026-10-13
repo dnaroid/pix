@@ -7,6 +7,7 @@ import { searchNative } from "../src/project-search/native-engine.mjs";
 import { openVectorStore } from "../src/project-search/native-vector-store.mjs";
 import { embedRepository, repositoryEmbeddingSettings } from "../src/project-search/native-embedding-provider.mjs";
 import { removeDirsWithRetry, unlinkWithRetry } from "./support/fs-retry.js";
+import { enableSearchSources } from "./support/search-sources.js";
 
 const roots: string[] = [];
 const originalHome = process.env.HOME;
@@ -24,6 +25,7 @@ async function fixture(enabled = true) {
   process.env.HOME = home;
   const root = join(home, "project");
   await mkdir(join(root, ".pi/search"), { recursive: true });
+  enableSearchSources(root);
   await put(root, "../.config/pi/pi-tools-suite.jsonc", JSON.stringify(enabled ? { revision: "fixture", search: { embedding: config } } : {}));
   return root;
 }
@@ -39,6 +41,38 @@ function fakeProvider() {
 afterEach(async () => { if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome; await removeDirsWithRetry(roots); });
 
 describe("native semantic repository retrieval", () => {
+  test("filters weak cosine candidates before RRF, preserving lexical matches and cached boundary vectors", async () => {
+    const root = await fixture();
+    await put(root, "../.config/pi/pi-tools-suite.jsonc", JSON.stringify({ search: { embedding: { ...config, vectorSize: 16 } } }));
+    await put(root, "boundary.ts", "boundaryCandidate");
+    await put(root, "boundary.test.ts", "boundaryCandidate");
+    await put(root, "docs.md", "boundaryCandidate");
+    await put(root, "weak.ts", "weakCandidate");
+    await put(root, "weak.md", "weakCandidate");
+    await put(root, "literal.ts", "needle weakCandidate");
+    let calls = 0;
+    const provider = { key: async () => "fixture-only-key", embed: async (inputs: string[]) => {
+      calls++;
+      // All ones has norm 4: exactly 0.25 against the query's unit vector,
+      // including after Float32 cache serialization.
+      return inputs.map(text => {
+        if (text.includes("boundaryCandidate")) return Array(16).fill(1);
+        if (text.includes("weakCandidate")) return [0.24, Math.sqrt(1 - 0.24 ** 2), ...Array(14).fill(0)];
+        return [1, ...Array(15).fill(0)];
+      });
+    } };
+    const hybrid = await searchNative(root, request({ query: "needle" }), provider);
+    expect(hybrid.hits.map((hit: any) => hit.path).sort()).toEqual(["boundary.test.ts", "boundary.ts", "docs.md", "literal.ts"]);
+    expect(hybrid.status.semantic).toMatchObject({ state: "ready", indexed: 6, total: 6 });
+    calls = 0;
+    const semantic = await searchNative(root, request({ query: "needle", mode: "semantic" }), provider);
+    expect(semantic.hits.map((hit: any) => hit.path).sort()).toEqual(["boundary.test.ts", "boundary.ts", "docs.md"]);
+    expect(calls).toBe(0);
+    const lexical = await searchNative(root, request({ query: "needle", mode: "lexical" }), provider);
+    expect(lexical.hits.map((hit: any) => hit.path)).toEqual(["literal.ts"]);
+    expect(calls).toBe(0);
+  });
+
   test("split Code and Knowledge share the original 128-document upload budget", async () => {
     const root = await fixture(), provider = fakeProvider();
     for (let i = 0; i < 130; i++) {

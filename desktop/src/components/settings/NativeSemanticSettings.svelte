@@ -10,6 +10,7 @@
   const embedding = $derived(settingsValue(parsed, ["search", "embedding"]));
   const provider = $derived(text("embeddingProvider"));
   const dimension = $derived(settingsValue(parsed, ["search", "embedding", "vectorSize"]));
+  const reranker = $derived(settingsValue(parsed, ["search", "rerankerModel"]));
   const providers = [
     { value: "", label: "Not configured" },
     { value: "openrouter", label: "OpenRouter" },
@@ -26,6 +27,10 @@
   function selectProvider(value: string) {
     if (!value) onChange(removeSettingsValue(source, ["search", "embedding"]));
     else set("embeddingProvider", value);
+  }
+  function setReranker(value: string) {
+    const path = ["search", "rerankerModel"];
+    onChange(value.trim() ? updateSettingsSource(source, path, value.trim()) : removeSettingsValue(source, path));
   }
 </script>
 
@@ -50,3 +55,6 @@
   </SettingsFieldRow>
 {/if}
 {#if !embedding}<p class="px-2.5 py-2 text-xs text-muted-foreground">Not configured. Semantic search is off; local search is unchanged.</p>{/if}
+<SettingsFieldRow label="Reranker model" description="Optional OpenRouter model at search.rerankerModel (for example voyageai/rerank-3-lite). Saving authorizes sending queries, bounded Code/Knowledge text and Sessions/Tasks/Commits titles/snippets across projects in Pi and Desktop; charges may apply. One merged pass, even without embeddings; Settings stay local. Empty disables it; pure agent/native lexical search stays local. Desktop shows local results first. Uses OPENROUTER_API_KEY or shared Pi auth. Provider errors retain original results.">
+  <input aria-label="Reranker model" value={typeof reranker === "string" ? reranker : ""} oninput={(event) => setReranker(event.currentTarget.value)} autocomplete="off" spellcheck="false" class="h-7 w-full rounded-md border border-input bg-panel-strong px-2 font-mono text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30" />
+</SettingsFieldRow>

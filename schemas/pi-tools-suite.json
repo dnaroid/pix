@@ -46,6 +46,19 @@
       },
       "description": "Bundled async-subagent role names to re-enable after an earlier config layer disabled them."
     },
+    "builtinAgentModels": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z0-9][a-z0-9_-]*$" },
+      "patternProperties": {
+        "^.*$": {
+          "anyOf": [
+            { "type": "string", "pattern": "^[^\\s/:]+/[^\\s:]+(?::(?:off|minimal|low|medium|high|xhigh|max))?$" },
+            { "type": "null", "const": null }
+          ]
+        }
+      },
+      "description": "Per-role primary model choices for bundled explicit-model agents, as provider/model[:thinking]. Preserve authored fallbacks. Layers merge by role; null clears an inherited choice and restores the current bundled default. Project-local replacements, unknown/disabled roles and frontier/automatic roles are unaffected."
+    },
     "todoThinking": {
       "type": "boolean",
       "description": "Enable per-todo thinking levels and automatic thinking switch/restore when tasks become in-progress/completed."
@@ -1445,6 +1458,11 @@
             "adoc"
           ],
           "description": "Complete Knowledge file extensions. Empty disables this category. Omitted uses the displayed defaults. Optional leading dot; case-insensitive. Must not overlap Code extensions. Paths/globs are not supported; normal ignore and safety rules still apply."
+        },
+        "rerankerModel": {
+          "type": "string",
+          "maxLength": 256,
+          "description": "Optional OpenRouter reranker for merged Code/Knowledge/Sessions/Tasks/Commits results. Empty or omitted disables it. Saving authorizes query, bounded repository text and history title/snippet uploads across projects; charges may apply. Settings and pure agent/native lexical search stay local. Desktop publishes local results first."
         },
         "embedding": {
           "type": "object",

@@ -58,6 +58,34 @@ function conversationOptions(sessionId: string | null, quotaWait = createQuotaWa
 }
 
 describe("workbench composer props", () => {
+  it("offers handoff only for idle loaded sessions without queued work or another handoff", () => {
+    const options = conversationOptions("source");
+    options.activeAgentControlState = () => "idle";
+    options.handoff = { busySessionId: null, start: vi.fn() };
+    expect(buildWorkbenchConversationProps(options).composer.onHandoff).toBe(options.handoff.start);
+    options.handoff.busySessionId = "source";
+    let props = buildWorkbenchConversationProps(options);
+    expect(props.composer.ready).toBe(false);
+    expect(props.queue.disabled).toBe(true);
+    expect(props.transcript.operationRunning).toBe(true);
+    expect(props.composer.onHandoff).toBeUndefined();
+    options.handoff.busySessionId = "other";
+    props = buildWorkbenchConversationProps(options);
+    expect(props.composer.ready).toBe(true);
+    expect(props.composer.onHandoff).toBeUndefined();
+    options.handoff.busySessionId = null;
+    options.promptRuntime.queueItemsBySession.set("source", [{}]);
+    expect(buildWorkbenchConversationProps(options).composer.onHandoff).toBeUndefined();
+    options.promptRuntime.queueItemsBySession.clear();
+    options.sessionHistoryLoading = () => true;
+    expect(buildWorkbenchConversationProps(options).composer.onHandoff).toBeUndefined();
+    options.sessionHistoryLoading = () => false;
+    options.activeSessionRuntimeReady = () => false;
+    expect(buildWorkbenchConversationProps(options).composer.onHandoff).toBeUndefined();
+    options.activeSessionRuntimeReady = () => true;
+    options.activeAgentControlState = () => "paused";
+    expect(buildWorkbenchConversationProps(options).composer.onHandoff).toBeUndefined();
+  });
   it("forwards scroll restoration readiness separately from reader follow mode", () => {
     const options = conversationOptions("session-1");
     options.transcriptScroll.restoring = true;

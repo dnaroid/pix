@@ -4,8 +4,11 @@ import { beginWrite, withProviderSlot } from "./source-work.mjs";
 import { readSafeFile } from "./native-scan.mjs";
 import { readSourceExtensions, sourceKind } from "./native-source-config.mjs";
 import { digest, repositoryEmbeddingSettings, repositoryEmbeddingKey, embedRepository } from "./native-embedding-provider.mjs";
+import { preferDistinctFiles, prioritizeIdentifiers } from "./native-ranking.mjs";
 
 export const MAX_CHUNKS_PER_SEARCH = 128;
+// Filter raw similarity before test penalties and reciprocal-rank fusion.
+export const MIN_REPOSITORY_SIMILARITY = 0.25;
 function cosine(a, b) {
   let dot = 0, aa = 0, bb = 0;
   for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; aa += a[i] ** 2; bb += b[i] ** 2; }
@@ -33,7 +36,7 @@ export function fuseRepositoryHits(lexical, semantic, request) {
     merged.set(hit.id, { ...hit, score: (previous?.score ?? 0) + 30 / (60 + rank + 1) });
   });
   const seen = new Set();
-  return [...merged.values()].sort((a, b) => b.score - a.score || (a.path < b.path ? -1 : a.path > b.path ? 1 : a.startLine - b.startLine))
+  return prioritizeIdentifiers(preferDistinctFiles([...merged.values()].sort((a, b) => b.score - a.score || (a.path < b.path ? -1 : a.path > b.path ? 1 : a.startLine - b.startLine))), request.query)
     .filter(hit => { if (request.dedupeFile && seen.has(hit.path)) return false; seen.add(hit.path); return true; }).slice(0, request.limit);
 }
 
@@ -58,6 +61,7 @@ async function semanticPass(store, request, generation, dependencies, documentOn
   let vectors, activeLease, indexed = 0, total = 0, uploaded = 0;
   const current = async () => {
     signal.throwIfAborted();
+    await requireSourceEnabled(store.root, store.source, signal);
     await checkStorage(store.root, store.filename);
     if (vectors) await checkStorage(store.root, vectors.filename);
     if ((await repositoryEmbeddingSettings(store.root))?.signature !== settings.signature
@@ -154,8 +158,10 @@ async function semanticPass(store, request, generation, dependencies, documentOn
         if (!vector) continue;
         indexed++;
         if (documentOnly || !queryVector) continue;
-        const score = cosine(queryVector, vector) * (!request.includeTests && chunk.row.is_test ? 0.6 : 1);
-        if (score > 0) hits.push(chunkHit(chunk.row, score, request));
+        const similarity = cosine(queryVector, vector);
+        if (!(similarity >= MIN_REPOSITORY_SIMILARITY)) continue;
+        const score = similarity * (!request.includeTests && chunk.row.is_test ? 0.6 : 1);
+        hits.push(chunkHit(chunk.row, score, request));
       }
       if (!documentOnly && !queryVector) notices.push("Semantic query embedding unavailable or another indexer is active; local results remain available.");
     }
@@ -173,3 +179,4 @@ async function semanticPass(store, request, generation, dependencies, documentOn
       status: { enabled: true, complete: false, state: "unavailable", indexed, total } };
   } finally { vectors?.close(); }
 }
+import { requireSourceEnabled } from "./source-policy.mjs";

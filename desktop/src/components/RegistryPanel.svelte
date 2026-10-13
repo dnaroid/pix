@@ -13,10 +13,12 @@
   import RegistryCatalog from "./RegistryCatalog.svelte";
   import type { RegistryBackgroundSyncState } from "../lib/registry-background-sync";
   import type { AvailableCommand } from "@agentclientprotocol/sdk";
+  import type { ModelThinkingModel } from "../lib/model-thinking";
 
   let {
     snapshot,
     contextCommands = [],
+    agentModels = [],
     backgroundSync,
     projectInitialized,
     projectPiSizeBytes,
@@ -38,6 +40,7 @@
   }: {
     snapshot: RegistrySnapshot | undefined;
     contextCommands?: readonly AvailableCommand[];
+    agentModels?: readonly ModelThinkingModel[];
     backgroundSync: RegistryBackgroundSyncState;
     projectInitialized: boolean | undefined;
     projectPiSizeBytes: number | null | undefined;
@@ -118,6 +121,7 @@
     <RegistryCatalog
       {snapshot}
       {contextCommands}
+      {agentModels}
       {loading}
       {remoteDisabled}
       {actionId}

@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { listSearchSessions } from "./session-list.js";
 import { findProjectRoot } from "../lib/project.js";
 import { withTaskDatabase } from "../project-tasks/storage.js";
 import { validateTaskDocument, type ProjectTask } from "../project-tasks/schema.js";
@@ -15,6 +16,10 @@ import type { CachedSessionCandidate } from "./semantic-cache.js";
 import { setImmediate as yieldToLoop } from "node:timers/promises";
 import { searchNativeProject } from "./native.js";
 import type { NativeSearchRequest, NativeSearchResponse } from "./native-contract.js";
+import type { FederatedRerankContext, NativeRerankContext } from "./native-contract.js";
+import { prepareFederatedRerank, rerankFederated } from "./federation-reranker.mjs";
+import { selectFederatedCandidates, applyFederatedOrder } from "./federation-ranking.mjs";
+import { preferDistinctFiles, prioritizeIdentifiers } from "./native-ranking.mjs";
 
 const exec = promisify(execFile);
 export const PROJECT_SEARCH_SOURCES = ["sessions", "tasks", "commits", "code", "knowledge"] as const;
@@ -92,6 +97,7 @@ export interface ProjectSearchServices {
    * explicit global semantic provider configuration and shared credentials. */
   semantic?: SemanticSearchOptions;
   commitSemantic?: CommitSemanticServices;
+  reranker?: { rerankerKey?: () => Promise<string | undefined>; rerank?: (query: string, documents: string[], model: string, key: string, signal: AbortSignal) => Promise<unknown> };
 }
 
 const MAX_OUTPUT = 12_000;
@@ -182,7 +188,7 @@ export async function resolveSearchRoot(cwd: string, projectPath?: string): Prom
 }
 
 async function defaultSessionList(cwd: string, signal: AbortSignal): Promise<SessionRecord[]> {
-  return SessionManager.list(cwd, undefined, undefined, signal);
+  return listSearchSessions(cwd, signal);
 }
 function messageText(content: unknown): string {
   if (typeof content === "string") return excludeSessionAttachments(content).slice(0, 4096);
@@ -404,17 +410,19 @@ async function searchCommits(root: string, query: string, queryTerms: readonly s
 }
 
 async function searchRepository(root: string, query: string, kinds: ("code" | "knowledge")[], params: ProjectSearchParams,
-  signal: AbortSignal, deps: ProjectSearchServices): Promise<{ hits: ProjectSearchHit[]; notices: string[] }> {
+  signal: AbortSignal, deps: ProjectSearchServices, federating: boolean,
+  nativeContext: NativeRerankContext): Promise<{ hits: ProjectSearchHit[]; notices: string[] }> {
   try {
     const response = await (deps.native ?? searchNativeProject)(root, {
       query, sources: kinds, mode: params.indexMode, limit: 100, pathPrefix: params.pathPrefix,
-      includeContent: params.includeContent, dedupeFile: params.dedupeFile,
+      includeContent: federating || params.includeContent, dedupeFile: federating ? false : params.dedupeFile, skipRerank: true,
       excludeTests: params.excludeTests, includeTests: params.includeTests,
     }, signal);
     signal.throwIfAborted();
     const cap = params.maxFiles ?? (params.includeContent ? 1 : 3);
     if (!response.status.generation && !response.status.complete) throw new Error("Native snapshot unavailable");
-    const hits = kinds.flatMap(kind => response.hits.filter(hit => hit.kind === kind).slice(0, cap));
+    Object.assign(nativeContext, response.rerankContext);
+    const hits = federating ? response.hits : kinds.flatMap(kind => response.hits.filter(hit => hit.kind === kind).slice(0, cap));
     return { hits, notices: response.notices };
   } catch {
     signal.throwIfAborted();
@@ -429,12 +437,30 @@ export async function searchProject(
 ): Promise<ProjectSearchResponse> {
   const parsed = parseProjectSearchParams(params);
   if (!parsed.params) throw new Error(parsed.error ?? "Invalid project_search request");
-  const { query, sources, limit, projectPath } = parsed.params;
+  const { projectPath } = parsed.params;
   signal.throwIfAborted();
   const root = await resolveSearchRoot(cwd, projectPath);
+  return withSourcePolicy(root, signal, owned => searchEnabledProject(root, parsed.params!, deps, owned));
+}
+async function searchEnabledProject(root: string, params: NonNullable<ReturnType<typeof parseProjectSearchParams>["params"]>,
+  deps: ProjectSearchServices, signal: AbortSignal): Promise<ProjectSearchResponse> {
+  const parsed = { params };
+  const { query, sources, limit } = params;
+  const policy = await readSourcePolicy(root);
   signal.throwIfAborted();
   const all: ProjectSearchHit[] = [], notices: string[] = [];
-  const wanted = /^patch:/iu.test(query) ? sources.filter(source => source === "commits") : sources;
+  const allowed = sources.filter(source => policy.enabled[source]);
+  const wanted = /^patch:/iu.test(query) ? allowed.filter(source => source === "commits") : allowed;
+  if (policy.error) notices.push(policy.error);
+  if (allowed.length !== sources.length) notices.push("Disabled project search sources were skipped.");
+  let rerankContext: FederatedRerankContext | undefined;
+  const nativeContext: NativeRerankContext = {};
+  if (params.indexMode !== "lexical") {
+    try {
+      const prepared = await prepareFederatedRerank(root, wanted, AbortSignal.any([signal, AbortSignal.timeout(4000)]));
+      rerankContext = prepared.context;
+    } catch { signal.throwIfAborted(); notices.push("Search reranking context unavailable; original ranking retained."); }
+  }
   const queryTerms = terms(query);
   const timeout = new AbortController();
   const timer = setTimeout(() => timeout.abort(), 60_000);
@@ -518,7 +544,7 @@ export async function searchProject(
     });
   }
   const repositoryKinds = wanted.filter((source): source is "code" | "knowledge" => source === "code" || source === "knowledge");
-  if (repositoryKinds.length) collect("Code/Knowledge", () => searchRepository(root, query, repositoryKinds, parsed.params!, deadline, deps));
+  if (repositoryKinds.length) collect("Code/Knowledge", () => searchRepository(root, query, repositoryKinds, parsed.params!, deadline, deps, !!rerankContext, nativeContext));
   try {
     await Promise.race([
       Promise.allSettled(jobs),
@@ -530,7 +556,7 @@ export async function searchProject(
     deadline.removeEventListener("abort", onAbort);
     clearTimeout(timer);
   }
-  if (wanted.length !== sources.length) notices.push("patch: only searches changed Git lines; other sources were skipped.");
+  if (/^patch:/iu.test(query) && wanted.length !== allowed.length) notices.push("patch: only searches changed Git lines; other sources were skipped.");
   const sorted = all.sort((a, b) => b.score - a.score || a.kind.localeCompare(b.kind) || a.id.localeCompare(b.id));
   const unique = new Map<string, ProjectSearchHit>();
   for (const hit of sorted) {
@@ -543,7 +569,33 @@ export async function searchProject(
       unique.set(hit.id, { ...lexical, score: Math.max(previous.score, hit.score), semantic: true });
     }
   }
-  return { projectRoot: root, query, sources: wanted, hits: [...unique.values()].slice(0, limit),
+  let ranked: ProjectSearchHit[] = prioritizeIdentifiers(preferDistinctFiles([...unique.values()]), query);
+  if (rerankContext && !deadline.aborted && ranked.length) {
+    const candidates: ProjectSearchHit[] = selectFederatedCandidates(ranked);
+    const response = await rerankFederated(root, { query, context: rerankContext, candidates, nativeContext }, { ...deps.reranker, signal: deadline });
+    notices.push(...response.notices);
+    const reordered: ProjectSearchHit[] | undefined = applyFederatedOrder(candidates, response.order);
+    if (reordered) {
+      ranked = reordered;
+      if (unique.size > candidates.length) notices.push("Search reranking candidate limit reached; results are partial.");
+    }
+  }
+  const counts = new Map<string, number>(), files = new Set<string>();
+  ranked = preferDistinctFiles(ranked).filter(hit => {
+    if (hit.kind !== "code" && hit.kind !== "knowledge") return true;
+    const key = `${hit.kind}:${hit.path}`;
+    if (files.has(key)) return !params.dedupeFile;
+    const count = (counts.get(hit.kind) ?? 0) + 1;
+    if (count > (params.maxFiles ?? (params.includeContent ? 1 : 3))) return false;
+    files.add(key);
+    counts.set(hit.kind, count);
+    return true;
+  }).map(hit => {
+    if (params.includeContent) return hit;
+    const { content, ...compact } = hit; return compact;
+  });
+  signal.throwIfAborted();
+  return { projectRoot: root, query, sources: wanted, hits: ranked.slice(0, limit),
     notices: [...new Set(notices)] };
 }
 
@@ -566,3 +618,4 @@ export function formatProjectSearch(response: ProjectSearchResponse): string {
   if (result.length > MAX_OUTPUT) result = result.slice(0, MAX_OUTPUT - 80) + "\n[Output truncated; narrow sources/query.]";
   return result;
 }
+import { readSourcePolicy, withSourcePolicy } from "./source-policy.mjs";

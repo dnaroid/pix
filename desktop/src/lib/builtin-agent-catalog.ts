@@ -4,6 +4,8 @@ export interface BuiltinAgentCatalogEntry {
   readonly name: string;
   readonly icon?: string;
   readonly description?: string;
+  /** Current bundled primary; automatic/frontier roles have no per-role picker. */
+  readonly defaultModel?: string;
 }
 
 const BUILTIN_AGENT_SOURCES = import.meta.glob(
@@ -22,6 +24,7 @@ export const BUILTIN_AGENT_CATALOG: readonly BuiltinAgentCatalogEntry[] = Object
     name: file.slice(file.lastIndexOf("/") + 1, -3),
     icon: frontmatterScalar(source, "icon"),
     description: frontmatterScalar(source, "description"),
+    defaultModel: builtinAgentDefaultModel(source),
   }] : [])
   .sort((left, right) => left.name.localeCompare(right.name));
 
@@ -44,4 +47,17 @@ function frontmatterScalar(source: string, key: string): string | undefined {
     return value.slice(1, -1);
   }
   return value;
+}
+
+/** Read display metadata from the bundled profiles' inline or block model lists. */
+export function builtinAgentDefaultModel(source: string): string | undefined {
+  if (!hasFrontmatter(source)) return undefined;
+  if (frontmatterScalar(source, "modelSelection") === "frontier") return undefined;
+  const models = frontmatterScalar(source, "models");
+  const inline = models?.startsWith("[") ? models.slice(1, -1).split(",")[0]?.trim() : undefined;
+  const normalized = source.replace(/^\uFEFF/u, "").replace(/\r\n?/gu, "\n");
+  const frontmatter = normalized.slice(4, normalized.indexOf("\n---", 4));
+  const block = /^models:\s*\n[ \t]+-[ \t]+([^\n]+)/mu.exec(frontmatter)?.[1]?.trim();
+  const value = inline || block || frontmatterScalar(source, "model");
+  return value?.replace(/^(["'])(.*)\1$/u, "$2");
 }

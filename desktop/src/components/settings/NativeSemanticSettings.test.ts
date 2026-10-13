@@ -7,6 +7,16 @@ import panel from "../SettingsPanel.svelte?raw";
 import { SETTINGS_SEARCH_CATALOG } from "../../lib/settings-search-catalog";
 
 describe("global semantic settings contract", () => {
+  it("edits an optional independent reranker through the same saved suite draft", () => {
+    expect(source).toContain('["search", "rerankerModel"]');
+    expect(source).toContain('label="Reranker model"');
+    expect(source).toContain('aria-label="Reranker model"');
+    expect(source).toContain("removeSettingsValue(source, path)");
+    expect(source).toContain("lexical search stays local");
+    expect(source).toContain("bounded Code/Knowledge text and Sessions/Tasks/Commits titles/snippets");
+    expect(source).toContain("Settings stay local");
+    expect(SETTINGS_SEARCH_CATALOG.find(entry => entry.section === "pi-tools-suite-search" && entry.id === "reranker-model")?.label).toBe("Reranker model");
+  });
   it("uses native configuration rather than ACP or independent consent flags", () => {
     expect(source).not.toContain("invoke");
     expect(source).toContain('removeSettingsValue(source, ["search", "embedding"])');

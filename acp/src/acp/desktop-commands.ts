@@ -461,6 +461,8 @@ export type DesktopRegistryResourceType = "skill" | "agent";
 export type DesktopRegistryProjectScope = "tasks" | "plans" | "todo" | "workspace" | "project";
 
 export type DesktopRegistryActionRequest = { readonly cwd: string } & (
+	| { readonly action: "set-agent-model"; readonly type: "agent"; readonly name: string; readonly model: string }
+	| { readonly action: "reset-agent-model"; readonly type: "agent"; readonly name: string }
 	| { readonly action: "refresh" | "configure" | "project-key" | "push-project-resources" }
 	| {
 		readonly action: "install" | "update" | "push" | "uninstall" | "remove" | "make-local" | "tags" | "toggle-scope";
@@ -747,6 +749,18 @@ export function parseDesktopRegistryActionRequest(value: unknown): DesktopRegist
 		throw new RequestError(ERROR_INVALID_PARAMS, "registry action request requires an action");
 	}
 	const workspace = { cwd: value.cwd };
+	if (value.action === "set-agent-model" || value.action === "reset-agent-model") {
+		if (value.type !== "agent" || typeof value.name !== "string"
+			|| !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value.name) || value.name.includes("..")) {
+			throw new RequestError(ERROR_INVALID_PARAMS, "invalid agent model action request");
+		}
+		if (value.action === "reset-agent-model") return { ...workspace, action: value.action, type: "agent", name: value.name };
+		if (typeof value.model !== "string" || value.model.length > 512
+			|| !/^[^\s/:]+\/[^\s:]+(?::(?:off|minimal|low|medium|high|xhigh|max))?$/.test(value.model)) {
+			throw new RequestError(ERROR_INVALID_PARAMS, "invalid agent model reference");
+		}
+		return { ...workspace, action: value.action, type: "agent", name: value.name, model: value.model };
+	}
 	if (value.action === "refresh" || value.action === "configure" || value.action === "project-key" || value.action === "push-project-resources") {
 		return { ...workspace, action: value.action };
 	}

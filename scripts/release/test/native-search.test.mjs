@@ -43,7 +43,7 @@ test("relocated native CLI uses only release-root dependencies without IDX or AC
   const workspace = join(directory, "workspace");
   await mkdir(engine, { recursive: true });
   await mkdir(workspace);
-  for (const name of ["cli", "engine", "scan", "store", "semantic", "vector-store", "embedding-provider", "source-config"]) {
+  for (const name of ["cli", "engine", "scan", "store", "semantic", "vector-store", "embedding-provider", "source-config", "reranker", "reranker-context"]) {
     assert.ok(packedPaths.has(`external/pi-tools-suite/src/project-search/native-${name}.mjs`));
     await cp(join(suite, `src/project-search/native-${name}.mjs`), join(engine, `native-${name}.mjs`));
   }
@@ -53,7 +53,9 @@ test("relocated native CLI uses only release-root dependencies without IDX or AC
   await cp(join(root, "node_modules/jsonc-parser"), join(app, "node_modules/jsonc-parser"), { recursive: true });
   assert.ok(packedPaths.has("external/pi-tools-suite/src/project-search/source-extension-settings.mjs"));
   await cp(join(suite, "src/project-search/source-extension-settings.mjs"), join(engine, "source-extension-settings.mjs"));
-  for (const name of ["source-work"]) {
+  for (const name of ["source-work", "source-policy", "source-policy-lock", "settings-policy",
+    "federation-reranker", "snapshot-probe", "session-discovery", "session-record", "session-text",
+    "session-revisions", "session-index-revision", "task-snapshot", "repository-snapshot"]) {
     assert.ok(packedPaths.has(`external/pi-tools-suite/src/project-search/${name}.mjs`));
     await cp(join(suite, `src/project-search/${name}.mjs`), join(engine, `${name}.mjs`));
   }
@@ -72,4 +74,19 @@ test("relocated native CLI uses only release-root dependencies without IDX or AC
   assert.equal(result.status.stale, false, run.stdout);
   assert.equal(result.status.complete, true, run.stdout);
   assert.deepEqual(result.hits.map((hit) => [hit.path, hit.startLine]), [["owner.ts", 1]]);
+  const native = input => spawnSync(process.execPath, [entry, workspace], {
+    input: JSON.stringify(input), encoding: "utf8", timeout: 15_000,
+    env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, HOME: directory },
+  });
+  const prepared = native({ operation: "rerank-prepare", sources: ["sessions", "tasks", "commits", "code", "knowledge"] });
+  assert.equal(prepared.status, 0, prepared.stderr || prepared.error?.message);
+  assert.deepEqual(JSON.parse(prepared.stdout), {}); // no global opt-in in relocated HOME
+  const candidates = Array.from({ length: 100 }, (_, id) => ({ kind: "code", id: String(id), title: "文".repeat(512), snippet: "文".repeat(4096), content: "文".repeat(7500) }));
+  const large = native({ operation: "rerank", query: "unicode", candidates });
+  assert.equal(large.status, 0, large.stderr || large.error?.message);
+  assert.deepEqual(JSON.parse(large.stdout), { notices: [] });
+  const oversizedOther = native({ query: "NativeReleaseProbe", sources: ["code"], mode: "lexical", padding: "x".repeat(16384) });
+  assert.equal(oversizedOther.status, 0); // failures use the JSON protocol, not the exit status
+  assert.equal(JSON.parse(oversizedOther.stdout).status.complete, false);
+  assert.ok(JSON.parse(oversizedOther.stdout).notices.length);
 });

@@ -23,6 +23,7 @@ export type RegistryStatus =
 export type RegistryItemAction = "install" | "update" | "push" | "pull" | "uninstall" | "remove" | "make-local" | "tags" | "toggle-scope";
 
 export interface RegistryItem {
+  readonly agentModel?: { readonly original: string; readonly override?: string; readonly parentAware: boolean };
   readonly id: string;
   readonly type: RegistryResourceType;
   readonly name: string;
@@ -73,6 +74,8 @@ export type RegistryDiffState =
   | { readonly phase: "error"; readonly target: RegistryDiffTarget; readonly error: string };
 
 export type RegistryActionRequest =
+  | { readonly action: "set-agent-model"; readonly type: "agent"; readonly name: string; readonly model: string }
+  | { readonly action: "reset-agent-model"; readonly type: "agent"; readonly name: string }
   | { readonly action: "refresh" | "configure" | "project-key" | "push-project-resources" }
   | {
       readonly action: "install" | "update" | "push" | "uninstall" | "remove" | "make-local" | "tags" | "toggle-scope";
@@ -374,6 +377,13 @@ function parseRegistryItem(value: unknown): RegistryItem | undefined {
   if (typeof value.statusLabel !== "string" || typeof value.icon !== "string") return undefined;
   if (typeof value.local !== "boolean" || typeof value.remote !== "boolean" || !Array.isArray(value.actions)) return undefined;
   if (value.description !== undefined && typeof value.description !== "string") return undefined;
+  if (value.agentModel !== undefined && (!isRecord(value.agentModel)
+    || value.type !== "agent" || !value.local
+    || typeof value.agentModel.original !== "string" || !value.agentModel.original.trim()
+    || typeof value.agentModel.parentAware !== "boolean"
+    || (value.agentModel.override !== undefined && (typeof value.agentModel.override !== "string" || !value.agentModel.override.trim())))) {
+    return undefined;
+  }
   if (value.tags !== undefined && (!Array.isArray(value.tags) || value.tags.some((tag) => typeof tag !== "string"))) return undefined;
   if (value.publicationScope !== undefined
     && (typeof value.publicationScope !== "string" || !PUBLICATION_SCOPES.has(value.publicationScope as RegistryPublicationScope))) {
@@ -396,6 +406,11 @@ function parseRegistryItem(value: unknown): RegistryItem | undefined {
     statusLabel: value.statusLabel,
     icon: value.icon,
     ...(typeof value.description === "string" ? { description: value.description } : {}),
+    ...(isRecord(value.agentModel) ? { agentModel: {
+      original: value.agentModel.original as string,
+      parentAware: value.agentModel.parentAware as boolean,
+      ...(typeof value.agentModel.override === "string" ? { override: value.agentModel.override } : {}),
+    } } : {}),
     ...(Array.isArray(value.tags) ? { tags: value.tags as string[] } : {}),
     local: value.local,
     remote: value.remote,

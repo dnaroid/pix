@@ -70,6 +70,8 @@ Preserve Pix conversation/session membership and lazy draft semantics after conv
 - A UI-only draft is never persisted as the active project session, so restarting Pix cannot attempt `session/history` for it. Compatibility recovery for older mapped empty sessions remains unchanged and generation-guarded.
 - The New Conversation action uses the shared `session.new` command metadata for its platform shortcut hint; the Command Palette New/Open Conversation actions use the same UI-only draft surface.
 
+- The composer actions ellipsis offers **Handoff to fresh session** (`composer.handoff`) only for an idle, loaded regular conversation. It is unavailable for question/edited-message flows, managed councils, and queued work. Handoff asks the current session to write a unique `.pi/artifacts/handoff-<UUID>/handoff.md` containing continuation context and ending with the completion marker; only a completed `end_turn` and a nonempty file with that marker can proceed. The target session is created and loaded off-screen before replacing the source tab, then automatically prompted to read the handoff file and continue. On commit, prior history requests are invalidated and history loading is cleared; the fresh session is marked fully loaded without starting hydration, so its running continuation can display composer activity normally. The source session's persistent history and unsent draft are preserved. Errors, cancellation, stale source/runtime/navigation/workspace ownership, incomplete output, and target create/load failures never switch away from the source. If continuation fails after the switch, the fresh session remains available for retry.
+
 - A cached transcript is not proof that persisted history finished loading. If tab navigation interrupted hydration, or hydration failed, selecting that session again retries history loading even when an empty placeholder or partial live updates were cached. Successful hydration, including a genuinely empty history, makes the cache reusable. Submit-owned pending hydration is retained rather than restarted on re-entry, and closing/resetting a session clears its incomplete-history state.
   A failed optimistic close restores incomplete-history and older-page cursor metadata along with tab membership, but never restores retired request ownership. Late updates for the retired attachment cannot recreate a deleted transcript before a fresh attachment opens.
 
@@ -105,6 +107,7 @@ Preserve Pix conversation/session membership and lazy draft semantics after conv
 - `desktop/src/components/SavedSessionRow.svelte`
 - `desktop/src/lib/saved-session-tree.ts`
 - `desktop/src/components/PromptComposer.svelte`
+- `desktop/src/components/PromptComposerActionsMenu.svelte`
 - `desktop/src/lib/workbench-tabs.ts`
 - `desktop/src/lib/session-tabs.ts`
 - `desktop/src/lib/model-thinking.ts`
@@ -120,6 +123,15 @@ Preserve Pix conversation/session membership and lazy draft semantics after conv
 - `desktop/src/app/workbench-controller.ts`
 - `desktop/src/app/desktop-root-effects.svelte.ts`
 - `desktop/src/app/session-coordinator.ts`
+- `desktop/src/app/session-handoff.svelte.ts`
+- `desktop/src/app/session-handoff-prompts.ts`
+- `desktop/src/app/prompt-run-lifecycle.svelte.ts`
+- `desktop/src/app/prompt-runtime.svelte.ts`
+- `desktop/src/app/desktop-command-controller.svelte.ts`
+- `desktop/src/app/desktop-prompt-action-services.ts`
+- `desktop/src/app/desktop-workbench-prop-builders.ts`
+- `desktop/src/app/desktop-workbench-view-model-services.ts`
+- `desktop/src/lib/desktop-commands.ts`
 - `desktop/src/app/session-activity.svelte.ts`
 - `desktop/src/app/desktop-presentation-state.svelte.ts`
 - `acp/src/acp/desktop-commands.ts`
@@ -166,6 +178,10 @@ Preserve Pix conversation/session membership and lazy draft semantics after conv
 - `desktop/src/app/desktop-workbench-prop-builders.test.ts`
 - `desktop/src/app/session-runtime-loading.test.ts`
 - `desktop/src/app/desktop-project-action-services.test.ts`
+- `desktop/src/app/session-handoff.test.ts`
+- `desktop/src/app/prompt-run-lifecycle.test.ts`
+- `desktop/src/app/desktop-prompt-handoff.test.ts`
+- `desktop/src/lib/desktop-commands.test.ts`
 
 ## Verification
 
@@ -184,6 +200,7 @@ Preserve Pix conversation/session membership and lazy draft semantics after conv
 - `desktop/src/app/prompt-submit.test.ts` verifies that the first draft user message renders and clears the composer before materialization resolves and is still sent to the materialized session after another conversation is selected; `desktop/src/app/draft-tab-selection.test.ts` verifies that background materialization does not steal active-session state or discard the created session.
 - `desktop/src/app/prompt-submit-opening.test.ts`, `desktop/src/app/desktop-workbench-prop-builders.test.ts`, `desktop/src/app/session-history.test.ts`, and `desktop/src/app/session-runtime-loading.test.ts` cover immediate existing-session editing/optimistic send, captured target and attachments, duplicate-submit rejection without consuming fresh input, invalidated ownership, and history merge/empty-history preservation.
 - `desktop/src/app/desktop-project-action-services.test.ts` verifies that launching a project task from the active UI-only draft deactivates/preserves that draft, transfers composer ownership, and foregrounds the created real task session.
+- Handoff tests cover eligibility/action wiring, completion-marker validation, source queue holding, ownership invalidation/cancellation/error paths, off-screen target preparation before tab replacement, preserved source draft/history, continuation failure leaving the new session available, and fresh-session activity while continuation is pending without unnecessary history hydration.
 - `npm --prefix desktop test`
 - `npm --prefix desktop run check`
 - `npm --prefix desktop run build:web`

@@ -5,13 +5,48 @@ import { SEARCH_CACHE_REBUILD_REQUIRED } from "../../../acp/src/search/contract"
 const consent = (over: Partial<SemanticConsent> = {}): SemanticConsent => ({ configured: false, provider: "openrouter", model: "m", vectorSize: 768, keyAvailable: true, ...over });
 const status = (files: Partial<SearchIndexStatus["stores"][number]>, history: Partial<SearchIndexStatus["stores"][number]> = {}): SearchIndexStatus => ({
   stores: [
-    ...(["code", "knowledge"] as const).map(id => ({ id, state: "present" as const, counts: { codeChunks: 5, knowledgeChunks: 2 }, completedAt: "t", generation: 1, ...files })),
+    ...(["code", "knowledge"] as const).map(id => ({ id, state: "present" as const, counts: { files: 3, codeChunks: 5, knowledgeChunks: 2 }, completedAt: "t", generation: 1, ...files })),
     ...(["settings", "sessions", "tasks", "commits"] as const).map(id => ({ id, state: "absent" as const, counts: {}, ...history })),
   ],
 });
 const row = (rows: ReturnType<typeof buildSearchSourceRows>, id: string) => rows.find(r => r.id === id)!;
 
 describe("buildSearchSourceRows", () => {
+  it("never turns a failed or missing store status into Not indexed", () => {
+    for (const snapshot of [null, { stores: [] }]) {
+      const rows = buildSearchSourceRows(snapshot, consent({ configured: true }), undefined, 110);
+      expect(rows.every(r => r.semantic === "unknown" && r.storedVectors === undefined)).toBe(true);
+      expect(row(rows, "settings").localSummary).toBe("110 fields");
+    }
+    expect(buildSearchSourceRows(status({ state: "absent", counts: {} }), consent({ configured: true }))
+      .every(r => r.semantic === "no-vectors")).toBe(true);
+  });
+  it("does not substitute chunks or zero for unknown cached entity counts", () => {
+    const rows = buildSearchSourceRows(status({ counts: { codeChunks: 30 } }, { state: "present", counts: { sessionChunks: 100 } }), consent());
+    expect(row(rows, "code").localSummary).toBeUndefined();
+    expect(row(rows, "sessions").localSummary).toBeUndefined();
+    expect(row(rows, "code").localDetail).toContain("30 chunks");
+    expect(row(rows, "sessions").localDetail).toContain("100 public-message chunks");
+  });
+  it("reports message-chunk-only session indexes without mistaking them for an empty title cache", () => {
+    const snapshot: SearchIndexStatus = { stores: [{ id: "sessions", state: "present",
+      counts: { sessions: 4, sessionChunks: 240, sessionChunkVectors: 96 } }] };
+    const session = row(buildSearchSourceRows(snapshot, consent({ configured: true })), "sessions");
+    expect(session).toMatchObject({ local: "ready", localSummary: "4 sessions", semantic: "vectors", storedVectors: 96 });
+    expect(session.localDetail).toContain("public-message chunks");
+    expect(session.semanticDetail).toContain("96 stored vectors");
+    const combined = row(buildSearchSourceRows({ stores: [{ ...snapshot.stores[0]!, counts: { sessionTitles: 3,
+      sessionVectors: 2, sessions: 4, sessionChunks: 240, sessionChunkVectors: 96 } }] }, consent({ configured: true })), "sessions");
+    expect(combined.storedVectors).toBe(98);
+    expect(combined.localDetail).toContain("3 saved titles");
+    expect(row(buildSearchSourceRows(null, consent()), "sessions").storedVectors).toBeUndefined();
+  });
+  it("keeps saved batch counts visible during a partial scan without declaring coverage complete", () => {
+    const code = row(buildSearchSourceRows(status({ completedAt: null, counts: { files: 12, codeChunks: 400, vectors: 32 } }), consent({ configured: true })), "code");
+    expect(code).toMatchObject({ local: "incomplete", localSummary: "12 files", storedVectors: 32 });
+    expect(code.semanticDetail).toContain("stored counts alone do not prove coverage");
+    expect(row(buildSearchSourceRows(status({ state: "error" }), consent()), "code").storedVectors).toBeUndefined();
+  });
   it("isolates source databases instead of substituting legacy aggregate counts", () => {
     const snapshot: SearchIndexStatus = { stores: [
       { id: "settings", state: "error", counts: {}, error: "broken settings" },
@@ -22,7 +57,7 @@ describe("buildSearchSourceRows", () => {
     ] };
     const rows = buildSearchSourceRows(snapshot, consent({ configured: true }));
     expect(row(rows, "settings").semantic).toBe("error");
-    expect(row(rows, "tasks")).toMatchObject({ semantic: "vectors", localSummary: "2 items" });
+    expect(row(rows, "tasks")).toMatchObject({ semantic: "vectors", localSummary: "2 tasks" });
     expect(row(rows, "sessions").semantic).toBe("no-vectors");
     expect(row(rows, "code").local).toBe("ready");
     expect(row(rows, "knowledge").local).toBe("error");
@@ -44,11 +79,15 @@ describe("buildSearchSourceRows", () => {
     expect(row(rows, "code").semantic).toBe("unknown");
   });
   it("reports independent semantic activity without changing other cells", () => {
+    const checking = buildSearchSourceRows(status({}), consent(), {
+      indexingSources: { settings: false, tasks: false, sessions: false }, checkingSources: { tasks: true },
+    });
+    expect(checking.some(r => r.semanticActive)).toBe(false);
     const rows = buildSearchSourceRows(status({}), consent({ configured: true }), {
       indexingSources: { settings: false, tasks: true, sessions: false },
     }, 40);
     expect(rows.filter(r => r.semanticActive).map(r => r.id)).toEqual(["tasks"]);
-    expect(row(rows, "settings")).toMatchObject({ local: "ready", localSummary: "40 items", semanticActive: false });
+    expect(row(rows, "settings")).toMatchObject({ local: "ready", localSummary: "40 fields", semanticActive: false });
     expect(rows.some(r => r.local === "incomplete")).toBe(false);
     const legacyAggregateOnly = { indexing: true };
     expect(buildSearchSourceRows(status({}), consent(), legacyAggregateOnly as {}).some(r => r.semanticActive)).toBe(false);
@@ -87,7 +126,7 @@ describe("buildSearchSourceRows", () => {
     const rows = buildSearchSourceRows(status({}, { state: "present", counts: { taskDocuments: 3, taskVectors: 3 } }), consent({ configured: true }));
     expect(row(rows, "tasks")).toMatchObject({ local: "ready", semantic: "vectors" });
     expect(row(rows, "sessions").local).toBe("on-demand");
-    expect(row(rows, "tasks").localSummary).toBe("3 items");
-    expect(row(rows, "code").localSummary).toBe("5 chunks");
+    expect(row(rows, "tasks").localSummary).toBe("3 tasks");
+    expect(row(rows, "code").localSummary).toBe("3 files");
   });
 });

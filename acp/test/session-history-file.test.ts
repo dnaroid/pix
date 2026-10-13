@@ -13,6 +13,31 @@ import {
 	readPersistedToolResult,
 } from "../src/acp/session-history-file.js";
 
+test("question results are visible in initial persisted history without expanding tools", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "pix-history-question-"));
+	const sessionPath = join(dir, "session.jsonl");
+	const details = { canceled: false, answers: [{ id: "target", label: "Desktop", value: "desktop", wasCustom: false, index: 1 }] };
+	const input = { questions: [{ id: "target", label: "Platform", prompt: "Which platform should we check?" }] };
+	const lines = [
+		{ type: "message", id: "u1", parentId: null, message: { role: "user", content: "ask" } },
+		{ type: "message", id: "a1", parentId: "u1", message: { role: "assistant", content: [{ type: "toolCall", id: "q1", name: "question", arguments: input }] } },
+		{ type: "message", id: "r1", parentId: "a1", message: { role: "toolResult", toolName: "question", toolCallId: "q1", isError: false, details, content: [{ type: "text", text: "question answers: Platform: Desktop." }, { type: "image", data: "QUJDRA==", mimeType: "image/png" }] } },
+	];
+	await writeFile(sessionPath, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
+	const tail = await readPersistedHistoryTail(sessionPath);
+	assert.ok(tail);
+	assert.equal(tail.toolResultRefs.size, 0);
+	const history = deferredSessionHistoryFromMessages(tail.messages, { sessionId: "s1", cwd: "/repo" }, tail.replayKeys);
+	assert.equal(history.toolResults.size, 0);
+	const call = history.updates.find((update) => update.sessionUpdate === "tool_call");
+	assert.ok(call && call.sessionUpdate === "tool_call");
+	assert.deepEqual(call.rawInput, input, "full question prompt must be available before tool expansion");
+	const result = history.updates.find((update) => update.sessionUpdate === "tool_call_update");
+	assert.ok(result && result.sessionUpdate === "tool_call_update");
+	assert.deepEqual(result.rawOutput, details);
+	assert.equal(result.content?.length, 2);
+});
+
 test("persisted history tail defers large tool-result JSON until requested", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "pix-history-tail-"));
 	const sessionPath = join(dir, "session.jsonl");

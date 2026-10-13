@@ -4,6 +4,15 @@ import { observeSearchIndexEvents } from "./search-index-events";
 import { emptySearchIndexView } from "./search-index-controller";
 
 describe("bounded index activity history", () => {
+  it("does not journal local task checks as indexing transitions", () => {
+    const history = createSearchIndexHistory();
+    const observer = observeSearchIndexEvents(history, "/a");
+    const snapshot = emptySearchIndexView().snapshot;
+    for (const tasks of [false, true, false, true, false]) observer.snapshot({ ...snapshot, activity: {
+      indexingSources: { settings: false, tasks: false, sessions: false }, checkingSources: { tasks },
+    } });
+    expect(history.entries("/a")).toEqual([]);
+  });
   it("clears only the selected workspace and keeps new event identities unique", () => {
     const history = createSearchIndexHistory();
     history.append("/a", "code", "info", "Old");

@@ -5,11 +5,12 @@ import { checkStorage, MAX_DATABASE_BYTES } from "./native-store.mjs";
 import { validVector } from "./native-embedding-provider.mjs";
 import { sourcePath } from "./source-work.mjs";
 
-const definitions = [
+export const VECTOR_DEFINITIONS = [
   "CREATE TABLE meta (singleton INTEGER PRIMARY KEY CHECK(singleton=1), version INTEGER NOT NULL, root TEXT NOT NULL)",
   "CREATE TABLE vectors (identity TEXT NOT NULL, digest TEXT NOT NULL, vector BLOB NOT NULL, PRIMARY KEY(identity,digest))",
   "CREATE TABLE leases (identity TEXT PRIMARY KEY, token TEXT NOT NULL, expires INTEGER NOT NULL)",
 ];
+const definitions = VECTOR_DEFINITIONS;
 const normalize = sql => sql.replace(/[\s;"`\[\]]/g, "").toLowerCase();
 const MAX_VECTORS = 50000;
 

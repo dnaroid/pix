@@ -5,6 +5,9 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   "$schema": "https://unpkg.com/pi-ui-extend/schemas/pi-tools-suite.json",
   // Complete extension lists. Empty arrays disable the corresponding category.
   "search": {
+    // Optional OpenRouter reranking across Code/Knowledge/Sessions/Tasks/Commits.
+    // Uploads query and candidate text; charges may apply. Empty disables it.
+    // "rerankerModel": "voyageai/rerank-3-lite",
     "codeExtensions": ${JSON.stringify(codeDefaults)},
     "knowledgeExtensions": ${JSON.stringify(knowledgeDefaults)}
   },
@@ -18,6 +21,13 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
     // "oracle",
     // "ui-qa"
   ],
+  // Primary model choices for bundled explicit-model roles. Fallbacks stay in
+  // their authored order; project-local replacements are not affected.
+  // Later layers merge per role; null restores the current suite default.
+  // Frontier/automatic roles (oracle) use frontierModels instead.
+  "builtinAgentModels": {
+    // "research": "provider/model:high"
+  },
   // Secret firewall is deliberately opt-in for now. Flip this to true to enable
   // high-confidence outbound redaction plus session-history hygiene.
   "modules": {

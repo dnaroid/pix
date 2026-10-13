@@ -5,6 +5,8 @@ import { beginWrite, claimWork, openDatabase, safeDirectory, safeFile, sourcePat
 import { readSessionTranscript, transcriptUnchanged } from "./session-transcript.js";
 import { logSearchDiagnostic } from "./search-diagnostics.js";
 import { sessionIndexProgress } from "./session-index-progress.js";
+import { SessionIndexDeferred } from "./session-idle.js";
+import { ensureSessionRevision } from "./session-index-revision.js";
 
 const DOCUMENTS = "pix_session_chunks";
 const VECTORS = "pix_session_chunk_vectors";
@@ -18,6 +20,7 @@ function schema(db) {
     CREATE INDEX IF NOT EXISTS pix_session_chunk_hash ON ${DOCUMENTS}(hash);
     CREATE TABLE IF NOT EXISTS ${VECTORS}(identity TEXT NOT NULL,hash TEXT NOT NULL,vector BLOB NOT NULL,PRIMARY KEY(identity,hash));
     CREATE VIRTUAL TABLE IF NOT EXISTS ${FTS} USING fts5(session_id UNINDEXED,message_id UNINDEXED,start UNINDEXED,text,tokenize='unicode61');`);
+  ensureSessionRevision(db);
 }
 async function reconcile(db, snapshot, signal) {
   const saved = db.prepare(`SELECT revision FROM ${META} WHERE session_id=?`).get(snapshot.id);
@@ -82,7 +85,7 @@ function decode(bytes, dimension) {
 export async function indexSessionChunks(root, candidates, options) {
   const { signal, embedding } = options;
   const progress = sessionIndexProgress(root, candidates.length), counts = progress.state;
-  let db, work, success = false, indexed = 0, total = 0, inspected = 0, calls = 0, outcome = "failed";
+  let db, work, success = false, indexed = 0, total = 0, calls = 0, outcome = "failed";
   const deadline = Date.now() + 40000;
   try {
     db = await storage(root,true);
@@ -91,16 +94,24 @@ export async function indexSessionChunks(root, candidates, options) {
     try { schema(db); work.assert(db); db.exec("COMMIT"); }
     catch (e) { db.exec("ROLLBACK"); throw e; }
     const diagnostics = [];
-    for await (const snapshot of sessionSnapshots(root,candidates,signal, async diagnostic => {
+    let deferred = 0;
+    const admitted = [];
+    for (const candidate of candidates) {
+      if (!options.eligible || await options.eligible(candidate, signal)) admitted.push(candidate);
+      else deferred++;
+    }
+    for await (const snapshot of sessionSnapshots(root,admitted,signal, async diagnostic => {
       counts.sessionsChecked++; counts.sessionsSkipped++;
       if (diagnostics.length < 100) diagnostics.push(diagnostic);
       await logSearchDiagnostic(root, { event: "session_transcript_skipped", ...diagnostic });
     }, candidate => { counts.phase = "reading"; counts.sessionId = candidate.id; })) {
-      inspected++; total += snapshot.chunks.length;
+      if (options.eligible && !await options.eligible(snapshot, signal)) { deferred++; continue; }
+      total += snapshot.chunks.length;
       counts.sessionsChecked++; counts.chunksDiscovered = total; counts.phase = "saving";
       await beginWrite(db,signal);
       try {
         await reconcile(db,snapshot,signal);
+        if (options.eligible && !await options.eligible(snapshot, signal)) { db.exec("ROLLBACK"); deferred++; continue; }
         work.assert(db); db.exec("COMMIT");
       } catch (e) { db.exec("ROLLBACK"); throw e; }
       if (!embedding) continue;
@@ -118,20 +129,31 @@ export async function indexSessionChunks(root, candidates, options) {
         signal.throwIfAborted();
         if (!missing.size || (!options.drain && (calls >= 16 || Date.now() >= deadline))) break;
         if (!await embedding.authorized(signal)) throw new Error("Session embedding configuration changed");
+        if (options.eligible && !await options.eligible(snapshot, signal)) { deferred++; break; }
         const batch = [];
         for (const entry of missing) { batch.push(entry); if (batch.length === 16) break; }
         await beginWrite(db,signal);
         try { work.network(db); db.exec("COMMIT"); } catch (e) { db.exec("ROLLBACK"); throw e; }
         counts.phase = "provider"; counts.requestsStarted++;
-        const vectors = await work.run(() => embedding.embed(batch.map(([,text])=>text),signal));
+        let vectors;
+        try {
+          vectors = await work.run(() => embedding.embed(batch.map(([,text])=>text),signal,async () => {
+            if (options.eligible && !await options.eligible(snapshot,signal)) throw new SessionIndexDeferred();
+          }));
+        } catch (error) {
+          if (!(error instanceof SessionIndexDeferred)) throw error;
+          deferred++; break;
+        }
         counts.requestsCompleted++;
         if (vectors.length !== batch.length || !vectors.every(v=>valid(v,embedding.dimension))) throw new Error("Invalid session chunk vectors");
         if (!await embedding.authorized(signal)) throw new Error("Session embedding configuration changed");
+        if (options.eligible && !await options.eligible(snapshot, signal)) { deferred++; break; }
         counts.phase = "saving";
         await beginWrite(db,signal);
         try {
           if (!await transcriptUnchanged(snapshot,signal)) throw new Error("Session changed during indexing; refresh required");
           if (!await embedding.authorized(signal)) throw new Error("Session embedding configuration changed");
+          if (options.eligible && !await options.eligible(snapshot, signal)) { db.exec("ROLLBACK"); deferred++; break; }
           work.assert(db);
           const insert = db.prepare(`INSERT OR REPLACE INTO ${VECTORS} VALUES(?,?,?)`);
           for (let i=0;i<batch.length;i++) {
@@ -149,9 +171,11 @@ export async function indexSessionChunks(root, candidates, options) {
       indexed += snapshot.chunks.filter(chunk=>!missing.has(chunk.hash)).length;
     }
     success = true;
-    const complete = (!embedding || indexed===total) && inspected===candidates.length;
+    const skipped = counts.sessionsSkipped;
+    const complete = (!embedding || indexed===total) && skipped===0 && deferred===0;
     outcome = complete ? "completed" : "incomplete";
-    return { indexed,total,complete,skipped:candidates.length-inspected,
+    return { indexed,total,complete,skipped,
+      ...(deferred ? { deferred } : {}),
       ...(diagnostics.length ? { diagnostics } : {}) };
   } catch (error) { outcome = signal.aborted ? "cancelled" : "failed"; throw error; }
   finally {

@@ -7,7 +7,7 @@ import { parseEmbeddingSettings, parseSemanticConfiguration, semanticConfigurati
 import { resetHistoryVectors } from "./semantic-reset.js";
 import { logSearchDiagnostic as writeDiagnostic } from "./search-diagnostics.mjs";
 
-const disclosure = "Saving provider configuration authorizes semantic search for all projects and sources in Pi and Desktop. Saved task titles/descriptions and public user/assistant session text chunks are embedded automatically on startup and changes; searches may send code/document chunks, paths/headings, saved session names, commit metadata, settings metadata and queries and incur charges. Tool payloads, thinking and attachments are excluded. Automatic session indexing drains remaining work; query enrichment is bounded to 256 missing chunks per pass. Use /search-index sessions to retry incomplete indexing. Repository indexing is bounded to 128 missing chunks per search. Local lexical search makes no embedding calls.";
+const disclosure = "Saving provider configuration authorizes semantic search for all projects and sources in Pi and Desktop. Saved tasks embed on startup and changes. Session names and public user/assistant text embed after one hour of per-session inactivity with no running agent; new activity resets only that session's delay, and restart reuses persisted activity. Session queries rank existing vectors without embedding documents. Indexing/searches may send code/document chunks, paths/headings, saved session names, commit metadata, settings metadata and queries and incur charges. Tool payloads, thinking and attachments are excluded. Use /search-index sessions for immediate manual indexing or retry. Repository indexing is bounded to 128 missing chunks per search. Local lexical search makes no embedding calls.";
 
 async function saveConfiguration(embedding: unknown | undefined): Promise<void> {
   const file = semanticConfigurationPath();
@@ -39,7 +39,7 @@ async function saveConfiguration(embedding: unknown | undefined): Promise<void> 
 /** User command only: never exposed as a model-callable configuration mutation. */
 export function registerSemanticConsentCommand(pi: ExtensionAPI, refreshTasks: () => void = () => {}, logSearchDiagnostic = writeDiagnostic): void {
   pi.registerCommand("search-semantic", {
-    description: "Global semantics: status | configure <embedding JSON> | off | reset-history. Reset explicitly deletes current-project history vectors, not canonical history.",
+    description: "Global semantics: status | configure <embedding JSON> | off | reset-history. Reset deletes current-project history vectors, not canonical history or global Settings vectors.",
     handler: async (args, ctx) => {
       const input = args.trim();
       const action = input.split(/\s+/, 1)[0] || "status";
@@ -51,7 +51,7 @@ export function registerSemanticConsentCommand(pi: ExtensionAPI, refreshTasks: (
           if (input !== action) throw new Error("Unexpected reset arguments");
           const count = await resetHistoryVectors(ctx.cwd, AbortSignal.timeout(40_000));
           refreshTasks();
-          void logSearchDiagnostic(ctx.cwd, { event: "search_command", message: `Removed ${count} derived history/settings vectors in ${ctx.cwd}. Canonical tasks, sessions, Git history, local documents and repository vectors are unchanged. Saved tasks catch up automatically; other histories rebuild on the next semantic search with the configured model and may incur charges.`, reason: "info" }); return;
+          void logSearchDiagnostic(ctx.cwd, { event: "search_command", message: `Removed ${count} derived history vectors in ${ctx.cwd}. Global Settings vectors, canonical tasks, sessions, Git history, local documents and repository vectors are unchanged. Saved tasks catch up automatically; use /search-index sessions to rebuild session vectors immediately. Other histories rebuild on the next semantic search with the configured model and may incur charges.`, reason: "info" }); return;
         }
         if (action === "status") {
           const settings = parseEmbeddingSettings(await semanticConfigurationText());

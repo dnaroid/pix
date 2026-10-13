@@ -7,12 +7,19 @@ import { normalizeSearchConcepts, patchSearchTerm } from "./search-query";
 import { pendingSearchNotice, runSearchSource } from "./search-source-deadline";
 import type { CommitSearchResponse, CommitSearchHit as HybridCommitHit } from "../../../acp/src/search/contract";
 import type { NativeSearchHit, NativeSearchRequest, NativeSearchResponse } from "../../../external/pi-tools-suite/src/project-search/native-contract";
+import type { SourcePolicy } from "./search-source-selection";
+import type { FederatedSource, FederatedRerankContext, FederatedRerankRequest, FederatedRerankResponse, NativeRerankContext } from "../../../external/pi-tools-suite/src/project-search/native-contract";
+import { selectFederatedCandidates, applyFederatedOrder } from "../../../external/pi-tools-suite/src/project-search/federation-ranking.mjs";
+import { requestFederatedSearch } from "./search-federated-request";
 
 export type SearchKind = "settings" | "sessions" | "tasks" | "commits" | "code" | "knowledge";
 export const SEARCH_KINDS: readonly SearchKind[] = ["settings", "sessions", "tasks", "commits", "code", "knowledge"];
 export const SEARCH_LABELS: Record<SearchKind, string> = { settings: "Settings", sessions: "Sessions", tasks: "Tasks", commits: "Commits", code: "Code", knowledge: "Knowledge" };
 export type SearchHit = LocalSearchHit | NativeSearchHit | TaskSearchHit | CommitSearchHit | HybridCommitHit;
 export interface SearchSources {
+  prepareRerank?: (workspace: string, sources: FederatedSource[], signal: AbortSignal) => Promise<{ context?: FederatedRerankContext }>;
+  rerank?: (workspace: string, request: FederatedRerankRequest, signal: AbortSignal) => Promise<FederatedRerankResponse>;
+  selection?: (workspace: string, signal: AbortSignal) => Promise<SourcePolicy>;
   repository?: (workspace: string, request: NativeSearchRequest, signal: AbortSignal) => Promise<NativeSearchResponse>;
   local?: (request: SearchQueryRequest, signal: AbortSignal) => Promise<SearchQueryResponse>;
   tasks?: (workspace: string) => Promise<ProjectTaskDocument>;
@@ -60,26 +67,89 @@ export async function queryUniversalSearch(
 ): Promise<UnifiedSearchResult> {
   const result: UnifiedSearchResult = { results: [], notices: [] };
   if (!query.trim() || !types.length || signal.aborted) return result;
+  try {
+    let policy: SourcePolicy | undefined;
+    if (sources.selection) {
+      const selection = sources.selection;
+      const owner = new AbortController();
+      const outcome = await runSearchSource(AbortSignal.any([signal, owner.signal]), async owned => {
+        const next = await selection(workspace, owned);
+        if (!owned.aborted) policy = next;
+      }, () => owner.abort(new Error("Search source selection timed out")), () => {}, 5000);
+      if (outcome !== "completed" || !policy || policy.error) throw new Error("Search source selection unavailable");
+    }
+    const enabled = policy?.enabled ?? { settings: true, code: true, knowledge: false, sessions: false, tasks: false, commits: false };
+    types = types.filter(kind => enabled[kind]);
+    if (!types.length) result.notices.push("Selected search sources are disabled for this project.");
+  } catch {
+    return { results: [], notices: signal.aborted ? [] : ["Search source selection unavailable; no sources were searched."] };
+  }
+  if (signal.aborted) return result;
   const patchOnly = patchSearchTerm(query) !== undefined;
   if (patchOnly) types = types.filter(kind => kind === "commits");
   if (!types.length) return result;
+  let rerankContext: FederatedRerankContext | undefined;
+  const nativeContext: NativeRerankContext = {};
+  const federatedTypes = types.filter((kind): kind is FederatedSource => kind !== "settings");
+  if (sources.prepareRerank && sources.rerank && workspace && federatedTypes.length) {
+    try {
+      const prepare = sources.prepareRerank;
+      const prepared = await requestFederatedSearch(signal, owned => prepare(workspace, federatedTypes, owned), 4000);
+      if (!signal.aborted) rerankContext = prepared.context;
+    } catch {
+      if (!signal.aborted) result.notices.push("Search reranking context unavailable; original ranking retained.");
+    }
+  }
+  if (signal.aborted) return { results: [], notices: [] };
   const indexQuery = normalizeSearchConcepts(query);
   const localTypes = types.filter((kind): kind is "settings" | "sessions" => kind === "settings" || kind === "sessions");
   const groups = new Map<string, SearchHit[]>();
   const pending = new Map<string, string>();
   let latest = result;
+  let finalRanked: SearchHit[] | undefined;
+  let completedSources = 0;
+  let reranking: Promise<void> | undefined;
+  const localRanked = (limit = 60) => rankSearchHits([
+    ...(groups.get("commits-hybrid") ?? []),
+    ...[...groups].filter(([group]) => group !== "commits-hybrid").flatMap(([, hits]) => hits),
+  ], query, settings, Boolean(result.status?.enabled && result.status.keyAvailable), false, limit);
   const emit = () => {
     if (signal.aborted) return;
     latest = {
       ...result,
-      results: rankSearchHits([
-        ...(groups.get("commits-hybrid") ?? []),
-        ...[...groups].filter(([group]) => group !== "commits-hybrid").flatMap(([, hits]) => hits),
-      ], query, settings, Boolean(result.status?.enabled && result.status.keyAvailable)),
+      results: finalRanked ?? localRanked(),
       notices: [...result.notices, ...pending.values()],
       ...(pending.size ? { pendingSources: [...pending.keys()] } : {}),
     };
     onUpdate?.(latest);
+  };
+  const finishRerank = async () => {
+    if (signal.aborted || !rerankContext || !sources.rerank) return;
+    const local = localRanked(1000);
+    const candidates: SearchHit[] = selectFederatedCandidates(local);
+    if (!candidates.length) return;
+    try {
+      const request: FederatedRerankRequest = { query, context: rerankContext, nativeContext,
+        candidates: candidates.filter((hit): hit is Exclude<SearchHit, { kind: "settings" }> => hit.kind !== "settings")
+          .map(hit => ({ kind: hit.kind, id: hit.id, title: hit.title.slice(0, 512), snippet: hit.snippet.slice(0, 4096),
+            ...((hit.kind === "code" || hit.kind === "knowledge") ? { path: hit.path, content: hit.content?.slice(0, 7500) } : {}) })),
+      };
+      const rerank = sources.rerank;
+      const response = await requestFederatedSearch(signal, owned => rerank(workspace, request, owned), 4500);
+      if (signal.aborted) return;
+      const ordered: SearchHit[] | undefined = applyFederatedOrder(candidates, response.order);
+      if (ordered) {
+        // Settings stay in their local slots and are never sent to the provider.
+        let index = 0;
+        finalRanked = local.filter(hit => hit.kind === "settings" || candidates.includes(hit))
+          .map(hit => hit.kind === "settings" ? hit : ordered[index++]!).slice(0, 60);
+        if (local.filter(hit => hit.kind !== "settings").length > candidates.length) result.notices.push("Search reranking candidate limit reached; results are partial.");
+      }
+      result.notices.push(...response.notices);
+    } catch {
+      if (!signal.aborted) result.notices.push("Search reranking unavailable; original ranking retained.");
+    }
+    emit();
   };
   const bounded = (label: string, operation: (signal: AbortSignal) => Promise<void>, fallback?: () => void) =>
     runSearchSource(signal, operation, () => {
@@ -90,6 +160,7 @@ export async function queryUniversalSearch(
       pending.delete(label);
       if (error) result.notices.push(`${label} search failed: ${searchErrorDetail(error)}`);
       emit();
+      if (++completedSources === 6) reranking = finishRerank();
     });
   await Promise.all([
     bounded("Tasks", async signal => {
@@ -110,7 +181,7 @@ export async function queryUniversalSearch(
         const response = await sources.taskSemantic(workspace, query, signal);
         if (signal.aborted) return;
         groups.set("task-semantic", [...response.results]);
-        if (response.pendingIndex) result.notices.push("Semantic Tasks: first-use indexing is incomplete; search again to index more tasks.");
+        if (response.pendingIndex) result.notices.push("Semantic Tasks: indexing is incomplete. Use Search indexes to continue; searching does not index task documents.");
       } catch (error) {
         if (!signal.aborted) result.notices.push(`Semantic Tasks search failed: ${searchErrorDetail(error)}. Local task matches remain available.`);
       }
@@ -153,7 +224,7 @@ export async function queryUniversalSearch(
         const response = await sources.local({ cwd: workspace, query, types: localTypes, settings, limit: 40 }, signal);
         if (signal.aborted) return;
         result.status = response.status;
-        groups.set("local", [...response.results]);
+        groups.set("local", response.results.filter(hit => types.includes(hit.kind)));
       } catch (error) {
         if (signal.aborted) return;
         if (types.includes("settings")) groups.set("local", settingsFallback(settings, query));
@@ -165,19 +236,24 @@ export async function queryUniversalSearch(
       if (!indexTypes.length || !workspace) return;
       if (sources.repository) {
         try {
-          const response = await sources.repository(workspace, { query: indexQuery, sources: indexTypes, mode: "lexical", limit: 30, includeContent: true }, signal);
+          const response = await sources.repository(workspace, { query: indexQuery, sources: indexTypes, mode: "lexical", limit: rerankContext ? 100 : 30, includeContent: true,
+            ...(sources.rerank ? { skipRerank: true } : {}) }, signal);
           if (signal.aborted) return;
           if (!response.status.generation && !response.status.complete) throw new Error("Native snapshot unavailable");
-          for (const kind of indexTypes) groups.set(kind, response.hits.filter(hit => hit.kind === kind).slice(0, 15));
+          Object.assign(nativeContext, response.rerankContext);
+          for (const kind of indexTypes) groups.set(kind, response.hits.filter(hit => hit.kind === kind).slice(0, rerankContext ? 100 : 15));
           result.notices.push(...response.notices);
           emit();
-          if (response.status.semanticEnabled) {
+          if (response.status.semanticEnabled || (response.status.rerankerEnabled && !sources.rerank)) {
             try {
               const enriched = await sources.repository(workspace, { query: indexQuery, sources: indexTypes,
-                mode: "hybrid", limit: 30, includeContent: true }, signal);
+                mode: "hybrid", limit: rerankContext ? 100 : 30, includeContent: true,
+                ...(sources.rerank ? { skipRerank: true } : {}) }, signal);
               if (signal.aborted) return;
               if (enriched.status.generation || enriched.status.complete) {
-                for (const kind of indexTypes) groups.set(kind, enriched.hits.filter(hit => hit.kind === kind).slice(0, 15));
+                for (const kind of indexTypes) groups.set(kind, enriched.hits.filter(hit => hit.kind === kind).slice(0, rerankContext ? 100 : 15));
+                for (const kind of indexTypes) delete nativeContext[kind];
+                Object.assign(nativeContext, enriched.rerankContext);
               }
               result.notices.push(...enriched.notices);
               emit();
@@ -188,11 +264,12 @@ export async function queryUniversalSearch(
           return;
         } catch {
           if (signal.aborted) return;
-          result.notices.push("Native Code/Knowledge search is unavailable. Configure this project's native search settings and retry.");
+          result.notices.push("Native Code/Knowledge search is unavailable. Retry the search or inspect Search indexes for diagnostics.");
         }
       }
     }),
   ]);
+  await reranking;
   if (signal.aborted) return { ...result, results: [], notices: [] };
   emit();
   return latest;

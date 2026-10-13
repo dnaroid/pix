@@ -11,10 +11,11 @@ Desktop's UI retrieves and navigates these sources independently of the
 headless `project_search` agent tool. Both read the same canonical task,
 session and Git stores and the native Code/Knowledge engine; the agent tool
 provides compact evidence and IDs for the calling agent, without RAG inference
-or a separate persistent index. It can incrementally populate and reuse the
-same task and saved-session-name vectors with the explicit global embedding
-configuration, sending **title/description or saved name and bounded query** to
-that provider. It also incrementally populates current Git commit metadata/message
+or a separate persistent index. Queries reuse maintained task, saved-session-name
+and public-message vectors and may embed the bounded query under the explicit
+global embedding configuration and project source policy. Task/session documents
+are maintained by authorized background/manual indexing, not query backfill.
+It also incrementally populates current Git commit metadata/message
 vectors using the suite-owned configured embedding provider and the shared
 `pix_commit_*` tables. Unlike Desktop's progressively updated UI, the agent
 tool waits for
@@ -23,6 +24,26 @@ the selected sources (up to 60 seconds) and returns one combined response. See
 
 - Source ownership and uncertain-work recovery are specified in
   [decision 0070](../docs/decisions/0070-search-source-work-recovery.md).
+- The five non-Settings source selections in the Search indexes panel are project-local and control both indexing
+  and search. Universal Search exposes only enabled-source filters and excludes
+  disabled sources from retrieval; disabling a source cancels owned work and
+  suppresses stale results. Selection is shared through `.pi/search-sources.json`;
+  caches are retained and reused if a source is re-enabled. Missing policy enables
+  Code only among these five sources; the on-disk map still requires all six booleans,
+  including the ignored legacy Settings boolean. Settings has a separate global enabled
+  flag, default true. An unreadable global Settings preference fails closed for the
+  complete aggregate policy (all sources unavailable until repaired); malformed or unsafe
+  project policy also fails closed. Embedding
+  configuration remains global and does not override project selection. Initial
+  selection inspection is bounded to five seconds; timeout or invalid policy fails
+  closed with a visible notice. Policy refresh runs every three seconds after the
+  previous read settles, and source results are discarded when cancelled,
+  superseded, or based on an obsolete policy revision.
+- Submitted inline Settings/Sessions searches read the same project policy before
+  dispatch; they do not substitute the missing-policy defaults for an enabled
+  project. Disabled sources produce a notice without dispatch. Local typeahead
+  remains navigation over already displayed settings metadata or saved titles,
+  not document indexing or a semantic provider request.
 - Desktop provides one current-project dialog, opened from the titlebar or
   Cmd+Shift+F (Ctrl+Shift+F on non-macOS hosts). Settings, Sessions, Tasks, Commits,
   Code and Knowledge are independently selectable. Results use a shared local
@@ -47,11 +68,20 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   matches, and semantic/full-message/patch commit candidates without visible
   lexical evidence.
   Source-local rank only breaks
-  lexical ties; results remain capped at 60. Reranking adds no provider calls or
+  lexical ties; results remain capped at 60. This local ranking adds no provider calls or
   on-demand file reads. Only Code/Knowledge retrieval uses the normalized technical
   concept as its query (one shared native request for the selected domains); settings and sessions
   retain the original query. No general machine translation or extra source
   discovery is attempted.
+- Optional global `search.rerankerModel` adds one remote pass over up to 100
+  source-balanced Sessions/Tasks/Commits/Code/Knowledge candidates after all source
+  operations finish, including late replies; local results remain visible while waiting.
+  Settings are excluded and keep their locally ranked slots. The final relevance order
+  is not re-sorted by BM25 and is capped at 60. Native retrieval skips its internal pass
+  to avoid double reranking. History uploads only bounded titles/snippets, not full
+  sessions or diffs; config/policy/history/native freshness checks fence upload and
+  publication. Timeout/error keeps local ranking, and cancellation discards late replies.
+  See [reranking safeguards](native-repository-search.md#optional-reranking).
 - Search runs only on Search or Enter in the input. Typing/changing types cancels
   stale requests and clears results but never runs a query. Empty queries do not
   search. Activating a result is separate from submitting a query.
@@ -77,7 +107,7 @@ the selected sources (up to 60 seconds) and returns one combined response. See
 - RAG retrieves from the existing selected Search sources (Settings, Sessions,
   Tasks, Commits, Code and Knowledge), reusing native lexical repository retrieval, the local
   session excerpt FTS and commit metadata/semantics. Source ranking reuses the
-  existing unified BM25 order, capped at 12 evidence items with at most four
+  current unified order (local BM25 or completed optional reranking), capped at 12 evidence items with at most four
   from each category. No duplicate vector index or full transcript/diff index
   is created. Code/Knowledge source files are reread by the ACP backend with
   realpath, regular-file and symlink checks, project-root containment, bounded
@@ -266,11 +296,12 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   A retained incompatible Settings cache blocks only settings-vector access, not
   writes to the separate Task/Session namespaces. Compatibility errors report that
   an explicit rebuild is required; normal indexing never silently replaces paid
-  vectors. Schema-2 settings reconciliation/pruning belongs to settings writes,
-  not unrelated namespace writes.
+  vectors. Schema-2 Settings reconciliation belongs to Settings writes, not unrelated
+  namespace writes; global content-addressed vectors are retained across catalogues.
   The global configuration editor explains recovery: run the suite's user-only
   `/search-semantic reset-history` from the affected project to explicitly discard
-  derived history vectors. Canonical tasks, sessions and Git history remain intact;
+  derived project Task/Session/Commit vectors, never the global Settings cache.
+  Canonical tasks, sessions and Git history remain intact;
   subsequent semantic searches can rebuild the cache and incur embedding charges.
   Missing config/key/provider retains local BM25 results and durable caches.
   Durable source-local ownership precedes paid batches. The publication fence is
@@ -379,11 +410,56 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   UTF-16-safe chunks are at most 1,600 characters and retain message ID, offsets,
   role, ordinal and content hash. Results remain one per session; the best chunk
   supplies a snippet and message identity for RAG, while navigation opens the session.
-  Startup and debounced message/turn changes automatically refresh the local index.
+  All production session discovery (search, manual and background) admits a
+  session only at least **24 hours from creation**. Creation time is the native
+  filename timestamp, else a bounded imported-session header timestamp, then
+  filesystem birthtime; modification time is never an age fallback. Young entries
+  retain only minimal age metadata and are not hydrated for title/body. Saved-title
+  and public-message automatic indexing additionally waits for **one hour of
+  inactivity per session**, using transcript modification time and persisted
+  runtime activity. New activity resets that session's delay; a running agent
+  blocks its own session via renewable cross-host leases, not other idle sessions.
+  Startup reuses persisted activity without starting a new hour. Metadata-only
+  eligibility checks run approximately every 30 seconds. Automatic discovery
+  reads file metadata plus bounded 16 KiB identity headers for new/changed files,
+  caching unchanged headers instead of calling SDK full-transcript listing.
+  Only eligible changed revisions hydrate titles/bodies. ACP reconciles an admitted
+  title individually, without rediscovering the corpus or pruning other sessions'
+  paid caches. A read-only shared retry-budget preflight pauses automatic discovery
+  while Continue is required; encountering that state during a sweep stops the
+  remaining candidates. Existing matching cached
+  vectors stay searchable; session queries never create document embeddings.
+  Background discovery persists a single successful pass-start watermark in
+  `pix_session_sweep` in the sessions cache, bound to embedding identity and
+  logical cache incarnation/revision; it does not persist a per-file manifest.
+  Only a fully successful title-and-chunk pass advances the checkpoint. Failed,
+  deferred, cancelled, unreadable or missing-title work cannot certify it. After
+  restart, eligible unchanged bodies can be skipped using transcript mtime/ctime,
+  activity, mapped title update time and the creation-plus-24-hour deadline, with
+  a conservative two-second overlap. Candidate discovery remains complete for
+  queries; only indexing work is filtered. Metadata and bounded identity-header
+  checks still run. A cache/model mismatch or backwards clock forces a full
+  eligible sweep; partial cache writes may invalidate the previous cutoff.
+  Manual Index/Continue is a full repair pass and seeds the same watermark only
+  on full success. Because the checkpoint is scalar, one pending mature session
+  may hold it back; successful unchanged attempts are reused in memory meanwhile.
+  Manual Index/Continue bypasses the idle delay only, not the 24-hour creation
+  minimum. Mature-file changes use directory events coalesced into dirty paths,
+  bootstrap plus bounded five-minute missed-event reconciliation, and maturity
+  deadlines that admit sessions even without events. The one-shot CLI fully
+  reconciles. Optional ACP snapshot requests can warm the digest from a bounded
+  1.5-second session snapshot; ACP reconnect falls back to native metadata.
+  Session digests cover mature file revisions and mature mapped title/id aliases.
+  Session-index logical revision is trigger-maintained and commit-coupled across
+  title, metadata, chunk and vector content tables; work heartbeat, FTS, WAL and
+  VACUUM changes do not affect it. Legacy caches remain read-only during status,
+  using a bounded metadata fingerprint until a writer installs revision tracking.
+  Shared CLI/Desktop receipts use the updated source fingerprint, so old receipts
+  require a new manual pass.
   With a valid global provider configuration and credentials, existing and new
   public text is uploaded in batches of 16; unchanged hashes reuse paid vectors.
-  Automatic/manual synchronization drains remaining work; query enrichment is
-  bounded to 256 new chunk vectors / 40 seconds and reports incomplete coverage.
+  Automatic/manual synchronization drains remaining work, checking eligibility
+  around provider requests and before publishing automatic results.
   Failures do not create a paid polling loop; explicit Continue retries interrupted work.
   Skipped transcripts produce local metadata-only diagnostic records (session ID,
   path, stable reason, optional line number and OS error code; missing parents
@@ -455,9 +531,10 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   and reject unsafe/oversized files. Desktop revisions identify the full content,
   including manual edits. Lock leftovers fail closed; active owners are not evicted
   by age. ACP rejects obsolete per-source preference writes.
-- Search uses six source-local databases under `.pi/search/`: `settings.sqlite`,
+- Search uses five project-local source databases under `.pi/search/`:
   `sessions.sqlite`, `tasks.sqlite`, `git-commits.sqlite`, `code.sqlite` and
-  `knowledge.sqlite`. Settings owns schema-2 `metadata`, `documents` and `vectors`;
+  `knowledge.sqlite`; shared Settings uses `~/.config/pi/search/settings.sqlite`.
+  Settings owns schema-2 `metadata`, `documents` and `vectors`;
   history sources own their respective `pix_<domain>_*` tables. Native chunks,
   lexical indexes and compatible paid vectors coexist in each native source store.
   Short token-leased publications never hold a database writer lock over provider
@@ -468,9 +545,15 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   `pix_session_chunks`, `pix_session_chunk_fts`, `pix_session_chunk_meta` and
   `pix_session_chunk_vectors` tables. Searches validate fresh live-branch chunks;
   retained vectors alone never authorize a stale session result.
-  Legacy stores are not read, imported, migrated or repaired. Schema-1 Settings
-  caches are rejected without mutation; explicit recovery is separate from normal
-  indexing. Read-only status/configuration polling never writes or repairs stores.
+  Legacy stores are not generally read, imported, migrated or repaired. The sole
+  exception is compatible schema-2 project-local Settings vectors: an owned write
+  may import them transactionally after validating configured identity. Read-only
+  legacy files are never changed/deleted; incompatible identity/schema is skipped,
+  while corrupt compatible data rejects the transaction atomically. Schema-1
+  Settings caches remain incompatible; explicit recovery is separate from normal
+  indexing. Settings vectors persist by content hash across catalogue versions;
+  each query filters results against the caller's authored catalogue. Read-only
+  status/configuration polling never writes or repairs stores.
   Obsolete running clients must be restarted separately; restart is not forced
   while a live draft is present. Source-local indexes do not modify canonical
   task storage, session files or Git history.
@@ -641,8 +724,10 @@ Run Desktop typecheck and focused search/queue/navigation/settings/modal tests,
 ACP typecheck/build/search/agent tests and schema generation/tests. Cover title
 boost, Robertson IDF, saturation, length normalization, explicit hybrid mode in
 both native domains, bounded/redacted source-failure notices, and native request cancellation.
-Also cover title deduplication/scope/renames/deletions, no transcript reads/provider calls for
-sessions, obsolete-schema rejection without mutation, source-local vector preservation,
+Also cover title deduplication/scope/renames/deletions, authenticated public-text
+projection and exclusion of private/tool/attachment content, cache-only session
+document vectors on queries (query embedding remains permitted), obsolete-schema
+rejection without mutation, source-local vector preservation,
 restart/hash reuse, contention, cancellation, revocation and stale completion.
 Real macOS QA checks explicit submit, Sessions labels, settings/file/session
 activation and native-search failure isolation, task reveal, commit metadata, and close/reopen

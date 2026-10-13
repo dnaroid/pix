@@ -57,7 +57,7 @@ describe("Status bar click surfaces", () => {
     expect(source("ObserverStatus")).toContain('@lucide/svelte/icons/telescope');
     expect(source("ObserverStatus")).not.toContain('@lucide/svelte/icons/eye');
     expect(source("ObserverStatus")).toContain('"h-4 w-4", status.kind');
-    expect(status).toContain('class="flex shrink-0 items-center gap-0.5" data-status-right');
+    expect(status).toContain('class="flex h-full shrink-0 items-center gap-0.5" data-status-right');
     expect(source("SessionActivityStatusHud")).not.toContain('class="mx-1 h-3 w-px');
   });
   it("does not use browser-native tooltips anywhere in status chrome or its details", () => {

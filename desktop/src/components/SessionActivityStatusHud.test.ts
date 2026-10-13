@@ -17,6 +17,46 @@ function renderProgress(completedTodos: number, totalTodos: number) {
 }
 
 describe("status HUD todo progress ring", () => {
+  it("shows independent child plan rings next to agent names, including overflow agents", () => {
+    const agents = Array.from({ length: 8 }, (_, index) => ({ id: `worker-${index}`, status: "running" as const,
+      todoProgress: index === 0 || index === 7 ? { completed: 1, total: 5 } : undefined }));
+    const html = render(SessionActivityStatusHud, { props: {
+      summary: { ...EMPTY_SESSION_ACTIVITY, activeSubagents: 8 },
+      subagentSnapshot: { version: 1, count: 8, checkedAt: 1, runs: [{ runDir: "/run", agents }] },
+      todoSnapshot: undefined, promptRunning: false, sessionNeedsInput: false,
+    } }).body;
+    expect(html.match(/data-session-subagent-todo-progress/g)).toHaveLength(2);
+    expect(html.match(/stroke-dashoffset="80"/g)).toHaveLength(2);
+    expect(html.match(/aria-label="Plan 1\/5"/g)).toHaveLength(2);
+    // Overflow agents retain their popup progress, but have no individual status icon.
+    expect(html.match(/data-session-subagent-status-progress/g)).toHaveLength(1);
+    expect(html).toContain('aria-valuenow="1"');
+    expect(html).toContain('aria-valuemax="5"');
+    expect(html).toContain('width: 20%');
+    expect(html).toContain("absolute top-[1px] right-0.5 left-0.5 h-[2px]");
+    expect(html).toContain("relative grid h-full w-6");
+    expect(html).not.toContain("data-session-todo-progress");
+  });
+
+  it.each([undefined, { completed: 0, total: 0 }, { completed: 5, total: 5 }])("hides absent, empty and finished child plans (%j)", (todoProgress) => {
+    const html = render(SessionActivityStatusHud, { props: {
+      summary: { ...EMPTY_SESSION_ACTIVITY, activeSubagents: 1 },
+      subagentSnapshot: { version: 1, count: 1, checkedAt: 1, runs: [{ runDir: "/run", agents: [{ id: "worker", status: "running", todoProgress }] }] },
+      todoSnapshot: undefined, promptRunning: false, sessionNeedsInput: false,
+    } }).body;
+    expect(html).not.toContain("data-session-subagent-todo-progress");
+    expect(html).not.toContain("data-session-subagent-status-progress");
+  });
+  it("shows an empty track above the icon for a not-yet-completed child plan", () => {
+    const html = render(SessionActivityStatusHud, { props: {
+      summary: { ...EMPTY_SESSION_ACTIVITY, activeSubagents: 1 },
+      subagentSnapshot: { version: 1, count: 1, checkedAt: 1, runs: [{ runDir: "/run", agents: [{ id: "worker", status: "running", todoProgress: { completed: 0, total: 5 } }] }] },
+      todoSnapshot: undefined, promptRunning: false, sessionNeedsInput: false,
+    } }).body;
+    expect(html).toContain("data-session-subagent-status-progress");
+    expect(html).toContain('width: 0%');
+    expect(html).toContain('aria-valuenow="0"');
+  });
   it("renders live activity as initially closed click popups without an inspector opener", () => {
     const html = renderProgress(1, 3);
     expect(html).toContain('aria-haspopup="dialog"');

@@ -3,6 +3,10 @@ import source from "./SubagentUsageDialog.svelte?raw";
 import statusBar from "./RuntimeStatusBarItems.svelte?raw";
 
 describe("subagent statistics dialog contract", () => {
+  it("only shows the header button for a loaded snapshot with recorded subagent calls", () => {
+    expect(statusBar).toMatch(/\{#if sessionUsage\?\.subagents\?\.agents\.length\}\s*<button[^>]*aria-label="Show subagent statistics"[^>]*>[\s\S]*?<\/button>\s*\{\/if\}/);
+    expect(statusBar).not.toContain('disabled={!sessionUsage}');
+  });
   it("places a fixed blue role icon beside the role and shared provider logos before models", () => {
     expect(source).toContain('<Icon class="h-4 w-4 shrink-0 text-tool-search" aria-hidden="true" />{agent.subagentType');
     expect(source).not.toContain('<Icon class="mt-0.5');

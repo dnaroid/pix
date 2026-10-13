@@ -109,8 +109,10 @@ blocks further BTW inference until reload rather than silently losing known spen
   destinations as Desktop. `Refresh limits` on Claude Code is an explicit
   quota-only refresh, distinct from `Refresh spend`.
   Desktop adds a `Subagents` button at the right of the Session usage header,
-  enabled after a spend snapshot loads when the runtime supplies the optional
-  breakdown. It opens a separate native modal with
+  shown only after a spend snapshot loads with a nonempty subagent call list.
+  It is hidden while the snapshot is unavailable, when the optional breakdown
+  is absent, or when its call list is empty; calls without recorded billable
+  usage still qualify. It opens a separate native modal with
   rotating-chevron task disclosures, role icons, requested/recorded models,
   tool-start counts, exact token categories and per-run token/cost totals.
   Between `Session usage` and `Subagents`, active Claude Code routes or sessions

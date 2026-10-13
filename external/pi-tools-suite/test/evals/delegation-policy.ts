@@ -10,6 +10,18 @@ export function validateDelegationRole(result: EvalRunResult, role: string): str
 		? [] : [`expected one explicit ${role} spawn`];
 }
 
+/** No user time cap in this scenario: keep the configured oracle watchdog. */
+export function validateOracleBudget(result: EvalRunResult): string[] {
+	const errors = validateDelegationRole(result, "oracle");
+	if (errors.length) return errors;
+	const call = result.events.find((event) => event.type === "tool_call" && event.toolName === "subagents");
+	const input = call?.input as { timeoutSeconds?: unknown; tasks: Array<{ timeoutSeconds?: unknown }> };
+	if (input.timeoutSeconds !== undefined || input.tasks[0]?.timeoutSeconds !== undefined) {
+		return ["expected oracle to retain the configured watchdog without spawn/task timeoutSeconds"];
+	}
+	return [];
+}
+
 const delegationPolicyCases: EvalCase[] = [
 	{
 		id: "orchestration.size-alone-stays-parent",
@@ -45,7 +57,7 @@ const delegationPolicyCases: EvalCase[] = [
 		blockTools: ["subagents"],
 		prompt: "I need a strong independent second opinion on the cross-module invariant for payment retries: whether an idempotency key belongs to the original payment or each attempt, and its persistence/recovery implications. Delegate one bounded read-only architectural opinion now and stop after spawning; do not delegate any implementation.",
 		assert: { requiredTools: ["subagents"], maxFilesChanged: 0 },
-		validate: (result: EvalRunResult) => validateDelegationRole(result, "oracle"),
+		validate: validateOracleBudget,
 	},
 	{
 		id: "orchestration.large-mechanical",

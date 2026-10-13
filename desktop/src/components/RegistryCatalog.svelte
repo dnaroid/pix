@@ -30,6 +30,8 @@
   } from "../lib/registry";
   import RegistryItemActions from "./RegistryItemActions.svelte";
   import RegistryStatusIcon from "./RegistryStatusIcon.svelte";
+  import RegistryAgentModel from "./RegistryAgentModel.svelte";
+  import type { ModelThinkingModel } from "../lib/model-thinking";
   import type { AvailableCommand } from "@agentclientprotocol/sdk";
   import type { Component } from "svelte";
 
@@ -40,6 +42,7 @@
   let {
     snapshot,
     contextCommands = [],
+    agentModels = [],
     loading,
     remoteDisabled,
     actionId,
@@ -49,6 +52,7 @@
   }: {
     snapshot: RegistrySnapshot | undefined;
     contextCommands?: readonly AvailableCommand[];
+    agentModels?: readonly ModelThinkingModel[];
     loading: boolean;
     remoteDisabled: boolean;
     actionId: string | null;
@@ -259,6 +263,7 @@
               {/if}
             </div>
           {/if}
+          <RegistryAgentModel {item} models={agentModels} disabled={loading || actionId !== null} {onAction} />
           <div class="flex min-w-0 items-center justify-between gap-2" data-registry-row="footer">
             <div class="flex min-w-0 items-center gap-1.5">
               <span
