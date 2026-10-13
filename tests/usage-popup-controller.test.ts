@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -32,6 +33,14 @@ type Harness = {
 	setTabGeneration(generation: number): void;
 	activate(label: string): void;
 };
+
+async function waitFor(check: () => boolean, description: string): Promise<void> {
+	const deadline = Date.now() + 5000;
+	while (!check()) {
+		assert.ok(Date.now() < deadline, `Timed out waiting for ${description}`);
+		await delay(10);
+	}
+}
 
 function setup(entries: readonly unknown[], workspace: string, selectIndex = 0): Harness {
 	const toasts = new AppToastController({ render: () => {} });
@@ -97,8 +106,10 @@ describe("TUI usage popup", () => {
 		assert.match(details, /Input: 100  Output: 20/);
 
 		ui.activate("Open run");
-		await delay(25);
-		assert.deepEqual(ui.opened, [pathToFileURL(realpathSync(runDir)).href]);
+		await waitFor(() => ui.opened.length === 1, "validated run directory to open");
+		// Match the async realpath used by the controller. On Windows the sync
+		// API can return an 8.3 short path while the async API returns its long name.
+		assert.deepEqual(ui.opened, [pathToFileURL(await realpath(runDir)).href]);
 		assert.match(ui.toasts.visibleStates()[0]?.message ?? "", /^Session usage/);
 	});
 
@@ -114,7 +125,8 @@ describe("TUI usage popup", () => {
 		ui.activate("Subagents (1)");
 		await delay(0);
 		ui.activate("Open run");
-		await delay(25);
+		await waitFor(() => (ui.toasts.visibleStates()[0]?.message ?? "").includes("outside the workspace"),
+			"rejected path warning");
 		assert.deepEqual(ui.opened, []);
 		assert.match(ui.toasts.visibleStates()[0]?.message ?? "", /outside the workspace/);
 		assert.ok(!ui.toasts.visibleStates()[0]?.actions?.some((action) => action.label === "Open run"));
