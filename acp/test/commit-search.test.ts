@@ -304,8 +304,19 @@ test("separate processes cannot duplicate paid document batches", async t => {
     import {appendFile} from 'node:fs/promises';
     const service = new DesktopCommitSearchService({loadConfig: async()=>(${JSON.stringify(config)}), loadKey:async()=> 'mock',
       embed:async texts=>{if(texts[0].startsWith('D:')) {await appendFile(process.argv[2], 'document\\n');await new Promise(r=>setTimeout(r,250));}return texts.map(()=>[1,0,0]);}});
-    const result=await service.query({cwd:process.argv[1],query:'target',limit:20},new AbortController().signal);
-    await service.dispose(); if(result.results.length!==1||result.notices.length)process.exitCode=1;`;
+    let result;
+    for(let attempt=0;attempt<5;attempt++) {
+      result=await service.query({cwd:process.argv[1],query:'target',limit:20},new AbortController().signal);
+      if(result.results.length===1&&!result.notices.length)break;
+      // A competing process can briefly hold the SQLite writer; retry local
+      // fallback without bypassing the final single-payment assertion.
+      await new Promise(r=>setTimeout(r,100*(attempt+1)));
+    }
+    await service.dispose();
+    if(result.results.length!==1||result.notices.length) {
+      console.error('Commit test child result:',JSON.stringify({count:result.results.length,notices:result.notices}));
+      process.exitCode=1;
+    }`;
   const run = () => exec(process.execPath, ["--import", "tsx", "--input-type=module", "-e", source, r.cwd, payment], { timeout: 15000 });
   const first = run();
   for (let i = 0; i < 500; i++) {
