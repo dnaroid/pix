@@ -144,7 +144,9 @@ remain true when CI or UI-QA tests change.
 - Source tests do not replace release smoke. Every native release job must execute
   the extracted TUI archive; the macOS job additionally executes the
   installed/relocated Desktop application.
-- TUI smoke proves bundled Node, native PTY, extensions and esbuild without ACP.
+- TUI smoke proves bundled Node, native PTY, real JS/TS extension loading and every
+  retained esbuild instance without ACP. An esbuild-free production graph is
+  valid (Pi SDK 1.2 uses jiti); retained esbuild transform failures still fail smoke.
 - Desktop smoke additionally proves ACP initialize/new/close and native host
   startup from the actual installer/bundle path.
 - Release smoke isolates HOME/config/secrets and places a failing system-Node

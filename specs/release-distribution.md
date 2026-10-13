@@ -39,7 +39,8 @@ suite is not independently version-bumped.
   including required optional platform packages. Desktop additionally installs
   ACP's locked dependencies before conservative deduplication. Development
   node_modules, HOME, credentials and the checkout are never copied into the
-  payload. Runtime compilers/loaders such as esbuild and jiti are retained.
+  payload. Production runtime compilers/loaders such as jiti, and esbuild when
+  present in the production dependency graph, are retained.
 - Layout is `pix/runtime/node[.exe]`, `pix/app/{bin,dist,node_modules,...}` and
   (Desktop only) `pix/app/acp/{dist,node_modules,...}`. Preserve the relative relationship between
   ACP, Pix dist and the bundled tools suite. Native addons and dependency license
@@ -459,7 +460,11 @@ esbuild probe reads the generated `DEPENDENCIES.json` inventory instead of recur
 walking the full dependency tree, avoiding pathological Windows filesystem cost.
 Desktop
 additionally runs real ACP initialize/new/close without a model request; TUI
-asserts that ACP is absent. GUI checks use an app copied from a read-only mounted DMG, extracted DEB/AppImage
+asserts that ACP is absent. An inventory without esbuild is valid: Pi SDK 1.2
+loads TypeScript through jiti and no longer requires production esbuild. This
+does not skip the real JS/TS extension-load checks or allow a retained esbuild
+instance to fail its transform. The standalone `verify.mjs` ships its built-in-only
+`esbuild-probe.mjs` helper alongside it. GUI checks use an app copied from a read-only mounted DMG, extracted DEB/AppImage
 or a temporary NSIS installation, and boot the native application diagnostic.
 Linux checks the DEB payload directly; for the AppImage it intentionally lets the
 native Tauri host resolve `resource_dir()` from the extracted AppDir instead of

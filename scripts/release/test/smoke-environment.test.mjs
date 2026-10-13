@@ -28,9 +28,13 @@ test("smoke has isolated paths and a failing system-Node sentinel ahead of OS to
 
 test("release probe uses the generated dependency inventory instead of recursively scanning node_modules", async () => {
   const probe = await readFile(join(process.cwd(), "scripts/release/probe.mjs"), "utf8");
+  const esbuildProbe = await readFile(join(process.cwd(), "scripts/release/esbuild-probe.mjs"), "utf8");
+  const prepare = await readFile(join(process.cwd(), "scripts/release/prepare.mjs"), "utf8");
   assert.match(probe, /DEPENDENCIES\.json/u);
-  assert.match(probe, /entry\?\.name !== "esbuild"/u);
-  assert.doesNotMatch(probe, /readdirSync/u);
+  assert.match(probe, /verifyEsbuildInventory\(app, dependencyInventory\)/u);
+  assert.match(esbuildProbe, /entry\?\.name !== "esbuild"/u);
+  assert.match(prepare, /copyFile\(join\(root, "scripts\/release\/esbuild-probe\.mjs"\), join\(payload, "esbuild-probe\.mjs"\)\)/u);
+  assert.doesNotMatch(probe + esbuildProbe, /readdirSync/u);
 });
 
 test("Linux AppImage smoke delegates resource lookup to the native Tauri host", async () => {

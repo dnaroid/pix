@@ -3,9 +3,10 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join, resolve, sep } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { verifyEsbuildInventory } from "./esbuild-probe.mjs";
 
 const root = dirname(fileURLToPath(import.meta.url));
 assert.equal(process.env.PIX_RELEASE_SMOKE, "1", "Use the release smoke harness with an isolated user profile");
@@ -50,27 +51,8 @@ const { createJiti } = sdkRequire("jiti");
 const jiti = createJiti(join(app, "package.json"), { interopDefault: true, fsCache: false });
 assert.equal(typeof await jiti.import(join(app, "external/pi-tools-suite/index.ts"), { default: true }), "function");
 
-// Exercise every retained esbuild host/binary pair, including versions nested by
-// the SDK. Use the package inventory generated during release preparation instead
-// of recursively walking tens of thousands of node_modules entries on Windows.
-function verifyEsbuildInventory() {
-  const appRoot = resolve(app);
-  const directories = new Set();
-  for (const entry of dependencyInventory) {
-    if (entry?.name !== "esbuild" || typeof entry.path !== "string") continue;
-    const packageJson = resolve(app, entry.path);
-    assert.ok(packageJson.startsWith(`${appRoot}${sep}`), `Unsafe dependency inventory path: ${entry.path}`);
-    directories.add(dirname(packageJson));
-  }
-  assert.ok(directories.size > 0, "Release payload must retain at least one esbuild package");
-  for (const directory of directories) {
-    const esbuild = require(directory);
-    const result = esbuild.transformSync("const value: number = 42", { loader: "ts" });
-    assert.match(result.code, /42/u);
-    esbuild.stop();
-  }
-}
-verifyEsbuildInventory();
+// Exercise every retained esbuild host/binary pair, including nested versions.
+verifyEsbuildInventory(app, dependencyInventory);
 
 if (manifest.variant === "desktop") {
 for (const path of ["acp/dist/main.js", "acp/dist/pi/pix-rpc-entry.js"]) {
