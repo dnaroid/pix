@@ -24,7 +24,7 @@ function setup() {
     sessionActivity: () => ({}), sessionSubagentSnapshot: () => undefined, sessionTodoSnapshot: () => undefined,
     sessionNeedsInput: () => false, canClearTodos: () => false,
     runtime: { statuses: new Map(), sessionUsageBySession: new Map(), sessionUsageRefreshing: new Set(),
-      sessionUsageFailed: new Set(), claudeLimitsRefreshing: new Set(), claudeLimitsFailed: new Set() },
+      sessionUsageFailed: new Set(), claudeAccountAttempts: new Map(), claudeLimitsRefreshing: new Set(), claudeLimitsFailed: new Set() },
     modelConfig, sessionCoordinator: {},
     quotaWait: { indicator: () => undefined, nowMs: 0 },
     headsUp: { state: () => undefined, isPending: () => false }, openObserverSettings: vi.fn(),

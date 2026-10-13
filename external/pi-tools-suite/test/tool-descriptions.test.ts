@@ -84,14 +84,21 @@ describe("tool descriptions", () => {
 		projectSearch({ registerTool: (tool: any) => { registered = tool; }, registerCommand: (name: string) => { commands.push(name); },
 			on: (name: string) => { events.push(name); } } as never);
 		expect(commands).toEqual(["search-semantic", "search-index"]);
-		expect(events).toEqual(["session_start", "session_shutdown", "session_start", "session_shutdown"]);
+		// Saved tasks, session chunks and the index command each own their
+		// registration lifecycle. Session text also updates at turn/message/tree boundaries.
+		expect(events).toEqual([
+			"session_start", "session_shutdown",
+			"session_start", "turn_end", "message_end", "session_tree", "session_shutdown",
+			"session_start", "session_shutdown",
+		]);
 		expect(registered.name).toBe("project_search");
 		expect(registered.promptSnippet).toContain("first pass maxFiles=3, no includeContent");
 		expect(registered.promptSnippet).toContain("Start focused code-path lookup or diagnosis with project_search");
 		const guidance = registered.promptGuidelines.join("\n");
 		expect(guidance).toContain("~/.config/pi/pi-tools-suite.jsonc");
-		expect(guidance).toContain("session startup and debounced task database changes");
-		expect(guidance).toContain("Task searches rank current cached vectors, never upload missing task texts");
+		expect(guidance).toContain("saved tasks and public session message chunks are embedded automatically on startup and changes");
+		expect(guidance).toContain("Task searches rank current cached vectors.");
+		expect(guidance).toContain("Session searches can fill missing chunk vectors");
 		expect(guidance).not.toContain("independent Desktop opt-ins");
 		expect(guidance).not.toContain("independent project consent");
 		expect(guidance).toContain("pathPrefix/dedupeFile");

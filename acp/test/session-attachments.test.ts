@@ -48,23 +48,23 @@ test("both record paths exclude sandbox text before the public-text limit", asyn
     "public_text_exceeds_limit");
 });
 
-test("index refresh replaces old sandbox chunks; embedding, retrieval and RAG use only projected text", async t => {
+test("index refresh replaces old sandbox chunks; embedding, retrieval and RAG use only projected text", async () => {
   const base = resolve(".pi/artifacts/session-attachments-tests");
   await mkdir(base, { recursive: true });
   const root = await mkdtemp(join(base, "case-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  const candidate = { id: "native", path: join(root, "session.jsonl") };
-  const raw = [
-    { type: "session", id: candidate.id, cwd: root },
-    message("u", null, "user", "Build Doom"),
-    message("a", "u", "assistant", `Ready\n\`\`\`pix-html\n${"SECRETcode ".repeat(7000)}\n\`\`\`\nUse arrows`),
-    message("only", "a", "assistant", "```pix-html\nONLYcode\n```"),
-    message("last", "only", "user", "Keep the game"),
-  ].map(row => JSON.stringify(row)).join("\n") + "\n";
-  await writeFile(candidate.path, raw);
-  await indexSessionChunks(root, [candidate], { signal: signal() });
-  const db = new DatabaseSync(join(root, ".pi/search/sessions.sqlite"));
+  let db: DatabaseSync | undefined;
   try {
+    const candidate = { id: "native", path: join(root, "session.jsonl") };
+    const raw = [
+      { type: "session", id: candidate.id, cwd: root },
+      message("u", null, "user", "Build Doom"),
+      message("a", "u", "assistant", `Ready\n\`\`\`pix-html\n${"SECRETcode ".repeat(7000)}\n\`\`\`\nUse arrows`),
+      message("only", "a", "assistant", "```pix-html\nONLYcode\n```"),
+      message("last", "only", "user", "Keep the game"),
+    ].map(row => JSON.stringify(row)).join("\n") + "\n";
+    await writeFile(candidate.path, raw);
+    await indexSessionChunks(root, [candidate], { signal: signal() });
+    db = new DatabaseSync(join(root, ".pi/search/sessions.sqlite"));
     // Recreate a pre-projection cache with the same unchanged canonical file.
     const oldRevision = createHash("sha256").update(raw).digest("hex");
     db.prepare("UPDATE pix_session_chunk_meta SET revision=?").run(oldRevision);
@@ -98,5 +98,10 @@ test("index refresh replaces old sandbox chunks; embedding, retrieval and RAG us
     assert.match(evidence[0]!.text, /Keep the game/);
     assert.doesNotMatch(evidence[0]!.text, /SECRETcode|ONLYcode/);
     assert.equal(await readFile(candidate.path, "utf8"), raw);
-  } finally { db.close(); }
+  } finally {
+    // Close our SQLite connection before cleaning the fixture; on Windows,
+    // the filesystem may briefly retain its native handles after close.
+    try { db?.close(); }
+    finally { await rm(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 }); }
+  }
 });

@@ -111,8 +111,10 @@ offline("default role: private todo is active; provider web search and other sui
 	// The production default path injected the vendored module's standalone entry.
 	const standalone = localClaudeProviderModule("pi-claude-code-provider/sonnet").standalone;
 	expect(piArgs.filter((arg) => arg === standalone)).toHaveLength(1);
-	expect(all).toContain(WEB_SEARCH); // registered by the provider...
-	expect(tools).not.toContain(WEB_SEARCH); // ...but never active in a child
+	// The bundled provider no longer registers its metered search at all;
+	// ensure it is neither registered nor active in the isolated child.
+	expect(all).not.toContain(WEB_SEARCH);
+	expect(tools).not.toContain(WEB_SEARCH);
 	expect(tools.length).toBeGreaterThan(0);
 	expect(tools).toContain("todo");
 	expect(tools).toContain("compress");

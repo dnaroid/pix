@@ -187,7 +187,9 @@ describe("explicit search dialog requests", () => {
     expect(source).toContain('event.key === "Enter" && event.target === input');
     expect(source).toContain("oninput={() => invalidate()}");
     expect(source).toContain("currentRequests?.submit(query, types)");
-    expect(source).toContain("searchStatusLabel(status)");
+    expect(source).toContain('const searching = $derived(busy || intentBusy || ragActive || !!result.pendingSources?.length)');
+    expect(source).toContain('{#if searching}<LoaderCircle');
+    expect(source).toContain('Searching…');
     expect(source).not.toContain("}, 180)");
     expect(source).not.toContain("void choose(hit); }");
   });

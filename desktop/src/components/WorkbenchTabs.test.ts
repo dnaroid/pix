@@ -42,7 +42,10 @@ describe("WorkbenchTabs desktop interaction", () => {
     expect(projectSwitcherSource).toContain('variant === "titlebar"');
     expect(projectSwitcherSource).toContain("style:--project-titlebar-color={projectColors.get(workspace)}");
     expect(projectSwitcherSource).toContain("style:--project-titlebar-hue={projectFolderHue(workspace)}");
-    expect(projectSwitcherSource).toContain("background-color: var(--project-titlebar-color");
+    expect(projectSwitcherSource).toContain("--project-titlebar-identity: var(--project-titlebar-color");
+    expect(projectSwitcherSource).toContain("background-color: var(--project-titlebar-identity)");
+    expect(projectSwitcherSource).toContain('data-window-inactive={!windowFocused}');
+    expect(projectSwitcherSource).toContain('border-color: var(--project-titlebar-identity)');
     expect(navigationViewModelSource).not.toContain("projectColors.get(options.workspace())");
   });
 
