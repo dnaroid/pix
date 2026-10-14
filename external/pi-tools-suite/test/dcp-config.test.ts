@@ -194,7 +194,7 @@ describe("DCP config", () => {
 		const resolved = resolveModelConfig(config, ["openai/gpt-5", "gpt-5"]);
 
 		expect(resolved.compress.nudgeFrequency).toBe(3);
-		expect(resolved.compress.protectedTools).toEqual(["compress", "write", "edit", "read"]);
+        expect(resolved.compress.protectedTools).toEqual(["read"]);
 		expect(resolved.strategies.emergencyCurrentTurnPruning.keepRecentToolPairs).toBe(2);
 		expect(config.compress.nudgeFrequency).toBe(1);
 	});
@@ -226,14 +226,19 @@ describe("DCP config", () => {
 		const resolved = resolveModelConfig(config, ["openai/gpt-5", "gpt-5"]);
 
 		expect(resolved.compress.nudgeFrequency).toBe(4);
-		expect(resolved.compress.protectedTools).toEqual([
-			"compress",
-			"write",
-			"edit",
-			"read",
-			"grep",
-			"find",
-		]);
+        expect(resolved.compress.protectedTools).toEqual(["find"]);
+	});
+
+	test("empty model overrides release inherited exact pins", () => {
+		const config = loadConfig({ homeDir: tempDir() });
+		config.compress.protectedTools = ["write"];
+		config.protectedFilePatterns = ["secrets/**"];
+		config.modelOverrides = { "test/model": { compress: { protectedTools: [], protectTags: false }, protectedFilePatterns: [] } };
+		const resolved = resolveModelConfig(config, ["test/model"]);
+		expect(resolved.compress.protectedTools).toEqual([]);
+		expect(resolved.protectedFilePatterns).toEqual([]);
+		expect(resolved.compress.protectTags).toBe(false);
+		expect(config.compress.protectedTools).toEqual(["write"]);
 	});
 
 	test("drops removed DCP policy keys and reports actionable compatibility issues", () => {

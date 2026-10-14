@@ -3,9 +3,8 @@
   import StatusBarPopover from "./StatusBarPopover.svelte";
   import type { BrainstormStatus, SessionBrainstormSnapshot } from "../lib/session-brainstorm";
 
-  let { snapshot, trailingSeparator = false, onOpenParticipant }: {
+  let { snapshot, onOpenParticipant }: {
     snapshot?: SessionBrainstormSnapshot;
-    trailingSeparator?: boolean;
     onOpenParticipant?: (sessionId: string) => void;
   } = $props();
 
@@ -66,7 +65,4 @@
     {/snippet}
   </StatusBarPopover>
   </div>
-  {#if trailingSeparator}
-    <span class="h-3 w-px shrink-0 bg-border" aria-hidden="true" data-status-separator="brainstorm-next"></span>
-  {/if}
 {/if}

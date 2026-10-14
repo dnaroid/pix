@@ -1,7 +1,7 @@
 export interface TranscriptCandidate { id: string; path: string }
-export interface TranscriptMessage { id: string; role: string; text: string; status: string }
-export interface TranscriptChunk { start: number; end: number; text: string; hash: string; messageId: string; ordinal: number; role: string; status: string }
-export interface TranscriptSnapshot extends TranscriptCandidate { fileStamp: string; revision: string; head: string; messages: TranscriptMessage[]; chunks: TranscriptChunk[] }
+export interface TranscriptMessage { id: string; role: string; text: string; status: string; byteOffset: number; byteLength: number }
+export interface TranscriptChunk { start: number; end: number; text: string; hash: string; messageId: string; ordinal: number; role: string; status: string; byteOffset: number; byteLength: number; active: true }
+export interface TranscriptSnapshot extends TranscriptCandidate { cwd: string; title: string; name: string; firstMessage: string; fileStamp: string; revision: string; head: string; messages: TranscriptMessage[]; chunks: TranscriptChunk[] }
 export const CHUNK_CHARS: number;
 export function messageChunks(text: string): Pick<TranscriptChunk, "start" | "end" | "text" | "hash">[];
 export interface TranscriptSkip { sessionId: string; path: string; reason: string; line?: number; code?: string; entryId?: string; parentId?: string }

@@ -1113,7 +1113,9 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 						mapEntries = state.conversationIndexSnapshot
 						mapTokenEstimates = captureDcpContextTokenEstimates(mapEntries, prunedMessages, state.messageMetaSnapshot)
 						const clearedAnchors = clearDcpNudgeAnchors(state)
-						warnedProgress.clear()
+						// Partial recovery keeps the same goal alive; do not repeat an
+						// already reported blocker after every positive partial commit.
+						if (autoResult.pressureRelieved) warnedProgress.clear()
 						state.progressRecovery = undefined
 						writeDcpDebugLog(effectiveConfig, "compress.auto", {
 							trigger: autoDecision.reason,

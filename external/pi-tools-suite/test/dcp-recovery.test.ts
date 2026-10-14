@@ -2,8 +2,25 @@ import { describe, expect, test } from "bun:test";
 
 import { rehydrateToolRecordsFromMessages } from "../src/dcp/recovery.js";
 import { createState } from "../src/dcp/state.js";
+import { toolRecordContinuity } from "../src/dcp/protected-continuity.js";
+import { loadConfig } from "../src/dcp/config.js";
 
 describe("DCP ephemeral tool-record recovery", () => {
+  test("restart preserves live output identity, including text-part joins and empty results", () => {
+    const state = createState();
+    const cfg = loadConfig({ homeDir: "/__dcp_recovery__" });
+    for (const output of ["  first\nsecond\r\n", "", " \n"]) {
+      const parts = [output.slice(0, 3), output.slice(3)];
+      rehydrateToolRecordsFromMessages([{ role: "toolResult", toolCallId: "call", toolName: "write", isError: false,
+        content: [{ type: "text", text: parts[0] }, { type: "image", data: "ignored" }, { type: "text", text: parts[1] }] }], state);
+      const restored = state.toolCalls.get("call")!;
+      expect(restored.outputText).toBe(output);
+      expect(toolRecordContinuity(restored, cfg).sourceHash).toBe(toolRecordContinuity({ ...restored, outputText: output }, cfg).sourceHash);
+      expect(toolRecordContinuity(restored, cfg).minimumText).toContain("Outcome: success");
+      state.toolCalls.clear();
+    }
+    expect(state.providerSeenToolIds.size).toBe(0);
+  });
   test("rebuilds protection metadata from raw history without inventing provider evidence", () => {
     const state = createState();
     const messages = [

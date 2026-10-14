@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open } from "node:fs/promises";
 import { resolve } from "node:path";
-import { createInterface } from "node:readline";
+import { sessionByteLines } from "./session-byte-lines.mjs";
 import { parseSessionRecord } from "./session-record.mjs";
 import { SESSION_TEXT_VERSION } from "./session-text.mjs";
 
@@ -39,16 +39,15 @@ export async function readSessionTranscript(root, candidate, signal, onSkip = ()
   if (before.size > MAX_BYTES) return skip("file_exceeds_64_mib");
   const file = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   const nodes = new Map();
-  let header, leaf;
+  let header, leaf, name = "";
   const digest = createHash("sha256").update(SESSION_TEXT_VERSION).update("\n");
-  let stream, lines;
+  let stream;
   try {
     if (stamp(await file.stat()) !== stamp(before)) return skip("file_changed");
     // Bound the actual read, not just the initial stat, if a writer appends.
-    stream = file.createReadStream({ encoding: "utf8", autoClose: false, signal, end: MAX_BYTES });
-    lines = createInterface({ input: stream, crlfDelay: Infinity });
+    stream = file.createReadStream({ autoClose: false, signal, end: MAX_BYTES });
     let lineNumber = 0;
-    for await (const line of lines) {
+    for await (const { line, byteOffset, byteLength } of sessionByteLines(stream, signal)) {
       lineNumber++;
       signal.throwIfAborted();
       if (!line.trim()) continue;
@@ -66,14 +65,15 @@ export async function readSessionTranscript(root, candidate, signal, onSkip = ()
       }
       if (typeof entry.id !== "string" || !(entry.parentId === null || typeof entry.parentId === "string")
         || nodes.has(entry.id)) return skip("invalid_or_duplicate_entry", { line: lineNumber });
-      nodes.set(entry.id, { parent: entry.parentId, message: entry.message, line: lineNumber });
+      if (entry.type === "session_info" && typeof entry.name === "string") name = entry.name.trim();
+      nodes.set(entry.id, { parent: entry.parentId, message: entry.message && { ...entry.message, byteOffset, byteLength }, line: lineNumber });
       leaf = entry.id;
     }
     if (!header) return skip("empty_transcript");
     if (stamp(await file.stat()) !== stamp(before)
       || stamp(await lstat(path)) !== stamp(before)) return skip("file_changed");
   } finally {
-    lines?.close(); stream?.destroy(); await file.close();
+    stream?.destroy(); await file.close();
   }
   const messages = [], seen = new Set();
   let cursor = leaf;
@@ -89,9 +89,13 @@ export async function readSessionTranscript(root, candidate, signal, onSkip = ()
     cursor = node.parent;
   }
   messages.reverse();
-  return { id: candidate.id, path, fileStamp: stamp(before), revision: digest.digest("hex"), head: leaf ?? "", messages,
+  const firstMessage = messages.find(message => message.role === "user")?.text.slice(0, 4096) ?? "";
+  return { id: candidate.id, path, cwd: resolve(root), name, firstMessage,
+    title: name || firstMessage.slice(0, 140) || candidate.id,
+    fileStamp: stamp(before), revision: digest.digest("hex"), head: leaf ?? "", messages,
     chunks: messages.flatMap((message, ordinal) => messageChunks(message.text).map(chunk => ({ ...chunk,
-      messageId: message.id, ordinal, role: message.role, status: message.status }))) };
+      messageId: message.id, ordinal, role: message.role, status: message.status,
+      byteOffset: message.byteOffset, byteLength: message.byteLength, active: true }))) };
 }
 
 /** The validated file incarnation is unchanged; callers still rank a fresh parse.

@@ -4,10 +4,12 @@ import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { parseSessionRecord } from "./session-record.js";
 import { SessionRevisionCatalog, sessionRevisionDigest } from "./session-revisions.js";
+import { SessionReadCache } from "./session-read-cache.js";
 
 const stamp = s => `${s.dev}:${s.ino}:${s.size}:${s.mtimeMs}:${s.ctimeMs}`;
 const regular = s => s?.isFile() && !s.isSymbolicLink() && s.nlink === 1;
 const MAX_BYTES = 64 * 1024 * 1024;
+const titleCache = new SessionReadCache();
 export function nativeSessionDirectory(root, agentDir) {
   return join(agentDir, "sessions", `--${resolve(root).replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`);
 }
@@ -68,6 +70,10 @@ export async function readSessionTitle(root, candidate, signal) {
   signal.throwIfAborted();
   const before = await lstat(candidate.path).catch(e => { if (e.code !== "ENOENT") throw e; });
   if (!regular(before) || before.size > MAX_BYTES) return;
+  signal.throwIfAborted();
+  const cacheKey = JSON.stringify([resolve(root), candidate.id, candidate.path]);
+  const cached = titleCache.get(cacheKey, stamp(before));
+  if (cached) return { ...candidate, ...cached };
   const file = await open(candidate.path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   let stream, lines;
   try {
@@ -93,6 +99,8 @@ export async function readSessionTitle(root, candidate, signal) {
     const after = await lstat(candidate.path).catch(() => undefined);
     signal.throwIfAborted();
     if (!header || !regular(after) || stamp(after) !== stamp(before) || stamp(await file.stat()) !== stamp(before)) return;
-    return { ...candidate, name, firstMessage, fileStamp: stamp(before) };
+    const snapshot = { name, firstMessage, fileStamp: stamp(before) };
+    titleCache.set(cacheKey, stamp(before), snapshot);
+    return { ...candidate, ...snapshot };
   } finally { lines?.close(); stream?.destroy(); await file.close(); }
 }

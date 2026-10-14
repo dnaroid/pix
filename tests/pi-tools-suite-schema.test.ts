@@ -102,6 +102,15 @@ describe("pi-tools-suite config schema", () => {
 		}), true);
 	});
 
+	it("models DCP exact pins separately from emergency deletion guards", () => {
+		assert.equal(Value.Check(PiToolsSuiteConfigSchema, { dcp: {
+			compress: { protectedTools: [], protectTags: true },
+			protectedFilePatterns: [],
+			strategies: { emergencyCurrentTurnPruning: { protectedTools: ["read"] } },
+			modelOverrides: { "test/*": { compress: { protectedTools: [], protectTags: false }, protectedFilePatterns: [] } },
+		} }), true);
+	});
+
 	it("rejects known removed async-subagent and DCP config keys", () => {
 		for (const value of [
 			{ asyncSubagents: {} },

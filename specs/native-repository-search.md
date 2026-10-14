@@ -68,7 +68,9 @@ uncertain-work recovery: [0070](../docs/decisions/0070-search-source-work-recove
   lists does not cause rechunking. A mid-scan classification change prevents publication.
   Saving lists alone does not scan, clear purchased vectors or trigger embeddings.
 - FTS5 tokenization normalizes case, Unicode, camel-case and punctuation. User text is
-  tokenized and safely quoted rather than interpreted as raw FTS syntax. File/heading terms
+  tokenized and safely quoted rather than interpreted as raw FTS syntax. Identifier and
+  camel/snake-case phrase candidates are reserved before broad prefix matches; retrieval
+  considers the first chunk from each file before alternate chunks. File/heading terms
   carry extra BM25 weight. Stable path/line ties, source filters, test filters, file dedupe,
   `pathPrefix` and bounded excerpts are supported.
 - Explicit searches scan/hash current eligible files but rechunk and rewrite only changed
@@ -112,7 +114,23 @@ uncertain-work recovery: [0070](../docs/decisions/0070-search-source-work-recove
   Up to 100 source-balanced candidates are sent once to
   `https://openrouter.ai/api/v1/rerank`. History uploads contain only titles (512 characters)
   and snippets (4096), never full sessions or diffs; native candidate content is capped
-  at 7500 characters, with provider documents capped at 8192 overall.
+  at 7500 characters. Provider documents remain capped at 8192 UTF-8 bytes each, while
+  the query plus all documents share a 32,000-byte UTF-8 budget. Native documents use
+  query-focused excerpts and avoid duplicate path/title headers. Each candidate shares
+  the remaining batch budget equally; truncated prefixes never split UTF-8 code points.
+  Code and prose with explicit identifiers, numeric anchors or acronyms retain contiguous
+  windows. Other prose uses extractive passages covering the whole question, or representative
+  sentences when there is no literal overlap. Selected sentences retain source order and
+  mark omissions with an ellipsis; this is not an answer-generation step.
+  Knowledge documents may include an explicit leading `Document status:` label from the
+  same hash-verified file used by freshness preflight. Only recognized leading `Status:`
+  metadata is used (first 32 lines, before a level-two-or-deeper heading, excluding fenced
+  examples); paths and incidental prose never imply status. The label shares the existing
+  byte budget, does not filter archived documents and adds no index schema or separate scan.
+  In-flight file changes still reject the ranking. Federated history that
+  cannot be verified during preflight stays in local results but is excluded from the
+  remote pool; verifiable candidates may still rerank with a partial notice. Revocation,
+  cancellation or stale sent-pool validation falls back to local order.
   Candidate filters, deduplication and source policy apply before upload; native per-domain
   caps and the requested final result limit apply after reranking. Returned relevance order
   is preserved rather than re-sorted by local BM25. Desktop Settings retain their local slots.
@@ -251,6 +269,9 @@ whole-scan failure. Other eligible files remain searchable.
 ## Implementation
 
 - `external/pi-tools-suite/src/project-search/native-contract.ts`
+- `external/pi-tools-suite/src/project-search/native-ranking.mjs`
+- `external/pi-tools-suite/src/project-search/reranker-documents.mjs`
+- `external/pi-tools-suite/src/project-search/session-read-cache.mjs`
 - `external/pi-tools-suite/src/project-search/native-source-config.mjs`
 - `external/pi-tools-suite/src/project-search/native-engine.mjs`
 - `external/pi-tools-suite/src/project-search/native-scan.mjs`

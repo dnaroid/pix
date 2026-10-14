@@ -65,6 +65,7 @@ export interface FederatedRerankCandidate {
   id: string;
   title: string;
   snippet: string;
+  score?: number;
   path?: string;
   content?: string;
 }

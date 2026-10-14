@@ -62,8 +62,9 @@ export async function rerankNativeHits(query, hits, settings, dependencies, chec
   const current = async (verifyContent = false) => {
     signal.throwIfAborted();
     if ((await repositoryRerankerSettings())?.signature !== settings.signature) throw new Error("Reranker configuration changed");
-    await checkCurrent(signal, verifyContent);
+    const lifecycles = await checkCurrent(signal, verifyContent);
     signal.throwIfAborted();
+    return lifecycles;
   };
   const timer = setInterval(() => {
     if (checking || closed) return;
@@ -71,11 +72,11 @@ export async function rerankNativeHits(query, hits, settings, dependencies, chec
     void current().catch(() => { if (!closed) owner.abort(); }).finally(() => { checking = false; });
   }, 200);
   try {
-    await current(true);
+    const lifecycles = await current(true);
     const key = await (dependencies.rerankerKey ?? repositoryEmbeddingKey)();
     if (!key) throw new Error("Reranking credentials unavailable");
     const candidates = hits.slice(0, MAX_RERANK_CANDIDATES);
-    const documents = rerankerDocuments(query, candidates);
+    const documents = rerankerDocuments(query, candidates, lifecycles);
     const results = await withProviderSlot(signal, async () => {
       await current(true);
       return (dependencies.rerank ?? rerankRepository)(query, documents, settings.model, key, signal);

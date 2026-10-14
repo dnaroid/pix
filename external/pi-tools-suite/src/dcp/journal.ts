@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { validContinuityReference } from "./continuity-reference.js";
 
 import type {
   CompressionBlock,
@@ -168,10 +169,14 @@ function validateExactBlock(value: unknown): asserts value is CompressionBlock {
       || typeof fragment.origin !== "string" || fragment.origin.length === 0
       || typeof fragment.hash !== "string" || !/^[a-f0-9]{64}$/i.test(fragment.hash)
       || typeof fragment.text !== "string"
-      || (fragment.representation !== undefined && !["exact", "digest", "receipt", "aggregate"].includes(fragment.representation as string))
+      || (fragment.representation !== undefined && !["exact", "digest", "receipt", "aggregate", "reference"].includes(fragment.representation as string))
       || (fragment.sourceHash !== undefined && (typeof fragment.sourceHash !== "string" || !/^[a-f0-9]{64}$/i.test(fragment.sourceHash)))
       || (fragment.sourceBytes !== undefined && !finiteNonNegativeInteger(fragment.sourceBytes))
-      || (fragment.policyVersion !== undefined && fragment.policyVersion !== 2)) {
+      || (fragment.policyVersion !== undefined && fragment.policyVersion !== 2 && fragment.policyVersion !== 3 && fragment.policyVersion !== 4)
+      || (fragment.minimumText !== undefined && typeof fragment.minimumText !== "string")
+      || (fragment.pinSourceToolCallId !== undefined && typeof fragment.pinSourceToolCallId !== "string")
+      || (fragment.pinSourceHash !== undefined && typeof fragment.pinSourceHash !== "string")
+      || !validContinuityReference(fragment, value.id as number)) {
       throw new DcpJournalError(`DCP journal block b${value.id} has malformed protectedFragments`);
     }
   }

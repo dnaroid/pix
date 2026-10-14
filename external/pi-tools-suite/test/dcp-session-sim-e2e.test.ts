@@ -284,10 +284,11 @@ describe("DCP deterministic session-simulation E2E", () => {
       expect(report.tokenOccurrenceReductionPercent).toBeGreaterThan(60);
       expect(report.nonRewritePrefixRetentionMean).toBeGreaterThan(0.95);
       expect(text).not.toContain("sha256:");
-      // Failures fixed in completed turns survive only in the raw session; the live
-      // last turn (rounds 30-33) is still protected and stays raw.
+      // Historical failures remain qualified facts, not current failures and not
+      // silently superseded by a later successful run against another revision.
       const failRounds = [...text.matchAll(/ROUND_(\d+)_FAIL/g)].map((match) => Number(match[1]));
-      expect(failRounds.every((round) => round >= 30)).toBe(true);
+      expect(failRounds.some((round) => round < 30)).toBe(true);
+      expect(text).toContain("Not current verification");
       for (const turn of [0, 1, 2, 3]) {
         expect(text).toContain(`TURN_${turn}_CONSTRAINT`);
         expect(text).toContain(`AREA_${turn}_DECISION`);

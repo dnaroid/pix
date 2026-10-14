@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
 import { mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -93,7 +94,7 @@ function config(overrides: any = {}): DcpConfig {
       nudgeFrequency: 2,
       iterationNudgeThreshold: 8,
       nudgeForce: "soft",
-      protectedTools: ["compress", "write", "edit"],
+      protectedTools: [],
       protectTags: false,
       protectUserMessages: false,
       autoCandidates: {
@@ -870,7 +871,7 @@ describe("DCP pruning effectiveness", () => {
     expect(state.messageMetaSnapshot.get(candidate!.endId)?.text).toContain("compressible analysis");
   });
 
-  test("tool continuity budget aggregates shaped overflow and fails closed for oversized exact evidence", () => {
+  test("tool continuity budget compacts evidence but retains every action identity and fails closed at the safety floor", () => {
     const state = createState();
     const cfg = config({ compress: { maxProtectedToolContinuityBytes: 4_096 } as any });
     const fragments = Array.from({ length: 24 }, (_, index) => {
@@ -883,10 +884,11 @@ describe("DCP pruning effectiveness", () => {
         origin: `tool:${id}`,
         hash: index.toString(16).padStart(64, "0"),
         text: `receipt-${index}\n${"evidence ".repeat(100)}`,
+        minimumText: `tool:${id}; success; src/file-${index}.ts`,
         representation: "receipt" as const,
         sourceHash: (index + 100).toString(16).padStart(64, "0"),
         sourceBytes: 10_000,
-        policyVersion: 2 as const,
+        policyVersion: 3 as const,
       };
     });
 
@@ -897,9 +899,21 @@ describe("DCP pruning effectiveness", () => {
     const aggregate = bounded.find((fragment) => fragment.representation === "aggregate");
 
     expect(toolBytes).toBeLessThanOrEqual(4_096);
-    expect(aggregate?.text).toContain("Historical tool continuity aggregate");
-    expect(aggregate?.text).toContain("apply_patch");
-    expect(bounded.length).toBeLessThan(fragments.length);
+    expect(aggregate).toBeUndefined();
+    expect(bounded.length).toBe(fragments.length);
+    const shrunk = bounded.filter((fragment, index) => fragment.text !== fragments[index]!.text);
+    expect(shrunk.length).toBeGreaterThan(0);
+    for (const fragment of shrunk) {
+      const original = fragments.find((source) => source.origin === fragment.origin)!;
+      expect(fragment.hash).toBe(createHash("sha256").update(fragment.text).digest("hex"));
+      expect(fragment.sourceHash).toBe(original.sourceHash);
+      expect(fragment.sourceBytes).toBe(original.sourceBytes);
+      expect(fragment.minimumText).toBe(original.minimumText);
+    }
+    for (let index = 0; index < 24; index++) {
+      expect(bounded[index]?.text).toContain(`tool:patch-${index}`);
+      expect(bounded[index]?.text).toContain(`src/file-${index}.ts`);
+    }
 
     const exactCfg = config({ compress: { maxProtectedToolContinuityBytes: 1_024 } as any });
     expect(() => budgetProtectedToolFragments([{
@@ -909,7 +923,8 @@ describe("DCP pruning effectiveness", () => {
       text: "MUST_REMAIN_EXACT".repeat(400),
       representation: "exact",
       policyVersion: 2,
-    }], createState(), exactCfg)).toThrow(/exact tool continuity requires/i);
+    }], createState(), exactCfg)).toThrow(/safety floor/i);
+    expect(() => budgetProtectedToolFragments(fragments.map(({ minimumText, ...fragment }) => ({ ...fragment, policyVersion: 2 as const })), state, cfg)).toThrow(/safety floor/i);
   });
 
   test("legacy block continuity is re-normalized only with matching recoverable provenance", () => {
@@ -2962,6 +2977,16 @@ describe("DCP pruning effectiveness", () => {
     const summary = renderCompressionBlockSummary(state.compressionBlocks[0]!);
     expect(summary).toContain("compact subagent summary");
     expect(summary).toContain("full subagent result body");
+    const original = state.compressionBlocks[0]!;
+    const artifact = original.protectedFragments!.find((fragment) => fragment.origin.startsWith("artifact:"))!;
+    expect(artifact.policyVersion).toBe(3);
+    expect(artifact.pinSourceToolCallId).toBe("call-sub");
+    const unpinned = previewCompressionContinuityRepack(original, state, config());
+    expect(unpinned.protectedFragments.some((fragment) => fragment.origin.startsWith("artifact:"))).toBe(false);
+    expect(original.protectedFragments).toContain(artifact);
+    state.toolCalls.get("call-sub")!.outputText = "different provenance";
+    const ambiguous = previewCompressionContinuityRepack(original, state, config());
+    expect(ambiguous.protectedFragments).toContainEqual(artifact);
   });
 
   test("protected subagent artifact recovery rejects symlinks outside the session cwd atomically", async () => {
@@ -3084,6 +3109,20 @@ describe("DCP pruning effectiveness", () => {
       1000,
     );
     expect(absolute).toEqual({ minContextPercent: 0.25, maxContextPercent: 0.5 });
+  });
+
+  test("/dcp sweep removes only provider-seen observations, never action facts or unknown records", async () => {
+    const state = createState();
+    const definitions = [["seen", "read"], ["unseen", "read"], ["mutation", "write"], ["effect", "publish"], ["missing", "read"]];
+    const branch = definitions.map(([id, name], index) => ({ id: `e${index}`, parentId: index ? `e${index - 1}` : null, type: "message", message: { role: "toolResult", toolCallId: id, toolName: name, content: [{ type: "text", text: "ok" }] } }));
+    for (const [id, name] of definitions) {
+      if (id !== "missing") state.toolCalls.set(id!, toolRecord(id!, name!, id!, 10));
+      if (id !== "unseen") state.providerSeenToolIds.add(id!);
+    }
+    let command: any;
+    registerCommands({ registerCommand(_name: string, value: any) { command = value; } } as any, state, config());
+    await command.handler("sweep", { waitForIdle: async () => {}, ui: { notify() {} }, sessionManager: { getBranch: () => branch } } as any);
+    expect([...state.prunedToolIds]).toEqual(["seen"]);
   });
 
   test("/dcp no longer exposes decompress or recompress mutation commands", async () => {

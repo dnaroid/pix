@@ -144,10 +144,10 @@ describe("watch:all build planning", () => {
 		});
 	});
 
-	it("syncs suite-only changes without restarting desktop", () => {
+	it("offers Restart for suite-only changes without rebuilding native output", () => {
 		assert.deepEqual(createBuildPlan([PARTS.SUITE]), {
 			steps: [PARTS.SUITE],
-			restartDesktop: false,
+			restartDesktop: true,
 		});
 	});
 
@@ -158,11 +158,17 @@ describe("watch:all build planning", () => {
 		});
 	});
 
-	it("does not replace Desktop for builds that produce no new artifact", () => {
-		assert.deepEqual(createBuildPlan([PARTS.ACP], { hasNativeBuild: true }), {
-			steps: [PARTS.ACP],
-			restartDesktop: false,
-		});
+	it("offers Restart for Pix and ACP without rebuilding native output", () => {
+		for (const part of [PARTS.PIX, PARTS.ACP]) {
+			assert.deepEqual(createBuildPlan([part], { hasNativeBuild: true }), {
+				steps: [part],
+				restartDesktop: true,
+			});
+		}
+	});
+
+	it("does not offer Restart for ignored changes", () => {
+		assert.deepEqual(createBuildPlan([]), { steps: [], restartDesktop: false });
 	});
 
 	it("orders a complete initial build by dependency", () => {

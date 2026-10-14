@@ -43,6 +43,8 @@ it("publishes failure then recovery with mocked build steps, never launching Des
 	supervisor.initialBuild = false;
 	supervisor.hasNativeBuild = true;
 	supervisor.scheduleDesktopRestart = () => {};
+	supervisor.desktopExecutable = "/tmp/ready";
+	supervisor.copyDesktopArtifact = async () => {};
 	const status = async () => JSON.parse(await readFile(supervisor.desktopWatchStatePath, "utf8"));
 	try {
 		await supervisor.desktopStatePublisher.publish(supervisor.desktopWatchStatePath, { target: "/tmp/ready", stale: true });
@@ -76,6 +78,9 @@ it("keeps building while another edit arrives, then publishes queued work", asyn
 	await supervisor.desktopStatePublisher.publish("mock-state", { target: "/tmp/ready", stale: true });
 	supervisor.initialBuild = false;
 	supervisor.hasNativeBuild = true;
+	supervisor.desktopExecutable = "/tmp/ready";
+	supervisor.copyDesktopArtifact = async () => {};
+	supervisor.publishDesktopBuild = async () => {};
 	supervisor.pendingParts.add(PARTS.PIX);
 	supervisor.runBuildStep = async () => {
 		supervisor.queueParts([PARTS.ACP], "edit during mock build");

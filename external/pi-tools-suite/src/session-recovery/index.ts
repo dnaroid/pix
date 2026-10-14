@@ -1,4 +1,5 @@
 import { SESSION_LIMITS } from "../session/parameters.js";
+import { isDcpContinuityRead, readDcpContinuity } from "./dcp-continuity.js";
 
 type Scope = "active" | "all";
 type UnknownRecord = Record<string, unknown>;
@@ -559,6 +560,7 @@ export function createRecoveryHandlers() {
 	};
 
 	const readSection = async (_toolCallId: string, params: { section_id?: string; entry_id?: string; cursor?: string; scope?: Scope; max_entries?: number; max_body_chars?: number }, _signal: AbortSignal | undefined, _onUpdate: unknown, ctx: unknown) => {
+		if (isDcpContinuityRead(params)) return readDcpContinuity(params, ctx);
 		const scope = scopeFrom(params.scope);
 		if (!params.cursor && Boolean(params.section_id) === Boolean(params.entry_id)) {
 			return contentResult("Pass exactly one of section_id or entry_id, or continue with cursor.", { scope, found: false });

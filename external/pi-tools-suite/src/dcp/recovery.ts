@@ -1,5 +1,5 @@
 import { createInputFingerprint, type DcpState, type ToolRecord } from "./state.js"
-import { estimateMessageTokens, messageText } from "./pruner-metadata.js"
+import { estimateMessageTokens } from "./pruner-metadata.js"
 
 export interface DcpToolRecordRehydration {
   recordsUpdated: number
@@ -81,7 +81,10 @@ export function rehydrateToolRecordsFromMessages(
   for (const message of messages) {
     if (message?.role !== "toolResult" || typeof message.toolCallId !== "string") continue
     const call = calls.get(message.toolCallId)
-    const text = messageText(message).trim()
+    // Match live tool_result capture byte-for-byte, including whitespace and
+    // adjacent text parts. Presentation messageText inserts extra separators.
+    const text = typeof message.content === "string" ? message.content : Array.isArray(message.content)
+      ? message.content.map((part: any) => part?.type === "text" ? part.text : "").join("") : ""
     const toolName = call?.name || (typeof message.toolName === "string" ? message.toolName : "")
     let record = state.toolCalls.get(message.toolCallId)
     if (!record) {
@@ -95,12 +98,12 @@ export function rehydrateToolRecordsFromMessages(
         turnIndex: call?.turnIndex ?? turnIndex,
         timestamp: Number.isFinite(message.timestamp) ? message.timestamp : call?.timestamp ?? 0,
         tokenEstimate: estimateMessageTokens(message),
-        ...(text ? { outputText: text } : {}),
+        outputText: text,
         ...(message.details !== undefined ? { outputDetails: message.details } : {}),
       }
       state.toolCalls.set(message.toolCallId, record)
       if (Object.keys(inputArgs).length > 0) exactArgsRestored++
-      if (text) exactOutputsRestored++
+      exactOutputsRestored++
       touched.add(message.toolCallId)
       continue
     }
@@ -112,7 +115,7 @@ export function rehydrateToolRecordsFromMessages(
       exactArgsRestored++
       touched.add(message.toolCallId)
     }
-    if (!record.outputText && text) {
+    if (record.outputText === undefined) {
       record.outputText = text
       exactOutputsRestored++
       touched.add(message.toolCallId)

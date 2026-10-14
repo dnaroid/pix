@@ -15,6 +15,7 @@ import { hashText, settingsDocuments } from "../src/search/documents.js";
 import { parseSearchQueryRequest, parseSearchConfigRequest } from "../src/search/request.js";
 import type { SessionMapRecord } from "../src/acp/session-map.js";
 import { synchronizeSessionBoundaries } from "../src/search/session-boundary-service.js";
+import { indexSessionChunks } from "../src/search/session-chunks.js";
 import { enableSearchSources, isolateSearchHome } from "./search-sources-fixture.js";
 
 const signal = () => new AbortController().signal;
@@ -48,7 +49,7 @@ async function fixture(t: TestContext) {
   const embed: Embedder = async inputs => { calls.push([...inputs]); return inputs.map(vector); };
   const services: DesktopSearchService[] = [];
   const make = (overrides: Partial<ConstructorParameters<typeof DesktopSearchService>[0]> = {}) => {
-    const service = new DesktopSearchService({ discover: async () => records, preferences, auth, embed, ...overrides });
+    const service = new DesktopSearchService({ discover: async () => records, sessionRecords: async () => records, preferences, auth, embed, ...overrides });
     services.push(service); return service;
   };
   t.after(async () => { await Promise.all(services.map(s => s.dispose())); await rm(cwd, { recursive: true, force: true }); restoreHome(); });
@@ -57,7 +58,14 @@ async function fixture(t: TestContext) {
     const status = await s.config({ cwd });
     return !status.indexing && !status.checkingSources?.tasks;
   }, "index idle");
-  return { cwd, path, preferences, record, calls, make, request, idle,
+  const index = () => indexSessionChunks(cwd,[{id:record.piSessionId,path}],{signal:signal()});
+  const publish = async (name = record.title!) => {
+    await writeFile(path,[{type:"session",id:record.piSessionId,cwd},
+      {type:"session_info",id:"name",parentId:null,name}].map(r=>JSON.stringify(r)).join("\n")+"\n");
+    await index();
+  };
+  await publish();
+  return { cwd, path, preferences, record, calls, make, request, idle, index, publish,
     setRecords: (value: SessionMapRecord[]) => { records = value; }, setKey: (value?: string) => { key = value; } };
 }
 
@@ -83,7 +91,7 @@ test("embedding decoder accepts only the pinned routing ID and its exact provide
   for (const model of [undefined, null, 42, "", "pplx-embed-v1-4b", "perplexity/pplx-embed-v1-4b", "other/pplx-embed-v1-0.6b", "pplx-embed-v1-0.6b ", "PPLX-EMBED-V1-0.6B"]) assert.throws(() => decodeEmbeddings(response(model), 1));
 });
 
-test("malformed transcripts remain local with Unicode title fallback and no provider calls", async t => {
+test("malformed transcripts invalidate indexed titles without query-time fallback reads", async t => {
   const f = await fixture(t); await f.preferences.configure();
   const body = "{malformed JSONL but private bodyOnly data}";
   await writeFile(f.path, body);
@@ -91,9 +99,7 @@ test("malformed transcripts remain local with Unicode title fallback and no prov
     { ...f.record, sessionId: "empty", title: " " }]);
   const s = f.make();
   const hits = (await s.query(f.request("МОДЕЛЬ эмбеддинга"))).results;
-  assert.deepEqual(hits.map(hit => hit.id), ["sessions:s1"]);
-  assert.equal(hits[0]?.snippet, "");
-  assert.equal("entryId" in hits[0]!, false);
+  assert.deepEqual(hits, []);
   assert.deepEqual((await s.query(f.request("bodyOnly"))).results, []);
   assert.deepEqual((await s.query(f.request())).results, []);
   assert.deepEqual(f.calls, []);
@@ -119,6 +125,7 @@ test("local session index uses first user and last completed assistant on active
     entry("a4", "u3", "assistant", "настоящийbranchfinal", "stop"),
   ].join("\n") + "\n";
   await writeFile(f.path, content);
+  await f.index();
   const s = f.make();
   for (const query of ["апельсины", "настоящийbranchfinal"]) {
     const result = await s.query(f.request(query));
@@ -126,22 +133,22 @@ test("local session index uses first user and last completed assistant on active
     assert.equal(result.results[0]?.kind, "sessions");
     assert.equal(result.results[0]?.kind === "sessions" && result.results[0].boundaryMatch, true);
   }
-  for (const query of ["obsoletebranchfinal", "intermediate", "первый окончательный"]) {
+  for (const query of ["obsoletebranchfinal", "intermediate", "окончательный"]) {
     assert.deepEqual((await s.query(f.request(query))).results, [], query);
   }
   const indexed = rows(f.cwd, "sqlite_master", "sessions").map(row => row.name);
-  assert.ok(indexed.includes("pix_session_boundary_fts"));
+  assert.ok(indexed.includes("pix_session_chunk_fts"));
   assert.deepEqual(f.calls, [], "local boundary FTS never sends messages or queries to a provider");
   assert.equal(rows(f.cwd, "documents").length, 0, "settings-only legacy tables stay protected");
 
   await writeFile(f.path, content.replace("настоящийbranchfinal", "исправленныйfinal"));
   assert.deepEqual((await s.query(f.request("настоящийbranchfinal"))).results, []);
+  assert.deepEqual((await s.query(f.request("исправленныйfinal"))).results, [], "wait for background refresh");
+  await f.index();
   assert.equal((await s.query(f.request("исправленныйfinal"))).results.length, 1);
   f.setRecords([]);
+  await rm(f.path);
   assert.deepEqual((await s.query(f.request("исправленныйfinal"))).results, []);
-  const db = new DatabaseSync(join(f.cwd, ".pi/search/sessions.sqlite"), { readOnly: true });
-  try { assert.equal(db.prepare("SELECT COUNT(*) AS n FROM pix_session_boundary_fts").get()?.n, 0); }
-  finally { db.close(); }
 });
 
 test("boundary refresh invalidates pre-projection cache and excludes sandbox source", async t => {
@@ -154,6 +161,7 @@ test("boundary refresh invalidates pre-projection cache and excludes sandbox sou
     entry("a", "u", "assistant", "Ready\n```pix-html\nassistantsecret\n```\nfinalprose"),
   ].join("\n") + "\n");
   const store = new SearchIndexStore();
+  await f.index();
   await synchronizeSessionBoundaries(store, f.cwd, [f.record], signal());
   const db = new DatabaseSync(join(f.cwd, ".pi/search/sessions.sqlite"));
   try {
@@ -172,6 +180,7 @@ test("private session excerpts refuse redirected SQLite index directories", asyn
   const f = await fixture(t);
   const target = await mkdtemp(join(f.cwd, "external-"));
   await mkdir(join(f.cwd, ".pi"), { recursive: true });
+  await rm(join(f.cwd,".pi/search"),{recursive:true,force:true});
   await symlink(target, join(f.cwd, ".pi", "search"));
   await writeFile(f.path, JSON.stringify({ type: "session", id: "pi1", cwd: f.cwd }) + "\n");
   await assert.rejects(
@@ -185,9 +194,11 @@ test("explicit queries see title renames/deletions and missing body files withou
   const f = await fixture(t); const s = f.make();
   assert.equal((await s.query(f.request("модель"))).results.length, 1);
   f.setRecords([{ ...f.record, title: "Новый заголовок" }]); s.changed(f.cwd);
+  await f.publish("Новый заголовок");
   assert.equal((await s.query(f.request("модель"))).results.length, 0);
   assert.equal((await s.query(f.request("заголовок"))).results.length, 1);
   f.setRecords([]);
+  await rm(f.path);
   assert.equal((await s.query(f.request("заголовок"))).results.length, 0);
 });
 
@@ -256,6 +267,7 @@ test("offline settings use authored metadata, not values; settings-only queries 
 
 test("settings embeddings persist/reuse across restart and absent transcripts do not trigger session query embeddings", async t => {
   const f = await fixture(t); await f.preferences.configure();
+  await rm(f.path);
   const request = f.request("", { types: ["settings", "sessions"], settings: [setting] });
   const first = f.make(); await first.query(request); await f.idle(first);
   assert.equal(rows(f.cwd, "vectors").length, 1); await first.dispose();
@@ -274,10 +286,11 @@ test("central configuration indexes named titles, not fallback prompts or histor
   const f = await fixture(t);
   const privateMessage = "PRIVATE-FIRST-MESSAGE-NOT-A-TITLE";
   await writeFile(f.path, `USER: ${privateMessage}\nPRIVATE-HISTORY-TEXT\n`);
+  await f.publish("Garden planning");
   f.setRecords([
     { ...f.record, title: "Garden planning", namedTitle: "Garden planning" },
-    { ...f.record, sessionId: "fallback", title: privateMessage },
-    { ...f.record, sessionId: "mismatch", title: "Fresh rename", namedTitle: "Old name" },
+    { ...f.record, sessionId: "fallback", piSessionPath: join(f.cwd,"fallback.jsonl"), title: privateMessage },
+    { ...f.record, sessionId: "mismatch", piSessionPath: join(f.cwd,"mismatch.jsonl"), title: "Fresh rename", namedTitle: "Old name" },
   ]);
   const s = f.make();
   const before = await s.config({ cwd: f.cwd });
@@ -298,7 +311,7 @@ test("central configuration indexes named titles, not fallback prompts or histor
   assert.deepEqual(f.calls, [["Garden planning"]], "only actual names may be embedded");
   assert.equal(rows(f.cwd, "pix_session_vectors").length, 1);
   assert.doesNotMatch(JSON.stringify(f.calls), /PRIVATE|Old name|эмбеддинга/);
-  assert.equal(await readFile(f.path, "utf8"), `USER: ${privateMessage}\nPRIVATE-HISTORY-TEXT\n`);
+  assert.match(await readFile(f.path, "utf8"), /Garden planning/);
   await s.dispose();
 
   const reopened = f.make();
@@ -315,6 +328,7 @@ test("central configuration indexes named titles, not fallback prompts or histor
 test("session-title embeddings add non-lexical results without affecting settings or commits", async t => {
   const f = await fixture(t);
   f.setRecords([{ ...f.record, title: "Orchard maintenance", namedTitle: "Orchard maintenance" }]);
+  await f.publish("Orchard maintenance");
   await f.preferences.configure();
   const s = f.make();
   await s.index({ cwd: f.cwd, source: "sessions" });
@@ -351,6 +365,7 @@ test("session title rename, delete, and duplicate names reconcile only session t
   assert.equal(rows(f.cwd, "pix_session_vectors").length, 1);
   f.setRecords([]);
   s.changed(f.cwd);
+  await rm(f.path);
   await s.query(f.request(""));
   assert.deepEqual(rows(f.cwd, "pix_session_titles"), []);
   assert.deepEqual(rows(f.cwd, "pix_session_vectors"), []);
@@ -452,6 +467,8 @@ for (const change of ["delete", "rename"] as const) test(`mixed search revalidat
   const pending = s.query(f.request("модель", { types: ["settings", "sessions"], settings: [setting] }));
   await started.promise;
   f.setRecords(change === "delete" ? [] : [{ ...f.record, title: "Модель переименована" }]);
+  if (change === "delete") await rm(f.path);
+  else await f.publish("Модель переименована");
   release.resolve();
   const result = await pending;
   assert.deepEqual(result.results.filter(hit => hit.kind === "sessions").map(hit => hit.title),
@@ -463,7 +480,7 @@ for (const providerFails of [false, true]) test(`mixed search propagates control
   const f = await fixture(t); await f.preferences.configure();
   let discoveries = 0;
   const s = f.make({
-    discover: async () => { if (++discoveries > 1) throw new Error("private discovery failure"); return [f.record]; },
+    sessionRecords: async () => { if (++discoveries > 1) throw new Error("private discovery failure"); return [f.record]; },
     embed: async inputs => {
       if (providerFails && inputs[0] === "модель") throw new Error("private provider failure");
       return inputs.map(vector);
@@ -471,7 +488,7 @@ for (const providerFails of [false, true]) test(`mixed search propagates control
   });
   await s.query(f.request("", { types: ["settings"], settings: [setting] })); await f.idle(s);
   await assert.rejects(s.query(f.request("модель", { types: ["settings", "sessions"], settings: [setting] })),
-    /Session title discovery timed out or failed/);
+    /Session index metadata unavailable or timed out/);
   assert.equal(discoveries, 2);
 });
 
@@ -517,20 +534,20 @@ test("consent revocation aborts an uncooperative settings provider without persi
 
 test("discovery is bounded/cancelable, sanitizes errors, and never publishes stale completion", async t => {
   const f = await fixture(t); const source = gate<SessionMapRecord[]>(); let aborted = false;
-  const s = f.make({ discoveryTimeoutMs: 30, discover: async (_cwd, owned) => { owned.addEventListener("abort", () => { aborted = true; }, { once: true }); return source.promise; } });
-  await assert.rejects(s.query(f.request("модель")), /Session title discovery timed out or failed/);
+  const s = f.make({ discoveryTimeoutMs: 30, sessionRecords: async (_cwd, owned) => { owned.addEventListener("abort", () => { aborted = true; }, { once: true }); return source.promise; } });
+  await assert.rejects(s.query(f.request("модель")), /Session index metadata unavailable or timed out/);
   assert.equal(aborted, true); source.resolve([f.record]);
-  const bad = f.make({ discover: async () => { throw new Error("Bearer SECRET private corpus"); } });
+  const bad = f.make({ sessionRecords: async () => { throw new Error("Bearer SECRET private corpus"); } });
   await assert.rejects(bad.query(f.request("модель")), error => { assert.doesNotMatch(String(error), /SECRET|private/); return true; });
   const started = gate<void>();
-  const blocked = f.make({ discover: async () => { started.resolve(); return new Promise(() => {}); } });
+  const blocked = f.make({ sessionRecords: async () => { started.resolve(); return new Promise(() => {}); } });
   const controller = new AbortController(); const query = blocked.query(f.request("модель"), controller.signal);
   await started.promise; controller.abort(); await assert.rejects(query); await blocked.dispose();
 });
 
 test("workspace switch and dispose cancel in-flight discovery before stale titles can escape", async t => {
   const f = await fixture(t); const started = gate<void>(), release = gate<SessionMapRecord[]>();
-  const s = f.make({ discover: async () => { started.resolve(); return release.promise; } });
+  const s = f.make({ sessionRecords: async () => { started.resolve(); return release.promise; } });
   const request = s.query(f.request("модель")); const canceled = assert.rejects(request); await started.promise;
   await s.config({ cwd: join(f.cwd, "other") }); await canceled;
   release.resolve([f.record]); await s.dispose();

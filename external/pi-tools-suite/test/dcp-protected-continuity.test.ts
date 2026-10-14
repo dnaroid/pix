@@ -1,210 +1,128 @@
 import { describe, expect, test } from "bun:test";
-
 import { loadConfig } from "../src/dcp/config.js";
-import { toolRecordContinuity } from "../src/dcp/protected-continuity.js";
+import { repeatableObservationKey, toolRecordContinuity } from "../src/dcp/protected-continuity.js";
 import { isToolRecordPruningProtected } from "../src/dcp/pruner-tools.js";
-import type { ToolRecord } from "../src/dcp/state.js";
+import { createState, type ToolRecord } from "../src/dcp/state.js";
+import { budgetProtectedToolFragments } from "../src/dcp/continuity-ledger.js";
 
 function record(overrides: Partial<ToolRecord> = {}): ToolRecord {
-	return {
-		toolCallId: "call-1",
-		toolName: "shell",
-		inputArgs: { command: "git status --short" },
-		inputFingerprint: "shell::fixture",
-		isError: false,
-		turnIndex: 0,
-		timestamp: 1,
-		tokenEstimate: 5000,
-		outputText: "M dist/a.js\n".repeat(3_000),
-		...overrides,
-	};
+	return { toolCallId: "call-1", toolName: "shell", inputArgs: { command: "git status --short" },
+		inputFingerprint: "shell::fixture", isError: false, turnIndex: 0, timestamp: 1,
+		tokenEstimate: 5000, outputText: "M dist/a.js\n".repeat(3_000), ...overrides };
 }
+const config = () => loadConfig({ homeDir: "/__dcp_protected_continuity__" });
 
-describe("DCP protected continuity", () => {
-	test("keeps shell protected from pruning while compacting proven inspection continuity", () => {
-		const config = loadConfig({ homeDir: "/__dcp_protected_continuity__" });
-		const source = record();
-		expect(isToolRecordPruningProtected(source, config)).toBe(true);
-
-		const continuity = toolRecordContinuity(source, config);
-		expect(continuity.mode).toBe("digest");
-		expect(continuity.reason).toBe("read-only-inspection");
-		expect(continuity.text).toContain("Command: git status --short");
-		expect(continuity.text).toContain("Outcome: success");
-		expect(continuity.text).toContain("Raw output size:");
-		expect(continuity.text).not.toMatch(/sha256|[0-9a-f]{64}/);
-		expect(continuity.sourceHash).toMatch(/^[0-9a-f]{64}$/);
-		expect(continuity.text!.length).toBeLessThan(800);
-		expect(continuity.text).not.toContain("M dist/a.js\nM dist/a.js\nM dist/a.js");
+describe("DCP fact retention", () => {
+	test("no implicit exact tools; explicit user tags are enabled", () => {
+		expect(config().compress.protectedTools).toEqual([]);
+		expect(config().compress.protectTags).toBe(true);
 	});
-
-	test("compacts a proven compound inspection pipeline with temp-only staging", () => {
-		const config = loadConfig({ homeDir: "/__dcp_protected_continuity__" });
-		const outputText = "README match detail\n".repeat(2_000);
-		const continuity = toolRecordContinuity(record({
-			inputArgs: {
-				command: "rg -n 'Project-local agents|\\.pi/agents' README.md > /tmp/readme.log; printf 'MATCH_RESULT\\n'; head -n 180 /tmp/readme.log",
-			},
-			outputText,
-		}), config);
-		expect(continuity.mode).toBe("digest");
-		expect(continuity.reason).toBe("read-only-inspection");
-		expect(continuity.text).toContain("Classification: inspection");
-		expect(continuity.text).toContain("Raw output size:");
-		expect(continuity.text!.length).toBeLessThan(1_000);
-		expect(continuity.text).not.toContain("README match detail\nREADME match detail");
-	});
-
-	test("compacts a confidently recognised simple Bun test result", () => {
-		const config = loadConfig({ homeDir: "/__dcp_protected_continuity__" });
-		const bunOutput = [
-			"bun test v1.3.14 (0d9b296a)",
-			...Array.from({ length: 25 }, (_, index) => `(pass) a.test.ts > case ${index + 1} [1.00ms] ${"detail ".repeat(8)}`),
-			"",
-			" 25 pass",
-			" 0 fail",
-			" 50 expect() calls",
-			"Ran 25 tests across 1 file. [5.00ms]",
-		].join("\n");
-		const continuity = toolRecordContinuity(record({
-			inputArgs: { command: "bun test test/a.test.ts" },
-			outputText: bunOutput,
-		}), config);
-		expect(continuity.mode).toBe("digest");
-		expect(continuity.reason).toBe("recognised-test-build");
-		expect(continuity.text).toContain("Execution outcome: SUCCESS");
-		expect(continuity.text).toContain("25 passed");
-		expect(continuity.text!.length).toBeLessThan(bunOutput.length);
-	});
-
-	test("preserves actionable failure evidence in a compact recognised test digest", () => {
-		const config = loadConfig({ homeDir: "/__dcp_protected_continuity__" });
-		const bunOutput = [
-			"bun test v1.3.14 (0d9b296a)",
-			...Array.from({ length: 25 }, (_, index) => `(pass) a.test.ts > ok ${index + 1} [1.00ms] ${"detail ".repeat(8)}`),
-			"(fail) a.test.ts > broken contract [2.00ms]",
-			"Error: expected compact continuity marker",
-			"",
-			" 25 pass",
-			" 1 fail",
-			"Ran 26 tests across 1 file. [7.00ms]",
-		].join("\n");
-		const continuity = toolRecordContinuity(record({
-			inputArgs: { command: "bun test test/a.test.ts" },
-			outputText: bunOutput,
-			isError: true,
-		}), config);
-		expect(continuity.mode).toBe("digest");
-		expect(continuity.reason).toBe("recognised-test-build");
-		expect(continuity.text).toContain("Execution outcome: ERROR");
-		expect(continuity.text).toContain("(fail) a.test.ts > broken contract");
-		expect(continuity.text).toContain("Error: expected compact continuity marker");
-		expect(continuity.text).toContain("25 passed, 1 failed, 26 tests, 1 files");
-		expect(continuity.text!.length).toBeLessThan(bunOutput.length);
-	});
-
-	test("retains exact output for mutation, compound, unknown, protected-path, and unrecognised test commands", () => {
-		const config = loadConfig({ homeDir: "/__dcp_protected_continuity__" });
-		for (const inputArgs of [
-			{ command: "git checkout main" },
-			{ command: "git status && git diff" },
-			{ command: "node custom-runner.mjs" },
-			{ command: "bun test test/a.test.ts" },
-		]) {
-			const outputText = inputArgs.command.startsWith("bun test") ? "custom output with no terminal summary" : "EXACT_SIDE_EFFECT_EVIDENCE";
-			const continuity = toolRecordContinuity(record({ inputArgs, outputText }), config);
-			expect(continuity.mode).toBe("verbatim");
-			expect(continuity.text).toContain(outputText);
+	test("observations of any size need no exact ledger", () => {
+		for (const outputText of ["clean\n", "observation\n".repeat(10_000)]) {
+			for (const source of [record({ outputText }), record({ toolName: "read", inputArgs: { path: "a.ts" }, outputText })]) {
+				expect(isToolRecordPruningProtected(source, config())).toBe(false);
+				expect(toolRecordContinuity(source, config()).mode).toBe("none");
+			}
 		}
-
-		const largeUnparsed = `${"custom test runner progress line\n".repeat(400)}FAILED: UNPARSED_RUNNER_FAILURE`;
-		const bounded = toolRecordContinuity(record({ inputArgs: { command: "bun test test/a.test.ts" }, outputText: largeUnparsed, isError: true }), config);
-		expect(bounded.mode).toBe("receipt");
-		expect(bounded.text).toContain("UNPARSED_RUNNER_FAILURE");
-		expect(bounded.text!.length).toBeLessThan(largeUnparsed.length / 4);
-
-		config.protectedFilePatterns = ["secrets/**"];
-		const protectedPath = toolRecordContinuity(record({
-			inputArgs: { command: "git status --short", cwd: "secrets/project" },
-			outputText: "EXACT_PROTECTED_PATH_OUTPUT",
-		}), config);
-		expect(protectedPath.mode).toBe("verbatim");
-		expect(protectedPath.reason).toBe("protected-file-pattern");
 	});
-
-	test("configured non-shell protected tools retain verbatim continuity", () => {
-		const config = loadConfig({ homeDir: "/__dcp_protected_continuity__" });
-		config.compress.protectedTools.push("read");
-		const continuity = toolRecordContinuity(record({
-			toolName: "read",
-			inputArgs: { path: "src/a.ts" },
-			outputText: "EXACT_READ_OUTPUT",
-		}), config);
-		expect(continuity).toMatchObject({ mode: "verbatim", reason: "non-shell-protected-tool" });
-		expect(continuity.text).toContain("EXACT_READ_OUTPUT");
+	test("mutations and unknown tools cannot be deleted without replacement", () => {
+		for (const toolName of ["write", "edit", "apply_patch", "ast_apply", "send_email", "paid_request", "unknown_extension"]) {
+			const source = record({ toolName, inputArgs: { path: "a.ts" }, outputText: "ok" });
+			expect(isToolRecordPruningProtected(source, config())).toBe(true);
+			const result = toolRecordContinuity(source, config());
+			expect(result.mode).toBe("receipt");
+			expect(result.minimumText).toContain("tool:call-1");
+			expect(result.sourceHash).toMatch(/^[0-9a-f]{64}$/);
+		}
 	});
-
-	test("compacts large apply_patch results into mutation receipts with producer evidence", () => {
-		const config = loadConfig({ homeDir: "/__dcp_protected_continuity__" });
-		const outputText = [
-			"Success. Updated the following files:",
-			"M src/a.ts",
-			"M src/b.ts",
-			"LSP diagnostics:",
-			...Array.from({ length: 500 }, (_, index) => `diagnostic ${index}: detail detail detail detail`),
-		].join("\n");
-		const continuity = toolRecordContinuity(record({
-			toolName: "apply_patch",
-			inputArgs: { patch: "*** Begin Patch\n*** Update File: src/a.ts\n*** End Patch" },
-			outputText,
-			outputDetails: {
-				changedFiles: ["src/a.ts", "src/b.ts"],
-				summary: "Updated two files and refreshed diagnostics.",
-			},
-		}), config);
-
-		expect(continuity.mode).toBe("receipt");
-		expect(continuity.reason).toBe("mutation-receipt");
-		expect(continuity.text).toContain("Mutation continuity receipt: apply_patch");
-		expect(continuity.text).toContain("src/a.ts");
-		expect(continuity.text).toContain("Updated two files and refreshed diagnostics.");
-		expect(continuity.text).toContain("Raw output size:");
-		expect(continuity.sourceHash).toMatch(/^[0-9a-f]{64}$/);
-		expect(continuity.text!.length).toBeLessThan(outputText.length / 4);
+	test("even tiny unknown shell results are receipts, not exact pins", () => {
+		const result = toolRecordContinuity(record({ inputArgs: { command: "node publish.mjs" }, outputText: "ok" }), config());
+		expect(result.mode).toBe("receipt");
+		expect(result.minimumText).toContain("effect UNKNOWN");
+		expect(result.minimumText).toContain("Do not repeat blindly");
 	});
-
-	test("compacts large unknown shell output but keeps tiny shell evidence verbatim", () => {
-		const config = loadConfig({ homeDir: "/__dcp_protected_continuity__" });
-		const outputText = "custom runner detail\n".repeat(2_000) + "final status: success\n";
-		const compact = toolRecordContinuity(record({
-			inputArgs: { command: "node custom-runner.mjs" },
-			outputText,
-		}), config);
-		expect(compact.mode).toBe("receipt");
-		expect(compact.reason).toBe("shell-unknown-receipt");
-		expect(compact.text).toContain("Classification: unknown/simple");
-		expect(compact.text!.length).toBeLessThan(outputText.length / 4);
-
-		const tiny = toolRecordContinuity(record({
-			inputArgs: { command: "node custom-runner.mjs" },
-			outputText: "ok\n",
-		}), config);
-		expect(tiny.mode).toBe("verbatim");
-		expect(tiny.reason).toBe("shell-unknown-receipt-not-smaller");
-		expect(tiny.text).toBe("### Tool: shell\nok");
+	test("explicit tool and file pins stay exact, independently of action protection", () => {
+		const cfg = config(); cfg.compress.protectedTools = ["read", "write"];
+		for (const toolName of ["read", "write"]) {
+			expect(toolRecordContinuity(record({ toolName, outputText: "EXACT" }), cfg)).toMatchObject({ mode: "verbatim", text: `### Tool: ${toolName}\nEXACT` });
+		}
+		cfg.compress.protectedTools = []; cfg.protectedFilePatterns = ["secrets/**"];
+		expect(toolRecordContinuity(record({ inputArgs: { command: "git status", cwd: "secrets/repo" } }), cfg).mode).toBe("verbatim");
 	});
-
-	test("does not replace a tiny protected result with a larger continuity digest", () => {
-		const config = loadConfig({ homeDir: "/__dcp_protected_continuity__" });
-		const continuity = toolRecordContinuity(record({
-			inputArgs: { command: "git status --short" },
-			outputText: "clean\n",
-		}), config);
-		expect(continuity).toMatchObject({
-			mode: "verbatim",
-			reason: "read-only-inspection-not-smaller",
+	test("external effects retain IDs, unknown outcomes and recovery links", () => {
+		const result = toolRecordContinuity(record({ toolName: "publish", isError: true,
+			outputText: "Timeout after sending request\noperation_id: remote-42\nlog: .pi/artifacts/run/log.txt",
+			outputDetails: { requestId: "request-1", status: "pending" } }), config());
+		for (const fact of ["effect UNKNOWN", "remote-42", "request-1", "pending", ".pi/artifacts/run/log.txt", "Timeout"]) {
+			expect(result.minimumText).toContain(fact);
+		}
+	});
+	test("missing outcome never becomes mutation success", () => {
+		expect(toolRecordContinuity(record({ toolName: "write", outputText: undefined }), config()).minimumText).toContain("UNKNOWN; result not observed");
+	});
+	test("plain JSON action receipts retain IDs and status without structured details", () => {
+		const result = toolRecordContinuity(record({ toolName: "publish", inputArgs: {}, outputText: '{"id":"remote-42","status":"pending"}' }), config());
+		expect(result.minimumText).toContain("remote-42");
+		expect(result.minimumText).toContain("pending");
+	});
+	test("successful mutation receipts do not drop reported diagnostic failures", () => {
+		const result = toolRecordContinuity(record({ toolName: "write", inputArgs: { path: "src/a.ts" }, outputText: "Written successfully.\nsrc/a.ts:1 error: cannot find module" }), config());
+		expect(result.minimumText).toContain("cannot find module");
+	});
+	test("one-line JSON references do not pin the adjacent raw transcript", () => {
+		const result = toolRecordContinuity(record({ toolName: "codemode", inputArgs: {}, outputText: JSON.stringify({
+			id: "remote-42", status: "pending", log: ".pi/artifacts/run/log.txt", output: "raw-observation ".repeat(10_000),
+		}) }), config());
+		expect(result.minimumText).toContain("remote-42");
+		expect(result.minimumText).toContain("pending");
+		expect(result.minimumText).toContain(".pi/artifacts/run/log.txt");
+		expect(result.minimumText).not.toContain("raw-observation");
+		expect(result.minimumText!.length).toBeLessThan(1_000);
+	});
+	test("mutation receipts retain attempted paths and producer summary", () => {
+		const result = toolRecordContinuity(record({ toolName: "apply_patch", inputArgs: { patch: "*** Update File: src/a.ts" },
+			outputText: "Success\nM src/b.ts\n" + "diagnostic detail\n".repeat(1_000),
+			outputDetails: { changedFiles: ["src/c.ts"], summary: "Updated three files" } }), config());
+		for (const path of ["src/a.ts", "src/b.ts", "src/c.ts"]) expect(result.minimumText).toContain(path);
+		expect(result.text).toContain("Updated three files");
+		expect(result.text!.length).toBeLessThan(1_000);
+	});
+	test("test results retain historical outcome and actionable failures, never newest-wins", () => {
+		const output = ["bun test v1.3.14 (0d9b296a)", "(fail) a.test.ts > contract [2.00ms]", "Error: expected marker", " 25 pass", " 1 fail", "Ran 26 tests across 1 file. [7.00ms]"].join("\n");
+		const source = record({ inputArgs: { command: "bun test test/a.test.ts" }, outputText: output, isError: true });
+		const result = toolRecordContinuity(source, config());
+		expect(result.mode).toBe("digest");
+		expect(result.minimumText).toContain("Execution outcome: ERROR");
+		expect(result.minimumText).toContain("expected marker");
+		expect(result.minimumText).toContain("25 passed, 1 failed, 26 tests, 1 files");
+		expect(result.minimumText).toContain("Not current verification");
+		expect(repeatableObservationKey(source, config())).toBeUndefined();
+	});
+	test("unparsed test output is never implicitly exact", () => {
+		const result = toolRecordContinuity(record({ inputArgs: { command: "bun test test/a.test.ts" }, outputText: "FAILED: custom runner", isError: true }), config());
+		expect(result.mode).toBe("digest");
+		expect(result.minimumText).toContain("custom runner");
+	});
+	test("several substantial test logs fit the default floor without dropping per-run facts", () => {
+		const fragments = Array.from({ length: 8 }, (_, index) => {
+			const outputText = ["bun test v1.3.14", ...Array.from({ length: 40 }, (_, n) => `Error: case ${n} ${"detail ".repeat(15)}`), " 25 pass", " 1 fail", "Ran 26 tests across 1 file. [7.00ms]"].join("\n");
+			const decision = toolRecordContinuity(record({ toolCallId: `test-${index}`, inputArgs: { command: "bun test" }, outputText, isError: true }), config());
+			return { kind: "tool" as const, origin: `tool:test-${index}`, hash: decision.sourceHash, text: decision.text!, minimumText: decision.minimumText,
+				representation: "digest" as const, policyVersion: 3 as const, sourceHash: decision.sourceHash };
 		});
-		expect(continuity.text).toBe("### Tool: shell\nclean");
+		const budgeted = budgetProtectedToolFragments(fragments, createState(), config());
+		expect(budgeted).toHaveLength(8);
+		for (const [index, fragment] of budgeted.entries()) {
+			expect(fragment.text).toContain(`tool:test-${index}`);
+			expect(fragment.text).toContain("25 passed, 1 failed, 26 tests");
+			expect(fragment.text).toContain("Error: case 0");
+			expect(fragment.text).toContain("additional diagnostics omitted; recover source");
+		}
 	});
-
+	test("compress and todo history are runtime-owned; subagent spawn keeps recovery evidence", () => {
+		for (const toolName of ["compress", "todo"]) expect(toolRecordContinuity(record({ toolName }), config()).mode).toBe("none");
+		expect(toolRecordContinuity(record({ toolName: "subagents", inputArgs: { action: "result" } }), config()).mode).toBe("none");
+		const result = toolRecordContinuity(record({ toolName: "subagents", inputArgs: { action: "spawn" }, outputDetails: { agentId: "a1", runDir: ".pi/subagents/run" } }), config());
+		expect(result.minimumText).toContain("a1"); expect(result.minimumText).toContain(".pi/subagents/run");
+	});
 });

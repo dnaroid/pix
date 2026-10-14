@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import type { SessionMapRecord } from "../acp/session-map.js";
 import type { LocalSearchHit, SearchConfigRequest, SearchIndexRequest, SearchIndexResponse, SearchSyncRequest, SearchQueryRequest, SearchQueryResponse, SearchStatus, SessionSearchHit, SemanticTasksRequest, SemanticTasksResponse, SemanticTaskHit } from "./contract.js";
 import { SearchPreferences, sharedSearchAuth, semanticEmbeddingIdentity, type SemanticEmbeddingConfig, type SearchAuth } from "./config.js";
+import { SESSION_CHUNK_FORMAT } from "./session-chunk-store.js";
 import { parseSearchConfigRequest, parseSearchIndexRequest, parseSearchSyncRequest } from "./request.js";
 import { bounded } from "./bounded.js";
 import { hashText, lexicalScore, settingsDocuments, settingsFingerprint, type SearchDocument } from "./documents.js";
@@ -9,14 +10,13 @@ import { cosine, embedOpenRouter, validVector, type Embedder } from "./embedding
 import { SearchIndexBusyError, SearchIndexStore, emptyIndex, type CachedIndex } from "./index-store.js";
 import { sessionTitleHits } from "./session-titles.js";
 import { namedSessionTitles, type NamedSessionTitle } from "./session-index.js";
-import { synchronizeSessionBoundaries } from "./session-boundary-service.js";
 import { readTaskSemanticCorpus } from "./task-corpus.js";
 import { SettingsTaskIndexer } from "./settings-task-indexer.js";
 import { withProviderSlot } from "./source-work.js";
 import type { TaskChangeWatcher } from "./task-watcher.js";
 import { SearchCacheCompatibilityError } from "./embedding-cache.js";
 import { IndexActions } from "./index-actions.js";
-import { DesktopSessionChunks, sessionChunkHits, transcriptCandidates } from "./session-chunk-service.js";
+import { DesktopSessionChunks, sessionChunkHits, transcriptCandidates, indexedSessionRecords } from "./session-chunk-service.js";
 import { hasSessionChunkVectors } from "./session-chunks.js";
 import { SessionIdlePolicy, SessionIndexDeferred } from "./session-idle.js";
 import { readSourcePolicy, sourceEnabled, requireSourceEnabled, watchSourcePolicy, type SourceSelection } from "./source-policy.js";
@@ -54,6 +54,7 @@ interface Workspace {
   error?: string;
 }
 export interface SearchServiceOptions {
+  sessionRecords?(cwd: string, signal: AbortSignal): Promise<readonly SessionMapRecord[]>;
   discover(cwd: string, signal: AbortSignal, strict?: boolean): Promise<readonly SessionMapRecord[]>;
   discoverBackground?(cwd: string, signal: AbortSignal): Promise<readonly BackgroundSessionRecord[]>;
   sessionSnapshot?(cwd: string, signal: AbortSignal): Promise<string>;
@@ -297,7 +298,7 @@ export class DesktopSearchService {
       const config = this.embeddingConfig!;
       const epoch = this.epoch;
       try {
-        const sweep = source === "sessions" ? await beginSessionSweep(w.cwd,semanticEmbeddingIdentity(config),owned) : undefined;
+        const sweep = source === "sessions" ? await beginSessionSweep(w.cwd,`${SESSION_CHUNK_FORMAT}:${semanticEmbeddingIdentity(config)}`,owned) : undefined;
         let indexed = 0, total = 0;
         let diagnostics: SearchIndexResponse["diagnostics"];
         let namedRevision: number | undefined;
@@ -468,16 +469,6 @@ export class DesktopSearchService {
     if (schedule) this.chunkIndexer(w).changed();
   }
 
-  private async refreshSessionBoundaries(w: Workspace, records: readonly SessionMapRecord[], signal: AbortSignal): Promise<void> {
-    try {
-      await synchronizeSessionBoundaries(this.store, w.cwd, records, signal);
-    } catch (error) {
-      signal.throwIfAborted();
-      if (this.current(w)) w.indexError = error instanceof SearchIndexBusyError
-        ? error.message : "Local session excerpt index unavailable; title search remains available";
-    }
-  }
-
   /** One SQLite-owned batch at a time, with durable hashes reused across restarts. */
   private async indexSessions(w: Workspace, epoch: number, signal: AbortSignal, retry = false, automatic?: SessionMapRecord,
     unchanged?: () => Promise<boolean>): Promise<void> {
@@ -572,10 +563,18 @@ export class DesktopSearchService {
     const settings = wantsSettings ? settingsDocuments(request.settings) : [];
     if (wantsSettings) { w.settings = settings; w.catalogue = [...request.settings]; this.background(w)?.catalogue(request.settings); }
     const wantsSessions = w.enabled.sessions && request.types.includes("sessions");
-    let records = wantsSessions ? await this.discover(w, signal) : [];
+    const indexedRecords = async () => {
+      try {
+        return await bounded(signal, this.options.discoveryTimeoutMs ?? 15000, async owned =>
+          indexedSessionRecords(w.cwd, owned, await this.options.sessionRecords?.(w.cwd, owned)));
+      } catch {
+        signal.throwIfAborted();
+        throw new SearchUnavailableError("Session index metadata unavailable or timed out");
+      }
+    };
+    let records = wantsSessions ? await indexedRecords() : [];
     if (wantsSessions) {
       await this.reconcileSessions(w, records, signal, false);
-      await this.refreshSessionBoundaries(w, records, signal);
     }
     authorized = await this.consent(signal);
     let queryVector: number[] | undefined;
@@ -614,34 +613,14 @@ export class DesktopSearchService {
       }
       // Provider failure/revocation can still outlive a title rename or deletion.
       if (wantsSessions) {
-        records = await this.discover(w, signal);
+        records = await indexedRecords();
         await this.reconcileSessions(w, records, signal);
-        await this.refreshSessionBoundaries(w, records, signal);
       }
     }
     signal.throwIfAborted();
     if (!this.current(w)) throw new SearchUnavailableError("Search unavailable");
     if (!this.current(w, epoch)) queryVector = undefined;
     const results: LocalSearchHit[] = wantsSessions ? sessionTitleHits(records, w.cwd, query) : [];
-    if (wantsSessions && query) {
-      try {
-        const byId = new Map(records.filter(record => resolve(record.cwd) === w.cwd && record.title?.trim())
-          .map(record => [record.sessionId, record.title!.trim()]));
-        for (const hit of await this.store.searchSessionBoundaries(w.cwd, query, signal)) {
-          const title = byId.get(hit.sessionId);
-          if (!title) continue;
-          const position = results.findIndex(candidate => candidate.kind === "sessions" && candidate.sessionId === hit.sessionId);
-          if (position >= 0 && results[position]?.kind === "sessions") {
-            results[position] = { ...results[position] as SessionSearchHit, snippet: hit.snippet, boundaryMatch: true };
-          } else {
-            results.push({ ...hit, title });
-          }
-        }
-      } catch {
-        signal.throwIfAborted();
-        if (this.current(w)) w.indexError = "Local session excerpt search unavailable; title search remains available";
-      }
-    }
     if (!await this.consent(signal) || !this.current(w, epoch)) queryVector = undefined;
     if (wantsSessions && queryVector && this.sessionTitlesEnabled) {
       try {
@@ -693,10 +672,13 @@ export class DesktopSearchService {
     results.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
     if (wantsSettings) await requireSourceEnabled(w.cwd, "settings", signal, w.policyRevision);
     if (wantsSessions) await requireSourceEnabled(w.cwd, "sessions", signal, w.policyRevision);
-    return { results: results.slice(0, request.limit), status: this.status() };
+    const fresh = wantsSessions ? new Map((await indexedRecords()).map(r => [r.sessionId,r.indexRevision])) : new Map();
+    const captured = new Map(records.map(r => [r.sessionId,r.indexRevision]));
+    return { results: results.filter(hit => hit.kind !== "sessions" || fresh.get(hit.sessionId) === captured.get(hit.sessionId))
+      .slice(0, request.limit), status: this.status() };
   }
   changed(cwd: string): void {
-    // Discovery on every explicit query observes renames/deletions; there is no history scanner.
+    // Queries validate indexed file stamps; background indexing owns JSONL reads.
     if (this.workspace?.cwd === resolve(cwd)) {
       this.workspace.queryVectors.clear();
       this.workspace.namedRevision++;

@@ -207,13 +207,11 @@
   <SessionBrainstormStatus
     snapshot={sessionBrainstormSnapshot}
     onOpenParticipant={onOpenBrainstormParticipant}
-    trailingSeparator={!!observer || sessionActivity.activeSubagents > 0 || (sessionActivity.openTodos > 0 && sessionActivity.totalTodos > 0)}
   />
   {#if observer}
     <ObserverStatus {...observer} />
   {/if}
   <SessionActivityStatusHud
-    leadingSeparator={!!observer}
     summary={sessionActivity}
     subagentSnapshot={sessionSubagentSnapshot}
     todoSnapshot={sessionTodoSnapshot}

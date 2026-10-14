@@ -1,6 +1,7 @@
 import type { SessionMapRecord } from "../acp/session-map.js";
 import { SessionChunkSync } from "./session-chunk-sync.js";
-import { indexSessionChunks, searchSessionChunks, type ChunkEmbedding } from "./session-chunks.js";
+import { indexSessionChunks, searchSessionChunks, listIndexedSessions, type ChunkEmbedding } from "./session-chunks.js";
+import { SESSION_CHUNK_FORMAT } from "./session-chunk-store.js";
 import { semanticEmbeddingIdentity, type SemanticEmbeddingConfig } from "./config.js";
 import type { SessionSearchHit } from "./contract.js";
 import { logSearchDiagnostic } from "./search-diagnostics.js";
@@ -27,7 +28,7 @@ export class DesktopSessionChunks {
     this.sync = new SessionChunkSync(async owned => {
       if (await automaticWorkPaused(cwd,"sessions",owned)) { selection.reset(); return; }
       const embedding = await options.embedding(owned);
-      const identity = embedding?.identity ?? "lexical-only";
+      const identity = `${SESSION_CHUNK_FORMAT}:${embedding?.identity ?? "lexical-only"}`;
       const pass = await beginSessionSweep(cwd,identity,owned);
       selection.useCache(`${identity}:${pass.cacheRevision}`);
       const records = await options.discoverBackground(owned);
@@ -86,4 +87,15 @@ export async function sessionChunkHits(cwd: string,records: readonly SessionMapR
         title:record.title?.trim() || record.piSessionId,
         messageId:hit.messageId,boundaryMatch:true}] : [];
     });
+}
+/** Mapping is metadata-only; never call SDK transcript discovery on a query. */
+export async function indexedSessionRecords(cwd: string,signal: AbortSignal,saved: readonly SessionMapRecord[] = []): Promise<(SessionMapRecord & { indexRevision: string })[]> {
+  const byPath = new Map(saved.map(record=>[record.piSessionPath,record]));
+  return (await listIndexedSessions(cwd,signal)).map(row=>{
+    const mapped = byPath.get(row.path);
+    return { sessionId:mapped?.piSessionId===row.id ? mapped.sessionId : row.id,
+      piSessionId:row.id,piSessionPath:row.path,cwd:row.cwd,title:row.title,indexRevision:`${row.revision}:${row.fileStamp}`,
+      namedTitle:row.name && (!mapped || (mapped.piSessionId===row.id && mapped.title?.trim()===row.name && mapped.namedTitle?.trim()===row.name))
+        ? row.name : undefined,updatedAt:mapped?.updatedAt ?? "" };
+  });
 }

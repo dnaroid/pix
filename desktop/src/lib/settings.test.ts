@@ -159,7 +159,7 @@ describe("settings JSONC helpers", () => {
 
     expect(settingsDefaultValue("pi-tools-suite", dcpSchema, ["dcp", "compress", "nudgeFrequency"])).toEqual({ exists: true, value: 2 });
     expect(settingsDefaultValue("pi-tools-suite", dcpSchema, ["dcp", "compress", "summaryBuffer"])).toEqual({ exists: true, value: true });
-    expect(settingsDefaultValue("pi-tools-suite", dcpSchema, ["dcp", "compress", "protectedTools"])).toEqual({ exists: true, value: ["compress", "write", "edit"] });
+    expect(settingsDefaultValue("pi-tools-suite", dcpSchema, ["dcp", "compress", "protectedTools"])).toEqual({ exists: true, value: [] });
     expect(settingsDefaultValue("pi-tools-suite", dcpSchema, ["dcp", "compress", "autoCandidates", "enabled"])).toEqual({ exists: true, value: true });
     expect(settingsDefaultValue("pi-tools-suite", dcpSchema, ["dcp", "compress", "autoCandidates", "minMessages"])).toEqual({ exists: true, value: 6 });
     expect(settingsDefaultValue("pi-tools-suite", dcpSchema, ["dcp", "compress", "autoCandidates", "minTokens"])).toEqual({ exists: true, value: 1500 });

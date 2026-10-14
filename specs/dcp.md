@@ -113,6 +113,11 @@ The journal intentionally excludes full raw history, provider payloads, complete
 tool records, provider-seen evidence, pressure counters, and periodic snapshots.
 No-op context transforms do not grow it.
 
+On replay, transient tool records are reconstructed from raw branch messages;
+tool-result output text matches live capture byte-for-byte, including
+empty/whitespace content and adjacent text parts (without presentation
+separators). Provider-seen evidence remains unknown after restart.
+
 Publication uses the host session append boundary. DCP validates and prepares a
 detached state, revalidates owner/source/config/model, appends the operation, and
 only then installs the committed projection in live state. The current host
@@ -236,12 +241,25 @@ Routine context construction only replays already committed pruning decisions.
 It does not discover new retroactive dedup/error/age deletions at each user
 turn. `/dcp sweep` is an explicit rewrite boundary.
 
+Sweep also requires completed provider evidence for candidate tool results and
+records its resulting rewrite/prune decision durably. Runtime protocol
+ownership, cancellation and lifecycle guards are unchanged by this evidence
+requirement.
+
 `compress.autoCompress.enabled` remains **false by default**. When explicitly
 enabled, an exact safe summary rewrite is preferred under hard pressure. It may
 commit positive partial recovery and retain the remaining recovery debt for a
 later block; one summary is not required to satisfy the entire accumulated
 target. This avoids falling directly from a useful partial candidate to mass
 tool-output deletion.
+
+Blocked-progress warnings are deduplicated by reason within the live recovery
+episode. A positive **partial** automatic commit does not rearm an already
+reported warning while recovery debt remains; a different blocker reason is
+still visible. Full automatic goal recovery, a below-threshold pass, a zero
+outstanding recovery goal, or an owner/lifecycle reset rearms warnings. This
+affects diagnostic notifications, not automatic recovery or capacity guards.
+Covered by `external/pi-tools-suite/test/dcp-progress-opportunities.test.ts`.
 
 Configured model summarizers receive only a bounded sub-deadline of the whole
 auto-compression operation, leaving deterministic extractive fallback and
@@ -271,8 +289,13 @@ is still subject to exact full-projection gain checks. Non-pressure/manual
 consolidation can also address `bN` blocks explicitly.
 
 The emergency path protects the current user request, newest live assistant
-group, configured recent pairs, protected tools/files, and results without
-completed provider evidence. If a safe exact summary cannot be prepared and the
+group, configured recent pairs, explicitly pinned tools/files, and results
+without completed provider evidence. `compress.protectedTools` and
+`protectedFilePatterns` are empty by default; explicit lists are opt-in and
+replace earlier/model-layer values, so an empty list unpins. Independently, a
+conservative raw-deletion guard prevents discarding action/effect evidence
+without a safe replacement. It is not an exact-retention pin or a hardcoded
+verbatim list. If a safe exact summary cannot be prepared and the
 hard safety floor must prune eligible old result bodies, those decisions are
 explicitly committed and replayed. If the remaining protected minimum itself
 cannot fit, DCP records a blocked state and uses the headless abort/handoff path
@@ -364,37 +387,42 @@ an excerpt, so a fixed failure never outranks the final outcome.
 Because the extractive floor is much weaker than an agent-authored summary, the
 DCP system prompt states who writes summaries: without a configured summarizer
 model the agent is told to always write the `compress` `summary` itself; with
-one, it may omit it. Protected user/tag/tool fragments and bounded
-subagent artifacts are carried through a deduplicated ledger so repeated
-rollups do not recursively duplicate them. Provider-visible ledger text carries
-no content hashes: receipts report raw output size, and identity hashes live in
-fragment metadata (`sourceHash`). The default per-block tool-continuity budget
-is 16 KiB. Unrecognised test/build output above 4 KiB gets a bounded
-failure/tail receipt instead of verbatim retention.
+one, it may omit it. Protected user/tag/tool fragments and bounded subagent
+artifacts are carried through a deduplicated ledger. Exact retention is opt-in
+(`protectedTools: []`
+by default); `protectTags` defaults true. The 16 KiB default block budget may
+discard optional evidence, but policy-version-3 `minimumText` safety floors for
+action identity/outcome survive budgeting and journal replay. Simple test/build
+floors also preserve parsed counts and parser caveats when available, and a
+basis-bounded diagnostic excerpt (up to 768 characters total); the full compact
+parsed output is not retained. At most the first two parsed diagnostics are
+included, with an omitted-diagnostic count and recover-source instruction when
+more exist; bounded error evidence is used if no parsed diagnostics exist. If
+those floors cannot fit, compression fails closed. There is no
+smaller-of-verbatim policy, hardcoded verbatim-tool list, or anonymous overflow
+aggregate. Legacy fragments without representation
+provenance cannot be reshaped; missing source records cannot be silently
+downgraded. Expanded artifact pins carry policy-v3 owner call ID and raw-output
+hash provenance; replacement releases one only when that owner hash verifies
+and current config no longer pins its output. Missing, legacy or mismatched
+provenance stays retained. Published blocks remain immutable; replacement
+creates new blocks and releases the old block's pins.
 
-Repeated side-effect-free observations are superseded, not accumulated. A
-shell result classified as read-only inspection or a single test/build command
-has a repeatable-observation key (its input fingerprint). Whenever a ledger is
-built (new compression, roll-up/consolidation, deterministic continuity
-repack), only the newest fragment per key survives, and a fragment is also
-dropped when a newer identical observation exists elsewhere in the latest
-projection (a visible raw result or another active block's ledger). Shell
-results are never pruned, so the newest occurrence always survives somewhere.
-Older runs (typically fixed failures, which the budget otherwise ranks highest)
-stay in the raw session only. Journaled blocks are never edited in place; an
-existing block sheds superseded fragments only through a new ledger build. Mutations, unknown commands and protected-path results have no
-key and every receipt is kept. For routine message-mode suggestions, a file
-read or keyed observation that a later identical call re-observed, or a read of
-a file a later successful write/edit changed, is marked stale, ranked high and
-reported with its reason. Staleness is derived from projection order, never
-timestamps, and only raises suggestion priority; it does not prune anything by
-itself. Inside the protected recent window (typically one long
-autonomous turn, where ordinary message-mode history is empty) a stale
-observation is still suggested, but only when the provider has completed-send
-evidence for it; the protected window is otherwise unchanged. Message-mode
-suggestions never include user messages: they are small and carry the
-requirements. An explicit `compress` call may still select one unless
-`compress.protectUserMessages` is set.
+Mutations and other potentially effectful actions retain source IDs and
+available outcome/UNKNOWN, paths, status, log/run/revision references so
+continuation does not blindly replay an action; these receipts are not full raw
+outputs. Simple test/build digests explicitly describe historical observations,
+never current verification. Ordinary inspections and todo/subagent progress are
+observations or runtime state, not append-only event history; semantic summaries
+preserve their conclusions. Unknown effects remain conservative. Repeatable
+observation deduplication does not apply as latest-test-wins across potentially
+different code revisions. The raw session is the historical source.
+
+For routine message-mode suggestions, stale reads/observations may be ranked by
+projection order, and staleness raises suggestion priority only; it does not
+prune by itself. Message-mode suggestions never include user messages. An
+explicit `compress` call may select one unless `compress.protectUserMessages` is
+set.
 
 Exact v2 source/mutation membership hashes are canonicalized with JSONL-stable
 value semantics before publication. In-memory-only `undefined` fields (notably
@@ -407,12 +435,32 @@ The archive is a safety net, not permission to write weak summaries: active
 requirements, decisions, constraints, verification failures, and unresolved
 work must remain usable in the working context.
 
+When policy-v3 action-receipt minimums cannot fit the bounded block ledger,
+DCP may publish one compact policy-v4 session reference instead of duplicating
+those receipts into a second archive. The reference contains raw tool-call
+identity hashes and/or addresses to immutable journal-leaf fragments; its
+visible text directs recovery through `session action=read
+entry_id="dcp:bN"`. Explicit pins and legacy records without proven
+representation provenance remain inline and can still make compression fail
+closed if their irreducible floors exceed the budget. References do not point
+to other references. Replay validates their format, and resolution binds to
+the original inputs, output, outcome, and structured details; a missing or
+changed source is UNKNOWN and must not authorize repeating the action.
+
 ## Recovery instead of decompression
 
 Raw session history remains unchanged by DCP. `session` history actions can navigate it
 with bounded overview/search pages, read a known raw `entry_id` directly, and
 continue long entry bodies using opaque cursors. DCP control custom entries are
 excluded from archive output.
+
+DCP continuity reads are a bounded specialization over that existing session
+JSONL. Use `session action=read entry_id="dcp:bN"`; continue a long response
+with its opaque `nextCursor`. Recovery is restricted to the active branch and
+validates session, branch lineage, and source identity; `scope=all`, missing or
+changed references, and stale cursors fail closed with an UNKNOWN warning.
+Recovered material is historical context, not current verification, and does
+not alter the session or compression blocks.
 
 Recovery returns historical material as a **new tool result**. It never toggles
 an old compression block, reinserts raw messages into their former provider

@@ -354,8 +354,16 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   Public-message chunks have a separate local lexical index and may also be embedded
   as described below. Per-file size/mtime and text-projection-version fingerprints
   skip unchanged JSONL; projection changes refresh existing first/final excerpts.
-  Changed, deleted and unmapped sessions are reconciled on later searches.
-  Sessions without a listing title are skipped. Queries observe renames/deletions.
+  Changed, deleted and unmapped sessions are reconciled by background indexing.
+  Session queries use cached SQLite titles/snippets and lexical/semantic chunks;
+  they perform stat-only freshness checks and do not read whole JSONL transcripts.
+  A changed or missing file is excluded until an eligible background index refresh
+  updates the cache. Legacy caches lacking indexed-file/range records require
+  background backfill; there is no query-time scan fallback. Chunk byte offsets
+  and lengths address serialized JSONL message records; text start/end are UTF-16
+  positions in sanitized projected text. Cached sanitized snippets suffice for
+  results, so query-time range reads are unnecessary. Sessions without a cached
+  title are skipped. Queries observe renames/deletions only after indexing.
   Selecting a result opens/activates and hydrates that session, without paging
   to or guessing a particular message. First/final excerpt retrieval remains
   lexical and independent of semantic embedding configuration.

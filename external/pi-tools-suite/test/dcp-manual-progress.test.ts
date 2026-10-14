@@ -63,6 +63,18 @@ describe("DCP manual compression progress", () => {
     expect(JSON.stringify(f.context())).toContain("CURRENT_REQUEST_MUST_SURVIVE");
   });
 
+  test("disabling tag protection releases pins only in a new replacement block", async () => {
+    const f = fixture({ protectTags: true });
+    await f.execute({ topic: "First", ranges: [{ startId: f.visibleId("old-user"), endId: f.visibleId("old-assistant"), summary: "Completed stage. ".repeat(200) }] });
+    const original = structuredClone(f.state.compressionBlocks[0]!);
+    f.config.compress.protectTags = false;
+    f.context();
+    await f.execute({ topic: "Release", ranges: [{ startId: "b1", endId: "b1", summary: "Stage complete." }] });
+    expect(f.state.compressionBlocks[1]?.protectedFragments).toEqual([]);
+    expect(f.state.compressionBlocks[0]?.protectedFragments).toEqual(original.protectedFragments);
+    expect(f.state.compressionBlocks[0]?.active).toBe(false);
+  });
+
   test("explicit modern block references expand once and unknown references fail atomically", async () => {
     const f = fixture();
     const oldSummary = "KNOWN_OLD_SUMMARY ".repeat(50);

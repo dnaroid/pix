@@ -131,7 +131,7 @@ export async function queryUniversalSearch(
     try {
       const request: FederatedRerankRequest = { query, context: rerankContext, nativeContext,
         candidates: candidates.filter((hit): hit is Exclude<SearchHit, { kind: "settings" }> => hit.kind !== "settings")
-          .map(hit => ({ kind: hit.kind, id: hit.id, title: hit.title.slice(0, 512), snippet: hit.snippet.slice(0, 4096),
+          .map(hit => ({ kind: hit.kind, id: hit.id, title: hit.title.slice(0, 512), snippet: hit.snippet.slice(0, 4096), score: hit.score,
             ...((hit.kind === "code" || hit.kind === "knowledge") ? { path: hit.path, content: hit.content?.slice(0, 7500) } : {}) })),
       };
       const rerank = sources.rerank;

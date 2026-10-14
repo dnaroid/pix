@@ -94,6 +94,11 @@ export interface ConversationIndexEntry {
   signedAssistant: boolean
 }
 
+/** Hash-bound addresses in the existing raw session or immutable DCP journal. */
+export type CompressionContinuitySource =
+  | { kind: "raw"; toolCallId: string; identityHash: string }
+  | { kind: "block"; blockId: number; origin: string; fragmentHash: string }
+
 export interface CompressionProtectedFragment {
   kind: "user" | "prompt" | "tool"
   /** Stable provenance key; not rendered into provider-visible context. */
@@ -103,13 +108,20 @@ export interface CompressionProtectedFragment {
   /** Provider-visible continuity text carried into future projections. */
   text: string
   /** Legacy fragments omit this and are treated as exact until safely re-normalized. */
-  representation?: "exact" | "digest" | "receipt" | "aggregate"
+  representation?: "exact" | "digest" | "receipt" | "aggregate" | "reference"
   /** SHA-256 of the raw tool output represented by this fragment, when known. */
   sourceHash?: string
   /** Raw tool-output byte size represented by this fragment, when known. */
   sourceBytes?: number
   /** Continuity shaping policy that produced this fragment. */
-  policyVersion?: 2
+  policyVersion?: 2 | 3 | 4
+  /** Policy-v3 irreducible facts; optional evidence can shrink to this floor. */
+  minimumText?: string
+  /** Verified owner of an opt-in expanded artifact, used only to release its pin. */
+  pinSourceToolCallId?: string
+  pinSourceHash?: string
+  /** Recovery addresses only, never a second copy of tool outputs. */
+  continuitySources?: CompressionContinuitySource[]
 }
 
 /**

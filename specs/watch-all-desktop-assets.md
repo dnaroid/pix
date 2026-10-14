@@ -32,7 +32,7 @@ Make the newest successfully built Vite bundle available to the Desktop process 
   Only after the app exits may it clean up the launch helper. A refused/failed
   Quit, unidentified live app, or timeout reports a failed shutdown and retains
   the app/helper and their bundles rather than interrupting persistence.
-- A Desktop web-source change schedules `web` followed by `native`. The first successful build launches Desktop; later successful builds leave the running Desktop in place and mark the newer build as ready instead of interrupting the active session.
+- A Desktop web-source change schedules `web` followed by `native`. The first successful build launches Desktop; later successful builds leave the running Desktop in place and mark the newer build as ready instead of interrupting the active session. Every nonempty successful build plan offers `Restart`, including Pix, ACP, and bundled pi-tools-suite-only changes. Runtime-only cycles copy/re-sign the last successful Desktop artifact to a distinct executable path without rebuilding web assets or Rust, then publish it as stale/ready for explicit restart. A failed build or copy/signing leaves the prior published target/stale state intact. Build, copy/signing, and state publication failures retain requested parts for retry, including edits queued during the failed cycle. Empty/ignored changes do not offer Restart.
 - Changes to `desktop/src/**/*.test.ts` (Desktop's Vitest file convention)
   do not schedule a rebuild. Production Svelte, TypeScript, and CSS sources
   remain build triggers. This classification also applies to the Git reflog
@@ -148,6 +148,7 @@ a separate explicitly requested scenario.
 - `tests/pix-watch.test.ts`
 - `tests/watch-all-desktop-quit.test.ts`
 - `tests/watch-all-state.test.ts`
+- `tests/watch-all-runtime.test.ts`
 - `desktop/src/app/desktop-watch-restart.test.ts`
 - `tests/watch-all.test.ts`
 - `tests/watch-all-frontend.test.ts`
@@ -167,6 +168,7 @@ a separate explicitly requested scenario.
   global symlink resolution, launch from an unrelated directory, argument
   forwarding, and exit-status propagation.
 - `tests/watch-all.test.ts` covers the ordered `web -> native` build plan, the bounded watcher-state handoff, and the Tauri CLI override that suppresses the duplicate `beforeBuildCommand`.
+- `tests/watch-all-runtime.test.ts` covers runtime-only artifact copying, failure/retry preservation, and avoiding redundant copying after native builds.
 - It also verifies that initial and repeated native watch builds use the same
   disk-saving Cargo environment and package-only cleanup before build/capture,
   without applying them to the web build, and abort on cleanup failure.

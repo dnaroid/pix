@@ -1,18 +1,10 @@
 import type { DcpConfig } from "./config.js";
 import type { DcpState, ToolRecord } from "./state.js";
 import { preserveRawMutationHash } from "./conversation-index.js";
+import { toolNeedsContinuity } from "./tool-retention-policy.js";
 
 export const EMERGENCY_CURRENT_TURN_PLACEHOLDER =
   "[Older tool output removed during current-turn context emergency; re-run the tool if exact content is needed]";
-
-// Tool outputs whose effects may mutate the workspace/process or control DCP.
-// Normalize names so provider/extension casing and aliases cannot bypass the
-// safety policy. Unknown tools are handled conservatively by autonomous
-// supersession below rather than assumed read-only.
-const ALWAYS_PROTECTED_TOOLS = new Set([
-  "compress", "write", "edit", "apply_patch", "patch",
-  "bash", "shell", "powershell", "exec", "execute",
-]);
 
 function normalizeToolName(name: string | undefined): string {
   return (name ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
@@ -20,7 +12,6 @@ function normalizeToolName(name: string | undefined): string {
 
 function buildProtectedTools(config: DcpConfig, extra: string[] = []): Set<string> {
   return new Set([
-    ...ALWAYS_PROTECTED_TOOLS,
     ...(config.compress.protectedTools ?? []).map(normalizeToolName),
     ...extra.map(normalizeToolName),
   ]);
@@ -96,9 +87,15 @@ export function isToolRecordPruningProtected(
   config: DcpConfig,
   extraProtectedTools: string[] = [],
 ): boolean {
-  const protectedTools = buildProtectedTools(config, extraProtectedTools);
-  if (protectedTools.has(normalizeToolName(record.toolName))) return true;
-  return isToolRecordProtectedByFilePattern(record, config);
+  return toolNeedsContinuity(record) ||
+    buildProtectedTools(config, extraProtectedTools).has(normalizeToolName(record.toolName)) ||
+    isToolRecordProtectedByFilePattern(record, config);
+}
+
+/** Explicit exact retention, independent of the no-deletion-without-replacement guard. */
+export function isToolRecordVerbatimProtected(record: ToolRecord, config: DcpConfig): boolean {
+  return buildProtectedTools(config).has(normalizeToolName(record.toolName)) ||
+    isToolRecordProtectedByFilePattern(record, config);
 }
 
 /** Backward-compatible name for callers that mean pruning protection. */

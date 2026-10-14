@@ -89,10 +89,20 @@ once using the current IDs reported by the tool.
 
 PROTECTION/ROLLUP: preserve \`<protect>...</protect>\` text verbatim. When a
 selected range contains compressed blocks, summarize their continuation-relevant
-meaning; their protected-fragment ledgers survive separately. Placeholders are
+meaning; their protected-fragment ledgers survive separately. Historical action
+receipts may become hash-bound session references. Follow their session read
+entry_id="dcp:bN" and nextCursor before relying on or repeating covered actions;
+UNKNOWN outcomes never authorize blind retry. Explicit pins stay inline. Placeholders are
 optional: use \`(bN)\` only when the full selected prior summary is genuinely
 required verbatim, at most once, and never invent a placeholder. Otherwise refer
 to it in prose as \`compressed bN\`.
+
+Retain facts, not raw tool dumps: changed paths/outcomes/open work; external
+effects with operation IDs and UNKNOWN outcomes (never blindly retry); tests
+with command, observed outcome, actionable error, log pointer and code revision
+or UNKNOWN. Historical test results are not current verification. Consolidate
+completed phases and current todo/subagent state with recovery links. Reads,
+searches and historical compress reports need no verbatim retention by default.
 
 RESULT: the tool rejects non-positive full-projection gain. An unsuccessful call
 does not satisfy a reminder. Inspect \`netGain\`, \`pressureRelieved\`, and

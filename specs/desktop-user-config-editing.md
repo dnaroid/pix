@@ -102,6 +102,14 @@ Let Pix Desktop users view and edit its independent JSONC application profile (`
   defaults come from the same shared DCP defaults module. Explicit values still
   come from the shared `~/.config/pi/pi-tools-suite.jsonc`, so Desktop's displayed
   current/effective DCP values match TUI rather than drifting to template values.
+  DCP exact tool pins (`compress.protectedTools`) are empty by default, while
+  tagged-content protection defaults on. Protection lists replace earlier
+  values, so clearing a list releases its exact pins; this is distinct from the
+  conservative guard against deleting action facts without a replacement.
+  Receipts/digests preserve relevant source IDs, outcomes/status and available
+  paths/log/version references; historical test digests do not claim current
+  verification. Irreducible safety floors can make compression fail closed if
+  they exceed the configured continuity budget.
 - Desktop Voice language/model and the external file editor use bounded selects for common supported values. The editor list includes Gram, Zed, VS Code, Cursor, Sublime Text, IntelliJ IDEA, and WebStorm. Desktop does not assume Zed (or any other editor) when `desktop.externalEditor` is omitted; external-editor actions ask the user to choose one in Desktop Settings. Non-standard/custom values already present in config remain preserved and appear as configured choices; adding a new custom value is a full-JSONC editor operation launched from `Advanced` rather than a free-form field in the primary UI. Deliberately free-form nested records elsewhere use scoped structured JSON editors instead of a schema-generated catch-all field.
 - `Advanced` does not embed a second source textarea in the narrow Settings sidebar; it exposes an `Open in editor` button. The button reads the selected config through `read_user_config(kind)`, opens it in the main Preview/editor workbench tab, and marks that preview as a user-config target.
 - User-config previews are editable even though generic home/absolute local previews remain read-only. Saving from the editor tab uses `write_user_config_if_unchanged(kind, expectedContent, content)` with the loaded preview content as the compare-and-swap baseline; a successful save refreshes the preview from the returned normalized document. If the current source has a JSONC parse error, structured sections are disabled and the panel directs the user straight to this editor-tab path so malformed source can be repaired without losing comments.

@@ -62,6 +62,23 @@ function provider() {
 }
 
 describe("federated repository reranking", () => {
+  test("every heading chunk carries verified file lifecycle, and changes revoke ranking", async () => {
+    const file = join(root, "guide.md");
+    const content = "# needle guide\n- Status: superseded\n\n## needle detail\nRecovery decisions\n\n## needle appendix\nFurther evidence\n";
+    await writeFile(file, content);
+    const input = await request(["knowledge"]), p = provider();
+    expect(input.candidates.length).toBeGreaterThan(1);
+    const result = await rerankFederated(root, input, p);
+    expect(result.notices).toEqual([]);
+    expect(p.calls[0]!.documents.every(text => text.startsWith("Document status: superseded\n"))).toBe(true);
+    const changed = await rerankFederated(root, input, { ...p, rerank: async (...args: Parameters<typeof p.rerank>) => {
+      const response = await p.rerank(...args);
+      await writeFile(file, content.replace("superseded", "accepted"));
+      return response;
+    } });
+    expect(changed.order).toBeUndefined();
+    expect(changed.notices.join()).toContain("original ranking retained");
+  });
   test("one call ranks all five sources; history uploads only bounded title/snippets", async () => {
     const input = await request(), p = provider();
     input.candidates[0]!.title = "t".repeat(1000); input.candidates[0]!.snippet = "s".repeat(20000);
@@ -88,6 +105,30 @@ describe("federated repository reranking", () => {
   test("changed history before HTTP prevents upload", async () => {
     const input = await request(["tasks"]), p = provider(); tasks("changed task");
     expect((await rerankFederated(root, input, p)).order).toBeUndefined(); expect(p.calls).toHaveLength(0);
+  });
+  test("unverified histories stay local without disabling independently current native reranking", async () => {
+    const input = await request(), p = provider();
+    delete input.context.history.tasks;
+    const task = input.candidates.find(hit => hit.kind === "tasks")!;
+    task.score = 0.42;
+    const response = await rerankFederated(root, input, p);
+    expect(p.calls).toHaveLength(1);
+    expect(p.calls[0]!.documents).toHaveLength(4);
+    expect(p.calls[0]!.documents.join("\n")).not.toContain("TASK_SAFE");
+    expect(response.order).toHaveLength(5);
+    expect(response.order!.at(-1)).toEqual({ kind: "tasks", id: task.id, score: 0.42 });
+    expect(response.notices.join(" ")).toContain("unverified history");
+    expect(applyFederatedOrder(input.candidates.map(hit => ({ ...hit, score: hit.score ?? 0 })), response.order)).toHaveLength(5);
+  });
+  test("partial history filtering never relaxes native content or source policy fences", async () => {
+    const input = await request(["tasks", "code"]), p = provider();
+    delete input.context.history.tasks;
+    await writeFile(join(root,"owner.ts"),"export const needle = 99;\n");
+    expect((await rerankFederated(root,input,p)).order).toBeUndefined();
+    expect(p.calls).toHaveLength(0);
+    await writeSourcePolicy(root,"tasks",false);
+    expect((await rerankFederated(root,input,p)).order).toBeUndefined();
+    expect(p.calls).toHaveLength(0);
   });
   test("native bytes and generations are fenced before and after HTTP", async () => {
     const input = await request(["code"]), p = provider();

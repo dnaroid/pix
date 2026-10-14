@@ -33,7 +33,8 @@ describe("status HUD todo progress ring", () => {
     expect(html).toContain('aria-valuenow="1"');
     expect(html).toContain('aria-valuemax="5"');
     expect(html).toContain('width: 20%');
-    expect(html).toContain("absolute top-[1px] right-0.5 left-0.5 h-[2px]");
+    expect(html).toContain("absolute top-[2px] right-0.5 left-0.5 h-[2px]");
+    expect(html).toContain("bg-muted-foreground/25 opacity-70");
     expect(html).toContain("relative grid h-full w-6");
     expect(html).not.toContain("data-session-todo-progress");
   });
@@ -79,21 +80,20 @@ describe("status HUD todo progress ring", () => {
     expect(html).toContain('aria-expanded="false"');
   });
   it.each([
-    [true, true, 2],
-    [true, false, 1],
-    [false, true, 1],
-    [false, false, 0],
-  ])("renders separators only between visible groups (agents=%s plan=%s)", (agents, plan, count) => {
+    [true, true],
+    [true, false],
+    [false, true],
+    [false, false],
+  ])("does not render separators (agents=%s plan=%s)", (agents, plan) => {
     const html = render(SessionActivityStatusHud, { props: {
       summary: { ...EMPTY_SESSION_ACTIVITY, activeSubagents: agents ? 1 : 0, completedTodos: 0, totalTodos: plan ? 2 : 0, openTodos: plan ? 2 : 0 },
       subagentSnapshot: agents ? { version: 1, count: 1, checkedAt: 1, runs: [{ runDir: "/run", agents: [{ id: "worker", status: "running" }] }] } : undefined,
       todoSnapshot: undefined,
       promptRunning: false,
       sessionNeedsInput: false,
-      leadingSeparator: true,
     } }).body;
-    expect(html.match(/data-status-separator=/g) ?? []).toHaveLength(count);
-    if (count) expect(html).toContain("h-3 w-px shrink-0 bg-border");
+    expect(html).not.toContain("data-status-separator");
+    expect(html).not.toContain("h-3 w-px shrink-0 bg-border");
   });
 
   it("omits the leading separator when Observer is absent", () => {

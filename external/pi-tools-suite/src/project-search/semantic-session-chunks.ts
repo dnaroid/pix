@@ -4,6 +4,7 @@ import { watchFile, unwatchFile } from "node:fs";
 import { semanticConfigurationPath } from "./native-embedding-provider.mjs";
 import { SessionChunkSync } from "./session-chunk-sync.mjs";
 import { indexSessionChunks } from "./session-chunks.mjs";
+import { SESSION_CHUNK_FORMAT } from "./session-chunk-store.mjs";
 import type { TranscriptCandidate } from "./session-transcript.mjs";
 import { commitIdentity } from "./semantic-commit-provider.js";
 import { semanticConfiguration, semanticKey, requireSemanticIdentity, embedTaskTexts, type SemanticSearchOptions } from "./semantic-provider.js";
@@ -55,7 +56,7 @@ export function registerSessionChunkSync(pi: ExtensionAPI,options: SemanticSearc
       const config = await semanticConfiguration(options,signal);
       const key = config?.provider === "openrouter" ? await semanticKey(options,signal) : undefined;
       if (config?.provider === "openrouter" && !key) return;
-      const identity = config ? commitIdentity(config) : "lexical-only";
+      const identity = `${SESSION_CHUNK_FORMAT}:${config ? commitIdentity(config) : "lexical-only"}`;
       const pass = await beginSessionSweep(root,identity,signal);
       selection.useCache(`${identity}:${pass.cacheRevision}`);
       const candidates = await catalog.list(root,getAgentDir(),signal);

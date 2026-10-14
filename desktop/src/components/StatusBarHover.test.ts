@@ -53,7 +53,8 @@ describe("Status bar click surfaces", () => {
     expect(status.indexOf("<RuntimeStatusBarItems")).toBeLessThan(status.indexOf("<ObserverStatus"));
     expect(status.indexOf("<SessionBrainstormStatus")).toBeLessThan(status.indexOf("<ObserverStatus"));
     expect(status.indexOf("<ObserverStatus")).toBeLessThan(status.indexOf("<SessionActivityStatusHud"));
-    expect(status).toContain("leadingSeparator={!!observer}");
+    expect(status).not.toContain("leadingSeparator");
+    expect(status).not.toContain("trailingSeparator");
     expect(source("ObserverStatus")).toContain('@lucide/svelte/icons/telescope');
     expect(source("ObserverStatus")).not.toContain('@lucide/svelte/icons/eye');
     expect(source("ObserverStatus")).toContain('"h-4 w-4", status.kind');

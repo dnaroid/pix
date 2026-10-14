@@ -1,272 +1,106 @@
 import { createHash } from "node:crypto";
-
-import { planProspectiveTestOutputDelivery, parseTestBuildOutput } from "./test-output-parser.js";
+import { parseTestBuildOutput } from "./test-output-parser.js";
 import { classifyShellCommand, shellCommandText } from "../shell-command-policy.js";
 import type { DcpConfig } from "./config.js";
-import {
-	isToolRecordPruningProtected,
-	isToolRecordProtectedByFilePattern,
-} from "./pruner-tools.js";
+import { isToolRecordVerbatimProtected } from "./pruner-tools.js";
 import type { ToolRecord } from "./state.js";
+import { MUTATION_TOOLS, SHELL_TOOLS, normalizeContinuityToolName, toolNeedsContinuity } from "./tool-retention-policy.js";
+import { boundedText, changedFiles, errorEvidence, evidenceReferences, failureDiagnostics, recordDetails } from "./continuity-evidence.js";
 
 export type ToolContinuityMode = "none" | "digest" | "receipt" | "verbatim";
-
 export interface ToolContinuityDecision {
 	mode: ToolContinuityMode;
 	text?: string;
+	/** Irreducible action facts; never replaced by an anonymous count aggregate. */
+	minimumText?: string;
 	reason: string;
-	/** Stable identity of the raw delivered output represented by this decision. */
-	sourceHash?: string;
-	/** Raw delivered output size before continuity shaping. */
-	sourceBytes?: number;
-}
-
-const SHELL_TOOLS = new Set(["bash", "shell", "powershell", "exec", "execute"]);
-const MUTATION_TOOLS = new Set(["apply_patch", "write", "edit", "ast_apply", "patch"]);
-const MAX_COMMAND_CHARS = 2_048;
-const MAX_ERROR_EXCERPT_CHARS = 2_048;
-const MAX_MUTATION_SUMMARY_CHARS = 2_048;
-const MAX_CHANGED_FILES = 40;
-const TEST_DIGEST_MAX_BYTES = 8_192;
-/** Unrecognised test/build output above this size gets a bounded receipt. */
-const UNRECOGNISED_TEST_VERBATIM_MAX_BYTES = 4_096;
-
-function normalizeToolName(name: string): string {
-	return name.trim().toLowerCase().replace(/[\s-]+/g, "_");
-}
-
-function stableDigest(text: string): string {
-	return createHash("sha256").update(text).digest("hex");
-}
-
-function renderedCommand(record: ToolRecord): string {
-	const command = shellCommandText(record.inputArgs);
-	if (!command) return "unavailable";
-	if (command.length <= MAX_COMMAND_CHARS) return command;
-	return `${command.slice(0, 240)}… [${command.length} chars total]`;
-}
-
-/**
- * Provider-visible size only. The content hash is kept in fragment metadata
- * (`sourceHash`) for identity; a 64-hex digest in the text is pure token noise.
- */
-function outputSize(output: string): string {
-	return `${Buffer.byteLength(output, "utf8")} bytes`;
+	sourceHash: string;
+	sourceBytes: number;
 }
 
 function sourceMetadata(record: ToolRecord): Pick<ToolContinuityDecision, "sourceHash" | "sourceBytes"> {
 	const output = record.outputText ?? "";
-	return {
-		sourceHash: stableDigest(output),
-		sourceBytes: Buffer.byteLength(output, "utf8"),
-	};
+	return { sourceHash: createHash("sha256").update(output).digest("hex"), sourceBytes: Buffer.byteLength(output, "utf8") };
 }
 
-function boundedErrorExcerpt(output: string): string | undefined {
-	const lines = output.replace(/\r\n/g, "\n").split("\n").filter((line) => line.trim().length > 0);
-	const selected: string[] = [];
-	const seen = new Set<string>();
-	const add = (line: string) => {
-		if (seen.has(line)) return;
-		seen.add(line);
-		selected.push(line);
-	};
-	for (const line of lines) {
-		if (/\b(error|failed?|failure|exception|denied|not found|cannot|unable)\b/i.test(line)) add(line);
-	}
-	for (const line of lines.slice(-6)) add(line);
-	if (selected.length === 0) return undefined;
-	let text = selected.join("\n");
-	if (text.length > MAX_ERROR_EXCERPT_CHARS) text = text.slice(0, MAX_ERROR_EXCERPT_CHARS) + "\n[excerpt truncated]";
-	return text;
-}
-
-function shellDigest(record: ToolRecord, kind: "inspection" | "test-build", body?: string): string {
-	const output = record.outputText ?? "";
-	const lines = [
-		`### Tool continuity: ${record.toolName}`,
-		`Command: ${renderedCommand(record)}`,
-		`Classification: ${kind}`,
-		`Outcome: ${record.isError ? "error" : "success"}`,
-		`Raw output size: ${outputSize(output)}`,
-	];
-	if (body) lines.push(body);
-	else if (record.isError) {
-		const excerpt = boundedErrorExcerpt(output);
-		if (excerpt) lines.push("Actionable error excerpt:", excerpt);
-	}
-	lines.push("Exact raw output is not retained in protected continuity; rerun the command only if exact text is needed.");
-	return lines.join("\n");
-}
-
-function shellReceipt(record: ToolRecord): string {
-	const output = record.outputText ?? "";
-	const classification = classifyShellCommand(record.inputArgs);
-	const lines = [
-		`### Tool continuity receipt: ${record.toolName}`,
-		`Command: ${renderedCommand(record)}`,
-		`Classification: ${classification.kind}/${classification.scope}`,
-		`Outcome: ${record.isError ? "error" : "success"}`,
-		`Raw output size: ${outputSize(output)}`,
-	];
-	const excerpt = boundedErrorExcerpt(output);
-	if (excerpt) lines.push(record.isError ? "Actionable error excerpt:" : "Bounded output evidence:", excerpt);
-	lines.push("Exact raw output remains in session history and is omitted from live protected continuity.");
-	return lines.join("\n");
-}
-
-function recordDetails(record: ToolRecord): Record<string, unknown> | undefined {
-	const details = record.outputDetails;
-	return details && typeof details === "object" && !Array.isArray(details)
-		? details as Record<string, unknown>
-		: undefined;
-}
-
-function boundedChangedFiles(details: Record<string, unknown> | undefined): string[] {
-	const changedFiles = details?.changedFiles;
-	if (!Array.isArray(changedFiles)) return [];
-	return changedFiles
-		.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-		.slice(0, MAX_CHANGED_FILES);
-}
-
-function mutationReceipt(record: ToolRecord): string {
-	const output = record.outputText ?? "";
-	const details = recordDetails(record);
-	const changedFiles = boundedChangedFiles(details);
-	const rawSummary = typeof details?.summary === "string" ? details.summary.trim() : "";
-	const summary = rawSummary.length > MAX_MUTATION_SUMMARY_CHARS
-		? rawSummary.slice(0, MAX_MUTATION_SUMMARY_CHARS) + "\n[summary truncated]"
-		: rawSummary;
-	const lines = [
-		`### Mutation continuity receipt: ${record.toolName}`,
-		`Outcome: ${record.isError ? "error" : "success"}`,
-	];
-	if (changedFiles.length > 0) {
-		lines.push(`Changed files (${changedFiles.length}${Array.isArray(details?.changedFiles) && details.changedFiles.length > changedFiles.length ? "+" : ""}):`);
-		lines.push(...changedFiles.map((file) => `- ${file}`));
-	}
-	if (summary) lines.push("Producer summary:", summary);
-	const excerpt = boundedErrorExcerpt(output);
-	if (record.isError && excerpt) lines.push("Actionable error excerpt:", excerpt);
-	lines.push(`Raw output size: ${outputSize(output)}`);
-	lines.push("Exact raw output remains in session history and is omitted from live protected continuity.");
-	return lines.join("\n");
-}
-
-function verbatimToolText(record: ToolRecord): string | undefined {
-	const output = (record.outputText ?? "").trim();
-	return output ? `### Tool: ${record.toolName}\n${output}` : undefined;
-}
-
-function preferSmallerDigest(
-	record: ToolRecord,
-	reason: string,
-	digest: string,
-): ToolContinuityDecision {
-	const verbatim = verbatimToolText(record);
-	if (verbatim && digest.length >= verbatim.length) {
-		return { mode: "verbatim", reason: `${reason}-not-smaller`, text: verbatim, ...sourceMetadata(record) };
-	}
-	return { mode: "digest", reason, text: digest, ...sourceMetadata(record) };
-}
-
-function preferSmallerReceipt(
-	record: ToolRecord,
-	reason: string,
-	receipt: string,
-): ToolContinuityDecision {
-	const verbatim = verbatimToolText(record);
-	if (verbatim && receipt.length >= verbatim.length) {
-		return { mode: "verbatim", reason: `${reason}-not-smaller`, text: verbatim, ...sourceMetadata(record) };
-	}
-	return { mode: "receipt", reason, text: receipt, ...sourceMetadata(record) };
-}
-
-/**
- * Decide how much of a pruning-protected tool result must survive a compression
- * roll-up. Pruning safety and continuity retention are deliberately separate:
- * shell results remain protected from generic pruning, while proven read-only
- * inspection and confidently parsed test/build output can keep only a bounded
- * continuation digest.
- */
+/** Exact retention is opt-in. A short result is not implicitly an exact pin. */
 export function toolRecordContinuity(record: ToolRecord, config: DcpConfig): ToolContinuityDecision {
-	if (!isToolRecordPruningProtected(record, config)) return { mode: "none", reason: "not-pruning-protected" };
-	const normalized = normalizeToolName(record.toolName);
+	const metadata = sourceMetadata(record);
+	const name = normalizeContinuityToolName(record.toolName);
 	const output = record.outputText ?? "";
-	if (isToolRecordProtectedByFilePattern(record, config)) {
-		return {
-			mode: "verbatim",
-			reason: "protected-file-pattern",
-			text: verbatimToolText(record),
-			...sourceMetadata(record),
-		};
+	if (name === "compress") return { mode: "none", reason: "runtime-owned-state", ...metadata };
+	if (isToolRecordVerbatimProtected(record, config)) {
+		return { mode: "verbatim", reason: "explicit-verbatim", text: output ? `### Tool: ${record.toolName}\n${output}` : undefined, ...metadata };
 	}
-	if (MUTATION_TOOLS.has(normalized)) {
-		return preferSmallerReceipt(record, "mutation-receipt", mutationReceipt(record));
-	}
-	if (!SHELL_TOOLS.has(normalized)) {
-		return {
-			mode: "verbatim",
-			reason: "non-shell-protected-tool",
-			text: verbatimToolText(record),
-			...sourceMetadata(record),
-		};
-	}
-	const classification = classifyShellCommand(record.inputArgs);
-	if (classification.kind === "inspection") {
-		return preferSmallerDigest(record, "read-only-inspection", shellDigest(record, "inspection"));
-	}
-	if (classification.kind === "test-build" && classification.scope === "simple") {
-		const parsed = parseTestBuildOutput({
-			text: output,
-			hostOutcome: record.isError ? "error" : "success",
-		});
-		const compact = planProspectiveTestOutputDelivery(parsed, TEST_DIGEST_MAX_BYTES, { commandScope: "simple" });
-		if (compact.decision === "compact-candidate" && compact.text) {
-			return preferSmallerDigest(
-				record,
-				"recognised-test-build",
-				shellDigest(record, "test-build", compact.text),
-			);
-		}
-		// Small unparsed output stays exact. Large unparsed output would otherwise
-		// ride every roll-up verbatim (and can exceed the block budget, failing
-		// compression closed); keep a bounded failure/tail receipt instead.
-		if (Buffer.byteLength(output, "utf8") > UNRECOGNISED_TEST_VERBATIM_MAX_BYTES) {
-			return preferSmallerReceipt(record, `test-build-${compact.reason}-receipt`, shellReceipt(record));
-		}
-		return {
-			mode: "verbatim",
-			reason: `test-build-${compact.reason}`,
-			text: verbatimToolText(record),
-			...sourceMetadata(record),
-		};
-	}
+	if (!toolNeedsContinuity(record)) return { mode: "none", reason: "ordinary-observation", ...metadata };
 
-	return preferSmallerReceipt(
-		record,
-		classification.kind === "mutation"
-			? "shell-mutation-receipt"
-			: classification.scope === "compound"
-				? "shell-compound-receipt"
-				: "shell-unknown-receipt",
-		shellReceipt(record),
-	);
+	const shell = SHELL_TOOLS.has(name);
+	const mutation = MUTATION_TOOLS.has(name);
+	const classification = shell ? classifyShellCommand(record.inputArgs) : undefined;
+	const test = classification?.kind === "test-build" && classification.scope === "simple";
+	const details = recordDetails(record);
+	// Tool success is not proof of a remote effect's success. A timeout/error may
+	// have occurred after the side effect. Persist UNKNOWN rather than invite retry.
+	const outcome = record.outputText === undefined ? "UNKNOWN; result not observed" : record.isError ? "error; effect UNKNOWN" : mutation ? "success" : "delivered; effect UNKNOWN";
+	const facts = [
+		`### ${mutation ? "Mutation continuity receipt" : "Tool continuity receipt"}: ${record.toolName}`,
+		`Source: tool:${record.toolCallId} @${record.timestamp} (raw session).`,
+		`Outcome: ${outcome}`,
+	];
+	if (shell) facts.push(`Command: ${boundedText(shellCommandText(record.inputArgs) || "UNKNOWN", 512)}`);
+	else if (typeof record.inputArgs.action === "string" || typeof record.inputArgs.op === "string") {
+		facts.push(`Action: ${record.inputArgs.action ?? record.inputArgs.op}`);
+	}
+	if (mutation) {
+		const paths = changedFiles(record);
+		facts.push(`Changed/attempted paths: ${paths.length ? paths.join(", ") : "UNKNOWN; recover source"}`);
+	}
+	const refs = evidenceReferences(record);
+	if (refs.length) facts.push(`Evidence: ${refs.join("; ")}`);
+	if (test) facts.push("Historical test/build; code version UNKNOWN unless recorded. Not current verification.");
+	if (!mutation && !test) facts.push("Do not repeat blindly; recover source/status first.");
+	if (record.isError && !test) facts.push(`Unresolved failure: ${errorEvidence(output) ?? "UNKNOWN; recover source"}`);
+	else if (mutation && failureDiagnostics(output)) facts.push(`Reported diagnostics: ${failureDiagnostics(output)}`);
+	const extra: string[] = [];
+	if (classification) extra.push(`Classification: ${classification.kind}/${classification.scope}`);
+	if (typeof details.summary === "string") extra.push(`Producer summary: ${boundedText(details.summary)}`);
+	if (test) {
+		const parsed = parseTestBuildOutput({ text: output, hostOutcome: record.isError ? "error" : "success" });
+		// Keep the outcome and an actionable bounded diagnostic, not the entire
+		// (up to 8 KiB) compact log, in every historical record's safety floor.
+		facts.push(`Execution outcome: ${parsed.hostOutcome.toUpperCase()}; termination: ${parsed.termination}; parser: ${parsed.classification}`);
+		const counts = parsed.summary;
+		if (counts) facts.push(`Observed counts: ${[
+			counts.passed === undefined ? undefined : `${counts.passed} passed`,
+			counts.failed === undefined ? undefined : `${counts.failed} failed`,
+			counts.tests === undefined ? undefined : `${counts.tests} tests`,
+			counts.files === undefined ? undefined : `${counts.files} files`,
+		].filter(Boolean).join(", ")}`);
+		if (parsed.parserWarnings.length) facts.push(`Parser caveats: ${parsed.parserWarnings.join(", ")}`);
+		const diagnostics = parsed.diagnostics.map((diagnostic) => diagnostic.text).join("\n");
+		if (diagnostics || record.isError || parsed.classification !== "recognised") {
+			const actionable = parsed.diagnostics.slice(0, 2).map((diagnostic) => diagnostic.text).join("\n");
+			facts.push(`Diagnostic evidence: ${boundedText(actionable || errorEvidence(output) || "UNKNOWN; recover source", 768)}`);
+			if (parsed.diagnostics.length > 2) facts.push(`${parsed.diagnostics.length - 2} additional diagnostics omitted; recover source before acting.`);
+		}
+	} else if (!record.isError && !mutation) {
+		const evidence = errorEvidence(output);
+		if (evidence) extra.push(`Bounded output evidence: ${evidence}`);
+	}
+	return {
+		mode: test ? "digest" : "receipt",
+		reason: test ? "historical-test-build" : mutation ? "mutation-receipt" : "action-receipt",
+		text: [...facts, ...extra].join("\n"),
+		minimumText: facts.join("\n"),
+		...metadata,
+	};
 }
 
-/**
- * Key for a repeatable, side-effect-free shell observation (read-only
- * inspection or a single test/build command). Re-running the identical
- * invocation makes earlier results history: only the newest one describes the
- * current state. Mutations, unknown commands and protected-path results have
- * no key, so each of their receipts is kept.
- */
+/** Only inspections are repeatable observations; identical test commands may
+ * cover different code revisions and must not supersede historical evidence. */
 export function repeatableObservationKey(record: ToolRecord, config: DcpConfig): string | undefined {
-	if (!SHELL_TOOLS.has(normalizeToolName(record.toolName))) return undefined;
-	if (!shellCommandText(record.inputArgs)) return undefined;
-	if (isToolRecordProtectedByFilePattern(record, config)) return undefined;
-	const { kind } = classifyShellCommand(record.inputArgs);
-	if (kind !== "inspection" && kind !== "test-build") return undefined;
-	return record.inputFingerprint;
+	return !isToolRecordVerbatimProtected(record, config) &&
+		SHELL_TOOLS.has(normalizeContinuityToolName(record.toolName)) &&
+		classifyShellCommand(record.inputArgs).kind === "inspection"
+		? record.inputFingerprint : undefined;
 }

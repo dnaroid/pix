@@ -33,7 +33,6 @@
 
   let {
     summary,
-    leadingSeparator = false,
     subagentSnapshot,
     todoSnapshot,
     promptRunning,
@@ -42,7 +41,6 @@
     onClearTodos,
   }: {
     summary: SessionActivitySummary;
-    leadingSeparator?: boolean;
     subagentSnapshot: SessionSubagentSnapshot | undefined;
     todoSnapshot: SessionTodoSnapshot | undefined;
     promptRunning: boolean;
@@ -133,9 +131,6 @@
     aria-label={"Session activity. " + activityLabel}
     data-session-activity-summary
   >
-    {#if leadingSeparator}
-      <span class="h-3 w-px shrink-0 bg-border" aria-hidden="true" data-status-separator="observer-activity"></span>
-    {/if}
     {#each compactIndicators as indicator (indicator.runDir + "\0" + indicator.agent.id)}
       {@const AgentIcon = agentIcon(indicator.preview?.icon)}
       {@const task = indicator.preview?.task?.trim() || indicator.preview?.scope?.trim() || "Task unavailable"}
@@ -156,7 +151,7 @@
         >
           {#if indicator.agent.todoProgress && indicator.agent.todoProgress.total > indicator.agent.todoProgress.completed}
             <span
-              class="pointer-events-none absolute top-[1px] right-0.5 left-0.5 h-[2px] overflow-hidden rounded-full bg-muted-foreground/25"
+              class="pointer-events-none absolute top-[2px] right-0.5 left-0.5 h-[2px] overflow-hidden rounded-full bg-muted-foreground/25 opacity-70"
               role="progressbar"
               aria-label={"Subagent " + indicator.agent.id + " plan"}
               aria-valuemin="0"
@@ -281,9 +276,6 @@
     {/if}
 
     {#if hasTodoProgress}
-      {#if indicators.length > 0}
-        <span class="h-3 w-px shrink-0 bg-border" aria-hidden="true" data-status-separator="agents-plan"></span>
-      {/if}
       <StatusBarPopover label="Session plan" onOpen={scrollTodoTooltipToCurrent}>
         {#snippet trigger({ open, toggle, id })}
         <button

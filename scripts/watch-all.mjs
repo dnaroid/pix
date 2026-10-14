@@ -181,9 +181,7 @@ export function createBuildPlan(changedParts, options = {}) {
 	const steps = PART_ORDER.filter((part) => parts.has(part));
 	return {
 		steps,
-		// Only a native build produces a new launchable Desktop artifact. Pix/ACP-only work
-		// remains available to a subsequently rebuilt Desktop without disturbing this one.
-		restartDesktop: steps.includes(PARTS.NATIVE),
+		restartDesktop: steps.length > 0,
 	};
 }
 
@@ -781,10 +779,19 @@ export class WatchAllSupervisor {
 		let succeeded = false;
 		try {
 			for (const step of plan.steps) await this.runBuildStep(step);
-			succeeded = true;
+			if (plan.restartDesktop) {
+				if (!plan.steps.includes(PARTS.NATIVE)) {
+					if (!this.desktopExecutable) throw new Error("no successfully built desktop executable is available");
+					// Desktop only offers Restart for a distinct executable path. Runtime-only
+					// edits reuse the successful bundle without rebuilding Rust or web assets.
+					const isBundle = usesDesktopAppBundle();
+					await this.copyDesktopArtifact(isBundle ? desktopAppBundlePath(this.desktopExecutable) : this.desktopExecutable, isBundle);
+				}
+				await this.publishDesktopBuild();
+			}
 			if (this.lastBuildFailure) console.error("[watch:all] recovered from previous build failure");
 			this.lastBuildFailure = undefined;
-			if (plan.restartDesktop) await this.publishDesktopBuild();
+			succeeded = true;
 			console.error("[watch:all] build cycle succeeded");
 		} catch (error) {
 			if (!this.stopping) {
@@ -825,7 +832,7 @@ export class WatchAllSupervisor {
 		}
 	}
 
-	/** Initial output launches Desktop; later native output is offered to the existing process on request. */
+	/** Initial output launches Desktop; later successful output is offered to the existing process on request. */
 	async publishDesktopBuild() {
 		if (!this.desktopExecutable || !this.desktopWatchStatePath) {
 			throw new Error("no successfully built desktop executable is available");

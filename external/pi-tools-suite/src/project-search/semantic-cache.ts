@@ -2,13 +2,13 @@ import { createHash } from "node:crypto";
 import { lstat, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { listIndexedSessions } from "./session-chunks.mjs";
 import { withTaskDatabase } from "../project-tasks/storage.js";
 import { validSearchVector, type SemanticSearchOptions } from "./semantic-provider.js";
 import { commitIdentity, type CommitEmbeddingConfig } from "./semantic-commit-provider.js";
 
 export interface CachedTaskCandidate { id: string; title: string; description?: string }
-export interface CachedSessionCandidate { id: string; path: string; name?: string; firstMessage: string; snippet?: string }
+export interface CachedSessionCandidate { id: string; path: string; name?: string; firstMessage: string; snippet?: string; revision?: string; fileStamp?: string }
 export interface CachedProjectVectors {
   tasks: Map<string, number[]>;
   sessions: Map<string, number[]>;
@@ -172,18 +172,13 @@ export async function freshSemanticCandidates(root: string, inputs: {
       signal.throwIfAborted();
       return new Map<string, NamedSessionLink>();
     });
+    const indexed = new Map((await listIndexedSessions(root,signal)).map(s=>[s.id,s]));
     for (const session of inputs.sessions) {
       signal.throwIfAborted();
       const record = linked.get(session.id);
       if (!record) continue;
-      const info = await lstat(session.path).catch(() => undefined);
-      if (!info?.isFile() || info.isSymbolicLink() || info.size > 4 * 1024 * 1024) continue;
-      try {
-        const manager = SessionManager.open(session.path);
-        const header = manager.getHeader();
-        if (header?.id === session.id && resolve(header.cwd) === root
-          && manager.getSessionName()?.trim() === record.name) fresh.sessions.add(session.id);
-      } catch { /* Missing/corrupt/renamed session does not become evidence. */ }
+      const current = indexed.get(session.id);
+      if (current?.path === session.path && current.name.trim() === record.name) fresh.sessions.add(session.id);
     }
   }
   return fresh;

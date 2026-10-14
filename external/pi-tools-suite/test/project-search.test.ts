@@ -89,6 +89,14 @@ describe("project_search shared store lookup", () => {
       firstText: "initial lookup request",
       finalText: "final project decision",
     });
+    expect(await readSessionBoundary(filename, signal())).toEqual({
+      firstText: "initial lookup request", finalText: "final project decision",
+    });
+    const cancelled = new AbortController(); cancelled.abort();
+    await expect(readSessionBoundary(filename, cancelled.signal)).rejects.toBeDefined();
+    const { appendFileSync } = await import("node:fs");
+    appendFileSync(filename, entry("a4", "u2", "assistant", "new active-branch decision", "stop") + "\n");
+    expect((await readSessionBoundary(filename, signal()))?.finalText).toBe("new active-branch decision");
     const { symlinkSync } = await import("node:fs");
     symlinkSync(filename, path.join(root, "alias.jsonl"));
     expect(await readSessionBoundary(path.join(root, "alias.jsonl"), signal())).toBeUndefined();

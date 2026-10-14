@@ -11,6 +11,7 @@ import { SearchPreferences, type SearchAuth, type SemanticEmbeddingConfig } from
 import { embedOpenRouter, type Embedder } from "../src/search/embeddings.js";
 import type { SessionMapRecord } from "../src/acp/session-map.js";
 import { TASK_SCHEMA } from "../src/registry/task-database.js";
+import { indexSessionChunks } from "../src/search/session-chunks.js";
 
 function gate<T>() {
   let resolve!: (value: T) => void;
@@ -36,7 +37,9 @@ async function fixture(t: TestContext) {
   const path = join(cwd, "pi-tools-suite.jsonc");
   const preferences = new SearchPreferences(path);
   const session = join(cwd, "session.jsonl");
-  await writeFile(session, JSON.stringify({ type: "session_info", name: "Named history" }) + "\n");
+  await writeFile(session, [{type:"session",id:"pi1",cwd},
+    { type: "session_info",id:"name",parentId:null, name: "Named history" }].map(r=>JSON.stringify(r)).join("\n") + "\n");
+  await indexSessionChunks(cwd,[{id:"pi1",path:session}],{signal:new AbortController().signal});
   const record: SessionMapRecord = { sessionId: "s1", piSessionId: "pi1", piSessionPath: session, cwd,
     title: "Named history", namedTitle: "Named history", updatedAt: new Date().toISOString() };
   const configure = (config: Record<string, unknown> = embedding) => writeFile(path, JSON.stringify({ search: { embedding: config } }));
@@ -47,7 +50,7 @@ async function fixture(t: TestContext) {
   };
   const services: DesktopSearchService[] = [];
   const make = (options: Partial<ConstructorParameters<typeof DesktopSearchService>[0]> = {}) => {
-    const service = new DesktopSearchService({ preferences, auth: noAuth, embed, discover: async () => [record], ...options });
+    const service = new DesktopSearchService({ preferences, auth: noAuth, embed, discover: async () => [record], sessionRecords: async () => [record], ...options });
     services.push(service); return service;
   };
   const request = (query = "", types: Array<"settings" | "sessions"> = ["settings", "sessions"]) =>
@@ -175,7 +178,7 @@ test("configuration removed during key lookup suppresses the provider request wi
 test("revocation during discovery suppresses a previously cached semantic query", async t => {
   const f = await fixture(t); await f.configure();
   const started = gate<void>(); const release = gate<void>(); let paused = false;
-  const service = f.make({ discover: async () => { if (paused) { started.resolve(); await release.promise; } return [f.record]; } });
+  const service = f.make({ sessionRecords: async () => { if (paused) { started.resolve(); await release.promise; } return [f.record]; } });
   await service.query(f.request()); await f.idle(service);
   await service.index({ cwd: f.cwd, source: "sessions" });
   assert.ok((await service.query(f.request("semantic meaning", ["sessions"]))).results.some(hit => hit.kind === "sessions" && hit.semantic));

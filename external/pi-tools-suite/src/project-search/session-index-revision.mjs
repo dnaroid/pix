@@ -11,6 +11,8 @@ const watched = {
   pix_session_chunk_meta: ["session_id", "path", "revision", "head"],
   pix_session_chunks: ["session_id", "message_id", "start", "end", "ordinal", "role", "status", "text", "hash"],
   pix_session_chunk_vectors: ["identity", "hash", "vector"],
+  pix_session_indexed_files: ["session_id", "cwd", "path", "file_stamp", "revision", "head", "format", "title", "name", "first_message"],
+  pix_session_chunk_ranges: ["session_id", "message_id", "start", "byte_offset", "byte_length", "snippet", "active"],
 };
 const normalize = sql => sql.replace(/\bIF NOT EXISTS\b/gi, "").replace(/[\s;"`\[\]]/g, "").toLowerCase();
 const digest = value => createHash("sha256").update(JSON.stringify(value)).digest("hex");

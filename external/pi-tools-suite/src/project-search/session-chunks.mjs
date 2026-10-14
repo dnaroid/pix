@@ -1,7 +1,8 @@
-import { join, resolve } from "node:path";
-import { lstat } from "node:fs/promises";
+import { resolve } from "node:path";
 import { setImmediate as yieldTask } from "node:timers/promises";
-import { beginWrite, claimWork, openDatabase, safeDirectory, safeFile, sourcePath } from "./source-work.mjs";
+import { beginWrite, claimWork } from "./source-work.mjs";
+import { storage, valid, decode, INDEX_META, RANGES, SESSION_CHUNK_FORMAT } from "./session-chunk-store.mjs";
+export { listIndexedSessions, searchSessionChunks, hasSessionChunkVectors } from "./session-chunk-query.mjs";
 import { readSessionTranscript, transcriptUnchanged } from "./session-transcript.mjs";
 import { logSearchDiagnostic } from "./search-diagnostics.mjs";
 import { sessionIndexProgress } from "./session-index-progress.mjs";
@@ -12,50 +13,44 @@ const DOCUMENTS = "pix_session_chunks";
 const VECTORS = "pix_session_chunk_vectors";
 const META = "pix_session_chunk_meta";
 const FTS = "pix_session_chunk_fts";
-const exists = (db, name) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE name=?").get(name));
 function schema(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS ${META}(session_id TEXT PRIMARY KEY,path TEXT NOT NULL,revision TEXT NOT NULL,head TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS ${DOCUMENTS}(session_id TEXT NOT NULL,message_id TEXT NOT NULL,start INTEGER NOT NULL,end INTEGER NOT NULL,
       ordinal INTEGER NOT NULL,role TEXT NOT NULL,status TEXT NOT NULL,text TEXT NOT NULL,hash TEXT NOT NULL,PRIMARY KEY(session_id,message_id,start));
     CREATE INDEX IF NOT EXISTS pix_session_chunk_hash ON ${DOCUMENTS}(hash);
     CREATE TABLE IF NOT EXISTS ${VECTORS}(identity TEXT NOT NULL,hash TEXT NOT NULL,vector BLOB NOT NULL,PRIMARY KEY(identity,hash));
-    CREATE VIRTUAL TABLE IF NOT EXISTS ${FTS} USING fts5(session_id UNINDEXED,message_id UNINDEXED,start UNINDEXED,text,tokenize='unicode61');`);
+    CREATE VIRTUAL TABLE IF NOT EXISTS ${FTS} USING fts5(session_id UNINDEXED,message_id UNINDEXED,start UNINDEXED,text,tokenize='unicode61');
+    CREATE TABLE IF NOT EXISTS ${INDEX_META}(session_id TEXT PRIMARY KEY,cwd TEXT NOT NULL,path TEXT NOT NULL,
+      file_stamp TEXT NOT NULL,revision TEXT NOT NULL,head TEXT NOT NULL,format TEXT NOT NULL,title TEXT NOT NULL,name TEXT NOT NULL,first_message TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS ${RANGES}(session_id TEXT NOT NULL,message_id TEXT NOT NULL,start INTEGER NOT NULL,
+      byte_offset INTEGER NOT NULL,byte_length INTEGER NOT NULL,snippet TEXT NOT NULL,active INTEGER NOT NULL CHECK(active=1),
+      PRIMARY KEY(session_id,message_id,start));`);
   ensureSessionRevision(db);
 }
 async function reconcile(db, snapshot, signal) {
-  const saved = db.prepare(`SELECT revision FROM ${META} WHERE session_id=?`).get(snapshot.id);
-  if (saved?.revision === snapshot.revision) return;
+  const saved = db.prepare(`SELECT * FROM ${INDEX_META} WHERE session_id=?`).get(snapshot.id);
+  if (saved?.revision === snapshot.revision && saved?.file_stamp === snapshot.fileStamp && saved?.format === SESSION_CHUNK_FORMAT
+    && saved.path === snapshot.path && saved.cwd === snapshot.cwd) return;
   db.prepare(`DELETE FROM ${DOCUMENTS} WHERE session_id=?`).run(snapshot.id);
   db.prepare(`DELETE FROM ${FTS} WHERE session_id=?`).run(snapshot.id);
+  db.prepare(`DELETE FROM ${RANGES} WHERE session_id=?`).run(snapshot.id);
+  db.prepare(`INSERT OR REPLACE INTO ${INDEX_META} VALUES(?,?,?,?,?,?,?,?,?,?)`).run(snapshot.id,snapshot.cwd,snapshot.path,
+    snapshot.fileStamp,snapshot.revision,snapshot.head,SESSION_CHUNK_FORMAT,snapshot.title,snapshot.name,snapshot.firstMessage);
   db.prepare(`INSERT INTO ${META} VALUES(?,?,?,?) ON CONFLICT(session_id)
     DO UPDATE SET path=excluded.path,revision=excluded.revision,head=excluded.head`).run(snapshot.id,snapshot.path,snapshot.revision,snapshot.head);
   const insert = db.prepare(`INSERT INTO ${DOCUMENTS} VALUES(?,?,?,?,?,?,?,?,?)`);
   const fts = db.prepare(`INSERT INTO ${FTS} VALUES(?,?,?,?)`);
+  const ranges = db.prepare(`INSERT INTO ${RANGES} VALUES(?,?,?,?,?,?,1)`);
   let count = 0;
   for (const c of snapshot.chunks) {
     signal.throwIfAborted();
     insert.run(snapshot.id,c.messageId,c.start,c.end,c.ordinal,c.role,c.status,c.text,c.hash);
     fts.run(snapshot.id,c.messageId,c.start,c.text);
+    ranges.run(snapshot.id,c.messageId,c.start,c.byteOffset,c.byteLength,c.text.replace(/\s+/gu," ").slice(0,1200));
     if (++count % 128 === 0) await yieldTask();
   }
 }
-async function storage(root, create) {
-  root = resolve(root);
-  for (const path of [join(root,".pi"),join(root,".pi/search")]) {
-    if (create) await safeDirectory(path);
-    else {
-      const s = await lstat(path).catch(() => undefined);
-      if (!s) return;
-      if (!s.isDirectory() || s.isSymbolicLink()) throw new Error("Unsafe session index directory");
-    }
-  }
-  const file = sourcePath(root,"sessions");
-  await safeFile(file);
-  if (create) return openDatabase(file);
-  if (!await lstat(file).catch(() => undefined)) return;
-  if ("Bun" in globalThis) { const { Database } = await import("bun:sqlite"); return new Database(file,{readonly:true}); }
-  const { DatabaseSync } = await import("node:sqlite"); return new DatabaseSync(file,{readOnly:true});
-}
+/* Shared index storage is owned by session-chunk-store. */
 async function* sessionSnapshots(root, candidates, signal, onSkip, onRead) {
   for (const candidate of candidates) {
     signal.throwIfAborted();
@@ -71,14 +66,6 @@ async function* sessionSnapshots(root, candidates, signal, onSkip, onRead) {
     if (snapshot) yield snapshot;
     await yieldTask();
   }
-}
-const valid = (vector, dimension) => Array.isArray(vector) && vector.length === dimension
-  && vector.every(value=>Number.isFinite(value) && Number.isFinite(Math.fround(value)))
-  && vector.some(value => Math.fround(value) !== 0);
-function decode(bytes, dimension) {
-  if (!(bytes instanceof Uint8Array) || bytes.byteLength !== dimension * 4) return;
-  const b = Buffer.from(bytes), v = Array.from({length:dimension},(_,i)=>b.readFloatLE(i*4));
-  return valid(v,dimension) ? v : undefined;
 }
 /** Both hosts share the documents lease, content hashes and model namespace.
  * Stream one transcript at a time; recheck its file incarnation after HTTP. */
@@ -111,6 +98,7 @@ export async function indexSessionChunks(root, candidates, options) {
       await beginWrite(db,signal);
       try {
         await reconcile(db,snapshot,signal);
+        if (!await transcriptUnchanged(snapshot,signal)) throw new Error("Session changed during indexing; refresh required");
         if (options.eligible && !await options.eligible(snapshot, signal)) { db.exec("ROLLBACK"); deferred++; continue; }
         work.assert(db); db.exec("COMMIT");
       } catch (e) { db.exec("ROLLBACK"); throw e; }
@@ -183,42 +171,4 @@ export async function indexSessionChunks(root, candidates, options) {
     catch (error) { outcome = signal.aborted ? "cancelled" : "failed"; throw error; }
     finally { await progress.finish(outcome); }
   }
-}
-function cosine(a,b) { let dot=0,aa=0,bb=0; for(let i=0;i<a.length;i++){dot+=a[i]*b[i];aa+=a[i]**2;bb+=b[i]**2;} return dot/Math.sqrt(aa*bb); }
-/** Avoid paying for a query when no fresh compatible message vector exists. */
-export async function hasSessionChunkVectors(root,candidates,signal,embedding) {
-  const db = await storage(root,false);
-  try {
-    if (!db || !exists(db,VECTORS)) return false;
-    const saved = db.prepare(`SELECT vector FROM ${VECTORS} WHERE identity=? AND hash=?`);
-    for await (const s of sessionSnapshots(root,candidates,signal)) for (const c of s.chunks) {
-      if (decode(saved.get(`session-chunks-v1:${embedding.identity}`,c.hash)?.vector,embedding.dimension)) return true;
-    }
-    return false;
-  } finally { db?.close(); }
-}
-/** Rank only fresh live-branch chunks. Cache-only vectors; lexical makes no provider call. */
-export async function searchSessionChunks(root,candidates,query,signal,embedding) {
-  const db = embedding ? await storage(root,false) : undefined;
-  try {
-    const vectors = db && exists(db,VECTORS) ? db.prepare(`SELECT vector FROM ${VECTORS} WHERE identity=? AND hash=?`) : undefined;
-    const terms = [...new Set(query.normalize("NFKC").toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])];
-    const hits = [];
-    for await (const s of sessionSnapshots(root,candidates,signal)) {
-      let best;
-      for(const c of s.chunks) {
-        signal.throwIfAborted();
-        const text = c.text.normalize("NFKC").toLowerCase();
-        const lexical = terms.length && terms.every(term=>text.includes(term)) ? 1 : 0;
-        const vector = embedding && vectors ? decode(vectors.get(`session-chunks-v1:${embedding.identity}`,c.hash)?.vector,embedding.dimension) : undefined;
-        const similarity = vector ? cosine(embedding.query,vector) : 0;
-        const score = Math.max(lexical,similarity >= .25 ? similarity : 0);
-        if(score > 0 && (!best || score > best.score)) best = {id:s.id,messageId:c.messageId,start:c.start,end:c.end,
-          snippet:`[${c.role} ${c.messageId}:${c.start}-${c.end}] ${c.text.slice(0,1800)}`,score,semantic:similarity >= .25};
-      }
-      if(best) hits.push(best);
-      await yieldTask();
-    }
-    return hits.sort((a,b)=>b.score-a.score || a.id.localeCompare(b.id));
-  } finally { db?.close(); }
 }

@@ -32,6 +32,15 @@ first prompts are automatically named. History actions never rename a session.
 The other four actions let an agent recover the task, recent instructions, file
 activity, and useful raw session history after compaction.
 
+DCP protected-continuity references use the existing `read` action with the
+synthetic entry ID `dcp:bN` (for example, `session action=read
+entry_id="dcp:b12"`). This is a bounded view over the original session, not a
+second archive. It is active-branch-only; continue long results with the
+returned opaque `nextCursor`. Missing or changed sources, a foreign session, a
+fork, or a stale cursor fail closed with an UNKNOWN warning. Treat recovered
+receipts as historical evidence: do not blindly repeat covered actions or
+mistake old test/build results for current verification.
+
 ## Goal
 
 Let an agent recover the task, recent instructions, file activity, and useful raw
@@ -113,6 +122,8 @@ tools are not guessed to be mutations.
   and total text size.
 - Overview, read, and search pagination use opaque validated cursors; a cursor
   from another scope/query or a stale section is rejected rather than guessed.
+- DCP `dcp:bN` reads are a narrower exception to ordinary read scope selection:
+  they require the original active branch and reject `scope: "all"`.
 - Empty or in-memory sessions return a normal explanatory result.
 - Unknown or partially shaped entries are ignored or rendered conservatively.
 - Concurrent sibling tool results might not yet be visible when recovery runs.

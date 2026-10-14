@@ -600,6 +600,7 @@ export class PixAcpAgent {
 		const backgroundSessions = new BackgroundSessionDiscovery(cwd => this.sessionMap.list(cwd));
 		this.backgroundSearchSessions = backgroundSessions;
 		this.searchService = options.searchService ?? new DesktopSearchService({
+			sessionRecords: (cwd) => this.sessionMap.list(cwd),
 			discoverBackground: (cwd, signal) => backgroundSessions.list(cwd, signal),
 			sessionSnapshot: (cwd, signal) => backgroundSessions.snapshot(cwd, signal),
 			discover: async (cwd, signal, strict) => {

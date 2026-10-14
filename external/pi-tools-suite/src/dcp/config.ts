@@ -33,7 +33,7 @@ export interface DcpConfig {
     nudgeFrequency: number // inject nudge every N context events (default: 2)
     iterationNudgeThreshold: number // nudge after N tool calls since last user msg (default: 4)
     nudgeForce: "strong" | "soft"
-    protectedTools: string[] // these tool outputs always protected from pruning
+    protectedTools: string[] // explicit verbatim retention; action facts are protected separately
     protectTags: boolean
     protectUserMessages: boolean
     /** Provider-visible byte ceiling for shaped tool continuity in one block. */
@@ -114,7 +114,8 @@ type DeepPartial<T> = T extends Array<infer U>
 // ---------------------------------------------------------------------------
 
 /**
- * Recursively merge `override` into `base`. Arrays are union-merged (deduped).
+ * Recursively merge `override` into `base`. Protection lists replace earlier
+ * layers so an empty list can release an explicit pin. Other arrays union-merge.
  * Returns a new object; does not mutate inputs.
  */
 function deepMerge<T>(base: T, override: Partial<T>): T {
@@ -130,6 +131,10 @@ function deepMerge<T>(base: T, override: Partial<T>): T {
     const overVal = (override as Record<string, unknown>)[key]
 
     if (Array.isArray(baseVal) && Array.isArray(overVal)) {
+      if (key === "protectedTools" || key === "protectedFilePatterns") {
+        result[key] = [...new Set(overVal)]
+        continue
+      }
       // Union merge: combine and deduplicate by value
       const combined = [...baseVal, ...overVal]
       result[key] = [...new Set(combined)]

@@ -4,12 +4,11 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { listSearchSessions } from "./session-list.js";
 import { findProjectRoot } from "../lib/project.js";
 import { withTaskDatabase } from "../project-tasks/storage.js";
 import { validateTaskDocument, type ProjectTask } from "../project-tasks/schema.js";
 import { cachedProjectSemantics, type SemanticSearchOptions } from "./semantic.js";
-import { searchSessionChunks } from "./session-chunks.mjs";
+import { searchSessionChunks, listIndexedSessions } from "./session-chunks.mjs";
 import { excludeSessionAttachments } from "./session-text.mjs";
 import { searchSemanticCommits, type CommitSemanticServices } from "./semantic-commit-indexer.js";
 import type { CachedSessionCandidate } from "./semantic-cache.js";
@@ -20,6 +19,7 @@ import type { FederatedRerankContext, NativeRerankContext } from "./native-contr
 import { prepareFederatedRerank, rerankFederated } from "./federation-reranker.mjs";
 import { selectFederatedCandidates, applyFederatedOrder } from "./federation-ranking.mjs";
 import { preferDistinctFiles, prioritizeIdentifiers } from "./native-ranking.mjs";
+import { SessionReadCache } from "./session-read-cache.mjs";
 
 const exec = promisify(execFile);
 export const PROJECT_SEARCH_SOURCES = ["sessions", "tasks", "commits", "code", "knowledge"] as const;
@@ -81,6 +81,8 @@ export interface SessionRecord {
   cwd: string;
   name?: string;
   firstMessage: string;
+  revision?: string;
+  fileStamp?: string;
 }
 
 export interface SessionBoundary {
@@ -187,9 +189,6 @@ export async function resolveSearchRoot(cwd: string, projectPath?: string): Prom
   return canonical;
 }
 
-async function defaultSessionList(cwd: string, signal: AbortSignal): Promise<SessionRecord[]> {
-  return listSearchSessions(cwd, signal);
-}
 function messageText(content: unknown): string {
   if (typeof content === "string") return excludeSessionAttachments(content).slice(0, 4096);
   if (!Array.isArray(content)) return "";
@@ -197,11 +196,18 @@ function messageText(content: unknown): string {
     && typeof block.text === "string" ? [block.text] : []).join("\n")).slice(0, 4096);
 }
 /** Same first/last completed assistant boundaries as the Desktop search index. */
+// Two 4096-character boundaries can exceed 8 KiB after UTF-8/JSON encoding.
+const boundaryCache = new SessionReadCache<SessionBoundary>({ maxBytes: 32768 });
+const boundaryRevision = (info: import("node:fs").Stats) =>
+  `${info.dev}:${info.ino}:${info.nlink}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`;
 export async function readSessionBoundary(pathname: string, signal: AbortSignal): Promise<SessionBoundary | undefined> {
   signal.throwIfAborted();
   const info = await lstat(pathname).catch(() => undefined);
   if (!info?.isFile() || info.isSymbolicLink() || info.size > MAX_SESSION_FILE || !pathname.endsWith(".jsonl")) return undefined;
   signal.throwIfAborted();
+  const revision = boundaryRevision(info);
+  const cached = boundaryCache.get(pathname, revision);
+  if (cached) return cached;
   const entries = SessionManager.open(pathname).getBranch();
   signal.throwIfAborted();
   let firstText = "", finalText = "";
@@ -211,11 +217,16 @@ export async function readSessionBoundary(pathname: string, signal: AbortSignal)
     if (message.role === "user" && !firstText) firstText = messageText(message.content);
     if (message.role === "assistant" && message.stopReason === "stop") finalText = messageText(message.content);
   }
-  return { firstText, finalText };
+  const after = await lstat(pathname).catch(() => undefined);
+  signal.throwIfAborted();
+  if (!after?.isFile() || after.isSymbolicLink() || boundaryRevision(after) !== revision) return undefined;
+  const snapshot = { firstText, finalText };
+  boundaryCache.set(pathname, revision, snapshot);
+  return snapshot;
 }
 
 async function searchSessions(root: string, queryTerms: readonly string[], signal: AbortSignal, deps: ProjectSearchServices): Promise<{ hits: ProjectSearchHit[]; notices: string[]; records: CachedSessionCandidate[] }> {
-  const discovered = await (deps.listSessions ?? defaultSessionList)(root, signal);
+  const discovered = await (deps.listSessions ?? listIndexedSessions)(root, signal);
   signal.throwIfAborted();
   const relevant: SessionRecord[] = [];
   for (const session of discovered) {
@@ -233,7 +244,9 @@ async function searchSessions(root: string, queryTerms: readonly string[], signa
     const title = (session.name?.trim() || firstMessage.trim().slice(0, 140) || session.id).slice(0, 240);
     let content: SessionBoundary | undefined;
     try {
-      content = await (deps.readSession ?? readSessionBoundary)(session.path, signal);
+      // Injected legacy adapters are test seams; production queries use only
+      // indexed snippets/chunks, including the first query in a new process.
+      if (deps.readSession) content = await deps.readSession(session.path, signal);
     } catch {
       signal.throwIfAborted();
       unreadable++;
@@ -251,6 +264,7 @@ async function searchSessions(root: string, queryTerms: readonly string[], signa
     });
   }
   const notices: string[] = [];
+  if (!deps.listSessions && !relevant.length) notices.push("Sessions: no current indexed sessions; background indexing may be pending. Queries do not scan session files.");
   if (relevant.length > MAX_SESSIONS) notices.push(`Sessions: inspected the ${MAX_SESSIONS.toLocaleString("en-US")} most recent sessions; narrow the query if older history is needed.`);
   for(const chunk of await searchSessionChunks(root,records,queryTerms.join(" "),signal)) {
     const session = records.find(record=>record.id===chunk.id)!;
@@ -485,7 +499,11 @@ async function searchEnabledProject(root: string, params: NonNullable<ReturnType
     })());
   };
   const taskSource = wanted.includes("tasks") ? searchTasks(root, queryTerms, deadline) : undefined;
-  const sessionSource = wanted.includes("sessions") ? searchSessions(root, queryTerms, deadline, deps) : undefined;
+  const capturedSessions = new Map<string, CachedSessionCandidate>();
+  const sessionSource = wanted.includes("sessions") ? searchSessions(root, queryTerms, deadline, deps).then(result => {
+    for (const record of result.records) capturedSessions.set(record.id, record);
+    return result;
+  }) : undefined;
   if (taskSource) collect("Tasks", () => taskSource);
   if (sessionSource) collect("Sessions", () => sessionSource);
   if ((taskSource || sessionSource) && ["hybrid", "semantic"].includes(parsed.params.indexMode)) {
@@ -595,6 +613,14 @@ async function searchEnabledProject(root: string, params: NonNullable<ReturnType
     const { content, ...compact } = hit; return compact;
   });
   signal.throwIfAborted();
+  if (!deps.listSessions && ranked.some(hit => hit.kind === "sessions")) {
+    const current = new Map((await listIndexedSessions(root, signal)).map(session => [session.id, session]));
+    ranked = ranked.filter(hit => {
+      if (hit.kind !== "sessions") return true;
+      const fresh = current.get(hit.sessionId ?? ""), captured = capturedSessions.get(hit.sessionId ?? "");
+      return fresh?.path === hit.sessionPath && fresh?.revision === captured?.revision && fresh?.fileStamp === captured?.fileStamp;
+    });
+  }
   return { projectRoot: root, query, sources: wanted, hits: ranked.slice(0, limit),
     notices: [...new Set(notices)] };
 }

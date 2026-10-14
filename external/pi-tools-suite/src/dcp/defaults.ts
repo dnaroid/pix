@@ -15,8 +15,8 @@ export const DEFAULT_DCP_CONFIG = {
     nudgeFrequency: 2,
     iterationNudgeThreshold: 8,
     nudgeForce: "soft" as const,
-    protectedTools: ["compress", "write", "edit"],
-    protectTags: false,
+    protectedTools: [],
+    protectTags: true,
     protectUserMessages: false,
     maxProtectedToolContinuityBytes: 16 * 1024,
     autoCandidates: {

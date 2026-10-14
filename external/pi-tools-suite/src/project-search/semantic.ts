@@ -93,8 +93,8 @@ export async function cachedProjectSemantics(root: string, query: string,
       const similarity = cosine(queryVector, vector);
       if (similarity >= 0.25) result.sessions.set(id, similarity);
     }
-    const chunks = await searchSessionChunks(root,candidates.sessions,query,signal,
-      {identity:commitIdentity(config),dimension:config.dimension,query:queryVector});
+    const chunks = candidates.sessions.length ? await searchSessionChunks(root,candidates.sessions,query,signal,
+      {identity:commitIdentity(config),dimension:config.dimension,query:queryVector}) : [];
     await requireSemanticIdentity(options,config,signal);
     for(const chunk of chunks) {
       result.chunks.set(chunk.id,chunk);

@@ -173,7 +173,15 @@ npm --prefix desktop test
 
 `npm run watch:all` watches Pix, ACP, the bundled suite and Desktop. It keeps
 the last working Desktop process alive while a replacement compiles and only
-switches after the complete queued build succeeds. On macOS it prunes superseded
+offers a user-triggered `Restart` after any nonempty queued build succeeds,
+including Pix-, ACP-, and bundled suite-only changes. Runtime-only changes reuse
+the last successful Desktop artifact by copying it to a distinct executable
+path; they do not rebuild web assets or Rust. A failed build or artifact copy
+leaves the previously published app target unchanged. Build, copy, and publication
+failures retain the requested work for retry. The watcher does not restart Desktop
+automatically. After updating `scripts/watch-all.mjs`, stop and start an already
+running `watch:all` supervisor once so it loads the new watcher script.
+On macOS it prunes superseded
 temporary `.app` copies after builds/restarts and safely reclaims abandoned
 watcher temp roots at the next startup. Roots containing a running app or owned
 by another watcher are retained; do not delete them while Desktop is active.

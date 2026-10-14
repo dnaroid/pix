@@ -12,8 +12,6 @@ import { formatDcpStatistics } from "./statistics.js"
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Tools whose outputs are always protected from sweep regardless of config. */
-const ALWAYS_PROTECTED_TOOLS = ["compress", "write", "edit"] as const
 export const DCP_STATS_MESSAGE_TYPE = "pix-system"
 const DCP_STATS_DETAILS_KIND = "dcp-stats"
 
@@ -152,7 +150,6 @@ async function handleSweep(
 
   // Build the full set of protected tool names.
   const protectedTools = new Set<string>([
-    ...ALWAYS_PROTECTED_TOOLS,
     ...config.compress.protectedTools,
     ...config.strategies.emergencyCurrentTurnPruning.protectedTools,
   ])
@@ -161,7 +158,6 @@ async function handleSweep(
   // and tracking where the last real user message was.
   const allToolCallIds: string[] = []
   const toolCallIdsSinceLastUser: string[] = []
-  const toolNamesByCallId = new Map<string, string>()
   let lastUserMsgBranchIndex = -1
 
   // First pass: find the last user message index.
@@ -183,7 +179,6 @@ async function handleSweep(
 
     const toolCallId = msg.toolCallId as string
     allToolCallIds.push(toolCallId)
-    if (typeof msg.toolName === "string") toolNamesByCallId.set(toolCallId, msg.toolName)
 
     if (lastUserMsgBranchIndex >= 0 && i > lastUserMsgBranchIndex) {
       toolCallIdsSinceLastUser.push(toolCallId)
@@ -205,16 +200,12 @@ async function handleSweep(
   // Filter: skip already-pruned IDs and protected tool names.
   const toAdd = candidates.filter((toolCallId) => {
     if (state.prunedToolIds.has(toolCallId)) return false
+    if (!state.providerSeenToolIds.has(toolCallId)) return false
 
-    // Tool name lookup: prefer the DCP tool-call record if tracked; fall back
-    // to the AgentMessage itself (msg.toolName is present on ToolResultMessage).
+    // Missing records cannot prove that an output is a disposable observation.
     const record = state.toolCalls.get(toolCallId)
-    const toolName = record?.toolName ?? toolNamesByCallId.get(toolCallId)
-
-    if (record && isToolRecordProtected(record, config, Array.from(protectedTools))) return false
-    if (toolName !== undefined && protectedTools.has(toolName)) return false
-
-    return true
+    if (!record) return false
+    return !isToolRecordProtected(record, config, Array.from(protectedTools))
   })
 
   let count = 0

@@ -208,6 +208,52 @@ Tests: `test/dcp-failed-attempt-replay.test.ts` and repository-root
   result selected for compression must have completed provider evidence in
   `providerSeenToolIds`; unknown evidence truncates the safe prefix.
   `[confirmed by code, pruner-candidates.ts:239-240, pruner-emergency.ts:160]`
+- `/dcp sweep` is an explicit rewrite boundary, not a cleanup bypass: candidate
+  results require completed provider evidence and the rewrite/prune decision is
+  recorded. This does not change protocol ownership or cancellation semantics.
+  `[confirmed by task-changed behavior/tests]`
+- Tool continuity distinguishes explicit exact pins from the conservative
+  no-deletion-without-replacement guard. `protectedTools` and
+  `protectedFilePatterns` default empty and replace rather than union-merge
+  across layers (empty releases pins); `protectTags` defaults true. There is no
+  hardcoded verbatim allowlist. `[confirmed by code, defaults.ts, config.ts]`
+- Receipts preserve source/action identity and available outcome/UNKNOWN,
+  relevant paths, and status/log/run/version references. Test/build digests are
+  historical observations, not current verification; todo/subagent progress
+  and ordinary observations belong in semantic summaries rather than verbatim
+  event histories. Unknown effects remain conservative.
+- Version-3 `minimumText` safety floors survive byte budgeting and journal
+  replay; optional evidence may be trimmed, but excess irreducible floors fail
+  closed. Simple test/build floors include outcome, parsed counts and parser
+  caveats when available, plus at most the first two parsed diagnostics bounded
+  to 768 characters total; the full compact parsed output is not retained. If
+  more diagnostics exist, their count and a recover-source instruction are
+  retained; bounded error evidence is used when parsing finds no diagnostics.
+  There is no anonymous overflow aggregation or latest-test-wins supersession.
+  Legacy provenance is required
+  for reshaping; published blocks are immutable, replacement publishes a new
+  block and releases old pins.
+- Expanded artifact pins persist `pinSourceToolCallId` and `pinSourceHash`.
+  Replacement releases a pin only when the owner's raw-output hash verifies and
+  current configuration no longer pins that output; missing, legacy, or
+  mismatched provenance remains retained. `[confirmed by code,
+  compression-blocks.ts, state.ts, journal.ts]`
+- `[confirmed by code, protected-continuity.ts, continuity-ledger.ts,
+  compression-blocks.ts, journal.ts]`
+- When a v3 receipt floor would overflow the bounded ledger, budgeting can
+  replace eligible unpinned receipts with one v4 reference. Its sources are
+  anchored either to raw tool-call identity or to immutable non-reference
+  journal leaves; it never recursively points through a reference. Explicit
+  pins and records without proven provenance remain inline, and can cause
+  fail-closed rejection. `[confirmed by code, continuity-reference.ts,
+  continuity-ledger.ts, state.ts, journal.ts; test/dcp-session-reference.test.ts]`
+- Reference recovery reuses the original session JSONL (no second archive),
+  requires the active branch, verifies source identity including inputs,
+  outcome and structured details, and exposes bounded pages with `nextCursor`.
+  Missing, changed, forked, or stale sources fail closed as UNKNOWN; recovered
+  facts are not permission to retry an action or claim historical tests as
+  current verification. `[confirmed by code, session-recovery/dcp-continuity.ts;
+  test/dcp-session-reference.test.ts]`
 - Locked by `test/dcp-protected-continuity.test.ts`. `[confirmed by tests]`
 
 ## Bounded protected-artifact reads
@@ -227,7 +273,9 @@ Tests: `test/dcp-failed-attempt-replay.test.ts` and repository-root
 
 - `rehydrateToolRecordsFromMessages` rebuilds tool records from raw session
   history when DCP metadata is missing, instead of declaring the data
-  unrecoverable. `[confirmed by code, recovery.ts:65]`
+  unrecoverable. Reconstructed output text matches live capture byte-for-byte,
+  including empty/whitespace content and adjacent text parts without added
+  presentation separators. `[confirmed by code, recovery.ts]`
 - Locked by `test/dcp-recovery.test.ts`. `[confirmed by tests]`
 
 ## Deterministic walls

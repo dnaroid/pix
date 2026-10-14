@@ -90,6 +90,26 @@ describe("DCP session journal", () => {
     expect(restored.toolCalls.size).toBe(0);
   });
 
+  test("round-trips v3 action safety floors alongside legacy exact fragments", () => {
+    const init = createDcpJournalInit("init-facts", 1);
+    const source = createState();
+    const mirror = createDcpJournalMirror(source, init.operationId);
+    const block = exactBlock();
+    block.protectedFragments = [
+      { kind: "tool", origin: "tool:publish", hash: "a".repeat(64), text: "receipt with evidence", minimumText: "operation_id=42; effect UNKNOWN; do not repeat", representation: "receipt", sourceHash: "b".repeat(64), sourceBytes: 9000, policyVersion: 3 },
+      { kind: "tool", origin: "tool:legacy", hash: "c".repeat(64), text: "legacy exact", representation: "exact", policyVersion: 2 },
+    ];
+    source.compressionBlocks.push(block);
+    source.nextBlockId = 2;
+    const delta = buildDcpJournalDelta(source, mirror, "facts-delta", 2)!;
+    const restored = createState();
+    replayDcpJournal([entry(init), entry(delta)], restored);
+    expect(restored.compressionBlocks[0]?.protectedFragments).toEqual(block.protectedFragments);
+    const invalid = structuredClone(delta);
+    (invalid.blocks![0]!.protectedFragments![0] as any).minimumText = 42;
+    expect(() => validateDcpJournalOperation(invalid)).toThrow(/malformed protectedFragments/);
+  });
+
   test("emits no delta for an unchanged durable state", () => {
     const state = createState();
     const mirror = createDcpJournalMirror(state, "init-operation");

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -19,6 +19,9 @@ import { enableSearchSources } from "./support/search-sources.js";
 
 const scratch = fileURLToPath(new URL("../../../.pi/artifacts/project-search-semantic-tests/", import.meta.url));
 const roots: string[] = [];
+let originalHome: string | undefined;
+beforeEach(() => { originalHome = process.env.HOME; process.env.HOME = fixture().root; });
+afterEach(() => { if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome; });
 afterEach(() => removeDirsWithRetry(roots));
 const SEARCH_VECTOR_MODEL = "history/test-model";
 const SEARCH_VECTOR_DIMENSIONS = 4;
@@ -73,7 +76,7 @@ test("global plain JSON enables Tasks, Sessions and Commits with the Knowledge m
   const f = fixture();
   taskDb(f.root, [{ id: "central-task", title: "Shield mechanics" }]);
   const name = "Engineering council";
-  const session = { id: "central-session", path: nativeSessionFile(f, "central-session", name), name, firstMessage: "Draft project" };
+  const session = { id: "central-session", path: await nativeSessionFile(f, "central-session", name), name, firstMessage: "Draft project" };
   writeFileSync(f.mapPath, JSON.stringify({ version: 1, sessions: [
     { sessionId: "acp-central", cwd: f.root, piSessionPath: session.path, title: name, namedTitle: name },
   ] }));
@@ -249,11 +252,13 @@ function taskDb(root: string, rows: { id: string; title: string; description?: s
   } finally { db.close(); }
 }
 
-function nativeSessionFile(f: ReturnType<typeof fixture>, nativeId: string, title: string, filename = path.join(f.root, `${nativeId}.jsonl`)): string {
+async function nativeSessionFile(f: ReturnType<typeof fixture>, nativeId: string, title: string, filename = path.join(f.root, `${nativeId}.jsonl`)): Promise<string> {
   writeFileSync(filename, [
     JSON.stringify({ type: "session", version: 3, id: nativeId, cwd: f.root, timestamp: "2026-10-10T00:00:00Z" }),
     JSON.stringify({ type: "session_info", id: `name-${nativeId}`, parentId: null, timestamp: "2026-10-10T00:00:00Z", name: title }),
   ].join("\n") + "\n");
+  const { indexSessionChunks } = await import("../src/project-search/session-chunks.mjs");
+  await indexSessionChunks(f.root, [{id:nativeId,path:filename}], {signal:new AbortController().signal});
   return filename;
 }
 
@@ -268,6 +273,8 @@ test("unnamed sessions retrieve middle public messages and reuse shared vectors"
     { type: "message", id: "v", parentId: "t", message: { role: "user", content: "No, keep rows" } },
   ].map(row => JSON.stringify(row)).join("\n") + "\n");
   const session: SessionRecord = { id: "unnamed", path: file, cwd: f.root, firstMessage: "Start" };
+  const { indexSessionChunks } = await import("../src/project-search/session-chunks.mjs");
+  await indexSessionChunks(f.root, [session], {signal:new AbortController().signal});
   const deps = services(f, { listSessions: async () => [session], readSession: async () => ({ firstText: "Start", finalText: "" }) });
   const local = await searchProject(f.root, { query: "keep rows", sources: ["sessions"], indexMode: "lexical" }, deps);
   expect(local.hits[0]?.snippet).toContain("keep rows");
@@ -401,7 +408,7 @@ describe("project_search shared semantic cache", () => {
       const f = fixture();
       const task = { id: "paid", title: "Paid work", vectorIndex: 0 };
       const name = "Engineering council";
-      const session: SessionRecord = { id: "native", path: nativeSessionFile(f, "native", name), cwd: f.root, name, firstMessage: "Draft project" };
+      const session: SessionRecord = { id: "native", path: await nativeSessionFile(f, "native", name), cwd: f.root, name, firstMessage: "Draft project" };
       taskDb(f.root, [{ id: task.id, title: task.title }]);
       writeFileSync(f.mapPath, JSON.stringify({ version: 1, sessions: [
         { sessionId: "acp", cwd: f.root, piSessionPath: session.path, title: name, namedTitle: name },
@@ -447,7 +454,7 @@ describe("project_search shared semantic cache", () => {
       f.configure();
       const task = { id: "new", title: "New work" };
       const name = "New council";
-      const session: SessionRecord = { id: "native", path: nativeSessionFile(f, "native", name), cwd: f.root, name, firstMessage: "Draft project" };
+      const session: SessionRecord = { id: "native", path: await nativeSessionFile(f, "native", name), cwd: f.root, name, firstMessage: "Draft project" };
       taskDb(f.root, [task]);
       writeFileSync(f.mapPath, JSON.stringify({ version: 1, sessions: [
         { sessionId: "acp-new", cwd: f.root, piSessionPath: session.path, title: name, namedTitle: name },
@@ -499,7 +506,7 @@ describe("project_search shared semantic cache", () => {
       f.configure();
       const task = { id: "new", title: "New work" };
       const name = "New council";
-      const session = { id: "native", path: nativeSessionFile(f, "native", name), name, firstMessage: "Draft project" };
+      const session = { id: "native", path: await nativeSessionFile(f, "native", name), name, firstMessage: "Draft project" };
       taskDb(f.root, [task]);
       writeFileSync(f.mapPath, JSON.stringify({ version: 1, sessions: [
         { sessionId: "acp-new", cwd: f.root, piSessionPath: session.path, title: name, namedTitle: name },
@@ -609,7 +616,7 @@ describe("project_search shared semantic cache", () => {
       { id: "native-fallback", path: path.join(f.root, "fallback.jsonl"), cwd: f.root,
         name: "First user question", firstMessage: "First user question" },
     ];
-    for (const session of sessions) nativeSessionFile(f, session.id, session.name!, session.path);
+    for (const session of sessions) await nativeSessionFile(f, session.id, session.name!, session.path);
     writeFileSync(f.mapPath, JSON.stringify({ version: 1, sessions: [
       { sessionId: "acp-good", cwd: f.root, piSessionPath: sessions[0]!.path,
         title: sessions[0]!.name, namedTitle: sessions[0]!.name },
@@ -638,10 +645,7 @@ describe("project_search shared semantic cache", () => {
     taskDb(f.root, [{ id: "task", title: "Magic overhaul" }]);
     const session: SessionRecord = { id: "native", path: path.join(f.root, "run.jsonl"), cwd: f.root,
       name: "Research laboratory", firstMessage: "First prompt" };
-    writeFileSync(session.path, [
-      JSON.stringify({ type: "session", version: 3, id: "native", cwd: f.root, timestamp: "2026-10-10T00:00:00Z" }),
-      JSON.stringify({ type: "session_info", id: "name-native", parentId: null, timestamp: "2026-10-10T00:00:00Z", name: session.name }),
-    ].join("\n") + "\n");
+    await nativeSessionFile(f, session.id, session.name!, session.path);
     writeFileSync(f.mapPath, JSON.stringify({ version: 1, sessions: [
       { sessionId: "acp", cwd: f.root, piSessionPath: session.path, title: session.name, namedTitle: session.name },
     ] }));
@@ -688,7 +692,7 @@ describe("project_search shared semantic cache", () => {
     savedVectors(f, [{ id: "task", title: "Magic overhaul", vectorIndex: 0 }]);
     f.configure();
     writeFileSync(f.mapPath, "{not JSON");
-    const session: SessionRecord = { id: "native", path: nativeSessionFile(f, "native", "Visible session"),
+    const session: SessionRecord = { id: "native", path: await nativeSessionFile(f, "native", "Visible session"),
       cwd: f.root, name: "Visible session", firstMessage: "First question" };
     const deps = services(f, { listSessions: async () => [session],
       readSession: async () => ({ firstText: "First question", finalText: "Answer" }) });
@@ -736,7 +740,7 @@ describe("project_search shared semantic cache", () => {
     const f = fixture();
     const nativeId = "session-change";
     const firstName = "Original research";
-    const session: SessionRecord = { id: nativeId, path: nativeSessionFile(f, nativeId, firstName),
+    const session: SessionRecord = { id: nativeId, path: await nativeSessionFile(f, nativeId, firstName),
       cwd: f.root, name: firstName, firstMessage: "First question" };
     writeFileSync(f.mapPath, JSON.stringify({ version: 1, sessions: [{
       sessionId: "acp-original", cwd: f.root, piSessionPath: session.path, title: firstName, namedTitle: firstName,
@@ -985,9 +989,9 @@ describe("project_search shared semantic cache", () => {
   test("saved session title search reads cache only, skips first-message fallbacks and respects renames", async () => {
     const f = fixture();
     const name = "Engineering council";
-    const session: SessionRecord = { id: "native", path: nativeSessionFile(f, "native", name),
+    const session: SessionRecord = { id: "native", path: await nativeSessionFile(f, "native", name),
       cwd: f.root, name, firstMessage: "Draft project" };
-    const fallback: SessionRecord = { id: "fallback", path: nativeSessionFile(f, "fallback", "First prompt"),
+    const fallback: SessionRecord = { id: "fallback", path: await nativeSessionFile(f, "fallback", "First prompt"),
       cwd: f.root, name: "First prompt", firstMessage: "First prompt" };
     writeFileSync(f.mapPath, JSON.stringify({ version: 1, sessions: [
       { sessionId: "acp", cwd: f.root, piSessionPath: session.path, title: name, namedTitle: name },
@@ -1019,6 +1023,8 @@ describe("project_search shared semantic cache", () => {
     result = await searchProject(f.root, { query: "conceptual redesign", sources: ["sessions"] }, deps);
     expect(result.hits).toEqual([]);
     expect(deps.documents).toEqual([name]);
+    const { indexSessionChunks } = await import("../src/project-search/session-chunks.mjs");
+    await indexSessionChunks(f.root, [session], {signal:new AbortController().signal});
     await indexMissingSessionVectors(f.root, [session], "fake-key", deps.semantic!, new AbortController().signal, historyConfig, true);
     result = await searchProject(f.root, { query: "conceptual redesign", sources: ["sessions"] }, deps);
     expect(result.hits.map(hit => hit.sessionId)).toEqual(["native"]);

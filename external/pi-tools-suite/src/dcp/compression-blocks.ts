@@ -7,9 +7,11 @@ import type {
 } from "./state.js"
 import type { DcpConfig } from "./config.js"
 import { estimateTokens } from "./pruner-metadata.js"
-import { isToolRecordProtected } from "./pruner-tools.js"
-import { repeatableObservationKey, toolRecordContinuity } from "./protected-continuity.js"
-import { DEFAULT_DCP_CONFIG } from "./defaults.js"
+import { isToolRecordVerbatimProtected } from "./pruner-tools.js"
+import { toolRecordContinuity } from "./protected-continuity.js"
+import { budgetProtectedToolFragments } from "./continuity-ledger.js"
+import { expandContinuityReference } from "./continuity-reference.js"
+export { budgetProtectedToolFragments } from "./continuity-ledger.js"
 import { compareConversationStableIds, buildExactRangeMembership } from "./conversation-index.js"
 import { createHash } from "node:crypto"
 import { open, realpath } from "node:fs/promises"
@@ -516,7 +518,7 @@ function compressionProtectedFragment(
 	kind: CompressionProtectedFragment["kind"],
 	origin: string,
 	text: string,
-	metadata: Pick<CompressionProtectedFragment, "representation" | "sourceHash" | "sourceBytes" | "policyVersion"> = {},
+	metadata: Pick<CompressionProtectedFragment, "representation" | "sourceHash" | "sourceBytes" | "policyVersion" | "minimumText" | "pinSourceToolCallId" | "pinSourceHash"> = {},
 ): CompressionProtectedFragment {
 	return {
 		kind,
@@ -550,13 +552,14 @@ function toolFragmentFromDecision(
 	toolCallId: string,
 	decision: ReturnType<typeof toolRecordContinuity>,
 ): CompressionProtectedFragment | undefined {
-	const text = decision.text?.trim()
+	const text = decision.text
 	if (!text) return undefined
 	return compressionProtectedFragment("tool", `tool:${toolCallId}`, text, {
 		representation: decision.mode === "digest" || decision.mode === "receipt" ? decision.mode : "exact",
 		sourceHash: decision.sourceHash,
 		sourceBytes: decision.sourceBytes,
-		policyVersion: 2,
+		policyVersion: 3,
+		minimumText: decision.minimumText,
 	})
 }
 
@@ -566,232 +569,37 @@ function normalizeInheritedProtectedFragments(
 	config: DcpConfig,
 ): CompressionProtectedFragment[] {
 	const normalized: CompressionProtectedFragment[] = []
-	for (const fragment of coveredBlocks.flatMap((block) => block.protectedFragments ?? [])) {
+	for (const fragment of coveredBlocks.flatMap((block) => block.protectedFragments ?? []).flatMap((fragment) => expandContinuityReference(fragment, state, config))) {
 		if (fragment.kind !== "tool") {
-			normalized.push(fragment)
+			if (fragment.kind === "user" ? config.compress.protectUserMessages : config.compress.protectTags) normalized.push(fragment)
 			continue
 		}
 		const match = /^tool:(.+)$/.exec(fragment.origin)
+		if (fragment.policyVersion === 3 && fragment.origin.startsWith("artifact:") && fragment.pinSourceToolCallId && fragment.pinSourceHash) {
+			const owner = state.toolCalls.get(fragment.pinSourceToolCallId)
+			if (owner?.outputText !== undefined &&
+				createHash("sha256").update(owner.outputText).digest("hex") === fragment.pinSourceHash &&
+				!isToolRecordVerbatimProtected(owner, config)) continue
+		}
 		const record = match ? state.toolCalls.get(match[1]!) : undefined
-		if (!match || !record || record.toolName === "compress" || !isToolRecordProtected(record, config)) {
+		if (!match || !record || record.outputText === undefined) {
 			normalized.push(fragment)
 			continue
 		}
 		const decision = toolRecordContinuity(record, config)
-		if (fragment.sourceHash && decision.sourceHash && fragment.sourceHash !== decision.sourceHash) {
+		const proven = fragment.sourceHash
+			? fragment.sourceHash === decision.sourceHash
+			: fragment.text === `### Tool: ${record.toolName}\n${record.outputText.trim()}`
+		if (!proven) {
 			// Same origin with a different raw identity is ambiguous. Retain the
 			// persisted evidence rather than silently rebinding it to new output.
 			normalized.push(fragment)
 			continue
 		}
-		normalized.push(toolFragmentFromDecision(match[1]!, decision) ?? fragment)
+		const replacement = toolFragmentFromDecision(match[1]!, decision)
+		if (replacement) normalized.push(replacement)
 	}
 	return mergeProtectedFragments(normalized)
-}
-
-function protectedFragmentBytes(fragment: CompressionProtectedFragment): number {
-	return Buffer.byteLength(fragment.text, "utf8")
-}
-
-function normalizedToolName(name: string | undefined): string {
-	return (name ?? "unknown").trim().toLowerCase().replace(/[\s-]+/g, "_")
-}
-
-function isMutationContinuityTool(name: string | undefined): boolean {
-	return ["apply_patch", "write", "edit", "ast_apply", "patch"].includes(normalizedToolName(name))
-}
-
-function aggregateToolContinuity(
-	fragments: CompressionProtectedFragment[],
-	state: DcpState,
-	maxBytes: number,
-): CompressionProtectedFragment {
-	let errors = 0
-	let mutations = 0
-	let sourceBytes = 0
-	const byTool = new Map<string, number>()
-	const changedFiles = new Set<string>()
-	const manifest: string[] = []
-	for (const fragment of fragments) {
-		const match = /^tool:(.+)$/.exec(fragment.origin)
-		const record = match ? state.toolCalls.get(match[1]!) : undefined
-		const toolName = normalizedToolName(record?.toolName)
-		byTool.set(toolName, (byTool.get(toolName) ?? 0) + 1)
-		if (record?.isError) errors++
-		if (isMutationContinuityTool(record?.toolName)) mutations++
-		sourceBytes += Math.max(0, fragment.sourceBytes ?? 0)
-		const details = record?.outputDetails
-		if (details && typeof details === "object" && !Array.isArray(details)) {
-			const files = (details as Record<string, unknown>).changedFiles
-			if (Array.isArray(files)) {
-				for (const file of files) {
-					if (typeof file === "string" && file.trim() && changedFiles.size < 24) changedFiles.add(file.trim())
-				}
-			}
-		}
-		manifest.push(`${fragment.origin}:${fragment.sourceHash ?? fragment.hash}`)
-	}
-	const manifestHash = createHash("sha256").update(manifest.sort().join("\n")).digest("hex")
-	const toolSummary = [...byTool.entries()]
-		.sort(([left], [right]) => left.localeCompare(right))
-		.map(([name, count]) => `${name}=${count}`)
-		.join(", ")
-	const lines = [
-		"### Historical tool continuity aggregate",
-		`Compacted records: ${fragments.length}; errors: ${errors}; mutations: ${mutations}.`,
-		`Tools: ${toolSummary || "unknown"}.`,
-		`Raw source represented: ${sourceBytes} bytes.`,
-	]
-	if (changedFiles.size > 0) lines.push(`Changed files observed: ${[...changedFiles].join(", ")}.`)
-	lines.push("Exact historical outputs remain in session history; this aggregate is continuation-only evidence.")
-	let text = lines.join("\n")
-	if (Buffer.byteLength(text, "utf8") > maxBytes) {
-		text = [
-			"### Historical tool continuity aggregate",
-			`Compacted records: ${fragments.length}; errors: ${errors}; mutations: ${mutations}.`,
-			`Raw source represented: ${sourceBytes} bytes.`,
-		].join("\n")
-	}
-	return compressionProtectedFragment("tool", `tool-ledger:${manifestHash}`, text, {
-		representation: "aggregate",
-		sourceHash: manifestHash,
-		sourceBytes,
-		policyVersion: 2,
-	})
-}
-
-/**
- * Bound provider-visible tool continuity per block. Exact/legacy fragments are
- * never dropped: if they alone exceed the configured ceiling, compression
- * fails closed. Shaped receipts/digests are prioritized by actionable errors,
- * mutation evidence and recency; overflow is replaced by one deterministic
- * recoverable aggregate whose exact source remains in the raw session.
- */
-/**
- * Newest timestamp per repeatable-observation key among occurrences outside
- * `exclude`: raw tool results visible in the latest projection and the
- * ledgers of active blocks. Shell results are never pruned, so the newest
- * occurrence of an observation always survives in one of these places.
- */
-function externalObservationTimestamps(
-	exclude: ReadonlySet<string>,
-	state: DcpState,
-	config: DcpConfig,
-): Map<string, number> {
-	const newest = new Map<string, number>()
-	const note = (toolCallId: string | undefined) => {
-		if (!toolCallId || exclude.has(toolCallId)) return
-		const record = state.toolCalls.get(toolCallId)
-		const key = record ? repeatableObservationKey(record, config) : undefined
-		if (!key || !record) return
-		if (record.timestamp > (newest.get(key) ?? -Infinity)) newest.set(key, record.timestamp)
-	}
-	for (const meta of state.messageMetaSnapshot.values()) {
-		if (meta.blockId === undefined && (meta.role === "toolResult" || meta.role === "bashExecution")) note(meta.toolCallId)
-	}
-	for (const block of state.compressionBlocks) {
-		if (!block.active) continue
-		for (const fragment of block.protectedFragments ?? []) note(/^tool:(.+)$/.exec(fragment.origin)?.[1])
-	}
-	return newest
-}
-
-/**
- * Keep only the newest receipt of each repeated side-effect-free observation
- * (same inspection/test command and arguments), both within this ledger and
- * against newer occurrences elsewhere in the projection. Ten `bun test` runs
- * describe one current state; the older receipts — typically fixed failures,
- * which the budget would otherwise rank highest — stay in the raw session.
- */
-function supersedeRepeatedObservations(
-	fragments: CompressionProtectedFragment[],
-	state: DcpState,
-	config: DcpConfig,
-): CompressionProtectedFragment[] {
-	const newest = new Map<string, { timestamp: number; index: number }>()
-	const ownIds = new Set<string>()
-	const keyed = fragments.map((fragment, index) => {
-		if (fragment.kind !== "tool") return undefined
-		const toolCallId = /^tool:(.+)$/.exec(fragment.origin)?.[1]
-		const record = toolCallId ? state.toolCalls.get(toolCallId) : undefined
-		const key = record ? repeatableObservationKey(record, config) : undefined
-		if (!key || !record || !toolCallId) return undefined
-		ownIds.add(toolCallId)
-		const current = newest.get(key)
-		if (!current || record.timestamp >= current.timestamp) newest.set(key, { timestamp: record.timestamp, index })
-		return { key, timestamp: record.timestamp }
-	})
-	if (newest.size === 0) return fragments
-	const external = externalObservationTimestamps(ownIds, state, config)
-	return fragments.filter((_fragment, index) => {
-		const entry = keyed[index]
-		if (!entry) return true
-		if (newest.get(entry.key)?.index !== index) return false
-		return !(entry.timestamp < (external.get(entry.key) ?? -Infinity))
-	})
-}
-
-export function budgetProtectedToolFragments(
-	inputFragments: CompressionProtectedFragment[],
-	state: DcpState,
-	config: DcpConfig,
-): CompressionProtectedFragment[] {
-	const fragments = supersedeRepeatedObservations(inputFragments, state, config)
-	const configuredBudget = config.compress.maxProtectedToolContinuityBytes
-	const maxBytes = typeof configuredBudget === "number" && Number.isFinite(configuredBudget) && configuredBudget > 0
-		? Math.max(1_024, Math.floor(configuredBudget))
-		: DEFAULT_DCP_CONFIG.compress.maxProtectedToolContinuityBytes
-	const toolEntries = fragments
-		.map((fragment, index) => ({ fragment, index }))
-		.filter(({ fragment }) => fragment.kind === "tool")
-	if (toolEntries.length === 0) return fragments
-	const totalBytes = toolEntries.reduce((sum, { fragment }) => sum + protectedFragmentBytes(fragment), 0)
-	if (totalBytes <= maxBytes) return fragments
-
-	const exact = toolEntries.filter(({ fragment }) => !fragment.representation || fragment.representation === "exact")
-	const exactBytes = exact.reduce((sum, { fragment }) => sum + protectedFragmentBytes(fragment), 0)
-	if (exactBytes > maxBytes) {
-		throw new Error(
-			`Protected exact tool continuity requires ${exactBytes} bytes, above the ${maxBytes}-byte block budget; ` +
-			"cannot compact safely without recoverable provenance.",
-		)
-	}
-
-	const shaped = toolEntries.filter(({ fragment }) => fragment.representation && fragment.representation !== "exact")
-	const reserveForAggregate = Math.min(2_048, Math.max(256, maxBytes - exactBytes))
-	let remaining = Math.max(0, maxBytes - exactBytes - reserveForAggregate)
-	const selected = new Set(exact.map(({ index }) => index))
-	const ranked = [...shaped].sort((left, right) => {
-		const recordFor = (entry: typeof left) => {
-			const match = /^tool:(.+)$/.exec(entry.fragment.origin)
-			return match ? state.toolCalls.get(match[1]!) : undefined
-		}
-		const leftRecord = recordFor(left)
-		const rightRecord = recordFor(right)
-		const priority = (record: ReturnType<typeof recordFor>) => record?.isError ? 3 : isMutationContinuityTool(record?.toolName) ? 2 : 1
-		return priority(rightRecord) - priority(leftRecord) || right.index - left.index
-	})
-	for (const entry of ranked) {
-		const bytes = protectedFragmentBytes(entry.fragment)
-		if (bytes > remaining) continue
-		selected.add(entry.index)
-		remaining -= bytes
-	}
-	const dropped = toolEntries.filter(({ index }) => !selected.has(index)).map(({ fragment }) => fragment)
-	if (dropped.length === 0) return fragments
-	const aggregateBudget = Math.max(128, maxBytes - exactBytes - [...selected]
-		.filter((index) => !exact.some((entry) => entry.index === index))
-		.reduce((sum, index) => sum + protectedFragmentBytes(fragments[index]!), 0))
-	const aggregate = aggregateToolContinuity(dropped, state, aggregateBudget)
-	const result = fragments.filter((fragment, index) => fragment.kind !== "tool" || selected.has(index))
-	result.push(aggregate)
-	const resultToolBytes = result
-		.filter((fragment) => fragment.kind === "tool")
-		.reduce((sum, fragment) => sum + protectedFragmentBytes(fragment), 0)
-	if (resultToolBytes > maxBytes) {
-		throw new Error(`Protected tool continuity aggregate cannot fit the ${maxBytes}-byte block budget safely.`)
-	}
-	return mergeProtectedFragments(result)
 }
 
 function collectCurrentProtectedFragments(
@@ -828,7 +636,7 @@ function collectCurrentProtectedFragments(
 		const toolCallId = meta.toolCallId
 		if (!toolCallId) continue
 		const record = state.toolCalls.get(toolCallId)
-		if (!record || record.toolName === "compress" || !isToolRecordProtected(record, config)) continue
+		if (!record || record.toolName === "compress") continue
 		const continuity = toolRecordContinuity(record, config)
 		const fragment = toolFragmentFromDecision(toolCallId, continuity)
 		if (fragment) fragments.push(fragment)
@@ -878,7 +686,7 @@ export async function prepareCompressionProtectedFragments(
     const toolCallId = meta.toolCallId
     if (!toolCallId) continue
     const record = state.toolCalls.get(toolCallId)
-    if (!record || !isToolRecordProtected(record, config)) continue
+    if (!record || !isToolRecordVerbatimProtected(record, config)) continue
     if (record.toolName !== "subagents" && record.toolName !== "async_subagents_result") continue
     const output = (record.outputText ?? meta.text ?? "").trim()
     if (!output) continue
@@ -896,7 +704,8 @@ export async function prepareCompressionProtectedFragments(
       "tool",
       `artifact:${toolCallId}:${artifact.artifactPath}`,
       `### Expanded subagent result: ${artifact.artifactPath}\n${artifact.text}`,
-	  { representation: "exact", sourceHash: createHash("sha256").update(artifact.text).digest("hex"), sourceBytes: artifactBytes, policyVersion: 2 },
+	  { representation: "exact", sourceHash: createHash("sha256").update(artifact.text).digest("hex"), sourceBytes: artifactBytes, policyVersion: 3,
+	    pinSourceToolCallId: toolCallId, pinSourceHash: record.outputText === undefined ? undefined : createHash("sha256").update(record.outputText).digest("hex") },
     ))
   }
   fragments = mergeProtectedFragments(fragments)

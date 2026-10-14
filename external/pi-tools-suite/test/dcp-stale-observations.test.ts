@@ -45,12 +45,12 @@ describe("DCP stale observations", () => {
     const stale = staleObservationReasons(messages, state, dcpConfig());
     expect(stale.get("read-a-1")).toBe("file changed later by a write/edit");
     expect(stale.get("read-b-1")).toBe("superseded by a later identical call");
-    expect(stale.get("test-1")).toBe("superseded by a later identical call");
-    expect(stale.get("test-2")).toBe("superseded by a later identical call");
+    expect(stale.has("test-1")).toBe(false);
+    expect(stale.has("test-2")).toBe(false);
     for (const current of ["read-b-2", "test-3", "edit-a", "commit-1", "commit-2"]) expect(stale.has(current)).toBe(false);
   });
 
-  test("continuity ledger keeps only the newest receipt of a repeated observation", () => {
+  test("continuity ledger retains historical test runs across identical commands", () => {
     const { state } = scenario();
     const fragment = (id: string) => ({
       kind: "tool" as const, origin: `tool:${id}`, hash: id.padEnd(64, "0"), text: `receipt ${id}`,
@@ -59,7 +59,7 @@ describe("DCP stale observations", () => {
     const kept = budgetProtectedToolFragments(
       ["test-1", "commit-1", "test-2", "commit-2", "test-3"].map(fragment), state, dcpConfig(),
     ).map((item) => item.origin);
-    expect(kept).toEqual(["tool:commit-1", "tool:commit-2", "tool:test-3"]);
+    expect(kept).toEqual(["tool:test-1", "tool:commit-1", "tool:test-2", "tool:commit-2", "tool:test-3"]);
   });
 
   test("stale observations surface as high-priority message candidates with their reason", () => {
@@ -99,7 +99,7 @@ describe("DCP stale observations", () => {
     expect(roles).not.toContain("user");
   });
 
-  test("a ledger drops an observation that a newer identical run supersedes elsewhere in the projection", () => {
+  test("a newer visible test run does not erase an earlier historical result", () => {
     const { state } = scenario();
     const fragment = (id: string) => ({
       kind: "tool" as const, origin: `tool:${id}`, hash: id.padEnd(64, "0"), text: `receipt ${id}`,
@@ -110,9 +110,9 @@ describe("DCP stale observations", () => {
     // test-3 is still raw and visible in the latest projection.
     state.messageMetaSnapshot.set("m090", { timestamp: 30, role: "toolResult", toolCallId: "test-3", tokenEstimate: 10 } as any);
     const kept = budgetProtectedToolFragments([fragment("test-1"), fragment("commit-1")], state, dcpConfig()).map((item) => item.origin);
-    expect(kept).toEqual(["tool:commit-1"]);
+    expect(kept).toEqual(["tool:test-1", "tool:commit-1"]);
 
-    // Without a newer occurrence the older run is the current state and survives.
+    // Absence of a newer occurrence also does not prove current verification.
     state.messageMetaSnapshot.clear();
     expect(budgetProtectedToolFragments([fragment("test-1")], state, dcpConfig()).map((item) => item.origin)).toEqual(["tool:test-1"]);
   });

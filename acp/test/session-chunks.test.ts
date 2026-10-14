@@ -16,6 +16,8 @@ const message = (id:string,parentId:string|null,role:string,text:string) =>
 async function fixture(t:{after(fn:()=>Promise<unknown>):void}) {
   const base=resolve(".pi/artifacts/session-chunks-tests");await mkdir(base,{recursive:true});
   const root=await mkdtemp(join(base,"case-"));t.after(()=>rm(root,{recursive:true,force:true}));
+  await mkdir(join(root,".pi"),{recursive:true});
+  await writeFile(join(root,".pi/search-sources.json"),JSON.stringify({version:1,enabled:{settings:false,sessions:true,tasks:false,commits:false,code:false,knowledge:false}}));
   const candidate={id:"native-id",path:join(root,"session.jsonl")};
   const rows=[{type:"session",id:candidate.id,cwd:root},message("a",null,"user","Use rows"),
     message("b","a","assistant","I propose a circle"),message("c","b","user","yes"),
@@ -32,6 +34,10 @@ test("shared protocol twins stay byte-identical apart from module extension",asy
       const source=await readFile(new URL(`../../external/pi-tools-suite/src/project-search/${name}${a}`,import.meta.url),"utf8");
       assert.equal(await readFile(new URL(`../src/search/${name}${b}`,import.meta.url),"utf8"),source.replaceAll('.mjs"','.js"'));
     }
+  }
+  for(const name of ["session-byte-lines","session-chunk-store","session-chunk-query","session-read-cache"]) {
+    const source=await readFile(new URL(`../../external/pi-tools-suite/src/project-search/${name}.mjs`,import.meta.url),"utf8");
+    assert.equal(await readFile(new URL(`../src/search/${name}.js`,import.meta.url),"utf8"),source.replaceAll('.mjs"','.js"'));
   }
 });
 test("chunks preserve complete text, UTF-16 offsets and astral characters",()=>{
@@ -73,7 +79,7 @@ test("reader distinguishes validation failures without treating cancellation as 
 });
 test("diagnostic storage refuses redirected artifact directories without failing search",async t=>{
   const f=await fixture(t),outside=join(f.root,"outside");
-  await mkdir(outside);await mkdir(join(f.root,".pi"));
+  await mkdir(outside);await mkdir(join(f.root,".pi"),{recursive:true});
   await symlink(outside,join(f.root,".pi/artifacts"));
   await logSearchDiagnostic(f.root,{event:"test",reason:"safe"});
   assert.deepEqual(await readdir(outside),[]);
@@ -181,6 +187,8 @@ test("RAG retains short late reversals, rejects missing anchors and never trunca
 test("lexical middle/short-user retrieval is network-free; vector cache is shared and incremental",async t=>{
   const f=await fixture(t);let calls=0;
   const embedding=config(async texts=>{calls++;return texts.map(()=>[1,0]);});
+  assert.deepEqual(await searchSessionChunks(f.root,[f.candidate],"yes",signal()),[]);
+  await indexSessionChunks(f.root,[f.candidate],{signal:signal()});
   const lexical=await searchSessionChunks(f.root,[f.candidate],"yes",signal());
   assert.equal(lexical[0]!.messageId,"c");assert.equal(calls,0);
   const first=await indexSessionChunks(f.root,[f.candidate],{signal:signal(),embedding});

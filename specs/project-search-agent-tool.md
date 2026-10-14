@@ -70,8 +70,16 @@ the terminal event. This is file-log progress, not streamed Desktop Activity upd
   Optional `projectPath` names an explicit alternate project directory,
   resolved relative to session cwd (also accepting absolute and `~/` paths);
   it does not change session cwd. The project directory must exist.
-- Sessions use Pi SDK native session listing for the selected project's
-  history. In addition to saved titles and first/final excerpts, search covers
+- Session queries use the local SQLite index only: cached titles/snippets plus
+  lexical/semantic public-message chunks. They do not discover sessions by
+  reading JSONL on the query path. Freshness validation is stat-only; a changed
+  or missing file is excluded until eligible background indexing refreshes its
+  cache. Existing caches without the indexed-file/range records require a
+  background index backfill; queries do not fall back to scanning transcripts.
+  Chunk byte offsets/lengths address the serialized JSONL message record, while
+  text start/end offsets are UTF-16 positions in sanitized projected text.
+  Cached sanitized snippets provide result text, so no query-time range reader
+  is required. In addition to saved titles and first/final excerpts, search covers
   public user/assistant text on the last persisted parent-linked JSONL branch.
   Tool outputs, thinking, attachments and abandoned branches are excluded.
   `pix-html` fences and their `html-sandbox` alias count as attachments in both
@@ -256,7 +264,8 @@ the terminal event. This is file-log progress, not streamed Desktop Activity upd
   and caches alone never activate semantics. OpenRouter credentials use
   `OPENROUTER_API_KEY`, then shared Pi auth storage; Ollama requires no key. `pathPrefix` is a safe project-relative
   directory/file scope.
-  `maxFiles` (1–50) limits returned native hits per domain,
+  `maxFiles` (1–50) limits distinct returned native files per domain at the final
+  result stage; candidate chunks remain available through ranking/reranking,
   defaulting to three with no inline content or one when `includeContent`
   is enabled. Combined final results remain capped at 20. Native supports
   `dedupeFile`, `excludeTests`, `includeTests`, and `includeContent`; test filters
@@ -394,6 +403,9 @@ slash commands below retain their existing lifetime and parallel behavior.
 ## Implementation
 
 - `external/pi-tools-suite/src/project-search/session-index-progress.mjs`
+- `external/pi-tools-suite/src/project-search/session-read-cache.mjs`
+- `external/pi-tools-suite/src/project-search/native-ranking.mjs`
+- `external/pi-tools-suite/src/project-search/reranker-documents.mjs`
 - `external/pi-tools-suite/src/project-search/session-index-progress.d.mts`
 - `external/pi-tools-suite/src/project-search/session-chunks.mjs`
 - `acp/src/search/session-index-progress.js`

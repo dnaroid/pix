@@ -184,6 +184,96 @@ describe("DCP bounded actionable opportunities", () => {
     expect(f.telemetry.find((event) => event.event === "progress-blocked")).toMatchObject({ reason: "auto-disabled" });
   });
 
+  test("partial automatic commits do not rearm blocked warnings during an unresolved recovery", async () => {
+    const f = await fixture();
+    f.config.compress.minContextPercent = 0.2;
+    f.config.compress.maxContextPercent = 0.55;
+    f.config.compress.autoCandidates.minContextPercent = 0.2;
+    f.config.compress.messageMode.minContextPercent = 0.2;
+    f.ctx.model.maxTokens = 128_000;
+    f.messages.splice(0, f.messages.length, {
+      id: "user", role: "user", timestamp: 1, content: "Continue this long investigation without losing the active request.",
+    });
+    let partialCommits = 0;
+    for (let step = 0; step < 50; step++) {
+      f.setUsage(75_000 + step * 100);
+      const call = { type: "toolCall", id: `read-${step}`, name: "read", arguments: { path: `source-${step}.ts` } };
+      const assistant = {
+        id: `call-${step}`, role: "assistant", provider: "fixture", model: "model", stopReason: "toolUse",
+        timestamp: step * 2 + 2, content: [call],
+      };
+      await f.emit("message_end", { message: assistant });
+      await f.emit("tool_call", { toolCallId: call.id, toolName: "read", input: call.arguments });
+      // Small outputs periodically leave no economical candidate after a
+      // partial commit; uniform large outputs would not reproduce the storm.
+      const result = {
+        id: `result-${step}`, role: "toolResult", toolCallId: call.id, toolName: "read", timestamp: step * 2 + 3,
+        content: [{ type: "text", text: `Read ${step}: stable source excerpt.\n${"Completed diagnostic line: ownership and cleanup were checked.\n".repeat(step % 6 < 3 ? 100 : 2)}` }],
+        isError: false,
+      };
+      await f.emit("tool_result", result);
+      f.messages.push(assistant, result);
+      const before = f.state.compressionBlocks.length;
+      await f.request(await f.context());
+      if (f.state.compressionBlocks.length > before && (f.state.compressionProgress?.remainingTokens ?? 0) > 0) partialCommits++;
+    }
+    expect(partialCommits).toBeGreaterThanOrEqual(3);
+    expect(f.getAbortCount()).toBe(0);
+    const reasons = () => f.telemetry.filter(event => event.event === "progress-blocked").map(event => event.reason);
+    expect(reasons()).toEqual(["budget-exhausted"]);
+    expect(f.warnings).toHaveLength(1);
+
+    // Deduplicate reasons, not all warnings: a new failure mode stays visible.
+    f.config.compress.autoCompress.enabled = false;
+    await f.context();
+    await f.context();
+    expect(reasons()).toEqual(["budget-exhausted", "auto-disabled"]);
+  });
+
+  for (const reset of ["below-threshold", "model_select"]) {
+    test(`${reset} rearms blocked warnings for a new recovery episode`, async () => {
+      const f = await fixture({ auto: false });
+      for (let episode = 0; episode < 2; episode++) {
+        for (let response = 0; response < 4; response++) {
+          await f.request(await f.context());
+          await f.complete();
+        }
+        expect(f.warnings).toHaveLength(episode + 1);
+        if (episode === 0) {
+          if (reset === "below-threshold") {
+            f.setUsage(0);
+            await f.context();
+            f.setUsage(73_900);
+          } else {
+            await f.emit(reset);
+          }
+          expect(f.state.compressionProgress).toBeUndefined();
+          expect(f.state.consecutiveIgnoredNudges).toBe(0);
+        }
+      }
+    });
+  }
+
+  test("a fully recovered automatic goal rearms warnings for the next goal", async () => {
+    const f = await fixture({ auto: false });
+    for (let response = 0; response < 4; response++) {
+      await f.request(await f.context());
+      await f.complete();
+    }
+    expect(f.warnings).toHaveLength(1);
+    f.config.compress.autoCompress.enabled = true;
+    await f.context();
+    expect(f.state.compressionBlocks.length).toBeGreaterThan(0);
+    expect(f.state.compressionProgress).toBeUndefined();
+    f.config.compress.autoCompress.enabled = false;
+    f.setUsage(110_000);
+    for (let response = 0; response < 4; response++) {
+      await f.request(await f.context());
+      await f.complete();
+    }
+    expect(f.telemetry.filter(event => event.event === "progress-blocked" && event.reason === "auto-disabled")).toHaveLength(2);
+  });
+
   test("manual mode is not widened into autonomous summaries below emergency pressure", async () => {
     const f = await fixture({ manual: true });
     for (let i = 0; i < 6; i++) {
