@@ -222,8 +222,9 @@ establish compatibility requirements.
   navigation moves DOM focus but does not move that Tab entry; returning with Tab
   enters at the active destination rather than the last arrow-focused button.
   This is not a focus-following roving-tabindex implementation.
-- The rail is a compact 40 px column with 40×40 view buttons. Density changes
-  must preserve visible focus and the single-composite keyboard model.
+- The rail is a compact 30 px column with 40 px-high view buttons and 20 px
+  icons. Density changes must preserve visible focus and the single-composite
+  keyboard model.
 - ArrowUp/ArrowDown and Home/End move focus without activating a destination.
 - Enter/Space/click keeps the existing view-selection/collapse behavior.
 - Every expanded workspace panel header includes a compact Close control. It uses

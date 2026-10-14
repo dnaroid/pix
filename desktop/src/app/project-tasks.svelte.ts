@@ -32,8 +32,19 @@ type ProjectTasksStoreOptions = {
   reportError: (error: unknown) => void;
 };
 
+type ProjectTasksPanelSnapshot = {
+  document: unknown;
+  attachmentCounts: Record<string, number> | null;
+};
+
+async function readPanel(workspace: string) {
+  const snapshot = await invoke<ProjectTasksPanelSnapshot>("read_project_tasks_panel", { workspace });
+  return { document: parseTaskDocument(snapshot.document), attachmentCounts: snapshot.attachmentCounts };
+}
+
 export function createProjectTasksStore(options: ProjectTasksStoreOptions) {
   let document = $state<ProjectTaskDocument>(EMPTY_TASK_DOCUMENT);
+  let attachmentCounts = $state<Record<string, number>>({});
   let loading = $state(false);
   let saving = $state(false);
   let loadFailed = $state(false);
@@ -44,17 +55,23 @@ export function createProjectTasksStore(options: ProjectTasksStoreOptions) {
   let pollGeneration = 0;
   let refreshing = false;
 
+  function applyPanel(next: Awaited<ReturnType<typeof readPanel>>, workspace: string): void {
+    if (JSON.stringify(next.document) !== JSON.stringify(document)) document = next.document;
+    const counts = next.attachmentCounts ?? (loadedWorkspace === workspace ? attachmentCounts : {});
+    if (JSON.stringify(counts) !== JSON.stringify(attachmentCounts)) attachmentCounts = counts;
+    loadedWorkspace = workspace;
+  }
+
   async function refresh(projectPath = options.workspace(), poll = pollGeneration): Promise<void> {
     if (!projectPath || saving || loading || refreshing) return;
     const generation = loadGeneration;
     const mutation = mutationGeneration;
     refreshing = true;
     try {
-      const next = parseTaskDocument(await invoke<unknown>("read_project_tasks", { workspace: projectPath }));
+      const next = await readPanel(projectPath);
       if (poll !== pollGeneration || generation !== loadGeneration || mutation !== mutationGeneration
         || options.workspace() !== projectPath || saving) return;
-      if (JSON.stringify(next) !== JSON.stringify(document)) document = next;
-      loadedWorkspace = projectPath;
+      applyPanel(next, projectPath);
       loadFailed = false;
     } catch (error) {
       if (poll === pollGeneration && generation === loadGeneration && mutation === mutationGeneration
@@ -87,10 +104,9 @@ export function createProjectTasksStore(options: ProjectTasksStoreOptions) {
     loadFailed = false;
     saveError = null;
     try {
-      const value = await invoke<unknown>("read_project_tasks", { workspace: projectPath });
+      const next = await readPanel(projectPath);
       if (generation !== loadGeneration || options.workspace() !== projectPath) return;
-      document = parseTaskDocument(value);
-      loadedWorkspace = projectPath;
+      applyPanel(next, projectPath);
     } catch (error) {
       if (generation === loadGeneration && options.workspace() === projectPath) {
         loadFailed = true;
@@ -295,6 +311,7 @@ export function createProjectTasksStore(options: ProjectTasksStoreOptions) {
     mutationGeneration++;
     pollGeneration++;
     document = EMPTY_TASK_DOCUMENT;
+    attachmentCounts = {};
     loadedWorkspace = null;
     loading = false;
     saving = false;
@@ -310,6 +327,7 @@ export function createProjectTasksStore(options: ProjectTasksStoreOptions) {
 
   return {
     get document() { return document; },
+    get attachmentCounts() { return loadedWorkspace === options.workspace() ? attachmentCounts : {}; },
     get loading() { return loading; },
     get initialLoading() { return loading && loadedWorkspace !== options.workspace(); },
     get saving() { return saving; },

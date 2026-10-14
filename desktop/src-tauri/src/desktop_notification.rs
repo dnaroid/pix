@@ -167,19 +167,19 @@ mod native {
         }
     );
 
-    fn foreground_window(window: &WebviewWindow) {
+    pub(super) fn foreground_window(window: &WebviewWindow) -> bool {
         // Only called after ownership validation, on the main thread. Window
         // focus alone does not activate Pix when another application is active.
         let Some(main_thread) = MainThreadMarker::new() else {
-            return;
+            return false;
         };
         let Ok(native_window) = window.ns_window() else {
-            return;
+            return false;
         };
         // SAFETY: Tauri's live window owns this NSWindow. The callback retains
         // the WebviewWindow and uses the pointer only synchronously on main.
         let Some(native_window) = (unsafe { native_window.cast::<NSWindow>().as_ref() }) else {
-            return;
+            return false;
         };
         let app = NSApplication::sharedApplication(main_thread);
         app.unhideWithoutActivation();
@@ -188,6 +188,7 @@ mod native {
         // App activation may raise a different Pix window; key/order the exact
         // notification owner afterwards, not every window in the application.
         native_window.makeKeyAndOrderFront(None);
+        true
     }
 
     impl Delegate {
@@ -422,6 +423,12 @@ pub fn shutdown(app: &tauri::AppHandle) {
     native::shutdown(app);
     #[cfg(not(target_os = "macos"))]
     let _ = app;
+}
+
+/// Activate an exact live owner, including accessory apps. Main thread only.
+#[cfg(target_os = "macos")]
+pub(crate) fn foreground_window(window: &tauri::WebviewWindow) -> bool {
+    native::foreground_window(window)
 }
 
 #[tauri::command]

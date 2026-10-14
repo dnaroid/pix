@@ -14,6 +14,7 @@ export type UserMessageAction = "copy" | "fork" | "fork-new-tab" | "edit" | "und
 interface TranscriptUserMessageMenuControllerOptions {
   readonly items: () => readonly TranscriptDisplayItem[];
   readonly activeSessionId: () => string | null;
+  readonly runtimeReady?: () => boolean;
   readonly promptRunning: () => boolean;
   readonly operationRunning: () => boolean;
   readonly historyLoading: () => boolean;
@@ -50,6 +51,7 @@ export function createTranscriptUserMessageMenuController(options: TranscriptUse
 
   function canForkNewTab(): boolean {
     return Boolean(options.activeSessionId())
+      && (options.runtimeReady?.() ?? true)
       && !options.operationRunning()
       && !options.historyLoading();
   }

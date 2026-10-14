@@ -5,8 +5,6 @@
   import StepForward from "@lucide/svelte/icons/step-forward";
   import Square from "@lucide/svelte/icons/square";
   import Settings from "@lucide/svelte/icons/settings";
-  import ChevronRight from "@lucide/svelte/icons/chevron-right";
-  import SearchIndexHistory from "./SearchIndexHistory.svelte";
   import { indexActionLabel, indexOutcomeLabel, indexResultDetail, type IndexActionState } from "../lib/search-index-actions";
   import type { SearchIndexController, SearchIndexViewState } from "../lib/search-index-controller";
   import { SETTINGS_SEARCH_CATALOG } from "../lib/settings-search-catalog";
@@ -37,7 +35,6 @@
 
   const rows = $derived(buildSearchSourceRows(snapshot.stores, consent, snapshot.activity, SETTINGS_SEARCH_CATALOG.length)
     .sort((a, b) => Number(a.id === "settings") - Number(b.id === "settings")));
-  const completedRows = $derived(rows.filter(row => actions[row.id] && !actions[row.id]?.running));
   const tone = (state: string) => state === "error" ? "text-tool-error" : state === "ready" || state === "vectors" ? "text-tool-success" : state === "incomplete" || state === "unavailable" || state === "incompatible" ? "text-tool-warning" : "text-muted-foreground";
 
   function actionHint(row: SearchSourceRow, action?: IndexActionState): string {
@@ -57,7 +54,7 @@
   });
 </script>
 
-<section class="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-sidebar text-sidebar-foreground" aria-label="Search index status">
+<section class="flex min-h-0 min-w-0 flex-col overflow-hidden bg-sidebar text-sidebar-foreground" aria-label="Search index status">
   <div class="flex h-8 min-w-0 items-center gap-2 border-b border-sidebar-border bg-panel px-2.5">
     <Database class="h-3.5 w-3.5 shrink-0 text-tool-search" aria-hidden="true" />
     <strong class="min-w-0 flex-1 truncate text-xs font-medium text-foreground">Search indexes</strong>
@@ -141,20 +138,6 @@
           </tbody>
         </table>
         <div class="flex items-center gap-2 pt-2 text-xs"><span class="font-medium">Semantic search</span><span class="text-muted-foreground">{!consent ? "Unavailable" : !consent.configured ? "Off" : consent.provider === "openrouter" && !consent.keyAvailable ? "Needs API key" : "On"}</span><button type="button" onclick={onSettings} aria-label="Configure semantic search" title="Configure semantic search: Embedding model" class="ml-auto grid h-6 w-6 place-items-center rounded text-tool-search hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"><Settings class="h-3.5 w-3.5" aria-hidden="true" /></button></div>
-        {#if completedRows.length}
-          <details class="group text-xs text-muted-foreground">
-            <summary class="flex cursor-pointer list-none items-center gap-1 rounded py-1 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
-              <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
-              Last runs
-            </summary>
-            <div class="space-y-1 pt-1">
-              {#each completedRows as row (row.id)}
-                <p>{row.label}: {indexResultDetail(actions[row.id])}</p>
-              {/each}
-            </div>
-          </details>
-        {/if}
       </div>
-      <SearchIndexHistory events={view.history} onClear={controller ? () => controller.clearHistory() : undefined} />
   </div>
 </section>

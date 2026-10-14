@@ -12,6 +12,7 @@ import {
 	type WorkspaceMutation,
 	type WorkspaceMutationPreparation,
 } from "../../app/workspace/workspace-undo.js";
+import { isMessageEditRewindPosition } from "../../app/session/message-edit-rewind.js";
 
 export { WORKSPACE_MUTATION_ENTRY_TYPE } from "../../app/workspace/workspace-undo.js";
 export const WORKSPACE_UNDO_RPC_COMMAND = "__pix-workspace-undo";
@@ -146,9 +147,20 @@ export default function workspaceUndoBridge(pi: ExtensionAPI): void {
 			const request = parseWorkspaceUndoBridgeRequest(args);
 			if (!request) return;
 			try {
-				const target = ctx.sessionManager.getBranch().find((entry) => entry.id === request.targetEntryId);
-				if (!target || target.type !== "message" || target.message.role !== "user") {
+				const branch = ctx.sessionManager.getBranch();
+				const target = ctx.sessionManager.getEntry(request.targetEntryId);
+				if (!target || target.id !== request.targetEntryId || target.type !== "message" || target.message.role !== "user") {
 					throw new Error("This user message is no longer on the active branch.");
+				}
+				if (!branch.some((entry) => entry.id === target.id)) {
+					// Recover a committed rewind whose acknowledgement was lost or
+					// rejected. Never navigate an inactive target or discard newer
+					// context: only the already-rewound position is a successful no-op.
+					if (!isMessageEditRewindPosition(ctx.sessionManager, target.parentId)) {
+						throw new Error("This user message is no longer on the active branch.");
+					}
+					emitResult(ctx, { requestId: request.requestId, status: "ok" });
+					return;
 				}
 				if (ctx.sessionManager.getLeafId() === target.id) {
 					throw new Error("This message has no response yet. Wait for the response before editing it.");
@@ -158,7 +170,7 @@ export default function workspaceUndoBridge(pi: ExtensionAPI): void {
 					emitResult(ctx, { requestId: request.requestId, status: "cancelled" });
 					return;
 				}
-				if (ctx.sessionManager.getLeafId() !== target.parentId) {
+				if (!isMessageEditRewindPosition(ctx.sessionManager, target.parentId)) {
 					throw new Error("The conversation did not rewind to the selected message.");
 				}
 				emitResult(ctx, { requestId: request.requestId, status: "ok" });

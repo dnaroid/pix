@@ -188,7 +188,150 @@ describe("desktop native notifications", () => {
   });
 });
 
+describe("sound-only notifications", () => {
+  function soundHarness(active = false) {
+    const { api } = notificationHarness();
+    const playPixSound = vi.fn(async () => undefined);
+    let notificationsEnabled = true;
+    let soundOnlyEnabled = true;
+    const preferences = vi.fn(async () => ({ notificationsEnabled, soundOnlyEnabled }));
+    const service = createDesktopNotificationService({
+      api, preferences, playPixSound,
+      isForeground: () => active,
+      isActiveSession: (sessionId) => sessionId === "active",
+    });
+    return {
+      api, service, playPixSound, preferences,
+      disable: () => notificationsEnabled = false,
+      native: () => soundOnlyEnabled = false,
+    };
+  }
+
+  it("only plays sound without contacting macOS notifications or requiring permission", async () => {
+    const h = soundHarness();
+    await h.service.question("inactive", "Research", "Need approval");
+    expect(h.playPixSound).toHaveBeenCalledTimes(1);
+    expect(h.api.isPermissionGranted).not.toHaveBeenCalled();
+    expect(h.api.requestPermission).not.toHaveBeenCalled();
+    expect(h.api.sendNotification).not.toHaveBeenCalled();
+  });
+
+  it("suppresses sound for the currently visible session but not for another tab", async () => {
+    const h = soundHarness(true);
+    await h.service.completed("active", "Active");
+    expect(h.preferences).not.toHaveBeenCalled();
+    await h.service.completed("inactive", "Inactive");
+    expect(h.playPixSound).toHaveBeenCalledTimes(1);
+  });
+
+  it("respects the master switch in both delivery modes", async () => {
+    const h = soundHarness();
+    h.disable();
+    await h.service.error("inactive", "Task", "Failed");
+    expect(h.playPixSound).not.toHaveBeenCalled();
+    h.native();
+    await h.service.completed("inactive", "Done");
+    expect(h.api.sendNotification).not.toHaveBeenCalled();
+    // Still disabled: neither delivery mechanism is active.
+    expect(h.api.isPermissionGranted).not.toHaveBeenCalled();
+  });
+
+  it("switches back to native delivery without playing sound", async () => {
+    const h = soundHarness();
+    await h.service.completed("inactive", "First");
+    h.native();
+    await h.service.completed("inactive", "Second");
+    expect(h.playPixSound).toHaveBeenCalledTimes(1);
+    expect(h.api.sendNotification).toHaveBeenCalledWith({
+      title: "Pix — Completed", body: "Second", sessionId: "inactive",
+    });
+  });
+
+  it("drops sound when preferences resolve after disposal", async () => {
+    const h = soundHarness();
+    let resolve!: (value: { notificationsEnabled: boolean; soundOnlyEnabled: boolean }) => void;
+    h.preferences.mockImplementationOnce(() => new Promise((done) => resolve = done));
+    const pending = h.service.completed("inactive", "Late");
+    await vi.waitFor(() => expect(h.preferences).toHaveBeenCalledTimes(1));
+    h.service.dispose();
+    resolve({ notificationsEnabled: true, soundOnlyEnabled: true });
+    await pending;
+    expect(h.playPixSound).not.toHaveBeenCalled();
+  });
+
+  it("does not send an old native notification when the preference changes during subscription", async () => {
+    const h = soundHarness();
+    h.native();
+    let subscribed!: (unlisten: () => void) => void;
+    h.api.listenActivation.mockImplementation(() => new Promise((done) => subscribed = done));
+    const pending = h.service.completed("inactive", "Old");
+    await vi.waitFor(() => expect(h.api.listenActivation).toHaveBeenCalledTimes(1));
+    h.preferences.mockResolvedValue({ notificationsEnabled: true, soundOnlyEnabled: true });
+    subscribed(vi.fn());
+    await pending;
+    expect(h.api.sendNotification).not.toHaveBeenCalled();
+  });
+
+  it("tolerates a failed audio cue without affecting agent work", async () => {
+    const h = soundHarness();
+    h.playPixSound.mockRejectedValue(new Error("device unavailable"));
+    await expect(h.service.question(null, "Ask", " long\n".repeat(100))).resolves.toBeUndefined();
+    expect(h.playPixSound).toHaveBeenCalledExactlyOnceWith();
+    expect(h.api.sendNotification).not.toHaveBeenCalled();
+  });
+});
+
 describe("desktop agent notification coordinator", () => {
+  it("marks tray attention only after prompt, state and subagents are fully settled", () => {
+    const { service } = notificationHarness(true);
+    const attention = { mark: vi.fn(), clearSession: vi.fn(), reset: vi.fn() };
+    let running = true;
+    let state: "running" | "idle" = "running";
+    let subagents = 1;
+    const coordinator = createDesktopAgentNotificationCoordinator({
+      notifications: service, sessionTitle: () => "Task", agentState: () => state,
+      isPromptRunning: () => running, activeSubagents: () => subagents, attention,
+    });
+    coordinator.promptSettled("a", "end_turn");
+    expect(attention.mark).not.toHaveBeenCalled();
+    running = false;
+    coordinator.sessionActivityChanged("a");
+    expect(attention.mark).not.toHaveBeenCalled();
+    state = "idle";
+    coordinator.sessionActivityChanged("a");
+    expect(attention.mark).not.toHaveBeenCalled();
+    subagents = 0;
+    coordinator.sessionActivityChanged("a");
+    coordinator.sessionActivityChanged("a");
+    expect(attention.mark.mock.calls).toEqual([["a"]]);
+  });
+
+  it("marks questions and errors independently of OS notification settings and permission", async () => {
+    const { api } = notificationHarness();
+    const service = createDesktopNotificationService({ api, enabled: () => false, isForeground: () => false });
+    const attention = { mark: vi.fn(), clearSession: vi.fn(), reset: vi.fn() };
+    const coordinator = createDesktopAgentNotificationCoordinator({
+      notifications: service, sessionTitle: () => "Task", agentState: () => "idle",
+      isPromptRunning: () => false, activeSubagents: () => 0, attention,
+    });
+    coordinator.needsInput("a", "Approve tool");
+    coordinator.needsInput(null, "Global question");
+    coordinator.promptError("b", new Error("provider"));
+    coordinator.promptSettled("c", "refusal");
+    coordinator.promptSettled("d", "end_turn");
+    coordinator.promptSettled("e", "cancelled");
+    coordinator.paused("e");
+    await Promise.resolve();
+    expect(attention.mark.mock.calls).toEqual([["a"], [null], ["b"], ["c"], ["d"]]);
+    expect(api.isPermissionGranted).not.toHaveBeenCalled();
+    expect(api.sendNotification).not.toHaveBeenCalled();
+    coordinator.promptStarted("a");
+    coordinator.clearSession("b");
+    coordinator.reset();
+    expect(attention.clearSession.mock.calls).toEqual([["a"], ["b"]]);
+    expect(attention.reset).toHaveBeenCalledTimes(1);
+  });
+
   it("waits for active subagents before reporting successful completion", async () => {
     const { api, service } = notificationHarness(false);
     let activeSubagents = 1;

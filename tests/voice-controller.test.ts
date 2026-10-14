@@ -162,8 +162,10 @@ describe("AppVoiceController", () => {
 		const controller = new AppVoiceController(host, dictationConfig());
 		let recorderSelections = 0;
 		let readySounds = 0;
+		const diagnostics: Array<{ level: string; event: string; details: Record<string, unknown> }> = [];
 
 		setVoiceControllerTestDeps({
+			log: (level, event, details) => { diagnostics.push({ level, event, details: details ?? {} }); },
 			deepgramApiKey: () => undefined,
 			playReadySound: () => { readySounds += 1; },
 			selectRecorderCommand: async () => {
@@ -179,6 +181,10 @@ describe("AppVoiceController", () => {
 			assert.equal(controller.statusWidgetActive(), false);
 			assert.ok(host.systemMessages.some((message) => message.includes("set dictation.apiKey in ~/.config/pi/pix.jsonc or DEEPGRAM_API_KEY")));
 			assert.ok(host.toasts.some((toast) => toast.includes("set dictation.apiKey in ~/.config/pi/pix.jsonc or DEEPGRAM_API_KEY")));
+			assert.deepEqual(diagnostics.map(({ event }) => event), ["voice:connecting", "voice:start-failed"]);
+			assert.equal(diagnostics[1]?.level, "error");
+			assert.deepEqual(diagnostics[1]?.details, { error: "Error" });
+			assert.doesNotMatch(JSON.stringify(diagnostics), /DEEPGRAM_API_KEY|apiKey/);
 		} finally {
 			setVoiceControllerTestDeps();
 		}

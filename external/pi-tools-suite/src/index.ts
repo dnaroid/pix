@@ -7,6 +7,7 @@ import { loadSuiteModules } from "./module-loader.js";
 import { registerProviderWebSearchGuard } from "./provider-web-search-guard.js";
 import { registerPromptSanitizer } from "./prompt-sanitizer.js";
 import { publishStartupModuleList } from "./startup-section";
+import { suiteDiagnostics } from "./lib/suite-diagnostics.js";
 
 type ExtensionAPI = any;
 
@@ -37,6 +38,8 @@ export default async function piToolsSuite(pi: ExtensionAPI) {
 	const { loaded: loadedModuleNames, failures } = await loadSuiteModules(pi, MODULES.filter((module) =>
 		!disabledModules.has(module.name) && !(module.cleanPiOnly && isPixOwnedHost())));
 	for (const failure of failures) {
+		// SDK registration remains best-effort. Do not send exception text/stack to the shared log.
+		suiteDiagnostics.report("warn", `loader.${failure.name}`, "module-load-failed");
 		console.warn(`Skipped pi-tools-suite module ${failure.name}: ${failure.error}`);
 	}
 	if (failures.length > 0) {

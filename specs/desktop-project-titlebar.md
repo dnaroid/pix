@@ -84,6 +84,11 @@ without blocking desktop interactions.
   `window-titlebar` surface rather than replacing it, uses the configured
   workspace color when present, and otherwise follows the same deterministic
   full-path fallback hue as the titlebar badge.
+- Only the vertical Activity Bar icon rail shares the project-tinted background
+  with the window titlebar, in light and dark themes. Expanded sidebar panels,
+  their headers, and their contents retain `bg-sidebar`. Selected Activity Bar
+  buttons use `background`, like selected Workbench tabs. This is a visual
+  treatment only; sidebar interaction behavior is unchanged.
 - The titlebar badge and recent-project badges use a stable fallback hue
   derived from the normalized full project path rather than only its basename.
   Windows drive and UNC identities are compared case-insensitively.
@@ -137,7 +142,8 @@ without blocking desktop interactions.
 - Replacing native window controls on Windows or Linux.
 - Creating project scaffolding or initializing a repository inside a chosen folder.
 - Recoloring global IDE chrome or semantic status colors from the project color;
-  the subtle active-project tint is limited to the window titlebar.
+  the subtle active-project tint is limited to the titlebar and vertical Activity
+  Bar rail.
 - Treating a missing or invalid workspace color override as a desktop error.
 
 ## Invariants

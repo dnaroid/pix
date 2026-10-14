@@ -2,8 +2,26 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { createIsolatedExtensionEventBus } from "../src/app/extensions/extension-event-bus.js";
+import { pixLogger } from "../src/app/logger.js";
 
 describe("createIsolatedExtensionEventBus", () => {
+	it("captures the handler project before asynchronous failure", async t => {
+		let project = "/projects/first";
+		let release!: () => void;
+		let observed!: (scope: unknown) => void;
+		const gate = new Promise<void>(resolve => { release = resolve; });
+		const result = new Promise<unknown>(resolve => { observed = resolve; });
+		t.mock.method(pixLogger, "log", (...args: Parameters<typeof pixLogger.log>) => {
+			observed(args[3]);
+			return Promise.resolve();
+		});
+		const bus = createIsolatedExtensionEventBus(undefined, () => project);
+		bus.on("test", async () => { await gate; throw new Error("failure"); });
+		bus.emit("test", {});
+		project = "/projects/second";
+		release();
+		assert.deepEqual(await result, { module: "extension-event-bus", project: "/projects/first" });
+	});
 	it("keeps extension listeners scoped to one runtime bus", () => {
 		const firstEvents: unknown[] = [];
 		const secondEvents: unknown[] = [];

@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { realpath, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { isPathInside } from "./path-utils";
+import { diagnosticErrorType, suiteDiagnostics } from "../lib/suite-diagnostics.js";
 
 /** Grants live only in this extension runtime, never in the session transcript or config. */
 export function registerShellWorkdir(
@@ -74,6 +75,8 @@ export function registerShellWorkdir(
           ctx.ui.notify(`Shell workdir was not allowed: ${canonical} (this session).`, "warning");
         }
       } catch (error) {
+        suiteDiagnostics.report("warn", "shell", "workdir-change-failed", ctx.cwd,
+          { errorType: diagnosticErrorType(error) });
         ctx.ui.notify(`Shell workdir ${action} failed for ${absolute}: ${error instanceof Error ? error.message : String(error)}`, "error");
       }
     },

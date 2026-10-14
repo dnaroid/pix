@@ -23,6 +23,7 @@ Let Pix Desktop users view and edit its independent JSONC application profile (`
 
 - A single continuous Settings page containing both `Desktop` and `Tools Suite` configuration groups, without config tabs or a chapter selector.
 - The Desktop group exposes the complete set of settings consumed by Desktop/ACP while excluding terminal-renderer-only TUI settings.
+- Desktop → General includes the optional Logs sidebar preference, `desktop.logPanelEnabled` (default false). It applies after successful save; disabling the panel hides it and stops its monitor but does not disable shared diagnostic log collection. See [Unified diagnostic logging](logging.md).
 - Settings use explicit product sections and purpose-built controls rather than deriving UI structure from JSON Schema properties.
 - A compact left-hand chapter index remains beside the scrollable content. Clicking a chapter scrolls to it below the file header; manual scrolling tracks and highlights the current visible chapter, including the final chapter at the bottom.
 - Search stays above the left index and matches case-insensitive whitespace-separated terms against authored setting labels, descriptions and chapter titles. Nonmatching rows and empty chapters/config groups are hidden from content and navigation; clearing search restores all controls. Search never includes control values (especially secrets). Controls stay mounted to preserve local edits during filtering; no-match queries show an explicit empty state.

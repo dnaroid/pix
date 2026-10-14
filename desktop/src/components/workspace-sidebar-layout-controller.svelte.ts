@@ -1,7 +1,7 @@
 import type { SidebarIndicatorTab } from "../lib/sidebar-indicators";
 import { windowLayoutKey } from "../lib/window-layout-storage";
 
-const ACTIVITY_BAR_WIDTH = 40;
+const ACTIVITY_BAR_WIDTH = 30;
 const DEFAULT_WIDTH = 296;
 const MIN_WIDTH = 236;
 const GIT_MIN_WIDTH = 360;
@@ -146,6 +146,7 @@ export function createWorkspaceSidebarLayoutController(options: WorkspaceSidebar
     if (tab === "settings") return SETTINGS_MIN_WIDTH;
     if (tab === "scripts") return SCRIPTS_MIN_WIDTH;
     if (tab === "search") return SEARCH_MIN_WIDTH;
+    if (tab === "logs") return SETTINGS_MIN_WIDTH;
     return MIN_WIDTH;
   }
 

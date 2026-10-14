@@ -7,6 +7,7 @@ import type { QueueState, QueuedUserMessage } from "../lib/acp-client";
 import type { ForkReadyNotification } from "../lib/acp-client-types";
 import type { SessionStateNotification } from "../lib/session-state";
 import { createConnectionStore } from "./connection.svelte";
+import type { DesktopDiagnosticEvent } from "../lib/diagnostic-logging";
 
 type SessionCoordinatorBridge = {
   handleUpdate: (notification: SessionNotification) => void;
@@ -37,6 +38,7 @@ type DesktopConnectionServicesOptions = {
   requestElicitation: (request: CreateElicitationRequest) => Promise<CreateElicitationResponse>;
   setErrorMessage: (message: string | null) => void;
   reportError: (error: unknown) => void;
+  recordDiagnostic?: (event: DesktopDiagnosticEvent) => void;
 };
 
 export function createDesktopConnectionServices(options: DesktopConnectionServicesOptions) {
@@ -57,5 +59,6 @@ export function createDesktopConnectionServices(options: DesktopConnectionServic
     openWorkspaceSession: () => options.workspaceSessionStartup().open(),
     setErrorMessage: options.setErrorMessage,
     reportError: options.reportError,
+    recordDiagnostic: options.recordDiagnostic,
   });
 }

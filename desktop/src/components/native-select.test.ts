@@ -1,0 +1,36 @@
+import { describe, expect, it } from "vitest";
+
+const components = import.meta.glob("../**/*.svelte", {
+  query: "?raw", import: "default", eager: true,
+}) as Record<string, string>;
+
+// Existing migration debt, not permission to add native selects or wrappers.
+// Remove entries as their dropdowns migrate; never grow this inventory for convenience.
+const legacySelects: Record<string, number> = {
+  "ClaudeAccountSwitcher.svelte": 1,
+  "StatusBar.svelte": 1,
+  "ElicitationDialog.svelte": 1,
+  "RegistryCatalog.svelte": 1,
+  "GitPanel.svelte": 1,
+  "GitRepositoryTools.svelte": 1,
+  "settings/SettingsSelect.svelte": 1,
+};
+
+describe("Desktop design contract: Pix dropdowns", () => {
+  it("does not introduce native selects beyond the existing migration debt", () => {
+    for (const [filename, source] of Object.entries(components)) {
+      const relative = filename.replace(/^(?:\.\.\/components\/|\.\/)/u, "");
+      const count = [...source.matchAll(/<select\b/gu)].length;
+      expect(count, `${filename}: use a Pix popup/listbox (DESIGN.md §11), not a native select`).toBeLessThanOrEqual(legacySelects[relative] ?? 0);
+    }
+  });
+
+  it("does not spread the legacy native-select settings wrapper to new surfaces", () => {
+    for (const [filename, source] of Object.entries(components)) {
+      const relative = filename.replace(/^(?:\.\.\/components\/|\.\/)/u, "");
+      if (!relative.startsWith("settings/")) {
+        expect(source, `${filename}: SettingsSelect is native migration debt`).not.toMatch(/<SettingsSelect\b/u);
+      }
+    }
+  });
+});

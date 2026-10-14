@@ -3,6 +3,7 @@ import { parse } from "jsonc-parser";
 export interface DesktopPreferences {
   readonly externalEditor: string | undefined;
   readonly notificationsEnabled: boolean;
+  readonly soundOnlyEnabled: boolean;
   readonly gitCiFixModelRef: string | undefined;
   readonly knowledgeReviewModelRef: string | undefined;
 }
@@ -25,11 +26,14 @@ export function resolveDesktopPreferences(
   const projectEditor = externalEditorFromSource(projectSource);
   const globalNotificationsEnabled = notificationsEnabledFromSource(globalSource);
   const projectNotificationsEnabled = notificationsEnabledFromSource(projectSource);
+  const globalSoundOnlyEnabled = soundOnlyEnabledFromSource(globalSource);
+  const projectSoundOnlyEnabled = soundOnlyEnabledFromSource(projectSource);
   const globalGitCiFixModelRef = gitCiFixModelRefFromSource(globalSource);
   const projectGitCiFixModelRef = gitCiFixModelRefFromSource(projectSource);
   return {
     externalEditor: projectEditor ?? globalEditor,
     notificationsEnabled: projectNotificationsEnabled ?? globalNotificationsEnabled ?? true,
+    soundOnlyEnabled: projectSoundOnlyEnabled ?? globalSoundOnlyEnabled ?? false,
     gitCiFixModelRef: projectGitCiFixModelRef ?? globalGitCiFixModelRef,
     knowledgeReviewModelRef: knowledgeReviewModelRefFromSource(projectSource) ?? knowledgeReviewModelRefFromSource(globalSource),
   };
@@ -73,6 +77,18 @@ function notificationsEnabledFromSource(source: string | undefined): boolean | u
     const parsed = parse(source, undefined, { allowTrailingComma: true }) as unknown;
     if (!isRecord(parsed) || !isRecord(parsed.desktop) || !isRecord(parsed.desktop.notifications)) return undefined;
     const enabled = parsed.desktop.notifications.enabled;
+    return typeof enabled === "boolean" ? enabled : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function soundOnlyEnabledFromSource(source: string | undefined): boolean | undefined {
+  if (!source?.trim()) return undefined;
+  try {
+    const parsed = parse(source, undefined, { allowTrailingComma: true }) as unknown;
+    if (!isRecord(parsed) || !isRecord(parsed.desktop) || !isRecord(parsed.desktop.notifications)) return undefined;
+    const enabled = parsed.desktop.notifications.usePix;
     return typeof enabled === "boolean" ? enabled : undefined;
   } catch {
     return undefined;

@@ -184,10 +184,78 @@ describe("DCP bounded actionable opportunities", () => {
     expect(f.telemetry.find((event) => event.event === "progress-blocked")).toMatchObject({ reason: "auto-disabled" });
   });
 
-  test("partial automatic commits do not rearm blocked warnings during an unresolved recovery", async () => {
+  for (const pressure of ["routine", "emergency", "capacity"] as const) {
+    test(`${pressure} distinguishes a temporarily unavailable candidate after partial compression from a safety blocker`, async () => {
+      const f = await fixture({ tokens: 73_261 });
+      f.config.compress.minContextPercent = 0.2;
+      f.config.compress.autoCandidates.minContextPercent = 0.2;
+      f.config.compress.messageMode.minContextPercent = 0.2;
+      f.config.compress.protectedTools = ["write"];
+      f.ctx.model.maxTokens = 128_000;
+      f.messages.splice(0, f.messages.length,
+        { id: "old-user", role: "user", timestamp: 1, content: "Investigate the completed task." },
+        { id: "old-answer", role: "assistant", timestamp: 2, content: "Completed investigation details and verified decisions.\n".repeat(600) },
+        { id: "live-user", role: "user", timestamp: 3, content: "ACTIVE_REQUEST: continue the current task." },
+      );
+      async function appendPair(step: number, toolName = "read") {
+        const call = { type: "toolCall", id: `tool-${step}`, name: toolName, arguments: { path: `source-${step}.ts` } };
+        const assistant = { id: `call-${step}`, role: "assistant", timestamp: step * 2 + 4, content: [call] };
+        const result = {
+          id: `result-${step}`, role: "toolResult", toolCallId: call.id, toolName, timestamp: step * 2 + 5,
+          content: [{ type: "text", text: `Evidence ${step}:\n${"Completed diagnostic line with verified ownership details.\n".repeat(250)}` }],
+          isError: false,
+        };
+        await f.emit("tool_call", { toolCallId: call.id, toolName, input: call.arguments });
+        await f.emit("tool_result", result);
+        f.messages.push(assistant, result);
+      }
+      for (let i = 0; i < 8; i++) await appendPair(i, i === 0 ? "write" : "read");
+      await f.request(await f.context());
+      await f.complete();
+      f.state.consecutiveIgnoredNudges = 3;
+      await f.tools.get("compress").execute("partial-manual", {
+        topic: "Completed task",
+        ranges: [{ startId: "m001", endId: "m002", summary: "Investigation complete. Preserve verified ownership decisions." }],
+      }, undefined, undefined, f.ctx);
+      expect(f.state.compressionBlocks).toHaveLength(1);
+      expect(f.state.compressionProgress!.remainingTokens).toBeGreaterThan(0);
+      f.setUsage({ routine: 57_513, emergency: 135_000, capacity: 145_000 }[pressure]);
+
+      // First all eight pairs are recent; then one pinned result ages out of
+      // the recent window. Neither situation is a routine recovery failure.
+      await f.context();
+      await appendPair(8);
+      const projection = await f.context();
+      const reasons = () => f.telemetry.filter(event => event.event === "progress-blocked").map(event => event.reason);
+      expect(reasons()).toEqual(pressure === "routine" ? [] : ["live-head-only", "protected-budget-exceeded"]);
+      expect(f.getAbortCount()).toBe(pressure === "capacity" ? 2 : 0);
+      expect(JSON.stringify(projection.messages)).toContain("ACTIVE_REQUEST");
+      expect(projection.messages.some((message: any) => message.toolCallId === "tool-0")).toBe(true);
+
+      if (pressure !== "routine") return;
+      const debt = f.state.compressionProgress!.remainingTokens;
+      for (let retry = 0; retry < 3; retry++) await f.context();
+      expect(f.state.compressionProgress!.remainingTokens).toBe(debt);
+      expect(f.state.consecutiveIgnoredNudges).toBe(3);
+      expect(f.warnings).toEqual([]);
+      for (let step = 9; step < 13; step++) {
+        await f.request(await f.context());
+        await f.complete();
+        await appendPair(step);
+      }
+      await f.context();
+      // Enough provider-seen reads now age out for a useful range: recovery
+      // resumes without a new user turn or a reset of the outstanding goal.
+      expect(f.state.compressionBlocks.length).toBeGreaterThan(1);
+      expect(f.warnings).toEqual([]);
+    });
+  }
+
+  test("partial automatic commits do not rearm blocked warnings during unresolved emergency recovery", async () => {
     const f = await fixture();
     f.config.compress.minContextPercent = 0.2;
-    f.config.compress.maxContextPercent = 0.55;
+    // Exercise genuine emergency pressure, not a routine no-candidate wait.
+    f.config.compress.maxContextPercent = 0.27;
     f.config.compress.autoCandidates.minContextPercent = 0.2;
     f.config.compress.messageMode.minContextPercent = 0.2;
     f.ctx.model.maxTokens = 128_000;
@@ -220,14 +288,14 @@ describe("DCP bounded actionable opportunities", () => {
     expect(partialCommits).toBeGreaterThanOrEqual(3);
     expect(f.getAbortCount()).toBe(0);
     const reasons = () => f.telemetry.filter(event => event.event === "progress-blocked").map(event => event.reason);
-    expect(reasons()).toEqual(["budget-exhausted"]);
-    expect(f.warnings).toHaveLength(1);
+    expect(reasons()).toEqual(["live-head-only", "budget-exhausted"]);
+    expect(f.warnings).toHaveLength(2);
 
     // Deduplicate reasons, not all warnings: a new failure mode stays visible.
     f.config.compress.autoCompress.enabled = false;
     await f.context();
     await f.context();
-    expect(reasons()).toEqual(["budget-exhausted", "auto-disabled"]);
+    expect(reasons()).toEqual(["live-head-only", "budget-exhausted", "auto-disabled"]);
   });
 
   for (const reset of ["below-threshold", "model_select"]) {

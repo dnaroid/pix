@@ -30,6 +30,14 @@ const SESSION_PROVIDER_WARNING = "Semantic session-title search unavailable; loc
 const TASK_PROVIDER_WARNING = "Semantic task search unavailable; local task search remains available";
 const DISCOVERY_ERROR = "Session title discovery timed out or failed";
 export class SearchUnavailableError extends Error {}
+export type SearchIndexDiagnostic = {
+  cwd: string;
+  source: SearchIndexRequest["source"];
+  complete: boolean;
+  indexed?: number;
+  total?: number;
+  durationMs: number;
+};
 interface Workspace {
   enabled: SourceSelection;
   policyRevision?: string;
@@ -66,6 +74,8 @@ export interface SearchServiceOptions {
   watchTasks?: TaskChangeWatcher;
   watchSourcePolicy?: typeof watchSourcePolicy;
   taskDebounceMs?: number;
+  /** Opt-in metadata only; never include source documents, queries or provider responses. */
+  onIndexDiagnostic?: (record: SearchIndexDiagnostic) => void;
 }
 /** Session public-text chunks and saved names share source-owned caches. */
 export class DesktopSearchService {
@@ -291,8 +301,20 @@ export class DesktopSearchService {
     // one another's authorization reads and return a fictitious missing config.
     return this.indexActions.run(key, caller, w.controller.signal, async operationSignal => {
       const source = request.source;
-      if (!await bounded(operationSignal, undefined, signal => this.consent(signal))) return { source, complete: false,
-        message: "Configure an embedding model and its credential to index this source" };
+      const startedAt = Date.now();
+      const finish = (result: SearchIndexResponse): SearchIndexResponse => {
+        if (!operationSignal.aborted) {
+          try {
+            this.options.onIndexDiagnostic?.({ cwd: w.cwd, source, complete: result.complete,
+              ...(result.indexed === undefined ? {} : { indexed: result.indexed }),
+              ...(result.total === undefined ? {} : { total: result.total }),
+              durationMs: Date.now() - startedAt });
+          } catch { /* Diagnostics cannot alter search results. */ }
+        }
+        return result;
+      };
+      if (!await bounded(operationSignal, undefined, signal => this.consent(signal))) return finish({ source, complete: false,
+        message: "Configure an embedding model and its credential to index this source" });
       const owned = AbortSignal.any([operationSignal, this.network.signal]);
       owned.throwIfAborted();
       const config = this.embeddingConfig!;
@@ -366,13 +388,13 @@ export class DesktopSearchService {
         if (!this.current(w, epoch)) throw new SearchUnavailableError("Search authorization changed");
         await requireSourceEnabled(w.cwd, source, owned, w.policyRevision);
         owned.throwIfAborted();
-        return { source, complete: indexed === total, indexed, total,
+        return finish({ source, complete: indexed === total, indexed, total,
           ...(diagnostics ? { diagnostics } : {}),
-          ...(indexed < total ? { message: "Indexing pass finished; continue to index remaining documents" } : {}) };
+          ...(indexed < total ? { message: "Indexing pass finished; continue to index remaining documents" } : {}) });
       } catch (error) {
         owned.throwIfAborted();
-        return { source, complete: false, message: error instanceof SearchIndexBusyError || error instanceof SearchCacheCompatibilityError
-          || error instanceof SearchUnavailableError ? error.message : "Document indexing unavailable; retry this source" };
+        return finish({ source, complete: false, message: error instanceof SearchIndexBusyError || error instanceof SearchCacheCompatibilityError
+          || error instanceof SearchUnavailableError ? error.message : "Document indexing unavailable; retry this source" });
       }
     });
   }

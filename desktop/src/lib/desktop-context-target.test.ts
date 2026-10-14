@@ -1,6 +1,35 @@
-import { describe, expect, it } from "vitest";
-import { contextFilePath, previewSourceReference, projectRevealPath, relativeImagePath } from "./desktop-context-target";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { contextFilePath, desktopContextTarget, previewSourceReference, projectRevealPath, relativeImagePath } from "./desktop-context-target";
 import previewSource from "../components/PreviewPane.svelte?raw";
+import tabsSource from "../components/WorkbenchTabs.svelte?raw";
+
+describe("session tab context targets", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("exposes raw session metadata only on session tab buttons", () => {
+    expect(tabsSource).toContain('data-context-session-id={tab.kind === "session" ? tab.sessionId : undefined}');
+  });
+
+  it("routes both the tab button and nested labels/icons to the clicked session", () => {
+    class ElementStub {
+      dataset = { contextSessionId: "clicked-session" };
+      closest(selector: string): ElementStub | null {
+        return selector === "[data-workbench-tab][data-context-session-id]" ? tab : null;
+      }
+    }
+    const tab = new ElementStub();
+    vi.stubGlobal("Element", ElementStub);
+    vi.stubGlobal("HTMLElement", ElementStub);
+    vi.stubGlobal("HTMLInputElement", class {});
+    vi.stubGlobal("HTMLTextAreaElement", class {});
+    for (const target of [tab, new ElementStub()]) {
+      expect(desktopContextTarget(target as unknown as EventTarget)).toEqual({
+        kind: "session", element: tab, sessionId: "clicked-session",
+        editor: null, hasSelection: false, readOnly: true,
+      });
+    }
+  });
+});
 
 describe("trusted preview file paths", () => {
   it("resolves project previews and preserves absolute paths, spaces and unicode", () => {

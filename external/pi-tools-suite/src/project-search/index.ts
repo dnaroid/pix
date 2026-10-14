@@ -5,6 +5,7 @@ import { registerSessionChunkSync } from "./semantic-session-chunks.js";
 import { registerSearchIndexCommand } from "./index-command.js";
 import { readSourcePolicy, watchSourcePolicy } from "./source-policy.mjs";
 import { findProjectRoot } from "../lib/project.js";
+import { suiteDiagnostics } from "../lib/suite-diagnostics.js";
 import type { ProjectSearchSource } from "./engine.js";
 import { formatProjectSearch, INDEX_SEARCH_MODES, parseProjectSearchParams, PROJECT_SEARCH_SOURCES, searchProject } from "./engine.js";
 
@@ -73,6 +74,7 @@ export default function projectSearch(pi: ExtensionAPI): void {
             sources: response.sources, results: response.hits, notices: response.notices },
         };
       } catch {
+        if (!signal?.aborted) suiteDiagnostics.report("warn", "search", "query-failed", ctx.cwd);
         return {
           content: [{ type: "text" as const, text: signal?.aborted
             ? "project_search cancelled." : "project_search unavailable: check the project path and retry." }],

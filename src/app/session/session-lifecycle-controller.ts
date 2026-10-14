@@ -7,6 +7,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { InputEditor } from "../../input-editor.js";
 import { createId } from "../id.js";
+import { logOperationFailure } from "../logging/operation-errors.js";
 import { scheduleQuestionRecovery } from "../../bundled-extensions/question/recovery.js";
 import { stringifyUnknown } from "../rendering/message-content.js";
 import { collectStartupAvailabilityIssues } from "../cli/startup-checks.js";
@@ -86,6 +87,7 @@ export class AppSessionLifecycleController {
 		this.host.startSubagentsPolling();
 		this.host.render();
 		void this.host.loadRequestHistory().catch((error) => {
+			logOperationFailure("request-history:load-failed", error, { project: this.host.options.cwd, module: "session.startup" });
 			if (!this.host.isRunning()) return;
 			this.host.addEntry({ id: createId("warning"), kind: "system", text: `Request history failed to load: ${stringifyUnknown(error)}` });
 			this.host.render();
@@ -131,12 +133,14 @@ export class AppSessionLifecycleController {
 			this.host.render();
 			void this.collectAvailabilityIssues(runtime);
 			void this.host.restoreTabsAfterStartup().catch((error) => {
+				logOperationFailure("tabs:restore-failed", error, { project: runtime.cwd, sessionId: runtime.session.sessionId, module: "session.startup" });
 				if (!this.host.isRunning()) return;
 				this.host.addEntry({ id: createId("warning"), kind: "system", text: `Tab restore failed: ${stringifyUnknown(error)}` });
 				this.host.showToast("Could not restore tabs", "warning");
 				this.host.render();
 			});
 	} catch (error) {
+		logOperationFailure("session:startup-failed", error, { project: this.host.options.cwd, module: "session.startup" });
 		this.host.addEntry({ id: createId("error"), kind: "error", text: stringifyUnknown(error) });
 		this.host.showToast("Session startup failed", "error");
 		this.host.setSessionStatus(undefined);
@@ -328,6 +332,7 @@ export class AppSessionLifecycleController {
 			}
 			if (availabilityIssues.length > 0) this.host.render();
 		} catch (error) {
+			logOperationFailure("startup:availability-check-failed", error, { project: runtime.cwd, sessionId: runtime.session.sessionId, module: "session.startup" });
 			if (!this.host.isRunning() || this.host.runtime() !== runtime) return;
 			this.host.addEntry({ id: createId("warning"), kind: "system", text: `Startup dependency check failed: ${stringifyUnknown(error)}` });
 			this.host.render();

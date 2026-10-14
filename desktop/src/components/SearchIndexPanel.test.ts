@@ -5,7 +5,6 @@ import monitor from "../lib/search-index-monitor.ts?raw";
 import controller from "../lib/search-index-controller.ts?raw";
 import transport from "../lib/workspace-search-index-controller.ts?raw";
 import owner from "../lib/workspace-search-index-owner.svelte.ts?raw";
-import history from "./SearchIndexHistory.svelte?raw";
 
 describe("SearchIndexPanel source contract", () => {
   it("keeps Settings last with a global checkbox and project-local controls for other sources", () => {
@@ -16,28 +15,13 @@ describe("SearchIndexPanel source contract", () => {
     expect(panel).not.toContain('Counts show cached entities');
     expect(panel).not.toContain('Last pass coverage and source changes are separate');
   });
-  it("fills available height and follows chronological events without pulling readers from history", () => {
+  it("keeps source status scrollable without embedding an activity log", () => {
     expect(panel).toContain('flex min-h-0 min-w-0 flex-col overflow-y-auto');
-    expect(history).toContain("min-h-32 min-w-0 flex-1 flex-col");
-    expect(history).not.toContain("max-h-64");
-    expect(history).toContain("{#each events as event (event.id)}");
-    expect(history).toContain("$effect.pre");
-    expect(history).toContain("createHistoryScrollTracker(viewport)");
-    expect(history).toContain("if (active) tracker.restore(position)");
-    expect(history).toContain("resize.observe(list)");
-    expect(history).toContain("resize.disconnect()");
-  });
-  it("opts the activity log into native text selection and copy", () => {
-    expect(history).toMatch(/<div[^>]*class="select-text [^"]*"[^>]*aria-label="Recent index events"/);
-    expect(history).not.toContain("oncopy=");
-    expect(history).not.toContain("onselectstart=");
-  });
-  it("wires an accessible icon-only clear button to workspace history", () => {
-    expect(history).toContain('aria-label="Clear index activity log"');
-    expect(history).toContain('title="Clear index activity log"');
-    expect(history).toContain('<Trash2 class="h-3.5 w-3.5" aria-hidden="true" />');
-    expect(history).toContain('disabled={!onClear || events.length === 0} onclick={onClear}');
-    expect(panel).toContain('onClear={controller ? () => controller.clearHistory() : undefined}');
+    expect(panel).not.toContain("SearchIndexHistory");
+    expect(panel).not.toContain("view.history");
+    expect(panel).not.toContain("Last runs");
+    expect(controller).not.toContain("createSearchIndexHistory");
+    expect(controller).not.toContain("observeSearchIndexEvents");
   });
   it("is mounted as the native search status tab", () => {
     expect(sidebar).toContain("<SearchIndexPanel");
@@ -57,17 +41,12 @@ describe("SearchIndexPanel source contract", () => {
     expect(panel).not.toContain("monitorSearchIndexes");
     expect(panel).not.toContain("Stored means saved vectors, not verified coverage");
     expect(panel).not.toContain("Status checks every 30 seconds when idle");
-    expect(panel).toContain("<SearchIndexHistory events={view.history}");
-    expect(history).toContain('aria-label="Recent index events"');
-    expect(history).toContain("events.length}/200");
+    expect(panel).not.toContain("Recent index events");
   });
-  it("collapses last runs and spins only active sources, not refreshed cells", () => {
+  it("spins only active sources, not refreshed cells", () => {
     expect(panel).toContain("<table");
-    expect(panel).toContain('<details class="group');
-    expect(panel).not.toMatch(/<details[^>]*\bopen\b/);
-    expect(panel).toContain("<ChevronRight");
-    expect(panel).toContain("group-open:rotate-90");
-    expect(panel).toContain("Last runs");
+    expect(panel).not.toContain('<details class="group');
+    expect(panel).not.toContain("Last runs");
     expect(panel).toContain("{#if !row.empty || action?.running}");
     expect(panel).not.toContain("{#if loading}");
     expect(panel).toContain("row.semanticActive || action?.running");

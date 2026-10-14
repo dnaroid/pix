@@ -5,14 +5,14 @@ import { doctorDesktop } from "./doctor.mjs";
 
 export function parseArguments(args) {
 	const [command, ...rest] = args;
-	if (!["prepare", "launch", "doctor"].includes(command)) throw new Error("usage: qa:desktop prepare [--state PATH] [--timeout-ms 100..300000] [--run-dir PATH] [--seed-config] [--seed-api-keys] [--empty-workspace] | launch --manifest PATH | doctor [--prompt]");
+	if (!["prepare", "launch", "doctor"].includes(command)) throw new Error("usage: qa:desktop prepare [--persistent-project PATH | --temporary] [--state PATH] [--timeout-ms 100..300000] [--run-dir PATH] [--seed-config] [--seed-api-keys] [--empty-workspace] | launch --manifest PATH | doctor [--prompt]");
 	const allowed = command === "doctor" ? { "--prompt": "prompt" }
-		: command === "prepare" ? { "--state": "state", "--timeout-ms": "timeoutMs", "--run-dir": "runDir", "--seed-config": "seedConfig", "--seed-api-keys": "seedApiKeys", "--empty-workspace": "emptyWorkspace" } : { "--manifest": "manifest" };
+		: command === "prepare" ? { "--persistent-project": "persistentProject", "--temporary": "temporary", "--state": "state", "--timeout-ms": "timeoutMs", "--run-dir": "runDir", "--seed-config": "seedConfig", "--seed-api-keys": "seedApiKeys", "--empty-workspace": "emptyWorkspace" } : { "--manifest": "manifest" };
 	const result = { command };
 	for (let i = 0; i < rest.length; i++) {
 		const key = Object.hasOwn(allowed, rest[i]) ? allowed[rest[i]] : undefined;
 		if (!key || key in result) throw new Error("unknown or duplicate QA option");
-		if (key === "seedConfig" || key === "seedApiKeys" || key === "prompt" || key === "emptyWorkspace") result[key] = true;
+		if (key === "seedConfig" || key === "seedApiKeys" || key === "prompt" || key === "emptyWorkspace" || key === "temporary") result[key] = true;
 		else {
 			const value = rest[++i];
 			if (!value || value.startsWith("--")) throw new Error("QA option requires a value");

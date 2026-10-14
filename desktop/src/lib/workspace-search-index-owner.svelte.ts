@@ -4,9 +4,6 @@ import { emptySearchIndexView, type SearchIndexController } from "./search-index
 import { createWorkspaceSearchIndexController } from "./workspace-search-index-controller";
 import { startSearchIndexSync } from "./search-index-sync";
 import { SETTINGS_SEARCH_CATALOG } from "./settings-search-catalog";
-import { createSearchIndexHistory } from "./search-index-history";
-
-const history = createSearchIndexHistory();
 
 export function createWorkspaceSearchIndexOwner(options: {
   workspace(): string;
@@ -25,9 +22,9 @@ export function createWorkspaceSearchIndexOwner(options: {
       view = emptySearchIndexView();
       controller = null;
       if (!selected) return;
-      const owner = createWorkspaceSearchIndexController(selected, connection, state => { view = state; }, history);
+      const owner = createWorkspaceSearchIndexController(selected, connection, state => { view = state; });
       controller = owner;
-      const stopSync = connection ? startSearchIndexSync(connection, selected, SETTINGS_SEARCH_CATALOG, window, owner.syncEvent) : undefined;
+      const stopSync = connection ? startSearchIndexSync(connection, selected, SETTINGS_SEARCH_CATALOG, window) : undefined;
       return () => { stopSync?.(); owner.dispose(); };
     });
   });

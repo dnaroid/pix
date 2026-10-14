@@ -7,6 +7,8 @@ import { getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { fetchLatestReleaseVersion, isReleaseInstall, readReleaseInstallInfo, releaseUpdateHint } from "./release-update.js";
 import { schedulePortableTuiUpdate } from "./portable-update.js";
 import { createPortableUpdateProgress } from "./portable-update-progress.js";
+import { logOperationFailure } from "../logging/operation-errors.js";
+import { withCliDiagnostics } from "./diagnostics.js";
 export { isReleaseInstall } from "./release-update.js";
 
 const DEFAULT_UPDATE_TIMEOUT_MS = 10_000;
@@ -359,6 +361,10 @@ function getGlobalPackageUpdateCommand(packageName: string, version: string | un
 }
 
 export async function runPixUpdateCli(argv: readonly string[] = process.argv.slice(2)): Promise<number> {
+	return withCliDiagnostics("update", () => runPixUpdate(argv));
+}
+
+async function runPixUpdate(argv: readonly string[]): Promise<number> {
 	let options: PixUpdateCliOptions;
 	try {
 		options = parsePixUpdateArgs(argv);
@@ -397,6 +403,7 @@ export async function runPixUpdateCli(argv: readonly string[] = process.argv.sli
 			return 0;
 		} catch (error) {
 			progress.stop();
+			logOperationFailure("update:portable-schedule-failed", error, { project: null, module: "cli.update" });
 			console.error(`Portable Pix update failed before replacement: ${error instanceof Error ? error.message : String(error)}`);
 			console.error("The current installation was left unchanged.");
 			return 1;
@@ -421,6 +428,7 @@ export async function runPixUpdateCli(argv: readonly string[] = process.argv.sli
 			await pixUpdateDeps.runCommand(command);
 			console.log("Updated Pix.");
 		} catch (error) {
+			logOperationFailure("update:pix-install-failed", error, { project: null, module: "cli.update" });
 			console.error(`Pix update failed: ${error instanceof Error ? error.message : String(error)}`);
 			console.error(`Try running manually: ${command.display}`);
 			return 1;
@@ -454,6 +462,7 @@ export async function runPixUpdateCli(argv: readonly string[] = process.argv.sli
 		console.log(`${successMessage} Restart any running pix/pi sessions.`);
 		return 0;
 	} catch (error) {
+		logOperationFailure("update:pi-install-failed", error, { project: null, module: "cli.update" });
 		const failureContext = shouldUpdatePix ? " after Pix update" : "";
 		console.error(`Global Pi update failed${failureContext}: ${error instanceof Error ? error.message : String(error)}`);
 		console.error(`Try running manually: ${piCommand.display}`);

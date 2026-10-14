@@ -6,7 +6,7 @@ import { sidebarIndicatorActionGroups } from "./sidebar-indicator-actions";
 import activityBar from "../components/WorkspaceSidebarActivityBar.svelte?raw";
 
 function stored(): SearchIndexViewState {
-  return { actions: {}, history: [], snapshot: { reading: false, error: "", activity: null,
+  return { actions: {}, snapshot: { reading: false, error: "", activity: null,
     selection: { enabled: { code: true, knowledge: true, settings: true, sessions: true, tasks: true, commits: true } },
     consent: { configured: true, provider: "ollama", model: "m", vectorSize: 3, keyAvailable: true },
     stores: { stores: [
@@ -101,8 +101,8 @@ describe("search indexing sidebar reasons", () => {
       ? { ...store, incompatibleSources: ["sessions"] } : store) };
     expect(indicator(view)).toMatchObject({ tone: "warning", reason: expect.stringContaining("Sessions") });
   });
-  it("wires accessible dot and cause-specific navigation to the shared manager", () => {
-    expect(activityBar).toContain('<SidebarIndicatorDot indicator={indicators.search} />');
+  it("wires accessible status icon and cause-specific navigation to the shared manager", () => {
+    expect(activityBar).toContain('sidebarIconTone(indicators.search)');
     expect(activityBar).toContain('activityLabel("search", "Search index status")');
     expect(activityBar).toContain('onIndicatorContext(event, "search")');
     const view = stored();

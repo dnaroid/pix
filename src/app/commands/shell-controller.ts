@@ -1,4 +1,5 @@
 import { createId } from "../id.js";
+import { logPixEvent, type PixLogDetails, type PixLogLevel } from "../logger.js";
 import {
 	runChatShellCommand,
 	type ChatShellCommandHandlers,
@@ -13,6 +14,7 @@ type ShellEntry = Extract<Entry, { kind: "shell" }>;
 
 type AppShellControllerDeps = {
 	runChatShellCommand(command: string, cwd: string, handlers: ChatShellCommandHandlers): RunningChatShellCommand;
+	log?: typeof logPixEvent;
 };
 
 const defaultDeps: AppShellControllerDeps = { runChatShellCommand };
@@ -46,6 +48,7 @@ export class AppShellController {
 	async run(command: string): Promise<InteractiveShellCommandResult> {
 		if (this.activeRun) throw new Error("A shell command is already running");
 		const scopeKey = this.host.activeScopeKey();
+		const startedAt = Date.now();
 
 		const entry: ShellEntry = {
 			id: createId("shell"),
@@ -59,6 +62,7 @@ export class AppShellController {
 		this.host.setStatus(`shell: ${command}`);
 		this.host.setSessionActivity("running");
 		this.host.render();
+		this.log("debug", "shell:started");
 
 		const runningCommand = this.deps.runChatShellCommand(command, this.host.cwd, {
 			onOutput: (chunk) => this.appendOutput(entry, chunk, scopeKey),
@@ -67,7 +71,14 @@ export class AppShellController {
 		this.activeRun = { entry, command: runningCommand, scopeKey };
 
 		try {
-			return await runningCommand.done;
+			const result = await runningCommand.done;
+			this.log(result.error ? "error" : result.signal || result.exitCode !== 0 ? "warn" : "info",
+				"shell:settled", { exitCode: result.exitCode, signal: result.signal, spawnFailed: Boolean(result.error),
+					durationMs: Date.now() - startedAt });
+			return result;
+		} catch (error) {
+			this.log("error", "shell:failed", { error: error instanceof Error ? error.name : "Unknown" });
+			throw error;
 		} finally {
 			if (this.activeRun?.entry === entry) this.activeRun = undefined;
 			this.flushRender();
@@ -92,7 +103,9 @@ export class AppShellController {
 		if (!activeRun || !this.isScopeActive(activeRun.scopeKey)) return false;
 
 		this.appendOutput(activeRun.entry, "\n^C\n", activeRun.scopeKey);
-		return activeRun.command.interrupt();
+		const interrupted = activeRun.command.interrupt();
+		if (interrupted) this.log("info", "shell:interrupted");
+		return interrupted;
 	}
 
 	dispose(): void {
@@ -100,7 +113,14 @@ export class AppShellController {
 		this.renderTimer = undefined;
 		const activeRun = this.activeRun;
 		this.activeRun = undefined;
+		if (activeRun) this.log("debug", "shell:disposed");
 		activeRun?.command.kill("SIGTERM");
+	}
+
+	private log(level: PixLogLevel, event: string, details: PixLogDetails = {}): void {
+		try {
+			(this.deps.log ?? logPixEvent)(level, event, details, { project: this.host.cwd, module: "commands.shell" });
+		} catch { /* Diagnostics must not affect command execution. */ }
 	}
 
 	private appendOutput(entry: ShellEntry, chunk: string, scopeKey: string | undefined): void {

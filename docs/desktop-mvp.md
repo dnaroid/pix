@@ -83,7 +83,13 @@ current product non-goals.
     of complete stdout lines (stdout stays protocol-only)
   - `acp://stderr` with `{ windowLabel, generation, lines: string[] }` batches
     of diagnostic lines
-  - `acp://exit` with the generation and child exit status
+  - `acp://exit` with the generation, child exit status, requested-stop flag,
+    optional error, and a separate stderr snapshot on unexpected exits. Current
+    failure diagnostics and project-local crash receipts are specified in
+    [`desktop-native-process-lifecycle.md`](../specs/desktop-native-process-lifecycle.md).
+- `save_acp_crash_log(workspace, content)` writes a bounded receipt on the
+  native blocking pool; it is available for unexpected exits and initialization
+  failures, not requested stops.
 - Rust starts Node with the generated `<repo>/acp/dist/main.js` entry by
   default. `PIX_ACP_NODE_BINARY`
   and `PIX_ACP_ENTRY` may override executable and entry path for development.

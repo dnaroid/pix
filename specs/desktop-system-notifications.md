@@ -1,4 +1,4 @@
-# Desktop system notifications
+# Desktop notifications (native and sound-only)
 
 <!-- markdownlint-disable MD013 -->
 
@@ -12,7 +12,7 @@ Active implemented contract.
 
 ## Goal
 
-Notify the user through the operating system when a Pix Desktop agent needs attention while its owning Desktop window is not currently visible and focused.
+Notify the user when a Pix Desktop agent needs attention. The default is native macOS notifications; an opt-in sound-only mode plays a short cue without popups or the OS notification center.
 
 ## Scope
 
@@ -21,13 +21,15 @@ Notify the user through the operating system when a Pix Desktop agent needs atte
 - Native pause notifications when a live agent-control state transitions into `paused`.
 - Native error notifications for agent prompt/continuation failures and abnormal ACP stop reasons.
 - Per-window foreground suppression so a visible, focused Pix window continues to rely on its in-app UI instead of duplicating the same event as an OS notification.
-- A Desktop General setting, `desktop.notifications.enabled`, that can disable all native notification permission requests and delivery. It defaults to `true`, and a project Desktop config may override the user-level value.
+- A Desktop General master setting, `desktop.notifications.enabled`, that disables both delivery modes when false (default `true`).
+- A Desktop General switch, **Sound only (no popups)** (`desktop.notifications.usePix`, default `false`), that selects a sound cue instead of native notifications. The legacy key name is retained for existing configs. Both settings allow project Desktop overrides.
 
 ## Behavior
 
-1. Before requesting OS permission or sending anything, Desktop resolves the latest effective `desktop.notifications.enabled` value from the user Desktop config and the active project's Desktop override. When disabled, no native notification is sent and no notification permission prompt is requested. Existing configs without the setting remain enabled for backward compatibility.
-2. A Desktop window is foreground only while `document.visibilityState === "visible"` and `document.hasFocus()` are both true. Completion, question, and error notifications are suppressed while foreground and are eligible in every other state, including minimized/hidden windows and a Pix window that has lost focus to another application or another Pix project window.
-3. Native notifications are best effort. Desktop checks notification permission, requests it once per window process when needed, caches the result for that run, and never lets notification API failures fail or delay agent work.
+1. Before delivering anything, Desktop resolves the latest effective `desktop.notifications.enabled` and `desktop.notifications.usePix` values from the user Desktop config and the active project's Desktop override. Disabled suppresses both delivery modes. Legacy configs remain enabled with native macOS delivery. Changes apply after saving and are read for each event.
+2. A Desktop window is foreground only while `document.visibilityState === "visible"` and `document.hasFocus()` are both true. Native completion, question, pause, and error notifications are suppressed while foreground. Sound cues are suppressed only when the owning conversation is the currently visible workbench tab in the focused window; other-tab events still sound. Both modes can signal when a window is unfocused, minimized, or hidden.
+   Sound-only delivery does not create a Pix popup, retain notification text, or emit macOS banners. The cue is played through the native macOS sound API on the application main thread, not through the notification center. This allows it to play when the WebView is in the background. Sound failure must not affect the agent.
+3. Native notifications are best effort. In native mode Desktop checks notification permission, requests it once per window process when needed, caches the result for that run, and never lets notification API failures fail or delay agent work. Sound-only mode does not check/request OS notification permission or send any native notification; a mode switch during an asynchronous native setup prevents stale native delivery.
 4. Successful completion is based on the ACP prompt/continuation stop reason after Pi's `agent_settled` boundary, not `agent_end`. `end_turn` is the only successful completion reason. User cancellation is silent. `max_tokens`, `max_turn_requests`, and `refusal` produce an error/attention notification instead of a success notification.
 5. Desktop's own auto queue is part of the completion boundary. A prompt that settles and immediately starts an automatic queued prompt must not emit an intermediate completion notification. Run generations ensure only the final run in that chain may report completion.
 6. Completion also waits while the owning session still reports active async subagents. When the subagent activity snapshot reaches zero, the deferred completion is emitted only if the session is idle and no newer prompt has started. Starting new work, clearing the session, or resetting prompt runtime drops an older deferred completion.
@@ -53,6 +55,7 @@ Notify the user through the operating system when a Pix Desktop agent needs atte
 ## Related files
 
 - `desktop/src/lib/desktop-notifications.ts`
+- `desktop/src-tauri/src/desktop_notification_sound.rs`
 - `desktop/src/App.svelte`
 - `desktop/src/app/prompt-run-lifecycle.svelte.ts`
 - `desktop/src/app/prompt-agent-control.svelte.ts`
@@ -68,7 +71,7 @@ Notify the user through the operating system when a Pix Desktop agent needs atte
 
 ## Verification
 
-- `desktop/src/lib/desktop-notifications.test.ts` covers foreground suppression, permission reuse, completion/error/cancel policy, active-subagent deferral, stale-completion cancellation, older-notification routing, subscribe-before-send, retry, and teardown races.
+- `desktop/src/lib/desktop-notifications.test.ts` covers foreground suppression, permission reuse, completion/error/cancel policy, active-subagent deferral, stale-completion cancellation, older-notification routing, subscribe-before-send, retry, teardown races, sound-only mode without popups or OS permission, mode switching, and disposal while preferences are pending.
 - `desktop/src/lib/desktop-notification-transport.test.ts` uses the real Tauri frontend APIs with mocked IPC to verify native command delivery, matching `WebviewWindow` subscription targets for main/project windows, owning-session activation, and unsubscribe even when the host `Notification` constructor has no EventTarget methods.
 - `desktop/src-tauri/src/desktop_notification.rs` contains native metadata/activation and ownership regressions: out-of-order delivery, multiple windows, body clicks versus dismissal/actions, reused window labels, stale queued sends, and shutdown.
 - Prompt-run lifecycle tests cover auto-queue generation gating and dedicated prompt-error signaling.

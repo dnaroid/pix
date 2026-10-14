@@ -11,6 +11,8 @@ const message: MessageItem = { type: "message", id: "replay-entry:user", session
 function fixture() {
   const state = createActiveSessionState(); state.setSessionId("source");
   let key = "source"; let text = "previous draft"; let attachments: Attachment[] = [file]; let busy = false;
+  let historyLoading = false;
+  const runningSessions = new Set<string>();
   const order: string[] = [];
   const resend = vi.fn(() => { order.push("send"); });
   const prepare = vi.fn(async (_sessionId: string, _edit: unknown) => { order.push("prepare"); return resend; });
@@ -20,14 +22,43 @@ function fixture() {
   const reportError = vi.fn();
   const edit = createComposerMessageEdit({ client: () => client, state, draftKey: () => key,
     promptText: () => text, promptAttachments: () => attachments, setPromptText: (value) => { text = value; },
-    setPromptAttachments: (value) => { attachments = value; }, invalidateAttachments: vi.fn(), busy: () => busy,
+    setPromptAttachments: (value) => { attachments = value; }, invalidateAttachments: vi.fn(),
+    operationRunning: () => busy, promptRunning: (sessionId) => runningSessions.has(sessionId), historyLoading: () => historyLoading,
     setOperationRunning: (value) => { busy = value; }, prepare, markHistoryFullyLoaded: vi.fn(), focus: vi.fn(), reportError });
   return { edit, state, order, prepare, rewind, history, resend, reportError, get text() { return text; }, get attachments() { return attachments; },
+    runningSessions, setBusy: (value: boolean) => { busy = value; }, setHistoryLoading: (value: boolean) => { historyLoading = value; },
     setText: (value: string) => { text = value; }, setAttachments: (value: Attachment[]) => { attachments = value; },
     switchSession: () => { state.setSessionId("other"); state.setTranscript({ items: [] }); key = "other"; text = "other draft"; attachments = []; },
     returnToSource: () => { state.setSessionId("source"); key = "source"; } };
 }
 describe("main composer edit and resend", () => {
+  it("allows begin, Cancel and Send in an idle tab while another session runs", async () => {
+    const f = fixture(); f.runningSessions.add("other"); const transcript = f.state.transcript;
+    f.edit.begin("user", message);
+    expect(f.edit.active).toBe(true); expect(f.text).toBe("original"); expect(f.attachments).toEqual([image, file]);
+    expect(f.state.transcript).toBe(transcript); expect(f.order).toEqual([]);
+    f.edit.cancel(); expect(f.edit.active).toBe(false); expect(f.text).toBe("previous draft"); expect(f.order).toEqual([]);
+    f.edit.begin("user", message); f.setText("edited while other tab runs");
+    expect(await f.edit.submit()).toBe(true);
+    expect(f.prepare).toHaveBeenCalledWith("source", { text: "edited while other tab runs", attachments: [image, file] });
+    expect(f.rewind).toHaveBeenCalledWith("source", "user", "rewind");
+    expect(f.resend).toHaveBeenCalledOnce(); expect(f.edit.active).toBe(false);
+    expect(f.runningSessions.has("other")).toBe(true);
+  });
+  it.each(["prompt", "operation", "history"] as const)("keeps the selected draft unchanged while its %s gate is busy", async (gate) => {
+    const f = fixture();
+    const block = (value: boolean) => {
+      if (gate === "prompt") value ? f.runningSessions.add("source") : f.runningSessions.delete("source");
+      else if (gate === "operation") f.setBusy(value);
+      else f.setHistoryLoading(value);
+    };
+    block(true); f.edit.begin("user", message);
+    expect(f.edit.active).toBe(false); expect(f.text).toBe("previous draft"); expect(f.attachments).toEqual([file]);
+    block(false); f.edit.begin("user", message); block(true);
+    f.edit.cancel(); expect(f.edit.active).toBe(true); expect(f.text).toBe("original");
+    expect(await f.edit.submit()).toBe(true); expect(f.order).toEqual([]);
+    block(false); f.edit.cancel(); expect(f.edit.active).toBe(false); expect(f.text).toBe("previous draft");
+  });
   it("begin loads text and removable attachment clones without changing history", () => {
     const f = fixture(); const transcript = f.state.transcript;
     f.edit.begin("user", message);

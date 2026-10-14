@@ -1,9 +1,52 @@
 import { RegistryExecutor } from "./context.js";
 import { loadRegistryConfig } from "./config-reader.js";
 import { pathExists, projectArtifactRelativePaths, projectKeyFromGitRemote, registryResourceRelativePath, validateName } from "./paths.js";
-import { ProjectArtifact, RegistryRuntime, ResourceType } from "./model.js";
+import { PROJECT_DIR, ProjectArtifact, RegistryRuntime, ResourceType } from "./model.js";
 import { dirname, join } from "node:path";
 import { promises as fs } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { lock } from "proper-lockfile";
+
+const AUTO_PROJECT_KEY_FILE = "registry-project-key";
+const AUTO_PROJECT_KEY_PATTERN = /^local-[0-9a-f]{32}$/;
+
+/** A stable, project-local fallback. Kept separate from explicit projectKey so Git origin can supersede it. */
+async function autoProjectKey(cwd: string): Promise<string> {
+	const projectDir = join(cwd, PROJECT_DIR);
+	const directory = await fs.lstat(projectDir);
+	if (!directory.isDirectory() || directory.isSymbolicLink()) throw new Error("Project .pi must be a directory to store its Registry key.");
+	const file = join(projectDir, AUTO_PROJECT_KEY_FILE);
+	// The lock also protects concurrent ACP processes; publishing via rename means
+	// readers never see a half-written key, even after an interrupted process.
+	const unlock = await lock(file, {
+		realpath: false,
+		stale: 60_000,
+		update: 10_000,
+		retries: { retries: 30, factor: 1, minTimeout: 100, maxTimeout: 100 },
+	});
+	try {
+		try {
+			const stat = await fs.lstat(file);
+			if (!stat.isFile()) throw new Error(`Invalid generated Registry key file: ${file}`);
+			const saved = (await fs.readFile(file, "utf8")).trim();
+			if (!AUTO_PROJECT_KEY_PATTERN.test(saved)) throw new Error(`Invalid generated Registry key in ${file}`);
+			return saved;
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+		}
+		const generated = `local-${randomUUID().replace(/-/g, "")}`;
+		const temporary = join(projectDir, `.${AUTO_PROJECT_KEY_FILE}.${randomUUID()}.tmp`);
+		try {
+			await fs.writeFile(temporary, `${generated}\n`, { flag: "wx", mode: 0o600 });
+			await fs.rename(temporary, file);
+		} finally {
+			await fs.rm(temporary, { force: true });
+		}
+		return generated;
+	} finally {
+		await unlock();
+	}
+}
 
 export async function runGit(
 	executor: RegistryExecutor,
@@ -30,9 +73,7 @@ export async function resolveProjectKey(executor: RegistryExecutor, cwd: string)
 	const origin = (await runGit(executor, cwd, ["remote", "get-url", "origin"], { allowFailure: true })).stdout.trim();
 	const derived = projectKeyFromGitRemote(origin);
 	if (derived) return derived;
-	throw new Error(
-		`Project state needs a registry key. Git origin can provide one automatically; otherwise set a project key in Desktop Registry.`,
-	);
+	return autoProjectKey(cwd);
 }
 
 export async function gitRefExists(executor: RegistryExecutor, cwd: string, ref: string): Promise<boolean> {

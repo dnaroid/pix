@@ -253,6 +253,21 @@ later block; one summary is not required to satisfy the entire accumulated
 target. This avoids falling directly from a useful partial candidate to mass
 tool-output deletion.
 
+An exhausted routine-reminder patience budget is not emergency pressure. If
+planning has no safe/economical candidate below the emergency threshold (for
+example, a partial commit leaves only recent or protected content), DCP waits
+for a new opportunity without a terminal blocked-progress warning. It retains
+the outstanding goal and patience state, so eligible new history can resume
+automatic recovery. Diagnostics mark this no-candidate pass as
+`awaiting_opportunity`; emergency blocker classification and input-capacity
+abort/handoff remain unchanged. The same waiting policy applies to an automatic
+`non-positive-gain` or `budget-exhausted` rejection below emergency/capacity
+pressure, unless that attempt also encountered a summary-model failure. The
+rejection remains in diagnostics, does not publish a replacement, and retains
+the recovery goal. Previously degraded extractive mode alone is not a new
+model failure. Explicit auto-disabled and actual automatic preparation/model
+failures remain reportable.
+
 Blocked-progress warnings are deduplicated by reason within the live recovery
 episode. A positive **partial** automatic commit does not rearm an already
 reported warning while recovery debt remains; a different blocker reason is

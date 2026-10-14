@@ -2,7 +2,9 @@ import { resolve } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { INDEX_SOURCES, runSourceIndex, type IndexResult, type IndexSource } from "./index-runner.js";
 import { readIndexStatus } from "./index-status.js";
-import { logSearchDiagnostic as writeDiagnostic } from "./search-diagnostics.mjs";
+import { logSearchDiagnostic as writeDiagnostic } from "./search-logging.mjs";
+import { suiteDiagnostics } from "../lib/suite-diagnostics.js";
+import { diagnosticErrorType } from "../lib/suite-diagnostics.js";
 
 const usage = "Usage: /search-index code|knowledge|sessions|tasks|commits|all|status|cancel [source|all]";
 const isSource = (value: string): value is IndexSource => INDEX_SOURCES.includes(value as IndexSource);
@@ -80,14 +82,22 @@ export function registerSearchIndexCommand(pi: ExtensionAPI, services: CommandSe
           void logSearchDiagnostic(ctx.cwd, { event: "search_command", message: `${source}: already running or stopping.`, reason: "info" }); continue;
         }
         const job: Job = { abort: new AbortController(), settled: Promise.resolve(), state: "running" };
+        const startedAt = Date.now();
         current.jobs.set(source, job);
         void logSearchDiagnostic(ctx.cwd, { event: "search_command", message: `${source}: indexing started. Configured provider charges may apply. /search-index cancel ${source} to stop.`, reason: "info" });
         job.settled = Promise.resolve().then(() => (services.run ?? runSourceIndex)(current.root, source, job.abort.signal))
           .then((result: IndexResult) => {
             job.state = job.abort.signal.aborted ? "cancelled" : result.complete ? "complete" : "partial";
+            if (current.live && !job.abort.signal.aborted) {
+              suiteDiagnostics.report(result.complete ? "debug" : "warn", "search", result.complete ? "index-completed" : "index-partial",
+                current.root, { source, durationMs: Date.now() - startedAt,
+                  ...(result.indexed === undefined ? {} : { indexed: result.indexed }) }, ctx);
+            }
             if (current.live) void logSearchDiagnostic(ctx.cwd, { event: "search_command", message: `${source}: ${job.state}${result.indexed === undefined ? "" : ` (${result.indexed} indexed)`}. ${job.abort.signal.aborted ? "Committed batches retained." : result.message ?? ""}`, reason: result.complete ? "info" : "warning" });
-          }, () => {
+          }, (error) => {
             job.state = job.abort.signal.aborted ? "cancelled" : "error";
+            if (current.live && !job.abort.signal.aborted) suiteDiagnostics.report("warn", "search", "index-failed", current.root,
+              { source, durationMs: Date.now() - startedAt, errorType: diagnosticErrorType(error) }, ctx);
             if (current.live) void logSearchDiagnostic(ctx.cwd, { event: "search_command", message: `${source}: ${job.state}. Cached batches retained; check provider configuration/credentials and storage, then rerun /search-index ${source}.`, reason: "warning" });
           }).finally(refresh);
       }

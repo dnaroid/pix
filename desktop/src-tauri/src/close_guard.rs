@@ -111,7 +111,7 @@ pub(crate) fn prevent(app: &AppHandle, label: Option<&str>, exit_code: Option<i3
         } else if let Some(window) = window {
             // Consent has been obtained; avoid another CloseRequested dialog.
             if let Err(error) = window.destroy() {
-                eprintln!("failed to close confirmed window: {error}");
+                crate::logging::error(module_path!(), format!("failed to close confirmed window: {error}"));
             }
         }
     });

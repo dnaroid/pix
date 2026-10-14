@@ -17,11 +17,13 @@ The provider-agnostic **Limits** section shows account quota windows (`hourly`,
 then `weekly`), including weekly-only snapshots. Headers retain the window name
 and percentage explicitly labelled “remaining”.
 
-The weekly timeline runs **start left, reset right**. One visibly gapped segment per local calendar day (the first and last are partial,
-widths proportional to time, so labels, pin and fill share one time axis) each show their share of `clamp(remainingPercent, 0, 100)` remaining
-quota, filled from the right edge. These are a visual distribution of the
-aggregate value, not measured per-day consumption. A thin primary-colored pin
-marks elapsed window time inside the corresponding segment, positioned by time
+The weekly timeline runs **start left, reset right**. One continuous track
+shows `clamp(remainingPercent, 0, 100)` remaining quota filled from the right
+edge, with hairline dividers marking the boundaries between local calendar days.
+The first and last days may be partial; widths are proportional to time, so
+labels, dividers, pin and fill share one gap-free time axis. The track shows
+only aggregate quota, not measured per-day consumption. A thin primary-colored pin
+marks elapsed window time within the corresponding day, positioned by time
 of day; the date row labels each segment with an uppercase short
 weekday above its day number. The current date is full-contrast and larger;
 other dates are dimmed. The final day's accessible label says quota resets at

@@ -9,11 +9,13 @@ import { Readable, Writable } from "node:stream";
 import { ndJsonStream } from "@agentclientprotocol/sdk";
 import { PixAcpAgent } from "./acp/pix-acp-agent.js";
 import { adapterConfigFromEnv } from "./config.js";
-import { createLogger } from "./logging.js";
+import { acpFileLogger, createLogger } from "./logging.js";
+import { installPixProcessLogging } from "../../dist/app/logger.js";
 import { PiRpcClient } from "./pi/pi-rpc-client.js";
 import { stringifyUnknown } from "./stringify-unknown.js";
 
 async function main(): Promise<void> {
+	installPixProcessLogging({ module: "acp-process" }, acpFileLogger);
 	const config = adapterConfigFromEnv();
 	const logger = createLogger(config.logLevel);
 
@@ -41,9 +43,11 @@ async function main(): Promise<void> {
 	await connection.closed;
 	await adapter.dispose();
 	logger.info("connection closed; exiting");
+	await acpFileLogger.flush();
 }
 
-main().catch((error: unknown) => {
-	process.stderr.write(`[pix-acp] fatal: ${stringifyUnknown(error)}\n`);
+main().catch(async (error: unknown) => {
+	createLogger().error(`fatal: ${stringifyUnknown(error)}`);
+	await acpFileLogger.flush();
 	process.exitCode = 1;
 });

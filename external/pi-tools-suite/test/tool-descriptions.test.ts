@@ -18,6 +18,17 @@ import { buildSubagentCatalogPrompt, SUBAGENT_TYPE_SELECTION_GUIDANCE } from "..
 import { agentStrategyPrompt, SUBAGENT_DELEGATION_GUIDANCE } from "../src/async-subagents/core/agent-strategy.js";
 
 describe("tool descriptions", () => {
+	test("UI QA requires explicit UI intent and a resolved blocker before retry", () => {
+		for (const repoAware of [true, false]) {
+			const tool = asyncSubagentToolDescriptions(repoAware).subagents;
+			for (const text of [tool.description, tool.promptGuidelines.join("\n")]) {
+				expect(text).toContain("Only explicit requests to exercise a real UI trigger mandatory QA");
+				expect(text).toContain("code/architecture/performance review alone does not");
+				expect(text).toContain("Clarify ambiguous intent");
+				expect(text).toContain("After BLOCKED, retry only once the concrete blocker is resolved");
+			}
+		}
+	});
 	test("text and path lookups have available-tool fallbacks without weakening AST-first routing", () => {
 		const tool = astGrepToolDescriptions(2000, "50KB").astGrep;
 		for (const text of [tool.description, tool.promptSnippet, tool.promptGuidelines.join("\n")]) {

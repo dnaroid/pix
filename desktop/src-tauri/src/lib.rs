@@ -1,18 +1,15 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use chrono::DateTime;
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
-use serde::{
-    de::{IgnoredAny, MapAccess, Visitor},
-    Deserialize, Serialize,
-};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    env, fmt, fs,
+    env, fs,
     hash::{Hash, Hasher},
-    io::{BufRead, BufReader, Read, Write},
+    io::{Read, Write},
     path::{Component, Path, PathBuf},
-    process::{Child, Command, ExitStatus, Stdio},
+    process::{Child, Command, Stdio},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc, Arc, Condvar, Mutex, RwLock,
@@ -24,18 +21,32 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_window_state::StateFlags;
 
+mod acp_host;
 mod acp_queue;
+use acp_host::{
+    remove_process_slot_locked, reserve_process_slot, stop_process, stop_process_slot,
+    AcpProcessState, ProcessSlot,
+};
+mod acp_diagnostics;
 mod backend_runtime;
 mod close_guard;
 mod desktop_bootstrap;
 mod desktop_context_menu;
 mod desktop_notification;
+mod desktop_notification_sound;
+mod desktop_tray;
+mod desktop_window_cycle;
+mod desktop_tray_attention;
+mod desktop_tray_icon;
 mod dictation_shortcut;
 mod git_ci;
 mod git_identity;
 mod git_ignore;
 mod git_operations;
 mod lsp_install;
+mod logging;
+mod log_reader;
+mod log_clear;
 #[cfg(test)]
 mod native_lifecycle_tests;
 mod native_process;
@@ -57,10 +68,6 @@ mod window_restore;
 mod window_tiling;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(40);
-const GRACEFUL_STOP_TIMEOUT: Duration = Duration::from_secs(2);
-const STOP_TIMEOUT: Duration = Duration::from_secs(5);
-const ACP_EVENT_BATCH_LATENCY: Duration = Duration::from_millis(4);
-const ACP_EVENT_BATCH_MAX_LINES: usize = 64;
 const MAX_ATTACHMENT_COUNT: usize = 10;
 const MAX_ATTACHMENT_BYTES: u64 = 25 * 1024 * 1024;
 const MAX_ATTACHMENT_CACHE_BYTES: u64 = 250 * 1024 * 1024;
@@ -122,6 +129,7 @@ const PROJECT_PI_CANONICAL_FILES: &[&str] = &[
     "pix.jsonc",
     "qa_auth.jsonc",
     "registry.json",
+    "registry-project-key",
     "tasks.sqlite",
     "tasks.sqlite-wal",
     "tasks.sqlite-shm",
@@ -294,12 +302,6 @@ struct DeepgramRuntimeConfig {
     language: String,
 }
 
-#[derive(Default)]
-struct AcpProcessState {
-    slots: Mutex<HashMap<String, Arc<ProcessSlot>>>,
-    next_generation: AtomicU64,
-    exiting: AtomicBool,
-}
 
 #[derive(Default)]
 struct PackageTerminalState {
@@ -359,64 +361,6 @@ struct PackageTerminalRunning {
     process_group_leader: Option<i32>,
 }
 
-struct ProcessSlot {
-    // Startup serialization is separate: send/stop only briefly lock running.
-    startup: Mutex<()>,
-    running: Mutex<Option<RunningProcess>>,
-    cancelled: AtomicBool,
-}
-
-impl Default for ProcessSlot {
-    fn default() -> Self {
-        Self {
-            startup: Mutex::new(()),
-            running: Mutex::new(None),
-            cancelled: AtomicBool::new(false),
-        }
-    }
-}
-
-struct RunningProcess {
-    generation: u64,
-    stdin_tx: Option<Arc<acp_queue::Queue<StdinCommand>>>,
-    stop_tx: mpsc::Sender<()>,
-    exited: ExitSignal,
-}
-
-impl Drop for RunningProcess {
-    fn drop(&mut self) {
-        if let Some(queue) = self.stdin_tx.take() {
-            queue.close();
-        }
-        let _ = self.stop_tx.send(());
-    }
-}
-
-enum StdinCommand {
-    Write {
-        line: String,
-        ack: tokio::sync::oneshot::Sender<Result<(), String>>,
-    },
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ExitPayload {
-    window_label: String,
-    generation: u64,
-    code: Option<i32>,
-    success: bool,
-    requested: bool,
-    error: Option<String>,
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct LinesPayload {
-    window_label: String,
-    generation: u64,
-    lines: Vec<String>,
-}
 
 async fn run_blocking<T, F>(operation: F) -> Result<T, String>
 where
@@ -1650,7 +1594,7 @@ async fn write_user_config(
     })
     .await?;
     if let Err(error) = dictation_shortcut::refresh(&shortcut_app).await {
-        eprintln!("dictation shortcut: {error}");
+        logging::error(module_path!(), format!("dictation shortcut: {error}"));
     }
     Ok(result)
 }
@@ -1683,7 +1627,7 @@ async fn write_user_config_if_unchanged(
     })
     .await?;
     if let Err(error) = dictation_shortcut::refresh(&shortcut_app).await {
-        eprintln!("dictation shortcut: {error}");
+        logging::error(module_path!(), format!("dictation shortcut: {error}"));
     }
     Ok(result)
 }
@@ -4119,7 +4063,7 @@ impl Drop for UserConfigFileLock {
         // Only remove the empty directory we own, never recursively delete it
         // or unlink a contending writer's lock.
         if let Err(error) = fs::remove_dir(&self.0) {
-            eprintln!("failed to release user config lock: {error}");
+            logging::error(module_path!(), format!("failed to release user config lock: {error}"));
         }
     }
 }
@@ -6824,6 +6768,28 @@ async fn read_project_tasks(workspace: String) -> Result<ProjectTaskDocument, St
         .await
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectTasksPanelSnapshot {
+    document: ProjectTaskDocument,
+    attachment_counts: Option<HashMap<String, i64>>,
+}
+
+impl Default for ProjectTasksPanelSnapshot {
+    fn default() -> Self {
+        Self {
+            document: empty_task_document(),
+            attachment_counts: Some(HashMap::new()),
+        }
+    }
+}
+
+#[tauri::command]
+async fn read_project_tasks_panel(workspace: String) -> Result<ProjectTasksPanelSnapshot, String> {
+    run_blocking(move || read_project_tasks_panel_from(Path::new(&workspace), MAX_TASK_DOCUMENT_BYTES))
+        .await
+}
+
 /// Resolve only attachment rows linked to the requested task in SQLite.
 /// The caller receives approved file paths, while descriptions remain plain text.
 #[tauri::command]
@@ -6926,12 +6892,27 @@ fn read_project_tasks_from(
     workspace: &Path,
     max_bytes: u64,
 ) -> Result<ProjectTaskDocument, String> {
+    match project_tasks_directory(workspace)? {
+        Some(directory) => project_tasks_sqlite::read(&directory, max_bytes),
+        None => Ok(empty_task_document()),
+    }
+}
+
+fn read_project_tasks_panel_from(
+    workspace: &Path,
+    max_bytes: u64,
+) -> Result<ProjectTasksPanelSnapshot, String> {
+    match project_tasks_directory(workspace)? {
+        Some(directory) => project_tasks_sqlite::read_panel(&directory, max_bytes),
+        None => Ok(ProjectTasksPanelSnapshot::default()),
+    }
+}
+
+fn project_tasks_directory(workspace: &Path) -> Result<Option<PathBuf>, String> {
     let root = canonical_workspace(workspace)?;
     let directory = root.join(".pi");
     match fs::symlink_metadata(&directory) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(empty_task_document())
-        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(format!("failed to inspect .pi: {error}")),
         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
             return Err(".pi must be a project-owned directory".to_owned());
@@ -6939,7 +6920,7 @@ fn read_project_tasks_from(
         Ok(_) => {}
     }
     let directory = canonical_project_directory(&root, &directory)?;
-    project_tasks_sqlite::read(&directory, max_bytes)
+    Ok(Some(directory))
 }
 
 fn read_project_state_bytes(
@@ -8313,537 +8294,12 @@ fn safe_file_name(name: &str) -> String {
     }
 }
 
-#[tauri::command]
-async fn acp_start(app: AppHandle, window_label: String) -> Result<u64, String> {
-    run_blocking(move || start_process(app, window_label)).await
-}
-
-fn start_process(app: AppHandle, window_label: String) -> Result<u64, String> {
-    let state = app.state::<AcpProcessState>();
-    let slot = reserve_process_slot(&state, &window_label, || {
-        app.get_webview_window(&window_label).is_some()
-    })?;
-    let _startup = slot
-        .startup
-        .lock()
-        .map_err(|_| "ACP process state is poisoned".to_owned())?;
-    let running_slot = slot
-        .running
-        .lock()
-        .map_err(|_| "ACP process state is poisoned".to_owned())?;
-    if slot.cancelled.load(Ordering::Acquire) || state.exiting.load(Ordering::Acquire) {
-        return Err("ACP window is closed".to_owned());
-    }
-    if app.get_webview_window(&window_label).is_none() {
-        return Err("ACP window is closed".to_owned());
-    }
-    if let Some(running) = &*running_slot {
-        return Ok(running.generation);
-    }
-    drop(running_slot);
-
-    let resource_dir = app
-        .path()
-        .resource_dir()
-        .map_err(|error| error.to_string())?;
-    let runtime = backend_runtime::BackendRuntime::resolve(&resource_dir)?;
-    let mut command = runtime.command()?;
-    command.env("PIX_CONFIG_PROFILE", "desktop");
-    native_process::isolate(&mut command);
-    command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = native_process::spawn(&mut command)
-        .map_err(|error| format!("failed to start Pix backend: {error}"))?;
-
-    let pipes = (child.stdin.take(), child.stdout.take(), child.stderr.take());
-    let (Some(stdin), Some(stdout), Some(stderr)) = pipes else {
-        let _ = native_process::force_stop(&mut child);
-        let _ = child.wait();
-        return Err("pix-acp did not expose all stdio pipes".to_owned());
-    };
-    // Destroyed is recorded synchronously, even if the blocking startup is
-    // currently resolving the runtime or spawning a child.
-    if slot.cancelled.load(Ordering::Acquire)
-        || state.exiting.load(Ordering::Acquire)
-        || app.get_webview_window(&window_label).is_none()
-    {
-        let _ = native_process::force_stop(&mut child);
-        let _ = child.wait();
-        return Err("ACP window closed during startup".to_owned());
-    }
-    let stdin_tx = Arc::new(acp_queue::Queue::new(8 * 1024 * 1024, 16));
-    forward_stdin(stdin, stdin_tx.clone());
-
-    let generation = state
-        .next_generation
-        .fetch_add(1, Ordering::AcqRel)
-        .wrapping_add(1);
-    let (stop_tx, stop_rx) = mpsc::channel();
-    let exited = Arc::new((Mutex::new(false), Condvar::new()));
-    // The cancellation guard above checked before publication; a close can
-    // happen after that guard. Recheck while publishing under the short lock.
-    let publish = publish_process(
-        &slot,
-        &state,
-        app.get_webview_window(&window_label).is_some(),
-        RunningProcess {
-            generation,
-            stdin_tx: Some(stdin_tx),
-            stop_tx,
-            exited: exited.clone(),
-        },
-    );
-    if let Err(error) = publish {
-        let _ = native_process::force_stop(&mut child);
-        let _ = child.wait();
-        return Err(error);
-    }
-
-    forward_lines(
-        stdout,
-        app.clone(),
-        window_label.clone(),
-        "acp://stdout",
-        generation,
-    );
-    forward_lines(
-        stderr,
-        app.clone(),
-        window_label.clone(),
-        "acp://stderr",
-        generation,
-    );
-    thread::spawn(move || supervise_child(child, stop_rx, app, window_label, generation, exited));
-    Ok(generation)
-}
-
-fn publish_process(
-    slot: &ProcessSlot,
-    state: &AcpProcessState,
-    window_available: bool,
-    running: RunningProcess,
-) -> Result<(), String> {
-    let mut guard = slot
-        .running
-        .lock()
-        .map_err(|_| "ACP process state is poisoned".to_owned())?;
-    if slot.cancelled.load(Ordering::Acquire)
-        || state.exiting.load(Ordering::Acquire)
-        || !window_available
-    {
-        return Err("ACP window closed during startup".to_owned());
-    }
-    *guard = Some(running);
-    Ok(())
-}
 
 #[tauri::command]
-async fn acp_send(
-    app: AppHandle,
-    window_label: String,
-    generation: u64,
-    line: String,
-) -> Result<(), String> {
-    if line.contains('\r') || line.contains('\n') {
-        return Err("ACP payload must be one newline-free JSON object".to_owned());
-    }
-    let stdin_tx = {
-        let state = app.state::<AcpProcessState>();
-        let slot = state
-            .slots
-            .lock()
-            .map_err(|_| "ACP process state is poisoned".to_owned())?
-            .get(&window_label)
-            .cloned()
-            .ok_or_else(|| format!("pix-acp is not running for window {window_label}"))?;
-        let running_slot = slot
-            .running
-            .lock()
-            .map_err(|_| "ACP process state is poisoned".to_owned())?;
-        let running = running_slot
-            .as_ref()
-            .ok_or_else(|| "pix-acp is not running".to_owned())?;
-        if running.generation != generation {
-            return Err(format!(
-                "stale pix-acp generation {generation}; current generation is {}",
-                running.generation
-            ));
-        }
-        running
-            .stdin_tx
-            .as_ref()
-            .cloned()
-            .ok_or_else(|| "pix-acp stdin is closed".to_owned())?
-    };
-    let ack_rx = admit_stdin(&stdin_tx, line)?;
-    ack_rx
-        .await
-        .map_err(|_| "pix-acp stdin writer stopped before acknowledging the write".to_owned())?
+async fn save_acp_crash_log(workspace: String, content: String) -> Result<String, String> {
+    run_blocking(move || acp_diagnostics::save(Path::new(&workspace), &content)).await
 }
 
-fn admit_stdin(
-    stdin_tx: &acp_queue::Queue<StdinCommand>,
-    line: String,
-) -> Result<tokio::sync::oneshot::Receiver<Result<(), String>>, String> {
-    let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
-    let bytes = line.len();
-    stdin_tx
-        .try_push(StdinCommand::Write { line, ack: ack_tx }, bytes)
-        .map_err(str::to_owned)?;
-    Ok(ack_rx)
-}
-
-fn validate_json_object(line: &str) -> Result<(), String> {
-    struct ObjectVisitor;
-
-    impl<'de> Visitor<'de> for ObjectVisitor {
-        type Value = ();
-
-        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-            formatter.write_str("a JSON object")
-        }
-
-        fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
-        where
-            M: MapAccess<'de>,
-        {
-            while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
-            Ok(())
-        }
-    }
-
-    let mut deserializer = serde_json::Deserializer::from_str(line);
-    serde::de::Deserializer::deserialize_map(&mut deserializer, ObjectVisitor)
-        .and_then(|()| deserializer.end())
-        .map_err(|error| format!("ACP payload is not a valid JSON object: {error}"))
-}
-
-#[tauri::command]
-async fn acp_stop(app: AppHandle, window_label: String, generation: u64) -> Result<(), String> {
-    run_blocking(move || {
-        let state = app.state::<AcpProcessState>();
-        stop_process(&state, &window_label, Some(generation))
-    })
-    .await
-}
-
-fn stop_process(
-    state: &AcpProcessState,
-    window_label: &str,
-    expected_generation: Option<u64>,
-) -> Result<(), String> {
-    let slot = {
-        let slots = state
-            .slots
-            .lock()
-            .map_err(|_| "ACP process state is poisoned".to_owned())?;
-        slots.get(window_label).cloned()
-    };
-    let Some(slot) = slot else {
-        return Ok(());
-    };
-    stop_process_slot(&slot, expected_generation)
-}
-
-fn stop_process_slot(slot: &ProcessSlot, expected_generation: Option<u64>) -> Result<(), String> {
-    let process = {
-        let mut running_slot = slot
-            .running
-            .lock()
-            .map_err(|_| "ACP process state is poisoned".to_owned())?;
-        running_slot.as_mut().and_then(|running| {
-            if expected_generation.is_some_and(|expected| expected != running.generation) {
-                return None;
-            }
-            // Closing stdin lets pix-acp finish its ACP connection and
-            // dispose every nested pi RPC process before we use signals.
-            Some((
-                running.stdin_tx.take(),
-                running.stop_tx.clone(),
-                running.exited.clone(),
-            ))
-        })
-    };
-    let Some((stdin_tx, stop_tx, exited)) = process else {
-        return Ok(());
-    };
-
-    if let Some(queue) = stdin_tx {
-        queue.close();
-    }
-    let _ = stop_tx.send(());
-    let (lock, wake) = &*exited;
-    let exited = lock
-        .lock()
-        .map_err(|_| "ACP exit signal is poisoned".to_owned())?;
-    let (_guard, timeout) = wake
-        .wait_timeout_while(exited, STOP_TIMEOUT, |exited| !*exited)
-        .map_err(|_| "ACP exit signal is poisoned".to_owned())?;
-    if timeout.timed_out() {
-        return Err("timed out waiting for pix-acp to stop".to_owned());
-    }
-    Ok(())
-}
-
-fn forward_stdin<W: Write + Send + 'static>(
-    mut stdin: W,
-    receiver: Arc<acp_queue::Queue<StdinCommand>>,
-) {
-    thread::spawn(move || {
-        while let Some(command) = receiver.pop(None) {
-            match command {
-                StdinCommand::Write { line, ack } => {
-                    let validation = validate_json_object(&line);
-                    if let Err(error) = validation {
-                        let _ = ack.send(Err(error));
-                        continue;
-                    }
-                    let result = (|| {
-                        stdin
-                            .write_all(line.as_bytes())
-                            .and_then(|_| stdin.write_all(b"\n"))
-                            .and_then(|_| stdin.flush())
-                            .map_err(|error| format!("failed to write to pix-acp: {error}"))
-                    })();
-                    let failed = result.is_err();
-                    let _ = ack.send(result);
-                    if failed {
-                        for pending in receiver.close_and_drain() {
-                            let StdinCommand::Write { ack, .. } = pending;
-                            let _ = ack.send(Err(
-                                "pix-acp stdin writer stopped after a write error".to_owned(),
-                            ));
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-    });
-}
-
-fn forward_lines<R>(
-    reader: R,
-    app: AppHandle,
-    window_label: String,
-    event: &'static str,
-    generation: u64,
-) where
-    R: Read + Send + 'static,
-{
-    // Reader backpressure is byte-bounded; oversized protocol lines occupy
-    // the queue exclusively rather than being truncated.
-    let lines = Arc::new(acp_queue::Queue::new(8 * 1024 * 1024, 32));
-    let line_tx = lines.clone();
-    let error_app = app.clone();
-    let error_window_label = window_label.clone();
-    thread::spawn(move || {
-        for line in BufReader::new(reader).lines() {
-            match line {
-                Ok(line) => {
-                    let bytes = line.len();
-                    if line_tx.push(line, bytes).is_err() {
-                        break;
-                    }
-                }
-                Err(error) => {
-                    let _ = error_app.emit_to(
-                        &error_window_label,
-                        "acp://stderr",
-                        LinesPayload {
-                            window_label: error_window_label.clone(),
-                            generation,
-                            lines: vec![format!("failed to read {event}: {error}")],
-                        },
-                    );
-                    break;
-                }
-            }
-        }
-        line_tx.close();
-    });
-    thread::spawn(move || batch_forwarded_lines(lines, app, window_label, event, generation));
-}
-
-fn batch_forwarded_lines(
-    receiver: Arc<acp_queue::Queue<String>>,
-    app: AppHandle,
-    window_label: String,
-    event: &'static str,
-    generation: u64,
-) {
-    while let Some(first) = receiver.pop(None) {
-        let mut lines = Vec::with_capacity(ACP_EVENT_BATCH_MAX_LINES);
-        let mut bytes = first.len();
-        lines.push(first);
-        let deadline = Instant::now() + ACP_EVENT_BATCH_LATENCY;
-        let mut disconnected = false;
-        while lines.len() < ACP_EVENT_BATCH_MAX_LINES && bytes < 1024 * 1024 {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                break;
-            }
-            match receiver.pop(Some(remaining)) {
-                Some(line) => {
-                    bytes += line.len();
-                    lines.push(line);
-                }
-                None => {
-                    disconnected = receiver.is_closed();
-                    break;
-                }
-            }
-        }
-        let _ = app.emit_to(
-            &window_label,
-            event,
-            LinesPayload {
-                window_label: window_label.clone(),
-                generation,
-                lines,
-            },
-        );
-        if disconnected {
-            break;
-        }
-    }
-}
-
-fn supervise_child(
-    mut child: native_process::OwnedChild,
-    stop_rx: mpsc::Receiver<()>,
-    app: AppHandle,
-    window_label: String,
-    generation: u64,
-    exited: ExitSignal,
-) {
-    let mut requested = false;
-    let mut force_stop_at = None;
-    let mut forced = false;
-    let mut stop_error = None;
-    let (status, error) = loop {
-        if !requested && stop_rx.try_recv().is_ok() {
-            requested = true;
-            force_stop_at = Some(Instant::now() + GRACEFUL_STOP_TIMEOUT);
-        }
-        if force_stop_at.is_some_and(|deadline| Instant::now() >= deadline) {
-            force_stop_at = None;
-            match native_process::force_stop(&mut child) {
-                Ok(()) => forced = true,
-                Err(error) => {
-                    // Still reap the leader, retry group cleanup on observed
-                    // exit if the first signal failed.
-                    stop_error = Some(format!("failed to stop pix-acp: {error}"));
-                }
-            }
-        }
-
-        // Check without reaping on Unix; kill any descendants while the
-        // original leader still pins the isolated process-group ID.
-        #[cfg(unix)]
-        match native_process::exited_before_reap(&child) {
-            Ok(true) => {
-                if !forced {
-                    if let Err(error) = native_process::force_stop(&mut child) {
-                        stop_error =
-                            Some(format!("failed to clean up pix-acp descendants: {error}"));
-                    }
-                }
-                break match child.wait() {
-                    Ok(status) => (Some(status), stop_error),
-                    Err(error) => (None, Some(format!("failed to reap pix-acp: {error}"))),
-                };
-            }
-            Ok(false) => thread::sleep(POLL_INTERVAL),
-            Err(error) => break (None, Some(format!("failed to wait for pix-acp: {error}"))),
-        }
-        #[cfg(not(unix))]
-        match child.try_wait() {
-            Ok(Some(status)) => break (Some(status), stop_error),
-            Ok(None) => thread::sleep(POLL_INTERVAL),
-            Err(error) => break (None, Some(format!("failed to wait for pix-acp: {error}"))),
-        }
-    };
-
-    // Job ownership survives leader exit. Terminate descendants even on
-    // natural exit, and close the job before notifying waiting callers.
-    #[cfg(windows)]
-    let error = if forced {
-        error
-    } else {
-        native_process::force_stop(&mut child)
-            .err()
-            .map(|e| format!("failed to clean up pix-acp descendants: {e}"))
-            .or(error)
-    };
-    #[cfg(not(any(unix, windows)))]
-    if requested && !forced {
-        let _ = native_process::force_stop(&mut child);
-    }
-    drop(child);
-    clear_generation(&app, &window_label, generation);
-    let payload = exit_payload(window_label.clone(), generation, status, requested, error);
-    let _ = app.emit_to(&window_label, "acp://exit", payload);
-    let (lock, wake) = &*exited;
-    if let Ok(mut exited) = lock.lock() {
-        *exited = true;
-        wake.notify_all();
-    }
-}
-
-fn clear_generation(app: &AppHandle, window_label: &str, generation: u64) {
-    let state = app.state::<AcpProcessState>();
-    let slot = state
-        .slots
-        .lock()
-        .ok()
-        .and_then(|slots| slots.get(window_label).cloned());
-    if let Some(slot) = slot {
-        if let Ok(mut running) = slot.running.lock() {
-            if running.as_ref().map(|process| process.generation) == Some(generation) {
-                *running = None;
-            }
-        }
-    }
-}
-
-fn reserve_process_slot(
-    state: &AcpProcessState,
-    window_label: &str,
-    window_available: impl FnOnce() -> bool,
-) -> Result<Arc<ProcessSlot>, String> {
-    let mut slots = state
-        .slots
-        .lock()
-        .map_err(|_| "ACP process state is poisoned".to_owned())?;
-    // Check while holding the same registry lock as destruction: checking
-    // before locking could insert a closed-window slot after cleanup removed it.
-    if state.exiting.load(Ordering::Acquire) || !window_available() {
-        return Err("ACP window is closed".to_owned());
-    }
-    Ok(slots
-        .entry(window_label.to_owned())
-        .or_insert_with(|| Arc::new(ProcessSlot::default()))
-        .clone())
-}
-
-fn remove_process_slot(state: &AcpProcessState, window_label: &str) -> Option<Arc<ProcessSlot>> {
-    if let Ok(mut slots) = state.slots.lock() {
-        return remove_process_slot_locked(&mut slots, window_label);
-    }
-    None
-}
-
-fn remove_process_slot_locked(
-    slots: &mut HashMap<String, Arc<ProcessSlot>>,
-    window_label: &str,
-) -> Option<Arc<ProcessSlot>> {
-    let slot = slots.remove(window_label)?;
-    slot.cancelled.store(true, Ordering::Release);
-    Some(slot)
-}
 
 // Capture both running and completed records before delayed ACP stop. Holding
 // the slot registry lock also excludes in-flight terminal publication; no
@@ -8883,22 +8339,6 @@ fn remove_captured_ids<T>(records: &mut HashMap<String, T>, ids: &[String]) {
     }
 }
 
-fn exit_payload(
-    window_label: String,
-    generation: u64,
-    status: Option<ExitStatus>,
-    requested: bool,
-    error: Option<String>,
-) -> ExitPayload {
-    ExitPayload {
-        window_label,
-        generation,
-        code: status.as_ref().and_then(ExitStatus::code),
-        success: status.as_ref().is_some_and(ExitStatus::success),
-        requested,
-        error,
-    }
-}
 
 const UI_QA_ENV: &str = "PI_UI_QA";
 const UI_QA_WORKSPACE_ENV: &str = "PI_UI_QA_WORKSPACE";
@@ -8995,13 +8435,24 @@ pub fn run() {
         .manage(native_project_search::SearchState::default())
         .manage(git_ci::GitCiProcessState::default())
         .manage(window_restore::WindowRestoreState::default())
+        .manage(desktop_tray_attention::State::default())
         .setup(move |app| {
+            if let Ok(home) = app.path().home_dir() {
+                logging::init(home);
+                logging::record("info", "lifecycle", "desktop:started", serde_json::json!({}), None);
+                let previous = std::panic::take_hook();
+                std::panic::set_hook(Box::new(move |info| {
+                    logging::panic(info.to_string());
+                    previous(info);
+                }));
+            }
             #[cfg(unix)]
             if let Some(bridge) = setup_signal_bridge.lock().unwrap().as_mut() {
                 bridge.start(app.handle().clone());
             }
             desktop_notification::setup(app).map_err(std::io::Error::other)?;
             let restored_windows = window_restore::setup(app)?;
+            desktop_tray::setup(app.handle());
             window_tiling::setup(app)?;
             app.manage(AttachmentPathState::new(app.handle()));
             #[cfg(feature = "bundled-runtime")]
@@ -9041,12 +8492,18 @@ pub fn run() {
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     let app = builder
         .invoke_handler(tauri::generate_handler![
+            logging::log_desktop_diagnostic,
+            logging::log_desktop_event,
+            log_reader::read_diagnostic_logs,
+            log_clear::clear_diagnostic_logs,
             close_guard::desktop_set_running_activity,
             dictation_shortcut::desktop_set_dictation_shortcut,
             window_restore::desktop_window_workspace,
             window_restore::desktop_open_project_window,
             desktop_context_menu::desktop_edit,
             desktop_notification::desktop_send_notification,
+            desktop_notification_sound::desktop_play_notification_sound,
+            desktop_tray::desktop_set_tray_attention,
             desktop_bootstrap::desktop_bootstrap_inspect,
             desktop_bootstrap::desktop_bootstrap_import_opencode,
             desktop_bootstrap::desktop_bootstrap_import_codex_api_key,
@@ -9054,9 +8511,10 @@ pub fn run() {
             desktop_watch_status,
             desktop_watch_restart,
             deepgram_token,
-            acp_start,
-            acp_send,
-            acp_stop,
+            acp_host::acp_start,
+            save_acp_crash_log,
+            acp_host::acp_send,
+            acp_host::acp_stop,
             inspect_attachments,
             read_attachment_base64,
             cache_attachment,
@@ -9144,6 +8602,7 @@ pub fn run() {
             resolve_home_media,
             resolve_local_media,
             read_project_tasks,
+            read_project_tasks_panel,
             read_project_task_attachments,
             read_project_task_attachment_counts,
             read_project_task_attachment_names,
@@ -9163,7 +8622,7 @@ pub fn run() {
             let handle = handle.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(error) = dictation_shortcut::refresh(&handle).await {
-                    eprintln!("dictation shortcut: {error}");
+                    logging::error(module_path!(), format!("dictation shortcut: {error}"));
                 }
             });
         }
@@ -9185,6 +8644,7 @@ pub fn run() {
                 profile.remove_runtime();
             }
             desktop_notification::shutdown(handle);
+            desktop_tray::shutdown(handle);
             dictation_shortcut::shutdown();
         }
         if let tauri::RunEvent::WindowEvent {
@@ -9197,6 +8657,7 @@ pub fn run() {
             close_guard::destroyed(handle, label);
             dictation_shortcut::destroyed(label);
             window_restore::destroyed(handle, label);
+            desktop_tray::destroyed(handle, label);
             handle
                 .state::<git_ci::GitCiProcessState>()
                 .cancel_window(label);
@@ -9212,7 +8673,7 @@ pub fn run() {
             thread::spawn(move || {
                 if let Some(slot) = slot {
                     if let Err(error) = stop_process_slot(&slot, None) {
-                        eprintln!("failed to stop pix-acp for closed window {window_label}: {error}");
+                        logging::error(module_path!(), format!("failed to stop pix-acp for closed window {window_label}: {error}"));
                     }
                 }
                 stop_captured_package_terminals(&handle, &window_label, &terminal_ids);
@@ -9234,7 +8695,7 @@ pub fn run() {
                 let handle = handle.clone();
                 thread::spawn(move || {
                     if let Err(error) = window_restore::save(&handle, windows) {
-                        eprintln!("failed to save open windows: {error}");
+                        logging::error(module_path!(), format!("failed to save open windows: {error}"));
                     }
                     let state = handle.state::<AcpProcessState>();
                     let window_labels = state
@@ -9244,13 +8705,13 @@ pub fn run() {
                         .unwrap_or_default();
                     for window_label in window_labels {
                         if let Err(error) = stop_process(&state, &window_label, None) {
-                            eprintln!(
-                                "failed to stop pix-acp for window {window_label} during exit: {error}"
-                            );
+                            logging::error(module_path!(), format!("failed to stop pix-acp for window {window_label} during exit: {error}"));
                         }
                         stop_package_terminals_for_window(&handle, &window_label);
                     }
                     stop_all_package_terminals(&handle);
+                    logging::record("info", "lifecycle", "desktop:stopping", serde_json::json!({}), None);
+                    logging::shutdown();
                     handle.exit(code.unwrap_or(0));
                 });
             }
@@ -9273,66 +8734,6 @@ mod tests {
         assert_eq!(macos_editor_app_name("ZED"), Some("Zed"));
     }
 
-    #[test]
-    fn destroyed_reservation_cannot_publish_after_global_slot_is_removed() {
-        let state = AcpProcessState::default();
-        let slot = Arc::new(ProcessSlot::default());
-        state
-            .slots
-            .lock()
-            .unwrap()
-            .insert("window".to_owned(), slot.clone());
-        let held_start = slot.running.lock().unwrap();
-        let removed = remove_process_slot(&state, "window").unwrap();
-        assert!(removed.cancelled.load(Ordering::Acquire));
-        assert!(state.slots.lock().unwrap().is_empty());
-        drop(held_start);
-        assert!(slot.cancelled.load(Ordering::Acquire));
-        // A recreated window with the same label receives a fresh reservation.
-        let replacement = Arc::new(ProcessSlot::default());
-        state
-            .slots
-            .lock()
-            .unwrap()
-            .insert("window".to_owned(), replacement.clone());
-        assert!(!replacement.cancelled.load(Ordering::Acquire));
-        assert!(!Arc::ptr_eq(&removed, &replacement));
-    }
-
-    #[test]
-    fn stale_stop_does_not_close_replacement_stdin() {
-        let slot = ProcessSlot::default();
-        let queue = Arc::new(acp_queue::Queue::<StdinCommand>::new(16, 1));
-        let (stop_tx, stop_rx) = mpsc::channel();
-        *slot.running.lock().unwrap() = Some(RunningProcess {
-            generation: 2,
-            stdin_tx: Some(queue.clone()),
-            stop_tx,
-            exited: Arc::new((Mutex::new(false), Condvar::new())),
-        });
-        stop_process_slot(&slot, Some(1)).unwrap();
-        assert!(!queue.is_closed());
-        assert!(stop_rx.try_recv().is_err());
-        assert_eq!(slot.running.lock().unwrap().as_ref().unwrap().generation, 2);
-    }
-
-    #[test]
-    fn one_window_startup_reservation_does_not_lock_global_registry() {
-        let state = AcpProcessState::default();
-        let slot = Arc::new(ProcessSlot::default());
-        state
-            .slots
-            .lock()
-            .unwrap()
-            .insert("one".into(), slot.clone());
-        let _startup = slot.startup.lock().unwrap();
-        let mut slots = state
-            .slots
-            .try_lock()
-            .expect("global registry must remain unlocked during startup");
-        slots.insert("two".into(), Arc::new(ProcessSlot::default()));
-        assert_eq!(slots.len(), 2);
-    }
 
     #[cfg(unix)]
     #[test]
@@ -9437,33 +8838,6 @@ mod tests {
         .is_err());
     }
 
-    #[test]
-    fn validates_acp_payloads_without_materializing_the_json_object() {
-        assert!(
-            validate_json_object(r#"{"jsonrpc":"2.0","id":1,"params":{"blob":"abc"}}"#).is_ok()
-        );
-        assert!(validate_json_object("[]").is_err());
-        assert!(validate_json_object("null").is_err());
-        assert!(validate_json_object(r#"{"jsonrpc":"2.0"} trailing"#).is_err());
-    }
-
-    #[test]
-    fn acp_event_payloads_include_the_owning_window_label() {
-        let lines = serde_json::to_value(LinesPayload {
-            window_label: "project-one".to_owned(),
-            generation: 7,
-            lines: vec!["message".to_owned()],
-        })
-        .expect("serialize lines payload");
-        let exit =
-            serde_json::to_value(exit_payload("project-two".to_owned(), 8, None, true, None))
-                .expect("serialize exit payload");
-
-        assert_eq!(lines["windowLabel"], "project-one");
-        assert_eq!(lines["generation"], 7);
-        assert_eq!(exit["windowLabel"], "project-two");
-        assert_eq!(exit["generation"], 8);
-    }
 
     fn temporary_workspace(name: &str) -> PathBuf {
         let stamp = SystemTime::now()
@@ -11959,6 +11333,7 @@ mod tests {
             "pix-desktop.jsonc",
             "pix.jsonc",
             "registry.json",
+            "registry-project-key",
             "todo-plan.json",
             "workspace.jsonc",
         ] {
@@ -12029,6 +11404,7 @@ mod tests {
             "pix-desktop.jsonc",
             "pix.jsonc",
             "registry.json",
+            "registry-project-key",
             "todo-plan.json",
             "workspace.jsonc",
         ] {
@@ -12566,6 +11942,41 @@ mod tests {
     }
 
     #[test]
+    fn task_panel_snapshot_combines_rows_and_counts_without_reading_blobs() {
+        let workspace = temporary_workspace("task-panel-snapshot");
+        let empty = read_project_tasks_panel_from(&workspace, MAX_TASK_DOCUMENT_BYTES).unwrap();
+        assert_eq!(empty.document, empty_task_document());
+        assert!(empty.attachment_counts.unwrap().is_empty());
+        assert!(!workspace.join(".pi").exists());
+        initialize_project_pi_from(&workspace).unwrap();
+        let document = sample_task_document();
+        write_project_tasks_to(&workspace, &document).unwrap();
+        let db = rusqlite::Connection::open(workspace.join(".pi/tasks.sqlite")).unwrap();
+        // Deliberately no blob: the panel must only query associations.
+        db.execute(
+            "INSERT INTO attachments(hash,name,size) VALUES('missing','image.png',5)",
+            [],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO task_attachments(task_id,hash) VALUES('task-1','missing')",
+            [],
+        )
+        .unwrap();
+        let panel = read_project_tasks_panel_from(&workspace, MAX_TASK_DOCUMENT_BYTES).unwrap();
+        assert_eq!(panel.document, document);
+        assert_eq!(panel.attachment_counts.unwrap().get("task-1"), Some(&1));
+        assert!(read_project_tasks_panel_from(&workspace, 1).is_err());
+        // A badge query error does not suppress readable task rows.
+        db.execute("DROP TABLE task_attachments", []).unwrap();
+        let panel = read_project_tasks_panel_from(&workspace, MAX_TASK_DOCUMENT_BYTES).unwrap();
+        assert_eq!(panel.document, document);
+        assert!(panel.attachment_counts.is_none());
+        drop(db);
+        fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[test]
     fn rejects_malformed_sqlite_payloads_and_duplicate_task_ids() {
         let workspace = temporary_workspace("invalid-tasks");
         initialize_project_pi_from(&workspace).expect("initialize SQLite");
@@ -12573,6 +11984,7 @@ mod tests {
         db.execute("INSERT INTO tasks(id,payload) VALUES('bad','{')", [])
             .unwrap();
         assert!(read_project_tasks_from(&workspace, 1024).is_err());
+        assert!(read_project_tasks_panel_from(&workspace, 1024).is_err());
 
         let mut duplicate = sample_task_document();
         duplicate.tasks.push(duplicate.tasks[0].clone());
@@ -12643,6 +12055,7 @@ mod tests {
         let outside = temporary_workspace("task-symlink-outside");
         symlink(&outside, workspace.join(".pi")).expect("create .pi symlink");
         assert!(read_project_tasks_from(&workspace, 1024).is_err());
+        assert!(read_project_tasks_panel_from(&workspace, 1024).is_err());
         assert!(write_project_tasks_to(&workspace, &sample_task_document()).is_err());
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
         fs::remove_dir_all(outside).expect("remove outside directory");

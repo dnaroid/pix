@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import sidebarSource from "./WorkspaceSidebar.svelte?raw";
 import activityBarSource from "./WorkspaceSidebarActivityBar.svelte?raw";
-import indicatorDotSource from "./SidebarIndicatorDot.svelte?raw";
 import tasksPanelSource from "./WorkspaceSidebarTasksPanel.svelte?raw";
 import layoutControllerSource from "./workspace-sidebar-layout-controller.svelte.ts?raw";
 import statusMenuControllerSource from "./workspace-sidebar-status-menu-controller.svelte.ts?raw";
@@ -13,6 +12,9 @@ describe("WorkspaceSidebar project sizing", () => {
     expect(sidebarSource).toContain('activeTab === "tasks" && !layoutController.collapsed && !editorOpen && workspace');
     expect(sidebarSource).toContain("return onObserveTasks?.()");
     expect(sidebarViewModelSource).toContain("onObserveTasks: options.projectTasks.observe");
+    expect(sidebarViewModelSource).toContain("taskAttachmentCounts: options.projectTasks.attachmentCounts");
+    expect(sidebarSource).not.toContain('"read_project_task_attachment_counts"');
+    expect(sidebarSource).not.toContain("4_000");
     expect(sidebarSource).toContain('<WorkspaceSidebarTaskEditor');
     expect(sidebarSource).toContain('<WorkspaceSidebarTaskQuickAdd');
     expect(sidebarSource).toContain('onSubmit={submitEditor}');
@@ -79,27 +81,50 @@ describe("WorkspaceSidebar project sizing", () => {
     expect(activityBarSource).toContain('role="toolbar"');
     expect(activityBarSource).toContain('aria-orientation="vertical"');
     expect(activityBarSource).toContain("data-sidebar-tab");
-    expect(activityBarSource).toContain('linearFocusIndex(currentIndex, event.key, SIDEBAR_TABS.length, "vertical", true)');
+    expect(activityBarSource).toContain('linearFocusIndex(currentIndex, event.key, visibleTabs.length, "vertical", true)');
   });
 
-  it("keeps the Activity Bar on the compact 40px desktop rail", () => {
-    expect(layoutControllerSource).toContain("const ACTIVITY_BAR_WIDTH = 40");
-    expect(activityBarSource).toContain("h-full w-10 shrink-0");
-    expect(activityBarSource).toContain("h-10 w-10 place-items-center");
+  it("keeps the Activity Bar on the compact 30px desktop rail", () => {
+    expect(layoutControllerSource).toContain("const ACTIVITY_BAR_WIDTH = 30");
+    expect(activityBarSource).toContain("h-full w-[30px] shrink-0");
+    expect(activityBarSource).toContain("h-10 w-full place-items-center");
     expect(activityBarSource).toContain("pt-1 pb-2");
-    expect(activityBarSource).toContain("mt-auto grid h-10 w-10 -translate-y-px");
+    expect(activityBarSource).toContain("mt-auto grid h-10 w-full -translate-y-px");
   });
 
-  it("keeps the Activity Bar project icon neutral", () => {
-    expect(activityBarSource).toContain('<Folder class="h-5 w-5" aria-hidden="true" />');
+  it("keeps the rail's right divider visible through all selected button backgrounds", () => {
+    // The 30px rail includes its 1px border; a 30px child would paint over it.
+    expect(activityBarSource).toContain("border-r border-sidebar-border");
+    expect(activityBarSource.match(/h-10 w-full/g)).toHaveLength(9);
+    expect(activityBarSource).not.toContain("h-10 w-[30px]");
+  });
+
+  it("gates the Logs view and its keyboard stop behind the opt-in preference", () => {
+    expect(activityBarSource).toContain("logsEnabled = false");
+    expect(activityBarSource).toContain('SIDEBAR_TABS.filter(tab => tab !== "logs" || logsEnabled)');
+    expect(sidebarSource).toContain('{#if logPreference.enabled}<LogsPanel {workspace} />{/if}');
+    expect(sidebarSource).toContain('logsEnabled={logPreference.enabled}');
+    expect(sidebarSource).toContain('if (activeTab === "logs") setActiveTab("tasks")');
+  });
+
+  it("restores the saved Logs tab before the asynchronous preference resolves", () => {
+    expect(sidebarSource).toContain('if (isSidebarTab(savedTab)) activeTab = savedTab');
+    const validator = sidebarSource.slice(sidebarSource.indexOf("function isSidebarTab("), sidebarSource.indexOf("function setActiveTab("));
+    expect(validator).toContain('value === "logs"');
+    expect(validator).not.toContain("logPreference.enabled");
+    expect(sidebarSource).toContain('{#if logPreference.enabled}<LogsPanel {workspace} />{/if}');
+  });
+
+  it("keeps project icons independent of project colors", () => {
+    expect(activityBarSource).toContain('<Folder class={["h-5 w-5", sidebarIconTone(indicators.project)]} aria-hidden="true" />');
     expect(activityBarSource).not.toContain("ProjectFolderIcon");
     expect(activityBarSource).not.toContain("projectColors");
   });
 
   it("shows selected Activity Bar styling only while the sidebar is expanded", () => {
     expect(activityBarSource).toContain("return activeTab === tab && !collapsed;");
-    expect(activityBarSource).toContain('selected("project") ? "border-l-primary bg-panel-selected text-foreground"');
-    expect(activityBarSource).toContain('selected("settings") ? "border-l-primary bg-panel-selected text-foreground"');
+    expect(activityBarSource).toContain('selected("project") ? "border-l-primary bg-background text-foreground"');
+    expect(activityBarSource).toContain('selected("settings") ? "border-l-primary bg-background text-foreground"');
   });
 
   it("gives every expanded sidebar panel a shared close button", () => {
@@ -117,9 +142,12 @@ describe("WorkspaceSidebar project sizing", () => {
     expect(tasksPanelSource).toContain('role="menuitemradio"');
   });
 
-  it("animates the shared Activity Bar dot only for transient background activity", () => {
-    expect(indicatorDotSource).toContain("indicator.animated");
-    expect(indicatorDotSource).toContain("motion-safe:animate-ping");
+  it("uses status-colored icons without dots or animation", () => {
+    expect(activityBarSource).not.toContain("SidebarIndicatorDot");
+    expect(activityBarSource).not.toContain("animate-ping");
+    for (const tab of ["project", "tasks", "git", "registry", "scripts", "search", "lsp", "settings"]) {
+      expect(activityBarSource).toContain(`sidebarIconTone(indicators.${tab})`);
+    }
     expect(sidebarViewModelSource).toContain('backgroundSyncState.phase === "syncing" ? "background-sync" : null');
   });
 

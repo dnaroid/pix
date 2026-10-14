@@ -115,7 +115,8 @@ With `heapSnapshot: true` (default) the first report also gets a
 snapshot write briefly pauses the UI, and it is skipped when the JS heap is
 above 4 GiB. A growing `rssMb` with a flat `heapUsedMb` in the timeline points
 at memory outside the JS heap (buffers, native modules). Every 20th sample (about
-every five minutes) and every report are also logged to `~/.config/pi/pix.log`.
+every five minutes) and every report are also written to the shared diagnostic
+logs in `~/.config/pi/logs/`. See [Unified diagnostic logging](../specs/logging.md).
 
 Turn the watchdog off with `"memoryWatchdog": { "enabled": false }` (or
 `"memoryWatchdog": false`) and restart Pix.
@@ -171,7 +172,20 @@ visibility/preferences, prompt helpers, voice, external editor and Source
 Control review/commit-message/CI-repair models. Leaving the Source Control
 **CI fix model** unset makes **Fix with AI** use the normal default model for
 its new repair session. TUI renderer/theme/tool-row settings remain
-in `pix.jsonc`.
+in `pix.jsonc`. **Settings → Desktop → General → Logs panel** controls the
+optional Logs sidebar (`desktop.logPanelEnabled`, default `false`). It takes
+effect after a successful save; hiding the panel stops monitoring but does not
+disable log collection. See [Unified diagnostic logging](../specs/logging.md)
+for coverage, snapshot limits and privacy guidance.
+
+**Settings → Desktop → General → Notifications** controls alerts for completed
+agent work, questions, pauses and errors. `desktop.notifications.enabled`
+defaults to `true`. **Sound only (no popups)** (`desktop.notifications.usePix`,
+default `false`) replaces macOS notifications with a short sound, including
+when Pix is in the background. No in-app or system notification popup appears
+in this mode, and OS notification permission is not needed. The user and
+project Desktop config can override both settings, and saves apply to
+subsequent events.
 
 ### Desktop Universal Search: Auto intent
 

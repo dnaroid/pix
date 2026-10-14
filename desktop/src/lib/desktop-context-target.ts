@@ -1,7 +1,7 @@
 import { normalizeExternalHref } from "./markdown-links";
 import { isWorkspaceProjectFilePath } from "./project-files";
 
-export type DesktopContextKind = "editable" | "readonly" | "password" | "selection" | "link" | "terminal" | "image" | "file";
+export type DesktopContextKind = "editable" | "readonly" | "password" | "selection" | "link" | "terminal" | "image" | "file" | "session";
 
 export interface DesktopContextTarget {
   kind: DesktopContextKind;
@@ -12,6 +12,7 @@ export interface DesktopContextTarget {
   imagePath?: string;
   imageRelativePath?: string;
   filePath?: string;
+  sessionId?: string;
   projectRevealPath?: string;
   sourceReference?: string;
   hasSelection: boolean;
@@ -115,6 +116,12 @@ export function desktopContextTarget(target: EventTarget | null, workspace = "")
     let editor = element;
     while (editor.parentElement?.isContentEditable) editor = editor.parentElement;
     return { kind: "editable", element, editor, hasSelection: hasContextSelection(element), readOnly: false };
+  }
+
+  const sessionTab = element.closest<HTMLElement>("[data-workbench-tab][data-context-session-id]");
+  const sessionId = sessionTab?.dataset.contextSessionId;
+  if (sessionTab && sessionId) {
+    return { kind: "session", element: sessionTab, sessionId, editor: null, hasSelection: false, readOnly: true };
   }
 
   const image = element.closest("img");

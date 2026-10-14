@@ -42,6 +42,13 @@ describe("global semantic settings contract", () => {
     expect(editor).toContain('if (kind === "pi-tools-suite") window.dispatchEvent(new CustomEvent("pix-semantic-config-changed"))');
     expect(source).toContain('return typeof value === "string" ? value : ""');
   });
+  it("offers one Save action in the sticky settings header and keeps validation errors visible", () => {
+    expect(editor).toContain('<header class="sticky top-0');
+    expect(editor.match(/onclick=\{\(\) => void save\(\)\}/g)).toHaveLength(1);
+    expect(editor).toContain("{#if error || (active && issues.length > 0)}");
+    expect(editor).toContain("{issues[0]}");
+    expect(editor).not.toContain("Changes may require a new or reloaded session.");
+  });
   it("deep-links to the authored model field, including delayed config mounting", () => {
     expect(sidebar).toContain('onSettings={() => void openSettingsField("pi-tools-suite-search", "embedding-model")}');
     expect(SETTINGS_SEARCH_CATALOG.find(entry => entry.section === "pi-tools-suite-search" && entry.id === "embedding-model")?.label).toBe("Embedding model");

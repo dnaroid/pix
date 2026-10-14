@@ -82,7 +82,9 @@ snapshots makes the in-memory thinking string grow approximately quadratically
 even though the final persisted assistant message can remain small.
 
 For diagnosis, leave the memory watchdog enabled. It writes RSS/heap reports to
-`~/.config/pi/memory-reports/` and periodic samples to `~/.config/pi/pix.log`.
+`~/.config/pi/memory-reports/` and periodic samples to `~/.config/pi/logs/`.
+See [Unified diagnostic logging](../specs/logging.md) for retention and privacy
+details.
 See [Memory watchdog](configuration.md#memory-watchdog) and the engineering note
 [TUI streaming-thinking memory growth](../specs/tui-streaming-thinking-memory.md)
 for the root cause, invariants, and regression coverage.

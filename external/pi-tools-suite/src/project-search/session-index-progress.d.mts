@@ -13,5 +13,5 @@ export interface SessionIndexProgressState {
 export function sessionIndexProgress(root: string, sessionsTotal: number,
   write?: (root: string, record: Record<string, unknown>) => Promise<void>): {
     state: SessionIndexProgressState;
-    finish(status: "completed" | "incomplete" | "failed" | "cancelled"): Promise<void>;
+    finish(status: "completed" | "incomplete" | "failed" | "cancelled", error?: unknown): Promise<void>;
   };

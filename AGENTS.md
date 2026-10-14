@@ -36,8 +36,18 @@
   as a current Desktop delivery requirement. This does not change TUI platform support.
 - Keep hand-written files cohesive; split growing multi-responsibility files by
   ownership instead of continuing to append unrelated behavior.
+- Send meaningful handled errors and recoverable warnings to the existing
+  diagnostic logger (TUI/ACP/Desktop/pi-tools-suite), even when shown in the UI. Use
+  appropriate levels, avoid duplicate/noisy events and sensitive payloads,
+  and never let logging change operation behavior. See `specs/logging.md`.
 - For UI/event code, avoid blocking work and heavy synchronous work on the
   UI/main thread.
+- New or changed Desktop dropdowns MUST use Pix-styled popup/listbox components,
+  not native HTML `<select>`/system menus (including `appearance-none` wrappers).
+  Reuse existing controls with a Lucide chevron and keyboard/focus handling;
+  exceptions require an explicit user requirement. Legacy selects are not a
+  precedent. Follow `DESIGN.md#11-inputs-and-composer-ui` and keep the Desktop
+  native-select regression test green.
 - Desktop disclosure/accordion triggers MUST have a visible, state-rotating
   Lucide chevron in both collapsed and expanded states. Native `<summary>`
   alone is not a sufficient affordance, nor is a plus icon or counter.

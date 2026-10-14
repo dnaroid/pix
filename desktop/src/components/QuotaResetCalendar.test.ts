@@ -1,5 +1,6 @@
 import { render } from "svelte/server";
 import { describe, expect, it } from "vitest";
+import { quotaCycleTimeline } from "../lib/quota-calendar";
 import QuotaResetCalendar from "./QuotaResetCalendar.svelte";
 
 const now = new Date(2026, 9, 10, 3, 12).getTime();
@@ -13,13 +14,19 @@ function fills(body: string): number[] {
   return [...body.matchAll(/style="width: ([\d.]+)%" data-weekly-remaining-fill/g)].map(m => Number(m[1]));
 }
 
-describe("QuotaResetCalendar calendar-day segments", () => {
-  it("renders one gapped right-anchored segment per calendar day with weekday and date labels", () => {
+function dividers(body: string): number[] {
+  return [...body.matchAll(/style="left: ([\d.]+)%" data-weekly-day-divider/g)].map(m => Number(m[1]));
+}
+
+describe("QuotaResetCalendar continuous weekly timeline", () => {
+  it("renders one continuous right-anchored fill with thin calendar-day dividers and date labels", () => {
     const body = renderCalendar();
     // Oct 7 03:12 .. Oct 14 10:12 touches 8 calendar days (first and last partial).
-    expect(body.match(/data-day-sector/g)).toHaveLength(8);
-    expect(body.match(/data-weekly-remaining-fill/g)).toHaveLength(8);
-    expect(body).toContain("absolute inset-y-0 right-0 bg-foreground");
+    expect(body).toContain("data-weekly-progress-track");
+    expect(body.match(/data-weekly-remaining-fill/g)).toHaveLength(1);
+    expect(body.match(/data-weekly-day-divider/g)).toHaveLength(7);
+    expect(body).toContain("absolute inset-y-0 w-px bg-popover/80");
+    expect(body).not.toContain("data-day-sector");
     expect(body).toContain("data-quota-cycle-dates");
     expect(body.match(/data-quota-day="today"/g)).toHaveLength(1);
     expect(body.match(/uppercase tracking-wide/g)).toHaveLength(8);
@@ -35,14 +42,12 @@ describe("QuotaResetCalendar calendar-day segments", () => {
     expect(fr.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 5);
     expect(fr[0]).toBeLessThan(fr[1]!);
     expect(fr[7]).toBeLessThan(fr[1]!);
+    expect(dividers(body)).toEqual(quotaCycleTimeline(window, now)!.days.slice(0, -1).map(d => d.endFraction * 100));
   });
 
   it.each([100, 57, 0])("covers %s%% of the time axis, right-anchored", remainingPercent => {
     const values = fills(renderCalendar({ remainingPercent }));
-    expect(values).toHaveLength(8);
-    expect([...values].sort((a, b) => a - b)).toEqual(values);
-    if (remainingPercent === 100) expect(values.every(v => v === 100)).toBe(true);
-    if (remainingPercent === 0) expect(values.every(v => v === 0)).toBe(true);
+    expect(values).toEqual([remainingPercent]);
   });
 
   it("marks the calendar date containing now as today", () => {
@@ -74,8 +79,9 @@ describe("QuotaResetCalendar calendar-day segments", () => {
     const first = render(QuotaResetCalendar, { props: { window, now: start } }).body;
     const later = render(QuotaResetCalendar, { props: { window, now: start + 3.5 * 86_400_000 } }).body;
     expect(fills(first)).toEqual(fills(later));
-    expect(first).toContain("calc(0px + 0 *");
-    expect(later).not.toContain("calc(0px + 0 *");
+    expect(dividers(first)).toEqual(dividers(later));
+    expect(first).toContain("left: clamp(3px, 0%, calc(100% - 3px))");
+    expect(later).toContain("left: clamp(3px, 50%, calc(100% - 3px))");
   });
 
   it("keeps a contrasting pin stem and a triangular head", () => {
@@ -100,10 +106,11 @@ describe("QuotaResetCalendar calendar-day segments", () => {
   });
 
   it("marks reset-credit deadlines that fall inside the window in red", () => {
-    const inside = now + 2 * 86_400_000;
+    const inside = window.resetAt - window.windowSeconds * 500;
     const body = render(QuotaResetCalendar, { props: { window, now, deadlines: [inside, inside, window.resetAt + 86_400_000, now - 30 * 86_400_000] } }).body;
     expect(body.match(/data-reset-credit-deadline/g)).toHaveLength(1);
     expect(body).toContain("bg-tool-error");
+    expect(body).toContain("left: clamp(1px, 50%, calc(100% - 1px))");
     expect(body).toContain("Reset credits expire:");
     expect(renderCalendar()).not.toContain("data-reset-credit-deadline");
   });

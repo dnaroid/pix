@@ -19,6 +19,10 @@ const DOCUMENT: ProjectTaskDocument = {
   }],
 };
 
+function panel(document: unknown, attachmentCounts: Record<string, number> | null = {}) {
+  return { document, attachmentCounts };
+}
+
 describe("project task store save hook", () => {
   beforeEach(() => tauri.invoke.mockReset());
 
@@ -42,7 +46,7 @@ describe("project task store save hook", () => {
   it("persists status-group reordering via a dedicated SQLite mutation and ignores self-drops", async () => {
     const afterSave = vi.fn();
     const store = createProjectTasksStore({ workspace: () => "/project", afterSave, reportError: vi.fn() });
-    tauri.invoke.mockResolvedValueOnce(DOCUMENT);
+    tauri.invoke.mockResolvedValueOnce(panel(DOCUMENT));
     await store.load("/project");
     tauri.invoke.mockResolvedValueOnce({
       ...DOCUMENT, tasks: [{ ...DOCUMENT.tasks[0], status: "in-progress", updatedAt: new Date().toISOString() }],
@@ -62,7 +66,7 @@ describe("project task store save hook", () => {
   it("passes editor attachments as task-scoped SQLite links and never embeds file paths in the description", async () => {
     const reportError = vi.fn();
     const store = createProjectTasksStore({ workspace: () => "/project", reportError });
-    tauri.invoke.mockResolvedValueOnce(DOCUMENT);
+    tauri.invoke.mockResolvedValueOnce(panel(DOCUMENT));
     await store.load("/project");
     tauri.invoke.mockResolvedValueOnce(undefined);
     const attachment = {
@@ -94,7 +98,7 @@ describe("project task store save hook", () => {
     const peer = { ...DOCUMENT.tasks[0]!, id: "peer", title: "Related" };
     const initial = { ...DOCUMENT, tasks: [parent, DOCUMENT.tasks[0]!, peer] };
     const store = createProjectTasksStore({ workspace: () => "/project", reportError: vi.fn() });
-    tauri.invoke.mockResolvedValueOnce(initial);
+    tauri.invoke.mockResolvedValueOnce(panel(initial));
     await store.load("/project");
     tauri.invoke.mockResolvedValueOnce(undefined);
     expect(await store.update("task-1", {
@@ -120,7 +124,7 @@ describe("project task store save hook", () => {
   it("does not save arbitrary unpersisted editor attachments", async () => {
     const reportError = vi.fn();
     const store = createProjectTasksStore({ workspace: () => "/project", reportError });
-    tauri.invoke.mockResolvedValueOnce(DOCUMENT);
+    tauri.invoke.mockResolvedValueOnce(panel(DOCUMENT));
     await store.load("/project");
     expect(await store.update("task-1", {
       title: "Updated", type: "feature",
@@ -155,7 +159,7 @@ describe("project task loading presentation", () => {
     const first = pendingRead();
     const loading = store.load("/project");
     expect(store.initialLoading).toBe(true);
-    first.resolve(document);
+    first.resolve(panel(document));
     await loading;
     expect(store.initialLoading).toBe(false);
 
@@ -164,7 +168,7 @@ describe("project task loading presentation", () => {
     expect(store.loading).toBe(true);
     expect(store.initialLoading).toBe(false);
     expect(store.document).toEqual(document);
-    next.resolve(DOCUMENT);
+    next.resolve(panel(DOCUMENT));
     await refreshing;
     expect(store.loading).toBe(false);
     expect(store.document).toEqual(DOCUMENT);
@@ -172,7 +176,7 @@ describe("project task loading presentation", () => {
 
   it("requires a fresh snapshot after workspace changes or reset and ignores stale reads", async () => {
     const { store, setWorkspace } = fixture();
-    tauri.invoke.mockResolvedValueOnce(DOCUMENT);
+    tauri.invoke.mockResolvedValueOnce(panel(DOCUMENT));
     await store.load("/project");
     const old = pendingRead();
     const stale = store.load("/project");
@@ -180,29 +184,29 @@ describe("project task loading presentation", () => {
     const current = pendingRead();
     const loading = store.load("/other");
     expect(store.initialLoading).toBe(true);
-    old.resolve(DOCUMENT);
+    old.resolve(panel(DOCUMENT));
     await stale;
     expect(store.initialLoading).toBe(true);
-    current.resolve({ version: 1, tasks: [] });
+    current.resolve(panel({ version: 1, tasks: [] }));
     await loading;
     expect(store.initialLoading).toBe(false);
 
     const late = pendingRead();
     const lateRead = store.load("/other");
     store.reset();
-    late.resolve(DOCUMENT);
+    late.resolve(panel(DOCUMENT));
     await lateRead;
     expect(store.document.tasks).toEqual([]);
     const fresh = pendingRead();
     const freshRead = store.load("/other");
     expect(store.initialLoading).toBe(true);
-    fresh.resolve(DOCUMENT);
+    fresh.resolve(panel(DOCUMENT));
     await freshRead;
   });
 
   it("still reports repeat read failures without flashing a loading screen", async () => {
     const { store, reportError } = fixture();
-    tauri.invoke.mockResolvedValueOnce(DOCUMENT);
+    tauri.invoke.mockResolvedValueOnce(panel(DOCUMENT));
     await store.load("/project");
     const next = pendingRead();
     const refreshing = store.load("/project");
@@ -229,7 +233,7 @@ describe("project task live reload and compare-and-save", () => {
   it("picks up external edits, coalesces polls, and owns timer cleanup", async () => {
     const { store } = fixture();
     let disk = DOCUMENT;
-    tauri.invoke.mockImplementation(async () => disk);
+    tauri.invoke.mockImplementation(async () => panel(disk));
     await store.load("/project");
     const stop = store.observe();
     await vi.advanceTimersByTimeAsync(0);
@@ -243,9 +247,47 @@ describe("project task live reload and compare-and-save", () => {
     expect(tauri.invoke).toHaveBeenCalledTimes(calls);
   });
 
+  it("reads tasks and badge-only changes through one IPC per tick and stops both on teardown", async () => {
+    const { store } = fixture();
+    let counts = { "task-1": 1 };
+    tauri.invoke.mockImplementation(async () => panel(DOCUMENT, counts));
+    await store.load("/project");
+    expect(store.attachmentCounts).toEqual(counts);
+    const stop = store.observe();
+    await vi.advanceTimersByTimeAsync(0);
+    tauri.invoke.mockClear();
+    counts = { "task-1": 2 };
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(store.document).toEqual(DOCUMENT);
+    expect(store.attachmentCounts).toEqual(counts);
+    expect(tauri.invoke.mock.calls).toEqual([
+      ["read_project_tasks_panel", { workspace: "/project" }],
+      ["read_project_tasks_panel", { workspace: "/project" }],
+    ]);
+    stop();
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(tauri.invoke).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps readable tasks on badge errors, but clears counts on workspace reset", async () => {
+    const { store, switchWorkspace, reportError } = fixture();
+    tauri.invoke.mockResolvedValueOnce(panel(DOCUMENT, { "task-1": 3 }));
+    await store.load("/project");
+    tauri.invoke.mockResolvedValueOnce(panel({ ...DOCUMENT, tasks: [] }, null));
+    await store.refresh();
+    expect(store.document.tasks).toEqual([]);
+    expect(store.attachmentCounts).toEqual({ "task-1": 3 });
+    expect(store.loadFailed).toBe(false);
+    expect(reportError).not.toHaveBeenCalled();
+    switchWorkspace();
+    tauri.invoke.mockResolvedValueOnce(panel(DOCUMENT, null));
+    await store.load("/other");
+    expect(store.attachmentCounts).toEqual({});
+  });
+
   it("creates in the explicitly selected status group and saves priority without losing other fields", async () => {
     const { store } = fixture();
-    tauri.invoke.mockResolvedValueOnce(DOCUMENT);
+    tauri.invoke.mockResolvedValueOnce(panel(DOCUMENT));
     await store.load("/project");
     tauri.invoke.mockResolvedValue(undefined);
     await expect(store.create({ title: "Idea", type: "idea", status: "backlog" })).resolves.toBe(true);
@@ -262,7 +304,7 @@ describe("project task live reload and compare-and-save", () => {
 
   it("rejects late poll completion after editor pause or workspace reset", async () => {
     const { store, switchWorkspace } = fixture();
-    tauri.invoke.mockResolvedValueOnce(DOCUMENT);
+    tauri.invoke.mockResolvedValueOnce(panel(DOCUMENT));
     await store.load("/project");
     let finish!: (value: unknown) => void;
     tauri.invoke.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
@@ -270,15 +312,17 @@ describe("project task live reload and compare-and-save", () => {
     await vi.advanceTimersByTimeAsync(6000);
     expect(tauri.invoke).toHaveBeenCalledTimes(2); // one in-flight poll, no overlap
     stop(); // editor opens: its baseline must not be replaced by this read
-    finish({ version: 1, tasks: [] });
+    finish(panel({ version: 1, tasks: [] }, { "late-task": 9 }));
     await vi.advanceTimersByTimeAsync(0);
     expect(store.document).toEqual(DOCUMENT);
+    expect(store.attachmentCounts).toEqual({});
     tauri.invoke.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
     const stopNext = store.observe();
     switchWorkspace();
-    finish(DOCUMENT);
+    finish(panel(DOCUMENT, { "task-1": 9 }));
     await vi.advanceTimersByTimeAsync(0);
     expect(store.document.tasks).toEqual([]);
+    expect(store.attachmentCounts).toEqual({});
     stopNext();
   });
 
@@ -286,6 +330,7 @@ describe("project task live reload and compare-and-save", () => {
     const { store, reportError } = fixture();
     let disk = DOCUMENT;
     tauri.invoke.mockImplementation(async (command, args) => {
+      if (command === "read_project_tasks_panel") return panel(disk);
       if (command === "read_project_tasks") return disk;
       if (JSON.stringify(args.expectedDocument) !== JSON.stringify(disk)) throw new Error("Task file conflict: changed externally");
       disk = args.document;
@@ -307,7 +352,7 @@ describe("project task live reload and compare-and-save", () => {
 
   it("does not let a poll or stale save replace a newer local/workspace snapshot", async () => {
     const { store, switchWorkspace } = fixture();
-    tauri.invoke.mockResolvedValueOnce(DOCUMENT);
+    tauri.invoke.mockResolvedValueOnce(panel(DOCUMENT));
     await store.load("/project");
     let finishRead!: (value: unknown) => void;
     tauri.invoke.mockReturnValueOnce(new Promise((resolve) => { finishRead = resolve; }));
@@ -316,9 +361,10 @@ describe("project task live reload and compare-and-save", () => {
     tauri.invoke.mockReturnValueOnce(new Promise<void>((resolve) => { finishWrite = resolve; }));
     const next = { ...DOCUMENT, tasks: [{ ...DOCUMENT.tasks[0]!, title: "Local saved" }] };
     const saving = store.save(next);
-    finishRead(DOCUMENT);
+    finishRead(panel(DOCUMENT, { "task-1": 9 }));
     await refreshing;
     expect(store.document).toEqual(next);
+    expect(store.attachmentCounts).toEqual({});
     await store.refresh();
     expect(tauri.invoke).toHaveBeenCalledTimes(3);
     switchWorkspace();
@@ -332,6 +378,7 @@ describe("project task live reload and compare-and-save", () => {
     const { store } = fixture();
     let disk = DOCUMENT;
     tauri.invoke.mockImplementation(async (command, args) => {
+      if (command === "read_project_tasks_panel") return panel(disk);
       if (command === "read_project_tasks") return disk;
       if (JSON.stringify(args.expectedDocument) !== JSON.stringify(disk)) throw "Task file conflict: changed externally";
       disk = args.document;
@@ -348,7 +395,7 @@ describe("project task live reload and compare-and-save", () => {
 
   it("keeps the loaded document on malformed polls, reports once and recovers on a valid read", async () => {
     const { store, reportError } = fixture();
-    tauri.invoke.mockResolvedValueOnce(DOCUMENT);
+    tauri.invoke.mockResolvedValueOnce(panel(DOCUMENT));
     await store.load("/project");
     tauri.invoke.mockRejectedValue(new Error("Malformed external JSONC"));
     const stop = store.observe();
@@ -356,7 +403,7 @@ describe("project task live reload and compare-and-save", () => {
     expect(store.document).toEqual(DOCUMENT);
     expect(store.loadFailed).toBe(true);
     expect(reportError).toHaveBeenCalledOnce();
-    tauri.invoke.mockResolvedValue({ ...DOCUMENT, tasks: [] });
+    tauri.invoke.mockResolvedValue(panel({ ...DOCUMENT, tasks: [] }));
     await vi.advanceTimersByTimeAsync(2000);
     expect(store.document.tasks).toEqual([]);
     expect(store.loadFailed).toBe(false);

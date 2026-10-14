@@ -1,6 +1,7 @@
 import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { extractImageContents } from "../rendering/message-content.js";
+import { isMessageEditRewindPosition } from "../session/message-edit-rewind.js";
 
 export type EditedUserMessage = { text: string; displayText?: string; images: ImageContent[] };
 
@@ -48,7 +49,7 @@ export async function commitUserMessageEdit(options: {
 		}
 		if (navigation.cancelled) return false;
 		markRewound();
-		if (!options.isCurrent() || manager.getSessionFile() !== pending.file || manager.getLeafId() !== pending.parentId) throw new Error("The conversation changed before resending.");
+		if (!options.isCurrent() || manager.getSessionFile() !== pending.file || !isMessageEditRewindPosition(manager, pending.parentId)) throw new Error("The conversation changed before resending.");
 		options.reloadHistory();
 		// Transfer reservation to the normal scoped prompt runner synchronously.
 		release();

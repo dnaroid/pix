@@ -17,29 +17,33 @@ Native Code/Knowledge uses disposable `.pi/search/code.sqlite` and `.pi/search/k
 see [native repository search](native-repository-search.md) and [0065](../docs/decisions/0065-native-repository-search.md).
 
 ## Behavior
-Search diagnostics stay out of the conversation: background session indexing
-and `/search-index` / `/search-semantic` command output write to the local
-`.pi/artifacts/search-diagnostics-<pid>-<uuid>/events.jsonl` log instead of UI
-notifications. The indexing status bar remains available. Skipped transcript
-records contain session ID, full path, a stable reason and optional line/OS code;
-missing-parent failures also identify the child entry and absent parent ID,
-not message contents or raw provider exceptions. Writes are best-effort, capped
-at 4 MiB per process log, and subject to artifact cleanup; retain needed evidence
-outside disposable storage. Automatic/manual indexing reports up to 100 skip
-diagnostics in its result for Desktop Activity, while logging each skip until
-the file cap is reached.
-Each message-index pass also logs `session_index_progress` at start, every five
-seconds while active (including provider waits), and at termination. A unique
-`runId` groups a pass. Metadata reports `phase` (`waiting_for_lease`, `reading`,
-`checking_cache`, `provider`, `saving`), elapsed milliseconds, current session ID,
-total/checked/skipped sessions, discovered chunks, cache-hit chunks, newly committed
-vectors, and started/completed embedding requests. Chunk totals grow as transcripts
-are read; saved-vector counts deduplicate identical text, so these are not percentages.
-Completed requests mean resolved embedding calls, not successful validation/publication.
-Terminal status is `completed`, `incomplete`, `failed`, or `cancelled`; no provider
-error bodies or message text are included. Slow writes drop intervening heartbeats
-instead of queuing them; teardown stops the timer and drains its pending write before
-the terminal event. This is file-log progress, not streamed Desktop Activity updates.
+Search indexing writes selected metadata-only diagnostics to the **shared Pix
+JSONL logger** at `~/.config/pi/logs/` (`search.index` module). The old
+`.pi/artifacts/search-diagnostics-*/events.jsonl` writer is retired: no search
+code opens an independent diagnostic file. Each host uses the in-process Pix
+sink; standalone Pi remains functional when that optional sink is absent.
+Normal starts, per-session successful/empty passes, cancellation and five-second
+provider-wait heartbeats are not written. Failed and incomplete index passes
+include bounded counts (checked/skipped sessions, discovered/cached chunks,
+saved vectors, provider calls), elapsed duration, fixed execution phase and
+allowlisted error type/OS/SQLite code. A successful pass that saved vectors is
+`debug`-only. Skipped transcripts emit a rate-limited warning with a fixed
+reason and safe code; raw session IDs, file paths, parent/child IDs, provider
+messages, prompts and document text never enter these events. The separate
+user-requested manual result retains existing bounded skip details for the
+current action, without building a Desktop Activity history.
+
+Background session synchronization normally rechecks cross-host inactivity after
+30 seconds. If a worker throws or finishes with an operationally incomplete
+index (e.g. an unreadable transcript), periodic recovery backs off to 2, 4, 8,
+then at most 15 minutes instead of retrying every 30 seconds. Deferred or
+not-yet-mature sessions do not trigger failure backoff. A fresh session or
+source change can trigger a debounced earlier retry; explicit manual
+Index/Continue is unaffected. Generic background-worker errors generate
+`search:background-failed` (warn), tagged with a fixed phase, error category
+and allowlisted OS/SQLite code; repeated causes are coalesced for five minutes
+with a suppressed count. Per-session failures use the same safe categories
+without including session IDs. Ordinary cancellations are not warnings.
 
 
 - `project-search` is a default-enabled module in the bundled pi-tools-suite

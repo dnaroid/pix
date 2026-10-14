@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Task } from "../tool/types.js";
+import { diagnosticErrorType, suiteDiagnostics } from "../../lib/suite-diagnostics.js";
 import { EMPTY_STATE, type TaskState } from "./state.js";
 
 export const TODO_PLAN_RELATIVE_PATH = join(".pi", "todo-plan.json");
@@ -52,6 +53,8 @@ export function loadPersistedPlan(cwd: string | undefined): PersistedPlanLoadRes
 			},
 		};
 	} catch (err) {
+		suiteDiagnostics.report("warn", "todo", "persistence-load-failed", normalizeCwd(cwd),
+			{ errorType: diagnosticErrorType(err) });
 		console.warn(`rpiv-todo: failed to load persisted plan from ${path} — ${(err as Error).message}`);
 		return undefined;
 	}

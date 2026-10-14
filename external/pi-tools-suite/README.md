@@ -4,6 +4,18 @@ Local all-in-one Pi extension package.
 
 This package keeps shared Pi tools as ordinary source folders under `src/` and registers them through one entrypoint.
 
+When hosted by Pix TUI/Desktop, selected suite failures and degradations are
+reported to Pix's shared JSONL diagnostics (`~/.config/pi/logs/`). These
+payload-free, rate-limited events cover module loading, DCP, search indexing,
+subagents, TODO/project tasks, workspace grants, LSP, auth and web provider
+fallback. In particular, DCP auto/manual failures and unsafe provider sends,
+plus failed manual and background indexing, have distinct diagnostic events. They do not
+copy ordinary tool outputs, prompts or UI notifications into logs. Logging is
+non-blocking and optional; standalone Pi remains independent of Pix's runtime,
+and detailed DCP/subagent logs remain separate. Search indexing writes
+selected metadata to the shared Pix Logger without a project-local log file. See
+[`specs/logging.md`](../../specs/logging.md).
+
 The opt-in [Headless Tool API](docs/headless-tool-api.md) executes the
 original Pi SDK read and Pix model-specific shell/patch tools alongside
 standalone extension tools, without a second Pi/ACP model session. ChatGPT

@@ -80,9 +80,13 @@ session-local todos.
   within a group. The view shows drop placeholders and preserves per-status
   group and filter presentation while dragging.
 - An expanded visible panel reloads from native SQLite initially and every
-  two seconds. Hidden/collapsed/unmounted panels stop polling. Late reads,
-  workspace switches, and teardown use generation guards; failures retain
-  the current visible data and surface a retry/error message.
+  two seconds through one `read_project_tasks_panel` IPC snapshot containing
+  task rows and attachment counts from the same SQLite read transaction.
+  Attachment badges have no separate timer and do not read attachment blobs;
+  badge-query errors leave tasks readable and preserve their prior counts for
+  that workspace. Hidden/collapsed/unmounted panels stop polling. Late reads,
+  workspace switches, and teardown use generation guards; task-read failures
+  retain the current visible data and surface a retry/error message.
 - Each regular UI task save (including session launch) may mutate exactly
   **one** row with revision-based optimistic conflict checking, never replace
   all rows. A dedicated native SQLite drag/reorder transaction recomputes

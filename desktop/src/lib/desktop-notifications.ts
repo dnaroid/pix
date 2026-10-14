@@ -8,6 +8,11 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { AgentControlState } from "./agent-control";
 
+type NotificationPreferences = {
+  notificationsEnabled: boolean;
+  soundOnlyEnabled: boolean;
+};
+
 type NativeNotificationApi = {
   isPermissionGranted: () => Promise<boolean>;
   requestPermission: () => Promise<NotificationPermission>;
@@ -19,6 +24,9 @@ type NativeNotificationApi = {
 type DesktopNotificationServiceOptions = {
   isForeground?: () => boolean;
   enabled?: () => boolean | Promise<boolean>;
+  preferences?: () => NotificationPreferences | Promise<NotificationPreferences>;
+  isActiveSession?: (sessionId: string | null) => boolean;
+  playPixSound?: () => void | Promise<void>;
   api?: NativeNotificationApi;
 };
 
@@ -130,18 +138,35 @@ export function createDesktopNotificationService(options: DesktopNotificationSer
   }
 
   async function notify(title: string, body: string, sessionId: string | null): Promise<void> {
-    if (disposed || isForeground()) return;
+    if (disposed || (isForeground() && (options.isActiveSession?.(sessionId) ?? true))) return;
+    let preferences: NotificationPreferences;
     try {
-      if (!(await enabled())) return;
+      preferences = options.preferences
+        ? await options.preferences()
+        : { notificationsEnabled: await enabled(), soundOnlyEnabled: false };
     } catch {
       return;
     }
-    if (isForeground()) return;
-    if (!(await ensurePermission()) || isForeground()) return;
+    if (disposed || !preferences.notificationsEnabled) return;
+    if (preferences.soundOnlyEnabled) {
+      if (isForeground() && (options.isActiveSession?.(sessionId) ?? true)) return;
+      try {
+        await options.playPixSound?.();
+      } catch {
+        // Audio is best effort and must not affect the agent run.
+      }
+      return;
+    }
+    if (isForeground() || !(await ensurePermission()) || isForeground()) return;
     try {
       // Subscribe before delivery so even an immediate native click is retained.
       await ensureActivationListener();
       if (disposed || isForeground()) return;
+      // The user may switch to sound-only mode while permissions are pending.
+      if (options.preferences) {
+        const latest = await options.preferences();
+        if (disposed || !latest.notificationsEnabled || latest.soundOnlyEnabled || isForeground()) return;
+      }
       await api.sendNotification({ title, body: compactBody(body), sessionId });
     } catch {
       // Native notifications are best effort and must never fail the agent flow.
@@ -181,6 +206,11 @@ type DesktopAgentNotificationCoordinatorOptions = {
   isPromptRunning: (sessionId: string) => boolean;
   activeSubagents: (sessionId: string) => number;
   onCompleted?: (sessionId: string) => void;
+  attention?: {
+    mark: (sessionId: string | null) => void;
+    clearSession: (sessionId: string) => void;
+    reset: () => void;
+  };
 };
 
 function stopReasonMessage(reason: Exclude<StopReason, "end_turn" | "cancelled">): string {
@@ -213,6 +243,7 @@ export function createDesktopAgentNotificationCoordinator(options: DesktopAgentN
     if (options.agentState(sessionId) !== "idle") return;
     if (options.activeSubagents(sessionId) > 0) return;
     pendingCompletions.delete(sessionId);
+    options.attention?.mark(sessionId);
     try {
       options.onCompleted?.(sessionId);
     } catch {
@@ -223,12 +254,14 @@ export function createDesktopAgentNotificationCoordinator(options: DesktopAgentN
 
   function promptStarted(sessionId: string): void {
     pendingCompletions.delete(sessionId);
+    options.attention?.clearSession(sessionId);
   }
 
   function promptSettled(sessionId: string, stopReason: StopReason): void {
     pendingCompletions.delete(sessionId);
     if (stopReason === "cancelled") return;
     if (stopReason !== "end_turn") {
+      options.attention?.mark(sessionId);
       void options.notifications.error(sessionId, title(sessionId), stopReasonMessage(stopReason));
       return;
     }
@@ -238,10 +271,12 @@ export function createDesktopAgentNotificationCoordinator(options: DesktopAgentN
 
   function promptError(sessionId: string, error: unknown): void {
     pendingCompletions.delete(sessionId);
+    options.attention?.mark(sessionId);
     void options.notifications.error(sessionId, title(sessionId), errorMessage(error));
   }
 
   function needsInput(sessionId: string | null, message: string): void {
+    options.attention?.mark(sessionId);
     void options.notifications.question(sessionId, title(sessionId), message || "Agent is waiting for your input.");
   }
 
@@ -255,10 +290,12 @@ export function createDesktopAgentNotificationCoordinator(options: DesktopAgentN
 
   function clearSession(sessionId: string): void {
     pendingCompletions.delete(sessionId);
+    options.attention?.clearSession(sessionId);
   }
 
   function reset(): void {
     pendingCompletions.clear();
+    options.attention?.reset();
   }
 
   return {

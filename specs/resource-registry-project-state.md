@@ -154,17 +154,22 @@ JSONC/task overlay import or fallback.
     Registry remote is trusted to hold them. The Desktop ACP Registry request
     validator accepts `workspace` for `push-project`, `pull-project` and `sync-project`,
     while still rejecting unknown project scopes.
-17. A workspace Git repository is optional. When `resourceRegistry.projectKey`
-    is not configured, Registry may derive a stable project key from Git
-    `remote.origin.url`, but that is only an automatic convenience for
-    project-scoped artifacts. If there is no Git origin, reusable skills and
-    agents remain fully usable and the Registry snapshot reports one non-fatal
-    project-key issue. The user can set a project key explicitly; lack of Git
-    must not surface as a duplicate global Registry error. Without a Git origin,
-    the interactive key prompt requires a nonempty explicit key and must not
-    suggest that leaving it blank will derive one automatically. Interactive
-    remote setup gives generic Git URL guidance when no remote is configured,
-    rather than presenting an example repository as a usable value.
+17. A workspace Git repository is optional. An explicit
+    `resourceRegistry.projectKey` takes priority. Otherwise Registry derives a
+    key from Git `remote.origin.url` when available. With neither, it silently
+    generates a unique `local-<uuid>` identity in `.pi/registry-project-key`
+    (atomic, persistent and preserved by Desktop Clean .pi). This fallback is
+    reused across refreshes/restarts and independent across workspaces; it is
+    never written as an explicit config override. If a valid `origin` later
+    appears, its derived key takes precedence automatically, while the stored
+    fallback remains available if `origin` is removed. Existing publications
+    under a previous key are not silently moved or overwritten: provenance
+    mismatch continues to require review. Missing `.pi` is not created by
+    catalog refresh and does not generate a project-key warning; project-state
+    initialization remains explicit. Reusable skills/agents remain usable
+    without Git. Interactive remote setup gives generic Git URL guidance when
+    no remote is configured, rather than presenting an example repository as
+    a usable value.
 18. Pix Desktop presents reusable Registry resources as an IDE-style catalog.
     Project artifacts stay in the dedicated project-sync review surface and do
     not appear in the reusable-resource browser. Reusable resources that exist

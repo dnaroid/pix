@@ -80,16 +80,33 @@ describe("desktop updater", () => {
   });
 
   it("surfaces check failures without throwing into application startup", async () => {
+    const diagnostic = vi.fn();
     const updater = createDesktopUpdater({
       check: async () => { throw new Error("network unavailable"); },
       relaunch: async () => undefined,
-    });
+    }, diagnostic);
     await updater.check();
     expect(updater.status).toBe("error");
+    expect(diagnostic.mock.calls.map(([event]) => event)).toEqual(["updater:checking", "updater:check-failed"]);
     expect(updater.error).toContain("network unavailable");
     expect(updater.visible).toBe(true);
     updater.dismiss();
     expect(updater.visible).toBe(false);
+    updater.dispose();
+  });
+
+  it("keeps update outcome independent of a failing diagnostic callback", async () => {
+    const diagnostic = vi.fn((_event: string) => { throw new Error("logging offline"); });
+    const updater = createDesktopUpdater({
+      check: async () => update() as never,
+      relaunch: async () => undefined,
+    }, diagnostic);
+    await updater.check();
+    await updater.install();
+    expect(updater.status).toBe("ready");
+    expect(diagnostic.mock.calls.map(([event]) => event)).toEqual([
+      "updater:checking", "updater:available", "updater:installing", "updater:ready",
+    ]);
     updater.dispose();
   });
 });

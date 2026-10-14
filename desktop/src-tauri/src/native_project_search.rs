@@ -69,13 +69,65 @@ pub(crate) async fn native_project_search(
     request: SearchRequest,
 ) -> Result<serde_json::Value, String> {
     let cancelled = state.token(&request.request_id)?;
+    let index_source = native_index_source(&request.query);
+    let workspace = index_source.map(|_| request.workspace.clone());
+    let cancel_flag = cancelled.clone();
+    let started = Instant::now();
     let id = request.request_id.clone();
     let result = tauri::async_runtime::spawn_blocking(move || run(&app, request, cancelled))
         .await
         .map_err(|_| "Native search worker failed".to_owned())
         .and_then(|result| result);
     state.finish(&id);
+    if let Some(source) = index_source {
+        let aborted = cancel_flag.load(Ordering::Acquire);
+        let complete = result
+            .as_ref()
+            .ok()
+            .and_then(|value| value.get("complete"))
+            .and_then(|value| value.as_bool());
+        let indexed = result
+            .as_ref()
+            .ok()
+            .and_then(|value| value.get("indexed"))
+            .and_then(|value| value.as_u64());
+        let level =
+            if aborted || (result.is_ok() && complete == Some(true) && indexed.unwrap_or(0) == 0) {
+                "debug"
+            } else if result.is_err() || complete == Some(false) {
+                "warn"
+            } else {
+                "info"
+            };
+        crate::logging::record(
+            level,
+            "search.index",
+            if aborted {
+                "search:index-cancelled"
+            } else if result.is_err() {
+                "search:index-native-failed"
+            } else if complete == Some(false) {
+                "search:index-native-incomplete"
+            } else {
+                "search:index-native-completed"
+            },
+            serde_json::json!({ "source": source, "complete": complete, "indexed": indexed,
+                "durationMs": started.elapsed().as_millis() }),
+            workspace.as_deref(),
+        );
+    }
     result
+}
+
+fn native_index_source(query: &serde_json::Value) -> Option<&'static str> {
+    if query.get("operation")?.as_str()? != "index" {
+        return None;
+    }
+    match query.get("source")?.as_str()? {
+        "code" => Some("code"),
+        "knowledge" => Some("knowledge"),
+        _ => None,
+    }
 }
 
 fn run(
@@ -188,6 +240,25 @@ fn request_input_limit(query: &serde_json::Value) -> usize {
 mod tests {
     use super::*;
     #[test]
+    fn only_explicit_code_and_knowledge_index_calls_are_logged() {
+        assert_eq!(
+            native_index_source(&serde_json::json!({"operation":"index","source":"code"})),
+            Some("code")
+        );
+        assert_eq!(
+            native_index_source(&serde_json::json!({"operation":"index","source":"knowledge"})),
+            Some("knowledge")
+        );
+        assert_eq!(
+            native_index_source(&serde_json::json!({"operation":"index","source":"sessions"})),
+            None
+        );
+        assert_eq!(
+            native_index_source(&serde_json::json!({"operation":"search","source":"code"})),
+            None
+        );
+    }
+    #[test]
     fn cancellation_before_start_and_finish_are_owned() {
         let state = SearchState::default();
         state.token("a-1").unwrap().store(true, Ordering::Release);
@@ -231,8 +302,15 @@ mod tests {
     }
     #[test]
     fn only_federated_rerank_allows_bounded_utf8_documents() {
-        assert_eq!(request_input_limit(&serde_json::json!({"operation":"rerank"})), 4 * 1024 * 1024);
-        for query in [serde_json::json!({"operation":"rerank-prepare"}), serde_json::json!({"operation":"index"}), serde_json::json!({"query":"needle"})] {
+        assert_eq!(
+            request_input_limit(&serde_json::json!({"operation":"rerank"})),
+            4 * 1024 * 1024
+        );
+        for query in [
+            serde_json::json!({"operation":"rerank-prepare"}),
+            serde_json::json!({"operation":"index"}),
+            serde_json::json!({"query":"needle"}),
+        ] {
             assert_eq!(request_input_limit(&query), 16 * 1024);
         }
     }

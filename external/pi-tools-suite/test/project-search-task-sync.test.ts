@@ -170,6 +170,39 @@ test("provider errors do not schedule automatic paid retries", async () => {
   expect(h.timers.size).toBe(0);
 });
 
+test("background task indexing reports a redacted warning without retries or chat output", async () => {
+  const sinkSymbol = Symbol.for("pix.diagnostics.sink");
+  const hostSymbol = Symbol.for("pix.host.runtime");
+  const globals = globalThis as Record<symbol, unknown>;
+  const previousSink = globals[sinkSymbol], previousHost = globals[hostSymbol];
+  const records: Array<{ event: string; details: Record<string, unknown>; scope: { project?: string } }> = [];
+  globals[hostSymbol] = true;
+  globals[sinkSymbol] = (_level: string, event: string, details: Record<string, unknown>, scope: { project?: string }) => {
+    records.push({ event, details, scope });
+  };
+  try {
+    const f = fixture();
+    let calls = 0;
+    const h = harness(f.root, { embedTasks: async () => {
+      calls++;
+      throw new Error("PRIVATE_PROVIDER_SECRET_TOKEN");
+    } });
+    await h.worker.settled();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(calls).toBe(1);
+    expect(records).toEqual([{
+      event: "suite:background-task-index-failed",
+      details: { source: "tasks", errorType: "Error" },
+      scope: { project: f.root, module: "suite.search" },
+    }]);
+    expect(h.timers.size).toBe(0);
+    expect(JSON.stringify(records)).not.toContain("PRIVATE_PROVIDER_SECRET_TOKEN");
+  } finally {
+    if (previousSink === undefined) delete globals[sinkSymbol]; else globals[sinkSymbol] = previousSink;
+    if (previousHost === undefined) delete globals[hostSymbol]; else globals[hostSymbol] = previousHost;
+  }
+});
+
 test("query task semantics ranks cache only; explicit lexical invokes no provider", async () => {
   const f = fixture();
   let docs = 0, queries = 0;

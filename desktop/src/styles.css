@@ -440,3 +440,31 @@ html, body, #app {
 .preview-text-surface :is(a, a *, .markdown-text code, .markdown-text code *, .sh__token--keyword, .sh__token--jsxliterals)::selection {
   color: var(--foreground);
 }
+
+/* Shared project-tinted window and sidebar surface. */
+.desktop-workspace-chrome { --workspace-chrome-background: var(--window-titlebar); }
+.desktop-workspace-chrome.project-window-titlebar {
+  --workspace-chrome-background: color-mix(
+    in srgb,
+    var(
+        --project-window-titlebar-color,
+        oklch(0.62 0.15 var(--project-window-titlebar-hue))
+      )
+      8%,
+    var(--window-titlebar)
+  );
+}
+
+@media (prefers-color-scheme: dark) {
+  .desktop-workspace-chrome.project-window-titlebar {
+    --workspace-chrome-background: color-mix(
+      in srgb,
+      var(
+          --project-window-titlebar-color,
+          oklch(0.74 0.13 var(--project-window-titlebar-hue))
+        )
+        8%,
+      var(--window-titlebar)
+    );
+  }
+}

@@ -124,6 +124,7 @@
             tabindex={active || (!activeId && index === 0) ? 0 : -1}
             data-workbench-tab
             data-workbench-tab-id={tab.id}
+            data-context-session-id={tab.kind === "session" ? tab.sessionId : undefined}
             data-context-file-path={tab.kind === "preview" ? (tab.filePath ?? "") : undefined}
             title={tab.title}
             onclick={() => onSelect(tab.id)}

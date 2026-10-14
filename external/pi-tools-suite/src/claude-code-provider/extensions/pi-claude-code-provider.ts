@@ -17,6 +17,7 @@ import { SessionImageStore } from "../src/session-image-store.ts";
 import { resolveSession, sessionRegistry, type SessionEntry } from "../src/session-registry.ts";
 import type { RateLimitNotice, RateLimitNoticeSink } from "../src/claude-protocol.ts";
 import type { RuntimeCleanupResult } from "../src/runtime-directories.ts";
+import { diagnosticErrorType, suiteDiagnostics } from "../../lib/suite-diagnostics.js";
 import type { ClaudeInstallation } from "../src/types.ts";
 
 const PROVIDER = "pi-claude-code-provider";
@@ -44,6 +45,8 @@ export default async function piClaudeCodeProvider(pi: ExtensionAPI): Promise<vo
     // machines. An absent CLI is not a broken setup unless a path was explicit.
     // Keep the doctor available, and don't hide auth/capability/preflight errors.
     if (errorCode(error) !== "executable_missing" || process.env.PI_CLAUDE_CODE_PROVIDER_PATH?.trim()) {
+      suiteDiagnostics.report("warn", "auth", "provider-unavailable", undefined,
+        { errorType: diagnosticErrorType(error) });
       registerUnavailableNotice(pi, errorText(error));
     }
     return;
@@ -163,12 +166,21 @@ export default async function piClaudeCodeProvider(pi: ExtensionAPI): Promise<vo
           } catch { /* Optional UI telemetry. */ }
         }
       },
-      onAccountPause: (previous, seconds) => ctx.ui.notify(`${NOTICE_PREFIX} OAuth profile ${previous} reached its limit; waiting ${seconds}s before trying another profile`, "warning"),
-      onAccountSwitch: (previous, next) => ctx.ui.notify(`${NOTICE_PREFIX} OAuth profile ${previous} reached its limit; continuing with ${next}`, "warning"),
+      onAccountPause: (previous, seconds) => {
+        suiteDiagnostics.report("warn", "auth", "profile-rate-limited", ctx.cwd);
+        ctx.ui.notify(`${NOTICE_PREFIX} OAuth profile ${previous} reached its limit; waiting ${seconds}s before trying another profile`, "warning");
+      },
+      onAccountSwitch: (previous, next) => {
+        suiteDiagnostics.report("debug", "auth", "profile-switched", ctx.cwd);
+        ctx.ui.notify(`${NOTICE_PREFIX} OAuth profile ${previous} reached its limit; continuing with ${next}`, "warning");
+      },
     };
     sessions.set(ownSessionId, ownSessionEntry);
     const platformWarning = startupPlatformWarning(currentPlatform);
-    if (platformWarning) ctx.ui.notify(`${NOTICE_PREFIX} ${platformWarning}`, "warning");
+    if (platformWarning) {
+      suiteDiagnostics.report("warn", "auth", "platform-warning", ctx.cwd);
+      ctx.ui.notify(`${NOTICE_PREFIX} ${platformWarning}`, "warning");
+    }
   });
 
   pi.on("session_shutdown", async () => {
@@ -257,6 +269,8 @@ function registerDoctorCommand(pi: ExtensionAPI, runtimeCleanup: RuntimeCleanupR
           bridgeProbe,
         }), bridgeProbe.ok && claudeStatus.isVerified && piStatus.isVerified && currentPlatform.isVerified ? "info" : "warning");
       } catch (error) {
+        suiteDiagnostics.report("warn", "auth", "doctor-failed", ctx.cwd,
+          { errorType: diagnosticErrorType(error) });
         ctx.ui.notify(errorText(error), "error");
       }
     },

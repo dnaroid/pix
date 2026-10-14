@@ -1,6 +1,7 @@
 import type { AgentSession, AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 import type { ImageContent } from "../../input-editor.js";
 import { createId } from "../id.js";
+import { logOperationFailure } from "../logging/operation-errors.js";
 import { stringifyUnknown, submittedUserDisplayText } from "../rendering/message-content.js";
 import type { Entry, SessionActivity, SubmittedUserMessage } from "../types.js";
 import { autoQueuedMessageEntries, cloneSubmittedUserMessage, deferredQueuedMessageEntries, queuedMessageEntries } from "./queued-message-entries.js";
@@ -117,18 +118,23 @@ export class AppQueuedMessageController {
 	): Promise<void> {
 		const targetSession = session ?? this.host.requireRuntime().session;
 		const markInFlight = !targetSession.isStreaming;
+		const runtime = this.host.runtime();
+		const logContext = { project: runtime?.session === targetSession ? runtime.cwd : null,
+			sessionId: targetSession.sessionId, module: "session.prompts" };
 		if (this.messageEditReservations.has(targetSession)) throw new Error("A message edit is in progress.");
 		if (markInFlight) this.promptSubmissionsInFlight.add(targetSession);
 		this.host.setSessionActivity("running");
 
 		try {
-			const runtime = this.host.runtime();
 			if (runtime?.session === targetSession) await this.host.awaitCurrentSessionExtensions(runtime);
 
 			const opts: { streamingBehavior?: "steer" | "followUp"; images?: ImageContent[] } = {};
 			if (targetSession.isStreaming) opts.streamingBehavior = options.streamingBehavior ?? "steer";
 			if (message.images.length > 0) opts.images = message.images;
 			await targetSession.prompt(message.promptText, Object.keys(opts).length > 0 ? opts : undefined);
+		} catch (error) {
+			logOperationFailure("prompt:failed", error, logContext);
+			throw error;
 		} finally {
 			if (markInFlight) this.promptSubmissionsInFlight.delete(targetSession);
 

@@ -17,6 +17,7 @@ describe("desktop config", () => {
     const defaults = resolveDesktopPreferences(undefined, undefined);
     expect(defaults.externalEditor).toBeUndefined();
     expect(defaults.notificationsEnabled).toBe(true);
+    expect(defaults.soundOnlyEnabled).toBe(false);
     expect(defaults.gitCiFixModelRef).toBeUndefined();
     expect(defaults.knowledgeReviewModelRef).toBeUndefined();
     expect(EXTERNAL_EDITOR_OPTIONS).toContainEqual({ value: "gram", label: "Gram" });
@@ -36,6 +37,17 @@ describe("desktop config", () => {
       `{ "desktop": { "notifications": { "enabled": true } } }`,
     ).notificationsEnabled).toBe(true);
     expect(resolveDesktopPreferences(`{ "desktop": {} }`, undefined).notificationsEnabled).toBe(true);
+  });
+
+  it("defaults to macOS notifications and allows a project to override sound-only mode", () => {
+    const global = `{ "desktop": { "notifications": { "enabled": true, "usePix": true } } }`;
+    const project = `{ "desktop": { "notifications": { "usePix": false } } }`;
+    expect(resolveDesktopPreferences(global, undefined).soundOnlyEnabled).toBe(true);
+    expect(resolveDesktopPreferences(global, project).soundOnlyEnabled).toBe(false);
+    expect(resolveDesktopPreferences(global,
+      `{ "desktop": { "notifications": { "usePix": "no" } } }`,
+    ).soundOnlyEnabled).toBe(true);
+    expect(resolveDesktopPreferences(undefined, undefined).soundOnlyEnabled).toBe(false);
   });
 
   it("uses the project CI fix model over the global model and leaves it unset by default", () => {

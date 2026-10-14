@@ -21,8 +21,11 @@ const tools = (section: string, label: string, description = "", ...synonyms: st
 
 // This catalogue is deliberately authored independently of JSONC, schemas' values, and DOM text.
 export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
+  desktop("general", "Logs panel", "Show Logs in the sidebar to browse and monitor shared diagnostics. Off by default.", "logging", "errors", "логи", "журнал"),
   desktop("general", "Ignore context files", "Do not discover AGENTS.md or CLAUDE.md for Desktop sessions.", "agents", "claude"),
-  desktop("general", "System notifications", "Send native notifications while this Pix window is in the background.", "alerts"),
+  desktop("general", "Notifications", "Enable alerts for completed work, questions, pauses and errors.", "alerts", "system notifications"),
+  desktop("general", "Sound only (no popups)", "Play a short sound without Pix popups or macOS system notifications.", "audio", "sound", "звуковые уведомления", "уведомления"),
+  desktop("general", "Menu bar instead of Dock", "Show Pix in the macOS menu bar with a list of open windows. Restart Pix to apply.", "tray", "dock", "windows"),
   desktop("models", "Default model", "Provider/model identifier used for new Desktop sessions.", "model picker"),
   desktop("models", "Default thinking", "Thinking budget applied when a new session starts.", "reasoning"),
   desktop("models", "Default fallbacks", "Ordered models tried after the default model.", "fallback models"),
@@ -98,6 +101,9 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
   tools("dcp", "Iteration nudge threshold", "Tool calls before nudging to compress.", "reminder"),
   tools("dcp", "Nudge force", "Strength of compression nudges.", "reminder"),
   tools("dcp", "Protected tools", "Tool outputs protected from compression and pruning.", "preserve"),
+  tools("dcp", "Verbatim tool outputs", "Keep selected tool outputs exact during context pruning.", "protected tools", "preserve"),
+  tools("dcp", "Prevent emergency deletion", "Protect chosen tools from emergency pruning.", "protected tools", "DCP"),
+  tools("dcp", "Verbatim file patterns", "Keep matching file outputs verbatim during pruning.", "protected files", "preserve"),
   tools("dcp", "Protect tagged content", "Preserve tagged content during context pruning.", "preserve"),
   tools("dcp", "Protect user messages", "Preserve user messages during context pruning.", "preserve"),
   tools("dcp", "Auto candidates", "Enable automatic compression-candidate selection.", "compression"),

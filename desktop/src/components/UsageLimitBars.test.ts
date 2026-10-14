@@ -24,7 +24,8 @@ describe("UsageLimitBars", () => {
     expect(body).toContain("remaining</span>");
     expect(body).toContain("Resets in 2h0m");
     expect(body.match(/data-quota-calendar/g)).toHaveLength(1);
-    expect(body.match(/data-weekly-remaining-fill/g)).toHaveLength(8);
+    expect(body.match(/data-weekly-remaining-fill/g)).toHaveLength(1);
+    expect(body.match(/data-weekly-day-divider/g)).toHaveLength(7);
     expect(body).not.toContain("Resets in 2d0h");
     expect(body).not.toContain("Cached");
   });

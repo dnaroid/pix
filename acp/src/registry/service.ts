@@ -28,12 +28,11 @@ async function configure(ctx: RegistryContext): Promise<void> {
 	await saveRegistryConfig(remote, branch.trim() || "main");
 }
 
-async function projectKey(ctx: RegistryContext, executor: RegistryExecutor): Promise<void> {
-	let current = loadRegistryConfig(ctx.cwd).projectKey;
-	if (!current) {
-		try { current = await resolveProjectKey(executor, ctx.cwd); } catch { /* Manual key for non-Git workspaces. */ }
-	}
-	const key = await ctx.ui.input("Project registry key (empty uses Git origin)", current ?? "");
+async function projectKey(ctx: RegistryContext): Promise<void> {
+	// Do not offer an automatically generated key as a manual override: saving it
+	// explicitly would prevent a later Git origin from taking precedence.
+	const current = loadRegistryConfig(ctx.cwd).projectKey;
+	const key = await ctx.ui.input("Project registry key (empty uses Git origin or automatic key)", current ?? "");
 	if (key !== undefined) await saveProjectKeyConfig(ctx.cwd, key.trim() || undefined);
 }
 
@@ -83,7 +82,7 @@ export class DesktopRegistryService {
 		// Editors/dialogs must not hold the checkout lock or block background refreshes.
 		try {
 			if (request.action === "configure") await configure(ctx);
-			else if (request.action === "project-key") await projectKey(ctx, this.executor);
+			else if (request.action === "project-key") await projectKey(ctx);
 			else if (request.action === "tags") await tags(request, ctx, this.executor);
 		} catch (cause) { error = cause instanceof Error ? cause.message : String(cause); }
 		return withRegistryCache(async () => {

@@ -3,6 +3,8 @@ import { isRetryableAssistantError, type AssistantMessage } from "@earendil-work
 import type { ImageContent } from "../../input-editor.js";
 import type { ConversationViewport } from "../rendering/conversation-viewport.js";
 import { createId } from "../id.js";
+import { logPixEvent } from "../logger.js";
+import { logOperationFailure } from "../logging/operation-errors.js";
 import { extractImageContents, renderContent, renderUserMessageContent, stringifyUnknown } from "../rendering/message-content.js";
 import { assistantTerminalErrorText, customMessageEntry, extensionSessionEntry, loadSessionHistoryEntries, loadSessionHistoryEntriesAsync, type LoadOlderSessionHistoryOptions, type SessionHistoryOlderLoader } from "./session-history.js";
 import { sessionHistoryDisplayMessages, sessionHistoryDisplayMessagesFromEntries, sessionHistoryFullBranchEntries, sessionHistoryOlderMessagesReader } from "./pix-system-message.js";
@@ -379,6 +381,7 @@ export class AppSessionEventController {
 				});
 				break;
 			case "tool_execution_end":
+				if (event.isError) this.logSessionFailure("tool:failed", { toolName: event.toolName, toolCallId: event.toolCallId }, "warn");
 				this.host.setSessionActivity(this.host.runtime()?.session.isStreaming ? "running" : "idle");
 				this.recordToolWorkspaceMutation(event.toolCallId, event.toolName, event.result.details, event.isError);
 				if (this.currentUserEntryId) this.host.scheduleUserSessionEntryMetadataSync();
@@ -398,6 +401,7 @@ export class AppSessionEventController {
 				this.host.setStatus(`compacting (${event.reason})`);
 				break;
 			case "compaction_end": {
+				if (!event.result && !event.aborted) this.logSessionFailure("compaction:failed", { diagnostic: event.errorMessage });
 				this.host.setSessionActivity(this.host.runtime()?.session.isStreaming ? "running" : "idle");
 				this.host.restoreSessionStatus();
 				this.host.flushAutoUserMessages();
@@ -425,6 +429,7 @@ export class AppSessionEventController {
 				}
 
 				const session = this.host.runtime()?.session;
+				if (event.finalError !== "Retry cancelled") this.logSessionFailure("retry:failed", { diagnostic: event.finalError });
 				this.host.showToast(`Retry failed: ${event.finalError}`, "error", session
 					? { action: { label: "Retry", onSelect: () => this.retryFailedTurn(session) } }
 					: undefined);
@@ -438,6 +443,12 @@ export class AppSessionEventController {
 
 	private retryFailedTurn(session: AgentSession): void {
 		void this.retryFailedTurnAsync(session);
+	}
+
+	private logSessionFailure(event: string, details: Record<string, unknown>, level: "error" | "warn" = "error"): void {
+		const runtime = this.host.runtime();
+		logPixEvent(level, event, details, { project: runtime?.cwd ?? null,
+			...(runtime ? { sessionId: runtime.session.sessionId } : {}), module: "session.events" });
 	}
 
 	/**
@@ -483,6 +494,7 @@ export class AppSessionEventController {
 				display: false,
 			}, { triggerTurn: true });
 		} catch (error) {
+			logOperationFailure("retry:start-failed", error, { project: runtime.cwd, sessionId: session.sessionId, module: "session.events" });
 			if (this.isActiveRuntimeSession(runtime, session)) {
 				this.host.showToast(`Retry could not start: ${stringifyUnknown(error)}`, "error");
 			}
@@ -696,6 +708,7 @@ export class AppSessionEventController {
 			this.flushAssistantTextBuffer(true);
 			const terminalError = assistantTerminalErrorText(message);
 			if (terminalError && !this.currentAssistantTerminalErrorRendered) {
+				this.logSessionFailure("model:failed", { diagnostic: terminalError });
 				this.addEntry({ id: createId("error"), kind: "error", text: terminalError });
 				this.currentAssistantTerminalErrorRendered = true;
 				this.showManualRetryOnTerminalError(message as unknown as AssistantMessage);
@@ -827,6 +840,9 @@ export class AppSessionEventController {
 				this.host.setSessionActivity(this.host.runtime()?.session.isStreaming ? "running" : "idle");
 				break;
 			case "error": {
+				if (assistantEvent.error.stopReason === "error" && !this.currentAssistantTerminalErrorRendered) {
+					this.logSessionFailure("model:failed", { diagnostic: assistantEvent.error.errorMessage ?? assistantEvent.reason });
+				}
 				this.finishCurrentThinkingEntry();
 				this.flushAssistantTextBuffer(true);
 				this.host.setSessionActivity(this.host.runtime()?.session.isStreaming ? "running" : "idle");

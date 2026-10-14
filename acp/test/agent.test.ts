@@ -3041,6 +3041,43 @@ test("session/close cancels dialogs still waiting for an elicitation answer", as
 	assert.deepEqual(clients[0]!.uiResponses, [{ type: "extension_ui_response", id: "ui-5", cancelled: true }]);
 });
 
+test("a late elicitation rejection after session teardown is diagnostic-only, not a warning", async () => {
+	const warnings: string[] = [];
+	const debug: string[] = [];
+	const { adapter, clients } = createTestAdapter({
+		logger: {
+			...TEST_LOGGER,
+			warn: (message) => { warnings.push(message); },
+			debug: (message) => { debug.push(message); },
+		},
+	});
+	let rejectElicitation!: (error: Error) => void;
+	try {
+		await connect(adapter, async (cx) => {
+			await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, ...ELICITATION_CAPS });
+			const { sessionId } = await cx.buildSession("/tmp").start();
+			clients[0]!.emit({
+				type: "extension_ui_request",
+				id: "late-disconnected-dialog",
+				method: "select",
+				title: "Pick",
+				options: ["a", "b"],
+			});
+			await waitFor(() => adapter.getSession(sessionId)?.pendingDialogIds.has("late-disconnected-dialog") === true);
+			await cx.request("session/close", { sessionId });
+			rejectElicitation(new Error("ACP connection closed"));
+			await waitFor(() => debug.some(message => message.includes("elicitation/create abandoned")));
+			assert.equal(warnings.some(message => message.includes("elicitation/create failed")), false);
+		}, (app) => {
+			app.onRequest("elicitation/create", () => new Promise<CreateElicitationResponse>((_resolve, reject) => {
+				rejectElicitation = reject;
+			}));
+		});
+	} finally {
+		await adapter.dispose();
+	}
+});
+
 test("session/close leaves a pending questionnaire unanswered and stops RPC without abort", async () => {
 	const { adapter, clients } = createTestAdapter();
 	try {
@@ -4276,6 +4313,50 @@ test("Pix Desktop edit rewind uses the history-only bridge, never workspace undo
 		const result = await cx.request("pix/session/user_message_action", { sessionId: created.sessionId, entryId: "user-1", action: "rewind" });
 		assert.deepEqual(result, { status: "ok", editorText: "original" });
 		assert.equal(pi.promptCalls.length, 1);
+	});
+});
+
+test("Pix Desktop forwards a committed rewind retry to the bridge but keeps Copy/Undo branch-only", async () => {
+	const harness = createTestAdapter();
+	await connectAs(harness.adapter, "pix-desktop", async (cx) => {
+		const created = await cx.request("session/new", { cwd: "/tmp/edit-retry", mcpServers: [] }) as { sessionId: string };
+		const pi = harness.clients[0]!;
+		pi.entriesState = { entries: [
+			{ type: "message", id: "parent", parentId: null, message: { role: "assistant", content: [] } },
+			{ type: "message", id: "user-1", parentId: "parent", message: { role: "user", content: "original" } },
+			{ type: "message", id: "answer", parentId: "user-1", message: { role: "assistant", content: [] } },
+			{ type: "custom", id: "dcp", parentId: "parent" },
+		], leafId: "dcp" };
+		const request = (entryId: string, action: string) => cx.request("pix/session/user_message_action", { sessionId: created.sessionId, entryId, action });
+		for (const action of ["copy", "undo"]) await assert.rejects(request("user-1", action), /not on the active session branch/u);
+		await assert.rejects(request("unknown", "rewind"), /not on the active session branch/u);
+		await assert.rejects(request("answer", "rewind"), /not on the active session branch/u);
+		pi.state.isStreaming = true;
+		await assert.rejects(request("user-1", "rewind"), /session is busy/u);
+		pi.state.isStreaming = false;
+		pi.state.isCompacting = true;
+		await assert.rejects(request("user-1", "rewind"), /session is busy/u);
+		pi.state.isCompacting = false;
+		pi.state.pendingMessageCount = 1;
+		await assert.rejects(request("user-1", "rewind"), /messages are queued/u);
+		pi.state.pendingMessageCount = 0;
+		await assert.rejects(request("user-1", "rewind"), /workspace undo bridge is unavailable/u);
+		assert.equal(pi.promptCalls.length, 0, "missing bridge must not dispatch a model prompt");
+		pi.getCommands = async () => [{ name: "__pix-message-rewind", source: "extension" }];
+		pi.promptHandledWithoutRun = true;
+		let bridgeStatus = "ok";
+		pi.promptHook = async (message) => {
+			assert.match(message, /^\/__pix-message-rewind /u);
+			const payload = JSON.parse(message.slice(message.indexOf(" ") + 1)) as { requestId: string; targetEntryId: string };
+			assert.equal(payload.targetEntryId, "user-1");
+			pi.emit({ type: "extension_ui_request", id: "retry-result", method: "setWidget", widgetKey: "pix.session-state",
+				widgetLines: ["pix.workspace-undo-result", JSON.stringify({ requestId: payload.requestId, status: bridgeStatus,
+					...(bridgeStatus === "error" ? { error: "This user message is no longer on the active branch." } : {}) })] } as PiEvent);
+		};
+		assert.deepEqual(await request("user-1", "rewind"), { status: "ok", editorText: "original" });
+		bridgeStatus = "error";
+		await assert.rejects(request("user-1", "rewind"), /no longer on the active branch/u, "ACP must not bypass the bridge's live ancestry check");
+		assert.equal(pi.promptCalls.length, 2);
 	});
 });
 

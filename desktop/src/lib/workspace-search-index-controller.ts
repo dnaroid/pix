@@ -5,7 +5,6 @@ import { createSearchIndexFreshness } from "./search-index-freshness";
 import { createSearchIndexController, type SearchIndexViewState } from "./search-index-controller";
 import type { SearchIndexStatus, SemanticConsent } from "./search-index-status";
 import { SETTINGS_SEARCH_CATALOG } from "./settings-search-catalog";
-import type { SearchIndexHistory } from "./search-index-history";
 import { readSearchSourceSelection, setSearchSourceSelection, SEARCH_SOURCE_SELECTION_CHANGED } from "./search-source-selection";
 import { runManagedIndex, type ManualRequest, type ManualReply } from "../../../external/pi-tools-suite/src/project-search/managed-index-run.mjs";
 
@@ -13,7 +12,6 @@ export function createWorkspaceSearchIndexController(
   workspace: string,
   client: Pick<AcpClient, "searchConfig" | "searchIndex"> | null,
   onChange: (state: SearchIndexViewState) => void,
-  history?: SearchIndexHistory,
 ) {
   const settings = SETTINGS_SEARCH_CATALOG.map(({ id, section, label, description, synonyms }) =>
     ({ id, section, label, description: description ?? "", synonyms: [...synonyms] }));
@@ -36,7 +34,7 @@ export function createWorkspaceSearchIndexController(
     },
   });
   const controller = createSearchIndexController({
-    workspace, history,
+    workspace,
     readStores: () => invoke<SearchIndexStatus>("search_index_status", { workspace }),
     readConsent: () => invoke<SemanticConsent>("native_repository_semantic_config"),
     readActivity: client ? signal => client.searchConfig(workspace, { includeSourceStatus: true }, signal) : undefined,

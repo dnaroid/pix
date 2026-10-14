@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { projectFolderHue } from "./lib/recent-projects";
   import { createComposerMessageEdit } from "./app/composer-message-edit.svelte";
   import { onDestroy, onMount, tick, untrack } from "svelte";
   import { invoke, isTauri } from "@tauri-apps/api/core";
@@ -22,6 +23,7 @@
   import { createTranscriptAttachmentController } from "./app/transcript-attachments";
   import { createTranscriptScrollController } from "./app/transcript-scroll.svelte";
   import { createErrorState } from "./app/error-state.svelte";
+  import { createDiagnosticLogger } from "./lib/diagnostic-logging";
   import { createActiveSessionState } from "./app/active-session-state.svelte";
   import { createDesktopSessionServices } from "./app/desktop-session-services";
   import { createDesktopProjectServices } from "./app/desktop-project-services";
@@ -43,9 +45,11 @@
   import { createDesktopPresentationState } from "./app/desktop-presentation-state.svelte";
   import { createDesktopRootEffects } from "./app/desktop-root-effects.svelte";
   import { createSessionTabAttentionStore } from "./app/session-tab-attention.svelte";
+  import { createDesktopTrayAttention } from "./lib/desktop-tray-attention";
   import { createDesktopViewModelServices } from "./app/desktop-view-model-services";
   import {
     createDesktopAgentNotificationCoordinator,
+    desktopWindowForeground,
     createDesktopNotificationService,
   } from "./lib/desktop-notifications";
   import { resolveDesktopPreferences } from "./lib/desktop-config";
@@ -119,9 +123,10 @@
   let localMessageId = 0;
   let onSessionActivityChanged = (_sessionId: string): void => {};
 
-  const errors = createErrorState();
+  const diagnosticLogger = createDiagnosticLogger(() => ({ workspace, sessionId: activeSessionId }));
+  const errors = createErrorState(diagnosticLogger.report);
   const reportError = errors.report;
-  const updater = createDesktopUpdater();
+  const updater = createDesktopUpdater(undefined, diagnosticLogger.record);
   const desktopWatchRestart = createDesktopWatchRestart();
 
   const transcriptScroll = createTranscriptScrollController({
@@ -144,6 +149,7 @@
     requestElicitation: (request) => requestElicitation(request),
     setErrorMessage: errors.set,
     reportError,
+    recordDiagnostic: diagnosticLogger.record,
   });
   const client = $derived(connection.client);
   const status = $derived(connection.status);
@@ -231,9 +237,14 @@
   const sessionCatalog = sessionServices.catalog;
   const sessions = $derived(sessionCatalog.sessions);
   const sessionTabAttention = createSessionTabAttentionStore();
+  const trayAttention = createDesktopTrayAttention({
+    isSessionVisible: (sessionId) => desktopWindowForeground()
+      && (sessionId === null || activeWorkbenchTabId === workbenchSessionTabId(sessionId)),
+  });
 
-  const nativeNotifications = createDesktopNotificationService({
-    enabled: async () => {
+  let pixSoundErrorReported = false;
+  const desktopNotifications = createDesktopNotificationService({
+    preferences: async () => {
       const notificationWorkspace = workspace;
       const [globalConfig, projectConfig] = await Promise.all([
         invoke<{ content: string }>("read_user_config", { kind: "desktop" }).catch(() => undefined),
@@ -244,11 +255,25 @@
             }).catch(() => undefined)
           : Promise.resolve(undefined),
       ]);
-      return resolveDesktopPreferences(globalConfig?.content, projectConfig?.content).notificationsEnabled;
+      return resolveDesktopPreferences(globalConfig?.content, projectConfig?.content);
+    },
+    isActiveSession: (sessionId) => sessionId !== null
+      && activeWorkbenchTabId === workbenchSessionTabId(sessionId),
+    playPixSound: async () => {
+      if (!isTauri()) return;
+      try {
+        await invoke("desktop_play_notification_sound");
+      } catch (error) {
+        if (!pixSoundErrorReported) {
+          pixSoundErrorReported = true;
+          diagnosticLogger.report(error, "notification:sound-failed");
+        }
+      }
     },
   });
   const agentNotifications = createDesktopAgentNotificationCoordinator({
-    notifications: nativeNotifications,
+    notifications: desktopNotifications,
+    attention: trayAttention,
     sessionTitle: (sessionId) => sessionCatalog.sessions.find((session) => session.sessionId === sessionId)?.title ?? undefined,
     agentState: (sessionId) => promptRuntime.agentState(sessionId),
     isPromptRunning: (sessionId) => promptRuntime.isRunning(sessionId),
@@ -370,7 +395,7 @@
     setOperationRunning: (running) => operationRunning = running,
     promptRunning: () => {
       const id = activeSessionState.sessionId;
-      return promptRunning || Boolean(id && promptRuntime.queueItemsBySession.get(id)?.some((item) => item.source === "auto" || item.source === "deferred"));
+      return Boolean(id && userMessagePromptRunning(id));
     },
     sessionHistoryLoading: () => sessionHistoryLoading,
     sessions: sessionServices,
@@ -640,11 +665,13 @@
   });
   const workbenchController = workbenchGitServices.workbench;
 
-  nativeNotifications.setActivationHandler(async (sessionId) => {
+  async function activateNotificationSession(sessionId: string): Promise<void> {
     sessionTabAttention.clear(sessionId);
     await sessionTabController.loadSession(sessionId);
     activeWorkbenchTabId = workbenchSessionTabId(sessionId);
-  });
+  }
+
+  desktopNotifications.setActivationHandler(activateNotificationSession);
 
   const searchNavigation = createSearchNavigation({
     workspace: () => workspace,
@@ -721,6 +748,10 @@
   const tabSessions = $derived(presentationState.tabSessions);
   const activeConversationWorkbenchTabId = $derived(presentationState.activeConversationWorkbenchTabId);
   const attachmentDraftKey = $derived(presentationState.attachmentDraftKey);
+  function userMessagePromptRunning(sessionId: string): boolean {
+    return promptRuntime.isRunning(sessionId)
+      || Boolean(promptRuntime.queueItemsBySession.get(sessionId)?.some((item) => item.source === "auto" || item.source === "deferred"));
+  }
   $effect(() => {
     const currentClient = client;
     const openDraftKeys = tabSessions.map((session) => `${workspace}\0${session.sessionId}`);
@@ -735,7 +766,9 @@
     setPromptText: (text) => promptText = text,
     setPromptAttachments: (attachments) => promptAttachments = attachments,
     invalidateAttachments: attachmentDrafts.invalidate,
-    busy: () => sessionMutationRunning || anyPromptRunning || sessionServices.history.loading,
+    operationRunning: () => sessionMutationRunning,
+    promptRunning: userMessagePromptRunning,
+    historyLoading: () => sessionServices.history.loading,
     setOperationRunning: (value) => operationRunning = value,
     prepare: promptActionServices.prepareEditedMessage,
     markHistoryFullyLoaded: sessionServices.history.markFullyLoaded,
@@ -823,7 +856,10 @@
     activeWorkbenchTabId: () => activeWorkbenchTabId,
     setActiveWorkbenchTabId: (id) => activeWorkbenchTabId = id,
     workbenchTabs: () => workbenchTabs,
-    markSessionTabViewed: sessionTabAttention.clear,
+    markSessionTabViewed: (sessionId) => {
+      sessionTabAttention.clear(sessionId);
+      trayAttention.acknowledgeVisible();
+    },
   });
   const viewModels = createDesktopViewModelServices({
     openBtw: (sessionId) => openBtw(sessionId).catch(reportError),
@@ -876,9 +912,11 @@
     revealProjectEntry: async (path) => { await workspaceSidebar?.revealProjectEntry(path); },
   }));
   onMount(desktopLifecycle.start);
+  onMount(diagnosticLogger.start);
   onDestroy(headsUp.reset);
   onDestroy(btw.reset);
-  onMount(nativeNotifications.start);
+  onMount(desktopNotifications.start);
+  onMount(trayAttention.start);
   onMount(() => desktopUpdaterEnabled ? updater.start() : updater.dispose);
   onMount(desktopWatchRestart.start);
 
@@ -896,7 +934,11 @@
 <svelte:window onkeydown={handleWindowKeydown} />
 <svelte:head><title>Pix Desktop</title></svelte:head>
 
-<div class="grid h-full grid-rows-[36px_minmax(0,1fr)_28px] bg-background text-foreground">
+<div class="desktop-workspace-chrome grid h-full grid-rows-[36px_minmax(0,1fr)_28px] bg-background text-foreground"
+  class:project-window-titlebar={Boolean(sidebarViewModel.projectSwitcher?.workspace)}
+  style:--project-window-titlebar-color={sidebarViewModel.projectSwitcher?.projectColors.get(sidebarViewModel.projectSwitcher.workspace)}
+  style:--project-window-titlebar-hue={sidebarViewModel.projectSwitcher?.workspace ? projectFolderHue(sidebarViewModel.projectSwitcher.workspace) : undefined}
+>
   <DesktopTitlebar
     {isMacOS}
     restartAvailable={desktopWatchRestart.available}

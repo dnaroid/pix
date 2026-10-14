@@ -6,7 +6,6 @@
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import type { DesktopBuildStatus } from "../app/desktop-watch-restart.svelte";
   import type { ComponentProps } from "svelte";
-  import { projectFolderHue } from "../lib/recent-projects";
   import ProjectSwitcher from "./ProjectSwitcher.svelte";
   import SessionSelector from "./SessionSelector.svelte";
   import WorkbenchTabs from "./WorkbenchTabs.svelte";
@@ -33,7 +32,6 @@
     selector: ComponentProps<typeof SessionSelector> | null;
   } = $props();
 
-  const projectWorkspace = $derived(projectSwitcher?.workspace ?? "");
   const buildHints: Record<DesktopBuildStatus, string> = {
     idle: "",
     queued: "New build queued",
@@ -41,21 +39,10 @@
     failed: "Build failed — see the pix-watch terminal for details",
   };
   const buildHint = $derived(buildHints[buildStatus]);
-  const projectTitlebarColor = $derived(
-    projectWorkspace ? projectSwitcher?.projectColors.get(projectWorkspace) : undefined,
-  );
-  const projectTitlebarHue = $derived(
-    projectWorkspace ? projectFolderHue(projectWorkspace) : undefined,
-  );
 </script>
 
 <header
-  class={[
-    "flex min-w-0 select-none items-stretch border-b border-border bg-window-titlebar text-chrome-foreground",
-    projectWorkspace && "project-window-titlebar",
-  ]}
-  style:--project-window-titlebar-color={projectTitlebarColor}
-  style:--project-window-titlebar-hue={projectTitlebarHue}
+  class="flex min-w-0 select-none items-stretch border-b border-border bg-window-titlebar text-chrome-foreground"
   data-tauri-drag-region
 >
   <div class={["shrink-0", isMacOS ? "w-[76px]" : "w-3"]} data-tauri-drag-region></div>
@@ -113,29 +100,5 @@
 </header>
 
 <style>
-  .project-window-titlebar {
-    background-color: color-mix(
-      in srgb,
-      var(
-          --project-window-titlebar-color,
-          oklch(0.62 0.15 var(--project-window-titlebar-hue))
-        )
-        8%,
-      var(--window-titlebar)
-    );
-  }
-
-  @media (prefers-color-scheme: dark) {
-    .project-window-titlebar {
-      background-color: color-mix(
-        in srgb,
-        var(
-            --project-window-titlebar-color,
-            oklch(0.74 0.13 var(--project-window-titlebar-hue))
-          )
-          8%,
-        var(--window-titlebar)
-      );
-    }
-  }
+  header { background-color: var(--workspace-chrome-background, var(--window-titlebar)); }
 </style>

@@ -4,6 +4,7 @@ import { monitorLsp } from "./runtime-control";
 import { createLspPanel } from "./renderer";
 import { attachSharedLsp } from "./shared-manager";
 import { lspProjectIdentity } from "./broker-identity";
+import { diagnosticErrorType, suiteDiagnostics } from "../lib/suite-diagnostics.js";
 
 export { LspManager, getGlobalLspManager } from "./manager";
 export { getEventPaths, isMutationToolResult } from "./mutation-events";
@@ -65,7 +66,15 @@ export default function piLspExtension(pi: ExtensionAPI) {
     if (epoch !== sessionEpoch) return;
     if (process.platform === "win32") return;
     try { await attachSharedLsp(ctx); }
-    catch (error) { if (epoch === sessionEpoch) ctx.ui.notify(`LSP broker: ${(error as Error).message}`, "warning"); }
+    catch (error) {
+      if (epoch === sessionEpoch) {
+        if (!ctx.signal?.aborted && diagnosticErrorType(error) !== "AbortError") {
+          suiteDiagnostics.report("warn", "lsp", "broker-attach-failed", ctx.cwd,
+            { errorType: diagnosticErrorType(error) });
+        }
+        ctx.ui.notify(`LSP broker: ${(error as Error).message}`, "warning");
+      }
+    }
   });
   pi.on("session_shutdown", async (_event, ctx) => {
     sessionEpoch += 1;

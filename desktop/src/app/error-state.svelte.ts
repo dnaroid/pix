@@ -1,4 +1,4 @@
-export function createErrorState() {
+export function createErrorState(onReport: (error: unknown) => void = () => {}) {
   let message = $state<string | null>(null);
 
   function set(next: string | null): void {
@@ -10,6 +10,7 @@ export function createErrorState() {
   }
 
   function report(error: unknown): void {
+    onReport(error);
     message = error instanceof Error ? error.message : String(error);
   }
 

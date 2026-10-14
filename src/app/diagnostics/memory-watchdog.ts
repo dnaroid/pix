@@ -11,7 +11,7 @@ import { TuiMemoryTrace } from "./tui-memory-trace.js";
 export const MEMORY_WATCHDOG_SAMPLE_INTERVAL_MS = 15_000;
 /** Samples kept for the report timeline (one hour at the sample interval). */
 export const MEMORY_WATCHDOG_HISTORY_SAMPLES = 240;
-/** Every Nth sample is also written to pix.log so gradual growth stays visible without a report. */
+/** Every Nth sample is also written to the shared JSONL diagnostics directory so gradual growth stays visible. */
 export const MEMORY_WATCHDOG_LOG_EVERY_SAMPLES = 20;
 /** Reports (and their heap snapshots) kept on disk; older ones are pruned. */
 export const MEMORY_WATCHDOG_MAX_REPORTS = 5;
@@ -81,8 +81,8 @@ const defaultDeps: MemoryWatchdogDeps = {
 	clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 	reportDir: () => getMemoryReportDir(),
 	writeReport: async (path, contents) => {
-		await mkdir(dirname(path), { recursive: true });
-		await writeFile(path, contents, "utf8");
+		await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+		await writeFile(path, contents, { encoding: "utf8", mode: 0o600 });
 	},
 	listReportFiles: async (dir) => await readdir(dir).catch(() => []),
 	removeFile: async (path) => {
@@ -134,6 +134,10 @@ export class MemoryWatchdog {
 		deps: Partial<MemoryWatchdogDeps> = {},
 	) {
 		this.deps = { ...defaultDeps, ...deps };
+		if (!deps.log) this.deps.log = (level, event, details) => {
+			const app = safeCall(() => this.host.appContext());
+			logPixEvent(level, event, details, { project: typeof app?.cwd === "string" ? app.cwd : null, module: "memory-watchdog" });
+		};
 		this.config = { ...config };
 		this.nextReportBytes = thresholdBytes(config);
 		this.startedAt = this.deps.now();

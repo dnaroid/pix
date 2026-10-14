@@ -4,7 +4,7 @@ import { indexSessionChunks, searchSessionChunks, listIndexedSessions, type Chun
 import { SESSION_CHUNK_FORMAT } from "./session-chunk-store.js";
 import { semanticEmbeddingIdentity, type SemanticEmbeddingConfig } from "./config.js";
 import type { SessionSearchHit } from "./contract.js";
-import { logSearchDiagnostic } from "./search-diagnostics.js";
+import { classifyIndexFailure, logBackgroundIndexFailure, logSearchDiagnostic } from "./search-logging.js";
 import { SessionIdlePolicy, IdleSessionSelection } from "./session-idle.js";
 import { automaticWorkPaused, SearchWorkNeedsContinueError } from "./source-work.js";
 import type { BackgroundSessionRecord } from "./background-session-discovery.js";
@@ -25,37 +25,53 @@ export class DesktopSessionChunks {
   }) {
     const signal = AbortSignal.any([this.owner.signal,options.signal]);
     const selection = new IdleSessionSelection(options.policy);
+    let phase = "policy";
     this.sync = new SessionChunkSync(async owned => {
+      phase = "policy";
       if (await automaticWorkPaused(cwd,"sessions",owned)) { selection.reset(); return; }
+      phase = "embedding";
       const embedding = await options.embedding(owned);
       const identity = `${SESSION_CHUNK_FORMAT}:${embedding?.identity ?? "lexical-only"}`;
+      phase = "sweep";
       const pass = await beginSessionSweep(cwd,identity,owned);
       selection.useCache(`${identity}:${pass.cacheRevision}`);
+      phase = "discovery";
       const records = await options.discoverBackground(owned);
+      phase = "selection";
       const candidates = await selection.select(records.map(r => ({id:r.piSessionId,path:r.piSessionPath,
         createdAt:r.createdAt,changedAt:Date.parse(r.updatedAt)||0})),owned,pass.since);
       let complete = selection.complete;
+      let failedIndexing = false;
       for (const candidate of candidates) {
         try {
           if (!await options.policy.eligible(candidate,owned)) { complete = false; continue; }
           const record = records.find(r => r.piSessionId === candidate.id && r.piSessionPath === candidate.path)!;
+          phase = "title";
           await options.titles(record,owned);
+          phase = "indexing";
           const result = await indexSessionChunks(cwd,[candidate],{signal:owned,...(embedding?{embedding}:{}),drain:true,
             eligible:(item,current)=>options.policy.eligible(item,current)});
           if (result.complete) selection.succeeded(candidate);
           else complete = false;
-          if(!result.complete && !result.deferred) options.failed(new Error("Some session transcripts could not be indexed; local results may be incomplete"));
+          if(!result.complete && !result.deferred) {
+            failedIndexing = true;
+            options.failed(new Error("Some session transcripts could not be indexed; local results may be incomplete"));
+          }
         } catch (error) {
           complete = false;
           owned.throwIfAborted();
+          failedIndexing = true;
           options.failed(error);
           const paused = error instanceof SearchWorkNeedsContinueError;
           await logSearchDiagnostic(cwd,{event:"session_indexing_stopped",sessionId:candidate.id,
-            reason:paused?"needs_continue":"candidate_failed",message:"Session indexing incomplete or unavailable; local search remains available."});
+            reason:paused?"needs_continue":"candidate_failed",...classifyIndexFailure(error),
+            message:"Session indexing incomplete or unavailable; local search remains available."});
           if (paused) { selection.reset(); break; }
         }
       }
       owned.throwIfAborted();
+      if (failedIndexing) this.sync.noteIncomplete();
+      phase = "finalize";
       if ((await options.embedding(owned))?.identity !== embedding?.identity) { selection.reset(); return; }
       if (embedding && !await embedding.authorized(owned)) { selection.reset(); return; }
       if (complete) await completeSessionSweep(cwd,pass,owned);
@@ -63,7 +79,7 @@ export class DesktopSessionChunks {
       if (pass.incarnation && after.incarnation !== pass.incarnation) selection.reset();
       selection.cacheRevision = `${identity}:${after.cacheRevision}`;
     },signal,error => {
-      void logSearchDiagnostic(cwd,{event:"session_indexing_stopped",message:"Session indexing incomplete or unavailable; local search remains available."});
+      logBackgroundIndexFailure(cwd,error,phase);
       options.failed(error);
     });
   }

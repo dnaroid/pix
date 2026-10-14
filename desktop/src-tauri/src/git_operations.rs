@@ -6,6 +6,7 @@ use super::{
     run_blocking, truncate_git_diff, validate_git_relative_path, MAX_GIT_DIFF_BYTES,
 };
 use serde::Serialize;
+use serde_json::json;
 use std::{
     io::{BufRead, BufReader, Read},
     path::Path,
@@ -39,12 +40,12 @@ pub(crate) struct GitStashEntry {
 
 #[tauri::command]
 pub(crate) async fn git_fetch(workspace: String) -> Result<(), String> {
-    run_blocking(move || fetch_from(Path::new(&workspace))).await
+    logged_git_mutation(workspace, "git:fetch", fetch_from).await
 }
 
 #[tauri::command]
 pub(crate) async fn git_pull(workspace: String) -> Result<(), String> {
-    run_blocking(move || pull_from(Path::new(&workspace))).await
+    logged_git_mutation(workspace, "git:pull", pull_from).await
 }
 
 /// Result of the one-click "Update project" command.
@@ -59,7 +60,7 @@ pub(crate) struct GitUpdateResult {
 
 #[tauri::command]
 pub(crate) async fn git_update(workspace: String) -> Result<GitUpdateResult, String> {
-    run_blocking(move || update_from(Path::new(&workspace))).await
+    logged_git_mutation(workspace, "git:update", update_from).await
 }
 
 #[tauri::command]
@@ -170,17 +171,43 @@ pub(crate) async fn git_stash_list(workspace: String) -> Result<Vec<GitStashEntr
 
 #[tauri::command]
 pub(crate) async fn git_stash_save(workspace: String) -> Result<(), String> {
-    run_blocking(move || stash_save_from(Path::new(&workspace))).await
+    logged_git_mutation(workspace, "git:stash-save", stash_save_from).await
 }
 
 #[tauri::command]
 pub(crate) async fn git_stash_apply(workspace: String, reference: String) -> Result<(), String> {
-    run_blocking(move || stash_apply_from(Path::new(&workspace), &reference)).await
+    logged_git_mutation(workspace, "git:stash-apply", move |root| {
+        stash_apply_from(root, &reference)
+    })
+    .await
 }
 
 #[tauri::command]
 pub(crate) async fn git_discard_file(workspace: String, path: String) -> Result<(), String> {
-    run_blocking(move || discard_file_from(Path::new(&workspace), &path)).await
+    logged_git_mutation(workspace, "git:discard-file", move |root| {
+        discard_file_from(root, &path)
+    })
+    .await
+}
+
+/// Do not log Git command arguments, file paths, ref names or command output.
+async fn logged_git_mutation<T: Send + 'static>(
+    workspace: String,
+    event: &'static str,
+    operation: impl FnOnce(&Path) -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    run_blocking(move || {
+        let result = operation(Path::new(&workspace));
+        crate::logging::record(
+            if result.is_ok() { "info" } else { "warn" },
+            "git",
+            event,
+            json!({ "ok": result.is_ok() }),
+            Some(&workspace),
+        );
+        result
+    })
+    .await
 }
 
 fn fetch_from(workspace: &Path) -> Result<(), String> {

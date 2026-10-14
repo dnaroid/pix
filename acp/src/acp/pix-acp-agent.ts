@@ -82,7 +82,8 @@ import {
 	type RpcExtensionUIResponse,
 	type SessionInfo as PiSessionInfo,
 } from "@earendil-works/pi-coding-agent";
-import type { Logger } from "../logging.js";
+import { acpFileLogger, withPixLogContext, type Logger } from "../logging.js";
+import { reportRequestFailure, withLoggedRequest } from "./request-logging.js";
 import { DesktopRegistryService } from "../registry/service.js";
 import type { RegistryContext } from "../registry/context.js";
 import { stringifyUnknown } from "../stringify-unknown.js";
@@ -600,6 +601,10 @@ export class PixAcpAgent {
 		const backgroundSessions = new BackgroundSessionDiscovery(cwd => this.sessionMap.list(cwd));
 		this.backgroundSearchSessions = backgroundSessions;
 		this.searchService = options.searchService ?? new DesktopSearchService({
+			onIndexDiagnostic: ({ cwd, source, complete, indexed, total, durationMs }) => {
+				void acpFileLogger.log(complete ? "info" : "warn", complete ? "search:index-completed" : "search:index-incomplete",
+					{ source, complete, indexed, total, durationMs }, { project: cwd, module: "search.index" });
+			},
 			sessionRecords: (cwd) => this.sessionMap.list(cwd),
 			discoverBackground: (cwd, signal) => backgroundSessions.list(cwd, signal),
 			sessionSnapshot: (cwd, signal) => backgroundSessions.snapshot(cwd, signal),
@@ -673,7 +678,7 @@ export class PixAcpAgent {
 		this.claudeCodeLoginNudge = options.claudeCodeLoginNudge ?? launchClaudeCodeLoginNudge;
 		this.parseAnthropicUsageHeaders = options.parseAnthropicUsageHeaders ?? parsePixAnthropicUsageHeaders;
 		this.app = agent({ name: "pix-acp" })
-			.onRequest("initialize", (ctx) => {
+			.onRequest("initialize", (ctx) => this.withRequestLogging("initialize", ctx.params, ctx.signal, () => {
 				this.clientCapabilities = ctx.params.clientCapabilities;
 				this.clientName = typeof ctx.params.clientInfo?.name === "string"
 					? ctx.params.clientInfo.name
@@ -694,33 +699,35 @@ export class PixAcpAgent {
 						},
 					},
 				};
-			})
+			}))
 			.onRequest("authenticate", () => ({}))
-			.onRequest(SEARCH_COMMITS_METHOD, parseCommitSearchRequest, async (ctx) => {
+			.onRequest(SEARCH_COMMITS_METHOD, parseCommitSearchRequest, async (ctx) => this.withRequestLogging(SEARCH_COMMITS_METHOD, ctx.params, ctx.signal, async () => {
 				if (this.clientName !== "pix-desktop") throw new RequestError(ERROR_SERVER, "Desktop search unavailable");
 				try { return await this.commitSearchService.query(ctx.params, ctx.signal); }
 				catch (error) {
 					if (ctx.signal.aborted) throw error;
 					throw new RequestError(ERROR_SERVER, "Commit search unavailable");
 				}
-			})
-			.onRequest(SEARCH_INTENT_METHOD, parseSearchIntentRequest, async (ctx) => {
+			}))
+			.onRequest(SEARCH_INTENT_METHOD, parseSearchIntentRequest, async (ctx) => this.withRequestLogging(SEARCH_INTENT_METHOD, ctx.params, ctx.signal, async () => {
 				if (this.clientName !== "pix-desktop") throw new RequestError(ERROR_SERVER, "Desktop search unavailable");
 				try { return await this.searchIntentService.classify(ctx.params.query, ctx.signal); }
 				catch (error) {
 					if (ctx.signal.aborted) throw error;
+					reportRequestFailure(this.options.logger, SEARCH_INTENT_METHOD, error, ctx.signal);
 					return { intent: "search" as const, fallback: true };
 				}
-			})
-			.onRequest(TASK_TYPE_CLASSIFY_METHOD, parseTaskTypeClassifyRequest, async (ctx) => {
+			}))
+			.onRequest(TASK_TYPE_CLASSIFY_METHOD, parseTaskTypeClassifyRequest, async (ctx) => this.withRequestLogging(TASK_TYPE_CLASSIFY_METHOD, ctx.params, ctx.signal, async () => {
 				if (this.clientName !== "pix-desktop") throw new RequestError(ERROR_SERVER, "Desktop task classification unavailable");
 				try { return await this.taskTypeClassifier.classify(ctx.params.text, ctx.signal); }
 				catch (error) {
 					if (ctx.signal.aborted) throw error;
+					reportRequestFailure(this.options.logger, TASK_TYPE_CLASSIFY_METHOD, error, ctx.signal);
 					return { type: "feature" as const, fallback: true };
 				}
-			})
-			.onRequest(SEARCH_RAG_METHOD, parseRagRequest, async (ctx) => {
+			}))
+			.onRequest(SEARCH_RAG_METHOD, parseRagRequest, async (ctx) => this.withRequestLogging(SEARCH_RAG_METHOD, ctx.params, ctx.signal, async () => {
 				if (this.clientName !== "pix-desktop") throw new RequestError(ERROR_SERVER, "Desktop search unavailable");
 				try {
 					return await this.ragService.generate(ctx.params, async update => {
@@ -731,169 +738,132 @@ export class PixAcpAgent {
 					if (ctx.signal.aborted) throw error;
 					throw new RequestError(ERROR_SERVER, error instanceof Error ? error.message : String(error));
 				}
-			})
-			.onRequest(SEARCH_QUERY_METHOD, parseSearchQueryRequest, async (ctx) => {
+			}))
+			.onRequest(SEARCH_QUERY_METHOD, parseSearchQueryRequest, async (ctx) => this.withRequestLogging(SEARCH_QUERY_METHOD, ctx.params, ctx.signal, async () => {
 				if (this.clientName !== "pix-desktop") throw new RequestError(ERROR_SERVER, "Desktop search unavailable");
 				try { return await this.searchService.query(ctx.params, ctx.signal); }
 				catch (error) {
 					if (error instanceof SearchUnavailableError) throw new RequestError(ERROR_SERVER, error.message);
 					throw error;
 				}
-			})
-			.onRequest(SEARCH_TASKS_METHOD, parseSemanticTasksRequest, async (ctx) => {
+			}))
+			.onRequest(SEARCH_TASKS_METHOD, parseSemanticTasksRequest, async (ctx) => this.withRequestLogging(SEARCH_TASKS_METHOD, ctx.params, ctx.signal, async () => {
 				if (this.clientName !== "pix-desktop") throw new RequestError(ERROR_SERVER, "Desktop search unavailable");
 				try { return await this.searchService.queryTasks(ctx.params, ctx.signal); }
 				catch (error) {
 					if (ctx.signal.aborted) throw error;
 					throw new RequestError(ERROR_SERVER, "Semantic task search unavailable; local task search remains available");
 				}
-			})
-			.onRequest(SEARCH_CONFIG_METHOD, parseSearchConfigRequest, async (ctx) => {
+			}))
+			.onRequest(SEARCH_CONFIG_METHOD, parseSearchConfigRequest, async (ctx) => this.withRequestLogging(SEARCH_CONFIG_METHOD, ctx.params, ctx.signal, async () => {
 				if (this.clientName !== "pix-desktop") throw new RequestError(ERROR_SERVER, "Desktop search unavailable");
 				try { return await this.searchService.config(ctx.params, ctx.signal); }
 				catch (error) {
 					if (error instanceof SearchUnavailableError) throw new RequestError(ERROR_SERVER, error.message);
 					throw error;
 				}
-			})
-			.onRequest(SEARCH_SYNC_METHOD, parseSearchSyncRequest, async (ctx) => {
+			}))
+			.onRequest(SEARCH_SYNC_METHOD, parseSearchSyncRequest, async (ctx) => this.withRequestLogging(SEARCH_SYNC_METHOD, ctx.params, ctx.signal, async () => {
 				if (this.clientName !== "pix-desktop") throw new RequestError(ERROR_SERVER, "Desktop search unavailable");
 				try { return await this.searchService.sync(ctx.params, ctx.signal); }
 				catch (error) {
 					if (error instanceof SearchUnavailableError) throw new RequestError(ERROR_SERVER, error.message);
 					throw error;
 				}
-			})
-			.onRequest(SEARCH_INDEX_METHOD, parseSearchIndexRequest, async (ctx) => {
+			}))
+			.onRequest(SEARCH_INDEX_METHOD, parseSearchIndexRequest, async (ctx) => this.withRequestLogging(SEARCH_INDEX_METHOD, ctx.params, ctx.signal, async () => {
 				if (this.clientName !== "pix-desktop") throw new RequestError(ERROR_SERVER, "Desktop search unavailable");
 				try {
 					return await (ctx.params.source === "commits" ? this.commitSearchService : this.searchService).index(ctx.params, ctx.signal);
 				} catch (error) {
 					if (ctx.signal.aborted) throw error;
+					reportRequestFailure(this.options.logger, SEARCH_INDEX_METHOD, error, ctx.signal);
 					return { source: ctx.params.source, complete: false, message: "Document indexing unavailable; retry this source" };
 				}
-			})
-			.onRequest("session/new", (ctx) => this.newSession(ctx.params, ctx.client))
-			.onRequest("session/load", (ctx) =>
-				this.withSessionLifecycle(ctx.params.sessionId, () => this.loadSession(ctx.params, ctx.client)),
+			}))
+			.onRequest("session/new", (ctx) => this.withRequestLogging("session/new", ctx.params, ctx.signal, () => this.newSession(ctx.params, ctx.client)))
+			.onRequest("session/load", (ctx) => this.withRequestLogging("session/load", ctx.params, ctx.signal, () => this.withSessionLifecycle(ctx.params.sessionId, () => this.loadSession(ctx.params, ctx.client))),
 			)
-			.onRequest("session/resume", (ctx) =>
-				this.withSessionLifecycle(ctx.params.sessionId, () => this.resumeSession(ctx.params, ctx.client)),
+			.onRequest("session/resume", (ctx) => this.withRequestLogging("session/resume", ctx.params, ctx.signal, () => this.withSessionLifecycle(ctx.params.sessionId, () => this.resumeSession(ctx.params, ctx.client))),
 			)
-			.onRequest("session/list", (ctx) => this.listSessions(ctx.params, ctx.client))
-			.onRequest("session/delete", (ctx) =>
-				this.withSessionLifecycle(ctx.params.sessionId, () => this.deleteSession(ctx.params.sessionId)),
+			.onRequest("session/list", (ctx) => this.withRequestLogging("session/list", ctx.params, ctx.signal, () => this.listSessions(ctx.params, ctx.client)))
+			.onRequest("session/delete", (ctx) => this.withRequestLogging("session/delete", ctx.params, ctx.signal, () => this.withSessionLifecycle(ctx.params.sessionId, () => this.deleteSession(ctx.params.sessionId))),
 			)
-			.onRequest("session/fork", (ctx) =>
-				this.withSessionLifecycle(ctx.params.sessionId, () => this.forkSession(ctx.params, ctx.client)),
+			.onRequest("session/fork", (ctx) => this.withRequestLogging("session/fork", ctx.params, ctx.signal, () => this.withSessionLifecycle(ctx.params.sessionId, () => this.forkSession(ctx.params, ctx.client))),
 			)
-			.onRequest("session/set_config_option", (ctx) => this.setConfigOption(ctx.params))
-			.onRequest("session/set_mode", async (ctx) => { await this.assertBrainstormWritable(ctx.params.sessionId); return {}; })
-			.onRequest("session/prompt", (ctx) => this.prompt(ctx.params))
-			.onRequest(PIX_AGENT_CONTROL_METHOD, parseDesktopAgentControlRequest, (ctx) =>
-				this.desktopAgentControl(ctx.params),
+			.onRequest("session/set_config_option", (ctx) => this.withRequestLogging("session/set_config_option", ctx.params, ctx.signal, () => this.setConfigOption(ctx.params)))
+			.onRequest("session/set_mode", async (ctx) => this.withRequestLogging("session/set_mode", ctx.params, ctx.signal, async () => { await this.assertBrainstormWritable(ctx.params.sessionId); return {}; }))
+			.onRequest("session/prompt", (ctx) => this.withRequestLogging("session/prompt", ctx.params, ctx.signal, () => this.prompt(ctx.params)))
+			.onRequest(PIX_AGENT_CONTROL_METHOD, parseDesktopAgentControlRequest, (ctx) => this.withRequestLogging(PIX_AGENT_CONTROL_METHOD, ctx.params, ctx.signal, () => this.desktopAgentControl(ctx.params)),
 			)
-			.onRequest(PIX_RUNTIME_STATUS_METHOD, parseDesktopRuntimeStatusRequest, (ctx) =>
-				this.desktopRuntimeStatus(ctx.params),
+			.onRequest(PIX_RUNTIME_STATUS_METHOD, parseDesktopRuntimeStatusRequest, (ctx) => this.withRequestLogging(PIX_RUNTIME_STATUS_METHOD, ctx.params, ctx.signal, () => this.desktopRuntimeStatus(ctx.params)),
 			)
-			.onRequest(PIX_DCP_STATS_METHOD, parseDesktopSessionRequest, (ctx) =>
-				this.desktopDcpStats(ctx.params),
+			.onRequest(PIX_DCP_STATS_METHOD, parseDesktopSessionRequest, (ctx) => this.withRequestLogging(PIX_DCP_STATS_METHOD, ctx.params, ctx.signal, () => this.desktopDcpStats(ctx.params)),
 			)
-			.onRequest(PIX_SESSION_USAGE_METHOD, parseDesktopSessionRequest, (ctx) =>
-				this.desktopSessionUsage(ctx.params),
+			.onRequest(PIX_SESSION_USAGE_METHOD, parseDesktopSessionRequest, (ctx) => this.withRequestLogging(PIX_SESSION_USAGE_METHOD, ctx.params, ctx.signal, () => this.desktopSessionUsage(ctx.params)),
 			)
-			.onRequest(PIX_CLAUDE_QUOTA_REFRESH_METHOD, parseDesktopSessionRequest, (ctx) =>
-				this.desktopClaudeQuotaRefresh(ctx.params),
+			.onRequest(PIX_CLAUDE_QUOTA_REFRESH_METHOD, parseDesktopSessionRequest, (ctx) => this.withRequestLogging(PIX_CLAUDE_QUOTA_REFRESH_METHOD, ctx.params, ctx.signal, () => this.desktopClaudeQuotaRefresh(ctx.params)),
 			)
-			.onRequest(PIX_DRAFT_CONFIG_METHOD, parseDesktopDraftConfigRequest, (ctx) =>
-				this.desktopDraftConfig(ctx.params),
+			.onRequest(PIX_DRAFT_CONFIG_METHOD, parseDesktopDraftConfigRequest, (ctx) => this.withRequestLogging(PIX_DRAFT_CONFIG_METHOD, ctx.params, ctx.signal, () => this.desktopDraftConfig(ctx.params)),
 			)
-			.onRequest(PIX_MODEL_ROUTING_STATUS_METHOD, parseDesktopModelRoutingStatusRequest, (ctx) =>
-				this.desktopModelRoutingStatus(ctx.params),
+			.onRequest(PIX_MODEL_ROUTING_STATUS_METHOD, parseDesktopModelRoutingStatusRequest, (ctx) => this.withRequestLogging(PIX_MODEL_ROUTING_STATUS_METHOD, ctx.params, ctx.signal, () => this.desktopModelRoutingStatus(ctx.params)),
 			)
-			.onRequest(PIX_MODEL_ROUTE_METHOD, parseDesktopModelRouteRequest, (ctx) =>
-				this.desktopRouteModel(ctx.params, ctx.signal),
+			.onRequest(PIX_MODEL_ROUTE_METHOD, parseDesktopModelRouteRequest, (ctx) => this.withRequestLogging(PIX_MODEL_ROUTE_METHOD, ctx.params, ctx.signal, () => this.desktopRouteModel(ctx.params, ctx.signal)),
 			)
-			.onRequest(PIX_BASH_METHOD, parseDesktopBashRequest, (ctx) =>
-				this.desktopBash(ctx.params),
+			.onRequest(PIX_BASH_METHOD, parseDesktopBashRequest, (ctx) => this.withRequestLogging(PIX_BASH_METHOD, ctx.params, ctx.signal, () => this.desktopBash(ctx.params)),
 			)
-			.onRequest(PIX_CLEAR_TODOS_METHOD, parseDesktopSessionRequest, (ctx) =>
-				this.desktopClearTodos(ctx.params),
+			.onRequest(PIX_CLEAR_TODOS_METHOD, parseDesktopSessionRequest, (ctx) => this.withRequestLogging(PIX_CLEAR_TODOS_METHOD, ctx.params, ctx.signal, () => this.desktopClearTodos(ctx.params)),
 			)
-			.onRequest(PIX_LSP_CONTROL_METHOD, parseDesktopLspControlRequest, (ctx) =>
-				this.desktopLspControl(ctx.params),
+			.onRequest(PIX_LSP_CONTROL_METHOD, parseDesktopLspControlRequest, (ctx) => this.withRequestLogging(PIX_LSP_CONTROL_METHOD, ctx.params, ctx.signal, () => this.desktopLspControl(ctx.params)),
 			)
-			.onRequest("pix/autocomplete", parseAutocompleteRequest, (ctx) =>
-				this.autocomplete(ctx.params, ctx.signal),
+			.onRequest("pix/autocomplete", parseAutocompleteRequest, (ctx) => this.withRequestLogging("pix/autocomplete", ctx.params, ctx.signal, () => this.autocomplete(ctx.params, ctx.signal)),
 			)
-			.onRequest("pix/autocomplete/config", parseAutocompleteSettingsRequest, (ctx) =>
-				this.autocompleteConfig(ctx.params),
+			.onRequest("pix/autocomplete/config", parseAutocompleteSettingsRequest, (ctx) => this.withRequestLogging("pix/autocomplete/config", ctx.params, ctx.signal, () => this.autocompleteConfig(ctx.params)),
 			)
-			.onRequest(PIX_ENHANCE_PROMPT_METHOD, parseDesktopEnhancePromptRequest, (ctx) =>
-				this.desktopEnhancePrompt(ctx.params, ctx.signal),
+			.onRequest(PIX_ENHANCE_PROMPT_METHOD, parseDesktopEnhancePromptRequest, (ctx) => this.withRequestLogging(PIX_ENHANCE_PROMPT_METHOD, ctx.params, ctx.signal, () => this.desktopEnhancePrompt(ctx.params, ctx.signal)),
 			)
-			.onRequest(BTW_METHOD, parseDesktopBtwRequest, (ctx) => this.desktopBtw(ctx.params))
-			.onRequest(PIX_GIT_ASSIST_METHOD, parseDesktopGitAssistantRequest, (ctx) =>
-				this.desktopGitAssist(ctx.params, ctx.signal),
+			.onRequest(BTW_METHOD, parseDesktopBtwRequest, (ctx) => this.withRequestLogging(BTW_METHOD, ctx.params, ctx.signal, () => this.desktopBtw(ctx.params)))
+			.onRequest(PIX_GIT_ASSIST_METHOD, parseDesktopGitAssistantRequest, (ctx) => this.withRequestLogging(PIX_GIT_ASSIST_METHOD, ctx.params, ctx.signal, () => this.desktopGitAssist(ctx.params, ctx.signal)),
 			)
-			.onRequest(PIX_FORK_MESSAGES_METHOD, parseDesktopSessionRequest, (ctx) =>
-				this.forkMessages(ctx.params),
+			.onRequest(PIX_FORK_MESSAGES_METHOD, parseDesktopSessionRequest, (ctx) => this.withRequestLogging(PIX_FORK_MESSAGES_METHOD, ctx.params, ctx.signal, () => this.forkMessages(ctx.params)),
 			)
-			.onRequest(PIX_BRANCH_USER_MESSAGES_METHOD, parseDesktopSessionRequest, (ctx) =>
-				this.branchUserMessages(ctx.params),
+			.onRequest(PIX_BRANCH_USER_MESSAGES_METHOD, parseDesktopSessionRequest, (ctx) => this.withRequestLogging(PIX_BRANCH_USER_MESSAGES_METHOD, ctx.params, ctx.signal, () => this.branchUserMessages(ctx.params)),
 			)
-			.onRequest(PIX_USER_MESSAGE_ACTION_METHOD, parseDesktopUserMessageActionRequest, (ctx) =>
-				this.withSessionLifecycle(ctx.params.sessionId, () => this.desktopUserMessageAction(ctx.params)),
+			.onRequest(PIX_USER_MESSAGE_ACTION_METHOD, parseDesktopUserMessageActionRequest, (ctx) => this.withRequestLogging(PIX_USER_MESSAGE_ACTION_METHOD, ctx.params, ctx.signal, () => this.withSessionLifecycle(ctx.params.sessionId, () => this.desktopUserMessageAction(ctx.params))),
 			)
-			.onRequest(PIX_IMPORT_SESSION_METHOD, parseDesktopImportSessionRequest, (ctx) =>
-				this.withSessionLifecycle(ctx.params.sessionId, () => this.importSession(ctx.params)),
+			.onRequest(PIX_IMPORT_SESSION_METHOD, parseDesktopImportSessionRequest, (ctx) => this.withRequestLogging(PIX_IMPORT_SESSION_METHOD, ctx.params, ctx.signal, () => this.withSessionLifecycle(ctx.params.sessionId, () => this.importSession(ctx.params))),
 			)
-			.onRequest(PIX_QUEUE_STATE_METHOD, parseDesktopSessionRequest, (ctx) =>
-				this.desktopQueueState(ctx.params),
+			.onRequest(PIX_QUEUE_STATE_METHOD, parseDesktopSessionRequest, (ctx) => this.withRequestLogging(PIX_QUEUE_STATE_METHOD, ctx.params, ctx.signal, () => this.desktopQueueState(ctx.params)),
 			)
-			.onRequest(PIX_QUEUE_MESSAGE_METHOD, parseDesktopQueueSubmitRequest, (ctx) =>
-				this.desktopQueueMessage(ctx.params),
+			.onRequest(PIX_QUEUE_MESSAGE_METHOD, parseDesktopQueueSubmitRequest, (ctx) => this.withRequestLogging(PIX_QUEUE_MESSAGE_METHOD, ctx.params, ctx.signal, () => this.desktopQueueMessage(ctx.params)),
 			)
-			.onRequest(PIX_DEFER_MESSAGE_METHOD, parseDesktopQueueSubmitRequest, (ctx) =>
-				this.desktopDeferMessage(ctx.params),
+			.onRequest(PIX_DEFER_MESSAGE_METHOD, parseDesktopQueueSubmitRequest, (ctx) => this.withRequestLogging(PIX_DEFER_MESSAGE_METHOD, ctx.params, ctx.signal, () => this.desktopDeferMessage(ctx.params)),
 			)
-			.onRequest(PIX_FORK_MESSAGE_METHOD, parseDesktopQueueSubmitRequest, (ctx) =>
-				this.desktopForkMessage(ctx.params),
+			.onRequest(PIX_FORK_MESSAGE_METHOD, parseDesktopQueueSubmitRequest, (ctx) => this.withRequestLogging(PIX_FORK_MESSAGE_METHOD, ctx.params, ctx.signal, () => this.desktopForkMessage(ctx.params)),
 			)
-			.onRequest(PIX_QUEUE_ACTION_METHOD, parseDesktopQueueActionRequest, (ctx) =>
-				this.desktopQueueAction(ctx.params),
+			.onRequest(PIX_QUEUE_ACTION_METHOD, parseDesktopQueueActionRequest, (ctx) => this.withRequestLogging(PIX_QUEUE_ACTION_METHOD, ctx.params, ctx.signal, () => this.desktopQueueAction(ctx.params)),
 			)
-			.onRequest(PIX_REGISTRY_ACTION_METHOD, parseDesktopRegistryActionRequest, (ctx) =>
-				this.desktopRegistryAction(ctx.params, ctx.client),
+			.onRequest(PIX_REGISTRY_ACTION_METHOD, parseDesktopRegistryActionRequest, (ctx) => this.withRequestLogging(PIX_REGISTRY_ACTION_METHOD, ctx.params, ctx.signal, () => this.desktopRegistryAction(ctx.params, ctx.client)),
 			)
-			.onRequest(PIX_REGISTRY_DIFF_METHOD, parseDesktopRegistryDiffRequest, (ctx) =>
-				this.desktopRegistryDiff(ctx.params),
+			.onRequest(PIX_REGISTRY_DIFF_METHOD, parseDesktopRegistryDiffRequest, (ctx) => this.withRequestLogging(PIX_REGISTRY_DIFF_METHOD, ctx.params, ctx.signal, () => this.desktopRegistryDiff(ctx.params)),
 			)
-			.onRequest(PIX_TAKE_AUTO_MESSAGE_METHOD, parseDesktopSessionRequest, (ctx) =>
-				this.desktopTakeAutoMessage(ctx.params),
+			.onRequest(PIX_TAKE_AUTO_MESSAGE_METHOD, parseDesktopSessionRequest, (ctx) => this.withRequestLogging(PIX_TAKE_AUTO_MESSAGE_METHOD, ctx.params, ctx.signal, () => this.desktopTakeAutoMessage(ctx.params)),
 			)
-			.onRequest(PIX_RELOAD_SESSION_METHOD, parseDesktopSessionRequest, (ctx) =>
-				this.withSessionLifecycle(ctx.params.sessionId, () => this.reloadSession(ctx.params, ctx.client)),
+			.onRequest(PIX_RELOAD_SESSION_METHOD, parseDesktopSessionRequest, (ctx) => this.withRequestLogging(PIX_RELOAD_SESSION_METHOD, ctx.params, ctx.signal, () => this.withSessionLifecycle(ctx.params.sessionId, () => this.reloadSession(ctx.params, ctx.client))),
 			)
-			.onRequest(PIX_REQUEST_HISTORY_METHOD, parseDesktopSessionRequest, (ctx) =>
-				this.desktopRequestHistory(ctx.params),
+			.onRequest(PIX_REQUEST_HISTORY_METHOD, parseDesktopSessionRequest, (ctx) => this.withRequestLogging(PIX_REQUEST_HISTORY_METHOD, ctx.params, ctx.signal, () => this.desktopRequestHistory(ctx.params)),
 			)
-			.onRequest(PIX_RESUME_PATH_METHOD, parseDesktopResumePathRequest, (ctx) =>
-				this.withSessionLifecycle(ctx.params.sessionId, () => this.resumePath(ctx.params)),
+			.onRequest(PIX_RESUME_PATH_METHOD, parseDesktopResumePathRequest, (ctx) => this.withRequestLogging(PIX_RESUME_PATH_METHOD, ctx.params, ctx.signal, () => this.withSessionLifecycle(ctx.params.sessionId, () => this.resumePath(ctx.params))),
 			)
-			.onRequest(PIX_SESSION_HISTORY_METHOD, parseDesktopSessionHistoryRequest, (ctx) =>
-				this.desktopSessionHistory(ctx.params),
+			.onRequest(PIX_SESSION_HISTORY_METHOD, parseDesktopSessionHistoryRequest, (ctx) => this.withRequestLogging(PIX_SESSION_HISTORY_METHOD, ctx.params, ctx.signal, () => this.desktopSessionHistory(ctx.params)),
 			)
-			.onRequest(PIX_TOOL_RESULT_METHOD, parseDesktopToolResultRequest, (ctx) =>
-				this.desktopToolResult(ctx.params),
+			.onRequest(PIX_TOOL_RESULT_METHOD, parseDesktopToolResultRequest, (ctx) => this.withRequestLogging(PIX_TOOL_RESULT_METHOD, ctx.params, ctx.signal, () => this.desktopToolResult(ctx.params)),
 			)
-			.onRequest(PIX_SESSION_IMAGE_METHOD, parseDesktopSessionImageRequest, (ctx) =>
-				this.desktopSessionImage(ctx.params),
+			.onRequest(PIX_SESSION_IMAGE_METHOD, parseDesktopSessionImageRequest, (ctx) => this.withRequestLogging(PIX_SESSION_IMAGE_METHOD, ctx.params, ctx.signal, () => this.desktopSessionImage(ctx.params)),
 			)
-			.onRequest("session/close", (ctx) =>
-				this.withSessionLifecycle(ctx.params.sessionId, () => this.closeSession(ctx.params.sessionId)),
+			.onRequest("session/close", (ctx) => this.withRequestLogging("session/close", ctx.params, ctx.signal, () => this.withSessionLifecycle(ctx.params.sessionId, () => this.closeSession(ctx.params.sessionId))),
 			)
-			.onNotification("session/cancel", (ctx) => this.cancel(ctx.params.sessionId));
+			.onNotification("session/cancel", (ctx) => this.withRequestLogging("session/cancel", ctx.params, ctx.signal, () => this.cancel(ctx.params.sessionId)));
 	}
 
 	/** Underlying ACP app; used by tests for in-process client connections. */
@@ -1074,8 +1044,18 @@ export class PixAcpAgent {
 		session: AgentSessionState,
 		params: DesktopUserMessageActionRequest,
 	): Promise<DesktopUserMessageActionResponse> {
-		const messages = branchUserMessagesFromEntries(await session.pi.getEntries());
-		const selected = messages.find((message) => message.entryId === params.entryId);
+		const entries = await session.pi.getEntries();
+		const messages = branchUserMessagesFromEntries(entries);
+		let selected = messages.find((message) => message.entryId === params.entryId);
+		if (!selected && params.action === "rewind") {
+			// A previous rewind may have committed before its RPC reported an
+			// error. Only the bridge can authorize this retry: it must prove that
+			// the live leaf is still the exact parent (plus neutral metadata), and
+			// must not navigate an inactive entry. Copy/Undo remain branch-only.
+			const entry = entries.entries.find((candidate) => candidate.id === params.entryId);
+			const message = entry?.type === "message" && isRecord(entry.message) ? entry.message : undefined;
+			if (message?.role === "user") selected = { entryId: params.entryId, text: sessionUserMessageText(message.content) };
+		}
 		if (!selected) {
 			throw new RequestError(ERROR_SERVER, `user message ${params.entryId} is not on the active session branch`);
 		}
@@ -2232,7 +2212,10 @@ export class PixAcpAgent {
 		// Register routing before start so session_start extension state emitted
 		// during RPC startup is delivered instead of being dropped.
 		this.sessions.set(acpSessionId, session);
-		const unsubscribeEvents = pi.onEvent((event) => this.onPiEvent(session, event));
+		const unsubscribeEvents = pi.onEvent((event) => withPixLogContext(
+			{ project: session.cwd, sessionId: session.acpSessionId, module: "rpc-events" },
+			() => this.onPiEvent(session, event),
+		));
 		session.unsubscribeEvents = unsubscribeEvents;
 		try {
 			await pi.start();
@@ -2252,7 +2235,10 @@ export class PixAcpAgent {
 			await pi.stop().catch(() => {});
 			throw new RequestError(ERROR_SERVER, "adapter is shutting down");
 		}
-		session.unsubscribeExit = pi.onExit((error) => this.onPiExit(session, error));
+		session.unsubscribeExit = pi.onExit((error) => withPixLogContext(
+			{ project: session.cwd, sessionId: session.acpSessionId, module: "rpc-process" },
+			() => this.onPiExit(session, error),
+		));
 		if (!startupOverride) await this.ensureDesktopQueuesLoaded(session);
 		void session.forks.tryIdle();
 		return session;
@@ -2408,6 +2394,17 @@ export class PixAcpAgent {
 				sessionId: session.acpSessionId, channel: BTW_CHANNEL, data,
 			}).catch(() => { /* Ephemeral progress must never leak through transcript/error logging. */ });
 			return;
+		}
+		// Observe terminal failures only: never persist streamed content, tool args/results,
+		// or an ordinary user abort. message_end avoids duplicate update+end diagnostics.
+		if (event.type === "message_end" && event.message.role === "assistant" && event.message.stopReason === "error") {
+			this.options.logger.error(`model:failed ${event.message.errorMessage ?? "Request failed"}`, { module: "session.events" });
+		} else if (event.type === "compaction_end" && !event.result && !event.aborted) {
+			this.options.logger.error(`compaction:failed ${event.errorMessage ?? "Compaction failed"}`, { module: "session.events" });
+		} else if (event.type === "auto_retry_end" && !event.success && event.finalError !== "Retry cancelled") {
+			this.options.logger.error(`retry:failed ${event.finalError ?? "Retry failed"}`, { module: "session.events" });
+		} else if (event.type === "tool_execution_end" && event.isError) {
+			this.options.logger.warn(`tool:failed ${event.toolName}`, { module: "session.events" });
 		}
 		if ((event.type === "turn_end" || event.type === "compaction_end" || event.type === "agent_settled")
 			&& typeof event.pixForkSessionPath === "string" && event.pixForkLeafId !== undefined) {
@@ -2715,7 +2712,13 @@ export class PixAcpAgent {
 			}
 			this.safeRespond(session.pi, fromElicitationResponse(answer, request));
 		} catch (error) {
-			this.options.logger.warn(`elicitation/create failed: ${stringifyUnknown(error)}`);
+			if (this.disposed || this.sessions.get(session.acpSessionId) !== session) {
+				// A pending elicitation is rejected when its session/transport is
+				// retired. This is a normal consequence of shutdown, not a user error.
+				this.options.logger.debug("elicitation/create abandoned after session teardown");
+			} else {
+				this.options.logger.warn(`elicitation/create failed: ${stringifyUnknown(error)}`);
+			}
 			interrupted = isQuestion;
 			if (!isQuestion && this.sessions.get(session.acpSessionId) === session) {
 				this.safeRespond(session.pi, cancelledResponse(request.id));
@@ -4010,6 +4013,16 @@ export class PixAcpAgent {
 		session.activeRun = undefined;
 		run.reject(error);
 		return true;
+	}
+
+	/** Resolve attribution per operation, never from the adapter's own cwd. */
+	private withRequestLogging<T>(method: string, params: unknown, signal: AbortSignal, operation: () => T | Promise<T>): Promise<T> {
+		const value = params as { sessionId?: unknown; cwd?: unknown; workspace?: unknown };
+		const sessionId = typeof value?.sessionId === "string" ? value.sessionId : undefined;
+		const project = (sessionId ? this.sessions.get(sessionId)?.cwd : undefined)
+			?? (typeof value?.cwd === "string" ? value.cwd : typeof value?.workspace === "string" ? value.workspace : null);
+		return withLoggedRequest(this.options.logger, method,
+			{ project, ...(sessionId ? { sessionId } : {}), module: "requests" }, signal, operation);
 	}
 
 	/** Queue lifecycle mutations so two requests cannot replace one another. */

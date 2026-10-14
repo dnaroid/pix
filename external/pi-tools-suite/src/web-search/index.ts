@@ -8,6 +8,7 @@ import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "
 import { Type } from "typebox";
 
 import { WEB_SEARCH_TOOL_DESCRIPTIONS } from "../tool-descriptions";
+import { suiteDiagnostics } from "../lib/suite-diagnostics.js";
 
 let spawnImpl: typeof spawn = spawn;
 
@@ -832,7 +833,7 @@ export default function webSearch(pi: ExtensionAPI) {
 			max_results: Type.Optional(Type.Number({ description: "Maximum number of search results to return (default: 5)", default: 5 })),
 			timeout_ms: timeoutParameter(),
 		}),
-		async execute(_toolCallId, params, signal) {
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			const maxResults = params.max_results ?? 5;
 			const ollamaTarget = resolveOllamaTarget();
 			const tavilyApiKey = resolveApiKey(TAVILY_API_KEY_ENV, "tavily");
@@ -853,6 +854,7 @@ export default function webSearch(pi: ExtensionAPI) {
 					"Tavily",
 				),
 			);
+			if (response.fallbackFrom) suiteDiagnostics.report("warn", "web", "search-provider-fallback", ctx?.cwd);
 			const formatted = truncateForTool(formatSearchResults(response.data.results));
 
 			return {
@@ -868,7 +870,7 @@ export default function webSearch(pi: ExtensionAPI) {
 			url: Type.String({ description: "URL to fetch and extract content from" }),
 			timeout_ms: timeoutParameter(),
 		}),
-		async execute(_toolCallId, params, signal) {
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			const ollamaTarget = resolveOllamaTarget();
 			const tavilyApiKey = resolveApiKey(TAVILY_API_KEY_ENV, "tavily");
 			const timeoutMs = resolveRequestTimeoutMs(params.timeout_ms);
@@ -888,6 +890,7 @@ export default function webSearch(pi: ExtensionAPI) {
 					params.url,
 				),
 			);
+			if (response.fallbackFrom) suiteDiagnostics.report("warn", "web", "fetch-provider-fallback", ctx?.cwd);
 			const formatted = truncateForTool(formatFetchResult(response.data));
 
 			return {

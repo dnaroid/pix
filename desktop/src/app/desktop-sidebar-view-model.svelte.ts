@@ -81,6 +81,7 @@ export function createDesktopSidebarViewModel(options: {
     rememberedThinkingByModel: options.modelPreferences.rememberedThinkingByModel,
     onVisibleModelsChange: options.modelPreferences.saveVisibleModelRefs,
     tasks: options.projectTasks.document.tasks,
+    taskAttachmentCounts: options.projectTasks.attachmentCounts,
     loading: options.projectTasks.loading,
     initialLoading: options.projectTasks.initialLoading,
     saving: options.projectTasks.saving,

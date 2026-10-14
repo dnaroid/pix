@@ -10,6 +10,7 @@ import {
 	type CommandControllerHost,
 } from "./command-host.js";
 import { getIdleRuntime, getRuntime, parsePathArgument } from "./command-runtime.js";
+import { logOperationFailure } from "../logging/operation-errors.js";
 import { createId } from "../id.js";
 import { runProcess } from "../process.js";
 import { copyTextToClipboard } from "../screen/clipboard.js";
@@ -348,6 +349,7 @@ export class SessionCommandActions {
 			this.host.addEntry({ id: createId("system"), kind: "system", text: formatReloadContextInventory(inventory) });
 			this.host.toast.success("Reloaded resources");
 		} catch (error) {
+			logOperationFailure("session:reload-failed", error, { project: runtime.cwd, ...(scope.session ? { sessionId: scope.session.sessionId } : {}), module: "commands.session" });
 			if (!isCommandScopeActive(this.host, scope)) return;
 			this.host.setSessionStatus(runtime.session);
 			this.host.addEntry({ id: createId("error"), kind: "error", text: `Reload failed: ${error instanceof Error ? error.message : String(error)}` });

@@ -4,6 +4,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { semanticConfiguration, semanticKey, type SemanticSearchOptions } from "./semantic-provider.js";
 import { syncSavedTaskVectors } from "./semantic-task-indexer.js";
 import { semanticConfigurationPath } from "./native-embedding-provider.mjs";
+import { diagnosticErrorType, suiteDiagnostics } from "../lib/suite-diagnostics.js";
 
 export interface TaskSyncServices {
   watch?: (root: string, changed: () => void) => () => void;
@@ -70,9 +71,11 @@ export function startSavedTaskEmbeddingSync(root: string, options: SemanticSearc
       const key = config.provider === "openrouter" ? await semanticKey(options, signal) : undefined;
       if (config.provider === "openrouter" && !key) return;
       await syncSavedTaskVectors(root, key, options, signal, config);
-    }).catch(() => {
-      if (!stopped) {
+    }).catch((error) => {
+      if (!stopped && !signal.aborted) {
         // A later content/configuration change may retry; never loop paid failures.
+        suiteDiagnostics.report("warn", "search", "background-task-index-failed", root,
+          { source: "tasks", errorType: diagnosticErrorType(error) });
         services.onError?.();
       }
     }).finally(() => {

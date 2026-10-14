@@ -11,6 +11,9 @@ import {
 import { clipboardInstallHint, clipboardSupportAvailable } from "../screen/clipboard.js";
 import { getPixConfigPath } from "../../config.js";
 import { DEFAULT_PIX_CONFIG_JSONC } from "../../default-pix-config.js";
+import { logPixEvent } from "../logger.js";
+import { logOperationFailure } from "../logging/operation-errors.js";
+import { withCliDiagnostics } from "./diagnostics.js";
 
 type PixInstallTestDeps = {
 	existsSync: typeof existsSync;
@@ -201,6 +204,10 @@ export function parsePixInstallArgs(argv: readonly string[]): PixInstallCliOptio
 }
 
 export async function runPixInstallCli(argv: readonly string[] = process.argv.slice(2), context: PixInstallCliContext = {}): Promise<number> {
+	return withCliDiagnostics("install", () => runPixInstall(argv, context));
+}
+
+async function runPixInstall(argv: readonly string[], context: PixInstallCliContext): Promise<number> {
 	let options: PixInstallCliOptions;
 	try {
 		options = parsePixInstallArgs(argv);
@@ -228,6 +235,7 @@ export async function runPixInstallCli(argv: readonly string[] = process.argv.sl
 			await pixInstallDeps.installJetBrainsNerdFont();
 			console.log(`✓ Installed ${FONT_FAMILY_NAME}`);
 		} catch (error) {
+			logPixEvent("warn", "install:optional-font-failed", { error: error instanceof Error ? error : "Non-Error failure" }, { project: null, module: "cli.install" });
 			console.warn(`! Failed to install optional ${FONT_FAMILY_NAME}: ${errorMessage(error)}`);
 		}
 	}
@@ -243,6 +251,7 @@ export async function runPixInstallCli(argv: readonly string[] = process.argv.sl
 			await installPiCli();
 			console.log("✓ Installed pi CLI globally");
 		} catch (error) {
+			logOperationFailure("install:pi-failed", error, { project: null, module: "cli.install" });
 			console.error(`✗ Failed to install pi CLI: ${errorMessage(error)}`);
 			console.error("  Pix can still use its bundled SDK, but sub-agent helpers may need `pi` on PATH.");
 			failures += 1;
@@ -262,6 +271,7 @@ export async function runPixInstallCli(argv: readonly string[] = process.argv.sl
 			for (const path of setupFiles.created) console.log(`✓ Created ${path}`);
 			for (const path of setupFiles.existing) console.log(`✓ Kept existing ${path}`);
 		} catch (error) {
+			logOperationFailure("install:setup-failed", error, { project: null, module: "cli.install" });
 			console.error(`✗ Failed to create setup config: ${errorMessage(error)}`);
 			failures += 1;
 		}

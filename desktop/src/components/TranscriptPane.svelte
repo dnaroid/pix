@@ -37,8 +37,10 @@
   let {
     transcript,
     activeSessionId,
+    runtimeReady = true,
     workspace,
     promptRunning,
+    messageMutationRunning = promptRunning,
     agentControlState = "idle",
     operationRunning,
     historyLoading,
@@ -67,8 +69,10 @@
   }: {
     transcript: TranscriptState;
     activeSessionId: string | null;
+    runtimeReady?: boolean;
     workspace: string;
     promptRunning: boolean;
+    messageMutationRunning?: boolean;
     agentControlState?: AgentControlState;
     operationRunning: boolean;
     historyLoading: boolean;
@@ -116,7 +120,8 @@
   const userMessageMenuController = createTranscriptUserMessageMenuController({
     items: () => displayItems,
     activeSessionId: () => activeSessionId,
-    promptRunning: () => promptRunning,
+    runtimeReady: () => runtimeReady,
+    promptRunning: () => messageMutationRunning,
     operationRunning: () => operationRunning,
     historyLoading: () => historyLoading,
     onScroll: () => onScroll(),

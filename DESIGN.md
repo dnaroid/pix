@@ -444,13 +444,20 @@ Textareas MUST NOT expose the browser's native resize handle. Persistent editor
 surfaces own their geometry, and compact textareas that need to grow should do so
 automatically up to a bounded height before enabling internal scrolling.
 
-Normalize native selects used inside designed application surfaces. A semantic
-background does not remove platform bevels or gradients by itself: use
-`appearance-none`, preserve the native select semantics, reserve space for a
-Lucide chevron, and verify the closed control in light and dark desktop WebViews.
+New or changed Desktop dropdowns MUST use an existing Pix-styled popup/listbox
+component (for example `TaskFieldSelect` for compact field/filter choices), with
+a visible Lucide chevron and keyboard navigation, dismissal, focus restoration,
+and narrow-pane positioning. Do not introduce raw HTML `<select>` controls or
+system option menus in application panels, toolbars, filters, dialogs, or settings.
+`appearance-none`, a semantic background, or a custom chevron over a native
+`<select>` is NOT a substitute: the opened menu must also match Pix. Exceptions
+require an explicit user requirement, not implementation convenience. Existing
+legacy selects are migration debt, not a precedent for new UI; replace them when
+their dropdown behavior is changed. Verify both closed and opened states in
+light and dark Desktop WebViews.
 
-Focused controls MUST have a visible focus state. Text-entry controls (`input`,
-`textarea`, and `select`) are the exception: they MUST retain native focus and
+Focused controls MUST have a visible focus state. Text-entry controls (`input`
+and `textarea`) are the exception: they MUST retain native focus and
 caret semantics without a global outline, border, or ring frame. Buttons and
 other keyboard-navigated controls retain the visible focus treatment.
 

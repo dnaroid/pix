@@ -7,6 +7,7 @@ import {
 	type DictationLanguageModelConfig,
 } from "../../config.js";
 import { APP_ICONS } from "../icons.js";
+import { logPixEvent, type PixLogDetails, type PixLogLevel } from "../logger.js";
 import { commandExists } from "../process.js";
 
 export type VoiceLanguage = string;
@@ -69,6 +70,7 @@ type VoiceControllerTestDeps = {
 	savePixDictationLanguage: typeof savePixDictationLanguage;
 	delay: typeof delay;
 	playReadySound: () => void;
+	log: typeof logPixEvent;
 };
 
 const defaultVoiceControllerDeps: VoiceControllerTestDeps = {
@@ -82,6 +84,7 @@ const defaultVoiceControllerDeps: VoiceControllerTestDeps = {
 	playReadySound: () => {
 		if (process.stdout.isTTY) process.stdout.write("\x07");
 	},
+	log: logPixEvent,
 };
 
 let voiceControllerDeps = defaultVoiceControllerDeps;
@@ -194,6 +197,7 @@ export class AppVoiceController {
 
 	async dispose(): Promise<void> {
 		if (this.disposed) return;
+		this.log("debug", "voice:disposed", { state: this.state });
 		this.disposed = true;
 		this.startGeneration += 1;
 		const audioProcess = this.audioProcess;
@@ -220,6 +224,7 @@ export class AppVoiceController {
 		this.startGeneration = generation;
 		this.recordingScope = scope;
 		this.state = "connecting";
+		this.log("debug", "voice:connecting", { language });
 		this.setProgressMessage("Connecting to Deepgram...", generation, scope);
 
 		let socket: DeepgramSocket | undefined;
@@ -248,6 +253,7 @@ export class AppVoiceController {
 			this.audioProcess = audioProcess;
 			this.clearProgressMessage();
 			this.state = "listening";
+			this.log("info", "voice:listening", { language });
 			this.host.render();
 			this.host.showToast(`Voice input on (${this.languageDefinition(language).label}, Deepgram ${this.deepgramModel})`, "info");
 			this.bindAudioProcess(audioProcess, socket, generation, scope);
@@ -256,6 +262,7 @@ export class AppVoiceController {
 				if (socket) safeCloseSocket(socket);
 				return;
 			}
+			this.log("error", "voice:start-failed", { error: error instanceof Error ? error.name : "Unknown" });
 			this.startGeneration += 1;
 			this.recordingScope = undefined;
 			this.audioProcess = undefined;
@@ -276,6 +283,7 @@ export class AppVoiceController {
 		const audioProcess = this.audioProcess;
 		const socket = this.socket;
 		const wasListening = this.state === "listening";
+		if (wasListening) this.log("info", "voice:stopping");
 
 		this.clearProgressMessage();
 		this.state = "idle";
@@ -326,12 +334,14 @@ export class AppVoiceController {
 
 		socket.addEventListener("error", () => {
 			if (!this.isCurrentSocket(socket, generation, scope) || this.state === "idle") return;
+			this.log("warn", "voice:socket-error");
 			this.host.showToast("Voice recognition failed: Deepgram WebSocket error", "error");
 			void this.stopRecording();
 		});
 
 		socket.addEventListener("close", (event) => {
 			if (!this.isCurrentSocket(socket, generation, scope) || this.state === "idle") return;
+			this.log("warn", "voice:socket-closed", { code: event.code ?? null });
 			const suffix = event.code && event.code !== 1000
 				? ` (${event.code}${event.reason ? `: ${event.reason}` : ""})`
 				: "";
@@ -355,6 +365,7 @@ export class AppVoiceController {
 				if (socket.readyState !== DEEPGRAM_SOCKET_OPEN) return;
 				socket.send(chunk);
 			} catch (error) {
+				this.log("error", "voice:audio-send-failed", { error: error instanceof Error ? error.name : "Unknown" });
 				this.host.showToast(`Voice recognition failed: ${errorMessage(error)}`, "error");
 				void this.stopRecording();
 				return;
@@ -377,6 +388,7 @@ export class AppVoiceController {
 		audioProcess.once("error", (error) => {
 			if (!this.isCurrentAudioProcess(audioProcess, socket, generation, scope)) return;
 			if (this.state === "idle") return;
+			this.log("error", "voice:recorder-error", { error: error.name });
 			this.host.showToast(`Voice recorder failed: ${errorMessage(error)}`, "error");
 			void this.stopRecording();
 		});
@@ -384,6 +396,7 @@ export class AppVoiceController {
 		audioProcess.once("close", (code, signal) => {
 			if (!this.isCurrentAudioProcess(audioProcess, socket, generation, scope)) return;
 			if (this.state === "idle") return;
+			this.log(code && code !== 0 ? "warn" : "debug", "voice:recorder-closed", { exitCode: code, signal });
 			if (code && code !== 0) {
 				const details = stderr.trim() || signal || `exit code ${code}`;
 				this.host.showToast(`Voice recorder stopped: ${details}`, "warning");
@@ -407,8 +420,14 @@ export class AppVoiceController {
 		try {
 			voiceControllerDeps.savePixDictationLanguage(language);
 		} catch (error) {
+			this.log("warn", "voice:language-save-failed", { error: error instanceof Error ? error.name : "Unknown" });
 			this.host.showToast(`Could not save voice language: ${errorMessage(error)}`, "warning");
 		}
+	}
+
+	private log(level: PixLogLevel, event: string, details: PixLogDetails = {}): void {
+		try { voiceControllerDeps.log(level, event, details, { module: "input.voice" }); }
+		catch { /* Voice recording must survive diagnostic failures. */ }
 	}
 
 	private languageDefinition(language: VoiceLanguage): VoiceLanguageDefinition {

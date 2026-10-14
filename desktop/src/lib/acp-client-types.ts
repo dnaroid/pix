@@ -15,6 +15,8 @@ export interface AcpExit {
   readonly success: boolean;
   readonly requested: boolean;
   readonly error: string | null;
+  /** Native, byte-bounded tail, independent of stderr event delivery order. */
+  readonly stderr?: string;
 }
 
 export interface AcpTransportHandlers {

@@ -31,6 +31,34 @@ describe("native desktop context menu commands", () => {
   it("uses native editing roles instead of replacing values or synthesizing paste", () => {
     expect(labels({})).toEqual(["Undo", "Redo", "Separator", "Cut", "Copy", "Paste", "Separator", "SelectAll"]);
   });
+  it("offers only session ID copy and copies the captured raw ID", async () => {
+    const target = context({ kind: "session", sessionId: "clicked-session", hasSelection: false });
+    const commands = nativeContextMenuItems(target, false, reportError, () => true);
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toMatchObject({ id: "desktop.session.copy-id", text: "Copy Session ID", enabled: true });
+    target.sessionId = "another-session";
+    const command = commands[0];
+    if (command && "action" in command) command.action?.("ignored");
+    await Promise.resolve();
+    expect(writeText).toHaveBeenCalledExactlyOnceWith("clicked-session");
+  });
+  it("does not copy missing session IDs or run stale or detached tab callbacks", async () => {
+    for (const commands of [
+      items({ kind: "session", sessionId: undefined }),
+      items({ kind: "session", sessionId: "old" }, false, () => false),
+      items({ kind: "session", sessionId: "closed", element: { isConnected: false } as HTMLElement }),
+    ]) for (const command of commands) if ("action" in command) command.action?.("ignored");
+    await Promise.resolve();
+    expect(writeText).not.toHaveBeenCalled();
+  });
+  it("reports session ID clipboard failures", async () => {
+    vi.mocked(writeText).mockRejectedValueOnce(new Error("clipboard unavailable"));
+    const command = items({ kind: "session", sessionId: "session-id" })[0];
+    if (command && "action" in command) command.action?.("ignored");
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(reportError).toHaveBeenCalledWith(expect.objectContaining({ message: "clipboard unavailable" }));
+  });
   it("offers source reference copy without requiring a text selection", () => {
     expect(labels({ kind: "readonly", hasSelection: false, sourceReference: "src/main.ts:42" }))
       .toEqual(["Copy Relative Path with Line Number"]);

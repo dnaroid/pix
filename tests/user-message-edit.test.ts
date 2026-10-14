@@ -13,7 +13,9 @@ function fixture(parentId: string | null = "parent") {
 	let reserved = false;
 	const calls: string[] = [];
 	const entries = [{ id: "user", parentId, type: "message", message: { role: "user", content: [{ type: "text", text: "canonical\n[Pix attachment: file:///tmp/a.txt]" }, image] } }];
-	const manager = { getLeafId: () => leaf, getSessionFile: () => "same.jsonl", getBranch: () => entries };
+	const appended: Array<{ id: string; parentId: string | null; type: string }> = [];
+	const manager = { getLeafId: () => leaf, getSessionFile: () => "same.jsonl", getBranch: () => entries,
+		getEntry: (id: string) => [...entries, ...appended].find((entry) => entry.id === id) };
 	const runtime = { session: { isStreaming: false, isCompacting: false, sessionManager: manager, navigateTree: async (id: string) => {
 		assert.equal(reserved, true); assert.equal(id, "user"); calls.push("navigate");
 		if (!cancelled) leaf = parentId;
@@ -25,7 +27,7 @@ function fixture(parentId: string | null = "parent") {
 		reloadHistory: () => calls.push("reload"),
 		resend: (message: unknown) => { assert.equal(reserved, false); assert.deepEqual(message, { text: "edited", images: [image] }); calls.push("send"); },
 	};
-	return { options, calls, entries, setCurrent: (value: boolean) => { current = value; },
+	return { options, calls, entries, appended, setCurrent: (value: boolean) => { current = value; },
 		setLeaf: (value: string | null) => { leaf = value; }, setCancelled: () => { cancelled = true; }, reserved: () => reserved };
 }
 
@@ -43,6 +45,40 @@ for (const parent of ["parent", null]) test(`Send rewinds to ${parent ?? "root"}
 	await commitUserMessageEdit({ ...f.options, pending, edit: { text: "edited", images: [image] } });
 	assert.deepEqual(f.calls, ["navigate", "reload", "send"]);
 	assert.equal(f.entries[0]!.message.content[0]!.type, "text");
+	assert.equal(f.reserved(), false);
+});
+
+for (const parent of ["parent", null]) test(`Send accepts session_tree metadata after rewind to ${parent ?? "root"}`, async () => {
+	const f = fixture(parent);
+	const pending = prepareUserMessageEdit(f.options.runtime, "user");
+	const navigate = f.options.runtime.session.navigateTree;
+	f.options.runtime.session.navigateTree = async (id: string) => {
+		const result = await navigate(id);
+		f.appended.push({ id: "dcp-epoch", parentId: parent, type: "custom" },
+			{ id: "dcp-journal", parentId: "dcp-epoch", type: "custom" });
+		f.setLeaf("dcp-journal");
+		return result;
+	};
+	await commitUserMessageEdit({ ...f.options, pending, edit: { text: "edited", images: [image] } });
+	assert.deepEqual(f.calls, ["navigate", "reload", "send"]);
+	assert.equal(f.reserved(), false);
+});
+
+for (const type of ["message", "custom_message", "branch_summary"]) test(`Send rejects a ${type} appended during navigation`, async () => {
+	const f = fixture();
+	const pending = prepareUserMessageEdit(f.options.runtime, "user");
+	const navigate = f.options.runtime.session.navigateTree;
+	f.options.runtime.session.navigateTree = async (id: string) => {
+		const result = await navigate(id);
+		f.appended.push({ id: "new-context", parentId: "parent", type });
+		f.setLeaf("new-context");
+		return result;
+	};
+	let rewound = false;
+	await assert.rejects(commitUserMessageEdit({ ...f.options, pending, edit: { text: "edited", images: [image] },
+		onRewound: () => { rewound = true; } }), /conversation changed before resending/i);
+	assert.equal(rewound, true);
+	assert.deepEqual(f.calls, ["navigate"]);
 	assert.equal(f.reserved(), false);
 });
 

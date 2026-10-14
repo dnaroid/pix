@@ -3,8 +3,28 @@ import { describe, it } from "node:test";
 import type { AgentSession, AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 
 import { AppQueuedMessageController, type AppQueuedMessageControllerHost } from "../src/app/session/queued-message-controller.js";
+import { pixLogger } from "../src/app/logger.js";
 
 describe("AppQueuedMessageController", () => {
+	it("logs a stale prompt failure against its original session without prompt contents", async (t) => {
+		const log = t.mock.method(pixLogger, "log", async () => {});
+		let reject!: (error: Error) => void;
+		const wait = new Promise<void>((_resolve, fail) => { reject = fail; });
+		let entered!: () => void;
+		const started = new Promise<void>(resolve => { entered = resolve; });
+		const original = Object.assign(fakeSession({ steering: [], followUp: [] }, { promptWait: () => { entered(); return wait; } }), { sessionId: "original" });
+		const runtime = { session: original, cwd: "/projects/original" } as unknown as AgentSessionRuntime;
+		const host = createHost(original, createHostState(""));
+		host.runtime = () => runtime; host.requireRuntime = () => runtime;
+		const controller = new AppQueuedMessageController(host);
+		const result = controller.submitUserMessage({ id: "input", promptText: "PRIVATE INPUT", displayText: "PRIVATE INPUT", images: [] }, original);
+		await started;
+		(runtime as unknown as { session: AgentSession }).session = Object.assign(fakeSession({ steering: [], followUp: [] }), { sessionId: "replacement" });
+		const failure = new Error("prompt rejected"); reject(failure);
+		await result; // Existing stale-session cleanup suppresses the rejected submit.
+		assert.deepEqual(log.mock.calls[0]!.arguments[3], { project: "/projects/original", sessionId: "original", module: "session.prompts" });
+		assert.doesNotMatch(JSON.stringify(log.mock.calls), /PRIVATE INPUT|replacement/);
+	});
 	it("rejects competing submits before they can queue during reserved edit navigation", async () => {
 		const calls: string[] = [];
 		const sdkQueue = { steering: [] as string[], followUp: [] as string[] };

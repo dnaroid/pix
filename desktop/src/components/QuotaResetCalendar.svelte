@@ -7,23 +7,12 @@
   let { window, now, deadlines = [] }: { window: ModelUsageLimitWindow; now: number; deadlines?: readonly number[] } = $props();
   const timeline = $derived(quotaCycleTimeline(window, now));
   const remainingPercent = $derived(clampUsagePercent(window.remainingPercent));
-  const GAP_PX = 4;
   const days = $derived(timeline?.days ?? []);
-  const dayCount = $derived(Math.max(days.length, 1));
   const elapsed = $derived((timeline?.timePosition ?? 0) / 100);
   const todayIndex = $derived(Math.max(0, days.findIndex(d => elapsed < d.endFraction) === -1 ? days.length - 1 : days.findIndex(d => elapsed < d.endFraction)));
   const columns = $derived(days.length
     ? days.map(d => `minmax(0, ${Math.max(d.endFraction - d.startFraction, 0.001)}fr)`).join(" ")
     : "minmax(0, 1fr)");
-  const pinLeft = $derived(`calc(${todayIndex * GAP_PX}px + ${elapsed} * (100% - ${(dayCount - 1) * GAP_PX}px))`);
-  /** Right-anchored remaining quota mapped onto the shared time axis. */
-  function sectorFill(index: number): number {
-    const d = days[index];
-    if (!d) return Math.round(remainingPercent * 100) / 100;
-    const from = Math.max(d.startFraction, 1 - remainingPercent / 100);
-    const covered = Math.max(0, d.endFraction - from) / (d.endFraction - d.startFraction);
-    return Math.round(Math.min(1, covered) * 10000) / 100;
-  }
   /** Reset-credit expiries inside the visible window, placed on the same time axis as the pin. */
   const deadlineMarks = $derived.by(() => {
     if (!timeline) return [];
@@ -32,10 +21,8 @@
     for (const at of [...new Set(deadlines)]) {
       const f = (at - start) / (window.windowSeconds * 1000);
       if (!(f >= 0 && f <= 1)) continue;
-      let i = days.findIndex(d => f <= d.endFraction);
-      if (i < 0) i = days.length - 1;
       marks.push({
-        left: `calc(${i * GAP_PX}px + ${f} * (100% - ${(dayCount - 1) * GAP_PX}px))`,
+        left: `${f * 100}%`,
         label: new Date(at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }),
       });
     }
@@ -56,25 +43,24 @@
 
 <div class="mt-1" role="group" aria-label={`Weekly account quota: ${Math.round(usedPercent)}% used, ${Math.round(window.remainingPercent)}% remaining. ${timingLabel}.${deadlineMarks.length ? ` Reset credits expire: ${deadlineMarks.map(m => m.label).join("; ")}.` : ""} Reset: ${resetLabel}${validReset ? `, ${formatResetDuration(window.resetAt, now)}` : ""}`} data-quota-calendar>
   <div class="relative h-3.5 w-full" aria-hidden="true">
-    <div class="grid h-full gap-1" style:grid-template-columns={columns} data-weekly-day-sectors>
-      {#each days.length ? days : [null] as _, index}
-        <i class="relative overflow-hidden rounded-sm bg-border" data-day-sector>
-          <b class="absolute inset-y-0 right-0 bg-foreground" style={`width: ${sectorFill(index)}%`} data-weekly-remaining-fill></b>
-        </i>
+    <div class="relative h-full overflow-hidden rounded-sm bg-border" data-weekly-progress-track>
+      <span class="absolute inset-y-0 right-0 bg-foreground" style={`width: ${remainingPercent}%`} data-weekly-remaining-fill></span>
+      {#each days.slice(0, -1) as day}
+        <span class="absolute inset-y-0 w-px bg-popover/80" style={`left: ${day.endFraction * 100}%`} data-weekly-day-divider></span>
       {/each}
     </div>
     {#each deadlineMarks as mark}
       <span class="absolute -bottom-1 -top-0.5 z-[5] w-0.5 -translate-x-1/2 rounded-full bg-tool-error ring-1 ring-popover" style:left={`clamp(1px, ${mark.left}, calc(100% - 1px))`} data-reset-credit-deadline></span>
     {/each}
     {#if timeline}
-      <span class="absolute -top-1 z-10 h-[calc(100%+8px)] w-0" style={`left: clamp(3px, ${pinLeft}, calc(100% - 3px))`} data-weekly-now-marker>
+      <span class="absolute -top-1 z-10 h-[calc(100%+8px)] w-0" style={`left: clamp(3px, ${timeline.timePosition}%, calc(100% - 3px))`} data-weekly-now-marker>
         <span class="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-primary ring-1 ring-popover"></span>
         <svg class="absolute -top-1 left-1/2 h-1.5 w-2 -translate-x-1/2 fill-primary" viewBox="0 0 8 6"><path d="M0 0H8L4 6Z" /></svg>
       </span>
     {/if}
   </div>
   {#if timeline}
-    <div class="mt-2 grid gap-1 text-center tabular-nums" style:grid-template-columns={columns} data-quota-cycle-dates>
+    <div class="mt-2 grid text-center tabular-nums" style:grid-template-columns={columns} data-quota-cycle-dates>
       {#each timeline.days as day, index}
         <span
           class={["flex min-w-0 flex-col items-center leading-tight", index === todayIndex ? "text-foreground" : "opacity-60", day.weekend ? "text-tool-warning" : index === todayIndex ? "" : "text-muted-foreground"]}

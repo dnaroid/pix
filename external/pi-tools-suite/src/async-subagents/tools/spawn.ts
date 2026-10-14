@@ -43,6 +43,7 @@ import type { RunState } from "../lib.js";
 import { renderPlainRunSummary, renderSubagentRun, renderSubagentSpawnPrompts } from "../render.js";
 import { normalizeAgentTasks, toTaskPreviews } from "../tasks.js";
 import { emptyToolSlot } from "../ui.js";
+import { diagnosticErrorType, suiteDiagnostics } from "../../lib/suite-diagnostics.js";
 import type { LiveAgent, SubagentRunRenderDetails } from "../types.js";
 
 interface LaunchQueuedAgentOptions {
@@ -336,6 +337,9 @@ export function registerSpawnTool(
 							signal: signal ?? undefined,
 							onResult: (result) => results.push({ id: task.id, pid: result.pid, agentDir: result.agentDir }),
 							onComplete: (completion) => {
+								if (completion.state.status === "failed") {
+									suiteDiagnostics.report("warn", "subagents", "agent-failed", ctx.cwd);
+								}
 								recordSubagentStateStatistics(parentSessionManager, runDir, task.id, completion.state.status);
 								reportCompletion?.(completion);
 								resolveCompleted();
@@ -358,6 +362,10 @@ export function registerSpawnTool(
 									// fabricating a terminal launch failure.
 									onLiveAgentsChange?.();
 									return;
+								}
+								if (!signal?.aborted && diagnosticErrorType(error) !== "AbortError") {
+									suiteDiagnostics.report("error", "subagents", "launch-failed", ctx.cwd,
+										{ errorType: diagnosticErrorType(error) });
 								}
 								writeLaunchFailure(runDir, task, message, resolved.maxResultBytes);
 								capture?.cancel();

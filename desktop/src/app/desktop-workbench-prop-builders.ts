@@ -158,8 +158,11 @@ export function buildWorkbenchConversationProps(
     transcript: {
       transcript,
       activeSessionId: sessionId,
+      runtimeReady: options.activeSessionRuntimeReady(),
       workspace: options.workspace(),
       promptRunning: options.promptRunning(),
+      messageMutationRunning: options.promptRunning() || Boolean(sessionId && options.promptRuntime.queueItemsBySession
+        .get(sessionId)?.some((item) => item.source === "auto" || item.source === "deferred")),
       agentControlState: options.activeAgentControlState(),
       operationRunning: options.operationRunning() || handoffBusy || link?.owned === true,
       historyLoading: options.sessionHistoryLoading(),

@@ -10,6 +10,7 @@ use std::{
 
 // Embedded capability marker used before launch; not a source hash/freshness claim.
 const CONTRACT: &str = "PIX_DESKTOP_ISOLATED_QA_V1";
+const PERSISTENT_CONTRACT: &str = "PIX_DESKTOP_PERSISTENT_QA_V1";
 
 /// Owned by run(), not managed AppHandle state: the listener may retain an
 /// AppHandle until the first signal, but cannot form an app/task ownership cycle.
@@ -93,6 +94,7 @@ impl Drop for SignalBridge {
 pub(crate) struct QaProfile {
     root: PathBuf,
     pub(crate) identifier: String,
+    webview_store: Option<uuid::Uuid>,
     shutdown_requested: AtomicBool,
 }
 
@@ -100,6 +102,8 @@ pub(crate) struct QaProfile {
 struct Manifest {
     version: u8,
     id: String,
+    #[serde(default, rename = "persistentWebview")]
+    persistent_webview: bool,
 }
 
 #[derive(Serialize)]
@@ -107,6 +111,8 @@ struct Manifest {
 struct Runtime<'a> {
     version: u8,
     contract: &'static str,
+    persistent_webview: bool,
+    webview_store_id: Option<String>,
     pid: u32,
     executable: PathBuf,
     profile_dir: &'a Path,
@@ -176,6 +182,21 @@ impl QaProfile {
         if manifest.version != 1 || id.is_nil() || id.hyphenated().to_string() != manifest.id {
             return Err("QA profile requires version 1 and a canonical non-nil UUID".into());
         }
+        let requested = env("PI_UI_QA_PERSISTENT_WEBVIEW");
+        if manifest.persistent_webview != (requested.as_deref() == Some(std::ffi::OsStr::new("1")))
+            || requested.is_some_and(|value| value != "1")
+        {
+            return Err(
+                "persistent QA requires matching explicit profile and launcher opt-in".into(),
+            );
+        }
+        // Recheck this threshold when upgrading wry/tauri: wry 0.55.1 silently
+        // uses defaultDataStore below macOS 14 despite a data-store identifier.
+        #[cfg(target_os = "macos")]
+        let persistent_available = objc2::available!(macos = 14.0);
+        #[cfg(not(target_os = "macos"))]
+        let persistent_available = cfg!(test);
+        require_persistent_store(manifest.persistent_webview, persistent_available)?;
         for (key, suffix) in [
             ("HOME", "home"),
             ("PI_CODING_AGENT_DIR", "home/.pi/agent"),
@@ -191,6 +212,7 @@ impl QaProfile {
         Ok(Some(Self {
             root,
             identifier: format!("dev.pix.desktop.qa.{}", id.simple()),
+            webview_store: manifest.persistent_webview.then_some(id),
             shutdown_requested: AtomicBool::new(false),
         }))
     }
@@ -200,7 +222,8 @@ impl QaProfile {
         // Do not permit auto-created windows to bypass startup_theme::build.
         for window in &mut config.app.windows {
             window.create = false;
-            window.incognito = true;
+            window.incognito = self.webview_store.is_none();
+            window.data_store_identifier = self.webview_store.map(|id| *id.as_bytes());
         }
     }
 
@@ -211,7 +234,13 @@ impl QaProfile {
     pub(crate) fn publish(&self) -> Result<(), Box<dyn std::error::Error>> {
         let runtime = Runtime {
             version: 1,
-            contract: CONTRACT,
+            contract: if self.webview_store.is_some() {
+                PERSISTENT_CONTRACT
+            } else {
+                CONTRACT
+            },
+            persistent_webview: self.webview_store.is_some(),
+            webview_store_id: self.webview_store.map(|id| id.hyphenated().to_string()),
             pid: std::process::id(),
             executable: fs::canonicalize(std::env::current_exe()?)?,
             profile_dir: &self.root,
@@ -253,10 +282,32 @@ impl QaProfile {
     }
 }
 
-pub(crate) fn isolated(manager: &impl tauri::Manager<tauri::Wry>) -> bool {
-    manager
-        .try_state::<Option<QaProfile>>()
-        .is_some_and(|profile| profile.is_some())
+fn require_persistent_store(requested: bool, available: bool) -> Result<(), String> {
+    if requested && !available {
+        return Err(
+            "persistent isolated QA WebViews require macOS 14 or later (no shared-store fallback)"
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+/// Apply to every creation path, overriding even restored window configuration.
+pub(crate) fn configure_webview<'a, M: tauri::Manager<tauri::Wry>>(
+    manager: &M,
+    builder: tauri::WebviewWindowBuilder<'a, tauri::Wry, M>,
+) -> tauri::WebviewWindowBuilder<'a, tauri::Wry, M> {
+    if let Some(state) = manager.try_state::<Option<QaProfile>>() {
+        if let Some(profile) = state.as_ref() {
+            if let Some(id) = profile.webview_store {
+                return builder
+                    .incognito(false)
+                    .data_store_identifier(*id.as_bytes());
+            }
+            return builder.incognito(true);
+        }
+    }
+    builder
 }
 
 /// Only infrastructure cancellation of an isolated QA process can skip the
@@ -460,6 +511,44 @@ mod tests {
         fs::remove_dir(&agent).unwrap();
         symlink(fixture.0.join("home/.config/pi"), agent).unwrap();
         assert!(QaProfile::from_values(|k| env.get(k).cloned()).is_err());
+    }
+
+    #[test]
+    fn persistent_store_cannot_fall_back_on_older_macos() {
+        assert!(require_persistent_store(true, false).is_err());
+        assert!(require_persistent_store(true, true).is_ok());
+        assert!(require_persistent_store(false, false).is_ok());
+    }
+
+    #[test]
+    fn persistent_profile_requires_opt_in_and_configures_every_window_store() {
+        let (fixture, mut env) = fixture();
+        fs::write(fixture.0.join("profile.json"), br#"{"version":1,"id":"12345678-1234-4234-8234-123456789abc","persistentWebview":true}"#).unwrap();
+        assert!(QaProfile::from_values(|k| env.get(k).cloned()).is_err());
+        env.insert("PI_UI_QA_PERSISTENT_WEBVIEW".into(), "1".into());
+        let profile = QaProfile::from_values(|k| env.get(k).cloned())
+            .unwrap()
+            .unwrap();
+        let mut config = tauri::utils::config::Config::default();
+        config.app.windows = vec![Default::default(), Default::default()];
+        profile.configure(&mut config);
+        for window in &config.app.windows {
+            assert!(!window.incognito);
+            assert!(!window.create);
+            assert_eq!(
+                window.data_store_identifier,
+                profile.webview_store.map(|id| *id.as_bytes())
+            );
+        }
+        profile.publish().unwrap();
+        let value: serde_json::Value =
+            serde_json::from_slice(&fs::read(fixture.0.join("runtime.json")).unwrap()).unwrap();
+        assert_eq!(value["contract"], PERSISTENT_CONTRACT);
+        assert_eq!(value["persistentWebview"], true);
+        assert_eq!(
+            value["webviewStoreId"],
+            "12345678-1234-4234-8234-123456789abc"
+        );
     }
 
     #[test]

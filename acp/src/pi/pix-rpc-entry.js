@@ -4,6 +4,8 @@
 process.env.PI_CODING_AGENT = "true";
 process.env.AI_AGENT = "pi";
 process.emitWarning = () => {};
+const { installPixProcessLogging } = await import("../../../dist/app/logger.js");
+installPixProcessLogging({ project: process.cwd(), module: "rpc-process" });
 
 const codingAgentIndex = import.meta.resolve("@earendil-works/pi-coding-agent");
 const { AgentSession, ModelRuntime } = await import("@earendil-works/pi-coding-agent");

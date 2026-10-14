@@ -10,6 +10,38 @@ import type {
 import type { Entry } from "../src/app/types.js";
 
 describe("AppShellController scope ownership", () => {
+	it("logs shell lifecycle and exit metadata without command text, input or output", async () => {
+		const diagnostics: Array<{ level: string; event: string; details: Record<string, unknown>; project?: string }> = [];
+		const result: InteractiveShellCommandResult = { exitCode: 7, signal: null, error: "token=private-error-text" };
+		const controller = new AppShellController({
+			cwd: "/tmp/project",
+			isRunning: () => true,
+			activeScopeKey: () => "tab-a",
+			addEntry: () => {},
+			touchEntry: () => {},
+			setStatus: () => {},
+			setSessionActivity: () => {},
+			restoreSessionStatus: () => {},
+			render: () => {},
+			scheduleRender: () => {},
+		}, {
+			runChatShellCommand: () => ({
+				done: Promise.resolve(result),
+				writeInput: () => true, interrupt: () => true, kill: () => true, endInput: () => {},
+			}),
+			log: (level, event, details, scope) => {
+				diagnostics.push({ level, event, details: details ?? {}, project: scope?.project ?? undefined });
+			},
+		});
+		assert.equal(await controller.run("echo private-command-text"), result);
+		assert.deepEqual(diagnostics.map(({ level, event }) => [level, event]), [
+			["debug", "shell:started"], ["error", "shell:settled"],
+		]);
+		assert.equal(diagnostics[1]?.details.exitCode, 7);
+		assert.equal(diagnostics[1]?.project, "/tmp/project");
+		assert.doesNotMatch(JSON.stringify(diagnostics), /private-command-text|private-error-text/);
+	});
+
 	it("keeps late output off the active tab after the originating scope changes", async () => {
 		let activeScope = "tab-a";
 		let handlers: ChatShellCommandHandlers | undefined;

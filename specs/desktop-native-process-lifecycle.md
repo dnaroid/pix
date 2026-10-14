@@ -29,6 +29,28 @@ Shutdown closes stdin and uses bounded grace before force-stop.
 Output is emitted in bounded batches. ACP diagnostics remain separate from
 protocol stdout.
 
+On an unexpected ACP exit, the native exit event includes a separate 64 KiB
+stderr tail captured before event batching. The supervisor waits at most 250 ms
+for the stderr reader to finish, off the UI thread; a broken inherited pipe may
+leave a partial tail but cannot indefinitely delay exit notification. The
+Desktop error strip shows the exit status and a bounded diagnostic reason
+(preferring a fatal line over stack frames), or explicitly states that stderr
+is unavailable. Each connection attempt resets its frontend diagnostic buffer.
+
+Unexpected exits and initialization failures save a bounded, uniquely named
+receipt at `<workspace>/.pi/artifacts/acp-crash-<uuid>/stderr.log` via the native
+blocking pool. Receipts contain the timestamp, failure summary and stderr tail;
+common credential forms and terminal controls are stripped before saving/display.
+Redaction is best-effort: logs can still contain private project data and should
+be reviewed before sharing. The native writer caps receipts at 512 KiB, refuses
+symlinked `.pi`/`artifacts` directories and creates files with mode 0600 on macOS.
+The error strip reports the saved path or a saving failure without hiding the
+original error. Requested stops do not create crash receipts; no workspace means
+no project-local receipt. A reconnect/dispose invalidates pending log-save UI
+updates, while an already submitted log may still finish saving for the original
+project. These scratch receipts follow the normal artifact cleanup policy; they
+are not a permanent crash archive.
+
 The backend starts in its own process group on macOS. Cleanup signals
 the process group before reaping an exited leader to prevent process-group ID
 reuse, including natural exits. A force-stop
@@ -97,12 +119,18 @@ fetches objects or mutates Git refs, the index, or the working tree.
 - `desktop/src-tauri/src/lib.rs::workspace_git_remote_update_probe`
 - `desktop/src-tauri/src/lib.rs::sidebar_git_remote_ls_remote_output`
 - `desktop/src-tauri/src/acp_queue.rs::Queue`
+- `desktop/src-tauri/src/acp_diagnostics.rs` (stderr capture and crash receipts)
+- `desktop/src/app/connection.svelte.ts` (failure reporting and stale-save guards)
+- `desktop/src/lib/acp-crash-diagnostics.ts` (bounded/redacted summaries)
 - `desktop/src-tauri/src/native_process.rs::force_stop`
 - `desktop/src-tauri/src/native_process/windows.rs` (suspended spawn, job ownership)
 
 ## Tests
 
 - `desktop/src-tauri/src/acp_queue.rs` (oversized payload, saturated queue, shutdown)
+- `desktop/src-tauri/src/acp_diagnostics.rs` (bounded capture, unique receipts, symlink refusal)
+- `desktop/src/app/connection.test.ts` (late stderr, stale save success/failure, requested stops)
+- `desktop/src/lib/acp-crash-diagnostics.test.ts` (summary, redaction and bounds)
 - `desktop/src-tauri/src/native_lifecycle_tests.rs` (command-level admission,
   invalid JSON isolation, writer failure acknowledgement drain, startup/stop
   publication cancellation, same-label replacement resource isolation,

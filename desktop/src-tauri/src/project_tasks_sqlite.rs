@@ -166,6 +166,12 @@ pub(super) fn attachment_counts(
         return Ok(std::collections::HashMap::new());
     }
     let connection = open(directory, false)?;
+    attachment_counts_from(&connection)
+}
+
+fn attachment_counts_from(
+    connection: &Connection,
+) -> Result<std::collections::HashMap<String, i64>, String> {
     let mut statement = connection
         .prepare("SELECT task_id,COUNT(*) FROM task_attachments GROUP BY task_id")
         .map_err(sql_error)?;
@@ -215,6 +221,32 @@ pub(super) fn read(directory: &Path, max_bytes: u64) -> Result<ProjectTaskDocume
         return Ok(empty_task_document());
     }
     let connection = open(directory, false)?;
+    read_from(&connection, max_bytes)
+}
+
+/// One read transaction keeps task rows and lightweight badge counts on the
+/// same SQLite snapshot. No attachment blobs are read or approved here.
+pub(super) fn read_panel(
+    directory: &Path,
+    max_bytes: u64,
+) -> Result<super::ProjectTasksPanelSnapshot, String> {
+    if !exists(directory)? {
+        return Ok(super::ProjectTasksPanelSnapshot::default());
+    }
+    let mut connection = open(directory, false)?;
+    let transaction = connection.transaction().map_err(sql_error)?;
+    let document = read_from(&transaction, max_bytes)?;
+    // Badge failures must not turn readable tasks into a storage error; the
+    // task editor owns reporting attachment problems when opened.
+    let attachment_counts = attachment_counts_from(&transaction).ok();
+    transaction.commit().map_err(sql_error)?;
+    Ok(super::ProjectTasksPanelSnapshot {
+        document,
+        attachment_counts,
+    })
+}
+
+fn read_from(connection: &Connection, max_bytes: u64) -> Result<ProjectTaskDocument, String> {
     let mut statement = connection
         .prepare("SELECT id,payload FROM tasks ORDER BY position ASC,id ASC")
         .map_err(sql_error)?;

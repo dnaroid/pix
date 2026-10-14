@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { loadPiToolsSuiteConfig, type TodoThinkingPolicy } from "../config.js";
 import { clampTodoThinkingRange } from "./thinking-policy.js";
 import { isAgentBusyRaceError } from "../context-usage.js";
+import { diagnosticErrorType, suiteDiagnostics } from "../lib/suite-diagnostics.js";
 import { autoClearCompletedTodos } from "./state/auto-clear.js";
 import { loadPersistedPlan, syncPersistedPlan } from "./state/persistence.js";
 import { replayFromBranch } from "./state/replay.js";
@@ -262,6 +263,8 @@ export default function (pi: ExtensionAPI) {
 					const sync = syncPersistedPlan(ctx.cwd, info.committedState);
 					if (sync?.completed) console.log(`rpiv-todo: completed persisted plan and removed ${sync.path}`);
 				} catch (err) {
+					suiteDiagnostics.report("warn", "todo", "persistence-sync-failed", ctx.cwd,
+						{ errorType: diagnosticErrorType(err) });
 					console.warn(`rpiv-todo: failed to sync persisted plan — ${(err as Error).message}`);
 				}
 			},
@@ -452,6 +455,8 @@ export default function (pi: ExtensionAPI) {
 			const sync = syncPersistedPlan(ctx.cwd, autoClear.state);
 			if (sync?.completed) console.log(`rpiv-todo: completed persisted plan and removed ${sync.path}`);
 		} catch (err) {
+			suiteDiagnostics.report("warn", "todo", "persistence-sync-failed", ctx.cwd,
+				{ errorType: diagnosticErrorType(err) });
 			console.warn(`rpiv-todo: failed to sync persisted plan — ${(err as Error).message}`);
 		}
 		return true;
@@ -504,6 +509,8 @@ export default function (pi: ExtensionAPI) {
 					return;
 				}
 				if (isStaleExtensionContextError(err)) return;
+				suiteDiagnostics.report("warn", "todo", "auto-nudge-failed", ctx.cwd,
+					{ errorType: diagnosticErrorType(err) });
 				console.warn(`rpiv-todo: failed to auto-nudge unfinished todos — ${(err as Error).message}`);
 			}
 		}, delayMs);

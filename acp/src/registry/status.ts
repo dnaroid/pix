@@ -1,6 +1,6 @@
 import { RegistryExecutor } from "./context.js";
 import { ProjectContext, hasTrackableFiles, pathExists, projectArtifactDisplayName, projectArtifactLocalPath, projectArtifactRegistryPath, projectCwd, resourceKey } from "./paths.js";
-import { ProjectArtifact, ProjectArtifactStatus, ProjectScope, ProjectStatusBundle, RegistryRuntime, RegistryStatus, RegistryStatusKind, RegistryUiAction, RegistryUiItem, RegistryUiSnapshot } from "./model.js";
+import { PROJECT_DIR, ProjectArtifact, ProjectArtifactStatus, ProjectScope, ProjectStatusBundle, RegistryRuntime, RegistryStatus, RegistryStatusKind, RegistryUiAction, RegistryUiItem, RegistryUiSnapshot } from "./model.js";
 import { hashResource, scanProject, scanRegistry } from "./resource-files.js";
 import { readProvenance } from "./provenance.js";
 import { ensureRegistryCache, projectArtifactRevision, resolveProjectKey, resourceRevision } from "./git.js";
@@ -10,6 +10,7 @@ import { loadRuntimeConfig } from "./config.js";
 import { resolvePublicationProjectKey, samePublication } from "./publication-location.js";
 import { localTasksExist } from "./task-database.js";
 import { readAgentModelOverrides, readAgentModelState } from "./agent-models.js";
+import { join } from "node:path";
 
 async function withAgentModels(cwd: string, statuses: RegistryStatus[], items: RegistryUiItem[]): Promise<RegistryUiItem[]> {
 	const overrides = await readAgentModelOverrides(cwd);
@@ -96,6 +97,8 @@ export async function collectProjectStatuses(
 	runtime: RegistryRuntime,
 ): Promise<ProjectStatusBundle> {
 	const cwd = projectCwd(project);
+	// A catalog refresh must not create .pi before explicit project initialization.
+	if (!await pathExists(join(cwd, PROJECT_DIR))) return { statuses: [] };
 	let projectKey: string;
 	try {
 		projectKey = await resolveProjectKey(executor, cwd);

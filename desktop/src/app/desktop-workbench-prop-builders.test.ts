@@ -58,6 +58,24 @@ function conversationOptions(sessionId: string | null, quotaWait = createQuotaWa
 }
 
 describe("workbench composer props", () => {
+  it("scopes message mutation gates to the selected session without changing transcript activity", () => {
+    const options = conversationOptions("source");
+    options.transcript = () => ({ items: [] });
+    options.promptRuntime.queueItemsBySession.set("other", [{ source: "auto" }]);
+    let props = buildWorkbenchConversationProps(options).transcript;
+    expect(props.runtimeReady).toBe(true); expect(props.messageMutationRunning).toBe(false);
+    for (const source of ["auto", "deferred"]) {
+      options.promptRuntime.queueItemsBySession.set("source", [{ source }]);
+      props = buildWorkbenchConversationProps(options).transcript;
+      expect(props.messageMutationRunning).toBe(true); expect(props.promptRunning).toBe(false);
+      expect(props.historyLoading).toBe(false);
+    }
+    options.promptRuntime.queueItemsBySession.delete("source");
+    options.promptRunning = () => true;
+    expect(buildWorkbenchConversationProps(options).transcript.messageMutationRunning).toBe(true);
+    options.activeSessionRuntimeReady = () => false;
+    expect(buildWorkbenchConversationProps(options).transcript.runtimeReady).toBe(false);
+  });
   it("offers handoff only for idle loaded sessions without queued work or another handoff", () => {
     const options = conversationOptions("source");
     options.activeAgentControlState = () => "idle";

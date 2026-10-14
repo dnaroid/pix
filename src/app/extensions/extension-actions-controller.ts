@@ -1,7 +1,7 @@
 import { basename } from "node:path";
 import type { AgentSessionRuntime, ExtensionCommandContextActions, ExtensionError } from "@earendil-works/pi-coding-agent";
 import { createId } from "../id.js";
-import { logPixEvent, type PixLogDetails, type PixLogLevel } from "../logger.js";
+import { logPixEvent, type PixLogContext, type PixLogDetails, type PixLogLevel } from "../logger.js";
 import type { Entry } from "../types.js";
 import { createReloadContextInventory, formatReloadContextInventory, type ReloadAgentCatalog } from "../commands/reload-context-inventory.js";
 
@@ -22,7 +22,7 @@ export type AppExtensionActionsHost = {
 	render(): void;
 };
 
-export type ExtensionErrorLogger = (level: PixLogLevel, event: string, details?: PixLogDetails) => void;
+export type ExtensionErrorLogger = (level: PixLogLevel, event: string, details?: PixLogDetails, scope?: PixLogContext) => void;
 
 export class AppExtensionActionsController {
 	constructor(
@@ -102,7 +102,9 @@ export class AppExtensionActionsController {
 	handleExtensionError(error: ExtensionError): void {
 		const sourceText = formatExtensionErrorSource(error.extensionPath);
 		const pathText = error.extensionPath ? ` (${error.extensionPath})` : "";
-		this.logExtensionError("error", "extension:error", extensionErrorLogDetails(error));
+		this.logExtensionError("error", "extension:error", extensionErrorLogDetails(error), {
+			project: this.host.runtime()?.cwd ?? null, module: "extensions",
+		});
 		this.host.addEntry({
 			id: createId("error"),
 			kind: "error",

@@ -249,6 +249,7 @@ export class PiUiExtendApp {
 		});
 		this.memoryWatchdog = new MemoryWatchdog({
 			appContext: () => ({
+				cwd: this.runtime?.cwd ?? this.options.cwd,
 				tabs: this.tabsController.tabs().length,
 				loadedRuntimes: this.tabsController.loadedRuntimeCount(),
 				visibleEntries: this.entries.length,
@@ -1380,7 +1381,7 @@ export class PiUiExtendApp {
 				const payload = parseModelUsageResponseHeadersPayload(data);
 				if (payload) this.modelUsageController.observeResponseHeaders(payload);
 			}
-		});
+		}, () => this.runtime?.cwd ?? this.options.cwd);
 	}
 
 	private subagentTypesForRuntime(runtime: AgentSessionRuntime): SubagentCatalogState | undefined {

@@ -15,7 +15,7 @@
 </script>
 
 <div class="row-start-1 flex min-h-8 items-center gap-2.5 border-b border-destructive/30 bg-destructive/8 py-1 pr-2 pl-3 text-xs text-destructive" role="alert">
-  <span class="flex-1">{message}</span>
+  <span class="min-w-0 flex-1 [overflow-wrap:anywhere]">{message}</span>
   {#if canReconnect}
     <button class="bg-transparent text-inherit hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" onclick={onReconnect}>Reconnect</button>
   {/if}

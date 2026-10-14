@@ -102,7 +102,7 @@ verification for changes to this path.
 The TUI memory watchdog samples the process every 15 seconds. At the configured
 RSS threshold it writes a report under `~/.config/pi/memory-reports/`; when safe,
 the first report also includes a V8 heap snapshot. Periodic samples are logged to
-`~/.config/pi/pix.log`.
+`~/.config/pi/logs/`.
 
 When investigating a recurrence, compare:
 

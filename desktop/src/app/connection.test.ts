@@ -7,6 +7,8 @@ interface ClientDouble {
 }
 
 const rpc = vi.hoisted(() => ({ start: vi.fn(), clients: [] as ClientDouble[] }));
+const native = vi.hoisted(() => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: native.invoke }));
 vi.mock("../lib/tauri-transport", () => ({ TauriAcpTransport: class {} }));
 vi.mock("../lib/acp-client", () => ({
   AcpClient: class {
@@ -27,7 +29,7 @@ function deferred<T>() {
 
 function fixture() {
   const options = {
-    workspace: () => "/workspace",
+    workspace: vi.fn(() => "/workspace"),
     onSessionUpdate: vi.fn(),
     onSessionCatalogChanged: vi.fn(),
     onSessionState: vi.fn(),
@@ -38,6 +40,7 @@ function fixture() {
     openWorkspaceSession: vi.fn(async () => {}),
     setErrorMessage: vi.fn(),
     reportError: vi.fn(),
+    recordDiagnostic: vi.fn(),
   };
   return { options, store: createConnectionStore(options) };
 }
@@ -46,6 +49,7 @@ describe("Desktop connection ownership", () => {
   beforeEach(() => {
     rpc.clients.length = 0;
     rpc.start.mockReset().mockResolvedValue({});
+    native.invoke.mockReset().mockResolvedValue("/workspace/.pi/artifacts/acp-crash-test/stderr.log");
   });
 
   it("ignores native catalog notifications from old clients and other workspaces", async () => {
@@ -74,6 +78,7 @@ describe("Desktop connection ownership", () => {
     await store.connect();
     expect(rpc.clients).toHaveLength(1);
     expect(options.openWorkspaceSession).toHaveBeenCalledOnce();
+    expect(options.recordDiagnostic.mock.calls.map(([event]) => event)).toEqual(["acp:connecting", "acp:ready"]);
     await store.dispose();
   });
 
@@ -134,10 +139,15 @@ describe("Desktop connection ownership", () => {
     await store.connect();
     expect(store.status).toBe("error");
     expect(options.reportError).toHaveBeenCalledOnce();
+    expect(options.recordDiagnostic).toHaveBeenCalledWith("acp:connect-failed");
+    expect(native.invoke).toHaveBeenCalledWith("save_acp_crash_log", {
+      workspace: "/workspace", content: expect.stringContaining("cannot initialize"),
+    });
     await store.connect();
     expect(rpc.clients[0]!.dispose).toHaveBeenCalledOnce();
     expect(rpc.clients).toHaveLength(2);
     expect(store.status).toBe("ready");
+    expect(options.recordDiagnostic).toHaveBeenCalledWith("acp:reconnecting");
     await store.dispose();
   });
 
@@ -154,6 +164,82 @@ describe("Desktop connection ownership", () => {
     expect(options.onDisconnect).toHaveBeenCalledOnce();
     expect(options.onSessionUpdate).not.toHaveBeenCalled();
     expect(old.dispose).toHaveBeenCalledOnce();
+    await store.dispose();
+  });
+
+  it("uses the native stderr snapshot even when the final stderr event is late", async () => {
+    const { store, options } = fixture();
+    await store.connect();
+    const old = rpc.clients[0]!;
+    old.handlers.onDiagnostic?.("old partial line");
+    old.handlers.onExit?.({ generation: 1, code: 1, success: false, requested: false, error: null,
+      stderr: "[pix-acp] fatal: startup failed\n    at main.js:42\n" });
+    old.handlers.onDiagnostic?.("late diagnostic");
+    await Promise.resolve();
+    expect(options.setErrorMessage).toHaveBeenLastCalledWith(expect.stringContaining("fatal: startup failed"));
+    expect(options.setErrorMessage).toHaveBeenLastCalledWith(expect.stringContaining("Log: /workspace/.pi/artifacts/"));
+    expect(native.invoke).toHaveBeenCalledWith("save_acp_crash_log", {
+      workspace: "/workspace", content: expect.stringContaining("at main.js:42"),
+    });
+    expect(store.diagnostics).toEqual(["old partial line"]);
+    await store.dispose();
+  });
+
+  it("persists the original crash but does not overwrite a reconnected banner", async () => {
+    const saved = deferred<string>();
+    native.invoke.mockReturnValue(saved.promise);
+    const { store, options } = fixture();
+    await store.connect();
+    rpc.clients[0]!.handlers.onDiagnostic?.("first generation stderr");
+    rpc.clients[0]!.handlers.onExit?.({ generation: 1, code: 1, success: false, requested: false, error: null });
+    await store.reconnect();
+    options.setErrorMessage.mockClear();
+    saved.resolve("/workspace/.pi/artifacts/old/stderr.log");
+    await Promise.resolve();
+    expect(store.status).toBe("ready");
+    expect(store.diagnostics).toEqual([]);
+    expect(options.setErrorMessage).not.toHaveBeenCalled();
+    await store.dispose();
+  });
+
+  it("reports saving failures without masking stderr, and ignores stale failures after disposal", async () => {
+    native.invoke.mockRejectedValueOnce(new Error("read-only filesystem"));
+    const { store, options } = fixture();
+    await store.connect();
+    rpc.clients[0]!.handlers.onExit?.({ generation: 1, code: 1, success: false, requested: false, error: null, stderr: "fatal: boom" });
+    await Promise.resolve();
+    expect(options.setErrorMessage).toHaveBeenLastCalledWith(expect.stringContaining("fatal: boom · Could not save crash log: Error: read-only filesystem"));
+    await store.reconnect();
+    const saved = deferred<string>();
+    native.invoke.mockReturnValue(saved.promise);
+    rpc.clients[1]!.handlers.onExit?.({ generation: 2, code: 1, success: false, requested: false, error: null });
+    await store.dispose();
+    options.setErrorMessage.mockClear();
+    saved.reject(new Error("late failure"));
+    await Promise.resolve();
+    expect(options.setErrorMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not create crash receipts for requested stops", async () => {
+    const { store } = fixture();
+    await store.connect();
+    rpc.clients[0]!.handlers.onExit?.({ generation: 1, code: 0, success: true, requested: true, error: null });
+    expect(native.invoke).not.toHaveBeenCalled();
+    await store.dispose();
+  });
+
+  it("saves to the failing project without updating a newly selected project's banner", async () => {
+    const saved = deferred<string>();
+    native.invoke.mockReturnValue(saved.promise);
+    const { store, options } = fixture();
+    await store.connect();
+    rpc.clients[0]!.handlers.onExit?.({ generation: 1, code: 1, success: false, requested: false, error: null });
+    expect(native.invoke).toHaveBeenCalledWith("save_acp_crash_log", expect.objectContaining({ workspace: "/workspace" }));
+    options.workspace.mockReturnValue("/other-project");
+    options.setErrorMessage.mockClear();
+    saved.resolve("/workspace/.pi/artifacts/old/stderr.log");
+    await Promise.resolve();
+    expect(options.setErrorMessage).not.toHaveBeenCalled();
     await store.dispose();
   });
 });

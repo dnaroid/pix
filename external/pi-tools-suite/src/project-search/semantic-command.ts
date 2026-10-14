@@ -5,7 +5,8 @@ import { randomUUID } from "node:crypto";
 import { applyEdits, modify } from "jsonc-parser";
 import { parseEmbeddingSettings, parseSemanticConfiguration, semanticConfigurationPath, semanticConfigurationText } from "./native-embedding-provider.mjs";
 import { resetHistoryVectors } from "./semantic-reset.js";
-import { logSearchDiagnostic as writeDiagnostic } from "./search-diagnostics.mjs";
+import { logSearchDiagnostic as writeDiagnostic } from "./search-logging.mjs";
+import { suiteDiagnostics } from "../lib/suite-diagnostics.js";
 
 const disclosure = "Saving provider configuration authorizes semantic search for all projects and sources in Pi and Desktop. Saved tasks embed on startup and changes. Session names and public user/assistant text embed after one hour of per-session inactivity with no running agent; new activity resets only that session's delay, and restart reuses persisted activity. Session queries rank existing vectors without embedding documents. Indexing/searches may send code/document chunks, paths/headings, saved session names, commit metadata, settings metadata and queries and incur charges. Tool payloads, thinking and attachments are excluded. Use /search-index sessions for immediate manual indexing or retry. Repository indexing is bounded to 128 missing chunks per search. Local lexical search makes no embedding calls.";
 
@@ -67,6 +68,8 @@ export function registerSemanticConsentCommand(pi: ExtensionAPI, refreshTasks: (
         refreshTasks();
         void logSearchDiagnostic(ctx.cwd, { event: "search_command", message: action === "configure" ? `Global semantic provider saved. ${disclosure}` : "Global semantics disabled. Cached vectors retained; local search remains available.", reason: "info" });
       } catch {
+        if (!ctx.signal?.aborted) suiteDiagnostics.report("warn", "search", "semantic-settings-failed", ctx.cwd,
+          { action }, ctx);
         void logSearchDiagnostic(ctx.cwd, { event: "search_command", message: action === "reset-history"
           ? "Could not reset history vectors: storage is busy, unsafe or unrecognized. No reset was committed."
           : "Could not change global semantic settings. Check provider/model/dimensions and malformed, redirected, locked or concurrently changed storage. Existing settings were not replaced.", reason: "warning" });

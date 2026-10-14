@@ -31,22 +31,15 @@ pub(crate) fn build(
     let visible = config.visible;
     let revealed = AtomicBool::new(false);
     let builder = WebviewWindowBuilder::from_config(manager, config)?;
-    // WKWebView uses a non-persistent store, never the working app's store.
-    // Apply this to restored, fallback and subsequently opened windows alike.
-    let builder = if crate::qa_profile::isolated(manager) {
-        builder.incognito(true)
-    } else {
-        builder
-    };
+    // Temporary QA uses incognito; explicit persistent QA uses its own UUID store.
+    // Neither may fall back to the working app's default WKWebView store.
+    let builder = crate::qa_profile::configure_webview(manager, builder);
     let window = builder
         .visible(false)
         .on_navigation(allow_workbench_navigation)
         .on_page_load(move |window, payload| {
             if claim_initial_reveal(payload.event(), visible, &revealed) {
-                apply_to(&window);
-                if let Err(error) = window.show() {
-                    eprintln!("failed to show the Pix startup window: {error}");
-                }
+                reveal(window.clone());
             }
         })
         .build()?;
@@ -57,17 +50,47 @@ fn claim_initial_reveal(event: PageLoadEvent, visible: bool, revealed: &AtomicBo
     matches!(event, PageLoadEvent::Finished) && visible && !revealed.swap(true, Ordering::Relaxed)
 }
 
+fn reveal(window: WebviewWindow) {
+    let app = window.app_handle().clone();
+    if let Err(error) = app.run_on_main_thread(move || {
+        if window
+            .state::<crate::AcpProcessState>()
+            .exiting
+            .load(Ordering::Acquire)
+        {
+            return;
+        }
+        apply_to(&window);
+        if let Err(error) = window.show() {
+            crate::logging::error(module_path!(), format!("failed to show the Pix startup window: {error}"));
+            return;
+        }
+        // Showing a previously hidden window alone does not activate Pix. Each
+        // restored window must be ordered forward once its document is ready.
+        #[cfg(target_os = "macos")]
+        if !crate::desktop_notification::foreground_window(&window) {
+            crate::logging::error(module_path!(), format!("failed to foreground the Pix startup window"));
+        }
+        #[cfg(not(target_os = "macos"))]
+        if let Err(error) = window.set_focus() {
+            crate::logging::error(module_path!(), format!("failed to focus the Pix startup window: {error}"));
+        }
+    }) {
+        crate::logging::error(module_path!(), format!("failed to dispatch the Pix startup reveal: {error}"));
+    }
+}
+
 fn apply_to(window: &WebviewWindow) {
     let theme = match window.theme() {
         Ok(theme) => theme,
         Err(error) => {
-            eprintln!("failed to resolve the Pix startup theme: {error}");
+            crate::logging::error(module_path!(), format!("failed to resolve the Pix startup theme: {error}"));
             return;
         }
     };
 
     if let Err(error) = window.set_background_color(Some(background_for(theme))) {
-        eprintln!("failed to set the Pix startup background: {error}");
+        crate::logging::error(module_path!(), format!("failed to set the Pix startup background: {error}"));
     }
 }
 
@@ -128,6 +151,17 @@ mod tests {
             false,
             &revealed
         ));
+    }
+
+    #[test]
+    fn restored_windows_each_claim_their_own_initial_reveal() {
+        let windows = [AtomicBool::new(false), AtomicBool::new(false)];
+        for window in &windows {
+            assert!(claim_initial_reveal(PageLoadEvent::Finished, true, window));
+        }
+        for window in &windows {
+            assert!(!claim_initial_reveal(PageLoadEvent::Finished, true, window));
+        }
     }
 
     #[test]

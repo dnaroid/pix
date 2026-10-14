@@ -1,5 +1,6 @@
 import { check, type DownloadEvent, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import type { DesktopDiagnosticEvent } from "../lib/diagnostic-logging";
 
 export type DesktopUpdaterStatus = "idle" | "checking" | "current" | "available" | "downloading" | "ready" | "error";
 
@@ -19,7 +20,8 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function createDesktopUpdater(dependencies: DesktopUpdaterDependencies = defaultDependencies) {
+export function createDesktopUpdater(dependencies: DesktopUpdaterDependencies = defaultDependencies,
+  recordDiagnostic?: (event: DesktopDiagnosticEvent) => void) {
   let status = $state<DesktopUpdaterStatus>("idle");
   let available = $state<UpdateHandle | null>(null);
   let downloadedBytes = $state(0);
@@ -28,6 +30,9 @@ export function createDesktopUpdater(dependencies: DesktopUpdaterDependencies = 
   let dismissed = $state(false);
   let generation = 0;
   let disposed = false;
+  function record(event: DesktopDiagnosticEvent): void {
+    try { recordDiagnostic?.(event); } catch { /* Update behavior must not depend on diagnostics. */ }
+  }
 
   const visible = $derived(!dismissed && ["available", "downloading", "ready", "error"].includes(status));
   const progress = $derived(totalBytes && totalBytes > 0 ? Math.min(1, downloadedBytes / totalBytes) : null);
@@ -45,6 +50,7 @@ export function createDesktopUpdater(dependencies: DesktopUpdaterDependencies = 
     if (disposed || status === "checking" || status === "downloading") return;
     const request = ++generation;
     status = "checking";
+    record("updater:checking");
     error = null;
     dismissed = false;
     try {
@@ -56,9 +62,11 @@ export function createDesktopUpdater(dependencies: DesktopUpdaterDependencies = 
       await closeUpdate(available);
       available = next;
       status = next ? "available" : "current";
+      record(next ? "updater:available" : "updater:current");
     } catch (cause) {
       if (!isCurrent(request)) return;
       status = "error";
+      record("updater:check-failed");
       error = errorMessage(cause);
     }
   }
@@ -79,6 +87,7 @@ export function createDesktopUpdater(dependencies: DesktopUpdaterDependencies = 
     if (!update || disposed || status === "downloading") return;
     const request = ++generation;
     status = "downloading";
+    record("updater:installing");
     error = null;
     downloadedBytes = 0;
     totalBytes = null;
@@ -88,9 +97,11 @@ export function createDesktopUpdater(dependencies: DesktopUpdaterDependencies = 
       await update.downloadAndInstall(handleDownloadEvent, { timeout: 15 * 60_000, restartAfterInstall: true });
       if (!isCurrent(request)) return;
       status = "ready";
+      record("updater:ready");
     } catch (cause) {
       if (!isCurrent(request)) return;
       status = "error";
+      record("updater:install-failed");
       error = errorMessage(cause);
     }
   }
@@ -101,6 +112,7 @@ export function createDesktopUpdater(dependencies: DesktopUpdaterDependencies = 
       await dependencies.relaunch();
     } catch (cause) {
       status = "error";
+      record("updater:restart-failed");
       error = errorMessage(cause);
     }
   }

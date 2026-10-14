@@ -2,6 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { parseProjectTasksParams, runProjectTasks, type ProjectTasksParams } from "./engine.js";
 import { object } from "./schema.js";
 import { attachTaskFile } from "./attachments.js";
+import { diagnosticErrorType, suiteDiagnostics } from "../lib/suite-diagnostics.js";
 
 export const TASK_COMMAND_USAGE = `Usage:
 /tasks list [JSON filters: status, priority, type]
@@ -56,6 +57,10 @@ export function registerTaskCommands(pi: ExtensionAPI): void {
             : await runProjectTasks(ctx.cwd, parseTaskCommand(command, args), ctx.signal);
           ctx.ui.notify(JSON.stringify(response, null, 2), "info");
         } catch (error) {
+          if (!(error instanceof Error && error.message === TASK_COMMAND_USAGE) && !ctx.signal?.aborted) {
+            suiteDiagnostics.report("warn", "tasks", "command-failed", ctx.cwd,
+              { errorType: diagnosticErrorType(error) });
+          }
           ctx.ui.notify(error instanceof Error ? error.message : "Task command failed; check storage and retry.", "error");
         }
       },

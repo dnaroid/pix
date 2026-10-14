@@ -25,6 +25,11 @@ browser preview retains browser behavior; this policy belongs to the Tauri host.
 - Empty application chrome has no context menu. Checkboxes, non-text inputs,
   disabled controls (including disabled fieldsets) and inert surfaces do not
   acquire editing commands because a selection exists elsewhere.
+- Session tab buttons offer **Copy Session ID**, copying the clicked tab's raw
+  session ID (without the `session:` workbench prefix), without selecting or
+  closing it. Nested labels/icons and Context Menu / Shift+F10 use the same
+  action. Non-session tabs retain their existing menus. Copy uses the native
+  clipboard and existing error reporting and stale-callback guards.
 - Editable text inputs, textareas and contenteditable editors offer native Undo,
   Redo, Cut, Copy, Paste and Select All. Read-only text inputs offer Copy and
   Select All. Password fields never expose Cut or Copy; read-only passwords have

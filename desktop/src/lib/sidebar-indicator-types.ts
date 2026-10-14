@@ -11,6 +11,7 @@ export type SidebarIndicatorTab =
   | "scripts"
   | "search"
   | "lsp"
+  | "logs"
   | "settings";
 
 export type SidebarIndicatorTone = "info" | "warning" | "error";

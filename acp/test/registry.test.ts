@@ -13,6 +13,7 @@ import { registryExecutor } from "../src/registry/executor.js";
 import { DesktopRegistryService } from "../src/registry/service.js";
 import { loadRuntimeConfig, saveRegistryConfig } from "../src/registry/config.js";
 import { loadRegistryConfig } from "../src/registry/config-reader.js";
+import { resolveProjectKey } from "../src/registry/git.js";
 import { projectKeyFromGitRemote } from "../src/registry/paths.js";
 import { collectRegistryUiSnapshot } from "../src/registry/status.js";
 import type { RegistryUiItem, RegistryUiSnapshot } from "../src/registry/model.js";
@@ -447,13 +448,16 @@ test("refuses global/project name collisions and global promotion or creation ov
 	assert.equal(fs.existsSync(path.join(seed, "skills", "demo")), false);
 });
 
-test("scope toggle requires a project identity, supports cancel and rejects symlink namespace ancestors", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
+test("scope toggle generates a project identity, supports cancel and rejects symlink namespace ancestors", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
 	const { project, seed, h } = await scopeFixture();
+	fs.mkdirSync(path.join(project, ".pi"), { recursive: true });
 	delete process.env.PI_RESOURCE_REGISTRY_PROJECT_KEY;
-	const missingKey = await act(project, { action: "toggle-scope", type: "skill", name: "demo" }, h.ctx);
-	assert.match(missingKey.error ?? "", /project key/i);
-	process.env.PI_RESOURCE_REGISTRY_PROJECT_KEY = "alpha";
 	h.setConfirm(async () => false);
+	const autoKey = await act(project, { action: "toggle-scope", type: "skill", name: "demo" }, h.ctx);
+	assert.equal(autoKey.error, undefined);
+	assert.match(autoKey.projectKey ?? "", /^local-[0-9a-f]{32}$/);
+	assert.equal(item(autoKey, "skill:demo").publicationScope, "global");
+	process.env.PI_RESOURCE_REGISTRY_PROJECT_KEY = "alpha";
 	const cancelled = await act(project, { action: "toggle-scope", type: "skill", name: "demo" }, h.ctx);
 	assert.equal(cancelled.error, undefined);
 	assert.equal(item(cancelled, "skill:demo").publicationScope, "global");
@@ -711,20 +715,23 @@ test("bulk project push stops on failure and retry retains earlier published res
 	for (const name of ["a", "b", "c"]) assert.equal(item(retried, `skill:${name}`).status, "up-to-date");
 });
 
-test("Local-only resource publication needs a project key and skips untracked Global collisions", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
+test("Local-only resource publication uses the automatic project key and skips untracked Global collisions", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
 	const { root, project, remote, h } = await scopeFixture();
 	const local = path.join(project, ".pi", "skills", "draft");
 	fs.mkdirSync(local, { recursive: true });
 	fs.writeFileSync(path.join(local, "SKILL.md"), "---\ndescription: Draft\n---\nDraft\n");
 	delete process.env.PI_RESOURCE_REGISTRY_PROJECT_KEY;
 	fs.writeFileSync(path.join(project, ".pi", "pi-tools-suite.jsonc"), JSON.stringify({ resourceRegistry: { projectKey: null } }));
+	const published = await act(project, { action: "sync-project", scope: "project" }, h.ctx);
+	assert.equal(published.error, undefined);
+	assert.match(published.projectKey ?? "", /^local-[0-9a-f]{32}$/);
+	assert.equal(item(published, "skill:draft").publicationScope, "project");
+	assert.equal(item(published, "skill:draft").status, "up-to-date");
+	assert.ok(git(root, ["--git-dir", remote, "ls-tree", "-r", "--name-only", "main"])
+		.includes(`projects/${published.projectKey}/skills/draft/SKILL.md`));
+	assert.equal((await act(project, { action: "push", type: "skill", name: "draft" }, h.ctx)).error, undefined);
+	assert.equal((await act(project, { action: "push-project-resources" }, h.ctx)).error, undefined);
 	const before = git(root, ["--git-dir", remote, "rev-parse", "main"]);
-	const missing = await act(project, { action: "sync-project", scope: "project" }, h.ctx);
-	assert.match(missing.error ?? missing.projectIssue ?? "", /project key/i);
-	assert.match((await act(project, { action: "push", type: "skill", name: "draft" }, h.ctx)).error ?? "", /project key/i);
-	const bulkMissingKey = await act(project, { action: "push-project-resources" }, h.ctx);
-	assert.match(bulkMissingKey.error ?? bulkMissingKey.projectIssue ?? "", /project key/i);
-	assert.equal(git(root, ["--git-dir", remote, "rev-parse", "main"]), before);
 	process.env.PI_RESOURCE_REGISTRY_PROJECT_KEY = "alpha";
 	fs.rmSync(local, { recursive: true });
 	const collision = path.join(project, ".pi", "skills", "demo");
@@ -878,7 +885,7 @@ test("publishes installed local resources before a Marketplace remote is configu
 	}
 });
 
-test("a project without Git origin keeps reusable Registry resources usable and asks only for a project key", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
+test("Registry catalog refresh does not initialize missing .pi or demand a project key", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
 	const root = tempRoot();
 	isolate(root);
 	const project = path.join(root, "plain-project");
@@ -888,13 +895,77 @@ test("a project without Git origin keeps reusable Registry resources usable and 
 	const snapshot = await service().action({ cwd: project, action: "refresh" }, harness(project).ctx);
 	assert.equal(snapshot.configured, true);
 	assert.equal(snapshot.projectKey, undefined);
-	assert.match(snapshot.projectIssue ?? "", /Project state needs a registry key/);
+	assert.equal(snapshot.projectIssue, undefined);
 	assert.equal(snapshot.error, undefined);
 	assert.ok(snapshot.items.some((entry) => entry.type === "skill" && entry.name === "demo"));
+	assert.equal(fs.existsSync(path.join(project, ".pi")), false);
+	const afterRefresh = await collectRegistryUiSnapshot(registryExecutor, project);
+	assert.equal(afterRefresh.projectIssue, undefined);
+	assert.equal(fs.existsSync(path.join(project, ".pi")), false);
+});
 
-	const afterProjectActionFailure = await collectRegistryUiSnapshot(registryExecutor, project, snapshot.projectIssue);
-	assert.equal(afterProjectActionFailure.projectIssue, snapshot.projectIssue);
-	assert.equal(afterProjectActionFailure.error, undefined);
+test("automatically generated project key persists, is unique, yields to origin and respects explicit overrides", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
+	const root = tempRoot();
+	isolate(root);
+	const project = path.join(root, "smart-clock");
+	const other = path.join(root, "another-project");
+	fs.mkdirSync(path.join(project, ".pi"), { recursive: true });
+	fs.mkdirSync(path.join(other, ".pi"), { recursive: true });
+	const { remote } = createRegistry(root);
+	await saveRegistryConfig(remote, "main");
+	const h = harness(project);
+	const initial = await act(project, { action: "refresh" }, h.ctx);
+	const fallback = initial.projectKey!;
+	assert.match(fallback, /^local-[0-9a-f]{32}$/);
+	assert.equal(initial.projectIssue, undefined);
+	assert.equal(initial.error, undefined);
+	assert.equal(h.prompts.length, 0);
+	assert.equal(fs.readFileSync(path.join(project, ".pi", "registry-project-key"), "utf8").trim(), fallback);
+	assert.equal(loadRegistryConfig(project).projectKey, undefined, "generated identity must not become a manual override");
+	assert.equal((await act(project, { action: "refresh" }, h.ctx, service())).projectKey, fallback);
+	const parallelKeys = await Promise.all(Array.from({ length: 12 }, () => resolveProjectKey(registryExecutor, other)));
+	assert.equal(new Set(parallelKeys).size, 1, "concurrent resolutions must persist a single identity");
+	assert.notEqual(parallelKeys[0], fallback, "independent projects get distinct keys");
+
+	git(project, ["init"]);
+	assert.equal((await act(project, { action: "refresh" }, h.ctx)).projectKey, fallback, "git init alone does not change the key");
+	git(project, ["remote", "add", "origin", "git@github.com:example/smart-clock.git"]);
+	assert.equal((await act(project, { action: "refresh" }, h.ctx)).projectKey, "github.com__example__smart-clock");
+	assert.equal(fs.readFileSync(path.join(project, ".pi", "registry-project-key"), "utf8").trim(), fallback);
+	git(project, ["remote", "remove", "origin"]);
+	assert.equal((await act(project, { action: "refresh" }, h.ctx)).projectKey, fallback);
+
+	h.setInput(async () => "my-manual-project-key");
+	const manual = await act(project, { action: "project-key" }, h.ctx);
+	assert.match(h.prompts.at(-1)?.title ?? "", /empty uses Git origin or automatic key/);
+	assert.equal(h.prompts.at(-1)?.prefill, "", "the auto key must not prefill the manual override");
+	assert.equal(manual.projectKey, "my-manual-project-key");
+	git(project, ["remote", "add", "origin", "https://github.com/example/smart-clock.git"]);
+	assert.equal((await act(project, { action: "refresh" }, h.ctx)).projectKey, "my-manual-project-key");
+});
+
+test("switching to Git origin never silently overwrites previously published fallback state", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
+	const root = tempRoot();
+	isolate(root);
+	const project = path.join(root, "project");
+	fs.mkdirSync(path.join(project, ".pi"), { recursive: true });
+	fs.writeFileSync(path.join(project, ".pi", "TODO.md"), "Local TODO\n");
+	const { remote } = createRegistry(root);
+	await saveRegistryConfig(remote, "main");
+	const h = harness(project);
+	const published = await act(project, { action: "push-project", scope: "todo" }, h.ctx);
+	assert.equal(published.error, undefined);
+	const previousKey = published.projectKey!;
+	const before = git(root, ["--git-dir", remote, "rev-parse", "main"]);
+	git(project, ["init"]);
+	git(project, ["remote", "add", "origin", "https://github.com/example/new-name.git"]);
+	const refreshed = await act(project, { action: "refresh" }, h.ctx);
+	assert.equal(refreshed.projectKey, "github.com__example__new-name");
+	assert.equal(item(refreshed, "project:todo").status, "registry-changed");
+	const blocked = await act(project, { action: "sync-project", scope: "todo" }, h.ctx);
+	assert.match(blocked.error ?? "", /tracked under another registry\/branch\/project key/);
+	assert.equal(git(root, ["--git-dir", remote, "rev-parse", "main"]), before);
+	assert.equal(git(root, ["--git-dir", remote, "show", `main:projects/${previousKey}/TODO.md`]), "Local TODO");
 });
 
 test("interactive remote setup prompts for remote and branch and cancelling saves nothing", async () => {

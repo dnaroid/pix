@@ -40,7 +40,7 @@
           "additionalProperties": false
         }
       ],
-      "description": "TUI memory-leak watchdog. Reports go to ~/.config/pi/memory-reports; samples and report events are also logged to ~/.config/pi/pix.log."
+      "description": "TUI memory-leak watchdog. Reports go to ~/.config/pi/memory-reports; samples and report events are also logged to ~/.config/pi/logs/."
     },
     "defaultModel": {
       "type": "object",

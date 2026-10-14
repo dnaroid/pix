@@ -203,7 +203,7 @@ export const PixConfigSchema = Type.Object(
 				},
 				{ additionalProperties: false },
 			),
-		], { description: "TUI memory-leak watchdog. Reports go to ~/.config/pi/memory-reports; samples and report events are also logged to ~/.config/pi/pix.log." })),
+		], { description: "TUI memory-leak watchdog. Reports go to ~/.config/pi/memory-reports; samples and report events are also logged to ~/.config/pi/logs/." })),
 		defaultModel: Type.Optional(DefaultModelConfig),
 		modelRouting: Type.Optional(ModelRoutingConfig),
 		visibleModels: Type.Optional(Type.Array(Type.String({

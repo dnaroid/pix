@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, writeFile, readFile, rm, symlink } from "node:fs/promis
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
-import { DesktopSearchService } from "../src/search/service.js";
+import { DesktopSearchService, type SearchIndexDiagnostic } from "../src/search/service.js";
 import { SearchIndexStore, SearchIndexBusyError } from "../src/search/index-store.js";
 import { sharedSearchAuth, type SearchAuth } from "../src/search/config.js";
 import { FixtureSearchPreferences as SearchPreferences } from "./central-semantics-fixture.js";
@@ -33,6 +33,26 @@ function rows(cwd: string, table: "documents" | "vectors" | "metadata" | "sqlite
   catch { return []; } finally { db?.close(); }
 }
 const setting = { id: "theme", section: "appearance", label: "Theme", description: "Color scheme", synonyms: ["dark"] };
+test("explicit index diagnostics contain metadata only and cannot break indexing", async t => {
+  const f = await fixture(t);
+  const records: SearchIndexDiagnostic[] = [];
+  const s = f.make({ onIndexDiagnostic: record => {
+    records.push(record);
+    throw new Error("broken logging sink");
+  } });
+  const secret = "private-setting-description-never-in-diagnostics";
+  const request = { cwd: f.cwd, source: "settings" as const, settings: [{ ...setting, description: secret }] };
+  const unavailable = await s.index(request);
+  assert.equal(unavailable.complete, false);
+  assert.equal(records[0]?.complete, false);
+  await f.preferences.configure();
+  const result = await s.index(request);
+  assert.equal(records.length, 2);
+  assert.deepEqual(records[1], { cwd: f.cwd, source: "settings", complete: result.complete,
+    indexed: result.indexed, total: result.total, durationMs: records[1]!.durationMs });
+  assert.ok(records[1]!.durationMs >= 0);
+  assert.doesNotMatch(JSON.stringify(records), /private-setting-description-never-in-diagnostics|broken logging sink/);
+});
 async function fixture(t: TestContext) {
   const artifacts = resolve(".pi/artifacts/central-semantics-acp/session-fixtures");
   await mkdir(artifacts, { recursive: true });

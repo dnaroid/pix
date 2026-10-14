@@ -469,21 +469,18 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   Automatic/manual synchronization drains remaining work, checking eligibility
   around provider requests and before publishing automatic results.
   Failures do not create a paid polling loop; explicit Continue retries interrupted work.
-  Skipped transcripts produce local metadata-only diagnostic records (session ID,
-  path, stable reason, optional line number and OS error code; missing parents
-  also carry the child entry ID and missing parent ID), never transcript
-  text or raw exception/provider bodies. Both hosts write best-effort JSONL to
-  `.pi/artifacts/search-diagnostics-<pid>-<uuid>/events.jsonl`, capped at 4 MiB per
-  process log and subject to ordinary artifact cleanup. Manual indexing returns
-  at most 100 skip diagnostics for the existing bounded Activity history; its
-  300-character entries may shorten paths, while the file log retains full paths.
-  Background search diagnostics and search-command output do not create chat
-  notifications. Failed diagnostic writes do not fail indexing or notify chat.
-  Message-index passes log start, five-second progress heartbeats (including
-  provider waits), and terminal status with per-pass IDs, phase, elapsed time,
-  session/chunk/cache/save/request counters as specified in
-  [the shared search contract](project-search-agent-tool.md#behavior).
-  These heartbeats are file-log-only, not live Activity updates.
+  Search indexing diagnostics use Pix's shared JSONL logger in
+  `~/.config/pi/logs/`, not a source-local `events.jsonl`. Terminal failures,
+  incomplete passes, meaningful vector saves (debug), background-worker failures
+  and repeated skipped-transcript causes are recorded with fixed, bounded
+  metadata only. No per-session heartbeat/start/empty-success spam, file path,
+  transcript ID or text, prompt, provider body or credential is logged.
+  Repeated skip/worker causes are coalesced per workspace for five minutes.
+  After a worker failure or operationally incomplete index, periodic recovery
+  backs off to 2–15 minutes, while fresh changes and explicit Index/Continue
+  can trigger earlier work. There is no separate Activity log in the index
+  status panel; its inline statuses, error banners and per-source actions remain.
+  Standalone Pi without the Pix log sink does not create separate search logs.
   Source leases are shared with Pi/TUI; publication rechecks transcript revision and
   provider authorization. Workspace replacement/disposal aborts owned work.
   Local lexical message search is available without embeddings. There is no

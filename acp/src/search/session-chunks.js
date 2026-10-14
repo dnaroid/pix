@@ -4,7 +4,7 @@ import { beginWrite, claimWork } from "./source-work.js";
 import { storage, valid, decode, INDEX_META, RANGES, SESSION_CHUNK_FORMAT } from "./session-chunk-store.js";
 export { listIndexedSessions, searchSessionChunks, hasSessionChunkVectors } from "./session-chunk-query.js";
 import { readSessionTranscript, transcriptUnchanged } from "./session-transcript.js";
-import { logSearchDiagnostic } from "./search-diagnostics.js";
+import { logSearchDiagnostic } from "./search-logging.js";
 import { sessionIndexProgress } from "./session-index-progress.js";
 import { SessionIndexDeferred } from "./session-idle.js";
 import { ensureSessionRevision } from "./session-index-revision.js";
@@ -72,7 +72,7 @@ async function* sessionSnapshots(root, candidates, signal, onSkip, onRead) {
 export async function indexSessionChunks(root, candidates, options) {
   const { signal, embedding } = options;
   const progress = sessionIndexProgress(root, candidates.length), counts = progress.state;
-  let db, work, success = false, indexed = 0, total = 0, calls = 0, outcome = "failed";
+  let db, work, success = false, indexed = 0, total = 0, calls = 0, outcome = "failed", failure;
   const deadline = Date.now() + 40000;
   try {
     db = await storage(root,true);
@@ -165,10 +165,10 @@ export async function indexSessionChunks(root, candidates, options) {
     return { indexed,total,complete,skipped,
       ...(deferred ? { deferred } : {}),
       ...(diagnostics.length ? { diagnostics } : {}) };
-  } catch (error) { outcome = signal.aborted ? "cancelled" : "failed"; throw error; }
+  } catch (error) { outcome = signal.aborted ? "cancelled" : "failed"; failure = error; throw error; }
   finally {
     try { try { if(work) await work.release(success); } finally { db?.close(); } }
-    catch (error) { outcome = signal.aborted ? "cancelled" : "failed"; throw error; }
-    finally { await progress.finish(outcome); }
+    catch (error) { outcome = signal.aborted ? "cancelled" : "failed"; failure = error; throw error; }
+    finally { await progress.finish(outcome,failure); }
   }
 }

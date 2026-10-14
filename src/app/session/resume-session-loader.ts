@@ -2,6 +2,7 @@ import { open, readdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { getAgentDir, type SessionInfo } from "@earendil-works/pi-coding-agent";
 import { isRecord } from "../guards.js";
+import { logPixEvent } from "../logger.js";
 
 const DEFAULT_INITIAL_CHUNK_SIZE = 20;
 const DEFAULT_CHUNK_SIZE = 10;
@@ -27,12 +28,14 @@ type SessionFile = {
 };
 
 export async function loadResumeSessionsInChunks(options: ResumeSessionLoaderOptions): Promise<SessionInfo[]> {
+	const startedAt = Date.now();
 	const initialChunkSize = positiveInteger(options.initialChunkSize, DEFAULT_INITIAL_CHUNK_SIZE);
 	const chunkSize = positiveInteger(options.chunkSize, DEFAULT_CHUNK_SIZE);
 	const files = await listSessionFiles(options.cwd, options.sessionDir);
 	const sessions: SessionInfo[] = [];
 
 	if (files.length === 0) {
+		logPixEvent("debug", "sessions:resume-empty", {}, { project: options.cwd, module: "session.resume" });
 		options.onChunk([], { loaded: 0, total: 0, done: true });
 		return [];
 	}
@@ -57,6 +60,15 @@ export async function loadResumeSessionsInChunks(options: ResumeSessionLoaderOpt
 		if (!done) await nextTick();
 	}
 
+	// An aborted browse has not attempted the remaining files; do not report
+	// them as unreadable sessions.
+	const skipped = Math.min(index, files.length) - sessions.length;
+	if (skipped > 0) {
+		logPixEvent("warn", "sessions:resume-skipped", { skipped, total: files.length }, { project: options.cwd, module: "session.resume" });
+	}
+	logPixEvent("debug", "sessions:resume-loaded",
+		{ loaded: sessions.length, total: files.length, aborted: options.signal?.aborted === true, durationMs: Date.now() - startedAt },
+		{ project: options.cwd, module: "session.resume" });
 	return [...sessions];
 }
 
@@ -87,7 +99,11 @@ async function listSessionFiles(cwd: string, sessionDir?: string): Promise<Sessi
 		return files
 			.filter((file): file is SessionFile => file !== undefined)
 			.sort((left, right) => right.mtime.getTime() - left.mtime.getTime());
-	} catch {
+	} catch (error) {
+		if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+			logPixEvent("warn", "sessions:resume-list-failed",
+				{ error: error instanceof Error ? error.name : "Unknown" }, { project: cwd, module: "session.resume" });
+		}
 		return [];
 	}
 }

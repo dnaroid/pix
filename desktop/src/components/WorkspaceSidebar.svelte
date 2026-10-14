@@ -65,6 +65,8 @@
   import RegistryPanel from "./RegistryPanel.svelte";
   import SearchIndexPanel from "./SearchIndexPanel.svelte";
   import LspPanel from "./LspPanel.svelte";
+  import LogsPanel from "./LogsPanel.svelte";
+  import { createLogPanelPreference } from "../lib/log-panel-preference.svelte";
   import type { AcpClient } from "../lib/acp-client";
   import GitPanel from "./GitPanel.svelte";
   import ProjectExplorer from "./ProjectExplorer.svelte";
@@ -111,6 +113,7 @@
     scripts: "Launch Commands",
     search: "Search Indexes",
     lsp: "Language Servers",
+    logs: "Logs",
     settings: "Settings",
   };
   let {
@@ -124,6 +127,7 @@
     tasks,
     loading,
     initialLoading = loading,
+    taskAttachmentCounts = {},
     saving,
     storageError,
     taskStorageIndicatorError,
@@ -212,6 +216,7 @@
     rememberedThinkingByModel?: Readonly<Record<string, string>>;
     onVisibleModelsChange?: (modelRefs: readonly string[]) => Promise<void> | void;
     tasks: ProjectTask[];
+    taskAttachmentCounts?: Record<string, number>;
     loading: boolean;
     initialLoading?: boolean;
     saving: boolean;
@@ -344,7 +349,6 @@
   let editorLinks = $state<string[]>([]);
   let editorRelatedTaskIds = $state<string[]>([]);
   let editorModelRef = $state("");
-  let taskAttachmentCounts = $state<Record<string, number>>({});
   let statusMenu = $state<HTMLDivElement | null>(null);
   const statusMenuController = createWorkspaceSidebarStatusMenuController({
     menu: () => statusMenu,
@@ -373,27 +377,6 @@
   let observedGitRemoteTarget = "";
 
   const busy = $derived(loading || saving || storageError || activeTaskId !== null);
-  $effect(() => {
-    const ownerWorkspace = workspace;
-    const taskIds = tasks.map((task) => task.id).join("\0");
-    if (activeTab !== "tasks" || layoutController.collapsed || !ownerWorkspace || storageError || initialLoading) {
-      taskAttachmentCounts = {};
-      return;
-    }
-    let disposed = false;
-    const poll = async () => {
-      try {
-        const counts = await invoke<Record<string, number>>("read_project_task_attachment_counts", { workspace: ownerWorkspace });
-        if (!disposed && workspace === ownerWorkspace && counts && typeof counts === "object" && !Array.isArray(counts)) {
-          taskAttachmentCounts = counts;
-        }
-      } catch { /* Attachment load errors are reported when the editor opens. */ }
-    };
-    void taskIds;
-    void poll();
-    const timer = setInterval(() => void poll(), 4_000);
-    return () => { disposed = true; clearInterval(timer); };
-  });
   const doneCount = $derived(tasks.filter((task) => task.status === "done").length);
   const indicatorInputs = $derived({
     service: indicatorServiceState,
@@ -573,6 +556,7 @@
       // Keep the defaults when webview storage is unavailable.
     }
     const cleanupLayout = layoutController.mount();
+    const cleanupLogPreference = logPreference.mount();
     indicatorService = new SidebarIndicatorService(
       getCurrentWindow().label,
       (state) => indicatorServiceState = state,
@@ -582,6 +566,7 @@
     indicatorService.start(workspace);
 
     return () => {
+      cleanupLogPreference();
       cleanupLayout();
       statusMenuController.dispose();
       taskDragController.dispose();
@@ -592,8 +577,14 @@
     };
   });
 
+  const logPreference = createLogPanelPreference(() => {
+    if (activeTab === "logs") setActiveTab("tasks");
+  });
+
   function isSidebarTab(value: string | null): value is SidebarTab {
-    return value === "project" || value === "tasks" || value === "git" || value === "registry" || value === "scripts" || value === "search" || value === "lsp" || value === "settings";
+    // Restore selection before the async preference resolves; the preference
+    // gates mounting and demotes to Tasks if the loaded value is disabled.
+    return value === "project" || value === "tasks" || value === "git" || value === "registry" || value === "scripts" || value === "search" || value === "lsp" || value === "settings" || value === "logs";
   }
 
   function setActiveTab(tab: SidebarTab): void {
@@ -878,6 +869,7 @@
   <WorkspaceSidebarActivityBar
     {indicators}
     {activeTab}
+    logsEnabled={logPreference.enabled}
     collapsed={layoutController.collapsed}
     onSelect={selectTab}
     onIndicatorContext={indicatorActions.open}
@@ -1103,6 +1095,10 @@
       {:else if activeTab === "lsp"}
         <div id="workspace-lsp-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Language Servers">
           <LspPanel client={lspClient} sessionId={lspSessionId} />
+        </div>
+      {:else if activeTab === "logs"}
+        <div id="workspace-logs-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Logs">
+          {#if logPreference.enabled}<LogsPanel {workspace} />{/if}
         </div>
       {:else}
         <div id="workspace-settings-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Settings">

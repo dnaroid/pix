@@ -15,9 +15,28 @@ import {
 	SHOW_CURSOR,
 } from "../src/app/constants.js";
 import { AppTerminalController } from "../src/app/terminal/terminal-controller.js";
+import { pixLogger } from "../src/app/logger.js";
 import { ANSI_RESET } from "../src/theme.js";
 
 describe("AppTerminalController", () => {
+	it("drains pending diagnostics on normal shutdown", async t => {
+		let release!: () => void;
+		let entered!: () => void;
+		const gate = new Promise<void>(resolve => { release = resolve; });
+		const started = new Promise<void>(resolve => { entered = resolve; });
+		t.mock.method(pixLogger, "flush", async () => { entered(); await gate; });
+		const controller = new AppTerminalController(fakeHost());
+		const restore = stubTerminalIo([]);
+		try {
+			let finished = false;
+			const stopping = controller.stop().then(() => { finished = true; });
+			await started;
+			assert.equal(finished, false);
+			release();
+			await stopping;
+			assert.equal(finished, true);
+		} finally { release(); restore(); }
+	});
 	it("resets viewport state when entering the interactive terminal", async () => {
 		const writes: string[] = [];
 		const controller = new AppTerminalController(fakeHost());

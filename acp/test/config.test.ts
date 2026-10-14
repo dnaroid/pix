@@ -63,6 +63,10 @@ test("adapterConfigFromEnv accepts the deprecated PIX_ACP_PI_BIN alias", () => {
 	assert.equal(config.piEntry, "/legacy/pi-entry.js");
 });
 
+test("the shared log level overrides the legacy ACP level", () => {
+	assert.equal(adapterConfigFromEnv({ PIX_LOG_LEVEL: "debug", PIX_ACP_LOG: "warn" }).logLevel, "debug");
+});
+
 test("logger writes only above threshold", () => {
 	const lines: string[] = [];
 	const logger = createLogger("warn", (line) => lines.push(line));

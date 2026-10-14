@@ -14,6 +14,7 @@ import { normalizeDcpContextUsage } from "./ui.js"
 import { COMPRESS_TOOL_DESCRIPTION } from "../tool-descriptions.js"
 import { safeGetContextUsage } from "../context-usage.js"
 import { summarizeDcpState, writeDcpDebugLog } from "./debug-log.js"
+import { diagnosticErrorType, suiteDiagnostics } from "../lib/suite-diagnostics.js"
 import {
   compareCompressionBoundaries,
   createRangeCompressionBlock,
@@ -324,13 +325,16 @@ export function registerCompressTool(
     parameters: COMPRESS_TOOL_PARAMETERS,
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      let phase = "preflight"
       _signal?.throwIfAborted()
       if (!isSessionSupported()) {
+        suiteDiagnostics.report("warn", "dcp", "manual-compression-failed", ctx.cwd,
+          { phase, errorType: "Error" }, ctx)
         throw new Error("DCP is unavailable in this session. Start a new session to use the current DCP journal format.")
       }
       const assertCurrent = captureDcpTransactionGuard(state, config, _signal, ctx)
       const requestHash = createHash("sha256").update(JSON.stringify(params)).digest("hex")
-      return runDcpStateTransaction(state, async () => {
+      return await runDcpStateTransaction(state, async () => {
       assertCurrent()
       const operationEpoch = state.sessionEpoch
       const effectiveConfig = resolveModelConfig(config, modelKeysFromContext(ctx))
@@ -389,7 +393,7 @@ export function registerCompressTool(
           state: summarizeDcpState(state, effectiveConfig),
         })
         return {
-          content: [{ type: "text", text: JSON.stringify(resultDetails, null, 2) }],
+          content: [{ type: "text" as const, text: JSON.stringify(resultDetails, null, 2) }],
           details: resultDetails,
         }
       }
@@ -398,6 +402,7 @@ export function registerCompressTool(
         throw new Error("compress requires at least one ranges[] or messages[] entry")
       }
 
+      phase = "resolve"
       let rangePlans: ResolvedRangePlan[]
       try {
         const boundaryPlans: ResolvedRangeBoundaries[] = ranges.map((range) => {
@@ -568,6 +573,7 @@ export function registerCompressTool(
         return prepared.text
       }
 
+      phase = "summary"
       for (const range of rangePlans) {
         range.summary = await resolveSummary({
           startId: range.startId,
@@ -804,6 +810,7 @@ export function registerCompressTool(
         }
         assertCurrent()
         let published = false
+        phase = "commit"
         await persistState(ctx, workingState, {
           beforePublish: assertCurrent,
           onPublished: () => { published = true },
@@ -881,12 +888,18 @@ export function registerCompressTool(
       return {
         content: [
           {
-            type: "text",
+            type: "text" as const,
             text: JSON.stringify(resultDetails, null, 2),
           },
         ],
         details: resultDetails,
       }
+      }).catch((error) => {
+        if (!_signal?.aborted && diagnosticErrorType(error) !== "AbortError") {
+          suiteDiagnostics.report("warn", "dcp", "manual-compression-failed", ctx.cwd,
+            { phase, errorType: diagnosticErrorType(error) }, ctx)
+        }
+        throw error
       })
     },
   })

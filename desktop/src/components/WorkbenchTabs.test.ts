@@ -9,6 +9,10 @@ import titlebarSource from "./DesktopTitlebar.svelte?raw";
 import projectSwitcherSource from "./ProjectSwitcher.svelte?raw";
 import statusIconSource from "./SessionTabStatusIcon.svelte?raw";
 import source from "./WorkbenchTabs.svelte?raw";
+import appSource from "../App.svelte?raw";
+import activityBarSource from "./WorkspaceSidebarActivityBar.svelte?raw";
+import sidebarSource from "./WorkspaceSidebar.svelte?raw";
+
 
 describe("WorkbenchTabs desktop interaction", () => {
   it("uses one roving ARIA tablist for sessions and auxiliary workbench surfaces", () => {
@@ -49,14 +53,27 @@ describe("WorkbenchTabs desktop interaction", () => {
     expect(navigationViewModelSource).not.toContain("projectColors.get(options.workspace())");
   });
 
-  it("subtly tints the window titlebar with the active project identity color", () => {
-    expect(titlebarSource).toContain("projectFolderHue(projectWorkspace)");
-    expect(titlebarSource).toContain("style:--project-window-titlebar-color={projectTitlebarColor}");
-    expect(titlebarSource).toContain("style:--project-window-titlebar-hue={projectTitlebarHue}");
-    expect(titlebarSource).toContain("project-window-titlebar");
-    expect(titlebarSource).toContain("color-mix(");
-    expect(titlebarSource).toContain("8%");
+  it("subtly tints the window titlebar with the active project identity color", async () => {
+    // @ts-expect-error Node fs import in Vitest runner
+    const fs = (await import(/* @vite-ignore */ "node:fs")).default;
+    const stylesSource = fs.readFileSync(new URL("../styles.css", import.meta.url), "utf8");
+    expect(appSource).toContain("projectFolderHue(sidebarViewModel.projectSwitcher.workspace)");
+    expect(appSource).toContain("style:--project-window-titlebar-color=");
+    expect(appSource).toContain("style:--project-window-titlebar-hue=");
+    expect(appSource).toContain("class:project-window-titlebar=");
+    expect(stylesSource).toContain("--workspace-chrome-background: color-mix(");
+    expect(stylesSource).toContain("8%");
     expect(titlebarSource).toContain("var(--window-titlebar)");
+  });
+
+  it("shares titlebar chrome with the sidebar and active tab canvas with panel buttons", () => {
+    expect(titlebarSource).toContain("background-color: var(--workspace-chrome-background");
+    expect(activityBarSource).toContain("bg-[var(--workspace-chrome-background)]");
+    expect(sidebarSource).not.toContain("bg-[var(--workspace-chrome-background)]");
+    expect(sidebarSource).toContain("border-r border-sidebar-border bg-sidebar");
+    expect(sidebarSource).toContain("border-b border-sidebar-border bg-sidebar");
+    expect(activityBarSource.match(/border-l-primary bg-background/g)).toHaveLength(9);
+    expect(source).toContain('? "bg-background"');
   });
 
   it("keeps pointer close outside the normal Tab sequence and supports Delete plus middle-click close", () => {

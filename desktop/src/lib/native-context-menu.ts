@@ -75,6 +75,17 @@ export function nativeContextMenuItems(
   const writable = context.kind === "editable" || context.kind === "password";
   const readonlyPassword = context.kind === "password" && context.readOnly;
 
+  if (context.kind === "session") {
+    const sessionId = context.sessionId;
+    items.push({
+      id: "desktop.session.copy-id",
+      text: "Copy Session ID",
+      enabled: Boolean(sessionId),
+      action: run(() => sessionId ? writeText(sessionId) : Promise.resolve()),
+    });
+    return items;
+  }
+
   if (context.image) {
     const image = context.image;
     items.push(

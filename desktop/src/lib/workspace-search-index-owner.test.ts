@@ -5,14 +5,13 @@ import { expect, it, vi } from "vitest";
 import * as client from "svelte/internal/client";
 import source from "./workspace-search-index-owner.svelte.ts?raw";
 import * as controller from "./search-index-controller";
-import * as history from "./search-index-history";
 import type { AcpClient } from "./acp-client";
 import type { createWorkspaceSearchIndexOwner } from "./workspace-search-index-owner.svelte";
 
 it("keeps one sync/controller across spread-prop updates; replaces only changed workspace/client identities", () => {
-  const owners: Array<{ dispose: ReturnType<typeof vi.fn>; syncEvent: ReturnType<typeof vi.fn> }> = [];
+  const owners: Array<{ dispose: ReturnType<typeof vi.fn> }> = [];
   const create = vi.fn((..._args: unknown[]) => {
-    const owner = { dispose: vi.fn(), syncEvent: vi.fn() };
+    const owner = { dispose: vi.fn() };
     owners.push(owner);
     return owner;
   });
@@ -24,7 +23,7 @@ it("keeps one sync/controller across spread-prop updates; replaces only changed 
   const exports: { createWorkspaceSearchIndexOwner?: typeof createWorkspaceSearchIndexOwner } = {};
   const dependencies: Record<string, unknown> = {
     "svelte/internal/client": client, svelte: { untrack: client.untrack },
-    "./search-index-controller": controller, "./search-index-history": history,
+    "./search-index-controller": controller,
     "./workspace-search-index-controller": { createWorkspaceSearchIndexController: create },
     "./search-index-sync": { startSearchIndexSync: sync },
     "./settings-search-catalog": { SETTINGS_SEARCH_CATALOG: [] },
@@ -60,7 +59,8 @@ it("keeps one sync/controller across spread-prop updates; replaces only changed 
     client.flush();
     expect(create).toHaveBeenCalledTimes(3);
     expect(sync).toHaveBeenCalledTimes(3);
-    expect(create.mock.calls[0]?.[3]).toBe(create.mock.calls[2]?.[3]);
+    expect(create.mock.calls[0]).toHaveLength(3);
+    expect(create.mock.calls[2]).toHaveLength(3);
   } finally { stop(); vi.unstubAllGlobals(); }
   expect(owners[2]!.dispose).toHaveBeenCalledTimes(1);
   expect(stops[2]).toHaveBeenCalledTimes(1);
@@ -71,6 +71,6 @@ it("keeps one sync/controller across spread-prop updates; replaces only changed 
   try {
     client.flush();
     expect(create).toHaveBeenCalledTimes(4);
-    expect(create.mock.calls[3]?.[3]).toBe(create.mock.calls[0]?.[3]);
+    expect(create.mock.calls[3]).toHaveLength(3);
   } finally { remount(); vi.unstubAllGlobals(); }
 });

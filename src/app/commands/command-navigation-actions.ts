@@ -9,6 +9,7 @@ import {
 } from "./command-host.js";
 import { getIdleRuntime, getRuntime } from "./command-runtime.js";
 import { createId } from "../id.js";
+import { logOperationFailure } from "../logging/operation-errors.js";
 import { isRecord } from "../guards.js";
 import { renderContent } from "../rendering/message-content.js";
 import { sanitizeText } from "../rendering/render-text.js";
@@ -152,6 +153,7 @@ export class NavigationCommandActions {
 		try {
 			await this.host.refreshUserMessageJumpMenuItems();
 		} catch (error) {
+			logOperationFailure("session:jump-load-failed", error, { project: runtime.cwd, ...(scope.session ? { sessionId: scope.session.sessionId } : {}), module: "commands.navigation" });
 			if (!isCommandScopeActive(this.host, scope)) return;
 			this.host.toast.error(`Could not load jump messages: ${error instanceof Error ? error.message : String(error)}`);
 		} finally {
@@ -252,6 +254,7 @@ export class NavigationCommandActions {
 
 			await this.host.openSearchResultInNewTab(selected);
 		} catch (error) {
+			logOperationFailure("session:search-failed", error, { project: runtime.cwd, ...(scope.session ? { sessionId: scope.session.sessionId } : {}), module: "commands.navigation" });
 			if (!isCommandScopeActive(this.host, scope)) return;
 			this.host.addEntry({ id: createId("error"), kind: "error", text: `Session search failed: ${error instanceof Error ? error.message : String(error)}` });
 			this.host.toast.error("Session search failed");
@@ -351,6 +354,8 @@ export class NavigationCommandActions {
 				},
 			});
 		} catch (error) {
+			logOperationFailure("session:list-failed", error, { project: options.scope.runtime?.cwd ?? this.host.options.cwd,
+				...(options.scope.session ? { sessionId: options.scope.session.sessionId } : {}), module: "commands.navigation" });
 			if (options.loadId !== this.resumeLoadId || !isCommandScopeActive(this.host, options.scope)) return;
 			this.host.setResumeLoading(false);
 			this.host.setDirectPopupMenu(undefined);

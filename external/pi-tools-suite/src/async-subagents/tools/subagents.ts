@@ -15,6 +15,7 @@ import { registerStatusTool } from "./status.js";
 import { registerStopTool } from "./stop.js";
 import { registerWaitTool } from "./wait.js";
 import type { CompletionDelivery } from "../completion-delivery.js";
+import { suiteDiagnostics } from "../../lib/suite-diagnostics.js";
 
 const AgentTaskSchema = Type.Object({
 	id: Type.Optional(Type.String({ description: "Short identifier for this agent (used as directory name). If omitted, assigns agent-1, agent-2, etc." })),
@@ -136,7 +137,12 @@ export function registerSubagentsTool(
 
 			const tool = collector.tools.get(internalName);
 			if (!tool) throw new Error(`Internal subagents action is not registered: ${internalName}`);
-			return tool.execute(toolCallId, params, signal, onUpdate, ctx);
+			const result = await tool.execute(toolCallId, params, signal, onUpdate, ctx);
+			if (result?.isError && !signal?.aborted) {
+				// Internal actions return handled errors; thrown SDK failures are logged by the host.
+				suiteDiagnostics.report("warn", "subagents", "action-failed", ctx.cwd, { action });
+			}
+			return result;
 		},
 
 		renderCall() {

@@ -1,7 +1,6 @@
 <script lang="ts">
   import FileCode from "@lucide/svelte/icons/file-code";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
-  import Save from "@lucide/svelte/icons/save";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import type { SessionConfigOption } from "@agentclientprotocol/sdk";
   import { invoke } from "@tauri-apps/api/core";
@@ -140,6 +139,7 @@
       if (!latest) return;
       setDraft(reconcileSavedSettingsDraft(latest, savedSource, result.document));
       if (kind === "pi-tools-suite") window.dispatchEvent(new CustomEvent("pix-semantic-config-changed"));
+      if (kind === "desktop") window.dispatchEvent(new CustomEvent("pix-desktop-config-changed"));
     } catch (caught) {
       if (!indicatorDisposed && generation === saveGeneration) error = caught instanceof Error ? caught.message : String(caught);
     } finally {
@@ -230,6 +230,7 @@
     {/if}
   </div>
 
+  {#if error || (active && issues.length > 0)}
   <div class="border-t border-sidebar-border bg-chrome px-2.5 py-2">
     {#if error}
       <div class="mb-2 rounded-md border border-tool-error/25 bg-tool-error/5 px-2 py-1.5 text-xs leading-4 text-tool-error">{error}</div>
@@ -237,15 +238,6 @@
     {#if active && issues.length > 0}
       <div class="mb-2 flex items-start gap-1.5 text-xs leading-4 text-tool-error"><TriangleAlert class="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" /><span>{issues[0]}{issues.length > 1 ? ` · ${issues.length - 1} more` : ""}</span></div>
     {/if}
-    <div class="flex items-center gap-2">
-      <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground">Changes may require a new or reloaded session.</span>
-      <button
-        class="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
-        type="button"
-        aria-label={`Save ${SETTINGS_GROUPS[activeKind].label} settings`}
-        onclick={() => void save()}
-        disabled={!active || !dirty || issues.length > 0 || saving || loading}
-      >{#if saving}<RefreshCw class="h-3 w-3 animate-spin" aria-hidden="true" />{:else}<Save class="h-3 w-3" aria-hidden="true" />{/if}{saving ? "Saving…" : "Save"}</button>
-    </div>
   </div>
+  {/if}
 </section>

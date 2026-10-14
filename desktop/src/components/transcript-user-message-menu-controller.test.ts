@@ -6,6 +6,7 @@ function fixture() {
   const message: MessageItem = { type: "message", id: "user", role: "user", text: "prompt", attachments: [] };
   const options = {
     items: () => [message], activeSessionId: (): string | null => "source",
+    runtimeReady: () => true,
     promptRunning: () => true, operationRunning: () => false, historyLoading: () => false,
     onScroll: vi.fn(), onAction: vi.fn(),
   };
@@ -38,5 +39,18 @@ describe("running-session user-message actions", () => {
     f.options.activeSessionId = () => null;
     await f.controller.runAction(f.message, "fork-new-tab");
     expect(f.options.onAction).not.toHaveBeenCalled();
+  });
+  it("disables mutations while runtime opens and permits Edit once ready", async () => {
+    const f = fixture(); f.options.promptRunning = () => false; f.options.runtimeReady = () => false;
+    expect(f.controller.canMutate).toBe(false); expect(f.controller.canForkNewTab).toBe(false);
+    await f.controller.runAction(f.message, "edit");
+    expect(f.options.onAction).not.toHaveBeenCalled();
+    await f.controller.runAction(f.message, "copy");
+    expect(f.options.onAction).toHaveBeenCalledWith(f.message, "copy");
+    f.options.runtimeReady = () => true;
+    expect(f.controller.canMutate).toBe(true);
+    await f.controller.runAction(f.message, "edit");
+    expect(f.options.onAction).toHaveBeenCalledWith(f.message, "edit");
+    f.controller.dispose();
   });
 });

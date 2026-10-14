@@ -38,7 +38,7 @@ Files are under `~/.config/pi/memory-traces/<timestamp>-<TUI pid>/`:
 - `allocations-{0,1,2}.heapprofile`: sampled allocation profiles;
 - bounded stack/map capture files and `summary.json` from the shared collector.
 
-`memory.trace_started` in `~/.config/pi/pix.log` records the directory. Directories
+`memory.trace_started` in `~/.config/pi/logs/` records the directory. Directories
 are created with mode 0700, files with 0600. Function/source paths occur in profiles
 and OS captures; review evidence before sharing. Old run directories are not
 automatically deleted.

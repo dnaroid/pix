@@ -74,6 +74,31 @@ describe("resume session loader", () => {
 			await rm(root, { recursive: true, force: true });
 		}
 	});
+
+	it("stops after the first chunk when the caller cancels browsing", async () => {
+		const root = await mkdtemp(join(tmpdir(), "pix-resume-loader-cancelled-"));
+		try {
+			const cwd = join(root, "workspace");
+			const sessionDir = join(root, "sessions");
+			await mkdir(cwd);
+			await mkdir(sessionDir);
+			for (let index = 0; index < 3; index++) {
+				await writeSession({ cwd, sessionDir, id: `session-${index}`,
+					created: `2026-01-01T00:0${index}:00.000Z`,
+					modified: `2026-01-01T00:0${index}:30.000Z`, message: "private message" });
+			}
+			const cancel = new AbortController();
+			const progress: number[] = [];
+			const sessions = await loadResumeSessionsInChunks({ cwd, sessionDir, initialChunkSize: 1, chunkSize: 1,
+				signal: cancel.signal,
+				onChunk: (_sessions, state) => { progress.push(state.loaded); cancel.abort(); },
+			});
+			assert.deepEqual(progress, [1]);
+			assert.equal(sessions.length, 1);
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
 });
 
 async function writeSession(options: {

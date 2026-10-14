@@ -168,6 +168,24 @@
   </div>
   <div class="border-y border-sidebar-border/70 bg-panel">
     <SettingsFieldRow
+      label="Logs panel"
+      description="Show Logs in the sidebar to browse and monitor shared diagnostics. Off by default; does not change log collection. Applies after saving."
+      explicit={has(["desktop", "logPanelEnabled"])}
+      defaultLabel={defaultLabel(["desktop", "logPanelEnabled"])}
+      onReset={() => reset(["desktop", "logPanelEnabled"])}
+    >
+      <SettingsSwitch value={bool(["desktop", "logPanelEnabled"])} onChange={(value) => set(["desktop", "logPanelEnabled"], value)} />
+    </SettingsFieldRow>
+    <SettingsFieldRow
+      label="Menu bar instead of Dock"
+      description="Show the Pix icon in the macOS menu bar instead of the Dock. Click it for a list of open windows. Applies to all windows after restarting Pix."
+      explicit={has(["desktop", "trayOnly"])}
+      defaultLabel={defaultLabel(["desktop", "trayOnly"])}
+      onReset={() => reset(["desktop", "trayOnly"])}
+    >
+      <SettingsSwitch value={bool(["desktop", "trayOnly"])} onChange={(value) => set(["desktop", "trayOnly"], value)} />
+    </SettingsFieldRow>
+    <SettingsFieldRow
       label="Ignore context files"
       description="Do not discover AGENTS.md or CLAUDE.md for Desktop sessions. Project Desktop config can override this value."
       explicit={has(["ignoreContextFiles"])}
@@ -177,8 +195,8 @@
       <SettingsSwitch value={bool(["ignoreContextFiles"])} onChange={(value) => set(["ignoreContextFiles"], value)} />
     </SettingsFieldRow>
     <SettingsFieldRow
-      label="System notifications"
-      description="Send native notifications for completed work, questions, and errors while this Pix window is in the background. Project Desktop config can override this value."
+      label="Notifications"
+      description="Notify about completed work, questions, pauses, and errors in the background. Project Desktop config can override this value."
       explicit={has(["desktop", "notifications", "enabled"])}
       defaultLabel={defaultLabel(["desktop", "notifications", "enabled"])}
       onReset={() => reset(["desktop", "notifications", "enabled"])}
@@ -186,6 +204,18 @@
       <SettingsSwitch
         value={bool(["desktop", "notifications", "enabled"])}
         onChange={(value) => set(["desktop", "notifications", "enabled"], value)}
+      />
+    </SettingsFieldRow>
+    <SettingsFieldRow
+      label="Sound only (no popups)"
+      description="Play a short sound instead of showing in-app alerts or macOS notifications. Works when Pix is in the background. Applies after saving."
+      explicit={has(["desktop", "notifications", "usePix"])}
+      defaultLabel={defaultLabel(["desktop", "notifications", "usePix"])}
+      onReset={() => reset(["desktop", "notifications", "usePix"])}
+    >
+      <SettingsSwitch
+        value={bool(["desktop", "notifications", "usePix"])}
+        onChange={(value) => set(["desktop", "notifications", "usePix"], value)}
       />
     </SettingsFieldRow>
   </div>

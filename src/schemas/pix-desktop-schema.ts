@@ -111,6 +111,14 @@ const DictationConfig = Type.Object(
 
 const DesktopAppConfig = Type.Object(
 	{
+		logPanelEnabled: Type.Optional(Type.Boolean({
+			default: false,
+			description: "Show the diagnostic Logs view in the Desktop sidebar. Global user preference only; disabled by default. Does not change log collection.",
+		})),
+		trayOnly: Type.Optional(Type.Boolean({
+			default: false,
+			description: "macOS: show Pix in the menu bar instead of the Dock. The menu lists all open windows. Global user preference only; takes effect after restarting Pix.",
+		})),
 		externalEditor: Type.Optional(Type.String({
 			description: "External file editor used by Project and Preview open-in-editor actions. Common values include gram, zed, code/vscode, cursor, subl/sublime, idea/intellij, and webstorm; an executable path/name is also accepted. When omitted, Desktop asks the user to choose an editor instead of assuming one.",
 		})),
@@ -118,10 +126,14 @@ const DesktopAppConfig = Type.Object(
 			{
 				enabled: Type.Optional(Type.Boolean({
 					default: true,
-					description: "Allow Pix Desktop to send native system notifications when the owning window is not focused.",
+					description: "Enable background and inactive-session notifications using the selected Desktop delivery mode.",
+				})),
+				usePix: Type.Optional(Type.Boolean({
+					default: false,
+					description: "Play an audible sound without Pix popups or native macOS notifications. No OS notification permission is requested.",
 				})),
 			},
-			{ description: "Desktop native system notification preferences." },
+			{ description: "Desktop notification delivery preferences." },
 		)),
 		knowledge: Type.Optional(Type.Object(
 			{

@@ -6,7 +6,7 @@ import { messageChunks, readSessionTranscript, sessionContext } from "../src/sea
 import { parseSessionRecord } from "../src/search/session-record.js";
 import { indexSessionChunks, searchSessionChunks } from "../src/search/session-chunks.js";
 import { SessionChunkSync } from "../src/search/session-chunk-sync.js";
-import { logSearchDiagnostic } from "../src/search/search-diagnostics.js";
+import { logSearchDiagnostic } from "../src/search/search-logging.js";
 import { collectRagEvidence } from "../src/search/rag-evidence.js";
 import { validateRagCitations } from "../src/search/rag-citations.js";
 
@@ -29,7 +29,7 @@ const config = (embed:(texts:string[],signal:AbortSignal)=>Promise<number[][]>) 
   ({identity:"mock-v1",dimension:2,authorized:async()=>true,embed});
 
 test("shared protocol twins stay byte-identical apart from module extension",async()=>{
-  for(const name of ["session-transcript","session-record","session-text","session-chunks","session-chunk-sync","search-diagnostics","session-index-progress","session-idle","source-policy","session-discovery","session-revisions","session-index-revision"]) {
+  for(const name of ["session-transcript","session-record","session-text","session-chunks","session-chunk-sync","search-logging","session-index-progress","session-idle","source-policy","session-discovery","session-revisions","session-index-revision"]) {
     for(const [a,b] of [[".mjs",".js"],[".d.mts",".d.ts"]]) {
       const source=await readFile(new URL(`../../external/pi-tools-suite/src/project-search/${name}${a}`,import.meta.url),"utf8");
       assert.equal(await readFile(new URL(`../src/search/${name}${b}`,import.meta.url),"utf8"),source.replaceAll('.mjs"','.js"'));
@@ -45,7 +45,18 @@ test("chunks preserve complete text, UTF-16 offsets and astral characters",()=>{
   const chunks=messageChunks(text);assert.equal(chunks.map(c=>c.text).join(""),text);
   for(const chunk of chunks){assert.equal(text.slice(chunk.start,chunk.end),chunk.text);assert.ok(chunk.text.length<=1600);assert.ok(!/[\uD800-\uDBFF]$/u.test(chunk.text));}
 });
-test("skipped transcripts have metadata-only diagnostics in the local log",async t=>{
+test("skipped transcripts reach shared Pix diagnostics with safe reason, not local files",async t=>{
+  const symbol = Symbol.for("pix.diagnostics.sink");
+  const globals = globalThis as Record<symbol, unknown>;
+  const previous = globals[symbol];
+  const events: Array<{event: string; details: Record<string, unknown>}> = [];
+  globals[symbol] = (_level: string, event: string, details: Record<string, unknown>) => {
+    events.push({event,details});
+  };
+  t.after(() => {
+    if (previous === undefined) delete globals[symbol];
+    else globals[symbol] = previous;
+  });
   const f=await fixture(t);
   await appendFile(f.candidate.path,"PRIVATE MALFORMED TEXT");
   const result=await indexSessionChunks(f.root,[f.candidate,{id:"missing",path:join(f.root,"missing.jsonl")}],{signal:signal()});
@@ -53,14 +64,11 @@ test("skipped transcripts have metadata-only diagnostics in the local log",async
   assert.equal(result.diagnostics?.[0]?.reason,"invalid_json");
   assert.equal(result.diagnostics?.[0]?.line,7);
   assert.equal(result.diagnostics?.[1]?.code,"ENOENT");
-  const base=join(f.root,".pi/artifacts");
-  const dirs=await readdir(base);
-  const logs=(await Promise.all(dirs.map(d=>readFile(join(base,d,"events.jsonl"),"utf8")))).join("");
-  const events=logs.trim().split(/\r?\n/u).map(line=>JSON.parse(line) as {event?:string;path?:string;reason?:string;line?:number;code?:string});
-  assert.ok(events.some(e=>e.event==="session_transcript_skipped"&&e.path===f.candidate.path&&e.reason==="invalid_json"&&e.line===7));
-  assert.ok(events.some(e=>e.event==="session_transcript_skipped"&&e.reason==="stat_failed"&&e.code==="ENOENT"));
-  // Compare decoded JSON fields: Windows escapes backslashes in the on-disk log.
-  assert.doesNotMatch(logs,/PRIVATE MALFORMED TEXT/);
+  await Promise.resolve();
+  assert.ok(events.some(e=>e.event==="search:transcript-skipped"&&e.details.reason==="invalid_json"));
+  assert.ok(events.some(e=>e.event==="search:transcript-skipped"&&e.details.reason==="stat_failed"&&e.details.code==="ENOENT"));
+  assert.doesNotMatch(JSON.stringify(events),/PRIVATE MALFORMED TEXT|session.jsonl|missing.jsonl/);
+  assert.deepEqual(await readdir(join(f.root,".pi/artifacts")).catch(()=>[]),[]);
 });
 test("reader distinguishes validation failures without treating cancellation as a skip",async t=>{
   const f=await fixture(t);
@@ -77,11 +85,11 @@ test("reader distinguishes validation failures without treating cancellation as 
   await assert.rejects(readSessionTranscript(f.root,f.candidate,AbortSignal.abort(),skipped));
   assert.deepEqual(reasons,["session_id_mismatch","workspace_mismatch","empty_transcript","missing_parent","cyclic_parent_chain"]);
 });
-test("diagnostic storage refuses redirected artifact directories without failing search",async t=>{
+test("index logger never visits a redirected artifacts directory",async t=>{
   const f=await fixture(t),outside=join(f.root,"outside");
   await mkdir(outside);await mkdir(join(f.root,".pi"),{recursive:true});
   await symlink(outside,join(f.root,".pi/artifacts"));
-  await logSearchDiagnostic(f.root,{event:"test",reason:"safe"});
+  await logSearchDiagnostic(f.root,{event:"session_transcript_skipped",reason:"missing_parent",path:f.candidate.path});
   assert.deepEqual(await readdir(outside),[]);
 });
 test("active branch excludes abandoned messages, tools, thinking and attachments",async t=>{
@@ -165,10 +173,9 @@ test("missing parent diagnostics identify the child line and missing ID without 
   const before=await readFile(f.candidate.path,"utf8");
   const indexed=await indexSessionChunks(f.root,[f.candidate],{signal:signal()});
   assert.deepEqual(indexed.diagnostics,diagnostics);
-  const base=join(f.root,".pi/artifacts");
-  const dirs=await readdir(base);
-  const logs=(await Promise.all(dirs.map(d=>readFile(join(base,d,"events.jsonl"),"utf8")))).join("");
-  assert.match(logs,/"entryId":"child","parentId":"lost"/);assert.doesNotMatch(logs,/PRIVATE/);
+  // Detailed IDs stay in the bounded manual result, not in a second file log.
+  const artifacts=await readdir(join(f.root,".pi/artifacts")).catch(()=>[]);
+  assert.equal(artifacts.some(name=>name.startsWith("search-diagnostics-")),false);
   assert.equal(await readFile(f.candidate.path,"utf8"),before);
 });
 test("RAG retains short late reversals, rejects missing anchors and never truncates suffix",async t=>{

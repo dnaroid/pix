@@ -47,8 +47,11 @@ export const DEFAULT_DESKTOP_CONFIG_JSONC = String.raw`{
     "model": "nova-3"
   },
   "desktop": {
+    "trayOnly": false,
+    "logPanelEnabled": false,
     "notifications": {
-      "enabled": true
+      "enabled": true,
+      "usePix": false
     },
     "git": {
       "reviewModelRef": "openai-codex/gpt-6-luna:medium",

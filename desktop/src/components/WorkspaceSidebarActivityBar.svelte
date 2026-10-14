@@ -1,18 +1,19 @@
 <script lang="ts">
-  import Database from "@lucide/svelte/icons/database";
+  import Blocks from "@lucide/svelte/icons/blocks";
   import Folder from "@lucide/svelte/icons/folder";
   import GitBranch from "@lucide/svelte/icons/git-branch";
   import ListTodo from "@lucide/svelte/icons/list-todo";
-  import ScanSearch from "@lucide/svelte/icons/scan-search";
+  import SearchCheck from "@lucide/svelte/icons/search-check";
   import CodeXml from "@lucide/svelte/icons/code-xml";
   import Settings from "@lucide/svelte/icons/settings";
   import SquareTerminal from "@lucide/svelte/icons/square-terminal";
+  import ScrollText from "@lucide/svelte/icons/scroll-text";
   import { linearFocusIndex } from "../lib/keyboard-navigation";
   import type {
     SidebarIndicatorMap,
     SidebarIndicatorTab,
   } from "../lib/sidebar-indicators";
-  import SidebarIndicatorDot from "./SidebarIndicatorDot.svelte";
+  import { sidebarIconTone } from "../lib/sidebar-icon-tone";
 
   type SidebarTab = SidebarIndicatorTab;
 
@@ -24,6 +25,7 @@
     "scripts",
     "search",
     "lsp",
+    "logs",
     "settings",
   ];
 
@@ -31,17 +33,20 @@
     indicators,
     activeTab,
     collapsed,
+    logsEnabled = false,
     onSelect,
     onIndicatorContext,
   }: {
     indicators: SidebarIndicatorMap;
     activeTab: SidebarTab;
     collapsed: boolean;
+    logsEnabled?: boolean;
     onSelect: (tab: SidebarTab) => void;
     onIndicatorContext: (event: MouseEvent, tab: SidebarTab) => void;
   } = $props();
 
   let activityBar = $state<HTMLElement | null>(null);
+  const visibleTabs = $derived(SIDEBAR_TABS.filter(tab => tab !== "logs" || logsEnabled));
 
   function selected(tab: SidebarTab): boolean {
     return activeTab === tab && !collapsed;
@@ -64,8 +69,8 @@
       onIndicatorContext(new MouseEvent("contextmenu", { cancelable: true }), tab);
       return;
     }
-    const currentIndex = SIDEBAR_TABS.indexOf(tab);
-    const nextIndex = linearFocusIndex(currentIndex, event.key, SIDEBAR_TABS.length, "vertical", true);
+    const currentIndex = visibleTabs.indexOf(tab);
+    const nextIndex = linearFocusIndex(currentIndex, event.key, visibleTabs.length, "vertical", true);
     if (nextIndex === null) return;
     event.preventDefault();
     activityBar?.querySelectorAll<HTMLButtonElement>("[data-sidebar-tab]")[nextIndex]?.focus();
@@ -74,13 +79,13 @@
 
 <div
   bind:this={activityBar}
-  class="flex h-full w-10 shrink-0 flex-col items-center border-r border-sidebar-border bg-chrome pt-1 pb-2"
+  class="flex h-full w-[30px] shrink-0 flex-col items-center border-r border-sidebar-border bg-[var(--workspace-chrome-background)] pt-1 pb-2"
   role="toolbar"
   aria-label="Workspace views"
   aria-orientation="vertical"
 >
   <button
-    class={["relative grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", selected("project") ? "border-l-primary bg-panel-selected text-foreground" : "border-l-transparent text-muted-foreground"]}
+    class={["relative grid h-10 w-full place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", selected("project") ? "border-l-primary bg-background text-foreground" : "border-l-transparent text-muted-foreground"]}
     type="button"
     data-sidebar-tab
     tabindex={activeTab === "project" ? 0 : -1}
@@ -93,11 +98,10 @@
     aria-haspopup={indicators.project ? "menu" : undefined}
     onclick={() => onSelect("project")}
   >
-    <Folder class="h-5 w-5" aria-hidden="true" />
-    <SidebarIndicatorDot indicator={indicators.project} />
+    <Folder class={["h-5 w-5", sidebarIconTone(indicators.project)]} aria-hidden="true" />
   </button>
   <button
-    class={["relative grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", selected("tasks") ? "border-l-primary bg-panel-selected text-foreground" : "border-l-transparent text-muted-foreground"]}
+    class={["relative grid h-10 w-full place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", selected("tasks") ? "border-l-primary bg-background text-foreground" : "border-l-transparent text-muted-foreground"]}
     type="button"
     data-sidebar-tab
     tabindex={activeTab === "tasks" ? 0 : -1}
@@ -110,11 +114,10 @@
     aria-haspopup={indicators.tasks ? "menu" : undefined}
     onclick={() => onSelect("tasks")}
   >
-    <ListTodo class="h-5 w-5" aria-hidden="true" />
-    <SidebarIndicatorDot indicator={indicators.tasks} />
+    <ListTodo class={["h-5 w-5", sidebarIconTone(indicators.tasks)]} aria-hidden="true" />
   </button>
   <button
-    class={["relative grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", selected("git") ? "border-l-primary bg-panel-selected text-foreground" : "border-l-transparent text-muted-foreground"]}
+    class={["relative grid h-10 w-full place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", selected("git") ? "border-l-primary bg-background text-foreground" : "border-l-transparent text-muted-foreground"]}
     type="button"
     data-sidebar-tab
     tabindex={activeTab === "git" ? 0 : -1}
@@ -127,11 +130,10 @@
     aria-haspopup={indicators.git ? "menu" : undefined}
     onclick={() => onSelect("git")}
   >
-    <GitBranch class="h-5 w-5" aria-hidden="true" />
-    <SidebarIndicatorDot indicator={indicators.git} />
+    <GitBranch class={["h-5 w-5", sidebarIconTone(indicators.git)]} aria-hidden="true" />
   </button>
   <button
-    class={["relative grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", selected("registry") ? "border-l-primary bg-panel-selected text-foreground" : "border-l-transparent text-muted-foreground"]}
+    class={["relative grid h-10 w-full place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", selected("registry") ? "border-l-primary bg-background text-foreground" : "border-l-transparent text-muted-foreground"]}
     type="button"
     data-sidebar-tab
     tabindex={activeTab === "registry" ? 0 : -1}
@@ -144,11 +146,10 @@
     aria-haspopup={indicators.registry ? "menu" : undefined}
     onclick={() => onSelect("registry")}
   >
-    <Database class="h-5 w-5" aria-hidden="true" />
-    <SidebarIndicatorDot indicator={indicators.registry} />
+    <Blocks class={["h-5 w-5", sidebarIconTone(indicators.registry)]} aria-hidden="true" />
   </button>
   <button
-    class={["relative grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", selected("scripts") ? "border-l-primary bg-panel-selected text-foreground" : "border-l-transparent text-muted-foreground"]}
+    class={["relative grid h-10 w-full place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", selected("scripts") ? "border-l-primary bg-background text-foreground" : "border-l-transparent text-muted-foreground"]}
     type="button"
     data-sidebar-tab
     tabindex={activeTab === "scripts" ? 0 : -1}
@@ -160,9 +161,9 @@
     oncontextmenu={(event) => onIndicatorContext(event, "scripts")}
     aria-haspopup={indicators.scripts ? "menu" : undefined}
     onclick={() => onSelect("scripts")}
-  ><SquareTerminal class="h-5 w-5" aria-hidden="true" /><SidebarIndicatorDot indicator={indicators.scripts} /></button>
+  ><SquareTerminal class={["h-5 w-5", sidebarIconTone(indicators.scripts)]} aria-hidden="true" /></button>
   <button
-    class={["relative grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", selected("search") ? "border-l-primary bg-panel-selected text-foreground" : "border-l-transparent text-muted-foreground"]}
+    class={["relative grid h-10 w-full place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", selected("search") ? "border-l-primary bg-background text-foreground" : "border-l-transparent text-muted-foreground"]}
     type="button"
     data-sidebar-tab
     tabindex={activeTab === "search" ? 0 : -1}
@@ -175,11 +176,10 @@
     aria-haspopup={indicators.search ? "menu" : undefined}
     onclick={() => onSelect("search")}
   >
-    <ScanSearch class="h-5 w-5" aria-hidden="true" />
-    <SidebarIndicatorDot indicator={indicators.search} />
+    <SearchCheck class={["h-5 w-5", sidebarIconTone(indicators.search)]} aria-hidden="true" />
   </button>
   <button
-    class={["relative grid h-10 w-10 place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", selected("lsp") ? "border-l-primary bg-panel-selected text-foreground" : "border-l-transparent text-muted-foreground"]}
+    class={["relative grid h-10 w-full place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", selected("lsp") ? "border-l-primary bg-background text-foreground" : "border-l-transparent text-muted-foreground"]}
     type="button" data-sidebar-tab tabindex={activeTab === "lsp" ? 0 : -1}
     title={activityTitle("lsp", activeTab === "lsp" && !collapsed ? "Hide Language Servers" : "Language Servers")}
     aria-label={activityLabel("lsp", "Language Servers")} aria-controls="workspace-lsp-panel"
@@ -187,9 +187,17 @@
     onkeydown={(event) => handleKeydown(event, "lsp")}
     oncontextmenu={(event) => onIndicatorContext(event, "lsp")}
     onclick={() => onSelect("lsp")}
-  ><CodeXml class="h-5 w-5" aria-hidden="true" /><SidebarIndicatorDot indicator={indicators.lsp} /></button>
+  ><CodeXml class={["h-5 w-5", sidebarIconTone(indicators.lsp)]} aria-hidden="true" /></button>
+  {#if logsEnabled}
+    <button
+      class={["relative grid h-10 w-full place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", selected("logs") ? "border-l-primary bg-background text-foreground" : "border-l-transparent text-muted-foreground"]}
+      type="button" data-sidebar-tab tabindex={activeTab === "logs" ? 0 : -1}
+      title={selected("logs") ? "Hide Logs" : "Logs"} aria-label="Logs" aria-controls="workspace-logs-panel" aria-pressed={selected("logs")}
+      onkeydown={(event) => handleKeydown(event, "logs")} onclick={() => onSelect("logs")}
+    ><ScrollText class="h-5 w-5" aria-hidden="true" /></button>
+  {/if}
   <button
-    class={["relative mt-auto grid h-10 w-10 -translate-y-px place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", selected("settings") ? "border-l-primary bg-panel-selected text-foreground" : "border-l-transparent text-muted-foreground"]}
+    class={["relative mt-auto grid h-10 w-full -translate-y-px place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", selected("settings") ? "border-l-primary bg-background text-foreground" : "border-l-transparent text-muted-foreground"]}
     type="button"
     data-sidebar-tab
     tabindex={activeTab === "settings" ? 0 : -1}
@@ -201,5 +209,5 @@
     oncontextmenu={(event) => onIndicatorContext(event, "settings")}
     aria-haspopup={indicators.settings ? "menu" : undefined}
     onclick={() => onSelect("settings")}
-  ><Settings class="h-5 w-5" aria-hidden="true" /><SidebarIndicatorDot indicator={indicators.settings} /></button>
+  ><Settings class={["h-5 w-5", sidebarIconTone(indicators.settings)]} aria-hidden="true" /></button>
 </div>

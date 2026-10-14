@@ -3,10 +3,13 @@ import type {
   CreateElicitationResponse,
   SessionNotification,
 } from "@agentclientprotocol/sdk";
+import { invoke } from "@tauri-apps/api/core";
 import { AcpClient, type QueueState, type QueuedUserMessage } from "../lib/acp-client";
+import { acpCrashReport, cleanAcpDiagnostic } from "../lib/acp-crash-diagnostics";
 import type { SessionStateNotification } from "../lib/session-state";
-import type { ForkReadyNotification } from "../lib/acp-client-types";
+import type { AcpExit, ForkReadyNotification } from "../lib/acp-client-types";
 import { TauriAcpTransport } from "../lib/tauri-transport";
+import type { DesktopDiagnosticEvent } from "../lib/diagnostic-logging";
 
 export type ConnectionStatus = "starting" | "ready" | "error" | "stopped";
 
@@ -27,6 +30,7 @@ type ConnectionStoreOptions = {
   openWorkspaceSession: () => Promise<void>;
   setErrorMessage: (message: string | null) => void;
   reportError: (error: unknown) => void;
+  recordDiagnostic?: (event: DesktopDiagnosticEvent) => void;
 };
 
 export function createConnectionStore(options: ConnectionStoreOptions) {
@@ -39,6 +43,31 @@ export function createConnectionStore(options: ConnectionStoreOptions) {
   let connectPromise: Promise<void> | null = null;
   let reconnectPromise: Promise<void> | null = null;
   let disposePromise: Promise<void> | null = null;
+  function record(event: DesktopDiagnosticEvent): void {
+    try { options.recordDiagnostic?.(event); }
+    catch { /* Logging must not affect connection ownership. */ }
+  }
+
+  function reportCrash(exit: AcpExit, requestGeneration: number): void {
+    const workspace = options.workspace();
+    const report = acpCrashReport(exit, diagnostics);
+    options.setErrorMessage(report.message);
+    if (!workspace) return;
+    // Persist even if reconnect follows immediately. Only the original failure
+    // may update the banner; stale completion must not touch the new session.
+    void invoke<string>("save_acp_crash_log", { workspace, content: report.content }).then(
+      (path) => {
+        if (!disposed && generation === requestGeneration && status === "error" && options.workspace() === workspace) {
+          options.setErrorMessage(`${report.message} · Log: ${path}`);
+        }
+      },
+      (error) => {
+        if (!disposed && generation === requestGeneration && status === "error" && options.workspace() === workspace) {
+          options.setErrorMessage(`${report.message} · Could not save crash log: ${cleanAcpDiagnostic(String(error)).slice(0, 200)}`);
+        }
+      },
+    );
+  }
 
   function connect(): Promise<void> {
     if (disposed) return Promise.resolve();
@@ -55,6 +84,8 @@ export function createConnectionStore(options: ConnectionStoreOptions) {
   async function performConnect(requestGeneration: number): Promise<void> {
     if (disposed || requestGeneration !== generation) return;
     status = "starting";
+    record("acp:connecting");
+    diagnostics = [];
     imagePromptSupported = false;
     options.setErrorMessage(null);
     const transport = new TauriAcpTransport();
@@ -86,7 +117,7 @@ export function createConnectionStore(options: ConnectionStoreOptions) {
         : Promise.resolve({ action: "cancel" }),
       onDiagnostic: (line) => {
         if (client !== next) return;
-        diagnostics = [...diagnostics.slice(-49), line];
+        diagnostics = [...diagnostics.slice(-49), cleanAcpDiagnostic(line)];
       },
       onExit: (exit) => {
         if (client !== next) return;
@@ -95,8 +126,9 @@ export function createConnectionStore(options: ConnectionStoreOptions) {
         imagePromptSupported = false;
         options.onDisconnect();
         status = exit.requested ? "stopped" : "error";
+        record(exit.requested ? "acp:stopped" : "acp:unexpected-exit");
         if (!exit.requested) {
-          options.setErrorMessage(exit.error ?? `pix-acp exited${exit.code === null ? "" : ` with code ${exit.code}`}`);
+          reportCrash(exit, generation);
         }
         void next.dispose().catch(() => {});
       },
@@ -111,10 +143,14 @@ export function createConnectionStore(options: ConnectionStoreOptions) {
       imagePromptSupported = initialization.agentCapabilities?.promptCapabilities?.image === true;
       status = "ready";
       if (options.workspace()) await options.openWorkspaceSession();
+      if (!disposed && generation === requestGeneration && client === next) record("acp:ready");
     } catch (error) {
       if (disposed || requestGeneration !== generation || client !== next) return;
       status = "error";
+      record("acp:connect-failed");
       options.reportError(error);
+      reportCrash({ generation: requestGeneration, code: null, success: false, requested: false,
+        error: error instanceof Error ? error.message : String(error) }, requestGeneration);
     }
   }
 
@@ -129,6 +165,7 @@ export function createConnectionStore(options: ConnectionStoreOptions) {
   }
 
   async function performReconnect(requestGeneration: number): Promise<void> {
+    record("acp:reconnecting");
     const previous = client;
     client = null;
     status = "starting";
@@ -143,6 +180,7 @@ export function createConnectionStore(options: ConnectionStoreOptions) {
     disposed = true;
     generation += 1;
     const current = client;
+    if (current) record("acp:stopped");
     client = null;
     status = "stopped";
     imagePromptSupported = false;

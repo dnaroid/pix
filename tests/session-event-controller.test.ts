@@ -2,10 +2,25 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { AppSessionEventController } from "../src/app/session/session-event-controller.js";
+import { pixLogger } from "../src/app/logger.js";
 import type { Entry } from "../src/app/types.js";
 import type { AgentSession, AgentSessionEvent, AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 
 describe("AppSessionEventController", () => {
+	it("logs model errors once and omits cancelled retries and tool payloads", (t) => {
+		const log = t.mock.method(pixLogger, "log", async () => {});
+		const controller = createController();
+		const message = { role: "assistant", content: [], stopReason: "error", errorMessage: "model failed" };
+		controller.handleSessionEvent({ type: "message_start", message } as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({ type: "message_update", message, assistantMessageEvent: { type: "error", reason: "error", error: message } } as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({ type: "message_end", message } as unknown as AgentSessionEvent);
+		controller.handleSessionEvent({ type: "auto_retry_end", success: false, finalError: "Retry cancelled" } as AgentSessionEvent);
+		controller.handleSessionEvent({ type: "tool_execution_end", toolName: "shell", toolCallId: "call", isError: true, result: { content: [{ type: "text", text: "PRIVATE TOOL RESULT" }] } } as AgentSessionEvent);
+		assert.equal(log.mock.calls.filter(call => call.arguments[1] === "model:failed").length, 1);
+		assert.equal(log.mock.calls.filter(call => call.arguments[1] === "retry:failed").length, 0);
+		assert.equal(log.mock.calls.find(call => call.arguments[1] === "tool:failed")?.arguments[0], "warn");
+		assert.doesNotMatch(JSON.stringify(log.mock.calls), /PRIVATE TOOL RESULT/);
+	});
 	function createController(entries: Entry[] = [], runtime: AgentSessionRuntime = ({ session: { isStreaming: false } }) as AgentSessionRuntime): AppSessionEventController {
 		return new AppSessionEventController({
 			entries,

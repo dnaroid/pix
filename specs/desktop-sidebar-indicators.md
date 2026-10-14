@@ -17,7 +17,7 @@ Active implemented contract.
 
 ## Goal
 
-Make the Workspace Activity Bar a compact live health/status rail. Every activity destination may expose one small semantic attention dot without turning the rail into a badge dashboard or requiring every panel to stay mounted.
+Make the Workspace Activity Bar a compact live health/status rail. Warning and error states color the destination icon without extra dots or badges or requiring every panel to stay mounted.
 
 ## Scope
 
@@ -31,18 +31,18 @@ Make the Workspace Activity Bar a compact live health/status rail. Every activit
 
 - Showing counts in Activity Bar badges. In particular, Source Control does not display a changed-file count.
 - Polling remote Registry state independently from the active ACP session.
-- Running full Git diff/stat/branch discovery merely to decide whether a dot is needed.
+- Running full Git diff/stat/branch discovery merely to decide whether an indicator is needed.
 - Running indexing or embedding work to decide whether a search indicator is needed.
 - Treating the existence of ordinary project tasks or absent search indexes as an error by itself.
 
 ## Indicator language
 
-- Every signal uses the same small circular marker at the same position on its Activity Bar button.
-- `info` uses the semantic tool-info color for active/dirty state that is useful but not unhealthy.
-- `warning` uses tool-warning for state that needs user review or input.
-- `error` uses tool-error for failed, conflicted, unreadable, or invalid state.
-- When several conditions apply, severity order is `error > warning > info` and only one dot is rendered.
-- No normal/healthy state renders a dot.
+- No Activity Bar dots or ping animations are rendered.
+- `info` and normal/healthy states leave the icon neutral; reasons remain in the title and accessibility label.
+- `warning` colors the icon with tool-warning for state that needs user review or input.
+- `error` colors the icon with tool-error for failed, conflicted, unreadable, or invalid state.
+- When several conditions apply, severity order is `error > warning > info`.
+- Selection remains independent: the active view keeps its left stripe and background, including when its icon is status-colored.
 
 ## Activity Bar keyboard contract
 
@@ -63,10 +63,11 @@ Make the Workspace Activity Bar a compact live health/status rail. Every activit
 
 Decision: [0027 — Cause-specific sidebar quick actions](../docs/decisions/0027-sidebar-reason-actions.md).
 
-- Right-click on an Activity Bar icon with a dot opens a component-owned context
-  menu for **all current reasons**, not a generic section menu and not only the
-  highest-priority reason shown in the tooltip. Without a dot there is no menu.
-  Left-click behavior remains unchanged.
+- Right-click on an Activity Bar icon with a current indicator opens a
+  component-owned context menu for **all current reasons**, not a generic
+  section menu and not only the highest-priority reason shown in the tooltip.
+  Informational indicators remain actionable despite their neutral icon.
+  Without an indicator there is no menu. Left-click behavior remains unchanged.
 - Work commands (reload/retry, Fetch, Push, AI repair/review and commit/push) do
   not switch or expand sidebar panels. Only explicit inspection/navigation actions
   open a view. Project-file retry also checks the root while the explorer is absent;
@@ -116,10 +117,10 @@ Decision: [0027 — Cause-specific sidebar quick actions](../docs/decisions/0027
 
 - **Project** — error only when the workspace/project tree cannot be read. A populated project is not attention by itself.
 - **Tasks** — info for planned (`todo`) project tasks or an active task action; error after project-task storage read/write failure. Completed/backlog tasks alone do not light the Activity Bar.
-- **Source Control** — info for a dirty working tree, commits ahead of upstream, a locally-known branch behind upstream, or a remote upstream tip that differs from the local tracking ref even before a fetch; warning for detached HEAD; error for current-HEAD CI failure, unresolved conflicts or local Git status failure. Any failed ready CI run is an error even while another run is running. Remote-probe network/auth failures are best-effort and do not create an error dot. Changed-file counts are never rendered in the rail.
-- **Registry** — warning when the indicator service detects local reusable/project resources that differ from their recorded provenance or are local-only while Registry is configured. Remote-side attention (`update-available`, `missing-local`, `diverged`, `registry-changed`) and project-level review issues continue to come from the pushed ACP Registry snapshot. While Desktop background project-state sync is pending, the Registry dot is `info`; while a sync is actively running the same dot uses a motion-safe ping animation. A background sync failure uses error severity. Optional remote-only resources (`not-installed`) remain a normal catalog state and do not light the Activity Bar. Registry snapshot or local-indicator health failures use error severity.
+- **Source Control** — info for a dirty working tree, commits ahead of upstream, a locally-known branch behind upstream, or a remote upstream tip that differs from the local tracking ref even before a fetch; warning for detached HEAD; error for current-HEAD CI failure, unresolved conflicts or local Git status failure. Any failed ready CI run is an error even while another run is running. Remote-probe network/auth failures are best-effort and do not create an error indicator. Changed-file counts are never rendered in the rail.
+- **Registry** — warning when the indicator service detects local reusable/project resources that differ from their recorded provenance or are local-only while Registry is configured. Remote-side attention (`update-available`, `missing-local`, `diverged`, `registry-changed`) and project-level review issues continue to come from the pushed ACP Registry snapshot. While Desktop background project-state sync is pending or active, Registry retains an informational reason; active-sync metadata is retained for policy consumers, but the Activity Bar does not animate or color the neutral icon for info. A background sync failure uses error severity. Optional remote-only resources (`not-installed`) remain a normal catalog state and do not color the Activity Bar icon. Registry snapshot or local-indicator health failures use error severity.
 - **Package Scripts** — info while one or more package/shell terminals are running; error for a newly observed failed terminal or non-zero exit, or for package-script discovery errors. A failure event is acknowledged once the Scripts view is visible.
-- **Search indexes** — error for read/source/manual indexing failures; motion-safe animated info for a manual run or source-specific reported background activity; warning for missing/partial local indexes, incompatible caches, unavailable configured credentials, missing vectors unless the local corpus is known empty, and partial/stopped manual runs. Errors take precedence over activity; during activity pending causes remain available but use info tone so they do not mask the active dot. Ordinary diagnostic polling never means indexing. Unknown state, disabled semantics alone and stored vector counts do not establish incomplete coverage or freshness. See [Search index status](desktop-search-index-status.md).
+- **Search indexes** — error for read/source/manual indexing failures; informational metadata for a manual run or source-specific reported background activity is retained, but the rail does not animate or color the neutral icon for info; warning for missing/partial local indexes, incompatible caches, unavailable configured credentials, missing vectors unless the local corpus is known empty, and partial/stopped manual runs. Errors take precedence over activity; during activity pending causes remain available but use info severity without masking the icon's warning/error tone. Ordinary diagnostic polling never means indexing. Unknown state, disabled semantics alone and stored vector counts do not establish incomplete coverage or freshness. See [Search index status](desktop-search-index-status.md).
 - **Settings** — error when either supported user config is unreadable, malformed JSONC, schema-invalid, or the mounted Settings editor reports a load/save/validation error. Missing optional user config files are healthy.
 
 ## Polling and invalidation
@@ -128,7 +129,7 @@ Decision: [0027 — Cause-specific sidebar quick actions](../docs/decisions/0027
 - The fast backend poll runs approximately every 5 seconds while the window is visible/focused and every 30 seconds in the background. It returns Project, lightweight Git, terminal runtime, and user-config health in one typed IPC snapshot.
 - Fast Git status uses a dedicated bounded porcelain-v2 branch/status probe only. It disables optional Git locks and fsmonitor, retains bounded output, and kills the probe after 5 seconds instead of allowing the Activity Bar service to hang behind a stuck filesystem hook. It does not calculate per-file numstat, local branch lists, or remotes.
 - Remote Git freshness has a separate approximately 60-second foreground / 5-minute background cadence. It resolves the current branch's configured upstream locally, then runs only `git ls-remote` for that one upstream ref and compares the returned SHA with the existing local tracking-ref SHA. It does **not** run `git fetch`, download the remote object graph, update refs, or touch the working tree. Refocus/visibility refreshes are rate-limited to at most one remote attempt per 30 seconds so repeatedly switching windows cannot create a network loop.
-- The remote probe coalesces concurrent invalidations to at most one in-flight request plus one queued retry and is guarded by workspace/generation checks. Network, authentication, timeout, or provider failures leave the last successful remote-freshness result in place and never block or fail the local fast poll. A branch/upstream change forces one fresh probe; otherwise a successful Pix-owned Git refresh immediately rechecks remote freshness only while an update dot is already active, so Fetch/Update project can clear the dot promptly without adding network work to ordinary local Git mutations.
+- The remote probe coalesces concurrent invalidations to at most one in-flight request plus one queued retry and is guarded by workspace/generation checks. Network, authentication, timeout, or provider failures leave the last successful remote-freshness result in place and never block or fail the local fast poll. A branch/upstream change forces one fresh probe; otherwise a successful Pix-owned Git refresh immediately rechecks remote freshness only while an update indicator is already active, so Fetch/Update project can clear it promptly without adding network work to ordinary local Git mutations.
 - Current-HEAD CI status reuses the sparse remote lane while Git is closed, with no job-detail queries or separate background timer. The visible Git panel keeps its own cadence; its store skips sidebar requests while active/in-flight. Unavailable setup states do not busy-poll. Job caches retain only runs in the current snapshot; late results for removed runs are discarded.
 - Package-terminal state is read from the existing in-memory backend registry; no subprocess is started for those checks.
 - Package-terminal **exit** events always invalidate the fast snapshot. Output events invalidate only until that runtime id is already known as running; ordinary terminal/log output does not turn a noisy process into a sub-second Git/config polling loop.
@@ -167,10 +168,10 @@ Decision: [0027 — Cause-specific sidebar quick actions](../docs/decisions/0027
 ## Persistent versus unseen state
 
 - Persistent conditions such as dirty Git, invalid configs, and active processes remain visible until the underlying condition clears.
-- Registry background-sync presentation orders remote/error attention above
-  active syncing, active syncing above ordinary pending dirtiness, and healthy
-  state last. The ping animation is purely transient and honors reduced-motion
-  styling.
+- Registry background-sync policy retains its ordering of remote/error attention
+  above active syncing, active syncing above ordinary pending dirtiness, and
+  healthy state last. Activity Bar rendering uses only warning/error icon tones;
+  it renders no dots or ping animation.
 - While a background Registry RPC is actively syncing, Registry-panel action
   controls are disabled even though the Desktop-wide foreground operation lock
   remains free. This prevents overlapping manual Registry commands without
@@ -191,7 +192,6 @@ Decision: [0027 — Cause-specific sidebar quick actions](../docs/decisions/0027
 ## Implementation
 
 - `desktop/src/components/WorkspaceSidebar.svelte`
-- `desktop/src/components/SidebarIndicatorDot.svelte`
 - `desktop/src/components/ProjectExplorer.svelte`
 - `desktop/src/components/sidebar-project-retry.ts`
 - `desktop/src/components/SettingsPanel.svelte`
@@ -244,7 +244,7 @@ Decision: [0027 — Cause-specific sidebar quick actions](../docs/decisions/0027
 
 ## Evidence
 
-- Confirmed by code: the Activity Bar consumes one indicator map and one shared dot component rather than tab-specific badge markup.
+- Confirmed by code: the Activity Bar consumes one indicator map and applies warning/error tone to destination icons; it renders no dot component.
 - Confirmed by code: fast polling uses one typed Tauri command, while terminal events and existing ACP/session state provide push invalidation where available.
 - Confirmed by tests: frontend policy helpers and backend polling helpers cover the highest-risk severity, unseen-failure, Git-cost, and config-validation behavior.
 

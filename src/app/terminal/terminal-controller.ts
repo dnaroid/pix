@@ -1,6 +1,7 @@
 import { StringDecoder } from "node:string_decoder";
 import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
 import { ANSI_RESET } from "../../theme.js";
+import { pixLogger } from "../logger.js";
 import {
 	DISABLE_BRACKETED_PASTE,
 	DISABLE_TERMINAL_KEY_REPORTING,
@@ -181,6 +182,8 @@ export class AppTerminalController {
 		await this.runBestEffort(() => this.host.disposeInactiveRuntimesForQuit());
 		const runtime = this.host.runtime();
 		if (runtime) await this.disposeRuntimeForQuit(runtime);
+		// The existing forced-exit deadline also bounds a stalled filesystem.
+		await this.runBestEffort(() => pixLogger.flush());
 	}
 
 	private async runBestEffort(task: () => Promise<void>): Promise<void> {

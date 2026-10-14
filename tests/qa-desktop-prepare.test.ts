@@ -77,6 +77,39 @@ test("prepare can explicitly keep its owned workspace empty", { skip: skipWindow
  assert.deepEqual(await readdir(result.workspace), []);
 });
 
+test("persistent prepare reuses project identity without seeding and keeps external data on failure", { skip: skipWindows }, async (t) => {
+ const f = await fixture(t);
+ const workspace = join(f.scratch, "permanent-project"); await mkdir(workspace);
+ const sentinel = join(workspace, "retained.txt"); await writeFile(sentinel, "keep project");
+ const options = { ...f.options, persistentProject: workspace };
+ // Reject an older binary before initializing any permanent profile.
+ await assert.rejects(prepareDesktop(options, f.dependencies), /predates/);
+ await absent(f.options.runDir); await absent(join(workspace, ".pix-qa"));
+ assert.equal(await readFile(sentinel, "utf8"), "keep project");
+ await writeFile(f.target, "PIX_DESKTOP_QA_PROFILE_V1 PIX_DESKTOP_PERSISTENT_QA_V1", { mode: 0o700 });
+ const first = await prepareDesktop(options, f.dependencies); const m = await json(first.manifestPath);
+ assert.equal(m.workspace, workspace); assert.equal(m.persistentWebview, true);
+ assert.equal(m.projectSeed, null); assert.deepEqual(m.seed, { configFiles: 0, apiKeyCount: 0 });
+ assert.equal(m.profileDir, join(workspace, ".pix-qa", "profile"));
+ assert.deepEqual((await readdir(m.runDir)).sort(), ["manifest.json", "native"]);
+ const marker = await readFile(join(m.profileDir, "profile.json"));
+ const retained = join(m.profileDir, "home", ".pi", "agent", "retained-test-state.json");
+ await writeFile(retained, '{"model":"test-model","history":"keep"}', { mode: 0o600 });
+ // Local default follows the same identity, but every artifact run is fresh.
+ await privateJson(join(f.checkout, ".pi", "qa-desktop.json"), { version: 1, persistentProject: workspace });
+ const second = await prepareDesktop({ ...f.options, runDir: join(f.checkout, ".pi", "artifacts", "run-2") }, f.dependencies);
+ const reused = await json(second.manifestPath);
+ assert.equal(reused.profileId, m.profileId); assert.equal(reused.profileDir, m.profileDir);
+ assert.notEqual(reused.runDir, m.runDir); assert.deepEqual(await readFile(join(m.profileDir, "profile.json")), marker);
+ assert.equal(await readFile(retained, "utf8"), '{"model":"test-model","history":"keep"}');
+ const failedRun = join(f.checkout, ".pi", "artifacts", "failed-run");
+ await assert.rejects(prepareDesktop({ ...f.options, runDir: failedRun }, { ...f.dependencies,
+  copy: async () => { throw new Error("copy failure"); } }), /copy failure/);
+ await absent(failedRun); assert.deepEqual(await readFile(join(m.profileDir, "profile.json")), marker);
+ assert.equal(await readFile(retained, "utf8"), '{"model":"test-model","history":"keep"}');
+ assert.equal(await readFile(sentinel, "utf8"), "keep project");
+});
+
 for (const status of ["queued", "building"]) test(`prepare waits for ${status} then pins idle`, { skip: skipWindows }, async (t) => {
  const f = await fixture(t); await f.publish(status); let waits = 0;
  const result = await prepareDesktop(f.options, { ...f.dependencies, wait: async (ms) => { waits++; await f.dependencies.wait(ms); await f.publish(); } });

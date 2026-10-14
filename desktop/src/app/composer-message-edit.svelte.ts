@@ -14,7 +14,9 @@ export function createComposerMessageEdit(options: {
   setPromptText: (text: string) => void;
   setPromptAttachments: (attachments: Attachment[]) => void;
   invalidateAttachments: () => void;
-  busy: () => boolean;
+  operationRunning: () => boolean;
+  promptRunning: (sessionId: string) => boolean;
+  historyLoading: () => boolean;
   setOperationRunning: (value: boolean) => void;
   prepare: (sessionId: string, edit: MessageEdit) => Promise<() => void>;
   markHistoryFullyLoaded: (sessionId: string) => void;
@@ -27,6 +29,9 @@ export function createComposerMessageEdit(options: {
   };
   let drafts = $state(new Map<string, Pending>());
   const current = () => drafts.get(options.draftKey());
+  // Background sessions must not lock selection, Cancel or Send in this draft.
+  const busy = (sessionId: string) => options.operationRunning()
+    || options.promptRunning(sessionId) || options.historyLoading();
   function remove(key: string) {
     const next = new Map(drafts); next.delete(key); drafts = next;
   }
@@ -37,7 +42,7 @@ export function createComposerMessageEdit(options: {
   function begin(entryId: string, message: MessageItem) {
     const client = options.client();
     const sessionId = options.state.sessionId;
-    if (!client || !sessionId || options.busy()) return;
+    if (!client || !sessionId || busy(sessionId)) return;
     const previous = current()?.previous ?? {
       text: options.promptText(), attachments: [...options.promptAttachments()],
     };
@@ -51,7 +56,7 @@ export function createComposerMessageEdit(options: {
   }
   function cancel() {
     const pending = current();
-    if (!pending || options.busy()) return;
+    if (!pending || busy(pending.sessionId)) return;
     remove(options.draftKey());
     options.invalidateAttachments();
     options.setPromptText(pending.previous.text);
@@ -61,7 +66,7 @@ export function createComposerMessageEdit(options: {
   async function submit(): Promise<boolean> {
     const pending = current();
     if (!pending) return false;
-    if (options.busy()) return true;
+    if (busy(pending.sessionId)) return true;
     const key = options.draftKey();
     const isCurrent = () => options.client() === pending.client
       && options.state.sessionId === pending.sessionId && options.draftKey() === key

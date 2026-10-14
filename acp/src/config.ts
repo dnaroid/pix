@@ -5,7 +5,8 @@
  *   PIX_ACP_PI_ENTRY     path to the Node-readable pi RPC entry module
  *                        (default: package-exported bundled rpc-entry)
  *   PIX_ACP_PI_BIN       deprecated alias for PIX_ACP_PI_ENTRY
- *   PIX_ACP_LOG          log level: debug | info | warn | error (default: info)
+ *   PIX_LOG_LEVEL        shared log level (default: info)
+ *   PIX_ACP_LOG          legacy ACP-only level; PIX_LOG_LEVEL takes precedence
  *   PIX_ACP_SESSION_MAP  path to the ACP↔pi session map file
  *                        (default: ~/.pi/agent/pix-acp/sessions.json)
  *   PIX_ACP_QUESTION_EXTENSION  Desktop-owned bundled question extension path
@@ -81,7 +82,7 @@ export function resolveAdapterConfig(input: AdapterConfigInput = {}): AdapterCon
 export function adapterConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AdapterConfig {
 	return resolveAdapterConfig({
 		piEntry: env["PIX_ACP_PI_ENTRY"] ?? env["PIX_ACP_PI_BIN"],
-		logLevel: env["PIX_ACP_LOG"],
+		logLevel: env["PIX_LOG_LEVEL"] ?? env["PIX_ACP_LOG"],
 		sessionMapPath: env["PIX_ACP_SESSION_MAP"],
 		questionExtensionPath: env["PIX_ACP_QUESTION_EXTENSION"],
 		sessionTitleExtensionPath: env["PIX_ACP_SESSION_TITLE_EXTENSION"],
