@@ -67,6 +67,8 @@ export function createDesktopWorkbenchViewModelServices(
       quotaWait: options.quotaWait,
       headsUp: options.headsUp,
       openBtw: options.openBtw,
+      openClaudeLoginTerminal: options.openClaudeLoginTerminal,
+      reportClaudeLoginError: options.errors.report,
     },
     editor: {
       workspace: options.workspace,

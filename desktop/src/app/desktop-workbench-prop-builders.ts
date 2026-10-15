@@ -91,6 +91,8 @@ export type WorkbenchConversationBuilderOptions = {
   quotaWait: QuotaWaitStore;
   headsUp: HeadsUpStore;
   openBtw?: (sessionId: string, question?: string) => void | Promise<void>;
+  openClaudeLoginTerminal?: (command: string) => Promise<void>;
+  reportClaudeLoginError?: (error: unknown) => void;
 };
 
 export type WorkbenchEditorBuilderOptions = {
@@ -182,6 +184,8 @@ export function buildWorkbenchConversationProps(
       onResolveLocalMedia: options.preview.resolveLocalMedia,
       onLoadToolResult: (toolCallId) => void options.history.loadDeferredToolResult(toolCallId),
       onUserMessageAction: (message, action) => { if (!link?.owned) void options.branchActions.runUserMessageContextAction(message, action); },
+      onOpenClaudeLoginTerminal: options.openClaudeLoginTerminal,
+      onClaudeLoginError: options.reportClaudeLoginError,
       onHtmlSandboxSubmit: sessionId && !link?.owned
         ? (messageId, payload) => options.promptSubmit.submitHtmlSandbox(sessionId, messageId, payload)
         : undefined,

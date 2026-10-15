@@ -86,6 +86,8 @@ export interface SearchIndexResponse {
   readonly indexed?: number;
   readonly total?: number;
   readonly message?: string;
+  /** Allowlisted stage of an incomplete commit pass, never a raw exception. */
+  readonly failurePhase?: "configuration" | "authorization" | "storage" | "provider" | "history";
 }
 export interface SearchStatus {
   readonly sessionSnapshot?: string;

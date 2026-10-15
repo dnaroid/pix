@@ -12,7 +12,10 @@ fn tray_only(source: &str) -> Result<bool, String> {
 }
 
 #[cfg(any(target_os = "macos", test))]
-fn window_entries(mut windows: Vec<(String, String)>) -> Vec<(String, String)> {
+fn window_entries(
+    mut windows: Vec<(String, String)>,
+    attention: &[String],
+) -> Vec<(String, String)> {
     for (_, title) in &mut windows {
         if let Some(workspace) = title
             .strip_prefix("Pix — ")
@@ -27,11 +30,15 @@ fn window_entries(mut windows: Vec<(String, String)>) -> Vec<(String, String)> {
     windows
         .iter()
         .map(|(label, title)| {
-            let text = if windows.iter().filter(|(_, other)| other == title).count() > 1 {
+            let mut text = if windows.iter().filter(|(_, other)| other == title).count() > 1 {
                 format!("{title} ({label})")
             } else {
                 title.clone()
             };
+            // Mark unseen attention without changing sort order or menu ids.
+            if attention.contains(label) {
+                text = format!("● {text}");
+            }
             (format!("pix.tray.window.{label}"), text)
         })
         .collect()
@@ -48,6 +55,7 @@ mod native {
     const TRAY_ID: &str = "pix.tray";
     const QUIT_ID: &str = "pix.tray.quit";
     const SHOW_ALL_ID: &str = "pix.tray.show-all";
+    const ARRANGE_ID: &str = "pix.tray.arrange";
 
     fn exiting(app: &AppHandle) -> bool {
         app.state::<crate::AcpProcessState>()
@@ -55,7 +63,7 @@ mod native {
             .load(std::sync::atomic::Ordering::Acquire)
     }
 
-    fn attention(app: &AppHandle) -> bool {
+    fn attention_labels(app: &AppHandle) -> Vec<String> {
         let live = app
             .webview_windows()
             .into_iter()
@@ -65,12 +73,25 @@ mod native {
             .0
             .lock()
             .map(|mut state| state.snapshot(&live))
-            .unwrap_or(false)
+            .unwrap_or_default()
+    }
+
+    fn attention(app: &AppHandle) -> bool {
+        !attention_labels(app).is_empty()
     }
 
     fn update_icon(app: &AppHandle) -> tauri::Result<()> {
         if let Some(tray) = app.tray_by_id(TRAY_ID) {
             tray.set_icon(Some(crate::desktop_tray_icon::image(attention(app))))?;
+        }
+        Ok(())
+    }
+
+    // Menu entries carry per-window attention markers, so attention changes
+    // rebuild the menu, not only the icon.
+    fn update_menu(app: &AppHandle) -> tauri::Result<()> {
+        if let Some(tray) = app.tray_by_id(TRAY_ID) {
+            tray.set_menu(Some(menu(app)?))?;
         }
         Ok(())
     }
@@ -108,12 +129,21 @@ mod native {
             true,
             None::<&str>,
         )?)?;
+        menu.append(&MenuItem::with_id(
+            app,
+            ARRANGE_ID,
+            "Arrange windows",
+            true,
+            None::<&str>,
+        )?)?;
         menu.append(&PredefinedMenuItem::separator(app)?)?;
+        let attention = attention_labels(app);
         let entries = super::window_entries(
             app.webview_windows()
                 .into_iter()
                 .map(|(label, window)| (label, window.title().unwrap_or_else(|_| "Pix".into())))
                 .collect(),
+            &attention,
         );
         for (id, title) in entries {
             menu.append(&MenuItem::with_id(app, id, title, true, None::<&str>)?)?;
@@ -155,6 +185,8 @@ mod native {
                     app.exit(0);
                 } else if event.id().as_ref() == SHOW_ALL_ID {
                     show_all(app);
+                } else if event.id().as_ref() == ARRANGE_ID {
+                    crate::window_tiling::arrange(app);
                 } else if let Some(label) = event.id().as_ref().strip_prefix("pix.tray.window.") {
                     if let Some(window) = app.get_webview_window(label) {
                         crate::desktop_notification::foreground_window(&window);
@@ -204,14 +236,20 @@ mod native {
                             return;
                         }
                         if let Err(error) = enable(&target) {
-                            crate::logging::error(module_path!(), format!("tray setup (keeping Dock): {error}"));
+                            crate::logging::error(
+                                module_path!(),
+                                format!("tray setup (keeping Dock): {error}"),
+                            );
                         }
                     }) {
                         crate::logging::error(module_path!(), format!("tray setup: {error}"));
                     }
                 }
                 Ok(false) => {}
-                Err(error) => crate::logging::error(module_path!(), format!("tray preferences (keeping Dock): {error}")),
+                Err(error) => crate::logging::error(
+                    module_path!(),
+                    format!("tray preferences (keeping Dock): {error}"),
+                ),
             }
         });
     }
@@ -224,13 +262,11 @@ mod native {
             }
             // Resolve both the icon and live membership when the task executes,
             // not when scheduled; stale queued updates cannot resurrect windows.
-            if let Some(tray) = target.tray_by_id(TRAY_ID) {
-                if let Err(error) = menu(&target).and_then(|menu| tray.set_menu(Some(menu))) {
-                    crate::logging::error(module_path!(), format!("tray menu refresh: {error}"));
-                }
-                if let Err(error) = update_icon(&target) {
-                    crate::logging::error(module_path!(), format!("tray icon refresh: {error}"));
-                }
+            if let Err(error) = update_menu(&target) {
+                crate::logging::error(module_path!(), format!("tray menu refresh: {error}"));
+            }
+            if let Err(error) = update_icon(&target) {
+                crate::logging::error(module_path!(), format!("tray icon refresh: {error}"));
             }
         }) {
             crate::logging::error(module_path!(), format!("tray menu refresh: {error}"));
@@ -266,7 +302,15 @@ mod native {
                     .lock()
                     .map_err(|error| error.to_string())?
                     .set(window.label(), invoking_id, current_id, value);
-                update_icon(app).map_err(|error| error.to_string())
+                let menu_result = update_menu(app);
+                let icon_result = update_icon(app);
+                menu_result.and(icon_result).map_err(|error| {
+                    crate::logging::error(
+                        module_path!(),
+                        format!("tray attention refresh: {error}"),
+                    );
+                    error.to_string()
+                })
             })();
             let _ = tx.send(result);
         })
@@ -370,11 +414,14 @@ mod tests {
     #[test]
     fn lists_every_window_with_stable_identity_and_disambiguated_titles() {
         assert_eq!(
-            window_entries(vec![
-                ("project-b".into(), "Pix — repo".into()),
-                ("project-a".into(), "Pix — repo".into()),
-                ("main".into(), "Pix".into()),
-            ]),
+            window_entries(
+                vec![
+                    ("project-b".into(), "Pix — repo".into()),
+                    ("project-a".into(), "Pix — repo".into()),
+                    ("main".into(), "Pix".into()),
+                ],
+                &[]
+            ),
             vec![
                 ("pix.tray.window.main".into(), "Pix".into()),
                 (
@@ -389,22 +436,47 @@ mod tests {
         );
         // A removed window is not retained in a later snapshot.
         assert_eq!(
-            window_entries(vec![("main".into(), "Pix — renamed".into())]),
+            window_entries(vec![("main".into(), "Pix — renamed".into())], &[]),
             vec![("pix.tray.window.main".into(), "renamed".into())]
         );
-        assert!(window_entries(vec![]).is_empty());
+        assert!(window_entries(vec![], &[]).is_empty());
     }
 
     #[test]
     fn removes_only_the_app_prefix_and_disambiguates_display_titles() {
         assert_eq!(
-            window_entries(vec![
-                ("a".into(), "Pix — repo".into()),
-                ("b".into(), "Pix - repo".into()),
-                ("c".into(), "project Pix — notes".into()),
-            ]),
+            window_entries(
+                vec![
+                    ("a".into(), "Pix — repo".into()),
+                    ("b".into(), "Pix - repo".into()),
+                    ("c".into(), "project Pix — notes".into()),
+                ],
+                &[]
+            ),
             vec![
                 ("pix.tray.window.c".into(), "project Pix — notes".into()),
+                ("pix.tray.window.a".into(), "repo (a)".into()),
+                ("pix.tray.window.b".into(), "repo (b)".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn attention_marks_only_its_owner_without_changing_order_or_identity() {
+        let windows = vec![
+            ("a".into(), "Pix — repo".into()),
+            ("b".into(), "Pix - repo".into()),
+        ];
+        assert_eq!(
+            window_entries(windows.clone(), &["b".into(), "destroyed".into()]),
+            vec![
+                ("pix.tray.window.a".into(), "repo (a)".into()),
+                ("pix.tray.window.b".into(), "● repo (b)".into()),
+            ]
+        );
+        assert_eq!(
+            window_entries(windows, &[]),
+            vec![
                 ("pix.tray.window.a".into(), "repo (a)".into()),
                 ("pix.tray.window.b".into(), "repo (b)".into()),
             ]

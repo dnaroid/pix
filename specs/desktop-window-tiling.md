@@ -7,7 +7,7 @@ status: active
 
 ## Behavior
 
-- macOS Pix application menu includes **Разложить окна**. Standard application,
+- macOS Pix application menu includes **Arrange windows**. Standard application,
   editing, services, window and Quit menu items remain available.
 - Arrange only Pix webview windows. The active window is placed first, followed
   by other windows in stable window-label order. Preserve the active window's focus.

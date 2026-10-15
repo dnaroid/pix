@@ -21,7 +21,7 @@ type ConversationSessionActionsOptions = {
   setErrorMessage: (message: string | null) => void;
   setPromptText: (text: string) => void;
   markRuntimeReady: (sessionId: string, options: SessionConfigOption[]) => void;
-  forgetRuntime: (sessionId: string) => void;
+  reloadRuntime: (client: AcpClient, sessionId: string, workspace: string) => Promise<void>;
   beginHistoryLoad: () => number;
   hydrateHistory: (
     client: AcpClient,
@@ -156,9 +156,11 @@ export function createConversationSessionActions(options: ConversationSessionAct
   async function reloadResources(config: { echo?: boolean } = {}): Promise<void> {
     const requestClient = options.client();
     const sessionId = options.state.sessionId;
+    const requestWorkspace = options.workspace();
     if (
       !requestClient
       || !sessionId
+      || !requestWorkspace
       || !options.state.runtimeReady
       || options.operationRunning()
       || options.promptRunning()
@@ -167,8 +169,6 @@ export function createConversationSessionActions(options: ConversationSessionAct
     options.closeProjectSelector();
     options.closeSessionSelector();
     options.clearCommandPicker();
-    options.setOperationRunning(true);
-    options.state.setRuntimeReady(false);
     options.setErrorMessage(null);
     if (config.echo !== false) {
       const next = appendLocalUserMessage(
@@ -180,23 +180,13 @@ export function createConversationSessionActions(options: ConversationSessionAct
       );
       options.state.setTranscript(next);
       options.state.setSessionTranscript(sessionId, next);
-      await options.scrollToLatest();
+      void options.scrollToLatest().catch(options.reportError);
     }
-    try {
-      const response = await requestClient.reloadSession(sessionId);
-      if (requestClient !== options.client() || sessionId !== options.state.sessionId) return;
-      options.state.setConfigOptions(response.configOptions);
-      options.markRuntimeReady(sessionId, response.configOptions);
+    // Runtime ownership, readiness and completion are session-scoped. Selection
+    // may change freely while the request is pending; re-entry joins the reload.
+    await options.reloadRuntime(requestClient, sessionId, requestWorkspace);
+    if (requestClient === options.client() && requestWorkspace === options.workspace()) {
       void options.refreshSessions();
-    } catch (error) {
-      if (requestClient === options.client() && sessionId === options.state.sessionId) {
-        options.forgetRuntime(sessionId);
-        options.reportError(error);
-      }
-    } finally {
-      if (requestClient === options.client() && sessionId === options.state.sessionId) {
-        options.setOperationRunning(false);
-      }
     }
   }
 

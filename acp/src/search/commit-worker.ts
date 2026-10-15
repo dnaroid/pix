@@ -73,7 +73,7 @@ async function run() {
   let head: string | undefined;
   let docs;
   try { head = await commitHead(data.root, signal); docs = await readCommitCorpus(data.root, signal); }
-  catch { signal.throwIfAborted(); return indexOnly ? { source: "commits", complete: false, message: "Commit history unavailable (repository may have no HEAD)." }
+  catch { signal.throwIfAborted(); return indexOnly ? { source: "commits", complete: false, failurePhase: "history", message: "Commit history unavailable (repository may have no HEAD)." }
     : { results: [], notices: ["Commit history unavailable (repository may have no HEAD)."] }; }
   const patchTerm = "query" in data.request ? patchSearchTerm(data.request.query) : undefined;
   if (patchTerm && "query" in data.request) {
@@ -92,6 +92,8 @@ async function run() {
   }
   const vectors = new Map<string, number[]>(); const notices: string[] = [];
   let queryVector: number[] | undefined;
+  let failurePhase: "configuration" | "authorization" | "storage" | "provider" | "history" | undefined;
+  let phase: NonNullable<typeof failurePhase> = "storage";
   if (data.config && docs.length) {
     let db: DatabaseSync | undefined;
     try {
@@ -106,11 +108,14 @@ async function run() {
       } catch (e) { db.exec("ROLLBACK"); throw e; }
       for (let offset = 0; offset < docs.length; offset += 16) {
         signal.throwIfAborted();
+        phase = "storage";
         const work = await claimWork(db, signal, { retry: indexOnly && offset === 0 });
         let writing = false, success = false;
         try {
           await lock(db); writing = true;
+          phase = "authorization";
           if (!(await rpc("validate"))) throw new Error(SEMANTIC_NOTICE);
+          phase = "storage";
           const saved = db.prepare(`SELECT value FROM ${COMMIT_META} WHERE key='identity'`).get()?.value;
           if (saved !== undefined && (typeof saved !== "string" || JSON.parse(saved)[0] !== 1)) throw new Error(SEMANTIC_NOTICE);
           const same = saved === identity;
@@ -129,8 +134,11 @@ async function run() {
           const selected = missing;
           if (selected.length) work.network(db);
           db.exec("COMMIT"); writing = false;
+          phase = "provider";
           const embedded = selected.length ? await embed(selected.map(d => (c.documentPrefix + d.commit.subject + "\n" + d.commit.author + "\n" + d.message).slice(0, 8192)), c) : [];
+          phase = "history";
           if (head !== await commitHead(data.root, signal)) throw new Error("Commit history changed during indexing");
+          phase = "storage";
           await lock(db); writing = true; work.assert(db);
           if (!(await rpc("validate"))) throw new Error(SEMANTIC_NOTICE);
           signal.throwIfAborted();
@@ -150,6 +158,7 @@ async function run() {
         await delay(0, undefined, { signal });
       }
       if (indexOnly && docs.length) {
+        phase = "storage";
         await lock(db);
         try {
           if (!(await rpc("validate"))) throw new Error(SEMANTIC_NOTICE);
@@ -161,9 +170,10 @@ async function run() {
       if ("query" in data.request) queryVector = (await embed([(c.queryPrefix + data.request.query).slice(0, 8192)], c, true))[0];
     } catch (e) {
       signal.throwIfAborted();
+      if (indexOnly) failurePhase = phase;
       notices.push(e instanceof Error && e.message === "Commit index busy; local BM25 results remain available." ? e.message : SEMANTIC_NOTICE);
     } finally { db?.close(); }
-  } else if (!data.config) notices.push(SEMANTIC_NOTICE);
+  } else if (!data.config) { notices.push(SEMANTIC_NOTICE); if (indexOnly) failurePhase = "configuration"; }
   if (queryVector) {
     try { if (!(await rpc("validate"))) throw new Error(SEMANTIC_NOTICE); }
     catch { signal.throwIfAborted(); queryVector = undefined; notices.push(SEMANTIC_NOTICE); }
@@ -172,10 +182,13 @@ async function run() {
   if (indexOnly) {
     try {
       if (!(await rpc("validate"))) throw new Error(SEMANTIC_NOTICE);
-      if (head !== await commitHead(data.root, signal)) notices.push("Commit history changed; retry indexing this source");
-    } catch { signal.throwIfAborted(); notices.push(SEMANTIC_NOTICE); }
+      if (head !== await commitHead(data.root, signal)) {
+        notices.push("Commit history changed; retry indexing this source"); failurePhase ??= "history";
+      }
+    } catch { signal.throwIfAborted(); notices.push(SEMANTIC_NOTICE); failurePhase ??= "authorization"; }
     const indexed = docs.filter(doc => vectors.has(doc.contentHash)).length;
     return { source: "commits", complete: notices.length === 0 && indexed === docs.length, indexed, total: docs.length,
+      ...(failurePhase ? { failurePhase } : {}),
       ...(notices.length ? { message: notices[0] } : indexed < docs.length ? { message: "Indexing pass finished; continue to index remaining documents" } : {}) };
   }
   if (!("query" in data.request)) throw new Error("Invalid commit request");

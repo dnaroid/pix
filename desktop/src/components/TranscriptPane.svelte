@@ -16,6 +16,8 @@
   import type { LspMissingSuggestion } from "../lib/lsp-onboarding";
   import type { ProjectFileLineRange } from "../lib/project-files";
   import { transcriptNotice } from "../lib/transcript-notice";
+  import { isClaudeLoginError } from "../lib/claude-login-recovery";
+  import ClaudeLoginAction from "./ClaudeLoginAction.svelte";
   import {
     formatTranscriptDuration,
     groupTranscriptItems,
@@ -63,6 +65,8 @@
     onLoadToolResult,
     onUserMessageAction,
     onHtmlSandboxSubmit,
+    onOpenClaudeLoginTerminal,
+    onClaudeLoginError,
     lspSuggestion,
     onInstallLsp,
     onDismissLsp,
@@ -95,6 +99,8 @@
     onLoadToolResult: (toolCallId: string) => void;
     onUserMessageAction: (message: MessageItem, action: UserMessageAction) => void | Promise<void>;
     onHtmlSandboxSubmit?: (messageId: string, payload: unknown) => Promise<"sent" | "queued">;
+    onOpenClaudeLoginTerminal?: (command: string) => Promise<void>;
+    onClaudeLoginError?: (error: unknown) => void;
     lspSuggestion?: LspMissingSuggestion;
     onInstallLsp?: () => void;
     onDismissLsp?: () => void;
@@ -303,6 +309,11 @@
                   <div class="font-semibold text-foreground">{notice.title}</div>
                   <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
                   <p class="mt-1 whitespace-pre-wrap break-words font-mono text-muted-foreground">{item.text}</p>
+                  {#if onOpenClaudeLoginTerminal && onClaudeLoginError && isClaudeLoginError(item.messageId, item.text)}
+                    {#key activeSessionId}
+                      <ClaudeLoginAction onOpenTerminal={onOpenClaudeLoginTerminal} onError={onClaudeLoginError} />
+                    {/key}
+                  {/if}
                 </div>
               </article>
             {:else}

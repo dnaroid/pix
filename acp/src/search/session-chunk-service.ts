@@ -86,9 +86,9 @@ export class DesktopSessionChunks {
   }
   get indexing(): boolean { return Boolean(this.sync.worker); }
   changed(): void { this.sync.changed(); }
-  async index(signal: AbortSignal, retry = false, drain = retry) {
+  async index(signal: AbortSignal, retry = false, drain = retry, snapshot?: readonly SessionMapRecord[]) {
     const owned = AbortSignal.any([signal,this.owner.signal,this.options.signal]);
-    const records = await this.options.discover(owned);
+    const records = snapshot ?? await this.options.discover(owned);
     const embedding = await this.options.embedding(owned);
     return indexSessionChunks(this.cwd,transcriptCandidates(records),{signal:owned,...(embedding?{embedding}:{}),retry,drain});
   }

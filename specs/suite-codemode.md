@@ -54,7 +54,7 @@ transcript tool-result messages. The SDK owns VM limits and script-state storage
 ## Tests
 
 - `external/pi-tools-suite/test/codemode.test.ts`
-- `external/pi-tools-suite/test/codemode-sdk.test.ts`
+- `external/pi-tools-suite/test/codemode-sdk.case.ts` (`npm --prefix external/pi-tools-suite run test:sdk`)
 - `external/pi-tools-suite/test/evals/extension-contracts.test.ts`
 - `external/pi-tools-suite/test/evals/coverage-manifest.ts`
 - `desktop/src/lib/tools-suite-module-visibility.test.ts`
@@ -64,7 +64,10 @@ transcript tool-result messages. The SDK owns VM limits and script-state storage
 Run suite typecheck and focused codemode/config/model-tools/eval-contract tests;
 run Desktop module-visibility tests and checks. Real installed-SDK tests exercise
 QuickJS, additive declarations, CLI reuse, nested hook blocking and cancellation
-without paid model calls. In native Desktop check the default row and saved
+without paid model calls. The codemode SDK integration cases run under Node,
+matching the shipped host; Bun's delayed worker exit can exhaust the SDK's live
+worker limit between otherwise sequential tests. The suite's `npm test` includes
+this Node leg after its Bun tests. In native Desktop check the default row and saved
 off/on JSONC round trip. Sync the live suite after verification.
 
 ## Related

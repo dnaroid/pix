@@ -36,6 +36,7 @@ import { DesktopRagService } from "../search/rag-service.js";
 import { collectRagEvidence } from "../search/rag-evidence.js";
 import { BrainstormHost, BRAINSTORM_CHANNEL, type BrainstormLink } from "./brainstorm-host.js";
 import { NativeSessionCatalog } from "./native-session-catalog.js";
+import { SessionRefreshScheduler } from "./session-refresh-scheduler.js";
 import { PIX_SESSION_CATALOG_CHANGED_METHOD } from "./session-catalog-contract.js";
 import { brainstormParticipantOptions, freshParticipantAnswer } from "./brainstorm-participant.js";
 import { spawn } from "node:child_process";
@@ -506,6 +507,9 @@ export interface PixAcpAgentOptions {
 
 export class PixAcpAgent {
 	private readonly sessions = new Map<string, AgentSessionState>();
+	private readonly sessionRefreshes = new SessionRefreshScheduler((error) => {
+		this.options.logger.warn(`session refresh failed: ${stringifyUnknown(error)}`);
+	});
 	/** Only runtime identity is retained here, never side-chat content. */
 	private readonly btwOwners = new WeakMap<AgentSessionState, string>();
 	/** Desktop may reserve a tab id before its expensive pi runtime has finished starting. */
@@ -602,9 +606,10 @@ export class PixAcpAgent {
 		const backgroundSessions = new BackgroundSessionDiscovery(cwd => this.sessionMap.list(cwd));
 		this.backgroundSearchSessions = backgroundSessions;
 		this.searchService = options.searchService ?? new DesktopSearchService({
-			onIndexDiagnostic: ({ cwd, source, complete, indexed, total, durationMs }) => {
+			onIndexDiagnostic: ({ cwd, source, complete, indexed, total, durationMs, phase, reason }) => {
 				void acpFileLogger.log(complete ? "info" : "warn", complete ? "search:index-completed" : "search:index-incomplete",
-					{ source, complete, indexed, total, durationMs }, { project: cwd, module: "search.index" });
+					{ source, complete, indexed, total, durationMs, ...(phase ? { phase } : {}), ...(reason ? { reason } : {}) },
+					{ project: cwd, module: "search.index" });
 			},
 			sessionRecords: (cwd) => this.sessionMap.list(cwd),
 			discoverBackground: (cwd, signal) => backgroundSessions.list(cwd, signal),
@@ -775,7 +780,24 @@ export class PixAcpAgent {
 			.onRequest(SEARCH_INDEX_METHOD, parseSearchIndexRequest, async (ctx) => this.withRequestLogging(SEARCH_INDEX_METHOD, ctx.params, ctx.signal, async () => {
 				if (this.clientName !== "pix-desktop") throw new RequestError(ERROR_SERVER, "Desktop search unavailable");
 				try {
-					return await (ctx.params.source === "commits" ? this.commitSearchService : this.searchService).index(ctx.params, ctx.signal);
+					if (ctx.params.source !== "commits") return await this.searchService.index(ctx.params, ctx.signal);
+					const startedAt = Date.now();
+					const result = await this.commitSearchService.index(ctx.params, ctx.signal);
+					if (!ctx.signal.aborted) {
+						const phase = result.failurePhase;
+						const safePhase = phase === "configuration" || phase === "authorization" || phase === "storage"
+							|| phase === "provider" || phase === "history" ? phase : undefined;
+						try {
+							void acpFileLogger.log(result.complete ? "info" : "warn",
+								result.complete ? "search:index-completed" : "search:index-incomplete",
+								{ source: "commits", complete: result.complete, indexed: result.indexed, total: result.total,
+									durationMs: Date.now() - startedAt,
+									...(safePhase ? { phase: safePhase } : {}),
+									...(result.complete ? {} : { reason: "incomplete_coverage" }) },
+								{ project: ctx.params.cwd, module: "search.index" });
+						} catch { /* Diagnostic logging cannot change indexing outcomes. */ }
+					}
+					return result;
 				} catch (error) {
 					if (ctx.signal.aborted) throw error;
 					reportRequestFailure(this.options.logger, SEARCH_INDEX_METHOD, error, ctx.signal);
@@ -1797,6 +1819,9 @@ export class PixAcpAgent {
 		if (lazyRuntime) {
 			this.pendingDesktopNewSessions.set(acpSessionId, { promise: pending });
 			void pending.catch((error: unknown) => {
+				if (this.pendingDesktopNewSessions.get(acpSessionId)?.promise === pending) {
+					this.pendingDesktopNewSessions.delete(acpSessionId);
+				}
 				this.options.logger.warn(`background session/new failed for ${acpSessionId}: ${stringifyUnknown(error)}`);
 			});
 			return { sessionId: acpSessionId };
@@ -2227,27 +2252,27 @@ export class PixAcpAgent {
 		session.unsubscribeEvents = unsubscribeEvents;
 		try {
 			await pi.start();
+			if (this.disposed || this.sessions.get(acpSessionId) !== session) {
+				throw new RequestError(ERROR_SERVER, "adapter is shutting down");
+			}
+			session.unsubscribeExit = pi.onExit((error) => withPixLogContext(
+				{ project: session.cwd, sessionId: session.acpSessionId, module: "rpc-process" },
+				() => this.onPiExit(session, error),
+			));
+			// Spawning is not readiness: the SDK returns before the first RPC
+			// response. Retire failed hydration before a model fallback can replace it.
+			if (!startupOverride) await this.ensureDesktopQueuesLoaded(session);
+			if (this.disposed || this.sessions.get(acpSessionId) !== session) {
+				throw new RequestError(ERROR_SERVER, "session closed during startup");
+			}
 		} catch (error) {
 			await this.brainstormHost.cancelParent(acpSessionId, true);
-			this.unsubscribeSessionEvents(session);
-			if (this.sessions.get(acpSessionId) === session) this.sessions.delete(acpSessionId);
-			void pi.stop().catch(() => {});
+			await this.teardownSession(session);
 			throw new RequestError(
 				ERROR_SERVER,
 				`failed to start pi (${this.options.piEntry}): ${stringifyUnknown(error)}`,
 			);
 		}
-		if (this.disposed || this.sessions.get(acpSessionId) !== session) {
-			this.unsubscribeSessionEvents(session);
-			if (this.sessions.get(acpSessionId) === session) this.sessions.delete(acpSessionId);
-			await pi.stop().catch(() => {});
-			throw new RequestError(ERROR_SERVER, "adapter is shutting down");
-		}
-		session.unsubscribeExit = pi.onExit((error) => withPixLogContext(
-			{ project: session.cwd, sessionId: session.acpSessionId, module: "rpc-process" },
-			() => this.onPiExit(session, error),
-		));
-		if (!startupOverride) await this.ensureDesktopQueuesLoaded(session);
 		void session.forks.tryIdle();
 		return session;
 	}
@@ -2472,7 +2497,7 @@ export class PixAcpAgent {
 
 	private scheduleContextUsagePush(session: AgentSessionState): void {
 		const generation = ++session.contextUsagePushGeneration;
-		queueMicrotask(() => void this.pushContextUsage(session, generation));
+		this.sessionRefreshes.schedule(session, "context", () => this.pushContextUsage(session, generation));
 	}
 
 	private async pushContextUsage(session: AgentSessionState, generation: number): Promise<void> {
@@ -2512,12 +2537,12 @@ export class PixAcpAgent {
 
 	private scheduleConfigOptionsPush(session: AgentSessionState): void {
 		const generation = ++session.configOptionsPushGeneration;
-		queueMicrotask(() => void this.pushConfigOptions(session, generation));
+		this.sessionRefreshes.schedule(session, "config", () => this.pushConfigOptions(session, generation));
 	}
 
 	private scheduleModelUsagePush(session: AgentSessionState): void {
 		const generation = ++session.modelUsagePushGeneration;
-		queueMicrotask(() => void this.pushModelUsage(session, generation));
+		this.sessionRefreshes.schedule(session, "model", () => this.pushModelUsage(session, generation));
 	}
 
 	/**
@@ -2610,6 +2635,7 @@ export class PixAcpAgent {
 	 */
 	private onPiExit(session: AgentSessionState, error: Error): void {
 		if (this.sessions.get(session.acpSessionId) !== session) return;
+		this.sessionRefreshes.forget(session);
 		this.resetBtw(session);
 		this.retireForkQueue(session);
 		void this.brainstormHost.participantLost(session.acpSessionId);
@@ -3958,6 +3984,7 @@ export class PixAcpAgent {
 	}
 
 	private async teardownSession(session: AgentSessionState): Promise<void> {
+		this.sessionRefreshes.forget(session);
 		this.resetBtw(session);
 		this.retireForkQueue(session);
 		if (this.sessions.get(session.acpSessionId) === session) {

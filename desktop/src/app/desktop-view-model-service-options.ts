@@ -69,5 +69,6 @@ export type DesktopViewModelServicesOptions = {
   quotaWait: QuotaWaitStore;
   headsUp: HeadsUpStore;
   openObserverSettings: () => void;
+  openClaudeLoginTerminal?: (command: string) => Promise<void>;
   openBtw?: (sessionId: string, question?: string) => void | Promise<void>;
 };

@@ -58,6 +58,14 @@ function conversationOptions(sessionId: string | null, quotaWait = createQuotaWa
 }
 
 describe("workbench composer props", () => {
+  it("forwards the explicit Claude login terminal and diagnostic actions", () => {
+    const options = conversationOptions("session-1");
+    options.openClaudeLoginTerminal = vi.fn();
+    options.reportClaudeLoginError = vi.fn();
+    const props = buildWorkbenchConversationProps(options).transcript;
+    expect(props.onOpenClaudeLoginTerminal).toBe(options.openClaudeLoginTerminal);
+    expect(props.onClaudeLoginError).toBe(options.reportClaudeLoginError);
+  });
   it("scopes message mutation gates to the selected session without changing transcript activity", () => {
     const options = conversationOptions("source");
     options.transcript = () => ({ items: [] });

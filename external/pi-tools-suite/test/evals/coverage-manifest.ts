@@ -10,7 +10,7 @@ export type EvalCoverageEntry = {
 };
 
 export const EXTENSION_EVAL_COVERAGE: Record<string, EvalCoverageEntry> = {
-	codemode: { deterministic: ["test/codemode.test.ts", "test/codemode-sdk.test.ts"] },
+	codemode: { deterministic: ["test/codemode.test.ts", "test/codemode-sdk.case.ts"] },
 	brainstorm: { deterministic: ["test/brainstorm/config.test.ts", "test/brainstorm/workflow.test.ts", "test/brainstorm/continuation.test.ts", "test/brainstorm/audit.test.ts", "test/brainstorm/extension.test.ts", "test/brainstorm/subagents.test.ts", "test/brainstorm/research-extension.test.ts"] },
 	"coding-discipline": { deterministic: ["test/coding-discipline.test.ts"], live: ["quality.two-hypotheses-before-fix", "quality.behavior-over-structural-check", "quality.async-stale-state"] },
 	"ast-grep": { deterministic: ["test/ast-grep.test.ts"], live: ["tool.ast-structural"] },
@@ -42,7 +42,7 @@ export const EXTENSION_EVAL_COVERAGE: Record<string, EvalCoverageEntry> = {
 };
 
 export const TOOL_EVAL_COVERAGE: Record<string, EvalCoverageEntry> = {
-	codemode: { deterministic: ["test/codemode.test.ts", "test/codemode-sdk.test.ts"] },
+	codemode: { deterministic: ["test/codemode.test.ts", "test/codemode-sdk.case.ts"] },
 	brainstorm: { deterministic: ["test/brainstorm/config.test.ts", "test/brainstorm/workflow.test.ts", "test/brainstorm/continuation.test.ts", "test/brainstorm/audit.test.ts", "test/brainstorm/extension.test.ts", "test/brainstorm/subagents.test.ts", "test/brainstorm/research-extension.test.ts"] },
 	lookup: { deterministic: ["test/coding-discipline.test.ts"] },
 	ast_grep: { deterministic: ["test/ast-grep.test.ts"], live: ["tool.ast-structural"] },
@@ -57,7 +57,7 @@ export const TOOL_EVAL_COVERAGE: Record<string, EvalCoverageEntry> = {
 	project_search: { deterministic: ["test/project-search.test.ts", "test/async-subagents/repo-tools.test.ts", "test/evals/decision-policy.test.ts"], live: ["tool.semantic-repo-search", "tool.architecture-first", "tool.project-search-general", "tool.project-search-contract", "tool.project-search-scoped-review"] },
 	project_tasks: { deterministic: ["test/project-tasks.test.ts"] },
 	todo: { deterministic: ["test/todo.test.ts", "test/evals/todo-conciseness.test.ts"], live: ["tool.todo-plan", ...TODO_CONCISE_IDS] },
-	session: { deterministic: ["test/session-name.test.ts", "test/session-recovery.test.ts", "test/session.test.ts", "test/codemode-sdk.test.ts", "test/evals/session-cases.test.ts"], live: SESSION_LIVE_IDS },
+	session: { deterministic: ["test/session-name.test.ts", "test/session-recovery.test.ts", "test/session.test.ts", "test/codemode-sdk.case.ts", "test/evals/session-cases.test.ts"], live: SESSION_LIVE_IDS },
 	web_search: { deterministic: ["test/web-search.test.ts"] },
 	web_fetch: { deterministic: ["test/web-search.test.ts"] },
 	Read: { deterministic: ["test/model-tools.test.ts"] },

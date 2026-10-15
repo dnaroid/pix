@@ -61,7 +61,7 @@ pub(crate) fn setup(app: &tauri::App) -> tauri::Result<()> {
     let menu = Menu::default(app.handle())?;
     if let Some(submenu) = menu.items()?.first().and_then(|item| item.as_submenu()) {
         submenu.insert(
-            &MenuItem::with_id(app, ID, "Разложить окна", true, None::<&str>)?,
+            &MenuItem::with_id(app, ID, "Arrange windows", true, None::<&str>)?,
             2,
         )?;
         submenu.insert(&PredefinedMenuItem::separator(app)?, 3)?;
@@ -69,13 +69,18 @@ pub(crate) fn setup(app: &tauri::App) -> tauri::Result<()> {
     app.set_menu(menu)?;
     app.on_menu_event(|app, event| {
         if event.id().as_ref() == ID {
-            let handle = app.clone();
-            if let Err(error) = app.run_on_main_thread(move || native::arrange(&handle)) {
-                crate::logging::error(module_path!(), format!("failed to arrange Pix windows: {error}"));
-            }
+            arrange(app);
         }
     });
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn arrange(app: &tauri::AppHandle) {
+    let handle = app.clone();
+    if let Err(error) = app.run_on_main_thread(move || native::arrange(&handle)) {
+        crate::logging::error(module_path!(), format!("failed to arrange Pix windows: {error}"));
+    }
 }
 
 #[cfg(not(target_os = "macos"))]

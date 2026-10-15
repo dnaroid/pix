@@ -1,4 +1,7 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+// Exercise the SDK on the production Node host. Bun can retain completed workers
+// past script settlement, exhausting Pi's process-wide worker slots between tests.
+import { afterEach, beforeEach, test } from "node:test";
+import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,7 +37,7 @@ async function sessionHarness(code: string, extensions: ExtensionFactory[] = [])
 		extensionFactories: [...extensions, codemode],
 	});
 	await loader.reload();
-	expect(loader.getExtensions().errors).toEqual([]);
+	assert.deepEqual(loader.getExtensions().errors, []);
 	const model = fauxProvider({ provider: "suite-codemode" }).getModel();
 	const responses = [fauxAssistantMessage(fauxToolCall("codemode", { code }, { id: "script" }), { stopReason: "toolUse" }), fauxAssistantMessage("done")];
 	const contexts: any[] = [];
@@ -72,17 +75,17 @@ test("real SDK runs QuickJS alongside direct tools and retains nested-call event
 			execute: async (_id, args) => ({ content: [{ type: "text", text: args.text }], details: {} }) });
 		pi.on("tool_call", (event) => { calls.push(event.toolName); });
 	}]);
-	expect(session.getActiveToolNames()).toContain("codemode");
-	expect(session.getActiveToolNames()).toContain("read");
+	assert.ok(session.getActiveToolNames().includes("codemode"));
+	assert.ok(session.getActiveToolNames().includes("read"));
 	await session.prompt("run script");
-	expect(calls).toEqual(["codemode", "echo"]);
+	assert.deepEqual(calls, ["codemode", "echo"]);
 	const results = session.messages.filter((message) => message.role === "toolResult");
-	expect(results).toHaveLength(1);
-	expect(JSON.stringify(results[0])).toContain("quickjs-ok");
-	expect(events.some((event) => event.type === "tool_execution_start" && event.toolName === "echo" && event.parentToolCallId === "script")).toBe(true);
+	assert.equal(results.length, 1);
+	assert.ok(JSON.stringify(results[0]).includes("quickjs-ok"));
+	assert.ok(events.some((event) => event.type === "tool_execution_start" && event.toolName === "echo" && event.parentToolCallId === "script"));
 	const declared = contexts[0].messages.flatMap((message: any) => message.role === "system" ? message.toolsAdded ?? [] : []);
-	expect(declared.some((tool: any) => tool.name === "read")).toBe(true);
-	expect(declared.some((tool: any) => tool.name === "codemode")).toBe(true);
+	assert.ok(declared.some((tool: any) => tool.name === "read"));
+	assert.ok(declared.some((tool: any) => tool.name === "codemode"));
 });
 
 test("session actions share one schema and dispatch through real SDK codemode", async () => {
@@ -91,16 +94,16 @@ test("session actions share one schema and dispatch through real SDK codemode", 
 		console.log(await tools.session({ action: "name" }));
 		console.log(await tools.session({ action: "overview", max_sections: 1 }));
 	`, [sessionTools]);
-	expect(session.getAllTools().filter((tool) => tool.name === "session")).toHaveLength(1);
-	expect(session.getActiveToolNames()).not.toContain("session_name");
+	assert.equal(session.getAllTools().filter((tool) => tool.name === "session").length, 1);
+	assert.ok(!session.getActiveToolNames().includes("session_name"));
 	await session.prompt("run script");
 	const result = JSON.stringify(session.messages.filter((message) => message.role === "toolResult"));
-	expect(result).toContain("Session name set: Codemode session");
-	expect(result).toContain("Current session name: Codemode session");
-	expect(result).toContain("selectedEntries");
-	expect(events.filter((event) => event.type === "tool_execution_start" && event.toolName === "session" && event.parentToolCallId === "script")).toHaveLength(3);
+	assert.ok(result.includes("Session name set: Codemode session"));
+	assert.ok(result.includes("Current session name: Codemode session"));
+	assert.ok(result.includes("selectedEntries"));
+	assert.equal(events.filter((event) => event.type === "tool_execution_start" && event.toolName === "session" && event.parentToolCallId === "script").length, 3);
 	const declared = contexts[0].messages.flatMap((message: any) => message.role === "system" ? message.toolsAdded ?? [] : []);
-	expect(declared.filter((tool: any) => tool.name === "session")).toHaveLength(1);
+	assert.equal(declared.filter((tool: any) => tool.name === "session").length, 1);
 });
 
 test("nested calls respect blockers and cannot reach inactive direct tools", async () => {
@@ -111,20 +114,20 @@ test("nested calls respect blockers and cannot reach inactive direct tools", asy
 		pi.on("tool_call", (event) => event.toolName === "denied" ? { block: true, reason: "denied by policy" } : undefined);
 	}]);
 	await session.prompt("run script");
-	expect(executed).toBe(false);
+	assert.equal(executed, false);
 	const result = JSON.stringify(session.messages.filter((message) => message.role === "toolResult"));
-	expect(result).toContain("denied by policy");
-	expect(result).toContain("false");
+	assert.ok(result.includes("denied by policy"));
+	assert.ok(result.includes("false"));
 });
 
 test("CLI builtin coexists without duplicate registrations", async () => {
 	const { session } = await sessionHarness('console.log(6 * 7)', [createCodemodeExtension()]);
-	expect(session.getAllTools().filter((tool) => tool.name === "codemode")).toHaveLength(1);
+	assert.equal(session.getAllTools().filter((tool) => tool.name === "codemode").length, 1);
 	await session.prompt("run script");
-	expect(JSON.stringify(session.messages.filter((message) => message.role === "toolResult"))).toContain("42");
+	assert.ok(JSON.stringify(session.messages.filter((message) => message.role === "toolResult")).includes("42"));
 });
 
-test("aborting a parent script cancels its pending nested call", async () => {
+test("aborting a parent script cancels its pending nested call", { timeout: 10000 }, async () => {
 	let started!: () => void;
 	const pending = new Promise<void>((resolve) => { started = resolve; });
 	let aborted = false;
@@ -141,5 +144,5 @@ test("aborting a parent script cancels its pending nested call", async () => {
 	await pending;
 	await session.abort();
 	await prompt;
-	expect(aborted).toBe(true);
-}, 10000);
+	assert.equal(aborted, true);
+});

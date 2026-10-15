@@ -81,3 +81,19 @@ test("title hydration authenticates native identity, names, first message and re
   t.after(() => catalog.dispose());
   assert.equal((await catalog.list(f.root,f.agent,signal())).length,1);
 });
+test("title hydration ignores unrelated large payloads after first user and still sees the latest saved name", async t => {
+  const f = await fixture(t);
+  const a = await f.save("large", [
+    { type: "message", id: "m1", message: { role: "user", content: [{ type: "text", text: "First public text" }] } },
+    { type: "message", id: "m2", message: { role: "assistant", content: [{ type: "text", text: "ignored" }] } },
+    { type: "session_info", name: "Last saved name" },
+  ]);
+  // Transcript validation owns malformed/tool-only bodies, not title discovery.
+  await appendFile(a.path, "NOT JSON BUT NOT TITLE METADATA\n");
+  await appendFile(a.path, JSON.stringify({ type: "message", id: "large", message: {
+    role: "assistant", content: [{ type: "toolResult", text: "x".repeat(2 * 1024 * 1024) }],
+  } }) + "\n" + JSON.stringify({ type: "session_info", name: "Newest name" }) + "\n");
+  const title = await readSessionTitle(f.root, a, signal());
+  assert.equal(title?.name, "Newest name");
+  assert.equal(title?.firstMessage, "First public text");
+});

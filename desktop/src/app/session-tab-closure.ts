@@ -194,9 +194,18 @@ export function createSessionTabClosure(
     const current = () => requestClient === options.client() && requestWorkspace === options.workspace();
     const session = options.catalog.sessions.find((candidate) => candidate.sessionId === sessionId);
     const title = session?.title || "Untitled conversation";
-    if (!await confirmDesktopAction(`Permanently delete “${title}”?\n\nThis removes the Pi session file and its DCP sidecar state.`, {
-      title: "Delete conversation?", okLabel: "Delete",
-    })) return;
+    // Reserve the session while the native confirmation is pending: otherwise
+    // two fast clicks can display two dialogs and authorize duplicate deletes.
+    if (!sessionActions.begin(sessionId)) return;
+    let confirmed: boolean;
+    try {
+      confirmed = await confirmDesktopAction(`Permanently delete “${title}”?\n\nThis removes the Pi session file and its DCP sidecar state.`, {
+        title: "Delete conversation?", okLabel: "Delete",
+      });
+    } finally {
+      sessionActions.end(sessionId);
+    }
+    if (!confirmed) return;
     if (!current() || options.sessionMutationRunning() || options.promptRunning(sessionId)
       || sessionActions.isBusy(sessionId)) return;
 

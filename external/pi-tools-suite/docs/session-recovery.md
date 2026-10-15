@@ -149,7 +149,7 @@ tools are not guessed to be mutations.
 - `external/pi-tools-suite/test/session-name.test.ts`
 - `external/pi-tools-suite/test/session-recovery.test.ts`
 - `external/pi-tools-suite/test/config.test.ts`
-- `external/pi-tools-suite/test/codemode-sdk.test.ts`
+- `external/pi-tools-suite/test/codemode-sdk.case.ts` (real-SDK cases run via `npm --prefix external/pi-tools-suite run test:sdk`)
 - `external/pi-tools-suite/test/dcp-session-sim-e2e.test.ts`
 - `external/pi-tools-suite/test/tool-descriptions.test.ts`
 - `external/pi-tools-suite/test/evals/extension-contracts.test.ts`

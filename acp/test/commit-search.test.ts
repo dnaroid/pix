@@ -88,6 +88,7 @@ test("explicit commit provider failure reports partial truthfully and retry buys
   const request = { cwd: r.cwd, source: "commits" as const };
   const failed = await s.index(request);
   assert.equal(failed.complete, false); assert.equal(failed.indexed, 16); assert.equal(failed.total, 20);
+  assert.equal(failed.failurePhase, "provider");
   assert.doesNotMatch(JSON.stringify(failed), /SECRET/); assert.equal(snapshot(r.cwd).vectors.length, 16);
   fail = false; const before = inputs.length;
   assert.equal((await s.index(request)).complete, true); assert.equal(inputs.length - before, 4);

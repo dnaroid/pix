@@ -84,6 +84,11 @@ export async function readSessionTitle(root, candidate, signal) {
     for await (const line of lines) {
       signal.throwIfAborted();
       if (!line.trim()) continue;
+      // Only the first public user message and saved session_info names belong
+      // to title discovery. The remaining message/tool payloads are validated
+      // by transcript indexing; parsing them here can take longer than the
+      // entire discovery budget for a large project.
+      if (header && firstMessage && !line.includes("session_info")) continue;
       const parsed = await parseSessionRecord(line, signal);
       if (parsed.reason) return;
       const entry = parsed.entry;

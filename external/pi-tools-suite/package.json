@@ -21,7 +21,8 @@
     "smoke:auto": "PI_OFFLINE=1 pi --no-session --no-tools -p \"ping\"",
     "smoke:tools": "PI_OFFLINE=1 pi --no-session -p \"ping\"",
     "smoke": "npm run smoke:explicit && npm run smoke:auto && npm run smoke:tools",
-    "test": "bun test --isolate --timeout 20000 test && node --import tsx --test --test-concurrency=1 test/claude-code-provider/upstream/unit/*.case.js",
+    "test": "bun test --isolate --timeout 20000 test && npm run test:sdk && node --import tsx --test --test-concurrency=1 test/claude-code-provider/upstream/unit/*.case.js",
+    "test:sdk": "node --import tsx --test test/codemode-sdk.case.ts",
     "test:claude-provider-upstream": "node --import tsx --test --test-concurrency=1 test/claude-code-provider/upstream/unit/*.case.js",
     "test:dcp-session-sim": "bun test test/dcp-session-sim-e2e.test.ts",
     "test:dcp-reminder-e2e": "DCP_REMINDER_E2E=1 bun test test/prompt-evals/dcp-reminder-e2e.test.ts",
@@ -56,9 +57,9 @@
     "vscode-languageserver-protocol": "^3.18.3"
   },
   "peerDependencies": {
-    "@earendil-works/pi-ai": "1.2.0",
-    "@earendil-works/pi-coding-agent": "1.2.0",
-    "@earendil-works/pi-tui": "1.2.0",
+    "@earendil-works/pi-ai": "1.3.0",
+    "@earendil-works/pi-coding-agent": "1.3.0",
+    "@earendil-works/pi-tui": "1.3.0",
     "typebox": "*"
   },
   "devDependencies": {

@@ -18,10 +18,14 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
-export function claudeAuthCommand(configDir: string, action: "login" | "status"): string {
+export function claudeConfigEnvironment(configDir: string): string {
   const trimmed = configDir.trim();
   const path = trimmed.startsWith("~/")
     ? `"$HOME/${trimmed.slice(2).replace(/[\\"$`]/g, "\\$&")}"`
     : shellQuote(trimmed);
-  return `CLAUDE_CONFIG_DIR=${path} claude auth ${action}`;
+  return `CLAUDE_CONFIG_DIR=${path}`;
+}
+
+export function claudeAuthCommand(configDir: string, action: "login" | "status"): string {
+  return `${claudeConfigEnvironment(configDir)} claude auth ${action}`;
 }

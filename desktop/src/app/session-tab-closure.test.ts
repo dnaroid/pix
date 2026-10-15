@@ -358,6 +358,39 @@ describe("session tab closure", () => {
     expect(h.options.catalog.remove).not.toHaveBeenCalled();
   });
 
+  it("deduplicates delete confirmations and retains the session lock through a pending delete", async () => {
+    const consent = deferred<boolean>();
+    const deletion = deferred<Record<string, never>>();
+    vi.mocked(confirmDesktopAction).mockReturnValueOnce(consent.promise);
+    const h = createHarness("active", ["active", "deleting"], async () => ({}));
+    h.client.deleteSession.mockReturnValueOnce(deletion.promise);
+    const first = h.closure.deleteSelectedSession("deleting");
+    await h.closure.deleteSelectedSession("deleting");
+    expect(confirmDesktopAction).toHaveBeenCalledOnce();
+    expect(h.client.deleteSession).not.toHaveBeenCalled();
+    consent.resolve(true);
+    await vi.waitFor(() => expect(h.client.deleteSession).toHaveBeenCalledTimes(1));
+    await h.closure.deleteSelectedSession("deleting");
+    expect(confirmDesktopAction).toHaveBeenCalledOnce();
+    expect(h.client.deleteSession).toHaveBeenCalledTimes(1);
+    deletion.resolve({});
+    await first;
+    expect(h.options.catalog.remove).toHaveBeenCalledTimes(1);
+    expect(h.sessionActions.isBusy("deleting")).toBe(false);
+  });
+
+  it("allows delete confirmation to retry after cancellation", async () => {
+    const consent = deferred<boolean>();
+    vi.mocked(confirmDesktopAction).mockReturnValueOnce(consent.promise).mockResolvedValueOnce(false);
+    const h = createHarness("active", ["active", "deleting"], async () => ({}));
+    const first = h.closure.deleteSelectedSession("deleting");
+    consent.resolve(false);
+    await first;
+    await h.closure.deleteSelectedSession("deleting");
+    expect(confirmDesktopAction).toHaveBeenCalledTimes(2);
+    expect(h.client.deleteSession).not.toHaveBeenCalled();
+  });
+
   it("does not delete a session after confirmation for a replaced workspace", async () => {
     const consent = deferred<boolean>();
     vi.mocked(confirmDesktopAction).mockReturnValueOnce(consent.promise);

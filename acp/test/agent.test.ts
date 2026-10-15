@@ -621,6 +621,103 @@ test("desktop lazy session/new returns before pi startup and session/load joins 
 	});
 });
 
+test("failed lazy session readiness retires the process and event routing", async () => {
+	const spawned: FakePiClient[] = [];
+	const { adapter } = createTestAdapter({
+		createPiClient: () => {
+			const fake = new FakePiClient();
+			fake.stateError = new Error("readiness get_state timed out");
+			spawned.push(fake);
+			return fake;
+		},
+	});
+	try {
+		await connect(adapter, async (cx) => {
+			const created = await cx.request("session/new", {
+				cwd: "/tmp/failed-readiness", mcpServers: [], _meta: { "pix.lazyRuntime": true },
+			});
+			await assert.rejects(cx.request("session/load", {
+				sessionId: created.sessionId, cwd: "/tmp/failed-readiness", mcpServers: [],
+				_meta: { "pix.lazyHistory": true },
+			}));
+			assert.equal(spawned[0]!.started, false, "failed readiness must stop the already spawned process");
+			assert.equal(spawned[0]!.eventListenerCount, 0);
+			assert.equal(adapter.getSession(created.sessionId), undefined);
+		});
+	} finally {
+		await adapter.dispose();
+	}
+});
+
+test("failed lazy readiness without a joining load releases pending session ownership", async () => {
+	const spawned: FakePiClient[] = [];
+	const { adapter } = createTestAdapter({
+		createPiClient: () => {
+			const fake = new FakePiClient();
+			fake.stateError = new Error("unjoined readiness failed");
+			spawned.push(fake);
+			return fake;
+		},
+	});
+	try {
+		await connect(adapter, async (cx) => {
+			const created = await cx.request("session/new", {
+				cwd: "/tmp/unjoined-readiness", mcpServers: [], _meta: { "pix.lazyRuntime": true },
+			});
+			await waitFor(() => spawned.length === 1 && !spawned[0]!.started && spawned[0]!.eventListenerCount === 0);
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			// A retained rejected new-session promise would route delete through
+			// closeSession and incorrectly rethrow the old startup failure.
+			await cx.request("session/delete", { sessionId: created.sessionId });
+			assert.equal(adapter.sessionCount, 0);
+		});
+	} finally {
+		await adapter.dispose();
+	}
+});
+
+test("model fallback waits for failed readiness cleanup before spawning its replacement", async () => {
+	const spawned: FakePiClient[] = [];
+	let releaseCleanup!: () => void;
+	let cleanupStarted!: () => void;
+	const cleanupGate = new Promise<void>((resolve) => { releaseCleanup = resolve; });
+	const cleaningUp = new Promise<void>((resolve) => { cleanupStarted = resolve; });
+	const { adapter } = createTestAdapter({
+		loadDefaultModel: () => ({ provider: "anthropic", modelId: "primary", fallbackModels: ["anthropic/fallback"] }),
+		createPiClient: () => {
+			if (spawned.length) {
+				assert.equal(spawned[0]!.started, false, "fallback cannot orphan the failed process");
+				assert.equal(spawned[0]!.eventListenerCount, 0);
+			}
+			const fake = new FakePiClient();
+			if (!spawned.length) {
+				fake.stateError = new Error("primary readiness failed");
+				fake.stop = async () => {
+					cleanupStarted();
+					await cleanupGate;
+					fake.started = false;
+				};
+			}
+			spawned.push(fake);
+			return fake;
+		},
+	});
+	try {
+		await connect(adapter, async (cx) => {
+			const creating = cx.buildSession("/tmp/fallback-readiness").start();
+			await cleaningUp;
+			assert.equal(spawned.length, 1, "fallback must wait for pending teardown");
+			releaseCleanup();
+			const created = await creating;
+			assert.equal(spawned.length, 2);
+			assert.equal(adapter.getSession(created.sessionId)?.pi, spawned[1]);
+		});
+	} finally {
+		releaseCleanup();
+		await adapter.dispose();
+	}
+});
+
 test("desktop draft model metadata overrides the configured default only for the new session", async () => {
 	const harness = createTestAdapter({
 		loadDefaultModel: () => ({
@@ -1750,6 +1847,37 @@ test("Pix Desktop runtime status exposes pi context usage without refreshing mod
 		assert.equal(pi.getEntriesCalls, 0, "periodic runtime status must not read the full session entries");
 	});
 });
+
+for (const closeBeforeRelease of [false, true]) {
+	test(`slow usage RPCs coalesce across event-loop ticks${closeBeforeRelease ? " and retire on close" : ""}`, async () => {
+		const { adapter, clients } = createTestAdapter();
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => { release = resolve; });
+		let statsCalls = 0;
+		try {
+			await connect(adapter, async (cx) => {
+				const session = await cx.buildSession("/tmp/coalesced-usage").start();
+				const pi = clients[0]!;
+				pi.getSessionStats = async () => { statsCalls++; await gate; return pi.sessionStats; };
+				for (let i = 0; i < 20; i++) {
+					pi.emit({ type: "message_end", message: { role: "user", content: "boundary", timestamp: i } });
+					await new Promise<void>((resolve) => setImmediate(resolve));
+				}
+				assert.equal(statsCalls, 2, "only one context and one model usage read may be in flight");
+				if (closeBeforeRelease) await cx.request("session/close", { sessionId: session.sessionId });
+				release();
+				if (!closeBeforeRelease) await waitFor(() => statsCalls === 4);
+				await new Promise<void>((resolve) => setImmediate(resolve));
+				await new Promise<void>((resolve) => setImmediate(resolve));
+				assert.equal(statsCalls, closeBeforeRelease ? 2 : 4,
+					"keep only the latest follow-up, or drop it entirely after close");
+			});
+		} finally {
+			release();
+			await adapter.dispose();
+		}
+	});
+}
 
 test("Pix Desktop pushes context usage on message and compaction boundaries without polling stream deltas", async () => {
 	type ContextNotification = { sessionId: string; channel: string; data: unknown };

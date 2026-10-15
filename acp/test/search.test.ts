@@ -45,6 +45,8 @@ test("explicit index diagnostics contain metadata only and cannot break indexing
   const unavailable = await s.index(request);
   assert.equal(unavailable.complete, false);
   assert.equal(records[0]?.complete, false);
+  assert.equal(records[0]?.phase, "authorization");
+  assert.equal(records[0]?.reason, "unconfigured");
   await f.preferences.configure();
   const result = await s.index(request);
   assert.equal(records.length, 2);
@@ -52,6 +54,44 @@ test("explicit index diagnostics contain metadata only and cannot break indexing
     indexed: result.indexed, total: result.total, durationMs: records[1]!.durationMs });
   assert.ok(records[1]!.durationMs >= 0);
   assert.doesNotMatch(JSON.stringify(records), /private-setting-description-never-in-diagnostics|broken logging sink/);
+});
+test("manual session indexing drains slow discovery without an interactive timeout or third scan", async t => {
+  const f = await fixture(t); await f.preferences.configure();
+  let discoveries = 0;
+  const s = f.make({
+    discoveryTimeoutMs: 5,
+    discover: async (_cwd, owned) => {
+      discoveries++;
+      await delay(30, undefined, { signal: owned });
+      return [f.record];
+    },
+  });
+  const indexed = await s.index({ cwd: f.cwd, source: "sessions" });
+  assert.equal(indexed.complete, true);
+  assert.equal(discoveries, 2, "refresh once and reuse the snapshot for chunk indexing");
+});
+test("manual session discovery remains cancellable without a title-discovery deadline", async t => {
+  const f = await fixture(t); await f.preferences.configure();
+  const entered = gate<void>(), release = gate<SessionMapRecord[]>();
+  const s = f.make({ discover: async () => { entered.resolve(); return release.promise; } });
+  const controller = new AbortController();
+  const pending = s.index({ cwd: f.cwd, source: "sessions" }, controller.signal);
+  await entered.promise;
+  controller.abort();
+  await assert.rejects(pending);
+  release.resolve([f.record]);
+});
+test("incomplete manual session diagnostics identify the stage without exposing errors", async t => {
+  const f = await fixture(t); await f.preferences.configure();
+  const records: SearchIndexDiagnostic[] = [];
+  const s = f.make({ discover: async () => { throw new Error("PRIVATE discovery failure"); },
+    onIndexDiagnostic: record => records.push(record) });
+  const result = await s.index({ cwd: f.cwd, source: "sessions" });
+  assert.equal(result.complete, false);
+  assert.equal(records.length, 1);
+  assert.equal(records[0]?.phase, "discovery");
+  assert.equal(records[0]?.reason, "discovery_failed");
+  assert.doesNotMatch(JSON.stringify(records), /PRIVATE/);
 });
 async function fixture(t: TestContext) {
   const artifacts = resolve(".pi/artifacts/central-semantics-acp/session-fixtures");

@@ -21,7 +21,9 @@
   onMount(controller.start);
 
   export async function openTerminal(command: string): Promise<void> {
+    if (controller.startingScript || controller.terminalActionId) throw new Error("Terminal is busy. Try again.");
     await controller.openShellTerminal(command);
+    if (controller.error) throw new Error(controller.error);
   }
 </script>
 

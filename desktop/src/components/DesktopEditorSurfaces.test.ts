@@ -43,6 +43,7 @@ describe("desktop editor work surfaces", () => {
   it("keeps preview editing state close-aware while using the full editor region", () => {
     expect(previewSource).toContain("export async function requestClose()");
     expect(previewSource).toContain("await editorController.canClose()");
+    expect(previewSource).toContain("if (closePending) return false;");
     expect(previewEditorControllerSource).toContain("options.onDirtyChange()?.(dirty())");
     expect(previewSource).not.toContain("Resize preview");
   });

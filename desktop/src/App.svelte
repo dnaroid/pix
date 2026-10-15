@@ -615,14 +615,7 @@
     requestLocalTextInput: (message, title) => elicitationStore.requestLocalTextInput(message, title),
     navigation: conversationNavigation,
     forkConversation,
-    openInteractiveTerminal: async (command) => {
-      if (!workspace) throw new Error("Open a project before starting a terminal.");
-      workbenchTerminal.show();
-      await tick();
-      const pane = workbenchTerminalPane;
-      if (!pane) throw new Error("Terminal workbench is unavailable.");
-      await pane.openTerminal(command);
-    },
+    openInteractiveTerminal,
     closeProjectSelector: () => workspaceSidebar?.closeProjectSwitcher(),
     applyModelSlashCommand: modelConfig.applyModelSlashCommand,
     applyThinkingSlashCommand: modelConfig.applyThinkingSlashCommand,
@@ -634,6 +627,17 @@
     reportError,
   });
   const promptSubmit = promptActionServices.submit;
+
+  async function openInteractiveTerminal(command: string): Promise<void> {
+    const owner = workspace;
+    if (!owner) throw new Error("Open a project before starting a terminal.");
+    workbenchTerminal.show();
+    await tick();
+    if (workspace !== owner) throw new Error("Project changed before the terminal opened. Try again.");
+    const pane = workbenchTerminalPane;
+    if (!pane) throw new Error("Terminal workbench is unavailable.");
+    await pane.openTerminal(command);
+  }
 
   const previewStore = projectServices.preview;
   const activePreview = $derived(previewStore.active);
@@ -900,6 +904,7 @@
     quotaWait,
     headsUp,
     openObserverSettings: () => void workspaceSidebar?.openSettingsSection("desktop-observer"),
+    openClaudeLoginTerminal: openInteractiveTerminal,
   });
   const titlebarViewModel = viewModels.titlebar;
   const sidebarViewModel = viewModels.sidebar;

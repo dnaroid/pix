@@ -62,7 +62,7 @@ export function createDesktopConversationServices(options: DesktopConversationSe
     setErrorMessage: options.setErrorMessage,
     setPromptText: options.setPromptText,
     markRuntimeReady: options.sessions.runtime.markReady,
-    forgetRuntime: (sessionId) => options.sessionCoordinator().forgetRuntime(sessionId),
+    reloadRuntime: options.sessions.runtime.reload,
     beginHistoryLoad: options.sessions.history.begin,
     hydrateHistory: options.sessions.history.hydrate,
     refreshSessions: options.sessions.catalog.refresh,

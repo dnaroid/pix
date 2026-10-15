@@ -297,7 +297,8 @@ test("sessions click reuses saved names and reports changed discovery as partial
   const s = f.make({ discover: async () => { calls++; return [named(title), { ...named("First message SECRET"), sessionId: "unnamed", namedTitle: undefined }]; },
     embed: async inputs => { f.calls.push([...inputs]); if (renameAfterEmbed) title = "New saved name"; return inputs.map(() => [1, 0, 0]); } });
   assert.deepEqual(await s.index({ cwd: f.cwd, source: "sessions" }), { source: "sessions", complete: true, indexed: 1, total: 1 });
-  assert.equal(calls, 3); assert.deepEqual(f.calls.flat(), ["search_document: Explicit title"]);
+  assert.equal(calls, 2, "the refreshed session list also serves the chunk pass");
+  assert.deepEqual(f.calls.flat(), ["search_document: Explicit title"]);
   assert.equal(f.rows("pix_task_vectors").length, 0); assert.equal(f.rows("vectors").length, 0); assert.equal(f.listeners.size, 0);
   await s.index({ cwd: f.cwd, source: "sessions" }); assert.equal(f.calls.length, 1);
   title = "Changed saved name"; renameAfterEmbed = true;

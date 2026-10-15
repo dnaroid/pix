@@ -1,3 +1,4 @@
+import type { AcpClient } from "../lib/acp-client";
 import { createSessionRuntimeConfigState } from "./session-runtime-config.svelte";
 import { createSessionRuntimeLoading } from "./session-runtime-loading";
 import type { SessionRuntimeStoreOptions } from "./session-runtime-options";
@@ -25,6 +26,12 @@ export function createSessionRuntimeStore(options: SessionRuntimeStoreOptions) {
     options.setActiveReady(false);
   }
 
+  function reload(client: AcpClient, sessionId: string, workspace: string): Promise<void> {
+    config.forget(sessionId);
+    status.forget(sessionId);
+    return loading.reload(client, sessionId, workspace);
+  }
+
   return {
     get statuses() { return status.statuses; },
     get claudeAccountAttempts() { return status.claudeAccountAttempts; },
@@ -41,6 +48,7 @@ export function createSessionRuntimeStore(options: SessionRuntimeStoreOptions) {
     getConfigOptions: loading.getConfigOptions,
     setConfigOptions: loading.setConfigOptions,
     ensure: loading.ensure,
+    reload,
     captureOwnership: loading.captureOwnership,
     markReady: loading.markReady,
     forget,

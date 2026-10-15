@@ -142,6 +142,39 @@ remain preflight errors; a nonzero exit never enables the provider. Auth status
 payloads/identity fields are not copied into the login notice. The unavailable
 notice is emitted once for consecutive startup bindings of the same session.
 
+### Desktop sign-in recovery
+
+Claude authentication error cards offer **Sign in to Claude**. This is an
+explicit user action, not a background login or an automatic task retry. Only
+host provider/extension error rows identifying Claude Code and expired OAuth,
+failed authentication or a missing login qualify; unrelated provider errors,
+quota warnings and ordinary transcript text do not.
+
+The action reads only the user-level Tools Suite configuration. With no named
+profiles it opens Pix's existing Terminal workbench and runs Claude's
+`auth login --claudeai`; with named profiles it first offers a Pix-styled
+profile selector and requires confirmation. The initial choice uses the saved
+preference, the first rotation profile, or Default when rotation is off. This
+choice is local to sign-in and does not change provider account preferences.
+Named profiles pin `CLAUDE_CONFIG_DIR`; Default inherits the terminal's ordinary
+Claude configuration. The command honors `PI_CLAUDE_CODE_PROVIDER_PATH` from the
+terminal environment, falling back to `claude`. Profile paths are shell-quoted,
+and CR/LF/NUL paths are rejected before writing into the PTY.
+
+Configuration is reread before launch so a changed path is used; removing the
+chosen profile requires another selection/confirmation rather than silently
+logging into Default. Repeated clicks are ignored while that action is pending,
+and stale configuration completions after unmount/session changes never launch
+a terminal. Config/launch failures have visible retry feedback and sanitized
+diagnostic reports. Terminal launch failures and a busy terminal propagate to
+the caller instead of looking like a successful launch.
+
+Claude CLI owns the browser flow and credential storage. Pix never reads,
+copies or displays tokens, and opening the terminal is not proof of successful
+authentication. The user completes the terminal/browser flow, returns to the
+conversation and retries the request. A provider disabled by startup preflight
+still needs a reload/restart after sign-in; recovery does not re-register it.
+
 Pix Desktop's ACP bridge delivers startup and background extension `warning`
 and `error` notifications as visible system rows (`pix-system:` message ids),
 without requiring an active prompt. Slash-command feedback still delivers all

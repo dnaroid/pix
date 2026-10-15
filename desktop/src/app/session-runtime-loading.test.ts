@@ -60,6 +60,38 @@ function setup() {
 }
 
 describe("runtime loading ownership", () => {
+  it("deduplicates loads for the same client and workspace", async () => {
+    const state = setup();
+    const first = state.store.ensure(state.client, "a", "/workspace");
+    const second = state.store.ensure(state.client, "a", "/workspace");
+    expect(second).toBe(first);
+    expect(state.requests).toHaveLength(1);
+    state.succeed(0);
+    await first;
+  });
+
+  for (const change of ["client", "workspace"] as const) {
+    it(`starts a new load after ${change} replacement without waiting for the stale request`, async () => {
+      const state = setup();
+      const old = state.store.ensure(state.client, "a", "/workspace");
+      const ownsOld = state.store.captureOwnership("a");
+      if (change === "workspace") state.setWorkspace("/other");
+      else state.setClient({ loadSession: state.client.loadSession } as unknown as AcpClient);
+      const current = state.store.ensure(state.currentClient, "a", change === "workspace" ? "/other" : "/workspace");
+      expect(state.requests).toHaveLength(2);
+      expect(current).not.toBe(old);
+      expect(ownsOld()).toBe(false);
+      state.requests[0]!.reject(new Error("obsolete request"));
+      await old;
+      expect(state.store.isLoading("a")).toBe(true);
+      expect(state.reportError).not.toHaveBeenCalled();
+      state.succeed(1);
+      await current;
+      expect(state.activeReady).toBe(true);
+      expect(state.store.pendingLoadCount).toBe(0);
+    });
+  }
+
   it("invalidates a captured send owner on close and same-ID reopen", async () => {
     const state = setup();
     const old = state.store.ensure(state.client, "a", "/workspace");

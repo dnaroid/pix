@@ -72,11 +72,12 @@ actual JavaScript exceptions and unhandled rejections still reach the logger.
   appears as an `aborted` flag in the debug completion record, not as a
   warning for unprocessed files.
 - **ACP explicit indexing** emits `search:index-completed` (info) and
-  `search:index-incomplete` (warn), scoped to the workspace. Records contain
-  only source, completion flag, counts (when available), and elapsed time;
-  they exclude search queries, document text, embedding inputs/responses,
-  provider error messages, and user-managed settings content. Cancelled
-  operations do not emit a completion event.
+  `search:index-incomplete` (warn), scoped to the workspace, including Git
+  Commits passes. Records contain only source, completion flag, counts (when
+  available), elapsed time, and allowlisted phase/reason of an incomplete
+  operation (when known); they exclude search queries, document text,
+  embedding inputs/responses, provider error messages, and user-managed
+  settings content. Cancelled operations do not emit a completion event.
 - **Desktop webview lifecycle** reports a fixed native-allowlisted set of
   `acp:*` and `updater:*` status events via `log_desktop_event`. Normal
   ready/available states use info, in-progress/current checks use debug, and

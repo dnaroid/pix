@@ -37,6 +37,7 @@ Present conversations, file/media Preview, Source Control Git Diff, interactive 
 - Conversation, Preview, and Git Diff remain mounted while merely hidden by another workbench tab so composer/transcript state, Preview edit draft/history/scroll, media state, and Git review output do not reset on ordinary tab switching.
 - Switching to a different conversation selects that session's workbench tab but does not discard workspace-scoped Preview or Git Diff tabs. Their state remains available until explicitly closed or the workspace lifecycle invalidates it.
 - Preview shows a dirty indicator while its editable project-text draft differs from the loaded file. Any existing UTF-8 project file that is small enough to open in Preview can enter edit mode; home-file and absolute local-file previews remain read-only. Closing dirty Preview asks before discard; cancellation keeps the tab/state intact. Workspace changes and project-reloading Git mutations keep the existing dirty-preview confirmation.
+- Preview close confirmation is single-flight: repeated close attempts while an asynchronous dialog is pending neither open a second dialog nor invoke close twice. A cancellation leaves the same draft visible; a late confirmation must not close a replacement Preview.
 - Right-clicking the Preview tab header offers Copy File, Open in External App,
   and Reveal in Finder for the current entry's underlying local file, including
   while the tab is inactive. See [context menus](desktop-context-menus.md) for

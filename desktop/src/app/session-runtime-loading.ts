@@ -4,7 +4,11 @@ import type { SessionRuntimeStoreOptions } from "./session-runtime-options";
 
 export function createSessionRuntimeLoading(options: SessionRuntimeStoreOptions) {
   const readySessionIds = new Set<string>();
-  const loadsBySessionId = new Map<string, Promise<void>>();
+  const loadsBySessionId = new Map<string, {
+    client: AcpClient;
+    workspace: string;
+    promise: Promise<void>;
+  }>();
   const configOptionsBySessionId = new Map<string, SessionConfigOption[]>();
   const ownersBySessionId = new Map<string, object>();
   let prewarmGeneration = 0;
@@ -32,23 +36,51 @@ export function createSessionRuntimeLoading(options: SessionRuntimeStoreOptions)
     sessionId: string,
     requestWorkspace: string,
   ): Promise<void> {
-    if (readySessionIds.has(sessionId)) {
+    return load(requestClient, sessionId, requestWorkspace, false);
+  }
+
+  function reload(
+    requestClient: AcpClient,
+    sessionId: string,
+    requestWorkspace: string,
+  ): Promise<void> {
+    return load(requestClient, sessionId, requestWorkspace, true);
+  }
+
+  function load(
+    requestClient: AcpClient,
+    sessionId: string,
+    requestWorkspace: string,
+    reloading: boolean,
+  ): Promise<void> {
+    const existing = loadsBySessionId.get(sessionId);
+    if (existing?.client === requestClient && existing.workspace === requestWorkspace) return existing.promise;
+    if (!reloading && readySessionIds.has(sessionId)) {
       if (sessionId === options.activeSessionId()) options.setActiveReady(true);
       void options.refreshQueueState(sessionId);
       return Promise.resolve();
     }
-    const existing = loadsBySessionId.get(sessionId);
-    if (existing) return existing;
+
+    // Tab re-entry and accepted sends must join reload, not reuse the old ready
+    // cache or start a competing session/load. Close/reset retires this owner.
+    if (reloading) {
+      readySessionIds.delete(sessionId);
+      configOptionsBySessionId.delete(sessionId);
+      if (sessionId === options.activeSessionId()) options.setActiveReady(false);
+    }
 
     options.onOpen?.(sessionId);
     ownersBySessionId.set(sessionId, {});
 
-    const pending = requestClient.loadSession(sessionId, requestWorkspace)
+    const request = reloading
+      ? requestClient.reloadSession(sessionId)
+      : requestClient.loadSession(sessionId, requestWorkspace);
+    const pending = request
       .then((response) => {
         if (
           requestClient !== options.client()
           || requestWorkspace !== options.workspace()
-          || loadsBySessionId.get(sessionId) !== pending
+          || loadsBySessionId.get(sessionId)?.promise !== pending
         ) return;
         const configOptions = response.configOptions ?? [];
         readySessionIds.add(sessionId);
@@ -62,19 +94,19 @@ export function createSessionRuntimeLoading(options: SessionRuntimeStoreOptions)
         if (
           requestClient === options.client()
           && requestWorkspace === options.workspace()
-          && loadsBySessionId.get(sessionId) === pending
+          && loadsBySessionId.get(sessionId)?.promise === pending
         ) {
           options.onLoadFailed?.(sessionId);
           if (sessionId === options.activeSessionId()) {
             options.setActiveReady(false);
-            options.reportError(error);
           }
+          if (reloading || sessionId === options.activeSessionId()) options.reportError(error);
         }
       })
       .finally(() => {
-        if (loadsBySessionId.get(sessionId) === pending) loadsBySessionId.delete(sessionId);
+        if (loadsBySessionId.get(sessionId)?.promise === pending) loadsBySessionId.delete(sessionId);
       });
-    loadsBySessionId.set(sessionId, pending);
+    loadsBySessionId.set(sessionId, { client: requestClient, workspace: requestWorkspace, promise: pending });
     return pending;
   }
 
@@ -141,6 +173,7 @@ export function createSessionRuntimeLoading(options: SessionRuntimeStoreOptions)
     getConfigOptions,
     setConfigOptions,
     ensure,
+    reload,
     captureOwnership: (sessionId: string) => {
       const owner = ownersBySessionId.get(sessionId);
       return () => owner !== undefined && ownersBySessionId.get(sessionId) === owner;

@@ -29,9 +29,16 @@ status: active
 - Right-clicking the icon opens a native menu listing every live app window,
   including minimized windows. Entries omit the leading `Pix — ` / `Pix - `
   from native workspace titles and use stable window-label identities; duplicate
-  displayed titles are disambiguated by label.
+  displayed titles are disambiguated by label. Windows with unseen attention
+  have a `●` prefix on their project entry, using the same per-window state as
+  the icon badge. Attention changes refresh both the menu and icon; marking
+  does not change entry order or identity.
 - **Show all windows** restores and raises every live window, leaving the
   previously focused window on top when one exists.
+- **Arrange windows**, immediately after **Show all windows**, runs the same
+  existing window arrangement as the app-menu **Arrange windows** action.
+  Layout, display allocation, focus preservation and fullscreen exclusions are
+  unchanged; see [window tiling](desktop-window-tiling.md).
 - Selecting an entry restores, shows and focuses that window. Workspace title
   changes, project-window creation and destruction refresh the menu from live
   membership. A stale selection for a destroyed window does nothing.

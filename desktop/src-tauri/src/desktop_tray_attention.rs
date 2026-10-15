@@ -22,13 +22,15 @@ impl Attention {
         }
     }
 
-    pub(crate) fn snapshot(&mut self, live: &[(String, usize)]) -> bool {
+    /// Drops stale owners and returns the labels still holding attention.
+    /// HashMap iteration order is irrelevant: callers test membership only.
+    pub(crate) fn snapshot(&mut self, live: &[(String, usize)]) -> Vec<String> {
         self.owners.retain(|label, owner| {
             live.iter().any(|(current_label, current_owner)| {
                 current_label == label && current_owner == owner
             })
         });
-        !self.owners.is_empty()
+        self.owners.keys().cloned().collect()
     }
 
     pub(crate) fn destroyed(&mut self, label: &str) {
@@ -51,24 +53,24 @@ mod tests {
         let live = vec![("main".into(), 1), ("project-a".into(), 2)];
         state.set("main", 1, 1, true);
         state.set("project-a", 2, 2, true);
-        assert!(state.snapshot(&live));
+        assert_eq!(sorted(state.snapshot(&live)), ["main", "project-a"]);
         state.set("main", 1, 1, false);
-        assert!(state.snapshot(&live));
+        assert_eq!(sorted(state.snapshot(&live)), ["project-a"]);
         state.destroyed("project-a");
-        assert!(!state.snapshot(&live));
+        assert!(state.snapshot(&live).is_empty());
     }
 
     #[test]
     fn stale_sends_cannot_set_or_clear_a_reused_label() {
         let mut state = Attention::default();
         state.set("main", 1, 1, true);
-        assert!(!state.snapshot(&[("main".into(), 2)]));
+        assert!(state.snapshot(&[("main".into(), 2)]).is_empty());
         state.set("main", 1, 2, true);
-        assert!(!state.snapshot(&[("main".into(), 2)]));
+        assert!(state.snapshot(&[("main".into(), 2)]).is_empty());
         state.set("main", 2, 2, true);
         state.set("main", 1, 2, false);
-        assert!(state.snapshot(&[("main".into(), 2)]));
-        assert!(!state.snapshot(&[]));
+        assert_eq!(state.snapshot(&[("main".into(), 2)]), ["main"]);
+        assert!(state.snapshot(&[]).is_empty());
     }
 
     #[test]
@@ -77,6 +79,11 @@ mod tests {
         state.set("main", 1, 1, true);
         state.shutdown();
         state.set("main", 1, 1, true);
-        assert!(!state.snapshot(&[("main".into(), 1)]));
+        assert!(state.snapshot(&[("main".into(), 1)]).is_empty());
+    }
+
+    fn sorted(mut labels: Vec<String>) -> Vec<String> {
+        labels.sort();
+        labels
     }
 }

@@ -37,6 +37,9 @@ export type SearchIndexDiagnostic = {
   indexed?: number;
   total?: number;
   durationMs: number;
+  /** Fixed metadata only: never include provider messages or session content. */
+  phase?: "authorization" | "documents" | "discovery" | "titles" | "chunks" | "finalize";
+  reason?: "unconfigured" | "incomplete_coverage" | "discovery_failed" | "operation_failed";
 };
 interface Workspace {
   enabled: SourceSelection;
@@ -310,19 +313,21 @@ export class DesktopSearchService {
     return this.indexActions.run(key, caller, w.controller.signal, async operationSignal => {
       const source = request.source;
       const startedAt = Date.now();
-      const finish = (result: SearchIndexResponse): SearchIndexResponse => {
+      let phase: NonNullable<SearchIndexDiagnostic["phase"]> = "authorization";
+      const finish = (result: SearchIndexResponse, reason: SearchIndexDiagnostic["reason"] = "incomplete_coverage"): SearchIndexResponse => {
         if (!operationSignal.aborted) {
           try {
             this.options.onIndexDiagnostic?.({ cwd: w.cwd, source, complete: result.complete,
               ...(result.indexed === undefined ? {} : { indexed: result.indexed }),
               ...(result.total === undefined ? {} : { total: result.total }),
-              durationMs: Date.now() - startedAt });
+              durationMs: Date.now() - startedAt,
+              ...(result.complete ? {} : { phase, reason }) });
           } catch { /* Diagnostics cannot alter search results. */ }
         }
         return result;
       };
       if (!await bounded(operationSignal, undefined, signal => this.consent(signal))) return finish({ source, complete: false,
-        message: "Configure an embedding model and its credential to index this source" });
+        message: "Configure an embedding model and its credential to index this source" }, "unconfigured");
       const owned = AbortSignal.any([operationSignal, this.network.signal]);
       owned.throwIfAborted();
       const config = this.embeddingConfig!;
@@ -333,6 +338,7 @@ export class DesktopSearchService {
         let diagnostics: SearchIndexResponse["diagnostics"];
         let namedRevision: number | undefined;
         if (source === "settings" || source === "tasks") {
+          phase = "documents";
           if (source === "settings") {
             if (revision !== this.catalogueRevision && (this.indexCatalogue?.revision !== this.catalogueRevision
               || this.indexCatalogue.fingerprint !== fingerprint)) throw new SearchUnavailableError("Settings catalogue changed; retry indexing");
@@ -354,16 +360,23 @@ export class DesktopSearchService {
             indexed = tasks.filter(task => saved.has(task.hash)).length;
           }
         } else {
+          phase = "discovery";
           const previous = w.sessionWorker;
           let previousSettled = !previous;
           const operation = (async () => {
             await bounded(owned, undefined, () => previous?.finally(() => { previousSettled = true; }) ?? Promise.resolve());
-            const records = await this.discover(w, owned, true);
+            const records = await this.discover(w, owned, true, true);
             await this.reconcileSessions(w, records, owned, false, true);
+            phase = "titles";
             await this.indexSessions(w, epoch, owned, true);
             // Refresh discovery so a rename/deletion during the pass cannot be reported current.
-            await this.reconcileSessions(w, await this.discover(w, owned, true), owned, false);
-            const chunks = await this.chunkIndexer(w).index(owned, true);
+            phase = "discovery";
+            const refreshed = await this.discover(w, owned, true, true);
+            await this.reconcileSessions(w, refreshed, owned, false);
+            // Reuse this authenticated, refreshed snapshot instead of reading
+            // the entire session corpus a third time in chunkIndexer.index().
+            phase = "chunks";
+            const chunks = await this.chunkIndexer(w).index(owned, true, true, refreshed);
             diagnostics = chunks.diagnostics;
             const titles = await this.store.readSessionTitles(w.cwd,owned,config);
             total = w.namedSessions.length + chunks.total + chunks.skipped;
@@ -383,6 +396,7 @@ export class DesktopSearchService {
           await operation;
           delete w.indexError;
         }
+        phase = "finalize";
         if (!await this.consent(owned) || !this.current(w, epoch)) throw new SearchUnavailableError("Search authorization changed");
         if (source === "settings" && settingsFingerprint(w.settings) !== fingerprint) throw new SearchUnavailableError("Settings catalogue changed; retry indexing");
         if (source === "sessions" && namedRevision !== w.namedRevision) throw new SearchUnavailableError("Saved session names changed; retry indexing");
@@ -402,16 +416,20 @@ export class DesktopSearchService {
       } catch (error) {
         owned.throwIfAborted();
         return finish({ source, complete: false, message: error instanceof SearchIndexBusyError || error instanceof SearchCacheCompatibilityError
-          || error instanceof SearchUnavailableError ? error.message : "Document indexing unavailable; retry this source" });
+          || error instanceof SearchUnavailableError ? error.message : "Document indexing unavailable; retry this source" },
+          error instanceof SearchUnavailableError && error.message === DISCOVERY_ERROR ? "discovery_failed" : "operation_failed");
       }
     });
   }
-  private async discover(w: Workspace, signal: AbortSignal, strict = false): Promise<readonly SessionMapRecord[]> {
+  private async discover(w: Workspace, signal: AbortSignal, strict = false, manual = false): Promise<readonly SessionMapRecord[]> {
     return bounded(signal, undefined, async owned => {
       const previous = w.refresh;
       const operation = bounded(owned, undefined, async queued => {
         await bounded(queued, undefined, () => previous.catch(() => {}));
-        try { return await bounded(queued, this.options.discoveryTimeoutMs ?? 15000, source => this.options.discover(w.cwd, source, strict)); }
+        // The short deadline protects interactive searches. Manual Index/Continue
+        // is cancellable but must be able to drain large, mature session corpora.
+        try { return await bounded(queued, manual ? undefined : this.options.discoveryTimeoutMs ?? 15000,
+          source => this.options.discover(w.cwd, source, strict)); }
         catch { queued.throwIfAborted(); throw new SearchUnavailableError(DISCOVERY_ERROR); }
       });
       w.refresh = operation.catch(() => {});

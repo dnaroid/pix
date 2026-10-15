@@ -56,20 +56,22 @@ Releasing a scope should require the same opaque owner that acquired it. The
 derived UI state should distinguish "active session cannot mutate" from
 "unrelated background work exists".
 
-### P1 — active-session import, reload, and resume are globally scoped
+### P1 — active-session import and resume are globally scoped
 
 File: `desktop/src/app/conversation-session-actions.ts`
 
 Remaining functions:
 
 - `importConversationPath()`;
-- `reloadResources()`;
 - `resumeConversationPath()`.
 
-All three mutate the active session/runtime/history, so concurrency with prompt
+Both mutate the active session/runtime/history, so concurrency with prompt
 submission or another active-session transition must remain blocked. The
 problem is scope: the global boolean also disables unrelated Registry, Git,
-attachments, background tabs, model UI, and other workbench actions.
+attachments, background tabs, model UI, and other workbench actions. `/reload`
+is no longer a global-lock call site: runtime readiness and the pending reload
+are owned by the target session, while unrelated tabs and workbench controls
+remain usable.
 
 Recommended direction: migrate these functions to an
 `active-session-transition` owner that blocks only controls whose correctness
