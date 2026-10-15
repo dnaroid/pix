@@ -3,11 +3,37 @@ import { mkdir, mkdtemp, rm, writeFile, utimes } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { SessionManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { registerSessionChunkSync } from "../src/project-search/semantic-session-chunks.js";
-import { SessionIdlePolicy, SESSION_IDLE_MS } from "../src/project-search/session-idle.mjs";
+import { IdleSessionSelection, SessionIdlePolicy, SESSION_IDLE_MS } from "../src/project-search/session-idle.mjs";
 import { SessionChunkSync } from "../src/project-search/session-chunk-sync.mjs";
 import { SessionCandidateCatalog } from "../src/project-search/session-discovery.mjs";
 import { Database } from "bun:sqlite";
 import { writeSourcePolicy } from "../src/project-search/source-policy.mjs";
+
+test("suite background inspection batches metadata and respects live activity", async () => {
+  const base = resolve(".pi/artifacts/session-idle-lifecycle");
+  await mkdir(base, { recursive: true });
+  const root = await mkdtemp(join(base, "batch-"));
+  const candidate = { id: "old", path: join(root, "old.jsonl") };
+  await writeFile(candidate.path, "");
+  const old = new Date(Date.now() - SESSION_IDLE_MS - 1000);
+  await utimes(candidate.path, old, old);
+  const owner = new SessionIdlePolicy(root), reader = new SessionIdlePolicy(root);
+  try {
+    await owner.observe(candidate.id, true, false);
+    let batches = 0;
+    const original = reader.states.bind(reader);
+    reader.states = async (...args: Parameters<typeof reader.states>) => { batches++; return original(...args); };
+    const selection = new IdleSessionSelection(reader);
+    expect(await selection.select([candidate], new AbortController().signal)).toHaveLength(0);
+    expect(batches).toBe(1);
+    await owner.observe(candidate.id, false, false);
+    expect(await selection.select([candidate], new AbortController().signal)).toHaveLength(1);
+    expect(batches).toBe(2);
+  } finally {
+    await Promise.all([owner.dispose(), reader.dispose()]);
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("activity during startup persistence is observed before the first indexing pass", async () => {
   const base = resolve(".pi/artifacts/session-idle-lifecycle");

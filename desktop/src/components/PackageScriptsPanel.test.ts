@@ -48,8 +48,8 @@ describe("PackageScriptsPanel saved launch commands", () => {
 
   it("provides guarded editor actions, confirmation, focus, and Escape cancellation", () => {
     expect(editorSource).toContain("crypto.randomUUID()");
-    expect(editorSource).toContain("confirm(`Delete “${command.name}” launch command?`)");
-    expect(editorSource).toContain("if (busy ||");
+    expect(editorSource).toContain("await confirmDesktopAction(`Delete “${command.name}” launch command?`");
+    expect(editorSource).toContain("if (busy) return;");
     expect(editorSource).toContain("nameInput?.focus()");
     expect(editorSource).toContain('event.key !== "Escape"');
     expect(editorSource).toContain('aria-label="Shell command"');

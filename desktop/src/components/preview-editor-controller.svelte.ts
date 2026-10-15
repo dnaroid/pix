@@ -1,4 +1,5 @@
 import { untrack } from "svelte";
+import { confirmDesktopAction } from "../lib/confirm-action";
 import type { ProjectFilePreview } from "../lib/project-files";
 
 interface PreviewEditorControllerOptions {
@@ -103,8 +104,14 @@ export function createPreviewEditorController(options: PreviewEditorControllerOp
     }
   }
 
-  function canClose(): boolean {
-    return !(state.editing && dirty()) || window.confirm("Discard unsaved changes?");
+  async function canClose(): Promise<boolean> {
+    if (!state.editing || !dirty()) return true;
+    const generation = editGeneration;
+    const preview = options.previewId(), path = options.file()?.path;
+    const draft = state.draft;
+    if (!await confirmDesktopAction("Discard unsaved changes?")) return false;
+    return generation === editGeneration && preview === options.previewId()
+      && path === options.file()?.path && state.editing && state.draft === draft;
   }
 
   return {

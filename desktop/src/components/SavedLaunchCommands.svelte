@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { confirmDesktopAction } from "../lib/confirm-action";
   import Play from "@lucide/svelte/icons/play";
   import Plus from "@lucide/svelte/icons/plus";
   import Pencil from "@lucide/svelte/icons/pencil";
@@ -54,9 +55,14 @@
   }
 
   async function remove(command: LaunchCommand): Promise<void> {
-    if (busy || !confirm(`Delete “${command.name}” launch command?`)) return;
+    if (busy) return;
+    const requestWorkspace = workspace;
     busy = true;
     try {
+      if (!await confirmDesktopAction(`Delete “${command.name}” launch command?`, {
+        title: "Delete launch command?", okLabel: "Delete",
+      })) return;
+      if (workspace !== requestWorkspace || !commands.some(item => item.id === command.id)) return;
       await onDelete(command.id);
     } finally {
       busy = false;

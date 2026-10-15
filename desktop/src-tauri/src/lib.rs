@@ -122,6 +122,7 @@ const PROJECT_PI_CANONICAL_DIRECTORIES: &[&str] = &[
     "tasks.d",
 ];
 const PROJECT_PI_CANONICAL_FILES: &[&str] = &[
+    "AGENTS.md",
     "agent-model-overrides.json",
     "TODO.md",
     "pi-tools-suite.jsonc",
@@ -11327,6 +11328,7 @@ mod tests {
         fs::write(workspace.join(".pi/qa_auth.jsonc"), b"{\"profiles\":{}}")
             .expect("write QA auth config");
         for canonical_file in [
+            "AGENTS.md",
             "TODO.md",
             "agent-model-overrides.json",
             "pi-tools-suite.jsonc",
@@ -11398,6 +11400,7 @@ mod tests {
         assert!(workspace.join(".pi/task-attachments/keep.bin").is_file());
         assert!(workspace.join(".pi/qa_auth.jsonc").is_file());
         for canonical_file in [
+            "AGENTS.md",
             "TODO.md",
             "agent-model-overrides.json",
             "pi-tools-suite.jsonc",
@@ -11526,6 +11529,9 @@ mod tests {
         }
         fs::write(workspace.join(".pi/plans/keep.md"), b"keep")
             .expect("write canonical project data");
+        let local_rules = workspace.join(".pi/AGENTS.md");
+        fs::write(&local_rules, b"private project instructions")
+            .expect("write private project context");
         fs::write(&old_receipt, b"old-receipt").expect("write old non-canonical file");
         fs::write(&fresh_receipt, b"fresh-receipt").expect("write fresh non-canonical file");
 
@@ -11536,6 +11542,7 @@ mod tests {
             set_tree_modified(directory, old);
         }
         set_tree_modified(&old_receipt, old);
+        set_tree_modified(&local_rules, old);
 
         let removed = auto_clean_project_pi_from(&workspace).expect("auto clean project .pi");
         assert!(removed >= (b"payload".len() * 3 + b"old-receipt".len()) as u64);
@@ -11548,6 +11555,7 @@ mod tests {
         assert!(fresh_noncanonical.join("payload.bin").is_file());
         assert!(fresh_receipt.is_file());
         assert!(workspace.join(".pi/plans/keep.md").is_file());
+        assert_eq!(fs::read(&local_rules).unwrap(), b"private project instructions");
         assert!(workspace.join(".pi/artifacts").is_dir());
         assert!(workspace.join(".pi/subagents").is_dir());
 

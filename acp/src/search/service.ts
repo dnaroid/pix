@@ -250,9 +250,17 @@ export class DesktopSearchService {
     await operation;
     signal.throwIfAborted();
     if (request.includeSessionSnapshot) {
-      const sessionSnapshot = await bounded(signal, 1500, owned =>
-        this.options.sessionSnapshot?.(request.cwd, owned) ?? this.statusCatalog.snapshot(request.cwd, owned));
-      return { ...this.status(), sessionSnapshot };
+      let sessionSnapshot: string | undefined;
+      try {
+        sessionSnapshot = await bounded(signal, 1500, owned =>
+          this.options.sessionSnapshot?.(request.cwd, owned) ?? this.statusCatalog.snapshot(request.cwd, owned));
+      } catch {
+        // A snapshot only accelerates native freshness checks. Its own deadline
+        // or I/O failure must not turn an otherwise healthy status read into an
+        // ACP error. Caller cancellation still owns the request.
+        signal.throwIfAborted();
+      }
+      return { ...this.status(), ...(sessionSnapshot !== undefined ? { sessionSnapshot } : {}) };
     }
     return this.status();
   }

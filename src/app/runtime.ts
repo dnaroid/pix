@@ -21,6 +21,7 @@ import {
 import { loadPixConfig, resolveDefaultModelRef, type PixConfig } from "../config.js";
 import { isThinkingLevel, parseModelRef, parseScopedModelRef } from "./model/model-ref.js";
 import { openLazySessionManager } from "./session/lazy-session-manager.js";
+import { projectAgentsResourceOptions } from "./project-agents-context.js";
 import type { AppOptions, ScopedSessionModel, SessionModel, ThinkingLevel } from "./types.js";
 
 const BUNDLED_QUESTION_EXTENSION_NAME = "question";
@@ -586,7 +587,7 @@ async function createPixRuntimeServices(options: {
 		cwd: options.cwd,
 		agentDir: options.agentDir,
 		resourceLoaderOptions: {
-			...(options.config.ignoreContextFiles ? { noContextFiles: true } : {}),
+			...projectAgentsResourceOptions(options.cwd, options.config.ignoreContextFiles),
 			...(options.eventBus === undefined ? {} : { eventBus: options.eventBus }),
 			...(bundledExtensionPaths.length === 0 ? {} : {
 				additionalExtensionPaths: bundledExtensionPaths,

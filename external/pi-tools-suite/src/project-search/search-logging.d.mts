@@ -12,6 +12,7 @@ export type SearchDiagnosticRecord = {
 };
 export function logSearchDiagnostic(root: string, diagnostic: SearchDiagnosticRecord): Promise<void>;
 export function classifyIndexFailure(error: unknown): { errorType: string; code?: string };
+export function isExpectedIndexCancellation(error: unknown): boolean;
 export type BackgroundIndexFailureLogger = (root: string, error: unknown, phase?: string) => void;
 export function createBackgroundIndexFailureLogger(options?: {
   write?: (root: string, diagnostic: SearchDiagnosticRecord) => void | Promise<void>;

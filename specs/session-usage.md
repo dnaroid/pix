@@ -108,6 +108,10 @@ blocks further BTW inference until reload rather than silently losing known spen
   polls the provider. `Provider pages` offers the same allowlisted external
   destinations as Desktop. `Refresh limits` on Claude Code is an explicit
   quota-only refresh, distinct from `Refresh spend`.
+  In Desktop, the `Session usage` header shows the shared provider logo
+  immediately after the title for the currently selected session model.
+  This follows the active model selection, not the providers in historical
+  recorded spend; unknown providers and Auto routing reserve no icon slot.
   Desktop adds a `Subagents` button at the right of the Session usage header,
   shown only after a spend snapshot loads with a nonempty subagent call list.
   It is hidden while the snapshot is unavailable, when the optional breakdown

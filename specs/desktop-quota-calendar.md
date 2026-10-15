@@ -43,10 +43,16 @@ timing. Exact local reset date/year/time, used percentage and pin orientation
 remain accessible.
 The pin uses the existing minute tick without another timer or request.
 
-Hourly popup and all compact status-bar quota tracks also anchor their remaining
-fill to the right, leaving consumed quota empty on the left. Percentages, colors,
-countdowns and context capacity tracks are unchanged; calendar and elapsed-time
-pin retain their normal left-to-right orientation. Cumulative daily-budget warnings defined in
+Hourly popup remaining fill uses the same `bg-foreground` color as the weekly
+remaining fill, over the unchanged `bg-border` track, and anchors to the right,
+leaving consumed quota empty on the left. For known finite hourly window durations
+greater than 3600 seconds, thin 1px `popover`-colored (80% opacity) divider
+overlays repeat every 3600 seconds, with spacing proportional to the full track
+width; this marks hours from the window start and permits a partial final hour.
+Unknown, nonfinite, nonpositive, and at-most-one-hour durations do not show these
+dividers. Percentages and countdowns remain unchanged. All compact status-bar
+quota tracks retain their existing appearance; calendar and elapsed-time pin
+retain their normal left-to-right orientation. Cumulative daily-budget warnings defined in
 [runtime status](desktop-runtime-status.md) remain; the weekly warning sits in
 the header. Passed resets explicitly say “Reset
 time reached · Awaiting quota refresh”. Unknown/invalid timing omits date ticks

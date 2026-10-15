@@ -6,11 +6,13 @@ import { DatabaseSync } from "node:sqlite";
 import { SessionIdlePolicy, IdleSessionSelection, SESSION_IDLE_MS } from "../src/search/session-idle.js";
 import { indexSessionChunks, hasSessionChunkVectors } from "../src/search/session-chunks.js";
 import { SessionSearchActivity } from "../src/search/session-activity.js";
+import { writeSourcePolicy } from "../src/search/source-policy.js";
 import type { SessionMapRecord } from "../src/acp/session-map.js";
 const signal = () => new AbortController().signal;
 async function fixture(t: { after(fn: () => Promise<unknown>): void }) {
   const base = resolve(".pi/artifacts/session-idle-tests"); await mkdir(base, { recursive: true });
   const root = await mkdtemp(join(base, "case-"));
+  await writeSourcePolicy(root, "sessions", true);
   const policies: SessionIdlePolicy[] = [];
   t.after(async () => { await Promise.all(policies.map(p => p.dispose())); await rm(root, { recursive: true, force: true }); });
   let now = Date.now();
@@ -93,6 +95,32 @@ test("selection reuses unchanged revisions and file activity restarts its own de
   assert.equal(await p.eligible(a, signal()), false);
   f.advance(SESSION_IDLE_MS);
   assert.deepEqual((await selection.select(f.candidates, signal())).map(c => c.id), [a.id]);
+});
+test("bulk session inspection preserves live leases, absent files and per-candidate revisions", async t => {
+  const f = await fixture(t), owner = f.policy(), reader = f.policy();
+  const missing = { id: "missing", path: join(f.root, "missing.jsonl") };
+  f.advance(SESSION_IDLE_MS + 1);
+  await owner.observe(f.candidates[0]!.id, true, false);
+  const candidates = [...f.candidates, missing];
+  const bulk = await reader.states(candidates, signal());
+  const individual = await Promise.all(candidates.map(candidate => reader.state(candidate, signal())));
+  assert.deepEqual(bulk, individual);
+  assert.deepEqual(bulk.map(state => state.eligible), [false, true, false]);
+  assert.equal(bulk[2]?.revision, "missing");
+  await owner.observe(f.candidates[0]!.id, false, false);
+  assert.equal((await reader.states(f.candidates, signal()))[0]?.eligible, true);
+});
+test("selection uses one metadata batch instead of a database connection per session", async t => {
+  const f = await fixture(t), p = f.policy(), selection = new IdleSessionSelection(p);
+  f.advance(SESSION_IDLE_MS + 1);
+  let batches = 0;
+  const original = p.states.bind(p);
+  p.states = async (...args: Parameters<typeof p.states>) => { batches++; return original(...args); };
+  const candidates = Array.from({ length: 100 }, (_, i) => ({ ...f.candidates[i % 2]!, id: `bulk-${i}` }));
+  assert.equal((await selection.select(candidates, signal())).length, candidates.length);
+  assert.equal(batches, 1);
+  assert.deepEqual(await selection.select(candidates, signal()), []);
+  assert.equal(batches, 2);
 });
 test("automatic work defers recent sessions, manual work bypasses idle, cache stays usable", async t => {
   const f = await fixture(t), p = f.policy(); let calls = 0;

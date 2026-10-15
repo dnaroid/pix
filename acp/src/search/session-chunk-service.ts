@@ -4,7 +4,7 @@ import { indexSessionChunks, searchSessionChunks, listIndexedSessions, type Chun
 import { SESSION_CHUNK_FORMAT } from "./session-chunk-store.js";
 import { semanticEmbeddingIdentity, type SemanticEmbeddingConfig } from "./config.js";
 import type { SessionSearchHit } from "./contract.js";
-import { classifyIndexFailure, logBackgroundIndexFailure, logSearchDiagnostic } from "./search-logging.js";
+import { classifyIndexFailure, isExpectedIndexCancellation, logBackgroundIndexFailure, logSearchDiagnostic } from "./search-logging.js";
 import { SessionIdlePolicy, IdleSessionSelection } from "./session-idle.js";
 import { automaticWorkPaused, SearchWorkNeedsContinueError } from "./source-work.js";
 import type { BackgroundSessionRecord } from "./background-session-discovery.js";
@@ -79,6 +79,7 @@ export class DesktopSessionChunks {
       if (pass.incarnation && after.incarnation !== pass.incarnation) selection.reset();
       selection.cacheRevision = `${identity}:${after.cacheRevision}`;
     },signal,error => {
+      if (isExpectedIndexCancellation(error)) return;
       logBackgroundIndexFailure(cwd,error,phase);
       options.failed(error);
     });

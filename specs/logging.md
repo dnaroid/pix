@@ -99,6 +99,8 @@ Indexer diagnostics from ACP and the suite use the shared Pix JSONL sink with
 `module: "search.index"` and fixed `search:*` event names. Only terminal
 failure/incomplete states, background-worker failures and aggregate skipped
 transcript reasons are warnings; meaningful successful vector saves are debug.
+Policy-selection changes and aborts are expected background cancellations,
+not worker-failure warnings; genuine policy-read failures remain warnings.
 Code/Knowledge native Desktop indexing reports its outcome through the same
 native logger. No per-pass start, five-second heartbeat, empty success, prompt,
 provider response, session ID, individual path, or raw exception text is

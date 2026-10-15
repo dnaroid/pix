@@ -63,6 +63,7 @@ import {
 } from "../../src/async-subagents/lib.js";
 import { isRecord, isoNow, serializeJsonLine } from "../../src/async-subagents/core/utils.js";
 import { agentStrategyPrompt, appendAgentStrategyPrompt, SUBAGENT_DELEGATION_GUIDANCE } from "../../src/async-subagents/core/agent-strategy.js";
+import { DEFAULT_OWNED_LAUNCH_TIMEOUTS } from "../../src/async-subagents/core/owned-launch/launcher.js";
 import { activityFromRpcEvent } from "../../src/async-subagents/core/activity.js";
 import { buildAgentCompletionNotification, isTerminalAgentStatus } from "../../src/async-subagents/core/notifications.js";
 import type { AgentTask } from "../../src/async-subagents/lib.js";
@@ -547,6 +548,16 @@ describe.serial("subagent type config", () => {
 		expect(buildSubagentCatalogPrompt(config, "openai-codex/gpt-6.1-sol")).toContain("- oracle:");
 		expect(buildSubagentCatalogPrompt(config, "zai/glm-5.3")).toContain("- oracle:");
 		expect(selectSubagentType({ id: "s", task: "vulnerability secret token" }, config)).toBe("research");
+	});
+
+	test.serial("uses the built-in watchdog only when the task has no timeout override", () => {
+		const config = loadSubagentConfig(tempDir(), {});
+		const task = { id: "probe", task: "Inspect", subagentType: "research" };
+		expect(resolveAgentTaskConfig(task, config).timeoutMs).toBeUndefined();
+		expect(DEFAULT_AGENT_TIMEOUT_MS).toBe(3 * 60 * 60 * 1000);
+		expect(resolveAgentTaskConfig({ ...task, timeoutMs: 4 * 60 * 60 * 1000 }, config).timeoutMs)
+			.toBe(4 * 60 * 60 * 1000);
+		expect(resolveAgentTaskConfig(task, config, { timeoutMs: 10_000 }).timeoutMs).toBe(10_000);
 	});
 
 	test.serial("can hide selected bundled roles while allowing project-local replacements with the same names", async () => {
@@ -2183,7 +2194,8 @@ setTimeout(() => {}, 1000);
 	});
 
 	test.serial("terminates agents that exceed the execution timeout", async () => {
-		expect(DEFAULT_AGENT_TIMEOUT_MS).toBe(30 * 60 * 1000);
+		expect(DEFAULT_AGENT_TIMEOUT_MS).toBe(3 * 60 * 60 * 1000);
+		expect(DEFAULT_OWNED_LAUNCH_TIMEOUTS.watchdogSeconds * 1000).toBe(DEFAULT_AGENT_TIMEOUT_MS);
 		const cwd = tempDir();
 		const runDir = createRunDir(cwd, "spawn-timeout");
 		const piScript = path.join(tempDir(), "pi.js");

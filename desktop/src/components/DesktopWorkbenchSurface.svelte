@@ -17,7 +17,7 @@
   };
 
   export type PreviewPaneHandle = {
-    requestClose: () => boolean;
+    requestClose: () => Promise<boolean>;
   };
 
   export type WorkbenchTerminalPaneHandle = {

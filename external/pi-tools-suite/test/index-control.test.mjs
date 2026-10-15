@@ -7,6 +7,7 @@ import { controlManualIndex, readManualRuns } from "../src/project-search/index-
 import { openDatabase } from "../src/project-search/source-work.mjs";
 import { runManagedIndex } from "../src/project-search/managed-index-run.mjs";
 import { probeSnapshots } from "../src/project-search/snapshot-probe.mjs";
+import { openStore } from "../src/project-search/native-store.mjs";
 
 const base = fileURLToPath(new URL("../../../.pi/artifacts/manual-index-tests/", import.meta.url));
 async function fixture(t, initialized = true) {
@@ -20,8 +21,10 @@ async function fixture(t, initialized = true) {
   });
   if (initialized) {
     await mkdir(join(root, ".pi/search"), { recursive: true });
-    await writeFile(join(root, ".pi/search/code.sqlite"), "stored derived index");
     await writeFile(join(root, "a.ts"), "export const a=1;");
+    // Receipts require a readable native SQLite store, not an arbitrary file
+    // with the expected extension.
+    (await openStore(root, "code")).close();
   }
   const control = request => controlManualIndex(root, request);
   return { root, control, begin: () => control({ action: "begin", source: "code" }),

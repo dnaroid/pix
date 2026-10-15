@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { confirmDesktopAction } from "../lib/confirm-action";
   import type { SessionConfigOption } from "@agentclientprotocol/sdk";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import FileText from "@lucide/svelte/icons/file-text";
@@ -773,7 +774,7 @@
     return files.map((file) => JSON.stringify([file.path ?? "", file.name, file.size ?? -1]));
   }
 
-  function openRelatedTask(task: ProjectTask): void {
+  async function openRelatedTask(task: ProjectTask): Promise<void> {
     if (busy || editorAttachmentsLoading || editorAttachmentError) return;
     const original = editorBaseTask;
     const hasUnsaved = original && (
@@ -784,7 +785,9 @@
       || JSON.stringify(editorRelatedTaskIds) !== JSON.stringify(original.relatedTaskIds ?? [])
       || JSON.stringify(editorAttachmentIdentities(editorAttachments)) !== JSON.stringify(editorOriginalAttachments)
     );
-    if (hasUnsaved && !window.confirm("Discard unsaved changes and open the related task?")) return;
+    const generation = editorGeneration;
+    if (hasUnsaved && !await confirmDesktopAction("Discard unsaved changes and open the related task?")) return;
+    if (generation !== editorGeneration || busy || editorAttachmentsLoading || editorAttachmentError) return;
     editorGeneration++;
     openEdit(task);
   }

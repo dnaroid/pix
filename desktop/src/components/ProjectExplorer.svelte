@@ -1,6 +1,7 @@
 <script lang="ts">
   import { invoke, isTauri } from "@tauri-apps/api/core";
   import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
+  import { confirmDesktopAction } from "../lib/confirm-action";
   import {
     canPasteProjectEntry,
     createProjectEntryClipboardReader,
@@ -613,8 +614,11 @@
     if (!entry.path || !canMutate(entry)) return;
     menuController.close();
     const kind = entry.kind === "directory" ? "folder" : "file";
-    if (!window.confirm(`Delete ${kind} “${entry.name}”?\n\nThis cannot be undone.`)) return;
     const requestWorkspace = workspace;
+    if (!await confirmDesktopAction(`Delete ${kind} “${entry.name}”?\n\nThis cannot be undone.`, {
+      title: `Delete ${kind}?`, okLabel: "Delete",
+    })) return;
+    if (workspace !== requestWorkspace || !canMutate(entry)) return;
     const parent = parentDirectory(entry.path);
     const fallback = treeController.focusFallbackAfterRemoval(entry.path);
     const operation = operations.begin(`Delete: ${entry.name}`, [{ path: entry.path, kind: "tree" }]);

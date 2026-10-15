@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { confirmDesktopAction } from "../../lib/confirm-action";
   import FileCode from "@lucide/svelte/icons/file-code";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
@@ -110,9 +111,11 @@
     onOpenUserConfig(activeKind);
   }
 
-  function reload(): void {
+  async function reload(): Promise<void> {
     if (saving) return;
-    if (dirty && !window.confirm("Discard unsaved settings changes and reload this config?")) return;
+    const selectedKind = activeKind, requestedDraft = active;
+    if (dirty && !await confirmDesktopAction("Discard unsaved settings changes and reload this config?")) return;
+    if (saving || selectedKind !== activeKind || requestedDraft !== active) return;
     void loadConfig(true);
   }
 

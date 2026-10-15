@@ -4,7 +4,7 @@ import type { GitSnapshot } from "../lib/git";
 import { sameGitDiff, type GitCommitDiff } from "../lib/git-workflow";
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
-vi.mock("@tauri-apps/api/core", () => ({ invoke }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke, isTauri: () => false }));
 
 function fixture() {
   let workspace = "/one";

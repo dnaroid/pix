@@ -166,4 +166,19 @@ describe("Status bar click surfaces", () => {
     expect(runtime.slice(start, subagents)).toContain('{#if showClaudeAccountSwitcher}');
     expect(runtime).toContain('provider.provider === "pi-claude-code-provider"');
   });
+
+  it("shows the active model provider logo beside Session usage without inferring it from billed models", () => {
+    const runtime = source("RuntimeStatusBarItems");
+    const title = runtime.indexOf('>Session usage</div>');
+    const icon = runtime.indexOf('<ModelProviderIcon provider={currentModelProvider} />');
+    const switcher = runtime.indexOf('<ClaudeAccountSwitcher lastAttemptedAccount={lastClaudeAccountAttempt} />');
+    expect(statusBar).toContain('currentModelProvider={modelThinking.currentModel?.provider}');
+    expect(runtime).toContain('{#if currentModelProvider && modelProviderBrand(currentModelProvider)}');
+    expect(runtime).toContain('aria-label={`Current model provider: ${currentModelProvider}`}');
+    expect(icon).toBeGreaterThan(title);
+    expect(icon).toBeLessThan(switcher);
+    expect(runtime.slice(runtime.lastIndexOf('class="flex shrink-0 items-center gap-1.5"', title), switcher))
+      .toContain('<ModelProviderIcon provider={currentModelProvider} />');
+    expect(runtime).not.toContain('currentModelProvider={sessionUsage');
+  });
 });

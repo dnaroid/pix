@@ -47,8 +47,11 @@ async function runEnabledSourceIndex(root: string, source: IndexSource, signal: 
     const candidates = (await (services.sessions ? services.sessions(root, undefined, undefined, signal) : listSearchSessions(root, signal, true)))
       .filter(session => resolve(session.cwd) === root);
     signal.throwIfAborted();
-    const titles = await indexMissingSessionVectors(root, candidates, key, options, signal, config, true);
     const result = await syncSessionChunks(root,candidates,signal,options,true);
+    // Saved-title freshness is authenticated against the current indexed
+    // session metadata. Reconcile transcripts first; otherwise a cold index
+    // silently skips every title, then only embeds them on a later Continue.
+    const titles = await indexMissingSessionVectors(root, candidates, key, options, signal, config, true);
     const complete = result.complete && titles.remaining === 0;
     if (complete) {
       await requireSemanticIdentity(options,config,signal);

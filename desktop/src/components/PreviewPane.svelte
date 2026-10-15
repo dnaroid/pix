@@ -168,8 +168,9 @@
     event.preventDefault();
   }
 
-  export function requestClose(): boolean {
-    if (!editorController.canClose()) return false;
+  export async function requestClose(): Promise<boolean> {
+    const requestedPreviewId = previewId;
+    if (!await editorController.canClose() || previewId !== requestedPreviewId) return false;
     onClose();
     return true;
   }

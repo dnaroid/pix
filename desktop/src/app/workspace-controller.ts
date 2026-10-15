@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
+import { confirmDesktopAction } from "../lib/confirm-action";
 import {
   isAbsoluteProjectPath,
   projectWindowUrl,
@@ -84,7 +85,8 @@ export function createWorkspaceController(options: WorkspaceControllerOptions) {
       void options.loadDesktopPreferences(selected);
       return;
     }
-    if (options.previewDirty() && !window.confirm("Discard unsaved Preview changes and switch projects?")) return;
+    if (options.previewDirty() && !await confirmDesktopAction("Discard unsaved Preview changes and switch projects?")) return;
+    if (options.blocked() || options.workspace() !== workspace) return;
 
     options.setOperationRunning(true);
     options.setErrorMessage(null);

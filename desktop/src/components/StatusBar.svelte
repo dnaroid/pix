@@ -152,6 +152,7 @@
     {#key observer?.sessionId}
     <RuntimeStatusBarItems
       status={runtimeStatus}
+      currentModelProvider={modelThinking.currentModel?.provider}
       {sessionUsage}
       loadingSessionUsage={sessionUsageRefreshing}
       {sessionUsageFailed}

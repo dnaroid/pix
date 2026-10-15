@@ -43,7 +43,18 @@ Index/Continue is unaffected. Generic background-worker errors generate
 `search:background-failed` (warn), tagged with a fixed phase, error category
 and allowlisted OS/SQLite code; repeated causes are coalesced for five minutes
 with a suppressed count. Per-session failures use the same safe categories
-without including session IDs. Ordinary cancellations are not warnings.
+without including session IDs. Ordinary cancellations, including a deliberate
+change to the enabled search sources, are not warnings. Invalid or unreadable
+source policies remain operational failures.
+
+The background idle-session selection reads activity/lease metadata in one
+SQLite connection per candidate sweep instead of reopening the source database
+for each session. This metadata snapshot only filters candidates: immediately
+before provider requests and final publication, current activity and source
+policy are rechecked. Manual TUI/CLI session indexing first reconciles public
+transcript metadata and chunks, then authenticates and embeds explicit saved
+names against that updated index. A cold first pass must not silently omit
+saved-name vectors and require a second Continue to populate them.
 
 
 - `project-search` is a default-enabled module in the bundled pi-tools-suite

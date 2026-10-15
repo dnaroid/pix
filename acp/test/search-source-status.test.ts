@@ -7,7 +7,8 @@ import { DesktopSearchService, type SearchServiceOptions } from "../src/search/s
 import { SearchPreferences } from "../src/search/config.js";
 import { parseSearchConfigRequest } from "../src/search/request.js";
 
-async function fixture(t: TestContext, discover: SearchServiceOptions["discover"]) {
+async function fixture(t: TestContext, discover: SearchServiceOptions["discover"],
+  overrides: Pick<SearchServiceOptions, "sessionSnapshot"> = {}) {
   const base = resolve("../.pi/artifacts/search-source-status");
   await mkdir(base, { recursive: true });
   const cwd = await mkdtemp(join(base, "run-"));
@@ -19,7 +20,7 @@ async function fixture(t: TestContext, discover: SearchServiceOptions["discover"
   } } }));
   const service = new DesktopSearchService({
     discover: async () => { assert.fail("Status must never hydrate transcripts through interactive SDK discovery"); },
-    discoverBackground: discover, preferences: new SearchPreferences(config),
+    discoverBackground: discover, preferences: new SearchPreferences(config), ...overrides,
     embed: async () => { assert.fail("Status must never request embeddings"); },
     watchTasks: () => { assert.fail("Status must never start indexing watchers"); } });
   t.after(async () => { await service.dispose(); await rm(cwd, { recursive: true, force: true }); restoreHome(); });
@@ -102,5 +103,52 @@ test("slow metadata cannot block activity or duplicate unsettled discovery", asy
   assert.equal((await f.status()).sessionsEmpty, true);
   assert.equal(calls, 2);
   await assert.rejects(access(join(f.cwd, ".pi/search")));
+});
+
+test("failed optional session snapshot does not fail a healthy search status", async t => {
+  const f = await fixture(t, async () => [], {
+    sessionSnapshot: async () => { throw new Error("Search operation timed out"); },
+  });
+  const status = await f.service.config({ cwd: f.cwd, includeSessionSnapshot: true });
+  assert.equal(status.sessionSnapshot, undefined);
+  assert.equal(status.indexingSources?.sessions, false);
+  assert.equal((await f.service.config({ cwd: f.cwd })).error, undefined);
+});
+
+test("snapshot timeout returns status and ignores late completion", async t => {
+  let started!: () => void, finish!: (snapshot: string) => void;
+  const ready = new Promise<void>(resolve => { started = resolve; });
+  const pendingSnapshot = new Promise<string>(resolve => { finish = resolve; });
+  let snapshotSignal: AbortSignal | undefined;
+  const f = await fixture(t, async () => [], {
+    sessionSnapshot: async (_cwd, signal) => { snapshotSignal = signal; started(); return pendingSnapshot; },
+  });
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1000 });
+  const pending = f.service.config({ cwd: f.cwd, includeSessionSnapshot: true });
+  await ready;
+  t.mock.timers.tick(1500);
+  const status = await pending;
+  assert.equal(snapshotSignal?.aborted, true);
+  assert.equal(status.sessionSnapshot, undefined);
+  assert.equal((await f.service.config({ cwd: f.cwd })).sessionSnapshot, undefined);
+  finish("late-snapshot");
+  await pendingSnapshot;
+  assert.equal((await f.service.config({ cwd: f.cwd })).sessionSnapshot, undefined);
+});
+
+test("caller cancellation still rejects an optional session snapshot", async t => {
+  let started!: () => void, finish!: (snapshot: string) => void;
+  const ready = new Promise<void>(resolve => { started = resolve; });
+  const pendingSnapshot = new Promise<string>(resolve => { finish = resolve; });
+  const f = await fixture(t, async () => [], {
+    sessionSnapshot: async () => { started(); return pendingSnapshot; },
+  });
+  const controller = new AbortController();
+  const pending = f.service.config({ cwd: f.cwd, includeSessionSnapshot: true }, controller.signal);
+  await ready;
+  controller.abort();
+  await assert.rejects(pending, { name: "AbortError" });
+  finish("late-snapshot");
+  await pendingSnapshot;
 });
 import { enableSearchSources, isolateSearchHome } from "./search-sources-fixture.js";

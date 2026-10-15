@@ -60,8 +60,8 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
   core/agent-strategy.ts and tool-descriptions.ts]`
 - For `oracle`, bounded means a narrow review scope, not a short runtime cap.
   Parent guidance omits both spawn-level and task-level `timeoutSeconds` unless
-  the user explicitly requests a shorter budget, retaining the configured
-  watchdog (30 minutes by default). Briefs name one concrete question/invariant,
+  the user explicitly requests a different budget, retaining the configured
+  watchdog (3 hours by default). Briefs name one concrete question/invariant,
   task-changed paths/diff and exclusions, not a repository-wide audit. The bundled
   oracle reads adjacent contracts as needed, excludes unrelated worktree changes,
   stops at an evidence-backed verdict, returns coverage gaps and the next question when needed,
@@ -272,7 +272,7 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
     not global knowledge-state reporting. Preserve concurrent work and keep
     disposable reports under `.pi/artifacts/`.
 11. **Session persistence**: only when `ASYNC_SUBAGENTS_ENABLE_SESSIONS` is truthy (child gets `--session-dir <agentDir>/sessions`; otherwise `--no-session`). `[confirmed by code]`
-12. **Timeout**: default 30 min (`DEFAULT_AGENT_TIMEOUT_MS`). On timeout: writes `timeout_ms`/`timed_out_at`/result.md, SIGTERM, SIGKILL after 5s grace, exit code 124. `[confirmed by code, spawn.ts ~168-187]`
+12. **Timeout**: default 3 hours (10,800 seconds; `DEFAULT_AGENT_TIMEOUT_MS`) when no task-, spawn-, role-, or global-level timeout is configured. Explicit `timeoutSeconds`/`timeoutMs` values override this default, including values longer than 3 hours; the default is not a hard cap. For macOS owned-launch agents, the supervisor's native watchdog defaults to the same 3 hours and receives the resolved per-agent timeout for explicit overrides. On timeout: writes `timeout_ms`/`timed_out_at`/result.md, SIGTERM, SIGKILL after 5s grace for ordinary agents, exit code 124. `[confirmed by code, spawn.ts, core/config.ts, owned-launch-integration.ts, owned-launch/launcher.ts]`
 13. **agent_end**: writes result.md, SIGTERM after 50ms grace, SIGKILL after 1s fallback. `[confirmed by code]`
 14. **RPC prompt failure** (`success=false`): writes result.md with error, `notifyComplete(1)`, SIGTERM. `[confirmed by code]`
 15. **Exit handling**: waits 10ms for stdio flush, then finalizes. Exit-code resolution: timed_out→124, completedFromAgentEnd→0, lastAgentEndError→1, numeric→code, signal→128, else→1. `[confirmed by code]`

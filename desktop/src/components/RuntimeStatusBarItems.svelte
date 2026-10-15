@@ -44,6 +44,7 @@
 
   let {
     status,
+    currentModelProvider,
     sessionUsage,
     loadingSessionUsage = false,
     sessionUsageFailed = false,
@@ -58,6 +59,8 @@
     subagentPathNavigation,
   }: {
     status?: RuntimeStatus;
+    /** Provider of the currently selected session model, not the historical usage total. */
+    currentModelProvider?: string;
     sessionUsage?: SessionUsageReport;
     loadingSessionUsage?: boolean;
     sessionUsageFailed?: boolean;
@@ -510,7 +513,14 @@
             <div class="flex max-h-[max(0px,calc(100dvh-70px))] flex-col overflow-y-auto rounded-lg border border-border bg-popover text-popover-foreground shadow-md">
               <header class="shrink-0 border-b border-border px-3 py-2">
                 <div class="flex items-center justify-between gap-2">
-                  <div class="shrink-0 text-xs font-medium text-foreground">Session usage</div>
+                  <div class="flex shrink-0 items-center gap-1.5">
+                    <div class="shrink-0 text-xs font-medium text-foreground">Session usage</div>
+                    {#if currentModelProvider && modelProviderBrand(currentModelProvider)}
+                      <span role="img" aria-label={`Current model provider: ${currentModelProvider}`}>
+                        <ModelProviderIcon provider={currentModelProvider} />
+                      </span>
+                    {/if}
+                  </div>
                   {#if showClaudeAccountSwitcher}
                     <ClaudeAccountSwitcher lastAttemptedAccount={lastClaudeAccountAttempt} />
                   {/if}

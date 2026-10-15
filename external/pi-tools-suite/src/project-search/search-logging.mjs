@@ -105,11 +105,15 @@ export function logSearchDiagnostic(root, diagnostic) {
 }
 
 /** A second layer of coalescing for failures preceding per-session indexing. */
+export function isExpectedIndexCancellation(error) {
+  return error?.name === "AbortError"
+    || (error?.name === "Error" && error?.message === "Search source selection changed");
+}
 export function createBackgroundIndexFailureLogger({ write = logSearchDiagnostic, now = Date.now } = {}) {
   const history = new Map();
   return (root, error, phase = "unknown") => {
     try {
-      if (error?.name === "AbortError") return;
+      if (isExpectedIndexCancellation(error)) return;
       const { code, errorType } = classifyIndexFailure(error);
       const reason = code === "SEARCH_WORK_NEEDS_CONTINUE" ? "needs_continue" : "worker_failed";
       const safePhase = INDEX_FAILURE_PHASES.has(phase) ? phase : "unknown";

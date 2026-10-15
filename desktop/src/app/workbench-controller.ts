@@ -16,7 +16,7 @@ type WorkbenchControllerOptions = {
     preferredNextSessionId?: string,
     onClosing?: () => void,
   ) => Promise<boolean>;
-  previewPane: () => { requestClose: () => boolean } | null;
+  previewPane: () => { requestClose: () => Promise<boolean> } | null;
   closePreview: () => void;
   closeGitDiff: () => void;
   closeLspInstall: () => void;
@@ -58,7 +58,7 @@ export function createWorkbenchController(options: WorkbenchControllerOptions) {
       });
     } else if (tab.kind === "preview") {
       const pane = options.previewPane();
-      closed = pane ? pane.requestClose() : (options.closePreview(), true);
+      closed = pane ? await pane.requestClose() : (options.closePreview(), true);
     } else if (tab.kind === "diff") {
       options.closeGitDiff();
       closed = true;

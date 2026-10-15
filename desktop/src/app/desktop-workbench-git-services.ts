@@ -33,7 +33,7 @@ type DesktopWorkbenchGitServicesOptions = {
   activeTabId: () => WorkbenchTabId | null;
   activeConversationTabId: () => WorkbenchTabId | null;
   setActiveTabId: (id: WorkbenchTabId | null) => void;
-  previewPane: () => { requestClose: () => boolean } | null;
+  previewPane: () => { requestClose: () => Promise<boolean> } | null;
   closeTerminal: () => void;
   nextLocalMessageId: () => string;
   scrollToLatest: () => Promise<void>;

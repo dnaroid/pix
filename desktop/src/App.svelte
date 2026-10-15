@@ -86,7 +86,7 @@
     setActiveWorkbenchTabId: (id) => activeWorkbenchTabId = id,
     nextWorkbenchAuxOrder: () => ++workbenchAuxSequence,
   });
-  let previewPane = $state<{ requestClose: () => boolean } | null>(null);
+  let previewPane = $state<{ requestClose: () => Promise<boolean> } | null>(null);
   let workbenchTerminalPane = $state<{ openTerminal: (command: string) => Promise<void> } | null>(null);
   let transcriptPane = $state<HTMLDivElement | null>(null);
   let transcriptContent = $state<HTMLDivElement | null>(null);

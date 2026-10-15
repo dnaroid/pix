@@ -131,7 +131,7 @@ export interface SubagentConfig {
 	retry?: Partial<RetryConfig>;
 	/** Maximum bytes kept in result.json resultText globally; per-type maxResultBytes overrides. */
 	maxResultBytes?: number;
-	/** Global per-agent wall-clock timeout in milliseconds. Defaults to the built-in 30 minutes. */
+	/** Global per-agent wall-clock timeout in milliseconds. Defaults to the built-in 3 hours. */
 	timeoutMs?: number;
 	/** Suite-level frontier model list and economy switch. Defaults to the built-in list. */
 	frontier?: FrontierConfig;

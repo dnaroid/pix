@@ -110,7 +110,7 @@ describe("WorkbenchTabs desktop interaction", () => {
     expect(workbenchControllerSource).toContain("options.closeSessionTab(tab.sessionId, preferredNextSessionId, () => {");
     expect(workbenchControllerSource).toContain("const wasSelected = options.activeTabId() === id");
     expect(workbenchControllerSource).toContain("if (closed && wasSelected && options.activeTabId() === id)");
-    expect(workbenchControllerSource).toContain("pane ? pane.requestClose() : (options.closePreview(), true)");
+    expect(workbenchControllerSource).toContain("pane ? await pane.requestClose() : (options.closePreview(), true)");
     expect(workbenchControllerSource).toContain("options.closeGitDiff();");
     expect(workbenchControllerSource).toContain("options.closeTerminal();");
     expect(sessionTabClosureSource).toContain("if (options.promptRunning(sessionId))");

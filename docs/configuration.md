@@ -400,7 +400,28 @@ microphone permission.
   be transmitted externally. Legacy external-search data/configuration is not read, migrated,
   deleted or modified by this integration.
 
-## Ignoring legacy context files
+## Local project instructions
+
+Pix TUI and Pix Desktop also load `<workspace>/.pi/AGENTS.md` when it exists.
+Use it for personal/project-specific instructions that should not be committed.
+These rules are added after ordinary `AGENTS.md` / `AGENTS.override.md`
+discovery, without replacing those files or Pi's `APPEND_SYSTEM.md`. Edits
+to existing rules take effect after `/reload` or in a new session. If the file
+is created after an ACP/Desktop session has started, start a new session to
+enable it. Desktop project cleanup (manual Clean and automatic 72-hour
+cleanup) preserves the file as canonical project state.
+
+```bash
+mkdir -p .pi
+${EDITOR:-vi} .pi/AGENTS.md
+```
+
+Keep the file out of Git: repositories that already ignore `.pi/` need no
+extra rule; otherwise add `.pi/AGENTS.md` to the local `.git/info/exclude`.
+This is a Pix feature; invoking stock `pi` directly does not automatically
+load `.pi/AGENTS.md`.
+
+## Ignoring context files
 
 To override an unwanted `AGENTS.md` / `CLAUDE.md` in one directory, create:
 
@@ -414,7 +435,7 @@ Keep the override local without changing repository history:
 echo AGENTS.override.md >> .git/info/exclude
 ```
 
-To disable all context-file discovery:
+To disable all context-file discovery, including private `.pi/AGENTS.md`:
 
 - stock Pi: `pi --no-context-files` / `pi -nc`;
 - Pix TUI: `/no-context-files on`.

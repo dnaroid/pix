@@ -6,13 +6,17 @@ import { fileURLToPath } from "node:url";
 import { DesktopSessionChunks } from "../src/search/session-chunk-service.js";
 import { SessionIdlePolicy } from "../src/search/session-idle.js";
 import { beginSessionSweep } from "../src/search/session-watermark.js";
+import { writeSourcePolicy } from "../src/search/source-policy.js";
+import { SESSION_CHUNK_FORMAT } from "../src/search/session-chunk-store.js";
 import type { BackgroundSessionRecord } from "../src/search/background-session-discovery.js";
 
 test("automatic sweeps resume after restart without old body reads and admit a newly 24h session",async t => {
   const base = fileURLToPath(new URL("../../.pi/artifacts/session-sweep-tests/",import.meta.url));
   await mkdir(base,{recursive:true});
   const root = await mkdtemp(join(base,"case-")), originalNow = Date.now;
+  await writeSourcePolicy(root,"sessions",true);
   let now = 2_000_000_000_000;
+  const identity = `${SESSION_CHUNK_FORMAT}:lexical-only`;
   Date.now = () => now;
   const signal = new AbortController().signal;
   const policy = new SessionIdlePolicy(root,() => now);
@@ -46,7 +50,7 @@ test("automatic sweeps resume after restart without old body reads and admit a n
   await save("old",now-7*86_400_000);
   const first = make(); await run(first); await first.dispose();
   assert.deepEqual(titles,["old"]);
-  const initial = await beginSessionSweep(root,"lexical-only",signal);
+  const initial = await beginSessionSweep(root,identity,signal);
   assert.equal(initial.since,now-2000);
   now += 60_000;
   const restarted = make(); await run(restarted);
@@ -57,18 +61,18 @@ test("automatic sweeps resume after restart without old body reads and admit a n
   assert.deepEqual(failures,[]);
   // Candidate discovery is still complete; cache/query callers never see a filtered list.
   assert.equal(records.length,2);
-  const successful = await beginSessionSweep(root,"lexical-only",signal);
+  const successful = await beginSessionSweep(root,identity,signal);
   now += 60_000;
   await save("failed",now-86_400_000); failTitle = "failed";
   await run(restarted);
-  assert.equal((await beginSessionSweep(root,"lexical-only",signal)).since,successful.since);
+  assert.equal((await beginSessionSweep(root,identity,signal)).since,successful.since);
   const reads = titles.length;
   await run(restarted);
   assert.equal(titles.length,reads,"an unchanged failure is not retried in a tight loop");
-  assert.equal((await beginSessionSweep(root,"lexical-only",signal)).since,successful.since,
+  assert.equal((await beginSessionSweep(root,identity,signal)).since,successful.since,
     "suppressed failure must not be mistaken for a complete pass");
   assert.equal(failures.length,1);
   failTitle = ""; await restarted.dispose(); await run(make());
   assert.equal(titles[titles.length-1],"failed");
-  assert.equal((await beginSessionSweep(root,"lexical-only",signal)).since,now-2000);
+  assert.equal((await beginSessionSweep(root,identity,signal)).since,now-2000);
 });

@@ -63,6 +63,8 @@ and an automatic-retry notice; a failed activity read does not discard readable 
 
 ## Snapshot coverage and cheap change checks
 
+An ACP `pix/search/config` request may include an optional 1.5-second session digest snapshot. Its timeout or read failure omits only `sessionSnapshot`: the remaining status still succeeds and the native freshness probe can proceed without that digest. Caller cancellation still rejects, and a late digest cannot be published after the deadline.
+
 Each source also displays two independent facts:
 
 - **Unchanged / Changed** compares Code/Knowledge content against the committed

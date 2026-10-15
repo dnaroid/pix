@@ -21,6 +21,9 @@ Keep true modal UI limited to bounded decisions, configuration and search, with 
 
 ## Behavior
 
+- Destructive-action confirmations use the shared asynchronous `confirmDesktopAction` helper. In Tauri, the supported `@tauri-apps/plugin-dialog` API invokes the native `message` command (authorized by `dialog:allow-message`); the plugin's injected `window.confirm` shim is asynchronous and invokes a removed `confirm` command, so no native action may rely on its truthiness. Browser previews may use the browser's synchronous `window.confirm` only when its return value is exactly `true`.
+- A missing/rejected native dialog fails closed and records a handled diagnostic. Destructive operations must await consent before reserving/mutating state, recheck workspace/operation ownership after asynchronous consent, and never treat a Promise as approval. Running-conversation tab closure keeps its separate native dialog and user-visible error path described in `desktop-close-warning.md`.
+
 - File/media Preview and Git Diff are explicitly not modal dialogs; they are UI-only tabs in the unified titlebar workbench governed by `specs/desktop-workbench-tabs.md`.
 - General form elicitation, Project settings, Command Picker/Palette and [Universal search](desktop-universal-search.md) use native HTML `<dialog>` with `showModal()` rather than a hand-built fullscreen `role=dialog` overlay. Model + Thinking is instead a [nonmodal status-bar popup](desktop-model-picker-popup.md), per [decision 0049](../docs/decisions/0049-nonmodal-model-picker.md).
 - `desktop/src/lib/modal-dialog.ts` centralizes opening the native modal, intentional initial focus, close-on-unmount, and best-effort focus restoration to the invoker by default. A caller may override the restoration target.

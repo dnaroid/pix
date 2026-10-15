@@ -4,6 +4,32 @@ import { createWorkbenchController } from "./workbench-controller";
 import { shouldActivateConversationTab } from "./desktop-root-effects.svelte";
 
 describe("workbench close navigation", () => {
+  it("waits for Preview consent and preserves its tab when close is rejected", async () => {
+    const preview = { id: "preview", kind: "preview", dirty: true, label: "Preview", title: "Preview",
+      panelId: "preview", closable: true, disabled: false } as const;
+    let activeId: WorkbenchTabId | null = "preview";
+    let resolve!: (allowed: boolean) => void;
+    const consent = new Promise<boolean>(finish => { resolve = finish; });
+    const closePreview = vi.fn();
+    const setActiveTabId = vi.fn((id: WorkbenchTabId | null) => { activeId = id; });
+    const pane = { requestClose: vi.fn(() => consent) };
+    const controller = createWorkbenchController({
+      tabs: () => [preview],
+      activeTabId: () => activeId, activeConversationTabId: () => null,
+      setActiveTabId, handleSessionTabClick: vi.fn(), closeSessionTab: vi.fn(),
+      previewPane: () => pane, closePreview, closeGitDiff: vi.fn(), closeLspInstall: vi.fn(),
+      closeTerminal: vi.fn(), retargetPreviewAnchor: vi.fn(), retargetGitAnchor: vi.fn(),
+    });
+    const pending = controller.close("preview", null);
+    expect(pane.requestClose).toHaveBeenCalledOnce();
+    expect(activeId).toBe("preview");
+    expect(closePreview).not.toHaveBeenCalled();
+    resolve(false);
+    await expect(pending).resolves.toBe(false);
+    expect(activeId).toBe("preview");
+    expect(setActiveTabId).not.toHaveBeenCalled();
+  });
+
   it.each([false, true])("does not overwrite navigation during pending consent (navigated=%s)", async (navigated) => {
     const closingId = workbenchSessionTabId("closing");
     const nextId = workbenchSessionTabId("next");

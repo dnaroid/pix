@@ -41,8 +41,8 @@ describe("desktop editor work surfaces", () => {
   });
 
   it("keeps preview editing state close-aware while using the full editor region", () => {
-    expect(previewSource).toContain("export function requestClose()");
-    expect(previewSource).toContain("editorController.canClose()");
+    expect(previewSource).toContain("export async function requestClose()");
+    expect(previewSource).toContain("await editorController.canClose()");
     expect(previewEditorControllerSource).toContain("options.onDirtyChange()?.(dirty())");
     expect(previewSource).not.toContain("Resize preview");
   });
@@ -86,4 +86,3 @@ describe("desktop editor work surfaces", () => {
     expect(previewFileSearchControllerSource).toContain("if (!query.trim()) {");
   });
 });
-

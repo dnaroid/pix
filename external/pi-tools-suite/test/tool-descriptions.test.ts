@@ -321,8 +321,8 @@ describe("tool descriptions", () => {
 			const prompt = asyncSubagentToolDescriptions(repoAware).subagents.description;
 			expect(prompt).toContain("Bound scope instead: one question/invariant");
 			expect(prompt).toContain("omit spawn-level and task-level timeoutSeconds");
-			expect(prompt).toContain("30 minutes by default");
-			expect(prompt).toContain("unless the user explicitly requests a shorter budget");
+			expect(prompt).toContain("3 hours by default");
+			expect(prompt).toContain("unless the user explicitly requests a different budget");
 			expect(prompt).toContain("exact task diff/paths and exclusions, not a repository-wide audit");
 			expect(prompt).toContain("A watchdog timeout means incomplete work");
 			expect(prompt).toContain("not proof of a provider stall; do not switch models automatically");

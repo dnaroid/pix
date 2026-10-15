@@ -39,6 +39,7 @@ import { NativeSessionCatalog } from "./native-session-catalog.js";
 import { PIX_SESSION_CATALOG_CHANGED_METHOD } from "./session-catalog-contract.js";
 import { brainstormParticipantOptions, freshParticipantAnswer } from "./brainstorm-participant.js";
 import { spawn } from "node:child_process";
+import { statSync } from "node:fs";
 import { copyFile, mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, parse, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -2156,6 +2157,10 @@ export class PixAcpAgent {
 				? { bundledExtensionPath: this.options.toolsSuiteExtensionPath }
 				: {}),
 		});
+		const ignoreContextFiles = this.loadIgnoreContextFiles(cwd);
+		const privateAgentsPath = !ignoreContextFiles && !startupOverride?.args?.includes("--no-context-files")
+			? projectAgentsContextPath(cwd, this.options.logger)
+			: undefined;
 		const startup = startupOverride ?? piClientOptions(
 			this.options.piEntry,
 			cwd,
@@ -2165,12 +2170,15 @@ export class PixAcpAgent {
 			this.options.workspaceUndoExtensionPath,
 			toolsSuiteExtensionPath,
 			this.options.quotaWaitExtensionPath,
-			this.loadIgnoreContextFiles(cwd),
+			ignoreContextFiles,
 			this.options.headsUpExtensionPath,
 			this.clientName === "pix-desktop" ? this.options.htmlSandboxExtensionPath : undefined,
 		);
 		const hostEnv = !startupOverride && this.clientName === "pix-desktop" ? await this.brainstormHost.environment(acpSessionId) : {};
-		const pi = this.options.createPiClient({ ...startup, env: { ...startup.env, ...hostEnv } });
+		const pi = this.options.createPiClient({
+			...startup,
+			env: { ...startup.env, ...hostEnv, ...(privateAgentsPath ? { PIX_PROJECT_AGENTS_FILE: privateAgentsPath } : {}) },
+		});
 		const translator = new EventTranslator({ sessionId: acpSessionId, cwd });
 		const session: AgentSessionState = {
 			acpSessionId,
@@ -4138,6 +4146,18 @@ function piClientOptions(
 	};
 	if (defaultModel.thinkingLevel === undefined) return selected;
 	return { ...selected, args: [...(base.args ?? []), "--thinking", defaultModel.thinkingLevel] };
+}
+
+function projectAgentsContextPath(cwd: string, logger: Logger): string | undefined {
+	const file = join(cwd, ".pi", "AGENTS.md");
+	try {
+		return statSync(file).isFile() ? file : undefined;
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+			logger.warn(`could not inspect project-local AGENTS.md: ${stringifyUnknown(error)}`);
+		}
+		return undefined;
+	}
 }
 
 

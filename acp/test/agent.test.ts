@@ -878,6 +878,26 @@ test("session/new applies the Pix no-context-files setting to the Pi RPC process
 	assert.deepEqual(options[0]?.args, ["--no-context-files"]);
 });
 
+test("session/new passes .pi/AGENTS.md as private context unless context files are disabled", async (t) => {
+	const cwd = mkdtempSync(join(tmpdir(), "pix-project-agents-"));
+	t.after(() => rm(cwd, { recursive: true, force: true }));
+	await mkdir(join(cwd, ".pi"));
+	const path = join(cwd, ".pi", "AGENTS.md");
+	await writeFile(path, "Personal project rules\n");
+	const enabled = createTestAdapter();
+	await connect(enabled.adapter, (cx) => cx.buildSession(cwd).start());
+	assert.equal(enabled.options[0]?.args, undefined);
+	assert.deepEqual(enabled.options[0]?.env, {
+		PIX_ACP_SESSION_STATE_BRIDGE: "1",
+		PIX_PROJECT_AGENTS_FILE: path,
+	});
+
+	const disabled = createTestAdapter({ loadIgnoreContextFiles: () => true });
+	await connect(disabled.adapter, (cx) => cx.buildSession(cwd).start());
+	assert.deepEqual(disabled.options[0]?.args, ["--no-context-files"]);
+	assert.deepEqual(disabled.options[0]?.env, { PIX_ACP_SESSION_STATE_BRIDGE: "1" });
+});
+
 test("Desktop sessions explicitly load all bundled extensions", async (t) => {
 	const agentDir = mkdtempSync(join(tmpdir(), "pix-acp-session-extensions-"));
 	t.after(() => rm(agentDir, { recursive: true, force: true }));

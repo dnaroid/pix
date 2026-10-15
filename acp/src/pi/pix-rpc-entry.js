@@ -4,14 +4,17 @@
 process.env.PI_CODING_AGENT = "true";
 process.env.AI_AGENT = "pi";
 process.emitWarning = () => {};
-const { installPixProcessLogging } = await import("../../../dist/app/logger.js");
+const { installPixProcessLogging, logPixEvent } = await import("../../../dist/app/logger.js");
 installPixProcessLogging({ project: process.cwd(), module: "rpc-process" });
 
 const codingAgentIndex = import.meta.resolve("@earendil-works/pi-coding-agent");
-const { AgentSession, ModelRuntime } = await import("@earendil-works/pi-coding-agent");
+const { AgentSession, DefaultResourceLoader, ModelRuntime } = await import("@earendil-works/pi-coding-agent");
 const { installContextInventoryHost } = await import("./context-inventory-host.js");
 const { installBtwHost, handleBtwPrompt } = await import("./btw-host.js");
-installContextInventoryHost(AgentSession);
+installContextInventoryHost(AgentSession, {
+	DefaultResourceLoader,
+	onReadError: (path, error) => logPixEvent("warn", "context:project-agents-read-failed", { path, error }, { project: process.cwd(), module: "resources" }),
+});
 installBtwHost(AgentSession);
 const { installRpcQuestionRecovery } = await import("../../../dist/bundled-extensions/question/recovery.js");
 installRpcQuestionRecovery(AgentSession);

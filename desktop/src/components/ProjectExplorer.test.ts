@@ -133,7 +133,7 @@ describe("ProjectExplorer keyboard tree", () => {
     expect(explorerSource).toContain('invoke<ProjectTreeEntry>("rename_project_entry"');
     expect(explorerSource).toContain('invoke<ProjectTreeEntry>("copy_project_entry"');
     expect(explorerSource).toContain('invoke("delete_project_entry"');
-    expect(explorerSource).toContain("window.confirm");
+    expect(explorerSource).toContain("await confirmDesktopAction");
     expect(explorerSource).toContain("operationGeneration");
     expect(explorerSource).toContain("finishOperation(operation)");
   });

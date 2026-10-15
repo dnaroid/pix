@@ -9,7 +9,7 @@
     "core:window:allow-internal-toggle-maximize",
     "core:webview:allow-create-webview-window",
     "dialog:allow-open",
-    "dialog:allow-confirm",
+    "dialog:allow-message",
     "clipboard-manager:allow-write-text",
     "clipboard-manager:allow-read-text",
     "clipboard-manager:allow-write-image",

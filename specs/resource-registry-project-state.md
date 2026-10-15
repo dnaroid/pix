@@ -280,7 +280,8 @@ JSONC/task overlay import or fallback.
   not delete the database. See [Desktop universal search](desktop-universal-search.md).
 - Any other regular top-level directory directly under `.pi/` is non-canonical
   and is removed recursively. Top-level regular files are allowlist-based too:
-  `TODO.md`, `pi-tools-suite.jsonc`, `pix-desktop.jsonc`, `pix.jsonc`,
+  `AGENTS.md` (untracked personal rules for Pix context), `TODO.md`,
+  `pi-tools-suite.jsonc`, `pix-desktop.jsonc`, `pix.jsonc`,
   `qa_auth.jsonc`, `registry.json`, `tasks.sqlite`, `tasks.sqlite-wal`,
   `tasks.sqlite-shm`, `tasks.sqlite-journal`, `todo-plan.json`,
   `workspace.jsonc`, and ignored legacy `tasks.jsonc` are preserved;

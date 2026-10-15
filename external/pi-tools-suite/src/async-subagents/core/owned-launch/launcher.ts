@@ -42,7 +42,7 @@ export interface OwnedLaunchTimeouts {
 }
 
 export const DEFAULT_OWNED_LAUNCH_TIMEOUTS: OwnedLaunchTimeouts = {
-	watchdogSeconds: 30 * 60,
+	watchdogSeconds: 3 * 60 * 60,
 	releaseTimeoutSeconds: 20,
 	drainDeadlineSeconds: 30,
 };

@@ -57,11 +57,19 @@
             <QuotaResetCalendar {window} {now} deadlines={creditDeadlines} />
           {:else}
             <span class="relative h-2 w-full" aria-hidden="true">
-              <span class="absolute inset-0 overflow-hidden rounded-sm bg-border">
+              <span class="absolute inset-0 overflow-hidden rounded-sm bg-border" data-hourly-progress-track>
                 <span
-                  class="absolute inset-y-0 right-0 bg-muted-foreground"
+                  class="absolute inset-y-0 right-0 bg-foreground"
                   style={`width: ${clampUsagePercent(window.remainingPercent)}%`}
+                  data-hourly-remaining-fill
                 ></span>
+                {#if window.hasKnownWindowDuration && Number.isFinite(window.windowSeconds) && window.windowSeconds > 3600}
+                  <span
+                    class="absolute inset-0 hourly-dividers"
+                    style:background-size={`${3600 / window.windowSeconds * 100}% 100%`}
+                    data-hourly-dividers
+                  ></span>
+                {/if}
               </span>
             </span>
             <div class="flex items-center justify-between gap-2">
@@ -76,3 +84,10 @@
     </div>
   </section>
 {/if}
+
+<style>
+  .hourly-dividers {
+    background-image: linear-gradient(to left, color-mix(in srgb, var(--popover) 80%, transparent) 1px, transparent 1px);
+    background-repeat: repeat-x;
+  }
+</style>

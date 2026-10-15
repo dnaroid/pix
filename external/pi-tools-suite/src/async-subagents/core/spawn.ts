@@ -37,10 +37,10 @@ export interface SpawnAgentOptions {
 	/** Test seam for Pi's installed-package lookup (provider dependency resolution). */
 	locateProviderPackagesForTest?: InstalledPackageLocator;
 	/** Unit-test-only native boundary; production tool never supplies this. */
-	ownedLaunchForTest?: (request: { agentDir: string; command: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv; binaries: OwnedLaunchBinaries }) => OwnedLaunchHandle;
+	ownedLaunchForTest?: (request: { agentDir: string; command: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv; binaries: OwnedLaunchBinaries; timeouts?: { watchdogSeconds: number } }) => OwnedLaunchHandle;
 }
 
-export const DEFAULT_AGENT_TIMEOUT_MS = 30 * 60 * 1000;
+export const DEFAULT_AGENT_TIMEOUT_MS = 3 * 60 * 60 * 1000;
 const UI_QA_WORKSPACE_DIR = "ui-qa";
 const UI_QA_BROWSER_WORKSPACE_DIR = "browser";
 const SUBAGENT_AGENT_DIR_ENV = "PI_SUBAGENT_AGENT_DIR";
@@ -207,7 +207,11 @@ export function spawnAgent(
 	// Always overwrite inherited state so retries/nested test processes cannot
 	// carry another child's capability selection into this attempt.
 	env[SUBAGENT_WORK_TOOLS_ENV] = JSON.stringify(workTools);
-	const ownedHandle = owned ? (options.ownedLaunchForTest ?? launchPreparedOwnedAgent)({ agentDir, command: invocation.command, args: invocation.args, cwd, env, binaries: options.ownedBinaries! }) : undefined;
+	const timeoutMs = options.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS;
+	const ownedHandle = owned ? (options.ownedLaunchForTest ?? launchPreparedOwnedAgent)({
+		agentDir, command: invocation.command, args: invocation.args, cwd, env, binaries: options.ownedBinaries!,
+		timeouts: timeoutMs > 0 ? { watchdogSeconds: Math.ceil(timeoutMs / 1000) } : undefined,
+	}) : undefined;
 	// The prepared bridge guarantees three piped stdio streams, just as spawn() does.
 	const proc: ChildProcessWithoutNullStreams = (ownedHandle?.process as ChildProcessWithoutNullStreams | undefined) ?? spawn(invocation.command, invocation.args, {
 		cwd,
@@ -454,7 +458,6 @@ export function spawnAgent(
 		agentSettledCompletionFallbackTimer.unref?.();
 	};
 
-	const timeoutMs = options.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS;
 	if (timeoutMs > 0) {
 		timeoutTimer = setTimeout(() => {
 			if (completionNotified) return;

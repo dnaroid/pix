@@ -7,7 +7,7 @@ const hourly = { remainingPercent: 62, resetAt: now + 2 * 3_600_000, windowSecon
 const weekly = { remainingPercent: 32, resetAt: now + 2 * 86_400_000, windowSeconds: 604_800, hasKnownWindowDuration: true };
 
 describe("UsageLimitBars", () => {
-  it("integrates the weekly timeline while leaving the hourly remaining track and countdown intact", () => {
+  it("uses the same fill color for hourly and weekly tracks while retaining their countdowns", () => {
     const { body } = render(UsageLimitBars, {
       props: { windows: [{ key: "H", label: "H", window: hourly }, { key: "W", label: "W", window: weekly }], now },
     });
@@ -17,9 +17,9 @@ describe("UsageLimitBars", () => {
     expect(body).toContain("62%");
     expect(body).toContain("32%");
     expect(body).toContain("width: 62%");
-    expect(body).toContain('class="absolute inset-y-0 right-0 bg-muted-foreground"');
+    expect(body.match(/class="absolute inset-y-0 right-0 bg-foreground"/g)).toHaveLength(2);
     expect(body).toContain("32%");
-    expect(body).toContain("bg-muted-foreground");
+    expect(body).not.toContain("bg-muted-foreground");
     expect(body).toContain("bg-foreground");
     expect(body).toContain("remaining</span>");
     expect(body).toContain("Resets in 2h0m");
@@ -44,11 +44,29 @@ describe("UsageLimitBars", () => {
     expect(body).not.toContain("data-usage-limit-bars");
   });
 
-  it("keeps short-window tracks continuous", () => {
+  it("divides a five-hour window into hour-wide segments", () => {
     const { body } = render(UsageLimitBars, { props: { windows: [{ key: "H", label: "H", window: hourly }], now } });
     expect(body).not.toContain("data-day-sector");
     expect(body).not.toContain("data-weekly-now-marker");
     expect(body).toContain("width: 62%");
+    expect(body).toContain("data-hourly-dividers");
+    expect(body).toContain("background-size: 20% 100%");
+  });
+
+  it.each([0, -3600, 3600, Number.NaN, Number.POSITIVE_INFINITY])("omits hourly dividers for an unsplittable duration (%s)", (windowSeconds) => {
+    const { body } = render(UsageLimitBars, { props: { windows: [{ key: "H", label: "H", window: { ...hourly, windowSeconds } }], now } });
+    expect(body).not.toContain("data-hourly-dividers");
+    expect(body).toContain("data-hourly-remaining-fill");
+  });
+
+  it("does not invent hour segments for an unknown duration", () => {
+    const { body } = render(UsageLimitBars, { props: { windows: [{ key: "H", label: "H", window: { ...hourly, hasKnownWindowDuration: false } }], now } });
+    expect(body).not.toContain("data-hourly-dividers");
+  });
+
+  it("sizes hour segments from the full window including a partial final hour", () => {
+    const { body } = render(UsageLimitBars, { props: { windows: [{ key: "H", label: "H", window: { ...hourly, windowSeconds: 9000 } }], now } });
+    expect(body).toContain("background-size: 40% 100%");
   });
 
   it("marks stale snapshots as cached", () => {

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { confirmDesktopAction } from "../lib/confirm-action";
 import type { GitDiff, GitDiffScope, GitSnapshot } from "../lib/git";
 import { sameGitDiff, gitPushBlockedReason, gitStageGenerateCommitPushBlockedReason, gitUpdateNotice, type GitUpdateResult, type GitRepositoryAction, type GitRepositoryDetails, type GitHistoryEntry, type GitCommitDiff, type GitStashEntry, type GitReviewResult } from "../lib/git-workflow";
 import type { WorkbenchTabId } from "../lib/workbench-tabs";
@@ -136,8 +137,9 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
     if (
       mutationOptions.reloadProject
       && options.previewDirty()
-      && !window.confirm("Discard unsaved Preview changes and reload the project?")
+      && !await confirmDesktopAction("Discard unsaved Preview changes and reload the project?")
     ) return false;
+    if (!current() || actionId !== null || llmActionId !== null || resolveRunning) return false;
     actionId = nextActionId;
     error = null;
     notice = null;
@@ -410,9 +412,14 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
     }
   }
 
-  function repositoryAction(action: GitRepositoryAction, target?: string): Promise<boolean> {
+  async function repositoryAction(action: GitRepositoryAction, target?: string): Promise<boolean> {
     if ((action === "discard" || action === "stash-apply") && !target) return Promise.resolve(false);
-    if (action === "discard" && !window.confirm(`Discard unstaged changes in ${target}?\n\nStaged changes are kept. This cannot be undone.`)) return Promise.resolve(false);
+    const requestWorkspace = options.workspace(), requestGeneration = generation;
+    if (action === "discard" && !await confirmDesktopAction(
+      `Discard unstaged changes in ${target}?\n\nStaged changes are kept. This cannot be undone.`,
+      { title: "Discard changes?", okLabel: "Discard" },
+    )) return false;
+    if (options.workspace() !== requestWorkspace || generation !== requestGeneration) return false;
     const commands = {
       update: "git_update", fetch: "git_fetch", pull: "git_pull", "stash-save": "git_stash_save",
       "stash-apply": "git_stash_apply", discard: "git_discard_file",

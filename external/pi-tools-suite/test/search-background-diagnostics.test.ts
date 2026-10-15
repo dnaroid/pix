@@ -1,5 +1,5 @@
 import { expect, spyOn, test } from "bun:test";
-import { classifyIndexFailure, createBackgroundIndexFailureLogger } from "../src/project-search/search-logging.mjs";
+import { classifyIndexFailure, createBackgroundIndexFailureLogger, isExpectedIndexCancellation } from "../src/project-search/search-logging.mjs";
 import { SessionChunkSync } from "../src/project-search/session-chunk-sync.mjs";
 import { sessionIndexProgress } from "../src/project-search/session-index-progress.mjs";
 
@@ -25,8 +25,13 @@ test("indexing failures are classified, coalesced and never include provider tex
     .toEqual({ errorType: "Error" });
   const abort = new DOMException("PRIVATE_CANCEL", "AbortError");
   log("/fixture", abort, "indexing");
+  log("/fixture", new Error("Search source selection changed"), "selection");
   await Promise.resolve();
   expect(records).toHaveLength(2);
+  expect(isExpectedIndexCancellation(new Error("Search source selection changed"))).toBe(true);
+  log("/fixture", new Error("Search source policy unavailable"), "policy");
+  await Promise.resolve();
+  expect(records).toHaveLength(3);
 });
 
 test("index progress failures include safe cause metadata, not provider text", async () => {

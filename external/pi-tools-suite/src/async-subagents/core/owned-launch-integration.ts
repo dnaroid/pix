@@ -337,6 +337,7 @@ function writeOwnedMetadataAtomic(agentDir: string, meta: OwnedMetadata): void {
 
 export function launchPreparedOwnedAgent(options: {
 	agentDir: string; command: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv; binaries: OwnedLaunchBinaries;
+	timeouts?: { watchdogSeconds: number };
 }): OwnedLaunchHandle {
 	if (process.platform !== "darwin") throw new Error("owned launch requires macOS");
 	let preparedRunDir: string | undefined;

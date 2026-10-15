@@ -7,6 +7,7 @@ import { runSourceIndex, type IndexServices } from "../src/project-search/index-
 import { readIndexStatus } from "../src/project-search/index-status.js";
 import { readCachedProjectVectors } from "../src/project-search/semantic-cache.js";
 import { indexMissingSessionVectors } from "../src/project-search/semantic-session-indexer.js";
+import { indexSessionChunks } from "../src/project-search/session-chunks.mjs";
 import type { CommitEmbeddingConfig } from "../src/project-search/semantic-commit-provider.js";
 import { removeDirsWithRetry } from "./support/fs-retry.js";
 
@@ -81,6 +82,8 @@ test("manual sessions drain names and public chunks beyond 256, and reuse both n
 
 test("ordinary session search retains its 256-vector budget", async () => {
   const f = fixture(), candidates = sessions(f.root, 260);
+  // Names must first be authenticated against indexed transcript metadata.
+  expect((await indexSessionChunks(f.root, candidates, { signal: signal() })).complete).toBe(true);
   const result = await indexMissingSessionVectors(f.root, candidates, undefined, f.services.semantic!, signal(), config);
   expect(result).toEqual({ indexed: 256, remaining: 4 });
 }, 30_000);

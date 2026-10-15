@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { confirmDesktopAction } from "../lib/confirm-action";
   import CircleArrowDown from "@lucide/svelte/icons/circle-arrow-down";
   import CircleArrowUp from "@lucide/svelte/icons/circle-arrow-up";
   import EllipsisVertical from "@lucide/svelte/icons/ellipsis-vertical";
@@ -111,13 +112,16 @@
     return projectPiCleanupBytes !== undefined ? `${total} · ${formatPiSize(projectPiCleanupBytes)} reclaimable` : total;
   }
 
-  function cleanProjectPi(): void {
+  async function cleanProjectPi(): Promise<void> {
     menuOpen = false;
     if (actionId !== null || projectPiStorageLoading || projectPiStorageError || !projectPiCleanupAvailable) return;
-    const confirmed = window.confirm(
+    const requestSnapshot = snapshot, requestedBytes = projectPiCleanupBytes;
+    const confirmed = await confirmDesktopAction(
       `Clean ${formatPiSize(projectPiCleanupBytes)} from .pi? This clears all contents of artifacts/ and subagents/ and removes non-canonical top-level files and directories. Canonical project state, config, agents/, plans/, skills/ and task-attachments/ are preserved.`,
     );
-    if (confirmed) onCleanProject();
+    if (confirmed && snapshot === requestSnapshot && projectPiCleanupBytes === requestedBytes
+      && actionId === null && !projectPiStorageLoading
+      && !projectPiStorageError && projectPiCleanupAvailable) onCleanProject();
   }
 
   $effect(() => {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { classifyIndexFailure, createBackgroundIndexFailureLogger } from "../src/search/search-logging.js";
+import { classifyIndexFailure, createBackgroundIndexFailureLogger, isExpectedIndexCancellation } from "../src/search/search-logging.js";
 import { SessionChunkSync } from "../src/search/session-chunk-sync.js";
 
 test("background index failure diagnostics coalesce repeats without leaking errors", async () => {
@@ -34,8 +34,14 @@ test("background index failure diagnostics coalesce repeats without leaking erro
   assert.deepEqual(classifyIndexFailure(unsafe), { errorType: "OtherError" });
   assert.doesNotMatch(JSON.stringify(rows), /private prompt|private query|PRIVATE_TOKEN|PRIVATE_EXCEPTION/);
   log("/project", new DOMException("do not log cancellation", "AbortError"), "indexing");
+  log("/project", new Error("Search source selection changed"), "policy");
   await Promise.resolve();
   assert.equal(rows.length, 3);
+  assert.equal(isExpectedIndexCancellation(new Error("Search source selection changed")), true);
+  assert.equal(isExpectedIndexCancellation(new Error("Search source policy unavailable")), false);
+  log("/project", new Error("Search source policy unavailable"), "policy");
+  await Promise.resolve();
+  assert.equal(rows.length, 4, "actual policy failures must still be logged");
 });
 
 test("backoff stops growing after 15 minutes and successful recovery restores ordinary polling", async t => {
