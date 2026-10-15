@@ -200,14 +200,21 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
    array (including `[]`), and every normalized `modelByParent` entry carries
    its own fallback array. Modern `models` profiles already encode the complete
    ordered candidate chain. `[confirmed by code, config.ts]`
-   The bundled `oracle` uses `modelSelection: frontier` with
-   `parentProviderPolicy: require-other`: for every parent, its entire
-   initial/fallback chain excludes the parent's vendor. Missing parent identity
-   or no eligible other-vendor candidate fails closed. A new frontier model is
-   a `frontierModels` config entry, not an oracle edit.
+   The bundled `oracle` uses `modelSelection: frontier`,
+   `vendorsByParentVendor`, and `parentProviderPolicy: require-other`. Its
+   profile pairs OpenAI parents with Anthropic candidates, Anthropic parents
+   with OpenAI candidates, and other parents with OpenAI then Anthropic;
+   missing parent identity or no eligible paired candidate fails closed. GLM
+   is never an oracle candidate. The vendor map orders vendors first, then
+   candidates follow `frontierModels` order within each vendor. A new frontier
+   model is a `frontierModels` config entry, not an oracle edit.
    The shipped frontier list is Astra, GLM-5.3, and
    `anthropic/claude-opus-5-5` with alias `*opus*` (any serving provider).
    Sol is not frontier. Astra is enabled for `oracle` in the default list.
+   Economy mode excludes both expensive candidates for OpenAI, Anthropic, and
+   Z.ai parents under the default pairing, hiding the oracle from those parent
+   catalogs. The oracle prompt also limits consequential decisions to one
+   question each and forbids re-invoking merely to confirm an earlier answer.
    The bundled `frontier-review` role has been merged into `oracle` and removed;
    oracle has no parent-tier visibility gate. User/project roles and model lists
    remain explicit overrides and are not rewritten. Oracle provides both a

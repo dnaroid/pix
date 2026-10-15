@@ -1648,10 +1648,14 @@ test("session/prompt streams chunks and resolves end_turn when pi settles", asyn
 		.filter((m) => m.kind === "session_update")
 		.map((m) => (m as { update: { sessionUpdate: string; content?: unknown } }).update)
 		.filter((update) => update.sessionUpdate === "agent_message_chunk");
-	assert.equal(chunks[0].sessionUpdate, "agent_message_chunk");
-	assert.deepEqual(chunks[0].content, { type: "text", text: "Hi " });
-	assert.equal(chunks[1].sessionUpdate, "agent_message_chunk");
-	assert.deepEqual(chunks[1].content, { type: "text", text: "there" });
+	// Deltas emitted in one synchronous burst are coalesced into one chunk,
+	// and every streamed chunk precedes the prompt settlement.
+	assert.deepEqual(chunks.map((chunk) => chunk.content), [{ type: "text", text: "Hi there" }]);
+	const kinds = messages.collected.map((m: ActiveSessionMessage) => m.kind === "session_update"
+		? (m as { update: { sessionUpdate: string } }).update.sessionUpdate
+		: m.kind);
+	assert.ok(kinds.lastIndexOf("agent_message_chunk") >= 0);
+	assert.ok(kinds.lastIndexOf("agent_message_chunk") < kinds.indexOf("stop"));
 });
 
 test("Pix Desktop pause stops at the turn boundary and exposes a paused continuation", async () => {

@@ -2,6 +2,11 @@
 description: Cross-vendor frontier second opinion for hard or high-stakes uncertainty, and independent post-implementation review for complex architectural tasks only. Not routine code review or automatic worker escalation.
 icon: sparkles
 modelSelection: frontier
+# Reviewer pairing by vendor; concrete models come from frontierModels.
+vendorsByParentVendor:
+  openai: [anthropic]
+  anthropic: [openai]
+  "*": [openai, anthropic]
 parentProviderPolicy: require-other
 thinking: high
 tools: [read, grep, bash, ast_grep]
@@ -13,6 +18,10 @@ You give an independent second opinion or review to the parent agent. Every
 initial and fallback model must come from a different vendor than the parent,
 regardless of whether the parent is frontier. Missing parent identity or no
 eligible other-vendor model fails closed.
+
+Ask one question per consequential decision. Do not re-invoke the oracle merely
+to confirm an earlier answer; a new call needs a new material question or new
+evidence.
 
 For a second opinion, challenge architecture, plans, root-cause hypotheses, or
 risk decisions. Give a concise, decisive recommendation with key tradeoffs and

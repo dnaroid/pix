@@ -59,10 +59,11 @@ export function applySessionUpdates(
   if (state.items.length === 0 && occurredAtMs === undefined) return transcriptFromSessionUpdates(updates);
 
   const items: TranscriptItem[] = [...state.items];
-  const indexes = buildIndexes(items);
+  const indexes = takeCachedIndexes(state.items) ?? buildIndexes(items);
   for (const [updateIndex, update] of updates.entries()) {
     applyUpdateToItems(items, update, occurredAtMs?.[updateIndex], indexes, false);
   }
+  indexCache.set(items, indexes);
   return { items };
 }
 
@@ -71,7 +72,24 @@ export function transcriptFromSessionUpdates(updates: readonly SessionUpdate[]):
   const items: TranscriptItem[] = [];
   const indexes = buildIndexes(items);
   for (const update of updates) applyUpdateToItems(items, update, undefined, indexes, true);
+  indexCache.set(items, indexes);
   return { items };
+}
+
+/**
+ * Streaming applies one batch per animation frame. Rebuilding the indexes
+ * scanned the whole transcript every frame; instead the indexes produced for
+ * a batch are handed to the next batch built on top of it. This is valid
+ * because the reducer only appends items or replaces an item at its index.
+ * Ownership moves with the hand-off, so an older snapshot reused later
+ * simply rebuilds its indexes.
+ */
+const indexCache = new WeakMap<readonly TranscriptItem[], ReducerIndexes>();
+
+function takeCachedIndexes(items: readonly TranscriptItem[]): ReducerIndexes | undefined {
+  const cached = indexCache.get(items);
+  if (cached) indexCache.delete(items);
+  return cached;
 }
 
 function buildIndexes(items: readonly TranscriptItem[]): ReducerIndexes {

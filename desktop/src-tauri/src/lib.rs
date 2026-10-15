@@ -234,9 +234,10 @@ fn desktop_watch_restart_request_path() -> Option<PathBuf> {
     desktop_watch_state_path().map(|path| path.with_extension("restart"))
 }
 
+// Path canonicalization/metadata checks must not run on the main (UI) thread.
 #[tauri::command]
-fn desktop_watch_restart_available() -> Result<bool, String> {
-    Ok(desktop_watch_restart_target()?.is_some())
+async fn desktop_watch_restart_available() -> Result<bool, String> {
+    run_blocking(|| Ok(desktop_watch_restart_target()?.is_some())).await
 }
 
 #[derive(Serialize)]
@@ -263,16 +264,22 @@ fn read_desktop_watch_status() -> Result<DesktopWatchStatus, String> {
 }
 
 #[tauri::command]
-fn desktop_watch_restart(app: AppHandle) -> Result<(), String> {
-    if desktop_watch_restart_target()?.is_none() {
-        return Ok(());
+async fn desktop_watch_restart(app: AppHandle) -> Result<(), String> {
+    let requested = run_blocking(|| {
+        if desktop_watch_restart_target()?.is_none() {
+            return Ok(false);
+        }
+        let Some(request_path) = desktop_watch_restart_request_path() else {
+            return Ok(false);
+        };
+        fs::write(&request_path, b"restart\n")
+            .map_err(|error| format!("could not request desktop restart: {error}"))?;
+        Ok(true)
+    })
+    .await?;
+    if requested {
+        app.exit(0);
     }
-    let Some(request_path) = desktop_watch_restart_request_path() else {
-        return Ok(());
-    };
-    fs::write(&request_path, b"restart\n")
-        .map_err(|error| format!("could not request desktop restart: {error}"))?;
-    app.exit(0);
     Ok(())
 }
 

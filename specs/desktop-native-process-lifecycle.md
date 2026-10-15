@@ -18,12 +18,16 @@ the label from the registry; even a start already queued on the blocking pool
 must not leave a child behind. Application exit rejects subsequent starts and
 stops all owned children. Generation-checked stop cannot terminate a replacement.
 
-ACP stdin is written by a worker, not an async command thread. Its command
-boundary admits at most 16 queued messages / 8 MiB; a single oversized JSON-RPC
-message is permitted exclusively. Saturated command admission returns an explicit
-busy/retry error immediately; rejected writes are not accepted. Accepted writes
-retain FIFO order and settle their acknowledgements asynchronously. Invalid JSON
-rejects only that write; an OS write failure rejects and drains all pending writes.
+ACP stdin is written by a worker, not an async command thread. `acp_send`
+accepts a batch of 1..=256 newline-free JSON objects as one queue item. The
+command boundary admits at most 16 queued batches / 8 MiB; a single oversized
+batch is permitted exclusively. Saturated command admission returns an explicit
+busy/retry error immediately; rejected writes are not accepted. Accepted batches
+retain FIFO order, are written through a buffered writer, flushed once, and
+settle their acknowledgements asynchronously. An invalid entry rejects only its
+batch, with nothing written; an OS write failure rejects and drains all pending
+writes. The webview keeps one batch in flight per run and coalesces later sends
+into an ordered outbox (bounded to 4096 lines), so send order is strict.
 Output producers backpressure on bounded queues rather than dropping lines.
 Shutdown closes stdin and uses bounded grace before force-stop.
 Output is emitted in bounded batches. ACP diagnostics remain separate from
@@ -32,7 +36,10 @@ protocol stdout.
 On an unexpected ACP exit, the native exit event includes a separate 64 KiB
 stderr tail captured before event batching. The supervisor waits at most 250 ms
 for the stderr reader to finish, off the UI thread; a broken inherited pipe may
-leave a partial tail but cannot indefinitely delay exit notification. The
+leave a partial tail but cannot indefinitely delay exit notification. Before
+emitting `acp://exit`, the supervisor also waits at most 1 s for the stdout and
+stderr forwarders to emit their final batches, so final JSON-RPC responses
+arrive before exit rejects pending requests. The
 Desktop error strip shows the exit status and a bounded diagnostic reason
 (preferring a fatal line over stack frames), or explicitly states that stderr
 is unavailable. Each connection attempt resets its frontend diagnostic buffer.

@@ -20,7 +20,7 @@ import * as path from "node:path";
  * - `#` comments (full-line and trailing)
  * - inline arrays: `[a, b, "c"]`
  * - block lists: `- item` (indented or at the parent key's indent)
- * - one+ levels of nested maps for `modelByParent` / `retry`
+ * - one+ levels of nested maps for `modelByParent` / `vendorsByParentVendor` / `retry`
  * - comma-separated strings for array fields (`tools: read, grep, bash`)
  *
  * Anything else (tabs, block scalars `|`/`>`, anchors/aliases, flow maps,
@@ -45,6 +45,7 @@ const KNOWN_FRONTMATTER_KEYS = new Set([
 	"icon",
 	"models",
 	"modelSelection",
+	"vendorsByParentVendor",
 	"model",
 	"fallbackModels",
 	"modelByParent",

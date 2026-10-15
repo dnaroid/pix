@@ -64,7 +64,7 @@ describe("TauriAcpTransport", () => {
     expect(lines).toEqual(["current", "next"]);
     expect(exits).toEqual([]);
     expect(tauri.invoke).toHaveBeenCalledWith("acp_start", { windowLabel: "project-one" });
-    expect(tauri.invoke).toHaveBeenCalledWith("acp_send", { windowLabel: "project-one", generation: 7, line: "{}" });
+    expect(tauri.invoke).toHaveBeenCalledWith("acp_send", { windowLabel: "project-one", generation: 7, lines: ["{}"] });
     expect(tauri.invoke).toHaveBeenCalledWith("acp_stop", { windowLabel: "project-one", generation: 7 });
     await expect(transport.send("{}")).rejects.toThrow("not started");
   });
@@ -179,5 +179,66 @@ describe("TauriAcpTransport", () => {
     await Promise.all([stopped, replacement]);
     expect(tauri.invoke.mock.calls.filter(([command]) => command === "acp_start")).toHaveLength(2);
     await transport.stop();
+  });
+  it("coalesces a burst of sends into one ordered native batch", async () => {
+    const transport = new TauriAcpTransport();
+    await transport.start(handlers());
+    await Promise.all([transport.send("{\"n\":1}"), transport.send("{\"n\":2}"), transport.send("{\"n\":3}")]);
+    const sends = tauri.invoke.mock.calls.filter(([command]) => command === "acp_send");
+    expect(sends).toEqual([["acp_send", { windowLabel: "project-one", generation: 7, lines: ["{\"n\":1}", "{\"n\":2}", "{\"n\":3}"] }]]);
+    await transport.stop();
+  });
+
+  it("keeps one batch in flight and sends later lines after it, in order", async () => {
+    const gate = deferred<void>();
+    const transport = new TauriAcpTransport();
+    await transport.start(handlers());
+    const batches: string[][] = [];
+    tauri.invoke.mockImplementation((command: string, args: { lines?: string[] }) => {
+      if (command !== "acp_send") return Promise.resolve();
+      batches.push(args.lines ?? []);
+      return batches.length === 1 ? gate.promise : Promise.resolve();
+    });
+    const first = transport.send("{\"a\":1}");
+    await Promise.resolve();
+    await Promise.resolve();
+    const second = transport.send("{\"b\":2}");
+    const third = transport.send("{\"c\":3}");
+    expect(batches).toEqual([["{\"a\":1}"]]);
+    gate.resolve();
+    await Promise.all([first, second, third]);
+    expect(batches).toEqual([["{\"a\":1}"], ["{\"b\":2}", "{\"c\":3}"]]);
+    await transport.stop();
+  });
+
+  it("rejects only the failed batch and keeps delivering later sends", async () => {
+    const transport = new TauriAcpTransport();
+    await transport.start(handlers());
+    let calls = 0;
+    tauri.invoke.mockImplementation((command: string) => {
+      if (command !== "acp_send") return Promise.resolve();
+      calls += 1;
+      return calls === 1 ? Promise.reject(new Error("write failed")) : Promise.resolve();
+    });
+    await expect(transport.send("{}")).rejects.toThrow("write failed");
+    await expect(transport.send("{}")).resolves.toBeUndefined();
+    await transport.stop();
+  });
+
+  it("rejects queued sends on stop without sending them to the native host", async () => {
+    const gate = deferred<void>();
+    const transport = new TauriAcpTransport();
+    await transport.start(handlers());
+    tauri.invoke.mockImplementation((command: string) => command === "acp_send" ? gate.promise : Promise.resolve());
+    const inFlight = transport.send("{\"a\":1}");
+    await Promise.resolve();
+    await Promise.resolve();
+    const queued = transport.send("{\"b\":2}");
+    const queuedRejected = expect(queued).rejects.toThrow("stopped before the write");
+    const stopped = transport.stop();
+    await queuedRejected;
+    gate.resolve();
+    await Promise.all([inFlight, stopped]);
+    expect(tauri.invoke.mock.calls.filter(([command]) => command === "acp_send")).toHaveLength(1);
   });
 });

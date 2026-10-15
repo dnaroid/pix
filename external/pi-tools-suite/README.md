@@ -1095,9 +1095,14 @@ release is a config edit:
 }
 ```
 
-- `oracle` (`modelSelection: frontier`, `require-other`) selects frontier
-  models from other vendors only for every parent, including all fallbacks.
-  Missing parent identity or no other-vendor candidate fails closed. It provides
+- `oracle` (`modelSelection: frontier`, `vendorsByParentVendor`,
+  `require-other`) pairs OpenAI parents with Anthropic candidates, Anthropic
+  parents with OpenAI candidates, and other parents with OpenAI then Anthropic.
+  GLM is never an oracle candidate. Vendor-list order comes first, followed by
+  `frontierModels` order within each vendor; missing parent identity or no
+  eligible paired candidate fails closed. The default economy list hides the
+  oracle for OpenAI, Anthropic, and Z.ai parents because their paired candidates
+  are expensive. It provides
   a deliberate second opinion and required post-implementation review only for
   complex architectural tasks, not routine features, local bug fixes, mechanical
   edits, or large diffs alone. There is no parent-tier gate. The separate bundled

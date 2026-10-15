@@ -9,6 +9,7 @@ import {
   parseRateLimitNotice,
   rateLimitRejectionMessage,
   recordKind,
+  isPreInitAdvisoryRecord,
   requireRecord,
   terminalResultErrorDetail,
   validateClaudeInitialization,
@@ -176,6 +177,7 @@ export class ClaudeEventMapper {
       return;
     }
     if (!this.initialized) {
+      if (isPreInitAdvisoryRecord(record)) return;
       throw new ClaudeCodeError("protocol_order", `Claude emitted a ${recordKind(record)} record before initialization`);
     }
     if (!this.responseStarted) {

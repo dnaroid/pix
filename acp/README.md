@@ -33,6 +33,10 @@ Zed (Agent Panel)  <--ACP JSON-RPC over stdio-->  pix-acp  <--JSONL RPC over std
   `JsonAgentSessionEvent`s into ACP `session/update` notifications
   (message/thought chunks, tool calls with titles/kinds/locations, structured
   edit/write diffs).
+- `src/acp/session-update-coalescer.ts` — coalesces adjacent streamed text
+  chunks and content-only tool progress updates per session. Synchronous bursts
+  flush at the end of the current microtask (without timer latency); clients may
+  receive fewer, larger text chunks than the underlying pi deltas.
 - `src/acp/ui-request-bridge.ts` — maps pi `extension_ui_request` dialogs to
   ACP form elicitations and the answers back to `extension_ui_response`
   lines on pi's stdin. Extension `notify` feedback from commands and background

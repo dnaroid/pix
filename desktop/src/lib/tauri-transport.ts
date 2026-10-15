@@ -3,6 +3,13 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { AcpTransport, AcpTransportHandlers } from "./acp-client";
 
+/** Must not exceed the native `MAX_SEND_BATCH_LINES` admission limit. */
+const SEND_BATCH_MAX_LINES = 256;
+/** Soft byte cap per batch; a single oversized line is still sent alone. */
+const SEND_BATCH_MAX_BYTES = 4 * 1024 * 1024;
+/** Bound for lines waiting behind an in-flight batch (stalled child stdin). */
+const SEND_OUTBOX_MAX_LINES = 4096;
+
 export class TauriAcpTransport implements AcpTransport {
   private run: TransportRun | null = null;
   private stopping: Promise<void> = Promise.resolve();
@@ -15,6 +22,8 @@ export class TauriAcpTransport implements AcpTransport {
       generation: null,
       unlisten: [],
       ready: Promise.resolve(),
+      outbox: [],
+      flushing: false,
     };
     this.run = run;
     run.ready = this.startRun(run, handlers, this.stopping);
@@ -68,6 +77,7 @@ export class TauriAcpTransport implements AcpTransport {
     } catch (error) {
       run.cancelled = true;
       this.removeListeners(run);
+      rejectOutbox(run, new Error("pix-acp transport stopped before the write"));
       // A cancelled acp_start can still create a child. Reap its own generation,
       // never a replacement run. stop() also observes any cleanup failure.
       const cleanup = this.stopNative(run);
@@ -80,12 +90,50 @@ export class TauriAcpTransport implements AcpTransport {
     }
   }
 
+  /**
+   * Lines are delivered strictly in call order: one native batch is in flight
+   * per run, and lines sent meanwhile coalesce into the next batch. Separate
+   * concurrent invokes could be reordered by IPC and saturate native stdin
+   * admission under bursts.
+   */
   send(line: string): Promise<void> {
     const run = this.run;
     if (!run || run.cancelled || run.generation === null) {
       return Promise.reject(new Error("pix-acp transport is not started"));
     }
-    return invoke("acp_send", { windowLabel: this.windowLabel, generation: run.generation, line });
+    if (run.outbox.length >= SEND_OUTBOX_MAX_LINES) {
+      return Promise.reject(new Error("pix-acp stdin is busy; retry the write"));
+    }
+    return new Promise<void>((resolve, reject) => {
+      run.outbox.push({ line, resolve, reject });
+      if (!run.flushing) {
+        run.flushing = true;
+        // Coalesce a synchronous burst of sends into the first batch.
+        queueMicrotask(() => void this.flush(run));
+      }
+    });
+  }
+
+  private async flush(run: TransportRun): Promise<void> {
+    try {
+      while (run.outbox.length > 0) {
+        const generation = run.generation;
+        if (run.cancelled || generation === null) {
+          rejectOutbox(run, new Error("pix-acp transport stopped before the write"));
+          return;
+        }
+        const batch = takeBatch(run.outbox);
+        try {
+          await invoke("acp_send", { windowLabel: this.windowLabel, generation, lines: batch.map(({ line }) => line) });
+          for (const entry of batch) entry.resolve();
+        } catch (error) {
+          const reason = error instanceof Error ? error : new Error(String(error));
+          for (const entry of batch) entry.reject(reason);
+        }
+      }
+    } finally {
+      run.flushing = false;
+    }
   }
 
   stop(): Promise<void> {
@@ -94,6 +142,7 @@ export class TauriAcpTransport implements AcpTransport {
     this.run = null;
     run.cancelled = true;
     this.removeListeners(run);
+    rejectOutbox(run, new Error("pix-acp transport stopped before the write"));
     this.stopping = run.ready.catch(() => {}).then(() => this.stopNative(run));
     return this.stopping;
   }
@@ -122,6 +171,31 @@ interface TransportRun {
   readonly unlisten: UnlistenFn[];
   ready: Promise<void>;
   stopping?: Promise<void>;
+  readonly outbox: OutboxEntry[];
+  flushing: boolean;
+}
+
+interface OutboxEntry {
+  readonly line: string;
+  readonly resolve: () => void;
+  readonly reject: (error: Error) => void;
+}
+
+function takeBatch(outbox: OutboxEntry[]): OutboxEntry[] {
+  let count = 0;
+  let bytes = 0;
+  while (count < outbox.length && count < SEND_BATCH_MAX_LINES) {
+    // UTF-16 length is a cheap proxy; the native byte budget is authoritative.
+    const next = outbox[count]!.line.length + 1;
+    if (count > 0 && bytes + next > SEND_BATCH_MAX_BYTES) break;
+    bytes += next;
+    count += 1;
+  }
+  return outbox.splice(0, count);
+}
+
+function rejectOutbox(run: TransportRun, error: Error): void {
+  for (const entry of run.outbox.splice(0)) entry.reject(error);
 }
 
 interface AcpLines {

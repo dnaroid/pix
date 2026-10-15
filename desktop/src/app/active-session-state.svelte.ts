@@ -3,7 +3,9 @@ import { emptyTranscript, type TranscriptState } from "../lib/transcript";
 
 export function createActiveSessionState() {
   let sessionId = $state<string | null>(null);
-  let transcript = $state<TranscriptState>(emptyTranscript);
+  // Transcripts are immutable snapshots replaced wholesale by the reducer;
+  // a deep proxy would wrap every streamed item and break identity checks.
+  let transcript = $state.raw<TranscriptState>(emptyTranscript);
   let configOptions = $state<SessionConfigOption[]>([]);
   let runtimeReady = $state(false);
   const transcriptsBySessionId = new Map<string, TranscriptState>();

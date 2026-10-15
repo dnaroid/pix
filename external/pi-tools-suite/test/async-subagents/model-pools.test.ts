@@ -82,8 +82,8 @@ describe("role-owned model candidates", () => {
 
 		// Non-frontier parent: every candidate must also be cross-vendor.
 		const fromLuna = resolveAgentTaskConfig(task("oracle"), config, { parentModel: "openai-codex/gpt-6-luna" });
-		expect(fromLuna.task.model).toBe("zai/glm-5.3");
-		expect(fromLuna.fallbackModels).toEqual(["anthropic/claude-opus-5-5"]);
+		expect(fromLuna.task.model).toBe("anthropic/claude-opus-5-5");
+		expect(fromLuna.fallbackModels).toEqual([]);
 
 		const fromTurbo = resolveAgentTaskConfig(task("oracle"), config, { parentModel: "zai/glm-5-turbo" });
 		expect(fromTurbo.task.model).toBe("openai-codex/gpt-6-astra");

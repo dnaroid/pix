@@ -553,3 +553,33 @@ function toolItem(
     attachments: [],
   };
 }
+
+describe("transcript reducer index hand-off", () => {
+  it("streams batches on cached indexes with the same result as one pass", () => {
+    const updates = [
+      { sessionUpdate: "agent_message_chunk", messageId: "m1", content: { type: "text", text: "Hel" } },
+      { sessionUpdate: "tool_call", toolCallId: "t1", title: "read", kind: "read", status: "pending" },
+      { sessionUpdate: "agent_message_chunk", messageId: "m1", content: { type: "text", text: "lo" } },
+      { sessionUpdate: "tool_call_update", toolCallId: "t1", status: "completed" },
+      { sessionUpdate: "agent_message_chunk", messageId: "m2", content: { type: "text", text: "next" } },
+      { sessionUpdate: "tool_call_update", toolCallId: "t1", title: "read file" },
+      { sessionUpdate: "agent_message_chunk", messageId: "m2", content: { type: "text", text: "!" } },
+    ] as Parameters<typeof applySessionUpdates>[1];
+    const oneShot = applySessionUpdates(
+      applySessionUpdates(emptyTranscript, [updates[0]!], [1]),
+      updates.slice(1),
+      updates.slice(1).map(() => 1),
+    );
+    let streamed = applySessionUpdates(emptyTranscript, [updates[0]!], [1]);
+    const snapshots = [streamed];
+    for (const update of updates.slice(1)) {
+      streamed = applySessionUpdates(streamed, [update], [1]);
+      snapshots.push(streamed);
+    }
+    expect(streamed).toEqual(oneShot);
+    // Re-applying on an older snapshot (indexes already handed off) rebuilds safely.
+    const branched = applySessionUpdates(snapshots[2]!, updates.slice(3), updates.slice(3).map(() => 1));
+    expect(branched).toEqual(oneShot);
+    expect(streamed.items.filter((item) => item.type === "tool")).toHaveLength(1);
+  });
+});

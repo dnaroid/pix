@@ -118,7 +118,33 @@ The bundled roles use it as follows:
 
 | Role | Selection | Result with the default list |
 |---|---|---|
-| `oracle` | `modelSelection: frontier`, `require-other` | Other-vendor frontier candidates only for every parent; hidden when parent identity is missing or no cross-vendor candidate exists |
+| `oracle` | `modelSelection: frontier`, `vendorsByParentVendor`, `require-other` | OpenAI parent → Anthropic; Anthropic parent → OpenAI; any other parent (e.g. Z.ai) → OpenAI, then Anthropic. GLM is never an oracle candidate. Hidden when parent identity is missing or no paired candidate exists |
+
+### Vendor pairing in the role file
+
+A `modelSelection: frontier` role may declare `vendorsByParentVendor` to keep
+the "who reviews whom" rule in its Markdown file without naming concrete
+models:
+
+```yaml
+modelSelection: frontier
+vendorsByParentVendor:
+  openai: [anthropic]
+  anthropic: [openai]
+  "*": [openai, anthropic]
+parentProviderPolicy: require-other
+```
+
+Keys are lowercase parent vendors (the same vendor resolution as the provider
+policy) or `*` for any parent vendor without its own key. Values are ordered
+candidate vendors. The resolver keeps only frontier entries of those vendors,
+ordered by the listed vendor order and then by `frontierModels` order within a
+vendor. A parent with neither a matching key nor `*` gets no candidates, so a
+`require-other` role is hidden for it. The concrete model per vendor remains a
+single `frontierModels` edit; `roles`, `enabled`, economy and the provider
+policy still apply afterwards. The field is rejected without
+`modelSelection: frontier`, and a project layer that switches to explicit
+`models` drops it.
 
 `economy: true` (or `PI_TOOLS_SUITE_ECONOMY=1`) excludes `expensive` frontier
 models from every role's automatic chain (including roles with their own

@@ -195,6 +195,14 @@ function alertStatus(value: unknown): RateLimitNotice["status"] | undefined {
   return value === "allowed_warning" || value === "rejected" ? value : undefined;
 }
 
+/** Advisory system subtypes Claude Code may emit before `system/init`; they carry nothing Pi consumes. */
+const PRE_INIT_ADVISORY_SUBTYPES: ReadonlySet<string> = new Set(["dev_intent"]);
+
+/** Whether a record is an advisory system status record that is safe to ignore before initialization. */
+export function isPreInitAdvisoryRecord(record: { type?: unknown; subtype?: unknown }): boolean {
+  return record.type === "system" && typeof record.subtype === "string" && PRE_INIT_ADVISORY_SUBTYPES.has(record.subtype);
+}
+
 /** A record's `type/subtype`, bounded, to name the record a protocol failure rejected. */
 export function recordKind(record: { type?: unknown; subtype?: unknown }): string {
   const part = (value: unknown) => (typeof value === "string" ? value.replace(/[^\w.-]/g, "").slice(0, 48) : "");

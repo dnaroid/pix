@@ -115,19 +115,19 @@ fn ack(receiver: tokio::sync::oneshot::Receiver<Result<(), String>>) -> Result<(
 #[test]
 fn command_admission_rejects_saturation_without_parking_and_preserves_accepted_fifo() {
     let queue = acp_queue::Queue::new(100, 2);
-    let first = admit_stdin(&queue, "{\"n\":1}".into()).unwrap();
-    let second = admit_stdin(&queue, "{\"n\":2}".into()).unwrap();
-    assert!(admit_stdin(&queue, "{\"n\":3}".into())
+    let first = admit_stdin(&queue, vec!["{\"n\":1}".into()]).unwrap();
+    let second = admit_stdin(&queue, vec!["{\"n\":2}".into()]).unwrap();
+    assert!(admit_stdin(&queue, vec!["{\"n\":3}".into()])
         .unwrap_err()
         .contains("busy"));
     for (expected, receiver) in [("{\"n\":1}", first), ("{\"n\":2}", second)] {
-        let StdinCommand::Write { line, ack: reply } = queue.pop(None).unwrap();
-        assert_eq!(line, expected);
+        let StdinCommand::Write { lines, ack: reply } = queue.pop(None).unwrap();
+        assert_eq!(lines, vec![expected.to_owned()]);
         reply.send(Ok(())).unwrap();
         ack(receiver).unwrap();
     }
-    let oversized = admit_stdin(&queue, "x".repeat(100)).unwrap();
-    assert!(admit_stdin(&queue, "{}".into())
+    let oversized = admit_stdin(&queue, vec!["x".repeat(100).into()]).unwrap();
+    assert!(admit_stdin(&queue, vec!["{}".into()])
         .unwrap_err()
         .contains("busy"));
     let StdinCommand::Write { ack: reply, .. } = queue.pop(None).unwrap();
@@ -152,21 +152,21 @@ impl Write for FailWrite {
 fn writer_error_drains_all_pending_acknowledgements() {
     let queue = Arc::new(acp_queue::Queue::new(100, 4));
     let receivers: Vec<_> = (0..4)
-        .map(|n| admit_stdin(&queue, format!("{{\"n\":{n}}}")).unwrap())
+        .map(|n| admit_stdin(&queue, vec![format!("{{\"n\":{n}}}").into()]).unwrap())
         .collect();
     forward_stdin(FailWrite, queue.clone());
     for receiver in receivers {
         assert!(ack(receiver).is_err());
     }
     assert!(queue.is_closed());
-    assert!(admit_stdin(&queue, "{}".into()).is_err());
+    assert!(admit_stdin(&queue, vec!["{}".into()]).is_err());
 }
 
 #[test]
 fn invalid_json_rejects_only_its_command() {
     let queue = Arc::new(acp_queue::Queue::new(100, 4));
-    let invalid = admit_stdin(&queue, "not-json".into()).unwrap();
-    let valid = admit_stdin(&queue, "{}".into()).unwrap();
+    let invalid = admit_stdin(&queue, vec!["not-json".into()]).unwrap();
+    let valid = admit_stdin(&queue, vec!["{}".into()]).unwrap();
     let output = Arc::new(Mutex::new(Vec::<u8>::new()));
     struct Writer(Arc<Mutex<Vec<u8>>>);
     impl Write for Writer {
@@ -237,4 +237,74 @@ fn cancellation_before_startup_publication_does_not_lose_stop() {
         .insert("window".into(), replacement.clone());
     assert!(!replacement.cancelled.load(Ordering::Acquire));
     let _ = slot;
+}
+
+#[derive(Clone, Default)]
+struct RecordingWriter {
+    output: Arc<Mutex<Vec<u8>>>,
+    flushes: Arc<AtomicU64>,
+}
+impl Write for RecordingWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.output.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.flushes.fetch_add(1, Ordering::AcqRel);
+        Ok(())
+    }
+}
+
+#[test]
+fn send_batch_is_written_in_order_and_flushed_once() {
+    let queue = Arc::new(acp_queue::Queue::new(1024, 4));
+    let writer = RecordingWriter::default();
+    let batch = admit_stdin(&queue, vec!["{\"n\":1}".into(), "{\"n\":2}".into()]).unwrap();
+    forward_stdin(writer.clone(), queue.clone());
+    ack(batch).unwrap();
+    assert_eq!(&*writer.output.lock().unwrap(), b"{\"n\":1}\n{\"n\":2}\n");
+    assert_eq!(writer.flushes.load(Ordering::Acquire), 1);
+    queue.close();
+}
+
+#[test]
+fn invalid_entry_rejects_its_whole_batch_without_partial_write() {
+    let queue = Arc::new(acp_queue::Queue::new(1024, 4));
+    let writer = RecordingWriter::default();
+    let invalid = admit_stdin(&queue, vec!["{}".into(), "[]".into()]).unwrap();
+    let valid = admit_stdin(&queue, vec!["{\"ok\":true}".into()]).unwrap();
+    forward_stdin(writer.clone(), queue.clone());
+    assert!(ack(invalid).is_err());
+    ack(valid).unwrap();
+    assert_eq!(&*writer.output.lock().unwrap(), b"{\"ok\":true}\n");
+    queue.close();
+}
+
+#[test]
+fn send_batch_shape_is_validated_at_the_command_boundary() {
+    assert!(validate_send_batch(&[]).is_err());
+    assert!(validate_send_batch(&["{}\n{}".to_owned()]).is_err());
+    assert!(validate_send_batch(&vec!["{}".to_owned(); MAX_SEND_BATCH_LINES + 1]).is_err());
+    assert!(validate_send_batch(&vec!["{}".to_owned(); MAX_SEND_BATCH_LINES]).is_ok());
+}
+
+#[test]
+fn forwarder_drain_waits_for_every_forwarder_but_is_bounded() {
+    let (tx, rx) = mpsc::channel();
+    let late = tx.clone();
+    tx.send(()).unwrap();
+    let worker = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(30));
+        late.send(()).unwrap();
+    });
+    let started = Instant::now();
+    Forwarders { done: rx, count: 2 }.drain(Duration::from_secs(5));
+    assert!(started.elapsed() >= Duration::from_millis(25));
+    worker.join().unwrap();
+
+    // A forwarder held open by an escaped descendant cannot stall exit forever.
+    let (_held, rx) = mpsc::channel::<()>();
+    let started = Instant::now();
+    Forwarders { done: rx, count: 2 }.drain(Duration::from_millis(50));
+    assert!(started.elapsed() < Duration::from_secs(2));
 }

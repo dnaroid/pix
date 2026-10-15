@@ -27,6 +27,11 @@ const GRACEFUL_STOP_TIMEOUT: Duration = Duration::from_secs(2);
 const STOP_TIMEOUT: Duration = Duration::from_secs(5);
 const ACP_EVENT_BATCH_LATENCY: Duration = Duration::from_millis(4);
 const ACP_EVENT_BATCH_MAX_LINES: usize = 64;
+/// Upper bound for draining stdout/stderr forwarders after the child is reaped,
+/// so the final protocol lines are emitted before `acp://exit`.
+const FORWARDER_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
+/// Lines admitted by one `acp_send` batch (the webview coalesces its outbox).
+const MAX_SEND_BATCH_LINES: usize = 256;
 
 #[derive(Default)]
 pub(super) struct AcpProcessState {
@@ -70,7 +75,7 @@ impl Drop for RunningProcess {
 
 enum StdinCommand {
     Write {
-        line: String,
+        lines: Vec<String>,
         ack: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
 }
@@ -183,12 +188,14 @@ fn start_process(app: AppHandle, window_label: String) -> Result<u64, String> {
         return Err(error);
     }
 
+    let (forwarders_tx, forwarders_rx) = mpsc::channel();
     forward_lines(
         stdout,
         app.clone(),
         window_label.clone(),
         "acp://stdout",
         generation,
+        forwarders_tx.clone(),
     );
     let diagnostics = acp_diagnostics::Capture::default();
     forward_lines(
@@ -197,6 +204,7 @@ fn start_process(app: AppHandle, window_label: String) -> Result<u64, String> {
         window_label.clone(),
         "acp://stderr",
         generation,
+        forwarders_tx,
     );
     thread::spawn(move || {
         supervise_child(
@@ -207,6 +215,10 @@ fn start_process(app: AppHandle, window_label: String) -> Result<u64, String> {
             generation,
             exited,
             diagnostics,
+            Forwarders {
+                done: forwarders_rx,
+                count: 2,
+            },
         )
     });
     Ok(generation)
@@ -237,11 +249,9 @@ pub(super) async fn acp_send(
     app: AppHandle,
     window_label: String,
     generation: u64,
-    line: String,
+    lines: Vec<String>,
 ) -> Result<(), String> {
-    if line.contains('\r') || line.contains('\n') {
-        return Err("ACP payload must be one newline-free JSON object".to_owned());
-    }
+    validate_send_batch(&lines)?;
     let stdin_tx = {
         let state = app.state::<AcpProcessState>();
         let slot = state
@@ -270,20 +280,37 @@ pub(super) async fn acp_send(
             .cloned()
             .ok_or_else(|| "pix-acp stdin is closed".to_owned())?
     };
-    let ack_rx = admit_stdin(&stdin_tx, line)?;
+    let ack_rx = admit_stdin(&stdin_tx, lines)?;
     ack_rx
         .await
         .map_err(|_| "pix-acp stdin writer stopped before acknowledging the write".to_owned())?
 }
 
+fn validate_send_batch(lines: &[String]) -> Result<(), String> {
+    if lines.is_empty() || lines.len() > MAX_SEND_BATCH_LINES {
+        return Err(format!(
+            "ACP send batch must contain 1..={MAX_SEND_BATCH_LINES} lines"
+        ));
+    }
+    if lines
+        .iter()
+        .any(|line| line.contains('\r') || line.contains('\n'))
+    {
+        return Err("ACP payload must be one newline-free JSON object".to_owned());
+    }
+    Ok(())
+}
+
+/// One webview batch is one queue item: it is written and flushed atomically
+/// in order, so batching never reorders or interleaves protocol lines.
 fn admit_stdin(
     stdin_tx: &acp_queue::Queue<StdinCommand>,
-    line: String,
+    lines: Vec<String>,
 ) -> Result<tokio::sync::oneshot::Receiver<Result<(), String>>, String> {
     let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
-    let bytes = line.len();
+    let bytes = lines.iter().map(|line| line.len() + 1).sum();
     stdin_tx
-        .try_push(StdinCommand::Write { line, ack: ack_tx }, bytes)
+        .try_push(StdinCommand::Write { lines, ack: ack_tx }, bytes)
         .map_err(str::to_owned)?;
     Ok(ack_rx)
 }
@@ -388,25 +415,29 @@ pub(super) fn stop_process_slot(
 }
 
 fn forward_stdin<W: Write + Send + 'static>(
-    mut stdin: W,
+    stdin: W,
     receiver: Arc<acp_queue::Queue<StdinCommand>>,
 ) {
     thread::spawn(move || {
+        // Buffer a whole batch and flush once instead of one syscall per write.
+        let mut stdin = std::io::BufWriter::with_capacity(64 * 1024, stdin);
         while let Some(command) = receiver.pop(None) {
             match command {
-                StdinCommand::Write { line, ack } => {
-                    let validation = validate_json_object(&line);
-                    if let Err(error) = validation {
+                StdinCommand::Write { lines, ack } => {
+                    // Validate the whole batch before writing any of it, so an
+                    // invalid entry never leaves a partially written batch.
+                    if let Err(error) = lines.iter().try_for_each(|line| validate_json_object(line)) {
                         let _ = ack.send(Err(error));
                         continue;
                     }
                     let result = (|| {
-                        stdin
-                            .write_all(line.as_bytes())
-                            .and_then(|_| stdin.write_all(b"\n"))
-                            .and_then(|_| stdin.flush())
-                            .map_err(|error| format!("failed to write to pix-acp: {error}"))
-                    })();
+                        for line in &lines {
+                            stdin.write_all(line.as_bytes())?;
+                            stdin.write_all(b"\n")?;
+                        }
+                        stdin.flush()
+                    })()
+                    .map_err(|error| format!("failed to write to pix-acp: {error}"));
                     let failed = result.is_err();
                     let _ = ack.send(result);
                     if failed {
@@ -430,6 +461,7 @@ fn forward_lines<R>(
     window_label: String,
     event: &'static str,
     generation: u64,
+    done: mpsc::Sender<()>,
 ) where
     R: Read + Send + 'static,
 {
@@ -464,7 +496,31 @@ fn forward_lines<R>(
         }
         line_tx.close();
     });
-    thread::spawn(move || batch_forwarded_lines(lines, app, window_label, event, generation));
+    thread::spawn(move || {
+        batch_forwarded_lines(lines, app, window_label, event, generation);
+        let _ = done.send(());
+    });
+}
+
+/// Completion signals of the stdout/stderr forwarders for one generation.
+struct Forwarders {
+    done: mpsc::Receiver<()>,
+    count: usize,
+}
+
+impl Forwarders {
+    /// Wait (bounded) until every forwarder emitted its final batch. Pipes
+    /// reach EOF once the process group is gone; a descendant that escaped the
+    /// group can hold them open, so the deadline keeps exit delivery bounded.
+    fn drain(self, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
+        for _ in 0..self.count {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if self.done.recv_timeout(remaining).is_err() {
+                break;
+            }
+        }
+    }
 }
 
 fn batch_forwarded_lines(
@@ -519,6 +575,7 @@ fn supervise_child(
     generation: u64,
     exited: ExitSignal,
     diagnostics: acp_diagnostics::Capture,
+    forwarders: Forwarders,
 ) {
     let mut requested = false;
     let mut force_stop_at = None;
@@ -584,6 +641,9 @@ fn supervise_child(
         let _ = native_process::force_stop(&mut child);
     }
     drop(child);
+    // Final stdout lines (e.g. the last JSON-RPC responses) must reach the
+    // webview before exit rejects every pending request.
+    forwarders.drain(FORWARDER_DRAIN_TIMEOUT);
     clear_generation(&app, &window_label, generation);
     let mut payload = exit_payload(window_label.clone(), generation, status, requested, error);
     payload.stderr = diagnostics.tail();

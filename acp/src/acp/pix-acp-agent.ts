@@ -251,6 +251,7 @@ import {
 	routeModelWithRuntime,
 } from "./model-routing.js";
 import { EventTranslator } from "./event-translator.js";
+import { SessionUpdateCoalescer } from "./session-update-coalescer.js";
 import { createGitAssistant, type GitAssistant } from "./git-assistant.js";
 import {
 	isThinkingLevel,
@@ -363,6 +364,23 @@ interface ActiveRun {
 	reject: (error: Error) => void;
 }
 
+/**
+ * Every notify/request issued through a session first flushes its coalesced
+ * streamed updates, so merging never reorders them behind later messages.
+ */
+function orderedSessionClient(client: ClientCaller, updates: SessionUpdateCoalescer): ClientCaller {
+	return {
+		notify: ((method: string, params: unknown) => {
+			updates.flush();
+			return (client.notify as (method: string, params: unknown) => Promise<void>)(method, params);
+		}) as ClientCaller["notify"],
+		request: (method, params) => {
+			updates.flush();
+			return client.request(method, params);
+		},
+	};
+}
+
 interface AgentSessionState {
 	readonly acpSessionId: string;
 	activityOwner: string | undefined;
@@ -371,6 +389,8 @@ interface AgentSessionState {
 	readonly pi: PiClient;
 	readonly client: ClientCaller;
 	translator: EventTranslator;
+	/** Streamed session/update coalescing; flushed before any other session notify. */
+	readonly updates: SessionUpdateCoalescer;
 	unsubscribeEvents: (() => void) | undefined;
 	unsubscribeExit: (() => void) | undefined;
 	activeRun: ActiveRun | undefined;
@@ -2205,14 +2225,20 @@ export class PixAcpAgent {
 			env: { ...startup.env, ...hostEnv, ...(privateAgentsPath ? { PIX_PROJECT_AGENTS_FILE: privateAgentsPath } : {}) },
 		});
 		const translator = new EventTranslator({ sessionId: acpSessionId, cwd });
+		const updates = new SessionUpdateCoalescer((notification) => {
+			void client.notify("session/update", notification).catch((error: unknown) => {
+				this.options.logger.warn(`session/update failed: ${stringifyUnknown(error)}`);
+			});
+		});
 		const session: AgentSessionState = {
 			acpSessionId,
 			activityOwner,
 			activitySnapshots: new Map(),
 			cwd,
 			pi,
-			client,
+			client: orderedSessionClient(client, updates),
 			translator,
+			updates,
 			unsubscribeEvents: undefined,
 			unsubscribeExit: undefined,
 			activeRun: undefined,
@@ -2830,10 +2856,11 @@ export class PixAcpAgent {
 			});
 		}
 		for (const notification of session.translator.translate(event, session.activeRun?.cancelled === true)) {
-			void session.client.notify("session/update", notification).catch((error: unknown) => {
-				this.options.logger.warn(`session/update failed: ${stringifyUnknown(error)}`);
-			});
+			session.updates.push(notification);
 		}
+		// Lifecycle events (agent_end/agent_settled/...) translate to nothing;
+		// never let streamed chunks trail behind their run's settlement.
+		if (event.type !== "message_update" && event.type !== "tool_execution_update") session.updates.flush();
 
 		const run = session.activeRun;
 		if (!run) {
@@ -4018,9 +4045,9 @@ export class PixAcpAgent {
 		session.unsubscribeExit?.();
 		session.unsubscribeExit = undefined;
 		const unsubscribe = session.unsubscribeEvents;
-		if (!unsubscribe) return;
 		session.unsubscribeEvents = undefined;
-		unsubscribe();
+		unsubscribe?.();
+		session.updates.dispose();
 	}
 
 	private resetBtw(session: AgentSessionState): void {
@@ -4037,6 +4064,8 @@ export class PixAcpAgent {
 	private resolveActiveRun(session: AgentSessionState, stopReason: StopReason): boolean {
 		const run = session.activeRun;
 		if (!run) return false;
+		// The prompt response must follow every streamed update of its run.
+		session.updates.flush();
 		session.activeRun = undefined;
 		run.resolve(stopReason);
 		return true;
@@ -4045,6 +4074,7 @@ export class PixAcpAgent {
 	private rejectActiveRun(session: AgentSessionState, error: Error): boolean {
 		const run = session.activeRun;
 		if (!run) return false;
+		session.updates.flush();
 		session.activeRun = undefined;
 		run.reject(error);
 		return true;

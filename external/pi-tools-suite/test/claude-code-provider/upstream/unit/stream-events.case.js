@@ -211,6 +211,10 @@ test("rejects duplicate initialization, unknown records, and invalid event order
     // Claude Code 2.1.281 first broke this way; the message must say which record it was.
     const early = makeMapper(createAssistantMessageEventStream(), createOutput(model), new Set(), new Map(), () => { });
     assert.throws(() => early.accept({ type: "system", subtype: "commands_changed" }), /Claude emitted a system\/commands_changed record before initialization/);
+    // Claude Code 2.1.300 emits an advisory system/dev_intent record before init; it is ignored.
+    const advisory = makeMapper(createAssistantMessageEventStream(), createOutput(model), new Set(), new Map(), () => { });
+    assert.doesNotThrow(() => advisory.accept({ type: "system", subtype: "dev_intent" }));
+    init(advisory);
 });
 test("maps result-only fallback text, served limits, and cache details", async () => {
     const stream = createAssistantMessageEventStream();

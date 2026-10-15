@@ -134,6 +134,33 @@ export function frontierCandidatesForRole(role: string | undefined, frontier: Fr
 }
 
 /**
+ * Parent vendor → ordered candidate vendors. Keys are lowercase vendor names
+ * or `*` (any parent vendor without its own key). Owned by an agent profile so
+ * reviewer pairing lives with the role while concrete models stay in
+ * `frontierModels`.
+ */
+export type VendorsByParentVendor = Record<string, string[]>;
+
+/**
+ * Frontier candidates for `role` and one parent. Without a vendor map this is
+ * the configured frontier order. With a map, only vendors listed for the
+ * parent's vendor (or `*`) remain, ordered by that list and then by the
+ * frontier order within each vendor; an unmatched parent gets no candidates.
+ */
+export function frontierCandidatesForParent(
+	role: string | undefined,
+	frontier: FrontierConfig,
+	parentRef: string | undefined,
+	vendorsByParentVendor?: VendorsByParentVendor,
+): string[] {
+	const candidates = frontierCandidatesForRole(role, frontier);
+	if (!vendorsByParentVendor) return candidates;
+	const parentVendor = modelVendor(parentRef, frontier);
+	const vendors = (parentVendor !== undefined ? vendorsByParentVendor[parentVendor] : undefined) ?? vendorsByParentVendor["*"] ?? [];
+	return vendors.flatMap((vendor) => candidates.filter((ref) => modelVendor(ref, frontier) === vendor));
+}
+
+/**
  * Apply a concrete parent-vendor policy to an ordered candidate list.
  * `prefer-other` keeps every candidate: other vendors, then the parent's
  * vendor, then the parent's own model. `require-other` keeps only candidates
@@ -162,8 +189,14 @@ export function applyVendorPolicy(
  * checks: frontier candidates for `role`, minus economy-blocked models, with
  * another vendor required for every parent, including all fallbacks.
  */
-export function frontierOracleCandidates(parentRef: string, frontier: FrontierConfig, role = "oracle"): string[] {
-	const candidates = frontierCandidatesForRole(role, frontier).filter((ref) => !economyBlockReason(ref, frontier));
+export function frontierOracleCandidates(
+	parentRef: string,
+	frontier: FrontierConfig,
+	role = "oracle",
+	vendorsByParentVendor?: VendorsByParentVendor,
+): string[] {
+	const candidates = frontierCandidatesForParent(role, frontier, parentRef, vendorsByParentVendor)
+		.filter((ref) => !economyBlockReason(ref, frontier));
 	return applyVendorPolicy(candidates, "require-other", parentRef, frontier);
 }
 

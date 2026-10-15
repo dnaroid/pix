@@ -7,10 +7,11 @@ import {
 	applyVendorPolicy,
 	defaultFrontierConfig,
 	economyBlockReason,
-	frontierCandidatesForRole,
+	frontierCandidatesForParent,
 	isFrontierModel,
 	modelVendor,
 	type FrontierConfig,
+	type VendorsByParentVendor,
 } from "./frontier-models.js";
 import type { AgentTask, RetryConfig } from "./types.js";
 
@@ -36,6 +37,13 @@ export interface SubagentTypeConfig {
 	 * of `models`, so new frontier releases need only a config edit.
 	 */
 	modelSelection?: "frontier";
+	/**
+	 * With `modelSelection: frontier`: parent vendor (or `*`) → ordered
+	 * candidate vendors. Keeps reviewer pairing in the role file while the
+	 * concrete models stay in `frontierModels`. An unmatched parent without a
+	 * `*` key has no candidates.
+	 */
+	vendorsByParentVendor?: VendorsByParentVendor;
 	/** Legacy primary candidate; new profiles use models. */
 	model?: string;
 	/** Legacy candidates after model; new profiles use one ordered models list. */
@@ -319,7 +327,7 @@ export function resolveAgentTaskConfig(
 	const parentMatch = resolveModelByParent(profile, parentModelRef);
 	const parentMatchModel = trimString(parentMatch?.model);
 	const globalModel = trimString(globalOptions.model);
-	const profileModels = profileCandidateModels(profile, selectedType, frontier);
+	const profileModels = profileCandidateModels(profile, selectedType, frontier, parentModelRef);
 	const profileModel = profileModels[0];
 	const usedParentMatch = Boolean(parentMatchModel) && !forcedModel && !taskModel
 		&& !globalModel;
@@ -552,6 +560,10 @@ export function normalizeSubagentTypeProfile(
 	if (modelSelection && (models !== undefined || rawProfile.model !== undefined || rawProfile.fallbackModels !== undefined || rawProfile.modelByParent !== undefined)) {
 		throw new Error(`Agent ${name}: modelSelection: ${modelSelection} conflicts with models/model/fallbackModels/modelByParent (${file})`);
 	}
+	const vendorsByParentVendor = normalizeVendorsByParentVendor(rawProfile.vendorsByParentVendor, name, file);
+	if (vendorsByParentVendor && modelSelection !== "frontier") {
+		throw new Error(`Agent ${name}: vendorsByParentVendor requires modelSelection: frontier (${file})`);
+	}
 	const model = models === undefined ? trimString(rawProfile.model) : undefined;
 	const fallbackModels = models === undefined ? modelList(rawProfile.fallbackModels, rawProfile.fallbackModel) : undefined;
 	const parentProviderPolicy = normalizeParentProviderPolicy(rawProfile.parentProviderPolicy, name, file);
@@ -567,6 +579,7 @@ export function normalizeSubagentTypeProfile(
 		icon: trimString(rawProfile.icon),
 		models,
 		modelSelection,
+		vendorsByParentVendor,
 		model,
 		fallbackModels: models === undefined && (model || fallbackModels !== undefined) ? fallbackModels ?? [] : undefined,
 		modelByParent: models === undefined ? normalizeModelByParent(rawProfile.modelByParent, name, file, fallbackModels ?? []) : undefined,
@@ -592,6 +605,7 @@ function mergeTypeProfile(base: SubagentTypeConfig, source: SubagentTypeConfig):
 	// An explicit candidate list replaces frontier-list selection (and vice versa).
 	if (source.modelSelection === undefined && (source.models !== undefined || source.model || source.fallbackModels !== undefined || source.modelByParent)) {
 		delete merged.modelSelection;
+		delete merged.vendorsByParentVendor;
 	}
 	if (source.modelSelection !== undefined) {
 		delete merged.models;
@@ -627,6 +641,7 @@ function compactProfile(profile: SubagentTypeConfig): SubagentTypeConfig {
 	if (profile.icon) compact.icon = profile.icon;
 	if (profile.models !== undefined) compact.models = profile.models;
 	if (profile.modelSelection !== undefined) compact.modelSelection = profile.modelSelection;
+	if (profile.vendorsByParentVendor !== undefined) compact.vendorsByParentVendor = profile.vendorsByParentVendor;
 	if (profile.model) compact.model = profile.model;
 	if (profile.fallbackModels) compact.fallbackModels = profile.fallbackModels;
 	if (profile.modelByParent) compact.modelByParent = profile.modelByParent;
@@ -670,6 +685,28 @@ function normalizeParentProviderPolicy(value: unknown, typeName: string, file: s
 	if (value === undefined) return undefined;
 	if (value === "any" || value === "prefer-other" || value === "require-other" || value === "require-other-if-frontier") return value;
 	throw new Error(`Subagent type "${typeName}" parentProviderPolicy must be one of any, prefer-other, require-other, require-other-if-frontier: ${file}`);
+}
+
+function isVendorName(value: string): boolean {
+	return /^[a-z0-9][a-z0-9._-]*$/.test(value);
+}
+
+function normalizeVendorsByParentVendor(value: unknown, typeName: string, file: string): VendorsByParentVendor | undefined {
+	if (value === undefined) return undefined;
+	const invalid = () => new Error(`Subagent type "${typeName}" vendorsByParentVendor must map lowercase vendor names or "*" to non-empty vendor lists: ${file}`);
+	if (!isRecord(value)) throw invalid();
+	const out: VendorsByParentVendor = {};
+	for (const [rawKey, rawVendors] of Object.entries(value)) {
+		const key = rawKey.trim();
+		if (key !== "*" && !isVendorName(key)) throw invalid();
+		const list = typeof rawVendors === "string" ? rawVendors.split(",") : rawVendors;
+		if (!Array.isArray(list) || list.length === 0) throw invalid();
+		const vendors = list.map((vendor) => typeof vendor === "string" ? vendor.trim() : "");
+		if (vendors.some((vendor) => !isVendorName(vendor))) throw invalid();
+		out[key] = [...new Set(vendors)];
+	}
+	if (Object.keys(out).length === 0) throw invalid();
+	return out;
 }
 
 function normalizeModelSelection(value: unknown, typeName: string, file: string): SubagentTypeConfig["modelSelection"] {
@@ -758,9 +795,14 @@ function effectiveParentProviderPolicy(
 	return !parentModelRef || isFrontierModel(parentModelRef, frontier) ? "require-other" : "prefer-other";
 }
 
-function profileCandidateModels(profile: SubagentTypeConfig | undefined, role: string | undefined, frontier: FrontierConfig): string[] {
+function profileCandidateModels(
+	profile: SubagentTypeConfig | undefined,
+	role: string | undefined,
+	frontier: FrontierConfig,
+	parentModelRef: string | undefined,
+): string[] {
 	if (profile?.models) return profile.models;
-	if (profile?.modelSelection === "frontier") return frontierCandidatesForRole(role, frontier);
+	if (profile?.modelSelection === "frontier") return frontierCandidatesForParent(role, frontier, parentModelRef, profile.vendorsByParentVendor);
 	return modelList(profile?.model, profile?.fallbackModels) ?? [];
 }
 

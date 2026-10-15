@@ -264,8 +264,11 @@ pub(crate) fn desktop_window_workspace(
     Ok(())
 }
 
+// Async: a sync command runs on the main thread, and building a webview
+// window there blocks the event loop for the whole creation (and can
+// deadlock on some platforms). Tauri dispatches the native work itself.
 #[tauri::command]
-pub(crate) fn desktop_open_project_window(
+pub(crate) async fn desktop_open_project_window(
     app: AppHandle,
     label: String,
     workspace: String,

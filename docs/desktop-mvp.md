@@ -75,9 +75,20 @@ current product non-goals.
 
 - Webview → Rust commands:
   - `acp_start()` returning the child generation number
-  - `acp_send(generation, line)` where `line` is one newline-free JSON-RPC
-    object and the generation must still own the child
+  - `acp_send(windowLabel, generation, lines)` where `lines` is a batch of
+    1–256 newline-free JSON objects and the window/generation must still own
+    the child. The native host admits the batch as one stdin queue item,
+    validates every entry before writing any of them, then writes entries in
+    order through a buffered writer and flushes once; one invalid entry rejects
+    the entire batch without a partial write.
   - `acp_stop(generation)`; stale generations cannot stop a replacement child
+- The webview transport keeps an ordered outbox per run: at most one
+  `acp_send` batch is in flight, and lines enqueued meanwhile are coalesced
+  into the next batch (up to 256 lines and approximately 4 MiB; one oversized
+  line is sent alone). The outbox holds at most 4096 lines; further sends
+  reject as busy. Stop or failed start rejects queued unsent lines, while a
+  failed batch rejects only its own lines. This preserves send order, which
+  concurrent command invokes do not guarantee.
 - Rust → webview events:
   - `acp://stdout` with `{ windowLabel, generation, lines: string[] }` batches
     of complete stdout lines (stdout stays protocol-only)
@@ -87,6 +98,13 @@ current product non-goals.
     optional error, and a separate stderr snapshot on unexpected exits. Current
     failure diagnostics and project-local crash receipts are specified in
     [`desktop-native-process-lifecycle.md`](../specs/desktop-native-process-lifecycle.md).
+- After the child is reaped, the native supervisor waits up to one second for
+  stdout/stderr forwarders to emit their final batches before publishing
+  `acp://exit`, allowing final JSON-RPC responses to arrive before exit rejects
+  still-pending requests.
+- `desktop_watch_restart_available` and `desktop_watch_restart` are async
+  commands; their filesystem work runs on the blocking pool rather than the
+  main thread.
 - `save_acp_crash_log(workspace, content)` writes a bounded receipt on the
   native blocking pool; it is available for unexpected exits and initialization
   failures, not requested stops.
@@ -104,6 +122,10 @@ current product non-goals.
   `session/load`.
 - Pending JSON-RPC calls have deterministic cleanup on response, send failure,
   adapter exit, and client disposal.
+- The active transcript is held in `$state.raw` and updated by replacing
+  immutable snapshots wholesale. The transcript reducer passes message/tool
+  indexes between batches in a `WeakMap` keyed by items-array identity, avoiding
+  a full transcript rescan on every frame.
 - Reconnect clears session-local UI state and ignores events from older child
   generations.
 
