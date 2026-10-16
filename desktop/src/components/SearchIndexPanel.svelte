@@ -77,7 +77,8 @@
             {@const actionLabel = indexActionLabel(action)}
             {@const sharedState = snapshot.freshness?.[row.id]?.runState}
             {@const active = (snapshot.selection?.enabled[row.id] ?? false) && (row.semanticActive || action?.running || sharedState === "running" || sharedState === "stopping")}
-            {@const detail = indexResultDetail(action) ?? row.semanticDetail}
+            {@const sourceProblem = (row.semantic === "error" || row.semantic === "incompatible") && !action?.running && !action?.error && !action?.cancelled}
+            {@const detail = sourceProblem ? row.semanticDetail : indexResultDetail(action) ?? row.semanticDetail}
             {@const enabled = snapshot.selection?.enabled[row.id] ?? false}
             {@const selectionKnown = Boolean(snapshot.selection)}
             {@const loadingCounts = !snapshot.stores && snapshot.reading && !snapshot.error}
@@ -105,8 +106,8 @@
                     </svg>
                     <span class="truncate text-tool-search" aria-label={`${action?.stopping || sharedState === "stopping" ? "Stopping" : "Indexing"} ${row.label}`}>{action?.stopping || sharedState === "stopping" ? "Stopping" : "Indexing"}</span>
                   {:else}
-                    <span class={["truncate", action?.error ? "text-tool-error" : action?.result && !action.result.complete ? "text-tool-warning" : tone(row.semantic)]}>
-                      {indexOutcomeLabel(action) ?? SEARCH_SEMANTIC_LABEL[row.semantic]}
+                    <span class={["truncate", sourceProblem ? tone(row.semantic) : action?.error ? "text-tool-error" : action?.result && !action.result.complete ? "text-tool-warning" : tone(row.semantic)]}>
+                      {sourceProblem ? SEARCH_SEMANTIC_LABEL[row.semantic] : indexOutcomeLabel(action) ?? SEARCH_SEMANTIC_LABEL[row.semantic]}
                     </span>
                   {/if}
                 </span>

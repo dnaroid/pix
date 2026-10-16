@@ -2289,7 +2289,7 @@ function registerHeaderUsageSink(notifications: HeaderUsageNotification[], chann
 	};
 }
 
-test("Pix Desktop updates saved Claude quota from structured warnings without quota I/O", async () => {
+test("Pix Desktop shares structured Claude quota account-wide without quota I/O", async () => {
 	const notifications: HeaderUsageNotification[] = [];
 	let quotaQueries = 0;
 	let credentialPending = false;
@@ -2336,14 +2336,24 @@ test("Pix Desktop updates saved Claude quota from structured warnings without qu
 		await new Promise<void>((resolve) => setImmediate(resolve));
 		assert.equal(notifications.length, 2);
 		await pi.setModel("pi-claude-code-provider", "sonnet");
-		const switched = await cx.request(PIX_RUNTIME_STATUS_METHOD, { sessionId: session.sessionId, refreshModelUsage: false }) as DesktopRuntimeStatusResponse;
-		assert.equal(switched.modelUsage, undefined, "sample does not cross model routes");
+		const switched = await cx.request(PIX_RUNTIME_STATUS_METHOD, { sessionId: session.sessionId, refreshModelUsage: true }) as DesktopRuntimeStatusResponse;
+		assert.equal(switched.modelUsage?.hourly?.remainingPercent, 0, "account-wide sample applies to every Claude Code model");
 		credentialPending = true;
 		const other = await cx.buildSession("/tmp/claude-streamed-quota-other").start();
 		await clients[1]!.setModel("pi-claude-code-provider", "opus");
 		const otherStatus = await cx.request(PIX_RUNTIME_STATUS_METHOD, { sessionId: other.sessionId, refreshModelUsage: true }) as DesktopRuntimeStatusResponse;
-		assert.equal(otherStatus.modelUsage?.hourly?.remainingPercent, 9, "session telemetry must not contaminate route-wide stale endpoint cache");
-		assert.equal(otherStatus.modelUsage?.stale, true);
+		assert.equal(otherStatus.modelUsage?.hourly?.remainingPercent, 0, "account-wide sample reaches another session");
+		assert.equal(otherStatus.modelUsage?.stale, undefined, "live telemetry is a fresh observation, not stale cache");
+		// One session's sample is pushed to every live Claude Code session.
+		const before = notifications.length;
+		emit({ modelRef: "pi-claude-code-provider/sonnet", rateLimitType: "seven_day", status: "allowed", utilization: 0.6,
+			resetsAt: now + 7 * 86400_000, observedAt: now + 2 });
+		await waitFor(() => notifications.length === before + 2);
+		const pushedTo = new Set(notifications.slice(before).map((entry) => entry.sessionId));
+		assert.deepEqual(pushedTo, new Set([session.sessionId, other.sessionId]));
+		for (const entry of notifications.slice(before)) {
+			assert.equal((entry.data as typeof previous).weekly!.remainingPercent, 40);
+		}
 	}, registerHeaderUsageSink(notifications, "claude-code-usage"));
 });
 

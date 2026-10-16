@@ -6,8 +6,8 @@ export const CLAUDE_CODE_USAGE_CHANNEL = "claude-code-usage";
 interface RateLimitSample { sessionId: string; modelRef: string; }
 export interface ClaudeCodeRateLimitCache {
 	observe(value: unknown): RateLimitSample | undefined;
-	merge(previous: DesktopModelUsageStatus | undefined, sessionId: string, modelKey: string): DesktopModelUsageStatus | undefined;
-	forget(sessionId: string): void;
+	/** Account-wide: samples from any session apply to every Claude Code route. */
+	merge(previous: DesktopModelUsageStatus | undefined, modelKey: string): DesktopModelUsageStatus | undefined;
 	clear(): void;
 }
 

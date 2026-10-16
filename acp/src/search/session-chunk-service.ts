@@ -22,6 +22,8 @@ export class DesktopSessionChunks {
     policy: SessionIdlePolicy;
     titles(record: BackgroundSessionRecord, signal: AbortSignal): Promise<void>;
     failed(error: unknown): void;
+    /** A later background pass finished without indexing failures. */
+    recovered?(): void;
   }) {
     const signal = AbortSignal.any([this.owner.signal,options.signal]);
     const selection = new IdleSessionSelection(options.policy);
@@ -78,6 +80,7 @@ export class DesktopSessionChunks {
       const after = await beginSessionSweep(cwd,identity,owned);
       if (pass.incarnation && after.incarnation !== pass.incarnation) selection.reset();
       selection.cacheRevision = `${identity}:${after.cacheRevision}`;
+      if (!failedIndexing && !selection.hasUnresolvedFailures()) options.recovered?.();
     },signal,error => {
       if (isExpectedIndexCancellation(error)) return;
       logBackgroundIndexFailure(cwd,error,phase);

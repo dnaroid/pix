@@ -15,11 +15,13 @@ export interface ClaudeCodeRateLimitSample {
 	resetPrecision?: "minute";
 }
 
+const CLAUDE_CODE_ROUTE = /^pi-claude-code-provider\/.+$/u;
+
 export function parseClaudeCodeRateLimitSample(value: unknown, now = Date.now()): ClaudeCodeRateLimitSample | undefined {
 	if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
 	const sample = value as Record<string, unknown>;
 	if (sample.version !== 1 || typeof sample.sessionId !== "string" || !sample.sessionId
-		|| typeof sample.modelRef !== "string" || !/^pi-claude-code-provider\/.+$/u.test(sample.modelRef)
+		|| typeof sample.modelRef !== "string" || !CLAUDE_CODE_ROUTE.test(sample.modelRef)
 		|| !["allowed", "allowed_warning", "rejected"].includes(String(sample.status))
 		|| !["five_hour", "seven_day"].includes(String(sample.rateLimitType))
 		|| typeof sample.resetsAt !== "number" || !Number.isFinite(sample.resetsAt) || sample.resetsAt <= now
@@ -36,40 +38,42 @@ export function parseClaudeCodeRateLimitSample(value: unknown, now = Date.now())
 		...(typeof sample.utilization === "number" ? { utilization: sample.utilization } : {}) };
 }
 
-/** Session/model-owned telemetry; never parses localized warning text or performs I/O. */
+/**
+ * Account-wide telemetry: Claude Code quota belongs to the subscription, not to
+ * the session or model route that happened to observe it, so a sample from any
+ * session updates every Claude Code route. Assumes one Claude Code account per
+ * process (account rotation disabled). Never parses localized warning text or
+ * performs I/O. Bounded to one sample per window; expired windows drop on merge.
+ */
 export class ClaudeCodeRateLimitCache {
-	private readonly samples = new Map<string, Map<ClaudeCodeRateLimitSample["rateLimitType"], ClaudeCodeRateLimitSample>>();
+	private readonly samples = new Map<ClaudeCodeRateLimitSample["rateLimitType"], ClaudeCodeRateLimitSample>();
 
 	observe(value: unknown, now = Date.now()): ClaudeCodeRateLimitSample | undefined {
 		const sample = parseClaudeCodeRateLimitSample(value, now);
 		if (!sample) return undefined;
-		const key = `${sample.sessionId}\0${sample.modelRef}`;
-		const windows = this.samples.get(key) ?? new Map();
-		const previous = windows.get(sample.rateLimitType);
+		const previous = this.samples.get(sample.rateLimitType);
 		const sameReset = previous && Math.abs(previous.resetsAt - sample.resetsAt)
 			<= (previous.resetPrecision === "minute" || sample.resetPrecision === "minute" ? 59_999 : 999);
 		if (previous && (previous.observedAt > sample.observedAt || (!sameReset && previous.resetsAt > sample.resetsAt))) return undefined;
-		windows.set(sample.rateLimitType, sameReset ? {
+		this.samples.set(sample.rateLimitType, sameReset ? {
 			...sample,
 			status: previous.status === "rejected" ? "rejected" : sample.status,
 			utilization: Math.max(previous.utilization ?? 0, sample.utilization ?? 0),
 		} : sample);
-		this.samples.set(key, windows);
 		return sample;
 	}
 
-	merge(previous: ModelUsageStatus | undefined, sessionId: string, modelKey: string, now = Date.now()): ModelUsageStatus | undefined {
-		const key = `${sessionId}\0${modelKey}`;
-		const windows = this.samples.get(key);
-		if (!windows) return previous;
+	/** Overlay account samples on `previous` for a Claude Code route; other routes pass through. */
+	merge(previous: ModelUsageStatus | undefined, modelKey: string, now = Date.now()): ModelUsageStatus | undefined {
+		if (!CLAUDE_CODE_ROUTE.test(modelKey) || !this.samples.size) return previous;
 		let status = previous?.modelKey === modelKey ? previous : undefined;
-		for (const [type, sample] of windows) {
+		for (const [type, sample] of this.samples) {
 			const field = type === "five_hour" ? "hourly" : "weekly";
 			const baseline = status?.[field];
 			// CLI resets have whole-second precision; OAuth can include fractions.
 			const tolerance = sample.resetPrecision === "minute" ? 59_999 : 999;
 			if (sample.resetsAt <= now || (baseline && !baseline.resetAtEstimated && baseline.resetAt > sample.resetsAt + tolerance)) {
-				windows.delete(type);
+				this.samples.delete(type);
 				continue;
 			}
 			const remaining = sample.status === "rejected" ? 0 : (1 - sample.utilization!) * 100;
@@ -81,12 +85,7 @@ export class ClaudeCodeRateLimitCache {
 			};
 			status = { ...status, provider: "anthropic", modelKey, updatedAt: Math.max(status?.updatedAt ?? 0, sample.observedAt), [field]: window };
 		}
-		if (!windows.size) this.samples.delete(key);
 		return status ?? previous;
-	}
-
-	forget(sessionId: string): void {
-		for (const key of this.samples.keys()) if (key.startsWith(`${sessionId}\0`)) this.samples.delete(key);
 	}
 
 	clear(): void { this.samples.clear(); }

@@ -3203,7 +3203,7 @@ export class PixAcpAgent {
 		if (existing) return existing;
 
 		const pending = this.queryModelUsage(state).then(async (queried) => {
-			// Account polling is route-wide; streamed samples stay session-owned.
+			// Account polling is route-wide; streamed samples are account-wide.
 			this.rememberClaudeCodeQuota(model, queried);
 			return this.mergeObservedClaudeCodeUsage(sessionId, model, queried);
 		}).finally(() => {
@@ -3229,8 +3229,8 @@ export class PixAcpAgent {
 		const key = claudeCodeRouteKey(model);
 		// Without a live sample, retain the endpoint's ordinary failure and
 		// credential-pending semantics rather than reviving an old cache.
-		if (!cache.merge(undefined, sessionId, key)) return result;
-		const status = cache.merge(result.status ?? this.claudeCodeQuotaCache.get(key), sessionId, key);
+		if (!cache.merge(undefined, key)) return result;
+		const status = cache.merge(result.status ?? this.claudeCodeQuotaCache.get(key), key);
 		return status ? { refresh: "ready", status } : result;
 	}
 
@@ -3243,18 +3243,37 @@ export class PixAcpAgent {
 			if (this.sessions.get(session.acpSessionId) !== session
 				|| session.claudeRateLimitGeneration !== generation || !isClaudeCodeRoute(state.model)) return;
 			const key = claudeCodeRouteKey(state.model);
+			// The transport owner validates provenance; the sample itself is
+			// account-wide quota once accepted.
 			if (!isRecord(value) || value.modelRef !== key || value.sessionId !== state.sessionId) return;
-			// The private widget's transport owner, not a supplied ACP id, owns
-			// the sample. Runtime samples use the Pi id; ACP uses its stable id.
-			if (!cache.observe({ ...value, sessionId: session.acpSessionId })) return;
-			const status = cache.merge(this.claudeCodeQuotaCache.get(key), session.acpSessionId, key);
-			if (!status) return;
-			await session.client.notify(PIX_SESSION_STATE_METHOD, {
-				sessionId: session.acpSessionId, channel: CLAUDE_CODE_USAGE_CHANNEL, data: status,
-			});
+			if (!cache.observe(value)) return;
 		} catch (error) {
 			this.options.logger.warn(`Claude Code quota telemetry failed: ${stringifyUnknown(error)}`);
+			return;
 		}
+		await this.pushClaudeCodeQuotaToSessions();
+	}
+
+	/** Fan account-wide Claude Code quota out to every live session on a Claude Code route. */
+	private async pushClaudeCodeQuotaToSessions(): Promise<void> {
+		const cache = await this.rateLimitCache();
+		if (!cache) return;
+		await Promise.allSettled([...this.sessions.values()].map(async (target) => {
+			const generation = target.claudeRateLimitGeneration;
+			try {
+				const model = (await target.pi.getState()).model;
+				if (this.sessions.get(target.acpSessionId) !== target
+					|| target.claudeRateLimitGeneration !== generation || !isClaudeCodeRoute(model)) return;
+				const key = claudeCodeRouteKey(model);
+				const status = cache.merge(this.claudeCodeQuotaCache.get(key), key);
+				if (!status) return;
+				await target.client.notify(PIX_SESSION_STATE_METHOD, {
+					sessionId: target.acpSessionId, channel: CLAUDE_CODE_USAGE_CHANNEL, data: status,
+				});
+			} catch (error) {
+				this.options.logger.warn(`Claude Code quota push failed: ${stringifyUnknown(error)}`);
+			}
+		}));
 	}
 
 	/** Keep the last successful quota per Claude Code route for stale-cache resend. */
@@ -4045,8 +4064,8 @@ export class PixAcpAgent {
 	}
 
 	private unsubscribeSessionEvents(session: AgentSessionState): void {
+		// Quota samples are account-wide and outlive any one session.
 		session.claudeRateLimitGeneration++;
-		void this.claudeRateLimits?.then((cache) => cache?.forget(session.acpSessionId));
 		session.unsubscribeExit?.();
 		session.unsubscribeExit = undefined;
 		const unsubscribe = session.unsubscribeEvents;

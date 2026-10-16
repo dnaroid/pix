@@ -21,7 +21,7 @@ test("automatic sweeps resume after restart without old body reads and admit a n
   const signal = new AbortController().signal;
   const policy = new SessionIdlePolicy(root,() => now);
   const owners: DesktopSessionChunks[] = [], titles: string[] = [], failures: unknown[] = [];
-  let failTitle = "";
+  let failTitle = "", recoveries = 0;
   t.after(async () => {
     for (const owner of owners) await owner.dispose();
     await policy.dispose(); Date.now = originalNow; await rm(root,{recursive:true,force:true});
@@ -40,7 +40,7 @@ test("automatic sweeps resume after restart without old body reads and admit a n
       titles:async record => {
         titles.push(record.piSessionId);
         if (record.piSessionId === failTitle) throw new Error("title failed");
-      },failed:error => failures.push(error)});
+      },failed:error => failures.push(error),recovered:() => { recoveries++; }});
     owners.push(owner); return owner;
   };
   const run = async (owner: DesktopSessionChunks) => {
@@ -64,6 +64,8 @@ test("automatic sweeps resume after restart without old body reads and admit a n
   const successful = await beginSessionSweep(root,identity,signal);
   now += 60_000;
   await save("failed",now-86_400_000); failTitle = "failed";
+  const recoveredBeforeFailure = recoveries;
+  assert.ok(recoveredBeforeFailure > 0,"clean passes report recovery");
   await run(restarted);
   assert.equal((await beginSessionSweep(root,identity,signal)).since,successful.since);
   const reads = titles.length;
@@ -72,7 +74,9 @@ test("automatic sweeps resume after restart without old body reads and admit a n
   assert.equal((await beginSessionSweep(root,identity,signal)).since,successful.since,
     "suppressed failure must not be mistaken for a complete pass");
   assert.equal(failures.length,1);
+  assert.equal(recoveries,recoveredBeforeFailure,"a skipped unchanged failure must not clear the background error");
   failTitle = ""; await restarted.dispose(); await run(make());
+  assert.equal(recoveries,recoveredBeforeFailure+1,"a later successful pass clears the background error");
   assert.equal(titles[titles.length-1],"failed");
   assert.equal((await beginSessionSweep(root,identity,signal)).since,now-2000);
 });

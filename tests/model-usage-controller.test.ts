@@ -28,7 +28,7 @@ describe("model usage controller", () => {
 		await settlePromises();
 		assert.match(controller.statusLabel(), /^0%/u);
 		controller.forgetSessionSamples(session.sessionId);
-		assert.match(controller.statusLabel(), /^9%/u);
+		assert.match(controller.statusLabel(), /^0%/u, "account-wide quota outlives the observing session");
 	});
 
 	it("polls Claude Code quota independently of Pi Anthropic API-key classification", async () => {

@@ -97,7 +97,8 @@ export class AppModelUsageController {
 	observeClaudeCodeRateLimit(value: unknown): boolean {
 		const sample = this.claudeRateLimits.observe(value);
 		if (!sample) return false;
-		if (this.host.runtimeSession()?.sessionId === sample.sessionId) this.host.render();
+		// Account-wide quota: any session's sample refreshes the visible Claude Code route.
+		if (this.activeModelKey && this.claudeRateLimits.merge(undefined, this.activeModelKey) !== undefined) this.host.render();
 		return true;
 	}
 
@@ -142,10 +143,10 @@ export class AppModelUsageController {
 	 * can later be reopened under the same session ID; its fresh incarnation
 	 * must not inherit the previous incarnation's rate-limit samples, which
 	 * describe windows that have long since rolled over. Samples owned by
-	 * other, concurrently open sessions are preserved.
+	 * other, concurrently open sessions are preserved. Claude Code quota
+	 * samples are account-wide, not session-owned, and are kept.
 	 */
 	forgetSessionSamples(sessionId: string): void {
-		this.claudeRateLimits.forget(sessionId);
 		if (this.pendingResponseHeaders?.payload.sessionId === sessionId) {
 			this.pendingResponseHeaders = undefined;
 		}
@@ -388,7 +389,7 @@ export class AppModelUsageController {
 			if (headerStatus) return headerStatus;
 		}
 		const status = this.statuses.get(this.activeModelKey);
-		return session ? this.claudeRateLimits.merge(status, session.sessionId, this.activeModelKey) : status;
+		return this.claudeRateLimits.merge(status, this.activeModelKey);
 	}
 
 	private isActiveHeaderStatus(sessionId: string, cacheKey: string): boolean {

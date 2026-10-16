@@ -27,6 +27,7 @@ import { beginSessionSweep, completeSessionSweep } from "./session-watermark.js"
 
 const PROVIDER_WARNING = "Semantic settings search unavailable; local search remains available";
 const SESSION_PROVIDER_WARNING = "Semantic session-title search unavailable; local search remains available";
+const SESSION_CHUNK_BACKGROUND_ERROR = "Session chunk indexing incomplete or unavailable; use Continue";
 const TASK_PROVIDER_WARNING = "Semantic task search unavailable; local task search remains available";
 const DISCOVERY_ERROR = "Session title discovery timed out or failed";
 export class SearchUnavailableError extends Error {}
@@ -457,7 +458,9 @@ export class DesktopSearchService {
           authorized: async owned => await sourceEnabled(w.cwd,"sessions",w.policyRevision) && await this.consent(owned) && this.current(w,epoch),
           embed:(inputs,owned,beforeSend) => this.vectors(inputs,owned,"sessions",false,beforeSend) };
       },
-      failed: () => { if(this.current(w)) w.indexError = "Session chunk indexing incomplete or unavailable; use Continue"; },
+      failed: () => { if(this.current(w)) w.indexError = SESSION_CHUNK_BACKGROUND_ERROR; },
+      // Only clear the error this background worker owns; title/manual errors persist.
+      recovered: () => { if(this.current(w) && w.indexError === SESSION_CHUNK_BACKGROUND_ERROR) delete w.indexError; },
     });
   }
   private async vectors(inputs: readonly string[], signal: AbortSignal, domain: "settings" | "sessions" | "tasks" = "settings", query = false, beforeSend?: () => Promise<void>): Promise<number[][]> {
