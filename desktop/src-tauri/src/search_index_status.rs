@@ -39,12 +39,19 @@ pub(crate) async fn search_index_status(workspace: String) -> Result<SearchIndex
 }
 
 fn read_status(workspace: &str) -> Result<SearchIndexStatus, String> {
-    let home = std::env::var("HOME").ok().filter(|value| !value.trim().is_empty())
-        .map(PathBuf::from).or_else(std::env::home_dir).ok_or("Home directory unavailable")?;
+    let home = std::env::var("HOME")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
+        .or_else(std::env::home_dir)
+        .ok_or("Home directory unavailable")?;
     read_status_with_settings(workspace, &home.join(".config/pi/search"))
 }
 
-fn read_status_with_settings(workspace: &str, settings_directory: &Path) -> Result<SearchIndexStatus, String> {
+fn read_status_with_settings(
+    workspace: &str,
+    settings_directory: &Path,
+) -> Result<SearchIndexStatus, String> {
     let root = fs::canonicalize(workspace).map_err(|_| "Selected workspace is unavailable")?;
     let search = root.join(".pi/search");
     let mut usable_dir = true;
@@ -138,7 +145,12 @@ fn read_status_with_settings(workspace: &str, settings_directory: &Path) -> Resu
             match fs::symlink_metadata(directory) {
                 Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() => (),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
-                _ => return fail(inspect_store(id, None, queries), "Unsafe global Settings search directory"),
+                _ => {
+                    return fail(
+                        inspect_store(id, None, queries),
+                        "Unsafe global Settings search directory",
+                    )
+                }
             }
         }
         inspect_store(id, Some(settings_directory.join(file)), queries)
@@ -353,10 +365,22 @@ mod tests {
         drop(db);
         fs::remove_dir_all(root.join(".pi")).unwrap();
         let result = read_status_with_settings(root.to_str().unwrap(), &global).unwrap();
-        let settings = result.stores.iter().find(|row| row.id == "settings").unwrap();
+        let settings = result
+            .stores
+            .iter()
+            .find(|row| row.id == "settings")
+            .unwrap();
         assert_eq!(settings.state, "present");
         assert_eq!(settings.counts.get("settingsVectors"), Some(&1));
-        assert_eq!(result.stores.iter().find(|row| row.id == "code").unwrap().state, "absent");
+        assert_eq!(
+            result
+                .stores
+                .iter()
+                .find(|row| row.id == "code")
+                .unwrap()
+                .state,
+            "absent"
+        );
         fs::remove_dir_all(root).unwrap();
     }
 

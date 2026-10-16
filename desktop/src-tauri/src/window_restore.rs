@@ -191,7 +191,10 @@ pub(crate) fn setup(app: &mut tauri::App) -> Result<bool, Box<dyn std::error::Er
             Ok(created) => {
                 track(&created, window.workspace.clone(), window.geometry);
             }
-            Err(error) => crate::logging::error(module_path!(), format!("could not restore window {}: {error}", window.label)),
+            Err(error) => crate::logging::error(
+                module_path!(),
+                format!("could not restore window {}: {error}", window.label),
+            ),
         }
     }
     if app.webview_windows().is_empty() {

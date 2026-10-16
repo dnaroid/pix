@@ -62,21 +62,33 @@ fn reveal(window: WebviewWindow) {
         }
         apply_to(&window);
         if let Err(error) = window.show() {
-            crate::logging::error(module_path!(), format!("failed to show the Pix startup window: {error}"));
+            crate::logging::error(
+                module_path!(),
+                format!("failed to show the Pix startup window: {error}"),
+            );
             return;
         }
         // Showing a previously hidden window alone does not activate Pix. Each
         // restored window must be ordered forward once its document is ready.
         #[cfg(target_os = "macos")]
         if !crate::desktop_notification::foreground_window(&window) {
-            crate::logging::error(module_path!(), format!("failed to foreground the Pix startup window"));
+            crate::logging::error(
+                module_path!(),
+                format!("failed to foreground the Pix startup window"),
+            );
         }
         #[cfg(not(target_os = "macos"))]
         if let Err(error) = window.set_focus() {
-            crate::logging::error(module_path!(), format!("failed to focus the Pix startup window: {error}"));
+            crate::logging::error(
+                module_path!(),
+                format!("failed to focus the Pix startup window: {error}"),
+            );
         }
     }) {
-        crate::logging::error(module_path!(), format!("failed to dispatch the Pix startup reveal: {error}"));
+        crate::logging::error(
+            module_path!(),
+            format!("failed to dispatch the Pix startup reveal: {error}"),
+        );
     }
 }
 
@@ -84,13 +96,19 @@ fn apply_to(window: &WebviewWindow) {
     let theme = match window.theme() {
         Ok(theme) => theme,
         Err(error) => {
-            crate::logging::error(module_path!(), format!("failed to resolve the Pix startup theme: {error}"));
+            crate::logging::error(
+                module_path!(),
+                format!("failed to resolve the Pix startup theme: {error}"),
+            );
             return;
         }
     };
 
     if let Err(error) = window.set_background_color(Some(background_for(theme))) {
-        crate::logging::error(module_path!(), format!("failed to set the Pix startup background: {error}"));
+        crate::logging::error(
+            module_path!(),
+            format!("failed to set the Pix startup background: {error}"),
+        );
     }
 }
 

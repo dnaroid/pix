@@ -42,10 +42,10 @@ mod git_ci;
 mod git_identity;
 mod git_ignore;
 mod git_operations;
-mod lsp_install;
-mod logging;
-mod log_reader;
 mod log_clear;
+mod log_reader;
+mod logging;
+mod lsp_install;
 #[cfg(test)]
 mod native_lifecycle_tests;
 mod native_process;
@@ -309,7 +309,6 @@ struct DeepgramRuntimeConfig {
     language: String,
 }
 
-
 #[derive(Default)]
 struct PackageTerminalState {
     sessions: Mutex<HashMap<String, PackageTerminalSession>>,
@@ -372,7 +371,6 @@ struct PackageTerminalRunning {
     process_id: Option<u32>,
     process_group_leader: Option<i32>,
 }
-
 
 async fn run_blocking<T, F>(operation: F) -> Result<T, String>
 where
@@ -4079,7 +4077,10 @@ impl Drop for UserConfigFileLock {
         // Only remove the empty directory we own, never recursively delete it
         // or unlink a contending writer's lock.
         if let Err(error) = fs::remove_dir(&self.0) {
-            logging::error(module_path!(), format!("failed to release user config lock: {error}"));
+            logging::error(
+                module_path!(),
+                format!("failed to release user config lock: {error}"),
+            );
         }
     }
 }
@@ -6903,8 +6904,10 @@ impl Default for ProjectTasksPanelSnapshot {
 
 #[tauri::command]
 async fn read_project_tasks_panel(workspace: String) -> Result<ProjectTasksPanelSnapshot, String> {
-    run_blocking(move || read_project_tasks_panel_from(Path::new(&workspace), MAX_TASK_DOCUMENT_BYTES))
-        .await
+    run_blocking(move || {
+        read_project_tasks_panel_from(Path::new(&workspace), MAX_TASK_DOCUMENT_BYTES)
+    })
+    .await
 }
 
 /// Resolve only attachment rows linked to the requested task in SQLite.
@@ -8411,12 +8414,10 @@ fn safe_file_name(name: &str) -> String {
     }
 }
 
-
 #[tauri::command]
 async fn save_acp_crash_log(workspace: String, content: String) -> Result<String, String> {
     run_blocking(move || acp_diagnostics::save(Path::new(&workspace), &content)).await
 }
-
 
 // Capture both running and completed records before delayed ACP stop. Holding
 // the slot registry lock also excludes in-flight terminal publication; no
@@ -8455,7 +8456,6 @@ fn remove_captured_ids<T>(records: &mut HashMap<String, T>, ids: &[String]) {
         records.remove(id);
     }
 }
-
 
 const UI_QA_ENV: &str = "PI_UI_QA";
 const UI_QA_WORKSPACE_ENV: &str = "PI_UI_QA_WORKSPACE";
@@ -8556,7 +8556,13 @@ pub fn run() {
         .setup(move |app| {
             if let Ok(home) = app.path().home_dir() {
                 logging::init(home);
-                logging::record("info", "lifecycle", "desktop:started", serde_json::json!({}), None);
+                logging::record(
+                    "info",
+                    "lifecycle",
+                    "desktop:started",
+                    serde_json::json!({}),
+                    None,
+                );
                 let previous = std::panic::take_hook();
                 std::panic::set_hook(Box::new(move |info| {
                     logging::panic(info.to_string());
@@ -8851,7 +8857,6 @@ mod tests {
         assert_eq!(macos_editor_app_name("ZED"), Some("Zed"));
     }
 
-
     #[cfg(unix)]
     #[test]
     fn forced_stop_targets_isolated_group() {
@@ -8954,7 +8959,6 @@ mod tests {
         )
         .is_err());
     }
-
 
     fn temporary_workspace(name: &str) -> PathBuf {
         let stamp = SystemTime::now()
@@ -11727,7 +11731,10 @@ mod tests {
         assert!(fresh_noncanonical.join("payload.bin").is_file());
         assert!(fresh_receipt.is_file());
         assert!(workspace.join(".pi/plans/keep.md").is_file());
-        assert_eq!(fs::read(&local_rules).unwrap(), b"private project instructions");
+        assert_eq!(
+            fs::read(&local_rules).unwrap(),
+            b"private project instructions"
+        );
         assert!(workspace.join(".pi/artifacts").is_dir());
         assert!(workspace.join(".pi/subagents").is_dir());
 

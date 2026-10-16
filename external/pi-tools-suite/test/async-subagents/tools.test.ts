@@ -399,7 +399,8 @@ process.stdin.on("data", (data) => {
 		registerExtension(pi as any);
 		const ctx = { cwd, mode: "rpc", sessionManager: { getSessionFile: () => parentSession },
 			ui: { setWidget: (key: string, lines: string[] | undefined) => widgets.push({ key, lines }) } };
-		const latest = () => JSON.parse(widgets.filter((widget) => widget.lines?.[0] === "pi-tools-suite:async-subagents:live-state").at(-1)?.lines?.[1] ?? "null");
+		// Agent listing order follows readdir and is platform-dependent; compare by id.
+		const latest = () => { const state = JSON.parse(widgets.filter((widget) => widget.lines?.[0] === "pi-tools-suite:async-subagents:live-state").at(-1)?.lines?.[1] ?? "null"); for (const run of state?.runs ?? []) run.agents?.sort((x: { id: string }, y: { id: string }) => x.id.localeCompare(y.id)); return state; };
 		await pi.events.get("session_start")![0]({}, ctx);
 		try {
 			expect(latest()).toMatchObject({ count: 2, runs: [{ agents: [

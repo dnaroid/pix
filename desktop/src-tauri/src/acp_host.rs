@@ -426,7 +426,8 @@ fn forward_stdin<W: Write + Send + 'static>(
                 StdinCommand::Write { lines, ack } => {
                     // Validate the whole batch before writing any of it, so an
                     // invalid entry never leaves a partially written batch.
-                    if let Err(error) = lines.iter().try_for_each(|line| validate_json_object(line)) {
+                    if let Err(error) = lines.iter().try_for_each(|line| validate_json_object(line))
+                    {
                         let _ = ack.send(Err(error));
                         continue;
                     }

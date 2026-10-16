@@ -8,7 +8,7 @@ import { openDatabase } from "../src/project-search/source-work.mjs";
 import { runManagedIndex } from "../src/project-search/managed-index-run.mjs";
 import { probeSnapshots } from "../src/project-search/snapshot-probe.mjs";
 import { openStore } from "../src/project-search/native-store.mjs";
-import { removeDirsWithRetry } from "./support/fs-retry.mjs";
+import { removeDirsWithRetry, unlinkWithRetry } from "./support/fs-retry.mjs";
 
 const base = fileURLToPath(new URL("../../../.pi/artifacts/manual-index-tests/", import.meta.url));
 async function fixture(t, initialized = true) {
@@ -87,7 +87,7 @@ test("source changes, cancellation, errors and missing indexes cannot certify fu
   done = await f.finish(started.token, { result: undefined });
   assert.equal(done.state, "error"); assert.equal(done.receipt, undefined);
   started = await f.begin();
-  await rm(join(f.root, ".pi/search/code.sqlite"));
+  await unlinkWithRetry(join(f.root, ".pi/search/code.sqlite"));
   done = await f.finish(started.token);
   assert.equal(done.result.complete, false); assert.equal(done.receipt, undefined);
 });

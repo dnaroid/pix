@@ -79,7 +79,10 @@ pub(crate) fn setup(app: &tauri::App) -> tauri::Result<()> {
 pub(crate) fn arrange(app: &tauri::AppHandle) {
     let handle = app.clone();
     if let Err(error) = app.run_on_main_thread(move || native::arrange(&handle)) {
-        crate::logging::error(module_path!(), format!("failed to arrange Pix windows: {error}"));
+        crate::logging::error(
+            module_path!(),
+            format!("failed to arrange Pix windows: {error}"),
+        );
     }
 }
 
