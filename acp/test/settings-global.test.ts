@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { mkdir, mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { removeDirsWithRetry } from "../../external/pi-tools-suite/test/support/fs-retry.mjs";
 import { SearchIndexStore } from "../src/search/index-store.js";
 import { settingsDocuments, hashText } from "../src/search/documents.js";
 import { embeddingMetadata } from "../src/search/embedding-cache.js";
@@ -17,7 +18,7 @@ async function fixture(t: TestContext) {
   const root = await mkdtemp(join(base, "run-"));
   const restore = await isolateSearchHome(root);
   const a = join(root, "a"), b = join(root, "b"); await mkdir(a); await mkdir(b);
-  t.after(async () => { await rm(root, { recursive: true, force: true }); restore(); });
+  t.after(async () => { await removeDirsWithRetry([root]); restore(); });
   return { a, b, store: new SearchIndexStore() };
 }
 async function legacy(cwd: string, docs = documents("Original"), model = config, corrupt = false) {

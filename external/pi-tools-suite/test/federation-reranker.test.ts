@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile, appendFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile, appendFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { prepareFederatedRerank, rerankFederated } from "../src/project-search/federation-reranker.mjs";
 import { selectFederatedCandidates, applyFederatedOrder } from "../src/project-search/federation-ranking.mjs";
@@ -11,6 +11,7 @@ import { writeSourcePolicy } from "../src/project-search/source-policy.mjs";
 import { searchProject } from "../src/project-search/engine.js";
 import type { FederatedRerankRequest, FederatedSource } from "../src/project-search/native-contract.js";
 import { enableSearchSources } from "./support/search-sources.js";
+import { removeDirsWithRetry } from "./support/fs-retry.js";
 
 const saved = { HOME: process.env.HOME, PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR,
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY, PIX_ACP_SESSION_MAP: process.env.PIX_ACP_SESSION_MAP };
@@ -45,7 +46,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
-  if (directory) await rm(directory, { recursive: true, force: true });
+  if (directory) await removeDirsWithRetry([directory]);
 });
 async function request(sources = all): Promise<FederatedRerankRequest> {
   const { context } = await prepareFederatedRerank(root, sources, signal());

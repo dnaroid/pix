@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdir, mkdtemp, rm, writeFile, utimes } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile, utimes } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { removeDirsWithRetry } from "../../external/pi-tools-suite/test/support/fs-retry.mjs";
 import { SessionIdlePolicy, IdleSessionSelection, SESSION_IDLE_MS } from "../src/search/session-idle.js";
 import { indexSessionChunks, hasSessionChunkVectors } from "../src/search/session-chunks.js";
 import { SessionSearchActivity } from "../src/search/session-activity.js";
@@ -14,7 +15,7 @@ async function fixture(t: { after(fn: () => Promise<unknown>): void }) {
   const root = await mkdtemp(join(base, "case-"));
   await writeSourcePolicy(root, "sessions", true);
   const policies: SessionIdlePolicy[] = [];
-  t.after(async () => { await Promise.all(policies.map(p => p.dispose())); await rm(root, { recursive: true, force: true }); });
+  t.after(async () => { await Promise.all(policies.map(p => p.dispose())); await removeDirsWithRetry([root]); });
   let now = Date.now();
   const candidates = await Promise.all(["a", "b"].map(async id => {
     const candidate = { id, path: join(root, `${id}.jsonl`) };

@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, utimes, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { removeDirsWithRetry } from "../../external/pi-tools-suite/test/support/fs-retry.mjs";
 import { DesktopSessionChunks } from "../src/search/session-chunk-service.js";
 import { BackgroundSessionDiscovery, hydrateBackgroundTitle } from "../src/search/background-session-discovery.js";
 import { nativeSessionDirectory } from "../src/search/session-discovery.js";
@@ -36,7 +37,7 @@ async function fixture(t: { after(fn: () => Promise<unknown>): void }) {
     discoverBackground:async s=>{discoveries++;return discovery.list(root,s);},
     titles:async r=>{titles.push(r.piSessionId);},failed:e=>{errors.push(e);},
   });
-  t.after(async()=>{discovery.dispose();await chunks.dispose();await policy.dispose();await rm(root,{recursive:true,force:true});});
+  t.after(async()=>{discovery.dispose();await chunks.dispose();await policy.dispose();await removeDirsWithRetry([root]);});
   const run = () => (chunks as unknown as {sync:{run(s:AbortSignal):Promise<void>}}).sync.run(signal());
   return {root,directory,policy,discovery,chunks,run,titles,errors,counts:()=>({discoveries,manual})};
 }

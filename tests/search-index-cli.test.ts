@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
+import { removeDirsWithRetry } from "../external/pi-tools-suite/test/support/fs-retry.mjs";
 import { join, resolve } from "node:path";
 import { parseIndexArgs } from "../scripts/search-index.js";
 import { settingsDocuments, hashText } from "../acp/src/search/documents.js";
@@ -23,7 +24,7 @@ test("shell status/check/stop are provider-free and do not initialize a fresh pr
   const base = resolve(".pi/artifacts/search-index-cli-tests");
   await mkdir(base, { recursive: true });
   const root = await mkdtemp(join(base, "run-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => removeDirsWithRetry([root]));
   for (const action of ["status", "check", "stop"]) {
     const { stdout } = await promisify(execFile)(process.execPath, ["--import", "tsx", "scripts/search-index.ts", action, "--project", root], {
       env: { ...process.env, HOME: root, OPENROUTER_API_KEY: "", PI_CODING_AGENT_DIR: join(root, "agent") }, timeout: 20000,
@@ -39,7 +40,7 @@ test("all six shell index adapters fail safely without a configured provider", a
   const base = resolve(".pi/artifacts/search-index-cli-tests");
   await mkdir(base, { recursive: true });
   const root = await mkdtemp(join(base, "run-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => removeDirsWithRetry([root]));
   const sources = ["code", "knowledge", "settings", "sessions", "tasks", "commits"];
   await mkdir(join(root, ".pi"));
   await mkdir(join(root, ".config/pi"), { recursive: true });
@@ -62,7 +63,7 @@ test("shell migrates compatible Settings once without a provider and toggles it 
   const base = resolve(".pi/artifacts/search-index-cli-tests");
   await mkdir(base, { recursive: true });
   const root = await mkdtemp(join(base, "global-")), a = join(root, "a"), b = join(root, "b");
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => removeDirsWithRetry([root]));
   await mkdir(join(a, ".pi/search"), { recursive: true }); await mkdir(b);
   await mkdir(join(root, ".config/pi"), { recursive: true });
   await writeFile(join(root, ".config/pi/pi-tools-suite.jsonc"), JSON.stringify({ search: { embedding: {
