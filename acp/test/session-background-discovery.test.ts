@@ -16,6 +16,13 @@ import { FixtureSearchPreferences } from "./central-semantics-fixture.js";
 import type { SessionMapRecord } from "../src/acp/session-map.js";
 import { enableSearchSources } from "./search-sources-fixture.js";
 const signal = () => new AbortController().signal;
+/** Late FS events from fixture writes (notably macOS FSEvents) fail a pass closed; production retries next pass. */
+async function listSettled(discovery: BackgroundSessionDiscovery, root: string) {
+  for (let attempt = 0; ; attempt++) {
+    try { return await discovery.list(root, signal()); }
+    catch (error) { if (attempt >= 4 || !(error instanceof Error) || error.message !== "Session changed during check") throw error; }
+  }
+}
 async function fixture(t: { after(fn: () => Promise<unknown>): void }) {
   const base = resolve(".pi/artifacts/session-background-discovery"); await mkdir(base,{recursive:true});
   const root = await mkdtemp(join(base,"case-")), agent = join(root,"agent");
@@ -68,7 +75,7 @@ test("Continue preflight skips discovery and an in-flight circuit stops the whol
   } finally {db.close();}
 });
 test("background title hydration keeps Desktop map authority and authenticates native titles",async t=>{
-  const f=await fixture(t),record=(await f.discovery.list(f.root,signal()))[0]!;
+  const f=await fixture(t),record=(await listSettled(f.discovery,f.root))[0]!;
   const native=await hydrateBackgroundTitle(f.root,record,signal());
   assert.equal(native?.record.namedTitle,"Title a");
   const mapped={...record,nativeOnly:false,title:"Stale title",namedTitle:"Stale title",sessionId:"acp"};
@@ -99,7 +106,7 @@ test("ACP service hydrates one admitted title without full rediscovery or prunin
     const internals=service as unknown as {workspace:unknown;chunkIndexer(w:unknown):DesktopSessionChunks};
     const chunks=internals.chunkIndexer(internals.workspace);await chunks.dispose();
     const options=(chunks as unknown as {options:{titles(r:SessionMapRecord,s:AbortSignal):Promise<void>}}).options;
-    const records=await f.discovery.list(f.root,signal());
+    const records=await listSettled(f.discovery,f.root);
     await options.titles(records[0]!,signal());await options.titles(records[1]!,signal());
     const prefix=(await preferences.embedding())!.documentPrefix;
     assert.equal(fullScans,0);assert.deepEqual(calls,[[prefix+"Title a"],[prefix+"Title b"]]);

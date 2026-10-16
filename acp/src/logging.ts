@@ -9,7 +9,6 @@ import { PixFileLogger, withPixLogContext, type PixLogContext } from "../../dist
 import { redactLogText } from "../../dist/app/logging/privacy.js";
 export { withPixLogContext };
 export type LogLevel = "debug" | "info" | "warn" | "error";
-export const acpFileLogger = new PixFileLogger({ source: "acp", module: "adapter", level: parseLogLevel(process.env.PIX_LOG_LEVEL ?? process.env.PIX_ACP_LOG) });
 
 const LEVEL_ORDER: Record<LogLevel, number> = {
 	debug: 10,
@@ -24,6 +23,9 @@ export function parseLogLevel(value: string | undefined): LogLevel {
 	if (value && LEVELS.has(value as LogLevel)) return value as LogLevel;
 	return "info";
 }
+
+// Declared after LEVELS: parseLogLevel reads it during module evaluation.
+export const acpFileLogger = new PixFileLogger({ source: "acp", module: "adapter", level: parseLogLevel(process.env.PIX_LOG_LEVEL ?? process.env.PIX_ACP_LOG) });
 
 export interface Logger {
 	debug(message: string, context?: PixLogContext): void;
