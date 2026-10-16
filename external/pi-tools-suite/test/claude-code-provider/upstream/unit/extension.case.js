@@ -238,6 +238,54 @@ test("routes rate-limit warnings to the active Pi UI and launches nothing before
     }
 });
 
+test("publishes unconstrained per-window consumption as quota telemetry without a warning", async () => {
+    const allowed = { status: "allowed", rateLimitType: "five_hour", resetsAt: 1_800_000_000,
+        unifiedWindows: { five_hour: { utilization: 0.47, resetsAt: 1_800_000_000 }, seven_day: { utilization: 0.04, resetsAt: 1_800_500_000 } } };
+    const { directory, executable } = await createFakeClaude("ok", { rateLimitInfo: allowed });
+    const original = process.env.PI_CLAUDE_CODE_PROVIDER_PATH;
+    process.env.PI_CLAUDE_CODE_PROVIDER_PATH = executable;
+    let shutdown;
+    try {
+        const pi = fakePi();
+        const events = [];
+        const widgets = [];
+        const notices = [];
+        pi.api.events = { emit(name, data) { events.push({ name, data }); } };
+        await piClaudeCodeProvider(pi.api);
+        shutdown = pi.handlers.get("session_shutdown")[0];
+        const ctx = sessionContext(tmpdir(), {
+            notify(message, level) { notices.push({ message, level }); },
+            setWidget(key, lines) { widgets.push({ key, lines }); },
+        });
+        ctx.mode = "rpc";
+        pi.handlers.get("session_start")[0]({}, ctx);
+        const provider = pi.providers.get("pi-claude-code-provider");
+        const model = { ...provider.models.find((candidate) => candidate.id === "sonnet"),
+            provider: "pi-claude-code-provider", api: "pi-claude-code-provider-headless", baseUrl: "pi-claude-code-provider://local" };
+        await provider.streamSimple(model, providerContext()).result();
+        assert.equal(notices.filter(({ message }) => message.includes("rate limit")).length, 0);
+        assert.deepEqual(events.map(({ name, data }) => [name, data.status, data.rateLimitType, data.utilization, data.resetsAt]), [
+            ["pix:claude-code:rate-limit", "allowed", "five_hour", 0.47, 1_800_000_000_000],
+            ["pix:claude-code:rate-limit", "allowed", "seven_day", 0.04, 1_800_500_000_000],
+        ]);
+        for (const { data } of events) {
+            assert.equal(data.version, 1);
+            assert.equal(data.sessionId, ctx.sessionManager.getSessionId());
+            assert.equal(data.modelRef, "pi-claude-code-provider/sonnet");
+        }
+        assert.equal(widgets.filter(({ lines }) => lines[0] === "pix:claude-code:rate-limit").length, 2);
+        const sink = sessionRegistry().get(ctx.sessionManager.getSessionId()).onRateLimitWindows;
+        await shutdown({}, {});
+        sink([{ rateLimitType: "five_hour", utilization: 0.5, resetsAt: 1_800_000_000_000 }], "pi-claude-code-provider/sonnet");
+        assert.equal(events.length, 2, "late request cannot publish after shutdown");
+    } finally {
+        if (shutdown) await shutdown({}, {});
+        if (original === undefined) delete process.env.PI_CLAUDE_CODE_PROVIDER_PATH;
+        else process.env.PI_CLAUDE_CODE_PROVIDER_PATH = original;
+        await rm(directory, { recursive: true, force: true });
+    }
+});
+
 test("publishes owned structured quota before a rejected stream and independently of warning dedup", async () => {
     const warning = { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.99, resetsAt: 1_800_000_000 };
     const { directory, executable } = await createFakeClaude("Rate limit reached", { resultError: true, rateLimitInfo: [warning, warning,

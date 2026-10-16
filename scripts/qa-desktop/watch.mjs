@@ -81,7 +81,7 @@ export async function successfulState(watcher, checkout, probe, budget) {
 	const state = parseDesktopWatchState(await readJson(watcher.statePath));
 	if (!state) throw new Error("invalid watcher state");
 	if (state.buildStatus === "failed") throw new Error("watch:all build failed; fix it in the watcher terminal before preparing QA");
-	if (state.buildStatus && state.buildStatus !== "idle") return undefined;
+	if (state.buildStatus && state.buildStatus !== "idle") { budget?.onPending?.(state.buildStatus); return undefined; }
 	const target = checkedPath(state.target);
 	if (!contained(watcher.directory, target)) throw new Error("published target escapes watcher ownership");
 	const bundle = dirname(dirname(dirname(target)));

@@ -63,6 +63,20 @@ describe("Claude Code structured quota telemetry", () => {
 		assert.equal(initial.hourly?.remainingPercent, 9, "never mutate endpoint snapshots");
 	});
 
+	it("applies unconstrained per-request consumption without lowering observed usage", () => {
+		const cache = new ClaudeCodeRateLimitCache();
+		const initial = { ...baseline(), hourly: { ...baseline().hourly!, remainingPercent: 60 } };
+		assert.ok(cache.observe(sample({ status: "allowed", utilization: 0.47 }), NOW));
+		const merged = cache.merge(initial, "a", MODEL, NOW)!;
+		assert.ok(Math.abs(merged.hourly!.remainingPercent - 53) < 0.001);
+		assert.equal(merged.weekly, initial.weekly);
+		cache.observe(sample({ status: "allowed", utilization: 0.3, observedAt: NOW + 1 }), NOW + 1);
+		assert.ok(Math.abs(cache.merge(initial, "a", MODEL, NOW + 1)!.hourly!.remainingPercent - 53) < 0.001);
+		cache.observe(sample({ status: "rejected", utilization: undefined, observedAt: NOW + 2 }), NOW + 2);
+		cache.observe(sample({ status: "allowed", utilization: 0.5, observedAt: NOW + 3 }), NOW + 3);
+		assert.equal(cache.merge(initial, "a", MODEL, NOW + 3)?.hourly?.remainingPercent, 0);
+	});
+
 	it("rejected windows stay at zero against lower warnings and older endpoint replies", () => {
 		const cache = new ClaudeCodeRateLimitCache();
 		cache.observe(sample({ status: "rejected", utilization: undefined }), NOW);
@@ -106,7 +120,7 @@ describe("Claude Code structured quota telemetry", () => {
 		for (const invalid of [
 			"Claude rate limit warning: 99% used (five_hour)", null, [],
 			sample({ version: 2 }), sample({ sessionId: "" }), sample({ modelRef: "anthropic/opus" }),
-			sample({ rateLimitType: "overage" }), sample({ status: "allowed" }),
+			sample({ rateLimitType: "overage" }), sample({ status: "allowed", utilization: undefined }), sample({ status: "unknown" }),
 			sample({ utilization: undefined }), sample({ utilization: 1.1 }), sample({ utilization: Number.NaN }),
 			sample({ resetsAt: NOW }), sample({ observedAt: NOW + 1 }),
 		]) assert.equal(parseClaudeCodeRateLimitSample(invalid, NOW), undefined);

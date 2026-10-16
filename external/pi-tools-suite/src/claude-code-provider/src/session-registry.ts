@@ -1,4 +1,4 @@
-import type { RateLimitNoticeSink } from "./claude-protocol.ts";
+import type { RateLimitNoticeSink, RateLimitWindowsSink } from "./claude-protocol.ts";
 import type { SessionImageStore } from "./session-image-store.ts";
 
 /** The per-session state a request needs, owned by the instance that started that session. */
@@ -6,6 +6,7 @@ export interface SessionEntry {
   cwd: string;
   imageStore: SessionImageStore;
   onRateLimitNotice: RateLimitNoticeSink;
+  onRateLimitWindows?: RateLimitWindowsSink;
   onAccountAttempt?: (name: string) => void;
   onAccountPause?: (previous: string, seconds: number) => void;
   onAccountSwitch?: (previous: string, next: string) => void;

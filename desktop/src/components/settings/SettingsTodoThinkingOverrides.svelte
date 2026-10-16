@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { iconButtonClass } from "../../lib/icon-button";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Plus from "@lucide/svelte/icons/plus";
   import Info from "@lucide/svelte/icons/info";
@@ -228,7 +229,7 @@
     </details>
     <button
       type="button"
-      class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+      class={iconButtonClass("sm", "panel")}
       aria-label="About todo thinking limits"
       title="Choose Min / Max for exact provider/model names, bare model names, or wildcard patterns (* and ?). Equal bounds force one level. No override clears inherited policy. Only supported levels are used; if none fit, the ceiling takes priority, or the model uses its lowest supported level."
     ><Info class="h-3.5 w-3.5" aria-hidden="true" /></button>

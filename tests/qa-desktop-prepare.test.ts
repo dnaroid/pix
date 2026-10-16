@@ -38,7 +38,7 @@ async function fixture(t) {
  await publish();
  const probe = async () => ({ cwd: checkout, command: "node scripts/watch-all.mjs" });
  let tick = 0;
- const dependencies = { tempRoot, probe, now: () => tick, wait: async (ms) => { tick += ms; }, seed: { env: {}, home: join(scratch, "absent") } };
+ const dependencies = { tempRoot, probe, now: () => tick, wait: async (ms) => { tick += ms; }, settleMs: 0, progress: () => {}, seed: { env: {}, home: join(scratch, "absent") } };
  const options = { checkout, state: statePath, timeoutMs: 500, runDir: join(checkout, ".pi", "artifacts", "run") };
  return { scratch, checkout, tempRoot, directory, statePath, owner, target, bundle, publish, probe, dependencies, options,
   watcher: { statePath, directory, ownerPid: 4242, tempRoot } };
@@ -115,6 +115,16 @@ for (const status of ["queued", "building"]) test(`prepare waits for ${status} t
  const result = await prepareDesktop(f.options, { ...f.dependencies, wait: async (ms) => { waits++; await f.dependencies.wait(ms); await f.publish(); } });
  assert.equal(waits, 1); assert.equal((await json(result.manifestPath)).source.target, f.target);
 });
+test("prepare pins only after idle settles and restarts the window when a build intervenes", { skip: skipWindows }, async (t) => {
+ const f = await fixture(t); const messages = []; let waits = 0;
+ const result = await prepareDesktop({ ...f.options, timeoutMs: 5000 }, { ...f.dependencies, settleMs: 300, progress: (m) => messages.push(m), wait: async (ms) => {
+  waits++; await f.dependencies.wait(ms);
+  if (waits === 1) await f.publish("building"); else if (waits === 2) await f.publish();
+ } });
+ assert.equal((await json(result.manifestPath)).source.target, f.target);
+ assert.ok(waits >= 5, `settle window must span several polls after the build, got ${waits}`);
+ assert.ok(messages.some((m) => /building/.test(m))); assert.ok(messages.some((m) => /settling 300 ms/.test(m)));
+});
 test("failed state never pins an old successful target and removes owned run", async (t) => {
  const f = await fixture(t); await f.publish("failed");
  await assert.rejects(prepareDesktop(f.options, f.dependencies), /build failed/); await absent(f.options.runDir); await stat(f.target);
@@ -123,8 +133,8 @@ test("bounded timeout removes run and does not copy queued old target", async (t
  const f = await fixture(t); await f.publish("queued"); let waits = 0;
  await assert.rejects(prepareDesktop({ ...f.options, timeoutMs: 100 }, { ...f.dependencies, copy: () => assert.fail("must not copy"), wait: async (ms) => { waits++; await f.dependencies.wait(ms); } }), /timed out/);
  assert.equal(waits, 1); await absent(f.options.runDir);
- for (const value of [99, 300001, 1.5, "bad", Infinity]) assert.throws(() => boundedTimeout(value));
- assert.equal(boundedTimeout(), 120000);
+ for (const value of [99, 900001, 1.5, "bad", Infinity]) assert.throws(() => boundedTimeout(value));
+ assert.equal(boundedTimeout(), 300000); assert.equal(boundedTimeout(900000), 900000);
 });
 for (const race of ["changed-target", "ENOENT"]) test(`prepare cleans staging and retries ${race} pruning race`, { skip: skipWindows }, async (t) => {
  const f = await fixture(t); const next = await f.bundle("Second"); let copies = 0;

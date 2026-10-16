@@ -15,7 +15,7 @@ import { createRotatingClaudeStream } from "../src/rotating-stream.ts";
 import { cleanupStaleRuntimeDirectories } from "../src/runtime-directories.ts";
 import { SessionImageStore } from "../src/session-image-store.ts";
 import { resolveSession, sessionRegistry, type SessionEntry } from "../src/session-registry.ts";
-import type { RateLimitNotice, RateLimitNoticeSink } from "../src/claude-protocol.ts";
+import type { RateLimitNotice, RateLimitNoticeSink, RateLimitWindowsSink } from "../src/claude-protocol.ts";
 import type { RuntimeCleanupResult } from "../src/runtime-directories.ts";
 import { diagnosticErrorType, suiteDiagnostics } from "../../lib/suite-diagnostics.js";
 import type { ClaudeInstallation } from "../src/types.ts";
@@ -125,6 +125,13 @@ export default async function piClaudeCodeProvider(pi: ExtensionAPI): Promise<vo
     // Claude's repeated notice from surfacing throughout one Pi turn.
     const notifyRateLimit = createRateLimitNotifier((message) => ctx.ui.notify(message, "warning"));
     const sessionId = ctx.sessionManager.getSessionId();
+    const publishQuota = (sample: Record<string, unknown>): void => {
+      // Telemetry is advisory and must never terminate paid model traffic.
+      try { pi.events.emit("pix:claude-code:rate-limit", sample); } catch { /* Optional host. */ }
+      if (ctx.mode === "rpc") {
+        try { ctx.ui.setWidget("pix.session-state", ["pix:claude-code:rate-limit", JSON.stringify(sample)]); } catch { /* Optional UI. */ }
+      }
+    };
     const rateLimitNotify: RateLimitNoticeSink = (notice, modelRef) => {
       if (activeRateLimitNotify !== rateLimitNotify) return;
       // Publish structured quota telemetry even when the visible warning is
@@ -133,18 +140,23 @@ export default async function piClaudeCodeProvider(pi: ExtensionAPI): Promise<vo
       if (route && (notice.rateLimitType === "five_hour" || notice.rateLimitType === "seven_day")
           && notice.resetsAt !== undefined
           && (notice.status === "rejected" || notice.utilization !== undefined)) {
-        const sample = { version: 1, sessionId, modelRef: route, status: notice.status,
+        publishQuota({ version: 1, sessionId, modelRef: route, status: notice.status,
           rateLimitType: notice.rateLimitType, ...(notice.utilization === undefined ? {} : { utilization: notice.utilization }),
-          resetsAt: notice.resetsAt, observedAt: Date.now() };
-        // Telemetry is advisory and must never terminate paid model traffic.
-        try { pi.events.emit("pix:claude-code:rate-limit", sample); } catch { /* Optional host. */ }
-        if (ctx.mode === "rpc") {
-          try { ctx.ui.setWidget("pix.session-state", ["pix:claude-code:rate-limit", JSON.stringify(sample)]); } catch { /* Optional UI. */ }
-        }
+          resetsAt: notice.resetsAt, observedAt: Date.now() });
       }
       notifyRateLimit(notice);
     };
     activeRateLimitNotify = rateLimitNotify;
+    // Unconstrained consumption arrives on every request; it updates the quota
+    // display only and never produces a user-visible warning.
+    const rateLimitWindows: RateLimitWindowsSink = (windows, modelRef) => {
+      if (activeRateLimitNotify !== rateLimitNotify || !modelRef) return;
+      const observedAt = Date.now();
+      for (const window of windows) {
+        publishQuota({ version: 1, sessionId, modelRef, status: "allowed", rateLimitType: window.rateLimitType,
+          utilization: window.utilization, resetsAt: window.resetsAt, observedAt });
+      }
+    };
     // Pi's session directory, not process.cwd(): a resumed session takes its cwd
     // from the session file, and Pi's tools resolve paths against that one.
     //
@@ -159,6 +171,7 @@ export default async function piClaudeCodeProvider(pi: ExtensionAPI): Promise<vo
       cwd: ctx.cwd,
       imageStore,
       onRateLimitNotice: rateLimitNotify,
+      onRateLimitWindows: rateLimitWindows,
       onAccountAttempt: (name) => {
         if (ctx.mode === "rpc") {
           try {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { countBadgeClass } from "../lib/status-text";
   import Paperclip from "@lucide/svelte/icons/paperclip";
   import X from "@lucide/svelte/icons/x";
   import type { SessionConfigOption } from "@agentclientprotocol/sdk";
@@ -145,7 +146,7 @@
       {projectFileSuggestions}
       {onValidateProjectFile}
     />
-    <div class="flex items-center gap-1.5 border-t border-sidebar-border pt-3 text-xs font-medium text-muted-foreground"><Paperclip class="h-3.5 w-3.5" aria-hidden="true" />Attached files <span class="rounded-full bg-panel-strong px-1.5 font-mono text-xs font-normal">{editorAttachments.length}</span></div>
+    <div class="flex items-center gap-1.5 border-t border-sidebar-border pt-3 text-xs font-medium text-muted-foreground"><Paperclip class="h-3.5 w-3.5" aria-hidden="true" />Attached files <span class={countBadgeClass}>{editorAttachments.length}</span></div>
     <div class="flex justify-end gap-2 pt-1">
       <button class="h-9 rounded-md px-3 text-sm text-muted-foreground hover:bg-sidebar-accent focus-visible:outline-2 focus-visible:outline-ring" type="button" onclick={onClose}>Cancel</button>
       <button class="h-9 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:opacity-90 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" onclick={onSubmit} disabled={submitDisabled}>{editingTaskId ? "Save" : "Add task"}</button>

@@ -76,12 +76,12 @@ export function nativeContextMenuItems(
   const readonlyPassword = context.kind === "password" && context.readOnly;
 
   if (context.kind === "session") {
-    const sessionId = context.sessionId;
+    const sessionFile = context.sessionFile;
     items.push({
-      id: "desktop.session.copy-id",
-      text: "Copy Session ID",
-      enabled: Boolean(sessionId),
-      action: run(() => sessionId ? writeText(sessionId) : Promise.resolve()),
+      id: "desktop.session.copy-path",
+      text: "Copy Session File Path",
+      enabled: Boolean(sessionFile),
+      action: run(() => sessionFile ? writeText(sessionFile) : Promise.resolve()),
     });
     return items;
   }

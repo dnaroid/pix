@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { dialogCancelButtonClass, dialogPrimaryButtonClass, modalBackdropClass } from "../lib/dialog";
   import CalendarClock from "@lucide/svelte/icons/calendar-clock";
   import {
     QUOTA_WAIT_DURATION_PRESETS,
@@ -82,7 +83,7 @@
 
 <dialog
   bind:this={dialogElement}
-  class="fixed inset-0 z-50 m-auto h-screen max-h-none w-screen max-w-none place-items-center bg-transparent p-6 text-foreground backdrop:bg-overlay open:grid"
+  class={modalBackdropClass}
   aria-labelledby="quota-wait-schedule-title"
   data-quota-wait-schedule-popup={sessionId}
   oncancel={(event) => { event.preventDefault(); onCancel(sessionId); }}
@@ -204,13 +205,13 @@
 
     <div class="mt-5 flex flex-wrap justify-end gap-2">
       <button
-        class="h-8 rounded-md px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        class={dialogCancelButtonClass}
         type="button"
         data-quota-wait-schedule-cancel
         onclick={() => onCancel(sessionId)}
       >Cancel</button>
       <button
-        class="inline-flex h-8 min-w-20 items-center justify-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+        class={dialogPrimaryButtonClass}
         type="submit"
         disabled={!canConfirm}
         data-quota-wait-schedule-confirm

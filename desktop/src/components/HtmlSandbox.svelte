@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { iconButtonClass } from "../lib/icon-button";
   import Code2 from "@lucide/svelte/icons/code-2";
   import Maximize2 from "@lucide/svelte/icons/maximize-2";
   import Minimize2 from "@lucide/svelte/icons/minimize-2";
@@ -155,10 +156,10 @@
     </div>
     <div class="flex shrink-0 items-center gap-1">
       <button type="button" title={showSource ? "Hide source" : "Show source"} aria-label={showSource ? "Hide source" : "Show source"}
-        class="grid h-7 w-7 place-items-center rounded-sm text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+        class={iconButtonClass("md", "panel")}
         onclick={() => showSource = !showSource}><Code2 class="h-3.5 w-3.5" aria-hidden="true" /></button>
       <button type="button" title={expanded ? "Normal size" : "Enlarge"} aria-label={expanded ? "Normal size" : "Enlarge"}
-        class="grid h-7 w-7 place-items-center rounded-sm text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+        class={iconButtonClass("md", "panel")}
         onclick={() => expanded = !expanded}>
         {#if expanded}<Minimize2 class="h-3.5 w-3.5" aria-hidden="true" />{:else}<Maximize2 class="h-3.5 w-3.5" aria-hidden="true" />{/if}
       </button>
@@ -167,7 +168,7 @@
         onclick={() => start()}>{#if running}<RotateCcw class="h-3.5 w-3.5" aria-hidden="true" />{:else}<Play class="h-3.5 w-3.5" aria-hidden="true" />{/if}</button>
       {#if running || loading}
         <button type="button" title="Stop prototype" aria-label="Stop prototype"
-          class="grid h-7 w-7 place-items-center rounded-sm text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+          class={iconButtonClass("md", "panel")}
           onclick={() => { stop(); status = ""; }}><Square class="h-3 w-3" aria-hidden="true" /></button>
       {/if}
     </div>

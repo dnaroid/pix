@@ -107,4 +107,37 @@ describe("sidebar polling lifecycle", () => {
     value.setViewedTab("scripts"); await flush();
     expect(updates.mock.lastCall?.[0].unseenScriptFailureIds).toEqual([]);
   });
+  it("does not republish identical polls but always delivers Registry project changes", async () => {
+    let next: WorkspaceSidebarIndicatorPoll = poll;
+    invoke.mockImplementation((command: string) => Promise.resolve(command === "workspace_sidebar_indicator_poll" ? { ...next, checkedAtMs: Date.now() } : { hasUpdates: false, checkedAtMs: Date.now() }));
+    const updates = vi.fn<(state: SidebarIndicatorServiceState) => void>();
+    const value = service(updates);
+    value.start("/one"); await flush();
+    const settled = updates.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(20_000);
+    value.setViewedTab("git");
+    expect(updates).toHaveBeenCalledTimes(settled);
+    next = { ...poll, git: { ...poll.git, dirty: true } };
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(updates).toHaveBeenCalledTimes(settled + 1);
+    next = { ...poll, registry: { stable: true, localChanges: true, projectChanges: ["tasks"] } };
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(updates).toHaveBeenCalledTimes(settled + 3);
+  });
+
+  it("coalesces owner invalidation bursts and foreground storms into single polls", async () => {
+    const pending = deferred<WorkspaceSidebarIndicatorPoll>();
+    let count = 0;
+    invoke.mockImplementation((command: string) => command === "workspace_sidebar_indicator_poll" ? (++count === 1 ? pending.promise : Promise.resolve(poll)) : Promise.resolve({ hasUpdates: false }));
+    const value = service();
+    value.start("/one");
+    windowEvents.dispatchEvent(new Event("focus"));
+    documentEvents.dispatchEvent(new Event("visibilitychange"));
+    pending.resolve(poll); await flush();
+    expect(calls("workspace_sidebar_indicator_poll")).toHaveLength(1);
+    for (let i = 0; i < 5; i += 1) value.invalidateFast();
+    expect(calls("workspace_sidebar_indicator_poll")).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(calls("workspace_sidebar_indicator_poll")).toHaveLength(2);
+  });
 });

@@ -93,7 +93,8 @@ describe("WorkbenchTabs desktop interaction", () => {
     expect(source).toContain("min-w-0 w-max flex-[0_1_auto]");
     expect(source).not.toContain("flex-[1_1_auto]");
     expect(source).not.toContain("max-w-[calc(");
-    expect(source).toContain("w-6 shrink-0");
+    // Fixed 24px non-shrinking button: literal or shared iconButtonClass("sm", …) (includes shrink-0).
+    expect(source).toMatch(/w-6 shrink-0|iconButtonClass\("sm"/u);
     expect(tablistStart).toBeGreaterThanOrEqual(0);
     expect(newConversation).toBeGreaterThan(tablistStart);
     expect(dragRegion).toBeGreaterThan(newConversation);

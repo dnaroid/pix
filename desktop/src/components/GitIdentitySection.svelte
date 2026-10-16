@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { paneDisclosureClass, paneDisclosureSummaryClass } from "../lib/disclosure";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import { invoke } from "@tauri-apps/api/core";
   import { onDestroy } from "svelte";
@@ -10,8 +11,8 @@
   const input = "h-7 w-full min-w-0 rounded-md border border-input bg-panel-strong px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-50";
 </script>
 
-<details class="group/identity border-t border-sidebar-border bg-panel" ontoggle={(event) => { if (event.currentTarget.open && !editor.identity) void editor.load(); }}>
-  <summary class="flex h-8 items-center gap-1.5 px-2 text-xs font-medium text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
+<details class={["group/identity", paneDisclosureClass]} ontoggle={(event) => { if (event.currentTarget.open && !editor.identity) void editor.load(); }}>
+  <summary class={paneDisclosureSummaryClass}>
     <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open/identity:rotate-90 motion-reduce:transition-none" aria-hidden="true" />Commit author
   </summary>
   <form class="space-y-2 px-2 pb-3" onsubmit={(event) => { event.preventDefault(); if (!busy) void editor.save(); }}>

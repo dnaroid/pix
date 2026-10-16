@@ -1,7 +1,7 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { onMount } from "svelte";
-  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import TaskFieldSelect from "./TaskFieldSelect.svelte";
   import UserRound from "@lucide/svelte/icons/user-round";
   import { claudeAccountSwitcherConfig, selectClaudeAccountInSource, type ClaudeAccountSwitcherConfig } from "../lib/claude-account-switcher";
   import { parseSettingsSchema, settingsSourceIssues, type SettingsConfigDocument } from "../lib/settings";
@@ -80,24 +80,20 @@
 </script>
 
 {#if config.accounts.length > 0}
-{#if config.accounts.length > 0}
 <div class="flex min-w-0 flex-1 flex-col items-end gap-0.5" data-claude-account-switcher>
-  <label class="relative flex h-6 w-full max-w-36 min-w-0 items-center gap-1 rounded-md border border-border bg-panel-strong pl-1.5 pr-1.5 text-xs text-foreground hover:bg-panel-hover focus-within:outline-2 focus-within:outline-ring has-[:disabled]:opacity-60">
-    <UserRound class="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
-    <select
-      class="h-full min-w-0 flex-1 appearance-none truncate bg-transparent pr-3 text-xs outline-none disabled:cursor-not-allowed"
-      aria-label="Choose Claude Code OAuth account"
+  <div class="w-full max-w-36 min-w-0">
+    <TaskFieldSelect
       value={config.selectedAccount}
+      options={[{ value: "", label: config.autoRotate ? "Auto" : "Default" }, ...config.accounts.map((account) => ({ value: account.name, label: account.name }))]}
+      ariaLabel="Choose Claude Code OAuth account"
+      size="xs"
+      popupMinWidth={160}
       disabled={loading || saving}
-      onchange={(event) => void switchAccount(event.currentTarget.value)}
+      onChange={(value) => void switchAccount(value)}
     >
-      <option value="">{config.autoRotate ? "Auto" : "Default"}</option>
-      {#each config.accounts as account (account.name)}
-        <option value={account.name}>{account.name}</option>
-      {/each}
-    </select>
-    <ChevronDown class="pointer-events-none absolute right-1 h-3 w-3 text-muted-foreground" aria-hidden="true" />
-  </label>
+      {#snippet leading()}<UserRound class="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />{/snippet}
+    </TaskFieldSelect>
+  </div>
   {#if lastAttemptedAccount}
     <span class="max-w-36 truncate text-xs text-muted-foreground" aria-label={`Last attempted Claude account: ${lastAttemptedAccount}`}>Last: {lastAttemptedAccount}</span>
   {/if}
@@ -109,5 +105,4 @@
     <span class="max-w-36 truncate text-xs text-tool-error" role="alert" aria-label={error}>Switch failed</span>
   {/if}
 </div>
-{/if}
 {/if}

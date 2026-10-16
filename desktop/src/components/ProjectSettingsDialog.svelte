@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { dialogCancelButtonClass, dialogPrimaryButtonClass, modalBackdropClass } from "../lib/dialog";
+  import { iconButtonClass } from "../lib/icon-button";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import X from "@lucide/svelte/icons/x";
   import { untrack } from "svelte";
@@ -65,7 +67,7 @@
 
 <dialog
   bind:this={dialogElement}
-  class="fixed inset-0 z-50 m-auto h-screen max-h-none w-screen max-w-none place-items-center bg-transparent p-5 text-foreground backdrop:bg-overlay open:grid"
+  class={modalBackdropClass}
   aria-label="Project settings"
   oncancel={(event) => { event.preventDefault(); if (!saving) onClose(); }}
   onclick={(event) => { if (!saving && event.target === event.currentTarget) onClose(); }}
@@ -76,7 +78,7 @@
       <strong class="min-w-0 flex-1 truncate text-xs font-semibold">Project settings</strong>
       <button
         bind:this={closeButton}
-        class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+        class={iconButtonClass("md", "chrome")}
         type="button"
         aria-label="Close project settings"
         disabled={saving}
@@ -150,8 +152,8 @@
     </div>
 
     <footer class="flex h-12 items-center justify-end gap-2 border-t border-border bg-chrome/60 px-3">
-      <button class="h-8 rounded-md px-3 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" disabled={saving} onclick={onClose}>Cancel</button>
-      <button class="inline-flex h-8 min-w-20 items-center justify-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="submit" disabled={saveDisabled}>
+      <button class={dialogCancelButtonClass} type="button" disabled={saving} onclick={onClose}>Cancel</button>
+      <button class={dialogPrimaryButtonClass} type="submit" disabled={saveDisabled}>
         {#if saving}<RotateCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />{/if}
         {saving ? "Saving…" : "Save"}
       </button>

@@ -3,18 +3,21 @@ kind: spec
 status: active
 ---
 
-# Desktop menu-bar mode
+# Desktop optional menu-bar icon
 
 ## Behavior
 
-- Settings → Desktop → General exposes **Menu bar instead of Dock**.
+- Settings → Desktop → General exposes **Show menu bar icon**.
 - `desktop.trayOnly` in the global `~/.config/pi/pix-desktop.jsonc` is an
   optional boolean, defaulting to `false`. Project overrides do not apply to
-  this process-wide preference. Save and restart Pix to change presentation.
+  this process-wide preference. The legacy key name is retained for compatibility:
+  `true` now enables an additional icon, not a tray-only application mode.
+  Save and restart Pix to change the icon preference.
 - On macOS, opting in creates one white square **P** icon in the system menu
-  bar, then switches to accessory activation policy to hide the Dock icon.
+  bar without changing the application's activation policy. Both modes retain
+  the Dock icon, native application menus and standard window behavior.
   The icon is a non-template image so its amber attention dot retains its color.
-  The default mode keeps the Dock and has no menu-bar icon.
+  The default mode has no menu-bar icon.
 - An amber dot indicates unseen input requests (including approvals), errors or
   completed work. Successful completion waits until the prompt has stopped,
   the agent is idle and no subagents remain active. Cancellation and pauses do
@@ -42,19 +45,16 @@ status: active
 - Selecting an entry restores, shows and focuses that window. Workspace title
   changes, project-window creation and destruction refresh the menu from live
   membership. A stale selection for a destroyed window does nothing.
-- In menu-bar-only mode, explicit app-menu equivalents implement `Cmd+\`` and
-  `Cmd+Shift+\`` to cycle forward/backward through visible, non-minimized Pix
-  windows in stable window-label order. They require a Pix-owned key window
-  and an active app; they are not global shortcuts. Dock mode retains AppKit's
-  native window cycling. Keyboard dispatch in accessory mode needs native QA.
+- Both modes retain AppKit's native `Cmd+\`` / `Cmd+Shift+\`` window cycling;
+  the tray installs no custom window-cycling menu items or shortcuts.
 - **Quit Pix** uses the normal application exit path, including active-run
   confirmation, backend cleanup and window restoration persistence.
 - Closing windows is unchanged: the last window closes the app; this is not a
   keep-alive/background mode. Other platforms do not enable this presentation.
 - Config reads run on the blocking pool. Native icon/menu operations run on
-  the main thread. Failed config reads keep the Dock; a failure to create the
-  icon never hides it. Exit removes the icon, and late startup cannot recreate
-  it after teardown begins. Attention updates validate native owner identity,
+  the main thread. Failed config reads or icon creation leave ordinary application
+  behavior intact without a tray icon. Exit removes the icon, and late startup
+  cannot recreate it after teardown begins. Attention updates validate native owner identity,
   prune destroyed/replaced windows and ignore shutdown; each renderer serializes
   and coalesces updates and releases focus/visibility listeners on teardown.
   There are no polling timers.
@@ -68,8 +68,7 @@ status: active
   window membership/title hooks.
 - `desktop/src-tauri/src/desktop_tray_icon.rs`, `desktop_tray_attention.rs`:
   cached antialiased icon variants and live-window attention aggregation.
-- `desktop/src-tauri/src/desktop_window_cycle.rs`, `desktop_notification.rs`:
-  accessory-only app-menu cycling and exact native foreground activation.
+- `desktop/src-tauri/src/desktop_notification.rs`: exact native foreground activation.
 - `desktop/src/lib/desktop-tray-attention.ts`, `desktop-notifications.ts`,
   `desktop/src/App.svelte`: unseen-event tracking, settled-work integration and
   foreground conversation acknowledgement. Focused tests cover serialization,
@@ -78,10 +77,12 @@ status: active
   `desktop/src/lib/settings-search-catalog.ts`: authored setting and lookup.
 - `src/schemas/pix-desktop-schema.ts`, `schemas/pix-desktop.json`,
   `desktop/src/lib/default-desktop-config.ts`: schema and default.
-- `tests/pix-desktop-tray-schema.test.ts`: schema parity and boolean validation.
+- `tests/pix-desktop-tray-schema.test.ts`: schema parity, boolean validation and
+  a source guard against tray activation-policy changes or custom window cycling.
 
-Native macOS QA must cover both startup modes, multiple windows, minimized
-window activation, opening/closing windows, workspace title updates and guarded
+Native macOS QA must cover both startup modes (including Dock and application
+menu availability), multiple windows, minimized window activation,
+opening/closing windows, workspace title updates and guarded
 Quit, forward/backward cycling (including minimized and ISO keyboard layouts),
 left/right clicks, Show all windows and attention across conversations/windows. Unit tests alone
 do not prove native menu, shortcut or Dock behavior.

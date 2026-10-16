@@ -177,8 +177,8 @@
       <SettingsSwitch value={bool(["desktop", "logPanelEnabled"])} onChange={(value) => set(["desktop", "logPanelEnabled"], value)} />
     </SettingsFieldRow>
     <SettingsFieldRow
-      label="Menu bar instead of Dock"
-      description="Show the Pix icon in the macOS menu bar instead of the Dock. Click it for a list of open windows. Applies to all windows after restarting Pix."
+      label="Show menu bar icon"
+      description="Add the Pix icon to the macOS menu bar while keeping the Dock icon and application menus. Left-click to show all windows; right-click for the window list. Applies to all windows after restarting Pix."
       explicit={has(["desktop", "trayOnly"])}
       defaultLabel={defaultLabel(["desktop", "trayOnly"])}
       onReset={() => reset(["desktop", "trayOnly"])}
@@ -378,21 +378,6 @@
           : THINKING_OPTIONS}
         ariaLabel="RAG thinking effort"
         onChange={(value) => set(["search", "ragThinking"], value)}
-      />
-    </SettingsFieldRow>
-    <SettingsFieldRow
-      label="Knowledge review model"
-      description="Model and optional thinking level for knowledge-base AI review. When omitted, the review session uses the normal default model. Does not change the knowledge-auditor sub-agent."
-      explicit={has(["desktop", "knowledge", "reviewModelRef"])}
-      defaultLabel="Default model"
-      onReset={() => reset(["desktop", "knowledge", "reviewModelRef"])}
-    >
-      <SettingsModelSelect
-        value={text(["desktop", "knowledge", "reviewModelRef"])}
-        options={gitModelOptions}
-        ariaLabel="Knowledge review model"
-        emptyLabel="Default model"
-        onChange={(value) => value ? set(["desktop", "knowledge", "reviewModelRef"], value) : reset(["desktop", "knowledge", "reviewModelRef"])}
       />
     </SettingsFieldRow>
     <SettingsFieldRow

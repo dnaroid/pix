@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { emptyStateClass } from "../lib/status-text";
+  import { iconButtonClass } from "../lib/icon-button";
   import FileDiff from "@lucide/svelte/icons/file-diff";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
@@ -81,7 +83,7 @@
       title="Old side is the registry copy; new side is the local project copy."
     >Registry → Local</span>
     <button
-      class="ml-auto grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+      class={iconButtonClass("sm", "panel", { extra: "ml-auto" })}
       type="button"
       title="Close registry diff"
       aria-label="Close registry diff"
@@ -116,7 +118,7 @@
         {/if}
       </div>
     {:else if diff.files.length === 0}
-      <div class="px-3 py-8 text-center text-xs text-muted-foreground">No differences between the registry and local copies.</div>
+      <div class={emptyStateClass}>No differences between the registry and local copies.</div>
     {:else}
       <div class="min-w-0 space-y-1">
         {#each diff.files as file (file.path)}

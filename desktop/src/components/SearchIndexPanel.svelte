@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { iconButtonClass } from "../lib/icon-button";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Database from "@lucide/svelte/icons/database";
   import Play from "@lucide/svelte/icons/play";
@@ -58,7 +59,7 @@
   <div class="flex h-8 min-w-0 items-center gap-2 border-b border-sidebar-border bg-panel px-2.5">
     <Database class="h-3.5 w-3.5 shrink-0 text-tool-search" aria-hidden="true" />
     <strong class="min-w-0 flex-1 truncate text-xs font-medium text-foreground">Search indexes</strong>
-    <button class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" title="Check source changes and re-read index status locally (no embeddings)" aria-label="Refresh index status" disabled={!controller || snapshot.reading} onclick={() => controller?.refresh()}><RefreshCw class={["h-3.5 w-3.5", snapshot.reading ? "animate-spin motion-reduce:animate-none" : ""]} aria-hidden="true" /></button>
+    <button class={iconButtonClass("md", "panel")} type="button" title="Check source changes and re-read index status locally (no embeddings)" aria-label="Refresh index status" disabled={!controller || snapshot.reading} onclick={() => controller?.refresh()}><RefreshCw class={["h-3.5 w-3.5", snapshot.reading ? "animate-spin motion-reduce:animate-none" : ""]} aria-hidden="true" /></button>
   </div>
   <div class="flex min-h-0 min-w-0 flex-col overflow-y-auto p-2.5">
       <div class="shrink-0 space-y-2">

@@ -6,15 +6,8 @@ const components = import.meta.glob("../**/*.svelte", {
 
 // Existing migration debt, not permission to add native selects or wrappers.
 // Remove entries as their dropdowns migrate; never grow this inventory for convenience.
-const legacySelects: Record<string, number> = {
-  "ClaudeAccountSwitcher.svelte": 1,
-  "StatusBar.svelte": 1,
-  "ElicitationDialog.svelte": 1,
-  "RegistryCatalog.svelte": 1,
-  "GitPanel.svelte": 1,
-  "GitRepositoryTools.svelte": 1,
-  "settings/SettingsSelect.svelte": 1,
-};
+// All legacy native selects have migrated to the Pix dropdown; keep this empty.
+const legacySelects: Record<string, number> = {};
 
 describe("Desktop design contract: Pix dropdowns", () => {
   it("does not introduce native selects beyond the existing migration debt", () => {

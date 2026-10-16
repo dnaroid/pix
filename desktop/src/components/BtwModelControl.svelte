@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { iconButtonClass } from "../lib/icon-button";
   import { onDestroy } from "svelte";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import type { SessionConfigOption } from "@agentclientprotocol/sdk";
@@ -66,7 +67,7 @@
   </button>
   {#if !inherited}<button type="button" aria-label="Use main model and effort for BTW"
     title="Use main model and effort for BTW"
-    class="grid h-7 w-7 shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-ring"
+    class={iconButtonClass("md", "chrome")}
     onclick={() => { close(); onSelect(null, null); onFocusInput(); }}><RotateCcw size={13} /></button>{/if}
   {#if error}<p role="alert" class="absolute left-0 top-full z-50 rounded-sm border border-border bg-popover p-2 text-xs text-destructive">{error}</p>{/if}
 </div>

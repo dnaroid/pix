@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { dialogCancelButtonClass, dialogPrimaryButtonClass, modalBackdropClass } from "../lib/dialog";
   import Hourglass from "@lucide/svelte/icons/hourglass";
   import {
     formatQuotaWaitCountdown,
@@ -42,7 +43,7 @@
 
 <dialog
   bind:this={dialogElement}
-  class="fixed inset-0 z-50 m-auto h-screen max-h-none w-screen max-w-none place-items-center bg-transparent p-6 text-foreground backdrop:bg-overlay open:grid"
+  class={modalBackdropClass}
   aria-labelledby="quota-wait-title"
   data-quota-wait-popup={sessionId}
   oncancel={(event) => { event.preventDefault(); onHide(sessionId); }}
@@ -68,13 +69,13 @@
     <div class="mt-5 flex flex-wrap justify-end gap-2">
       {#if wait.autoResume}
         <button
-          class="h-8 rounded-md px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          class={dialogCancelButtonClass}
           type="button"
           onclick={() => onCancelAutoResume(sessionId)}
         >Cancel auto-resume</button>
         <button
           bind:this={primaryButton}
-          class="inline-flex h-8 min-w-20 items-center justify-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          class={dialogPrimaryButtonClass}
           type="button"
           data-quota-wait-retry
           onclick={() => onRetry(sessionId)}
@@ -82,14 +83,14 @@
       {:else}
         <button
           bind:this={primaryButton}
-          class="inline-flex h-8 min-w-20 items-center justify-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          class={dialogPrimaryButtonClass}
           type="button"
           data-quota-wait-retry
           onclick={() => onRetry(sessionId)}
         >Try now</button>
       {/if}
       <button
-        class="h-8 rounded-md px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        class={dialogCancelButtonClass}
         type="button"
         data-quota-wait-hide
         onclick={() => onHide(sessionId)}

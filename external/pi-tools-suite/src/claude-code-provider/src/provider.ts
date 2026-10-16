@@ -134,6 +134,7 @@ function createClaudeAttempt(
     const resolved = session && "error" in session ? undefined : session;
     const imageStore = resolved?.imageStore;
     const onRateLimitNotice = resolved?.onRateLimitNotice;
+    const onRateLimitWindows = resolved?.onRateLimitWindows;
     // Leased with the session, not after preparation: a request that borrowed a
     // store from another live session would otherwise fail across the awaits in
     // between if that session shut down, even carrying no images at all. close()
@@ -373,6 +374,7 @@ function createClaudeAttempt(
             dependencies.onAccountRateLimitNotice?.(notice);
             onRateLimitNotice?.(notice, `${model.provider}/${model.id}`);
           },
+          onRateLimitWindows: (windows) => onRateLimitWindows?.(windows, `${model.provider}/${model.id}`),
           onResponseAnnouncement: announceResponse,
           privatePaths: [prepared.directory, ...(prepared.imageStoreDirectory ? [prepared.imageStoreDirectory] : [])],
         });

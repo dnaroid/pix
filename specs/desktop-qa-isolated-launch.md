@@ -17,7 +17,7 @@ command and canonical checkout working directory. Legacy PID-only owner markers
 are supported. Multiple matching watchers require an explicit `--state` path.
 Preparation waits for idle successful state; queued/building states wait within
 the deadline, and failed state rejects even if an older target is still present.
-The default deadline is 120 seconds; `--timeout-ms` accepts 100..300000.
+The default deadline is 300 seconds; `--timeout-ms` accepts 100..900000. Prepare reports `building`/`queued` progress on stderr and pins only after idle has persisted for a 1 s settle window (longer than the watcher change debounce).
 
 An automatic discovery limit is not evidence that the watcher is absent.
 QA recovery inspects direct `pix-watch-all-*` children of the canonical Node

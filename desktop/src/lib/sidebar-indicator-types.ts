@@ -62,6 +62,8 @@ export interface WorkspaceSidebarIndicatorPoll {
   readonly registry: {
     readonly localChanges: boolean;
     readonly projectChanges?: readonly RegistryProjectArtifact[];
+    /** Content fingerprint per dirty artifact; a new value means a new edit. */
+    readonly projectStamps?: Readonly<Partial<Record<RegistryProjectArtifact, string>>>;
     readonly stable: boolean;
     readonly error?: string;
   };

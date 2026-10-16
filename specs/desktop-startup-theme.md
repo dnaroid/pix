@@ -17,8 +17,9 @@ document load, with the native theme background applied before showing it.
 The initial reveal also activates Pix and raises that window on the native main
 thread. Every restored window is raised independently as its document becomes
 ready; startup does not leave the restored windows behind other applications.
-The tray-only activation-policy switch re-raises already visible windows if it
-finishes after their reveal, but never exposes documents that are still loading.
+Optional tray-icon setup re-raises already visible windows if it finishes after
+their reveal, but never exposes documents that are still loading. It does not
+change activation policy; Dock and tray-icon modes share normal window behavior.
 This does not wait for sessions, workspace services or network requests.
 
 ## Constraints and failure cases
@@ -50,4 +51,5 @@ window as a fallback.
 Run focused Rust and Vitest startup-theme tests. Verify real macOS launch under
 dark and light system appearance, restored windows and new-project windows:
 no white intermediate canvas in dark appearance, no repeated reveal on reload.
-All restored windows must come to the foreground in both Dock and tray-only mode.
+All restored windows must come to the foreground with the tray icon both disabled
+and enabled.

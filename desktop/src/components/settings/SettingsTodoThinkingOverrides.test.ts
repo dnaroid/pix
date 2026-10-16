@@ -45,6 +45,9 @@ describe("Todo thinking overrides settings UI", () => {
   it("resets rejected bounds without remounting and losing keyboard focus", () => {
     expect(overridesSource).not.toContain("{#key rowError");
     expect(overridesSource).toContain("return false;");
-    expect(selectSource).toContain("if (onChange(select.value) === false) select.value = previousValue;");
+    // Controlled Pix dropdown: a rejected change leaves `value` untouched and
+    // focus returns to the same trigger instead of a remounted control.
+    expect(selectSource).toContain("<TaskFieldSelect");
+    expect(selectSource).not.toMatch(/<select\b/u);
   });
 });

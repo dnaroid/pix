@@ -31,29 +31,30 @@ describe("native desktop context menu commands", () => {
   it("uses native editing roles instead of replacing values or synthesizing paste", () => {
     expect(labels({})).toEqual(["Undo", "Redo", "Separator", "Cut", "Copy", "Paste", "Separator", "SelectAll"]);
   });
-  it("offers only session ID copy and copies the captured raw ID", async () => {
-    const target = context({ kind: "session", sessionId: "clicked-session", hasSelection: false });
+  it("offers only session file path copy and copies the captured absolute path", async () => {
+    const target = context({ kind: "session", sessionFile: "/sessions/мой session.jsonl", hasSelection: false });
     const commands = nativeContextMenuItems(target, false, reportError, () => true);
     expect(commands).toHaveLength(1);
-    expect(commands[0]).toMatchObject({ id: "desktop.session.copy-id", text: "Copy Session ID", enabled: true });
-    target.sessionId = "another-session";
+    expect(commands[0]).toMatchObject({ id: "desktop.session.copy-path", text: "Copy Session File Path", enabled: true });
+    target.sessionFile = "/sessions/another.jsonl";
     const command = commands[0];
     if (command && "action" in command) command.action?.("ignored");
     await Promise.resolve();
-    expect(writeText).toHaveBeenCalledExactlyOnceWith("clicked-session");
+    expect(writeText).toHaveBeenCalledExactlyOnceWith("/sessions/мой session.jsonl");
   });
-  it("does not copy missing session IDs or run stale or detached tab callbacks", async () => {
+  it("does not copy missing session paths or run stale or detached tab callbacks", async () => {
+    expect(items({ kind: "session", sessionId: "id-without-file" })[0]).toMatchObject({ enabled: false });
     for (const commands of [
-      items({ kind: "session", sessionId: undefined }),
-      items({ kind: "session", sessionId: "old" }, false, () => false),
-      items({ kind: "session", sessionId: "closed", element: { isConnected: false } as HTMLElement }),
+      items({ kind: "session", sessionFile: undefined }),
+      items({ kind: "session", sessionFile: "old" }, false, () => false),
+      items({ kind: "session", sessionFile: "closed", element: { isConnected: false } as HTMLElement }),
     ]) for (const command of commands) if ("action" in command) command.action?.("ignored");
     await Promise.resolve();
     expect(writeText).not.toHaveBeenCalled();
   });
-  it("reports session ID clipboard failures", async () => {
+  it("reports session path clipboard failures", async () => {
     vi.mocked(writeText).mockRejectedValueOnce(new Error("clipboard unavailable"));
-    const command = items({ kind: "session", sessionId: "session-id" })[0];
+    const command = items({ kind: "session", sessionFile: "session-id" })[0];
     if (command && "action" in command) command.action?.("ignored");
     await Promise.resolve();
     await Promise.resolve();

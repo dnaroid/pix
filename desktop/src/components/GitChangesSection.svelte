@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { iconButtonClass } from "../lib/icon-button";
   import Minus from "@lucide/svelte/icons/minus";
   import Plus from "@lucide/svelte/icons/plus";
   import FileDiff from "@lucide/svelte/icons/file-diff";
@@ -28,7 +29,7 @@
       <span class="font-mono text-xs text-muted-foreground">{query ? `${visible.length}/` : ""}{changes.length}</span>
     </button>
     {#if changes.length}
-      <button class="ml-auto grid h-6 w-6 place-items-center rounded-sm text-muted-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button"
+      <button class={iconButtonClass("sm", "panel", { extra: "ml-auto" })} type="button"
         title={isStaged ? "Open staged diff" : "Open working-tree diff"} aria-label={isStaged ? "Open staged diff" : "Open working-tree diff"} disabled={busy} onclick={() => onOpenDiff(undefined, scope)}><FileDiff class="h-3.5 w-3.5" aria-hidden="true" /></button>
       <button class="inline-flex h-6 items-center gap-1 rounded-sm px-1 text-xs text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" disabled={busy}
         title={`${isStaged ? "Unstage" : "Stage"} all ${changes.length} files, including filtered-out files`} onclick={() => onToggle()}>
@@ -54,7 +55,7 @@
       {#if !isStaged && !change.untracked && !change.conflicted}
         <button class="grid h-6 w-6 shrink-0 place-items-center rounded-sm text-muted-foreground opacity-0 hover:bg-panel-hover hover:text-tool-error focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-30 group-hover:opacity-100 group-focus-within:opacity-100" type="button" disabled={busy} title={`Discard unstaged changes in ${change.path}…`} aria-label={`Discard unstaged changes in ${change.path}`} onclick={() => onDiscard(change.path)}><RotateCcw class="h-3 w-3" aria-hidden="true" /></button>
       {/if}
-      <button class="grid h-6 w-6 shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-30" type="button" disabled={busy} title={`${isStaged ? "Unstage" : "Stage"} ${change.path}`} aria-label={`${isStaged ? "Unstage" : "Stage"} ${change.path}`} onclick={() => onToggle(change.path)}>
+      <button class={iconButtonClass("sm", "panel")} type="button" disabled={busy} title={`${isStaged ? "Unstage" : "Stage"} ${change.path}`} aria-label={`${isStaged ? "Unstage" : "Stage"} ${change.path}`} onclick={() => onToggle(change.path)}>
         {#if isStaged}<Minus class="h-3 w-3" aria-hidden="true" />{:else}<Plus class="h-3 w-3" aria-hidden="true" />{/if}
       </button>
     </div>

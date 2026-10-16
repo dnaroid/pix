@@ -35,7 +35,6 @@ mod desktop_context_menu;
 mod desktop_notification;
 mod desktop_notification_sound;
 mod desktop_tray;
-mod desktop_window_cycle;
 mod desktop_tray_attention;
 mod desktop_tray_icon;
 mod dictation_shortcut;
@@ -330,6 +329,11 @@ struct WorkspaceConfigState {
 #[derive(Default)]
 struct SidebarIndicatorState {
     registry_cache: Mutex<HashMap<PathBuf, SidebarRegistryWorkspaceCache>>,
+    /// User-config health keyed by path and file stamp; unchanged files are
+    /// not re-read/re-validated on every fast poll.
+    settings_cache: Mutex<HashMap<PathBuf, (SidebarFileStamp, Option<String>)>>,
+    /// package.json discovery error keyed by workspace root, resolved path and stamp.
+    package_scripts_cache: Mutex<HashMap<PathBuf, (PathBuf, SidebarFileStamp, Option<String>)>>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -765,6 +769,10 @@ struct SidebarRegistryIndicatorState {
     local_changes: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     project_changes: Vec<String>,
+    /// Content fingerprint per dirty project artifact. Consumers reload local
+    /// state only when a stamp changes, not on every poll that stays dirty.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    project_stamps: std::collections::BTreeMap<String, String>,
     stable: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
@@ -796,7 +804,7 @@ struct SidebarRegistryProjectProvenanceEntry {
     hash: String,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 struct SidebarFileStamp {
     len: u64,
     modified_ns: u128,
@@ -4180,7 +4188,10 @@ fn workspace_sidebar_indicator_poll_from(
     let settings = {
         let state = app.state::<UserConfigState>();
         let result = match state.lock.read() {
-            Ok(_guard) => sidebar_settings_indicator_state(home),
+            Ok(_guard) => sidebar_settings_indicator_state_cached(
+                app.state::<SidebarIndicatorState>().inner(),
+                home,
+            ),
             Err(_) => SidebarSettingsIndicatorState {
                 errors: vec!["user config state is unavailable".to_owned()],
             },
@@ -4232,6 +4243,7 @@ fn sidebar_registry_indicator_state(
         Err(error) => SidebarRegistryIndicatorState {
             local_changes: false,
             project_changes: Vec::new(),
+            project_stamps: Default::default(),
             stable: true,
             error: Some(error),
         },
@@ -4309,7 +4321,7 @@ fn sidebar_registry_indicator_state_inner(
                 &tracked.hash,
                 &mut hash_budget,
             )? {
-                Some(changed) => {
+                Some((changed, _)) => {
                     if changed {
                         local_changes = true;
                         break;
@@ -4321,6 +4333,7 @@ fn sidebar_registry_indicator_state_inner(
     }
 
     let mut project_changes = Vec::new();
+    let mut project_stamps = std::collections::BTreeMap::new();
     for artifact in ["tasks", "plans", "todo", "workspace"] {
         let tracked = provenance.project_resources.get(artifact);
         let path = sidebar_registry_project_artifact_path(root, artifact);
@@ -4329,12 +4342,17 @@ fn sidebar_registry_indicator_state_inner(
             if configured_before && exists {
                 local_changes = true;
                 project_changes.push(artifact.to_owned());
+                project_stamps.insert(
+                    artifact.to_owned(),
+                    sidebar_registry_untracked_artifact_stamp(root, artifact, &path)?,
+                );
             }
             continue;
         }
         if !exists {
             local_changes = true;
             project_changes.push(artifact.to_owned());
+            project_stamps.insert(artifact.to_owned(), "missing".to_owned());
             continue;
         }
         let tracked = tracked.expect("tracked project artifact exists");
@@ -4363,11 +4381,12 @@ fn sidebar_registry_indicator_state_inner(
             )?
         };
         match changed {
-            Some(true) => {
+            Some((true, fingerprint)) => {
                 local_changes = true;
                 project_changes.push(artifact.to_owned());
+                project_stamps.insert(artifact.to_owned(), format!("{fingerprint:016x}"));
             }
-            Some(false) => {}
+            Some((false, _)) => {}
             None => return Ok(SidebarRegistryIndicatorState::default()),
         }
     }
@@ -4393,6 +4412,7 @@ fn sidebar_registry_indicator_state_inner(
     Ok(SidebarRegistryIndicatorState {
         local_changes,
         project_changes,
+        project_stamps,
         stable: true,
         error: None,
     })
@@ -4737,7 +4757,7 @@ fn sidebar_registry_cached_path_changed(
     include_agent_companion: bool,
     expected_hash: &str,
     hash_budget: &mut u64,
-) -> Result<Option<bool>, String> {
+) -> Result<Option<(bool, u64)>, String> {
     let plans_only = cache_key == "project:plans";
     let fingerprint = || {
         if plans_only {
@@ -4756,7 +4776,8 @@ fn sidebar_registry_cached_path_changed(
     if let Some(cached) = cached {
         if cached.expected_hash == expected_hash && cached.fingerprint == fingerprint_before {
             let (fingerprint_after, _) = fingerprint()?;
-            return Ok((fingerprint_before == fingerprint_after).then_some(cached.changed));
+            return Ok((fingerprint_before == fingerprint_after)
+                .then_some((cached.changed, fingerprint_after)));
         }
     }
 
@@ -4793,7 +4814,7 @@ fn sidebar_registry_cached_path_changed(
             },
         );
     }
-    Ok(Some(changed))
+    Ok(Some((changed, fingerprint_after)))
 }
 
 fn sidebar_registry_cached_task_bundle_changed(
@@ -4801,7 +4822,7 @@ fn sidebar_registry_cached_task_bundle_changed(
     root: &Path,
     expected_hash: &str,
     hash_budget: &mut u64,
-) -> Result<Option<bool>, String> {
+) -> Result<Option<(bool, u64)>, String> {
     let (fingerprint_before, file_bytes) = sidebar_registry_task_bundle_fingerprint(root)?;
     let cache_key = "project:tasks";
     let cached = state.registry_cache.lock().ok().and_then(|cache| {
@@ -4813,7 +4834,8 @@ fn sidebar_registry_cached_task_bundle_changed(
     if let Some(cached) = cached {
         if cached.expected_hash == expected_hash && cached.fingerprint == fingerprint_before {
             let (fingerprint_after, _) = sidebar_registry_task_bundle_fingerprint(root)?;
-            return Ok((fingerprint_before == fingerprint_after).then_some(cached.changed));
+            return Ok((fingerprint_before == fingerprint_after)
+                .then_some((cached.changed, fingerprint_after)));
         }
     }
 
@@ -4840,7 +4862,29 @@ fn sidebar_registry_cached_task_bundle_changed(
             },
         );
     }
-    Ok(Some(changed))
+    Ok(Some((changed, fingerprint_after)))
+}
+
+/// Cheap change stamp for a project artifact that exists but has no
+/// provenance yet. Tasks use SQLite/WAL file stamps instead of a logical
+/// snapshot: a checkpoint may cause one extra reload, never a missed edit.
+fn sidebar_registry_untracked_artifact_stamp(
+    root: &Path,
+    artifact: &str,
+    path: &Path,
+) -> Result<String, String> {
+    let fingerprint = match artifact {
+        "tasks" => {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            for suffix in ["tasks.sqlite", "tasks.sqlite-wal"] {
+                sidebar_path_stamp(&root.join(".pi").join(suffix))?.hash(&mut hasher);
+            }
+            hasher.finish()
+        }
+        "plans" => sidebar_registry_tree_fingerprint_for(path, true)?.0,
+        _ => sidebar_registry_resource_hash::fingerprint(path, false)?.0,
+    };
+    Ok(format!("{fingerprint:016x}"))
 }
 
 fn sidebar_registry_task_bundle_fingerprint(root: &Path) -> Result<(u64, u64), String> {
@@ -5438,7 +5482,8 @@ fn sidebar_scripts_indicator_state(
     window_label: &str,
     root: &Path,
 ) -> SidebarRuntimeIndicatorState {
-    let package_error = package_scripts_from(root).err();
+    let package_error =
+        sidebar_package_scripts_error_cached(app.state::<SidebarIndicatorState>().inner(), root);
     let state = app.state::<PackageTerminalState>();
     let sessions = match state.sessions.lock() {
         Ok(sessions) => sessions,
@@ -5473,60 +5518,124 @@ fn sidebar_scripts_indicator_state(
     }
 }
 
-fn sidebar_settings_indicator_state(home: &Path) -> SidebarSettingsIndicatorState {
+/// package.json discovery verdict reused while the resolved file is unchanged.
+fn sidebar_package_scripts_error_cached(
+    state: &SidebarIndicatorState,
+    root: &Path,
+) -> Option<String> {
+    let resolved = fs::canonicalize(root.join("package.json")).ok();
+    let stamp = resolved
+        .as_deref()
+        .and_then(|path| sidebar_path_stamp(path).ok().flatten());
+    let (Some(resolved), Some(stamp)) = (resolved, stamp) else {
+        if let Ok(mut cache) = state.package_scripts_cache.lock() {
+            cache.remove(root);
+        }
+        return package_scripts_from(root).err();
+    };
+    let cached = state
+        .package_scripts_cache
+        .lock()
+        .ok()
+        .and_then(|cache| cache.get(root).cloned());
+    if let Some((cached_path, cached_stamp, error)) = cached {
+        if cached_path == resolved && cached_stamp == stamp {
+            return error;
+        }
+    }
+    let error = package_scripts_from(root).err();
+    if matches!(sidebar_path_stamp(&resolved), Ok(Some(after)) if after == stamp) {
+        if let Ok(mut cache) = state.package_scripts_cache.lock() {
+            if !cache.contains_key(root) && cache.len() >= 32 {
+                cache.clear();
+            }
+            cache.insert(root.to_path_buf(), (resolved, stamp, error.clone()));
+        }
+    }
+    error
+}
+
+/// Reuse the previous verdict for unchanged config files. A stamp that moves
+/// while validating is not cached, so the next poll re-validates it.
+fn sidebar_settings_indicator_state_cached(
+    state: &SidebarIndicatorState,
+    home: &Path,
+) -> SidebarSettingsIndicatorState {
     let mut errors = Vec::new();
     for kind in [UserConfigKind::Desktop, UserConfigKind::PiToolsSuite] {
         let path = user_config_path(home, kind);
-        if !path.exists() {
+        let Ok(Some(stamp)) = sidebar_path_stamp(&path) else {
+            // Missing, or uninspectable: the uncached path reports precisely.
+            if let Ok(mut cache) = state.settings_cache.lock() {
+                cache.remove(&path);
+            }
+            errors.extend(sidebar_settings_file_issue(kind, &path));
             continue;
+        };
+        let cached = state
+            .settings_cache
+            .lock()
+            .ok()
+            .and_then(|cache| cache.get(&path).cloned());
+        if let Some((cached_stamp, issue)) = cached {
+            if cached_stamp == stamp {
+                errors.extend(issue);
+                continue;
+            }
         }
-        let label = match kind {
-            UserConfigKind::Desktop => "pix-desktop.jsonc",
-            UserConfigKind::PiToolsSuite => "pi-tools-suite.jsonc",
-        };
-        let content = match fs::metadata(&path) {
-            Ok(metadata) if !metadata.is_file() => {
-                errors.push(format!("{label} is not a file"));
-                continue;
+        let issue = sidebar_settings_file_issue(kind, &path);
+        if matches!(sidebar_path_stamp(&path), Ok(Some(after)) if after == stamp) {
+            if let Ok(mut cache) = state.settings_cache.lock() {
+                cache.insert(path.clone(), (stamp, issue.clone()));
             }
-            Ok(metadata) if metadata.len() > MAX_USER_CONFIG_BYTES => {
-                errors.push(format!("{label} is too large to edit"));
-                continue;
-            }
-            Ok(_) => match fs::read_to_string(&path) {
-                Ok(content) => content,
-                Err(error) => {
-                    errors.push(format!("failed to read {label}: {error}"));
-                    continue;
-                }
-            },
-            Err(error) => {
-                errors.push(format!("failed to inspect {label}: {error}"));
-                continue;
-            }
-        };
-        let normalized = match normalize_jsonc(&content) {
-            Ok(normalized) => normalized,
-            Err(_) => {
-                errors.push(format!("{label} contains invalid JSONC"));
-                continue;
-            }
-        };
-        match serde_json::from_str::<serde_json::Value>(&normalized) {
-            Ok(value) if value.is_object() => {
-                if let Ok(schema) =
-                    serde_json::from_str::<serde_json::Value>(user_config_schema(kind))
-                {
-                    if let Some(issue) = sidebar_settings_schema_issue(&value, &schema, "$", 24) {
-                        errors.push(format!("{label}: {issue}"));
-                    }
-                }
-            }
-            Ok(_) => errors.push(format!("{label} must contain a JSON object")),
-            Err(error) => errors.push(format!("{label} contains invalid JSONC: {error}")),
         }
+        errors.extend(issue);
     }
     SidebarSettingsIndicatorState { errors }
+}
+
+#[cfg(test)]
+fn sidebar_settings_indicator_state(home: &Path) -> SidebarSettingsIndicatorState {
+    let errors = [UserConfigKind::Desktop, UserConfigKind::PiToolsSuite]
+        .into_iter()
+        .filter_map(|kind| sidebar_settings_file_issue(kind, &user_config_path(home, kind)))
+        .collect();
+    SidebarSettingsIndicatorState { errors }
+}
+
+/// Health of one optional user config file; a missing file is healthy.
+fn sidebar_settings_file_issue(kind: UserConfigKind, path: &Path) -> Option<String> {
+    if !path.exists() {
+        return None;
+    }
+    let label = match kind {
+        UserConfigKind::Desktop => "pix-desktop.jsonc",
+        UserConfigKind::PiToolsSuite => "pi-tools-suite.jsonc",
+    };
+    let content = match fs::metadata(path) {
+        Ok(metadata) if !metadata.is_file() => return Some(format!("{label} is not a file")),
+        Ok(metadata) if metadata.len() > MAX_USER_CONFIG_BYTES => {
+            return Some(format!("{label} is too large to edit"));
+        }
+        Ok(_) => match fs::read_to_string(path) {
+            Ok(content) => content,
+            Err(error) => return Some(format!("failed to read {label}: {error}")),
+        },
+        Err(error) => return Some(format!("failed to inspect {label}: {error}")),
+    };
+    let Ok(normalized) = normalize_jsonc(&content) else {
+        return Some(format!("{label} contains invalid JSONC"));
+    };
+    match serde_json::from_str::<serde_json::Value>(&normalized) {
+        Ok(value) if value.is_object() => {
+            let schema =
+                serde_json::from_str::<serde_json::Value>(user_config_schema(kind)).ok()?;
+            sidebar_settings_schema_issue(&value, &schema, "$", 24)
+                .map(|issue| format!("{label}: {issue}"))
+        }
+        Ok(_) => Some(format!("{label} must contain a JSON object")),
+        Err(error) => Some(format!("{label} contains invalid JSONC: {error}")),
+    }
 }
 
 fn sidebar_settings_schema_issue(
@@ -10071,8 +10180,64 @@ mod tests {
         assert!(changed.local_changes);
         assert_eq!(changed.project_changes, vec!["workspace".to_owned()]);
         assert!(changed.error.is_none());
+        let stamp = changed
+            .project_stamps
+            .get("workspace")
+            .cloned()
+            .expect("dirty stamp");
+        let repeated = sidebar_registry_indicator_state(&state, &workspace, &home);
+        assert_eq!(repeated.project_stamps.get("workspace"), Some(&stamp));
+        fs::write(&settings, "{\"version\":1,\"updated\":\"again!\"}\n").expect("second edit");
+        let second = sidebar_registry_indicator_state(&state, &workspace, &home);
+        assert_eq!(second.project_changes, vec!["workspace".to_owned()]);
+        assert_ne!(second.project_stamps.get("workspace"), Some(&stamp));
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
         fs::remove_dir_all(home).expect("remove temporary home");
+    }
+
+    #[test]
+    fn sidebar_settings_and_package_health_cache_follow_file_stamps() {
+        let home = temporary_workspace("sidebar-settings-cache-home");
+        let state = SidebarIndicatorState::default();
+        let path = user_config_path(&home, UserConfigKind::Desktop);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "{ not json").unwrap();
+        let invalid = sidebar_settings_indicator_state_cached(&state, &home);
+        assert_eq!(invalid.errors.len(), 1);
+        assert!(state.settings_cache.lock().unwrap().contains_key(&path));
+        assert_eq!(
+            sidebar_settings_indicator_state_cached(&state, &home).errors,
+            invalid.errors
+        );
+        fs::write(&path, "{}\n").unwrap();
+        assert!(sidebar_settings_indicator_state_cached(&state, &home)
+            .errors
+            .is_empty());
+        fs::remove_file(&path).unwrap();
+        assert!(sidebar_settings_indicator_state_cached(&state, &home)
+            .errors
+            .is_empty());
+        assert!(!state.settings_cache.lock().unwrap().contains_key(&path));
+
+        let workspace = fs::canonicalize(temporary_workspace("sidebar-package-cache")).unwrap();
+        fs::write(workspace.join("package.json"), "{ broken").unwrap();
+        assert!(sidebar_package_scripts_error_cached(&state, &workspace).is_some());
+        assert!(state
+            .package_scripts_cache
+            .lock()
+            .unwrap()
+            .contains_key(&workspace));
+        fs::write(workspace.join("package.json"), "{\"scripts\":{}}\n").unwrap();
+        assert!(sidebar_package_scripts_error_cached(&state, &workspace).is_none());
+        fs::remove_file(workspace.join("package.json")).unwrap();
+        assert!(sidebar_package_scripts_error_cached(&state, &workspace).is_none());
+        assert!(!state
+            .package_scripts_cache
+            .lock()
+            .unwrap()
+            .contains_key(&workspace));
+        fs::remove_dir_all(workspace).unwrap();
+        fs::remove_dir_all(home).unwrap();
     }
 
     #[test]

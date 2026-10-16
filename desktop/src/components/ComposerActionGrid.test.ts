@@ -10,8 +10,9 @@ describe("composer action grid", () => {
       expect(source).toContain("grid w-23 shrink-0 grid-cols-3 items-center gap-1");
     }
     for (const source of [activity, queue, controls]) {
-      expect(source.match(/h-7 w-7/g)).toHaveLength(3);
-      expect(source).not.toContain("h-6 w-6");
+      // 28px buttons are either literal or the shared iconButtonClass("md", …) geometry.
+      expect(source.match(/h-7 w-7|iconButtonClass\("md"/g)).toHaveLength(3);
+      expect(source).not.toMatch(/h-6 w-6|iconButtonClass\("sm"/u);
     }
   });
 

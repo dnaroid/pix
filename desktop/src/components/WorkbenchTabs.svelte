@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { iconButtonClass } from "../lib/icon-button";
   import FileCode from "@lucide/svelte/icons/file-code";
   import GitCompareArrows from "@lucide/svelte/icons/git-compare-arrows";
   import GitFork from "@lucide/svelte/icons/git-fork";
@@ -125,6 +126,7 @@
             data-workbench-tab
             data-workbench-tab-id={tab.id}
             data-context-session-id={tab.kind === "session" ? tab.sessionId : undefined}
+            data-context-session-file={tab.kind === "session" ? tab.sessionFile : undefined}
             data-context-file-path={tab.kind === "preview" ? (tab.filePath ?? "") : undefined}
             title={tab.title}
             onclick={() => onSelect(tab.id)}
@@ -176,7 +178,7 @@
 
     <button
       use:titlebarDrag
-      class="mx-1 grid h-6 w-6 shrink-0 self-center place-items-center rounded-sm bg-transparent text-muted-foreground transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+      class={iconButtonClass("sm", "chrome", { extra: "mx-1 self-center" })}
       title={newSessionShortcut ? `New conversation · ${newSessionShortcut}` : "New conversation"}
       aria-label="New conversation"
       data-session-new

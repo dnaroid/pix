@@ -12,6 +12,7 @@ import composerSource from "./PromptComposer.svelte?raw";
 import composerActionsSource from "./PromptComposerActionsMenu.svelte?raw";
 import diffViewSource from "./DiffView.svelte?raw";
 import elicitationSource from "./ElicitationDialog.svelte?raw";
+import dialogClassesSource from "../lib/dialog.ts?raw";
 import gitCommitComposerSource from "./GitCommitComposer.svelte?raw";
 import lspInstallPaneSource from "./LspInstallPane.svelte?raw";
 import packageScriptsSource from "./PackageScriptsPanel.svelte?raw";
@@ -140,15 +141,19 @@ describe("desktop visual regressions", () => {
   it("normalizes modal elicitation controls and action buttons", () => {
     expect(elicitationSource).toContain("appearance-none");
     expect(elicitationSource).toContain('import Check from "@lucide/svelte/icons/check"');
-    expect(elicitationSource).toContain("ChevronDown");
+    expect(elicitationSource).toContain("<TaskFieldSelect");
+    expect(elicitationSource).not.toMatch(/<select\b/u);
     expect(elicitationSource).toContain("focus:border-ring");
     expect(elicitationSource).toContain("checked:border-primary checked:bg-primary");
     expect(elicitationSource).toContain("peer-checked:opacity-100");
     expect(elicitationSource).toContain("field.label.trim() === message.trim()");
     expect(elicitationSource).not.toContain("accent-primary");
     expect(elicitationSource).not.toContain("border-primary bg-primary");
-    expect(elicitationSource).toContain("h-8 rounded-md px-3 text-xs font-medium text-muted-foreground");
-    expect(elicitationSource).toContain("inline-flex h-8 min-w-20 items-center justify-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground");
+    // Footer actions use the shared dialog action geometry (lib/dialog.ts).
+    expect(elicitationSource).toContain("class={dialogCancelButtonClass}");
+    expect(elicitationSource).toContain("class={dialogPrimaryButtonClass}");
+    expect(dialogClassesSource).toContain("h-8 rounded-md px-3 text-xs font-medium text-muted-foreground");
+    expect(dialogClassesSource).toContain("inline-flex h-8 min-w-20 items-center justify-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground");
   });
 
   it("keeps text-file Preview selectable for native copy without making desktop chrome selectable", async () => {
@@ -622,8 +627,8 @@ describe("desktop visual regressions", () => {
     expect(settingsModelVisibilitySource).toContain("Choose visible models");
     expect(settingsModelVisibilitySource).toContain("searchSettingsModels");
     expect(desktopSettingsEditorSource).toContain('ariaLabel="CI fix model"');
-    expect(desktopSettingsEditorSource).toContain('ariaLabel="Knowledge review model"');
-    expect(desktopSettingsEditorSource).toContain('["desktop", "knowledge", "reviewModelRef"]');
+    expect(desktopSettingsEditorSource).not.toContain('ariaLabel="Knowledge review model"');
+    expect(desktopSettingsEditorSource).not.toContain('["desktop", "knowledge", "reviewModelRef"]');
     expect(desktopSettingsEditorSource).toContain('emptyLabel="Default model"');
     expect(desktopSettingsEditorSource).toContain('ariaLabel="Review model"');
     expect(desktopSettingsEditorSource).toContain('ariaLabel="Commit message model"');

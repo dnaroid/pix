@@ -51,6 +51,7 @@ export class SidebarIndicatorService {
   private started = false;
   private destroyed = false;
   private unlisteners: UnlistenFn[] = [];
+  private publishedSignature: string | undefined;
 
   constructor(
     private readonly windowLabel: string,
@@ -100,8 +101,13 @@ export class SidebarIndicatorService {
     this.refreshGitRemoteIfDue();
   }
 
+  /**
+   * Owner snapshots (Git panel, Registry, CI) can change in bursts. Coalesce
+   * them into one debounced fast poll instead of stacking extra IPC/Git work
+   * on top of the regular cadence.
+   */
   invalidateFast(): void {
-    void this.refreshFast();
+    this.scheduleEventRefresh();
   }
 
   invalidateGitRemote(force = false): void {
@@ -121,7 +127,10 @@ export class SidebarIndicatorService {
 
   private readonly handleForeground = (): void => {
     if (document.visibilityState !== "visible") return;
-    this.refreshNow();
+    // focus and visibilitychange usually fire together; an in-flight poll
+    // already reflects the foreground moment, so do not queue a second one.
+    void this.refreshFast(false);
+    this.refreshGitRemoteIfDue();
   };
 
   private attachListeners(): void {
@@ -148,14 +157,18 @@ export class SidebarIndicatorService {
     }, EVENT_REFRESH_DELAY_MS);
   }
 
-  private async refreshFast(): Promise<void> {
+  private async refreshFast(queueIfRunning = true): Promise<void> {
     if (this.destroyed || !this.workspace) {
       this.scheduleFast();
       return;
     }
     if (this.fastRunning) {
-      this.fastQueued = true;
+      if (queueIfRunning) this.fastQueued = true;
       return;
+    }
+    if (this.eventRefreshTimer !== undefined) {
+      window.clearTimeout(this.eventRefreshTimer);
+      this.eventRefreshTimer = undefined;
     }
     this.fastRunning = true;
     const workspace = this.workspace;
@@ -271,8 +284,16 @@ export class SidebarIndicatorService {
     this.publish();
   }
 
+  /**
+   * Skip identical snapshots so a steady 5-second poll does not re-run every
+   * derived indicator/menu computation. A poll that reports Registry project
+   * changes is always delivered: its fresh checkedAtMs drives local reloads.
+   */
   private publish(): void {
     if (this.destroyed) return;
+    const signature = sidebarIndicatorStateSignature(this.state);
+    if (signature !== undefined && signature === this.publishedSignature) return;
+    this.publishedSignature = signature;
     this.onChange(this.state);
   }
 
@@ -306,4 +327,14 @@ export class SidebarIndicatorService {
     this.gitRemoteTimer = undefined;
     this.eventRefreshTimer = undefined;
   }
+}
+
+/** Content identity without poll timestamps; undefined means always publish. */
+export function sidebarIndicatorStateSignature(state: SidebarIndicatorServiceState): string | undefined {
+  if ((state.poll?.registry.projectChanges?.length ?? 0) > 0) return undefined;
+  return JSON.stringify([
+    state.poll ? { ...state.poll, checkedAtMs: 0 } : null,
+    state.gitRemote?.hasUpdates ?? null,
+    state.unseenScriptFailureIds,
+  ]);
 }

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { compactEmptyStateClass } from "../../lib/status-text";
   import Check from "@lucide/svelte/icons/check";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import Search from "@lucide/svelte/icons/search";
@@ -185,7 +186,7 @@
             </span>
           </button>
         {:else}
-          <p class="px-2 py-4 text-center text-xs text-muted-foreground">No matching models</p>
+          <p class={compactEmptyStateClass}>No matching models</p>
         {/each}
       </div>
     </div>

@@ -10,7 +10,7 @@
 <nav aria-label="Settings chapters" class="min-h-0 overflow-y-auto px-1.5 pb-2">
   {#each Object.entries(SETTINGS_GROUPS) as [kind, group]}
     {#if group.sections.some((section) => visible.includes(`${kind}-${section.id}`))}
-      <div class="px-1.5 pt-3 pb-1 text-[11px] font-semibold text-muted-foreground">{group.label}</div>
+      <div class="px-1.5 pt-3 pb-1 text-xs font-semibold text-muted-foreground">{group.label}</div>
       {#each group.sections as section (section.id)}
         {@const id = `${kind}-${section.id}`}
         {#if visible.includes(id)}

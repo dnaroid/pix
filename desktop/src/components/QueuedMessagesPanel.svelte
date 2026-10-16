@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { iconButtonClass } from "../lib/icon-button";
   import Hourglass from "@lucide/svelte/icons/hourglass";
   import GitFork from "@lucide/svelte/icons/git-fork";
   import Pause from "@lucide/svelte/icons/pause";
@@ -61,7 +62,7 @@
         </div>
         <div class="grid w-23 shrink-0 grid-cols-3 items-center gap-1 opacity-65 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
           <button
-            class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-35"
+            class={iconButtonClass("md", "popover")}
             type="button"
             title={item.source === "fork" ? "Waiting for a safe fork boundary" : "Send immediately"}
             aria-label="Send queued message immediately"
@@ -69,7 +70,7 @@
             onclick={() => onAction(item, "send-now")}
           ><Play class="h-3.5 w-3.5" aria-hidden="true" /></button>
           <button
-            class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-35"
+            class={iconButtonClass("md", "popover")}
             type="button"
             title="Move to editor"
             aria-label="Edit queued message"
@@ -77,7 +78,7 @@
             onclick={() => onAction(item, "edit")}
           ><Pencil class="h-3.5 w-3.5" aria-hidden="true" /></button>
           <button
-            class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-destructive focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-35"
+            class={iconButtonClass("md", "popover", { tone: "danger" })}
             type="button"
             title="Cancel queued message"
             aria-label="Cancel queued message"

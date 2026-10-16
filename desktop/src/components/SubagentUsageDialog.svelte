@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { modalBackdropClass } from "../lib/dialog";
+  import { iconButtonClass } from "../lib/icon-button";
   import X from "@lucide/svelte/icons/x";
   import Users from "@lucide/svelte/icons/users";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
@@ -33,7 +35,7 @@
 
 <dialog
   bind:this={dialog}
-  class="fixed inset-0 z-50 m-auto h-screen max-h-none w-screen max-w-none place-items-center bg-transparent p-5 text-foreground backdrop:bg-overlay open:grid"
+  class={modalBackdropClass}
   aria-label="Subagent statistics"
   oncancel={(event) => { event.preventDefault(); onClose(); }}
   onclick={(event) => { if (event.target === event.currentTarget) onClose(); }}
@@ -42,10 +44,10 @@
     <header class="flex h-10 shrink-0 items-center gap-2 border-b border-border bg-chrome px-3">
       <Users class="h-4 w-4 text-muted-foreground" aria-hidden="true" />
       <h2 class="min-w-0 flex-1 text-xs font-semibold">Subagent statistics</h2>
-      <button type="button" class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" aria-label="Refresh subagent statistics" disabled={loading} onclick={onRefresh}>
+      <button type="button" class={iconButtonClass("md", "chrome")} aria-label="Refresh subagent statistics" disabled={loading} onclick={onRefresh}>
         <RotateCw class={loading ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} aria-hidden="true" />
       </button>
-      <button bind:this={closeButton} type="button" class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-ring" aria-label="Close subagent statistics" onclick={onClose}>
+      <button bind:this={closeButton} type="button" class={iconButtonClass("md", "chrome")} aria-label="Close subagent statistics" onclick={onClose}>
         <X class="h-3.5 w-3.5" aria-hidden="true" />
       </button>
     </header>

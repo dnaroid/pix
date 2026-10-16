@@ -13,6 +13,7 @@ export interface DesktopContextTarget {
   imageRelativePath?: string;
   filePath?: string;
   sessionId?: string;
+  sessionFile?: string;
   projectRevealPath?: string;
   sourceReference?: string;
   hasSelection: boolean;
@@ -121,7 +122,8 @@ export function desktopContextTarget(target: EventTarget | null, workspace = "")
   const sessionTab = element.closest<HTMLElement>("[data-workbench-tab][data-context-session-id]");
   const sessionId = sessionTab?.dataset.contextSessionId;
   if (sessionTab && sessionId) {
-    return { kind: "session", element: sessionTab, sessionId, editor: null, hasSelection: false, readOnly: true };
+    const sessionFile = contextFilePath(sessionTab.dataset.contextSessionFile, "");
+    return { kind: "session", element: sessionTab, sessionId, sessionFile, editor: null, hasSelection: false, readOnly: true };
   }
 
   const image = element.closest("img");

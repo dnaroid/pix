@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { countBadgeClass } from "../lib/status-text";
+  import { iconButtonClass } from "../lib/icon-button";
   import CheckCircle2 from "@lucide/svelte/icons/check-circle-2";
   import CircleX from "@lucide/svelte/icons/circle-x";
   import Circle from "@lucide/svelte/icons/circle";
@@ -206,10 +208,10 @@
               <button type="button" class="inline-flex min-w-0 items-center gap-1.5 rounded-sm hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" aria-label={`Toggle ${group.label} tasks`} aria-expanded={!collapsed} aria-controls={`workspace-tasks-${group.status}-list`} onclick={() => onToggleStatusCollapsed(group.status)}>
                 <ChevronDown class={["h-3.5 w-3.5 transition-transform motion-reduce:transition-none", collapsed ? "-rotate-90" : "rotate-0"]} aria-hidden="true" />
                 <span class={[statusTone(group.status), "opacity-80"]}>{group.label}</span>
-                <span class="rounded-full bg-panel-strong px-1.5 py-px font-mono text-xs font-normal tracking-normal text-muted-foreground/80 normal-case" title={`${total} total tasks`}>{total}</span>
+                <span class={countBadgeClass} title={`${total} total tasks`}>{total}</span>
               </button>
               <button
-                class="ml-auto grid h-6 w-6 shrink-0 place-items-center rounded-sm text-muted-foreground transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default"
+                class={iconButtonClass("sm", "chrome", { extra: "ml-auto" })}
                 type="button"
                 title={`Add ${group.label} task`}
                 aria-label={`Add ${group.label} task`}
@@ -314,7 +316,7 @@
                       </button>
                       <div class="relative" data-task-status-control>
                         <button
-                          class="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                          class={iconButtonClass("sm", "popover")}
                           type="button"
                           title={`Status: ${taskStatusLabel(task.status)}`}
                           aria-label={`Change status for ${taskLabel}. Current status: ${taskStatusLabel(task.status)}`}

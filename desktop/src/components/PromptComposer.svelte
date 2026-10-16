@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { iconButtonClass } from "../lib/icon-button";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Paperclip from "@lucide/svelte/icons/paperclip";
   import { onDestroy, onMount, tick, type Snippet } from "svelte";
@@ -702,7 +703,7 @@
       <div class="flex min-w-0 items-end gap-1.5" data-prompt-composer-row>
         {#if editorMode || questionMode}
         <button
-          class="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+          class={iconButtonClass("md", "popover")}
           type="button"
           aria-label={questionMode ? "Attach images" : "Attach files"}
           title={questionMode ? "Attach images" : "Attach files"}

@@ -2033,10 +2033,11 @@ export class PixAcpAgent {
 		const sessionIdByPath = new Map(records
 			.map((record) => [resolve(record.piSessionPath), record.sessionId]));
 		const sessions: SessionInfo[] = records.map((record) => {
-			const info: SessionInfo = { sessionId: record.sessionId, cwd: record.cwd, updatedAt: record.updatedAt };
+			const info: SessionInfo = { sessionId: record.sessionId, cwd: record.cwd, updatedAt: record.updatedAt,
+				_meta: { "pix.sessionFile": resolve(record.piSessionPath) } };
 			if (record.title !== undefined) info.title = record.title;
 			const brainstorm = this.brainstormHost.metadata(record.sessionId) ?? record.brainstorm;
-			if (brainstorm) info._meta = { "pix.brainstorm": brainstorm };
+			if (brainstorm) info._meta = { ...info._meta, "pix.brainstorm": brainstorm };
 			if (record.parentSessionPath !== undefined) {
 				const parentSessionId = sessionIdByPath.get(resolve(record.parentSessionPath));
 				info._meta = {

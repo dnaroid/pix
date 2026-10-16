@@ -150,6 +150,27 @@ describe("registry background project sync", () => {
     store.reset();
   });
 
+  it("re-observes unchanged dirty content without reloading local state", () => {
+    vi.useFakeTimers();
+    const loadProjectDocuments = vi.fn();
+    const store = createRegistryStore({
+      client: () => null,
+      operationRunning: () => false,
+      workspace: () => "/project",
+      sessionWorkspace: () => "/project",
+      setErrorMessage: vi.fn(),
+      loadProjectTasks: vi.fn(),
+      loadProjectDocuments,
+      reportError: vi.fn(),
+    });
+
+    store.observeProjectChange("plans", false);
+
+    expect(loadProjectDocuments).not.toHaveBeenCalled();
+    expect(store.backgroundSyncState).toMatchObject({ phase: "pending", dirtyScopes: ["plans"] });
+    store.reset();
+  });
+
   it("reloads externally changed plans even while another registry sync is pending", () => {
     vi.useFakeTimers();
     const loadProjectDocuments = vi.fn();

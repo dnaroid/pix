@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { emptyStateClass } from "../lib/status-text";
   import Play from "@lucide/svelte/icons/play";
   import Search from "@lucide/svelte/icons/search";
   import { onMount } from "svelte";
@@ -92,7 +93,7 @@
                 <span class="min-w-0 flex-1 truncate font-mono text-xs font-medium text-foreground">{script.name}</span>
               </button>
             {/each}
-            {#if visibleScripts.length === 0}<div class="px-3 py-4 text-center text-xs text-muted-foreground">No matching scripts.</div>{/if}
+            {#if visibleScripts.length === 0}<div class={emptyStateClass}>No matching scripts.</div>{/if}
           </div>
         {:else}
           <div class="border-t border-sidebar-border/70 px-3 py-3 text-center text-xs text-muted-foreground">No scripts in package.json.</div>

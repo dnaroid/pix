@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { iconButtonClass } from "../lib/icon-button";
   import EllipsisVertical from "@lucide/svelte/icons/ellipsis-vertical";
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
@@ -35,7 +36,7 @@
 <div class="relative shrink-0" data-composer-menu>
   <button
     bind:this={menuTrigger}
-    class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+    class={iconButtonClass("md", "popover")}
     type="button"
     aria-label="More composer actions"
     title="More actions"

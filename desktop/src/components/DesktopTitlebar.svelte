@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { iconButtonClass } from "../lib/icon-button";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import Search from "@lucide/svelte/icons/search";
   import Clock from "@lucide/svelte/icons/clock";
@@ -61,7 +62,7 @@
 
   {#if onSearch}
     <button type="button" onclick={onSearch} aria-label="Search current project" title="Search current project (⌘⇧F)"
-      class="my-auto mr-2 grid h-7 w-7 shrink-0 place-items-center rounded text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">
+      class={iconButtonClass("md", "chrome", { extra: "my-auto mr-2" })}>
       <Search class="h-4 w-4" aria-hidden="true" />
     </button>
   {/if}

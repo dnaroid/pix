@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { countBadgeClass } from "../lib/status-text";
   import GitBranch from "@lucide/svelte/icons/git-branch";
   import Crown from "@lucide/svelte/icons/crown";
   import Link2 from "@lucide/svelte/icons/link-2";
@@ -104,7 +105,7 @@
   {/if}
   {#if editingTaskId}
     <div class="space-y-1" aria-label="Subtasks">
-      <div class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"><GitBranch class="h-3.5 w-3.5" aria-hidden="true" />Subtasks <span class="rounded-full bg-panel-strong px-1.5 font-mono text-xs">{children.length}</span></div>
+      <div class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"><GitBranch class="h-3.5 w-3.5" aria-hidden="true" />Subtasks <span class={countBadgeClass}>{children.length}</span></div>
       {#each children as child (child.id)}
         <button type="button" class="flex w-full min-w-0 items-center gap-2 rounded-md border border-border/50 px-2 py-1.5 text-left text-xs hover:border-primary/40 hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring" onclick={() => onOpenTask(child)} title="Open subtask">
           <span class="min-w-0 flex-1 truncate">{projectTaskDisplayLabel(child)}</span>
@@ -116,7 +117,7 @@
 </section>
 
 <section class="space-y-2 border-t border-sidebar-border pt-3" aria-label="Related tasks">
-  <h3 class="flex items-center gap-1.5 text-xs font-semibold text-foreground"><Link2 class="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />Related tasks <span class="ml-auto rounded-full bg-panel-strong px-1.5 font-mono text-xs font-normal text-muted-foreground">{linkedTasks.length + linkedFrom.length}</span></h3>
+  <h3 class="flex items-center gap-1.5 text-xs font-semibold text-foreground"><Link2 class="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />Related tasks <span class={["ml-auto", countBadgeClass]}>{linkedTasks.length + linkedFrom.length}</span></h3>
   {#each linkedTasks as related (related.id)}
     <div class="flex min-w-0 items-center gap-1 rounded-md border border-border/50 p-1">
       <button type="button" class="min-w-0 flex-1 truncate rounded px-1 py-1 text-left text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring" title="Open related task" onclick={() => onOpenTask(related)}>{projectTaskDisplayLabel(related)}</button>
@@ -133,7 +134,7 @@
 </section>
 
 <section class="space-y-2 border-t border-sidebar-border pt-3" aria-label="Linked project files and artifacts">
-  <h3 class="flex items-center gap-1.5 text-xs font-semibold text-foreground"><Link2 class="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />Related files &amp; artifacts <span class="ml-auto rounded-full bg-panel-strong px-1.5 font-mono text-xs font-normal text-muted-foreground">{links.length}</span></h3>
+  <h3 class="flex items-center gap-1.5 text-xs font-semibold text-foreground"><Link2 class="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />Related files &amp; artifacts <span class={["ml-auto", countBadgeClass]}>{links.length}</span></h3>
   {#each links as link (link)}
     <div class="flex min-w-0 items-center gap-1 rounded-md border border-border/50 bg-panel-strong/30 p-1">
       <button type="button" class="flex min-w-0 flex-1 items-center gap-1.5 rounded px-1 py-1 text-left text-xs text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring" onclick={() => onOpenLink(link)} title={`Open ${link}`} aria-label={`Open linked file ${link}`}>

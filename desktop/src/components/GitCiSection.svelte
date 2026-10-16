@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { paneDisclosureClass, paneDisclosureSummaryClass } from "../lib/disclosure";
   import { untrack } from "svelte";
   import { writeText } from "@tauri-apps/plugin-clipboard-manager";
   import Check from "@lucide/svelte/icons/check";
@@ -81,8 +82,8 @@
   }
 </script>
 
-<details class="group/ci border-t border-sidebar-border bg-panel" bind:open={expanded}>
-  <summary class="flex h-8 items-center gap-1.5 px-2 text-xs font-medium text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
+<details class={["group/ci", paneDisclosureClass]} bind:open={expanded}>
+  <summary class={paneDisclosureSummaryClass}>
     <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open/ci:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
     <span class="min-w-0 flex-1 truncate">{providerLabel}</span>
     {#if ci.loading}

@@ -11,6 +11,7 @@
   import FrontierModelBadge from "./FrontierModelBadge.svelte";
   import RuntimeStatusBarItems from "./RuntimeStatusBarItems.svelte";
   import ObserverStatus from "./ObserverStatus.svelte";
+  import TaskFieldSelect from "./TaskFieldSelect.svelte";
   import type { HeadsUpSnapshot } from "../lib/heads-up";
   import SessionActivityStatusHud from "./SessionActivityStatusHud.svelte";
   import SessionBrainstormStatus from "./SessionBrainstormStatus.svelte";
@@ -171,23 +172,23 @@
       {#if option.id === "model" || option.id === "thought_level"}
         <!-- Model + thinking are presented as one staged control above. -->
       {:else if option.type === "select"}
-        <label class="flex min-w-0 items-center gap-1.5">
-          <span class="text-muted-foreground/70 max-[760px]:hidden">{option.name}</span>
-          <span class="relative min-w-0">
-            <select
-              class="h-6 max-w-[220px] appearance-none overflow-hidden rounded-sm border-0 bg-transparent py-0 pr-5 pl-1 text-primary transition-colors outline-none enabled:hover:bg-chrome-hover enabled:hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-40"
-              aria-label={option.name}
-              value={option.currentValue}
+        <div class="flex min-w-0 items-center gap-1.5">
+          <span class="text-muted-foreground/70 max-[760px]:hidden" aria-hidden="true">{option.name}</span>
+          <div class="min-w-0 max-w-[220px]">
+            <TaskFieldSelect
+              value={String(option.currentValue)}
+              options={configValues(option).map((value) => ({ value: value.value, label: `${value.group ? `${value.group} · ` : ""}${value.name}` }))}
+              ariaLabel={option.name}
+              size="xs"
+              variant="ghost"
+              popupMinWidth={180}
+              searchPlaceholder="Search…"
+              emptyLabel="No matching options"
               disabled={!canConfigure || changingConfig !== null || promptRunning}
-              onchange={(event) => onSetConfig(option, event.currentTarget.value)}
-            >
-              {#each configValues(option) as value (value.value)}
-                <option value={value.value}>{value.group ? `${value.group} · ` : ""}{value.name}</option>
-              {/each}
-            </select>
-            <ChevronDown class="pointer-events-none absolute top-1/2 right-1 h-3 w-3 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-          </span>
-        </label>
+              onChange={(value) => onSetConfig(option, value)}
+            />
+          </div>
+        </div>
       {:else}
         <label class="flex items-center gap-1.5">
           <input

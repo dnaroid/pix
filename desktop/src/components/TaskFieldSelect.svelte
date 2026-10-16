@@ -1,10 +1,19 @@
 <script lang="ts">
+  import { compactEmptyStateClass } from "../lib/status-text";
+  /*
+   * Shared Pix dropdown (DESIGN.md §11): styled trigger + popup listbox with
+   * keyboard navigation, dismissal, focus restoration and viewport-aware
+   * positioning. Use it for every Desktop field/filter/toolbar choice instead
+   * of a native select element.
+   */
   import Check from "@lucide/svelte/icons/check";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import Search from "@lucide/svelte/icons/search";
-  import { tick } from "svelte";
+  import { tick, type Snippet } from "svelte";
 
   export type TaskFieldOption = { value: string; label: string; description?: string };
+  export type PixSelectSize = "xs" | "sm" | "md";
+  export type PixSelectVariant = "field" | "ghost";
 
   let {
     value,
@@ -14,14 +23,35 @@
     disabled = false,
     searchable = false,
     compact = false,
+    size,
+    variant = "field",
+    mono = false,
+    placeholder,
+    searchPlaceholder = "Search tasks…",
+    emptyLabel = "No matching tasks",
+    popupMinWidth = 0,
+    triggerClass = "",
+    leading,
   }: {
     value: string;
     options: readonly TaskFieldOption[];
-    onChange: (value: string) => void;
+    /** Controlled value: the parent decides whether to apply the change. */
+    onChange: (value: string) => unknown;
     ariaLabel: string;
     disabled?: boolean;
     searchable?: boolean;
+    /** Legacy alias for size="sm". */
     compact?: boolean;
+    size?: PixSelectSize;
+    variant?: PixSelectVariant;
+    mono?: boolean;
+    /** Trigger label when value matches no option (e.g. detached HEAD). */
+    placeholder?: string;
+    searchPlaceholder?: string;
+    emptyLabel?: string;
+    popupMinWidth?: number;
+    triggerClass?: string;
+    leading?: Snippet;
   } = $props();
 
   const id = $props.id();
@@ -33,13 +63,19 @@
   let query = $state("");
   let selectedIndex = $state(0);
   let popupPosition = $state({ left: 8, top: 32, width: 200, maxHeight: 240 });
+  const resolvedSize = $derived<PixSelectSize>(size ?? (compact ? "sm" : "md"));
   const currentOption = $derived(options.find((option) => option.value === value));
+  const triggerLabel = $derived(currentOption?.label ?? placeholder ?? value);
   const filteredOptions = $derived.by(() => {
     const term = query.trim().toLocaleLowerCase();
     return term
       ? options.filter((option) => `${option.label} ${option.value} ${option.description ?? ""}`.toLocaleLowerCase().includes(term))
       : options;
   });
+
+  export function focus(): void {
+    trigger?.focus();
+  }
 
   function reposition(): void {
     if (!open || !trigger) return;
@@ -49,7 +85,7 @@
     const above = Math.max(0, rect.top - 8);
     const useAbove = below < 200 && above > below;
     const maxHeight = Math.max(40, Math.min(280, (useAbove ? above : below) - 4));
-    const width = Math.max(0, Math.min(rect.width, window.innerWidth - 16));
+    const width = Math.max(0, Math.min(Math.max(rect.width, popupMinWidth), window.innerWidth - 16));
     popupPosition = {
       left: Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)),
       top: useAbove ? rect.top - maxHeight - 4 : rect.bottom + 4,
@@ -78,8 +114,8 @@
   }
 
   function choose(option: TaskFieldOption): void {
-    onChange(option.value);
     close(true);
+    if (option.value !== value) onChange(option.value);
   }
 
   function focusOption(): void {
@@ -92,6 +128,10 @@
       event.preventDefault();
       event.stopPropagation();
       close(true);
+      return;
+    }
+    if (event.key === "Tab") {
+      close();
       return;
     }
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -153,13 +193,20 @@
     bind:this={trigger}
     type="button"
     class={[
-      "flex w-full min-w-0 items-center justify-between gap-2 rounded-md border border-input bg-background px-2.5 text-left text-xs text-foreground transition-colors hover:border-ring/55 hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-45",
-      compact ? "h-7" : "h-9",
+      "flex w-full min-w-0 items-center justify-between gap-1.5 text-left text-xs transition-colors focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-45",
+      variant === "field"
+        ? "rounded-md border border-input bg-background text-foreground hover:border-ring/55 hover:bg-panel-hover"
+        : "rounded-sm border-0 bg-transparent text-primary enabled:hover:bg-chrome-hover enabled:hover:text-foreground",
+      resolvedSize === "xs" ? "h-6 px-1.5" : resolvedSize === "sm" ? "h-7 px-2" : "h-9 px-2.5",
+      mono && "font-mono",
+      open && variant === "field" && "border-ring/55",
+      triggerClass,
     ]}
     aria-label={ariaLabel}
     aria-haspopup="listbox"
     aria-expanded={open}
     aria-controls={open ? optionsId : undefined}
+    title={triggerLabel}
     disabled={disabled}
     onclick={() => open ? close() : show()}
     onkeydown={(event) => {
@@ -169,14 +216,15 @@
       }
     }}
   >
-    <span class="min-w-0 truncate">{currentOption?.label ?? value}</span>
-    <ChevronDown class={["h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", open ? "rotate-180" : "rotate-0"]} aria-hidden="true" />
+    {#if leading}{@render leading()}{/if}
+    <span class={["min-w-0 flex-1 truncate", !currentOption && placeholder && "text-muted-foreground"]}>{triggerLabel}</span>
+    <ChevronDown class={["h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none", open ? "rotate-180" : "rotate-0"]} aria-hidden="true" />
   </button>
 
   {#if open}
     <dialog
       open
-      class="fixed z-[70] m-0 max-w-none overflow-hidden rounded-md border border-border bg-popover p-0 text-popover-foreground shadow-lg"
+      class="fixed z-[70] m-0 max-w-none overflow-hidden rounded-md border border-border bg-popover p-0 text-popover-foreground shadow-md"
       style:left={`${popupPosition.left}px`}
       style:top={`${popupPosition.top}px`}
       style:width={`${popupPosition.width}px`}
@@ -197,8 +245,8 @@
             aria-expanded="true"
             aria-controls={optionsId}
             aria-activedescendant={filteredOptions[selectedIndex] ? `${optionsId}-${selectedIndex}` : undefined}
-            class="h-8 w-full rounded-md border border-input bg-background pr-2 pl-7 text-xs text-foreground outline-none focus:ring-2 focus:ring-ring/20"
-            placeholder="Search tasks…"
+            class="h-7 w-full rounded-md border border-input bg-background pr-2 pl-7 text-xs text-foreground outline-none"
+            placeholder={searchPlaceholder}
             bind:value={query}
             oninput={() => selectedIndex = 0}
             autocomplete="off"
@@ -206,13 +254,14 @@
           />
         </div>
       {/if}
-      <div id={optionsId} class="overflow-y-auto p-1" style:max-height={`${popupPosition.maxHeight - (searchable ? 48 : 0)}px`} role="listbox" aria-label={ariaLabel}>
+      <div id={optionsId} class="overflow-y-auto p-1" style:max-height={`${popupPosition.maxHeight - (searchable ? 44 : 0)}px`} role="listbox" aria-label={ariaLabel}>
         {#each filteredOptions as option, index (option.value)}
           <button
             data-task-select-option={index}
             class={[
-              "flex min-h-8 w-full min-w-0 items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
+              "flex min-h-7 w-full min-w-0 items-center gap-2 rounded-sm px-2 py-1 text-left text-xs hover:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
               index === selectedIndex ? "bg-panel-selected" : "",
+              mono && "font-mono",
             ]}
             type="button"
             role="option"
@@ -226,7 +275,7 @@
             <span class="min-w-0 flex-1 truncate" title={option.label}>{option.label}</span>
           </button>
         {:else}
-          <p class="px-2 py-4 text-center text-xs text-muted-foreground">No matching tasks</p>
+          <p class={compactEmptyStateClass}>{emptyLabel}</p>
         {/each}
       </div>
     </dialog>

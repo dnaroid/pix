@@ -20,6 +20,16 @@ function build(sessions: SessionInfo[]) {
 }
 
 describe("session workbench model", () => {
+  it("uses authoritative session file metadata, never an ID or draft path", () => {
+    const tabs = build([
+      { sessionId: "saved", cwd: "/tmp", _meta: { "pix.sessionFile": "/sessions/мой session.jsonl" } },
+      { sessionId: "missing", cwd: "/tmp" },
+      { sessionId: "invalid", cwd: "/tmp", _meta: { "pix.sessionFile": 42 } },
+      { sessionId: "draft", cwd: "/tmp", _meta: { "pix.sessionFile": "/sessions/old.jsonl" } },
+    ]);
+    expect(tabs.map((tab) => tab.sessionFile)).toEqual(["/sessions/мой session.jsonl", undefined, undefined, undefined]);
+  });
+
   it("keeps selection enabled independently from guarded close/mutation controls", () => {
     const tabs = buildSessionWorkbenchTabs({
       sessions: [{ sessionId: "a", cwd: "/tmp" }, { sessionId: "draft", cwd: "/tmp" }],

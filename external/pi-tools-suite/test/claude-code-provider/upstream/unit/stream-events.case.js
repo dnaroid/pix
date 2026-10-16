@@ -354,6 +354,31 @@ test("emits validated rate-limit notices and retains rejected diagnostics", () =
     assert.match(mapper.rateLimitFailure, /five_hour/);
     assert.match(mapper.rateLimitFailure, /2027-/);
 });
+test("reports unified window consumption even for an unconstrained event", () => {
+    const notices = [];
+    const windows = [];
+    const mapper = new EventMapper({ stream: createAssistantMessageEventStream(), output: createOutput(model), expectedTools: new Set(), toolNames: new Map(), onToolUse: () => { },
+        onRateLimitNotice: (notice) => notices.push(notice), onRateLimitWindows: (value) => windows.push(value) });
+    init(mapper);
+    mapper.accept({ type: "rate_limit_event", rate_limit_info: { status: "allowed", rateLimitType: "five_hour", resetsAt: 1_800_000_000,
+        overageStatus: "rejected", overageDisabledReason: "out_of_credits", isUsingOverage: false,
+        unifiedWindows: { five_hour: { utilization: 0.47, resetsAt: 1_800_000_000 }, seven_day: { utilization: 0.04, resetsAt: 1_800_500_000 } } } });
+    assert.deepEqual(notices, [], "unconstrained consumption is never a warning");
+    assert.deepEqual(windows, [[
+        { rateLimitType: "five_hour", utilization: 0.47, resetsAt: 1_800_000_000_000 },
+        { rateLimitType: "seven_day", utilization: 0.04, resetsAt: 1_800_500_000_000 },
+    ]]);
+    // Partial and malformed windows are dropped individually; none at all emits nothing.
+    mapper.accept({ type: "rate_limit_event", rate_limit_info: { status: "allowed",
+        unifiedWindows: { five_hour: { utilization: 1.5, resetsAt: 1_800_000_000 }, seven_day: { utilization: 0.1, resetsAt: 1_800_500_000 }, overage: { utilization: 0.2, resetsAt: 1 } } } });
+    mapper.accept({ type: "rate_limit_event", rate_limit_info: { status: "allowed", unifiedWindows: [] } });
+    mapper.accept({ type: "rate_limit_event", rate_limit_info: { status: "allowed" } });
+    assert.deepEqual(windows.slice(1), [[{ rateLimitType: "seven_day", utilization: 0.1, resetsAt: 1_800_500_000_000 }]]);
+    const throwing = new EventMapper({ stream: createAssistantMessageEventStream(), output: createOutput(model), expectedTools: new Set(), toolNames: new Map(), onToolUse: () => { },
+        onRateLimitWindows: () => { throw new Error("observer"); } });
+    init(throwing);
+    assert.doesNotThrow(() => throwing.accept({ type: "rate_limit_event", rate_limit_info: { unifiedWindows: { five_hour: { utilization: 0.5, resetsAt: 1_800_000_000 } } } }));
+});
 test("does not double-convert epoch-millisecond reset timestamps", () => {
     const notices = [];
     const mapper = makeMapper(createAssistantMessageEventStream(), createOutput(model), new Set(), new Map(), () => { }, (notice) => notices.push(notice));

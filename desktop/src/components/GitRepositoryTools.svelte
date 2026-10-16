@@ -1,11 +1,12 @@
 <script lang="ts">
-  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import { paneDisclosureClass, paneDisclosureSummaryClass } from "../lib/disclosure";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import GitBranch from "@lucide/svelte/icons/git-branch";
   import Archive from "@lucide/svelte/icons/archive";
   import { tick } from "svelte";
   import type { GitSnapshot } from "../lib/git";
   import type { GitPanelWorkflow } from "../lib/git-workflow";
+  import TaskFieldSelect from "./TaskFieldSelect.svelte";
   let { snapshot, busy, workflow, onCreateBranch }: {
     snapshot: GitSnapshot; busy: boolean; workflow: GitPanelWorkflow; onCreateBranch: (name: string) => void;
   } = $props();
@@ -17,8 +18,8 @@
   const dirty = $derived(snapshot.changes.length > 0);
   const conflicted = $derived(snapshot.changes.some((change) => change.conflicted));
   const stashes = $derived(workflow.details?.stashes ?? []);
+  const stashOptions = $derived(stashes.map((stash) => ({ value: stash.reference, label: `${stash.reference}: ${stash.subject}` })));
   const selectedStash = $derived(stashes.some((stash) => stash.reference === reference) ? reference : stashes[0]?.reference ?? "");
-  const section = "flex h-8 items-center gap-1.5 px-2 text-xs font-medium text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring";
   const button = "inline-flex min-h-7 items-center justify-center gap-1.5 rounded-md border border-border bg-panel-strong px-2 text-xs hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40";
   async function toggleBranch(): Promise<void> { creatingBranch = !creatingBranch; if (creatingBranch) { await tick(); branchInput?.focus(); } }
   async function closeBranch(): Promise<void> {
@@ -28,8 +29,8 @@
   }
 </script>
 
-<details class="group/branches border-t border-sidebar-border bg-panel" ontoggle={(event) => { if (event.currentTarget.open) workflow.onLoadDetails(); }}>
-  <summary class={section}>
+<details class={["group/branches", paneDisclosureClass]} ontoggle={(event) => { if (event.currentTarget.open) workflow.onLoadDetails(); }}>
+  <summary class={paneDisclosureSummaryClass}>
     <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open/branches:rotate-90 motion-reduce:transition-none" aria-hidden="true" />Branches &amp; stashes
   </summary>
   <div class="space-y-3 px-2 pb-3">
@@ -48,11 +49,19 @@
       {#if workflow.detailsLoading && !workflow.details}<p class="text-xs text-muted-foreground" role="status">Loading repository details…</p>
       {:else if stashes.length}
         <div class="flex gap-1">
-          <div class="relative min-w-0 flex-1">
-            <select class="h-7 w-full appearance-none rounded-md border border-input bg-panel-strong pl-2 pr-6 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/30" aria-label="Saved stash" value={selectedStash} onchange={(event) => reference = event.currentTarget.value} disabled={busy}>
-              {#each stashes as stash (stash.reference)}<option value={stash.reference}>{stash.reference}: {stash.subject}</option>{/each}
-            </select>
-            <ChevronDown class="pointer-events-none absolute right-1.5 top-2 h-3 w-3 text-muted-foreground" aria-hidden="true" />
+          <div class="min-w-0 flex-1">
+            <TaskFieldSelect
+              value={selectedStash}
+              options={stashOptions}
+              ariaLabel="Saved stash"
+              size="sm"
+              mono
+              disabled={busy}
+              searchable={stashOptions.length > 8}
+              searchPlaceholder="Search stashes…"
+              emptyLabel="No matching stashes"
+              onChange={(value) => reference = value}
+            />
           </div>
           <button class={button} type="button" disabled={busy || dirty || !selectedStash} title={dirty ? "Commit or stash changes first" : "Restore this stash and keep the saved copy"} onclick={() => void workflow.onRepositoryAction("stash-apply", selectedStash)}>Restore</button>
         </div>
@@ -62,8 +71,8 @@
   </div>
 </details>
 
-<details class="group/log border-t border-sidebar-border bg-panel" ontoggle={(event) => { if (event.currentTarget.open) workflow.onLoadDetails(); }}>
-  <summary class={section}>
+<details class={["group/log", paneDisclosureClass]} ontoggle={(event) => { if (event.currentTarget.open) workflow.onLoadDetails(); }}>
+  <summary class={paneDisclosureSummaryClass}>
     <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open/log:rotate-90 motion-reduce:transition-none" aria-hidden="true" />Log
     <span class="ml-auto font-normal">latest 30</span>
   </summary>

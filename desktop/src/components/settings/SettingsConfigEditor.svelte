@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { iconButtonClass } from "../../lib/icon-button";
   import { confirmDesktopAction } from "../../lib/confirm-action";
   import FileCode from "@lucide/svelte/icons/file-code";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
@@ -158,7 +159,7 @@
       {#if active && !active.exists}<span class="rounded border border-border px-1 py-0.5 text-xs text-muted-foreground">new file</span>{/if}
       {#if dirty}<span class="ml-auto text-xs font-medium text-tool-warning">Unsaved</span>{/if}
       <button
-        class="ml-auto grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+        class={iconButtonClass("md", "chrome", { extra: "ml-auto" })}
         type="button"
         title="Reload settings from disk"
         aria-label={`Reload ${SETTINGS_GROUPS[activeKind].label} settings from disk`}

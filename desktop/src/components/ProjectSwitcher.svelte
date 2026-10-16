@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { compactEmptyStateClass } from "../lib/status-text";
   import Check from "@lucide/svelte/icons/check";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import ExternalLink from "@lucide/svelte/icons/external-link";
@@ -332,7 +333,7 @@
             ><ExternalLink class="h-3.5 w-3.5" aria-hidden="true" /></button>
           </div>
         {:else}
-          <p class="px-2 py-4 text-center text-xs text-muted-foreground">No recent projects</p>
+          <p class={compactEmptyStateClass}>No recent projects</p>
         {/each}
       </div>
 

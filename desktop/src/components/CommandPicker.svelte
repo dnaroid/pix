@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { emptyStateClass } from "../lib/status-text";
   import Check from "@lucide/svelte/icons/check";
   import X from "@lucide/svelte/icons/x";
   import { onMount, tick } from "svelte";
@@ -157,7 +158,7 @@
           {/if}
         </button>
       {:else}
-        <p class="px-3 py-6 text-center text-xs text-muted-foreground">{picker.emptyText}</p>
+        <p class={emptyStateClass}>{picker.emptyText}</p>
       {/each}
     </div>
   </div>

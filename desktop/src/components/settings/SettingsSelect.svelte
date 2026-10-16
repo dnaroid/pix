@@ -1,5 +1,5 @@
 <script lang="ts">
-  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import TaskFieldSelect from "../TaskFieldSelect.svelte";
 
   export type SettingsSelectOption = { value: string; label: string };
 
@@ -11,29 +11,26 @@
   }: {
     value: string;
     options: readonly SettingsSelectOption[];
-    // Returning false rejects the native selection without moving keyboard focus.
+    // Controlled value: returning false (rejecting the change) keeps the current value.
     onChange: (value: string) => unknown;
     ariaLabel?: string;
   } = $props();
 
-  const configuredOnly = $derived(value.length > 0 && !options.some((option) => option.value === value));
+  // A configured value missing from the catalog stays visible and selectable.
+  const resolvedOptions = $derived(
+    value.length > 0 && !options.some((option) => option.value === value)
+      ? [{ value, label: `${value} · Configured` }, ...options]
+      : options,
+  );
 </script>
 
-<div class="relative">
-  <select
-    class="h-7 w-full appearance-none rounded-md border border-input bg-panel-strong py-0 pr-7 pl-2 text-xs text-foreground outline-none hover:bg-panel-hover focus-visible:ring-2 focus-visible:ring-ring/30"
-    {value}
-    aria-label={ariaLabel}
-    onchange={(event) => {
-      const select = event.currentTarget as HTMLSelectElement;
-      const previousValue = value;
-      if (onChange(select.value) === false) select.value = previousValue;
-    }}
-  >
-    {#if configuredOnly}<option value={value}>{value} · Configured</option>{/if}
-    {#each options as option (option.value)}
-      <option value={option.value}>{option.label}</option>
-    {/each}
-  </select>
-  <ChevronDown class="pointer-events-none absolute top-1/2 right-2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-</div>
+<TaskFieldSelect
+  {value}
+  options={resolvedOptions}
+  {onChange}
+  ariaLabel={ariaLabel ?? "Select value"}
+  size="sm"
+  searchable={resolvedOptions.length > 12}
+  searchPlaceholder="Search…"
+  emptyLabel="No matching options"
+/>

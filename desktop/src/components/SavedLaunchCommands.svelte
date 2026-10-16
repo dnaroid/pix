@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { iconButtonClass } from "../lib/icon-button";
   import { confirmDesktopAction } from "../lib/confirm-action";
   import Play from "@lucide/svelte/icons/play";
   import Plus from "@lucide/svelte/icons/plus";
@@ -80,7 +81,7 @@
 <section class="border-t border-sidebar-border/70" aria-label="Saved launch commands">
   <div class="flex h-8 items-center justify-between px-2.5">
     <strong class="text-xs font-medium">Saved launch commands</strong>
-    <button class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" title="Add launch command" aria-label="Add launch command" disabled={editing !== null || busy || !workspace} onclick={() => void beginEdit()}><Plus class="h-3.5 w-3.5" aria-hidden="true" /></button>
+    <button class={iconButtonClass("sm", "panel")} type="button" title="Add launch command" aria-label="Add launch command" disabled={editing !== null || busy || !workspace} onclick={() => void beginEdit()}><Plus class="h-3.5 w-3.5" aria-hidden="true" /></button>
   </div>
   <div class="max-h-44 overflow-y-auto">
     {#each commands as item (item.id)}
@@ -89,7 +90,7 @@
           <span class="grid h-5 w-5 shrink-0 place-items-center text-muted-foreground group-hover/run:text-primary"><Play class="h-3 w-3" aria-hidden="true" /></span>
           <span class="min-w-0 flex-1 truncate">{item.name}</span>
         </button>
-        <button class="grid h-6 w-6 shrink-0 place-items-center rounded text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" title={`Edit ${item.name}`} aria-label={`Edit ${item.name}`} disabled={busy || editing !== null} onclick={() => void beginEdit(item)}><Pencil class="h-3.5 w-3.5" aria-hidden="true" /></button>
+        <button class={iconButtonClass("sm", "panel")} type="button" title={`Edit ${item.name}`} aria-label={`Edit ${item.name}`} disabled={busy || editing !== null} onclick={() => void beginEdit(item)}><Pencil class="h-3.5 w-3.5" aria-hidden="true" /></button>
         <button class="grid h-6 w-6 shrink-0 place-items-center rounded text-tool-error hover:bg-tool-error/10 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" title={`Delete ${item.name}`} aria-label={`Delete ${item.name}`} disabled={busy || editing !== null} onclick={() => void remove(item)}><Trash2 class="h-3.5 w-3.5" aria-hidden="true" /></button>
       </div>
     {/each}

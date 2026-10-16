@@ -430,7 +430,7 @@
         "trayOnly": {
           "type": "boolean",
           "default": false,
-          "description": "macOS: show Pix in the menu bar instead of the Dock. The menu lists all open windows. Global user preference only; takes effect after restarting Pix."
+          "description": "macOS: add a Pix menu bar icon while keeping the Dock icon and application menus. The menu lists all open windows. Legacy key name; no longer hides the Dock. Global user preference only; takes effect after restarting Pix."
         },
         "externalEditor": {
           "type": "string",
@@ -451,16 +451,6 @@
             }
           },
           "description": "Desktop notification delivery preferences."
-        },
-        "knowledge": {
-          "type": "object",
-          "properties": {
-            "reviewModelRef": {
-              "type": "string",
-              "description": "Model used by knowledge-base AI review sessions, optionally with a :thinking suffix. Omit to use the normal default model."
-            }
-          },
-          "description": "Desktop knowledge-base AI review preferences."
         },
         "git": {
           "type": "object",

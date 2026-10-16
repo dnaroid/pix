@@ -6,10 +6,12 @@ import { SETTINGS_SEARCH_CATALOG, settingsFieldId } from "./settings-search-cata
 
 describe("authored settings search catalogue", () => {
   it("makes tray mode searchable and discloses its global restart requirement", () => {
-    const entry = SETTINGS_SEARCH_CATALOG.find(entry => entry.id === "menu-bar-instead-of-dock");
+    const entry = SETTINGS_SEARCH_CATALOG.find(entry => entry.id === "show-menu-bar-icon");
     expect(entry?.section).toBe("desktop-general");
     expect(entry?.synonyms).toContain("tray");
-    expect(desktopEditorSource).toContain('label="Menu bar instead of Dock"');
+    expect(desktopEditorSource).toContain('label="Show menu bar icon"');
+    expect(desktopEditorSource).toContain("keeping the Dock icon and application menus");
+    expect(entry?.description).toContain("Keeps the Dock icon and application menus");
     expect(desktopEditorSource).toContain('bool(["desktop", "trayOnly"])');
     expect(desktopEditorSource).toContain('onReset={() => reset(["desktop", "trayOnly"])}');
     expect(desktopEditorSource).toContain("Applies to all windows after restarting Pix");

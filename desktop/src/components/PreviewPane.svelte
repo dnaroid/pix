@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { iconButtonClass } from "../lib/icon-button";
   import { convertFileSrc } from "@tauri-apps/api/core";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
@@ -194,7 +195,7 @@
     <header class="flex min-h-9 min-w-0 items-center gap-2 border-b border-border bg-chrome px-3">
       <div class="flex shrink-0 items-center gap-0.5" aria-label="Preview history">
         <button
-          class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:text-muted-foreground/35 disabled:hover:bg-transparent disabled:hover:text-muted-foreground/35"
+          class={iconButtonClass("md", "popover")}
           type="button"
           aria-label="Go back"
           title="Back"
@@ -204,7 +205,7 @@
           <ArrowLeft class="h-4 w-4" aria-hidden="true" />
         </button>
         <button
-          class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:text-muted-foreground/35 disabled:hover:bg-transparent disabled:hover:text-muted-foreground/35"
+          class={iconButtonClass("md", "popover")}
           type="button"
           aria-label="Go forward"
           title="Forward"
@@ -280,7 +281,7 @@
       {/if}
       {#if file && externalEditorLabel && onOpenExternalEditor}
         <button
-          class="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          class={iconButtonClass("md", "popover")}
           type="button"
           title={`Open in ${externalEditorLabel}`}
           aria-label={`Open ${file.path} in ${externalEditorLabel}`}
@@ -317,7 +318,7 @@
             : ""}
         </span>
         <button
-          class="grid h-6 w-6 shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-1 focus-visible:outline-ring disabled:opacity-35"
+          class={iconButtonClass("sm", "popover")}
           type="button"
           aria-label="Previous match"
           title="Previous match (Shift+Enter)"
@@ -325,7 +326,7 @@
           onclick={searchController.previous}
         ><ChevronUp class="h-3.5 w-3.5" aria-hidden="true" /></button>
         <button
-          class="grid h-6 w-6 shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-1 focus-visible:outline-ring disabled:opacity-35"
+          class={iconButtonClass("sm", "popover")}
           type="button"
           aria-label="Next match"
           title="Next match (Enter)"
@@ -333,7 +334,7 @@
           onclick={searchController.next}
         ><ChevronDown class="h-3.5 w-3.5" aria-hidden="true" /></button>
         <button
-          class="grid h-6 w-6 shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-1 focus-visible:outline-ring"
+          class={iconButtonClass("sm", "popover")}
           type="button"
           aria-label="Close find"
           title="Close find"

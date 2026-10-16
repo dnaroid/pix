@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { iconButtonClass } from "../lib/icon-button";
   import { confirmDesktopAction } from "../lib/confirm-action";
   import CircleArrowDown from "@lucide/svelte/icons/circle-arrow-down";
   import CircleArrowUp from "@lucide/svelte/icons/circle-arrow-up";
@@ -180,7 +181,7 @@
       {/if}
       <div class="relative shrink-0">
         <button
-          class="grid h-6 w-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+          class={iconButtonClass("sm", "popover")}
           type="button"
           aria-haspopup="menu"
           aria-expanded={menuOpen}
@@ -227,7 +228,7 @@
             </span>
             {#if item.local && item.artifact}
               <button
-                class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                class={iconButtonClass("sm", "popover")}
                 type="button"
                 title={projectEditTitle(item)}
                 aria-label={`${projectEditTitle(item)}: ${item.name}`}
@@ -238,7 +239,7 @@
             {/if}
             {#if projectPrimary}
               <button
-                class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+                class={iconButtonClass("sm", "popover")}
                 type="button"
                 disabled={remoteBusy}
                 title={registryFriendlyActionLabel(item, projectPrimary)}

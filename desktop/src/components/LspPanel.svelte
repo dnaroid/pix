@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { iconButtonClass } from "../lib/icon-button";
   import { onMount, untrack } from "svelte";
   import CodeXml from "@lucide/svelte/icons/code-xml";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
@@ -82,6 +83,6 @@
     {/each}
   </div>
   <footer class="flex h-9 shrink-0 items-center gap-2 border-t border-border px-3">
-    <button class="ml-auto grid h-7 w-7 place-items-center rounded-sm text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" aria-label="Refresh language server status" title="Refresh status" disabled={!client || !sessionId || busy} onclick={() => void refresh(client, sessionId, generation)}><RotateCw class="h-3.5 w-3.5" aria-hidden="true" /></button>
+    <button class={iconButtonClass("md", "chrome", { extra: "ml-auto" })} type="button" aria-label="Refresh language server status" title="Refresh status" disabled={!client || !sessionId || busy} onclick={() => void refresh(client, sessionId, generation)}><RotateCw class="h-3.5 w-3.5" aria-hidden="true" /></button>
   </footer>
 </section>

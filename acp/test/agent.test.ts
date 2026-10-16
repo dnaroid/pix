@@ -1437,10 +1437,11 @@ test("session/list reconciles native Pi sessions and reports ordered TUI tabs", 
 	assert.deepEqual(requestedCwds, ["/tmp/proj"]);
 	assert.deepEqual(listed.sessions.map((session) => session.sessionId), ["native-b", "existing-acp-id"]);
 	assert.deepEqual(listed.sessions[0]?._meta, {
+		"pix.sessionFile": secondPath,
 		"pix.isFork": true,
 		"pix.parentSessionId": "existing-acp-id",
 	});
-	assert.equal(listed.sessions[1]?._meta, undefined);
+	assert.deepEqual(listed.sessions[1]?._meta, { "pix.sessionFile": firstPath });
 	assert.equal(listed.sessions[1]?.title, "Native title");
 	assert.deepEqual(listed._meta?.["pix.tabs"], {
 		sessionIds: ["native-b", "existing-acp-id"],

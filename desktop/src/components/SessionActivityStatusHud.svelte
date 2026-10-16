@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { iconButtonClass } from "../lib/icon-button";
   import SubagentTodoProgress from "./SubagentTodoProgress.svelte";
   import Brain from "@lucide/svelte/icons/brain";
   import CheckCircle2 from "@lucide/svelte/icons/check-circle-2";
@@ -322,7 +323,7 @@
             <div class="flex shrink-0 items-center gap-2">
               <span class="font-semibold text-foreground">Plan</span>
               <button
-                class="ml-auto grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-panel-hover hover:text-destructive focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40"
+                class={iconButtonClass("sm", "panel", { tone: "danger", extra: "ml-auto" })}
                 type="button"
                 aria-label="Clear session plan"
                 disabled={!canClearTodos || clearingTodos || todoRows.length === 0}

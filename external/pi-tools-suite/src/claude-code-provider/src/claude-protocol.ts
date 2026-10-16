@@ -22,6 +22,39 @@ export interface RateLimitNotice {
 
 export type RateLimitNoticeSink = (notice: RateLimitNotice, modelRef?: string) => void;
 
+/** Current consumption of one subscription window, reported on every request. */
+export interface RateLimitWindowSample {
+  rateLimitType: "five_hour" | "seven_day";
+  /** Fraction from 0 through 1. */
+  utilization: number;
+  /** Reset instant in JavaScript milliseconds. */
+  resetsAt: number;
+}
+
+export type RateLimitWindowsSink = (windows: readonly RateLimitWindowSample[], modelRef?: string) => void;
+
+const UNIFIED_WINDOW_TYPES = ["five_hour", "seven_day"] as const;
+
+/**
+ * Per-window utilization from Claude Code's undocumented `unifiedWindows`
+ * field, which accompanies even an unconstrained (`allowed`) event. Advisory:
+ * malformed or absent windows yield nothing rather than failing the request.
+ */
+export function parseRateLimitWindows(info: unknown): RateLimitWindowSample[] {
+  if (!info || typeof info !== "object" || Array.isArray(info)) return [];
+  const unified = (info as Record<string, unknown>).unifiedWindows;
+  if (!unified || typeof unified !== "object" || Array.isArray(unified)) return [];
+  const samples: RateLimitWindowSample[] = [];
+  for (const rateLimitType of UNIFIED_WINDOW_TYPES) {
+    const window = (unified as Record<string, unknown>)[rateLimitType];
+    if (!window || typeof window !== "object" || Array.isArray(window)) continue;
+    const utilization = validUtilization((window as Record<string, unknown>).utilization);
+    const resetsAt = validTimestamp((window as Record<string, unknown>).resetsAt);
+    if (utilization !== undefined && resetsAt !== undefined) samples.push({ rateLimitType, utilization, resetsAt });
+  }
+  return samples;
+}
+
 /** Failure text for a rate limit that rejected a provider or web-search request. */
 export function rateLimitRejectionMessage(notice: RateLimitNotice): string {
   const reason = notice.overageDisabledReason === undefined ? "" : `; ${notice.overageDisabledReason}`;

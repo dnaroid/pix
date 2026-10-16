@@ -93,7 +93,6 @@ describe("settings JSONC helpers", () => {
     expect(settingsDefaultValue("desktop", schema, ["sessionTitle", "modelRef"])).toEqual({ exists: true, value: "openai-codex/gpt-6-luna" });
     expect(settingsDefaultValue("desktop", schema, ["desktop", "git", "reviewModelRef"])).toEqual({ exists: true, value: "openai-codex/gpt-6-luna:medium" });
     expect(settingsDefaultValue("desktop", schema, ["desktop", "git", "commitMessageModelRef"])).toEqual({ exists: true, value: "openai-codex/gpt-6-luna:minimal" });
-    expect(settingsDefaultValue("desktop", schema, ["desktop", "knowledge", "reviewModelRef"])).toEqual({ exists: false });
 
     expect(settingsDefaultValue("pi-tools-suite", {
       type: "object",

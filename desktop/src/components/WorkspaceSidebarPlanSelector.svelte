@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { compactEmptyStateClass } from "../lib/status-text";
+  import { iconButtonClass } from "../lib/icon-button";
   import FileText from "@lucide/svelte/icons/file-text";
   import Search from "@lucide/svelte/icons/search";
   import X from "@lucide/svelte/icons/x";
@@ -23,11 +25,18 @@
   class="absolute top-12 right-2 left-14 z-40 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-md"
   role="dialog"
   aria-label="Choose plan"
+  tabindex="-1"
+  onkeydown={(event) => {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    onClose();
+  }}
 >
   <div class="flex h-9 items-center gap-2 border-b border-border px-2.5">
     <strong class="min-w-0 flex-1 truncate text-xs font-semibold">Choose plan</strong>
     <button
-      class="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+      class={iconButtonClass("sm", "popover")}
       type="button"
       title="Close plan selector"
       aria-label="Close plan selector"
@@ -52,7 +61,7 @@
 
   <div class="max-h-72 overflow-y-auto p-1.5">
     {#if choices.length === 0}
-      <div class="px-2 py-5 text-center text-xs text-muted-foreground">No matching plans</div>
+      <div class={compactEmptyStateClass}>No matching plans</div>
     {:else}
       {#each choices as plan (plan)}
         <button

@@ -221,10 +221,14 @@ export function createRegistryStore(options: RegistryStoreOptions) {
     void runAction({ action: "refresh" }, "refresh");
   }
 
-  function observeProjectChange(scope: RegistryProjectSyncScope): void {
+  /**
+   * A poll that still reports the same dirty content only re-observes sync
+   * (a no-op while already dirty); local state is reloaded for new content.
+   */
+  function observeProjectChange(scope: RegistryProjectSyncScope, reload = true): void {
     const workspace = options.workspace();
     if (!workspace) return;
-    reloadLocalProjectState(scope, workspace);
+    if (reload) reloadLocalProjectState(scope, workspace);
     backgroundSync.observe(scope);
   }
 

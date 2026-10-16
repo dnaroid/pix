@@ -5,7 +5,7 @@ import { doctorDesktop } from "./doctor.mjs";
 
 export function parseArguments(args) {
 	const [command, ...rest] = args;
-	if (!["prepare", "launch", "doctor"].includes(command)) throw new Error("usage: qa:desktop prepare [--persistent-project PATH | --temporary] [--state PATH] [--timeout-ms 100..300000] [--run-dir PATH] [--seed-config] [--seed-api-keys] [--empty-workspace] | launch --manifest PATH | doctor [--prompt]");
+	if (!["prepare", "launch", "doctor"].includes(command)) throw new Error("usage: qa:desktop prepare [--persistent-project PATH | --temporary] [--state PATH] [--timeout-ms 100..900000] [--run-dir PATH] [--seed-config] [--seed-api-keys] [--empty-workspace] | launch --manifest PATH | doctor [--prompt]");
 	const allowed = command === "doctor" ? { "--prompt": "prompt" }
 		: command === "prepare" ? { "--persistent-project": "persistentProject", "--temporary": "temporary", "--state": "state", "--timeout-ms": "timeoutMs", "--run-dir": "runDir", "--seed-config": "seedConfig", "--seed-api-keys": "seedApiKeys", "--empty-workspace": "emptyWorkspace" } : { "--manifest": "manifest" };
 	const result = { command };

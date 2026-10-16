@@ -436,6 +436,22 @@ SHOULD not reuse the primary accent as a substitute for destructive semantics.
 
 Toolbar actions SHOULD generally be quiet until hover/active state.
 
+New or migrated count badges and empty-state messages SHOULD reuse the shared
+classes from `desktop/src/lib/status-text.ts`:
+`countBadgeClass` is a neutral, monospace count pill; `emptyStateClass` is the
+standard centered, muted message treatment for panes and dialogs; and
+`compactEmptyStateClass` is the tighter empty message treatment for popup
+listboxes. Keep these shared geometries consistent rather than reintroducing
+per-component spacing or typography drift.
+
+New or migrated compact Desktop icon actions SHOULD use the shared
+`iconButtonClass(size, surface, options)` helper in
+`desktop/src/lib/icon-button.ts`: `sm` is 24 px, `md` is 28 px; surfaces are
+`chrome`, `panel`, or `popover`; and `tone: "danger"` supplies destructive
+hover semantics. Add component-specific classes through `extra` rather than
+rebuilding shared geometry. Do not add per-button focus-outline utilities: the
+global visible `:focus-visible` ring provides keyboard focus treatment.
+
 ## 11. Inputs and composer UI
 
 Inputs SHOULD use semantic border/input/ring tokens.
@@ -444,17 +460,22 @@ Textareas MUST NOT expose the browser's native resize handle. Persistent editor
 surfaces own their geometry, and compact textareas that need to grow should do so
 automatically up to a bounded height before enabling internal scrolling.
 
-New or changed Desktop dropdowns MUST use an existing Pix-styled popup/listbox
-component (for example `TaskFieldSelect` for compact field/filter choices), with
-a visible Lucide chevron and keyboard navigation, dismissal, focus restoration,
-and narrow-pane positioning. Do not introduce raw HTML `<select>` controls or
+All Desktop field, filter, toolbar, and dialog dropdowns MUST use the shared
+Pix-styled `TaskFieldSelect` popup/listbox, with a visible Lucide chevron,
+keyboard navigation, dismissal, focus restoration, and viewport-aware
+positioning. Its trigger supports `xs`, `sm`, and `md` sizes; `field` and `ghost`
+variants; optional monospaced labels and a leading snippet; and configurable
+placeholder, search/empty-state labels, popup minimum width, and trigger classes.
+Searchability is opt-in at each call site. Tab closes the popup without trapping
+focus, and `onChange` fires only when the selected value changes. Do not
+introduce raw HTML `<select>` controls or
 system option menus in application panels, toolbars, filters, dialogs, or settings.
 `appearance-none`, a semantic background, or a custom chevron over a native
 `<select>` is NOT a substitute: the opened menu must also match Pix. Exceptions
-require an explicit user requirement, not implementation convenience. Existing
-legacy selects are migration debt, not a precedent for new UI; replace them when
-their dropdown behavior is changed. Verify both closed and opened states in
-light and dark Desktop WebViews.
+require an explicit user requirement, not implementation convenience. All
+legacy native selects have been migrated; keep the native-select regression
+inventory empty. Verify both closed and opened states in light and dark Desktop
+WebViews.
 
 Focused controls MUST have a visible focus state. Text-entry controls (`input`
 and `textarea`) are the exception: they MUST retain native focus and
@@ -583,6 +604,11 @@ Before shipping a new or changed disclosure, verify both open and closed
 states and run the Desktop disclosure-chevron regression test. Do not add
 unmarked `<summary>` controls.
 
+Git attached-pane `<details>` disclosures SHOULD use the shared
+`paneDisclosureClass` and `paneDisclosureSummaryClass` from
+`desktop/src/lib/disclosure.ts`; retain the visible, state-rotating chevron in
+each summary.
+
 ## 13. Dialogs, popovers, and menus
 
 Transient elevated UI SHOULD use `popover` semantics.
@@ -611,6 +637,12 @@ controls without requiring a pointer click; textarea Enter keeps its text-editin
 meaning.
 
 Avoid oversized modal padding and huge dialog titles.
+
+New Desktop modal shells and footer actions SHOULD reuse the shared classes in
+`desktop/src/lib/dialog.ts`: `modalBackdropClass`, `dialogCancelButtonClass`,
+`dialogPrimaryButtonClass`, and `dialogDestructiveButtonClass`. The backdrop
+uses the semantic overlay token; rely on the global `:focus-visible` ring rather
+than adding per-action outline utilities.
 
 ## 14. Conversation UI
 

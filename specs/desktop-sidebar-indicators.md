@@ -133,22 +133,30 @@ Decision: [0027 — Cause-specific sidebar quick actions](../docs/decisions/0027
 - Current-HEAD CI status reuses the sparse remote lane while Git is closed, with no job-detail queries or separate background timer. The visible Git panel keeps its own cadence; its store skips sidebar requests while active/in-flight. Unavailable setup states do not busy-poll. Job caches retain only runs in the current snapshot; late results for removed runs are discarded.
 - Package-terminal state is read from the existing in-memory backend registry; no subprocess is started for those checks.
 - Package-terminal **exit** events always invalidate the fast snapshot. Output events invalidate only until that runtime id is already known as running; ordinary terminal/log output does not turn a noisy process into a sub-second Git/config polling loop.
-- Existing full Git refreshes triggered by Pix mutations invalidate the fast indicator snapshot immediately. External local Git changes are discovered by the next fast poll; external remote-only branch advances are discovered by the sparse remote probe.
+- Existing full Git refreshes triggered by Pix mutations invalidate the fast indicator snapshot through the shared ~180 ms event-refresh debounce. A direct fast refresh cancels a pending debounce timer. External local Git changes are discovered by the next fast poll; external remote-only branch advances are discovered by the sparse remote probe.
 - Pushed Registry refresh/action snapshots likewise invalidate the fast poll so a completed sync clears/recomputes the local Registry dot immediately; the pushed snapshot is only an invalidation signal for this local check, not the source of local dirtiness.
 - The fast Registry poll also returns the specific dirty project artifacts among
   `tasks`, `plans`, and `todo`. WorkspaceSidebar consumes each new fast-poll
   `checkedAtMs` at most once and feeds its dirty artifact list into the same
-  Desktop background sync coordinator used by direct saves. Desktop always
-  reloads the matching local renderer state when a new poll reports a change:
+  Desktop background sync coordinator used by direct saves. Each dirty artifact
+  carries a content stamp (`projectStamps`); Desktop reloads the matching local
+  renderer state only when that stamp differs from the last observed one (or the
+  artifact newly became dirty), while every poll still re-observes sync cheaply:
   `tasks` reloads the task document, while `plans` and `todo` reload the
   project-document snapshot used by Registry plan selection. A new background
   push is scheduled only while the coordinator is idle, so pending/syncing/error
   phases do not create duplicate pushes or prevent the local UI from reflecting
   filesystem changes. A later poll can still detect a second external change to
-  the same artifact without requiring an intermediate clean artifact set.
+  the same artifact without requiring an intermediate clean artifact set,
+  because its stamp changes. Observed stamps reset on workspace switch and are
+  dropped when an artifact becomes clean. Tracked artifacts reuse the cached
+  verification fingerprint; untracked tasks use SQLite/WAL file stamps (a
+  checkpoint may cause one extra reload, never a missed edit).
 - Remote Registry state, task execution state, Project Explorer read errors, and mounted Settings errors flow reactively from their existing owners. The fast indicator poll additionally performs a local-only Registry check over `.pi/registry.json`, reusable resources, and project artifacts; it never fetches/clones the Registry or runs Registry Git commands. Session todo/Subagent state is intentionally presented in session tabs/status chrome/the contextual inspector rather than in the workspace Activity Bar.
 - Search indexes have one workspace/client-scoped controller shared with the panel: quiet diagnostic reads every 30 seconds after settlement when idle, or every 1.5 seconds while indexing. Closing the panel cancels its manual requests but preserves outcomes and the monitor; it does not cancel independent Settings/Tasks background work. Workspace/client replacement disposes the old controller, timers and configuration listener; generation fences reject late completions. Configuration changes reset manual state and refresh diagnostics. Neither the controller nor indicator policy starts indexing without an explicit manual action; the separate Settings/Tasks change-driven synchronizer retains its existing authorization and lifecycle.
-- Refocusing or making the window visible triggers immediate local indicator refresh; remote Git attempts remain rate-limited to at most once per 30 seconds.
+- Refocusing or making the window visible triggers immediate local indicator refresh; remote Git attempts remain rate-limited to at most once per 30 seconds. Simultaneous `focus`/`visibilitychange` events do not queue a second fast poll behind an in-flight one.
+- Owner invalidations (Git panel snapshots, pushed Registry snapshots, terminal events) share one ~180 ms debounce, so bursts collapse into one fast poll instead of stacking extra IPC/Git work on top of the regular cadence. A scheduled or queued poll still runs after a workspace switch or state change during an in-flight poll.
+- The service publishes only when indicator content changes, ignoring poll timestamps, so a steady poll does not re-run derived indicator/menu computation. A poll reporting Registry `projectChanges` is always published because its fresh `checkedAtMs` drives local reload/background sync.
 - Local Registry verification is metadata-first and cached per workspace/resource. Unchanged fingerprints reuse the previous hash verdict; only cache misses or metadata changes read file contents, with a bounded content-hash budget per fast poll so initial verification is amortized instead of turning the 5-second service into a filesystem scan storm.
 - Agent verification matches ACP's package hash: the Markdown definition plus
   an optional same-named companion directory. Companion presence and all nested
@@ -185,7 +193,7 @@ Decision: [0027 — Cause-specific sidebar quick actions](../docs/decisions/0027
 - `workspace_git_remote_update_probe` uses the same blocking-task boundary. Its single network command is non-interactive, limits stdout/stderr to 64 KiB each, has a 5-second hard deadline, and kills the isolated Git process group on timeout/error. The probe is read-only with respect to the repository: no fetch, ref update, index lock, or working-tree mutation is performed.
 - Workspace paths are canonicalized before inspection. Source Control retains the existing rule that the selected workspace must itself be the Git repository root.
 - User config paths resolve from the platform home to `.config/pi/pix-desktop.jsonc` and `.config/pi/pi-tools-suite.jsonc`, matching the config loader/editor contract. TUI `.config/pi/pix.jsonc` is intentionally excluded from Desktop settings health.
-- User config health checks preserve JSONC support and validate the schema subset used by the Desktop settings editor without modifying files. Config reads/polls share a read lock while saves take the write lock, preventing the poll from observing the editor's truncate/write window; the config lock is released before Git/runtime state is inspected.
+- User config health checks preserve JSONC support and validate the schema subset used by the Desktop settings editor without modifying files. Config reads/polls share a read lock while saves take the write lock, preventing the poll from observing the editor's truncate/write window; the config lock is released before Git/runtime state is inspected. Per-file config verdicts and the package.json discovery error are cached by length/mtime stamp (package.json also by resolved path); unchanged files are not re-read or re-validated on each poll, and a stamp that moves during validation is not cached.
 - Package-terminal registry mutexes are used only to copy/update in-memory state. Rejected child processes are killed/reaped after releasing those registries, PTY resize uses a separate per-terminal master lock, and Stop never waits indefinitely for a busy stdin writer before reaching its process-tree kill path.
 - Poll failures are represented as indicator health instead of crashing or disabling unrelated views.
 

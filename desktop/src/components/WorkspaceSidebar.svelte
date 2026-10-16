@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { dialogCancelButtonClass, dialogDestructiveButtonClass } from "../lib/dialog";
+  import { iconButtonClass } from "../lib/icon-button";
   import { confirmDesktopAction } from "../lib/confirm-action";
   import type { SessionConfigOption } from "@agentclientprotocol/sdk";
   import ExternalLink from "@lucide/svelte/icons/external-link";
@@ -289,7 +291,7 @@
     onRegistryAction: (request: RegistryActionRequest, actionId: string) => void;
     onRegistryDiff: (item: RegistryItem) => void;
     onRegistryCloseDiff: () => void;
-    onRegistryProjectChange: (artifact: RegistryProjectArtifact) => void;
+    onRegistryProjectChange: (artifact: RegistryProjectArtifact, reload: boolean) => void;
     onWorkspaceSettingsSave: (workspace: string) => void;
     onGitRefresh: () => void;
     onGitStatusRefresh?: () => Promise<void>;
@@ -361,6 +363,15 @@
   let planSelectorOpen = $state(false);
   let planSelectorQuery = $state("");
   let planSearchInput = $state<HTMLInputElement | null>(null);
+  let planSelectorInvoker: HTMLElement | null = null;
+
+  function dismissPlanSelector(): void {
+    planSelectorOpen = false;
+    planSelectorQuery = "";
+    const invoker = planSelectorInvoker;
+    planSelectorInvoker = null;
+    void tick().then(() => { if (invoker?.isConnected) invoker.focus({ preventScroll: true }); });
+  }
   let projectTreeRefreshKey = $state(0);
   const taskDragController = createWorkspaceSidebarTaskDragController({
     busy: () => busy,
@@ -375,6 +386,9 @@
   let projectPanelError = $state<string | null>(null);
   let settingsPanelError = $state<string | null>(null);
   let observedRegistryProjectPollAt = 0;
+  // Last content stamp per dirty artifact; reset per workspace and dropped
+  // when an artifact becomes clean so a later edit always reloads.
+  let observedRegistryProjectStamps = new Map<RegistryProjectArtifact, string>();
   let observedGitRemoteTarget = "";
 
   const busy = $derived(loading || saving || storageError || activeTaskId !== null);
@@ -474,6 +488,7 @@
         return;
       }
       planSelectorQuery = "";
+      planSelectorInvoker = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       planSelectorOpen = true;
       void tick().then(() => planSearchInput?.focus());
       return;
@@ -498,6 +513,7 @@
     if (!projectSettingsController.syncWorkspace()) return;
     projectRetry.invalidate();
     observedGitRemoteTarget = "";
+    observedRegistryProjectStamps = new Map();
     projectPanelError = null;
     indicatorService?.setWorkspace(requestWorkspace);
   });
@@ -537,15 +553,25 @@
 
   $effect(() => {
     const checkedAtMs = indicatorServiceState.poll?.checkedAtMs ?? 0;
-    const projectChanges = indicatorServiceState.poll?.registry.projectChanges ?? [];
+    const registryPoll = indicatorServiceState.poll?.registry;
+    const projectChanges = registryPoll?.projectChanges ?? [];
     if (!checkedAtMs || checkedAtMs === observedRegistryProjectPollAt) return;
     observedRegistryProjectPollAt = checkedAtMs;
-    if (projectChanges.length === 0) return;
+    const previousStamps = observedRegistryProjectStamps;
     const changed = [...new Set(projectChanges)];
+    const nextStamps = new Map<RegistryProjectArtifact, string>();
+    const reload = new Set<RegistryProjectArtifact>();
+    for (const artifact of changed) {
+      const stamp = registryPoll?.projectStamps?.[artifact];
+      if (stamp === undefined || previousStamps.get(artifact) !== stamp) reload.add(artifact);
+      if (stamp !== undefined) nextStamps.set(artifact, stamp);
+    }
+    observedRegistryProjectStamps = nextStamps;
+    if (changed.length === 0) return;
     const observedWorkspace = workspace;
     queueMicrotask(() => {
       if (workspace !== observedWorkspace) return;
-      for (const artifact of changed) onRegistryProjectChange(artifact);
+      for (const artifact of changed) onRegistryProjectChange(artifact, reload.has(artifact));
     });
   });
 
@@ -888,7 +914,7 @@
         {:else if activeTab === "project"}
           <div class="ml-auto flex shrink-0 items-center gap-0.5">
             <button
-              class="grid h-6 w-6 place-items-center rounded-sm text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+              class={iconButtonClass("sm", "chrome")}
               type="button"
               title="Project settings"
               aria-label="Project settings"
@@ -896,7 +922,7 @@
               disabled={!workspace}
             ><SlidersHorizontal class="h-3.5 w-3.5" aria-hidden="true" /></button>
             <button
-              class="grid h-6 w-6 place-items-center rounded-sm text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+              class={iconButtonClass("sm", "chrome")}
               type="button"
               title={`Open project in ${externalEditorLabel}`}
               aria-label={`Open project in ${externalEditorLabel}`}
@@ -904,7 +930,7 @@
               disabled={!workspace}
             ><ExternalLink class="h-3.5 w-3.5" aria-hidden="true" /></button>
             <button
-              class="grid h-6 w-6 place-items-center rounded-sm text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+              class={iconButtonClass("sm", "chrome")}
               type="button"
               title="Refresh project files"
               aria-label="Refresh project files"
@@ -915,7 +941,7 @@
         {:else if activeTab === "registry"}
           <div class="ml-auto flex shrink-0 items-center gap-0.5">
             <button
-              class="grid h-6 w-6 place-items-center rounded-sm text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+              class={iconButtonClass("sm", "chrome")}
               type="button"
               title="Browse plans"
               aria-label="Browse plans"
@@ -923,7 +949,7 @@
               disabled={!workspace}
             ><FileText class="h-3.5 w-3.5" aria-hidden="true" /></button>
             <button
-              class="grid h-6 w-6 place-items-center rounded-sm text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+              class={iconButtonClass("sm", "chrome")}
               type="button"
               title="Configure registry"
               aria-label="Configure registry"
@@ -931,7 +957,7 @@
               disabled={!registryReady || registryActionId !== null}
             ><Settings class="h-3.5 w-3.5" aria-hidden="true" /></button>
             <button
-              class="grid h-6 w-6 place-items-center rounded-sm text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+              class={iconButtonClass("sm", "chrome")}
               type="button"
               title="Refresh registry"
               aria-label="Refresh registry"
@@ -941,7 +967,7 @@
           </div>
         {:else if activeTab === "scripts"}
           <button
-            class="ml-auto grid h-6 w-6 shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+            class={iconButtonClass("sm", "chrome", { extra: "ml-auto" })}
             type="button"
             title="Refresh launch commands"
             aria-label="Refresh launch commands"
@@ -950,7 +976,7 @@
           ><RefreshCw class="h-3.5 w-3.5" aria-hidden="true" /></button>
         {/if}
         <button
-          class="grid h-6 w-6 shrink-0 place-items-center rounded-sm text-muted-foreground transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+          class={iconButtonClass("sm", "chrome")}
           type="button"
           title={`Close ${activeTabTitle}`}
           aria-label={`Close ${activeTabTitle}`}
@@ -1115,10 +1141,7 @@
         choices={visiblePlanChoices}
         bind:query={planSelectorQuery}
         bind:searchInput={planSearchInput}
-        onClose={() => {
-          planSelectorOpen = false;
-          planSelectorQuery = "";
-        }}
+        onClose={dismissPlanSelector}
         onChoose={choosePlan}
       />
     {/if}
@@ -1209,8 +1232,8 @@
         <strong class="text-xs font-semibold">Delete task?</strong>
         <p class="mt-1.5 break-words text-xs leading-4 text-muted-foreground">“{deleteTask ? projectTaskDisplayLabel(deleteTask) : "This task"}”</p>
         <div class="mt-3 flex justify-end gap-2">
-          <button class="h-8 rounded-md px-3 text-xs text-muted-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring" type="button" onclick={() => deleteTaskId = null}>Cancel</button>
-          <button class="h-8 rounded-md bg-destructive/10 px-3 text-xs font-medium text-destructive hover:bg-destructive/20 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" onclick={confirmDelete} disabled={busy}>Delete</button>
+          <button class={dialogCancelButtonClass} type="button" onclick={() => deleteTaskId = null}>Cancel</button>
+          <button class={dialogDestructiveButtonClass} type="button" onclick={confirmDelete} disabled={busy}>Delete</button>
         </div>
       </div>
     </div>

@@ -9,9 +9,10 @@ import { seedQaWorkspace } from "../qa-workspace.mjs";
 import { persistentProjectOption, preparePersistentProject, PERSISTENT_QA_CONTRACT } from "./persistent.mjs";
 import { requireNativeIsolation } from "./launch.mjs";
 
-export function boundedTimeout(value = 120000) {
+/** Native Rust rebuilds routinely exceed two minutes; wait up to 5 min by default, 15 min max. */
+export function boundedTimeout(value = 300000) {
 	const timeout = Number(value);
-	if (!Number.isSafeInteger(timeout) || timeout < 100 || timeout > 300000) throw new Error("--timeout-ms must be an integer from 100 to 300000");
+	if (!Number.isSafeInteger(timeout) || timeout < 100 || timeout > 900000) throw new Error("--timeout-ms must be an integer from 100 to 900000");
 	return timeout;
 }
 
@@ -21,6 +22,10 @@ export async function prepareDesktop(options, dependencies = {}) {
 	const persistentProject = await persistentProjectOption(checkout, options);
 	const timeout = boundedTimeout(options.timeoutMs);
 	const { now = Date.now, wait = sleep, copy = cp, probe, tempRoot } = dependencies;
+	// Idle must persist past the watcher's change debounce so an edit saved just before
+	// prepare cannot be skipped by pinning the previous bundle.
+	const settleMs = dependencies.settleMs ?? 1000;
+	const progress = dependencies.progress ?? ((message) => console.error(`qa:desktop: ${message}`));
 	const deadline = now() + timeout;
 	const watcher = await discoverWatcher({ checkout, state: options.state, tempRoot, probe, deadline, now });
 	const runDir = await createRun(checkout, options.runDir);
@@ -39,11 +44,21 @@ export async function prepareDesktop(options, dependencies = {}) {
 		}
 		let selected;
 		let app;
+		let lastStatus;
+		let idleSince;
+		let idleTarget;
+		const onPending = (status) => {
+			idleSince = undefined;
+			if (status !== lastStatus) { lastStatus = status; progress(`watch:all is ${status}; waiting for an idle successful build`); }
+		};
 		while (now() < deadline) {
 			const staging = join(runDir, `.snapshot-${randomUUID()}`);
 			try {
-				selected = await successfulState(watcher, checkout, probe, { deadline, now });
+				selected = await successfulState(watcher, checkout, probe, { deadline, now, onPending });
 				if (!selected) { await wait(Math.min(100, Math.max(1, deadline - now()))); continue; }
+				if (idleSince === undefined || idleTarget !== selected.target) { idleSince = now(); idleTarget = selected.target; }
+				if (lastStatus !== "idle") { lastStatus = "idle"; progress(`watch:all is idle; settling ${settleMs} ms before pinning`); }
+				if (now() - idleSince < settleMs) { await wait(Math.min(100, Math.max(1, deadline - now()))); continue; }
 				await validateBundle(selected.bundle, deadline, now);
 				await mkdir(staging, { mode: 0o700 });
 				const snapshot = join(staging, basename(selected.bundle));
@@ -61,7 +76,7 @@ export async function prepareDesktop(options, dependencies = {}) {
 				await wait(Math.min(100, Math.max(1, deadline - now())));
 			} finally { await rm(staging, { recursive: true, force: true }); }
 		}
-		if (!app) throw new Error("timed out waiting for an idle successful watch:all bundle; check watcher terminal and retry prepare");
+		if (!app) throw new Error(`timed out after ${timeout} ms waiting for an idle successful watch:all bundle (last status: ${lastStatus ?? "unknown"}); check watcher terminal and retry prepare, optionally with a larger --timeout-ms`);
 		if (persistentProject) {
 			await requireNativeIsolation(join(app, "Contents", "MacOS", "pix-desktop"), PERSISTENT_QA_CONTRACT);
 			({ profileDir, profileId, workspace } = await preparePersistentProject(checkout, persistentProject));

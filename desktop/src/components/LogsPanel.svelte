@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { dialogCancelButtonClass, dialogDestructiveButtonClass } from "../lib/dialog";
   import { onMount, tick } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import Pause from "@lucide/svelte/icons/pause";
@@ -123,12 +124,12 @@
         <button type="button" class="flex w-full items-start gap-1.5 px-2 py-2 text-left hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-ring" aria-expanded={expanded === entry.id} onclick={() => expanded = expanded === entry.id ? null : entry.id}>
           <ChevronRight class={["mt-0.5 h-3 w-3 shrink-0 transition-transform", expanded === entry.id && "rotate-90"]} aria-hidden="true" />
           <span class="min-w-0 flex-1">
-            <span class="flex flex-wrap gap-x-2 text-[10px] text-muted-foreground"><time datetime={entry.record.time} title={entry.record.time}>{formatDiagnosticLogTime(entry.record.time)}</time><span>{entry.record.source}</span><span class:text-destructive={entry.record.level === "error"} class:text-tool-warning={entry.record.level === "warn"}>{entry.record.level.toUpperCase()}</span></span>
+            <span class="flex flex-wrap gap-x-2 text-xs text-muted-foreground"><time datetime={entry.record.time} title={entry.record.time}>{formatDiagnosticLogTime(entry.record.time)}</time><span>{entry.record.source}</span><span class:text-destructive={entry.record.level === "error"} class:text-tool-warning={entry.record.level === "warn"}>{entry.record.level.toUpperCase()}</span></span>
             <span class="block break-words font-medium">{entry.record.event}</span>
             <span class="block truncate text-muted-foreground">{entry.record.module} · {entry.record.project?.name ?? "No project"}</span>
           </span>
         </button>
-        {#if expanded === entry.id}<pre class="overflow-x-auto whitespace-pre-wrap break-all bg-background px-3 py-2 text-[11px] leading-4">{JSON.stringify(entry.record, null, 2)}</pre>{/if}
+        {#if expanded === entry.id}<pre class="overflow-x-auto whitespace-pre-wrap break-all bg-background px-3 py-2 font-mono text-xs leading-4">{JSON.stringify(entry.record, null, 2)}</pre>{/if}
       </div>
     {:else}
       <p class="p-4 text-muted-foreground">{view.loading && !view.snapshot ? "Loading logs…" : "No recent logs match these filters."}</p>
@@ -141,8 +142,8 @@
     <h2 class="text-sm font-semibold">Clear all logs?</h2>
     <p class="mt-2 max-w-80 text-xs text-muted-foreground">Delete diagnostic logs for all projects and sources, not just the filtered records. This cannot be undone. Logging stays enabled, so new records may appear.</p>
     <div class="mt-4 flex justify-end gap-2">
-      <button bind:this={cancelClearButton} type="button" class="h-8 rounded-md px-3 text-xs hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-ring" onclick={() => confirmingClear = false}>Cancel</button>
-      <button type="button" class="h-8 rounded-md bg-destructive/10 px-3 text-xs font-medium text-destructive hover:bg-destructive/20 focus-visible:outline-2 focus-visible:outline-ring" onclick={() => void clearLogs()}>Clear all logs</button>
+      <button bind:this={cancelClearButton} type="button" class={dialogCancelButtonClass} onclick={() => confirmingClear = false}>Cancel</button>
+      <button type="button" class={dialogDestructiveButtonClass} onclick={() => void clearLogs()}>Clear all logs</button>
     </div>
   </dialog>
 {/if}

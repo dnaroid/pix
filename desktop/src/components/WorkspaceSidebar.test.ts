@@ -164,10 +164,12 @@ describe("WorkspaceSidebar project sizing", () => {
   });
 
   it("routes externally observed registry changes through the local-state observer", () => {
-    expect(sidebarSource).toContain("indicatorServiceState.poll?.registry.projectChanges");
+    expect(sidebarSource).toContain("const registryPoll = indicatorServiceState.poll?.registry;");
+    expect(sidebarSource).toContain("registryPoll?.projectChanges");
     expect(sidebarSource).toContain("checkedAtMs === observedRegistryProjectPollAt");
     expect(sidebarSource).toContain("if (workspace !== observedWorkspace) return;");
-    expect(sidebarSource).toContain("onRegistryProjectChange(artifact)");
+    expect(sidebarSource).toContain("onRegistryProjectChange(artifact, reload.has(artifact))");
+    expect(sidebarSource).toContain("previousStamps.get(artifact) !== stamp");
     expect(sidebarViewModelSource).toContain("onRegistryProjectChange: options.registry.observeProjectChange");
   });
 

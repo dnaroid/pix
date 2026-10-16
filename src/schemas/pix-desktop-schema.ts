@@ -117,7 +117,7 @@ const DesktopAppConfig = Type.Object(
 		})),
 		trayOnly: Type.Optional(Type.Boolean({
 			default: false,
-			description: "macOS: show Pix in the menu bar instead of the Dock. The menu lists all open windows. Global user preference only; takes effect after restarting Pix.",
+			description: "macOS: add a Pix menu bar icon while keeping the Dock icon and application menus. The menu lists all open windows. Legacy key name; no longer hides the Dock. Global user preference only; takes effect after restarting Pix.",
 		})),
 		externalEditor: Type.Optional(Type.String({
 			description: "External file editor used by Project and Preview open-in-editor actions. Common values include gram, zed, code/vscode, cursor, subl/sublime, idea/intellij, and webstorm; an executable path/name is also accepted. When omitted, Desktop asks the user to choose an editor instead of assuming one.",
@@ -134,12 +134,6 @@ const DesktopAppConfig = Type.Object(
 				})),
 			},
 			{ description: "Desktop notification delivery preferences." },
-		)),
-		knowledge: Type.Optional(Type.Object(
-			{
-				reviewModelRef: Type.Optional(Type.String({ description: "Model used by knowledge-base AI review sessions, optionally with a :thinking suffix. Omit to use the normal default model." })),
-			},
-			{ description: "Desktop knowledge-base AI review preferences." },
 		)),
 		git: Type.Optional(Type.Object(
 			{

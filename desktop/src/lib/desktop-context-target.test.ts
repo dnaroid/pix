@@ -8,11 +8,12 @@ describe("session tab context targets", () => {
 
   it("exposes raw session metadata only on session tab buttons", () => {
     expect(tabsSource).toContain('data-context-session-id={tab.kind === "session" ? tab.sessionId : undefined}');
+    expect(tabsSource).toContain('data-context-session-file={tab.kind === "session" ? tab.sessionFile : undefined}');
   });
 
   it("routes both the tab button and nested labels/icons to the clicked session", () => {
     class ElementStub {
-      dataset = { contextSessionId: "clicked-session" };
+      dataset = { contextSessionId: "clicked-session", contextSessionFile: "/sessions/мой session.jsonl" };
       closest(selector: string): ElementStub | null {
         return selector === "[data-workbench-tab][data-context-session-id]" ? tab : null;
       }
@@ -24,7 +25,7 @@ describe("session tab context targets", () => {
     vi.stubGlobal("HTMLTextAreaElement", class {});
     for (const target of [tab, new ElementStub()]) {
       expect(desktopContextTarget(target as unknown as EventTarget)).toEqual({
-        kind: "session", element: tab, sessionId: "clicked-session",
+        kind: "session", element: tab, sessionId: "clicked-session", sessionFile: "/sessions/мой session.jsonl",
         editor: null, hasSelection: false, readOnly: true,
       });
     }

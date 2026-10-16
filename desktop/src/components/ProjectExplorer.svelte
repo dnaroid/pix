@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { emptyStateClass } from "../lib/status-text";
+  import { dialogCancelButtonClass, dialogPrimaryButtonClass } from "../lib/dialog";
   import { invoke, isTauri } from "@tauri-apps/api/core";
   import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
   import { confirmDesktopAction } from "../lib/confirm-action";
@@ -830,7 +832,7 @@
           <RotateCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />Searching project…
         </div>
       {:else if searchResults.length === 0}
-        <div class="px-3 py-8 text-center text-xs text-muted-foreground">No matches found.</div>
+        <div class={emptyStateClass}>No matches found.</div>
       {:else}
         {#each searchResults as result, index (`${result.path}:${result.line ?? ""}:${result.column ?? ""}:${index}`)}
           <button
@@ -949,7 +951,7 @@
       {:else if rootError}
         <div class="mx-2 rounded-md border border-tool-error/25 bg-tool-error/5 px-2.5 py-2 text-xs leading-4 text-tool-error">{rootError}</div>
       {:else if rootEntries.length === 0}
-        <div class="px-3 py-8 text-center text-xs text-muted-foreground">This project folder is empty.</div>
+        <div class={emptyStateClass}>This project folder is empty.</div>
       {/if}
     {/if}
   </div>
@@ -1097,8 +1099,8 @@
         <p class="mt-2 text-xs leading-4 text-tool-error">{nameDialog.error}</p>
       {/if}
       <div class="mt-4 flex justify-end gap-2">
-        <button class="h-8 rounded-md px-3 text-xs text-muted-foreground hover:bg-accent hover:text-foreground" type="button" onclick={closeNameDialog}>Cancel</button>
-        <button class="h-8 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-50" type="submit" disabled={!nameDialog.value.trim()}>
+        <button class={dialogCancelButtonClass} type="button" onclick={closeNameDialog}>Cancel</button>
+        <button class={dialogPrimaryButtonClass} type="submit" disabled={!nameDialog.value.trim()}>
           {nameDialog.mode === "rename" ? "Rename" : "Create"}
         </button>
       </div>

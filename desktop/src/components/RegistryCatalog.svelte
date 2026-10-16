@@ -1,6 +1,6 @@
 <script lang="ts">
+  import { emptyStateClass } from "../lib/status-text";
   import Bot from "@lucide/svelte/icons/bot";
-  import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import Database from "@lucide/svelte/icons/database";
   import FolderGit2 from "@lucide/svelte/icons/folder-git-2";
   import Globe from "@lucide/svelte/icons/globe";
@@ -29,6 +29,7 @@
     type RegistrySnapshot,
   } from "../lib/registry";
   import RegistryItemActions from "./RegistryItemActions.svelte";
+  import TaskFieldSelect from "./TaskFieldSelect.svelte";
   import RegistryStatusIcon from "./RegistryStatusIcon.svelte";
   import RegistryAgentModel from "./RegistryAgentModel.svelte";
   import type { ModelThinkingModel } from "../lib/model-thinking";
@@ -61,6 +62,11 @@
     onDiff: (item: RegistryItem) => void;
   } = $props();
 
+  const registryFilterOptions = [
+    { value: "all", label: "All types" },
+    { value: "skill", label: "Skills" },
+    { value: "agent", label: "Agents" },
+  ] as const;
   let filter = $state<RegistryFilter>("all");
   let catalogSection = $state<RegistryCatalogSection>("installed");
   let query = $state("");
@@ -204,19 +210,14 @@
         spellcheck="false"
       />
     </div>
-    <div class="relative min-w-0">
-      <label class="sr-only" for="registry-filter">Registry filter</label>
-      <select
-        id="registry-filter"
-        class="h-7 w-full appearance-none rounded-md border border-input bg-panel-strong py-0 pr-7 pl-2.5 text-xs font-medium text-foreground shadow-none hover:bg-panel-hover"
-        bind:value={filter}
-      >
-        <option value="all">All types</option>
-        <option value="skill">Skills</option>
-        <option value="agent">Agents</option>
-      </select>
-      <ChevronDown class="pointer-events-none absolute top-1/2 right-2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-    </div>
+    <TaskFieldSelect
+      value={filter}
+      options={registryFilterOptions}
+      ariaLabel="Registry filter"
+      size="sm"
+      popupMinWidth={140}
+      onChange={(value) => filter = value as RegistryFilter}
+    />
   </div>
 </div>
 
@@ -224,7 +225,7 @@
   {#if loading && !snapshot}
     <div class="flex items-center justify-center gap-2 py-8 text-xs text-muted-foreground"><RefreshCw class="h-4 w-4 animate-spin" aria-hidden="true" />Checking registry…</div>
   {:else if !snapshot}
-    <div class="px-3 py-8 text-center text-xs text-muted-foreground">Registry data is not loaded yet. Refresh to check this workspace.</div>
+    <div class={emptyStateClass}>Registry data is not loaded yet. Refresh to check this workspace.</div>
   {:else}
     {#if snapshot.error}
       <div class="mb-2 flex items-start gap-2 rounded-md border border-tool-error/30 bg-tool-error/5 px-2.5 py-2 text-xs leading-4 text-tool-error"><X class="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" /><span>{snapshot.error}</span></div>
@@ -237,7 +238,7 @@
         <button class="mt-3 inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-panel-strong px-2.5 text-xs font-medium hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40" type="button" disabled={remoteBusy} onclick={() => onAction({ action: "configure" }, "configure")}><Settings class="h-3 w-3" aria-hidden="true" />Connect registry</button>
       </div>
     {:else if visibleItems.length === 0}
-      <div class="px-3 py-8 text-center text-xs text-muted-foreground">{emptyCatalogLabel()}</div>
+      <div class={emptyStateClass}>{emptyCatalogLabel()}</div>
     {:else}
       <div class="min-w-0 space-y-2">
         {#each visibleItems as item (item.id)}

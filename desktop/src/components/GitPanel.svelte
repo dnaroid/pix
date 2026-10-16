@@ -1,7 +1,6 @@
 <script lang="ts">
   import ArrowDownToLine from "@lucide/svelte/icons/arrow-down-to-line";
   import ArrowUpFromLine from "@lucide/svelte/icons/arrow-up-from-line";
-  import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import CloudDownload from "@lucide/svelte/icons/cloud-download";
   import GitBranch from "@lucide/svelte/icons/git-branch";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
@@ -19,6 +18,7 @@
   import GitCommitComposer from "./GitCommitComposer.svelte";
   import GitRepositoryTools from "./GitRepositoryTools.svelte";
   import GitIdentitySection from "./GitIdentitySection.svelte";
+  import TaskFieldSelect from "./TaskFieldSelect.svelte";
 
   let { workspace, snapshot, uninitialized, loading, error, actionId, llmActionId, gitAssistantReady, workflow, ci,
     onRefresh, onInitialize, onOpenDiff, onStage, onUnstage, onCommit, onPush, onSwitchBranch, onCreateBranch, onGenerateCommitMessage, onReview }: {
@@ -46,6 +46,7 @@
   const pushBlocked = $derived(gitPushBlockedReason(snapshot));
   const updateBlocked = $derived(gitUpdateBlockedReason(snapshot));
   const diverged = $derived(Boolean(snapshot && snapshot.ahead > 0 && snapshot.behind > 0));
+  const branchOptions = $derived((snapshot?.branches ?? []).map((branch) => ({ value: branch.name, label: branch.name })));
   const tool = "inline-flex h-7 min-w-7 shrink-0 items-center justify-center gap-1 rounded-sm px-1.5 text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:opacity-40";
   const progressLabel = $derived.by(() => {
     switch (actionId) {
@@ -85,14 +86,21 @@
     <div class="flex h-9 min-w-0 items-center gap-0.5 pr-1 pl-2" role="toolbar" aria-label="Source Control actions">
       <GitBranch class="mr-1 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
       {#if snapshot}
-        <div class="relative mr-1 min-w-0 flex-1">
-          <select class="h-6 w-full appearance-none rounded-sm border border-input bg-panel-strong pl-2 pr-6 font-mono text-xs text-foreground outline-none hover:bg-panel-hover focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-50"
-            aria-label="Current branch" value={snapshot.branch} disabled={busy}
-            onchange={(event) => { const branch = event.currentTarget.value; if (branch && branch !== snapshot?.branch) onSwitchBranch(branch); }}>
-            {#if snapshot.detached}<option value="HEAD" disabled>Detached HEAD</option>{/if}
-            {#each snapshot.branches as branch (branch.name)}<option value={branch.name}>{branch.name}</option>{/each}
-          </select>
-          <ChevronDown class="pointer-events-none absolute top-1.5 right-1.5 h-3 w-3 text-muted-foreground" aria-hidden="true" />
+        <div class="mr-1 min-w-0 flex-1">
+          <TaskFieldSelect
+            value={snapshot.detached ? "HEAD" : snapshot.branch}
+            options={branchOptions}
+            ariaLabel="Current branch"
+            size="xs"
+            mono
+            disabled={busy}
+            placeholder={snapshot.detached ? "Detached HEAD" : undefined}
+            searchable={branchOptions.length > 8}
+            searchPlaceholder="Search branches…"
+            emptyLabel="No matching branches"
+            popupMinWidth={200}
+            onChange={(branch) => { if (branch && branch !== snapshot?.branch) onSwitchBranch(branch); }}
+          />
         </div>
         <button class={[tool, snapshot.behind > 0 && !diverged && "text-tool-info"]} type="button" aria-label="Update project"
           title={updateBlocked ?? `Update project: fetch and fast-forward ${snapshot.upstream}. Local changes are stashed and restored automatically.`}

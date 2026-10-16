@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Claude Code 2.1.300's `rate_limit_info.unifiedWindows` now updates the five-hour and weekly quota from each `rate_limit_event`, including `allowed` events, rather than waiting for OAuth polling. Invalid windows are ignored individually; these telemetry-only updates do not show user-facing warnings. Older CLI versions continue to use polling and warning/429 observations.
+
 ### Fixed
 
 - On macOS, process-group termination no longer treats a transient `EPERM` while an owned group is disappearing as proof of cleanup. It accepts termination only after a subsequent `ESRCH` probe confirms that exact group is gone; otherwise cleanup remains an error.

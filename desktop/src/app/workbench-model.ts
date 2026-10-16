@@ -62,6 +62,8 @@ export function buildSessionWorkbenchTabs(options: {
       id: workbenchSessionTabId(session.sessionId),
       kind: "session",
       sessionId: session.sessionId,
+      sessionFile: !draft && typeof session._meta?.["pix.sessionFile"] === "string"
+        ? session._meta["pix.sessionFile"] : undefined,
       label: session.title || "Untitled conversation",
       title: `${sessionWorkbenchTitle(session)} · ${statusLabel}`,
       panelId: "conversation-workspace",

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { modalBackdropClass } from "../lib/dialog";
   import CheckCircle2 from "@lucide/svelte/icons/circle-check";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
@@ -102,7 +103,7 @@
 {#if visible}
   <dialog
     bind:this={dialogElement}
-    class="fixed inset-0 z-50 m-auto h-screen max-h-none w-screen max-w-none place-items-center bg-transparent p-5 text-foreground backdrop:bg-overlay open:grid"
+    class={modalBackdropClass}
     aria-labelledby="desktop-bootstrap-title"
     oncancel={retainUntilContinue}
   >

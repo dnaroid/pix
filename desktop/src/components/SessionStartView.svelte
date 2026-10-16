@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { emptyStateClass } from "../lib/status-text";
   import Search from "@lucide/svelte/icons/search";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import { onMount } from "svelte";
@@ -205,7 +206,7 @@
           onActivate={(active, source) => activateRow(row, active, source)} />
       {:else}
         {#if displayedSessions.length === 0}
-          <p class="px-3 py-6 text-center text-xs text-muted-foreground">
+          <p class={emptyStateClass}>
             {query ? "No matching saved conversations" : "No saved conversations outside the open tabs"}
           </p>
         {/if}

@@ -1,10 +1,12 @@
-//! macOS application presentation. One process-wide icon, no timers or hidden
+//! Optional macOS menu-bar icon. One process-wide icon, no timers or hidden
 //! window ownership; closing the last window retains the normal quit behavior.
 
 #[cfg(any(target_os = "macos", test))]
-fn tray_only(source: &str) -> Result<bool, String> {
+fn tray_enabled(source: &str) -> Result<bool, String> {
     let value: serde_json::Value = serde_json::from_str(&crate::normalize_jsonc(source)?)
         .map_err(|error| error.to_string())?;
+    // Retain the original preference key for existing installations. It now
+    // enables only the icon, never accessory presentation or Dock suppression.
     Ok(value
         .pointer("/desktop/trayOnly")
         .and_then(|value| value.as_bool())
@@ -49,7 +51,7 @@ mod native {
     use tauri::{
         menu::{Menu, MenuItem, PredefinedMenuItem},
         tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-        ActivationPolicy, AppHandle, Manager,
+        AppHandle, Manager,
     };
 
     const TRAY_ID: &str = "pix.tray";
@@ -161,7 +163,8 @@ mod native {
 
     fn enable(app: &AppHandle) -> tauri::Result<()> {
         let menu = menu(app)?;
-        // Never hide the Dock before a working recovery/control surface exists.
+        // The tray is additive: leave AppKit's activation policy and main menu
+        // untouched so Dock, application menus and native window cycling remain.
         TrayIconBuilder::with_id(TRAY_ID)
             .icon(crate::desktop_tray_icon::image(attention(app)))
             // Literal white silhouette and colored badge; AppKit template tint
@@ -194,16 +197,7 @@ mod native {
                 }
             })
             .build(app)?;
-        if let Err(error) = app.set_activation_policy(ActivationPolicy::Accessory) {
-            app.remove_tray_by_id(TRAY_ID);
-            return Err(error);
-        }
-        // Main-menu key equivalents remain app-local in accessory mode. Install
-        // only after the policy switch: Dock mode keeps AppKit's native behavior.
-        if let Err(error) = crate::desktop_window_cycle::install(app) {
-            crate::logging::error(module_path!(), format!("tray window shortcuts: {error}"));
-        }
-        // The asynchronous policy switch may finish after initial page reveals.
+        // Asynchronous tray setup may finish after initial page reveals.
         // Reassert their foreground order, without exposing unpainted windows;
         // those will activate independently when their first document finishes.
         raise_windows(
@@ -225,7 +219,7 @@ mod native {
                     .home_dir()
                     .map_err(|error| error.to_string())?;
                 let document = crate::read_user_config_from(&home, crate::UserConfigKind::Desktop)?;
-                super::tray_only(&document.content)
+                super::tray_enabled(&document.content)
             })
             .await;
             match enabled {
@@ -236,20 +230,16 @@ mod native {
                             return;
                         }
                         if let Err(error) = enable(&target) {
-                            crate::logging::error(
-                                module_path!(),
-                                format!("tray setup (keeping Dock): {error}"),
-                            );
+                            crate::logging::error(module_path!(), format!("tray setup: {error}"));
                         }
                     }) {
                         crate::logging::error(module_path!(), format!("tray setup: {error}"));
                     }
                 }
                 Ok(false) => {}
-                Err(error) => crate::logging::error(
-                    module_path!(),
-                    format!("tray preferences (keeping Dock): {error}"),
-                ),
+                Err(error) => {
+                    crate::logging::error(module_path!(), format!("tray preferences: {error}"))
+                }
             }
         });
     }
@@ -405,10 +395,10 @@ mod tests {
             r#"{"desktop":{"trayOnly":false}}"#,
             r#"{"desktop":{"trayOnly":"true"}}"#,
         ] {
-            assert!(!tray_only(source).unwrap());
+            assert!(!tray_enabled(source).unwrap());
         }
-        assert!(tray_only("{ // opt in\n\"desktop\": {\"trayOnly\": true,},}").unwrap());
-        assert!(tray_only("{").is_err());
+        assert!(tray_enabled("{ // opt in\n\"desktop\": {\"trayOnly\": true,},}").unwrap());
+        assert!(tray_enabled("{").is_err());
     }
 
     #[test]

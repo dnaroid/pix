@@ -198,7 +198,8 @@ mod tests {
                 SYNCED,
                 &mut budget
             )
-            .unwrap(),
+            .unwrap()
+            .map(|(changed, _)| changed),
             Some(false)
         );
     }

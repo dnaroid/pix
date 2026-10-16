@@ -88,7 +88,7 @@
   class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background text-foreground"
   aria-label={`Git diff ${title}`}
 >
-    <header class="flex min-h-9 min-w-0 flex-wrap items-center gap-2 border-b border-border bg-chrome px-3 py-1">
+    <header class="flex h-9 min-w-0 shrink-0 items-center gap-2 overflow-x-auto border-b border-border bg-chrome px-3 [scrollbar-width:none]">
       <strong class="min-w-0 flex-1 truncate text-xs font-medium" title={title}>{title}</strong>
       <span class="rounded border border-border bg-muted px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">{scopeLabel}</span>
       {#if review || reviewLoading}

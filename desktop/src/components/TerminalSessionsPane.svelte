@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { iconButtonClass } from "../lib/icon-button";
   import Plus from "@lucide/svelte/icons/plus";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
@@ -104,7 +105,7 @@
           title={packageTerminalStatusLabel(activeTerminal)}
         >{packageTerminalStatusLabel(activeTerminal)}</span>
         <button
-          class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-35"
+          class={iconButtonClass("md", "chrome")}
           type="button"
           title="Restart terminal"
           aria-label="Restart terminal"
@@ -123,7 +124,7 @@
     {/if}
 
     <button
-      class="grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-35"
+      class={iconButtonClass("md", "chrome")}
       type="button"
       title="New terminal"
       aria-label="Open new terminal"

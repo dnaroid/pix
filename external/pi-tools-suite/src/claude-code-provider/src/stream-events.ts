@@ -7,6 +7,7 @@ import { resolveToolName } from "./tool-name-resolution.ts";
 import {
   isCacheBreakpointLimit,
   parseRateLimitNotice,
+  parseRateLimitWindows,
   rateLimitRejectionMessage,
   recordKind,
   isPreInitAdvisoryRecord,
@@ -14,6 +15,7 @@ import {
   terminalResultErrorDetail,
   validateClaudeInitialization,
   type RateLimitNoticeSink,
+  type RateLimitWindowsSink,
 } from "./claude-protocol.ts";
 import type { MutableOutput, ToolNameMismatch } from "./types.ts";
 
@@ -53,6 +55,8 @@ export interface ClaudeEventMapperOptions {
   /** Omitted only by tests: without it a length stop falls back to failing on Claude Code's continuation. */
   onLengthStop?: () => void;
   onRateLimitNotice?: RateLimitNoticeSink;
+  /** Current subscription-window consumption, reported even without a warning. */
+  onRateLimitWindows?: RateLimitWindowsSink;
   onResponseAnnouncement?: ResponseAnnouncementSink;
   privatePaths?: readonly string[];
 }
@@ -93,6 +97,7 @@ export class ClaudeEventMapper {
   private readonly onToolUse: () => void;
   private readonly onLengthStop: () => void;
   private readonly onRateLimitNotice: RateLimitNoticeSink;
+  private readonly onRateLimitWindows: RateLimitWindowsSink;
   private readonly onResponseAnnouncement: ResponseAnnouncementSink;
   private assistantDiagnostic: string | undefined;
   private rejectedToolName: ToolNameMismatch | undefined;
@@ -107,6 +112,7 @@ export class ClaudeEventMapper {
     this.onToolUse = options.onToolUse;
     this.onLengthStop = options.onLengthStop ?? (() => {});
     this.onRateLimitNotice = options.onRateLimitNotice ?? (() => {});
+    this.onRateLimitWindows = options.onRateLimitWindows ?? (() => {});
     this.onResponseAnnouncement = options.onResponseAnnouncement ?? (() => {});
     this.privatePaths = options.privatePaths ?? [];
   }
@@ -329,6 +335,19 @@ export class ClaudeEventMapper {
       this.stopReason = stopReason(delta.stop_reason);
     }
     this.applyUsage(event.usage);
+    // A safety refusal is deterministic: Claude Code answers it with a synthetic
+    // "do not produce that again" turn, which must not be reported as a retryable
+    // stream interruption. The wording deliberately avoids Pi's retry patterns.
+    if (this.stopReason === "refusal") {
+      const details = delta.stop_details && typeof delta.stop_details === "object" && !Array.isArray(delta.stop_details)
+        ? delta.stop_details as Record<string, unknown>
+        : undefined;
+      const category = typeof details?.category === "string" ? details.category.replace(/[^\w.-]/g, "").slice(0, 48) : "";
+      throw new ClaudeCodeError(
+        "model_refusal",
+        `Claude refused this request${category ? ` (category: ${category})` : ""}: the model's safety classifier blocked the response. Rephrase the request or use another model.`,
+      );
+    }
     if (this.stopReason === "tool_use") this.latchHandoff(this.onToolUse);
     else if (isLengthStop(this.stopReason)) this.latchHandoff(this.onLengthStop);
   }
@@ -578,6 +597,14 @@ export class ClaudeEventMapper {
   }
 
   private acceptRateLimit(info: unknown): void {
+    const windows = parseRateLimitWindows(info);
+    if (windows.length > 0) {
+      try {
+        this.onRateLimitWindows(windows);
+      } catch {
+        // Quota telemetry is advisory and must never fail a provider request.
+      }
+    }
     const notice = parseRateLimitNotice(info);
     if (!notice) return;
     // Repeats are de-duplicated once per session by the extension's notifier,

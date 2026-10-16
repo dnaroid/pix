@@ -370,7 +370,7 @@
     {#each contextLegend as item}
       <span class="inline-flex items-center justify-between gap-2">
         <span class="inline-flex min-w-0 items-center gap-1">
-          <i class={["h-2 w-2 shrink-0 rounded-[1px]", contextCellClass(item.kind)]} aria-hidden="true"></i>
+          <i class={["h-2 w-2 shrink-0 rounded-xs", contextCellClass(item.kind)]} aria-hidden="true"></i>
           <span class="truncate">{item.label}</span>
         </span>
         {#if item.value}<span class="shrink-0 tabular-nums">{item.value}</span>{/if}

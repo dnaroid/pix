@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { iconButtonClass } from "../lib/icon-button";
   import { onDestroy, tick } from "svelte";
   import EllipsisVertical from "@lucide/svelte/icons/ellipsis-vertical";
   import CloudOff from "@lucide/svelte/icons/cloud-off";
@@ -141,7 +142,7 @@
 
 <div class="flex shrink-0 items-center gap-0.5">
   {#if registryDiffAvailable(item)}
-    <button class="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
+    <button class={iconButtonClass("sm", "popover")}
       type="button" disabled={remoteDisabled || diffBusy} title={`Compare registry and local copies: ${item.name}`}
       aria-label={`Compare registry and local copies: ${item.name}`} data-registry-diff-trigger={item.id} onclick={onDiff}>
       {#if diffBusy}<RefreshCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
@@ -160,7 +161,7 @@
     </button>
   {/if}
   {#if actions.secondary.length}
-    <button bind:this={trigger} class="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+    <button bind:this={trigger} class={iconButtonClass("sm", "popover")}
       type="button" aria-haspopup="menu" aria-expanded={open} aria-label={`More actions: ${item.name}`} title={`More actions: ${item.name}`}
       onclick={() => open ? close(true) : void show()}
       onkeydown={(event) => { if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); void show(event.key === "ArrowUp"); } }}>

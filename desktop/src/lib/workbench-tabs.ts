@@ -15,6 +15,7 @@ interface WorkbenchTabBase {
 export interface WorkbenchSessionTab extends WorkbenchTabBase {
   readonly kind: "session";
   readonly sessionId: string;
+  readonly sessionFile?: string;
   readonly running: boolean;
   readonly viewOnlyClose?: boolean;
   readonly draft: boolean;

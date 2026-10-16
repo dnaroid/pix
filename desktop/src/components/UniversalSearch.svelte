@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { emptyStateClass } from "../lib/status-text";
   import { onMount, tick, untrack } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import Search from "@lucide/svelte/icons/search";
@@ -424,7 +425,7 @@
     </div>
     <div class="overflow-auto p-1.5" aria-busy={searching} aria-label="Search results">
       {#if intentBusy}
-        <p class="px-3 py-6 text-center text-xs text-muted-foreground" role="status">Jev is choosing Search or RAG…</p>
+        <p class={emptyStateClass} role="status">Jev is choosing Search or RAG…</p>
       {:else if ragPhase !== "idle"}
         <div class="space-y-3 px-3 py-3" aria-label="RAG answer">
           <div class="flex items-center gap-2">
@@ -459,11 +460,11 @@
           {/if}
         </div>
       {:else if !query.trim()}
-        <p class="px-3 py-6 text-center text-xs text-muted-foreground">Search this project.</p>
-      {:else if !view.submitted}<p class="px-3 py-6 text-center text-xs text-muted-foreground" role="status">{types.length ? "Press Go or Enter to search or answer." : "Select at least one result type."}</p>
-      {:else if searching && !result.results.length}<p class="px-3 py-6 text-center text-xs text-muted-foreground">Waiting for results…</p>
-      {:else if !result.results.length && notices.length}<p class="px-3 py-6 text-center text-xs text-muted-foreground" role="status">No results. Check search details.</p>
-      {:else if !result.results.length}<p class="px-3 py-6 text-center text-xs text-muted-foreground" role="status">{types.length ? 'No results.' : 'Select at least one result type.'}</p>{/if}
+        <p class={emptyStateClass}>Search this project.</p>
+      {:else if !view.submitted}<p class={emptyStateClass} role="status">{types.length ? "Press Go or Enter to search or answer." : "Select at least one result type."}</p>
+      {:else if searching && !result.results.length}<p class={emptyStateClass}>Waiting for results…</p>
+      {:else if !result.results.length && notices.length}<p class={emptyStateClass} role="status">No results. Check search details.</p>
+      {:else if !result.results.length}<p class={emptyStateClass} role="status">{types.length ? 'No results.' : 'Select at least one result type.'}</p>{/if}
       {#each result.results as hit, index (hit.id)}
         <button type="button" data-search-result={index} data-active={index === active ? "true" : undefined}
           disabled={navigating} onclick={() => void choose(hit)}

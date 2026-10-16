@@ -7,7 +7,7 @@ export interface ClaudeCodeRateLimitSample {
 	version: 1;
 	sessionId: string;
 	modelRef: string;
-	status: "allowed_warning" | "rejected";
+	status: "allowed" | "allowed_warning" | "rejected";
 	rateLimitType: "five_hour" | "seven_day";
 	utilization?: number;
 	resetsAt: number;
@@ -20,13 +20,13 @@ export function parseClaudeCodeRateLimitSample(value: unknown, now = Date.now())
 	const sample = value as Record<string, unknown>;
 	if (sample.version !== 1 || typeof sample.sessionId !== "string" || !sample.sessionId
 		|| typeof sample.modelRef !== "string" || !/^pi-claude-code-provider\/.+$/u.test(sample.modelRef)
-		|| !["allowed_warning", "rejected"].includes(String(sample.status))
+		|| !["allowed", "allowed_warning", "rejected"].includes(String(sample.status))
 		|| !["five_hour", "seven_day"].includes(String(sample.rateLimitType))
 		|| typeof sample.resetsAt !== "number" || !Number.isFinite(sample.resetsAt) || sample.resetsAt <= now
 		|| typeof sample.observedAt !== "number" || !Number.isFinite(sample.observedAt) || sample.observedAt > now
 		|| (sample.utilization !== undefined && (typeof sample.utilization !== "number"
 			|| !Number.isFinite(sample.utilization) || sample.utilization < 0 || sample.utilization > 1))
-		|| (sample.status === "allowed_warning" && sample.utilization === undefined)) return undefined;
+		|| (sample.status !== "rejected" && sample.utilization === undefined)) return undefined;
 	if (sample.resetPrecision !== undefined && sample.resetPrecision !== "minute") return undefined;
 	return { version: 1, sessionId: sample.sessionId, modelRef: sample.modelRef,
 		status: sample.status as ClaudeCodeRateLimitSample["status"],
