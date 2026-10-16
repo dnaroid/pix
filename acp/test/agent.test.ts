@@ -3701,28 +3701,30 @@ test("Pix Desktop search preserves controlled source errors across ACP without l
 	let failing = true;
 	const sourceSignals: AbortSignal[] = [];
 	const harness = createTestAdapter({
-		listPiSessions: async (_cwd, signal) => {
-			assert.ok(signal, "search forwards its deadline signal to native discovery");
-			sourceSignals.push(signal);
-			if (failing) throw new Error("private corpus content Bearer SECRET");
-			return [];
+		// Search discovery reads the session candidate catalog, not listPiSessions.
+		sessionCandidates: {
+			list: async (_cwd, _agentDir, signal) => {
+				assert.ok(signal, "search forwards its deadline signal to native discovery");
+				sourceSignals.push(signal);
+				if (failing) throw new Error("private corpus content Bearer SECRET");
+				return [];
+			},
+			snapshot: async () => "fixture",
+			dispose: () => {},
 		},
 		createPiClient: () => { throw new Error("Search must not create Pi"); },
 	});
 	t.after(async () => { await harness.adapter.dispose(); await rm(cwd, { recursive: true, force: true }); });
 	await connectAs(harness.adapter, "pix-desktop", async cx => {
 		await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, clientInfo: { name: "pix-desktop", version: "test" } });
-		const request = { cwd, query: "target", types: ["sessions"], settings: [], limit: 10 };
-		await assert.rejects(cx.request(SEARCH_QUERY_METHOD, request), error => {
-			assert.ok(error instanceof RequestError);
-			assert.equal(error.code, -32000);
-			assert.equal(error.message, "Session title discovery timed out or failed");
-			assert.doesNotMatch(JSON.stringify(error), /SECRET|private corpus/);
-			return true;
-		});
-		assert.equal(sourceSignals.length, 1);
+		// Queries read indexed metadata; discovery runs in the manual session index pass.
+		const failed = await cx.request(SEARCH_INDEX_METHOD, { cwd, source: "sessions" }) as { complete: boolean; message?: string };
+		assert.equal(failed.complete, false);
+		assert.equal(failed.message, "Session title discovery timed out or failed");
+		assert.doesNotMatch(JSON.stringify(failed), /SECRET|private corpus/);
+		assert.ok(sourceSignals.length >= 1);
 		failing = false;
-		const response = await cx.request(SEARCH_QUERY_METHOD, request) as SearchQueryResponse;
+		const response = await cx.request(SEARCH_QUERY_METHOD, { cwd, query: "target", types: ["sessions"], settings: [], limit: 10 }) as SearchQueryResponse;
 		assert.deepEqual(response.results, []);
 	});
 });
@@ -3738,7 +3740,11 @@ test("Pix Desktop title discovery does not resurrect a session deleted while nat
   const started = new Promise<void>(resolve => { start = resolve; });
   const released = new Promise<void>(resolve => { finish = resolve; });
   const harness = createTestAdapter({
-    listPiSessions: async () => { start(); await released; return [nativeSession("native", { path, cwd, name: "target title" })]; },
+    sessionCandidates: {
+      list: async () => { start(); await released; return [{ id: "native", path, createdAt: 0 }]; },
+      snapshot: async () => "fixture",
+      dispose: () => {},
+    },
     createPiClient: () => { throw new Error("Search must not spawn Pi"); },
   });
   t.after(async () => { finish(); await harness.adapter.dispose(); await rm(cwd, { recursive: true, force: true }); });
@@ -3746,11 +3752,14 @@ test("Pix Desktop title discovery does not resurrect a session deleted while nat
   await map.put({ sessionId: "stable", piSessionId: "native", piSessionPath: path, cwd, title: "target title", updatedAt: "2025-01-01T00:00:00.000Z" });
   await connectAs(harness.adapter, "pix-desktop", async cx => {
     await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, clientInfo: { name: "pix-desktop", version: "test" } });
-    const pending = cx.request(SEARCH_QUERY_METHOD, { cwd, query: "target", types: ["sessions"], settings: [], limit: 10 });
+    // Discovery runs in the manual session index pass; queries read indexed metadata.
+    const pending = cx.request(SEARCH_INDEX_METHOD, { cwd, source: "sessions" });
     await started;
     await cx.request("session/delete", { sessionId: "stable" });
     finish();
-    assert.deepEqual((await pending as SearchQueryResponse).results, []);
+    await pending;
+    const response = await cx.request(SEARCH_QUERY_METHOD, { cwd, query: "target", types: ["sessions"], settings: [], limit: 10 }) as SearchQueryResponse;
+    assert.deepEqual(response.results, []);
     assert.equal(await map.get("stable"), undefined);
     assert.equal(await map.get("native"), undefined);
   });

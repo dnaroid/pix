@@ -6,6 +6,7 @@ const KNOWN_FRONTMATTER_KEYS = new Set([
 	"icon",
 	"models",
 	"modelSelection",
+	"vendorsByParentVendor",
 	"model",
 	"fallbackModels",
 	"modelByParent",

@@ -23,7 +23,8 @@ import { parseDesktopBtwRequest } from "../btw/request.js";
 import { SEARCH_QUERY_METHOD, SEARCH_CONFIG_METHOD, SEARCH_SYNC_METHOD, SEARCH_INDEX_METHOD, SEARCH_COMMITS_METHOD, SEARCH_INTENT_METHOD, SEARCH_TASKS_METHOD } from "../search/contract.js";
 import { parseSearchQueryRequest, parseSearchConfigRequest, parseSearchSyncRequest, parseSearchIndexRequest, parseSemanticTasksRequest } from "../search/request.js";
 import { DesktopSearchService, SearchUnavailableError } from "../search/service.js";
-import { BackgroundSessionDiscovery, hydrateBackgroundTitle } from "../search/background-session-discovery.js";
+import { BackgroundSessionDiscovery, hydrateBackgroundTitle, type SessionCandidateSource } from "../search/background-session-discovery.js";
+import { SessionCandidateCatalog } from "../search/session-discovery.js";
 import { SessionSearchActivity } from "../search/session-activity.js";
 import { parseCommitSearchRequest } from "../search/commit-contract.js";
 import { DesktopCommitSearchService } from "../search/commit-service.js";
@@ -477,6 +478,8 @@ export interface PixAcpAgentOptions {
 	readonly sessionMapPath: string;
 	/** Native Pi-session discovery (overridable for hermetic tests). */
 	readonly listPiSessions?: (cwd?: string, signal?: AbortSignal) => Promise<readonly PiSessionInfo[]>;
+	/** Search-only session candidate catalog (overridable for hermetic tests). */
+	readonly sessionCandidates?: SessionCandidateSource;
 	/** Filesystem catalog revision (injected only by isolated tests). */
 	readonly nativeSessionRevision?: (cwd: string) => Promise<string>;
 	/** Hermetic Desktop search backend override. */
@@ -623,7 +626,8 @@ export class PixAcpAgent {
 			(error) => this.options.logger.warn(`native session discovery failed: ${stringifyUnknown(error)}`),
 			options.nativeSessionRevision,
 		);
-		const backgroundSessions = new BackgroundSessionDiscovery(cwd => this.sessionMap.list(cwd));
+		const backgroundSessions = new BackgroundSessionDiscovery(cwd => this.sessionMap.list(cwd),
+			options.agentDir ?? getAgentDir(), options.sessionCandidates ?? new SessionCandidateCatalog());
 		this.backgroundSearchSessions = backgroundSessions;
 		this.searchService = options.searchService ?? new DesktopSearchService({
 			onIndexDiagnostic: ({ cwd, source, complete, indexed, total, durationMs, phase, reason }) => {

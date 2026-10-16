@@ -5,10 +5,11 @@ import { SessionCandidateCatalog, readSessionTitle } from "./session-discovery.j
 
 export interface BackgroundSessionRecord extends SessionMapRecord { nativeOnly?: boolean; createdAt?: number }
 /** Metadata supply is deliberately separate from interactive/manual SDK discovery. */
+export type SessionCandidateSource = Pick<SessionCandidateCatalog, "list" | "snapshot" | "dispose">;
 export class BackgroundSessionDiscovery {
-  private readonly catalog = new SessionCandidateCatalog();
   constructor(private readonly records: (cwd: string) => Promise<readonly SessionMapRecord[]>,
-    private readonly agentDir = getAgentDir()) {}
+    private readonly agentDir = getAgentDir(),
+    private readonly catalog: SessionCandidateSource = new SessionCandidateCatalog()) {}
   dispose(): void { this.catalog.dispose(); }
   async snapshot(cwd: string, signal: AbortSignal): Promise<string> {
     const records = await this.records(cwd);
