@@ -1091,7 +1091,8 @@ test("adapter registers when its optional compat import is unavailable", async (
     try {
         const { stdout } = await promisify(execFile)(
             process.execPath,
-            [fileURLToPath(new URL("../support/extension-without-compat.js", import.meta.url))],
+            // The adapter is TypeScript importing `.js` specifiers; run it the way this suite runs.
+            ["--import", "tsx", fileURLToPath(new URL("../support/extension-without-compat.js", import.meta.url))],
             { env: { ...process.env, PI_CLAUDE_CODE_PROVIDER_PATH: executable } },
         );
         assert.equal(stdout.trim(), "ok");

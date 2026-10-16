@@ -1,12 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-    AssistantMessageFrameEncoder,
     createAssistantMessageEventStream,
     isContextOverflow,
     isRecoverableLength,
     isRetryableAssistantError,
-    reduceAssistantMessageFrames,
 } from "@earendil-works/pi-ai";
 import { ClaudeEventMapper as EventMapper, argumentPreviewDue } from "../../../../src/claude-code-provider/src/stream-events.ts";
 import { createOutput } from "../../../../src/claude-code-provider/src/output.ts";
@@ -564,9 +562,12 @@ test("rejects malformed results and accepts future stop reasons", () => {
         () => make().accept({ type: "result", is_error: false, result: { forged: true } }),
         /non-string result field/,
     );
-    for (const stopReason of ["future_reason", "model_context_window_exceeded", "pause_turn", "refusal"]) {
+    for (const stopReason of ["future_reason", "model_context_window_exceeded", "pause_turn"]) {
         assert.doesNotThrow(() => make().accept({ type: "stream_event", event: { type: "message_delta", delta: { stop_reason: stopReason } } }));
     }
+    // A streamed safety refusal is deterministic and fails as a non-retryable model_refusal.
+    assert.throws(() => make().accept({ type: "stream_event", event: { type: "message_delta", delta: { stop_reason: "refusal", stop_details: { category: "cyber" } } } }),
+        (error) => error.code === "model_refusal" && /refused this request \(category: cyber\)/.test(error.message));
     const duplicate = make();
     duplicate.accept({ type: "stream_event", event: { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } } });
     assert.throws(() => duplicate.accept({ type: "stream_event", event: { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } } }), /Duplicate content block/);
@@ -722,16 +723,13 @@ async function replayCapture(scenario) {
     const stream = createAssistantMessageEventStream();
     const output = createOutput(model);
     const events = [];
-    // `partial` is a shared live accumulator, so encoding each event as it arrives and
-    // encoding the whole stream afterwards are genuinely different inputs to Pi's
-    // encoder. Both orders must produce frames its reducer accepts.
-    const liveEncoder = new AssistantMessageFrameEncoder();
-    const liveFrames = [];
+    // `partial` is a shared live accumulator, so its content is snapshotted as each
+    // event arrives; checking it afterwards would only see the final state.
+    const liveSnapshots = [];
     const consume = (async () => {
         for await (const event of stream) {
-            const frame = liveEncoder.encode(event);
-            if (frame)
-                liveFrames.push(frame);
+            if (event.partial?.content)
+                liveSnapshots.push(structuredClone(event.partial.content));
             events.push(event);
         }
     })();
@@ -770,7 +768,7 @@ async function replayCapture(scenario) {
     }
     const message = await stream.result();
     await consume;
-    return { message, output, events, liveFrames, rejected, mapper };
+    return { message, output, events, liveSnapshots, rejected, mapper };
 }
 
 // Every recovery Claude Code performs after a response starts streaming. The first
@@ -859,47 +857,48 @@ test("accepts the output-limit handoff acknowledgement and fails closed on near 
         assert.equal((await stream.result()).stopReason, "error", entry.name);
     }
 });
-test("replays every captured scenario through Pi's own frame encoder and reducer", async () => {
-    // Pi's assistant events are append-only. Rewriting published content to reuse a
-    // recovered stream, as the rejected external fix did, makes these throw.
+/** Published assistant content only grows: blocks are never removed or retyped, and
+ * text/thinking already shown is never rewritten. (Pi SDK 1.x removed the frame
+ * encoder/reducer that used to enforce this, so the invariant is checked directly.) */
+function assertAppendOnly(snapshots, label) {
+    for (let i = 1; i < snapshots.length; i++) {
+        const previous = snapshots[i - 1], current = snapshots[i];
+        assert.equal(current.length >= previous.length, true, `${label}: content shrank at event ${i}`);
+        previous.forEach((block, index) => {
+            assert.equal(current[index].type, block.type, `${label}: block ${index} retyped at event ${i}`);
+            for (const key of ["text", "thinking"])
+                if (typeof block[key] === "string")
+                    assert.equal(current[index][key].startsWith(block[key]), true, `${label}: block ${index} ${key} rewritten at event ${i}`);
+        });
+    }
+}
+test("replays every captured scenario with append-only published content", async () => {
+    // Rewriting published content to reuse a recovered stream, as the rejected
+    // external fix did, violates this.
     for (const [scenario] of [...INTERRUPTED, ["http529"], ["post-stop"], ["tool-ok"], ["max-tokens"], ["context-window-exceeded"], ["prompt-too-long"]]) {
-        const { events, liveFrames } = await replayCapture(scenario);
-        assert.equal(liveFrames.length > 0, true, `${scenario} produced no frames`);
-        assert.doesNotThrow(() => reduceAssistantMessageFrames(liveFrames), `${scenario} (live)`);
-        const queuedEncoder = new AssistantMessageFrameEncoder();
-        const queuedFrames = [];
-        assert.doesNotThrow(() => {
-            for (const event of events) {
-                const frame = queuedEncoder.encode(event);
-                if (frame)
-                    queuedFrames.push(frame);
-            }
-        }, `${scenario} (queued encode)`);
-        assert.doesNotThrow(() => reduceAssistantMessageFrames(queuedFrames), `${scenario} (queued)`);
+        const { liveSnapshots } = await replayCapture(scenario);
+        assert.equal(liveSnapshots.length > 0, true, `${scenario} published no content events`);
+        assertAppendOnly(liveSnapshots, scenario);
     }
 });
-test("a failure before the response starts still reduces through Pi's frames", async () => {
+test("a failure before the response starts still resolves the stream with an error", async () => {
     // A setup failure -- a rejected initialization, an aborted request -- publishes
     // error and end with no preceding start. Every replay above begins with a
     // validated init, so this is the one shape they do not cover, and the
     // provider's own pre-mapper failure path emits it too.
     const stream = createAssistantMessageEventStream();
     const output = createOutput(model);
-    const encoder = new AssistantMessageFrameEncoder();
-    const frames = [];
+    const snapshots = [];
     const consume = (async () => {
         for await (const event of stream) {
-            const frame = encoder.encode(event);
-            if (frame)
-                frames.push(frame);
+            if (event.partial?.content)
+                snapshots.push(structuredClone(event.partial.content));
         }
     })();
     const mapper = makeMapper(stream, output, new Set(), new Map(), () => { });
     mapper.fail("Claude Code initialized with an unexpected tool set");
     await consume;
-    // Pi's encoder currently frames nothing for a bare error, and reducing an
-    // empty set is the guarantee that matters either way: neither half throws.
-    assert.doesNotThrow(() => reduceAssistantMessageFrames(frames));
+    assertAppendOnly(snapshots, "pre-start failure");
     // The failure reaches the consumer through the stream's own result, which is
     // the path the provider's pre-mapper failures rely on.
     const result = await stream.result();
