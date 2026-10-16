@@ -8,6 +8,7 @@ import { openDatabase } from "../src/project-search/source-work.mjs";
 import { runManagedIndex } from "../src/project-search/managed-index-run.mjs";
 import { probeSnapshots } from "../src/project-search/snapshot-probe.mjs";
 import { openStore } from "../src/project-search/native-store.mjs";
+import { removeDirsWithRetry } from "./support/fs-retry.mjs";
 
 const base = fileURLToPath(new URL("../../../.pi/artifacts/manual-index-tests/", import.meta.url));
 async function fixture(t, initialized = true) {
@@ -17,7 +18,7 @@ async function fixture(t, initialized = true) {
   process.env.HOME = home;
   t.after(async () => {
     if (previous === undefined) delete process.env.HOME; else process.env.HOME = previous;
-    await rm(root, { recursive: true, force: true, maxRetries: 5 });
+    await removeDirsWithRetry([root]);
   });
   if (initialized) {
     await mkdir(join(root, ".pi/search"), { recursive: true });

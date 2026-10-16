@@ -1,15 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { ensureSessionRevision, readSessionIndexRevision } from "../src/project-search/session-index-revision.mjs";
 import { openDatabase } from "../src/project-search/source-work.mjs";
+import { removeDirsWithRetry } from "./support/fs-retry.mjs";
 const signal = () => new AbortController().signal;
 test("logical generation follows committed content, not heartbeat, WAL or maintenance", async t => {
   const base = resolve(".pi/artifacts/session-index-revision-tests"); await mkdir(base, {recursive:true});
   const root = await mkdtemp(join(base,"case-")); await mkdir(join(root,".pi/search"),{recursive:true});
   const db = await openDatabase(join(root,".pi/search/sessions.sqlite"));
-  t.after(async()=>{db.close();await rm(root,{recursive:true,force:true});});
+  t.after(async()=>{db.close();await removeDirsWithRetry([root]);});
   db.exec("PRAGMA journal_mode=WAL; CREATE TABLE pix_session_titles(session_id TEXT PRIMARY KEY,title TEXT NOT NULL,title_hash TEXT NOT NULL); CREATE TABLE pix_session_vectors(title_hash TEXT PRIMARY KEY,vector BLOB NOT NULL); CREATE TABLE activity(value INTEGER); INSERT INTO activity VALUES(0)");
   ensureSessionRevision(db);
   const read = async()=>(await readSessionIndexRevision(root,signal())).index;

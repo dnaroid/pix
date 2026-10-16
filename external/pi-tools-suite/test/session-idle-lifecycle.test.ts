@@ -1,5 +1,5 @@
 import { expect, spyOn, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile, utimes } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile, utimes } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { SessionManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { registerSessionChunkSync } from "../src/project-search/semantic-session-chunks.js";
@@ -8,6 +8,7 @@ import { SessionChunkSync } from "../src/project-search/session-chunk-sync.mjs";
 import { SessionCandidateCatalog } from "../src/project-search/session-discovery.mjs";
 import { Database } from "bun:sqlite";
 import { writeSourcePolicy } from "../src/project-search/source-policy.mjs";
+import { removeDirsWithRetry } from "./support/fs-retry.js";
 
 test("suite background inspection batches metadata and respects live activity", async () => {
   const base = resolve(".pi/artifacts/session-idle-lifecycle");
@@ -31,7 +32,7 @@ test("suite background inspection batches metadata and respects live activity", 
     expect(batches).toBe(2);
   } finally {
     await Promise.all([owner.dispose(), reader.dispose()]);
-    await rm(root, { recursive: true, force: true });
+    await removeDirsWithRetry([root]);
   }
 });
 
@@ -70,7 +71,7 @@ test("activity during startup persistence is observed before the first indexing 
     await handlers.get("session_shutdown")!({}, ctx);
     release(); await starting;
     observe.mockRestore(); await other.dispose();
-    await rm(root, { recursive: true, force: true });
+    await removeDirsWithRetry([root]);
   }
 });
 
@@ -109,6 +110,6 @@ test("extension background uses metadata discovery and skips corpus scans, uncha
   } finally {
     await handlers.get("session_shutdown")!({},ctx);await other.dispose();
     changed.mockRestore();start.mockRestore();full.mockRestore();list.mockRestore();
-    await rm(root,{recursive:true,force:true});
+    await removeDirsWithRetry([root]);
   }
 });

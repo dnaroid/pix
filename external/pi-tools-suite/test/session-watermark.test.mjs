@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { openDatabase } from "../src/project-search/source-work.mjs";
@@ -8,6 +8,7 @@ import { ensureSessionRevision, readSessionIndexRevision } from "../src/project-
 import { beginSessionSweep, completeSessionSweep, SESSION_WATERMARK_OVERLAP_MS as overlap } from "../src/project-search/session-watermark.mjs";
 import { IdleSessionSelection } from "../src/project-search/session-idle.mjs";
 import { SESSION_MIN_AGE_MS as age } from "../src/project-search/session-revisions.mjs";
+import { removeDirsWithRetry } from "./support/fs-retry.mjs";
 
 const signal = () => new AbortController().signal;
 const T = 2_000_000_000_000;
@@ -19,7 +20,7 @@ async function fixture(t) {
   const db = await openDatabase(join(root,".pi/search/sessions.sqlite"));
   db.exec("CREATE TABLE pix_session_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)");
   ensureSessionRevision(db);
-  t.after(async () => { db.close(); await rm(root,{recursive:true,force:true}); });
+  t.after(async () => { db.close(); await removeDirsWithRetry([root]); });
   return {root,db};
 }
 const candidate = (id,createdAt = T-age-10_000) => ({id,path:`/${id}.jsonl`,createdAt});

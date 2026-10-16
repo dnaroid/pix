@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { appendFile, mkdir, mkdtemp, rm, symlink, truncate, utimes, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, symlink, truncate, utimes, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { SessionCandidateCatalog, nativeSessionDirectory, readSessionTitle } from "../src/project-search/session-discovery.mjs";
 import { IdleSessionSelection, SessionIdlePolicy, SESSION_IDLE_MS } from "../src/project-search/session-idle.mjs";
 import { transcriptUnchanged } from "../src/project-search/session-transcript.mjs";
+import { removeDirsWithRetry } from "./support/fs-retry.mjs";
 
 const signal = () => new AbortController().signal;
 async function fixture(t) {
@@ -15,7 +16,7 @@ async function fixture(t) {
   const directory = nativeSessionDirectory(root, agent);
   await mkdir(directory, { recursive: true });
   const policies = [];
-  t.after(async () => { await Promise.all(policies.map(p => p.dispose())); await rm(root, { recursive: true, force: true }); });
+  t.after(async () => { await Promise.all(policies.map(p => p.dispose())); await removeDirsWithRetry([root]); });
   const save = async (id, rows = []) => {
     const path = join(directory, `arbitrary-name-${id}.jsonl`);
     await writeFile(path, [JSON.stringify({ type: "session", id, cwd: root, timestamp: "2020-01-01T00:00:00.000Z" }), ...rows.map(JSON.stringify)].join("\n") + "\n");

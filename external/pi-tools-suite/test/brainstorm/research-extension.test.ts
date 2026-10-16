@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
@@ -7,6 +7,7 @@ import { fauxProvider } from "@earendil-works/pi-ai";
 import councilResearch from "../../src/brainstorm/research-extension.js";
 import { COUNCIL_RESEARCH_TOOLS } from "../../src/brainstorm/research-tools.js";
 import { SUBAGENT_WORK_TOOLS_ENV, subagentWorkTools, withSubagentCapabilities } from "../../src/async-subagents/core/child-tools.js";
+import { removeDirsWithRetry } from "../support/fs-retry.js";
 
 const scratchRoot = resolve(import.meta.dir, "../../../../.pi/artifacts/council-research-tools");
 
@@ -76,7 +77,7 @@ for (const indexed of [false, true]) test(`isolated SDK child loads actual resea
 		process.chdir(oldCwd);
 		if (oldWorkTools === undefined) delete process.env[SUBAGENT_WORK_TOOLS_ENV];
 		else process.env[SUBAGENT_WORK_TOOLS_ENV] = oldWorkTools;
-		rmSync(root, { recursive: true, force: true });
+		await removeDirsWithRetry([root]);
 	}
 });
 }

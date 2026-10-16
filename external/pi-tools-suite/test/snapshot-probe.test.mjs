@@ -11,6 +11,7 @@ import { openStore, snapshot, publish } from "../src/project-search/native-store
 import { scanProject } from "../src/project-search/native-scan.mjs";
 import { readRepositorySnapshot } from "../src/project-search/repository-snapshot.mjs";
 import { openVectorStore } from "../src/project-search/native-vector-store.mjs";
+import { removeDirsWithRetry } from "./support/fs-retry.mjs";
 
 const signal = () => new AbortController().signal;
 async function publishLocal(root, source = "code") {
@@ -43,7 +44,7 @@ async function fixture(t) {
   t.after(async () => {
     for (const resource of resources) resource.close();
     keys.forEach((key, i) => { if (previous[i] === undefined) delete process.env[key]; else process.env[key] = previous[i]; });
-    await rm(root, { recursive: true, force: true, maxRetries: 5 });
+    await removeDirsWithRetry([root]);
   });
   await mkdir(join(root, ".pi/search"), { recursive: true });
   await mkdir(join(home, ".config/pi"), { recursive: true });
