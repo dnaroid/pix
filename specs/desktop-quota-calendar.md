@@ -66,6 +66,15 @@ After the integrated limits/timeline and any reset credits, directly before the 
 **Token usage by model** adds a donut only when more than
 one provider/model entry has nonzero recorded tokens. Its center shows the sum
 of attributed model tokens; its legend identifies the models and token counts.
+Donut segments and legend rows are ordered by descending recorded token count
+across providers. The spend table likewise orders models by descending token
+count within each provider by default, without changing provider order. Clicking
+the Tokens or Cost header sorts models within every provider by that criterion;
+selecting a new criterion starts descending, and clicking the active header
+toggles ascending/descending. An arrow indicates the active direction. This
+table-only selection stays while the component is mounted, including popup
+reopens; the donut remains descending by tokens. Equal values retain their input
+order; totals, costs and token shares are unchanged.
 Chart entries use successive semantic palette colors independently of provider,
 so models sharing a provider remain distinguishable. Each legend dot matches its
 segment; the palette repeats after eight entries. Table model colors are unchanged.

@@ -37,7 +37,13 @@ pub(crate) async fn preview_file_action(
     #[cfg(target_os = "macos")]
     {
         return super::run_blocking(move || {
-            let path = super::resolve_local_file_path(Path::new(&path))?;
+            let path = if path.starts_with("~/") {
+                use tauri::Manager;
+                let home = app.path().home_dir().map_err(|error| error.to_string())?;
+                super::resolve_home_file_path(&home, Path::new(&path))?.1
+            } else {
+                super::resolve_local_file_path(Path::new(&path))?
+            };
             perform_macos_action(app, path, action)
         })
         .await;

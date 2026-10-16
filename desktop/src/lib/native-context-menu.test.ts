@@ -113,6 +113,17 @@ describe("native desktop context menu commands", () => {
     await Promise.resolve();
     expect(reveal).toHaveBeenCalledExactlyOnceWith("a/file.ts");
   });
+  it("offers Show in Files and Reveal in Finder for Markdown file links", async () => {
+    const reveal = vi.fn(async () => {});
+    const commands = nativeContextMenuItems(context({ kind: "link", hasSelection: false,
+      fileLinkPath: "/project/a/my file.md", fileLinkRevealPath: "a/my file.md" }), false, reportError, () => true, reveal);
+    expect(commands.map((item) => "text" in item && item.text)).toEqual(["Show in Files", "Reveal in Finder"]);
+    for (const command of commands) if ("action" in command) command.action?.("ignored");
+    await Promise.resolve();
+    expect(reveal).toHaveBeenCalledExactlyOnceWith("a/my file.md");
+    expect(invoke).toHaveBeenCalledExactlyOnceWith("preview_file_action", { path: "/project/a/my file.md", action: "reveal" });
+    expect(labels({ kind: "link", hasSelection: false, fileLinkPath: "~/.config/pi/pix.jsonc" })).toEqual(["Reveal in Finder"]);
+  });
   it("disables file actions without a local path and never runs stale or detached actions", () => {
     const unavailable = items({ kind: "file", hasSelection: false });
     expect(unavailable).toHaveLength(3);

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { contextFilePath, desktopContextTarget, previewSourceReference, projectRevealPath, relativeImagePath } from "./desktop-context-target";
+import { contextFilePath, desktopContextTarget, linkedFilePath, previewSourceReference, projectRevealPath, relativeImagePath } from "./desktop-context-target";
 import previewSource from "../components/PreviewPane.svelte?raw";
 import tabsSource from "../components/WorkbenchTabs.svelte?raw";
 
@@ -42,6 +42,23 @@ describe("trusted preview file paths", () => {
       expect(contextFilePath(path, "/project")).toBeUndefined();
     }
     expect(contextFilePath("src/a.ts", "")).toBeUndefined();
+  });
+});
+
+describe("Markdown file link paths", () => {
+  const link = (data: Partial<Record<"projectFile" | "localFile", string>>) => ({ dataset: data }) as unknown as HTMLElement;
+  it("resolves project links in the workspace and keeps absolute or home local links", () => {
+    expect(linkedFilePath(link({ projectFile: "src/my file.ts" }), "/project")).toBe("/project/src/my file.ts");
+    expect(linkedFilePath(link({ localFile: "/tmp/ролик.mov" }), "/project")).toBe("/tmp/ролик.mov");
+    expect(linkedFilePath(link({ localFile: "~/.config/pi/pix.jsonc" }), "/project")).toBe("~/.config/pi/pix.jsonc");
+    expect(projectRevealPath(linkedFilePath(link({ localFile: "/project/a/b.md" }), "/project"), "/project")).toBe("a/b.md");
+  });
+  it("rejects escaping, relative or unavailable link paths", () => {
+    for (const data of [{}, { projectFile: "../x" }, { projectFile: "/abs" }, { localFile: "rel.txt" },
+      { localFile: "~/../etc/passwd" }, { localFile: "/tmp/a\0b" }]) {
+      expect(linkedFilePath(link(data), "/project")).toBeUndefined();
+    }
+    expect(linkedFilePath(link({ projectFile: "src/a.ts" }), "")).toBeUndefined();
   });
 });
 

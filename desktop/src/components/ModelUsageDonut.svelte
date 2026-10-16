@@ -14,7 +14,8 @@
   const palette: readonly ModelDisplayTone[] = [
     "model-openai", "model-zai", "model-anthropic", "warning", "info", "accent", "error", "search",
   ];
-  const entries = $derived(models.filter((m) => m.totalTokens > 0).map((model, index) => ({
+  const entries = $derived(models.filter((m) => m.totalTokens > 0)
+    .sort((a, b) => b.totalTokens - a.totalTokens).map((model, index) => ({
     ...model, tone: palette[index % palette.length],
   })));
   const totalTokens = $derived(entries.reduce((sum, m) => sum + m.totalTokens, 0));

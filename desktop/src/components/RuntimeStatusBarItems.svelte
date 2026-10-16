@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import Hourglass from "@lucide/svelte/icons/hourglass";
+  import ArrowDown from "@lucide/svelte/icons/arrow-down";
+  import ArrowUp from "@lucide/svelte/icons/arrow-up";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import Users from "@lucide/svelte/icons/users";
   import SubagentUsageDialog from "./SubagentUsageDialog.svelte";
@@ -32,6 +34,9 @@
     formatSessionUsageCost,
     formatSessionUsageTokens,
     sessionUsageHasValue,
+    sortSessionUsageProviders,
+    nextSessionUsageSort,
+    type SessionUsageSort,
     providerUsageUrl,
   } from "../lib/session-usage";
   import { openExternalHref } from "../lib/external-links";
@@ -79,6 +84,11 @@
   let root = $state<HTMLDivElement | null>(null);
   let contextOpen = $state(false);
   let usageOpen = $state(false);
+  let usageSort = $state<SessionUsageSort>({ key: "totalTokens", direction: "desc" });
+  const usageColumns: readonly { key: SessionUsageSort["key"]; label: string }[] = [
+    { key: "totalTokens", label: "Tokens" },
+    { key: "cost", label: "Cost" },
+  ];
   let subagentUsageOpen = $state(false);
   let now = $state(Date.now());
   let usageLinkFailed = $state(false);
@@ -116,6 +126,7 @@
   const popupLimitWindows = $derived(
     usageWindowItems.filter((item): item is { key: string; label: "H" | "W"; window: ModelUsageLimitWindow } => item.label === "H" || item.label === "W"),
   );
+  const usageProviders = $derived(sortSessionUsageProviders(sessionUsage?.providers ?? [], usageSort));
   const donutModels = $derived(
     (sessionUsage?.providers ?? []).flatMap((provider) =>
       provider.models.map((model) => ({ provider: provider.provider, model: model.model, totalTokens: model.totals.totalTokens })),
@@ -578,10 +589,22 @@
                       <div class="grid grid-cols-[1fr_auto_auto] items-center gap-x-3 gap-y-1 font-mono tabular-nums">
                         <span class="col-span-3 grid grid-cols-subgrid pb-1 text-xs font-sans tracking-wide text-muted-foreground/70">
                           <span></span>
-                          <span class="text-right uppercase">Tokens</span>
-                          <span class="text-right uppercase">Cost</span>
+                          {#each usageColumns as column (column.key)}
+                            <button
+                              type="button"
+                              class="inline-flex items-center justify-end gap-0.5 rounded-sm uppercase hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                              aria-label={`Sort models by ${column.label.toLowerCase()}, ${usageSort.key === column.key && usageSort.direction === "desc" ? "ascending" : "descending"}`}
+                              aria-pressed={usageSort.key === column.key}
+                              onclick={() => usageSort = nextSessionUsageSort(usageSort, column.key)}
+                            >
+                              {column.label}
+                              {#if usageSort.key === column.key}
+                                {#if usageSort.direction === "desc"}<ArrowDown class="h-3 w-3" aria-hidden="true" />{:else}<ArrowUp class="h-3 w-3" aria-hidden="true" />{/if}
+                              {/if}
+                            </button>
+                          {/each}
                         </span>
-                        {#each sessionUsage.providers as provider (provider.provider)}
+                        {#each usageProviders as provider (provider.provider)}
                           {@const usageUrl = providerUsageUrl(provider.provider)}
                           <div class="col-span-3 mt-1 flex min-w-0 items-center gap-1.5 text-xs font-sans font-medium text-muted-foreground first:mt-0">
                             {#if modelProviderBrand(provider.provider)}

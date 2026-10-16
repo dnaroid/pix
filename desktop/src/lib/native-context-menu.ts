@@ -142,6 +142,17 @@ export function nativeContextMenuItems(
       { id: "desktop.link.copy", text: "Copy Link Address", action: run(() => writeText(url)) },
     );
   }
+  const fileLinkPath = context.fileLinkPath;
+  if (fileLinkPath) {
+    if (items.length) separator();
+    const revealPath = context.fileLinkRevealPath;
+    if (revealPath && revealProjectEntry) {
+      items.push({ id: "desktop.link-file.explorer", text: "Show in Files",
+        action: run(() => revealProjectEntry(revealPath)) });
+    }
+    items.push({ id: "desktop.link-file.reveal", text: "Reveal in Finder",
+      action: run(() => invoke("preview_file_action", { path: fileLinkPath, action: "reveal" })) });
+  }
   if (context.kind === "file" || context.filePath) {
     if (items.length) separator();
     for (const [action, text] of [["copy", "Copy File"], ["open", "Open in External App"], ["reveal", "Reveal in Finder"]] as const) {

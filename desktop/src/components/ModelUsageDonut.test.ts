@@ -3,6 +3,21 @@ import { describe, expect, it } from "vitest";
 import ModelUsageDonut from "./ModelUsageDonut.svelte";
 
 describe("ModelUsageDonut", () => {
+  it("sorts the legend and segments by descending tokens, preserving ties and input", () => {
+    const models = Object.freeze([
+      { provider: "first", model: "small", totalTokens: 100 },
+      { provider: "second", model: "large", totalTokens: 900 },
+      { provider: "first", model: "equal", totalTokens: 900 },
+    ]);
+    const { body } = render(ModelUsageDonut, { props: { models } });
+    expect(body.indexOf(">large</span>")).toBeLessThan(body.indexOf(">equal</span>"));
+    expect(body.indexOf(">equal</span>")).toBeLessThan(body.indexOf(">small</span>"));
+    const dashes = [...body.matchAll(/stroke-dasharray="([\d.]+) /g)].map((match) => Number(match[1]));
+    expect(dashes).toHaveLength(3);
+    expect(dashes[0]).toBe(dashes[1]);
+    expect(dashes[1]!).toBeGreaterThan(dashes[2]!);
+    expect(models.map((model) => model.model)).toEqual(["small", "large", "equal"]);
+  });
   it("distinguishes models from the same provider and matches segment colors to legend dots", () => {
     const { body } = render(ModelUsageDonut, { props: { models: [
       { provider: "openai-codex", model: "sol", totalTokens: 900 },

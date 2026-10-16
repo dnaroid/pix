@@ -8,6 +8,10 @@ export interface DesktopContextTarget {
   element: HTMLElement;
   editor: HTMLElement | null;
   linkUrl?: string;
+  /** Absolute (or `~/`) target of a validated Markdown local/project file link. */
+  fileLinkPath?: string;
+  /** Workspace-relative Files-tree path for `fileLinkPath`, when inside the project. */
+  fileLinkRevealPath?: string;
   image?: HTMLImageElement;
   imagePath?: string;
   imageRelativePath?: string;
@@ -71,6 +75,16 @@ export function projectRevealPath(path: string | undefined, workspace: string): 
   const absolute = contextFilePath(path, workspace);
   const relative = absolute ? relativeImagePath(absolute, workspace) : undefined;
   return relative && relative !== "." && isWorkspaceProjectFilePath(relative) ? relative : undefined;
+}
+
+/** Validated Markdown file links: project paths are workspace-relative, local ones absolute or `~/`. */
+export function linkedFilePath(link: HTMLElement, workspace: string): string | undefined {
+  const projectPath = link.dataset.projectFile;
+  if (projectPath) return isWorkspaceProjectFilePath(projectPath) ? contextFilePath(projectPath, workspace) : undefined;
+  const localPath = link.dataset.localFile;
+  if (!localPath || localPath.includes("\0")) return undefined;
+  if (localPath.startsWith("~/")) return localPath.split("/").includes("..") ? undefined : localPath;
+  return localPath.startsWith("/") ? localPath : undefined;
 }
 
 /** Source rows, including their generated line-number gutter, share one logical line. */
@@ -143,13 +157,19 @@ export function desktopContextTarget(target: EventTarget | null, workspace = "")
 
   const href = element.closest("a[href]")?.getAttribute("href");
   const linkUrl = href ? normalizeExternalHref(href) : undefined;
+  const fileLink = element.closest<HTMLAnchorElement>("a[data-local-file], a[data-project-file]");
+  const fileLinkPath = fileLink ? linkedFilePath(fileLink, workspace) : undefined;
+  const fileLinkRevealPath = fileLinkPath ? projectRevealPath(fileLinkPath, workspace) : undefined;
   const hasSelection = hasContextSelection(element);
   const sourceReference = previewSourceReference(element, workspace);
-  if (linkUrl || hasSelection || sourceReference || fileSurface) {
+  if (linkUrl || fileLinkPath || hasSelection || sourceReference || fileSurface) {
     let kind: DesktopContextKind = fileSurface ? "file" : "readonly";
-    if (linkUrl) kind = "link";
+    if (linkUrl || fileLinkPath) kind = "link";
     if (hasSelection) kind = "selection";
-    return { kind, element, editor: null, linkUrl, sourceReference, filePath, projectRevealPath: revealPath, hasSelection, readOnly: true };
+    return {
+      kind, element, editor: null, linkUrl, fileLinkPath, fileLinkRevealPath, sourceReference,
+      filePath, projectRevealPath: revealPath, hasSelection, readOnly: true,
+    };
   }
   return null;
 }
