@@ -3707,9 +3707,10 @@ test("Pix Desktop explicit indexing propagates ACP caller cancellation to its ow
 async function hermeticSearchOverrides(dir: string) {
 	const path = join(dir, ".config", "pi", "pi-tools-suite.jsonc");
 	await mkdir(join(dir, ".config", "pi"), { recursive: true });
-	await writeFile(path, JSON.stringify({ search: { embedding: { embeddingProvider: "ollama", embeddingModel: "fixture", vectorSize: 4 } } }));
+	await writeFile(path, JSON.stringify({ search: { embedding: { embeddingProvider: "openrouter", embeddingModel: "fixture", vectorSize: 4 } } }));
+	// Production path (OpenRouter) with a stub key; the fake embedder means no network.
 	return { preferences: new SearchPreferences(path),
-		auth: { available: async () => false, key: async () => undefined, save: async () => {} },
+		auth: { available: async () => true, key: async () => "fixture", save: async () => {} },
 		embed: async (input: readonly string[]) => input.map(() => [1, 0, 0, 0]) };
 }
 
