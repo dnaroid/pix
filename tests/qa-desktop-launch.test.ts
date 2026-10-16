@@ -47,7 +47,7 @@ function child() {
 
 test("bounded exact CLI flags", () => {
 	assert.equal(parseArguments(["prepare", "--timeout-ms", "100", "--seed-config"]).seedConfig, true);
-	for (const args of [["launch"], ["launch", "--manifest", "/x", "--seed-config"], ["prepare", "--timeout-ms", "300001"], ["prepare", "--state", "../escape"], ["prepare", "--seed-config", "--seed-config"], ["prepare", "--state"]]) assert.throws(() => parseArguments(args));
+	for (const args of [["launch"], ["launch", "--manifest", "/x", "--seed-config"], ["prepare", "--timeout-ms", "900001"], ["prepare", "--state", "../escape"], ["prepare", "--seed-config", "--seed-config"], ["prepare", "--state"]]) assert.throws(() => parseArguments(args));
 });
 
 test("launch environment overrides isolation roots and removes working watcher/profile values", () => {

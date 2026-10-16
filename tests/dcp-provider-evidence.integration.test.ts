@@ -9,7 +9,7 @@ const converterUrl = new URL("../node_modules/@earendil-works/pi-ai/dist/api/ope
 const { convertResponsesMessages } = await import(converterUrl.href);
 const model = { provider: "openai-codex", id: "fixture", api: "openai-codex-responses", input: ["text"], contextWindow: 272_000, maxTokens: 128_000 };
 const serialize = (messages: any[]) => ({ input: convertResponsesMessages(model, { messages }, new Set([model.provider]), {
-  grammarToolInputProperties: new Map([["codemode", "code"]]),
+  grammarToolInputProperties: new Map([["codemode", "code"], ["grep", "pattern"]]),
 }) });
 
 test("Responses evidence accepts output items, not assistant calls or lookalike IDs", () => {
@@ -42,12 +42,12 @@ test("completed grammar-tool output enables DCP capacity recovery in one long tu
     const id = `call_${i}|ctc_${i}`;
     ids.push(id);
     const content = [{ type: "text" as const, text: `Result ${i}: completed inspection.\n${"old details ".repeat(500)}` }];
-    const args = { code: `return ${i}` };
-    await f.emit("tool_call", { toolCallId: id, toolName: "codemode", input: args });
-    await f.emit("tool_result", { toolCallId: id, toolName: "codemode", content, details: {}, isError: false });
+    const args = { pattern: `needle_${i}` };
+    await f.emit("tool_call", { toolCallId: id, toolName: "grep", input: args });
+    await f.emit("tool_result", { toolCallId: id, toolName: "grep", content, details: {}, isError: false });
     manager.appendMessage({ ...assistant("", i * 2 + 2), provider: model.provider, model: model.id, api: model.api,
-      stopReason: "toolUse", content: [{ type: "toolCall", id, name: "codemode", arguments: args }] });
-    manager.appendMessage({ role: "toolResult", toolCallId: id, toolName: "codemode", content, isError: false, timestamp: i * 2 + 3 });
+      stopReason: "toolUse", content: [{ type: "toolCall", id, name: "grep", arguments: args }] });
+    manager.appendMessage({ role: "toolResult", toolCallId: id, toolName: "grep", content, isError: false, timestamp: i * 2 + 3 });
   }
   const projection = await f.project();
   const payload = serialize(projection.messages);
@@ -66,6 +66,8 @@ test("completed grammar-tool output enables DCP capacity recovery in one long tu
   await complete("toolUse");
   assert.equal(f.state.providerSeenToolIds.size, 30);
 
+  // Only proven observations are prunable without a replacement fact; unknown
+  // grammar tools such as codemode keep continuity (see tool-retention-policy).
   // Same capacity numbers as the incident; recovery must prune only eligible
   // completed output, not abort or erase the active task/newest pairs.
   usage = 144_294;

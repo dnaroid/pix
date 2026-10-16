@@ -257,7 +257,7 @@ WebView and disposable project; your working app stays on its current build.
 
 Preparation waits for the successful watcher artifact and never starts another
 watcher. Use `--state <desktop-watch-state.json>` to disambiguate watchers and
-`--timeout-ms <100..300000>` for a bounded wait. For authorized model-based tests,
+`--timeout-ms <100..900000>` for a bounded wait. For authorized model-based tests,
 `--seed-config --seed-api-keys` explicitly copies allowlisted settings and literal
 API keys only; it does not copy OAuth tokens, sessions or an entire home. Do not
 export the private profile with screenshots. UI-only tests need no credentials.

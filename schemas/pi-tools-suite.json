@@ -213,6 +213,23 @@
       ],
       "description": "Ordered frontier models used by frontier-selecting sub-agent roles (oracle, frontier-review, delivery-review). A layer's list replaces inherited entries; null restores the built-in list."
     },
+    "builtinAgentModels": {
+      "type": "object",
+      "patternProperties": {
+        "^[a-z0-9][a-z0-9_-]*$": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^\\s*[^\\s/:]+/[^\\s:]+(?::(?:off|minimal|low|medium|high|xhigh|max))?\\s*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "description": "Per-role model overrides for built-in sub-agent roles as provider/model[:thinking]. Later layers merge per role; null restores the suite default. Frontier roles use frontierModels."
+    },
     "economy": {
       "type": "boolean",
       "description": "Economy mode: no sub-agent role selects a frontier model marked expensive. PI_TOOLS_SUITE_ECONOMY overrides it."
