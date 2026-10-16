@@ -22,7 +22,7 @@ import { BTW_METHOD, BTW_CHANNEL, parseBtwEvent, type BtwRequest, type BtwState 
 import { parseDesktopBtwRequest } from "../btw/request.js";
 import { SEARCH_QUERY_METHOD, SEARCH_CONFIG_METHOD, SEARCH_SYNC_METHOD, SEARCH_INDEX_METHOD, SEARCH_COMMITS_METHOD, SEARCH_INTENT_METHOD, SEARCH_TASKS_METHOD } from "../search/contract.js";
 import { parseSearchQueryRequest, parseSearchConfigRequest, parseSearchSyncRequest, parseSearchIndexRequest, parseSemanticTasksRequest } from "../search/request.js";
-import { DesktopSearchService, SearchUnavailableError } from "../search/service.js";
+import { DesktopSearchService, SearchUnavailableError, type SearchServiceOptions } from "../search/service.js";
 import { BackgroundSessionDiscovery, hydrateBackgroundTitle, type SessionCandidateSource } from "../search/background-session-discovery.js";
 import { SessionCandidateCatalog } from "../search/session-discovery.js";
 import { SessionSearchActivity } from "../search/session-activity.js";
@@ -484,6 +484,8 @@ export interface PixAcpAgentOptions {
 	readonly nativeSessionRevision?: (cwd: string) => Promise<string>;
 	/** Hermetic Desktop search backend override. */
 	readonly searchService?: DesktopSearchService;
+	/** Hermetic embedding preferences/auth/embedder for the default search backend (tests only). */
+	readonly searchOverrides?: Pick<SearchServiceOptions, "preferences" | "auth" | "embed">;
 	readonly commitSearchService?: Pick<DesktopCommitSearchService, "query" | "index" | "dispose">;
 	/** Stateless search-intent classifier; no session or project-source access. */
 	readonly searchIntentService?: Pick<DesktopSearchIntentService, "classify">;
@@ -630,6 +632,7 @@ export class PixAcpAgent {
 			options.agentDir ?? getAgentDir(), options.sessionCandidates ?? new SessionCandidateCatalog());
 		this.backgroundSearchSessions = backgroundSessions;
 		this.searchService = options.searchService ?? new DesktopSearchService({
+			...options.searchOverrides,
 			onIndexDiagnostic: ({ cwd, source, complete, indexed, total, durationMs, phase, reason }) => {
 				void acpFileLogger.log(complete ? "info" : "warn", complete ? "search:index-completed" : "search:index-incomplete",
 					{ source, complete, indexed, total, durationMs, ...(phase ? { phase } : {}), ...(reason ? { reason } : {}) },

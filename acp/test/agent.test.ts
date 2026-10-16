@@ -3703,6 +3703,16 @@ test("Pix Desktop explicit indexing propagates ACP caller cancellation to its ow
 	assert.equal(harness.adapter.sessionCount, 0);
 });
 
+/** Hermetic Ollama embedding consent: no credentials, no network, deterministic vectors. */
+async function hermeticSearchOverrides(dir: string) {
+	const path = join(dir, ".config", "pi", "pi-tools-suite.jsonc");
+	await mkdir(join(dir, ".config", "pi"), { recursive: true });
+	await writeFile(path, JSON.stringify({ search: { embedding: { embeddingProvider: "ollama", embeddingModel: "fixture", vectorSize: 4 } } }));
+	return { preferences: new SearchPreferences(path),
+		auth: { available: async () => false, key: async () => undefined, save: async () => {} },
+		embed: async (input: readonly string[]) => input.map(() => [1, 0, 0, 0]) };
+}
+
 test("Pix Desktop search preserves controlled source errors across ACP without leaking underlying failures", async t => {
 	const artifacts = resolve(".pi/artifacts/search-backend-locked/agent");
 	await mkdir(artifacts, { recursive: true });
@@ -3711,6 +3721,7 @@ test("Pix Desktop search preserves controlled source errors across ACP without l
 	let failing = true;
 	const sourceSignals: AbortSignal[] = [];
 	const harness = createTestAdapter({
+		searchOverrides: await hermeticSearchOverrides(cwd),
 		// Search discovery reads the session candidate catalog, not listPiSessions.
 		sessionCandidates: {
 			list: async (_cwd, _agentDir, signal) => {
@@ -3750,6 +3761,7 @@ test("Pix Desktop title discovery does not resurrect a session deleted while nat
   const started = new Promise<void>(resolve => { start = resolve; });
   const released = new Promise<void>(resolve => { finish = resolve; });
   const harness = createTestAdapter({
+    searchOverrides: await hermeticSearchOverrides(cwd),
     sessionCandidates: {
       list: async () => { start(); await released; return [{ id: "native", path, createdAt: 0 }]; },
       snapshot: async () => "fixture",
