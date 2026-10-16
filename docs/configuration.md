@@ -178,6 +178,11 @@ effect after a successful save; hiding the panel stops monitoring but does not
 disable log collection. See [Unified diagnostic logging](../specs/logging.md)
 for coverage, snapshot limits and privacy guidance.
 
+`desktop.projectIcon.model` optionally selects the OpenRouter image model used
+to generate project logos (default `google/gemini-2.5-flash-image`). A project
+value overrides the global Desktop profile. See [Pix Desktop](desktop.md) for
+what project information is sent for logo generation.
+
 **Settings → Desktop → General → Notifications** controls alerts for completed
 agent work, questions, pauses and errors. `desktop.notifications.enabled`
 defaults to `true`. **Sound only (no popups)** (`desktop.notifications.usePix`,

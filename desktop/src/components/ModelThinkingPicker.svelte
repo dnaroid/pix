@@ -7,6 +7,10 @@
   import ModelProviderIcon from "./ModelProviderIcon.svelte";
   import FrontierModelBadge from "./FrontierModelBadge.svelte";
   import { fuzzySearch } from "../lib/fuzzy";
+  import {
+    modelsBySelectionFrequency, readModelSelectionCounts, recordModelSelection,
+    type ModelSelectionCounts,
+  } from "../lib/model-selection-frequency";
   import { activateModelPickerPopover, modelPickerPopoverPosition } from "../lib/model-picker-popover";
   import { pickerModelIndex, nextPickerThinking } from "../lib/model-picker-navigation";
   import { modelDisplayToneClass, thinkingLevelTone } from "../lib/model-display";
@@ -20,6 +24,7 @@
 
   let {
     configOptions,
+    workspace = "",
     visibleModelRefs,
     rememberedThinkingByModel = {},
     defaultSelection,
@@ -34,6 +39,7 @@
     applyUnchanged = false,
   }: {
     configOptions: readonly SessionConfigOption[];
+    workspace?: string;
     visibleModelRefs?: readonly string[];
     rememberedThinkingByModel?: Readonly<Record<string, string>>;
     defaultSelection?: ModelDefaultSelection;
@@ -54,6 +60,7 @@
   let panel = $state<HTMLElement | null>(null);
   let search = $state<HTMLInputElement | null>(null);
   let query = $state("");
+  let selectionCounts = $state<ModelSelectionCounts>({});
   let selectedModelRef = $state("");
   let selectedThinking = $state("off");
   let selectedIndex = $state(0);
@@ -74,7 +81,8 @@
     : config.models.filter((model) => modelIsVisible(model)));
   const filteredModels = $derived.by(() => {
     const auto = visibilityMode ? undefined : pickerModels.find((model) => model.ref === AUTO_MODEL_REF);
-    const models = pickerModels.filter((model) => model.ref !== AUTO_MODEL_REF);
+    const catalogModels = pickerModels.filter((model) => model.ref !== AUTO_MODEL_REF);
+    const models = visibilityMode ? catalogModels : modelsBySelectionFrequency(catalogModels, selectionCounts);
     const filtered = fuzzySearch(
       models.map((model) => ({
       value: model,
@@ -104,6 +112,7 @@
 
   onMount(() => {
     alive = true;
+    selectionCounts = readModelSelectionCounts(workspace);
     visibleRefs = visibleModelRefs === undefined ? undefined : [...visibleModelRefs];
     for (const [modelRef, thinkingLevel] of Object.entries(rememberedThinkingByModel)) {
       thinkingByModel.set(modelRef, thinkingLevel);
@@ -303,8 +312,11 @@
 
   async function applySelection(): Promise<void> {
     if (!selectedModel || disabled || applying) return;
+    const selectionWorkspace = workspace;
+    const selectionRef = selectedModel.ref;
     if (!dirty) {
       if (!applyUnchanged) {
+        recordModelSelection(selectionWorkspace, selectionRef);
         confirmSelection();
         return;
       }
@@ -313,6 +325,7 @@
     applyError = "";
     try {
       await onApply(selectedModel.ref, selectedThinking);
+      recordModelSelection(selectionWorkspace, selectionRef);
       if (!alive) return;
       confirmSelection();
     } catch (error) {

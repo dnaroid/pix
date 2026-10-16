@@ -2,7 +2,6 @@
   import { onMount } from "svelte";
   import Hourglass from "@lucide/svelte/icons/hourglass";
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
-  import ArrowUp from "@lucide/svelte/icons/arrow-up";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import Users from "@lucide/svelte/icons/users";
   import SubagentUsageDialog from "./SubagentUsageDialog.svelte";
@@ -35,7 +34,6 @@
     formatSessionUsageTokens,
     sessionUsageHasValue,
     sortSessionUsageProviders,
-    nextSessionUsageSort,
     type SessionUsageSort,
     providerUsageUrl,
   } from "../lib/session-usage";
@@ -84,8 +82,8 @@
   let root = $state<HTMLDivElement | null>(null);
   let contextOpen = $state(false);
   let usageOpen = $state(false);
-  let usageSort = $state<SessionUsageSort>({ key: "totalTokens", direction: "desc" });
-  const usageColumns: readonly { key: SessionUsageSort["key"]; label: string }[] = [
+  let usageSort = $state<SessionUsageSort>("totalTokens");
+  const usageColumns: readonly { key: SessionUsageSort; label: string }[] = [
     { key: "totalTokens", label: "Tokens" },
     { key: "cost", label: "Cost" },
   ];
@@ -593,13 +591,13 @@
                             <button
                               type="button"
                               class="inline-flex items-center justify-end gap-0.5 rounded-sm uppercase hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-                              aria-label={`Sort models by ${column.label.toLowerCase()}, ${usageSort.key === column.key && usageSort.direction === "desc" ? "ascending" : "descending"}`}
-                              aria-pressed={usageSort.key === column.key}
-                              onclick={() => usageSort = nextSessionUsageSort(usageSort, column.key)}
+                              aria-label={`Sort models by ${column.label.toLowerCase()}, descending`}
+                              aria-pressed={usageSort === column.key}
+                              onclick={() => usageSort = column.key}
                             >
                               {column.label}
-                              {#if usageSort.key === column.key}
-                                {#if usageSort.direction === "desc"}<ArrowDown class="h-3 w-3" aria-hidden="true" />{:else}<ArrowUp class="h-3 w-3" aria-hidden="true" />{/if}
+                              {#if usageSort === column.key}
+                                <ArrowDown class="h-3 w-3" aria-hidden="true" />
                               {/if}
                             </button>
                           {/each}

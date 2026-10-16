@@ -68,6 +68,9 @@ Decision: [0015 — Canonical disposable harness output](../docs/decisions/0015-
 - `.pi/search/` is canonical durable project state, not scratch output. Both
   Desktop cleanup paths preserve its SQLite database and sidecars; see
   [Desktop universal search](desktop-universal-search.md).
+- Project logo files `.pi/project-icon.{png,jpg,webp,gif,svg}` are canonical
+  project state and are preserved by `.pi` cleanup; see the
+  [project identity contract](desktop-project-titlebar.md).
 - No new cleanup mechanism is introduced. The
   [Registry storage contract](resource-registry-project-state.md) cleans
   initialized-project `.pi/artifacts/` and `.pi/subagents/` in Desktop after a

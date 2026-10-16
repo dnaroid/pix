@@ -5,6 +5,8 @@ export interface DesktopPreferences {
   readonly notificationsEnabled: boolean;
   readonly soundOnlyEnabled: boolean;
   readonly gitCiFixModelRef: string | undefined;
+  /** OpenRouter image model for generated project logos; Rust supplies the default. */
+  readonly projectIconModel: string | undefined;
 }
 
 export const EXTERNAL_EDITOR_OPTIONS = [
@@ -34,6 +36,7 @@ export function resolveDesktopPreferences(
     notificationsEnabled: projectNotificationsEnabled ?? globalNotificationsEnabled ?? true,
     soundOnlyEnabled: projectSoundOnlyEnabled ?? globalSoundOnlyEnabled ?? false,
     gitCiFixModelRef: projectGitCiFixModelRef ?? globalGitCiFixModelRef,
+    projectIconModel: projectIconModelFromSource(projectSource) ?? projectIconModelFromSource(globalSource),
   };
 }
 
@@ -100,6 +103,18 @@ function gitCiFixModelRefFromSource(source: string | undefined): string | undefi
     if (!isRecord(parsed) || !isRecord(parsed.desktop) || !isRecord(parsed.desktop.git)) return undefined;
     const modelRef = parsed.desktop.git.ciFixModelRef;
     return typeof modelRef === "string" && modelRef.trim() ? modelRef.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function projectIconModelFromSource(source: string | undefined): string | undefined {
+  if (!source?.trim()) return undefined;
+  try {
+    const parsed = parse(source, undefined, { allowTrailingComma: true }) as unknown;
+    if (!isRecord(parsed) || !isRecord(parsed.desktop) || !isRecord(parsed.desktop.projectIcon)) return undefined;
+    const model = parsed.desktop.projectIcon.model;
+    return typeof model === "string" && model.trim() ? model.trim() : undefined;
   } catch {
     return undefined;
   }

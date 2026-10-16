@@ -26,13 +26,14 @@ function source(name: keyof typeof sources): string {
 
 describe("Status bar click surfaces", () => {
   it("connects keyboard-accessible usage headers to table-only sorting with direction indicators", () => {
-    expect(runtimeStatus).toContain('let usageSort = $state<SessionUsageSort>({ key: "totalTokens", direction: "desc" })');
+    expect(runtimeStatus).toContain('let usageSort = $state<SessionUsageSort>("totalTokens")');
     expect(runtimeStatus).toContain("sortSessionUsageProviders(sessionUsage?.providers ?? [], usageSort)");
     expect(runtimeStatus).toContain("{#each usageProviders as provider");
-    expect(runtimeStatus).toContain("onclick={() => usageSort = nextSessionUsageSort(usageSort, column.key)}");
-    expect(runtimeStatus).toContain('aria-pressed={usageSort.key === column.key}');
+    expect(runtimeStatus).toContain("onclick={() => usageSort = column.key}");
+    expect(runtimeStatus).toContain('aria-pressed={usageSort === column.key}');
     expect(runtimeStatus).toContain('<ArrowDown class="h-3 w-3" aria-hidden="true"');
-    expect(runtimeStatus).toContain('<ArrowUp class="h-3 w-3" aria-hidden="true"');
+    expect(runtimeStatus).not.toContain('ArrowUp');
+    expect(runtimeStatus).toContain('aria-label={`Sort models by ${column.label.toLowerCase()}, descending`}');
     expect(runtimeStatus).toContain('<ModelUsageDonut models={donutModels}');
   });
   it("uses neutral model and thinking labels in persistent chrome", () => {

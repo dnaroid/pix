@@ -7,6 +7,18 @@ status: active
 
 ## Behavior
 
+- The main session/draft model picker orders visible models by descending count
+  of confirmed selections in the current project. Counts are stored locally per
+  workspace path and start empty; past selections are not reconstructed. Apply
+  or Enter records one confirmation after a successful callback (also when
+  confirming the unchanged model); staging, Cancel, failed Apply and Set default
+  do not count. Thinking levels share the model's counter. Auto stays first;
+  ties preserve catalog order. Fuzzy-search relevance remains primary, with
+  frequency resolving equally ranked matches. Manage retains catalog order.
+  Counts are loaded on opening and do not reorder a popup during selection.
+  Storage failures are logged and do not block applying a model. Other shared
+  picker callers without a project scope retain their existing ordering.
+
 - Frontier models have a compact Lucide crown beside their name in the shared
   picker (including Manage mode) and beside the current model in the status bar.
   Classification uses saved Tools Suite `frontierModels`, with runtime default
@@ -83,12 +95,14 @@ status: active
 - `desktop/src/app/desktop-model-services.ts`
 - `desktop/src/App.svelte`
 - `desktop/src/lib/model-picker-popover.ts`
+- `desktop/src/lib/model-selection-frequency.ts`
 
 ## Tests
 
 - `desktop/src/lib/frontier-model-badges.test.ts`
 
 - `desktop/src/components/ModelThinkingPicker.test.ts`
+- `desktop/src/lib/model-selection-frequency.test.ts`
 - `desktop/src/components/DesktopModalDialogs.test.ts`
 - `desktop/src/app/model-picker-state.test.ts`
 - `desktop/src/app/model-config-actions.test.ts`

@@ -24,6 +24,7 @@
     workspace,
     recentProjects,
     projectColors,
+    projectIcons = new Map(),
     currentWindowDisabled,
     onOpen,
     onMinimumWidthChange,
@@ -36,6 +37,8 @@
     workspace: string;
     recentProjects: string[];
     projectColors: ReadonlyMap<string, string>;
+    /** Project path -> data URL of a custom logo; absent projects use initials. */
+    projectIcons?: ReadonlyMap<string, string>;
     currentWindowDisabled: boolean;
     onOpen?: () => void;
     onMinimumWidthChange?: (width: number) => void;
@@ -246,10 +249,11 @@
       aria-haspopup="menu"
       aria-expanded={open}
       data-project-badge
+      data-project-logo={projectIcons.has(workspace) || undefined}
       data-window-inactive={!windowFocused}
       onclick={toggle}
       onkeydown={handleTriggerKeydown}
-    >{projectAbbreviation(workspace)}</button>
+    >{#if projectIcons.get(workspace)}<img class="h-full w-full rounded-[inherit] object-cover" src={projectIcons.get(workspace)} alt="" draggable="false" />{:else}{projectAbbreviation(workspace)}{/if}</button>
   {:else}
     <button
       bind:this={trigger}
@@ -313,8 +317,9 @@
                 class="project-titlebar-badge grid h-5 w-5 place-items-center justify-self-center rounded-sm border border-border font-mono text-xs font-semibold"
                 style:--project-titlebar-hue={projectFolderHue(project)}
                 style:--project-titlebar-color={projectColors.get(project)}
+                data-project-logo={projectIcons.has(project) || undefined}
                 aria-hidden="true"
-              >{projectAbbreviation(project)}</span>
+              >{#if projectIcons.get(project)}<img class="h-full w-full rounded-[inherit] object-cover" src={projectIcons.get(project)} alt="" draggable="false" />{:else}{projectAbbreviation(project)}{/if}</span>
               <span class="min-w-0">
                 <strong class="block truncate text-xs font-medium">{projectName(project)}</strong>
                 <small class="block truncate font-mono text-xs leading-4 text-muted-foreground">{projectParentPath(project)}</small>
@@ -371,6 +376,20 @@
     background-color: transparent;
     border-color: var(--project-titlebar-identity);
     color: var(--project-titlebar-identity);
+  }
+
+  /* A logo carries its own identity: no identity-colored frame in any state. */
+  .project-titlebar-badge[data-project-logo],
+  .project-titlebar-badge[data-project-logo][data-window-inactive="true"] {
+    overflow: hidden;
+    border-color: transparent;
+    border-width: 0;
+    background-color: transparent;
+  }
+
+  .project-titlebar-badge[data-project-logo][data-window-inactive="true"] img {
+    /* Grayscale alone lifts luminance on dark chrome; dim it like inactive text. */
+    filter: grayscale(1) brightness(0.55);
   }
 
   @media (prefers-color-scheme: dark) {

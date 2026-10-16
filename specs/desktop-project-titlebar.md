@@ -115,6 +115,35 @@ without blocking desktop interactions.
   config path. Saving `Automatic` removes only the `color` property; saving a
   custom color updates only that property and preserves sibling JSONC settings
   and comments. A malformed `.pi/workspace.jsonc` is never overwritten.
+- A project may replace the two-letter initials with a logo image. The image is
+  stored as exactly one canonical file `.pi/project-icon.{png,jpg,webp,gif,svg}`
+  (format detected from content, maximum 4 MB) and referenced from
+  `.pi/workspace.jsonc` as `"icon": ".pi/project-icon.png"`. Only those canonical
+  paths are accepted; anything else falls back to initials. All five names are
+  canonical `.pi` files, so automatic/manual `.pi` cleanup never removes them;
+  their `.project-icon.*.tmp` write temporaries are treated like other Pix temps.
+  The titlebar badge and recent-project badges render the image instead of the
+  initials; the unfocused-window titlebar state dims/desaturates the image.
+- Project settings has a `Logo` section with `Initials` and `Image` modes. In
+  `Image` mode the user can `Choose file…` (native chooser owned by Rust; the
+  webview never passes arbitrary paths) or `Generate with AI`/`Generate another`
+  with an optional free-text prompt (max 1000 characters). Generation calls
+  OpenRouter chat completions with image modalities using `OPENROUTER_API_KEY` or
+  the Pi auth `openrouter` key; the project name, user prompt, and the first
+  1000 README characters are sent. The model defaults to
+  `google/gemini-2.5-flash-image` and can be overridden by
+  `desktop.projectIcon.model` in project or global `pix-desktop.jsonc`. Picked or
+  generated images are previews only; nothing is written until Save. Saving an
+  image writes the canonical file first, then updates `icon` in the workspace
+  config via the same compare-and-swap path; saving `Initials` removes only the
+  `icon` property. Pick/generate results arriving after the dialog closes or a
+  newer request starts are discarded.
+- In `Custom` color mode, `From logo` (enabled when a stored or previewed logo
+  exists) decodes the logo off-screen at 32×32 and fills the hex field with its
+  most vivid prominent color: transparent, near-black, near-white and gray
+  pixels are ignored and hue bins are weighted by saturation; a colorless logo
+  falls back to its most frequent color. The value is an ordinary editable
+  custom color written to `color` on Save; it does not follow later logo changes.
 - Project settings remains open across background sidebar-prop updates for the
   same workspace (including Git/Registry refreshes). Only an actual workspace
   change resets its open, saving, and error state; explicit dismissal and a
@@ -176,6 +205,9 @@ without blocking desktop interactions.
   visible in the modal instead of silently winning with stale content.
 
 ## Related files
+
+- `desktop/src-tauri/src/project_icon.rs`
+- `desktop/src/lib/project-icon.ts`
 
 - `desktop/src-tauri/src/window_restore.rs`
 - `desktop/src-tauri/tauri.conf.json`

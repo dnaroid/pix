@@ -1,7 +1,9 @@
+import type { ProjectSettingsDraft } from "../lib/project-icon";
+
 interface WorkspaceSidebarProjectSettingsControllerOptions {
   readonly workspace: () => string;
   readonly closeProjectSwitcher: () => void;
-  readonly saveProjectColor: (color: string | undefined) => Promise<string | undefined>;
+  readonly saveProjectSettings: (draft: ProjectSettingsDraft) => Promise<string | undefined>;
 }
 
 export function createWorkspaceSidebarProjectSettingsController(
@@ -29,13 +31,13 @@ export function createWorkspaceSidebarProjectSettingsController(
     open = true;
   }
 
-  async function save(color: string | undefined): Promise<void> {
+  async function save(draft: ProjectSettingsDraft): Promise<void> {
     const requestWorkspace = options.workspace();
     if (!requestWorkspace || saving) return;
     saving = true;
     error = null;
     try {
-      const nextError = await options.saveProjectColor(color);
+      const nextError = await options.saveProjectSettings(draft);
       if (options.workspace() !== requestWorkspace) return;
       if (nextError) {
         error = nextError;

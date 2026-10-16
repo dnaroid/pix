@@ -205,4 +205,39 @@ describe("project color loading", () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it("saves the logo image before referencing it in workspace config", async () => {
+    vi.stubGlobal("localStorage", { setItem: vi.fn() });
+    try {
+      const calls: string[] = [];
+      let written = "";
+      tauri.invoke.mockImplementation((command: string, args?: { content?: string }) => {
+        calls.push(command);
+        if (command === "save_project_icon") return Promise.resolve(".pi/project-icon.png");
+        if (command === "project_file_exists") return Promise.resolve(false);
+        if (command === "write_project_workspace_config_if_unchanged") {
+          written = args?.content ?? "";
+          return Promise.resolve({ written: true, document: { content: written } });
+        }
+        if (command === "read_project_file") return Promise.resolve({ content: written });
+        if (command === "read_project_icon") return Promise.resolve({ mimeType: "image/png", dataBase64: "AAA" });
+        return Promise.resolve(undefined);
+      });
+      const store = createProjectWorkspaceStore({ workspace: () => "/active", reportError: vi.fn() });
+      store.remember("/active");
+      expect(await store.saveSettings({
+        color: undefined,
+        icon: { kind: "image", image: { mimeType: "image/png", dataBase64: "AAA" } },
+      })).toBeUndefined();
+      expect(calls.indexOf("save_project_icon")).toBeLessThan(calls.indexOf("write_project_workspace_config_if_unchanged"));
+      expect(written).toContain('"icon": ".pi/project-icon.png"');
+      expect(store.projectIcons.get("/active")).toBe("data:image/png;base64,AAA");
+
+      expect(await store.saveSettings({ color: undefined, icon: { kind: "none" } })).toBeUndefined();
+      expect(written).not.toContain('"icon"');
+      expect(store.projectIcons.get("/active")).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });

@@ -11,6 +11,7 @@ type OverlaysProps = ComponentProps<typeof DesktopOverlays>;
 type ModelThinkingProps = NonNullable<OverlaysProps["modelThinking"]>;
 
 export function createDesktopOverlaysViewModel(options: {
+  workspace: () => string;
   pendingElicitation: () => PendingElicitation | null;
   displayedConfigOptions: () => ModelThinkingProps["configOptions"];
   canUseSession: () => boolean;
@@ -58,6 +59,7 @@ export function createDesktopOverlaysViewModel(options: {
         onCancel: (id: string) => options.quotaWait.closeSchedule(id),
       } : null,
       modelThinking: options.modelConfig.pickerOpen ? {
+        workspace: options.workspace(),
         configOptions: options.modelConfig.pickerConfigOptions(options.displayedConfigOptions()),
         visibleModelRefs: options.preferences.visibleModelRefs,
         rememberedThinkingByModel: options.preferences.rememberedThinkingByModel,

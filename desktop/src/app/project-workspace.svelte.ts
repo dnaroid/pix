@@ -15,9 +15,15 @@ import {
 } from "../lib/recent-projects";
 import {
   projectColorFromWorkspaceConfig,
-  workspaceConfigWithProjectColor,
+  projectIconPathFromWorkspaceConfig,
+  workspaceConfigWithProjectSettings,
   WORKSPACE_CONFIG_PATH,
 } from "../lib/project-colors";
+import {
+  projectIconDataUrl,
+  type ProjectIconImage,
+  type ProjectSettingsDraft,
+} from "../lib/project-icon";
 import { resolveDesktopPreferences } from "../lib/desktop-config";
 import type { ProjectFilePreview } from "../lib/project-files";
 import type { ProjectTreeEntry } from "../lib/project-tree";
@@ -72,8 +78,11 @@ export function restoreProjectWorkspace(
 export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOptions) {
   let recentProjects = $state<string[]>([]);
   let projectColors = $state<Map<string, string>>(new Map());
+  /** Project path -> data URL of its canonical `.pi/project-icon.*` logo. */
+  let projectIcons = $state<Map<string, string>>(new Map());
   let externalEditor = $state<string | undefined>(undefined);
   let gitCiFixModelRef = $state<string | undefined>(undefined);
+  let projectIconModel: string | undefined;
   let colorLoadGeneration = 0;
   let colorSaveGeneration = 0;
 
@@ -103,6 +112,7 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
   function pruneProjectColors(): Set<string> {
     const activePaths = new Set(recentProjects);
     projectColors = new Map([...projectColors].filter(([path]) => activePaths.has(path)));
+    projectIcons = new Map([...projectIcons].filter(([path]) => activePaths.has(path)));
     return activePaths;
   }
 
@@ -125,14 +135,48 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
     if (color) next.set(projectPath, color);
     else next.delete(projectPath);
     projectColors = next;
+    await loadProjectIcon(projectPath, projectIconPathFromWorkspaceConfig(preview?.content), generation);
   }
 
-  async function saveColor(color: string | undefined): Promise<string | undefined> {
+  async function loadProjectIcon(
+    projectPath: string,
+    iconPath: string | undefined,
+    generation: number,
+  ): Promise<void> {
+    const image = iconPath
+      ? await invoke<ProjectIconImage>("read_project_icon", { workspace: projectPath, path: iconPath })
+        .catch(() => undefined)
+      : undefined;
+    if (generation !== colorLoadGeneration || !recentProjects.includes(projectPath)) return;
+    setProjectIcon(projectPath, image ? projectIconDataUrl(image) : undefined);
+  }
+
+  function setProjectIcon(projectPath: string, dataUrl: string | undefined): void {
+    if (projectIcons.get(projectPath) === dataUrl) return;
+    const next = new Map(projectIcons);
+    if (dataUrl) next.set(projectPath, dataUrl);
+    else next.delete(projectPath);
+    projectIcons = next;
+  }
+
+  function saveColor(color: string | undefined): Promise<string | undefined> {
+    return saveSettings({ color, icon: { kind: "keep" } });
+  }
+
+  async function saveSettings(draft: ProjectSettingsDraft): Promise<string | undefined> {
     const workspace = options.workspace();
     if (!workspace) return "Open a project before changing project settings.";
     const generation = ++colorSaveGeneration;
     colorLoadGeneration += 1;
+    const { color, icon } = draft;
     try {
+      // The image is written first; config only references it after success.
+      const iconPath = icon.kind === "image"
+        ? await invoke<string>("save_project_icon", { workspace, dataBase64: icon.image.dataBase64 })
+        : undefined;
+      if (generation !== colorSaveGeneration || options.workspace() !== workspace) {
+        return "The active project changed before settings could be saved.";
+      }
       const exists = await invoke<boolean>("project_file_exists", {
         workspace,
         path: WORKSPACE_CONFIG_PATH,
@@ -150,7 +194,10 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
         return "The active project changed before settings could be saved.";
       }
       for (let attempt = 0; attempt < 3; attempt += 1) {
-        const content = workspaceConfigWithProjectColor(current?.content, color);
+        const content = workspaceConfigWithProjectSettings(
+          current?.content,
+          icon.kind === "keep" ? { color } : { color, icon: iconPath },
+        );
         const result = await invoke<{ written: boolean; document: ProjectFilePreview | null }>(
           "write_project_workspace_config_if_unchanged",
           {
@@ -166,6 +213,9 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
           if (savedColor) next.set(workspace, savedColor);
           else next.delete(workspace);
           projectColors = next;
+          if (icon.kind !== "keep") {
+            setProjectIcon(workspace, icon.kind === "image" ? projectIconDataUrl(icon.image) : undefined);
+          }
           refreshColors([workspace]);
           options.afterSave?.(workspace);
           return undefined;
@@ -177,6 +227,22 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
       if (generation !== colorSaveGeneration || options.workspace() !== workspace) return undefined;
       return error instanceof Error ? error.message : String(error);
     }
+  }
+
+  async function pickIcon(): Promise<ProjectIconImage | undefined> {
+    return (await invoke<ProjectIconImage | null>("pick_project_icon_image")) ?? undefined;
+  }
+
+  async function generateIcon(prompt?: string): Promise<ProjectIconImage> {
+    const workspace = options.workspace();
+    if (!workspace) throw new Error("Open a project before generating a logo.");
+    await loadPreferences(workspace);
+    if (options.workspace() !== workspace) throw new Error("The active project changed.");
+    return invoke<ProjectIconImage>("generate_project_icon_image", {
+      workspace,
+      model: projectIconModel ?? null,
+      prompt: prompt?.trim() || null,
+    });
   }
 
   async function loadPreferences(projectPath: string): Promise<void> {
@@ -191,6 +257,7 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
     const preferences = resolveDesktopPreferences(globalConfig?.content, projectConfig?.content);
     externalEditor = preferences.externalEditor;
     gitCiFixModelRef = preferences.gitCiFixModelRef;
+    projectIconModel = preferences.projectIconModel;
   }
 
   async function listDirectory(path: string): Promise<ProjectTreeEntry[]> {
@@ -226,12 +293,16 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
   return {
     get recentProjects() { return recentProjects; },
     get projectColors() { return projectColors; },
+    get projectIcons() { return projectIcons; },
     get externalEditor() { return externalEditor; },
     get gitCiFixModelRef() { return gitCiFixModelRef; },
     remember,
     restore,
     refreshColors,
     saveColor,
+    saveSettings,
+    pickIcon,
+    generateIcon,
     loadPreferences,
     listDirectory,
     openInEditor,

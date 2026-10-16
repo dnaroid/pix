@@ -11,6 +11,7 @@ export function createDesktopShellViewModelServices(
 ) {
   const openBrainstormSession = createBrainstormSessionOpener(options);
   const overlays = createDesktopOverlaysViewModel({
+    workspace: options.workspace,
     pendingElicitation: () => options.presentation.activePendingElicitation,
     displayedConfigOptions: options.displayedConfigOptions,
     canUseSession: () => options.presentation.canUseSession,

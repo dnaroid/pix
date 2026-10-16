@@ -95,4 +95,13 @@ describe("ProjectSwitcher project opening actions", () => {
     expect(switcherSource).toContain("else if (nextWorkspace !== observedWorkspace)");
     expect(switcherSource).not.toContain("workspace;\n    open = false;");
   });
+
+  it("renders a custom project logo instead of initials when configured", () => {
+    expect(switcherSource).toContain("projectIcons.get(workspace)");
+    expect(switcherSource).toContain("projectIcons.get(project)");
+    expect(switcherSource).toContain("data-project-logo=");
+    // A logo has no identity-colored frame; the unfocused window shows it in grayscale.
+    expect(switcherSource).toMatch(/\[data-project-logo\]\[data-window-inactive="true"\] \{[^}]*border-width: 0;/u);
+    expect(switcherSource).toContain("filter: grayscale(1) brightness(0.55);");
+  });
 });

@@ -436,6 +436,16 @@
           "type": "string",
           "description": "External file editor used by Project and Preview open-in-editor actions. Common values include gram, zed, code/vscode, cursor, subl/sublime, idea/intellij, and webstorm; an executable path/name is also accepted. When omitted, Desktop asks the user to choose an editor instead of assuming one."
         },
+        "projectIcon": {
+          "type": "object",
+          "properties": {
+            "model": {
+              "type": "string",
+              "description": "OpenRouter image-generation model used for project logos. Defaults to google/gemini-2.5-flash-image."
+            }
+          },
+          "description": "AI project-logo generation preferences."
+        },
         "notifications": {
           "type": "object",
           "properties": {

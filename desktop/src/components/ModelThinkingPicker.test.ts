@@ -29,7 +29,7 @@ describe("ModelThinkingPicker staged selection", () => {
     expect(pickerSource).toContain("activateModelPickerPopover(dialogElement, search, onClose");
     expect(pickerSource).not.toContain("{:else if model.ref === selectedModelRef}");
     expect(pickerSource).not.toContain("!dirty || disabled");
-    expect(pickerSource).toContain("if (!dirty) {\n      if (!applyUnchanged) {\n        confirmSelection();");
+    expect(pickerSource).toContain("if (!dirty) {\n      if (!applyUnchanged) {\n        recordModelSelection(selectionWorkspace, selectionRef);\n        confirmSelection();");
     expect(pickerSource).toContain("await onApply(selectedModel.ref, selectedThinking)");
   });
 
@@ -45,7 +45,7 @@ describe("ModelThinkingPicker staged selection", () => {
     expect(pickerSource).not.toContain("showModal");
     expect(pickerSource).not.toContain("backdrop:bg-overlay");
     expect(pickerSource).toContain("popover?.dispose()");
-    expect(pickerSource).toContain("await onApply(selectedModel.ref, selectedThinking);\n      if (!alive) return;");
+    expect(pickerSource).toContain("await onApply(selectedModel.ref, selectedThinking);\n      recordModelSelection(selectionWorkspace, selectionRef);\n      if (!alive) return;");
     expect(pickerSource).toContain("if (selectedAuto) return;");
   });
 
@@ -53,6 +53,15 @@ describe("ModelThinkingPicker staged selection", () => {
     expect(pickerSource).toContain("const focusComposer = restoreFocus;\n    onClose();\n    focusComposer?.();");
     expect(pickerSource).toContain("if (!alive) return;\n      confirmSelection();");
     expect(pickerSource).not.toContain("onClose();\n      restoreFocus?.();");
+  });
+
+  it("ranks normal browsing before fuzzy search and captures the project before asynchronous Apply", () => {
+    expect(pickerSource).toContain("visibilityMode ? catalogModels : modelsBySelectionFrequency(catalogModels, selectionCounts)");
+    expect(pickerSource).toContain("return auto ? [auto, ...filtered] : filtered");
+    expect(pickerSource).toContain("selectionCounts = readModelSelectionCounts(workspace)");
+    expect(pickerSource.indexOf("const selectionWorkspace = workspace")).toBeLessThan(pickerSource.indexOf("await onApply("));
+    const stage = pickerSource.slice(pickerSource.indexOf("function stageModel("), pickerSource.indexOf("function stageThinking("));
+    expect(stage).not.toContain("recordModelSelection");
   });
 
   it("confirms the staged selection with Enter from model rows in select mode only", () => {

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   projectColorFromWorkspaceConfig,
+  projectIconPathFromWorkspaceConfig,
+  workspaceConfigWithProjectSettings,
   workspaceConfigWithProjectColor,
   WORKSPACE_CONFIG_PATH,
 } from "./project-colors";
@@ -47,5 +49,27 @@ describe("workspace project color", () => {
 
   it("refuses to overwrite malformed workspace config", () => {
     expect(() => workspaceConfigWithProjectColor("{", "#112233")).toThrow("workspace.jsonc is malformed");
+  });
+
+  it("reads only canonical project logo paths", () => {
+    expect(projectIconPathFromWorkspaceConfig('{"icon":".pi/project-icon.png"}')).toBe(".pi/project-icon.png");
+    expect(projectIconPathFromWorkspaceConfig('{"icon":".pi/project-icon.svg"}')).toBe(".pi/project-icon.svg");
+    expect(projectIconPathFromWorkspaceConfig('{"icon":"../secret.png"}')).toBeUndefined();
+    expect(projectIconPathFromWorkspaceConfig('{"icon":".pi/workspace.jsonc"}')).toBeUndefined();
+    expect(projectIconPathFromWorkspaceConfig("{")).toBeUndefined();
+  });
+
+  it("updates or preserves the logo independently of the color", () => {
+    const withIcon = workspaceConfigWithProjectSettings('{ // keep\n "color": "#123" }', {
+      color: "#123", icon: ".pi/project-icon.png",
+    });
+    expect(withIcon).toContain("// keep");
+    expect(projectIconPathFromWorkspaceConfig(withIcon)).toBe(".pi/project-icon.png");
+    const kept = workspaceConfigWithProjectSettings(withIcon, { color: undefined });
+    expect(projectIconPathFromWorkspaceConfig(kept)).toBe(".pi/project-icon.png");
+    expect(projectColorFromWorkspaceConfig(kept)).toBeUndefined();
+    const removed = workspaceConfigWithProjectSettings(kept, { color: undefined, icon: undefined });
+    expect(projectIconPathFromWorkspaceConfig(removed)).toBeUndefined();
+    expect(() => workspaceConfigWithProjectSettings("{}", { color: undefined, icon: "/etc/passwd" })).toThrow();
   });
 });

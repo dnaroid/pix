@@ -1,19 +1,14 @@
 import type { SessionUsageProvider, SessionUsageReport, SessionUsageTotals } from "./acp-client-types";
 
-export type SessionUsageSort = { key: "totalTokens" | "cost"; direction: "desc" | "asc" };
-
-export function nextSessionUsageSort(current: SessionUsageSort, key: SessionUsageSort["key"]): SessionUsageSort {
-  return { key, direction: current.key === key && current.direction === "desc" ? "asc" : "desc" };
-}
+export type SessionUsageSort = "totalTokens" | "cost";
 
 export function sortSessionUsageProviders(
   providers: readonly SessionUsageProvider[],
-  sort: SessionUsageSort = { key: "totalTokens", direction: "desc" },
+  sort: SessionUsageSort = "totalTokens",
 ): SessionUsageProvider[] {
-  const direction = sort.direction === "desc" ? -1 : 1;
   return providers.map((provider) => ({
     ...provider,
-    models: [...provider.models].sort((a, b) => direction * (a.totals[sort.key] - b.totals[sort.key])),
+    models: [...provider.models].sort((a, b) => b.totals[sort] - a.totals[sort]),
   }));
 }
 

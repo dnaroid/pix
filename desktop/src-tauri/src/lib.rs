@@ -55,6 +55,7 @@ mod preview_file;
 mod preview_file_action;
 mod project_browser;
 mod project_directory_link;
+mod project_icon;
 mod project_tasks_sqlite;
 mod qa_profile;
 #[cfg(feature = "bundled-runtime")]
@@ -127,6 +128,12 @@ const PROJECT_PI_CANONICAL_FILES: &[&str] = &[
     "pi-tools-suite.jsonc",
     "pix-desktop.jsonc",
     "pix.jsonc",
+    // Project logo (see project_icon::PROJECT_ICON_FILE_NAMES).
+    "project-icon.gif",
+    "project-icon.jpg",
+    "project-icon.png",
+    "project-icon.svg",
+    "project-icon.webp",
     "qa_auth.jsonc",
     "registry.json",
     "registry-project-key",
@@ -7773,7 +7780,8 @@ fn is_pix_project_temp_name(name: &str) -> bool {
         && (name.starts_with(".tasks.jsonc.")
             || name.starts_with(".tasks.jsonc.initialize.")
             || name.starts_with(".workspace.jsonc.")
-            || name.starts_with(".markdown."))
+            || name.starts_with(".markdown.")
+            || name.starts_with(project_icon::PROJECT_ICON_TEMP_PREFIX))
 }
 
 /// The scaffold itself is the initialization marker.  A pre-existing `.pi`
@@ -8640,6 +8648,10 @@ pub fn run() {
             acp_host::acp_stop,
             inspect_attachments,
             read_attachment_base64,
+            project_icon::pick_project_icon_image,
+            project_icon::generate_project_icon_image,
+            project_icon::save_project_icon,
+            project_icon::read_project_icon,
             cache_attachment,
             cache_task_attachment,
             persist_task_attachment,
@@ -11510,6 +11522,7 @@ mod tests {
             "pi-tools-suite.jsonc",
             "pix-desktop.jsonc",
             "pix.jsonc",
+            "project-icon.png",
             "registry.json",
             "registry-project-key",
             "todo-plan.json",
@@ -11582,6 +11595,7 @@ mod tests {
             "pi-tools-suite.jsonc",
             "pix-desktop.jsonc",
             "pix.jsonc",
+            "project-icon.png",
             "registry.json",
             "registry-project-key",
             "todo-plan.json",

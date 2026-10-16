@@ -70,8 +70,8 @@ Donut segments and legend rows are ordered by descending recorded token count
 across providers. The spend table likewise orders models by descending token
 count within each provider by default, without changing provider order. Clicking
 the Tokens or Cost header sorts models within every provider by that criterion;
-selecting a new criterion starts descending, and clicking the active header
-toggles ascending/descending. An arrow indicates the active direction. This
+sorting is always descending, and clicking the active header leaves the order
+unchanged. A down arrow indicates the active criterion. This
 table-only selection stays while the component is mounted, including popup
 reopens; the donut remains descending by tokens. Equal values retain their input
 order; totals, costs and token shares are unchanged.

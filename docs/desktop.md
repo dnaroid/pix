@@ -104,6 +104,18 @@ defaults, prompt helpers, visible models, external editor, voice input and Git
 review/commit-message model preferences. TUI-only renderer/theme settings stay
 in `pix.jsonc`.
 
+Project settings can assign a logo using **Initials** or **Image**. Images may
+be selected with the native file chooser or generated through OpenRouter; they
+remain previews until saved. A saved image is stored as `.pi/project-icon.png`,
+`.jpg`, `.webp`, `.gif` or `.svg` (content-detected, up to 4 MB) and referenced
+by `.pi/workspace.jsonc`. Generation uses `OPENROUTER_API_KEY` or the OpenRouter
+key in Pi's `auth.json`; it sends the project name, optional prompt (up to 1000
+characters) and up to the first 1000 README characters to the provider. The
+default image model is `google/gemini-2.5-flash-image`; configure
+`desktop.projectIcon.model` in global or project `pix-desktop.jsonc` to override
+it. `.pi` cleanup preserves the canonical icon files. See the
+[project identity contract](../specs/desktop-project-titlebar.md).
+
 See [Configuration and accounts](configuration.md) for provider and voice setup.
 
 ## BTW side questions

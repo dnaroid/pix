@@ -20,4 +20,20 @@ describe("project settings dialog", () => {
   it("keeps filesystem IO outside the presentation component", () => {
     expect(dialogSource).not.toContain("invoke(");
   });
+
+  it("offers initials or an image logo from a file, AI generation, and an optional prompt", () => {
+    expect(dialogSource).toContain(">Initials<");
+    expect(dialogSource).toContain(">Image<");
+    expect(dialogSource).toContain("Choose file…");
+    expect(dialogSource).toContain("Generate with AI");
+    expect(dialogSource).toContain("data-project-logo-prompt");
+    expect(dialogSource).toContain("onGenerateIcon(iconPrompt.trim() || undefined)");
+    expect(dialogSource).toContain("to OpenRouter");
+  });
+
+  it("can derive a custom color from the logo", () => {
+    expect(dialogSource).toContain("From logo");
+    expect(dialogSource).toContain("vividColorFromImageUrl(source)");
+    expect(dialogSource).toContain("disabled={!iconPreview || logoColorBusy || saving}");
+  });
 });

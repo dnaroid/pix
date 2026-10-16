@@ -75,6 +75,7 @@
   import ProjectExplorer from "./ProjectExplorer.svelte";
   import PackageScriptsPanel from "./PackageScriptsPanel.svelte";
   import ProjectSettingsDialog from "./ProjectSettingsDialog.svelte";
+  import type { ProjectIconImage, ProjectSettingsDraft } from "../lib/project-icon";
   import ProjectSwitcher from "./ProjectSwitcher.svelte";
   import SettingsPanel from "./SettingsPanel.svelte";
   import WorkspaceSidebarActivityBar from "./WorkspaceSidebarActivityBar.svelte";
@@ -161,6 +162,7 @@
     projectDocuments,
     recentProjects,
     projectColors,
+    projectIcons = new Map(),
     projectSwitchDisabled,
     externalEditorLabel,
     onCreate,
@@ -187,7 +189,9 @@
     onOpenProjectInNewWindow,
     onChooseWorkspace,
     onChooseWorkspaceInNewWindow,
-    onSaveProjectColor,
+    onSaveProjectSettings,
+    onPickProjectIcon,
+    onGenerateProjectIcon,
     onReload,
     onRegistryRefresh,
     onRegistryInitializeProject,
@@ -252,6 +256,7 @@
     projectDocuments: ProjectDocumentsSnapshot;
     recentProjects: string[];
     projectColors: ReadonlyMap<string, string>;
+    projectIcons?: ReadonlyMap<string, string>;
     projectSwitchDisabled: boolean;
     externalEditorLabel: string;
     onCreate: (draft: TaskDraft) => void | boolean | Promise<boolean | void>;
@@ -283,7 +288,9 @@
     onOpenProjectInNewWindow: (path: string) => void;
     onChooseWorkspace: () => void;
     onChooseWorkspaceInNewWindow: () => void;
-    onSaveProjectColor: (color: string | undefined) => Promise<string | undefined>;
+    onSaveProjectSettings: (draft: ProjectSettingsDraft) => Promise<string | undefined>;
+    onPickProjectIcon: () => Promise<ProjectIconImage | undefined>;
+    onGenerateProjectIcon: (prompt?: string) => Promise<ProjectIconImage>;
     onReload: () => void;
     onRegistryRefresh: () => void;
     onRegistryInitializeProject: () => void;
@@ -324,7 +331,7 @@
   const projectSettingsController = createWorkspaceSidebarProjectSettingsController({
     workspace: () => workspace,
     closeProjectSwitcher: () => projectSwitcher?.close(),
-    saveProjectColor: (color) => onSaveProjectColor(color),
+    saveProjectSettings: (draft) => onSaveProjectSettings(draft),
   });
   let editorOpen = $state(false);
   let editorAttachmentsLoading = $state(false);
@@ -1034,6 +1041,7 @@
             {workspace}
             {recentProjects}
             {projectColors}
+            {projectIcons}
             currentWindowDisabled={projectSwitchDisabled}
             onOpen={onProjectSwitcherOpen}
             onMinimumWidthChange={layoutController.setProjectSwitcherMinimumWidth}
@@ -1243,9 +1251,12 @@
     <ProjectSettingsDialog
       {workspace}
       color={projectColors.get(workspace)}
+      icon={projectIcons.get(workspace)}
       saving={projectSettingsController.saving}
       error={projectSettingsController.error}
-      onSave={(color) => void projectSettingsController.save(color)}
+      onSave={(draft) => void projectSettingsController.save(draft)}
+      onPickIcon={onPickProjectIcon}
+      onGenerateIcon={onGenerateProjectIcon}
       onClose={projectSettingsController.close}
     />
   {/if}

@@ -122,6 +122,14 @@ const DesktopAppConfig = Type.Object(
 		externalEditor: Type.Optional(Type.String({
 			description: "External file editor used by Project and Preview open-in-editor actions. Common values include gram, zed, code/vscode, cursor, subl/sublime, idea/intellij, and webstorm; an executable path/name is also accepted. When omitted, Desktop asks the user to choose an editor instead of assuming one.",
 		})),
+		projectIcon: Type.Optional(Type.Object(
+			{
+				model: Type.Optional(Type.String({
+					description: "OpenRouter image-generation model used for project logos. Defaults to google/gemini-2.5-flash-image.",
+				})),
+			},
+			{ description: "AI project-logo generation preferences." },
+		)),
 		notifications: Type.Optional(Type.Object(
 			{
 				enabled: Type.Optional(Type.Boolean({

@@ -671,8 +671,18 @@ fn status(data: Option<&Value>, revision: Option<String>) -> Result<SemanticConf
 }
 
 fn openrouter_key_available() -> bool {
-    if std::env::var("OPENROUTER_API_KEY").is_ok_and(|key| !key.trim().is_empty()) {
-        return true;
+    openrouter_api_key().is_some()
+}
+
+/// Resolve the OpenRouter API key from the environment or the Pi auth store.
+/// The key is returned only to in-process callers and must never be logged.
+pub(crate) fn openrouter_api_key() -> Option<String> {
+    if let Some(key) = std::env::var("OPENROUTER_API_KEY")
+        .ok()
+        .map(|key| key.trim().to_owned())
+        .filter(|key| !key.is_empty())
+    {
+        return Some(key);
     }
     let user_home = std::env::var("HOME")
         .ok()
@@ -709,14 +719,13 @@ fn openrouter_key_available() -> bool {
         }
         serde_json::from_slice::<Value>(&bytes).ok()
     })
-    .is_some_and(|value| {
-        value.get("openrouter").is_some_and(|entry| {
-            entry.get("type").and_then(Value::as_str) == Some("api_key")
-                && entry
-                    .get("key")
-                    .and_then(Value::as_str)
-                    .is_some_and(|key| !key.trim().is_empty() && key.len() <= 10000)
-        })
+    .and_then(|value| {
+        let entry = value.get("openrouter")?;
+        if entry.get("type").and_then(Value::as_str) != Some("api_key") {
+            return None;
+        }
+        let key = entry.get("key").and_then(Value::as_str)?.trim();
+        (!key.is_empty() && key.len() <= 10000).then(|| key.to_owned())
     })
 }
 

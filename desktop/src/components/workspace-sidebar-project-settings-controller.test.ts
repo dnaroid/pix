@@ -10,17 +10,17 @@ function deferred<T>() {
 
 function fixture() {
   let workspace = "/one";
-  const saveProjectColor = vi.fn<() => Promise<string | undefined>>(async () => undefined);
+  const saveProjectSettings = vi.fn<() => Promise<string | undefined>>(async () => undefined);
   const closeProjectSwitcher = vi.fn();
   const controller = createWorkspaceSidebarProjectSettingsController({
     workspace: () => workspace,
     closeProjectSwitcher,
-    saveProjectColor,
+    saveProjectSettings,
   });
   controller.syncWorkspace();
   return {
     controller,
-    saveProjectColor,
+    saveProjectSettings,
     closeProjectSwitcher,
     setWorkspace(value: string) { workspace = value; },
   };
@@ -45,11 +45,11 @@ describe("project settings workspace identity", () => {
   });
 
   it("preserves saving guards and closes on successful save, not on prop refresh", async () => {
-    const { controller, saveProjectColor } = fixture();
+    const { controller, saveProjectSettings } = fixture();
     const saved = deferred<string | undefined>();
-    saveProjectColor.mockReturnValueOnce(saved.promise);
+    saveProjectSettings.mockReturnValueOnce(saved.promise);
     controller.show();
-    const pending = controller.save("#abc");
+    const pending = controller.save({ color: "#abc", icon: { kind: "keep" } });
     expect(controller.syncWorkspace()).toBe(false);
     controller.close();
     expect(controller.saving).toBe(true);
@@ -61,10 +61,10 @@ describe("project settings workspace identity", () => {
   });
 
   it("preserves save errors across same-workspace background updates", async () => {
-    const { controller, saveProjectColor, setWorkspace } = fixture();
-    saveProjectColor.mockResolvedValueOnce("Config changed");
+    const { controller, saveProjectSettings, setWorkspace } = fixture();
+    saveProjectSettings.mockResolvedValueOnce("Config changed");
     controller.show();
-    await controller.save("#abc");
+    await controller.save({ color: "#abc", icon: { kind: "keep" } });
     expect(controller.syncWorkspace()).toBe(false);
     expect(controller.open).toBe(true);
     expect(controller.error).toBe("Config changed");
@@ -75,19 +75,19 @@ describe("project settings workspace identity", () => {
   });
 
   it("resets on a real project switch and ignores the previous save completion", async () => {
-    const { controller, saveProjectColor, setWorkspace } = fixture();
+    const { controller, saveProjectSettings, setWorkspace } = fixture();
     const oldSave = deferred<string | undefined>();
     const newSave = deferred<string | undefined>();
-    saveProjectColor.mockReturnValueOnce(oldSave.promise).mockReturnValueOnce(newSave.promise);
+    saveProjectSettings.mockReturnValueOnce(oldSave.promise).mockReturnValueOnce(newSave.promise);
     controller.show();
-    const oldPending = controller.save("#abc");
+    const oldPending = controller.save({ color: "#abc", icon: { kind: "keep" } });
     setWorkspace("/two");
     expect(controller.syncWorkspace()).toBe(true);
     expect(controller.open).toBe(false);
     expect(controller.saving).toBe(false);
     expect(controller.error).toBeNull();
     controller.show();
-    const newPending = controller.save("#def");
+    const newPending = controller.save({ color: "#def", icon: { kind: "keep" } });
     oldSave.resolve("Old workspace error");
     await oldPending;
     expect(controller.open).toBe(true);

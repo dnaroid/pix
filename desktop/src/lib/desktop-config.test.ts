@@ -66,4 +66,14 @@ describe("desktop config", () => {
       `{ "desktop": { "knowledge": { "reviewModelRef": "provider/project:off" } } }`,
     )).toEqual(resolveDesktopPreferences(undefined, undefined));
   });
+
+  it("reads the project logo model with project precedence", () => {
+    expect(resolveDesktopPreferences(undefined, undefined).projectIconModel).toBeUndefined();
+    expect(resolveDesktopPreferences(
+      '{"desktop":{"projectIcon":{"model":"global/model"}}}',
+      '{"desktop":{"projectIcon":{"model":" project/model "}}}',
+    ).projectIconModel).toBe("project/model");
+    expect(resolveDesktopPreferences('{"desktop":{"projectIcon":{"model":"global/model"}}}', undefined)
+      .projectIconModel).toBe("global/model");
+  });
 });
