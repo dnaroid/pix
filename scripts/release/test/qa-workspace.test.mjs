@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { execFile } from "node:child_process";
@@ -30,7 +30,8 @@ test("fresh QA projects are independent, seeded and have no real state", async (
   assert.equal((await readdir(first.workspace)).includes(".pi"), false);
   assert.equal((await readdir(first.workspace)).includes(".git"), true);
   const gitEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.toUpperCase().startsWith("GIT_")));
-  assert.equal((await run("git", ["rev-parse", "--show-toplevel"], { cwd: first.workspace, env: gitEnv })).stdout.trim(), first.workspace);
+  // Git prints forward slashes on Windows; compare normalized native paths.
+  assert.equal(resolve((await run("git", ["rev-parse", "--show-toplevel"], { cwd: first.workspace, env: gitEnv })).stdout.trim()), resolve(first.workspace));
   assert.equal((await run("git", ["remote"], { cwd: first.workspace, env: gitEnv })).stdout.trim(), "");
   await assert.rejects(run("git", ["rev-parse", "--verify", "HEAD"], { cwd: first.workspace, env: gitEnv }));
   assert.equal((await readdir(join(first.workspace, ".git"))).includes("hooks"), false);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -58,6 +58,22 @@ test("relocated native CLI uses only release-root dependencies without IDX or AC
     "session-revisions", "session-index-revision", "task-snapshot", "repository-snapshot"]) {
     assert.ok(packedPaths.has(`external/pi-tools-suite/src/project-search/${name}.mjs`));
     await cp(join(suite, `src/project-search/${name}.mjs`), join(engine, `${name}.mjs`));
+  }
+  // Copy the remaining runtime import closure so new helper modules cannot
+  // silently diverge from the package file list. Type-only JSDoc imports are
+  // not runtime edges.
+  const pending = (await readdir(engine)).filter((name) => name.endsWith(".mjs"));
+  const copied = new Set(pending);
+  while (pending.length) {
+    const source = await readFile(join(engine, pending.pop()), "utf8");
+    for (const match of source.matchAll(/^\s*(?:import|export)(?!\s+type\b)[^;]*?\sfrom\s*["'](\.\/[^"'/]+\.mjs)["']|\bimport\(\s*["'](\.\/[^"'/]+\.mjs)["']\s*\)/gm)) {
+      const name = (match[1] ?? match[2]).slice(2);
+      if (copied.has(name)) continue;
+      assert.ok(packedPaths.has(`external/pi-tools-suite/src/project-search/${name}`), `${name} must be packed`);
+      await cp(join(suite, "src/project-search", name), join(engine, name));
+      copied.add(name);
+      pending.push(name);
+    }
   }
   const entry = join(engine, "native-cli.mjs");
   assert.equal(dirname(createRequire(entry).resolve("ignore/package.json")), dependency);
