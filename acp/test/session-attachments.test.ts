@@ -9,6 +9,7 @@ import { parseSessionRecord } from "../src/search/session-record.js";
 import { readSessionTranscript, sessionContext } from "../src/search/session-transcript.js";
 import { indexSessionChunks, searchSessionChunks } from "../src/search/session-chunks.js";
 import { collectRagEvidence } from "../src/search/rag-evidence.js";
+import { enableSearchSources } from "./search-sources-fixture.js";
 
 const signal = () => new AbortController().signal;
 const message = (id: string, parentId: string | null, role: string, text: string) =>
@@ -54,6 +55,7 @@ test("index refresh replaces old sandbox chunks; embedding, retrieval and RAG us
   const root = await mkdtemp(join(base, "case-"));
   let db: DatabaseSync | undefined;
   try {
+    await enableSearchSources(root);
     const candidate = { id: "native", path: join(root, "session.jsonl") };
     const raw = [
       { type: "session", id: candidate.id, cwd: root },
@@ -68,6 +70,8 @@ test("index refresh replaces old sandbox chunks; embedding, retrieval and RAG us
     // Recreate a pre-projection cache with the same unchanged canonical file.
     const oldRevision = createHash("sha256").update(raw).digest("hex");
     db.prepare("UPDATE pix_session_chunk_meta SET revision=?").run(oldRevision);
+    // reconcile() trusts the indexed-files record; mark that pre-projection revision stale too.
+    db.prepare("UPDATE pix_session_indexed_files SET revision=?").run(oldRevision);
     db.exec("UPDATE pix_session_chunks SET text='SECRETcode',hash='old'; UPDATE pix_session_chunk_fts SET text='SECRETcode'");
     const vector = Buffer.alloc(8); vector.writeFloatLE(1, 0);
     db.prepare("INSERT INTO pix_session_chunk_vectors VALUES(?,?,?)").run("session-chunks-v1:mock", "old", vector);
@@ -85,7 +89,7 @@ test("index refresh replaces old sandbox chunks; embedding, retrieval and RAG us
     assert.deepEqual(await searchSessionChunks(root, [candidate], "SECRETcode", signal()), []);
     const hits = await searchSessionChunks(root, [candidate], "arrows", signal(), { identity: "mock", dimension: 2, query: [1, 0] });
     assert.equal(hits.length, 1);
-    assert.equal(hits[0]?.messageId, "u"); // Compatible semantic score ties prefer the first message.
+    assert.equal(hits[0]?.messageId, "a"); // An exact lexical hit keeps a tie against equal semantic scores.
     assert.equal((await searchSessionChunks(root, [candidate], "arrows", signal()))[0]?.messageId, "a");
     const snapshot = (await readSessionTranscript(root, candidate, signal()))!;
     assert.deepEqual(snapshot.messages.map(m => m.id), ["u", "a", "last"]);

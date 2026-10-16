@@ -134,6 +134,12 @@ export class IdleSessionSelection {
   reset() { this.attempted.clear(); this.successful.clear(); }
   useCache(revision) { if (this.cacheRevision !== revision) this.reset(); this.cacheRevision = revision; }
   succeeded(candidate) { this.successful.set(candidate.id, this.attempted.get(candidate.id)); }
+  /** An attempted revision that never succeeded is still a live failure, even
+   * when later passes skip it as unchanged. */
+  hasUnresolvedFailures() {
+    for (const [id, revision] of this.attempted) if (this.successful.get(id) !== revision) return true;
+    return false;
+  }
   async select(candidates, signal, since = 0) {
     const selected = [];
     this.complete = true;
