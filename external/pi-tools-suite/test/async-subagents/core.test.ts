@@ -629,11 +629,11 @@ Research only this project.
 			config,
 			{ parentModel: "openai-codex/gpt-6-luna" },
 		);
-		expect(oracle.task.thinking).toBe("max");
+		expect(oracle.task.thinking).toBe("high");
 		expect(resolved.task.model).toBe("openai-codex/gpt-6-luna");
 		expect(resolved.task.subagentType).toBe("ui-qa");
 		expect(resolved.task.thinking).toBe("medium");
-		expect(resolved.fallbackModels).toEqual(["zai/glm-5.3-flash"]);
+		expect(resolved.fallbackModels).toEqual(["zai/glm-5.3-flash", "pi-claude-code-provider/haiku"]);
 		expect(resolved.task.tools).toEqual(["read", "grep", "bash"]);
 		expect(resolved.timeoutMs).toBe(600_000);
 		expect(fs.existsSync(runner)).toBe(true);
@@ -649,8 +649,9 @@ Research only this project.
 		expect(instructions).toContain("Never silently redirect that check to a sandbox");
 		expect(instructions).toContain("docs/qa-sandbox.md");
 		// The bundled role is a thin common contract plus a deterministic
-		// guide-routing workflow; backend specifics load via `guide` at runtime.
-		expect(instructions.length).toBeLessThan(5_000);
+		// guide-routing workflow plus the escalation contract; backend specifics
+		// load via `guide` at runtime.
+		expect(instructions.length).toBeLessThan(6_500);
 		expect(instructions).toContain("PI_UI_QA_RUNNER");
 		expect(instructions).toContain('guide --backend browser');
 		expect(instructions).toContain('guide --backend tui');

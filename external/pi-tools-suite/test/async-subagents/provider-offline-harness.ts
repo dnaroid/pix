@@ -2,7 +2,7 @@ import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { claudeProviderLocalRoot } from "../../src/async-subagents/core/provider-extensions.js";
 import { localNode, rpcProbe, stopAndConfirm } from "./provider-offline-rpc.ts";
@@ -24,6 +24,36 @@ function files(dir: string, prefix = ""): string[] {
 		if (item.isSymbolicLink()) throw new Error(`Snapshot has unexpected symlink: ${path}`);
 		return item.isDirectory() ? files(dir, path) : item.isFile() ? [path] : [];
 	}).sort();
+}
+
+/**
+ * The vendored provider imports shared suite modules (e.g. `../../lib/…`) that
+ * live beside, not inside, its package. Stage that static relative-import
+ * closure at the same relative position, bounded to the snapshot's parent.
+ */
+function stageEscapingImports(snapshot: string, target: string, staged: string[]): void {
+	const sourceBase = dirname(snapshot), targetBase = dirname(target);
+	const queue = staged.filter((path) => /\.(ts|mts|js|mjs)$/.test(path)).map((path) => join(snapshot, path));
+	const seen = new Set<string>();
+	while (queue.length) {
+		const file = queue.pop()!;
+		for (const [, spec] of readFileSync(file, "utf8").matchAll(/from\s+"(\.\.?\/[^"]+)"/g)) {
+			let source = resolve(dirname(file), spec!);
+			if (!existsSync(source)) source = source.replace(/\.js$/, ".ts").replace(/\.mjs$/, ".mts");
+			const inside = relative(snapshot, source);
+			if (!existsSync(source) || (!inside.startsWith("..") && !isAbsolute(inside)) || seen.has(source)) continue;
+			const shared = relative(sourceBase, source);
+			if (!shared || isAbsolute(shared) || shared.split(sep).includes("..")) {
+				throw new Error(`Provider import escapes the staging boundary: ${spec}`);
+			}
+			seen.add(source);
+			const destination = join(targetBase, shared);
+			mkdirSync(dirname(destination), { recursive: true });
+			cpSync(source, destination, { dereference: false });
+			if (hash(destination) !== hash(source)) throw new Error(`Provider shared module differs after staging: ${shared}`);
+			queue.push(source);
+		}
+	}
 }
 
 /** The vendored patched provider module inside the tools suite (default source). */
@@ -76,6 +106,7 @@ export function stageSnapshot(snapshot: string, work: string, pinned = true): st
 	const targetFiles = ["package.json", ...(standalone ? ["index.ts"] : []), ...files(target, "src"), ...files(target, "extensions"), ...files(target, "bridge")];
 	if (JSON.stringify(Object.keys(sourceHashes)) !== JSON.stringify(targetFiles) ||
 		targetFiles.some((path) => hash(join(target, path)) !== sourceHashes[path])) throw new Error("Provider staged source differs from snapshot");
+	stageEscapingImports(snapshot, target, targetFiles);
 	writeFileSync(join(work, "snapshot-manifest.json"), JSON.stringify({ name: manifest.name, version: manifest.version, hashes: sourceHashes }, null, 2), { mode: 0o600 });
 	const dependencies = manifest.peerDependencies as Record<string, string>;
 	for (const name of ["@earendil-works/pi-ai", "@earendil-works/pi-coding-agent", "typebox"]) {

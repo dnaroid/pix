@@ -304,6 +304,7 @@ function validateSettingsValue(
   }
   if (schema.type === "string" && typeof value !== "string") return [`${location} must be a string`];
   if (schema.type === "boolean" && typeof value !== "boolean") return [`${location} must be a boolean`];
+  if (schema.type === "null" && value !== null) return [`${location} must be null`];
   if (typeof value === "string") {
     if (schema.minLength !== undefined && value.length < schema.minLength) return [`${location} is too short`];
     if (schema.maxLength !== undefined && value.length > schema.maxLength) return [`${location} is too long`];

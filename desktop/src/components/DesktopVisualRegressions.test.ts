@@ -362,7 +362,7 @@ describe("desktop visual regressions", () => {
 
     expect(transcriptSource).not.toContain('aria-label="Pix is working"');
     expect(transcriptSource).not.toContain('LoaderCircle from "@lucide/svelte/icons/loader-circle"');
-    expect(transcriptSource).toContain("promptRunning: () => promptRunning");
+    expect(transcriptSource).toContain("promptRunning: () => messageMutationRunning");
     expect(transcriptSource).toContain("disabled={promptRunning || operationRunning}");
   });
 
@@ -414,7 +414,7 @@ describe("desktop visual regressions", () => {
     expect(runtimeStatusSource).not.toContain("data-runtime-workspace-skeleton");
     expect(runtimeStatusSource).not.toContain("data-runtime-workspace-branch-skeleton");
     expect(sessionActivityStatusHudSource).toContain("indicators.slice(0, 6)");
-    expect(sessionActivityStatusHudSource).toContain('class="flex shrink-0 items-center gap-0.5"');
+    expect(sessionActivityStatusHudSource).toContain('class="flex h-full shrink-0 items-center gap-0.5"');
   });
 
   it("keeps only model placeholders while context and usage resolve without skeletons", () => {
@@ -689,9 +689,9 @@ describe("desktop visual regressions", () => {
   });
 
   it("exposes a Desktop switch for native system notifications", () => {
-    expect(desktopSettingsEditorSource).toContain('label="System notifications"');
+    expect(desktopSettingsEditorSource).toContain('label="Notifications"');
     expect(desktopSettingsEditorSource).toContain('["desktop", "notifications", "enabled"]');
-    expect(desktopSettingsEditorSource).toContain("Send native notifications for completed work, questions, and errors");
+    expect(desktopSettingsEditorSource).toContain("Notify about completed work, questions, pauses, and errors");
   });
 
   it("keeps one full xterm surface shared by package scripts and the workbench terminal", async () => {

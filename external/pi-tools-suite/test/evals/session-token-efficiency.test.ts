@@ -65,10 +65,10 @@ describe("session token-efficiency analysis", () => {
 	test("can project protected continuity savings from journal tool-fragment provenance", () => {
 		const config = loadConfig({ homeDir: "/__efficiency_fixture__" });
 		const output = "large status output\n".repeat(1_000);
-		const protectedText = `### Tool: shell\n${output}`;
+		const protectedText = `### Tool: shell\n${output.trim()}`;
 		const legacySummary = `semantic core\n\nThe following protected continuity fragments were preserved verbatim:\n\n${protectedText}`;
 		const fixture = [
-			line({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "s1", name: "shell", arguments: { command: "git status --short" } }] } }),
+			line({ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "s1", name: "shell", arguments: { command: "npm test" } }] } }),
 			line({ type: "message", message: { role: "toolResult", toolCallId: "s1", toolName: "shell", content: [{ type: "text", text: output }], isError: false } }),
 			line({ type: "custom", customType: "dcp-journal", data: { kind: "delta", blocks: [{ id: 1, active: true, summary: legacySummary, summaryTokenEstimate: 1, protectedFragments: [{ kind: "tool", origin: "tool:s1", hash: "fixture", text: protectedText }] }] } }),
 		].join("\n");
@@ -107,10 +107,10 @@ describe("session token-efficiency analysis", () => {
 		expect(measured.components.compressDescription.estimatedTokens).toBeLessThanOrEqual(1203);
 		// Cheap explicit-summary delegation must not reintroduce a permanent
 		// control-plane tax. The complete post-follow-up envelope is currently
-		// 1,348 estimated tokens (the repository-discovery prompt consolidation refined the
-		// system-prompt and compress guidelines); keep that measured baseline
+		// 1,530 estimated tokens (DCP continuity guidance added hash-bound session
+		// references and fact-retention rules); keep that measured baseline
 		// as the hard ceiling and update it only deliberately.
-		expect(measured.staticSystemPlusToolEnvelope.estimatedTokens).toBeLessThanOrEqual(1348);
+		expect(measured.staticSystemPlusToolEnvelope.estimatedTokens).toBeLessThanOrEqual(1530);
 		expect(measured.components.turnNudge.estimatedTokens).toBeLessThanOrEqual(205);
 		expect(measured.components.iterationNudge.estimatedTokens).toBeLessThanOrEqual(176);
 	});
