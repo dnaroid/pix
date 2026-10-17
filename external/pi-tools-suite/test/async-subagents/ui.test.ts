@@ -3,6 +3,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentState } from "../../src/async-subagents/lib.js";
+import { runKey } from "../../src/async-subagents/core/paths.js";
+import { resetSubagentStoreForTest, resolveScope, updateLive, updateRecord, type SubagentRecordPatch } from "../../src/async-subagents/core/store.js";
 
 // Snapshot the real module before mocking: bun's top-level mock.module swaps the
 // live export slots for every later-loaded file in the same `bun test` process
@@ -46,9 +48,15 @@ function writeFile(filePath: string, content = ""): void {
 	fs.writeFileSync(filePath, content, "utf-8");
 }
 
-function createAgent(runDir: string, id: string, files: Record<string, string> = {}): void {
-	writeFile(path.join(runDir, id, "prompt.md"), `prompt for ${id}`);
-	for (const [name, content] of Object.entries(files)) writeFile(path.join(runDir, id, name), content);
+/** Run key of a named batch in this process's (headless) parent scope. */
+function batch(cwd: string, name: string): string {
+	return runKey(cwd, resolveScope(undefined), name);
+}
+
+/** Seed a parent-session record (decision 0072: no per-agent sidecars). */
+function createAgent(runDir: string, id: string, patch: SubagentRecordPatch = {}): void {
+	const status = patch.status ?? (patch.exitCode === undefined ? "running" : patch.exitCode === 0 ? "done" : "failed");
+	updateRecord(runDir, id, { turn: 1, ...patch, status });
 }
 
 function theme() {
@@ -59,6 +67,7 @@ function theme() {
 }
 
 afterEach(() => {
+	resetSubagentStoreForTest();
 	for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -125,12 +134,9 @@ describe.serial("live run tracking", () => {
 
 	test.serial("prunes completed live agents without rendering UI", async () => {
 		const { SubagentOverlay } = await import("../../src/async-subagents/subagent-overlay.js");
-		const runDir = tempDir();
-		createAgent(runDir, "running", {
-			pid: String(process.pid),
-			started_at: new Date(Date.now() - 1_000).toISOString(),
-		});
-		createAgent(runDir, "done", { exit_code: "0" });
+		const runDir = batch(tempDir(), "prune");
+		createAgent(runDir, "running", { pid: process.pid, startedAt: new Date(Date.now() - 1_000).toISOString() });
+		createAgent(runDir, "done", { exitCode: 0 });
 
 		const liveAgents = new Map<string, Map<string, any>>([
 			[runDir, new Map([
@@ -150,7 +156,7 @@ describe.serial("live run tracking", () => {
 		expect(liveAgents.get(runDir)?.has("running")).toBe(true);
 		expect(liveAgents.get(runDir)?.has("done")).toBe(false);
 
-		writeFile(path.join(runDir, "running", "exit_code"), "0");
+		updateRecord(runDir, "running", { status: "done", exitCode: 0, finishedAt: new Date().toISOString() });
 		overlay.update();
 		expect(liveAgents.has(runDir)).toBe(false);
 		overlay.dispose();
@@ -159,21 +165,15 @@ describe.serial("live run tracking", () => {
 	test.serial("restores only running agents linked to the active parent session", async () => {
 		const { SubagentOverlay } = await import("../../src/async-subagents/subagent-overlay.js");
 		const cwd = tempDir();
-		const runDir = path.join(cwd, ".pi", "subagents", "restored-run");
+		const runDir = batch(cwd, "restored-run");
 		const parentSession = path.join(cwd, "sessions", "parent.jsonl");
-		createAgent(runDir, "owned", {
-			pid: String(process.pid),
-			parent_session: parentSession,
-		});
-		createAgent(runDir, "sibling", {
-			pid: String(process.pid),
-			parent_session: path.join(cwd, "sessions", "sibling.jsonl"),
-		});
-		createAgent(runDir, "unlinked", { pid: String(process.pid) });
+		createAgent(runDir, "owned", { pid: process.pid, parentSession });
+		createAgent(runDir, "sibling", { pid: process.pid, parentSession: path.join(cwd, "sessions", "sibling.jsonl") });
+		createAgent(runDir, "unlinked", { pid: process.pid });
 
 		const liveAgents = new Map<string, Map<string, any>>();
 		const overlay = new SubagentOverlay(liveAgents as any);
-		overlay.restoreRunningAgents(cwd, parentSession);
+		overlay.restoreRunningAgents({ cwd }, parentSession);
 
 		expect([...liveAgents.get(runDir)?.keys() ?? []]).toEqual(["owned"]);
 		overlay.dispose();
@@ -181,13 +181,12 @@ describe.serial("live run tracking", () => {
 
 	test.serial("keeps queued live agents until they become running", async () => {
 		const { SubagentOverlay } = await import("../../src/async-subagents/subagent-overlay.js");
-		const runDir = tempDir();
-		createAgent(runDir, "sleeper-1", {
-			pid: String(process.pid),
-			started_at: new Date(Date.now() - 1_000).toISOString(),
-		});
-		createAgent(runDir, "sleeper-2");
-		createAgent(runDir, "sleeper-3");
+		const runDir = batch(tempDir(), "queued");
+		createAgent(runDir, "sleeper-1", { pid: process.pid, startedAt: new Date(Date.now() - 1_000).toISOString() });
+		for (const id of ["sleeper-2", "sleeper-3"]) {
+			createAgent(runDir, id, { status: "planned" });
+			updateLive(runDir, id, { active: true });
+		}
 
 		const liveRun = new Map<string, any>(["sleeper-1", "sleeper-2", "sleeper-3"].map((id) => [id, {
 			runDir,
@@ -202,8 +201,7 @@ describe.serial("live run tracking", () => {
 		expect(liveRun.size).toBe(3);
 
 		for (const id of ["sleeper-2", "sleeper-3"]) {
-			writeFile(path.join(runDir, id, "pid"), String(process.pid));
-			writeFile(path.join(runDir, id, "started_at"), new Date(Date.now() - 500).toISOString());
+			updateRecord(runDir, id, { status: "running", pid: process.pid, startedAt: new Date(Date.now() - 500).toISOString() });
 		}
 		overlay.update();
 		expect(liveRun.size).toBe(3);
@@ -328,8 +326,8 @@ describe.serial("polling", () => {
 
 	test.serial("emits updates and returns when a run is terminal, timed out, or aborted", async () => {
 		const { pollRunWithUpdates } = await import("../../src/async-subagents/polling.js");
-		const runDir = tempDir();
-		createAgent(runDir, "done", { exit_code: "0" });
+		const runDir = batch(tempDir(), "poll-done");
+		createAgent(runDir, "done", { exitCode: 0 });
 		const updates: any[] = [];
 		const state = await pollRunWithUpdates(runDir, undefined, {
 			mode: "status",
@@ -340,18 +338,18 @@ describe.serial("polling", () => {
 		expect(updates).toHaveLength(1);
 		expect(updates[0].content[0].text).toContain("Checked 1 subagent");
 
-		const runningRun = tempDir();
-		createAgent(runningRun, "running", { pid: String(process.pid) });
+		const runningRun = batch(tempDir(), "runningRun");
+		createAgent(runningRun, "running", { pid: process.pid });
 		expect((await pollRunWithUpdates(runningRun, undefined, { mode: "wait", timeoutSeconds: 0 })).agents[0].status).toBe("running");
 
-		const abortRun = tempDir();
-		createAgent(abortRun, "running", { pid: String(process.pid) });
+		const abortRun = batch(tempDir(), "abortRun");
+		createAgent(abortRun, "running", { pid: process.pid });
 		const controller = new AbortController();
 		controller.abort();
 		expect((await pollRunWithUpdates(abortRun, undefined, { mode: "wait", timeoutSeconds: 10, signal: controller.signal })).agents[0].status).toBe("running");
 
-		const abortDuringSleepRun = tempDir();
-		createAgent(abortDuringSleepRun, "running", { pid: String(process.pid) });
+		const abortDuringSleepRun = batch(tempDir(), "abortDuringSleepRun");
+		createAgent(abortDuringSleepRun, "running", { pid: process.pid });
 		const sleepingController = new AbortController();
 		setTimeout(() => sleepingController.abort(), 10);
 		expect((await pollRunWithUpdates(abortDuringSleepRun, undefined, {
@@ -376,13 +374,12 @@ describe.serial("slash command registration", () => {
 		const notifications: any[] = [];
 		const ctx = { cwd, hasUI: true, ui: { notify: (...args: any[]) => notifications.push(args) } };
 		await command.handler("", ctx);
-		expect(notifications.pop()).toEqual(["Usage: /sub-status [run-dir]", "warning"]);
+		expect(notifications.pop()).toEqual(["Usage: /sub-status [batch]", "warning"]);
 
 		await command.handler("missing", ctx);
 		expect(notifications.pop()[0]).toContain("No agents found");
 
-		const runDir = path.join(cwd, "run");
-		createAgent(runDir, "agent-1", { exit_code: "0" });
+		createAgent(batch(cwd, "run"), "agent-1", { exitCode: 0 });
 		await command.handler("run", ctx);
 		expect(notifications.pop()).toEqual(["[done] agent-1", "info"]);
 
@@ -400,12 +397,10 @@ describe.serial("slash command registration", () => {
 		const cwd = tempDir();
 		const parentSession = path.join(cwd, "parent.jsonl");
 		writeFile(parentSession, "{}");
-		const runDir = path.join(cwd, ".pi", "subagents", "2026-run");
-		createAgent(runDir, "agent-1", { exit_code: "0" });
-		const subSession = path.join(runDir, "agent-1", "sessions", "sub.jsonl");
+		const runDir = batch(cwd, "2026-run");
+		const subSession = path.join(cwd, ".pi", "subagents", resolveScope(undefined), "sub.jsonl");
 		writeFile(subSession, "{}");
-		writeFile(path.join(runDir, "agent-1", "session_file"), subSession);
-		writeFile(path.join(runDir, "agent-1", "parent_session"), parentSession);
+		createAgent(runDir, "agent-1", { exitCode: 0, childSessionFile: subSession, parentSession });
 
 		let currentSession = parentSession;
 		const notifications: any[] = [];
@@ -423,9 +418,8 @@ describe.serial("slash command registration", () => {
 			},
 		};
 
-		await registered.get("sub-open").handler(`${runDir} agent-1`, ctx);
+		await registered.get("sub-open").handler("2026-run agent-1", ctx);
 		expect(switches).toEqual([subSession]);
-		expect(fs.readFileSync(path.join(runDir, "agent-1", "return_session"), "utf-8")).toBe(parentSession);
 		expect(notifications.pop()[0]).toContain("Opened sub-agent agent-1");
 
 		await registered.get("sub-where").handler("", ctx);

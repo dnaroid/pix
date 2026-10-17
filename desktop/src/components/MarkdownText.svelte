@@ -78,6 +78,8 @@
     {#if onHtmlSandboxSubmit}
       <HtmlSandbox source={segment.html} onSubmit={onHtmlSandboxSubmit} />
     {/if}
+  {:else if segment.type === "sandbox-pending"}
+    <div class="py-2 text-xs text-muted-foreground" role="status">HTML preview · awaiting complete block…</div>
   {:else if segment.type === "actions"}
     {#if onChoiceActionsSubmit}
       {#key JSON.stringify(segment.actions)}

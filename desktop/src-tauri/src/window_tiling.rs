@@ -157,7 +157,7 @@ mod native {
             })
             .collect::<Vec<_>>();
         let config = app.config().app.windows.first();
-        let min_width = config.and_then(|config| config.min_width).unwrap_or(860.0);
+        let min_width = config.and_then(|config| config.min_width).unwrap_or(660.0);
         let min_height = config.and_then(|config| config.min_height).unwrap_or(380.0);
         // Native minimums constrain content; tiles contain the entire frame.
         let minimum = windows

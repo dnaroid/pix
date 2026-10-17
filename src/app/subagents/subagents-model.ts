@@ -11,16 +11,13 @@ import type {
 	SubagentActiveStatus,
 	SubagentAgentState,
 	SubagentsLiveStateEvent,
-	SubagentRegistry,
-	SubagentRegistryAgent,
-	SubagentRegistryRun,
 	SubagentRenderMode,
 	SubagentRunRenderDetails,
 	SubagentStatus,
 	SubagentTaskPreview,
 	SubagentTerminalStatus,
 } from "../types.js";
-import { isRecord, isStringArray } from "../guards.js";
+import { isRecord } from "../guards.js";
 import { APP_ICONS } from "../icons.js";
 import { stripProviderFromModelRef } from "../model/model-ref.js";
 
@@ -109,37 +106,6 @@ export function isSubagentsLiveStateEvent(value: unknown): value is SubagentsLiv
 		if (run.tasks !== undefined && (!Array.isArray(run.tasks) || !run.tasks.every(isSubagentTaskPreview))) return false;
 		return true;
 	});
-}
-
-export function isSubagentRegistryRun(runId: string, value: unknown): value is SubagentRegistryRun {
-	void runId;
-	if (!isRecord(value)) return false;
-	if (typeof value.runId !== "string") return false;
-	if (typeof value.runDir !== "string") return false;
-	if (!isStringArray(value.agentIds)) return false;
-	if (typeof value.createdAt !== "string") return false;
-	if (typeof value.updatedAt !== "string") return false;
-	return true;
-}
-
-export function isSubagentRegistryAgent(agentId: string, value: unknown): value is SubagentRegistryAgent {
-	void agentId;
-	if (!isRecord(value)) return false;
-	if (typeof value.agentId !== "string") return false;
-	if (typeof value.runId !== "string") return false;
-	if (typeof value.runDir !== "string") return false;
-	if (typeof value.updatedAt !== "string") return false;
-	return true;
-}
-
-export function isSubagentRegistry(value: unknown): value is SubagentRegistry {
-	if (!isRecord(value)) return false;
-	if (value.version !== 1) return false;
-	if (value.latestRunId !== undefined && typeof value.latestRunId !== "string") return false;
-	if (value.latestRunDir !== undefined && typeof value.latestRunDir !== "string") return false;
-	if (!isRecord(value.runs) || !isRecord(value.agents)) return false;
-	return Object.entries(value.runs).every(([runId, run]) => isSubagentRegistryRun(runId, run))
-		&& Object.entries(value.agents).every(([agentId, agent]) => isSubagentRegistryAgent(agentId, agent));
 }
 
 /**

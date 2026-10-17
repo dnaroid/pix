@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
@@ -24,20 +24,41 @@ async function start(base = project(), mode = "brainstorm") {
 	return { base, init, spawn: init.spawn as Spawn, run: init.runDir as string };
 }
 
-function answer(ctx: { base: { cwd: string }; spawn: Spawn }, slot: number, round: number, text: string, over: { status?: string; model?: string; turns?: number; thinking?: string; messages?: number } = {}) {
+const SCOPE = "0199f0c2-0000-7000-8000-00000000c0de";
+
+type AnswerOptions = { status?: string; model?: string; turns?: number; thinking?: string; messages?: number; noRecord?: boolean };
+
+/**
+ * Simulate a settled participant the way async-subagents persists it
+ * (decision 0072): a child session under `.pi/subagents/<scope>/` that starts
+ * with `subagent_meta`, plus folded `pi-tools-suite:subagent` records in the
+ * parent session.
+ */
+function answer(ctx: { base: { cwd: string }; spawn: Spawn }, slot: number, round: number, text: string, over: AnswerOptions = {}) {
 	const task = ctx.spawn.tasks[slot - 1]!;
-	const dir = path.join(ctx.base.cwd, ctx.spawn.runDir, task.id);
-	mkdirSync(dir, { recursive: true });
+	const batch = ctx.spawn.runDir;
+	const cwd = ctx.base.cwd;
+	const parentSession = path.join(cwd, ".pi", "parent-session.jsonl");
+	const scopeDir = path.join(cwd, ".pi", "subagents", SCOPE);
+	mkdirSync(scopeDir, { recursive: true });
 	const model = over.model ?? task.model;
-	writeFileSync(path.join(dir, "launch.json"), JSON.stringify({ task: { model, subagentType: "research", thinking: over.thinking ?? task.thinking }, extraArgs: task.extraArgs }));
 	const turns = over.turns ?? round - 1;
-	if (turns > 0) writeFileSync(path.join(dir, "turn_count"), String(turns));
-	mkdirSync(path.join(dir, "sessions"), { recursive: true });
-	const session = path.join(dir, "sessions", "s.jsonl");
-	writeFileSync(session, Array.from({ length: over.messages ?? round }, () => JSON.stringify({ type: "message", message: { role: "user" } })).join("\n") + "\n");
-	writeFileSync(path.join(dir, "session_file"), session);
-	writeFileSync(path.join(dir, "result.json"), JSON.stringify({ schemaVersion: 2, status: over.status ?? "done", model }));
-	writeFileSync(path.join(dir, "result.md"), text);
+	const meta = { version: 1, agentId: task.id, batch, runDir: path.join(cwd, ".pi", "subagents", SCOPE, batch), cwd, subagentType: "research", parentSession, parentSessionId: SCOPE, scope: SCOPE };
+	const lines = [
+		{ type: "session", version: 3, id: `child-${task.id}`, timestamp: new Date().toISOString(), cwd },
+		{ type: "custom", customType: "subagent_meta", data: meta },
+		...Array.from({ length: over.messages ?? round }, () => ({ type: "message", message: { role: "user", content: "round" } })),
+		{ type: "message", message: { role: "assistant", content: [{ type: "text", text }], stopReason: "stop" } },
+	];
+	writeFileSync(path.join(scopeDir, `${task.id}.jsonl`), lines.map((line) => JSON.stringify(line)).join("\n") + "\n");
+	if (over.noRecord) return;
+	const record = {
+		version: 1, scope: SCOPE, batch, agentId: task.id,
+		task: { id: task.id, task: "council", model, subagentType: "research", thinking: over.thinking ?? task.thinking },
+		extraArgs: task.extraArgs, status: over.status ?? "done", turn: turns + 1,
+		structured: { schemaVersion: 2, agentId: task.id, status: over.status ?? "done", model },
+	};
+	appendFileSync(parentSession, JSON.stringify({ type: "custom", customType: "pi-tools-suite:subagent", data: record }) + "\n");
 }
 
 const ledger = (slot: number, round: number) => `Answer P${slot} R${round}.\n\n## Ledger\n\n| ID | Stance | Refs | Note |\n| --- | --- | --- | --- |\n| P${slot}-H1 | ${round === 1 ? "new" : "keep"} | | idea ${slot} |\n`;
@@ -56,7 +77,8 @@ describe("council protocol", () => {
 		expect(spawn.tasks.map((task) => task.id)).toEqual(["p1", "p2", "p3"]);
 		expect(spawn.tasks[0]!.extraArgs.slice(2)).toEqual(["--tools", "read,grep,web_search,web_fetch,project_search"]);
 		expect(spawn.tasks[0]!.thinking).toBe("high");
-		expect(spawn.runDir.startsWith(".pi/subagents/")).toBe(true);
+		expect(spawn.runDir).toMatch(/^[0-9T-]+-brainstorm-[0-9a-f]+$/);
+		expect(existsSync(path.join(base.cwd, ".pi", "subagents", spawn.runDir))).toBe(false);
 		expect(readFileSync(path.join(run, "prompts", "round-1-p1.md"), "utf8")).toContain("Pick a cache strategy");
 
 		const pending = await collectRound({ ...base, run });
@@ -167,7 +189,15 @@ describe("council protocol", () => {
 		expect(manifestOf(tampered.run).error).toContain("changed after it was recorded");
 	});
 
-	test("live follow-ups that bypass turn_count are refused via the session", async () => {
+	test("participants of a parent without a persisted session are refused", async () => {
+		const ctx = await start();
+		for (const slot of [1, 2, 3]) answer(ctx, slot, 1, ledger(slot, 1), slot === 1 ? { noRecord: true } : {});
+		const error = await failure(collectRound({ ...ctx.base, run: ctx.run }));
+		expect(error.code).toBe(1);
+		expect(error.message).toContain("saved parent session");
+	});
+
+	test("live follow-ups that bypass the turn record are refused via the session", async () => {
 		const live = await start();
 		for (const slot of [1, 2, 3]) answer(live, slot, 1, ledger(slot, 1), slot === 2 ? { messages: 2 } : {});
 		const error = await failure(collectRound({ ...live.base, run: live.run }));

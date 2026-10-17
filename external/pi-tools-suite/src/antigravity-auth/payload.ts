@@ -290,6 +290,7 @@ const SCHEMA_DROP_KEYS = new Set([
 	"unevaluatedProperties",
 	"dependentRequired",
 	"dependentSchemas",
+	"uniqueItems",
 	"default",
 	"examples",
 	"title",

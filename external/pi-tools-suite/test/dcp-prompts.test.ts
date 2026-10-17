@@ -12,6 +12,27 @@ import {
 } from "../src/dcp/prompts.js";
 
 describe("DCP prompt contracts", () => {
+	test("cache guidance is qualitative and subordinate to recovery and manual requests", () => {
+		expect(SYSTEM_PROMPT).toContain("invalidate prompt caches");
+		expect(SYSTEM_PROMPT).toContain("fewer tokens need not mean lower cost");
+		expect(SYSTEM_PROMPT).toContain("Skip optional near-finish housekeeping with ample headroom");
+		expect(SYSTEM_PROMPT).toContain("Context-limit recovery and explicit user requests take priority");
+		for (const prompt of [COMPRESS_RANGE_DESCRIPTION, TURN_NUDGE, ITERATION_NUDGE]) {
+			expect(prompt).not.toContain("invalidate prompt caches");
+		}
+		expect(CONTEXT_LIMIT_NUDGE_STRONG).toContain("MUST use the `compress` tool now");
+		expect(MANUAL_MODE_SYSTEM_PROMPT).toContain("user explicitly asks");
+	});
+
+	test("normal mode batches new closed stages without routinely rewriting prior summaries", () => {
+		expect(SYSTEM_PROMPT).toContain("Batch newly closed stages early when substantial work remains");
+		expect(SYSTEM_PROMPT).toMatch(/not each small\s+result/);
+		expect(SYSTEM_PROMPT).toMatch(/Keep prior summaries unchanged unless correction or context-limit\s+recovery requires rewriting them/);
+		for (const prompt of [COMPRESS_RANGE_DESCRIPTION, TURN_NUDGE, ITERATION_NUDGE, MANUAL_MODE_SYSTEM_PROMPT]) {
+			expect(prompt).not.toContain("Batch newly closed stages early");
+		}
+	});
+
 	test("normal mode ties proactive compression to meaningful pressure and closed work", () => {
 		expect(SYSTEM_PROMPT).toMatch(/Low context\s+usage alone does not require compression/);
 		expect(SYSTEM_PROMPT).toContain("implementation, verification");

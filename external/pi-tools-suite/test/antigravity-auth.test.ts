@@ -195,6 +195,43 @@ describe.serial("Antigravity account rotation", () => {
 		expect(request.tools[0]?.functionDeclarations.map((declaration) => declaration.name)).toEqual(["new_tool"]);
 	});
 
+	test.serial("strips uniqueItems from tool schemas without mutating the transcript", async () => {
+		const { buildPayload } = await import("../src/antigravity-auth/payload.js");
+		const sources = {
+			type: "array",
+			uniqueItems: true,
+			minItems: 1,
+			items: { type: "string", enum: ["code"] },
+		};
+		const parameters = {
+			type: "object",
+			properties: {
+				sources,
+				groups: { type: "array", uniqueItems: false, items: { type: "object", properties: { sources } } },
+			},
+			required: ["sources"],
+		};
+		const context = normalizeContext({
+			tools: [{ name: "project_search", description: "Search", parameters }],
+			messages: [{ role: "user", content: "hello", timestamp: 1 }],
+		});
+		const originalContext = JSON.stringify(context);
+		const payload = buildPayload(antigravityModelStub("antigravity-gemini-3.8-flash"), context);
+		const request = payload.request as {
+			tools: Array<{ functionDeclarations: Array<{ parameters: unknown }> }>;
+		};
+		const cleanSources = { type: "array", minItems: 1, items: { type: "string", enum: ["code"] } };
+		expect(request.tools[0]?.functionDeclarations[0]?.parameters).toEqual({
+			type: "object",
+			properties: {
+				sources: cleanSources,
+				groups: { type: "array", items: { type: "object", properties: { sources: cleanSources } } },
+			},
+			required: ["sources"],
+		});
+		expect(JSON.stringify(context)).toBe(originalContext);
+	});
+
 	test.serial("preserves Antigravity OAuth client credentials when Pi auth storage refreshes", async () => {
 		const agentDir = tempDir();
 		writeJson(path.join(agentDir, "auth.json"), {

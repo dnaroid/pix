@@ -1,5 +1,4 @@
 import * as fs from "node:fs";
-import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "@earendil-works/pi-ai";
 import { ASYNC_SUBAGENT_TOOL_DESCRIPTIONS } from "../../tool-descriptions.js";
@@ -8,14 +7,14 @@ import {
 	DEFAULT_MAX_CONCURRENT,
 	getAgentState,
 	loadSubagentConfig,
-	readSessionFileLink,
-	resolveSubagentAgentRunDir,
 	spawnAgent,
 	validateBasename,
-	writeStructuredResult,
 } from "../lib.js";
+import { settleStructuredResult } from "../core/structured-result.js";
+import { ownedAgentDir } from "../core/paths.js";
+import { getRecord, updateLive, updateRecord } from "../core/store.js";
+import { resolveSubagentAgentRunDir } from "../core/lookup.js";
 import { isTerminalAgentStatus } from "../core/notifications.js";
-import { archiveAgentTurn, readLaunchSpec, readTurnCount } from "../core/turns.js";
 import { getLiveChannel, LiveChannelClosingError, type LiveSendMode } from "../core/live-channel.js";
 import { maySelectOwnedProvider } from "../core/owned-launch-integration.js";
 import { ownedArtifactsPresentSync, ownedDeletableSync } from "../core/owned-retirement.js";
@@ -27,7 +26,7 @@ import { getLiveRun } from "../live.js";
 import { emptyToolSlot } from "../ui.js";
 import { diagnosticErrorType, suiteDiagnostics } from "../../lib/suite-diagnostics.js";
 import type { LiveAgent } from "../types.js";
-import { getProjectSemaphore, resolveOwnedLaunchOptions } from "./spawn.js";
+import { getProjectSemaphore, ownedProbeDir, resolveOwnedLaunchOptions } from "./spawn.js";
 
 /** Bounded wait for a settling live process before falling back to a cold resume. */
 const CLOSING_CHANNEL_WAIT_MS = 15_000;
@@ -80,7 +79,7 @@ export function registerSendTool(
 		...INLINE_RENDERING,
 		parameters: Type.Object({
 			agentId: Type.String({ description: "Agent ID to message" }),
-			runDir: Type.Optional(Type.String({ description: "Run directory path. If omitted, resolves agentId through .pi/subagents/registry.json." })),
+			runDir: Type.Optional(Type.String({ description: "Batch name (or run key). If omitted, resolves agentId to its latest run in this session." })),
 			message: Type.String({ description: "Message for the sub-agent" }),
 			mode: Type.Optional(Type.String({ description: "Running agents only: followUp (default, after the current turn) or steer (interrupt the current turn)." })),
 		}),
@@ -91,9 +90,9 @@ export function registerSendTool(
 			if (!message) return textResult("send requires a non-empty message.", {}, true);
 			const mode = normalizeMode(params.mode);
 			if (!mode) return textResult("send mode must be followUp or steer.", {}, true);
-			const runDir = resolveSubagentAgentRunDir(ctx.cwd, params.agentId, params.runDir);
+			const runDir = resolveSubagentAgentRunDir(ctx, params.agentId, params.runDir);
 			const agentId = params.agentId;
-			const agentDir = path.join(runDir, agentId);
+			const agentDir = ownedAgentDir(runDir, agentId);
 			const details = { runDir, agentId, mode };
 
 			// Live path: the agent runs in this parent process.
@@ -127,11 +126,12 @@ export function registerSendTool(
 			}
 
 			// Cold path: resume the persisted session in a fresh process.
-			const sessionFile = readSessionFileLink(agentDir);
+			const record = getRecord(runDir, agentId);
+			const sessionFile = record?.childSessionFile;
 			if (!sessionFile || !fs.existsSync(sessionFile))
 				return textResult(`Agent "${agentId}" has no persisted session to resume (it never started).`, details, true);
-			const spec = readLaunchSpec(agentDir);
-			if (!spec) return textResult(`Agent "${agentId}" has no launch.json; it was launched before resume support and cannot be resumed.`, details, true);
+			if (!record?.task) return textResult(`Agent "${agentId}" has no recorded launch task and cannot be resumed.`, details, true);
+			const spec = { task: record.task, extraArgs: record.extraArgs ?? [], timeoutMs: record.timeoutMs, maxResultBytes: record.maxResultBytes };
 			if (ownedArtifactsPresentSync(agentDir) && !ownedDeletableSync(agentDir))
 				return textResult(`Agent "${agentId}" is still retiring its previous process; retry send shortly.`, details, true);
 
@@ -140,7 +140,13 @@ export function registerSendTool(
 			const parentSessionId = typeof ctx.sessionManager?.getSessionId === "function" ? ctx.sessionManager.getSessionId() : undefined;
 			const config = loadSubagentConfig(ctx.cwd);
 			const semaphore = getProjectSemaphore(ctx.cwd, config.maxConcurrent ?? DEFAULT_MAX_CONCURRENT);
-			const turn = archiveAgentTurn(agentDir, message) + 1;
+			const turn = (record.turn ?? 1) + 1;
+			// Queued until the semaphore opens: non-terminal and owned by this process.
+			updateRecord(runDir, agentId, {
+				turn, status: "planned", exitCode: null, finishedAt: null, nextRetryAt: null, stopRequested: null, stopSignal: null,
+				timedOut: null, structured: null, message: null, stderrPreview: null,
+			}, parentSessionManager);
+			updateLive(runDir, agentId, { active: true, resultText: undefined, stderrTail: undefined });
 
 			let resolveCompleted!: () => void;
 			const completed = new Promise<void>((resolve) => { resolveCompleted = resolve; });
@@ -161,16 +167,12 @@ export function registerSendTool(
 				const text = `Resume failed before the sub-agent process started: ${errorMessage(error)}`;
 				if (diagnosticErrorType(error) !== "AbortError")
 					suiteDiagnostics.report("error", "subagents", "resume-failed", ctx.cwd, { errorType: diagnosticErrorType(error) });
-				if (fs.existsSync(agentDir)) {
-					const now = isoNow();
-					fs.writeFileSync(path.join(agentDir, "result.md"), text, "utf-8");
-					fs.writeFileSync(path.join(agentDir, "exit_code"), "1", "utf-8");
-					if (!fs.existsSync(path.join(agentDir, "started_at"))) fs.writeFileSync(path.join(agentDir, "started_at"), now, "utf-8");
-					fs.writeFileSync(path.join(agentDir, "finished_at"), now, "utf-8");
-				}
+				const now = isoNow();
+				updateRecord(runDir, agentId, { status: "failed", exitCode: 1, startedAt: getRecord(runDir, agentId)?.startedAt ?? now, finishedAt: now, message: text });
+				updateLive(runDir, agentId, { active: false, resultText: text });
 				const failed = getAgentState(runDir, agentId, { includeLineCounts: false }) ?? { id: agentId, status: "failed" as const, exitCode: 1 };
 				try {
-					writeStructuredResult({ agentDir, agentId, state: failed, subagentType: spec.task.subagentType, model: spec.task.model, maxResultBytes: spec.maxResultBytes });
+					settleStructuredResult(runDir, agentId, { state: failed, subagentType: spec.task.subagentType, model: spec.task.model, maxResultBytes: spec.maxResultBytes });
 				} catch { /* non-critical */ }
 				finish({ runDir, agentId, agentDir, exitCode: 1, state: failed });
 			};
@@ -188,7 +190,7 @@ export function registerSendTool(
 					await semaphore.acquire();
 					slotAcquired = true;
 					const ownedOptions = maySelectOwnedProvider(spec.task, spec.extraArgs, [])
-						? await resolveOwnedLaunchOptions([ctx.cwd, runDir]) : {};
+						? await resolveOwnedLaunchOptions([ctx.cwd, ownedProbeDir(ctx.cwd, runDir)]) : {};
 					spawnAgent(runDir, spec.task, ctx.cwd, spec.extraArgs, (event) => {
 						recordSubagentUsage(parentSessionManager, event, agentId, runDir);
 						recordSubagentToolStatistics(parentSessionManager, event, runDir, agentId);
@@ -213,7 +215,7 @@ export function registerSendTool(
 
 			if (signal?.aborted) throw new Error("Aborted");
 			return textResult(
-				`Resumed agent "${agentId}" (turn ${turn}) from its persisted session in ${runDir}. Previous turn artifacts are in turns/${readTurnCount(agentDir)}/. The result arrives as a completion follow-up; use subagents({ action: "result", agentId: "${agentId}" }) after it finishes.`,
+				`Resumed agent "${agentId}" (turn ${turn}) from its persisted session. The result arrives as a completion follow-up; use subagents({ action: "result", agentId: "${agentId}" }) after it finishes.`,
 				{ ...details, delivery: "resume", turn },
 			);
 		},

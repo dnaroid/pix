@@ -160,9 +160,13 @@ function countLines(text: string): number {
 
 /** Agent ids with owned-launch directories but no record (crash before the parent entry flushed). */
 function orphanOwnedAgentIds(runDir: string): string[] {
+	// Owned agent dirs: `<scope>/owned/<batch>/<agentId>/`, or legacy `<run>/<agentId>/`.
+	// Only directories carrying owned-launch artifacts count (fail closed).
 	const batchDir = ownedBatchDir(runDir);
-	if (batchDir === runDir || !isDir(batchDir)) return [];
-	return fs.readdirSync(batchDir, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+	if (!isDir(batchDir)) return [];
+	return fs.readdirSync(batchDir, { withFileTypes: true })
+		.filter((entry) => entry.isDirectory() && ownedArtifactsPresentSync(path.join(batchDir, entry.name)))
+		.map((entry) => entry.name);
 }
 
 export function getRunState(

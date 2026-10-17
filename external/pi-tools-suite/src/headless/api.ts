@@ -7,6 +7,7 @@ import { detectModelProfile, selectSuitableToolsForModel, type ModelProfile } fr
 import { SUBAGENT_TYPE_SELECTION_GUIDANCE } from "../async-subagents/core/agent-catalog.js";
 import { assertPatchWorkspace, assertWorkspacePath } from "./workspace.js";
 import { withHeadlessTodoSession, type HeadlessTodoSession } from "./session-todo.js";
+import { createHeadlessSessionManager, type HeadlessSessionManager } from "./subagent-journal.js";
 
 /** ChatGPT is an OpenAI GPT model, NOT Pi's default/unknown (Claude) profile. */
 export const CHATGPT_HEADLESS_MODEL = Object.freeze({ provider: "openai", id: "gpt-6" });
@@ -53,7 +54,7 @@ type RegisteredTool = {
 };
 
 const MUTATING_TOOLS = new Set(["shell", "apply_patch", "ast_apply", "todo", "subagents"]);
-type HostSession = { getSessionId(): string; getSessionFile(): undefined };
+type HostSession = HeadlessSessionManager;
 
 /**
  * UI QA and image-backed tasks require confirmed vision-capable model metadata.
@@ -187,7 +188,8 @@ async function loadTools(root: string, model: HeadlessModel, sessionKey?: string
 	host.registerTool(createReadToolDefinition(root) as unknown as RegisteredTool);
 	const existing = handlers.get("session_start")?.length ?? 0;
 	(await import("../model-tools/index.js")).default(host as unknown as ExtensionAPI);
-	const sessionManager: HostSession = { getSessionId: () => sessionKey ?? "headless", getSessionFile: () => undefined };
+	// Sub-agent records persist to a per-session journal so status/result work across CLI processes.
+	const sessionManager: HostSession = createHeadlessSessionManager(root, sessionKey);
 	const normalizedModel = typeof model === "string"
 		? { provider: model.split("/")[0] ?? "openai", id: model.split("/").slice(1).join("/") || model }
 		: model;

@@ -2,7 +2,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import { ASYNC_SUBAGENT_TOOL_DESCRIPTIONS } from "../../tool-descriptions.js";
-import { getRunState, resolveSubagentRunDir, validateBasename } from "../lib.js";
+import { getRunState, validateBasename } from "../lib.js";
+import { resolveSubagentRunDir } from "../core/lookup.js";
 import { reconcileOwnedRuns } from "../core/owned-retirement.js";
 import { INLINE_RENDERING } from "../constants.js";
 import { formatAgentStatus } from "../format.js";
@@ -14,12 +15,12 @@ export function registerStatusTool(pi: ExtensionAPI): void {
 		...ASYNC_SUBAGENT_TOOL_DESCRIPTIONS.statusAction,
 		...INLINE_RENDERING,
 		parameters: Type.Object({
-			runDir: Type.Optional(Type.String({ description: "Run directory path. If omitted, uses the latest project sub-agent run from .pi/subagents/registry.json or .pi/subagents/." })),
+			runDir: Type.Optional(Type.String({ description: "Batch name (or run key). If omitted, uses this session's latest sub-agent batch." })),
 			agentIds: Type.Optional(Type.Array(Type.String(), { description: "Filter to specific agent IDs" })),
 		}),
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const runDir = resolveSubagentRunDir(ctx.cwd, params.runDir);
+			const runDir = resolveSubagentRunDir(ctx, params.runDir);
 			if (params.agentIds) {
 				for (const id of params.agentIds) validateBasename(id, "agentId");
 			}
@@ -30,7 +31,7 @@ export function registerStatusTool(pi: ExtensionAPI): void {
 
 			if (state.agents.length === 0) {
 				return {
-					content: [{ type: "text", text: "No agents found in run directory." }],
+					content: [{ type: "text", text: "No agents found in this batch." }],
 					details: { runDir, agents: [], mode: "status" } satisfies SubagentRunRenderDetails,
 				};
 			}

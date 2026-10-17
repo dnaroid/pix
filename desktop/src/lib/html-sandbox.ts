@@ -10,11 +10,12 @@ export const MAX_SANDBOX_SUBMISSION_CHARS = 16_384;
 export type HtmlSandboxSegment =
   | { type: "markdown"; text: string }
   | { type: "sandbox"; html: string }
+  | { type: "sandbox-pending" }
   | { type: "actions"; actions: ChoiceActions };
 
 /**
- * Opt-in fences are recognized only in assistant messages. An incomplete fence
- * remains ordinary (escaped) Markdown until the closing fence arrives.
+ * Opt-in fences are recognized only in assistant messages. Incomplete sandbox
+ * fences show a compact placeholder without rendering or executing their source.
  * Other code fences are skipped so examples cannot inadvertently run.
  */
 export function splitHtmlSandboxSegments(
@@ -28,13 +29,23 @@ export function splitHtmlSandboxSegments(
   while (index < lines.length) {
     const fence = parseFence(lines[index] ?? "");
     if (!fence) { index += 1; continue; }
+    const language = fence.language.toLowerCase();
+    const sandbox = options.sandbox && ["pix-html", "html-sandbox"].includes(language);
     let closing = index + 1;
     while (closing < lines.length && !isClosingFence(lines[closing] ?? "", fence)) closing += 1;
-    if (closing >= lines.length) break;
-    const language = fence.language.toLowerCase();
+    if (closing >= lines.length) {
+      if (sandbox) {
+        if (index > markdownStart) {
+          segments.push({ type: "markdown", text: lines.slice(markdownStart, index).join("\n") });
+        }
+        segments.push({ type: "sandbox-pending" });
+        markdownStart = lines.length;
+      }
+      break;
+    }
     const body = lines.slice(index + 1, closing).join("\n");
     let segment: HtmlSandboxSegment | undefined;
-    if (options.sandbox && ["pix-html", "html-sandbox"].includes(language)) {
+    if (sandbox) {
       if (body.trim() && body.length <= MAX_SANDBOX_SOURCE_CHARS) segment = { type: "sandbox", html: body };
     } else if (options.actions && language === CHOICE_ACTIONS_LANGUAGE) {
       const actions = parseChoiceActions(fence.info, body);

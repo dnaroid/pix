@@ -109,20 +109,16 @@ afterEach(() => {
 
 async function entryHarness(ids = ["child"]) {
 	const { default: register } = await import("../../src/async-subagents/index.js");
-	const { createRunDir } = await import("../../src/async-subagents/lib.js");
+	const { createBatch, resolveScope, updateRecord } = await import("../../src/async-subagents/core/store.js");
 	fs.mkdirSync(scratchRoot, { recursive: true });
 	const cwd = fs.mkdtempSync(path.join(scratchRoot, "case-"));
 	dirs.push(cwd);
 	const parent = path.join(cwd, "parent.jsonl");
 	let busy = false;
 	const ctx = { cwd, isIdle: () => !busy, sessionManager: { getSessionFile: () => parent, getSessionId: () => parent, getLeafId: () => "spawn-entry" } };
-	const runDir = createRunDir(cwd, "delivery");
+	const runDir = createBatch(cwd, resolveScope(ctx.sessionManager), "delivery");
 	for (const id of ids) {
-		const dir = path.join(runDir, id);
-		fs.mkdirSync(dir, { recursive: true });
-		for (const [name, content] of Object.entries({ "prompt.md": id, pid: String(process.pid), parent_session: parent })) {
-			fs.writeFileSync(path.join(dir, name), content);
-		}
+		updateRecord(runDir, id, { cwd, status: "running", pid: process.pid, parentSession: parent, startedAt: new Date().toISOString(), turn: 1 });
 	}
 	const tools = new Map<string, any>();
 	const handlers = new Map<string, any>();
@@ -144,7 +140,11 @@ async function entryHarness(ids = ["child"]) {
 		startTool: (event: any, context = ctx) => handlers.get("tool_call")(event, context),
 		endTool: (event: any, context = ctx) => handlers.get("tool_execution_end")({ ...event, result: { content: event.content, details: event.details } }, context),
 		result: () => tools.get("subagents").execute("result", { action: "result", runDir, agentId: "child" }, undefined, undefined, ctx),
-		finish: (id = "child", code = "0") => fs.writeFileSync(path.join(runDir, id, "exit_code"), code),
+		finish: (id = "child", code = "0") => {
+			updateRecord(runDir, id, code === "stopped"
+				? { status: "stopped", stopRequested: true, exitCode: null, finishedAt: new Date().toISOString() }
+				: { status: code === "0" ? "done" : "failed", exitCode: Number(code), finishedAt: new Date().toISOString() });
+		},
 		refresh: () => handlers.get("tool_execution_end")({ toolName: "subagents" }),
 		close: (stopChildren = false) => handlers.get("session_shutdown")(stopChildren ? {} : { reason: "reload" }, ctx),
 		wait: (params: any = {}, onUpdate?: (update: any) => void, signal?: AbortSignal, context = ctx) =>
@@ -202,35 +202,6 @@ describe.serial("completion delivery through the entrypoint", () => {
 			expect(h.messages[0].details.status).toBe("failed");
 		} finally { await h.close(); }
 	});
-
-	for (const mode of ["full", "partial", "error", "changed", "late-error", "aborted", "sibling", "nonterminal", "shutdown"]) {
-		test(`direct artifact read: ${mode}`, async () => {
-			const h = await entryHarness();
-			try {
-				h.setBusy(true);
-				const file = path.join(h.runDir, "child", "result.md");
-				fs.writeFileSync(file, "audit complete\nno changes\n");
-				if (mode !== "nonterminal") h.finish();
-				await h.refresh();
-				const event = { toolCallId: "read", toolName: "read", input: { path: file } };
-				await h.startTool(event);
-				if (mode === "nonterminal") h.finish();
-				if (mode === "late-error") h.finish("child", "1");
-				if (mode === "changed") fs.writeFileSync(file, "new version");
-				if (mode === "shutdown") await h.close();
-				const controller = new AbortController();
-				if (mode === "aborted") controller.abort();
-				const context = mode === "sibling"
-					? { ...h.ctx, sessionManager: { ...h.ctx.sessionManager, getSessionFile: () => "/sibling" } }
-					: { ...h.ctx, signal: controller.signal };
-				await h.endTool({ ...event, isError: mode === "error", content: [{ type: "text", text: mode === "partial" ? "audit complete" : "audit complete\nno changes\n" }] }, context);
-				const boundary = h.boundary();
-				if (mode === "full" || mode === "shutdown") expect(boundary).toBeUndefined();
-				else expect(boundary.entries).toHaveLength(1);
-				expect(h.messages).toHaveLength(0);
-			} finally { await h.close(); }
-		});
-	}
 
 	test("foreign, aborted and noncontinuable boundaries do not consume pending results", async () => {
 		const h = await entryHarness();

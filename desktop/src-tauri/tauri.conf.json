@@ -16,7 +16,7 @@
         "title": "Pix Desktop",
         "width": 1240,
         "height": 820,
-        "minWidth": 860,
+        "minWidth": 660,
         "minHeight": 380,
         "resizable": true,
         "acceptFirstMouse": true,

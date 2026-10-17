@@ -7655,15 +7655,51 @@ fn clean_project_pi_from(workspace: &Path) -> Result<u64, String> {
     }
     let project_directory = canonical_project_directory(&root, &project_directory)?;
     let candidates = project_pi_cleanup_targets(&project_directory)?;
+    let subagents_directory = project_directory.join("subagents");
     let mut removed_bytes = 0u64;
     for candidate in candidates {
-        let candidate_bytes = project_pi_path_logical_size(&candidate)?;
-        remove_project_pi_path_nofollow(&candidate)?;
-        removed_bytes = removed_bytes
-            .checked_add(candidate_bytes)
-            .ok_or_else(|| "removed .pi garbage size exceeds u64".to_owned())?;
+        // Owned-launch records survive Manual Clean (decision 0072): remove the
+        // rest of the parent-scoped directory but keep `owned/`.
+        let targets = if candidate.parent() == Some(subagents_directory.as_path())
+            && subagent_scope_with_owned_records(&candidate)
+        {
+            fs::read_dir(&candidate)
+                .map_err(|error| format!("failed to read {}: {error}", candidate.display()))?
+                .map(|entry| {
+                    entry
+                        .map(|entry| entry.path())
+                        .map_err(|error| format!("failed to read {}: {error}", candidate.display()))
+                })
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .filter(|path| {
+                    path.file_name().and_then(|name| name.to_str())
+                        != Some(subagent_retention::OWNED_RECORDS_DIR)
+                })
+                .collect()
+        } else {
+            vec![candidate]
+        };
+        for target in targets {
+            let target_bytes = project_pi_path_logical_size(&target)?;
+            remove_project_pi_path_nofollow(&target)?;
+            removed_bytes = removed_bytes
+                .checked_add(target_bytes)
+                .ok_or_else(|| "removed .pi garbage size exceeds u64".to_owned())?;
+        }
     }
     Ok(removed_bytes)
+}
+
+fn subagent_scope_with_owned_records(candidate: &Path) -> bool {
+    let is_scope = candidate
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(subagent_retention::is_parent_session_dir_name);
+    is_scope
+        && fs::symlink_metadata(candidate)
+            .is_ok_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+        && subagent_retention::has_owned_records(candidate)
 }
 
 fn auto_clean_project_pi_from(workspace: &Path) -> Result<u64, String> {
@@ -7708,7 +7744,8 @@ fn auto_clean_project_pi_with_agent_dir(
     for candidate in candidates {
         let ttl = if candidate.parent() == Some(subagents_directory.as_path()) {
             match subagent_retention::classify_subagent_dir(&candidate, &mut parent_sessions) {
-                subagent_retention::SubagentDirRetention::ParentPresent => continue,
+                subagent_retention::SubagentDirRetention::ParentPresent
+                | subagent_retention::SubagentDirRetention::OwnedRecords => continue,
                 subagent_retention::SubagentDirRetention::ParentMissing => {
                     subagent_retention::SUBAGENT_ORPHAN_GRACE
                 }
@@ -12018,11 +12055,26 @@ mod tests {
             .expect("auto clean project .pi");
         assert!(!live.exists());
 
-        // Manual Clean ignores retention and empties the directory.
+        // Owned-launch records keep an orphaned scope out of background cleanup.
+        let owned_scope = subagents.join("0199f0c2-0000-7000-8000-000000000004");
+        write_child(&owned_scope, &parents.join("gone.jsonl"));
+        let owned_record = owned_scope.join("owned/batch/a1/owned_launch");
+        fs::create_dir_all(owned_record.parent().expect("owned agent dir"))
+            .expect("create owned agent dir");
+        fs::write(&owned_record, b"{}").expect("write owned pointer");
+        age_tree(&owned_scope, past_grace);
+        auto_clean_project_pi_with_agent_dir(&workspace, Some(&agent_dir))
+            .expect("auto clean project .pi");
+        assert!(owned_scope.join("child.jsonl").is_file());
+        assert!(owned_record.is_file());
+
+        // Manual Clean ignores retention and empties the directory, except owned records.
         clean_project_pi_from(&workspace).expect("manual cleanup");
         assert!(!fresh_orphan.exists());
         assert!(!legacy.exists());
         assert!(subagents.is_dir());
+        assert!(!owned_scope.join("child.jsonl").exists());
+        assert!(owned_record.is_file(), "manual clean keeps owned records");
 
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }

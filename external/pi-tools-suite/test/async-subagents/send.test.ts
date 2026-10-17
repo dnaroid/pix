@@ -2,8 +2,10 @@ import { afterEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { createRunDir, spawnAgent } from "../../src/async-subagents/lib.js";
-import { archiveAgentTurn, readLaunchSpec, readTurnCount } from "../../src/async-subagents/core/turns.js";
+import { spawnAgent } from "../../src/async-subagents/lib.js";
+import { ownedAgentDir } from "../../src/async-subagents/core/paths.js";
+import { readResultText } from "../../src/async-subagents/core/state.js";
+import { createBatch, getRecord, resetSubagentStoreForTest, resolveScope } from "../../src/async-subagents/core/store.js";
 import { getLiveChannel } from "../../src/async-subagents/core/live-channel.js";
 import { registerSendTool } from "../../src/async-subagents/tools/send.js";
 
@@ -12,8 +14,13 @@ const originalArgv1 = process.argv[1];
 
 afterEach(() => {
 	process.argv[1] = originalArgv1;
+	resetSubagentStoreForTest();
 	for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
+
+function newBatch(cwd: string, slug: string): string {
+	return createBatch(cwd, resolveScope(undefined), slug);
+}
 
 function tempDir(): string {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "async-subagents-send-"));
@@ -70,48 +77,38 @@ function readLog(logFile: string): { message: string; args: string[] }[] {
 }
 
 describe.serial("sub-agent send/resume", () => {
-	test.serial("persists launch.json and resumes the same session as a new turn", async () => {
+	test.serial("records the launch on the parent record and resumes the same session as a new turn", async () => {
 		const cwd = tempDir();
-		const runDir = createRunDir(cwd, "resume");
+		const runDir = newBatch(cwd, "resume");
 		const logFile = path.join(cwd, "prompts.log");
 		installEchoPi(logFile);
 		await withTimeout(new Promise((resolve) => {
 			spawnAgent(runDir, { id: "a1", task: "First task" }, cwd, ["--thinking", "low"], undefined, resolve, { timeoutMs: 60_000 });
 		}), "first turn did not complete");
-		const agentDir = path.join(runDir, "a1");
-		const spec = readLaunchSpec(agentDir);
-		expect(spec).toMatchObject({ version: 1, task: { id: "a1", task: "First task" }, extraArgs: ["--thinking", "low"], timeoutMs: 60_000 });
-		const sessionFile = fs.readFileSync(path.join(agentDir, "session_file"), "utf-8").trim();
-		expect(sessionFile.startsWith(path.join(agentDir, "sessions"))).toBe(true);
-		const firstResult = fs.readFileSync(path.join(agentDir, "result.md"), "utf-8");
-		expect(firstResult.startsWith("echo:")).toBe(true);
+		const record = getRecord(runDir, "a1")!;
+		expect(record).toMatchObject({ task: { id: "a1", task: "First task" }, extraArgs: ["--thinking", "low"], timeoutMs: 60_000, turn: 1, status: "done" });
+		const sessionFile = record.childSessionFile!;
+		expect(sessionFile.startsWith(path.join(cwd, ".pi", "subagents"))).toBe(true);
+		expect(readResultText(runDir, "a1")?.startsWith("echo:")).toBe(true);
 
-		expect(archiveAgentTurn(agentDir, "Second message")).toBe(1);
-		expect(fs.existsSync(path.join(agentDir, "result.md"))).toBe(false);
-		expect(fs.existsSync(path.join(agentDir, "pid"))).toBe(false);
 		const completion: any = await withTimeout(new Promise((resolve) => {
-			spawnAgent(runDir, spec!.task, cwd, spec!.extraArgs, undefined, resolve, { resume: { message: "Second message", sessionFile } });
+			spawnAgent(runDir, record.task!, cwd, record.extraArgs ?? [], undefined, resolve, { resume: { message: "Second message", sessionFile } });
 		}), "resumed turn did not complete");
 
 		expect(completion).toMatchObject({ exitCode: 0, state: { status: "done" } });
-		expect(fs.readFileSync(path.join(agentDir, "result.md"), "utf-8")).toBe("echo:Second message");
-		expect(fs.readFileSync(path.join(agentDir, "turns", "1", "result.md"), "utf-8")).toBe(firstResult);
-		// Turn 1 started from prompt.md; the resumed turn's message is recorded alongside it.
-		expect(fs.existsSync(path.join(agentDir, "turns", "1", "turn_message.md"))).toBe(false);
-		expect(fs.readFileSync(path.join(agentDir, "turn_message.md"), "utf-8")).toBe("Second message");
-		expect(readTurnCount(agentDir)).toBe(1);
+		expect(readResultText(runDir, "a1")).toBe("echo:Second message");
 		const log = readLog(logFile);
 		expect(log).toHaveLength(2);
 		expect(log[1].message).toBe("Second message");
 		expect(log[1].args[log[1].args.indexOf("--session") + 1]).toBe(sessionFile);
 		// The session file survives (and accumulates) across turns.
 		expect(fs.readFileSync(sessionFile, "utf-8").trim().split("\n")).toHaveLength(2);
-		expect(fs.readFileSync(path.join(agentDir, "prompt.md"), "utf-8")).toContain("First task");
+		expect(log[0].message).toContain("First task");
 	});
 
 	test.serial("send tool resumes a finished agent and reports completion", async () => {
 		const cwd = tempDir();
-		const runDir = createRunDir(cwd, "tool-resume");
+		const runDir = newBatch(cwd, "tool-resume");
 		const logFile = path.join(cwd, "prompts.log");
 		installEchoPi(logFile);
 		await withTimeout(new Promise((resolve) => {
@@ -133,7 +130,8 @@ describe.serial("sub-agent send/resume", () => {
 		expect(liveAgents.get(runDir)?.get("a1")?.awaitingCompletion).toBe(true);
 		await withTimeout(done, "resumed turn did not complete");
 		expect(completions[0]).toMatchObject({ agentId: "a1", exitCode: 0, state: { status: "done" } });
-		expect(fs.readFileSync(path.join(runDir, "a1", "result.md"), "utf-8")).toBe("echo:Continue please");
+		expect(readResultText(runDir, "a1")).toBe("echo:Continue please");
+		expect(getRecord(runDir, "a1")?.turn).toBe(2);
 
 		const missing = await tool.execute("call", { agentId: "a1", runDir, message: "x", mode: "sideways" }, undefined, undefined, { cwd });
 		expect(missing.isError).toBe(true);
@@ -141,25 +139,24 @@ describe.serial("sub-agent send/resume", () => {
 
 	test.serial("send tool refuses to resume when the persisted session is missing", async () => {
 		const cwd = tempDir();
-		const runDir = createRunDir(cwd, "missing-session");
+		const runDir = newBatch(cwd, "missing-session");
 		installEchoPi(path.join(cwd, "prompts.log"));
 		await withTimeout(new Promise((resolve) => {
 			spawnAgent(runDir, { id: "a1", task: "First task" }, cwd, [], undefined, resolve);
 		}), "turn did not complete");
-		const agentDir = path.join(runDir, "a1");
-		expect((JSON.parse(fs.readFileSync(path.join(agentDir, "launch.json"), "utf-8")).piArgs as string[]).join("\n")).not.toContain("--no-session");
-		fs.rmSync(path.join(agentDir, "sessions"), { recursive: true, force: true });
+		const sessionFile = getRecord(runDir, "a1")!.childSessionFile!;
+		fs.rmSync(sessionFile, { force: true });
 		let tool: any;
 		registerSendTool({ registerTool: (t: any) => { tool = t; } } as any, new Map(), () => {});
 		const result = await tool.execute("call", { agentId: "a1", runDir, message: "again" }, undefined, undefined, { cwd });
 		expect(result.isError).toBe(true);
 		expect(result.content[0].text).toContain("no persisted session");
-		expect(fs.existsSync(path.join(agentDir, "turns"))).toBe(false);
+		expect(getRecord(runDir, "a1")?.turn).toBe(1);
 	});
 
 	test.serial("live follow-up is queued into the running turn and drives the final result", async () => {
 		const cwd = tempDir();
-		const runDir = createRunDir(cwd, "live-followup");
+		const runDir = newBatch(cwd, "live-followup");
 		const script = path.join(tempDir(), "pi.js");
 		fs.writeFileSync(script, `${FAKE_PI_PRELUDE}
 let streaming = false; const queue = []; let last = "";
@@ -192,21 +189,21 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
 		const completed = new Promise((resolve) => {
 			spawnAgent(runDir, { id: "a1", task: "First task" }, cwd, [], undefined, (value) => { completion = value; resolve(value); });
 		});
-		const agentDir = path.join(runDir, "a1");
+		const agentDir = ownedAgentDir(runDir, "a1");
 		const channel = getLiveChannel(agentDir);
 		expect(channel).toBeDefined();
 		const sent = await withTimeout(channel!.send("more", "followUp"), "live send not accepted");
 		expect(sent.disposition).toBe("queued");
 		await withTimeout(completed, "live turn did not complete");
 		expect(completion).toMatchObject({ exitCode: 0, state: { status: "done" } });
-		expect(fs.readFileSync(path.join(agentDir, "result.md"), "utf-8")).toBe("echo:more");
+		expect(readResultText(runDir, "a1")).toBe("echo:more");
 		expect(getLiveChannel(agentDir)).toBeUndefined();
 		await expect(channel!.send("late", "followUp")).rejects.toThrow("finishing");
 	});
 
 	test.serial("a live send pending at agent_settled defers termination until the new run settles", async () => {
 		const cwd = tempDir();
-		const runDir = createRunDir(cwd, "live-race");
+		const runDir = newBatch(cwd, "live-race");
 		const script = path.join(tempDir(), "pi.js");
 		// Mimics pi deferring a prompt received while it emits agent_settled.
 		fs.writeFileSync(script, `${FAKE_PI_PRELUDE}
@@ -237,11 +234,11 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
 		const completed = new Promise<any>((resolve) => {
 			spawnAgent(runDir, { id: "a1", task: "First task" }, cwd, [], undefined, resolve);
 		});
-		const agentDir = path.join(runDir, "a1");
+		const agentDir = ownedAgentDir(runDir, "a1");
 		const sent = await withTimeout(getLiveChannel(agentDir)!.send("second", "followUp"), "live send not accepted");
 		expect(sent.disposition).toBe("started");
 		const completion = await withTimeout(completed, "deferred run did not complete");
 		expect(completion).toMatchObject({ exitCode: 0, state: { status: "done" } });
-		expect(fs.readFileSync(path.join(agentDir, "result.md"), "utf-8")).toBe("echo:second");
+		expect(readResultText(runDir, "a1")).toBe("echo:second");
 	});
 });

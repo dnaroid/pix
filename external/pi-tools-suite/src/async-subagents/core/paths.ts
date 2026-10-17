@@ -5,21 +5,6 @@ export function getRunRoot(cwd: string): string {
 	return path.join(cwd, ".pi", "subagents");
 }
 
-export function createRunDir(cwd: string, slug?: string): string {
-	if (slug) validateBasename(slug, "slug");
-	const runRoot = getRunRoot(cwd);
-	const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-	const baseName = `${timestamp}${slug ? `-${slug}` : ""}`;
-	let runDir = path.join(runRoot, baseName);
-	let suffix = 2;
-	while (fs.existsSync(runDir)) {
-		runDir = path.join(runRoot, `${baseName}-${suffix}`);
-		suffix++;
-	}
-	fs.mkdirSync(path.join(runDir, "prompts"), { recursive: true });
-	return runDir;
-}
-
 /**
  * Parent session ids are UUIDs. Legacy run directories are timestamp-named, so
  * the two kinds of `.pi/subagents/` children never collide (decision 0072).
@@ -85,18 +70,6 @@ export function isDir(p: string): boolean {
 	} catch {
 		return false;
 	}
-}
-
-export function hasLaunchedAgentPrompt(runDir: string, agentId: string): boolean {
-	return fs.existsSync(path.join(runDir, agentId, "prompt.md"));
-}
-
-export function hasQueuedAgentPrompt(runDir: string, agentId: string): boolean {
-	return fs.existsSync(path.join(runDir, "prompts", `${agentId}.md`));
-}
-
-export function hasAgentPrompt(runDir: string, agentId: string): boolean {
-	return hasLaunchedAgentPrompt(runDir, agentId) || hasQueuedAgentPrompt(runDir, agentId);
 }
 
 const SAFE_BASENAME = /^[A-Za-z0-9._-]+$/;

@@ -16,6 +16,8 @@ export interface SubagentMeta {
 	subagentType?: string;
 	parentSession?: string;
 	parentSessionId?: string;
+	/** Parent scope (session id, or a per-process scope for a headless parent). */
+	scope?: string;
 }
 
 export function parseSubagentMeta(raw: string | undefined): SubagentMeta | undefined {

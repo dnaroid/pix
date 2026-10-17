@@ -1,4 +1,3 @@
-import { join } from "node:path";
 import type { ResolvedToolRule } from "../config.js";
 
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
@@ -43,10 +42,6 @@ export const CLEAR_TERMINAL = "\x1b[2J\x1b[3J\x1b[H";
 export const THINKING_TOOL_NAME = "thinking";
 export const SUBAGENTS_TOOL_NAME = "subagents";
 export const SUBAGENTS_TOOL_NAME_PREFIX = "async_subagents_";
-export const SUBAGENTS_RUN_ROOT = join(".pi", "subagents");
-export const SUBAGENTS_REGISTRY_FILE = "registry.json";
-export const SUBAGENT_PARENT_SESSION_FILE = "parent_session";
-export const SUBAGENTS_POLL_INTERVAL_MS = 1_500;
 export const SUBAGENTS_WIDGET_MAX_ROWS = 8;
 export const DEFAULT_THINKING_TOOL_RULE: ResolvedToolRule = {
 	previewLines: 0,

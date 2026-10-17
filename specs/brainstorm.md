@@ -86,13 +86,18 @@ the run state untouched, `1` run marked incomplete.
 - **Participants.** Agent `p<slot>` uses `subagentType: research`,
   `promptOverride: "{task}"`, and `extraArgs`
   `--extension <council-guard.ts> --tools read,grep,web_search,web_fetch,project_search`.
-  The subagent run dir is `.pi/subagents/<stamp>-brainstorm-<id>`. Before using
-  a round, `collect` checks `launch.json` (model, role, extraArgs, thinking), the
-  `turn_count` (R−1 before round R), `result.json` (status, exact model) and the
-  user-message count in the participant's persisted session (exactly R; live
-  follow-ups do not advance `turn_count`). `turn_count` and `result.json` are
-  re-read after `result.md`; a changed snapshot stays pending. A missing session
-  fails the run. Any mismatch marks the run incomplete. Failed, stopped, timed-out, empty or
+  Participants share the sub-agent batch `<stamp>-brainstorm-<id>` (a bare
+  batch name, not a directory). State is read from sessions (decision 0072):
+  the participant's child session under `.pi/subagents/<parent scope>/` is found
+  by its `subagent_meta` entry, and its folded `pi-tools-suite:subagent` record
+  is read from the parent session named there. Before using a round, `collect`
+  checks the record's launch task (model, role, extraArgs, thinking), its turn
+  (R before round R), its status and reported model, and the user-message count
+  in the child session (exactly R; live follow-ups do not advance the turn). The
+  answer is the child's last successful assistant message. The parent record is
+  re-read after the answer; a changed snapshot stays pending. A missing child
+  session after round 1, or a parent without a persisted session, fails the run.
+  Any mismatch marks the run incomplete. Failed, stopped, timed-out, empty or
   oversized (>40,000 chars) answers, and `--missing`, become declared gaps.
   The participant is dropped from later rounds and never replaced. A round
   below quorum makes the run incomplete.
@@ -100,7 +105,7 @@ the run state untouched, `1` run marked incomplete.
   `compress` on session start, model select and before each agent start. It
   blocks every other tool call.
 - **Storage.** `<outputDir>/<slug>-<id>/`: `manifest.json` (format
-  `pi-brainstorm-v5`), `brief.md`, `discussion.md` (position matrix plus all
+  `pi-brainstorm-v6`), `brief.md`, `discussion.md` (position matrix plus all
   rounds), `prompts/round-R-pS.md`, `rounds/round-R-participant-S.md`,
   `draft-proposal.md`, `revision-notes.md`, `proposal.md`. Paths are confined to
   the project; `prompts/` and `rounds/` must not be symlinks. Mutations hold `.council.lock`. Files are

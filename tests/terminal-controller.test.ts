@@ -203,7 +203,6 @@ function fakeHost(inputChunks: string[] = [], events: string[] = []) {
 		closeSdkMenuForStop: () => {},
 		clearToastTimers: () => {},
 		stopBlinking: () => {},
-		stopSubagentsPolling: () => {},
 		stopModelUsagePolling: () => {},
 		stopMemoryWatchdog: () => {
 			events.push("stopMemoryWatchdog");

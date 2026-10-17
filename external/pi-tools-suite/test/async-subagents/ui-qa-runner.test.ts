@@ -35,15 +35,14 @@ afterEach(() => {
 function createProject(type = "ui-qa") {
 	const project = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ui-qa-runner-")));
 	tempDirs.push(project);
-	const agentDir = path.join(project, ".pi", "subagents", "run", "qa");
+	const agentDir = path.join(project, ".pi", "artifacts", "subagents", "run-qa");
 	const uiWorkspace = path.join(agentDir, "ui-qa");
 	const browserWorkspace = path.join(uiWorkspace, "browser");
 	fs.mkdirSync(path.join(uiWorkspace, "flows"), { recursive: true, mode: 0o700 });
 	fs.mkdirSync(path.join(browserWorkspace, "flows"), { recursive: true, mode: 0o700 });
-	for (const directory of [path.join(project, ".pi"), path.join(project, ".pi", "subagents"), path.join(project, ".pi", "subagents", "run"), agentDir, uiWorkspace, path.join(uiWorkspace, "flows"), browserWorkspace, path.join(browserWorkspace, "flows")]) {
+	for (const directory of [path.join(project, ".pi"), path.join(project, ".pi", "artifacts"), path.join(project, ".pi", "artifacts", "subagents"), agentDir, uiWorkspace, path.join(uiWorkspace, "flows"), browserWorkspace, path.join(browserWorkspace, "flows")]) {
 		if (process.platform !== "win32") fs.chmodSync(directory, 0o700);
 	}
-	fs.writeFileSync(path.join(agentDir, "prompt.md"), "QA prompt\n", { mode: 0o600 });
 	fs.writeFileSync(path.join(agentDir, "project_cwd"), `${project}\n`, { mode: 0o600 });
 	fs.writeFileSync(path.join(agentDir, "subagent_type"), `${type}\n`, { mode: 0o600 });
 	return { project, agentDir, uiWorkspace };
@@ -832,7 +831,7 @@ process.stdin.on("data", (data) => {
 		expect(video.format).toBe("asciicast-v2");
 		expect(video.truncated).toBe(false);
 		expect(video.path.endsWith("terminal-recording.cast")).toBe(true);
-		expect(video.path.startsWith(path.join(project, ".pi", "subagents", "run", "qa", "ui-qa", "evidence", "recording"))).toBe(true);
+		expect(video.path.startsWith(path.join(project, ".pi", "artifacts", "subagents", "run-qa", "ui-qa", "evidence", "recording"))).toBe(true);
 		const stat = fs.statSync(video.path);
 		expect(stat.isFile()).toBe(true);
 		if (process.platform !== "win32") expect(stat.mode & 0o777).toBe(0o600);

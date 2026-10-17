@@ -71,7 +71,7 @@ import { CompressionRegretTracker } from "./regret-signals.js"
 import { RoutinePressureTracker } from "./routine-pressure.js"
 import { canonicalMessageHash } from "./conversation-index.js"
 import { randomUUID } from "node:crypto"
-import { dcpRequestSnapshot } from "./diagnostics.js"
+import { dcpRequestSnapshot, dcpUsageObservation } from "./diagnostics.js"
 import {
 	collectProviderToolResultEvidence,
 	providerPayloadIncludesToolResult,
@@ -1501,7 +1501,8 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 			opportunityKind: reminderDelivered ? latestProviderOpportunityKind : undefined,
 		})
 		routinePressureTracker.beforeRequest()
-		diagnostic("request", { id: `${diagnosticEpoch}:${pending.lastAttemptId}`, reminder: reminderDelivered, snapshot: diagnosticSnapshot })
+		diagnostic("request", { id: `${diagnosticEpoch}:${pending.lastAttemptId}`, reminder: reminderDelivered,
+			contentRevision: pending.contentRevision, attempts: pending.attempts, ambiguous: pending.ambiguous, snapshot: diagnosticSnapshot })
 
 		writeDcpDebugLog(effectiveConfig, "provider_payload.message_ids", {
 			injected: false,
@@ -1559,6 +1560,7 @@ export default async function dcpModule(pi: ExtensionAPI, dependencies: { config
 		})
 		routinePressureTracker.complete(message, completion.status === "promote")
 		latestProviderOpportunityAvailable = false
+		diagnostic("usage", dcpUsageObservation(message, completion, diagnosticEpoch))
 
 		if (completion.status !== "promote") {
 			writeDcpDebugLog(effectiveConfig, "provider_payload.tool_results_not_promoted", {

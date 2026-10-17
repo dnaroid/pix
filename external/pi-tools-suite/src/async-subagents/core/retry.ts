@@ -5,7 +5,8 @@ import type { SpawnedAgent, AgentCompletionHandler } from "./types.js";
 import { isQuotaLimitCompletion, nextFallbackModel, rememberSessionModelFallback, selectSessionModelWithFallback } from "./model-fallback.js";
 import { spawnAgent, type SpawnAgentOptions } from "./spawn.js";
 import { getAgentState } from "./state.js";
-import { isoNow } from "./utils.js";
+import { ownedAgentDir } from "./paths.js";
+import { getRecord, updateLive, updateRecord } from "./store.js";
 
 export interface RetryableSpawnOptions extends SpawnAgentOptions {
 	retry: RetryConfig;
@@ -53,9 +54,9 @@ export function spawnAgentWithRetry(
 		settled = true;
 		if (retryTimer) clearTimeout(retryTimer);
 		abortRetry?.();
-		clearRetryPending(completion.agentDir);
-		writeRetryCount(completion.agentDir, currentAttempt);
-		onComplete?.(completion);
+		clearRetryPending(runDir, completion.agentId);
+		writeRetryCount(runDir, completion.agentId, currentAttempt);
+		onComplete?.(error ? completion : refreshedCompletion(completion));
 		if (error) rejectAllDone!(error);
 		else resolveAllDone!();
 	};
@@ -68,13 +69,13 @@ export function spawnAgentWithRetry(
 		if (fallbackModel) {
 			const failedModel = currentTask.model;
 			rememberSessionModelFallback(failedModel, fallbackModel);
-			writeModelFallbackLog(completion.agentDir, failedModel, fallbackModel, completion.exitCode);
+			updateRecord(runDir, completion.agentId, { modelFallback: { from: failedModel ?? "", to: fallbackModel } });
 			currentTask = { ...currentTask, model: fallbackModel };
 			if (signal?.aborted) {
 				settle(completion);
 				return;
 			}
-			if (isStopRequested(completion.agentDir)) {
+			if (isStopRequested(runDir, completion.agentId)) {
 				settle(refreshedCompletion(completion));
 				return;
 			}
@@ -97,10 +98,9 @@ export function spawnAgentWithRetry(
 		const delayMs = retry.backoffMs * Math.pow(2, currentAttempt - 1);
 		onRetry?.(currentAttempt, maxRetries, delayMs);
 
-		// Write retry metadata.
-		writeRetryCount(completion.agentDir, currentAttempt);
-		writeRetryPending(completion.agentDir, delayMs);
-		writeRetryLog(completion.agentDir, currentAttempt, delayMs, completion.exitCode);
+		// Retry metadata: nonterminal and owned by this process until relaunch.
+		writeRetryCount(runDir, completion.agentId, currentAttempt);
+		writeRetryPending(runDir, completion.agentId, delayMs);
 
 		if (signal?.aborted) {
 			settle(completion);
@@ -112,11 +112,11 @@ export function spawnAgentWithRetry(
 			abortRetry?.();
 			abortRetry = undefined;
 			if (settled) return;
-			if (signal?.aborted || isStopRequested(completion.agentDir)) {
+			if (signal?.aborted || isStopRequested(runDir, completion.agentId)) {
 				settle(refreshedCompletion(completion));
 				return;
 			}
-			clearRetryPending(completion.agentDir);
+			// spawnAgent resets status/nextRetryAt for the relaunch.
 			try {
 				spawnAgent(runDir, currentTask, cwd, extraArgs, onRpcEvent, handleCompletion, spawnOpts);
 			} catch (error) {
@@ -144,48 +144,33 @@ function shouldRetry(completion: Parameters<AgentCompletionHandler>[0], retry: R
 	return retry.retryableExitCodes.includes(completion.exitCode);
 }
 
-function writeRetryCount(agentDir: string, count: number): void {
-	try {
-		// Readers treat a missing file as zero retries; do not persist the default.
-		const file = path.join(agentDir, "retry_count");
-		if (count <= 0) fs.rmSync(file, { force: true });
-		else fs.writeFileSync(file, String(count), "utf-8");
-	} catch { /* best-effort */ }
+function writeRetryCount(runDir: string, agentId: string, count: number): void {
+	const record = getRecord(runDir, agentId);
+	if (!record || (record.retryCount ?? 0) === count) return;
+	updateRecord(runDir, agentId, { retryCount: count });
 }
 
-function writeRetryPending(agentDir: string, delayMs: number): void {
-	try {
-		const nextRetryAt = new Date(Date.now() + delayMs).toISOString().replace(/\.\d{3}Z$/, "Z");
-		fs.writeFileSync(path.join(agentDir, "retry_pending"), isoNow(), "utf-8");
-		fs.writeFileSync(path.join(agentDir, "next_retry_at"), nextRetryAt, "utf-8");
-	} catch { /* best-effort */ }
+function writeRetryPending(runDir: string, agentId: string, delayMs: number): void {
+	if (!getRecord(runDir, agentId)) return;
+	const nextRetryAt = new Date(Date.now() + delayMs).toISOString().replace(/\.\d{3}Z$/, "Z");
+	updateRecord(runDir, agentId, { status: "retrying", nextRetryAt });
+	updateLive(runDir, agentId, { active: true });
 }
 
-function clearRetryPending(agentDir: string): void {
-	try {
-		fs.rmSync(path.join(agentDir, "retry_pending"), { force: true });
-		fs.rmSync(path.join(agentDir, "next_retry_at"), { force: true });
-	} catch { /* best-effort */ }
+/** A retry chain that settles without relaunching restores the attempt's terminal status. */
+function clearRetryPending(runDir: string, agentId: string): void {
+	const record = getRecord(runDir, agentId);
+	if (!record) return;
+	if (record.status === "retrying") {
+		updateRecord(runDir, agentId, { status: record.exitCode === 0 ? "done" : "failed", nextRetryAt: null });
+		updateLive(runDir, agentId, { active: false });
+	} else if (record.nextRetryAt) {
+		updateRecord(runDir, agentId, { nextRetryAt: null });
+	}
 }
 
-function writeRetryLog(agentDir: string, attempt: number, delayMs: number, exitCode: number): void {
-	try {
-		const line = `${isoNow()} retry=${attempt} delay=${delayMs}ms exitCode=${exitCode}\n`;
-		fs.appendFileSync(path.join(agentDir, "retry.log"), line, "utf-8");
-	} catch { /* best-effort */ }
-}
-
-function writeModelFallbackLog(agentDir: string, failedModel: string | undefined, fallbackModel: string, exitCode: number): void {
-	try {
-		const line = `${isoNow()} modelFallback ${failedModel ?? "(default)"} -> ${fallbackModel} exitCode=${exitCode}\n`;
-		fs.appendFileSync(path.join(agentDir, "model_fallback.log"), line, "utf-8");
-		fs.writeFileSync(path.join(agentDir, "model_fallback_from"), failedModel ?? "", "utf-8");
-		fs.writeFileSync(path.join(agentDir, "model_fallback_to"), fallbackModel, "utf-8");
-	} catch { /* best-effort */ }
-}
-
-function isStopRequested(agentDir: string): boolean {
-	return fs.existsSync(path.join(agentDir, "stop_requested"));
+function isStopRequested(runDir: string, agentId: string): boolean {
+	return getRecord(runDir, agentId)?.stopRequested === true || fs.existsSync(path.join(ownedAgentDir(runDir, agentId), "stop_requested"));
 }
 
 function refreshedCompletion(completion: Parameters<AgentCompletionHandler>[0]): Parameters<AgentCompletionHandler>[0] {

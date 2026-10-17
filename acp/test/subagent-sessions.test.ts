@@ -139,6 +139,66 @@ test("resolves a child in its parent-scoped .pi/subagents/<parentSessionId>/ dir
 	}
 });
 
+test("resolves a session-native child by subagent_meta and reads status from the parent record (decision 0072)", async () => {
+	const f = await fixture();
+	try {
+		const scope = "0199f0c2-4444-7222-8333-944445555666";
+		const batch = "2026-10-17T00-00-00-batch";
+		const scopeDir = join(f.cwd, ".pi", "subagents", scope);
+		await mkdir(scopeDir, { recursive: true });
+		const parent = join(f.cwd, "parent.jsonl");
+		const record = (data: Record<string, unknown>) => `${JSON.stringify({ type: "custom", customType: "pi-tools-suite:subagent", data: { version: 1, scope, batch, agentId: "a1", ...data } })}\n`;
+		await writeFile(parent, `${JSON.stringify({ type: "session", id: scope, cwd: f.cwd })}\n${record({ status: "running", pid: 1 })}`);
+		const meta = (agentId: string, b = batch) => JSON.stringify({ type: "custom", customType: "subagent_meta", data: { version: 1, agentId, batch: b, runDir: join(f.cwd, ".pi", "subagents", scope, b), cwd: f.cwd, scope, parentSession: parent } });
+		const child = join(scopeDir, "child-a1.jsonl");
+		await writeFile(child, `${JSON.stringify({ type: "session", id: "child-a1", cwd: f.cwd })}\n${meta("a1")}\n{"type":"message"}\n`);
+		await writeFile(join(scopeDir, "child-a2.jsonl"), `${JSON.stringify({ type: "session", id: "child-a2", cwd: f.cwd })}\n${meta("a2")}\n`);
+		await writeFile(join(scopeDir, "other-batch.jsonl"), `${JSON.stringify({ type: "session", id: "x", cwd: f.cwd })}\n${meta("a1", "other")}\n`);
+
+		const runKey = join(f.cwd, ".pi", "subagents", scope, batch);
+		const resolved = await resolveSubagentSession(f.cwd, runKey, "a1");
+		assert.equal(resolved.kind, "scoped");
+		assert.equal(resolved.sessionFile, child);
+		assert.equal(resolved.runDir, runKey);
+		assert.equal((await resolveSubagentSession(f.cwd, `${scope}/${batch}`, "a1")).sessionFile, child);
+		assert.equal((await resolveSubagentSession(f.cwd, runKey, "a2")).sessionFile, join(scopeDir, "child-a2.jsonl"));
+
+		const running = await readSubagentSessionState(resolved);
+		assert.equal(running.terminal, false);
+		// Appended parent records are folded incrementally; null deletes a field.
+		await writeFile(parent, `${await readFile(parent, "utf8")}${record({ status: "done", exitCode: 0, pid: null })}`);
+		const done = await readSubagentSessionState(resolved);
+		assert.equal(done.terminal, true);
+		assert.notEqual(done.revision, running.revision);
+		await writeFile(parent, `${await readFile(parent, "utf8")}${record({ status: "retrying" })}`);
+		assert.equal((await readSubagentSessionState(resolved)).terminal, false);
+
+		// Unknown agent/batch, symlinked children and nested files are never resolved.
+		await assert.rejects(resolveSubagentSession(f.cwd, runKey, "missing"), /no persisted session/);
+		await assert.rejects(resolveSubagentSession(f.cwd, `${scope}/unknown-batch`, "a1"), /no persisted session/);
+		await assert.rejects(resolveSubagentSession(f.cwd, `0199f0c2-5555-7222-8333-944445555666/${batch}`, "a1"), /scope not found/);
+		const outside = await realpath(await mkdtemp(join(tmpdir(), "pix-subagent-foreign-")));
+		try {
+			const foreign = join(outside, "foreign.jsonl");
+			await writeFile(foreign, `${meta("a3")}\n`);
+			await symlink(foreign, join(scopeDir, "linked.jsonl"));
+			await mkdir(join(scopeDir, "nested"));
+			await writeFile(join(scopeDir, "nested", "deep.jsonl"), `${meta("a4")}\n`);
+			await assert.rejects(resolveSubagentSession(f.cwd, runKey, "a3"), /no persisted session/);
+			await assert.rejects(resolveSubagentSession(f.cwd, runKey, "a4"), /no persisted session/);
+		} finally {
+			await rm(outside, { recursive: true, force: true });
+		}
+
+		// A child of a headless parent (no persisted parent session) is never terminal.
+		await writeFile(join(scopeDir, "headless.jsonl"), `${JSON.stringify({ type: "custom", customType: "subagent_meta", data: { version: 1, agentId: "h1", batch, scope } })}\n`);
+		const headless = await resolveSubagentSession(f.cwd, runKey, "h1");
+		assert.equal((await readSubagentSessionState(headless)).terminal, false);
+	} finally {
+		await rm(f.cwd, { recursive: true, force: true });
+	}
+});
+
 test("recognizes sub-agent session paths only inside the sub-agent tree", () => {
 	assert.equal(isSubagentSessionPath("/p/.pi/subagents/0199f0c2-1111-7222-8333-944445555666/child.jsonl"), true);
 	assert.equal(isSubagentSessionPath("/p/.pi/subagents/0199f0c2-1111-7222-8333-944445555666/notes.md"), false);

@@ -191,6 +191,16 @@ successive continuation inputs after an intentional exact rewrite. Actual
 server-side cache hits still depend on provider routing/TTL and are not promised
 by DCP.
 
+Normal-mode guidance explicitly treats compression as a cache tradeoff, not
+guaranteed usage/cost savings: batch newly closed stages early when substantial
+work remains, rather than compressing each small result. Keep prior summaries
+unchanged unless correction or context-limit recovery requires rewriting them;
+this is a selection preference, not a prohibition on rollups. Skip optional
+near-finish housekeeping when headroom is ample. Context-limit recovery and
+explicit user requests take priority. This is qualitative guidance only; it
+adds no price table, break-even estimate, threshold, cooldown or manual-tool gate.
+The reminder and tool-description prompts do not repeat this explanation.
+
 ## Pressure and autonomous policy
 
 Effective pressure is the maximum of fresh repository projection and usable

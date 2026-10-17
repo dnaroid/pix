@@ -74,6 +74,7 @@ capacity limits. `[confirmed by code: src/antigravity-auth/index.ts]`
   - Sonnet 4.6 Thinking: base route `claude-sonnet-4-6` (the `-thinking` suffix is stripped) with Claude-style `thinking_budget`/`include_thoughts`; Opus keeps the dedicated `claude-opus-4-6-thinking` route.
   - All new flash/pro routes send numeric `thinkingBudget` + `includeThoughts: true`; no thinking config is attached to any image route. `[confirmed by code: payload.ts; confirmed by tests]`
 - `extraHeadersForPayload` intentionally returns no extra content headers. Claude thinking remains encoded in `generationConfig`; the old `anthropic-beta` header is not emitted because native agy content traffic does not send it. `[confirmed by code: payload.ts, stream.ts; confirmed by tests]`
+- Tool declaration schemas are recursively cleaned before transmission: `uniqueItems` is dropped at any nesting depth while supported constraints such as `minItems`, `items`, and `enum` are preserved. This conversion does not mutate the transcript. `[confirmed by code: payload.ts; confirmed by tests]`
 - `isGemini3Model` treats `gemini-pro-agent` as a Gemini-3 route so functionCall history gets the `skip_thought_signature_validator` sentinel. `[confirmed by code: payload.ts]`
 
 ### Quota keys (host `src/app/model/model-usage-status.ts`)
@@ -127,6 +128,7 @@ capacity limits. `[confirmed by code: src/antigravity-auth/index.ts]`
 - `external/pi-tools-suite/test/antigravity-auth.test.ts` (`bun:test`, `describe.serial "Antigravity account rotation"`): `[confirmed by tests]`
   - Antigravity reasoning levels are clamped to the provider's supported `high` maximum.
   - Canonical Pi transcript system messages replay the active system prompt and tool declarations into the Antigravity payload.
+  - Tool-schema regression checks confirm `uniqueItems: true` and `uniqueItems: false` are removed at top-level and nested schema locations, other constraints are retained, and the source transcript is unchanged.
   - Model catalog test pins the exact registered model id order (current catalog + legacy aliases + Gemini CLI mirrors, no image-output models).
   - Deterministic payload mapping tests pin every new public id → live route/budget combination (3.5/3.6/3.7/3.8 Flash tiers, 3.1 Pro low/agent, GPT-OSS, Sonnet/Opus thinking) and assert legacy Antigravity and Gemini CLI routes are unchanged.
   - OAuth client credentials preserved across refresh.

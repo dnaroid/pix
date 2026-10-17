@@ -28,6 +28,7 @@ import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { OWNED_LAUNCH_SPEC_FILE } from "./owned-launch/spec.js";
+import { ownedBatchDir } from "./paths.js";
 import { isValidOwnedLaunchLabel, listOwnedLaunchRunDirs } from "./owned-launch/label.js";
 import { fenceOwnedLaunchRunAsync, ownedLaunchClaimProtocolSync, readOwnedLaunchClaimSync } from "./owned-launch/marker.js";
 import {
@@ -354,16 +355,19 @@ const inFlightReconcile = new Set<string>();
  * launchctl synchronously.
  */
 export function reconcileOwnedRuns(runDir: string, agentIds?: string[]): void {
+	// Owned agent dirs of a batch live at `<scope>/owned/<batch>/<agentId>/`
+	// (legacy run directories: `<run>/<agentId>/`).
+	const batchDir = ownedBatchDir(runDir);
 	let entries: fs.Dirent[];
 	try {
-		entries = fs.readdirSync(runDir, { withFileTypes: true });
+		entries = fs.readdirSync(batchDir, { withFileTypes: true });
 	} catch {
 		return;
 	}
 	for (const entry of entries) {
 		if (!entry.isDirectory()) continue;
 		if (agentIds && !agentIds.includes(entry.name)) continue;
-		const agentDir = path.join(runDir, entry.name);
+		const agentDir = path.join(batchDir, entry.name);
 		if (inFlightReconcile.has(agentDir) || ownedHandleActiveSync(agentDir)) continue;
 		try {
 			if (!ownedArtifactsPresentSync(agentDir)) continue;

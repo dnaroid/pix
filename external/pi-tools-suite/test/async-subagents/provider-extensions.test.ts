@@ -10,6 +10,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnAgent } from "../../src/async-subagents/core/spawn.js";
+import { getLive, getRecord } from "../../src/async-subagents/core/store.js";
 import { selectsOwnedProvider } from "../../src/async-subagents/core/owned-launch-integration.js";
 import { spawnAgentWithRetry } from "../../src/async-subagents/core/retry.js";
 import { resetSessionModelFallbacks } from "../../src/async-subagents/core/model-fallback.js";
@@ -260,8 +261,7 @@ function spawnForArgs(task: { id: string; model?: string }, extraArgs: string[] 
 	} catch (error) {
 		if (!(error instanceof OwnedBoundaryReached)) throw error;
 	}
-	const argsFile = path.join(runDir, task.id, "launch.json");
-	return { argv: () => JSON.parse(fs.readFileSync(argsFile, "utf8")).piArgs as string[], launched: () => launched, completed, runDir, argsFile };
+	return { argv: () => getLive(runDir, task.id)?.launchArgs ?? [], launched: () => launched, completed, runDir };
 }
 const count = (argv: string[], value: string) => argv.filter((arg) => arg === value).length;
 const lastModels = (argv: string[]) => argv[argv.lastIndexOf("--models") + 1];
@@ -346,7 +346,7 @@ describeOwnedSpawnMatrix("child pi_args matrix (T1)", () => {
 			if (installed) {
 				expect(failure).toBeInstanceOf(OwnedBoundaryReached);
 				expect(launches.length).toBe(1);
-				const argv = (JSON.parse(fs.readFileSync(path.join(runDir, "fb", "launch.json"), "utf8")).piArgs as string[]).join("\n").split("\n");
+				const argv = (getLive(runDir, "fb")?.launchArgs ?? []).join("\n").split("\n");
 				expect(count(argv, STUB_ENTRY)).toBe(1);
 				expect(lastModels(argv)).toBe(CLAUDE);
 			} else {
@@ -354,7 +354,7 @@ describeOwnedSpawnMatrix("child pi_args matrix (T1)", () => {
 				expect((failure as ProviderExtensionError).code).toBe("provider_not_installed");
 				expect(launches.length).toBe(0);
 				// No retry of the permanent failure: the retry counter never advanced.
-				expect(fs.existsSync(path.join(runDir, "fb", "retry.log"))).toBe(false);
+				expect(getRecord(runDir, "fb")?.retryCount ?? 0).toBe(0);
 			}
 		}
 	}, 20_000);
@@ -372,15 +372,14 @@ describeOwnedSpawnMatrix("child pi_args matrix (T1)", () => {
 				ownedLaunchForTest: () => { launched = true; throw new OwnedBoundaryReached(); },
 			});
 		});
-		const agentDir = path.join(runDir, "plain");
 		expect(launched).toBe(false);
 		expect(exitCode).toBe(0);
-		expect(fs.existsSync(path.join(agentDir, "process_group"))).toBe(true);
-		expect(fs.existsSync(path.join(agentDir, "owned_launch"))).toBe(false);
-		const argv = (JSON.parse(fs.readFileSync(path.join(agentDir, "launch.json"), "utf8")).piArgs as string[]).join("\n").split("\n");
+		expect(getRecord(runDir, "plain")?.processGroup).toBe(true);
+		expect(getRecord(runDir, "plain")?.owned).toBeFalsy();
+		expect(fs.existsSync(path.join(runDir, "plain", "owned_launch"))).toBe(false);
+		const argv = (getLive(runDir, "plain")?.launchArgs ?? []).join("\n").split("\n");
 		expect(count(argv, STUB_ENTRY)).toBe(1);
 		expect(lastModels(argv)).toBe(CLAUDE);
-		expect(fs.readFileSync(path.join(agentDir, "progress.jsonl"), "utf8")).toContain("owned_launch_unavailable");
 	}, 20_000);
 });
 

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { execFile as execFileCallback } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -26,12 +26,12 @@ for (const { label, status, receipt, mode } of scenarios) {
 		await mkdir(artifacts, { recursive: true });
 		const scratch = await mkdtemp(path.join(artifacts, "headless-broker-lifecycle-"));
 		try {
-			await mkdir(path.join(scratch, "agent"));
 			await execFile("node", ["--import", "tsx", fixture, scratch, status, receipt, mode ?? ""], { cwd: root, timeout: 5_000 });
-			if (mode === "cleanup") expect(await stat(scratch).catch(() => undefined)).toBeUndefined();
+			const observed = await readFile(path.join(scratch, "observed-receipt"), "utf8").catch(() => "missing");
+			if (mode === "cleanup") expect(observed).toBe("removed");
 			else {
-				expect(await readFile(path.join(scratch, "agent/exit_code"), "utf8").catch(() => "missing")).toBe(receipt);
-				const diagnostic = await readFile(path.join(scratch, "headless-broker.log"), "utf8");
+				expect(observed).toBe(receipt);
+				const diagnostic = await readFile(path.join(scratch, ".pi/artifacts/subagents/broker-batch-headless-broker.log"), "utf8");
 				expect(diagnostic).toContain("broker_pid=");
 				expect(diagnostic).toContain(mode === "poll-error" ? "controlled transient wait failure" : "awaiting completion receipts");
 			}

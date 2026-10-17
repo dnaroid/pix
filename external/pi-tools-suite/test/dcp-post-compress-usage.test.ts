@@ -3,6 +3,10 @@ import dcpModule from "../src/dcp/index.js";
 import { loadConfig } from "../src/dcp/config.js";
 import { createState } from "../src/dcp/state.js";
 import { estimateMessageTokens } from "../src/dcp/pruner-metadata.js";
+import { prepareRequestWithLimits } from "../src/claude-code-provider/src/context-serializer.js";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
 const countTokens = (messages: any[]) => messages.reduce((sum, message) => sum + estimateMessageTokens(message), 0);
 
@@ -93,6 +97,58 @@ const emittedNudges = (f: Awaited<ReturnType<typeof fixture>>) =>
   f.entries.filter((entry) => entry.type === "dcp-nudge" && entry.data.event === "emitted");
 
 describe("DCP post-compression provider usage", () => {
+  test("Claude serialization changes at compression, then preserves the new prefix across appends", async () => {
+    const f = await fixture();
+    const artifacts = fileURLToPath(new URL("../../../.pi/artifacts/", import.meta.url));
+    await mkdir(artifacts, { recursive: true });
+    const root = await mkdtemp(join(artifacts, "dcp-cache-serialization-"));
+    const prepare = (messages: any[]) => prepareRequestWithLimits({ systemPrompt: "fixed system", messages,
+      tools: [{ name: "read", description: "read", parameters: { type: "object", properties: {} } }] } as any, {}, root);
+    try {
+      const before = await prepare(f.before.messages);
+      const rewritten = await prepare((await f.project()).messages);
+      expect(rewritten.transcriptBytes).toBeLessThan(before.transcriptBytes);
+      expect(rewritten.transcriptBlocks[0]).toBe(before.transcriptBlocks[0]);
+      expect(rewritten.transcriptBlocks[1]).not.toBe(before.transcriptBlocks[1]);
+      expect(await readFile(rewritten.systemPromptPath, "utf8")).toBe(await readFile(before.systemPromptPath, "utf8"));
+      expect(await readFile(rewritten.catalogPath!, "utf8")).toBe(await readFile(before.catalogPath!, "utf8"));
+      // A repeated projection and two ordinary continuations must not rebuild
+      // older bytes. This proves request shape only, not a server cache hit.
+      expect((await prepare((await f.project()).messages)).transcriptBlocks).toEqual(rewritten.transcriptBlocks);
+      let previous = rewritten;
+      for (const content of ["Continue implementation.", "Then verify the result."]) {
+        f.append({ role: "user", content });
+        const next = await prepare((await f.project()).messages);
+        expect(next.transcriptBlocks.slice(0, previous.transcriptBlocks.length)).toEqual(previous.transcriptBlocks);
+        previous = next;
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("plain final responses emit correlated usage even without a delivery commit", async () => {
+    const f = await fixture();
+    await f.send(await f.project());
+    const message = f.append({ role: "assistant", provider: "fixture", model: "model", stopReason: "stop",
+      content: [{ type: "text", text: "Done." }], usage: { input: 2, output: 10, cacheRead: 100, cacheWrite: 20 } });
+    await f.emit("message_end", { message });
+    // All prior result IDs are now seen. A further plain final completion has
+    // no new evidence to commit, but still needs an observational usage record.
+    await f.send(await f.project());
+    const commits = f.entries.filter(e => e.type === "dcp-diagnostic" && e.data.event === "completion").length;
+    await f.emit("message_end", { message: { ...message, timestamp: message.timestamp + 1 } });
+    expect(f.entries.filter(e => e.type === "dcp-diagnostic" && e.data.event === "completion")).toHaveLength(commits);
+    const request = f.entries.filter(e => e.type === "dcp-diagnostic" && e.data.event === "request").at(-1)!.data;
+    expect(typeof request.contentRevision).toBe("string");
+    expect(request).toMatchObject({ attempts: 1, ambiguous: false });
+    const observed = f.entries.filter(e => e.type === "dcp-diagnostic" && e.data.event === "usage").at(-1)!.data;
+    expect(observed).toMatchObject({ scope: "assistant-message-reported", correlation: "promote",
+      lastRequestId: request.id, cacheRead: 100, cacheWrite: 20, attempts: 1 });
+    await f.emit("message_end", { message: { ...message, stopReason: "error" } });
+    expect(f.entries.at(-1)!.data).toMatchObject({ event: "usage", correlation: "refused", lastRequestId: null });
+  });
+
   test("does not issue another routine nudge for the pre-compression usage sample", async () => {
     const f = await fixture();
     expect(f.compressed.details.pressureRelieved).toBe(true);

@@ -1,10 +1,6 @@
-import * as fs from "node:fs";
-import * as path from "node:path";
 import { RPC_SESSION_STATE_WIDGET_KEY } from "../../lib/rpc-session-state.js";
 import type { AgentState, RpcEventRecord } from "./types.js";
 import { isRecord } from "./utils.js";
-
-export const TODO_PROGRESS_FILE = "todo-progress.json";
 
 /** Consume the child-local plan, never the parent event bus or project plan. */
 export function todoProgressFromRpcEvent(event: RpcEventRecord): AgentState["todoProgress"] {
@@ -25,35 +21,6 @@ export function todoProgressFromRpcEvent(event: RpcEventRecord): AgentState["tod
 			if (task.status === "completed") completed++;
 		}
 		return { completed, total };
-	} catch {
-		return undefined;
-	}
-}
-
-/** Tiny atomic snapshot survives bounded/truncated diagnostic logs. */
-export function writeTodoProgress(agentDir: string, progress: NonNullable<AgentState["todoProgress"]>): void {
-	const file = path.join(agentDir, TODO_PROGRESS_FILE);
-	try {
-		// An empty/cleared plan carries no information; absence means "no plan".
-		if (progress.total === 0) {
-			fs.rmSync(file, { force: true });
-			return;
-		}
-		fs.writeFileSync(`${file}.tmp`, JSON.stringify(progress), "utf8");
-		fs.renameSync(`${file}.tmp`, file);
-	} catch {
-		// Optional telemetry must not fail the child or resurrect a cleaned run.
-	}
-}
-
-export function readTodoProgress(agentDir: string): AgentState["todoProgress"] {
-	try {
-		const file = path.join(agentDir, TODO_PROGRESS_FILE);
-		if (fs.statSync(file).size > 256) return undefined;
-		const value: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
-		if (!isRecord(value) || !Number.isSafeInteger(value.completed) || !Number.isSafeInteger(value.total)
-			|| (value.completed as number) < 0 || (value.total as number) < (value.completed as number)) return undefined;
-		return { completed: value.completed as number, total: value.total as number };
 	} catch {
 		return undefined;
 	}

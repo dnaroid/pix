@@ -39,6 +39,7 @@ import {
 import { forgetOwnedHandle, launchPreparedOwnedAgent, OWNED_BOOTSTRAP_FAILED_CAUSE, ownedOutcomeSync } from "../../src/async-subagents/core/owned-launch-integration.js";
 import { writeOwnedLaunchSpec, type OwnedLaunchWorkerSpec } from "../../src/async-subagents/core/owned-launch/spec.js";
 import { getAgentState, waitForAgents } from "../../src/async-subagents/core/state.js";
+import { updateRecord } from "../../src/async-subagents/core/store.js";
 import { pollRunWithUpdates } from "../../src/async-subagents/polling.js";
 import { deleteRunDirs } from "../../src/async-subagents/core/cleanup.js";
 import type { OwnedLaunchBinaries } from "../../src/async-subagents/core/owned-launch/bootstrap.js";
@@ -638,11 +639,11 @@ describeOwnedRuntime("owned retry backoff", () => {
 		f.drainedOk(owner);
 		fs.writeFileSync(path.join(owner, "payload-exit.json"), "role=payload-exit code=1\n");
 		setOwnedRetirementPrintForTest(async () => "absent");
-		fs.writeFileSync(path.join(f.agentDir, "retry_pending"), new Date().toISOString());
+		updateRecord(f.runDir, "agent", { status: "retrying", nextRetryAt: new Date().toISOString() });
 		const state = await waitForAgents(f.runDir, ["agent"], { interval: 0.05, timeout: 1 });
 		expect(fs.existsSync(path.join(owner, "retired"))).toBe(true);
 		expect(state.agents[0]?.status).toBe("retrying");
-		fs.rmSync(path.join(f.agentDir, "retry_pending"));
+		updateRecord(f.runDir, "agent", { status: "failed", nextRetryAt: null });
 		expect(getAgentState(f.runDir, "agent")?.status).toBe("failed");
 	}, 10_000);
 });

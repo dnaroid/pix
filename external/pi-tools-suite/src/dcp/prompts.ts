@@ -13,7 +13,15 @@ Keep live context high-signal. \`compress\` is the only DCP context tool; use it
 only when a closed stale slice materially reduces context pressure. Low context
 usage alone does not require compression. Good boundaries include completed
 implementation, verification, investigation, config/docs, or understood logs.
-Use \`messages\` for one large stale message and batch independent safe work.
+Use \`messages\` for one large stale message.
+
+Batch newly closed stages early when substantial work remains, not each small
+result. Keep prior summaries unchanged unless correction or context-limit
+recovery requires rewriting them.
+
+Compression can invalidate prompt caches; fewer tokens need not mean lower cost.
+Skip optional near-finish housekeeping with ample headroom.
+Context-limit recovery and explicit user requests take priority.
 
 Do not compress active work or raw code/errors/output needed next. If unfinished
 work is compressed, preserve the active objective and next step. A summary must

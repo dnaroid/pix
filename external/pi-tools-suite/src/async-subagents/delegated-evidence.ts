@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { open } from "node:fs/promises";
-import * as path from "node:path";
+import { readResultText } from "./core/state.js";
+import { getRecord } from "./core/store.js";
 import type { AgentCompletionHandler } from "./core/types.js";
 
 const CHANNEL = "async-subagents:delegated-evidence";
-const MAX_BYTES = 128 * 1024;
+const MAX_REPORT_CHARS = 6000;
 interface Owner { sessionId: string; anchorId: string; }
 interface Bus { emit(channel: string, value: unknown): void; }
 interface EvidenceCapture {
@@ -14,24 +14,14 @@ interface EvidenceCapture {
 }
 
 /** Final report only; never infer file ownership from a shared working-tree diff. */
-async function readReport(agentDir: string, agentId: string): Promise<{ report: string; clipped: boolean } | undefined> {
-	const file = await open(path.join(agentDir, "result.json"), "r");
-	try {
-		const buffer = Buffer.alloc(MAX_BYTES + 1);
-		let size = 0;
-		while (size < buffer.length) {
-			const read = await file.read(buffer, size, buffer.length - size, null);
-			if (!read.bytesRead) break;
-			size += read.bytesRead;
-		}
-		if (size > MAX_BYTES) return undefined;
-		const data = JSON.parse(buffer.subarray(0, size).toString("utf8"));
-		if (data?.agentId !== agentId) return undefined;
-		// Preserve the final report's ordering (including corrections/retests), not
-		// a bag of extracted risks that could resurrect an already resolved issue.
-		const report = typeof data.resultText === "string" ? data.resultText : typeof data.summary === "string" ? data.summary : "";
-		return report.trim() ? { report: report.slice(0, 6000), clipped: data.resultTruncated === true || report.length > 6000 } : undefined;
-	} finally { await file.close(); }
+function readReport(runDir: string, agentId: string): { report: string; clipped: boolean } | undefined {
+	const record = getRecord(runDir, agentId);
+	// Preserve the final report's ordering (including corrections/retests), not
+	// a bag of extracted risks that could resurrect an already resolved issue.
+	const text = readResultText(runDir, agentId) ?? record?.structured?.summary ?? "";
+	if (!text.trim()) return undefined;
+	const clipped = record?.structured?.resultTruncated === true || text.length > MAX_REPORT_CHARS;
+	return { report: text.slice(0, MAX_REPORT_CHARS), clipped };
 }
 
 /** Start before launch; finish only on the final retry/fallback callback, independent of wait/follow-up arbitration. */
@@ -53,9 +43,9 @@ export function beginDelegatedEvidence(bus: Bus | undefined, owner: Owner | unde
 			return (completion) => {
 				if (finished || completion.runDir !== runDir || completion.agentId !== agentId) return;
 				finished = true;
-				void readReport(completion.agentDir, agentId).then((report) => {
-					emit({ ...identity, runDir, phase: "completed", status: completion.state.status, ...report });
-				}).catch(() => { emit({ ...identity, runDir, phase: "completed", status: completion.state.status }); });
+				let report: ReturnType<typeof readReport>;
+				try { report = readReport(runDir, agentId); } catch { report = undefined; }
+				emit({ ...identity, runDir, phase: "completed", status: completion.state.status, ...report });
 			};
 		},
 		cancel,

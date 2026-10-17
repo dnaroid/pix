@@ -5,6 +5,9 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { createPiAiMock } from "../support/pi-ai-mock.js";
 import { SUBAGENT_COMMON_TOOLS } from "../../src/async-subagents/core/child-tools.js";
+import { runKey } from "../../src/async-subagents/core/paths.js";
+import { readResultText } from "../../src/async-subagents/core/state.js";
+import { getLive, getRecord, resetSubagentStoreForTest, resolveScope, updateLive, updateRecord, type SubagentRecordPatch } from "../../src/async-subagents/core/store.js";
 
 // Snapshot the real modules before mocking: bun's top-level mock.module swaps
 // the live export slots for every later-loaded file in the same `bun test`
@@ -100,7 +103,36 @@ beforeEach(() => {
 	delete process.env.PI_SUBAGENTS_MAX_RESULT_BYTES;
 });
 
-function createAgent(runDir: string, id: string, files: Record<string, string> = {}): string {
+/** Run key of a named batch in this process's (headless) parent scope. */
+function batch(cwd: string, name: string): string {
+	return runKey(cwd, resolveScope(undefined), name);
+}
+
+type AgentSeed = SubagentRecordPatch & { stderr?: string; resultText?: string; todoProgress?: { completed: number; total: number } };
+
+/** Seed a parent-session record (decision 0072: no per-agent sidecars). */
+function createAgent(runDir: string, id: string, seed: AgentSeed = {}): string {
+	const { stderr, resultText, todoProgress, ...patch } = seed;
+	const status = patch.status ?? (patch.exitCode === undefined ? "running" : patch.exitCode === 0 ? "done" : "failed");
+	updateRecord(runDir, id, { turn: 1, ...patch, status });
+	if (stderr !== undefined || resultText !== undefined || todoProgress) {
+		updateLive(runDir, id, {
+			...(stderr !== undefined ? { stderrTail: stderr } : {}),
+			...(resultText !== undefined ? { resultText } : {}),
+			...(todoProgress ? { todoProgress } : {}),
+		});
+	}
+	return runDir;
+}
+
+function finishAgent(runDir: string, id: string, outcome: number | "stopped"): void {
+	const finishedAt = new Date().toISOString();
+	if (outcome === "stopped") updateRecord(runDir, id, { status: "stopped", stopRequested: true, exitCode: null, finishedAt });
+	else updateRecord(runDir, id, { status: outcome === 0 ? "done" : "failed", exitCode: outcome, finishedAt });
+}
+
+/** Pre-0072 on-disk run layout (legacy cleanup/retention coverage only). */
+function writeLegacyAgent(runDir: string, id: string, files: Record<string, string> = {}): string {
 	const agentDir = path.join(runDir, id);
 	writeFile(path.join(agentDir, "prompt.md"), `prompt for ${id}`);
 	for (const [name, content] of Object.entries(files)) writeFile(path.join(agentDir, name), content);
@@ -169,6 +201,7 @@ async function waitForChildExit(child: ReturnType<typeof spawnChild>, timeoutMs 
 afterEach(async () => {
 	const { resetSessionModelFallbacks } = await import("../../src/async-subagents/lib.js");
 	resetSessionModelFallbacks();
+	resetSubagentStoreForTest();
 	process.argv[1] = originalArgv1;
 	if (originalAsyncSubagentsModel === undefined) delete process.env.ASYNC_SUBAGENTS_MODEL;
 	else process.env.ASYNC_SUBAGENTS_MODEL = originalAsyncSubagentsModel;
@@ -243,15 +276,14 @@ process.stdin.on("data", (data) => {
 			}, undefined, undefined, ctx);
 			expect(pi.messages).toHaveLength(0);
 			await waitUntil(() => fs.existsSync(startedFile));
-			// Reproduce the disk-visible terminal receipt between attempts, before
-			// the final retry/fallback callback has settled this tracked launch.
-			const exitFile = path.join(result.details.runDir, "child", "exit_code");
-			writeFile(exitFile, "1");
+			// Reproduce a terminal record between attempts, before the final
+			// retry/fallback callback has settled this tracked launch.
+			updateRecord(result.details.runDir, "child", { status: "failed", exitCode: 1 });
 			const { getAgentState } = await import("../../src/async-subagents/lib.js");
 			expect(getAgentState(result.details.runDir, "child")?.status).toBe("failed");
 			await pi.events.get("tool_execution_end")![0]({ toolName: "subagents" });
 			expect(pi.messages).toHaveLength(0);
-			fs.unlinkSync(exitFile);
+			updateRecord(result.details.runDir, "child", { status: "running", exitCode: null });
 			writeFile(releaseFile);
 			await waitUntil(() => pi.messages.length > 0, 5000);
 			expect(pi.messages).toHaveLength(1);
@@ -259,7 +291,7 @@ process.stdin.on("data", (data) => {
 				message: { details: { agentId: "child", runDir: result.details.runDir, status: "done" } },
 				options: { triggerTurn: true, deliverAs: "followUp" },
 			});
-			expect(fs.readFileSync(path.join(result.details.runDir, "child", "result.md"), "utf-8")).toBe("child result");
+			expect(readResultText(result.details.runDir, "child")).toBe("child result");
 			await pi.events.get("tool_execution_end")![0]({ toolName: "subagents" });
 			expect(pi.messages).toHaveLength(1);
 		} finally {
@@ -267,21 +299,20 @@ process.stdin.on("data", (data) => {
 		}
 	});
 
-	for (const [status, exitCode] of [["done", "0"], ["failed", "1"], ["stopped", "stopped"]]) {
+	for (const [status, outcome] of [["done", 0], ["failed", 1], ["stopped", "stopped"]] as const) {
 		test.serial(`wakes the idle parent once when a restored child becomes ${status}`, async () => {
 			const { default: registerExtension } = await import("../../src/async-subagents/index.js");
-			const { createRunDir } = await import("../../src/async-subagents/lib.js");
 			const cwd = tempDir();
 			const parentSession = path.join(cwd, "sessions", "parent.jsonl");
 			const ctx = { cwd, sessionManager: { getSessionFile: () => parentSession } };
-			const runDir = createRunDir(cwd, "wake-parent");
-			const agentDir = createAgent(runDir, "child", { pid: String(process.pid), parent_session: parentSession });
+			const runDir = batch(cwd, "wake-parent");
+			createAgent(runDir, "child", { pid: process.pid, parentSession: parentSession });
 			const pi = new FakePi();
 			registerExtension(pi as any);
 			await pi.events.get("session_start")![0]({}, ctx);
 			try {
 				expect(pi.messages).toHaveLength(0);
-				writeFile(path.join(agentDir, "exit_code"), exitCode!);
+				finishAgent(runDir, "child", outcome);
 				// No parent tool calls or new input: the completion watcher must wake it.
 				await waitUntil(() => pi.messages.length > 0, 4000);
 				expect(pi.messages).toHaveLength(1);
@@ -299,13 +330,12 @@ process.stdin.on("data", (data) => {
 
 	test.serial("defers completion while another session is active and suppresses shutdown wakeups", async () => {
 		const { default: registerExtension } = await import("../../src/async-subagents/index.js");
-		const { createRunDir } = await import("../../src/async-subagents/lib.js");
 		const cwd = tempDir();
 		const parentSession = path.join(cwd, "sessions", "parent.jsonl");
 		const ctx = { cwd, sessionManager: { getSessionFile: () => parentSession } };
 		const siblingCtx = { cwd, sessionManager: { getSessionFile: () => path.join(cwd, "sessions", "sibling.jsonl") } };
-		const runDir = createRunDir(cwd, "session-isolation");
-		const agentDir = createAgent(runDir, "child", { pid: String(process.pid), parent_session: parentSession });
+		const runDir = batch(cwd, "session-isolation");
+		createAgent(runDir, "child", { pid: process.pid, parentSession: parentSession });
 		const pi = new FakePi();
 		registerExtension(pi as any);
 		const start = pi.events.get("session_start")![0];
@@ -313,17 +343,17 @@ process.stdin.on("data", (data) => {
 		const shutdown = pi.events.get("session_shutdown")![0];
 		await start({}, ctx);
 		await start({}, siblingCtx);
-		writeFile(path.join(agentDir, "exit_code"), "0");
+		finishAgent(runDir, "child", 0);
 		await refresh({ toolName: "subagents" });
 		expect(pi.messages).toHaveLength(0);
 		await start({}, ctx);
 		expect(pi.messages).toHaveLength(1);
 		await refresh({ toolName: "subagents" });
 		expect(pi.messages).toHaveLength(1);
-		const lateAgentDir = createAgent(runDir, "late-child", { pid: String(process.pid), parent_session: parentSession });
+		createAgent(runDir, "late-child", { pid: process.pid, parentSession: parentSession });
 		await start({}, ctx);
 		await shutdown({ reason: "reload" }, ctx);
-		writeFile(path.join(lateAgentDir, "exit_code"), "1");
+		finishAgent(runDir, "late-child", 1);
 		await refresh({ toolName: "subagents" });
 		expect(pi.messages).toHaveLength(1);
 		// Shutdown suppression must not consume the pending completion.
@@ -381,14 +411,13 @@ process.stdin.on("data", (data) => {
 
 	test.serial("RPC live state restores independent child plan snapshots and reflects clear", async () => {
 		const { default: registerExtension } = await import("../../src/async-subagents/index.js");
-		const { createRunDir } = await import("../../src/async-subagents/lib.js");
 		const cwd = tempDir();
 		const parentSession = path.join(cwd, "sessions", "parent.jsonl");
-		const runDir = createRunDir(cwd, "child-todos");
-		const first = createAgent(runDir, "first", { pid: String(process.pid), parent_session: parentSession });
-		const second = createAgent(runDir, "second", { pid: String(process.pid), parent_session: parentSession });
-		writeFile(path.join(first, "todo-progress.json"), '{"completed":1,"total":5}');
-		writeFile(path.join(second, "todo-progress.json"), '{"completed":2,"total":3}');
+		const runDir = batch(cwd, "child-todos");
+		const first = createAgent(runDir, "first", { pid: process.pid, parentSession: parentSession });
+		const second = createAgent(runDir, "second", { pid: process.pid, parentSession: parentSession });
+		updateLive(first, "first", { todoProgress: { completed: 1, total: 5 } });
+		updateLive(second, "second", { todoProgress: { completed: 2, total: 3 } });
 		const widgets: Array<{ key: string; lines: string[] | undefined }> = [];
 		process.env.PIX_ACP_SESSION_STATE_BRIDGE = "1";
 		const pi = new FakePi();
@@ -403,7 +432,7 @@ process.stdin.on("data", (data) => {
 				{ id: "first", todoProgress: { completed: 1, total: 5 } },
 				{ id: "second", todoProgress: { completed: 2, total: 3 } },
 			] }] });
-			writeFile(path.join(first, "todo-progress.json"), '{"completed":0,"total":0}');
+			updateLive(first, "first", { todoProgress: { completed: 0, total: 0 } });
 			await pi.events.get("tool_execution_end")![0]({ toolName: "subagents" });
 			expect(latest().runs[0].agents[0].todoProgress).toEqual({ completed: 0, total: 0 });
 			expect(latest().runs[0].agents[1].todoProgress).toEqual({ completed: 2, total: 3 });
@@ -477,18 +506,16 @@ Check the project conventions before approving changes.
 
 	test.serial("session shutdown kills running sub-agent processes but preserves run state", async () => {
 		const { default: registerExtension } = await import("../../src/async-subagents/index.js");
-		const { createRunDir, recordSubagentRun } = await import("../../src/async-subagents/lib.js");
 		const cwd = tempDir();
 		const parentSession = path.join(cwd, "sessions", "parent.jsonl");
 		const pi = new FakePi();
 		registerExtension(pi as any);
-		const runDir = createRunDir(cwd, "shutdown");
+		const runDir = batch(cwd, "shutdown");
 		const child = spawnChild(process.execPath, ["-e", "process.on('SIGTERM',()=>{}); setInterval(()=>{},1000);"], { stdio: "ignore" });
 		if (!child.pid) throw new Error("Failed to spawn child process for shutdown test");
 
 		try {
-			createAgent(runDir, "agent-1", { pid: String(child.pid), started_at: new Date().toISOString(), parent_session: parentSession });
-			recordSubagentRun(cwd, runDir, ["agent-1"]);
+			createAgent(runDir, "agent-1", { pid: child.pid, startedAt: new Date().toISOString(), parentSession: parentSession });
 			const shutdownHandlers = pi.events.get("session_shutdown") ?? [];
 			expect(shutdownHandlers).toHaveLength(1);
 
@@ -496,7 +523,7 @@ Check the project conventions before approving changes.
 			await waitForChildExit(child);
 
 			expect(isProcessAlive(child.pid)).toBe(false);
-			expect(fs.existsSync(runDir)).toBe(true);
+			expect(getRecord(runDir, "agent-1")).toBeDefined();
 		} finally {
 			if (child.pid && isProcessAlive(child.pid)) child.kill("SIGKILL");
 		}
@@ -504,23 +531,20 @@ Check the project conventions before approving changes.
 
 	test.serial("session shutdown keeps sibling-session sub-agents in the same cwd alive", async () => {
 		const { default: registerExtension } = await import("../../src/async-subagents/index.js");
-		const { createRunDir, recordSubagentRun } = await import("../../src/async-subagents/lib.js");
 		const cwd = tempDir();
 		const shuttingDownSession = path.join(cwd, "sessions", "shutting-down.jsonl");
 		const siblingSession = path.join(cwd, "sessions", "sibling.jsonl");
 		const pi = new FakePi();
 		registerExtension(pi as any);
-		const ownedRunDir = createRunDir(cwd, "owned-shutdown");
-		const siblingRunDir = createRunDir(cwd, "sibling-stays-running");
+		const ownedRunDir = batch(cwd, "owned-shutdown");
+		const siblingRunDir = batch(cwd, "sibling-stays-running");
 		const ownedChild = spawnChild(process.execPath, ["-e", "process.on('SIGTERM',()=>{}); setInterval(()=>{},1000);"], { stdio: "ignore" });
 		const siblingChild = spawnChild(process.execPath, ["-e", "process.on('SIGTERM',()=>{}); setInterval(()=>{},1000);"], { stdio: "ignore" });
 		if (!ownedChild.pid || !siblingChild.pid) throw new Error("Failed to spawn child processes for shutdown test");
 
 		try {
-			createAgent(ownedRunDir, "owned-agent", { pid: String(ownedChild.pid), started_at: new Date().toISOString(), parent_session: shuttingDownSession });
-			createAgent(siblingRunDir, "sibling-agent", { pid: String(siblingChild.pid), started_at: new Date().toISOString(), parent_session: siblingSession });
-			recordSubagentRun(cwd, ownedRunDir, ["owned-agent"]);
-			recordSubagentRun(cwd, siblingRunDir, ["sibling-agent"]);
+			createAgent(ownedRunDir, "owned-agent", { pid: ownedChild.pid, startedAt: new Date().toISOString(), parentSession: shuttingDownSession });
+			createAgent(siblingRunDir, "sibling-agent", { pid: siblingChild.pid, startedAt: new Date().toISOString(), parentSession: siblingSession });
 			const shutdownHandlers = pi.events.get("session_shutdown") ?? [];
 			expect(shutdownHandlers).toHaveLength(1);
 
@@ -528,9 +552,9 @@ Check the project conventions before approving changes.
 			await waitForChildExit(ownedChild);
 
 			expect(isProcessAlive(ownedChild.pid)).toBe(false);
-			expect(fs.existsSync(ownedRunDir)).toBe(true);
+			expect(getRecord(ownedRunDir, "owned-agent")).toBeDefined();
 			expect(isProcessAlive(siblingChild.pid)).toBe(true);
-			expect(fs.existsSync(siblingRunDir)).toBe(true);
+			expect(getRecord(siblingRunDir, "sibling-agent")).toBeDefined();
 		} finally {
 			if (ownedChild.pid && isProcessAlive(ownedChild.pid)) ownedChild.kill("SIGKILL");
 			if (siblingChild.pid && isProcessAlive(siblingChild.pid)) siblingChild.kill("SIGKILL");
@@ -692,38 +716,35 @@ setTimeout(() => {}, 1000);
 		}, undefined, undefined, { cwd });
 
 		expect(result.content[0].text).toContain("All scheduled agents are no longer running or queued.");
-		expect(fs.readFileSync(path.join(result.details.runDir, "agent-1", "result.md"), "utf-8")).toBe("entrypoint ok");
+		expect(readResultText(result.details.runDir, "agent-1")).toBe("entrypoint ok");
 	});
 
-	test.serial("preserves reports, media and registry resolution after the main session closes", async () => {
+	test.serial("preserves records, media and lookup after the main session closes", async () => {
 		const { default: registerExtension } = await import("../../src/async-subagents/index.js");
-		const { recordSubagentRun, getSubagentRegistryPath, resolveSubagentRunDir } = await import("../../src/async-subagents/lib.js");
+		const { resolveSubagentRunDir } = await import("../../src/async-subagents/core/lookup.js");
 		const pi = new FakePi();
 		registerExtension(pi as any);
 		const cwd = tempDir();
 		const parentSession = path.join(cwd, "sessions", "parent.jsonl");
-		const runRoot = path.join(cwd, ".pi", "subagents");
-		const completedRun = path.join(runRoot, "2026-01-01-completed");
-		const incompleteRun = path.join(runRoot, "2026-01-02-incomplete");
-		createAgent(completedRun, "done", { exit_code: "0", "result.md": "ok", parent_session: parentSession });
-		createAgent(incompleteRun, "planned", { parent_session: parentSession });
-		const screenshot = path.join(completedRun, "done", "browser-qa", "screenshot.png");
-		const video = path.join(completedRun, "done", "browser-qa", "video.webm");
-		const attachment = path.join(runRoot, "attachments", "recent", "image.png");
+		const completedRun = batch(cwd, "2026-01-01-completed");
+		const incompleteRun = batch(cwd, "2026-01-02-incomplete");
+		createAgent(completedRun, "done", { exitCode: 0, message: "ok", parentSession });
+		createAgent(incompleteRun, "planned", { status: "planned", parentSession });
+		const workspace = path.join(cwd, ".pi", "artifacts", "subagents", "2026-01-01-completed-done", "browser-qa");
+		const screenshot = path.join(workspace, "screenshot.png");
+		const video = path.join(workspace, "video.webm");
+		const attachment = path.join(cwd, ".pi", "subagents", "attachments", "recent", "image.png");
 		for (const file of [screenshot, video, attachment]) writeFile(file, `evidence:${file}`);
-		recordSubagentRun(cwd, completedRun, ["done"]);
-		recordSubagentRun(cwd, incompleteRun, ["planned"]);
-		const registryBefore = fs.readFileSync(getSubagentRegistryPath(cwd), "utf-8");
 
 		await pi.events.get("session_shutdown")![0]({ reason: "quit" }, { cwd, sessionManager: { getSessionFile: () => parentSession } });
 
-		expect(fs.readFileSync(path.join(completedRun, "done", "result.md"), "utf-8")).toBe("ok");
+		expect(readResultText(completedRun, "done")).toBe("ok");
 		for (const file of [screenshot, video, attachment]) {
 			expect(fs.readFileSync(file, "utf-8")).toBe(`evidence:${file}`);
 		}
-		expect(fs.existsSync(incompleteRun)).toBe(true);
-		expect(fs.readFileSync(getSubagentRegistryPath(cwd), "utf-8")).toBe(registryBefore);
-		expect(resolveSubagentRunDir(cwd)).toBe(incompleteRun);
+		expect(getRecord(incompleteRun, "planned")).toBeDefined();
+		expect(fs.existsSync(path.join(cwd, ".pi", "subagents", "registry.json"))).toBe(false);
+		expect(resolveSubagentRunDir({ cwd })).toBe(incompleteRun);
 
 		// A fresh extension can resolve the completed agent without the old live map.
 		const reopenedPi = new FakePi();
@@ -732,8 +753,6 @@ setTimeout(() => {}, 1000);
 			action: "result", agentId: "done",
 		}, undefined, undefined, { cwd });
 		expect(result.isError).not.toBe(true);
-		// Compare parsed fields: JSON.stringify escapes Windows path separators,
-		// so a serialized-path contains() can never match on win32.
 		expect((result as { details?: { runDir?: string } }).details?.runDir).toBe(completedRun);
 	});
 
@@ -745,8 +764,8 @@ setTimeout(() => {}, 1000);
 		const runRoot = path.join(cwd, ".pi", "subagents");
 		const reloadRun = path.join(runRoot, "2026-01-01-reload");
 		const forkRun = path.join(runRoot, "2026-01-02-fork");
-		createAgent(reloadRun, "done", { exit_code: "0" });
-		createAgent(forkRun, "done", { exit_code: "0" });
+		writeLegacyAgent(reloadRun, "done", { exit_code: "0" });
+		writeLegacyAgent(forkRun, "done", { exit_code: "0" });
 
 		await pi.events.get("session_shutdown")![0]({ reason: "reload" }, { cwd });
 		expect(fs.existsSync(reloadRun)).toBe(true);
@@ -764,12 +783,10 @@ describe.serial("subagents tool", () => {
 		const tool = pi.tools.get("subagents");
 		expect(tool.parameters.properties.compact).toBeUndefined();
 		const cwd = tempDir();
-		const runDir = path.join(cwd, "run");
-		createAgent(runDir, "done", { exit_code: "0", "result.md": "wrapped ok" });
-		const projectRunDir = path.join(cwd, ".pi", "subagents", "registered-run");
-		createAgent(projectRunDir, "registered", { exit_code: "0", "result.md": "registry ok" });
-		const { recordSubagentRun } = await import("../../src/async-subagents/lib.js");
-		recordSubagentRun(cwd, projectRunDir, ["registered"]);
+		const runDir = batch(cwd, "run");
+		createAgent(runDir, "done", { exitCode: 0, message: "wrapped ok" });
+		const projectRunDir = batch(cwd, "registered-run");
+		createAgent(projectRunDir, "registered", { exitCode: 0, message: "registry ok" });
 
 		const invalid = await tool.execute("call", { action: "bad" }, undefined, undefined, { cwd });
 		expect(invalid).toEqual({ content: [{ type: "text", text: "Invalid subagents action. Use one of: spawn, status, wait, result, send, stop, cleanup." }], isError: true });
@@ -780,15 +797,13 @@ describe.serial("subagents tool", () => {
 		expect(tool.renderResult({ details: { runDir, agents: [{ id: "running", status: "running" }], mode: "spawn" } }).children).toEqual([]);
 
 		const result = await tool.execute("call", { action: "result", runDir: "run", agentId: "done" }, undefined, undefined, { cwd });
-		expect(result.content[0].text).toContain("summary unavailable");
-		expect(result.content[0].text).not.toContain("wrapped ok");
+		expect(result.content[0].text).toContain("wrapped ok");
 		expect(tool.renderResult(result).children).toEqual([]);
 
 		const defaultStatus = await tool.execute("call", { action: "status" }, undefined, undefined, { cwd });
 		expect(defaultStatus.content[0].text).toContain("[done] registered exit=0");
 		const resolvedResult = await tool.execute("call", { action: "result", agentId: "registered" }, undefined, undefined, { cwd });
-		expect(resolvedResult.content[0].text).toContain("summary unavailable");
-		expect(resolvedResult.content[0].text).not.toContain("registry ok");
+		expect(resolvedResult.content[0].text).toContain("registry ok");
 	});
 });
 
@@ -802,12 +817,12 @@ describe.serial("status tool", () => {
 
 		const cwd = tempDir();
 		const empty = await tool.execute("call", { runDir: "missing" }, undefined, undefined, { cwd });
-		expect(empty.content[0].text).toBe("No agents found in run directory.");
-		expect(empty.details).toMatchObject({ runDir: path.join(cwd, "missing"), agents: [], mode: "status" });
+		expect(empty.content[0].text).toBe("No agents found in this batch.");
+		expect(empty.details).toMatchObject({ runDir: batch(cwd, "missing"), agents: [], mode: "status" });
 
-		const runDir = path.join(cwd, "run");
-		createAgent(runDir, "done", { exit_code: "0", started_at: "2024-01-01T00:00:00Z", finished_at: "2024-01-01T00:00:01Z" });
-		createAgent(runDir, "failed", { exit_code: "3" });
+		const runDir = batch(cwd, "run");
+		createAgent(runDir, "done", { exitCode: 0, startedAt: "2024-01-01T00:00:00Z", finishedAt: "2024-01-01T00:00:01Z" });
+		createAgent(runDir, "failed", { exitCode: 3 });
 		const result = await tool.execute("call", { runDir: "run", agentIds: ["done"] }, undefined, undefined, { cwd });
 		expect(result.content[0].text).toContain("[done] done exit=0 started=2024-01-01T00:00:00Z finished=2024-01-01T00:00:01Z");
 		expect(result.content[0].text).not.toContain("failed");
@@ -820,40 +835,30 @@ describe.serial("status tool", () => {
 });
 
 describe.serial("result tool", () => {
-	test.serial("reads missing and compact agent output without inlining raw logs", async () => {
+	test.serial("reads missing agents and inlines bounded result and stderr tails", async () => {
 		const { registerResultTool } = await import("../../src/async-subagents/tools/result.js");
 		const pi = new FakePi();
 		registerResultTool(pi as any);
 		const tool = pi.tools.get("async_subagents_result");
 		expect(tool.parameters.properties.compact).toBeUndefined();
 		const cwd = tempDir();
-		const runDir = path.join(cwd, "run");
-		const { recordSubagentRun } = await import("../../src/async-subagents/lib.js");
+		const runDir = batch(cwd, "run");
 
 		const missing = await tool.execute("call", { runDir: "run", agentId: "missing" }, undefined, undefined, { cwd });
 		expect(missing.isError).toBe(true);
 		expect(missing.content[0].text).toContain('Agent "missing" not found');
 
-		createAgent(runDir, "agent-1", {
-			exit_code: "0",
-			"result.md": "r".repeat(9000),
-			"stderr.log": "s".repeat(2500),
-		});
-		createAgent(runDir, "running", {
-			pid: String(process.pid),
-			"result.md": "partial",
-		});
-		recordSubagentRun(cwd, runDir, ["agent-1", "running"]);
+		createAgent(runDir, "agent-1", { exitCode: 0, message: "r".repeat(9000), stderr: "s".repeat(2500) });
+		createAgent(runDir, "running", { pid: process.pid, resultText: "partial" });
 		const compact = await tool.execute("call", { runDir: "run", agentId: "agent-1" }, undefined, undefined, { cwd });
 		expect(compact.content[0].text).toContain("Status: done");
 		expect(compact.content[0].text).toContain("Exit code: 0");
-		expect(compact.content[0].text).toContain("summary unavailable");
-		expect(compact.content[0].text).toContain(`Full result: ${path.join("run", "agent-1", "result.md")}`);
+		expect(compact.content[0].text).toContain("r".repeat(9000));
 		expect(compact.details).toMatchObject({ runDir, agentId: "agent-1", exitCode: 0 });
-
-		expect(compact.content[0].text).toContain(`Full stderr: ${path.join("run", "agent-1", "stderr.log")}`);
-		expect(compact.content[0].text).not.toContain("r".repeat(9000));
+		expect(compact.content[0].text).toContain("Stderr (tail):");
+		expect(compact.content[0].text).toContain("s".repeat(2000));
 		expect(compact.content[0].text).not.toContain("s".repeat(2500));
+		expect(compact.content[0].text).not.toContain("result.md");
 		const running = await tool.execute("call", { runDir: "run", agentId: "running" }, undefined, undefined, { cwd });
 		expect(running.content[0].text).toContain("Agent is still running");
 		const resolved = await tool.execute("call", { agentId: "agent-1" }, undefined, undefined, { cwd });
@@ -872,9 +877,9 @@ describe.serial("wait tool", () => {
 		registerWaitTool(pi as any);
 		const tool = pi.tools.get("async_subagents_wait");
 		const cwd = tempDir();
-		const runDir = path.join(cwd, "run");
-		createAgent(runDir, "failed", { exit_code: "1" });
-		createAgent(runDir, "running", { pid: String(process.pid) });
+		const runDir = batch(cwd, "run");
+		createAgent(runDir, "failed", { exitCode: 1 });
+		createAgent(runDir, "running", { pid: process.pid });
 		const updates: any[] = [];
 		const result = await tool.execute("call", { runDir: "run", timeout: 10, interval: 1, failFast: true }, undefined, (update: any) => updates.push(update), { cwd });
 		expect(result.content[0].text).toContain("Wait complete: 0 done, 1 failed, 0 stopped, 1 still running");
@@ -893,21 +898,21 @@ describe.serial("stop tool", () => {
 		registerStopTool(pi as any);
 		const tool = pi.tools.get("async_subagents_stop");
 		const cwd = tempDir();
-		const runDir = path.join(cwd, "run");
+		const runDir = batch(cwd, "run");
 		const child = spawnChild(process.execPath, ["-e", "setInterval(() => {}, 1000)"]);
 		if (!child.pid) throw new Error("child process did not start");
 
 		try {
 			const missing = await tool.execute("call", { runDir: "missing" }, undefined, undefined, { cwd });
-			expect(missing.content[0].text).toBe("No agents found in run directory.");
+			expect(missing.content[0].text).toBe("No agents found in this batch.");
 
-			createAgent(runDir, "running", { pid: String(child.pid) });
-			createAgent(runDir, "done", { exit_code: "0" });
+			createAgent(runDir, "running", { pid: child.pid });
+			createAgent(runDir, "done", { exitCode: 0 });
 			const result = await tool.execute("call", { runDir: "run", agentIds: ["running"], force: true }, undefined, undefined, { cwd });
 			expect(result.content[0].text).toContain("Stop requested in");
 			expect(result.content[0].text).toContain(`[stopped] running (pid ${child.pid}) signal=SIGKILL`);
 			expect(result.details).toMatchObject({ runDir, mode: "stop" });
-			expect(fs.readFileSync(path.join(runDir, "running", "exit_code"), "utf-8")).toBe("stopped");
+			expect(getRecord(runDir, "running")).toMatchObject({ status: "stopped", stopRequested: true });
 			expect(tool.renderCall().children).toEqual([]);
 			expect(tool.renderResult().children).toEqual([]);
 			expect(() => tool.execute("call", { runDir: "run", agentIds: ["bad/id"] }, undefined, undefined, { cwd })).toThrow();
@@ -953,7 +958,7 @@ describe.serial("cleanup tool", () => {
 
 		const runRoot = path.join(cwd, ".pi", "subagents");
 		const candidate = path.join(runRoot, "2024-01-01-old");
-		createAgent(candidate, "agent-1", { exit_code: "0" });
+		writeLegacyAgent(candidate, "agent-1", { exit_code: "0" });
 		const old = new Date(Date.now() - 10_000);
 		fs.utimesSync(candidate, old, old);
 
@@ -1075,11 +1080,9 @@ describe.serial("spawn tool", () => {
 		expect(invalid).toEqual({ content: [{ type: "text", text: "spawn requires at least one task in the tasks array." }], details: {}, isError: true });
 		process.env.ASYNC_SUBAGENTS_ROUTING = "0";
 
-		const blockedRunDir = path.join(cwd, "blocked-run");
-		writeFile(blockedRunDir, "not a directory");
 		let blockedRunError: unknown;
 		try {
-			await tool.execute("call", { tasks: [{ id: "agent-1", task: "will fail", subagentType: "research" }], runDir: "blocked-run" }, undefined, undefined, { cwd });
+			await tool.execute("call", { tasks: [{ id: "agent-1", task: "will fail", subagentType: "research" }], runDir: "bad/batch" }, undefined, undefined, { cwd });
 		} catch (error) {
 			blockedRunError = error;
 		}
@@ -1120,14 +1123,12 @@ setTimeout(() => {}, 1000);
 			expect.objectContaining({ type: "tool_execution_start", toolName: "Grep" }),
 		]));
 		const runDir = result.details.runDir;
-		const registry = JSON.parse(fs.readFileSync(path.join(cwd, ".pi", "subagents", "registry.json"), "utf-8"));
-		expect(registry.latestRunDir).toBe(runDir);
-		expect(registry.agents["agent-1"].runDir).toBe(runDir);
-		expect(fs.readFileSync(path.join(runDir, "agent-1", "result.md"), "utf-8")).toBe("spawned ok");
-		expect(fs.readFileSync(path.join(runDir, "agent-1", "session_file"), "utf-8")).toBe("/tmp/fake-sub-session.jsonl");
-		expect((JSON.parse(fs.readFileSync(path.join(runDir, "agent-1", "launch.json"), "utf-8")).piArgs as string[]).join("\n")).toContain("--session-dir");
-		expect((JSON.parse(fs.readFileSync(path.join(runDir, "agent-1", "launch.json"), "utf-8")).piArgs as string[]).join("\n")).not.toContain("--no-session");
-		expect((JSON.parse(fs.readFileSync(path.join(runDir, "agent-1", "launch.json"), "utf-8")).piArgs as string[]).join("\n")).toContain("--thinking\nlow\n--some-flag");
+		expect(fs.existsSync(path.join(cwd, ".pi", "subagents", "registry.json"))).toBe(false);
+		expect(readResultText(runDir, "agent-1")).toBe("spawned ok");
+		expect(getRecord(runDir, "agent-1")?.childSessionFile).toBe("/tmp/fake-sub-session.jsonl");
+		expect((getLive(runDir, "agent-1")?.launchArgs ?? []).join("\n")).toContain("--session-dir");
+		expect((getLive(runDir, "agent-1")?.launchArgs ?? []).join("\n")).not.toContain("--no-session");
+		expect((getLive(runDir, "agent-1")?.launchArgs ?? []).join("\n")).toContain("--thinking\nlow\n--some-flag");
 		await waitUntil(() => liveAgents.size === 0);
 
 		expect(tool.renderCall().children).toEqual([]);
@@ -1179,7 +1180,7 @@ setTimeout(() => {}, 1000);
 		await waitUntil(() => liveAgents.size === 0);
 	});
 
-	test.serial("writes structured result.json with configured maxResultBytes from spawn", async () => {
+	test.serial("records the compact structured result with configured maxResultBytes from spawn", async () => {
 		const { registerSpawnTool } = await import("../../src/async-subagents/tools/spawn.js");
 		const pi = new FakePi();
 		const liveAgents = new Map<string, Map<string, any>>();
@@ -1208,29 +1209,27 @@ setTimeout(() => {}, 1000);
 			watchSeconds: 1,
 		}, undefined, undefined, { cwd });
 
-		const structured = JSON.parse(fs.readFileSync(path.join(result.details.runDir, "agent-1", "result.json"), "utf-8"));
+		const structured = getRecord(result.details.runDir, "agent-1")?.structured;
 		expect(structured).toMatchObject({
 			agentId: "agent-1",
 			status: "done",
-			resultText: "abc",
 			resultTruncated: true,
 			resultOriginalBytes: 6,
 		});
 		await waitUntil(() => liveAgents.size === 0);
 	});
 
-	test.serial("result tool defaults to summary-first output with artifact paths", async () => {
+	test.serial("result tool falls back to the structured summary when no result text is available", async () => {
 		const { registerResultTool } = await import("../../src/async-subagents/tools/result.js");
 		const pi = new FakePi();
 		registerResultTool(pi as any);
 		const tool = pi.tools.get("async_subagents_result");
 		const cwd = tempDir();
-		const runDir = path.join(cwd, ".pi", "subagents", "run-1");
+		const runDir = batch(cwd, "run-1");
 		createAgent(runDir, "agent-1", {
-			"exit_code": "0",
-			"result.md": "Short summary\n\nRAW-DETAIL-SHOULD-NOT-APPEAR",
-			"stderr.log": "stderr raw detail",
-			"result.json": JSON.stringify({
+			exitCode: 0,
+			stderr: "stderr raw detail",
+			structured: {
 				schemaVersion: 2,
 				agentId: "agent-1",
 				status: "done",
@@ -1245,7 +1244,7 @@ setTimeout(() => {}, 1000);
 				risks: [{ text: "Risk detail", severity: "medium" }],
 				nextActions: ["Add regression test"],
 				stderrPreview: "stderr raw detail",
-			}),
+			},
 		});
 
 		const compact = await tool.execute("call", { runDir, agentId: "agent-1" }, undefined, undefined, { cwd });
@@ -1255,19 +1254,11 @@ setTimeout(() => {}, 1000);
 		expect(compactText).toContain("Referenced files:\n- src/foo.ts:12");
 		expect(compactText).toContain("Risks:\n- [medium] Risk detail");
 		expect(compactText).toContain("Next actions:\n- Add regression test");
-		expect(compactText).toContain(`Full result: ${path.join(".pi", "subagents", "run-1", "agent-1", "result.md")}`);
-		expect(compactText).toContain(`Structured result: ${path.join(".pi", "subagents", "run-1", "agent-1", "result.json")}`);
-		expect(compactText).toContain(`Full stderr: ${path.join(".pi", "subagents", "run-1", "agent-1", "stderr.log")}`);
-		expect(compactText).toContain("Raw result/stderr are intentionally not inlined");
-		expect(compactText).not.toContain("--- Result ---");
-		expect(compactText).not.toContain("RAW-DETAIL-SHOULD-NOT-APPEAR");
-		expect(compact.details.artifacts).toEqual({
-			resultMd: path.join(".pi", "subagents", "run-1", "agent-1", "result.md"),
-			resultJson: path.join(".pi", "subagents", "run-1", "agent-1", "result.json"),
-			stderrLog: path.join(".pi", "subagents", "run-1", "agent-1", "stderr.log"),
-		});
-
-		expect(compactText).not.toContain("--- Stderr ---");
+		expect(compactText).toContain("Stderr (tail):\nstderr raw detail");
+		expect(compactText).not.toContain("--- Result");
+		expect(compactText).not.toContain("result.md");
+		expect(compact.details.structured).toMatchObject({ summary: "Short summary", confidence: "high" });
+		expect(compact.details).not.toHaveProperty("artifacts");
 	});
 
 	for (const watchSeconds of [undefined, 0]) test.serial(`queues excess agents without blocking spawn with watchSeconds=${watchSeconds}`, async () => {
@@ -1313,19 +1304,15 @@ setTimeout(() => {}, 2000);
 		expect(elapsedMs).toBeLessThan(1200);
 		expect(result.content[0].text).toContain("Scheduled 2 agent(s) in");
 		expect(result.content[0].text).toContain("maxConcurrent=1");
-		// Each agent is either still queued (prompts/<id>.md) or launched
-		// (<id>/prompt.md); the queue copy is removed once launched.
-		const { hasAgentPrompt } = await import("../../src/async-subagents/lib.js");
-		expect(hasAgentPrompt(result.details.runDir, "agent-1")).toBe(true);
-		expect(hasAgentPrompt(result.details.runDir, "agent-2")).toBe(true);
-		expect(fs.existsSync(path.join(result.details.runDir, "prompts", "agent-2.md"))).toBe(true);
+		// Both agents are recorded immediately; the second waits for a slot.
+		expect(getRecord(result.details.runDir, "agent-1")).toBeDefined();
+		expect(getRecord(result.details.runDir, "agent-2")?.status).toBe("planned");
 		expect(liveAgents.get(result.details.runDir)?.size).toBe(2);
 
 		await waitUntil(() => liveAgents.size === 0, 2500);
-		expect(fs.readFileSync(path.join(result.details.runDir, "agent-1", "result.md"), "utf-8")).toBe("queued ok");
-		expect(fs.readFileSync(path.join(result.details.runDir, "agent-2", "result.md"), "utf-8")).toBe("queued ok");
-		expect(fs.readdirSync(path.join(result.details.runDir, "prompts"))).toEqual([]);
-		expect(fs.existsSync(path.join(result.details.runDir, "agent-1", "prompt.md"))).toBe(true);
+		expect(readResultText(result.details.runDir, "agent-1")).toBe("queued ok");
+		expect(readResultText(result.details.runDir, "agent-2")).toBe("queued ok");
+		expect(getRecord(result.details.runDir, "agent-2")?.status).toBe("done");
 	});
 
 	test.serial("stops queued agents before their concurrency slot opens", async () => {
@@ -1364,12 +1351,12 @@ setInterval(() => {}, 1000);
 		expect(liveAgents.get(runDir)?.has("agent-2")).toBe(true);
 		const stoppedQueued = await stopTool.execute("call", { runDir, agentIds: ["agent-2"] }, undefined, undefined, { cwd });
 		expect(stoppedQueued.content[0].text).toContain("[stopped] agent-2");
-		expect(fs.readFileSync(path.join(runDir, "agent-2", "exit_code"), "utf-8")).toBe("stopped");
+		expect(getRecord(runDir, "agent-2")).toMatchObject({ status: "stopped", stopRequested: true });
 		expect(liveAgents.get(runDir)?.has("agent-2")).not.toBe(true);
 
 		await stopTool.execute("call", { runDir, agentIds: ["agent-1"], force: true }, undefined, undefined, { cwd });
 		await waitUntil(() => liveAgents.size === 0, 1500);
-		expect(fs.existsSync(path.join(runDir, "agent-2", "pid"))).toBe(false);
+		expect(getRecord(runDir, "agent-2")?.pid).toBeUndefined();
 	});
 
 	test.serial("spawn tool falls back through role-owned candidates for the current process", async () => {
@@ -1412,8 +1399,8 @@ setTimeout(() => {}, 1000);
 			watchSeconds: 1,
 		}, undefined, undefined, { cwd });
 		await waitUntil(() => liveAgents.size === 0);
-		expect(fs.readFileSync(path.join(first.details.runDir, "agent-1", "result.md"), "utf-8")).toBe("ok beta/quick");
-		expect(fs.readFileSync(path.join(first.details.runDir, "agent-1", "model_fallback_to"), "utf-8")).toBe("beta/quick");
+		expect(readResultText(first.details.runDir, "agent-1")).toBe("ok beta/quick");
+		expect(getRecord(first.details.runDir, "agent-1")?.modelFallback).toEqual({ from: "alpha/primary", to: "beta/quick" });
 
 		const second = await tool.execute("call", {
 			tasks: [{ id: "agent-2", task: "Quick fallback check again", subagentType: "quick" }],
@@ -1423,7 +1410,7 @@ setTimeout(() => {}, 1000);
 		await waitUntil(() => liveAgents.size === 0);
 
 		expect(JSON.parse(fs.readFileSync(attemptFile, "utf-8"))).toEqual(["alpha/primary", "beta/quick", "beta/quick"]);
-		expect((JSON.parse(fs.readFileSync(path.join(second.details.runDir, "agent-2", "launch.json"), "utf-8")).task.model as string)).toBe("beta/quick");
+		expect(getRecord(second.details.runDir, "agent-2")?.task?.model).toBe("beta/quick");
 	});
 
 	test.serial("does not terminate sub-agent auto-retries after an error agent_end", async () => {
@@ -1463,8 +1450,8 @@ setTimeout(() => {}, 1000);
 		}, undefined, undefined, { cwd });
 
 		const runDir = result.details.runDir;
-		expect(fs.readFileSync(path.join(runDir, "agent-1", "exit_code"), "utf-8")).toBe("0");
-		expect(fs.readFileSync(path.join(runDir, "agent-1", "result.md"), "utf-8")).toBe("retried ok");
+		expect(getRecord(runDir, "agent-1")?.exitCode).toBe(0);
+		expect(readResultText(runDir, "agent-1")).toBe("retried ok");
 		await waitUntil(() => liveAgents.size === 0);
 	});
 
@@ -1519,17 +1506,17 @@ setTimeout(() => {}, 1000);
 		const runDir = result.details.runDir;
 		expect(result.content[0].text).toContain("LLM-routed 2 inferred subagent type(s).");
 		expect(routerCompleteMock).toHaveBeenCalled();
-		const scanArgs = (JSON.parse(fs.readFileSync(path.join(runDir, "scan-agent", "launch.json"), "utf-8")).piArgs as string[]).join("\n");
+		const scanArgs = (getLive(runDir, "scan-agent")?.launchArgs ?? []).join("\n");
 		expect(scanArgs).toContain("--model\nfast/scan");
 		expect(scanArgs).toContain("--thinking\noff");
 		expect(scanArgs).toContain(`--tools\nRead,Grep,${SUBAGENT_COMMON_TOOLS.join(",")}`);
-		expect(fs.readFileSync(path.join(runDir, "scan-agent", "subagent_type"), "utf-8")).toBe("scan");
-		const reviewArgs = (JSON.parse(fs.readFileSync(path.join(runDir, "review-agent", "launch.json"), "utf-8")).piArgs as string[]).join("\n");
+		expect(getRecord(runDir, "scan-agent")?.subagentType).toBe("scan");
+		const reviewArgs = (getLive(runDir, "review-agent")?.launchArgs ?? []).join("\n");
 		expect(reviewArgs).toContain("--model\nsmart/review");
 		expect(reviewArgs).toContain("--thinking\nhigh\n--temperature\n0.1");
 		expect(reviewArgs).toContain(`--tools\nRead,Grep,${SUBAGENT_COMMON_TOOLS.join(",")}`);
-		expect(fs.readFileSync(path.join(runDir, "review-agent", "subagent_type"), "utf-8")).toBe("review");
-		expect(fs.readFileSync(path.join(runDir, "review-agent", "prompt.md"), "utf-8")).toContain("Additional instructions from sub-agent profile:\nReview-only instruction for Code review payment module");
+		expect(getRecord(runDir, "review-agent")?.subagentType).toBe("review");
+		expect((await import("../../src/async-subagents/lib.js")).generatePrompt(getRecord(runDir, "review-agent")!.task!)).toContain("Additional instructions from sub-agent profile:\nReview-only instruction for Code review payment module");
 		await waitUntil(() => liveAgents.size === 0);
 	});
 
@@ -1566,7 +1553,7 @@ setTimeout(() => {}, 1000);
 		}, undefined, undefined, { cwd, model: { provider: "zai", id: "glm-5-turbo" } });
 
 		const runDir = result.details.runDir;
-		const piArgs = (JSON.parse(fs.readFileSync(path.join(runDir, "scan-agent", "launch.json"), "utf-8")).piArgs as string[]).join("\n");
+		const piArgs = (getLive(runDir, "scan-agent")?.launchArgs ?? []).join("\n");
 		expect(piArgs).toContain("--model\nzai/glm-5-turbo");
 		expect(piArgs).toContain("--temperature\n0");
 		expect(piArgs).toContain("--foo");
@@ -1575,7 +1562,7 @@ setTimeout(() => {}, 1000);
 		expect(piArgs).not.toContain("task/model");
 		expect(piArgs).not.toContain("env/fallback-model");
 		expect(piArgs).not.toContain("arg-model");
-		expect((JSON.parse(fs.readFileSync(path.join(runDir, "scan-agent", "launch.json"), "utf-8")).task.model as string)).toBe("zai/glm-5-turbo");
+		expect(getRecord(runDir, "scan-agent")?.task?.model).toBe("zai/glm-5-turbo");
 		await waitUntil(() => liveAgents.size === 0);
 	});
 });

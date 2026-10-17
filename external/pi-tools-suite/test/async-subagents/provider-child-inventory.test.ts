@@ -11,6 +11,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnAgent } from "../../src/async-subagents/core/spawn.js";
+import { getLive } from "../../src/async-subagents/core/store.js";
 import { localClaudeProviderModule } from "../../src/async-subagents/core/provider-extensions.js";
 import { SUBAGENT_DENIED_TOOLS } from "../../src/async-subagents/core/tool-guard.js";
 import { SUBAGENT_COMMON_TOOLS } from "../../src/async-subagents/core/child-tools.js";
@@ -81,8 +82,8 @@ async function inventory(tools: string[] | undefined, indexed = false, extraArgs
 		try { record = JSON.parse(readFileSync(probeLog, "utf8").split("\n")[0]); } catch { await new Promise((r) => setTimeout(r, 50)); }
 	}
 	child?.kill("SIGTERM");
-	if (!record) throw new Error(`no provider request observed; stderr=${readFileSync(join(spawned.agentDir, "stderr.log"), "utf8").slice(-3000)}`);
-	return { ...record, piArgs: (JSON.parse(readFileSync(join(spawned.agentDir, "launch.json"), "utf8")).piArgs as string[]).join("\n").split("\n") };
+	if (!record) throw new Error(`no provider request observed; stderr=${(getLive(runDir, "child")?.stderrTail ?? "").slice(-3000)}`);
+	return { ...record, piArgs: (getLive(runDir, "child")?.launchArgs ?? []).join("\n").split("\n") };
 }
 
 offline("research work tools are read-only in the actual child provider inventory", async () => {

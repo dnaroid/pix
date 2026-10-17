@@ -24,6 +24,7 @@ import {
 import { spawnAgent } from "../../src/async-subagents/core/spawn.js";
 import { spawnAgentWithRetry } from "../../src/async-subagents/core/retry.js";
 import { getAgentState } from "../../src/async-subagents/core/state.js";
+import { getRecord } from "../../src/async-subagents/core/store.js";
 import { stopAgents } from "../../src/async-subagents/core/stop.js";
 import { deleteRunDirs, findCleanupCandidates } from "../../src/async-subagents/core/cleanup.js";
 import type { OwnedLaunchBinaries } from "../../src/async-subagents/core/owned-launch/bootstrap.js";
@@ -289,11 +290,11 @@ describeOwnedRuntime("blocker 3: receipt before service retirement never relaunc
 		// reuse guard killed the whole retry chain with an error).
 		expect(completions).toEqual([]);
 		expect(launches).toBe(1);
-		expect(fs.existsSync(path.join(agentDir, "retry_pending"))).toBe(false);
+		expect(getRecord(root, "agent")?.status).not.toBe("retrying");
 		// Retirement proven: the retry chain proceeds into a clean relaunch.
 		presence = "absent";
 		await until(() => launches === 2, 6_000, "retry relaunch after retirement");
-		expect(fs.existsSync(path.join(agentDir, "retry_count"))).toBe(true);
+		expect(getRecord(root, "agent")?.retryCount).toBe(1);
 		journal(ownerDirs[1]);
 		drainOk(ownerDirs[1]);
 		endAttempt(processes[1], true);

@@ -1,13 +1,35 @@
 import { spawn } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
-import { appendFile, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { HeadlessToolApi, HeadlessResult } from "./api.js";
+import { PROJECT_ARTIFACTS_DIR } from "../artifact-paths.js";
+import { runKnown } from "../async-subagents/core/lookup.js";
+import { parseRunKey } from "../async-subagents/core/paths.js";
+import { getLive, getRecord } from "../async-subagents/core/store.js";
 
 type BrokerReply = { ok: true; result: HeadlessResult } | { ok: false; error: string };
 
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }
+
+/**
+ * Durable completion receipt of a scheduled agent: its parent-session record
+ * has a final outcome (`finishedAt` + exit code or `stopped`), no pending
+ * retry and no live process in this runtime (decision 0072).
+ */
+export function subagentCompletionReceipt(runDir: string, agentId: string): string | undefined {
+	const record = getRecord(runDir, agentId);
+	if (!record?.finishedAt || record.status === "retrying" || getLive(runDir, agentId)?.active) return undefined;
+	if (record.status === "stopped") return "stopped";
+	return typeof record.exitCode === "number" ? String(record.exitCode) : undefined;
+}
+
+/** Broker diagnostics live in `.pi/artifacts/subagents/<batch>-headless-broker.log`. */
+function brokerLogFile(runDir: string): string {
+	const parsed = parseRunKey(runDir);
+	return path.join(parsed?.cwd ?? process.cwd(), PROJECT_ARTIFACTS_DIR, "subagents", `${parsed?.batch ?? path.basename(runDir)}-headless-broker.log`);
+}
 
 export async function writeSubagentsBrokerReply(
 	file: string,
@@ -100,32 +122,24 @@ export async function runSubagentsBroker(
 	// `wait` is the original Pix tool and reads durable run artifacts. The broker
 	// must not confuse its dead-PID `stopped` fallback with a final receipt.
 	// In particular, Windows taskkill can release the last child/pipe handle
-	// before Pix's UNREFERENCED drain/finalization timers commit exit_code.
+	// before Pix's UNREFERENCED drain/finalization timers commit the outcome.
 	// Keep a referenced poll alive until every scheduled agent has both a
 	// terminal state and a receipt, including when wait returns immediately.
 	// IDs can be omitted or normalized by Pix. Its resolved task previews are
 	// authoritative, including queued tasks missing from a transient status.
 	const tasks = details.tasks ?? [];
-	const log = (text: string) => appendFile(path.join(runDir, "headless-broker.log"),
-		`${new Date().toISOString()}: broker_pid=${process.pid} ${text}\n`).catch(() => {});
+	const logFile = brokerLogFile(runDir);
+	const log = (text: string) => mkdir(path.dirname(logFile), { recursive: true })
+		.then(() => appendFile(logFile, `${new Date().toISOString()}: broker_pid=${process.pid} ${text}\n`)).catch(() => {});
 	let lastDiagnostic = "";
 	while (true) {
 		try {
 			// External cleanup must not retain an otherwise idle broker forever.
-			if (!await stat(runDir).catch((error: NodeJS.ErrnoException) => {
-				if (error.code === "ENOENT") return undefined;
-				throw error;
-			})) return;
+			if (!runKnown(runDir)) return;
 			// Read receipts BEFORE status. Otherwise a stopped snapshot can be
 			// paired with a new failed receipt whose callback has already queued
 			// a retry, causing us to abandon its unreferenced backoff timer.
-			const receipts = await Promise.all(tasks.map(async (task) => {
-				const receipt = await readFile(path.join(runDir, task.id, "exit_code"), "utf8").catch((error: NodeJS.ErrnoException) => {
-					if (error.code === "ENOENT") return undefined;
-					throw error;
-				});
-				return { task, receipt };
-			}));
+			const receipts = tasks.map((task) => ({ task, receipt: subagentCompletionReceipt(runDir, task.id) }));
 			const status = await api.execute("subagents", { action: "wait", runDir, timeout: 300, interval: 2 });
 			const agents = (status.details as { agents?: Array<{ id: string; status: string }> } | undefined)?.agents ?? [];
 			const pending = receipts.map(({ task, receipt }) => {

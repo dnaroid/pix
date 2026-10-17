@@ -2,7 +2,7 @@
 // The parent agent drives subagents; this module only validates what they
 // produced and prepares the next round. It never launches models.
 import { createHash, randomBytes } from "node:crypto";
-import { mkdir, open, readFile, realpath } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyRunModels, assertRunnable, loadCouncilConfig, resolvedQuorum, thinkingForModel } from "./config.mjs";
@@ -12,8 +12,9 @@ import {
 	assertBoundedText, CouncilError, createRunDirectory, ensureConfinedDirectory, ensureRunSubdirectory, MAX_DOCUMENT_CHARS, PUBLISH_DIR,
 	readDocument, replaceDocument, runRoots, safeTopicSlug, validatedRunPath, withRunLock, writeExclusive, writeJson,
 } from "./storage.mjs";
+import { assertBatchName, findChildSession, readChildSession, readParentRecord } from "./subagent-state.mjs";
 
-export const MANIFEST_FORMAT = "pi-brainstorm-v5";
+export const MANIFEST_FORMAT = "pi-brainstorm-v6";
 export const MAX_RESPONSE_CHARS = 40_000;
 const MAX_RESULT_BYTES = 64 * 1024;
 const PENDING_MARKER = "Status: **pending synthesis**";
@@ -48,7 +49,7 @@ function briefDocument(manifest, templates) {
 	const { config, mode } = manifest;
 	const thinking = manifest.participants.map((p) => `${p.model}: ${p.thinking}`).join(", ");
 	const rounds = [1, 2, 3, 4, 5].map((round) => roundName(templates, mode, round)).join(" → ");
-	return `# Council brief\n\n${manifest.brief}\n\n## Execution\n\n- Mode: ${mode}\n- Topic: ${manifest.topic}\n- Date: ${manifest.createdAt.slice(0, 10)}\n- Models: ${config.models.join(", ")}${config.modelsExplicit ? "" : " (from frontierModels)"}\n- Thinking: ${thinking}\n- Quorum per round: ${resolvedQuorum(config)}/${config.models.length}\n- Timeout per participant per round: ${config.timeoutSeconds}s\n- Participant sessions: ${manifest.subagentRunDir}\n- Rounds: ${rounds}. Parent draft before round 5; parent finalization after review. No implementation.\n`;
+	return `# Council brief\n\n${manifest.brief}\n\n## Execution\n\n- Mode: ${mode}\n- Topic: ${manifest.topic}\n- Date: ${manifest.createdAt.slice(0, 10)}\n- Models: ${config.models.join(", ")}${config.modelsExplicit ? "" : " (from frontierModels)"}\n- Thinking: ${thinking}\n- Quorum per round: ${resolvedQuorum(config)}/${config.models.length}\n- Timeout per participant per round: ${config.timeoutSeconds}s\n- Participant batch: ${manifest.subagentRunDir}\n- Rounds: ${rounds}. Parent draft before round 5; parent finalization after review. No implementation.\n`;
 }
 
 export function renderDiscussion(manifest, texts, templates) {
@@ -80,6 +81,7 @@ function validateManifest(directory, manifest) {
 	}
 	if (!manifest.rounds || typeof manifest.rounds !== "object" || !manifest.missing || typeof manifest.missing !== "object") throw new CouncilError("Manifest rounds are malformed");
 	if (!Array.isArray(manifest.expectedExtraArgs)) throw new CouncilError("Manifest lacks the participant launch contract");
+	assertBatchName(manifest.subagentRunDir);
 }
 
 async function loadRun(options) {
@@ -126,91 +128,38 @@ async function mutate(state, templates, operation) {
 	}
 }
 
-async function resolveSubagentRunDir(cwd, relative) {
-	const root = path.join(await realpath(cwd), ".pi", "subagents");
-	const resolved = path.resolve(cwd, relative);
-	const actual = await realpath(resolved).catch(() => resolved);
-	if (path.dirname(actual) !== root) throw new CouncilError("Participant run directory must be a direct child of .pi/subagents");
-	return actual;
-}
-
-async function readJsonFile(file) {
-	try { return JSON.parse(await readFile(file, "utf8")); }
-	catch { return undefined; }
-}
-
-async function readBounded(file) {
-	let handle;
-	try { handle = await open(file, "r"); }
-	catch { return { text: "" }; }
-	try {
-		const buffer = Buffer.alloc(MAX_RESULT_BYTES + 1);
-		const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-		if (bytesRead > MAX_RESULT_BYTES) return { oversize: true, text: "" };
-		return { text: buffer.subarray(0, bytesRead).toString("utf8") };
-	} finally {
-		await handle.close();
-	}
-}
-
-async function readTurnCount(agentDir) {
-	return Number.parseInt(await readFile(path.join(agentDir, "turn_count"), "utf8").catch(() => "0"), 10) || 0;
-}
-
-/**
- * User messages persisted in the participant's own session. Live follow-ups do
- * not advance turn_count, but every delivered message is appended here.
- */
-async function countSessionUserMessages(agentDir) {
-	const link = (await readFile(path.join(agentDir, "session_file"), "utf8").catch(() => "")).trim();
-	if (!link) return undefined;
-	const file = await realpath(path.resolve(agentDir, link)).catch(() => undefined);
-	if (!file) return undefined;
-	const root = await realpath(agentDir);
-	if (!file.startsWith(root + path.sep)) throw new CouncilError(`${path.basename(agentDir)} session file is outside its agent directory`, 1);
-	let count = 0;
-	for (const line of (await readFile(file, "utf8")).split("\n")) {
-		if (!line.trim()) continue;
-		let entry;
-		try { entry = JSON.parse(line); } catch { continue; }
-		if (entry?.type === "message" && entry.message?.role === "user") count++;
-	}
-	return count;
-}
-
-/** Classify one participant's answer for a round from async-subagents artifacts. */
-export async function inspectParticipant(subagentRunDir, participant, round, expectedArgs) {
-	const agentDir = path.join(subagentRunDir, agentId(participant.slot));
-	const spec = await readJsonFile(path.join(agentDir, "launch.json"));
-	if (!spec?.task) {
-		if (round === 1) return { kind: "pending", undelivered: true, reason: "not launched (spawn it)" };
-		throw new CouncilError(`${agentId(participant.slot)} has no launch.json; its session cannot be a continuation`, 1);
-	}
+/** Classify one participant's answer for a round from its child and parent sessions. */
+export async function inspectParticipant(cwd, batch, participant, round, expectedArgs) {
 	const label = agentId(participant.slot);
-	if (spec.task.model !== participant.model) throw new CouncilError(`${label} ran ${spec.task.model ?? "an unknown model"} instead of ${participant.model}; model substitution is not allowed (disable forced-current-model overrides)`, 1);
-	if (spec.task.subagentType !== "research") throw new CouncilError(`${label} must use the research role`, 1);
-	if (JSON.stringify(spec.extraArgs ?? []) !== JSON.stringify(expectedArgs)) throw new CouncilError(`${label} launch arguments differ from the read-only council contract; research.extraArgs and global extraArgs must be empty`, 1);
-	if (spec.task.thinking !== participant.thinking) throw new CouncilError(`${label} ran thinking ${spec.task.thinking ?? "default"} instead of ${participant.thinking}`, 1);
-	const turns = await readTurnCount(agentDir);
+	const child = await findChildSession(cwd, batch, label);
+	if (!child) {
+		if (round === 1) return { kind: "pending", undelivered: true, reason: "not launched (spawn it)" };
+		throw new CouncilError(`${label} has no persisted session; it cannot be a continuation`, 1);
+	}
+	const parent = await readParentRecord(child.meta.parentSession, child.meta);
+	if (!parent) throw new CouncilError(`${label} has no sub-agent record in a persisted parent session; councils require a saved parent session`, 1);
+	const { record } = parent;
+	const task = record.task ?? {};
+	if (task.model !== participant.model) throw new CouncilError(`${label} ran ${task.model ?? "an unknown model"} instead of ${participant.model}; model substitution is not allowed (disable forced-current-model overrides)`, 1);
+	if (task.subagentType !== "research") throw new CouncilError(`${label} must use the research role`, 1);
+	if (JSON.stringify(record.extraArgs ?? []) !== JSON.stringify(expectedArgs)) throw new CouncilError(`${label} launch arguments differ from the read-only council contract; research.extraArgs and global extraArgs must be empty`, 1);
+	if (task.thinking !== participant.thinking) throw new CouncilError(`${label} ran thinking ${task.thinking ?? "default"} instead of ${participant.thinking}`, 1);
+	const turns = (Number.isInteger(record.turn) ? record.turn : 1) - 1;
 	if (turns > round - 1) throw new CouncilError(`${label} has ${turns + 1} turns, more than round ${round}; extra messages were sent to a council participant`, 1);
 	if (turns < round - 1) return { kind: "pending", undelivered: true, reason: `round ${round} message not delivered (send it)` };
-	const resultJson = path.join(agentDir, "result.json");
-	const rawResult = await readFile(resultJson, "utf8").catch(() => undefined);
-	let result;
-	try { result = rawResult === undefined ? undefined : JSON.parse(rawResult); } catch { result = undefined; }
-	if (!result || !["done", "failed", "stopped"].includes(result.status)) return { kind: "pending", reason: result?.status ?? "running" };
-	const messages = await countSessionUserMessages(agentDir);
-	if (messages !== undefined && messages > round) throw new CouncilError(`${label} session has ${messages} user messages, more than round ${round}; extra messages were sent to a council participant`, 1);
-	if (messages !== undefined && messages < round && result.status === "done") return { kind: "pending", reason: `round ${round} message not yet in the session` };
-	if (messages === undefined && result.status === "done") throw new CouncilError(`${label} has no persisted session; the participant never started a subagent session`, 1);
-	if (result.model && result.model !== participant.model) throw new CouncilError(`${label} reported model ${result.model} instead of ${participant.model}`, 1);
-	if (result.status !== "done") return { kind: "gap", reason: `participant ${result.status}` };
-	const { text, oversize } = await readBounded(path.join(agentDir, "result.md"));
-	// send archives/replaces these files: accept only an unchanged snapshot.
-	if (await readTurnCount(agentDir) !== turns || await readFile(resultJson, "utf8").catch(() => undefined) !== rawResult) {
-		return { kind: "pending", reason: "artifacts changed while reading; collect again" };
+	if (!["done", "failed", "stopped"].includes(record.status)) return { kind: "pending", reason: record.status ?? "running" };
+	const session = await readChildSession(child.file);
+	if (session.userMessages > round) throw new CouncilError(`${label} session has ${session.userMessages} user messages, more than round ${round}; extra messages were sent to a council participant`, 1);
+	if (session.userMessages < round && record.status === "done") return { kind: "pending", reason: `round ${round} message not yet in the session` };
+	const reported = record.structured?.model;
+	if (reported && reported !== participant.model) throw new CouncilError(`${label} reported model ${reported} instead of ${participant.model}`, 1);
+	if (record.status !== "done") return { kind: "gap", reason: `participant ${record.status}` };
+	const text = session.lastText ?? record.message ?? "";
+	// A send/respawn appends parent entries: accept only an unchanged snapshot.
+	if ((await readParentRecord(child.meta.parentSession, child.meta))?.entries !== parent.entries) {
+		return { kind: "pending", reason: "session state changed while reading; collect again" };
 	}
-	if (oversize || text.length > MAX_RESPONSE_CHARS) return { kind: "gap", reason: `response exceeds ${MAX_RESPONSE_CHARS} characters` };
+	if (Buffer.byteLength(text, "utf8") > MAX_RESULT_BYTES || text.length > MAX_RESPONSE_CHARS) return { kind: "gap", reason: `response exceeds ${MAX_RESPONSE_CHARS} characters` };
 	if (!text.trim()) return { kind: "gap", reason: "empty response" };
 	return { kind: "done", text, turn: turns + 1 };
 }
@@ -259,12 +208,17 @@ function deliveryActions(state, templates, undelivered) {
 async function undeliveredParticipants(state) {
 	const { manifest } = state;
 	if (!["running", "reviewing_synthesis"].includes(manifest.status)) return [];
-	const subagentRunDir = await resolveSubagentRunDir(state.cwd, manifest.subagentRunDir);
+	const batch = assertBatchName(manifest.subagentRunDir);
 	const result = [];
 	for (const p of manifest.participants.filter((item) => item.active)) {
-		const agentDir = path.join(subagentRunDir, agentId(p.slot));
-		const launched = (await readJsonFile(path.join(agentDir, "launch.json")))?.task !== undefined;
-		if (manifest.round === 1 ? !launched : launched && await readTurnCount(agentDir) < manifest.round - 1) result.push(p);
+		const child = await findChildSession(state.cwd, batch, agentId(p.slot));
+		if (manifest.round === 1) {
+			if (!child) result.push(p);
+			continue;
+		}
+		if (!child) continue;
+		const turn = (await readParentRecord(child.meta.parentSession, child.meta))?.record.turn;
+		if (Number.isInteger(turn) && turn - 1 < manifest.round - 1) result.push(p);
 	}
 	return result;
 }
@@ -291,14 +245,11 @@ export async function initCouncil(options) {
 	const { sources, ...snapshot } = config;
 	const id = randomBytes(6).toString("hex");
 	const directory = await createRunDirectory(cwd, topic, id, config.outputDir);
-	const subagentsRoot = await ensureConfinedDirectory(cwd, ".pi/subagents");
 	const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-	const subagentDir = path.join(subagentsRoot, `${stamp}-brainstorm-${id}`);
-	await mkdir(subagentDir);
 	const manifest = {
 		format: MANIFEST_FORMAT, id, mode, topic, brief, createdAt: new Date().toISOString(),
 		status: "running", round: 1, config: snapshot, configSources: sources,
-		subagentRunDir: path.relative(await realpath(cwd), subagentDir),
+		subagentRunDir: `${stamp}-brainstorm-${id}`,
 		expectedExtraArgs: expectedExtraArgs(),
 		participants: config.models.map((model, index) => ({ slot: index + 1, model, thinking: thinkingForModel(config, model), active: true })),
 		rounds: {}, missing: {},
@@ -343,10 +294,10 @@ export async function collectRound(options) {
 		const declared = options.missing instanceof Map ? options.missing : parseMissing(options.missing);
 		const active = manifest.participants.filter((p) => p.active);
 		for (const id of declared.keys()) if (!active.some((p) => agentId(p.slot) === id)) throw new CouncilError(`--missing ${id} is not an active participant`);
-		const subagentRunDir = await resolveSubagentRunDir(state.cwd, manifest.subagentRunDir);
+		const batch = assertBatchName(manifest.subagentRunDir);
 		return mutate(state, templates, async () => {
 			const outcomes = [];
-			for (const participant of active) outcomes.push({ participant, ...(await inspectParticipant(subagentRunDir, participant, round, manifest.expectedExtraArgs)) });
+			for (const participant of active) outcomes.push({ participant, ...(await inspectParticipant(state.cwd, batch, participant, round, manifest.expectedExtraArgs)) });
 			const pending = outcomes.filter((o) => o.kind === "pending" && !declared.has(agentId(o.participant.slot)));
 			if (pending.length) {
 				const undelivered = pending.filter((o) => o.undelivered).map((o) => o.participant);

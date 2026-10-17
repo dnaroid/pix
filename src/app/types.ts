@@ -191,29 +191,6 @@ export type SubagentsLiveStateEvent = {
 	checkedAt: number;
 };
 
-export type SubagentRegistry = {
-	version: 1;
-	latestRunId?: string;
-	latestRunDir?: string;
-	runs: Record<string, SubagentRegistryRun>;
-	agents: Record<string, SubagentRegistryAgent>;
-};
-
-export type SubagentRegistryRun = {
-	runId: string;
-	runDir: string;
-	agentIds: string[];
-	createdAt: string;
-	updatedAt: string;
-};
-
-export type SubagentRegistryAgent = {
-	agentId: string;
-	runId: string;
-	runDir: string;
-	updatedAt: string;
-};
-
 export type SubagentsWidgetState = {
 	runs?: SubagentLiveStateRun[];
 	runDir: string;

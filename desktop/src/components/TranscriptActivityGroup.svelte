@@ -83,7 +83,7 @@
         aria-label="Collapse tool activity"
         class="group/gutter absolute inset-y-0 -left-[7px] z-10 flex w-[14px] justify-center focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-ring"
         onclick={() => { expanded = false; groupSummary.focus(); }}
-      ><span class="h-full w-px bg-code-border transition-colors group-hover/gutter:bg-foreground/50 group-focus-visible/gutter:bg-foreground/50" aria-hidden="true"></span></button>
+      ></button>
       {#each item.entries as entry (entry.id)}
         {#if entry.type === "message"}
           <details class="group/thought" data-activity-entry-id={entry.id} open={expandedEntries.has(entry.id)} ontoggle={(event) => toggleEntry(event, entry)}>
@@ -98,7 +98,7 @@
               </span>
             </summary>
             {#if expandedEntries.has(entry.id)}
-              <div class="ml-[7px] border-l border-code-border pl-2.5 text-muted-foreground">
+              <div class="ml-[7px] pl-2.5 text-muted-foreground">
                 <MarkdownText text={entry.text} compact dense fitTables {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />
               </div>
             {/if}
@@ -125,7 +125,7 @@
                       aria-label={`Collapse ${presentation.name} tool`}
                       class="group/tool-gutter absolute inset-y-0 -left-[7px] z-10 flex w-[14px] justify-center focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-ring"
                       onclick={(event) => collapseTool(event, tool.id)}
-                    ><span class="h-full w-px bg-code-border transition-colors group-hover/tool-gutter:bg-foreground/50 group-focus-visible/tool-gutter:bg-foreground/50" aria-hidden="true"></span></button>
+                    ></button>
                   {#if tool.resultLoading}
                     <div class="py-0.5 pl-8 text-xs leading-tight text-muted-foreground" role="status">Loading tool result…</div>
                   {:else if tool.resultError}

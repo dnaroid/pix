@@ -29,7 +29,6 @@ export type AppTerminalControllerHost = {
 	closeSdkMenuForStop(): void;
 	clearToastTimers(): void;
 	stopBlinking(): void;
-	stopSubagentsPolling(): void;
 	stopModelUsagePolling(): void;
 	stopMemoryWatchdog(): void;
 	stopVoiceInput(): Promise<void>;
@@ -166,7 +165,6 @@ export class AppTerminalController {
 		this.host.closeSdkMenuForStop();
 		this.host.clearToastTimers();
 		this.host.stopBlinking();
-		this.host.stopSubagentsPolling();
 		this.host.stopModelUsagePolling();
 		this.host.stopMemoryWatchdog();
 		this.host.stopAutocomplete();

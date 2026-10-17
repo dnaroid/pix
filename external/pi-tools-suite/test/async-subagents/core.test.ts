@@ -4,47 +4,37 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
+	buildStructuredResult,
 	buildSubagentCatalogPrompt,
-	createRunDir,
+	compactStructuredResult,
+	settleStructuredResult,
 	createSemaphore,
 	currentModelRef,
 	DEFAULT_AGENT_TIMEOUT_MS,
 	DEFAULT_RPC_EVENT_LINE_MAX_CHARS,
 	DEFAULT_STDERR_LOG_MAX_BYTES,
 	findCleanupCandidates,
-	findLatestSubagentRunDir,
 	filterSubagentConfigForParentModel,
 	generatePrompt,
 	getAgentState,
 	getBuiltinSubagentDefinitionsDir,
 	getBrowserQaRunnerPath,
 	getUiQaRunnerPath,
-	getSubagentRegistryPath,
 	getPiInvocation,
 	getRunRoot,
 	getRunState,
-	hasAgentPrompt,
-	hasLaunchedAgentPrompt,
-	hasQueuedAgentPrompt,
 	isBlindModelRef,
 	isQuotaLimitCompletion,
 	isSubagentTypeAvailableForParent,
 	loadSubagentConfig,
-	loadSubagentRegistry,
 	projectAgentDefinitionFiles,
 	readAgentDefinitionsFromDir,
 	readProjectAgentDefinitions,
 	readResult,
-	recordSubagentRun,
-	removeSubagentRunsFromRegistry,
-	readStructuredResult,
 	rememberSessionModelFallback,
 	resetSessionModelFallbacks,
 	resolveAgentTaskConfig,
 	routeSubagentTasks,
-	resolveSubagentAgentRunDir,
-	resolveSubagentRunDir,
-	resolveRunDir,
 	resolveSubagentLogLimits,
 	selectSessionModelWithFallback,
 	selectSubagentType,
@@ -55,10 +45,12 @@ import {
 	validateBasename,
 	validateStopSignal,
 	waitForAgents,
-	writePromptFile,
-	writeStructuredResult,
 } from "../../src/async-subagents/lib.js";
 import { isRecord, isoNow, serializeJsonLine } from "../../src/async-subagents/core/utils.js";
+import { batchBaseName, parseRunKey, runKey, scopeDir } from "../../src/async-subagents/core/paths.js";
+import { createBatch, forgetRecord, getLive, getRecord, resetSubagentStoreForTest, resolveScope, updateLive, updateRecord, type SubagentRecordPatch } from "../../src/async-subagents/core/store.js";
+import { normalizeRunDir, resolveSubagentAgentRunDir, resolveSubagentRunDir } from "../../src/async-subagents/core/lookup.js";
+import { readResultText } from "../../src/async-subagents/core/state.js";
 import { agentStrategyPrompt, appendAgentStrategyPrompt, SUBAGENT_DELEGATION_GUIDANCE } from "../../src/async-subagents/core/agent-strategy.js";
 import { DEFAULT_OWNED_LAUNCH_TIMEOUTS } from "../../src/async-subagents/core/owned-launch/launcher.js";
 import { activityFromRpcEvent } from "../../src/async-subagents/core/activity.js";
@@ -89,13 +81,30 @@ function writeFile(filePath: string, content = ""): void {
 	fs.writeFileSync(filePath, content, "utf-8");
 }
 
-function createAgent(runDir: string, id: string, files: Record<string, string> = {}): string {
+function writeLegacyAgent(runDir: string, id: string, files: Record<string, string> = {}): string {
 	const agentDir = path.join(runDir, id);
 	writeFile(path.join(agentDir, "prompt.md"), `prompt for ${id}`);
 	for (const [name, content] of Object.entries(files)) {
 		writeFile(path.join(agentDir, name), content);
 	}
 	return agentDir;
+}
+
+function newRun(cwd = tempDir(), name = "2026-01-01T00-00-00-run"): string {
+	return runKey(cwd, resolveScope(undefined), name);
+}
+
+function createAgent(runDir: string, id: string, patch: SubagentRecordPatch & { resultText?: string; stderr?: string; active?: boolean } = {}): void {
+	const { resultText, stderr, active, ...record } = patch;
+	const status = record.status ?? (record.exitCode === undefined ? "running" : record.exitCode === 0 ? "done" : "failed");
+	updateRecord(runDir, id, { turn: 1, ...record, status });
+	if (resultText !== undefined || stderr !== undefined || active !== undefined) {
+		updateLive(runDir, id, {
+			...(resultText !== undefined ? { resultText } : {}),
+			...(stderr !== undefined ? { stderrTail: stderr } : {}),
+			...(active !== undefined ? { active } : {}),
+		});
+	}
 }
 
 async function waitUntil(predicate: () => boolean, timeoutMs = 1000): Promise<void> {
@@ -111,34 +120,6 @@ async function withTimeout<T>(promise: Promise<T>, message: string, timeoutMs = 
 		promise,
 		new Promise<never>((_, reject) => setTimeout(() => reject(new Error(message)), timeoutMs)),
 	]);
-}
-
-function spawnRegistryWriter(scriptPath: string, cwd: string, runDir: string, agentId: string): {
-	ready: Promise<void>;
-	done: Promise<void>;
-	recorded: () => boolean;
-} {
-	const child = spawnChild(process.execPath, [scriptPath, cwd, runDir, agentId], { stdio: ["ignore", "pipe", "pipe"] });
-	let hasRecorded = false;
-	let resolveReady!: () => void;
-	let rejectReady!: (error: Error) => void;
-	const ready = new Promise<void>((resolve, reject) => {
-		resolveReady = resolve;
-		rejectReady = reject;
-	});
-	const done = new Promise<void>((resolve, reject) => {
-		child.once("error", reject);
-		child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`Registry writer exited with ${code}.`)));
-	});
-	child.stdout?.on("data", (chunk: Buffer) => {
-		for (const line of chunk.toString().split("\n")) {
-			if (line === "ready") resolveReady();
-			if (line === "recorded") hasRecorded = true;
-		}
-	});
-	child.stderr?.on("data", (chunk: Buffer) => rejectReady(new Error(chunk.toString())));
-	done.catch(rejectReady);
-	return { ready, done, recorded: () => hasRecorded };
 }
 
 afterEach(() => {
@@ -164,21 +145,23 @@ afterEach(() => {
 	if (originalPiSubagentsDebugLogs === undefined) delete process.env.PI_SUBAGENTS_DEBUG_LOGS;
 	else process.env.PI_SUBAGENTS_DEBUG_LOGS = originalPiSubagentsDebugLogs;
 	resetSessionModelFallbacks();
+	resetSubagentStoreForTest();
 	for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
 describe.serial("core paths", () => {
-	test.serial("builds, creates, and resolves run directories", () => {
+	test.serial("builds batch run keys without creating directories", () => {
 		const cwd = tempDir();
 		expect(getRunRoot(cwd)).toBe(path.join(cwd, ".pi", "subagents"));
-
-		const runDir = createRunDir(cwd, "my-run_1");
-		expect(runDir).toStartWith(path.join(cwd, ".pi", "subagents"));
-		expect(path.basename(runDir)).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-my-run_1$/);
-		expect(fs.statSync(path.join(runDir, "prompts")).isDirectory()).toBe(true);
-
-		expect(resolveRunDir(cwd, "relative/run")).toBe(path.join(cwd, "relative", "run"));
-		expect(resolveRunDir(cwd, runDir)).toBe(runDir);
+		expect(batchBaseName("my-run_1")).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-my-run_1$/);
+		const scope = resolveScope(undefined);
+		const runDir = createBatch(cwd, scope, "my-run_1");
+		expect(parseRunKey(runDir)).toMatchObject({ cwd, scope, batch: path.basename(runDir) });
+		expect(fs.existsSync(runDir)).toBe(false);
+		expect(parseRunKey(path.join(cwd, ".pi", "subagents", "legacy-run"))).toBeUndefined();
+		expect(normalizeRunDir(cwd, scope, path.basename(runDir))).toBe(runDir);
+		expect(normalizeRunDir(cwd, scope, runDir)).toBe(runDir);
+		expect(() => normalizeRunDir(cwd, scope, "/elsewhere/run")).toThrow("Run not found");
 	});
 
 	test.serial("rejects unsafe basenames", () => {
@@ -186,124 +169,23 @@ describe.serial("core paths", () => {
 		expect(() => validateBasename("../escape", "agentId")).toThrow("Invalid agentId");
 		expect(() => validateBasename("has space", "agentId")).toThrow("Invalid agentId");
 		expect(() => validateBasename("agent..x", "agentId")).toThrow('Must not contain ".."');
-		expect(() => createRunDir(tempDir(), "bad/slug")).toThrow("Invalid slug");
+		expect(() => batchBaseName("bad/slug")).toThrow("Invalid slug");
 	});
 
-	test.serial("records project registry entries and resolves omitted runDir", () => {
+	test.serial("resolves omitted runDir from the session store", () => {
 		const cwd = tempDir();
-		const runA = createRunDir(cwd, "registry-a");
-		createAgent(runA, "agent-1");
-		recordSubagentRun(cwd, runA, ["agent-1"]);
-
-		expect(getSubagentRegistryPath(cwd)).toBe(path.join(cwd, ".pi", "subagents", "registry.json"));
-		expect(loadSubagentRegistry(cwd)).toMatchObject({
-			latestRunDir: runA,
-			agents: { "agent-1": { runDir: runA } },
-		});
-		expect(resolveSubagentRunDir(cwd)).toBe(runA);
-		expect(resolveSubagentAgentRunDir(cwd, "agent-1")).toBe(runA);
-
-		const runB = createRunDir(cwd, "registry-b");
-		createAgent(runB, "agent-2");
-		recordSubagentRun(cwd, runB, ["agent-2"]);
-		expect(findLatestSubagentRunDir(cwd)).toBe(runB);
-		expect(resolveSubagentRunDir(cwd)).toBe(runB);
-		expect(resolveSubagentAgentRunDir(cwd, "agent-1")).toBe(runA);
-		expect(resolveSubagentAgentRunDir(cwd, "agent-2")).toBe(runB);
-
-		removeSubagentRunsFromRegistry(cwd, [runB]);
-		expect(loadSubagentRegistry(cwd).agents["agent-2"]).toBeUndefined();
-		expect(resolveSubagentRunDir(cwd)).toBe(runA);
-
-		const scannedRun = path.join(cwd, ".pi", "subagents", "manually-created-run");
-		createAgent(scannedRun, "manual-agent");
-		expect(resolveSubagentAgentRunDir(cwd, "manual-agent")).toBe(scannedRun);
-		expect(() => resolveSubagentAgentRunDir(cwd, "missing-agent")).toThrow('agent "missing-agent" was not found');
-	});
-
-	test.serial("serializes concurrent registry writers and atomically preserves every mapping", async () => {
-		const cwd = tempDir();
-		const registryPath = getSubagentRegistryPath(cwd);
-		const lockPath = `${registryPath}.lock`;
-		const startPath = path.join(cwd, "start-registry-writers");
-		const writerPath = path.join(cwd, "registry-writer.mjs");
-		const registryModuleUrl = new URL("../../src/async-subagents/core/registry.ts", import.meta.url).href;
-		writeFile(writerPath, `
-import * as fs from "node:fs";
-import { recordSubagentRun } from ${JSON.stringify(registryModuleUrl)};
-const [cwd, runDir, agentId] = process.argv.slice(2);
-const startPath = ${JSON.stringify(startPath)};
-process.stdout.write("ready\\n");
-while (!fs.existsSync(startPath)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
-recordSubagentRun(cwd, runDir, [agentId]);
-process.stdout.write("recorded\\n");
-`);
-		writeFile(lockPath, JSON.stringify({ pid: process.pid, token: "test-lock-holder" }));
-		const writers = Array.from({ length: 6 }, (_, index) => {
-			const runDir = path.join(cwd, ".pi", "subagents", `concurrent-${index}`);
-			createAgent(runDir, `agent-${index}`);
-			return spawnRegistryWriter(writerPath, cwd, runDir, `agent-${index}`);
-		});
-		await withTimeout(Promise.all(writers.map((writer) => writer.ready)), "Registry writers did not start");
-		writeFile(startPath);
-		await new Promise((resolve) => setTimeout(resolve, 50));
-		expect(writers.some((writer) => writer.recorded())).toBe(false);
-		fs.rmSync(lockPath);
-		await withTimeout(Promise.all(writers.map((writer) => writer.done)), "Registry writers did not finish");
-
-		const registry = loadSubagentRegistry(cwd);
-		for (let index = 0; index < writers.length; index++) {
-			expect(registry.runs[`concurrent-${index}`]?.runDir).toBe(path.join(cwd, ".pi", "subagents", `concurrent-${index}`));
-			expect(registry.agents[`agent-${index}`]?.runId).toBe(`concurrent-${index}`);
-		}
-		expect(() => JSON.parse(fs.readFileSync(registryPath, "utf-8"))).not.toThrow();
-		expect(fs.readdirSync(path.dirname(registryPath)).some((name) => name.includes(".tmp"))).toBe(false);
-	});
-
-	test.serial("recovers a dead registry lock owner", () => {
-		const cwd = tempDir();
-		const runDir = path.join(cwd, ".pi", "subagents", "stale-lock-run");
-		createAgent(runDir, "stale-agent");
-		const lockPath = `${getSubagentRegistryPath(cwd)}.lock`;
-		writeFile(lockPath, JSON.stringify({ pid: 2_147_483_647, token: "dead-owner" }));
-
-		recordSubagentRun(cwd, runDir, ["stale-agent"]);
-
-		expect(loadSubagentRegistry(cwd).agents["stale-agent"]?.runDir).toBe(runDir);
-		expect(fs.existsSync(lockPath)).toBe(false);
-	});
-
-	test.serial("does not reclaim an expired registry lock from the same live process", async () => {
-		const cwd = tempDir();
-		const registryPath = getSubagentRegistryPath(cwd);
-		const lockPath = `${registryPath}.lock`;
-		const startPath = path.join(cwd, "start-live-lock-writer");
-		const writerPath = path.join(cwd, "live-lock-writer.mjs");
-		const runDir = path.join(cwd, ".pi", "subagents", "live-lock-run");
-		createAgent(runDir, "live-lock-agent");
-		const registryModuleUrl = new URL("../../src/async-subagents/core/registry.ts", import.meta.url).href;
-		writeFile(writerPath, `
-import * as fs from "node:fs";
-import { recordSubagentRun } from ${JSON.stringify(registryModuleUrl)};
-const [cwd, runDir] = process.argv.slice(2);
-const startPath = ${JSON.stringify(startPath)};
-process.stdout.write("ready\\n");
-while (!fs.existsSync(startPath)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
-recordSubagentRun(cwd, runDir, ["live-lock-agent"]);
-process.stdout.write("recorded\\n");
-`);
-		writeFile(lockPath, JSON.stringify({ pid: process.pid, token: "live-owner" }));
-		const expiredAt = new Date(Date.now() - 31_000);
-		fs.utimesSync(lockPath, expiredAt, expiredAt);
-		const writer = spawnRegistryWriter(writerPath, cwd, runDir, "unused-agent-id");
-		await withTimeout(writer.ready, "Registry writer did not start");
-		writeFile(startPath);
-		await new Promise((resolve) => setTimeout(resolve, 75));
-		expect(writer.recorded()).toBe(false);
-		expect(fs.existsSync(lockPath)).toBe(true);
-		fs.rmSync(lockPath);
-		await withTimeout(writer.done, "Registry writer did not finish after live lock release");
-		expect(loadSubagentRegistry(cwd).agents["live-lock-agent"]?.runDir).toBe(runDir);
+		const scope = resolveScope(undefined);
+		expect(() => resolveSubagentRunDir({ cwd })).toThrow("no sub-agent runs");
+		const runA = runKey(cwd, scope, "2026-01-01T00-00-00-a");
+		updateRecord(runA, "agent-1", { cwd, status: "planned", createdAt: "2026-01-01T00:00:00.000Z" });
+		expect(resolveSubagentRunDir({ cwd })).toBe(runA);
+		expect(resolveSubagentAgentRunDir({ cwd }, "agent-1")).toBe(runA);
+		const runB = runKey(cwd, scope, "2026-01-02T00-00-00-b");
+		updateRecord(runB, "agent-2", { cwd, status: "planned", createdAt: "2026-01-02T00:00:00.000Z" });
+		expect(resolveSubagentRunDir({ cwd })).toBe(runB);
+		expect(resolveSubagentAgentRunDir({ cwd }, "agent-1")).toBe(runA);
+		expect(resolveSubagentAgentRunDir({ cwd }, "agent-2")).toBe(runB);
+		expect(() => resolveSubagentAgentRunDir({ cwd }, "missing-agent")).toThrow('agent "missing-agent" was not found');
 	});
 });
 
@@ -424,7 +306,6 @@ describe.serial("core utils and prompt generation", () => {
 	});
 
 	test.serial("generates and writes prompts with defaults and scope", () => {
-		const runDir = tempDir();
 		const task: AgentTask = {
 			id: "agent-1",
 			task: "Inspect tests",
@@ -439,7 +320,7 @@ describe.serial("core utils and prompt generation", () => {
 		expect(prompt).toContain("Output format:");
 		expect(prompt).toContain("unique task/run directories under the current project's .pi/artifacts/");
 		expect(prompt).toContain("never use project-root artifacts/ or .artifacts/ for scratch output");
-		expect(prompt).toContain("subagent/QA evidence stays in .pi/subagents/");
+		expect(prompt).toContain("Harness-owned sub-agent/QA workspaces live in .pi/artifacts/subagents/");
 		expect(prompt).toContain("user-requested deliverable paths are exceptions");
 
 		const defaultPrompt = generatePrompt({ id: "agent-2", task: "Run" });
@@ -470,9 +351,6 @@ describe.serial("core utils and prompt generation", () => {
 		});
 		expect(overridePrompt).toBe("CUSTOM Fix bug / Deep debug / src/core");
 
-		const promptPath = writePromptFile(runDir, task);
-		expect(promptPath).toBe(path.join(runDir, "prompts", "agent-1.md"));
-		expect(fs.readFileSync(promptPath, "utf-8")).toBe(prompt);
 	});
 });
 
@@ -493,20 +371,6 @@ describe.serial("pi invocation", () => {
 });
 
 describe.serial("subagent type config", () => {
-	test.serial("detects launched and queued agent prompt records through shared helpers", () => {
-		const runDir = tempDir();
-		fs.mkdirSync(path.join(runDir, "launched"), { recursive: true });
-		fs.writeFileSync(path.join(runDir, "launched", "prompt.md"), "launched");
-		fs.mkdirSync(path.join(runDir, "prompts"), { recursive: true });
-		fs.writeFileSync(path.join(runDir, "prompts", "queued.md"), "queued");
-
-		expect(hasLaunchedAgentPrompt(runDir, "launched")).toBe(true);
-		expect(hasQueuedAgentPrompt(runDir, "queued")).toBe(true);
-		expect(hasAgentPrompt(runDir, "launched")).toBe(true);
-		expect(hasAgentPrompt(runDir, "queued")).toBe(true);
-		expect(hasAgentPrompt(runDir, "missing")).toBe(false);
-	});
-
 	test.serial("loads bundled roles and runtime defaults without public sub-agent config", () => {
 		const cwd = tempDir();
 		const config = loadSubagentConfig(cwd, {});
@@ -1173,20 +1037,14 @@ describe.serial("run and agent state", () => {
 		expect(activityFromRpcEvent({ type: "turn_start" }, at)).toBeUndefined();
 	});
 
-		test.serial("detects planned, running, done, failed, and stopped agents", () => {
-		const runDir = tempDir();
-		writeFile(path.join(runDir, "prompts", "planned.md"), "planned prompt");
-		createAgent(runDir, "done", {
-			"exit_code": "0",
-			"started_at": "2024-01-01T00:00:00Z",
-			"finished_at": "2024-01-01T00:00:02Z",
-			"result.md": "a\nb\n",
-			"stderr.log": "",
-		});
-		createAgent(runDir, "failed", { "exit_code": "2" });
-		createAgent(runDir, "stopped", { "exit_code": "not-a-number" });
-		createAgent(runDir, "running", { pid: String(process.pid), "stderr.log": "warn\nerr" });
-		createAgent(runDir, "dead-pid", { pid: "99999999" });
+	test.serial("detects planned, running, done, failed, and stopped agents", () => {
+		const runDir = newRun();
+		createAgent(runDir, "planned", { status: "planned", active: true });
+		createAgent(runDir, "done", { exitCode: 0, startedAt: "2024-01-01T00:00:00Z", finishedAt: "2024-01-01T00:00:02Z", resultText: "a\nb\n" });
+		createAgent(runDir, "failed", { exitCode: 2 });
+		createAgent(runDir, "stopped", { status: "stopped", stopRequested: true });
+		createAgent(runDir, "running", { pid: process.pid, active: true, stderr: "warn\nerr" });
+		createAgent(runDir, "dead-pid", { pid: 99999999 });
 
 		expect(getAgentState(runDir, "missing")).toBeNull();
 		expect(getAgentState(runDir, "done")).toMatchObject({ id: "done", status: "done", exitCode: 0, resultLines: 2 });
@@ -1194,24 +1052,20 @@ describe.serial("run and agent state", () => {
 		expect(getAgentState(runDir, "stopped")).toMatchObject({ id: "stopped", status: "stopped" });
 		expect(getAgentState(runDir, "running")).toMatchObject({ id: "running", status: "running", pid: process.pid, stderrLines: 2 });
 		expect(getAgentState(runDir, "dead-pid")).toMatchObject({ id: "dead-pid", status: "stopped", pid: 99999999 });
+		expect(getAgentState(runDir, "planned")).toMatchObject({ id: "planned", status: "planned" });
 
-		expect(getAgentState(runDir, "done", { includeLineCounts: false })).toMatchObject({ id: "done", status: "done", exitCode: 0 });
 		expect(getAgentState(runDir, "done", { includeLineCounts: false })?.resultLines).toBeUndefined();
 		expect(getRunState(runDir, ["done"], { includeLineCounts: false }).agents[0].resultLines).toBeUndefined();
 
 		const all = getRunState(runDir).agents.map((a) => a.id).sort();
 		expect(all).toEqual(["dead-pid", "done", "failed", "planned", "running", "stopped"]);
 		expect(getRunState(runDir, ["planned", "done"]).agents.map((a) => a.id).sort()).toEqual(["done", "planned"]);
-		expect(getRunState(path.join(runDir, "missing")).agents).toEqual([]);
+		expect(getRunState(newRun(tempDir(), "missing")).agents).toEqual([]);
 	});
 
 	test.serial("reads result and stderr for an agent", () => {
-		const runDir = tempDir();
-		createAgent(runDir, "agent-1", {
-			"exit_code": "0",
-			"result.md": "final answer",
-			"stderr.log": "warning\n",
-		});
+		const runDir = newRun();
+		createAgent(runDir, "agent-1", { exitCode: 0, resultText: "final answer", stderr: "warning\n" });
 
 		expect(readResult(runDir, "missing")).toBeNull();
 		expect(readResult(runDir, "agent-1")).toMatchObject({
@@ -1222,25 +1076,21 @@ describe.serial("run and agent state", () => {
 		});
 	});
 
-	test.serial("reads structured result metadata when result.json exists", () => {
-		const runDir = tempDir();
-		const agentDir = createAgent(runDir, "agent-structured", {
-			"exit_code": "0",
-			"started_at": "2026-01-01T00:00:00Z",
-			"finished_at": "2026-01-01T00:00:03Z",
-			"result.md": "abcdef",
+	test.serial("settles a compact structured result on the parent record", () => {
+		const runDir = newRun();
+		createAgent(runDir, "agent-structured", {
+			exitCode: 0,
+			startedAt: "2026-01-01T00:00:00Z",
+			finishedAt: "2026-01-01T00:00:03Z",
+			resultText: "abcdef",
 		});
 
-		writeStructuredResult({
-			agentDir,
-			agentId: "agent-structured",
+		const structured = settleStructuredResult(runDir, "agent-structured", {
 			state: getAgentState(runDir, "agent-structured")!,
 			subagentType: "scan",
 			model: "test/model",
 			maxResultBytes: 3,
 		});
-
-		const structured = readStructuredResult(agentDir);
 		expect(structured).toMatchObject({
 			agentId: "agent-structured",
 			status: "done",
@@ -1252,74 +1102,73 @@ describe.serial("run and agent state", () => {
 			resultTruncated: true,
 			resultOriginalBytes: 6,
 		});
-		expect(readResult(runDir, "agent-structured")?.structured).toEqual(structured);
+		expect(getRecord(runDir, "agent-structured")?.structured).toEqual(compactStructuredResult(structured));
+		expect(getRecord(runDir, "agent-structured")?.structured?.resultText).toBeUndefined();
+		expect(readResult(runDir, "agent-structured")?.structured).toEqual(compactStructuredResult(structured));
+		expect(readResultText(runDir, "agent-structured")).toBe("abcdef");
 	});
 
-	test.serial("structured result extracts chaining fields without truncating raw result.md", () => {
-		const runDir = tempDir();
-		const agentDir = createAgent(runDir, "agent-rich", {
-			"exit_code": "0",
-			"result.md": [
-				"Summary: inspect retry behavior.",
-				"- High: bug in pi-tools-suite/src/async-subagents/core/retry.ts:42 should be fixed.",
-				"- Risk: queued work may launch after stop.",
-				"- Next: add regression tests.",
-				"Confidence: high",
-			].join("\n"),
-		});
-
-		writeStructuredResult({
-			agentDir,
+	test.serial("structured result extracts chaining fields without truncating the full result", () => {
+		const text = [
+			"Summary: inspect retry behavior.",
+			"- High: bug in pi-tools-suite/src/async-subagents/core/retry.ts:42 should be fixed.",
+			"- Risk: queued work may launch after stop.",
+			"- Next: add regression tests.",
+			"Confidence: high",
+		].join("\n");
+		const structured = buildStructuredResult({
 			agentId: "agent-rich",
-			state: getAgentState(runDir, "agent-rich")!,
+			state: { id: "agent-rich", status: "done", exitCode: 0 },
 			maxResultBytes: 40,
+			resultText: text,
 		});
-
-		const structured = readStructuredResult(agentDir)!;
 		expect(structured.schemaVersion).toBe(2);
 		expect(structured.resultTruncated).toBe(true);
 		expect(structured.summary).toContain("Summary");
 		expect(structured.findings?.[0]).toMatchObject({ severity: "high" });
 		expect(structured.files?.[0]).toMatchObject({ path: "pi-tools-suite/src/async-subagents/core/retry.ts", line: 42 });
 		expect(structured.confidence).toBe("high");
-		expect(fs.readFileSync(path.join(agentDir, "result.md"), "utf-8")).toContain("add regression tests");
+		expect(structured.nextActions?.join("\n") ?? "").toContain("add regression tests");
 	});
 
 	test.serial("waits until launched agents are terminal, timeout/abort/failFast aware", async () => {
-		const runDir = tempDir();
-		createAgent(runDir, "running", { pid: String(process.pid) });
-		setTimeout(() => writeFile(path.join(runDir, "running", "exit_code"), "0"), 20);
+		const runDir = newRun();
+		createAgent(runDir, "running", { pid: process.pid, active: true });
+		setTimeout(() => {
+			updateRecord(runDir, "running", { status: "done", exitCode: 0 });
+			updateLive(runDir, "running", { active: false });
+		}, 20);
 		const completed = await waitForAgents(runDir, undefined, { timeout: 1, interval: 0.01 });
 		expect(completed.agents).toContainEqual(expect.objectContaining({ id: "running", status: "done" }));
 
-		const failFastRun = tempDir();
-		createAgent(failFastRun, "failed", { exit_code: "1" });
-		createAgent(failFastRun, "still-running", { pid: String(process.pid) });
+		const failFastRun = newRun(tempDir(), "fail-fast");
+		createAgent(failFastRun, "failed", { exitCode: 1 });
+		createAgent(failFastRun, "still-running", { pid: process.pid, active: true });
 		const failFast = await waitForAgents(failFastRun, undefined, { timeout: 10, interval: 1, failFast: true });
 		expect(failFast.agents).toContainEqual(expect.objectContaining({ id: "failed", status: "failed" }));
 		expect(failFast.agents).toContainEqual(expect.objectContaining({ id: "still-running", status: "running" }));
 
-		const plannedOnly = tempDir();
-		writeFile(path.join(plannedOnly, "prompts", "planned.md"), "prompt");
+		const plannedOnly = newRun(tempDir(), "planned-only");
+		createAgent(plannedOnly, "planned", { status: "planned", active: true });
 		expect((await waitForAgents(plannedOnly, undefined, { timeout: 1, interval: 0 })).agents).toEqual([{ id: "planned", status: "planned" }]);
 
-		const abortRun = tempDir();
-		createAgent(abortRun, "running", { pid: String(process.pid) });
+		const abortRun = newRun(tempDir(), "abort");
+		createAgent(abortRun, "running", { pid: process.pid, active: true });
 		const controller = new AbortController();
 		controller.abort();
 		expect((await waitForAgents(abortRun, undefined, { timeout: 10, interval: 1, signal: controller.signal })).agents[0].status).toBe("running");
 
-		const timeoutRun = tempDir();
-		createAgent(timeoutRun, "running", { pid: String(process.pid) });
+		const timeoutRun = newRun(tempDir(), "timeout");
+		createAgent(timeoutRun, "running", { pid: process.pid, active: true });
 		expect((await waitForAgents(timeoutRun, undefined, { timeout: 0, interval: 1 })).agents[0].status).toBe("running");
 	});
 
 	test.serial("stops running agents and records stopped metadata", async () => {
-		const runDir = tempDir();
+		const runDir = newRun();
 		const child = spawnChild(process.execPath, ["-e", "setInterval(() => {}, 1000)"]);
 		if (!child.pid) throw new Error("child process did not start");
-		createAgent(runDir, "running", { pid: String(child.pid) });
-		createAgent(runDir, "done", { exit_code: "0" });
+		createAgent(runDir, "running", { pid: child.pid });
+		createAgent(runDir, "done", { exitCode: 0 });
 
 		try {
 			expect(validateStopSignal("SIGKILL")).toBe("SIGKILL");
@@ -1328,9 +1177,7 @@ describe.serial("run and agent state", () => {
 			const results = stopAgents(runDir, undefined, { signal: "SIGKILL" });
 			expect(results).toContainEqual(expect.objectContaining({ id: "running", stopped: true, signal: "SIGKILL", pid: child.pid }));
 			expect(results).toContainEqual(expect.objectContaining({ id: "done", stopped: false, previousStatus: "done" }));
-			expect(fs.readFileSync(path.join(runDir, "running", "exit_code"), "utf-8")).toBe("stopped");
-			expect(fs.readFileSync(path.join(runDir, "running", "stop_signal"), "utf-8")).toBe("SIGKILL");
-			expect(fs.existsSync(path.join(runDir, "running", "stop_requested"))).toBe(true);
+			expect(getRecord(runDir, "running")).toMatchObject({ status: "stopped", stopRequested: true, stopSignal: "SIGKILL" });
 			expect(getAgentState(runDir, "running")).toMatchObject({ id: "running", status: "stopped", pid: child.pid });
 		} finally {
 			try {
@@ -1344,9 +1191,10 @@ describe.serial("run and agent state", () => {
 
 	test.serial("stops the launcher-owned POSIX process group", async () => {
 		if (process.platform === "win32") return;
-		const runDir = tempDir();
-		const ready = path.join(runDir, "descendant-ready");
-		const signalled = path.join(runDir, "descendant-signalled");
+		const scratch = tempDir();
+		const runDir = newRun();
+		const ready = path.join(scratch, "descendant-ready");
+		const signalled = path.join(scratch, "descendant-signalled");
 		const descendantSource = `
 const fs = require("node:fs");
 process.on("SIGTERM", () => {
@@ -1363,16 +1211,14 @@ setInterval(() => {}, 1000);
 `;
 		const root = spawnChild(process.execPath, ["-e", rootSource], { detached: true, stdio: "ignore" });
 		if (!root.pid) throw new Error("process-group root did not start");
-		createAgent(runDir, "owned-group", {
-			pid: String(root.pid),
-			process_group: String(root.pid),
-		});
+		createAgent(runDir, "owned-group", { pid: root.pid, processGroup: true });
 
 		try {
 			await waitUntil(() => fs.existsSync(ready), 2000);
 			const [result] = stopAgents(runDir, ["owned-group"], { signal: "SIGTERM" });
 			expect(result).toMatchObject({ id: "owned-group", stopped: true, signal: "SIGTERM", pid: root.pid });
-			await waitUntil(() => fs.existsSync(signalled), 2000);
+			// The descendant creates the file before writing it; wait for content, not existence.
+			await waitUntil(() => fs.existsSync(signalled) && fs.readFileSync(signalled, "utf-8") === "SIGTERM", 2000);
 			expect(fs.readFileSync(signalled, "utf-8")).toBe("SIGTERM");
 		} finally {
 			try {
@@ -1384,14 +1230,14 @@ setInterval(() => {}, 1000);
 	});
 
 	test.serial("stops planned queued agents before they launch", () => {
-		const runDir = tempDir();
-		writeFile(path.join(runDir, "prompts", "queued.md"), "queued prompt");
+		const runDir = newRun();
+		createAgent(runDir, "queued", { status: "planned", active: true });
 
 		const [result] = stopAgents(runDir, ["queued"], { signal: "SIGTERM" });
 		expect(result).toMatchObject({ id: "queued", previousStatus: "planned", stopped: true, signal: "SIGTERM" });
 		expect(getAgentState(runDir, "queued")).toMatchObject({ id: "queued", status: "stopped" });
-		expect(fs.readFileSync(path.join(runDir, "queued", "exit_code"), "utf-8")).toBe("stopped");
-		expect(readStructuredResult(path.join(runDir, "queued"))).toMatchObject({ agentId: "queued", status: "stopped" });
+		expect(getRecord(runDir, "queued")).toMatchObject({ status: "stopped", stopRequested: true });
+		expect(getRecord(runDir, "queued")?.structured).toMatchObject({ agentId: "queued", status: "stopped" });
 	});
 });
 
@@ -1403,11 +1249,11 @@ describe.serial("cleanup candidates", () => {
 
 		for (const name of ["2024-01-01-old-a", "2024-01-02-old-b", "2024-01-03-recent", "2024-01-04-newest"]) {
 			const dir = path.join(root, name);
-			createAgent(dir, "agent-1", { exit_code: "0" });
+			writeLegacyAgent(dir, "agent-1", { exit_code: "0" });
 			fs.utimesSync(dir, recent, name.includes("recent") || name.includes("newest") ? recent : old);
 		}
 		const incomplete = path.join(root, "2024-01-00-incomplete");
-		createAgent(incomplete, "agent-1");
+		writeLegacyAgent(incomplete, "agent-1");
 		fs.utimesSync(incomplete, old, old);
 		fs.mkdirSync(path.join(root, "2024-01-00-empty"));
 
@@ -1424,7 +1270,7 @@ describe.serial("spawning agents", () => {
 	test.serial("delivers the inline QA workflow while disabling skills for every child", async () => {
 		const cwd = path.join(tempDir(), "project with spaces");
 		const config = loadSubagentConfig(cwd, {});
-		const runDir = createRunDir(cwd, "inline-qa");
+		const runDir = createBatch(cwd, resolveScope(undefined), "inline-qa");
 		const captured = path.join(cwd, "captured-prompt.json");
 		const piScript = path.join(tempDir(), "pi.js");
 		writeFile(piScript, `
@@ -1468,7 +1314,7 @@ setTimeout(() => {}, 2000);
 						undefined, resolve);
 				}), `Timed out waiting for ${id}`);
 				const payload = JSON.parse(fs.readFileSync(captured, "utf8"));
-				const args = (JSON.parse(fs.readFileSync(path.join(runDir, id, "launch.json"), "utf8")).piArgs as string[]).join("\n").split("\n");
+				const args = (getLive(runDir, id)?.launchArgs ?? []).join("\n").split("\n");
 				expect(payload.message).toBe(generatePrompt(resolved.task));
 				expect(args.filter((arg) => arg === "--no-skills")).toHaveLength(1);
 				expect(args).not.toContain("injected.md");
@@ -1487,7 +1333,7 @@ setTimeout(() => {}, 2000);
 					expect(payload.message).not.toContain("## Detailed scenario-design guidance");
 					 expect(payload.runner).toBe(getBrowserQaRunnerPath());
 					expect(payload.uiRunner).toBe(getUiQaRunnerPath());
-					expect(payload.agentDir).toBe(fs.realpathSync(path.join(runDir, id)));
+					expect(payload.agentDir).toBe(fs.realpathSync(path.join(cwd, ".pi", "artifacts", "subagents", `${parseRunKey(runDir)!.batch}-${id}`)));
 					expect(payload.probeExit).toBe(0);
 					expect(JSON.parse(payload.probeOutput).profiles).toEqual([]);
 				} else {
@@ -1511,8 +1357,8 @@ setTimeout(() => {}, 2000);
 
 	test.serial("provides UI QA with native and browser-backend workspaces and clears stale evidence on reuse", async () => {
 		const cwd = tempDir();
-		const runDir = createRunDir(cwd, "ui-qa-workspace");
-		const agentDir = path.join(runDir, "qa-agent");
+		const runDir = createBatch(cwd, resolveScope(undefined), "ui-qa-workspace");
+		const agentDir = path.join(cwd, ".pi", "artifacts", "subagents", `${parseRunKey(runDir)!.batch}-qa-agent`);
 		const staleEvidence = path.join(agentDir, "ui-qa", "browser", "evidence", "stale.png");
 		const staleNativeEvidence = path.join(agentDir, "ui-qa", "evidence", "stale.txt");
 		const capturedEnv = path.join(cwd, "captured-ui-qa-agent-dir");
@@ -1550,10 +1396,9 @@ setTimeout(() => {}, 1000);
 
 	test.serial("streams child todo counts before live callbacks and resets old attempt counts", async () => {
 		const cwd = tempDir();
-		const runDir = createRunDir(cwd, "todo-progress");
-		const agentDir = path.join(runDir, "worker");
-		fs.mkdirSync(agentDir);
-		writeFile(path.join(agentDir, "todo-progress.json"), '{"completed":4,"total":5}');
+		const runDir = createBatch(cwd, resolveScope(undefined), "todo-progress");
+		updateRecord(runDir, "worker", { status: "done", turn: 1 });
+		updateLive(runDir, "worker", { todoProgress: { completed: 4, total: 5 } });
 		const piScript = path.join(tempDir(), "pi.js");
 		writeFile(piScript, `
 if (process.env.PIX_ACP_SESSION_STATE_BRIDGE !== "1") process.exit(1);
@@ -1571,7 +1416,7 @@ setTimeout(() => {}, 1000);
 			spawnAgent(runDir, { id: "worker", task: "Work" }, cwd, [], (event) => {
 				if (event.type === "extension_ui_request") observed = getAgentState(runDir, "worker")?.todoProgress;
 			}, resolve);
-			expect(fs.existsSync(path.join(agentDir, "todo-progress.json"))).toBe(false);
+			expect(getLive(runDir, "worker")?.todoProgress).toBeUndefined();
 		}), "Timed out waiting for todo progress spawn");
 		expect(observed).toEqual({ completed: 1, total: 2 });
 		expect(getAgentState(runDir, "worker")).toMatchObject({ status: "done", todoProgress: { completed: 1, total: 2 } });
@@ -1579,7 +1424,7 @@ setTimeout(() => {}, 1000);
 
 	test.serial("writes metadata, captures agent_end output, and notifies completion", async () => {
 		const cwd = tempDir();
-		const runDir = createRunDir(cwd, "spawn-ok");
+		const runDir = createBatch(cwd, resolveScope(undefined), "spawn-ok");
 		const piScript = path.join(tempDir(), "pi.js");
 		writeFile(piScript, `
 process.stdin.on("data", () => {
@@ -1598,40 +1443,32 @@ setTimeout(() => {}, 1000);
 				seenEvent = event;
 			}, resolve);
 			expect(spawned.pid).toBeGreaterThan(0);
-			expect(fs.existsSync(spawned.agentDir)).toBe(true);
+			expect(fs.existsSync(spawned.agentDir)).toBe(false);
 		});
 
 		const completed = await withTimeout(completion, "Timed out waiting for spawn completion");
 		expect(completed).toMatchObject({ runDir, agentId: "agent-1", exitCode: 0, state: { status: "done" } });
 		expect(seenEvent).toMatchObject({ type: "agent_end" });
 		const agentDir = path.join(runDir, "agent-1");
-		expect(fs.readFileSync(path.join(agentDir, "project_cwd"), "utf-8")).toBe(cwd);
-		expect((JSON.parse(fs.readFileSync(path.join(agentDir, "launch.json"), "utf-8")).piArgs as string[]).join("\n")).toContain("--session-dir");
-		expect((JSON.parse(fs.readFileSync(path.join(agentDir, "launch.json"), "utf-8")).piArgs as string[]).join("\n")).not.toContain("--no-session");
-		for (const legacy of ["session_dir", "pi_args", "model"]) expect(fs.existsSync(path.join(agentDir, legacy))).toBe(false);
-		expect((JSON.parse(fs.readFileSync(path.join(agentDir, "launch.json"), "utf-8")).piArgs as string[]).join("\n")).toContain("--extension\n");
-		expect((JSON.parse(fs.readFileSync(path.join(agentDir, "launch.json"), "utf-8")).piArgs as string[]).join("\n")).toContain(path.join("model-tools", "index.ts"));
-		expect((JSON.parse(fs.readFileSync(path.join(agentDir, "launch.json"), "utf-8")).piArgs as string[]).join("\n")).toContain(path.join("todo", "subagent.ts"));
-		expect((JSON.parse(fs.readFileSync(path.join(agentDir, "launch.json"), "utf-8")).piArgs as string[]).join("\n")).toContain(path.join("repo-discovery", "subagent.ts"));
-		expect((JSON.parse(fs.readFileSync(path.join(agentDir, "launch.json"), "utf-8")).piArgs as string[]).join("\n")).toContain(path.join("dcp", "subagent.ts"));
+		expect(getRecord(runDir, "agent-1")?.cwd).toBe(cwd);
+		expect((getLive(runDir, "agent-1")?.launchArgs ?? []).join("\n")).toContain("--session-dir");
+		expect((getLive(runDir, "agent-1")?.launchArgs ?? []).join("\n")).not.toContain("--no-session");
+		expect(fs.existsSync(agentDir)).toBe(false);
+		expect((getLive(runDir, "agent-1")?.launchArgs ?? []).join("\n")).toContain("--extension\n");
+		expect((getLive(runDir, "agent-1")?.launchArgs ?? []).join("\n")).toContain(path.join("model-tools", "index.ts"));
+		expect((getLive(runDir, "agent-1")?.launchArgs ?? []).join("\n")).toContain(path.join("todo", "subagent.ts"));
+		expect((getLive(runDir, "agent-1")?.launchArgs ?? []).join("\n")).toContain(path.join("repo-discovery", "subagent.ts"));
+		expect((getLive(runDir, "agent-1")?.launchArgs ?? []).join("\n")).toContain(path.join("dcp", "subagent.ts"));
 		// Environment fallback models do not opt provider extensions back in.
-		expect((JSON.parse(fs.readFileSync(path.join(agentDir, "launch.json"), "utf-8")).piArgs as string[]).join("\n")).not.toContain(path.join("antigravity-auth", "index.ts"));
-		expect((JSON.parse(fs.readFileSync(path.join(agentDir, "launch.json"), "utf-8")).piArgs as string[]).join("\n")).toContain("--model\nzai/glm-5-turbo");
-		expect((JSON.parse(fs.readFileSync(path.join(agentDir, "launch.json"), "utf-8")).piArgs as string[]).join("\n")).toContain("--models\nzai/glm-5-turbo");
-		expect((JSON.parse(fs.readFileSync(path.join(agentDir, "launch.json"), "utf-8")).piArgs as string[]).join("\n")).toContain("--tools\nRead,Grep");
-		expect(fs.readFileSync(path.join(agentDir, "result.md"), "utf-8")).toBe("done result");
-		expect(fs.readFileSync(path.join(agentDir, "exit_code"), "utf-8")).toBe("0");
+		expect((getLive(runDir, "agent-1")?.launchArgs ?? []).join("\n")).not.toContain(path.join("antigravity-auth", "index.ts"));
+		expect((getLive(runDir, "agent-1")?.launchArgs ?? []).join("\n")).toContain("--model\nzai/glm-5-turbo");
+		expect((getLive(runDir, "agent-1")?.launchArgs ?? []).join("\n")).toContain("--models\nzai/glm-5-turbo");
+		expect((getLive(runDir, "agent-1")?.launchArgs ?? []).join("\n")).toContain("--tools\nRead,Grep");
+		expect(readResultText(runDir, "agent-1")).toBe("done result");
+		expect(getRecord(runDir, "agent-1")?.exitCode).toBe(0);
 		expect(fs.existsSync(path.join(agentDir, "events.jsonl"))).toBe(false);
-		expect(fs.existsSync(path.join(agentDir, "stderr.log"))).toBe(false);
-		const progress = fs.readFileSync(path.join(agentDir, "progress.jsonl"), "utf-8");
-		expect(progress).toContain('"stage":"spawned"');
-		expect(progress).toContain('"stage":"prompt_sent"');
-		expect(progress).not.toContain('"stage":"rpc_event"');
-		expect(progress).toContain('"stage":"completed"');
-		expect(progress).not.toContain("done result");
-		expect(progress).not.toContain("Do work");
 		if (process.platform !== "win32") {
-			expect(fs.readFileSync(path.join(agentDir, "process_group"), "utf-8")).toMatch(/^\d+$/);
+			expect(getRecord(runDir, "agent-1")?.processGroup).toBe(true);
 		}
 	});
 
@@ -1649,11 +1486,11 @@ setTimeout(() => {}, 1000);
 		process.env.ASYNC_SUBAGENTS_MODEL = "antigravity/gemini-from-env";
 
 		const spawnAndReadArgs = async (id: string, task: AgentTask, extraArgs: string[] = []) => {
-			const runDir = createRunDir(cwd, id);
+			const runDir = createBatch(cwd, resolveScope(undefined), id);
 			await withTimeout(new Promise<any>((resolve) => {
 				spawnAgent(runDir, task, cwd, extraArgs, undefined, resolve);
 			}), `Timed out waiting for ${id}`);
-			return (JSON.parse(fs.readFileSync(path.join(runDir, task.id, "launch.json"), "utf-8")).piArgs as string[]).join("\n");
+			return (getLive(runDir, task.id)?.launchArgs ?? []).join("\n");
 		};
 
 		const envOnlyArgs = await spawnAndReadArgs("env-only", { id: "env-only", task: "Do work" });
@@ -1697,7 +1534,7 @@ setTimeout(() => {}, 1000);
 
 	test.serial("notifies completion when the pi process cannot be spawned", async () => {
 		const cwd = tempDir();
-		const runDir = createRunDir(cwd, "spawn-error");
+		const runDir = createBatch(cwd, resolveScope(undefined), "spawn-error");
 		const originalPath = process.env.PATH;
 		process.argv[1] = path.join(tempDir(), "not-present.js");
 		process.env.PATH = tempDir();
@@ -1711,10 +1548,9 @@ setTimeout(() => {}, 1000);
 			]);
 
 			expect(completed).toMatchObject({ runDir, agentId: "agent-1", exitCode: 1, state: { status: "failed" } });
-			const agentDir = path.join(runDir, "agent-1");
-			expect(fs.readFileSync(path.join(agentDir, "result.md"), "utf-8")).toContain("pi");
-			expect(fs.readFileSync(path.join(agentDir, "exit_code"), "utf-8")).toBe("1");
-			expect(fs.readFileSync(path.join(agentDir, "stderr.log"), "utf-8")).toContain("pi");
+			expect(readResultText(runDir, "agent-1")).toContain("pi");
+			expect(getRecord(runDir, "agent-1")?.exitCode).toBe(1);
+			expect((getLive(runDir, "agent-1")?.stderrTail ?? "")).toContain("pi");
 		} finally {
 			if (originalPath === undefined) delete process.env.PATH;
 			else process.env.PATH = originalPath;
@@ -1723,7 +1559,7 @@ setTimeout(() => {}, 1000);
 
 	test.serial("writes session metadata when sub-agent sessions are enabled", async () => {
 		const cwd = tempDir();
-		const runDir = createRunDir(cwd, "spawn-session");
+		const runDir = createBatch(cwd, resolveScope(undefined), "spawn-session");
 		const piScript = path.join(tempDir(), "pi.js");
 		writeFile(piScript, `
 process.stdin.on("data", () => {
@@ -1738,16 +1574,15 @@ setTimeout(() => {}, 1000);
 			spawnAgent(runDir, { id: "agent-1", task: "Do work" }, cwd, [], undefined, resolve);
 		}), "Timed out waiting for session spawn completion");
 
-		const agentDir = path.join(runDir, "agent-1");
-		const piArgs = (JSON.parse(fs.readFileSync(path.join(agentDir, "launch.json"), "utf-8")).piArgs as string[]).join("\n");
+		const piArgs = (getLive(runDir, "agent-1")?.launchArgs ?? []).join("\n");
 		expect(piArgs).toContain("--session-dir");
 		expect(piArgs).not.toContain("--no-session");
-		expect(fs.existsSync(path.join(agentDir, "sessions"))).toBe(true);
+		expect(fs.existsSync(scopeDir(cwd, resolveScope(undefined)))).toBe(true);
 	});
 
 	test.serial("captures final assistant text when pi exits without agent_end", async () => {
 		const cwd = tempDir();
-		const runDir = createRunDir(cwd, "spawn-message-end");
+		const runDir = createBatch(cwd, resolveScope(undefined), "spawn-message-end");
 		const piScript = path.join(tempDir(), "pi.js");
 		writeFile(piScript, `
 process.stdin.on("data", () => {
@@ -1762,12 +1597,12 @@ process.stdin.on("data", () => {
 		}), "Timed out waiting for message-end spawn completion");
 
 		expect(completed).toMatchObject({ exitCode: 0, state: { status: "done" } });
-		expect(fs.readFileSync(path.join(runDir, "agent-1", "result.md"), "utf-8")).toBe("final assistant result");
+		expect(readResultText(runDir, "agent-1")).toBe("final assistant result");
 	});
 
 	test.serial("keeps RPC stdin open until async prompt emits a result", async () => {
 		const cwd = tempDir();
-		const runDir = createRunDir(cwd, "spawn-rpc-stdin-open");
+		const runDir = createBatch(cwd, resolveScope(undefined), "spawn-rpc-stdin-open");
 		const piScript = path.join(tempDir(), "pi.js");
 		writeFile(piScript, `
 let scheduled = false;
@@ -1790,12 +1625,12 @@ setTimeout(() => {}, 1000);
 		}), "Timed out waiting for delayed RPC spawn completion");
 
 		expect(completed).toMatchObject({ exitCode: 0, state: { status: "done" } });
-		expect(fs.readFileSync(path.join(runDir, "agent-1", "result.md"), "utf-8")).toBe("delayed rpc result");
+		expect(readResultText(runDir, "agent-1")).toBe("delayed rpc result");
 	});
 
 	test.serial("keeps opted-in runtime logs compact and bounded", async () => {
 		const cwd = tempDir();
-		const runDir = createRunDir(cwd, "spawn-compact-logs");
+		const runDir = createBatch(cwd, resolveScope(undefined), "spawn-compact-logs");
 		const piScript = path.join(tempDir(), "pi.js");
 		writeFile(piScript, `
 const huge = "x".repeat(10000);
@@ -1820,16 +1655,16 @@ setTimeout(() => {}, 1000);
 
 		const agentDir = path.join(runDir, "agent-1");
 		expect(completed).toMatchObject({ exitCode: 0, state: { status: "done" } });
-		expect(fs.readFileSync(path.join(agentDir, "result.md"), "utf-8")).toBe("compact final");
+		expect(readResultText(runDir, "agent-1")).toBe("compact final");
 		expect(fs.existsSync(path.join(agentDir, "events.jsonl"))).toBe(false);
-		const stderr = fs.readFileSync(path.join(agentDir, "stderr.log"), "utf-8");
-		expect(stderr).toContain("truncated");
-		expect(fs.statSync(path.join(agentDir, "stderr.log")).size).toBeLessThanOrEqual(256);
+		const stderr = (getLive(runDir, "agent-1")?.stderrTail ?? "");
+		expect(stderr.length).toBeGreaterThan(0);
+		expect(stderr.length).toBeLessThanOrEqual(1024);
 	});
 
 	test.serial("waits for agent_settled across a delayed continuation", async () => {
 		const cwd = tempDir();
-		const runDir = createRunDir(cwd, "spawn-agent-settled-delayed-continuation");
+		const runDir = createBatch(cwd, resolveScope(undefined), "spawn-agent-settled-delayed-continuation");
 		const controlDir = tempDir();
 		const readyPath = path.join(controlDir, "continuation-ready");
 		const continuePath = path.join(controlDir, "continue");
@@ -1868,14 +1703,13 @@ setInterval(() => {}, 1000);
 		writeFile(continuePath, "continue");
 		const completed = await withTimeout(completion, "Timed out waiting for agent_settled completion", 3000);
 
-		const agentDir = path.join(runDir, "agent-1");
 		expect(completed).toMatchObject({ exitCode: 0, state: { status: "done" } });
-		expect(fs.readFileSync(path.join(agentDir, "result.md"), "utf-8")).toBe("final result after continuation");
+		expect(readResultText(runDir, "agent-1")).toBe("final result after continuation");
 	});
 
 	test.serial("attaches task image paths to the RPC prompt", async () => {
 		const cwd = tempDir();
-		const runDir = createRunDir(cwd, "spawn-image");
+		const runDir = createBatch(cwd, resolveScope(undefined), "spawn-image");
 		const imagePath = path.join(cwd, "screen.png");
 		const promptCapturePath = path.join(cwd, "captured-prompt.json");
 		writeFile(imagePath, "fake-png-bytes");
@@ -1917,12 +1751,12 @@ setTimeout(() => {}, 1000);
 		const captured = JSON.parse(fs.readFileSync(promptCapturePath, "utf-8"));
 		expect(captured.images).toEqual([{ type: "image", data: Buffer.from("fake-png-bytes").toString("base64"), mimeType: "image/png" }]);
 		expect(captured.message).toContain("Visual focus / attention instructions:\nCheck the top banner");
-		expect(fs.readFileSync(path.join(runDir, "agent-image", "image_paths"), "utf-8")).toBe("@screen.png");
+		expect(getRecord(runDir, "agent-image")?.task?.imagePaths).toEqual(["@screen.png"]);
 	});
 
 	test.serial("turns RPC prompt failures into failed results", async () => {
 		const cwd = tempDir();
-		const runDir = createRunDir(cwd, "spawn-fail");
+		const runDir = createBatch(cwd, resolveScope(undefined), "spawn-fail");
 		const piScript = path.join(tempDir(), "pi.js");
 		writeFile(piScript, `
 process.stdin.on("data", () => {
@@ -1939,12 +1773,12 @@ setTimeout(() => {}, 1000);
 
 		expect(completed.exitCode).toBe(1);
 		expect(completed.state.status).toBe("failed");
-		expect(fs.readFileSync(path.join(runDir, "agent-1", "result.md"), "utf-8")).toBe("bad prompt");
+		expect(readResultText(runDir, "agent-1")).toBe("bad prompt");
 	});
 
 	test.serial("retries failed agents with pending state and then succeeds", async () => {
 		const cwd = tempDir();
-		const runDir = createRunDir(cwd, "spawn-retry-ok");
+		const runDir = createBatch(cwd, resolveScope(undefined), "spawn-retry-ok");
 		const attemptFile = path.join(cwd, "attempt.txt");
 		const piScript = path.join(tempDir(), "pi.js");
 		writeFile(piScript, `
@@ -1971,16 +1805,16 @@ setTimeout(() => {}, 1000);
 
 		await waitUntil(() => getAgentState(runDir, "agent-1")?.status === "retrying", 500);
 		expect(getAgentState(runDir, "agent-1")).toMatchObject({ status: "retrying", retryCount: 1 });
-		expect(fs.existsSync(path.join(runDir, "agent-1", "next_retry_at"))).toBe(true);
+		expect(getRecord(runDir, "agent-1")?.nextRetryAt).toBeDefined();
 		await withTimeout(retry.done, "Timed out waiting for retrying agent completion", 15000);
 		expect(completed).toMatchObject({ exitCode: 0, state: { status: "done", retryCount: 1 } });
-		expect(fs.readFileSync(path.join(runDir, "agent-1", "result.md"), "utf-8")).toBe("retry ok");
-		expect(fs.existsSync(path.join(runDir, "agent-1", "retry_pending"))).toBe(false);
+		expect(readResultText(runDir, "agent-1")).toBe("retry ok");
+		expect(getRecord(runDir, "agent-1")?.status).not.toBe("retrying");
 	});
 
 	test.serial("falls back to configured provider models on quota limit failures in the current session", async () => {
 		const cwd = tempDir();
-		const runDir = createRunDir(cwd, "spawn-model-fallback");
+		const runDir = createBatch(cwd, resolveScope(undefined), "spawn-model-fallback");
 		const attemptFile = path.join(cwd, "attempts.json");
 		const piScript = path.join(tempDir(), "pi.js");
 		writeFile(piScript, `
@@ -2011,15 +1845,15 @@ setTimeout(() => {}, 1000);
 
 		expect(firstCompletion).toMatchObject({ exitCode: 0, state: { status: "done" } });
 		expect(JSON.parse(fs.readFileSync(attemptFile, "utf-8"))).toEqual(["primary/model", "fallback/model"]);
-		expect(fs.readFileSync(path.join(runDir, "agent-1", "result.md"), "utf-8")).toBe("fallback ok on fallback/model");
-		expect(fs.readFileSync(path.join(runDir, "agent-1", "model_fallback_from"), "utf-8")).toBe("primary/model");
-		expect(fs.readFileSync(path.join(runDir, "agent-1", "model_fallback_to"), "utf-8")).toBe("fallback/model");
-		const fallbackArgs = (JSON.parse(fs.readFileSync(path.join(runDir, "agent-1", "launch.json"), "utf-8")).piArgs as string[]).join("\n").split("\n");
+		expect(readResultText(runDir, "agent-1")).toBe("fallback ok on fallback/model");
+		expect(getRecord(runDir, "agent-1")?.modelFallback?.from).toBe("primary/model");
+		expect(getRecord(runDir, "agent-1")?.modelFallback?.to).toBe("fallback/model");
+		const fallbackArgs = (getLive(runDir, "agent-1")?.launchArgs ?? []).join("\n").split("\n");
 		expect(fallbackArgs).toContain("--no-skills");
 		expect(fallbackArgs).not.toContain("--skill");
 		expect(fallbackArgs).not.toContain("injected-skill.md");
 
-		const secondRun = createRunDir(cwd, "spawn-model-fallback-session");
+		const secondRun = createBatch(cwd, resolveScope(undefined), "spawn-model-fallback-session");
 		let secondCompletion: any;
 		const second = spawnAgentWithRetry(secondRun, { id: "agent-2", task: "Fallback again", model: "primary/model" }, cwd, (completion) => {
 			secondCompletion = completion;
@@ -2028,9 +1862,9 @@ setTimeout(() => {}, 1000);
 
 		expect(secondCompletion).toMatchObject({ exitCode: 0, state: { status: "done" } });
 		expect(JSON.parse(fs.readFileSync(attemptFile, "utf-8"))).toEqual(["primary/model", "fallback/model", "fallback/model"]);
-		expect((JSON.parse(fs.readFileSync(path.join(secondRun, "agent-2", "launch.json"), "utf-8")).task.model as string)).toBe("fallback/model");
+		expect(getRecord(secondRun, "agent-2")?.task?.model).toBe("fallback/model");
 
-		const thirdRun = createRunDir(cwd, "spawn-provider-fallback-session");
+		const thirdRun = createBatch(cwd, resolveScope(undefined), "spawn-provider-fallback-session");
 		let thirdCompletion: any;
 		const third = spawnAgentWithRetry(thirdRun, { id: "agent-3", task: "Same provider again", model: "primary/other" }, cwd, (completion) => {
 			thirdCompletion = completion;
@@ -2039,12 +1873,13 @@ setTimeout(() => {}, 1000);
 
 		expect(thirdCompletion).toMatchObject({ exitCode: 0, state: { status: "done" } });
 		expect(JSON.parse(fs.readFileSync(attemptFile, "utf-8"))).toEqual(["primary/model", "fallback/model", "fallback/model", "fallback/other"]);
-		expect((JSON.parse(fs.readFileSync(path.join(thirdRun, "agent-3", "launch.json"), "utf-8")).task.model as string)).toBe("fallback/other");
+		expect(getRecord(thirdRun, "agent-3")?.task?.model).toBe("fallback/other");
 	});
 
 	test.serial("waits for Antigravity all-accounts exhaustion before provider fallback", async () => {
-		const runDir = tempDir();
-		const agentDir = createAgent(runDir, "agent-1", { "exit_code": "1" });
+		const runDir = newRun(tempDir(), "quota");
+		createAgent(runDir, "agent-1", { exitCode: 1 });
+		const agentDir = path.join(runDir, "agent-1");
 		const baseCompletion = {
 			runDir,
 			agentId: "agent-1",
@@ -2053,11 +1888,11 @@ setTimeout(() => {}, 1000);
 			state: getAgentState(runDir, "agent-1")!,
 		};
 
-		writeFile(path.join(agentDir, "result.md"), "429 quota exceeded on one Antigravity account; rotated account may still work");
+		updateLive(runDir, "agent-1", { resultText: "429 quota exceeded on one Antigravity account; rotated account may still work" });
 		expect(isQuotaLimitCompletion(baseCompletion, "antigravity/gemini-3-flash-preview")).toBe(false);
 		expect(isQuotaLimitCompletion(baseCompletion, "openai-codex/gpt-5.5")).toBe(true);
 
-		writeFile(path.join(agentDir, "result.md"), "ANTIGRAVITY_ALL_ACCOUNTS_EXHAUSTED model=gemini status=429: all configured Antigravity accounts are exhausted for this model");
+		updateLive(runDir, "agent-1", { resultText: "ANTIGRAVITY_ALL_ACCOUNTS_EXHAUSTED model=gemini status=429: all configured Antigravity accounts are exhausted for this model" });
 		expect(isQuotaLimitCompletion(baseCompletion, "antigravity/gemini-3-flash-preview")).toBe(true);
 		rememberSessionModelFallback("antigravity/gemini-3-flash-preview", "openai-codex/gpt-5.5");
 		expect(selectSessionModelWithFallback("antigravity/gemini-3-flash-preview", ["openai-codex/gpt-5.5"])).toMatchObject({
@@ -2072,7 +1907,7 @@ setTimeout(() => {}, 1000);
 
 	test.serial("does not retry stopped agents or explicitly empty retryable exit codes", async () => {
 		const stoppedCwd = tempDir();
-		const stoppedRun = createRunDir(stoppedCwd, "spawn-retry-stopped");
+		const stoppedRun = createBatch(stoppedCwd, resolveScope(undefined), "spawn-retry-stopped");
 		const stoppedAttemptFile = path.join(stoppedCwd, "attempt.txt");
 		const stoppedScript = path.join(tempDir(), "pi.js");
 		writeFile(stoppedScript, `
@@ -2097,10 +1932,10 @@ setTimeout(() => {}, 1000);
 		await withTimeout(stopped.done, "Timed out waiting for stopped agent completion", 15000);
 		expect(stoppedCompletion.state.status).toBe("stopped");
 		expect(fs.readFileSync(stoppedAttemptFile, "utf-8")).toBe("1");
-		expect(fs.existsSync(path.join(stoppedRun, "agent-stopped", "retry_pending"))).toBe(false);
+		expect(getRecord(stoppedRun, "agent-stopped")?.status).not.toBe("retrying");
 
 		const cwd = tempDir();
-		const runDir = createRunDir(cwd, "spawn-retry-disabled");
+		const runDir = createBatch(cwd, resolveScope(undefined), "spawn-retry-disabled");
 		const attemptFile = path.join(cwd, "attempt.txt");
 		const piScript = path.join(tempDir(), "pi.js");
 		writeFile(piScript, `
@@ -2122,14 +1957,14 @@ setTimeout(() => {}, 1000);
 		await withTimeout(disabled.done, "Timed out waiting for no-retry completion", 15000);
 		expect(disabledCompletion).toMatchObject({ exitCode: 1, state: { status: "failed" } });
 		expect(fs.readFileSync(attemptFile, "utf-8")).toBe("1");
-		expect(fs.existsSync(path.join(runDir, "agent-1", "retry_pending"))).toBe(false);
+		expect(getRecord(runDir, "agent-1")?.status).not.toBe("retrying");
 	});
 
 	test.serial("terminates agents that exceed the execution timeout", async () => {
 		expect(DEFAULT_AGENT_TIMEOUT_MS).toBe(3 * 60 * 60 * 1000);
 		expect(DEFAULT_OWNED_LAUNCH_TIMEOUTS.watchdogSeconds * 1000).toBe(DEFAULT_AGENT_TIMEOUT_MS);
 		const cwd = tempDir();
-		const runDir = createRunDir(cwd, "spawn-timeout");
+		const runDir = createBatch(cwd, resolveScope(undefined), "spawn-timeout");
 		const piScript = path.join(tempDir(), "pi.js");
 		const descendantReady = path.join(cwd, "descendant-ready");
 		const descendantSignalled = path.join(cwd, "descendant-signalled");
@@ -2155,15 +1990,11 @@ setTimeout(() => {}, 10000);
 			spawnAgent(runDir, { id: "agent-1", task: "Hang" }, cwd, [], undefined, resolve, { timeoutMs: 500 });
 		}), "Timed out waiting for timeout spawn completion");
 
-		const agentDir = path.join(runDir, "agent-1");
 		expect(completed.exitCode).toBe(124);
 		expect(completed.state.status).toBe("failed");
-		expect(fs.readFileSync(path.join(agentDir, "exit_code"), "utf-8")).toBe("124");
-		expect(fs.readFileSync(path.join(agentDir, "timeout_ms"), "utf-8")).toBe("500");
-		expect(fs.readFileSync(path.join(agentDir, "result.md"), "utf-8")).toContain("timed out");
-		const progress = fs.readFileSync(path.join(agentDir, "progress.jsonl"), "utf-8");
-		expect(progress).toContain('"stage":"timeout"');
-		expect(progress).toContain('"reason":"timeout","signal":"SIGTERM"');
+		expect(getRecord(runDir, "agent-1")?.exitCode).toBe(124);
+		expect(getRecord(runDir, "agent-1")).toMatchObject({ timedOut: true, timeoutMs: 500 });
+		expect(readResultText(runDir, "agent-1")).toContain("timed out");
 		if (process.platform !== "win32") {
 			expect(fs.existsSync(descendantReady)).toBe(true);
 			await waitUntil(() => fs.existsSync(descendantSignalled), 2000);
@@ -2173,7 +2004,7 @@ setTimeout(() => {}, 10000);
 
 	test.serial("records invalid final JSON lines and exits with process status", async () => {
 		const cwd = tempDir();
-		const runDir = createRunDir(cwd, "spawn-invalid-json");
+		const runDir = createBatch(cwd, resolveScope(undefined), "spawn-invalid-json");
 		const piScript = path.join(tempDir(), "pi.js");
 		writeFile(piScript, `
 process.stdin.on("data", () => {
@@ -2189,12 +2020,12 @@ process.stdin.on("data", () => {
 
 		expect(completed.exitCode).toBe(7);
 		expect(completed.state.status).toBe("failed");
-		expect(fs.readFileSync(path.join(runDir, "agent-1", "stderr.log"), "utf-8")).toContain("Invalid RPC JSON line");
+		expect((getLive(runDir, "agent-1")?.stderrTail ?? "")).toContain("Invalid RPC JSON line");
 	});
 
 	test.serial("falls back to synthetic completion state if agent state disappears", async () => {
 		const cwd = tempDir();
-		const runDir = createRunDir(cwd, "spawn-fallback-state");
+		const runDir = createBatch(cwd, resolveScope(undefined), "spawn-fallback-state");
 		const piScript = path.join(tempDir(), "pi.js");
 		writeFile(piScript, `
 process.stdin.on("data", () => {
@@ -2211,7 +2042,8 @@ setTimeout(() => {}, 1000);
 		const completedPromise = new Promise<any>((resolve) => {
 			spawnedAgentDir = spawnAgent(runDir, { id: "agent-1", task: "Do work" }, cwd, [], undefined, resolve).agentDir;
 		});
-		fs.unlinkSync(path.join(spawnedAgentDir, "prompt.md"));
+		void spawnedAgentDir;
+		forgetRecord(runDir, "agent-1");
 		const completed = await withTimeout(completedPromise, "Timed out waiting for fallback-state spawn completion");
 
 		expect(completed).toMatchObject({ exitCode: 0, state: { id: "agent-1", status: "done", exitCode: 0 } });

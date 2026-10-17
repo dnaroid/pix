@@ -24,15 +24,48 @@ describe("HTML sandbox fence extraction", () => {
     ]);
   });
 
-  it("keeps nested-looking fences, incomplete output, and oversized source inert", () => {
+  it("keeps nested-looking fences and oversized source as Markdown", () => {
     const example = "```markdown\n```pix-html\nalert(1)\n```\n```";
     expect(splitHtmlSandboxSegments(example)).toEqual([{ type: "markdown", text: example }]);
-    const incomplete = "```pix-html\n<script>bad()</script>";
-    expect(splitHtmlSandboxSegments(incomplete)).toEqual([{ type: "markdown", text: incomplete }]);
     const oversized = "```pix-html\n" + "x".repeat(MAX_SANDBOX_SOURCE_CHARS + 1) + "\n```";
     expect(splitHtmlSandboxSegments(oversized)).toEqual([{ type: "markdown", text: oversized }]);
     expect(splitHtmlSandboxSegments("~~~~html-sandbox\n<h1>Hi</h1>\n~~~~"))
       .toEqual([{ type: "sandbox", html: "<h1>Hi</h1>" }]);
+  });
+
+  it.each(["```pix-html", "~~~~html-sandbox", "```PIX-HTML"])("hides source at every streaming prefix of %s", (opener) => {
+    const source = "<h1>Preview</h1>\n<script>run()</script>";
+    const prefix = `Before\n${opener}\n`;
+    for (let length = 0; length <= source.length; length += 1) {
+      expect(splitHtmlSandboxSegments(prefix + source.slice(0, length))).toEqual([
+        { type: "markdown", text: "Before" },
+        { type: "sandbox-pending" },
+      ]);
+    }
+    const closer = opener.startsWith("~") ? "~~~~" : "```";
+    expect(splitHtmlSandboxSegments(prefix + source + "\n" + closer + "\nAfter")).toEqual([
+      { type: "markdown", text: "Before" },
+      { type: "sandbox", html: source },
+      { type: "markdown", text: "After" },
+    ]);
+  });
+
+  it("does not hide disabled sandboxes, ordinary code, or incomplete action fences", () => {
+    for (const opener of ["```pix-html", "```html-sandbox", "```html", "```pix-actions Next"]) {
+      const text = `${opener}\nsource`;
+      expect(splitHtmlSandboxSegments(text, { actions: true })).toEqual([{ type: "markdown", text }]);
+    }
+    const nested = "````markdown\n```pix-html\nsource";
+    expect(splitHtmlSandboxSegments(nested)).toEqual([{ type: "markdown", text: nested }]);
+  });
+
+  it("preserves a completed sandbox before an incomplete one without retaining its source", () => {
+    expect(splitHtmlSandboxSegments("```pix-html\n<p>Ready</p>\n```\nBetween\n```pix-html\n<script>partial")).toEqual([
+      { type: "sandbox", html: "<p>Ready</p>" },
+      { type: "markdown", text: "Between" },
+      { type: "sandbox-pending" },
+    ]);
+    expect(splitHtmlSandboxSegments("```pix-html")).toEqual([{ type: "sandbox-pending" }]);
   });
 
   it("does not recognize a code example as a running demo", () => {

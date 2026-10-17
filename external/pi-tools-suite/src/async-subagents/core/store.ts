@@ -39,7 +39,7 @@ export interface SubagentRecordPatch {
 	nextRetryAt?: string | null;
 	pid?: number | null;
 	processGroup?: boolean | null;
-	childSessionFile?: string;
+	childSessionFile?: string | null;
 	parentSession?: string;
 	owned?: boolean;
 	stopRequested?: boolean | null;
@@ -74,6 +74,8 @@ export interface SubagentLive {
 	stderrTail?: string;
 	lastActivity?: AgentActivity;
 	todoProgress?: { completed: number; total: number };
+	/** Child pi argv of the latest launch (diagnostics/tests; never persisted). */
+	launchArgs?: string[];
 }
 
 export interface SubagentRecordWriter {

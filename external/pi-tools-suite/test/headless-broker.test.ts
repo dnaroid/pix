@@ -3,7 +3,7 @@ import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { waitForHeadlessSubagentCompletion } from "./fixtures/headless-subagent-completion.js";
+import { readHeadlessRecord, waitForHeadlessSubagentCompletion } from "./fixtures/headless-subagent-completion.js";
 
 const execFile = promisify(execFileCallback);
 const CLI = path.resolve(import.meta.dir, "../src/headless/cli.ts");
@@ -86,7 +86,7 @@ test("detached Pix subagents broker owns RPC pipes after CLI responds (offline f
 		for (const key of Object.keys(env)) if (key !== "PATH" && key.toUpperCase() === "PATH") delete env[key];
 		async function call(tool: string, args: Record<string, unknown>) {
 			const encoded = Buffer.from(JSON.stringify({ operation: "call", cwd: workspace, readOnly: false,
-				model: { provider: "openai", id: "gpt-6" }, tool, args }), "utf8").toString("base64url");
+				model: { provider: "openai", id: "gpt-6" }, todoSessionKey: "offline-headless-session", tool, args }), "utf8").toString("base64url");
 			const { stdout, stderr } = await execFile("node", ["--import", "tsx", CLI, encoded, "--allow-write"], {
 				cwd: SUITE_ROOT, env, timeout: 40_000, maxBuffer: 6 * 1024 * 1024,
 			});
@@ -104,11 +104,8 @@ test("detached Pix subagents broker owns RPC pipes after CLI responds (offline f
 				// log survives even if a broker crashes before flushing it.
 				throw new Error(`${error.message}\nOffline fixture: ${(await readFile(fixtureLog, "utf8").catch(() => "never started")).slice(-4000)}`, { cause: error });
 			});
-			const diagnostics = finalStatus === "done" ? "" : await Promise.all(
-				["exit_code", "stderr.log", "progress.jsonl"].map(async (file) =>
-					`${file}: ${(await readFile(path.join(runDir, agentId, file), "utf8").catch(() => "missing")).slice(-2000)}`),
-			);
-			expect(finalStatus, String(diagnostics)).toBe("done");
+			const diagnostics = finalStatus === "done" ? "" : JSON.stringify(await readHeadlessRecord(runDir, agentId) ?? null).slice(0, 4000);
+			expect(finalStatus, diagnostics).toBe("done");
 		}
 		const spawn = await call("subagents", { action: "spawn", slug: "offline-proof", tasks: [{
 			id: "mock-agent", task: "Only use the offline fake pi fixture", subagentType: "project-specialist",
@@ -117,16 +114,18 @@ test("detached Pix subagents broker owns RPC pipes after CLI responds (offline f
 		expect(spawn.content[0]?.text).toContain("Scheduled 1 agent");
 		const runDir = (spawn.details as { runDir: string }).runDir;
 		expect(runDir).toContain("offline-proof");
-		expect(await readFile(path.join(runDir, "mock-agent", "subagent_type"), "utf8")).toBe("project-specialist");
-		expect((JSON.parse(await readFile(path.join(runDir, "mock-agent", "launch.json"), "utf8")).task.model as string)).toBe("zai/glm-5-turbo");
+		// Records live in the headless parent journal, not per-agent sidecar files.
+		const launched = await readHeadlessRecord(runDir, "mock-agent");
+		expect((launched?.task as { subagentType?: string } | undefined)?.subagentType).toBe("project-specialist");
+		expect((launched?.task as { model?: string } | undefined)?.model).toBe("zai/glm-5-turbo");
 		// execFile has returned only after the initiating CLI exited. Release
 		// the child now, rather than racing that exit against a 350ms timer.
-		expect(await readFile(path.join(runDir, "mock-agent", "result.md"), "utf8").catch(() => undefined)).toBeUndefined();
+		expect(launched?.finishedAt).toBeUndefined();
 		const beforeRelease = await call("subagents", { action: "status", runDir });
 		expect(beforeRelease.details.agents.find((agent: { id: string }) => agent.id === "mock-agent")?.status).toBe("running");
 		await writeFile(releaseFile, "release");
 		await waitForAgent(runDir, "mock-agent");
-		const childDiagnostics = await readFile(path.join(runDir, "mock-agent", "stderr.log"), "utf8");
+		const childDiagnostics = await readFile(fixtureLog, "utf8");
 		expect(childDiagnostics).toContain("MOCK_PI_STARTED");
 		expect(childDiagnostics).toContain("MOCK_PI_REQUEST prompt");
 		expect(childDiagnostics).toContain("MOCK_PI_RELEASED");
@@ -145,7 +144,7 @@ test("detached Pix subagents broker owns RPC pipes after CLI responds (offline f
 		expect(visual.isError).not.toBe(true);
 		expect(visual.content[0]?.text).toContain("Scheduled 1 agent");
 		const visualRun = (visual.details as { runDir: string }).runDir;
-		expect((JSON.parse(await readFile(path.join(visualRun, "mock-ui-qa", "launch.json"), "utf8")).task.model as string)).toBe("zai/glm-5.3-flash");
+		expect(((await readHeadlessRecord(visualRun, "mock-ui-qa"))?.task as { model?: string } | undefined)?.model).toBe("zai/glm-5.3-flash");
 		await writeFile(releaseFile, "release");
 		await waitForAgent(visualRun, "mock-ui-qa");
 	} finally {

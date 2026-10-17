@@ -2687,18 +2687,17 @@ function resolveBrowserQaAgentDirectory(cwd, value) {
 		throw new Error(`${SUBAGENT_AGENT_DIR_ENV} is required for browser QA runs`);
 	}
 	const projectRoot = fs.realpathSync(cwd);
-	const subagentRoot = path.join(projectRoot, ".pi", "subagents");
+	const subagentRoot = path.join(projectRoot, ".pi", "artifacts", "subagents");
 	const resolved = path.resolve(value);
 	if (!fs.existsSync(resolved)) throw new Error("browser QA agent directory is missing");
 	const real = fs.realpathSync(resolved);
-	if (!isInside(subagentRoot, real)) throw new Error("browser QA agent directory must be inside .pi/subagents");
+	if (!isInside(subagentRoot, real)) throw new Error("browser QA agent directory must be inside .pi/artifacts/subagents");
 	assertNoSymlinkComponents(projectRoot, real, "browser QA agent directory");
 	if (!fs.statSync(real).isDirectory()) throw new Error("browser QA agent directory must be a real directory");
 
-	const promptFile = path.join(real, "prompt.md");
 	const projectFile = path.join(real, "project_cwd");
 	const typeFile = path.join(real, "subagent_type");
-	for (const [file, label] of [[promptFile, "prompt"], [projectFile, "project metadata"], [typeFile, "type metadata"]]) {
+	for (const [file, label] of [[projectFile, "project metadata"], [typeFile, "type metadata"]]) {
 		if (!fs.existsSync(file) || !fs.statSync(file).isFile()) throw new Error(`browser QA ${label} is missing`);
 		assertNoSymlinkComponents(real, file, `browser QA ${label}`);
 	}

@@ -1,10 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import * as path from "node:path";
-import {
-	getParentSubagentSessionDir,
-	getSubagentSessionDir,
-	PARENT_SESSION_ID_PATTERN,
-} from "../../src/async-subagents/core/sessions.js";
+import { getParentSubagentSessionDir, getSubagentSessionDir } from "../../src/async-subagents/core/sessions.js";
+import { PARENT_SESSION_ID_PATTERN } from "../../src/async-subagents/core/paths.js";
 import { parseSubagentMeta, registerSubagentMetaEntry, SUBAGENT_META_ENTRY, SUBAGENT_META_ENV } from "../../src/async-subagents/core/subagent-meta.js";
 
 const parentId = "0199f0c2-1111-7222-8333-944445555666";

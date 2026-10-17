@@ -96,7 +96,7 @@ mod tests {
         WindowConfig {
             width: 1240.0,
             height: 820.0,
-            min_width: Some(860.0),
+            min_width: Some(660.0),
             min_height: Some(380.0),
             ..Default::default()
         }
@@ -207,6 +207,20 @@ mod tests {
             }),
             &[],
         );
-        assert_eq!((config.width, config.height), (860.0, 380.0));
+        assert_eq!((config.width, config.height), (660.0, 380.0));
+    }
+
+    #[test]
+    fn restored_narrow_window_keeps_its_width() {
+        let mut config = config();
+        apply(
+            &mut config,
+            Some(Geometry {
+                width: 700.0,
+                ..geometry(0.0, 0.0)
+            }),
+            &[],
+        );
+        assert_eq!(config.width, 700.0);
     }
 }

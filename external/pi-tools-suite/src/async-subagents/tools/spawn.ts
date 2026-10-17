@@ -9,25 +9,24 @@ import { selectAvailableAgentModels } from "../core/model-selection.js";
 import { SubagentModelSelectionError } from "../core/config.js";
 import type { AgentCompletionHandler, AgentTask, ResolvedAgentTaskConfig, RpcEventRecord, Semaphore, SpawnedAgent } from "../lib.js";
 import {
-	createRunDir,
 	createSemaphore,
 	currentModelRef,
 	DEFAULT_MAX_CONCURRENT,
 	getAgentState,
 	getRunState,
 	loadSubagentConfig,
-	recordSubagentRun,
 	resolveAgentTaskConfig,
-	resolveRunDir,
 	routeSubagentTasks,
 	SubagentRoutingError,
 	selectSessionModelWithFallback,
 	shouldForceCurrentSubagentModel,
 	spawnAgent,
 	stopAgents,
-	writePromptFile,
-	writeStructuredResult,
 } from "../lib.js";
+import { settleStructuredResult } from "../core/structured-result.js";
+import { ownedAgentDir, parseRunKey, scopeDir } from "../core/paths.js";
+import { createBatch, getLive, getRecord, updateLive, updateRecord } from "../core/store.js";
+import { normalizeRunDir, scopeForContext } from "../core/lookup.js";
 import { spawnAgentWithRetry } from "../core/retry.js";
 import { recordSubagentUsage } from "../core/usage.js";
 import { recordSubagentTaskStatistics, recordSubagentStateStatistics, recordSubagentToolStatistics } from "../core/statistics.js";
@@ -123,7 +122,7 @@ async function launchQueuedAgent(options: LaunchQueuedAgentOptions): Promise<voi
 			maxResultBytes: resolved.maxResultBytes,
 			timeoutMs: resolved.timeoutMs,
 			...(maySelectOwnedProvider(resolved.task, resolved.extraArgs, resolved.fallbackModels)
-				? await resolveOwnedLaunchOptions([cwd, runDir]) : {}),
+				? await resolveOwnedLaunchOptions([cwd, ownedProbeDir(cwd, runDir)]) : {}),
 		};
 		if (signal?.aborted) throw new Error("Aborted");
 		if (resolved.retry.maxRetries > 0 || resolved.fallbackModels.length > 0) {
@@ -163,29 +162,38 @@ async function launchQueuedAgent(options: LaunchQueuedAgentOptions): Promise<voi
  * durable retirement marker (written by the bounded async verifier).
  */
 function ownedLaunchHoldsSlot(runDir: string, agentId: string): boolean {
-	const agentDir = path.join(runDir, agentId);
+	const agentDir = ownedAgentDir(runDir, agentId);
 	return ownedArtifactsPresentSync(agentDir) && !ownedSlotReleasedSync(agentDir);
 }
 
 function launchSkipReason(runDir: string, agentId: string): string | undefined {
-	if (!fs.existsSync(runDir)) return "run directory was removed before launch";
+	if (!getRecord(runDir, agentId)) return "run was removed before launch";
 	const state = getAgentState(runDir, agentId, { includeLineCounts: false });
 	if (state?.status === "stopped") return "agent was stopped before launch";
 	return undefined;
 }
 
+/** launchd must reach the parent-scoped directory that will hold the owned base. */
+export function ownedProbeDir(cwd: string, runDir: string): string {
+	const parsed = parseRunKey(runDir);
+	const dir = parsed ? scopeDir(parsed.cwd, parsed.scope) : runDir;
+	try {
+		fs.mkdirSync(dir, { recursive: true });
+	} catch {
+		return cwd;
+	}
+	return dir;
+}
+
 function writeLaunchFailure(runDir: string, task: AgentTask, message: string, maxResultBytes?: number): void {
-	const agentDir = path.join(runDir, task.id);
-	fs.mkdirSync(agentDir, { recursive: true });
 	const now = new Date().toISOString();
-	fs.writeFileSync(path.join(agentDir, "prompt.md"), `Launch failed before sub-agent process started.\n\n${message}\n`, "utf-8");
-	fs.writeFileSync(path.join(agentDir, "result.md"), message, "utf-8");
-	fs.writeFileSync(path.join(agentDir, "stderr.log"), `${message}\n`, "utf-8");
-	fs.writeFileSync(path.join(agentDir, "exit_code"), "1", "utf-8");
-	fs.writeFileSync(path.join(agentDir, "started_at"), now, "utf-8");
-	fs.writeFileSync(path.join(agentDir, "finished_at"), now, "utf-8");
+	updateRecord(runDir, task.id, {
+		status: "failed", exitCode: 1, startedAt: getRecord(runDir, task.id)?.startedAt ?? now, finishedAt: now,
+		message, stderrPreview: message,
+	});
+	updateLive(runDir, task.id, { active: false, resultText: message, stderrTail: `${message}\n` });
 	const state = getAgentState(runDir, task.id) ?? { id: task.id, status: "failed" as const, exitCode: 1 };
-	writeStructuredResult({ agentDir, agentId: task.id, state, subagentType: task.subagentType, model: task.model, maxResultBytes });
+	settleStructuredResult(runDir, task.id, { state, subagentType: task.subagentType, model: task.model, maxResultBytes });
 }
 
 function errorMessage(error: unknown): string {
@@ -241,8 +249,8 @@ export function registerSpawnTool(
 		...INLINE_RENDERING,
 		parameters: Type.Object({
 			tasks: Type.Array(AgentTaskSchema, { description: "Agent tasks to spawn" }),
-			runDir: Type.Optional(Type.String({ description: "Existing run directory. Creates new one if omitted." })),
-			slug: Type.Optional(Type.String({ description: "Slug for new run directory name" })),
+			runDir: Type.Optional(Type.String({ description: "Existing batch name (or run key) to add agents to. Creates a new batch if omitted." })),
+			slug: Type.Optional(Type.String({ description: "Slug for the new batch name" })),
 			thinking: Type.Optional(Type.String({ description: "Thinking level for sub-agents (off, minimal, low, medium, high, xhigh, max)" })),
 			extraArgs: Type.Optional(Type.Array(Type.String(), { description: "Additional pi CLI args for sub-agents" })),
 			timeoutSeconds: Type.Optional(Type.Number({ description: "Wall-clock timeout in seconds for every spawned agent in this call. Task-level timeoutSeconds overrides this." })),
@@ -304,13 +312,29 @@ export function registerSpawnTool(
 					if (!(error instanceof SubagentModelSelectionError)) throw error;
 					return { content: [{ type: "text", text: error.message }], details: { error: "subagent_model_selection" }, isError: true };
 				}
-				const tasks: AgentTask[] = resolvedTasks.map((resolved) => resolved.task);
+				let tasks: AgentTask[] = resolvedTasks.map((resolved) => resolved.task);
 				if (signal?.aborted) throw new Error("Aborted");
 				if (signal?.aborted) throw new Error("Aborted");
 				// Resolve the entire batch before creating run state or launching children.
+				const scope = scopeForContext(ctx);
 				const runDir = params.runDir
-					? resolveRunDir(ctx.cwd, params.runDir)
-					: createRunDir(ctx.cwd, params.slug);
+					? normalizeRunDir(ctx.cwd, scope, params.runDir)
+					: createBatch(ctx.cwd, scope, params.slug);
+				// Never relaunch an agent this process still owns (queued, running or
+				// retry pending): a duplicate spawn would reset its record and race a
+				// second child against the first.
+				const alreadyActive = resolvedTasks.filter((resolved) => agentStillActive(runDir, resolved.task.id)).map((resolved) => resolved.task.id);
+				if (alreadyActive.length > 0) {
+					resolvedTasks = resolvedTasks.filter((resolved) => !alreadyActive.includes(resolved.task.id));
+					tasks = resolvedTasks.map((resolved) => resolved.task);
+					if (tasks.length === 0) {
+						return {
+							content: [{ type: "text", text: `Not relaunched: ${alreadyActive.join(", ")} still active in batch ${path.basename(runDir)}. Wait for them or stop them first.` }],
+							details: { runDir, agents: getRunState(runDir, alreadyActive).agents, mode: "spawn" } satisfies SubagentRunRenderDetails,
+							isError: true,
+						};
+					}
+				}
 				const taskPreviews = toTaskPreviews(tasks).map((preview, index) => {
 					// tasks[i] === resolvedTasks[i].task (positional), so the resolved
 					// profile's icon rides along into every preview consumer (tool render
@@ -322,11 +346,18 @@ export function registerSpawnTool(
 				const maxConcurrent = config.maxConcurrent ?? DEFAULT_MAX_CONCURRENT;
 				const semaphore = getProjectSemaphore(ctx.cwd, maxConcurrent);
 				const launchErrors: { id: string; error: string }[] = [];
-				recordSubagentRun(ctx.cwd, runDir, tasks.map((task) => task.id));
-
-				// Materialize prompts up front so queued agents appear as planned in status/wait
-				// output before their semaphore slot opens.
-				for (const task of tasks) writePromptFile(runDir, task);
+				// Record planned agents in the parent session up front so queued
+				// agents appear in status/wait before their semaphore slot opens.
+				for (const resolved of resolvedTasks) {
+					const task = resolved.task;
+					updateRecord(runDir, task.id, {
+						cwd: ctx.cwd, task, extraArgs: resolved.extraArgs, timeoutMs: resolved.timeoutMs, maxResultBytes: resolved.maxResultBytes,
+						subagentType: task.subagentType, model: task.model, parentSession, status: "planned", turn: 1,
+						exitCode: null, startedAt: null, finishedAt: null, nextRetryAt: null, pid: null, processGroup: null, childSessionFile: null,
+						stopRequested: null, stopSignal: null, timedOut: null, structured: null, message: null, stderrPreview: null, retryCount: 0,
+					}, parentSessionManager);
+					updateLive(runDir, task.id, { active: true, resultText: undefined, stderrTail: undefined, lastActivity: undefined, todoProgress: undefined });
+				}
 				for (const preview of taskPreviews) recordSubagentTaskStatistics(parentSessionManager, runDir, preview);
 				const liveRun = getLiveRun(liveAgents, runDir);
 				const reservation = completionDelivery?.begin(parentSession);
@@ -369,7 +400,7 @@ export function registerSpawnTool(
 								resolveCompleted();
 								const state = getAgentState(runDir, task.id, { includeLineCounts: false }) ?? { id: task.id, status: "stopped" as const };
 								recordSubagentStateStatistics(parentSessionManager, runDir, task.id, state.status);
-								handleAgentCompletion({ runDir, agentId: task.id, agentDir: path.join(runDir, task.id), exitCode: 0, state });
+								handleAgentCompletion({ runDir, agentId: task.id, agentDir: ownedAgentDir(runDir, task.id), exitCode: 0, state });
 							},
 							onLaunchError: (error) => {
 								const message = errorMessage(error);
@@ -390,7 +421,7 @@ export function registerSpawnTool(
 								resolveCompleted();
 								const state = getAgentState(runDir, task.id, { includeLineCounts: false }) ?? { id: task.id, status: "failed" as const, exitCode: 1 };
 								recordSubagentStateStatistics(parentSessionManager, runDir, task.id, state.status);
-								handleAgentCompletion({ runDir, agentId: task.id, agentDir: path.join(runDir, task.id), exitCode: 1, state });
+								handleAgentCompletion({ runDir, agentId: task.id, agentDir: ownedAgentDir(runDir, task.id), exitCode: 1, state });
 							},
 							onUpdate: () => {
 								onLiveAgentsChange?.();
@@ -429,7 +460,7 @@ export function registerSpawnTool(
 					onLiveAgentsChange?.();
 					const hasActiveOrQueued = state.agents.some((agent) => agent.status === "planned" || agent.status === "running" || agent.status === "retrying");
 					const lines = [
-						`Scheduled ${tasks.length} agent(s) in ${runDir}`,
+						`Scheduled ${tasks.length} agent(s) in batch ${path.basename(runDir)}`,
 						`Started ${results.length} agent(s) so far; maxConcurrent=${semaphore.limit} (project-wide).`,
 						...(routed.usedLlm
 							? [`LLM-routed ${Object.keys(routed.routes).length} inferred subagent type(s).`]
@@ -439,6 +470,9 @@ export function registerSpawnTool(
 						...state.agents.map(
 							(a) => `${formatAgentStatus(a.status)} ${a.id}${a.pid ? ` (pid ${a.pid})` : ""}`,
 						),
+						...(alreadyActive.length > 0
+							? ["", `Not relaunched (still active): ${alreadyActive.join(", ")}`]
+							: []),
 						...(launchErrors.length > 0
 							? ["", "Launch errors:", ...launchErrors.map((item) => `- ${item.id}: ${item.error}`)]
 							: []),
@@ -446,8 +480,8 @@ export function registerSpawnTool(
 						hasActiveOrQueued
 							? "Agents continue running or queued in the background after this watch window."
 							: "All scheduled agents are no longer running or queued.",
-						`Use subagents({ action: "status" }) for the latest project run, or include runDir: "${runDir}" for an exact run.`,
-						"Use subagents({ action: \"result\", agentId: \"<agent-id>\" }) to read output; runDir is optional because .pi/subagents/registry.json maps agent IDs to their latest run.",
+						`Use subagents({ action: "status" }) for this session's latest batch, or include runDir: "${path.basename(runDir)}" for this batch.`,
+						"Use subagents({ action: \"result\", agentId: \"<agent-id>\" }) to read output; runDir is optional because agent IDs resolve to their latest run in this session.",
 					];
 
 					deliveredState = state;
@@ -480,4 +514,11 @@ export function registerSpawnTool(
 			return renderSubagentRun(details, opts, theme);
 		},
 	});
+}
+
+/** True while this process still owns a non-terminal launch of the agent. */
+function agentStillActive(runDir: string, agentId: string): boolean {
+	const record = getRecord(runDir, agentId);
+	if (!record || !getLive(runDir, agentId)?.active) return false;
+	return record.status === "planned" || record.status === "running" || record.status === "retrying";
 }

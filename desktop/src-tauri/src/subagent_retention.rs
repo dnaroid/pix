@@ -5,7 +5,13 @@
 //! parent session file exists, and removes it once the parent is gone and the
 //! subtree has been idle for [`SUBAGENT_ORPHAN_GRACE`]. Timestamp-named legacy
 //! run directories keep the ordinary background TTL. Manual Clean ignores this
-//! policy and empties `.pi/subagents/` immediately.
+//! policy and empties `.pi/subagents/` immediately, except owned-launch records.
+//!
+//! Owned-launch records (`<parentSessionId>/owned/`) are written by the native
+//! launchd supervisor and must survive parent death until the sub-agent tooling
+//! proves the launch drained and retired. Neither cleanup path removes them:
+//! background cleanup keeps the whole parent-scoped directory, Manual Clean
+//! removes everything in it except `owned/` (unknown ownership fails closed).
 
 use serde_json::Value;
 use std::{
@@ -22,11 +28,15 @@ pub(crate) const SUBAGENT_ORPHAN_GRACE: Duration = Duration::from_secs(24 * 60 *
 /// `subagent_meta` is appended at child session start, so the head suffices.
 const META_SCAN_LIMIT: u64 = 256 * 1024;
 const SUBAGENT_META_ENTRY: &str = "subagent_meta";
+/// Owned-launch records inside a parent-scoped directory.
+pub(crate) const OWNED_RECORDS_DIR: &str = "owned";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SubagentDirRetention {
     /// Not a parent-scoped directory (legacy run dir) or not inspectable: ordinary TTL.
     Legacy,
+    /// Holds owned-launch records: never auto-clean (fail closed).
+    OwnedRecords,
     /// The parent session file still exists: never auto-clean.
     ParentPresent,
     /// No parent session file could be found: reclaim after the orphan grace.
@@ -119,6 +129,9 @@ pub(crate) fn classify_subagent_dir(
         Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
         _ => return SubagentDirRetention::Legacy,
     }
+    if has_owned_records(dir) {
+        return SubagentDirRetention::OwnedRecords;
+    }
     if index.contains(name) {
         return SubagentDirRetention::ParentPresent;
     }
@@ -132,6 +145,22 @@ pub(crate) fn classify_subagent_dir(
         return SubagentDirRetention::ParentPresent;
     }
     SubagentDirRetention::ParentMissing
+}
+
+/// True when a parent-scoped directory holds owned-launch records. An
+/// unreadable or non-directory `owned` entry counts as present (fail closed).
+pub(crate) fn has_owned_records(scope_dir: &Path) -> bool {
+    let owned = scope_dir.join(OWNED_RECORDS_DIR);
+    match fs::symlink_metadata(&owned) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+            match fs::read_dir(&owned) {
+                Ok(mut entries) => entries.next().is_some(),
+                Err(_) => true,
+            }
+        }
+        _ => true,
+    }
 }
 
 /// Absolute parent session paths recorded in children's `subagent_meta` entries.
@@ -285,6 +314,29 @@ mod tests {
             SubagentDirRetention::ParentPresent
         );
 
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn owned_records_keep_parent_scoped_dir() {
+        let root = temporary_dir("owned");
+        let subagents = root.join("workspace/.pi/subagents");
+        let scope = subagents.join(PARENT);
+        write_child(&scope, &root.join("missing-parent.jsonl"));
+        let mut index = ParentSessionIndex::new(None, &[]);
+        assert_eq!(
+            classify_subagent_dir(&scope, &mut index),
+            SubagentDirRetention::ParentMissing
+        );
+        // An empty owned/ directory is not a record.
+        fs::create_dir_all(scope.join(OWNED_RECORDS_DIR)).unwrap();
+        assert!(!has_owned_records(&scope));
+        fs::create_dir_all(scope.join("owned/batch/a1/owned-launch")).unwrap();
+        assert!(has_owned_records(&scope));
+        assert_eq!(
+            classify_subagent_dir(&scope, &mut index),
+            SubagentDirRetention::OwnedRecords
+        );
         fs::remove_dir_all(root).unwrap();
     }
 }

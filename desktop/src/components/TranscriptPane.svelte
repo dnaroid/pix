@@ -281,7 +281,7 @@
                   {#if thoughtDuration}<span class="shrink-0 text-muted-foreground/45">{thoughtDuration}</span>{/if}
                 </span>
               </summary>
-              <div class="ml-[7px] border-l border-code-border pl-2.5 text-muted-foreground">
+              <div class="ml-[7px] pl-2.5 text-muted-foreground">
                 <MarkdownText text={item.text} compact dense fitTables {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />
               </div>
             </details>

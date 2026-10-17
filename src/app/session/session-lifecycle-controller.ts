@@ -29,7 +29,6 @@ export type AppSessionLifecycleHost = {
 	disposeRuntimeForQuit(runtime: AgentSessionRuntime): Promise<void>;
 	loadStartupConfig(): Promise<void>;
 	loadRequestHistory(): Promise<void>;
-	startSubagentsPolling(): void;
 	closeSdkMenuForBind(): void;
 	clearExtensionWidgets(scopeKey?: string, options?: { cancelCustomUi?: boolean }): void;
 	createExtensionUIContext(scopeKey?: string): PixExtensionUIContext;
@@ -84,7 +83,6 @@ export class AppSessionLifecycleController {
 
 		this.host.enableTerminal();
 		this.host.setRunning(true);
-		this.host.startSubagentsPolling();
 		this.host.render();
 		void this.host.loadRequestHistory().catch((error) => {
 			logOperationFailure("request-history:load-failed", error, { project: this.host.options.cwd, module: "session.startup" });

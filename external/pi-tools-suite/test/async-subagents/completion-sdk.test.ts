@@ -7,23 +7,22 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { createAssistantMessageEventStream, fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import registerSubagents from "../../src/async-subagents/index.js";
-import { createRunDir } from "../../src/async-subagents/lib.js";
+import { createBatch, resetSubagentStoreForTest, resolveScope, updateLive, updateRecord } from "../../src/async-subagents/core/store.js";
 
 const scratch = fileURLToPath(new URL("../../../../.pi/artifacts/completion-sdk-tests/", import.meta.url));
 
-for (const mode of ["read", "result", "partial", "transformed", "late-failure"] as const) {
+// Decision 0072: only the result action acknowledges a completion (no result.md read receipts).
+for (const mode of ["result", "unread", "late-failure"] as const) {
 	test(`real SDK settlement: ${mode}`, async () => {
 		fs.mkdirSync(scratch, { recursive: true });
 		const cwd = fs.mkdtempSync(path.join(scratch, "case-"));
 		const sessionManager = SessionManager.create(cwd, path.join(cwd, "sessions"));
 		const settingsManager = SettingsManager.inMemory({ retry: { enabled: false }, compaction: { enabled: false } });
-		const runDir = createRunDir(cwd, "completion");
-		const agentDir = path.join(runDir, "child");
-		fs.mkdirSync(agentDir);
-		for (const [name, text] of Object.entries({
-			"prompt.md": "audit", pid: String(process.pid), parent_session: sessionManager.getSessionFile()!,
-			"result.md": "Audit complete\nNo changes required\n",
-		})) fs.writeFileSync(path.join(agentDir, name), text);
+		resetSubagentStoreForTest();
+		// A child adopted while running: its parent-session record links it to this session.
+		const runDir = createBatch(cwd, resolveScope(sessionManager), "completion");
+		updateRecord(runDir, "child", { status: "running", pid: process.pid, parentSession: sessionManager.getSessionFile()!, turn: 1 }, sessionManager);
+		updateLive(runDir, "child", { resultText: "Audit complete\nNo changes required\n" });
 		const loader = new DefaultResourceLoader({
 			cwd, agentDir: cwd, settingsManager, noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true,
 			extensionFactories: [registerSubagents, (pi) => {
@@ -36,10 +35,9 @@ for (const mode of ["read", "result", "partial", "transformed", "late-failure"] 
 		await loader.reload();
 		expect(loader.getExtensions().errors).toEqual([]);
 		const model = fauxProvider({ provider: "completion-contract" }).getModel();
-		const args: Record<string, string | number> = mode === "result" ? { action: "result", runDir, agentId: "child" }
-			: { path: path.join(agentDir, "result.md"), ...(mode === "partial" ? { limit: 1 } : {}) };
 		const responses = mode === "late-failure" ? [fauxAssistantMessage("Initial final answer"), fauxAssistantMessage("New failure report")]
-			: [fauxAssistantMessage(fauxToolCall(mode === "result" ? "subagents" : "read", args, { id: "collect" }), { stopReason: "toolUse" }),
+			: mode === "unread" ? [fauxAssistantMessage("Final answer"), fauxAssistantMessage("Completion follow-up")]
+			: [fauxAssistantMessage(fauxToolCall("subagents", { action: "result", runDir, agentId: "child" }, { id: "collect" }), { stopReason: "toolUse" }),
 				fauxAssistantMessage("Final answer"), fauxAssistantMessage("Completion follow-up")];
 		let requests = 0;
 		const modelRuntime = {
@@ -47,7 +45,8 @@ for (const mode of ["read", "result", "partial", "transformed", "late-failure"] 
 				requests++;
 				// The child was adopted while running. Its final receipt appears
 				// while the real parent SDK run is busy, before result collection.
-				fs.writeFileSync(path.join(agentDir, "exit_code"), mode === "late-failure" ? "1" : "0");
+				const code = mode === "late-failure" ? 1 : 0;
+				updateRecord(runDir, "child", { status: code === 0 ? "done" : "failed", exitCode: code, finishedAt: new Date().toISOString() });
 				const response = responses.shift();
 				if (!response) throw new Error("Unexpected duplicate provider request");
 				const stream = createAssistantMessageEventStream();
@@ -66,13 +65,14 @@ for (const mode of ["read", "result", "partial", "transformed", "late-failure"] 
 		try {
 			await session.bindExtensions({});
 			await session.prompt("Collect the audit if necessary and report once");
-			expect(requests).toBe(mode === "partial" || mode === "transformed" ? 3 : 2);
+			expect(requests).toBe(2);
 			const completions = session.messages.filter((message) => message.role === "custom" && message.customType === "async-subagents-agent-completion");
-			expect(completions).toHaveLength(mode === "read" || mode === "result" ? 0 : 1);
+			expect(completions).toHaveLength(mode === "result" ? 0 : 1);
 		} finally {
 			await session.extensionRunner.emit({ type: "session_shutdown", reason: "reload" });
 			session.dispose();
 			fs.rmSync(cwd, { recursive: true, force: true });
+			resetSubagentStoreForTest();
 		}
 	});
 }

@@ -6,12 +6,10 @@ import {
 	getRunState,
 	isBlindModelRef,
 	loadSubagentConfig,
-	listSubagentSessionRecords,
 	stopAgents,
 	type AgentCompletionHandler,
 	type RpcEventRecord,
 	type StopSignal,
-	type SubagentSessionRecord,
 } from "./lib.js";
 import { activityFromRpcEvent } from "./core/activity.js";
 import { buildAgentCompletionNotification } from "./core/notifications.js";
@@ -28,6 +26,8 @@ import {
 
 import { appendUltraworkAutoHint, decideUltraworkAuto, isGptLikeModel, isUltraworkAutoEnvEnabled } from "./core/ultrawork-auto.js";
 import { SubagentOverlay } from "./subagent-overlay.js";
+import { ownedAgentDir } from "./core/paths.js";
+import { listProjectRecords, type SubagentRecord } from "./core/store.js";
 import { registerSubagentsTool } from "./tools/subagents.js";
 import type { LiveAgent, SubagentsLiveStateEvent } from "./types.js";
 import type { AgentState } from "./core/types.js";
@@ -285,7 +285,7 @@ export default function (pi: ExtensionAPI) {
 			currentSessionStateContext = ctx;
 			publishSessionLiveState(ctx);
 			publishSubagentCatalogState(ctx);
-			subagentOverlay.restoreRunningAgents(ctx.cwd, currentSessionFile);
+			subagentOverlay.restoreRunningAgents(ctx, currentSessionFile);
 			refreshSubagentOverlay();
 		} catch (error) {
 			ignoreStaleExtensionContextError(error);
@@ -554,7 +554,7 @@ async function stopProjectSubagents(
 
 	for (const target of targets) stopRunBestEffort(target.runDir, target.agentIds, "SIGKILL");
 	// Session lifetime is not evidence lifetime. Keep reports, attachments and
-	// registry pointers for later reads; explicit/TTL cleanup owns deletion.
+	// session records for later reads; explicit/parent-based cleanup owns deletion.
 }
 
 
@@ -569,7 +569,7 @@ function collectShutdownTargets(
 	}));
 
 	const targets = new Map<string, Set<string>>();
-	const recordsByRun = groupRecordsByRun(listSubagentSessionRecords(cwd));
+	const recordsByRun = groupRecordsByRun(listProjectRecords(cwd));
 
 	for (const [runDir, records] of recordsByRun) {
 		const matchingRecords = records.filter((record) => recordMatchesSession(record, parentSession));
@@ -588,8 +588,8 @@ function collectShutdownTargets(
 	return targetMapToTargets(targets);
 }
 
-function groupRecordsByRun(records: SubagentSessionRecord[]): Map<string, SubagentSessionRecord[]> {
-	const grouped = new Map<string, SubagentSessionRecord[]>();
+function groupRecordsByRun(records: SubagentRecord[]): Map<string, SubagentRecord[]> {
+	const grouped = new Map<string, SubagentRecord[]>();
 	for (const record of records) {
 		const existing = grouped.get(record.runDir) ?? [];
 		existing.push(record);
@@ -598,7 +598,7 @@ function groupRecordsByRun(records: SubagentSessionRecord[]): Map<string, Subage
 	return grouped;
 }
 
-function recordMatchesSession(record: SubagentSessionRecord, sessionFile: string): boolean {
+function recordMatchesSession(record: SubagentRecord, sessionFile: string): boolean {
 	return Boolean(record.parentSession && pathsEqual(record.parentSession, sessionFile));
 }
 
@@ -626,7 +626,7 @@ function signalShutdownTargets(targets: ShutdownTarget[], signal: StopSignal): n
 				// group) for an owned run. stopAgents writes the durable cancel
 				// marker. Artifacts alone (even without a pointer) mark the run
 				// owned: unknown ownership never falls back to PID signaling.
-				if (ownedArtifactsPresentSync(path.join(target.runDir, agent.id))) continue;
+				if (ownedArtifactsPresentSync(ownedAgentDir(target.runDir, agent.id))) continue;
 				if (agent.status !== "running" || !agent.pid || agent.pid <= 0) continue;
 				try {
 					process.kill(agent.pid, signal);

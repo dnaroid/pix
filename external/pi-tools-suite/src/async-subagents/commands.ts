@@ -2,20 +2,10 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { ignoreStaleExtensionContextError } from "../context-usage.js";
-import {
-	ensureSessionFileLink,
-	findSubagentSessionByFile,
-	getRunState,
-	listRunDirs,
-	listSubagentSessionRecords,
-	readParentSessionLink,
-	readReturnSessionLink,
-	resolveRunDir,
-	stopAgents,
-	validateBasename,
-	writeParentSessionLink,
-	writeReturnSessionLink,
-} from "./lib.js";
+import { getAgentState, getRunState, stopAgents, validateBasename } from "./lib.js";
+import { normalizeRunDir, resolveSubagentRunDir, scopeForContext } from "./core/lookup.js";
+import { findRecordByChildSession, getRecord, listProjectRecords, listRunRecords, listScopeRunDirs } from "./core/store.js";
+import { SUBAGENT_META_ENTRY, type SubagentMeta } from "./core/subagent-meta.js";
 import { formatAgentStatus } from "./format.js";
 
 interface CommandContext {
@@ -26,7 +16,11 @@ interface CommandContext {
 		select(title: string, options: string[]): Promise<string | undefined>;
 	};
 	waitForIdle?: () => Promise<void>;
-	sessionManager: { getSessionFile(): string | undefined };
+	sessionManager: {
+		getSessionFile(): string | undefined;
+		getSessionId?: () => string;
+		getEntries?: () => ReadonlyArray<{ type?: string; customType?: string; data?: unknown }>;
+	};
 	switchSession(sessionPath: string, options?: { withSession?: (ctx: CommandContext) => Promise<void> }): Promise<{ cancelled: boolean }>;
 }
 
@@ -65,13 +59,13 @@ export function registerCommands(pi: ExtensionAPI): void {
 		handler: async (args: string, ctx: CommandContext) => {
 			if (!ctx.hasUI) return;
 
-			const runDir = args.trim() || listRunDirs(ctx.cwd)[0] || "";
-			if (!runDir) {
-				ctx.ui.notify("Usage: /sub-status [run-dir]", "warning");
+			let resolved: string;
+			try {
+				resolved = resolveSubagentRunDir(ctx, args.trim() || undefined);
+			} catch {
+				ctx.ui.notify("Usage: /sub-status [batch]", "warning");
 				return;
 			}
-
-			const resolved = resolveRunDir(ctx.cwd, runDir);
 			const state = getRunState(resolved);
 
 			if (state.agents.length === 0) {
@@ -96,13 +90,13 @@ export function registerCommands(pi: ExtensionAPI): void {
 			const values = parts.filter((part) => part !== "--force" && part !== "-f");
 			const runDirArg = values.shift();
 			if (!runDirArg) {
-				ctx.ui.notify("Usage: /sub-stop <run-dir> [agent-id ...] [--force]", "warning");
+				ctx.ui.notify("Usage: /sub-stop <batch> [agent-id ...] [--force]", "warning");
 				return;
 			}
 
 			try {
 				for (const id of values) validateBasename(id, "agentId");
-				const resolved = resolveRunDir(ctx.cwd, runDirArg);
+				const resolved = normalizeRunDir(ctx.cwd, scopeForContext(ctx), runDirArg);
 				const results = stopAgents(resolved, values.length ? values : undefined, { signal: force ? "SIGKILL" : "SIGTERM" });
 
 				if (results.length === 0) {
@@ -183,7 +177,7 @@ function registerSessionCommands(pi: ExtensionAPI): void {
 				const target = await chooseOpenTarget(args, ctx);
 				if (!target) return;
 
-				const sessionFile = ensureSessionFileLink(target.agentDir);
+				const sessionFile = getRecord(target.runDir, target.agentId)?.childSessionFile ?? undefined;
 				if (!sessionFile) {
 					ctx.ui.notify(`No session file recorded for ${target.agentId}. The agent may not have produced a persisted session yet.`, "warning");
 					return;
@@ -199,8 +193,7 @@ function registerSessionCommands(pi: ExtensionAPI): void {
 					return;
 				}
 
-				writeReturnSessionLink(target.agentDir, currentSession);
-				if (!readParentSessionLink(target.agentDir)) writeParentSessionLink(target.agentDir, currentSession);
+				returnSessions.set(sessionFile, currentSession);
 
 				const runName = path.basename(target.runDir);
 				const agentId = target.agentId;
@@ -227,14 +220,13 @@ function registerSessionCommands(pi: ExtensionAPI): void {
 			if (!ctx.hasUI) return;
 
 			try {
-				const currentSession = ctx.sessionManager.getSessionFile();
-				const record = findSubagentSessionByFile(ctx.cwd, currentSession);
+				const record = currentSubagentSession(ctx);
 				if (!record) {
 					ctx.ui.notify("This session is not a known sub-agent session.", "warning");
 					return;
 				}
 
-				const returnSession = readReturnSessionLink(record.agentDir) ?? readParentSessionLink(record.agentDir);
+				const returnSession = record.returnSession;
 				if (!returnSession) {
 					ctx.ui.notify(`No return session recorded for ${record.agentId}.`, "error");
 					return;
@@ -268,12 +260,12 @@ function registerSessionCommands(pi: ExtensionAPI): void {
 		handler: async (_args: string, ctx: CommandContext) => {
 			if (!ctx.hasUI) return;
 			const currentSession = ctx.sessionManager.getSessionFile();
-			const record = findSubagentSessionByFile(ctx.cwd, currentSession);
+			const record = currentSubagentSession(ctx);
 			if (!record) {
 				ctx.ui.notify(`Current session is not a known sub-agent session.\n${currentSession ?? "ephemeral session"}`, "info");
 				return;
 			}
-			const returnSession = readReturnSessionLink(record.agentDir) ?? readParentSessionLink(record.agentDir) ?? "not recorded";
+			const returnSession = record.returnSession ?? "not recorded";
 			ctx.ui.notify([
 				`Sub-agent session: ${record.agentId}`,
 				`Run: ${record.runDir}`,
@@ -284,25 +276,60 @@ function registerSessionCommands(pi: ExtensionAPI): void {
 	});
 }
 
-async function chooseOpenTarget(args: string, ctx: CommandContext): Promise<{ runDir: string; agentDir: string; agentId: string } | undefined> {
+/** Child session file -> session to return to with /sub-back (process-local). */
+const returnSessions = new Map<string, string>();
+
+interface CurrentSubagentSession {
+	agentId: string;
+	runDir: string;
+	runName: string;
+	returnSession?: string;
+	state?: ReturnType<typeof getAgentState>;
+}
+
+/** Identify the current child session from the parent's records or the child's own `subagent_meta`. */
+function currentSubagentSession(ctx: CommandContext): CurrentSubagentSession | undefined {
+	const currentSession = ctx.sessionManager.getSessionFile();
+	if (!currentSession) return undefined;
+	const record = findRecordByChildSession(currentSession);
+	let meta: SubagentMeta | undefined;
+	try {
+		const entry = ctx.sessionManager.getEntries?.().find((item) => item.type === "custom" && item.customType === SUBAGENT_META_ENTRY);
+		meta = entry?.data as SubagentMeta | undefined;
+	} catch {
+		meta = undefined;
+	}
+	const agentId = record?.agentId ?? meta?.agentId;
+	const runDir = record?.runDir ?? meta?.runDir;
+	if (!agentId || !runDir) return undefined;
+	return {
+		agentId,
+		runDir,
+		runName: path.basename(runDir),
+		returnSession: returnSessions.get(currentSession) ?? record?.parentSession ?? meta?.parentSession,
+		state: record ? getAgentState(record.runDir, record.agentId, { includeLineCounts: false }) : undefined,
+	};
+}
+
+async function chooseOpenTarget(args: string, ctx: CommandContext): Promise<{ runDir: string; agentId: string } | undefined> {
 	const parts = args.trim().split(/\s+/).filter(Boolean);
 	let runDirArg = parts[0];
 	let agentId = parts[1];
 
-	if (parts.length > 2) throw new Error("Usage: /sub-open [run-dir] [agent-id]");
+	if (parts.length > 2) throw new Error("Usage: /sub-open [batch] [agent-id]");
 
+	const scope = scopeForContext(ctx);
 	if (!runDirArg) {
-		const selectedRun = await ctx.ui.select("Open sub-agent run:", listRunDirs(ctx.cwd));
+		const batches = listScopeRunDirs(ctx.cwd, scope).map((runDir) => path.basename(runDir));
+		if (batches.length === 0) throw new Error("This session has no sub-agent runs.");
+		const selectedRun = await ctx.ui.select("Open sub-agent run:", batches);
 		if (!selectedRun) return undefined;
 		runDirArg = selectedRun;
 	}
 
-	const runDir = resolveRunDir(ctx.cwd, runDirArg);
-	if (!fs.existsSync(runDir) || !fs.statSync(runDir).isDirectory())
-		throw new Error(`Run directory not found: ${runDir}`);
-
-	const agentIds = getRunState(runDir).agents.map((agent) => agent.id).sort();
-	if (agentIds.length === 0) throw new Error(`No agents found in ${runDir}`);
+	const runDir = normalizeRunDir(ctx.cwd, scope, runDirArg);
+	const agentIds = listRunRecords(runDir).map((record) => record.agentId).sort();
+	if (agentIds.length === 0) throw new Error(`No agents found in batch ${path.basename(runDir)}`);
 
 	if (!agentId) {
 		const selectedAgent = await ctx.ui.select("Open sub-agent:", agentIds);
@@ -310,20 +337,15 @@ async function chooseOpenTarget(args: string, ctx: CommandContext): Promise<{ ru
 		agentId = selectedAgent;
 	}
 	validateBasename(agentId, "agentId");
-	if (!agentIds.includes(agentId)) throw new Error(`Agent "${agentId}" not found in ${runDir}`);
+	if (!agentIds.includes(agentId)) throw new Error(`Agent "${agentId}" not found in batch ${path.basename(runDir)}`);
 
-	return { runDir, agentId, agentDir: path.join(runDir, agentId) };
+	return { runDir, agentId };
 }
 
 function completeRunAndAgent(prefix: string, cwd: string): { value: string; label: string; description?: string }[] | null {
-	const records = listSubagentSessionRecords(cwd);
-	const items = records.map((record) => {
-		const value = `${record.runDir} ${record.agentId}`;
-		return {
-			value,
-			label: `${record.runName} ${record.agentId}`,
-			description: record.state?.status,
-		};
+	const items = listProjectRecords(cwd).map((record) => {
+		const value = `${record.batch} ${record.agentId}`;
+		return { value, label: value, description: record.status };
 	});
 	const filtered = items.filter((item) => item.value.startsWith(prefix) || item.label.includes(prefix));
 	return filtered.length ? filtered : null;

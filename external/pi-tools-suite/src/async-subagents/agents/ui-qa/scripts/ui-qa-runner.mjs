@@ -333,14 +333,14 @@ function readFlow(flowPath, requireSteps) {
 
 function resolveAgentDirectory(projectRoot, value) {
 	if (typeof value !== "string" || value.length === 0) throw new UiQaError("FAILED", `${AGENT_DIR_ENV} is required`);
-	const subagentRoot = path.join(projectRoot, ".pi", "subagents");
+	const subagentRoot = path.join(projectRoot, ".pi", "artifacts", "subagents");
 	const resolved = path.resolve(value);
 	if (!fs.existsSync(resolved)) throw new UiQaError("FAILED", "UI QA agent directory is missing");
 	const real = fs.realpathSync(resolved);
 	assertInside(subagentRoot, real, "UI QA agent directory");
 	assertNoSymlinkComponents(projectRoot, real, "UI QA agent directory");
 	if (!fs.statSync(real).isDirectory()) throw new UiQaError("FAILED", "UI QA agent directory must be a directory");
-	for (const [name, label] of [["prompt.md", "prompt"], ["project_cwd", "project metadata"], ["subagent_type", "type metadata"]]) {
+	for (const [name, label] of [["project_cwd", "project metadata"], ["subagent_type", "type metadata"]]) {
 		const file = path.join(real, name);
 		if (!fs.existsSync(file) || !fs.statSync(file).isFile()) throw new UiQaError("FAILED", `UI QA ${label} is missing`);
 		assertNoSymlinkComponents(real, file, `UI QA ${label}`);

@@ -196,7 +196,7 @@ export function spawnAgent(
 	// Durable launch facts go to the parent session; a fresh attempt resets
 	// every outcome field of a reused agent id.
 	updateRecord(runDir, task.id, {
-		...(resume ? {} : { task, extraArgs, timeoutMs: options.timeoutMs, maxResultBytes: options.maxResultBytes, turn: 1, childSessionFile: null }),
+		...(resume ? {} : { ...(getRecord(runDir, task.id)?.task === task ? {} : { task }), extraArgs, timeoutMs: options.timeoutMs, maxResultBytes: options.maxResultBytes, turn: 1, childSessionFile: null }),
 		cwd,
 		subagentType: task.subagentType,
 		model: task.model,
@@ -206,7 +206,7 @@ export function spawnAgent(
 		exitCode: null, finishedAt: null, nextRetryAt: null, pid: null, processGroup: null,
 		stopRequested: null, stopSignal: null, timedOut: null, structured: null, message: null, stderrPreview: null,
 	});
-	updateLive(runDir, task.id, { active: true, resultText: undefined, stderrTail: undefined, lastActivity: undefined, todoProgress: undefined });
+	updateLive(runDir, task.id, { active: true, resultText: undefined, stderrTail: undefined, lastActivity: undefined, todoProgress: undefined, launchArgs: [...piArgs] });
 
 	const logLimits = resolveSubagentLogLimits();
 	const invocation = getPiInvocation(piArgs);
@@ -1058,6 +1058,9 @@ function prepareUiQaWorkspace(cwd: string, runDir: string, agentId: string): str
 		fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 		if (process.platform !== "win32") fs.chmodSync(dir, 0o700);
 	}
+	// Workspace identity markers checked by the ui-qa/browser runners (not run state).
+	fs.writeFileSync(path.join(root, "project_cwd"), `${cwd}\n`, "utf-8");
+	fs.writeFileSync(path.join(root, "subagent_type"), "ui-qa\n", "utf-8");
 	return root;
 }
 

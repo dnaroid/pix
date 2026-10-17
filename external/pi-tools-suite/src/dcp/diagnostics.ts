@@ -3,6 +3,35 @@ import { modelKeysFromContext } from "./config.js";
 import type { DcpState } from "./state.js";
 import { estimateMessageTokens, getActiveSummaryTokenEstimate, resolveContextThresholds } from "./pruner-metadata.js";
 import { planDcpBudget } from "./progress-controller.js";
+import type { ProviderEvidenceCompletion } from "./provider-tool-results.js";
+
+function observedCount(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+/** Final adapter output, not an upstream API-call ledger or a cost estimate.
+ * A provider may aggregate internal/recovery calls. Refused correlation must
+ * never acquire a request ID merely because it is adjacent in the transcript. */
+export function dcpUsageObservation(message: any, completion: ProviderEvidenceCompletion, epoch: string) {
+  return {
+    scope: "assistant-message-reported",
+    firstRequestId: completion.status === "promote" ? `${epoch}:${completion.firstAttemptId}` : null,
+    lastRequestId: completion.status === "promote" ? `${epoch}:${completion.lastAttemptId}` : null,
+    correlation: completion.status,
+    refusalReason: completion.status === "refused" ? completion.reason : null,
+    attempts: completion.attempts,
+    provider: typeof message.provider === "string" ? message.provider : null,
+    model: typeof message.model === "string" ? message.model : null,
+    stopReason: typeof message.stopReason === "string" ? message.stopReason : null,
+    messageTimestamp: observedCount(message.timestamp),
+    input: observedCount(message.usage?.input),
+    output: observedCount(message.usage?.output),
+    cacheRead: observedCount(message.usage?.cacheRead),
+    cacheWrite: observedCount(message.usage?.cacheWrite),
+    cacheWrite1h: observedCount(message.usage?.cacheWrite1h),
+    totalTokens: observedCount(message.usage?.totalTokens),
+  };
+}
 
 /** Scalar-only diagnostic snapshot; never stores raw messages or credentials.
  * These records are observational, never journal/recovery authority. */

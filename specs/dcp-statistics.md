@@ -96,8 +96,10 @@ selection and summary quality, not correctness signals.
 
 ## Diagnostic records are not recovery authority
 
-Version-1 `dcp-diagnostic` custom entries contain only scalar epoch, request,
-completion and rejected-auto-attempt observations. They are separate from the
+Version-1 `dcp-diagnostic` custom entries contain epoch, request, completion,
+usage and rejected-auto-attempt observations. Usage fields are scalar; request
+records may also contain the existing bounded scalar diagnostic snapshot. They
+are separate from the
 `dcp-journal` projection decisions. They carry no raw message bodies, tool
 arguments or credentials, never enter provider context, and their write failure
 cannot invalidate a successful rewrite or provider operation.
@@ -106,6 +108,20 @@ These records are produced at lifecycle/provider boundaries, not on every
 context callback. Delivery counts cover instrumented history only. Absence of
 older instrumentation is shown as unknown. No diagnostic record restores
 provider-seen evidence, freshness grants or patience into a resumed runtime.
+
+With DCP enabled, each finalized assistant `message_end` emits a scalar `usage`
+observation even when there is no new delivery evidence to commit or correlation
+is refused. Its scope is `assistant-message-reported`, not individual upstream
+API calls or billable spend: adapters may include internal/recovery usage. Input,
+output, cache-read/write, optional 1h writes and total are copied, never multiplied
+by retries or treated as DCP-projected context size; unavailable/invalid counters
+are null. The 1h field is a subset of writes, not additional token volume.
+Only the existing tracker's unambiguous promotion supplies first/last epoch-bound
+request IDs; refused observations retain reason/attempt count and null IDs.
+Repeated/unmatched events are not a deduplicated billing ledger. Request records
+also expose the already-computed payload revision hash, attempt count and ambiguity,
+without retaining payloads. These observations neither alter correlation rules nor
+restore state, and are not counted as new reminder deliveries by statistics.
 
 ## Full branch and owner boundaries
 

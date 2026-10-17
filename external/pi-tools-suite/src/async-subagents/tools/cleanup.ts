@@ -3,15 +3,17 @@ import { Type } from "@earendil-works/pi-ai";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { ASYNC_SUBAGENT_TOOL_DESCRIPTIONS } from "../../tool-descriptions.js";
-import { deleteCleanupCandidates, findCleanupCandidates, getRunRoot, removeSubagentRunsFromRegistry, resolveRunDir } from "../lib.js";
+import { deleteCleanupCandidates, findCleanupCandidates, getRunRoot, resolveRunDir } from "../lib.js";
+import { LEGACY_REGISTRY_FILE } from "../core/cleanup.js";
+import { scopeForContext } from "../core/lookup.js";
 
 export function registerCleanupTool(pi: ExtensionAPI): void {
 	pi.registerTool({
 		...ASYNC_SUBAGENT_TOOL_DESCRIPTIONS.cleanupAction,
 		parameters: Type.Object({
 			runRoot: Type.Optional(Type.String({ description: "Root directory (default: .pi/subagents)" })),
-			days: Type.Optional(Type.Number({ description: "Remove runs older than N days (default 7)", default: 7 })),
-			keep: Type.Optional(Type.Number({ description: "Always keep newest N runs (default 20)", default: 20 })),
+			days: Type.Optional(Type.Number({ description: "Remove finished legacy runs and orphaned parent-scope directories older than N days (default 7)", default: 7 })),
+			keep: Type.Optional(Type.Number({ description: "Always keep newest N legacy runs (default 20)", default: 20 })),
 			delete: Type.Optional(Type.Boolean({ description: "Actually delete (default: dry-run)", default: false })),
 		}),
 
@@ -55,7 +57,7 @@ export function registerCleanupTool(pi: ExtensionAPI): void {
 			const keep = params.keep ?? 20;
 			const doDelete = params.delete ?? false;
 
-			const candidates = findCleanupCandidates(runRoot, days, keep);
+			const candidates = findCleanupCandidates(runRoot, days, keep, { currentScope: scopeForContext(ctx) });
 
 			if (candidates.length === 0) {
 				return {
@@ -83,7 +85,8 @@ export function registerCleanupTool(pi: ExtensionAPI): void {
 
 
 			deleteCleanupCandidates(candidates);
-			removeSubagentRunsFromRegistry(ctx.cwd, candidates);
+			// The pre-0072 registry is obsolete; nothing reads it any more.
+			fs.rmSync(path.join(expectedRoot, LEGACY_REGISTRY_FILE), { force: true });
 
 			return {
 				content: [

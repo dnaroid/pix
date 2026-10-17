@@ -24,7 +24,13 @@ from the HTML sandbox and uses its shared generated-prompt submission path.
 - Only assistant transcript text opts into the sandbox via a **closed** fenced
   `pix-html` or `html-sandbox` block, with either backticks or tildes.
 - Ordinary `html` fences, user/system/thought messages, tool results, and
-  incomplete/oversized fences retain the existing escaped Markdown behavior.
+  oversized closed fences retain the existing escaped Markdown behavior.
+- An unclosed assistant `pix-html`/`html-sandbox` fence shows a compact
+  awaiting-completion status instead of streaming its source as code. Once the
+  opening language is recognized, its body is neither rendered as Markdown nor
+  executed; the preview mounts only when a matching closing fence arrives.
+  Adjacent Markdown and earlier previews remain visible. Interrupted or replayed
+  incomplete blocks retain the same placeholder, not a running iframe.
 - A closed sandbox fence can be interleaved with normal explanatory Markdown.
   The iframe keeps its DOM/Canvas while the rest of the assistant message
   streams, unless that sandbox's source actually changes.

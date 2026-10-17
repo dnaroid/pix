@@ -54,11 +54,10 @@ function writeAuth(project: string, profiles: Record<string, unknown>): void {
 }
 
 function createBrowserQaAgent(project: string, id = "qa-agent"): string {
-	const agentDir = path.join(project, ".pi", "subagents", "test-run", id);
+	const agentDir = path.join(project, ".pi", "artifacts", "subagents", `test-run-${id}`);
 	const workspace = path.join(agentDir, "ui-qa", "browser");
 	const flows = path.join(workspace, "flows");
 	fs.mkdirSync(flows, { recursive: true, mode: 0o700 });
-	writeFile(path.join(agentDir, "prompt.md"), "browser QA test\n");
 	writeFile(path.join(agentDir, "project_cwd"), project);
 	writeFile(path.join(agentDir, "subagent_type"), "ui-qa");
 	if (process.platform !== "win32") {

@@ -1,8 +1,9 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "@earendil-works/pi-ai";
-import * as path from "node:path";
 import { ASYNC_SUBAGENT_TOOL_DESCRIPTIONS } from "../../tool-descriptions.js";
-import { readResult, resolveSubagentAgentRunDir, validateBasename } from "../lib.js";
+import { readResult, validateBasename } from "../lib.js";
+import { resolveSubagentAgentRunDir } from "../core/lookup.js";
+import { getRecord } from "../core/store.js";
 import type { AgentResult } from "../lib.js";
 import type { StructuredFileReference, StructuredFinding, StructuredRisk } from "../core/types.js";
 import { INLINE_RENDERING } from "../constants.js";
@@ -14,25 +15,23 @@ const MAX_COMPACT_FILES = 20;
 const MAX_COMPACT_RISKS = 10;
 const MAX_COMPACT_NEXT_ACTIONS = 10;
 
-interface ResultArtifactPaths {
-	resultMd: string;
-	resultJson: string;
-	stderrLog: string;
-}
+/** Bound of the result text inlined into the parent context. */
+const MAX_INLINE_RESULT_CHARS = 12_000;
+const MAX_INLINE_STDERR_CHARS = 2_000;
 
 export function registerResultTool(pi: ExtensionAPI): void {
 	pi.registerTool({
 		...ASYNC_SUBAGENT_TOOL_DESCRIPTIONS.resultAction,
 		...INLINE_RENDERING,
 		parameters: Type.Object({
-			runDir: Type.Optional(Type.String({ description: "Run directory path. If omitted, resolves agentId through the project sub-agent registry under .pi/subagents/registry.json, falling back to scanning .pi/subagents/." })),
+			runDir: Type.Optional(Type.String({ description: "Batch name (or run key). If omitted, resolves agentId to its latest run in this session." })),
 			agentId: Type.String({ description: "Agent ID to read" }),
 		}),
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			validateBasename(params.agentId, "agentId");
-			const runDir = resolveSubagentAgentRunDir(ctx.cwd, params.agentId, params.runDir);
-			const result = readResult(runDir, params.agentId, { includeRawFiles: false });
+			const runDir = resolveSubagentAgentRunDir(ctx, params.agentId, params.runDir);
+			const result = readResult(runDir, params.agentId, { includeRawFiles: true });
 
 			if (!result) {
 				return {
@@ -49,9 +48,8 @@ export function registerResultTool(pi: ExtensionAPI): void {
 			if (result.state.retryCount) parts.push(`Retries: ${result.state.retryCount}`);
 
 			if (result.state.status === "running") {
-				parts.push("\nAgent is still running. Wait for it to finish or inspect the artifact paths below.");
+				parts.push("\nAgent is still running. Wait for it to finish, then read the result again.");
 			}
-			const artifacts = buildArtifactPaths(ctx.cwd, runDir, params.agentId);
 
 			// Include structured metadata when available
 			if (result.structured) {
@@ -62,7 +60,8 @@ export function registerResultTool(pi: ExtensionAPI): void {
 				if (s.resultTruncated) parts.push(`Result truncated: ${s.resultOriginalBytes} bytes → maxResultBytes`);
 			}
 
-			appendCompactResult(parts, result, artifacts);
+			appendCompactResult(parts, result);
+			const childSessionFile = getRecord(runDir, params.agentId)?.childSessionFile;
 
 			return {
 				content: [{ type: "text", text: parts.join("\n") }],
@@ -72,7 +71,7 @@ export function registerResultTool(pi: ExtensionAPI): void {
 					state: result.state,
 					exitCode: result.exitCode,
 					structured: compactStructuredForDetails(result.structured),
-					artifacts,
+					...(childSessionFile ? { childSessionFile } : {}),
 				},
 			};
 		},
@@ -88,48 +87,30 @@ export function registerResultTool(pi: ExtensionAPI): void {
 	});
 }
 
-function buildArtifactPaths(cwd: string, runDir: string, agentId: string): ResultArtifactPaths {
-	const agentDir = path.join(runDir, agentId);
-	return {
-		resultMd: displayPath(cwd, path.join(agentDir, "result.md")),
-		resultJson: displayPath(cwd, path.join(agentDir, "result.json")),
-		stderrLog: displayPath(cwd, path.join(agentDir, "stderr.log")),
-	};
-}
-
-function displayPath(cwd: string, filePath: string): string {
-	const relative = path.relative(cwd, filePath);
-	if (relative && !relative.startsWith("..") && !path.isAbsolute(relative)) return relative;
-	return filePath;
-}
-
-function appendCompactResult(parts: string[], result: AgentResult, artifacts: ResultArtifactPaths): void {
+function appendCompactResult(parts: string[], result: AgentResult): void {
 	const structured = result.structured;
-
-	if (structured?.summary) {
-		parts.push(`\nSummary:\n${structured.summary}`);
-	} else if (result.resultAvailable) {
-		parts.push("\nSummary:\n(summary unavailable; see the full result artifact below)");
-	} else {
-		parts.push("\n--- No result yet ---");
-	}
-
 	if (structured?.confidence) parts.push(`Confidence: ${structured.confidence}`);
 	if (structured?.findings?.length) appendList(parts, "Findings", structured.findings, formatFinding, MAX_COMPACT_FINDINGS);
 	if (structured?.files?.length) appendList(parts, "Referenced files", structured.files, formatFileReference, MAX_COMPACT_FILES);
 	if (structured?.risks?.length) appendList(parts, "Risks", structured.risks, formatRisk, MAX_COMPACT_RISKS);
 	if (structured?.nextActions?.length) appendList(parts, "Next actions", structured.nextActions, (action) => truncate(action, 500), MAX_COMPACT_NEXT_ACTIONS);
 
-	if (result.stderrAvailable) {
-		parts.push("\nStderr:");
-		if (structured?.stderrPreview) parts.push(`Preview: ${structured.stderrPreview}`);
-		parts.push(`Full stderr: ${artifacts.stderrLog}`);
+	const text = result.result?.trim();
+	if (text) {
+		const clipped = text.length > MAX_INLINE_RESULT_CHARS;
+		parts.push(`\n--- Result${clipped ? ` (first ${MAX_INLINE_RESULT_CHARS} of ${text.length} chars; the full answer is the child session's last message)` : ""} ---`);
+		parts.push(clipped ? text.slice(0, MAX_INLINE_RESULT_CHARS) : text);
+	} else if (structured?.summary) {
+		parts.push(`\nSummary:\n${structured.summary}`);
+	} else {
+		parts.push("\n--- No result yet ---");
 	}
 
-	parts.push("\nArtifacts:");
-	parts.push(`${result.resultAvailable ? "Full result" : "Full result (not written yet)"}: ${artifacts.resultMd}`);
-	parts.push(`${structured ? "Structured result" : "Structured result (not available yet)"}: ${artifacts.resultJson}`);
-	parts.push("Raw result/stderr are intentionally not inlined to keep parent context and IPC buffers small.");
+	const stderr = result.stderr?.trim();
+	if (stderr) {
+		parts.push("\nStderr (tail):");
+		parts.push(stderr.length > MAX_INLINE_STDERR_CHARS ? `...${stderr.slice(-MAX_INLINE_STDERR_CHARS)}` : stderr);
+	}
 }
 
 function compactStructuredForDetails(structured: AgentResult["structured"]): AgentResult["structured"] {
@@ -142,7 +123,7 @@ function appendList<T>(parts: string[], title: string, items: readonly T[], form
 	const visible = items.slice(0, limit);
 	parts.push(`\n${title}:`);
 	for (const item of visible) parts.push(`- ${format(item)}`);
-	if (items.length > visible.length) parts.push(`- ... ${items.length - visible.length} more in result.json`);
+	if (items.length > visible.length) parts.push(`- ... ${items.length - visible.length} more in the full result`);
 }
 
 function formatFinding(finding: StructuredFinding): string {

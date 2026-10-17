@@ -1,5 +1,5 @@
-import * as fs from "node:fs";
-import * as path from "node:path";
+import { readResultText } from "./state.js";
+import { getLive, getRecord } from "./store.js";
 import type { AgentCompletionHandler } from "./types.js";
 
 const exhaustedModels = new Set<string>();
@@ -58,9 +58,10 @@ export function rememberSessionModelFallback(failedModel: string | undefined, fa
 
 export function isQuotaLimitCompletion(completion: Parameters<AgentCompletionHandler>[0], model?: string): boolean {
 	if (completion.exitCode === 0 || completion.state.status === "stopped") return false;
+	const record = getRecord(completion.runDir, completion.agentId);
 	const text = [
-		readIfExists(path.join(completion.agentDir, "result.md")),
-		readIfExists(path.join(completion.agentDir, "stderr.log")),
+		readResultText(completion.runDir, completion.agentId) ?? "",
+		getLive(completion.runDir, completion.agentId)?.stderrTail ?? record?.stderrPreview ?? "",
 	].filter(Boolean).join("\n").toLowerCase();
 	if (!text.trim()) return false;
 	if (modelProvider(model ?? "") === "antigravity") return text.includes(ANTIGRAVITY_ALL_ACCOUNTS_EXHAUSTED_MARKER);
@@ -114,12 +115,3 @@ function modelProvider(model: string): string {
 	const slash = model.indexOf("/");
 	return slash > 0 ? model.slice(0, slash) : model;
 }
-
-function readIfExists(file: string): string {
-	try {
-		return fs.existsSync(file) ? fs.readFileSync(file, "utf-8") : "";
-	} catch {
-		return "";
-	}
-}
-

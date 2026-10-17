@@ -16,7 +16,7 @@ status: active
 - Use native logical-point work areas (excluding the menu bar and Dock).
   Each layout has at most three columns and three windows per column: 2×1,
   2×2 and 3×3 when space/window count permits, with strips for narrow/short screens.
-- Capacity is bounded by the configured 860×380 logical-point content minimum,
+- Capacity is bounded by the configured 660×380 logical-point content minimum,
   including any native frame overhead. For the windows assigned to one display,
   prefer ceil(sqrt(window count)) columns, clamped to feasible column counts.
   Distribute windows as evenly as possible among equal-width columns, with

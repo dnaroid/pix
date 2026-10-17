@@ -2,7 +2,9 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { getAgentState, getRunState } from "./state.js";
 import { terminateProcess, terminateProcessTree } from "./process.js";
-import { writeStructuredResult } from "./structured-result.js";
+import { settleStructuredResult } from "./structured-result.js";
+import { ownedAgentDir } from "./paths.js";
+import { getLive, getRecord, updateLive, updateRecord } from "./store.js";
 import type { AgentState } from "./types.js";
 import { isoNow } from "./utils.js";
 import { readOwnedMetadata, requestOwnedCancel, verifiedOwnedDrainSync } from "./owned-launch-integration.js";
@@ -46,7 +48,7 @@ function stopAgent(runDir: string, agent: AgentState, signal: StopSignal): StopA
 		pid: agent.pid,
 		stopped: false,
 	};
-	const agentDir = path.join(runDir, agent.id);
+	const agentDir = ownedAgentDir(runDir, agent.id);
 	// Any surviving owned-launch artifact — the ownership pointer OR UUID run
 	// directories — selects the owned cancellation path. A pointerless owned
 	// run must NEVER fall through to the legacy PID signal or a terminal
@@ -59,6 +61,7 @@ function stopAgent(runDir: string, agent: AgentState, signal: StopSignal): StopA
 			// Durable intent first. Never signal a saved bridge PID or process group.
 			fs.writeFileSync(path.join(agentDir, "stop_requested"), isoNow(), "utf8");
 			fs.writeFileSync(path.join(agentDir, "stop_signal"), signal, "utf8");
+			if (getRecord(runDir, agent.id)) updateRecord(runDir, agent.id, { stopRequested: true, stopSignal: signal });
 		} catch (error) {
 			return { ...result, signal, error: error instanceof Error ? error.message : String(error) };
 		}
@@ -119,7 +122,7 @@ function stopAgent(runDir: string, agent: AgentState, signal: StopSignal): StopA
 	}
 
 	try {
-		const ownsProcessGroup = fs.existsSync(path.join(runDir, agent.id, "process_group"));
+		const ownsProcessGroup = getRecord(runDir, agent.id)?.processGroup === true;
 		if (ownsProcessGroup) terminateProcessTree(agent.pid, signal);
 		else terminateProcess(agent.pid, signal);
 		markStopped(runDir, agent.id, signal);
@@ -151,32 +154,21 @@ function stopAgent(runDir: string, agent: AgentState, signal: StopSignal): StopA
 }
 
 function markStopped(runDir: string, agentId: string, signal: StopSignal, resultText = "Sub-agent stop requested."): void {
-	const agentDir = path.join(runDir, agentId);
 	const now = isoNow();
-	fs.mkdirSync(agentDir, { recursive: true });
-	ensurePromptFile(runDir, agentId, agentDir, resultText);
-	fs.writeFileSync(path.join(agentDir, "stop_requested"), now, "utf-8");
-	fs.writeFileSync(path.join(agentDir, "stop_signal"), signal, "utf-8");
-	fs.rmSync(path.join(agentDir, "retry_pending"), { force: true });
-	fs.rmSync(path.join(agentDir, "next_retry_at"), { force: true });
-	if (!fs.existsSync(path.join(agentDir, "result.md"))) fs.writeFileSync(path.join(agentDir, "result.md"), resultText, "utf-8");
-	fs.writeFileSync(path.join(agentDir, "exit_code"), "stopped", "utf-8");
-	fs.writeFileSync(path.join(agentDir, "finished_at"), now, "utf-8");
+	const wasActiveProcess = getLive(runDir, agentId)?.process !== undefined;
+	updateRecord(runDir, agentId, {
+		stopRequested: true, stopSignal: signal, status: "stopped", exitCode: null, nextRetryAt: null, finishedAt: now,
+	});
+	if (getLive(runDir, agentId)?.resultText === undefined) {
+		updateLive(runDir, agentId, { resultText });
+		updateRecord(runDir, agentId, { message: resultText });
+	}
+	// A queued/retrying agent has no process left to settle it.
+	if (!wasActiveProcess) updateLive(runDir, agentId, { active: false });
 	const state = getAgentState(runDir, agentId, { includeLineCounts: false }) ?? { id: agentId, status: "stopped" as const, finishedAt: now };
 	try {
-		writeStructuredResult({ agentDir, agentId, state });
+		settleStructuredResult(runDir, agentId, { state });
 	} catch {
 		// Stop is best-effort; failure to write metadata must not hide the stop result.
 	}
-}
-
-function ensurePromptFile(runDir: string, agentId: string, agentDir: string, fallback: string): void {
-	const promptFile = path.join(agentDir, "prompt.md");
-	if (fs.existsSync(promptFile)) return;
-	const queuedPromptFile = path.join(runDir, "prompts", `${agentId}.md`);
-	if (fs.existsSync(queuedPromptFile)) {
-		fs.copyFileSync(queuedPromptFile, promptFile);
-		return;
-	}
-	fs.writeFileSync(promptFile, fallback, "utf-8");
 }
