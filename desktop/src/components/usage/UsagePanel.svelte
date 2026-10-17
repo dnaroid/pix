@@ -4,17 +4,17 @@
   import { onMount, setContext, untrack } from "svelte";
   import type { AcpClient, RuntimeStatus } from "../../lib/acp-client";
   import { createUsagePanelSections } from "../../app/usage-panel-sections.svelte";
-  import { USAGE_SECTIONS_CONTEXT } from "../../lib/usage-panel-sections";
+  import { USAGE_SECTIONS_CONTEXT, USAGE_SECTION_IDS } from "../../lib/usage-panel-sections";
   import { createUsageStatsStore } from "../../app/usage-stats.svelte";
   import { createProviderUsageStore } from "../../app/provider-usage.svelte";
   import { createDiagnosticLogger } from "../../lib/diagnostic-logging";
   import { iconButtonClass } from "../../lib/icon-button";
   import { subscribeUsageStatsChanged } from "../../lib/usage-stats-events";
-  import { hasUsageData, type UsagePeriod, type UsageSessionTarget } from "../../lib/usage-stats";
+  import type { UsagePeriod, UsageSessionTarget } from "../../lib/usage-stats";
   import UsageSegmented from "./UsageSegmented.svelte";
   import UsageSourceView from "./UsageSourceView.svelte";
   import UsageProviderLimits from "./UsageProviderLimits.svelte";
-  import { PERIOD_LABELS, STATUS_LABELS } from "./usage-format";
+  import { PERIOD_LABELS } from "./usage-format";
 
   let { client, workspace, providerStatuses = [], onOpenSession }: {
     client: AcpClient | null;
@@ -35,7 +35,7 @@
   setContext(USAGE_SECTIONS_CONTEXT, sections);
   $effect(() => {
     const target = workspace;
-    untrack(() => { void sections.load(target); });
+    untrack(() => { error = null; void sections.load(target); });
   });
   const store = createUsageStatsStore({
     client: () => client,
@@ -50,22 +50,32 @@
     workspace: () => workspace,
     reportError: (cause) => diagnostics.report(cause, "frontend:provider-usage"),
   });
-  const quotaStatuses = $derived([...providerStatuses, ...quotas.entries.flatMap((entry) => entry.runtime ? [entry.runtime] : [])]);
+  const providerOpen = $derived(sections.ready && sections.isOpen("provider-limits"));
+  const historyOpen = $derived(sections.ready && USAGE_SECTION_IDS.some((id) => id !== "provider-limits" && sections.isOpen(id)));
+  const quotaStatuses = $derived(providerOpen ? [...providerStatuses, ...quotas.entries.flatMap((entry) => entry.runtime ? [entry.runtime] : [])] : []);
   const refreshing = $derived(store.busy || quotas.busy);
 
   // Re-read the clock whenever data changes; no timers while the panel idles.
   const nowMs = $derived.by(() => { void store.snapshots; return Date.now(); });
   const snapshot = $derived(store.snapshot("pix-sessions"));
-  const hasData = $derived(hasUsageData(snapshot));
 
-  // Panel mounted = open. Scope (client/workspace) changes re-request in place.
+  // The historical sections share one source. Only visible consumers need updates.
   $effect(() => {
     void client;
     void workspace;
+    const active = historyOpen;
     untrack(() => {
-      error = null;
-      void (store.active ? store.sync() : store.open());
-      void quotas.refresh();
+      if (active) void (store.active ? store.sync() : store.open());
+      else store.close();
+    });
+  });
+  $effect(() => {
+    void client;
+    void workspace;
+    const active = providerOpen;
+    untrack(() => {
+      if (active) void quotas.resume();
+      else quotas.pause();
     });
   });
 
@@ -92,7 +102,7 @@
     <button
       class={iconButtonClass("sm", "panel")}
       type="button" title="Refresh usage" aria-label="Refresh usage"
-      disabled={!client || !workspace || refreshing}
+      disabled={!client || !workspace || refreshing || (!providerOpen && !historyOpen)}
       aria-busy={refreshing}
       onclick={refresh}
     ><RefreshCw class={["h-3.5 w-3.5", refreshing && "animate-spin motion-reduce:animate-none"]} aria-hidden="true" /></button>
@@ -113,18 +123,7 @@
       <div class="flex flex-wrap items-center gap-1.5 px-3 pt-2">
         <UsageSegmented value={period} options={PERIODS.map((value) => ({ value, label: PERIOD_LABELS[value] }))} ariaLabel="Period" onChange={(value) => period = value} />
       </div>
-      {#if snapshot && hasData}
-        {#key snapshot.source}
-          <UsageSourceView {snapshot} {period} {nowMs} {workspace} {...(onOpenSession ? { onOpenSession } : {})} />
-        {/key}
-      {:else if snapshot && snapshot.status !== "loading"}
-        <div class="px-3 py-6 text-center text-xs text-muted-foreground" role="status">
-          <p class="m-0 font-medium text-foreground">{snapshot.status === "ready" || snapshot.status === "stale" ? "No usage recorded yet" : STATUS_LABELS[snapshot.status]}</p>
-          {#if snapshot.message}<p class="m-0 mt-1 leading-4">{snapshot.message}</p>{/if}
-        </div>
-      {:else}
-        <p class="m-0 px-3 py-6 text-center text-xs text-muted-foreground" role="status">Loading usage…</p>
-      {/if}
+      <UsageSourceView {snapshot} {period} {nowMs} {workspace} loading={store.busy || snapshot?.status === "loading"} {...(onOpenSession ? { onOpenSession } : {})} />
     {/if}
   </div>
 </section>

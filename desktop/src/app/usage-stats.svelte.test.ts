@@ -137,6 +137,42 @@ describe("usage stats store", () => {
     expect(calls[1]!.options).toEqual({ sources: ["pix-sessions"] });
   });
 
+  it("ignores updates and successful in-flight results while all historical sections sleep", async () => {
+    const { store, calls } = setup();
+    const first = store.open();
+    calls[0]!.resolve({ snapshots: [snap("pix-sessions", 1)] });
+    await first;
+    const interrupted = store.refresh();
+    store.handleChanged({ source: "pix-sessions" });
+    store.close();
+    calls[1]!.resolve({ snapshots: [snap("pix-sessions", 2)] });
+    await interrupted;
+    store.handleChanged({ source: "pix-sessions" });
+    await store.refresh();
+    await flush();
+    expect(calls).toHaveLength(2);
+    expect(store.snapshot("pix-sessions")?.fetchedAtMs).toBe(1);
+    const reopened = store.open();
+    expect(calls).toHaveLength(3);
+    calls[2]!.resolve({ snapshots: [snap("pix-sessions", 3)] });
+    await reopened;
+    expect(store.snapshot("pix-sessions")?.fetchedAtMs).toBe(3);
+    store.dispose();
+  });
+
+  it("clears foreign cached data without fetching when the workspace changes while asleep", async () => {
+    const { store, calls, setWorkspace } = setup();
+    const first = store.open();
+    calls[0]!.resolve({ snapshots: [snap("pix-sessions")] });
+    await first;
+    store.close();
+    setWorkspace("/w/b");
+    store.close();
+    expect(store.snapshots.size).toBe(0);
+    expect(calls).toHaveLength(1);
+    store.dispose();
+  });
+
   it("reports current request failures once and stops after dispose", async () => {
     const { store, calls, errors } = setup();
     const opening = store.open();

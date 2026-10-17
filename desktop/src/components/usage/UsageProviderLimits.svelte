@@ -1,11 +1,14 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { getContext } from "svelte";
+  import type { UsagePanelSections } from "../../app/usage-panel-sections.svelte";
+  import { USAGE_SECTIONS_CONTEXT } from "../../lib/usage-panel-sections";
   import type { ModelUsageLimitWindow, ModelUsageStatus, RuntimeStatus } from "../../lib/acp-client";
   import type { ProviderUsageEntry } from "../../app/provider-usage.svelte";
   import { providerUsageLimits, providerUsageLimitKey, quotaProviderLabel, type ProviderUsageSummary } from "../../lib/provider-usage-limits";
   import ModelProviderIcon from "../ModelProviderIcon.svelte";
   import UsageLimitBars from "../UsageLimitBars.svelte";
   import UsageSection from "./UsageSection.svelte";
+  import UsageSkeleton from "./UsageSkeleton.svelte";
 
   let { statuses, entries = [], loading = false, failed = false }: {
     statuses: readonly RuntimeStatus[];
@@ -13,8 +16,10 @@
     loading?: boolean;
     failed?: boolean;
   } = $props();
+  const sections = getContext<UsagePanelSections | undefined>(USAGE_SECTIONS_CONTEXT);
+  const expanded = $derived(sections?.isOpen("provider-limits") ?? true);
   let now = $state(Date.now());
-  const providers = $derived(providerUsageLimits(statuses, now));
+  const providers = $derived(expanded ? providerUsageLimits(statuses, now) : []);
   const missing = $derived.by(() => {
     const grouped = new Map<ModelUsageStatus["provider"], ProviderUsageEntry>();
     const priority = { loading: 0, failed: 1, unavailable: 2, ready: 3 };
@@ -26,13 +31,14 @@
     return [...grouped.values()];
   });
 
-  onMount(() => {
+  $effect(() => {
+    if (!expanded) return;
+    now = Date.now();
     const timer = window.setInterval(() => now = Date.now(), 60_000);
     return () => window.clearInterval(timer);
   });
 
   function missingMessage(entry: ProviderUsageEntry): string {
-    if (entry.state === "loading") return "Loading limits…";
     if (entry.state === "failed") return "Could not refresh limits. Try again.";
     return "Quota unavailable for this account.";
   }
@@ -45,7 +51,7 @@
   }
 </script>
 
-<UsageSection title="Provider limits" sectionId="provider-limits">
+<UsageSection title="Provider limits" sectionId="provider-limits" {loading}>
   {#each providers as usage (providerUsageLimitKey(usage))}
     <div class="mb-2 flex min-w-0 flex-col gap-1 text-xs">
       <div class="flex min-w-0 items-center gap-1.5 font-medium">
@@ -62,12 +68,12 @@
         <ModelProviderIcon provider={entry.modelRef.split("/")[0] ?? entry.provider} />
         <span>{quotaProviderLabel(entry.provider)}</span>
       </div>
-      <span class="text-muted-foreground">{missingMessage(entry)}</span>
+      {#if entry.state === "loading"}<UsageSkeleton label="Loading limits…" />{:else}<span class="text-muted-foreground">{missingMessage(entry)}</span>{/if}
     </div>
   {/each}
   {#if failed}
     <p class="m-0 text-xs leading-4 text-muted-foreground" role="status">Could not load provider limits. Try refreshing.</p>
   {:else if providers.length === 0 && missing.length === 0}
-    <p class="m-0 text-xs leading-4 text-muted-foreground">{loading ? "Loading provider limits…" : "No provider limits available yet. Connect a supported provider to load its quota."}</p>
+    {#if loading}<UsageSkeleton label="Loading provider limits…" tall />{:else}<p class="m-0 text-xs leading-4 text-muted-foreground">No provider limits available yet. Connect a supported provider to load its quota.</p>{/if}
   {/if}
 </UsageSection>

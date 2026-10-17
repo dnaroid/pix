@@ -49,6 +49,95 @@ describe("provider quota targets", () => {
 });
 
 describe("panel-owned provider quota polling", () => {
+  it("sleeps while collapsed, retains cached quotas and resumes on expansion", async () => {
+    const { store, draftConfig } = setup();
+    await store.refresh();
+    const cached = store.entries;
+    store.pause();
+    expect(store.busy).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+    await store.refresh();
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(draftConfig).toHaveBeenCalledTimes(4);
+    expect(store.entries).toBe(cached);
+    await store.resume();
+    expect(draftConfig).toHaveBeenCalledTimes(8);
+    expect(vi.getTimerCount()).toBe(1);
+    store.dispose();
+    await store.resume();
+    expect(draftConfig).toHaveBeenCalledTimes(8);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("ignores an interrupted catalogue even after a same-workspace reopen", async () => {
+    const { store, draftConfig } = setup();
+    const late = deferred<Response>();
+    draftConfig.mockReturnValueOnce(late.promise);
+    const old = store.refresh();
+    store.pause();
+    await store.resume();
+    const fresh = store.entries;
+    late.resolve(catalogue(["google-antigravity/old"]));
+    await old;
+    expect(store.entries).toBe(fresh);
+    expect(draftConfig).toHaveBeenCalledTimes(5);
+    expect(vi.getTimerCount()).toBe(1);
+    store.dispose();
+  });
+
+  it("drops pending quotas and queued work when collapsed, including across a reopen", async () => {
+    const { store, draftConfig } = setup();
+    const late = deferred<Response>();
+    const refs = Array.from({ length: 8 }, (_, i) => `google-antigravity/model-${i}`);
+    draftConfig.mockImplementation((_cwd, selection) => selection ? late.promise : Promise.resolve(catalogue(refs)));
+    const old = store.refresh();
+    await flush();
+    expect(draftConfig).toHaveBeenCalledTimes(4);
+    store.pause();
+    expect(vi.getTimerCount()).toBe(0);
+    draftConfig.mockResolvedValue(catalogue([]));
+    await store.resume();
+    const fresh = store.entries;
+    late.resolve({ ...catalogue(), modelUsageRefresh: "ready", modelUsage: quota(refs[0]!) });
+    await old;
+    expect(store.entries).toBe(fresh);
+    expect(store.entries).toHaveLength(0);
+    expect(draftConfig).toHaveBeenCalledTimes(5);
+    expect(store.busy).toBe(false);
+    expect(vi.getTimerCount()).toBe(1);
+    store.dispose();
+  });
+
+  it("does not replace settled missing-provider rows with loading skeletons on warm refresh", async () => {
+    const { store, draftConfig } = setup();
+    draftConfig.mockResolvedValue({ ...catalogue(), modelUsageRefresh: "unavailable" });
+    await store.refresh();
+    const late = deferred<Response>();
+    draftConfig.mockImplementation((_cwd, selection) => selection ? late.promise : Promise.resolve(catalogue()));
+    const warm = store.refresh();
+    await flush();
+    expect(store.busy).toBe(true);
+    expect(store.entries.every((entry) => entry.state === "unavailable")).toBe(true);
+    late.resolve({ ...catalogue(), modelUsageRefresh: "unavailable" });
+    await warm;
+    store.dispose();
+  });
+
+  it("retains an existing catalogue error while retrying, avoiding a disappearing error row", async () => {
+    const { store, draftConfig } = setup();
+    draftConfig.mockRejectedValueOnce(new Error("catalogue failed"));
+    await store.refresh();
+    expect(store.error).toBe(true);
+    const late = deferred<Response>();
+    draftConfig.mockReturnValueOnce(late.promise);
+    const retry = store.refresh();
+    expect(store.error).toBe(true);
+    late.resolve(catalogue([]));
+    await retry;
+    expect(store.error).toBe(false);
+    store.dispose();
+  });
+
   it("loads OpenAI, Anthropic and Z.ai without sessions or model selection changes", async () => {
     const { store, draftConfig } = setup();
     await store.refresh();

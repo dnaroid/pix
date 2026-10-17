@@ -40,14 +40,16 @@ uses the same account-quota widgets and `displayModelUsage` precedence as the
 status-bar popover: remaining percentages, hourly segments, reset countdowns,
 weekly calendar/day slices, daily-budget warnings and cached-state labels.
 Day slices describe the aggregate weekly quota, not independently measured daily
-limits. Opening the panel discovers authenticated supported provider routes from
+limits. Expanding **Provider limits** discovers authenticated supported provider routes from
 the sessionless model catalogue and queries their quotas through `draft_config`,
 independently of the active session/model (OpenAI, Anthropic/Claude Code, Z.ai,
 and Antigravity). Account-wide routes use one representative model; Antigravity
 retains model-specific queries. Queries have bounded concurrency, refresh every
-five minutes while open (one minute for pending local Claude Code credentials),
-and also run on header refresh. Closing the panel stops polling; late completions
-from previous workspaces/connections or disposed panels are ignored. Failed
+five minutes while expanded (one minute for pending local Claude Code credentials),
+and also run on header refresh while expanded. Collapsing the section or closing
+the panel stops polling and queued queries; already-started requests may finish
+but their late completions are ignored, including after a same-workspace reopen.
+Completions from previous workspaces/connections or disposed panels are ignored. Failed
 refreshes retain prior quotas as cached; missing quotas remain visible as loading,
 unavailable or failed provider rows, rather than silently omitting the provider.
 Existing runtime snapshots (including draft telemetry) supplement fetched quotas;
@@ -74,6 +76,25 @@ other sections' changes. Malformed configuration is not overwritten; failures
 remain visible and are sent to Desktop diagnostics. Late restores cannot undo
 user input or apply another project's state; accepted writes remain scoped to
 their original project even after panel teardown.
+
+Sections stay closed until their saved state is restored, so persisted collapsed
+sections never briefly render expanded or start background requests. Only an
+explicit summary activation changes/persists disclosure state; native toggle
+events caused by rendering or restoration do not. Collapsed section content is
+unmounted and its chart-specific derivations sleep until expansion. Provider
+quota polling and its minute clock also stop while **Provider limits** is
+collapsed. Historical sections share one source: it remains active while any
+historical section is expanded, but stops accepting completions and requesting
+source-change updates when all are collapsed. Re-expansion requests the current
+snapshot; data retained for other expanded sections is rendered only on expansion.
+Header refresh does not wake collapsed sections and is disabled when all sleep.
+
+Historical disclosure headers remain mounted through loading, empty results and
+refreshes; empty sections explain the lack of data inside their expanded body.
+Cold loads use skeletons and expanded sections show a small update spinner.
+Warm refreshes retain charts and settled missing-provider rows rather than
+replacing them with skeletons. Cached/status text stays in the existing single-line
+provenance row rather than inserting/removing a banner above the disclosures.
 
 `UsageSourceView` provides a **This project / All projects** segmented toggle,
 defaulting to **This project**. Project filtering compares normalized
@@ -157,8 +178,9 @@ refresh about 0.2 seconds; maximum host event-loop lag was about 1 ms (versus
 about 36 ms in-process). These are measured observations, not timing
 guarantees.
 
-The Desktop store requests usage while the panel is open, refreshes on demand
-and reacts to source-change notifications. Local-day bucketing and project
+The Desktop store requests usage while at least one historical section is expanded,
+refreshes on demand and reacts to source-change notifications only while active.
+Local-day bucketing and project
 scope filtering are derived on Desktop; no request is needed to switch project
 scope. Session summaries expose project paths so the UI can keep
 other-project rows non-clickable.

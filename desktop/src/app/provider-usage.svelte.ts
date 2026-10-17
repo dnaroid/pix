@@ -20,7 +20,7 @@ function failedEntry(entry: ProviderUsageEntry): ProviderUsageEntry {
   };
 }
 
-/** Sessionless quota polling owned by the open Usage panel, not the active model. */
+/** Sessionless quota polling while Provider limits is expanded, not tied to the active model. */
 export function createProviderUsageStore(options: {
   client: () => UsageClient | null;
   workspace: () => string;
@@ -52,9 +52,11 @@ export function createProviderUsageStore(options: {
     const owner = ++generation;
     scopeClient = client;
     scopeWorkspace = workspace;
-    if (!sameScope) entries = [];
+    if (!sameScope) {
+      entries = [];
+      error = false;
+    }
     busy = false;
-    error = false;
     pending = undefined;
     if (!client || !workspace) return Promise.resolve();
     const requestClient = client;
@@ -69,9 +71,10 @@ export function createProviderUsageStore(options: {
       try {
         const catalogue = await requestClient.draftConfig(workspace);
         if (!current()) return;
+        error = false;
         const previous = new Map(entries.map((entry) => [entry.modelRef, entry]));
         entries = providerUsageTargets(catalogue.configOptions).map((target) => ({
-          ...target, state: "loading", runtime: previous.get(target.modelRef)?.runtime,
+          ...target, state: previous.get(target.modelRef)?.state ?? "loading", runtime: previous.get(target.modelRef)?.runtime,
         }));
         const queue = [...entries];
         // Bound concurrent provider queries/catalogue runtimes, including model-specific pools.

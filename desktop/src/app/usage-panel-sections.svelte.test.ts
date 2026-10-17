@@ -31,6 +31,27 @@ function setup(initial: Record<string, string> = {}) {
 beforeEach(() => { native.invoke.mockReset(); });
 
 describe("usage panel disclosure persistence", () => {
+  it("keeps sections asleep until restoration finishes and never saves programmatic restoration", async () => {
+    const { store, files } = setup({ "/a": '{"usagePanel":{"collapsedSections":["daily","provider-limits"]}}' });
+    expect(store.ready).toBe(false);
+    expect(store.isOpen("overview")).toBe(false);
+    const loading = store.load("/a");
+    expect(store.ready).toBe(false);
+    expect(store.isOpen("daily")).toBe(false);
+    await loading;
+    expect(store.ready).toBe(true);
+    expect(store.isOpen("overview")).toBe(true);
+    expect(store.isOpen("daily")).toBe(false);
+    expect(store.isOpen("provider-limits")).toBe(false);
+    expect(native.invoke.mock.calls.some(([command]) => command === "write_project_workspace_config_if_unchanged")).toBe(false);
+    await store.setOpen("overview", false);
+    await store.load("/a");
+    expect(store.ready).toBe(true);
+    expect(store.isOpen("overview")).toBe(false);
+    expect(usageCollapsedSections(files.get("/a"))).toContain("overview");
+    store.dispose();
+  });
+
   it("restores sections and persists rapid toggles in order, including across a reopen", async () => {
     const { store, files, errors } = setup({ "/a": '{"usagePanel":{"collapsedSections":["daily"]}}' });
     await store.load("/a");
@@ -63,9 +84,10 @@ describe("usage panel disclosure persistence", () => {
     expect(store.isOpen("activity")).toBe(false);
     expect(store.isOpen("daily")).toBe(true);
     const loading = store.load("/a");
+    const pendingState = store.isOpen("daily");
     store.dispose();
     await loading;
-    expect(store.isOpen("daily")).toBe(true);
+    expect(store.isOpen("daily")).toBe(pendingState);
   });
 
   it("does not let slow restoration undo input and keeps writes in their original project", async () => {

@@ -3,6 +3,9 @@ import { render } from "svelte/server";
 import type { RuntimeStatus } from "../../lib/acp-client";
 import UsagePanel from "./UsagePanel.svelte";
 import UsageProviderLimits from "./UsageProviderLimits.svelte";
+import UsageSection from "./UsageSection.svelte";
+import UsageSourceView from "./UsageSourceView.svelte";
+import type { UsageSourceSnapshot } from "../../../../acp/src/acp/usage-stats-contract";
 import panelSource from "./UsagePanel.svelte?raw";
 import viewSource from "./UsageSourceView.svelte?raw";
 import sectionSource from "./UsageSection.svelte?raw";
@@ -70,6 +73,52 @@ describe("usage events", () => {
 });
 
 describe("Usage panel", () => {
+  it("does not evaluate collapsed content or show its update indicator", () => {
+    let rendered = 0;
+    const children = (() => { rendered++; }) as never;
+    const closed = render(UsageSection, { props: { title: "Sleeping", open: false, loading: true, children } }).body;
+    expect(rendered).toBe(0);
+    expect(closed).toContain("Sleeping");
+    expect(closed).not.toContain("Updating section");
+    expect(closed).not.toContain('aria-busy="true"');
+    const expanded = render(UsageSection, { props: { title: "Awake", open: true, loading: true, children } }).body;
+    expect(rendered).toBe(1);
+    expect(expanded).toContain("Updating section");
+    expect(expanded).toContain('aria-busy="true"');
+  });
+
+  it("keeps all historical disclosure headers mounted for cold, empty and populated snapshots", () => {
+    const nowMs = Date.now();
+    const empty: UsageSourceSnapshot = { source: "pix-sessions", status: "ready", unit: "tokens", coverage: null, buckets: [], fetchedAtMs: nowMs };
+    const populated: UsageSourceSnapshot = { ...empty, buckets: [{
+      startMs: nowMs, width: "hour", model: "model", provider: "anthropic", sessionId: "s", projectCwd: "/tmp/p",
+      values: { totalTokens: 150, input: 100, cacheRead: 25, calls: 1 },
+    }] };
+    for (const snapshot of [undefined, empty, populated]) {
+      const { body } = render(UsageSourceView, { props: { snapshot, period: "7d", nowMs, workspace: "/tmp/p", loading: !snapshot } });
+      expect(body.match(/<details\b/gu)).toHaveLength(6);
+      for (const title of ["Overview", "Activity", "Daily tokens", "By model", "Top sessions", "Cache efficiency"]) expect(body).toContain(title);
+    }
+    const cold = render(UsageSourceView, { props: { snapshot: undefined, period: "7d", nowMs, workspace: "/tmp/p", loading: true } }).body;
+    expect(cold).toContain("Loading activity…");
+    expect(cold).toContain("animate-pulse");
+    const warm = render(UsageSourceView, { props: { snapshot: { ...populated, status: "stale" }, period: "7d", nowMs, workspace: "/tmp/p", loading: true } }).body;
+    expect(warm).toContain("150 tok");
+    expect(warm).not.toContain("Loading activity…");
+    expect(warm).not.toContain("animate-pulse");
+    expect(warm).not.toContain('role="status"');
+  });
+
+  it("gates shared history and provider requests on restored disclosure state", () => {
+    expect(panelSource).toContain('sections.ready && sections.isOpen("provider-limits")');
+    expect(panelSource).toContain('id !== "provider-limits" && sections.isOpen(id)');
+    expect(panelSource).toContain("else store.close()");
+    expect(panelSource).toContain("void quotas.resume()");
+    expect(panelSource).toContain("else quotas.pause()");
+    for (const id of ["overview", "activity", "daily", "models", "sessions", "cache"]) expect(viewSource).toContain(`isOpen("${id}")`);
+    expect(panelSource).not.toContain("{#if snapshot && hasData}");
+  });
+
   it("renders a disconnected state without fetching", () => {
     const { body } = render(UsagePanel, { props: { client: null, workspace: "/tmp/p" } });
     expect(body).toContain("Usage statistics");
@@ -86,7 +135,9 @@ describe("Usage panel", () => {
     expect(panelSource).not.toContain('role="tablist"');
     expect(panelSource).toContain('store.snapshot("pix-sessions")');
     expect(panelSource).toContain("sections.dispose()");
-    expect(sectionSource).toContain("sections?.setOpen(sectionId, event.currentTarget.open)");
+    expect(sectionSource).toContain("sections.setOpen(sectionId, !expanded)");
+    expect(sectionSource).toContain("event.preventDefault()");
+    expect(sectionSource).not.toContain("ontoggle=");
   });
 
   it("shows the same provider hourly and weekly scales even without historical usage", () => {
@@ -103,7 +154,7 @@ describe("Usage panel", () => {
     }
     expect(body).not.toContain("claude-opus");
     expect(body).not.toMatch(/>Limits<|>LIMITS</u);
-    expect(panelSource.indexOf("<UsageProviderLimits")).toBeLessThan(panelSource.indexOf("{#if snapshot && hasData}"));
+    expect(panelSource.indexOf("<UsageProviderLimits")).toBeLessThan(panelSource.indexOf("<UsageSourceView"));
   });
 
   it("uses stable disclosure ids independent of metric labels", () => {
@@ -151,7 +202,7 @@ describe("Usage panel", () => {
       { provider: "google-antigravity", modelRef: "google-antigravity/third", state: "failed" },
     ] } });
     expect(body.match(/>Antigravity</gu)).toHaveLength(1);
-    expect(body.match(/Loading limits…/gu)).toHaveLength(1);
+    expect(body.match(/aria-label="Loading limits…"/gu)).toHaveLength(1);
     expect(body).not.toContain("data-usage-limit-bars");
   });
 

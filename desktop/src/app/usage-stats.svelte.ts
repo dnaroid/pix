@@ -112,7 +112,7 @@ export function createUsageStatsStore(options: UsageStatsStoreOptions) {
     /** Panel closed: drop in-flight completions, keep cached data for reopen. */
     close(): void {
       active = false;
-      resetScope(scopeClient, scopeCwd);
+      resetScope(options.client(), options.workspace());
     },
     refresh(): Promise<void> {
       return request(undefined, true);

@@ -1,6 +1,9 @@
 <script lang="ts">
   import X from "@lucide/svelte/icons/x";
+  import { getContext } from "svelte";
   import type { UsageSourceSnapshot } from "../../../../acp/src/acp/usage-stats-contract";
+  import type { UsagePanelSections } from "../../app/usage-panel-sections.svelte";
+  import { USAGE_SECTIONS_CONTEXT, type UsageSectionId } from "../../lib/usage-panel-sections";
   import {
     availableMetrics, bucketDayKey, cacheEfficiency, currentWeekWindow, dailyByModel, filterByTime, metricValue, modelOptions, modelShares,
     calendarHeatmap, hourOfDayProfile, periodWindow, selectBuckets, sumValues, topSessions,
@@ -13,18 +16,28 @@
   import UsageSection from "./UsageSection.svelte";
   import UsageSegmented from "./UsageSegmented.svelte";
   import UsageShareList from "./UsageShareList.svelte";
+  import UsageSkeleton from "./UsageSkeleton.svelte";
   import {
     METRIC_LABELS, SOURCE_LABELS, STATUS_LABELS, UNIT_LABELS,
     formatDate, formatDayKey, formatHour, formatMetric, formatRelative, localWeekStart, modelLabel, pathBasename,
   } from "./usage-format";
 
-  let { snapshot, period, nowMs, workspace, onOpenSession }: {
-    snapshot: UsageSourceSnapshot;
+  let { snapshot: receivedSnapshot, period, nowMs, workspace, loading = false, onOpenSession }: {
+    snapshot: UsageSourceSnapshot | undefined;
     period: UsagePeriod;
     nowMs: number;
     workspace: string;
+    loading?: boolean;
     onOpenSession?: (target: UsageSessionTarget) => void;
   } = $props();
+  const emptySnapshot: UsageSourceSnapshot = { source: "pix-sessions", status: "loading", unit: "tokens", buckets: [], coverage: null, fetchedAtMs: 0 };
+  const snapshot = $derived(receivedSnapshot ?? emptySnapshot);
+  const sections = getContext<UsagePanelSections | undefined>(USAGE_SECTIONS_CONTEXT);
+  const cold = $derived((!receivedSnapshot || loading) && snapshot.buckets.length === 0);
+
+  function isOpen(id: UsageSectionId): boolean {
+    return sections?.isOpen(id) ?? true;
+  }
 
   /** `""` = all models. */
   let model = $state("");
@@ -51,9 +64,7 @@
   });
   // Period + scope + model; charts keep the full period so a selected day stays visible.
   const periodBuckets = $derived(selectBuckets(snapshot, selection));
-  const periodTotals = $derived(sumValues(periodBuckets));
-  const periodTotal = $derived(metricValue(periodTotals, metric));
-  const estimated = $derived(periodTotals.costEstimated === true);
+  const estimated = $derived(sumValues(periodBuckets).costEstimated === true);
   // A day outside the current period/scope/model silently stops filtering.
   const selectedDay = $derived(dayChoice !== null && periodBuckets.some((bucket) => bucket.startMs !== 0 && bucketDayKey(bucket) === dayChoice) ? dayChoice : null);
   const selectedHour = $derived(hourChoice !== null && periodBuckets.some((bucket) => bucket.width === "hour" && bucket.startMs !== 0 && new Date(bucket.startMs).getHours() === hourChoice) ? hourChoice : null);
@@ -63,19 +74,19 @@
   const totals = $derived(sumValues(buckets));
   // Each chart applies every filter except its own axis.
   const byHour = $derived(filterByTime(periodBuckets, { hour: selectedHour }));
-  const calendar = $derived(calendarHeatmap(byHour, metric, calendarRange, nowMs, weekStart));
-  const daily = $derived(dailyByModel(byHour, metric, range, nowMs));
-  const hourProfile = $derived(hourOfDayProfile(filterByTime(periodBuckets, { day: selectedDay }), metric));
-  const shares = $derived(modelShares(filterByTime(selectBuckets(snapshot, { ...selection, model: null }), timeFilter), metric));
-  const sessions = $derived(topSessions(buckets, snapshot.sessions, metric));
+  const calendar = $derived(isOpen("activity") ? calendarHeatmap(byHour, metric, calendarRange, nowMs, weekStart) : null);
+  const daily = $derived(isOpen("daily") ? dailyByModel(byHour, metric, range, nowMs) : null);
+  const hourProfile = $derived(isOpen("activity") ? hourOfDayProfile(filterByTime(periodBuckets, { day: selectedDay }), metric) : null);
+  const shares = $derived(isOpen("models") ? modelShares(filterByTime(selectBuckets(snapshot, { ...selection, model: null }), timeFilter), metric) : []);
+  const sessions = $derived(isOpen("sessions") ? topSessions(buckets, snapshot.sessions, metric) : []);
   const sessionCount = $derived(new Set(buckets.map((bucket) => bucket.sessionId).filter(Boolean)).size);
-  const cache = $derived(cacheEfficiency(totals));
-  const kpis = $derived([
+  const cache = $derived(isOpen("cache") ? cacheEfficiency(totals) : null);
+  const kpis = $derived(isOpen("overview") ? [
     totals.cost ? { label: estimated ? "Cost (estimate)" : "Cost", value: formatMetric(totals.cost, "cost", estimated) } : null,
     metricValue(totals, "tokens") > 0 ? { label: "Tokens", value: formatMetric(metricValue(totals, "tokens"), "tokens") } : null,
     totals.calls ? { label: "Calls", value: formatMetric(totals.calls, "calls") } : null,
     sessionCount > 0 ? { label: "Sessions", value: String(sessionCount) } : null,
-  ].filter((kpi): kpi is { label: string; value: string } => kpi !== null));
+  ].filter((kpi): kpi is { label: string; value: string } => kpi !== null) : []);
   const granularity = $derived(buckets.some((bucket) => bucket.width === "hour") ? "hourly" : "daily");
   const provenance = $derived([
     SOURCE_LABELS[snapshot.source], UNIT_LABELS[snapshot.unit], granularity,
@@ -132,42 +143,54 @@
       {/if}
     </div>
   {/if}
-  <p class="m-0 px-3 pb-2 text-[11px] leading-4 text-muted-foreground">{provenance}</p>
-  {#if snapshot.status !== "ready"}
-    <p class="m-0 border-l-2 border-tool-warning mx-3 mb-2 px-2 py-1 text-[11px] leading-4 text-muted-foreground" role="status">
-      {STATUS_LABELS[snapshot.status]}{snapshot.message ? ` — ${snapshot.message}` : ""}
-    </p>
-  {/if}
+  <p class="m-0 truncate px-3 pb-2 text-[11px] leading-4 text-muted-foreground" title={snapshot.message}>
+    {#if receivedSnapshot}{provenance}{snapshot.status !== "ready" ? ` · ${STATUS_LABELS[snapshot.status]}` : ""}{snapshot.message ? ` — ${snapshot.message}` : ""}{:else}Expand a section to load usage.{/if}
+  </p>
   {#if range.truncated && snapshot.coverage}
     <p class="m-0 px-3 pb-2 text-[11px] leading-4 text-muted-foreground">This source only covers data since {formatDate(snapshot.coverage.fromMs)}.</p>
   {/if}
 
-  {#if periodTotal <= 0 && kpis.length === 0}
-    <p class="m-0 border-t border-sidebar-border px-3 py-6 text-center text-xs text-muted-foreground">No usage in this period.</p>
-  {:else}
-    <UsageSection title="Overview" sectionId="overview">
+  <UsageSection title="Overview" sectionId="overview" {loading}>
+    {#if cold}
+      <UsageSkeleton label="Loading overview…" />
+    {:else if kpis.length === 0}
+      <p class="m-0 text-xs text-muted-foreground">No usage in this period.</p>
+    {:else}
       <dl class="m-0 grid grid-cols-2 gap-x-3 gap-y-2">
         {#each kpis as kpi (kpi.label)}
           <div class="min-w-0"><dt class="text-[11px] text-muted-foreground">{kpi.label}</dt><dd class="m-0 truncate text-sm font-medium tabular-nums">{kpi.value}</dd></div>
         {/each}
       </dl>
-    </UsageSection>
-    {#if calendar.total > 0 || (hourProfile && hourProfile.total > 0)}
-      <UsageSection title="Activity" sectionId="activity">
-        <div class="flex flex-col gap-3">
-          <UsageHeatmap {calendar} {metric} {estimated} {selectedDay} onSelectDay={(day) => dayChoice = day} />
-          {#if hourProfile && hourProfile.total > 0}<UsageHourStrip profile={hourProfile} {metric} {estimated} {selectedHour} onSelectHour={(hour) => hourChoice = hour} />{/if}
-        </div>
-      </UsageSection>
     {/if}
-    {#if daily.days.length > 0 && daily.max > 0}
-      <UsageSection title={`Daily ${METRIC_LABELS[metric].toLowerCase()}`} sectionId="daily"><UsageDailyBars series={daily} {metric} {estimated} {selectedDay} {selectedModel} onSelectDay={(day) => dayChoice = day} onSelectModel={selectModel} /></UsageSection>
-    {/if}
-    {#if shares.length > 1 || selectedModel !== null}
-      <UsageSection title="By model" sectionId="models"><UsageShareList {shares} {metric} {estimated} ariaLabel="Share by model" selected={selectedModel} onSelect={selectModel} /></UsageSection>
-    {/if}
-    {#if sessions.length > 0}
-      <UsageSection title="Top sessions" sectionId="sessions">
+  </UsageSection>
+  <UsageSection title="Activity" sectionId="activity" {loading}>
+    {#if cold}
+      <UsageSkeleton label="Loading activity…" tall />
+    {:else if calendar && (calendar.total > 0 || (hourProfile && hourProfile.total > 0))}
+      <div class="flex flex-col gap-3">
+        <UsageHeatmap {calendar} {metric} {estimated} {selectedDay} onSelectDay={(day) => dayChoice = day} />
+        {#if hourProfile && hourProfile.total > 0}<UsageHourStrip profile={hourProfile} {metric} {estimated} {selectedHour} onSelectHour={(hour) => hourChoice = hour} />{/if}
+      </div>
+    {:else}<p class="m-0 text-xs text-muted-foreground">No activity in this period.</p>{/if}
+  </UsageSection>
+  <UsageSection title={`Daily ${METRIC_LABELS[metric].toLowerCase()}`} sectionId="daily" {loading}>
+    {#if cold}
+      <UsageSkeleton label="Loading daily usage…" tall />
+    {:else if daily && daily.days.length > 0 && daily.max > 0}
+      <UsageDailyBars series={daily} {metric} {estimated} {selectedDay} {selectedModel} onSelectDay={(day) => dayChoice = day} onSelectModel={selectModel} />
+    {:else}<p class="m-0 text-xs text-muted-foreground">No daily usage in this period.</p>{/if}
+  </UsageSection>
+  <UsageSection title="By model" sectionId="models" {loading}>
+    {#if cold}
+      <UsageSkeleton label="Loading models…" />
+    {:else if shares.length > 0}
+      <UsageShareList {shares} {metric} {estimated} ariaLabel="Share by model" selected={selectedModel} onSelect={selectModel} />
+    {:else}<p class="m-0 text-xs text-muted-foreground">No model usage in this period.</p>{/if}
+  </UsageSection>
+  <UsageSection title="Top sessions" sectionId="sessions" {loading}>
+    {#if cold}
+      <UsageSkeleton label="Loading sessions…" />
+    {:else if sessions.length > 0}
         <ol class="m-0 flex list-none flex-col p-0">
           {#each sessions as session (session.sessionId)}
             <li>
@@ -187,18 +210,19 @@
             </li>
           {/each}
         </ol>
-      </UsageSection>
-    {/if}
-    {#if cache}
-      <UsageSection title="Cache efficiency" sectionId="cache">
-        <div class="flex flex-col gap-1.5">
-          <div class="flex items-baseline justify-between text-xs">
-            <span>Cache hit rate</span><span class="font-medium tabular-nums">{Math.round(cache.hitRate * 100)}%</span>
-          </div>
-          <div class="h-1 overflow-hidden rounded-full bg-muted" aria-hidden="true"><div class="h-full rounded-full bg-tool-success" style:width={`${cache.hitRate * 100}%`}></div></div>
-          <p class="m-0 text-[11px] text-muted-foreground">{formatMetric(cache.cacheRead, "tokens")} read from cache of {formatMetric(cache.prompt, "tokens")} prompt.</p>
+    {:else}<p class="m-0 text-xs text-muted-foreground">No sessions in this period.</p>{/if}
+  </UsageSection>
+  <UsageSection title="Cache efficiency" sectionId="cache" {loading}>
+    {#if cold}
+      <UsageSkeleton label="Loading cache efficiency…" />
+    {:else if cache}
+      <div class="flex flex-col gap-1.5">
+        <div class="flex items-baseline justify-between text-xs">
+          <span>Cache hit rate</span><span class="font-medium tabular-nums">{Math.round(cache.hitRate * 100)}%</span>
         </div>
-      </UsageSection>
-    {/if}
-  {/if}
+        <div class="h-1 overflow-hidden rounded-full bg-muted" aria-hidden="true"><div class="h-full rounded-full bg-tool-success" style:width={`${cache.hitRate * 100}%`}></div></div>
+        <p class="m-0 text-[11px] text-muted-foreground">{formatMetric(cache.cacheRead, "tokens")} read from cache of {formatMetric(cache.prompt, "tokens")} prompt.</p>
+      </div>
+    {:else}<p class="m-0 text-xs text-muted-foreground">No cache usage in this period.</p>{/if}
+  </UsageSection>
 </div>
