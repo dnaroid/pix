@@ -6,6 +6,12 @@ Draft integration in `core/spawn.ts` selects this launcher for
 This wiring is **not yet accepted**: the real Pi/provider lifecycle matrix and
 independent review must pass before G1/T3 can close.
 
+launchd jobs do not inherit the caller's TCC grants. `access-probe.ts` checks,
+with a throwaway launchd job, that the project and run directories are
+reachable; when they definitively are not (external volume, no GUI domain),
+the Claude-provider attempt falls back to the ordinary process-group launch
+(progress `owned_launch_unavailable`). An undecided probe keeps owned launch.
+
 Goal: a launched sub-agent's **entire descendant tree** — including
 detached, `setsid`'d, exec'd, TERM-resistant descendants — is durably owned
 and cleaned up even when Pi, the bridge, and the worker are lost
@@ -152,10 +158,16 @@ produce a false failure after kernel-zero.
   launchers) are never fenced and stay pending.
 - Bridge deterministic failure after its claim but before any launchctl
   action (bind 13, plist 14, claim dir fsync 18) writes `prelaunch_abort`
-  and classifies `never-launched`. A bridge crash, or a bootstrap failure
-  (15), between claim and supervisor bootstrap is not resolved: the run
-  stays pending (fail closed) because a live bridge or an orphaned
-  `launchctl bootstrap` cannot be excluded without identity proof. Bridge
+  and classifies `never-launched`. A supervisor bootstrap failure (15) is
+  recorded only after the bridge reaped `launchctl`, as
+  `bootstrap_failed` (`role=bootstrap-failed rc=N`); with a bridge claim and
+  no journal/receipt it classifies `unproven-fail` (cause
+  `bootstrap_failed`), settles as failed only after both UUID labels are
+  confirmed absent, and writes an explanatory `result.md` (typically a TCC
+  restriction: launchd jobs cannot access a project on an external volume).
+  A bridge crash between claim and supervisor bootstrap is not resolved: the
+  run stays pending (fail closed) because a live bridge cannot be excluded
+  without identity proof. Bridge
   exit cleanup unlinks only listeners the bridge bound.
 - The agent's outcome is its newest generation's (`generation` record),
   never a stale pointer's; reconciliation leaves runs held by a live

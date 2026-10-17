@@ -5,6 +5,7 @@
   import Users from "@lucide/svelte/icons/users";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
+  import MessageSquareText from "@lucide/svelte/icons/message-square-text";
   import ModelProviderIcon from "./ModelProviderIcon.svelte";
   import ValidatedProjectPath from "./ValidatedProjectPath.svelte";
   import type { ProjectPathNavigation } from "../lib/project-path-navigation";
@@ -15,11 +16,13 @@
   import { formatSessionUsageTokens } from "../lib/session-usage";
   import { subagentUsageCost } from "../lib/subagent-usage";
 
-  let { usage, loading = false, failed = false, pathNavigation, onRefresh, onClose }: {
+  let { usage, loading = false, failed = false, pathNavigation, onOpenSession, onRefresh, onClose }: {
     usage: SessionUsageReport;
     loading?: boolean;
     failed?: boolean;
     pathNavigation?: ProjectPathNavigation;
+    /** Open the agent's persisted session as a read-only tab. */
+    onOpenSession?: (runDir: string, agentId: string) => void;
     onRefresh: () => void;
     onClose: () => void;
   } = $props();
@@ -93,7 +96,7 @@
                     {/each}
                   </dl>
                 {/if}
-                {#if agent.runDir}<p class="break-all font-mono text-muted-foreground">Run: <ValidatedProjectPath path={agent.runDir} kind="directory" navigation={pathNavigation} onNavigate={onClose} /></p>{:else}<p class="text-muted-foreground">Run identity not recorded (legacy usage).</p>{/if}
+                {#if agent.runDir}<p class="break-all font-mono text-muted-foreground">Run: <ValidatedProjectPath path={agent.runDir} kind="directory" navigation={pathNavigation} onNavigate={onClose} /></p>{#if onOpenSession}{@const runDir = agent.runDir}<button type="button" class="inline-flex items-center gap-1.5 rounded border border-border px-2 py-1 text-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring" data-subagent-open-session onclick={() => { onOpenSession(runDir, agent.agentId); onClose(); }}><MessageSquareText class="h-3.5 w-3.5" aria-hidden="true" />Open session</button>{/if}{:else}<p class="text-muted-foreground">Run identity not recorded (legacy usage).</p>{/if}
               </div>
             </details>
           {/each}

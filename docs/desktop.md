@@ -32,15 +32,29 @@ The left Activity Bar exposes:
 - **Tasks** — project-local SQLite tasks (`.pi/tasks.sqlite`) with full UI
   management, Quick Add, drag-and-drop, linked sessions and SHA-256 attachments;
   slash commands and the agent task tool supplement the UI;
-- **Project** — file explorer with keyboard navigation, project settings and
-  external-editor actions;
+- **Project** — file explorer with keyboard navigation and external-editor
+  actions;
 - **Source Control** — branch/status, diffs, stage/unstage, commit/push, code
   review and safe repository tools;
 - **Registry** — private Git-backed skills/agents/project-state synchronization;
 - **Package Scripts** — project package scripts and interactive terminals;
 - **Search indexes** — local and semantic search-store status by source;
+- **Usage** — Pix session usage across this project or all projects, with
+  selectable time period and cost, token and call metrics;
+- **LSP** — language-server status and controls;
 - **Settings** — Desktop-specific model, voice, editor and Source Control
   preferences.
+
+The Usage panel charts support hover and keyboard-focus tooltips, and clicking
+a day, hour or model toggles a chart filter. Active day/hour filters appear as
+removable chips; chart cross-filtering keeps the relevant breakdowns visible.
+See the [usage panel specification](../specs/desktop-usage-stats.md) for filter
+and tooltip behavior.
+
+Settings → General includes a **Theme** preference: **System** (default),
+**Light**, or **Dark**. Pix applies it through the native window appearance, so
+system color-scheme-aware web content follows the selected theme. Changes are
+reapplied when the window regains focus or the Desktop configuration changes.
 
 Long-lived files, media, Git diff/review surfaces, and the interactive Terminal
 opened by composer `!!` commands live in the main workbench tab strip rather
@@ -57,6 +71,40 @@ The first-run dialog verifies the bundled runtime and can optionally:
 
 ChatGPT/Codex OAuth refresh tokens are deliberately not copied between auth
 stores.
+
+Shipped defaults contain no provider/model ids. When providers are connected
+and no default model is configured, Desktop opens a **Main / Fast / Strong**
+model setup dialog. Skip dismisses it for this browser profile (remembered in
+local storage). Reopen it from any model summary in Settings with **Edit in
+wizard…**; cancelling a manual run changes nothing.
+
+Steps: Roles (first run) or **In use** (manual run), then per-feature pages
+(Features, Routing & desktop, Agents) with model, fallback chips and thinking
+level per slot, then optional **Search & embeddings**. The **In use** step lists
+every configured model with its usage count; replacing one updates it
+everywhere — roles, slots, fallback lists and the frontier list. Unsupported
+thinking levels move to the nearest supported level, slots with constraints
+(vision Lookup, OpenRouter-only search & task classifier) keep the old model,
+a **Newer: … — replace** hint appears when the catalog has a newer release of
+the same provider and line, and **New frontier release** makes a model the
+primary frontier model while keeping the previous one in the list.
+
+The frontier primary defaults to the Strong role; extra frontier models have
+no role default. An untouched frontier list keeps existing entries with their
+flags and aliases; an edited list replaces everything after the primary.
+Saving writes `pix.jsonc`, `pi-tools-suite.jsonc` and, when it exists,
+`pix-desktop.jsonc` (including `search.intentModelRef`, one key for search
+intent and task type classification), plus `search.embedding` /
+`search.rerankerModel` when search is enabled. Open Settings editors reload
+from disk afterwards. Setup uses sessionless ACP requests and does not create
+a chat session.
+
+Settings show models read-only with **Edit in wizard…**: Default & router
+models, Feature models, Git models, Observer model, Sub-agent models, Lookup
+models and Summarizer models. Wizard-managed routing tiers (simple, standard,
+complex, expert) show model/thinking read-only; custom tiers stay editable, as
+do non-model settings such as Auto by default, routing fallback tier, visible
+models, RAG thinking effort, autocomplete limits, frontier flags and economy.
 
 Code and Knowledge use native local search. Optional semantic retrieval requires
 explicit project consent/configuration in `.pi/search/semantic.json`; eligible
@@ -104,7 +152,9 @@ defaults, prompt helpers, visible models, external editor, voice input and Git
 review/commit-message model preferences. TUI-only renderer/theme settings stay
 in `pix.jsonc`.
 
-Project settings can assign a logo using **Initials** or **Image**. Images may
+Project settings (name color and logo) open from **Project settings…** at the
+bottom of the project switcher menu, or by right-clicking the project badge in
+the titlebar. They can assign a logo using **Initials** or **Image**. Images may
 be selected with the native file chooser or generated through OpenRouter; they
 remain previews until saved. A saved image is stored as `.pi/project-icon.png`,
 `.jpg`, `.webp`, `.gif` or `.svg` (content-detected, up to 4 MB) and referenced

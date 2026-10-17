@@ -130,10 +130,8 @@ export async function runGate({
     // Nested npm --prefix scripts can replace npm's PATH entries. The headless
     // AST regression invokes the root devDependency binary directly.
     childEnv.PATH = [join(cwd, "node_modules", ".bin"), childEnv.PATH || childEnv.Path || ""].join(delimiter);
-    // Desktop profile/council capabilities must not redirect fixtures or reach the live host.
+    // A Desktop configuration profile must not redirect default-profile fixtures.
     delete childEnv.PIX_CONFIG_PROFILE;
-    delete childEnv.PIX_BRAINSTORM_HOST_URL;
-    delete childEnv.PIX_BRAINSTORM_HOST_TOKEN;
     report(`[check:ci] ${step.id}: ${step.command} ${step.args.join(" ")} (log: ${logPath})`);
     const result = await runStep(step, { env: childEnv, cwd, platform, launch, signals, stopChild }, logPath);
     results.push({ id: step.id, command: [step.command, ...step.args], logPath, ...result });

@@ -252,3 +252,18 @@ test("a malformed task hierarchy is rejected before any provider call", async t 
   assert.deepEqual(f.rows("pix_task_documents"), []);
 });
 import { enableSearchSources, isolateSearchHome } from "./search-sources-fixture.js";
+
+test("a complete background task pass records coverage for the current task snapshot", async t => {
+  const f = await fixture(t);
+  await f.preferences.configure();
+  f.put(f.task("one"));
+  const service = f.make();
+  await f.sync(service);
+  const first = f.rows("pix_source_coverage");
+  assert.equal(first.length, 1);
+  f.put(f.task("two"));
+  await f.sync(service);
+  const second = f.rows("pix_source_coverage");
+  assert.equal(second.length, 1, "tasks retain only the latest covered revision");
+  assert.notEqual(second[0]!.digest, first[0]!.digest);
+});

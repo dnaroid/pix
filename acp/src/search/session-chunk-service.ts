@@ -9,6 +9,7 @@ import { SessionIdlePolicy, IdleSessionSelection } from "./session-idle.js";
 import { automaticWorkPaused, SearchWorkNeedsContinueError } from "./source-work.js";
 import type { BackgroundSessionRecord } from "./background-session-discovery.js";
 import { beginSessionSweep, completeSessionSweep } from "./session-watermark.js";
+import { coverageDigest } from "./source-coverage.js";
 
 export const transcriptCandidates = (records: readonly SessionMapRecord[]) => records.map(r => ({ id:r.piSessionId,path:r.piSessionPath }));
 export class DesktopSessionChunks {
@@ -20,6 +21,8 @@ export class DesktopSessionChunks {
     discoverBackground(signal: AbortSignal): Promise<readonly BackgroundSessionRecord[]>;
     embedding(signal: AbortSignal): Promise<ChunkEmbedding | undefined>;
     policy: SessionIdlePolicy;
+    /** Logical session snapshot observed by the native probe; enables coverage evidence. */
+    snapshot?(signal: AbortSignal): Promise<string>;
     titles(record: BackgroundSessionRecord, signal: AbortSignal): Promise<void>;
     failed(error: unknown): void;
     /** A later background pass finished without indexing failures. */
@@ -35,6 +38,7 @@ export class DesktopSessionChunks {
       const embedding = await options.embedding(owned);
       const identity = `${SESSION_CHUNK_FORMAT}:${embedding?.identity ?? "lexical-only"}`;
       phase = "sweep";
+      const snapshotBefore = await options.snapshot?.(owned).catch(() => undefined);
       const pass = await beginSessionSweep(cwd,identity,owned);
       selection.useCache(`${identity}:${pass.cacheRevision}`);
       phase = "discovery";
@@ -76,7 +80,12 @@ export class DesktopSessionChunks {
       phase = "finalize";
       if ((await options.embedding(owned))?.identity !== embedding?.identity) { selection.reset(); return; }
       if (embedding && !await embedding.authorized(owned)) { selection.reset(); return; }
-      if (complete) await completeSessionSweep(cwd,pass,owned);
+      if (complete) {
+        // Coverage only when the observed snapshot held for the whole complete pass.
+        const stable = snapshotBefore !== undefined && await options.snapshot?.(owned).catch(() => undefined) === snapshotBefore;
+        await completeSessionSweep(cwd,pass,owned,Date.now,
+          stable ? coverageDigest("sessions",snapshotBefore,embedding?.identity ?? null) : undefined);
+      }
       const after = await beginSessionSweep(cwd,identity,owned);
       if (pass.incarnation && after.incarnation !== pass.incarnation) selection.reset();
       selection.cacheRevision = `${identity}:${after.cacheRevision}`;

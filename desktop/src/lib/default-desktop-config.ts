@@ -47,6 +47,7 @@ export const DEFAULT_DESKTOP_CONFIG_JSONC = String.raw`{
     "model": "nova-3"
   },
   "desktop": {
+    "theme": "system",
     "trayOnly": false,
     "logPanelEnabled": false,
     "notifications": {

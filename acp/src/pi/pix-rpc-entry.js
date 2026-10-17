@@ -288,6 +288,9 @@ function bindPause(session) {
 			|| turn.message.stopReason === "aborted" || turn.message.stopReason === "error") {
 			return priorDecision;
 		}
+		// Pausing while sub-agents still run would let their completion
+		// delivery restart the agent (or strand it); wait for a later boundary.
+		if (hasLiveSubagents(session)) return priorDecision;
 		record.pauseBoundaryReached = true;
 		return { action: "end" };
 	};
@@ -303,6 +306,8 @@ function bindPause(session) {
 		// Preserve the scheduled retry instead of losing its failed response when
 		// _startRun settles. Defer the requested Pause to the next turn boundary.
 		if (shouldContinue && internals._failedResponse !== undefined) return true;
+		// Keep an uncommitted Pause pending while sub-agents are live.
+		if (!pauseBoundaryReached && shouldContinue && hasLiveSubagents(session)) return true;
 		if (pauseBoundaryReached || record.state === "pause-requested") {
 			// Keep the irreversible decision locked through before-settle awaits.
 			record.pauseBoundaryReached = true;
@@ -330,12 +335,28 @@ function bindPause(session) {
 			clearPauseRequest(record);
 			return false;
 		}
+		// Before-settle may deliver some completions while others still run:
+		// continue and keep the request pending for the next safe boundary.
+		if (shouldContinue && !record.pauseBoundaryReached && hasLiveSubagents(session)) return true;
 		if (shouldContinue || canContinue(session)) pause(record);
 		else clearPauseRequest(record);
 		return false;
 	};
 
 	return record;
+}
+
+const PIX_SUBAGENTS_SESSION_LIVE_SYMBOL = Symbol.for("pix.subagents.session-live");
+
+/** Read-only async-subagents bridge published on the owning session manager.
+ * @param {AgentSession} session */
+function hasLiveSubagents(session) {
+	try {
+		const getter = session.sessionManager?.[PIX_SUBAGENTS_SESSION_LIVE_SYMBOL];
+		return typeof getter === "function" && getter() === true;
+	} catch {
+		return false;
+	}
 }
 
 /** @param {AgentSession} session */

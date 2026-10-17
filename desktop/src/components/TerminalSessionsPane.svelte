@@ -34,6 +34,8 @@
     onStopTerminal,
     onRestartTerminal,
     onCloseTerminal,
+    isTerminalBusy = (terminal: PackageTerminalView) => terminal.status === "running",
+    terminalLabel = (terminal: PackageTerminalView) => terminal.script,
   }: {
     workspace: string;
     terminals: readonly PackageTerminalView[];
@@ -53,10 +55,17 @@
     onStopTerminal: (terminal: PackageTerminalView) => void | Promise<void>;
     onRestartTerminal: (terminal: PackageTerminalView) => void | Promise<void>;
     onCloseTerminal: (terminal: PackageTerminalView) => void | Promise<void>;
+    isTerminalBusy?: (terminal: PackageTerminalView) => boolean;
+    terminalLabel?: (terminal: PackageTerminalView) => string;
   } = $props();
 
+  function statusLabel(terminal: PackageTerminalView): string {
+    if (terminal.status === "running" && terminal.kind === "shell" && !isTerminalBusy(terminal)) return "Idle";
+    return packageTerminalStatusLabel(terminal);
+  }
+
   function terminalTone(terminal: PackageTerminalView): string {
-    if (terminal.status === "running") return "bg-primary";
+    if (terminal.status === "running") return isTerminalBusy(terminal) ? "bg-tool-success animate-pulse" : "bg-muted-foreground/60";
     if (terminal.status === "failed" || (terminal.status === "exited" && terminal.exitCode !== 0)) return "bg-tool-error";
     if (terminal.status === "exited" && terminal.exitCode === 0) return "bg-tool-success";
     return "bg-muted-foreground/60";
@@ -81,17 +90,17 @@
             type="button"
             role="tab"
             aria-selected={selected}
-            title={`${terminal.script} · ${packageTerminalStatusLabel(terminal)}`}
+            title={`${terminalLabel(terminal)} · ${statusLabel(terminal)}${terminal.kind === "shell" ? "" : ` · ${terminal.command}`}`}
             onclick={() => void onSelectTerminal(terminal.id)}
           >
             <span class={["h-1.5 w-1.5 shrink-0 rounded-full", terminalTone(terminal)]} aria-hidden="true"></span>
-            <span class="min-w-0 flex-1 truncate font-mono text-xs">{terminal.script}</span>
+            <span class="min-w-0 flex-1 truncate font-mono text-xs">{terminalLabel(terminal)}</span>
           </button>
           <button
             class="mr-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring group-hover:opacity-100"
             type="button"
             title="Close terminal"
-            aria-label={`Close ${terminal.script} terminal`}
+            aria-label={`Close ${terminalLabel(terminal)} terminal`}
             onclick={() => void onCloseTerminal(terminal)}
           ><X class="h-3 w-3" aria-hidden="true" /></button>
         </div>
@@ -102,8 +111,8 @@
       <div class="flex shrink-0 items-center border-l border-code-border/70 px-0.5">
         <span
           class="max-w-32 truncate px-1.5 font-mono text-xs text-muted-foreground"
-          title={packageTerminalStatusLabel(activeTerminal)}
-        >{packageTerminalStatusLabel(activeTerminal)}</span>
+          title={statusLabel(activeTerminal)}
+        >{statusLabel(activeTerminal)}</span>
         <button
           class={iconButtonClass("md", "chrome")}
           type="button"
@@ -115,8 +124,8 @@
         <button
           class="grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-tool-error/10 hover:text-tool-error focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-30"
           type="button"
-          title="Stop terminal"
-          aria-label="Stop terminal"
+          title={activeTerminal.kind === "shell" && isTerminalBusy(activeTerminal) ? "Interrupt running command (Ctrl+C)" : "Stop terminal"}
+          aria-label={activeTerminal.kind === "shell" && isTerminalBusy(activeTerminal) ? "Interrupt running command" : "Stop terminal"}
           disabled={activeTerminal.status !== "running" || terminalActionId !== null}
           onclick={() => void onStopTerminal(activeTerminal)}
         ><Square class="h-3 w-3 fill-current" aria-hidden="true" /></button>
@@ -141,7 +150,7 @@
           bind:this={terminalView}
           initialContent={activeTerminal.output}
           running={activeTerminal.status === "running"}
-          ariaLabel={`${activeTerminal.script} terminal`}
+          ariaLabel={`${terminalLabel(activeTerminal)} terminal`}
           onInput={(data) => onWriteTerminal(terminalId, data)}
           onResize={(cols, rows) => onResizeTerminal(terminalId, cols, rows)}
         />

@@ -5,6 +5,7 @@ import {
 	aggregateSessionUsage,
 	formatSessionUsageText,
 	loadSessionUsageReport,
+	usageFromEntry,
 } from "../src/app/session/session-usage.js";
 
 describe("session usage accounting", () => {
@@ -154,5 +155,32 @@ describe("session usage accounting", () => {
 		assert.equal(report.totals.totalTokens, 900);
 		assert.equal(report.providers[0]?.provider, "full");
 		assert.equal(report.providers.some((provider) => provider.provider === "tail"), false);
+	});
+
+	it("normalizes single entries with identity and call timestamps for time-bucketed statistics", () => {
+		const assistant = usageFromEntry({
+			type: "message", timestamp: "2026-10-01T10:00:00.000Z",
+			message: { role: "assistant", provider: "openai-codex", model: "gpt-5.6-sol", timestamp: 1_790_000_000_000, usage: { totalTokens: 10, cost: { total: 0.1 } } },
+		});
+		assert.equal(assistant?.provider, "openai-codex");
+		assert.equal(assistant?.model, "gpt-5.6-sol");
+		assert.equal(assistant?.timestampMs, 1_790_000_000_000);
+		assert.equal(assistant?.totals.totalTokens, 10);
+
+		const explicit = usageFromEntry({ type: "usage", provider: "anthropic", model: "claude-sonnet", timestamp: "2026-10-01T10:00:00.000Z", usage: { totalTokens: 5 } });
+		assert.equal(explicit?.timestampMs, Date.parse("2026-10-01T10:00:00.000Z"));
+
+		const toolResult = usageFromEntry({ type: "message", timestamp: "2026-10-01T11:00:00.000Z", message: { role: "toolResult", provider: "ignored", usage: { totalTokens: 3 } } });
+		assert.equal(toolResult?.provider, undefined);
+		assert.equal(toolResult?.timestampMs, Date.parse("2026-10-01T11:00:00.000Z"));
+
+		const compaction = usageFromEntry({ type: "compaction", timestamp: "not a date", usage: { totalTokens: 7 } });
+		assert.equal(compaction?.provider, undefined);
+		assert.equal(compaction?.timestampMs, undefined);
+		assert.equal(compaction?.totals.totalTokens, 7);
+
+		assert.equal(usageFromEntry({ type: "message", message: { role: "user", usage: { totalTokens: 1 } } }), undefined);
+		assert.equal(usageFromEntry({ type: "session_info" }), undefined);
+		assert.equal(usageFromEntry(null), undefined);
 	});
 });

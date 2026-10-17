@@ -1,5 +1,6 @@
 <script lang="ts">
   import { projectFolderHue } from "./lib/recent-projects";
+  import { modelThinkingConfigState } from "./lib/model-thinking";
   import { createComposerMessageEdit } from "./app/composer-message-edit.svelte";
   import { onDestroy, onMount, tick, untrack } from "svelte";
   import { invoke, isTauri } from "@tauri-apps/api/core";
@@ -19,6 +20,7 @@
   import DesktopStatusBar from "./components/DesktopStatusBar.svelte";
   import DesktopUpdateBanner from "./components/DesktopUpdateBanner.svelte";
   import DesktopBootstrapDialog from "./components/DesktopBootstrapDialog.svelte";
+  import ModelSetupDialog from "./components/ModelSetupDialog.svelte";
   import { workbenchSessionTabId, type WorkbenchTabId } from "./lib/workbench-tabs";
   import { createTranscriptAttachmentController } from "./app/transcript-attachments";
   import { createTranscriptScrollController } from "./app/transcript-scroll.svelte";
@@ -61,6 +63,7 @@
   import { createBtwStore } from "./app/btw.svelte";
   import { btwDiscussionDraft, canInsertBtwDraft } from "./app/btw-draft";
   import BtwDock from "./components/BtwDock.svelte";
+  import { startThemePreference } from "./lib/theme-preference";
   import { createWorkbenchTerminalState } from "./app/workbench-terminal.svelte";
 
   const isMacOS = /Macintosh|Mac OS X/.test(navigator.userAgent);
@@ -119,6 +122,7 @@
     openSettingsField: (section: string, fieldId: string) => Promise<void>;
     openGitPanel: (isCurrent?: () => boolean) => void;
     closeProjectSwitcher: () => void;
+    openProjectSettings: () => void;
   } | null>(null);
   let localMessageId = 0;
   let onSessionActivityChanged = (_sessionId: string): void => {};
@@ -588,8 +592,7 @@
   const taskActionId = $derived(projectActions.actionId);
 
   const promptActionServices = createDesktopPromptActionServices({
-    handoffAllowed: () => status === "ready" && !activePendingElicitation
-      && !presentationState.activeBrainstormLink?.owned,
+    handoffAllowed: () => status === "ready" && !activePendingElicitation,
     retargetSessionAnchors: (sourceId, targetId) => workbenchController.retargetSessionAnchors(sourceId, targetId),
     submitMessageEdit: () => messageEdit.submit(),
     messageEditActive: () => messageEdit.active,
@@ -904,6 +907,7 @@
     quotaWait,
     headsUp,
     openObserverSettings: () => void workspaceSidebar?.openSettingsSection("desktop-observer"),
+    openProjectSettings: () => workspaceSidebar?.openProjectSettings(),
     openClaudeLoginTerminal: openInteractiveTerminal,
   });
   const titlebarViewModel = viewModels.titlebar;
@@ -918,6 +922,7 @@
   }));
   onMount(desktopLifecycle.start);
   onMount(diagnosticLogger.start);
+  onMount(() => startThemePreference((error) => diagnosticLogger.report(error, "frontend:theme-preference")));
   onDestroy(headsUp.reset);
   onDestroy(btw.reset);
   onMount(desktopNotifications.start);
@@ -988,4 +993,5 @@
     }} />
 {/if}
 <DesktopBootstrapDialog onCredentialsChanged={reconnect} />
+<ModelSetupDialog client={client ?? undefined} onApplied={reconnect} catalog={modelThinkingConfigState(displayedConfigOptions).models} />
 <DesktopUpdateBanner {updater} />

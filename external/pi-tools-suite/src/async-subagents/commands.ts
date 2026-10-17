@@ -11,7 +11,6 @@ import {
 	readParentSessionLink,
 	readReturnSessionLink,
 	resolveRunDir,
-	shouldPersistSubagentSessions,
 	stopAgents,
 	validateBasename,
 	writeParentSessionLink,
@@ -59,7 +58,6 @@ export function isUltraworkEnvEnabled(env: NodeJS.ProcessEnv = process.env): boo
 }
 
 export function registerCommands(pi: ExtensionAPI): void {
-	const persistSessions = shouldPersistSubagentSessions();
 	registerOrchestrationCommands(pi);
 
 	pi.registerCommand("sub-status", {
@@ -86,7 +84,7 @@ export function registerCommands(pi: ExtensionAPI): void {
 		},
 	});
 
-	if (persistSessions) registerSessionCommands(pi);
+	registerSessionCommands(pi);
 
 	pi.registerCommand("sub-stop", {
 		description: "Stop running async sub-agents in a run directory",

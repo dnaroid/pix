@@ -9,6 +9,7 @@
   import type { SessionSearchHit } from "../../../acp/src/search/contract";
   import { buildSessionTree, type SessionTreeRow } from "../lib/session-tabs";
   import { expandedSessionRows, flatSessionRow, sessionRowsRelated } from "../lib/saved-session-tree";
+  import { isSubagentSession } from "../lib/session-subagent-link";
   import SavedSessionRow from "./SavedSessionRow.svelte";
   import {
     SAVED_SESSION_INITIAL_ROWS,
@@ -41,10 +42,14 @@
   let searching = $state(false);
   let searchNotice = $state("");
   let searchRequest: AbortController | null = null;
+  // Read-only sub-agent viewers are hidden unless explicitly requested.
+  let showSubagents = $state(false);
+  const hasSubagentSessions = $derived(sessions.some(isSubagentSession));
+  const candidateSessions = $derived(showSubagents ? sessions : sessions.filter((session) => !isSubagentSession(session)));
   const displayedSessions = $derived.by(() => {
-    if (!query.trim()) return expandedSessionRows(buildSessionTree(sessions), collapsed);
-    const byId = new Map(sessions.map(session => [session.sessionId, session]));
-    return (submittedHits ?? previewInlineSearch("sessions", query, sessions)).flatMap(hit => {
+    if (!query.trim()) return expandedSessionRows(buildSessionTree(candidateSessions), collapsed);
+    const byId = new Map(candidateSessions.map(session => [session.sessionId, session]));
+    return (submittedHits ?? previewInlineSearch("sessions", query, candidateSessions)).flatMap(hit => {
       const session = byId.get(hit.sessionId);
       return session ? [flatSessionRow(session)] : [];
     });
@@ -194,6 +199,18 @@
         </button>
       </div>
       {#if searching}<p role="status" class="mt-1 text-xs text-muted-foreground">Searching…</p>{:else if searchNotice}<p role="status" class="mt-1 text-xs text-muted-foreground">{searchNotice}</p>{/if}
+      {#if hasSubagentSessions}
+        <label class="mt-2 flex w-fit items-center gap-1.5 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            class="h-3.5 w-3.5 accent-primary focus-visible:outline-2 focus-visible:outline-ring"
+            data-show-subagent-sessions
+            bind:checked={showSubagents}
+            onchange={resetPages}
+          />
+          Show sub-agent sessions
+        </label>
+      {/if}
     </header>
 
     <div bind:this={scrollContainer} class="min-h-0 overflow-y-auto border-t border-border/70" aria-label="Saved conversations">

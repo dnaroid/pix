@@ -2,6 +2,8 @@ export interface MarkdownFence {
   readonly marker: "`" | "~";
   readonly length: number;
   readonly language: string;
+  /** Full info string after the marker (language plus any attributes). */
+  readonly info: string;
 }
 
 export function parseFence(line: string): MarkdownFence | undefined {
@@ -11,6 +13,7 @@ export function parseFence(line: string): MarkdownFence | undefined {
     marker: match[1][0] as MarkdownFence["marker"],
     length: match[1].length,
     language: (match[2] ?? "").trim().split(/\s+/, 1)[0] ?? "",
+    info: (match[2] ?? "").trim(),
   };
 }
 

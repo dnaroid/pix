@@ -3,7 +3,7 @@
   import { formatSettingsDefaultValue, parseSettingsSource, removeSettingsValue, settingsDefaultValue, settingsHasValue, settingsValue, updateSettingsSource, type SettingsSchema } from "../../lib/settings";
   import type { ModelThinkingModel } from "../../lib/model-thinking";
   import SettingsFieldRow from "./SettingsFieldRow.svelte";
-  import SettingsModelSelect from "./SettingsModelSelect.svelte";
+  import SettingsModelSummary from "./SettingsModelSummary.svelte";
   import SettingsNumberInput from "./SettingsNumberInput.svelte";
   import SettingsSwitch from "./SettingsSwitch.svelte";
 
@@ -88,14 +88,8 @@
   >
     <SettingsSwitch ariaLabel="Enable Observer in new Desktop sessions" value={bool(["headsUp", "enabled"])} onChange={(value) => set(["headsUp", "enabled"], value)} />
   </SettingsFieldRow>
-  <SettingsFieldRow
-    label="Observer model"
-    description="Provider/model used for checks. Configured and custom provider/model references are accepted."
-    explicit={has(["headsUp", "model"])}
-    defaultLabel={defaultLabel(["headsUp", "model"])}
-    onReset={() => reset(["headsUp", "model"])}
-  >
-    <SettingsModelSelect value={text(["headsUp", "model"])} {models} allowCustom ariaLabel="Observer model" onChange={(value) => set(["headsUp", "model"], value)} />
+  <SettingsFieldRow label="Observer model" description="Provider/model used for checks. Managed by the model setup wizard.">
+    <SettingsModelSummary {models} rows={[{ label: "Observer", ref: text(["headsUp", "model"]) }]} />
   </SettingsFieldRow>
   <SettingsFieldRow
     label="Turns between checks"

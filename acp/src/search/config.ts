@@ -1,5 +1,6 @@
 import { ModelRuntime, getAgentDir } from "@earendil-works/pi-coding-agent";
-import { lstat, open } from "node:fs/promises";
+import { lstat, open, readFile } from "node:fs/promises";
+import { parse as parseJsonc } from "jsonc-parser";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { loadSemanticEmbeddingConfig, semanticSearchConfigPath, type SemanticEmbeddingConfig } from "./semantic-config.js";
@@ -51,4 +52,18 @@ export class SearchPreferences {
   async enabled(): Promise<boolean> { return Boolean(await this.embedding()); }
   sessionTitlesEnabled(): Promise<boolean> { return this.enabled(); }
   tasksSemanticEnabled(): Promise<boolean> { return this.enabled(); }
+}
+
+/**
+ * OpenRouter model id for the Jev-style intent/task classifiers from
+ * pix-desktop.jsonc `search.intentModelRef` (`openrouter/<id>`). Undefined = built-in default.
+ */
+export async function loadIntentModelId(path = desktopSearchConfigPath()): Promise<string | undefined> {
+  let config: unknown;
+  try { config = parseJsonc(await readFile(path, "utf8")); } catch { return undefined; }
+  const search = config && typeof config === "object" ? (config as { search?: unknown }).search : undefined;
+  const ref = search && typeof search === "object" ? (search as { intentModelRef?: unknown }).intentModelRef : undefined;
+  if (typeof ref !== "string") return undefined;
+  const match = /^openrouter\/(\S+)$/.exec(ref.trim());
+  return match ? match[1] : undefined;
 }

@@ -36,7 +36,6 @@ export interface AgentState {
 	pid?: number;
 	resultLines?: number;
 	stderrLines?: number;
-	eventLines?: number;
 	/** How many times this agent has been retried (0 = first attempt). */
 	retryCount?: number;
 	/** Most recent user-visible activity observed from the sub-agent RPC stream. */

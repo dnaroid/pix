@@ -62,6 +62,25 @@ describe("buildSessionTree", () => {
     ]);
   });
 
+  it("nests sub-agent viewer sessions under the conversation that spawned them", () => {
+    const viewer: SessionInfo = {
+      ...session("viewer"),
+      updatedAt: "2025-01-03T00:00:00.000Z",
+      _meta: { "pix.subagent": { runDir: "/r", agentId: "agent-1", parentSessionId: "parent" } },
+    };
+    const orphan: SessionInfo = {
+      ...session("orphan"),
+      updatedAt: "2025-01-02T00:00:00.000Z",
+      _meta: { "pix.subagent": { runDir: "/r", agentId: "agent-2", parentSessionId: "missing" } },
+    };
+    const rows = buildSessionTree([treeSession("parent", "2025-01-01T00:00:00.000Z"), viewer, orphan]);
+    expect(rows.map((row) => [row.session.sessionId, row.depth])).toEqual([
+      ["orphan", 0],
+      ["parent", 0],
+      ["viewer", 1],
+    ]);
+  });
+
   it("draws continuation columns for arbitrarily nested forks", () => {
     const rows = buildSessionTree([
       treeSession("root", "2025-01-01T00:00:00.000Z"),

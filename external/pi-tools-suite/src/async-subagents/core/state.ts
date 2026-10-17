@@ -1,23 +1,21 @@
+// Agent state read model over the session-native store (decision 0072).
+// Non-owned agents derive status from their record plus in-process
+// liveness; owned-launch agents keep the receipt-chain semantics and read
+// their durable control records from the owned base directory.
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { activityFromProgressRecord } from "./activity.js";
-import { readTodoProgress } from "./todo-progress.js";
-import { hasLaunchedAgentPrompt, isDir } from "./paths.js";
-import { readStructuredResult } from "./structured-result.js";
-import type { AgentResult, AgentState, RpcEventRecord, RunState } from "./types.js";
+import { isDir, ownedAgentDir, ownedBatchDir } from "./paths.js";
+import { getLive, getRecord, listRunRecords, readChildLastAssistantText, type SubagentRecord } from "./store.js";
+import type { AgentResult, AgentState, RunState } from "./types.js";
 import { ownedOutcomeSync, ownedRecoveredExitSync, type OwnedRunOutcome } from "./owned-launch-integration.js";
 import { ownedArtifactsPresentSync, ownedRetiredSync, reconcileOwnedRuns } from "./owned-retirement.js";
 
-const MAX_RPC_EVENT_LINE_CHARS = 1024 * 1024;
-const LAST_ACTIVITY_TAIL_BYTES = 64 * 1024;
-
 interface AgentStateReadOptions {
 	includeLineCounts?: boolean;
-	checkRpcPromptFailure?: boolean;
 }
 
 interface AgentResultReadOptions {
-	/** Read raw result.md/stderr.log contents for internal callers that explicitly need file contents. */
+	/** Include the full result/stderr text (internal callers only; the tool inlines a bounded copy). */
 	includeRawFiles?: boolean;
 }
 
@@ -26,140 +24,105 @@ export function getAgentState(
 	agentId: string,
 	options: AgentStateReadOptions = {},
 ): AgentState | null {
-	const agentDir = path.join(runDir, agentId);
-	if (!isDir(agentDir)) return null;
-	if (!hasLaunchedAgentPrompt(runDir, agentId)) return null;
+	const record = getRecord(runDir, agentId);
+	const ownedDir = ownedAgentDir(runDir, agentId);
+	// Unknown ownership fails closed: surviving owned-launch artifacts (even
+	// without a store record, e.g. a crash before the parent entry flushed)
+	// mark the run owned.
+	const owned = ownedArtifactsPresentSync(ownedDir);
+	if (!record && !owned) return null;
 	const includeLineCounts = options.includeLineCounts ?? true;
-	const checkRpcPromptFailure = options.checkRpcPromptFailure ?? true;
+	const live = getLive(runDir, agentId);
 
 	const state: AgentState = { id: agentId, status: "planned" };
-	const pid = readPid(path.join(agentDir, "pid"));
-	if (pid !== undefined) state.pid = pid;
+	if (record?.pid !== undefined) state.pid = record.pid;
+	if (record?.startedAt) state.startedAt = record.startedAt;
+	if (record?.finishedAt) state.finishedAt = record.finishedAt;
+	if (record?.retryCount && record.retryCount > 0) state.retryCount = record.retryCount;
+	if (live?.todoProgress) state.todoProgress = live.todoProgress;
+	if (live?.lastActivity) state.lastActivity = live.lastActivity;
 
-	const exitCodeFile = path.join(agentDir, "exit_code");
-	// Unknown ownership fails closed: surviving owned-launch artifacts (even
-	// without a readable pointer) mark the run owned.
-	const owned = ownedArtifactsPresentSync(agentDir);
-	const exitCodeFileExists = fs.existsSync(exitCodeFile);
-	let parseExitCodeFile = !owned && exitCodeFileExists;
 	if (owned) {
-		// The bridge's PID, stale exit_code, and RPC events cannot establish
-		// that the owned coalition has drained; only the receipt chain can.
-		const outcome = ownedOutcomeSync(agentDir);
-		// Receipt-before-bootout contract: a drained (or unproven-failure)
-		// receipt is not terminal state until BOTH exact UUID jobs are
-		// durably retired. Keeping wait/poll nonterminal until then is what
-		// keeps restart reconciliation retrying the retirement proof, so a
-		// receipt the supervisor wrote before booting out its jobs can never
-		// leave deletion/reuse permanently blocked. A fenced (never-launched)
-		// run follows the same rule, so every other surviving directory of
-		// the agent must be retired too.
-		const terminalReceipt = outcome.kind === "launch-failed" ||
-			((outcome.kind === "drained-ok" || outcome.kind === "drained-fail" || outcome.kind === "unproven-fail" ||
-				outcome.kind === "never-launched") && ownedRetiredSync(agentDir));
-		if (!terminalReceipt) {
-			// No final proof yet: keep the run pending on any ambiguity —
-			// never "stopped" from a dead bridge PID, never "failed" from an
-			// RPC prompt-failure event.
-			state.status = "running";
-		} else {
-			const recovered = ownedTerminalExit(agentDir, outcome, exitCodeFileExists ? fs.readFileSync(exitCodeFile, "utf-8").trim() : undefined);
-			if (!recovered) state.status = "running";
-			else if ("stopped" in recovered) state.status = "stopped";
-			else {
-				state.exitCode = recovered.exitCode;
-				state.status = recovered.exitCode === 0 ? "done" : "failed";
-			}
+		deriveOwnedStatus(state, ownedDir);
+		// A pending retry stays nonterminal so wait/poll do not return
+		// "failed" for an attempt the retry chain will relaunch.
+		if (record?.status === "retrying" && !record.stopRequested && state.status !== "running" && state.status !== "done") {
+			state.status = "retrying";
+			if (record.nextRetryAt) state.nextRetryAt = record.nextRetryAt;
 		}
-	}
-	if (parseExitCodeFile) {
-		const code = parseInt(fs.readFileSync(exitCodeFile, "utf-8").trim(), 10);
-		if (isNaN(code)) {
-			state.status = "stopped";
-		} else {
-			state.exitCode = code;
-			state.status = code === 0 ? "done" : "failed";
-		}
-	} else if (
-		!owned &&
-		checkRpcPromptFailure &&
-		hasRpcPromptFailure(path.join(agentDir, "events.jsonl"))
-	) {
-		state.exitCode = 1;
-		state.status = "failed";
-	} else if (!owned && pid !== undefined) {
-		try {
-			process.kill(pid, 0);
-			state.status = "running";
-		} catch {
-			state.status = "stopped";
-		}
-	}
-
-	const startedAtFile = path.join(agentDir, "started_at");
-	if (fs.existsSync(startedAtFile)) {
-		state.startedAt = fs.readFileSync(startedAtFile, "utf-8").trim();
-	}
-
-	const finishedAtFile = path.join(agentDir, "finished_at");
-	if (fs.existsSync(finishedAtFile)) {
-		state.finishedAt = fs.readFileSync(finishedAtFile, "utf-8").trim();
-	}
-
-	const lastActivity = readLastActivity(path.join(agentDir, "progress.jsonl"));
-	if (lastActivity) state.lastActivity = lastActivity;
-	const todoProgress = readTodoProgress(agentDir);
-	if (todoProgress) state.todoProgress = todoProgress;
-
-	const retryPendingFile = path.join(agentDir, "retry_pending");
-	const stopRequestedFile = path.join(agentDir, "stop_requested");
-	// Owned runs reach this only once terminal and retired; a pending retry
-	// must still surface as nonterminal so wait/poll do not return "failed"
-	// for an attempt the retry chain will relaunch.
-	if (fs.existsSync(retryPendingFile) && !fs.existsSync(stopRequestedFile) && state.status !== "running" && state.status !== "done") {
-		state.status = "retrying";
-		const nextRetryAt = readTrimmed(path.join(agentDir, "next_retry_at"));
-		if (nextRetryAt) state.nextRetryAt = nextRetryAt;
+	} else if (record) {
+		deriveRecordStatus(state, record, live?.active === true);
 	}
 
 	if (includeLineCounts) {
-		const resultLines = countFileLines(path.join(agentDir, "result.md"));
-		if (resultLines !== undefined) state.resultLines = resultLines;
-
-		const stderrLines = countFileLines(path.join(agentDir, "stderr.log"));
-		if (stderrLines !== undefined && stderrLines > 0)
-			state.stderrLines = stderrLines;
-
-		const eventLines = countFileLines(path.join(agentDir, "events.jsonl"));
-		if (eventLines !== undefined) state.eventLines = eventLines;
+		const text = live?.resultText ?? record?.message;
+		if (text !== undefined) state.resultLines = countLines(text);
+		const stderrLines = live?.stderrTail ? countLines(live.stderrTail) : 0;
+		if (stderrLines > 0) state.stderrLines = stderrLines;
 	}
-
-	// Read retry count if present.
-	const retryCountFile = path.join(agentDir, "retry_count");
-	if (fs.existsSync(retryCountFile)) {
-		const count = parseInt(fs.readFileSync(retryCountFile, "utf-8").trim(), 10);
-		if (!isNaN(count) && count > 0) state.retryCount = count;
-	}
-
 	return state;
 }
 
-function readTrimmed(filePath: string): string | undefined {
-	if (!fs.existsSync(filePath)) return undefined;
-	const value = fs.readFileSync(filePath, "utf-8").trim();
-	return value || undefined;
+function deriveRecordStatus(state: AgentState, record: SubagentRecord, activeHere: boolean): void {
+	const status = record.status ?? "planned";
+	if (record.stopRequested && !activeHere && status !== "done" && status !== "failed") {
+		state.status = "stopped";
+		return;
+	}
+	if (status === "done" || status === "failed") {
+		state.status = status;
+		if (record.exitCode !== undefined) state.exitCode = record.exitCode;
+		return;
+	}
+	if (status === "stopped") {
+		state.status = "stopped";
+		return;
+	}
+	if (activeHere) {
+		state.status = status;
+		if (status === "retrying" && record.nextRetryAt) state.nextRetryAt = record.nextRetryAt;
+		return;
+	}
+	// Not owned by this process (parent restart/reload in another process):
+	// a live PID keeps it running; a lost queue/retry timer cannot resume.
+	if (status === "running" && record.pid !== undefined && pidAlive(record.pid)) state.status = "running";
+	else state.status = "stopped";
+}
+
+function deriveOwnedStatus(state: AgentState, ownedDir: string): void {
+	const exitCodeFile = path.join(ownedDir, "exit_code");
+	const rawExit = fs.existsSync(exitCodeFile) ? fs.readFileSync(exitCodeFile, "utf-8").trim() : undefined;
+	// The bridge's PID, stale exit records, and RPC events cannot establish
+	// that the owned coalition has drained; only the receipt chain can.
+	const outcome = ownedOutcomeSync(ownedDir);
+	// Receipt-before-bootout contract: a drained (or unproven-failure)
+	// receipt is not terminal until BOTH exact UUID jobs are durably retired.
+	const terminalReceipt = outcome.kind === "launch-failed" ||
+		((outcome.kind === "drained-ok" || outcome.kind === "drained-fail" || outcome.kind === "unproven-fail" ||
+			outcome.kind === "never-launched") && ownedRetiredSync(ownedDir));
+	if (!terminalReceipt) {
+		state.status = "running";
+		return;
+	}
+	const recovered = ownedTerminalExit(ownedDir, outcome, rawExit);
+	if (!recovered) state.status = "running";
+	else if ("stopped" in recovered) state.status = "stopped";
+	else {
+		state.exitCode = recovered.exitCode;
+		state.status = recovered.exitCode === 0 ? "done" : "failed";
+	}
+	const finishedAt = readTrimmed(path.join(ownedDir, "finished_at"));
+	if (finishedAt && !state.finishedAt) state.finishedAt = finishedAt;
 }
 
 /**
  * Terminal exit for an owned run with a final receipt. A persisted exit
  * record from the in-process completion path wins when it is self-consistent
- * with the receipt ("stopped", or a numeric code whose failure/success
- * matches the receipt kind); anything absent, unparsable, or contradicting
- * the receipt (for example a stale 0 against a drained-fail receipt) is
- * recovered deterministically from the receipt chain instead.
+ * with the receipt; anything absent, unparsable, or contradicting the
+ * receipt is recovered deterministically from the receipt chain instead.
  */
 function ownedTerminalExit(
-	agentDir: string,
+	ownedDir: string,
 	outcome: OwnedRunOutcome,
 	rawExitRecord: string | undefined,
 ): { exitCode: number } | { stopped: true } | undefined {
@@ -169,114 +132,37 @@ function ownedTerminalExit(
 		if (outcome.kind !== "drained-ok" && code === 0) return { exitCode: 1 };
 		return { exitCode: code };
 	}
-	return ownedRecoveredExitSync(agentDir, outcome);
+	return ownedRecoveredExitSync(ownedDir, outcome);
 }
 
-function readPid(pidFile: string): number | undefined {
-	if (!fs.existsSync(pidFile)) return undefined;
-	const pid = parseInt(fs.readFileSync(pidFile, "utf-8").trim(), 10);
-	return isNaN(pid) ? undefined : pid;
-}
-
-function readLastActivity(filePath: string): AgentState["lastActivity"] | undefined {
-	if (!fs.existsSync(filePath)) return undefined;
-	let fd: number | undefined;
+function readTrimmed(filePath: string): string | undefined {
 	try {
-		fd = fs.openSync(filePath, "r");
-		const size = fs.fstatSync(fd).size;
-		if (size <= 0) return undefined;
-		const start = Math.max(0, size - LAST_ACTIVITY_TAIL_BYTES);
-		const buffer = Buffer.allocUnsafe(size - start);
-		const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, start);
-		if (bytesRead <= 0) return undefined;
-		const lines = buffer.toString("utf-8", 0, bytesRead).split(/\r?\n/);
-		if (start > 0) {
-			const previousByte = Buffer.allocUnsafe(1);
-			const previousBytesRead = fs.readSync(fd, previousByte, 0, 1, start - 1);
-			if (previousBytesRead === 1 && previousByte[0] !== 0x0a) lines.shift();
-		}
-		for (let index = lines.length - 1; index >= 0; index--) {
-			const line = lines[index]?.trim();
-			if (!line) continue;
-			try {
-				const activity = activityFromProgressRecord(JSON.parse(line) as unknown);
-				if (activity) return activity;
-			} catch {
-				// Ignore malformed or partially written tail lines and keep scanning.
-			}
-		}
+		return fs.readFileSync(filePath, "utf-8").trim() || undefined;
 	} catch {
 		return undefined;
-	} finally {
-		if (fd !== undefined) fs.closeSync(fd);
 	}
-	return undefined;
 }
 
-function hasRpcPromptFailure(eventsFile: string): boolean {
-	if (!fs.existsSync(eventsFile)) return false;
-	let fd: number | undefined;
+function pidAlive(pid: number): boolean {
 	try {
-		fd = fs.openSync(eventsFile, "r");
-		const buffer = Buffer.allocUnsafe(64 * 1024);
-		const decoder = new TextDecoder();
-		let pending = "";
-
-		while (true) {
-			const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, null);
-			if (bytesRead === 0) break;
-			pending += decoder.decode(buffer.subarray(0, bytesRead), { stream: true });
-			if (pending.length > MAX_RPC_EVENT_LINE_CHARS) return false;
-			const lines = pending.split(/\r?\n/);
-			pending = lines.pop() ?? "";
-			for (const line of lines) {
-				if (isRpcPromptFailureLine(line)) return true;
-			}
-		}
-
-		pending += decoder.decode();
-		if (isRpcPromptFailureLine(pending)) return true;
+		process.kill(pid, 0);
+		return true;
 	} catch {
 		return false;
-	} finally {
-		if (fd !== undefined) fs.closeSync(fd);
 	}
-	return false;
 }
 
-function isRpcPromptFailureLine(line: string): boolean {
-	if (!line.trim()) return false;
-	const event = JSON.parse(line) as RpcEventRecord;
-	return event.type === "response" && event.command === "prompt" && event.success === false;
+function countLines(text: string): number {
+	if (!text) return 0;
+	const newlines = text.split("\n").length - 1;
+	return text.endsWith("\n") ? newlines : newlines + 1;
 }
 
-function countFileLines(filePath: string): number | undefined {
-	if (!fs.existsSync(filePath)) return undefined;
-	let fd: number | undefined;
-	try {
-		fd = fs.openSync(filePath, "r");
-		const buffer = Buffer.allocUnsafe(64 * 1024);
-		let newlines = 0;
-		let bytesTotal = 0;
-		let lastByte: number | undefined;
-
-		while (true) {
-			const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, null);
-			if (bytesRead === 0) break;
-			bytesTotal += bytesRead;
-			for (let i = 0; i < bytesRead; i++) {
-				if (buffer[i] === 0x0a) newlines++;
-			}
-			lastByte = buffer[bytesRead - 1];
-		}
-
-		if (bytesTotal === 0) return 0;
-		return lastByte === 0x0a ? newlines : newlines + 1;
-	} catch {
-		return undefined;
-	} finally {
-		if (fd !== undefined) fs.closeSync(fd);
-	}
+/** Agent ids with owned-launch directories but no record (crash before the parent entry flushed). */
+function orphanOwnedAgentIds(runDir: string): string[] {
+	const batchDir = ownedBatchDir(runDir);
+	if (batchDir === runDir || !isDir(batchDir)) return [];
+	return fs.readdirSync(batchDir, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
 }
 
 export function getRunState(
@@ -285,35 +171,26 @@ export function getRunState(
 	options: AgentStateReadOptions = {},
 ): RunState {
 	const agents: AgentState[] = [];
-	const launchedIds = new Set<string>();
-
-	if (!isDir(runDir)) return { runDir, agents };
-
-	// Read launched agent dirs
-	for (const entry of fs.readdirSync(runDir, { withFileTypes: true })) {
-		if (!entry.isDirectory()) continue;
-		if (!hasLaunchedAgentPrompt(runDir, entry.name)) continue;
-		if (filterIds && !filterIds.includes(entry.name)) continue;
-		const state = getAgentState(runDir, entry.name, options);
-		if (state) {
-			agents.push(state);
-			launchedIds.add(entry.name);
-		}
+	const seen = new Set<string>();
+	const ids = [...listRunRecords(runDir).map((record) => record.agentId), ...orphanOwnedAgentIds(runDir)];
+	for (const id of ids) {
+		if (seen.has(id) || (filterIds && !filterIds.includes(id))) continue;
+		seen.add(id);
+		const state = getAgentState(runDir, id, options);
+		if (state) agents.push(state);
 	}
-
-	// Check for planned agents (prompts without launched agent dirs)
-	const promptsDir = path.join(runDir, "prompts");
-	if (isDir(promptsDir)) {
-		for (const pf of fs.readdirSync(promptsDir)) {
-			if (!pf.endsWith(".md")) continue;
-			const id = pf.slice(0, -3);
-			if (launchedIds.has(id)) continue;
-			if (filterIds && !filterIds.includes(id)) continue;
-			agents.push({ id, status: "planned" });
-		}
-	}
-
 	return { runDir, agents };
+}
+
+/** Full result text: live final text, parent-authored message, then the child session's last answer. */
+export function readResultText(runDir: string, agentId: string): string | undefined {
+	const record = getRecord(runDir, agentId);
+	const live = getLive(runDir, agentId);
+	if (live?.resultText !== undefined) return live.resultText;
+	if (record?.message !== undefined) return record.message;
+	const child = readChildLastAssistantText(record?.childSessionFile);
+	if (child !== undefined) return child;
+	return readTrimmed(path.join(ownedAgentDir(runDir, agentId), "result.md"));
 }
 
 export function readResult(
@@ -323,33 +200,20 @@ export function readResult(
 ): AgentResult | null {
 	const state = getAgentState(runDir, agentId);
 	if (!state) return null;
-
-	const agentDir = path.join(runDir, agentId);
+	const record = getRecord(runDir, agentId);
+	const live = getLive(runDir, agentId);
 	const includeRawFiles = options.includeRawFiles ?? true;
-	let result: string | undefined;
-	let stderr: string | undefined;
-	let resultAvailable = false;
-	let stderrAvailable = false;
-
-	const resultFile = path.join(agentDir, "result.md");
-	if (fs.existsSync(resultFile)) {
-		resultAvailable = true;
-		if (includeRawFiles) result = fs.readFileSync(resultFile, "utf-8");
-	}
-
-	const stderrFile = path.join(agentDir, "stderr.log");
-	if (fs.existsSync(stderrFile)) {
-		stderrAvailable = fs.statSync(stderrFile).size > 0;
-		if (includeRawFiles) {
-			const content = fs.readFileSync(stderrFile, "utf-8");
-			if (content.trim()) stderr = content;
-			stderrAvailable = Boolean(stderr);
-		}
-	}
-
-	const structured = readStructuredResult(agentDir);
-
-	return { resultAvailable, result, stderrAvailable, stderr, exitCode: state.exitCode, state, structured };
+	const text = readResultText(runDir, agentId);
+	const stderr = live?.stderrTail?.trim() ? live.stderrTail : record?.stderrPreview;
+	return {
+		resultAvailable: text !== undefined,
+		result: includeRawFiles ? text : undefined,
+		stderrAvailable: Boolean(stderr?.trim()),
+		stderr: includeRawFiles ? stderr : undefined,
+		exitCode: state.exitCode,
+		state,
+		structured: record?.structured,
+	};
 }
 
 export async function waitForAgents(
@@ -365,38 +229,16 @@ export async function waitForAgents(
 	const timeout = options.timeout ?? 300;
 	const interval = options.interval ?? 3;
 	const failFast = options.failFast ?? false;
-
 	const start = Date.now();
-
 	while (true) {
 		// Self-heal owned runs left unpersisted by a parent restart (receipt
 		// recovery + retirement markers); never blocks this loop.
 		reconcileOwnedRuns(runDir, agentIds);
 		const state = getRunState(runDir, agentIds);
-		const terminal = state.agents.filter(
-			(a) =>
-				a.status === "done" || a.status === "failed" || a.status === "stopped",
-		);
-
-		if (
-			failFast &&
-			terminal.some((a) => a.status === "failed" || a.status === "stopped")
-		) {
-			return state;
-		}
-
-		if (state.agents.length === 0 || terminal.length === state.agents.length) {
-			return state;
-		}
-
-		if (Date.now() - start >= timeout * 1000) {
-			return state;
-		}
-
-		if (options.signal?.aborted) {
-			return state;
-		}
-
+		const terminal = state.agents.filter((a) => a.status === "done" || a.status === "failed" || a.status === "stopped");
+		if (failFast && terminal.some((a) => a.status === "failed" || a.status === "stopped")) return state;
+		if (state.agents.length === 0 || terminal.length === state.agents.length) return state;
+		if (Date.now() - start >= timeout * 1000 || options.signal?.aborted) return state;
 		await new Promise((resolve) => setTimeout(resolve, interval * 1000));
 	}
 }

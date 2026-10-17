@@ -20,8 +20,8 @@ path-based attachment markers made ownership and Registry transport cumbersome.
 
 - A single project-local `.pi/tasks.sqlite` database (schema v1) is the only
   source of saved tasks. Older `tasks.jsonc`/`tasks.d` files are never read,
-  imported or migrated. To avoid destructive cleanup, ignored user-owned
-  files remain untouched.
+  imported or migrated. They are not canonical project state: Desktop
+  `.pi` cleanup (manual Clean and TTL) treats them as reclaimable.
 - SQLite WAL, foreign keys and bounded busy timeout replace all custom
   cross-process task lock files, native bindings and lock-cleanup logic.
 - Last-close cleanup may unlink `-wal`/`-shm` while another reader inspects

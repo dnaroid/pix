@@ -41,7 +41,7 @@ export function defaultFrontierConfig(): FrontierConfig {
 
 /** Ordered by specificity: the first matching family wins. */
 const VENDOR_FAMILIES: ReadonlyArray<readonly [RegExp, string]> = [
-	[/(?:^|[^a-z0-9])claude(?:$|[^a-z])/, "anthropic"],
+	[/(?:^|[^a-z0-9])(?:claude|opus|sonnet|haiku)(?:$|[^a-z])/, "anthropic"],
 	[/(?:^|[^a-z0-9])gemini(?:$|[^a-z])/, "google"],
 	[/(?:^|[^a-z0-9])gemma(?:$|[^a-z])/, "google"],
 	[/(?:^|[^a-z0-9])glm(?:$|[^a-z])/, "zai"],

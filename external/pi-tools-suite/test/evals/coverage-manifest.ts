@@ -11,7 +11,7 @@ export type EvalCoverageEntry = {
 
 export const EXTENSION_EVAL_COVERAGE: Record<string, EvalCoverageEntry> = {
 	codemode: { deterministic: ["test/codemode.test.ts", "test/codemode-sdk.case.ts"] },
-	brainstorm: { deterministic: ["test/brainstorm/config.test.ts", "test/brainstorm/workflow.test.ts", "test/brainstorm/continuation.test.ts", "test/brainstorm/audit.test.ts", "test/brainstorm/extension.test.ts", "test/brainstorm/subagents.test.ts", "test/brainstorm/research-extension.test.ts"] },
+	brainstorm: { deterministic: ["test/brainstorm/council-config.test.ts", "test/brainstorm/council-protocol.test.ts", "test/brainstorm/council-prompts.test.ts", "test/brainstorm/extension.test.ts"] },
 	"coding-discipline": { deterministic: ["test/coding-discipline.test.ts"], live: ["quality.two-hypotheses-before-fix", "quality.behavior-over-structural-check", "quality.async-stale-state"] },
 	"ast-grep": { deterministic: ["test/ast-grep.test.ts"], live: ["tool.ast-structural"] },
 	"async-subagents": { deterministic: ["test/async-subagents/core.test.ts", "test/async-subagents/tools.test.ts", "test/async-subagents/ui.test.ts", "test/async-subagents/retired-roles.test.ts", "test/evals/delegation-policy.test.ts", "test/evals/decision-policy.test.ts"], live: ["orchestration.size-alone-stays-parent", "orchestration.keeps-tiny-edit", "orchestration.explicit-implementation", "orchestration.architecture-advice-first", "orchestration.large-mechanical", "decision.auditor-accepts-no-record", "decision.auditor-escalates-missing-record"] },
@@ -43,7 +43,6 @@ export const EXTENSION_EVAL_COVERAGE: Record<string, EvalCoverageEntry> = {
 
 export const TOOL_EVAL_COVERAGE: Record<string, EvalCoverageEntry> = {
 	codemode: { deterministic: ["test/codemode.test.ts", "test/codemode-sdk.case.ts"] },
-	brainstorm: { deterministic: ["test/brainstorm/config.test.ts", "test/brainstorm/workflow.test.ts", "test/brainstorm/continuation.test.ts", "test/brainstorm/audit.test.ts", "test/brainstorm/extension.test.ts", "test/brainstorm/subagents.test.ts", "test/brainstorm/research-extension.test.ts"] },
 	lookup: { deterministic: ["test/coding-discipline.test.ts"] },
 	ast_grep: { deterministic: ["test/ast-grep.test.ts"], live: ["tool.ast-structural"] },
 	ast_apply: { deterministic: ["test/ast-grep.test.ts"] },

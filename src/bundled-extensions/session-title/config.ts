@@ -22,7 +22,7 @@ export interface SessionTitleConfig {
 
 const DEFAULT_CONFIG: SessionTitleConfig = {
 	enabled: true,
-	model: "zai/glm-5-turbo",
+	model: "",
 	fallbackModels: [],
 	maxInputChars: 2000,
 	maxTitleChars: 80,

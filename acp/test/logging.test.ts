@@ -46,3 +46,19 @@ test("ACP remains stderr-only when file storage fails", async () => {
 		assert.match(stderr[0]!, /still visible/);
 	} finally { await rm(directory, { recursive: true, force: true }); }
 });
+
+test("stderr mirroring stops quietly once the host closes the pipe", async () => {
+	const { writeDiagnosticLine, isClosedPipeError } = await import("../src/logging.js");
+	let closed = 0;
+	const epipe = Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
+	const throwing = { writable: true, write: () => { throw epipe; } } as unknown as NodeJS.WritableStream;
+	assert.doesNotThrow(() => writeDiagnosticLine(throwing, "line", () => { closed += 1; }));
+	assert.equal(closed, 1);
+	const destroyed = { destroyed: true, write: () => assert.fail("must not write") } as unknown as NodeJS.WritableStream;
+	writeDiagnosticLine(destroyed, "line", () => { closed += 1; });
+	assert.equal(closed, 2);
+	const other = { writable: true, write: () => { throw new TypeError("boom"); } } as unknown as NodeJS.WritableStream;
+	assert.throws(() => writeDiagnosticLine(other, "line", () => {}), /boom/);
+	assert.equal(isClosedPipeError({ code: "ERR_STREAM_DESTROYED" }), true);
+	assert.equal(isClosedPipeError(new Error("x")), false);
+});

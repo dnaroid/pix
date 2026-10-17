@@ -1,5 +1,5 @@
 <script lang="ts">
-  import Telescope from "@lucide/svelte/icons/telescope";
+  import ObserverIcon from "./ObserverIcon.svelte";
   import SettingsSwitch from "./settings/SettingsSwitch.svelte";
   import type { HeadsUpSnapshot } from "../lib/heads-up";
   import { observerDuration, observerPopoverPosition, observerResultLabel, observerStatus, observerTime } from "../lib/observer-status";
@@ -112,7 +112,7 @@
     aria-haspopup="dialog" aria-expanded={open} aria-controls={popupId} onclick={togglePopup} onkeydown={keydown}
     class={["grid h-6 w-6 place-items-center rounded-sm transition-colors hover:bg-chrome-hover focus-visible:outline-2 focus-visible:outline-ring",
       iconColor]}>
-    <Telescope class={["h-4 w-4", status.kind === "checking" && "animate-pulse motion-reduce:animate-none"]} aria-hidden="true" />
+    <ObserverIcon class={["h-4 w-4", status.kind === "checking" && "animate-pulse motion-reduce:animate-none"]} aria-hidden="true" />
   </button>
 
   {#if open}
@@ -121,7 +121,7 @@
       class="fixed z-50 m-0 overflow-visible border-0 bg-transparent p-0 text-left text-popover-foreground focus:outline-none">
       <div class="overflow-y-auto rounded-md border border-border bg-popover shadow-lg" style:max-height={`${position.maxHeight}px`}>
       <div class="flex items-start gap-2 border-b border-border px-3 py-2.5">
-        <Telescope class="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+        <ObserverIcon class="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
         <div class="min-w-0 flex-1"><h2 class="text-sm font-medium">{status.label}</h2><p class="mt-0.5 text-xs leading-4 text-muted-foreground">{status.detail}</p></div>
       </div>
       <div class="space-y-3 px-3 py-3 text-xs">

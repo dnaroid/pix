@@ -82,7 +82,7 @@ async function inventory(tools: string[] | undefined, indexed = false, extraArgs
 	}
 	child?.kill("SIGTERM");
 	if (!record) throw new Error(`no provider request observed; stderr=${readFileSync(join(spawned.agentDir, "stderr.log"), "utf8").slice(-3000)}`);
-	return { ...record, piArgs: readFileSync(join(spawned.agentDir, "pi_args"), "utf8").split("\n") };
+	return { ...record, piArgs: (JSON.parse(readFileSync(join(spawned.agentDir, "launch.json"), "utf8")).piArgs as string[]).join("\n").split("\n") };
 }
 
 offline("research work tools are read-only in the actual child provider inventory", async () => {
@@ -120,7 +120,8 @@ offline("default role: private todo is active; provider web search and other sui
 	expect(tools).toContain("compress");
 	expect(tools).toContain("project_search");
 	for (const name of ["repo_context", "repo_inspect", "repo_audit"]) expect(all).not.toContain(name);
-	expect(piArgs).toContain("--no-session");
+	expect(piArgs).toContain("--session-dir");
+	expect(piArgs).not.toContain("--no-session");
 	expect(piArgs.some((arg) => arg.endsWith("dcp/subagent.ts"))).toBe(true);
 	for (const name of tools) {
 		expect(SUBAGENT_DENIED_TOOLS.has(name)).toBe(false);

@@ -12,9 +12,8 @@
   import { EXTERNAL_EDITOR_OPTIONS } from "../../lib/desktop-config";
   import type { ModelThinkingModel } from "../../lib/model-thinking";
   import SettingsFieldRow from "./SettingsFieldRow.svelte";
-  import SettingsModelList from "./SettingsModelList.svelte";
+  import SettingsModelSummary from "./SettingsModelSummary.svelte";
   import SettingsModelRoutingTiers, { type ModelRoutingTierDraft } from "./SettingsModelRoutingTiers.svelte";
-  import SettingsModelSelect from "./SettingsModelSelect.svelte";
   import SettingsModelVisibility from "./SettingsModelVisibility.svelte";
   import SettingsNumberInput from "./SettingsNumberInput.svelte";
   import SettingsObserver from "./SettingsObserver.svelte";
@@ -26,6 +25,12 @@
 
   const THINKING_OPTIONS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
     .map((value) => ({ value, label: value === "xhigh" ? "Extra high" : value[0]!.toUpperCase() + value.slice(1) }));
+  const THEME_OPTIONS = [
+    { value: "system", label: "System" },
+    { value: "light", label: "Light" },
+    { value: "dark", label: "Dark" },
+  ];
+  const WIZARD_TIERS = ["simple", "standard", "complex", "expert"];
   const LANGUAGE_OPTIONS = [
     ["en", "English"],
     ["ru", "Russian"],
@@ -66,24 +71,6 @@
   } = $props();
 
   const parsed = $derived(parseSettingsSource(source).value);
-  const gitModelOptions = $derived.by(() => models.flatMap((model) => [
-    {
-      value: model.ref,
-      label: `${model.name} · Default thinking`,
-      description: model.ref,
-      aliases: [model.ref, model.modelId, model.provider, "default thinking"],
-      keywords: [model.name, `${model.provider} ${model.modelId}`],
-    },
-    ...model.thinkingLevels
-      .filter((level) => level !== "off")
-      .map((level) => ({
-        value: `${model.ref}:${level}`,
-        label: `${model.name} · ${level === "xhigh" ? "Extra high" : level}`,
-        description: `${model.ref}:${level}`,
-        aliases: [model.ref, model.modelId, model.provider, level, level === "xhigh" ? "extra high" : level],
-        keywords: [model.name, `${model.provider} ${model.modelId}`, level],
-      })),
-  ]));
   const routingTiers = $derived.by<ModelRoutingTierDraft[]>(() => {
     const value = effective(["modelRouting", "tiers"]);
     if (!Array.isArray(value)) return [];
@@ -168,6 +155,20 @@
   </div>
   <div class="border-y border-sidebar-border/70 bg-panel">
     <SettingsFieldRow
+      label="Theme"
+      description="Follow the macOS appearance or force a light or dark theme for all Pix windows. Applies after saving."
+      explicit={has(["desktop", "theme"])}
+      defaultLabel={defaultLabel(["desktop", "theme"])}
+      onReset={() => reset(["desktop", "theme"])}
+    >
+      <SettingsSelect
+        value={text(["desktop", "theme"]) || "system"}
+        options={THEME_OPTIONS}
+        ariaLabel="Theme"
+        onChange={(value) => set(["desktop", "theme"], value)}
+      />
+    </SettingsFieldRow>
+    <SettingsFieldRow
       label="Logs panel"
       description="Show Logs in the sidebar to browse and monitor shared diagnostics. Off by default; does not change log collection. Applies after saving."
       explicit={has(["desktop", "logPanelEnabled"])}
@@ -226,33 +227,13 @@
   </div>
   <div class="border-y border-sidebar-border/70 bg-panel">
     <SettingsFieldRow
-      label="Default model"
-      description="Provider/model identifier used for new Desktop sessions."
-      explicit={has(["defaultModel", "modelRef"])}
-      defaultLabel={defaultLabel(["defaultModel", "modelRef"])}
-      onReset={() => reset(["defaultModel", "modelRef"])}
+      label="Default & router models"
+      description="Default model for new sessions and the Auto router. Managed by the model setup wizard."
     >
-      <SettingsModelSelect value={text(["defaultModel", "modelRef"])} {models} onChange={(value) => set(["defaultModel", "modelRef"], value)} />
-    </SettingsFieldRow>
-
-    <SettingsFieldRow
-      label="Default thinking"
-      description="Thinking budget applied when a new session starts."
-      explicit={has(["defaultModel", "thinking"])}
-      defaultLabel={defaultLabel(["defaultModel", "thinking"])}
-      onReset={() => reset(["defaultModel", "thinking"])}
-    >
-      <SettingsSelect value={text(["defaultModel", "thinking"])} options={THINKING_OPTIONS} onChange={(value) => set(["defaultModel", "thinking"], value)} />
-    </SettingsFieldRow>
-
-    <SettingsFieldRow
-      label="Default fallbacks"
-      description="Ordered models tried after the default model."
-      explicit={has(["defaultModel", "fallbackModels"])}
-      defaultLabel={defaultLabel(["defaultModel", "fallbackModels"])}
-      onReset={() => reset(["defaultModel", "fallbackModels"])}
-    >
-      <SettingsModelList value={list(["defaultModel", "fallbackModels"])} {models} addLabel="Add fallback" onChange={(value) => set(["defaultModel", "fallbackModels"], value)} />
+      <SettingsModelSummary {models} rows={[
+        { label: "Default", ref: text(["defaultModel", "modelRef"]), thinking: text(["defaultModel", "thinking"]), fallbacks: list(["defaultModel", "fallbackModels"]) },
+        { label: "Router", ref: text(["modelRouting", "modelRef"]), fallbacks: list(["modelRouting", "fallbackModels"]) },
+      ]} />
     </SettingsFieldRow>
 
     <SettingsFieldRow
@@ -276,36 +257,6 @@
     </SettingsFieldRow>
 
     <SettingsFieldRow
-      label="Router model"
-      description="Short classification call used only by Auto. The default is OpenRouter Jev Latest."
-      explicit={has(["modelRouting", "modelRef"])}
-      defaultLabel={defaultLabel(["modelRouting", "modelRef"])}
-      onReset={() => reset(["modelRouting", "modelRef"])}
-    >
-      <SettingsModelSelect
-        value={text(["modelRouting", "modelRef"])}
-        {models}
-        ariaLabel="Router model"
-        onChange={(value) => set(["modelRouting", "modelRef"], value)}
-      />
-    </SettingsFieldRow>
-
-    <SettingsFieldRow
-      label="Router fallbacks"
-      description="Ordered models tried when the primary router is unavailable or returns no valid tier."
-      explicit={has(["modelRouting", "fallbackModels"])}
-      defaultLabel={defaultLabel(["modelRouting", "fallbackModels"])}
-      onReset={() => reset(["modelRouting", "fallbackModels"])}
-    >
-      <SettingsModelList
-        value={list(["modelRouting", "fallbackModels"])}
-        {models}
-        addLabel="Add router fallback"
-        onChange={(value) => set(["modelRouting", "fallbackModels"], value)}
-      />
-    </SettingsFieldRow>
-
-    <SettingsFieldRow
       label="Routing fallback tier"
       description="Deterministic tier used if every router model fails or returns an invalid choice."
       explicit={has(["modelRouting", "defaultTier"])}
@@ -321,7 +272,7 @@
 
     <SettingsFieldRow
       label="Routing tiers"
-      description="Semantic task classes available to the router. Each tier owns its target model and thinking level."
+      description="Semantic task classes available to the router. The simple, standard, complex and expert tiers take their model and thinking level from the model setup wizard; custom tiers are edited here."
       explicit={has(["modelRouting", "tiers"])}
       defaultLabel={defaultLabel(["modelRouting", "tiers"])}
       onReset={() => reset(["modelRouting", "tiers"])}
@@ -329,6 +280,7 @@
       <SettingsModelRoutingTiers
         value={routingTiers}
         {models}
+        managedIds={WIZARD_TIERS}
         onChange={(value) => set(["modelRouting", "tiers"], value)}
       />
     </SettingsFieldRow>
@@ -350,19 +302,16 @@
   </div>
   <div class="border-y border-sidebar-border/70 bg-panel">
     <SettingsFieldRow
-      label="RAG answer model"
-      description="The model that generates answers inside Universal Search. Independent of Jev and the main conversation. Empty uses the Desktop default model."
-      explicit={has(["search", "ragModelRef"])}
-      defaultLabel="Default Desktop model"
-      onReset={() => reset(["search", "ragModelRef"])}
+      label="Feature models"
+      description="Models used by search answers, prompt enhancement, autocomplete, session titles and the search/task classifier. Managed by the model setup wizard."
     >
-      <SettingsModelSelect
-        value={text(["search", "ragModelRef"])}
-        {models}
-        ariaLabel="RAG answer model"
-        emptyLabel="Default Desktop model"
-        onChange={(value) => value ? set(["search", "ragModelRef"], value) : reset(["search", "ragModelRef"])}
-      />
+      <SettingsModelSummary {models} rows={[
+        { label: "Search answers (RAG)", ref: text(["search", "ragModelRef"]), emptyLabel: "Default Desktop model" },
+        { label: "Prompt enhancer", ref: text(["promptEnhancer", "modelRef"]), fallbacks: list(["promptEnhancer", "fallbackModels"]) },
+        { label: "Autocomplete", ref: text(["autocomplete", "modelRef"]), fallbacks: list(["autocomplete", "fallbackModels"]), emptyLabel: "Disabled" },
+        { label: "Session titles", ref: text(["sessionTitle", "modelRef"]), fallbacks: list(["sessionTitle", "fallbackModels"]) },
+        { label: "Search & task classifier", ref: text(["search", "intentModelRef"]), emptyLabel: "Built-in default" },
+      ]} />
     </SettingsFieldRow>
     <SettingsFieldRow
       label="RAG thinking effort"
@@ -379,41 +328,6 @@
         ariaLabel="RAG thinking effort"
         onChange={(value) => set(["search", "ragThinking"], value)}
       />
-    </SettingsFieldRow>
-    <SettingsFieldRow
-      label="Prompt enhancer model"
-      description="Model used when Desktop improves a draft prompt."
-      explicit={has(["promptEnhancer", "modelRef"])}
-      defaultLabel={defaultLabel(["promptEnhancer", "modelRef"])}
-      onReset={() => reset(["promptEnhancer", "modelRef"])}
-    >
-      <SettingsModelSelect value={text(["promptEnhancer", "modelRef"])} {models} onChange={(value) => set(["promptEnhancer", "modelRef"], value)} />
-    </SettingsFieldRow>
-    <SettingsFieldRow
-      label="Prompt enhancer fallbacks"
-      explicit={has(["promptEnhancer", "fallbackModels"])}
-      defaultLabel={defaultLabel(["promptEnhancer", "fallbackModels"])}
-      onReset={() => reset(["promptEnhancer", "fallbackModels"])}
-    >
-      <SettingsModelList value={list(["promptEnhancer", "fallbackModels"])} {models} addLabel="Add fallback" onChange={(value) => set(["promptEnhancer", "fallbackModels"], value)} />
-    </SettingsFieldRow>
-
-    <SettingsFieldRow
-      label="Autocomplete model"
-      description="Model used for inline prompt completions. Set an explicit empty string to disable LLM autocomplete."
-      explicit={has(["autocomplete", "modelRef"])}
-      defaultLabel={defaultLabel(["autocomplete", "modelRef"])}
-      onReset={() => reset(["autocomplete", "modelRef"])}
-    >
-      <SettingsModelSelect value={text(["autocomplete", "modelRef"])} {models} emptyLabel="Disabled" onChange={(value) => set(["autocomplete", "modelRef"], value)} />
-    </SettingsFieldRow>
-    <SettingsFieldRow
-      label="Autocomplete fallbacks"
-      explicit={has(["autocomplete", "fallbackModels"])}
-      defaultLabel={defaultLabel(["autocomplete", "fallbackModels"])}
-      onReset={() => reset(["autocomplete", "fallbackModels"])}
-    >
-      <SettingsModelList value={list(["autocomplete", "fallbackModels"])} {models} addLabel="Add fallback" onChange={(value) => set(["autocomplete", "fallbackModels"], value)} />
     </SettingsFieldRow>
     <SettingsFieldRow
       label="Typing debounce"
@@ -461,23 +375,6 @@
       <SettingsNumberInput value={number(["autocomplete", "includeRecentMessages"])} min={0} max={20} step={1} onChange={(value) => updateNumber(["autocomplete", "includeRecentMessages"], value)} />
     </SettingsFieldRow>
 
-    <SettingsFieldRow
-      label="Session title model"
-      description="Model used to generate compact session titles."
-      explicit={has(["sessionTitle", "modelRef"])}
-      defaultLabel={defaultLabel(["sessionTitle", "modelRef"])}
-      onReset={() => reset(["sessionTitle", "modelRef"])}
-    >
-      <SettingsModelSelect value={text(["sessionTitle", "modelRef"])} {models} onChange={(value) => set(["sessionTitle", "modelRef"], value)} />
-    </SettingsFieldRow>
-    <SettingsFieldRow
-      label="Session title fallbacks"
-      explicit={has(["sessionTitle", "fallbackModels"])}
-      defaultLabel={defaultLabel(["sessionTitle", "fallbackModels"])}
-      onReset={() => reset(["sessionTitle", "fallbackModels"])}
-    >
-      <SettingsModelList value={list(["sessionTitle", "fallbackModels"])} {models} addLabel="Add fallback" onChange={(value) => set(["sessionTitle", "fallbackModels"], value)} />
-    </SettingsFieldRow>
   </div>
 {:else if section === "observer"}
   <SettingsObserver {source} {schema} {models} onChange={onChange} />
@@ -542,53 +439,14 @@
   </div>
   <div class="border-y border-sidebar-border/70 bg-panel">
     <SettingsFieldRow
-      label="CI fix model"
-      description="Model and optional thinking level used by Fix with AI when CI fails. When omitted, the repair session uses the normal default model."
-      explicit={has(["desktop", "git", "ciFixModelRef"])}
-      defaultLabel="Default model"
-      onReset={() => reset(["desktop", "git", "ciFixModelRef"])}
+      label="Git models"
+      description="Models used by Fix with AI, diff review and commit messages. Managed by the model setup wizard."
     >
-      <SettingsModelSelect
-        value={text(["desktop", "git", "ciFixModelRef"])}
-        options={gitModelOptions}
-        ariaLabel="CI fix model"
-        emptyLabel="Default model"
-        onChange={(value) => value ? set(["desktop", "git", "ciFixModelRef"], value) : reset(["desktop", "git", "ciFixModelRef"])}
-      />
-    </SettingsFieldRow>
-    <SettingsFieldRow
-      label="Review model"
-      description="Model and thinking level used for Source Control diff review."
-      explicit={has(["desktop", "git", "reviewModelRef"])}
-      defaultLabel={defaultLabel(["desktop", "git", "reviewModelRef"])}
-      onReset={() => reset(["desktop", "git", "reviewModelRef"])}
-    >
-      <SettingsModelSelect value={text(["desktop", "git", "reviewModelRef"])} options={gitModelOptions} ariaLabel="Review model" onChange={(value) => set(["desktop", "git", "reviewModelRef"], value)} />
-    </SettingsFieldRow>
-    <SettingsFieldRow
-      label="Review fallbacks"
-      explicit={has(["desktop", "git", "reviewFallbackModels"])}
-      defaultLabel={defaultLabel(["desktop", "git", "reviewFallbackModels"])}
-      onReset={() => reset(["desktop", "git", "reviewFallbackModels"])}
-    >
-      <SettingsModelList value={list(["desktop", "git", "reviewFallbackModels"])} {models} addLabel="Add fallback" onChange={(value) => set(["desktop", "git", "reviewFallbackModels"], value)} />
-    </SettingsFieldRow>
-    <SettingsFieldRow
-      label="Commit message model"
-      description="Model and thinking level used to generate Git commit messages."
-      explicit={has(["desktop", "git", "commitMessageModelRef"])}
-      defaultLabel={defaultLabel(["desktop", "git", "commitMessageModelRef"])}
-      onReset={() => reset(["desktop", "git", "commitMessageModelRef"])}
-    >
-      <SettingsModelSelect value={text(["desktop", "git", "commitMessageModelRef"])} options={gitModelOptions} ariaLabel="Commit message model" onChange={(value) => set(["desktop", "git", "commitMessageModelRef"], value)} />
-    </SettingsFieldRow>
-    <SettingsFieldRow
-      label="Commit message fallbacks"
-      explicit={has(["desktop", "git", "commitMessageFallbackModels"])}
-      defaultLabel={defaultLabel(["desktop", "git", "commitMessageFallbackModels"])}
-      onReset={() => reset(["desktop", "git", "commitMessageFallbackModels"])}
-    >
-      <SettingsModelList value={list(["desktop", "git", "commitMessageFallbackModels"])} {models} addLabel="Add fallback" onChange={(value) => set(["desktop", "git", "commitMessageFallbackModels"], value)} />
+      <SettingsModelSummary {models} rows={[
+        { label: "CI fix", ref: text(["desktop", "git", "ciFixModelRef"]), emptyLabel: "Default model" },
+        { label: "Review", ref: text(["desktop", "git", "reviewModelRef"]), fallbacks: list(["desktop", "git", "reviewFallbackModels"]) },
+        { label: "Commit messages", ref: text(["desktop", "git", "commitMessageModelRef"]), fallbacks: list(["desktop", "git", "commitMessageFallbackModels"]) },
+      ]} />
     </SettingsFieldRow>
   </div>
 {/if}

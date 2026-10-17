@@ -684,6 +684,35 @@ pub(crate) fn openrouter_api_key() -> Option<String> {
     {
         return Some(key);
     }
+    pi_agent_dir()
+        .and_then(|dir| {
+            let path = dir.join("auth.json");
+            let metadata = fs::symlink_metadata(&path).ok()?;
+            if !metadata.is_file()
+                || metadata.file_type().is_symlink()
+                || hard_linked(&metadata)
+                || metadata.len() > 512 * 1024
+            {
+                return None;
+            }
+            let bytes = fs::read(path).ok()?;
+            if bytes.len() > 512 * 1024 {
+                return None;
+            }
+            serde_json::from_slice::<Value>(&bytes).ok()
+        })
+        .and_then(|value| {
+            let entry = value.get("openrouter")?;
+            if entry.get("type").and_then(Value::as_str) != Some("api_key") {
+                return None;
+            }
+            let key = entry.get("key").and_then(Value::as_str)?.trim();
+            (!key.is_empty() && key.len() <= 10000).then(|| key.to_owned())
+        })
+}
+
+/// Pi agent directory: `PI_CODING_AGENT_DIR` (with `~` expansion) or `~/.pi/agent`.
+pub(crate) fn pi_agent_dir() -> Option<PathBuf> {
     let user_home = std::env::var("HOME")
         .ok()
         .filter(|p| !p.trim().is_empty())
@@ -703,30 +732,7 @@ pub(crate) fn openrouter_api_key() -> Option<String> {
             }
         })
         .or_else(|| user_home.map(|p| p.join(".pi/agent")));
-    home.and_then(|dir| {
-        let path = dir.join("auth.json");
-        let metadata = fs::symlink_metadata(&path).ok()?;
-        if !metadata.is_file()
-            || metadata.file_type().is_symlink()
-            || hard_linked(&metadata)
-            || metadata.len() > 512 * 1024
-        {
-            return None;
-        }
-        let bytes = fs::read(path).ok()?;
-        if bytes.len() > 512 * 1024 {
-            return None;
-        }
-        serde_json::from_slice::<Value>(&bytes).ok()
-    })
-    .and_then(|value| {
-        let entry = value.get("openrouter")?;
-        if entry.get("type").and_then(Value::as_str) != Some("api_key") {
-            return None;
-        }
-        let key = entry.get("key").and_then(Value::as_str)?.trim();
-        (!key.is_empty() && key.len() <= 10000).then(|| key.to_owned())
-    })
+    home
 }
 
 struct ConfigLock(PathBuf);

@@ -11,7 +11,6 @@
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import Settings from "@lucide/svelte/icons/settings";
-  import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
   import X from "@lucide/svelte/icons/x";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { openExternalHref } from "../lib/external-links";
@@ -68,6 +67,8 @@
   import RegistryPanel from "./RegistryPanel.svelte";
   import SearchIndexPanel from "./SearchIndexPanel.svelte";
   import LspPanel from "./LspPanel.svelte";
+  import UsagePanel from "./usage/UsagePanel.svelte";
+  import type { UsageSessionTarget } from "../lib/usage-stats";
   import LogsPanel from "./LogsPanel.svelte";
   import { createLogPanelPreference } from "../lib/log-panel-preference.svelte";
   import type { AcpClient } from "../lib/acp-client";
@@ -116,6 +117,7 @@
     registry: "Registry",
     scripts: "Launch Commands",
     search: "Search Indexes",
+    usage: "Usage",
     lsp: "Language Servers",
     logs: "Logs",
     settings: "Settings",
@@ -177,6 +179,7 @@
     onReorder,
     onRun,
     onOpenSession,
+    onOpenUsageSession,
     onOpenProjectDocument,
     onListProjectDirectory,
     onValidateProjectFile,
@@ -202,6 +205,7 @@
     onRegistryProjectChange,
     onWorkspaceSettingsSave,
     onGitRefresh,
+    onGitOpen,
     onGitStatusRefresh,
     onGitInitialize,
     onGitOpenDiff,
@@ -276,6 +280,7 @@
     ) => void;
     onRun: (task: ProjectTask) => void;
     onOpenSession: (task: ProjectTask) => void;
+    onOpenUsageSession?: (target: UsageSessionTarget) => void;
     onOpenProjectDocument: (path: string, exists?: boolean) => void;
     onListProjectDirectory: (path: string) => Promise<ProjectTreeEntry[]>;
     onValidateProjectFile: (path: string) => Promise<boolean>;
@@ -301,6 +306,7 @@
     onRegistryProjectChange: (artifact: RegistryProjectArtifact, reload: boolean) => void;
     onWorkspaceSettingsSave: (workspace: string) => void;
     onGitRefresh: () => void;
+    onGitOpen?: () => void;
     onGitStatusRefresh?: () => Promise<void>;
     onGitInitialize: () => void;
     onGitOpenDiff: (path: string | undefined, scope: GitDiffScope) => void;
@@ -618,7 +624,7 @@
   function isSidebarTab(value: string | null): value is SidebarTab {
     // Restore selection before the async preference resolves; the preference
     // gates mounting and demotes to Tasks if the loaded value is disabled.
-    return value === "project" || value === "tasks" || value === "git" || value === "registry" || value === "scripts" || value === "search" || value === "lsp" || value === "settings" || value === "logs";
+    return value === "project" || value === "tasks" || value === "git" || value === "registry" || value === "scripts" || value === "search" || value === "usage" || value === "lsp" || value === "settings" || value === "logs";
   }
 
   function setActiveTab(tab: SidebarTab): void {
@@ -723,6 +729,13 @@
     await tick();
     if (activeTab !== "settings" || layoutController.collapsed) return;
     await settingsPanel?.openField(section, fieldId);
+  }
+
+  /** Open the current project's name/color/logo settings dialog. */
+  export function openProjectSettings(): void {
+    if (!workspace) return;
+    projectSwitcher?.close();
+    projectSettingsController.show();
   }
 
   /** Close the project picker when another top-level interaction takes focus. */
@@ -923,14 +936,6 @@
             <button
               class={iconButtonClass("sm", "chrome")}
               type="button"
-              title="Project settings"
-              aria-label="Project settings"
-              onclick={projectSettingsController.show}
-              disabled={!workspace}
-            ><SlidersHorizontal class="h-3.5 w-3.5" aria-hidden="true" /></button>
-            <button
-              class={iconButtonClass("sm", "chrome")}
-              type="button"
               title={`Open project in ${externalEditorLabel}`}
               aria-label={`Open project in ${externalEditorLabel}`}
               onclick={() => onOpenExternalEditor()}
@@ -1049,6 +1054,7 @@
             {onOpenProjectInNewWindow}
             {onChooseWorkspace}
             {onChooseWorkspaceInNewWindow}
+            onOpenProjectSettings={openProjectSettings}
           />
           <div class="grid min-h-0 min-w-0 overflow-hidden">
             {#if !workspace}
@@ -1083,6 +1089,7 @@
             workflow={gitWorkflow}
             {gitAssistantReady}
             onRefresh={onGitRefresh}
+            onOpen={onGitOpen ?? onGitRefresh}
             onInitialize={onGitInitialize}
             onOpenDiff={onGitOpenDiff}
             onStage={onGitStage}
@@ -1128,6 +1135,10 @@
       {:else if activeTab === "search"}
         <div id="workspace-search-index-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Search indexes">
           {#key workspace}<SearchIndexPanel view={searchIndexes} controller={searchIndexController} connected={Boolean(lspClient)} onSettings={() => void openSettingsField("pi-tools-suite-search", "embedding-model")} />{/key}
+        </div>
+      {:else if activeTab === "usage"}
+        <div id="workspace-usage-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Usage">
+          <UsagePanel client={lspClient} {workspace} {...(onOpenUsageSession ? { onOpenSession: onOpenUsageSession } : {})} />
         </div>
       {:else if activeTab === "lsp"}
         <div id="workspace-lsp-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Language Servers">

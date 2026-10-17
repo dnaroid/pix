@@ -21,6 +21,18 @@ export function estimateClaudeCodeCost(
 	cacheWrite1h: number,
 ): number | undefined {
 	if (provider !== "pi-claude-code-provider" || !model) return undefined;
+	return estimateAnthropicModelCost(model, tokens, cacheWrite1h);
+}
+
+/**
+ * API-equivalent cost for an Anthropic model id (or Claude Code alias) from
+ * the SDK catalog; `undefined` for unknown models or zero usage.
+ */
+export function estimateAnthropicModelCost(
+	model: string,
+	tokens: Pick<Usage, "input" | "output" | "cacheRead" | "cacheWrite" | "totalTokens">,
+	cacheWrite1h: number,
+): number | undefined {
 	const id = Object.hasOwn(CLAUDE_CODE_ALIASES, model) ? CLAUDE_CODE_ALIASES[model]! : model;
 	const original = ORIGINAL_MODELS.get(id);
 	if (!original || tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite === 0) return undefined;

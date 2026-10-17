@@ -107,10 +107,9 @@ describeOwnedRuntime("owned runtime boundary", () => {
 		expect(findCleanupCandidates(path.dirname(f.runDir), 0, 0)).toEqual([f.runDir]);
 	});
 
-	test("pending owned runs stay running despite a dead bridge pid and rpc prompt failure", () => {
+	test("pending owned runs stay running despite a dead bridge pid", () => {
 		const f = fixture();
-		fs.writeFileSync(path.join(f.agentDir, "events.jsonl"), JSON.stringify({ type: "response", command: "prompt", success: false }) + "\n");
-		const state = getAgentState(f.runDir, "agent", { checkRpcPromptFailure: true });
+		const state = getAgentState(f.runDir, "agent");
 		expect(state?.status).toBe("running");
 		expect(state?.exitCode).toBeUndefined();
 	});

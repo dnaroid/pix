@@ -25,7 +25,7 @@ export function checkSelectedModelAuthAvailability(runtime: AgentSessionRuntime)
 	if (!model) {
 		return [{
 			kind: "error",
-			message: "No model is selected. Configure a provider with `npx @earendil-works/pi-coding-agent` and /login (or run /opencode-import), then choose /model in Pix.",
+			message: "No model is selected. Run `pix install --models` to choose models, or configure a provider with `npx @earendil-works/pi-coding-agent` and /login (or run /opencode-import), then choose /model in Pix.",
 		}];
 	}
 

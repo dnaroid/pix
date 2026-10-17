@@ -61,7 +61,6 @@ export function isQuotaLimitCompletion(completion: Parameters<AgentCompletionHan
 	const text = [
 		readIfExists(path.join(completion.agentDir, "result.md")),
 		readIfExists(path.join(completion.agentDir, "stderr.log")),
-		readRecentEvents(completion.agentDir),
 	].filter(Boolean).join("\n").toLowerCase();
 	if (!text.trim()) return false;
 	if (modelProvider(model ?? "") === "antigravity") return text.includes(ANTIGRAVITY_ALL_ACCOUNTS_EXHAUSTED_MARKER);
@@ -124,9 +123,3 @@ function readIfExists(file: string): string {
 	}
 }
 
-function readRecentEvents(agentDir: string): string {
-	const text = readIfExists(path.join(agentDir, "events.jsonl"));
-	if (!text) return "";
-	const lines = text.split("\n").filter(Boolean);
-	return lines.slice(-20).join("\n");
-}

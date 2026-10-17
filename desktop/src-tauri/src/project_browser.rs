@@ -1,18 +1,51 @@
 //! Open saved project HTML in the default HTTP browser, not the HTML file handler.
 use std::path::{Path, PathBuf};
 
-fn resolve_html(workspace: &Path, path: &Path) -> Result<PathBuf, String> {
-    let (_, file) = super::resolve_project_entry_path(workspace, path)?;
+pub(crate) fn is_html_file(file: &Path) -> bool {
     let extension = file
         .extension()
         .and_then(|value| value.to_str())
         .unwrap_or("");
-    if !file.is_file()
-        || !(extension.eq_ignore_ascii_case("html") || extension.eq_ignore_ascii_case("htm"))
-    {
+    file.is_file()
+        && (extension.eq_ignore_ascii_case("html") || extension.eq_ignore_ascii_case("htm"))
+}
+
+fn resolve_html(workspace: &Path, path: &Path) -> Result<PathBuf, String> {
+    let (_, file) = super::resolve_project_entry_path(workspace, path)?;
+    if !is_html_file(&file) {
         return Err("browser opening requires a project HTML file".to_owned());
     }
     Ok(file)
+}
+
+/// Open an already-resolved HTML file in the default HTTPS browser.
+#[cfg(target_os = "macos")]
+pub(crate) fn open_html_in_default_browser(file: &Path) -> Result<(), String> {
+    use objc2_app_kit::NSWorkspace;
+    use objc2_foundation::{NSString, NSURL};
+    // Resolve the HTTPS handler rather than the user's .html editor association.
+    let browser = objc2::rc::autoreleasepool(|_| {
+        let url = NSURL::URLWithString(&NSString::from_str("https://example.com"))
+            .ok_or_else(|| "failed to construct browser lookup URL".to_owned())?;
+        NSWorkspace::sharedWorkspace()
+            .URLForApplicationToOpenURL(&url)
+            .and_then(|app| app.path())
+            .map(|path| path.to_string())
+            .ok_or_else(|| "no default browser is configured".to_owned())
+    })?;
+    let status = std::process::Command::new("/usr/bin/open")
+        .arg("-a")
+        .arg(browser)
+        .arg(file)
+        .status()
+        .map_err(|error| format!("failed to open HTML in browser: {error}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "browser could not open HTML (exit status {status})"
+        ))
+    }
 }
 
 #[tauri::command]
@@ -24,31 +57,7 @@ pub(crate) async fn open_project_html_in_browser(
         let file = resolve_html(Path::new(&workspace), Path::new(&path))?;
         #[cfg(target_os = "macos")]
         {
-            use objc2_app_kit::NSWorkspace;
-            use objc2_foundation::{NSString, NSURL};
-            // Resolve the HTTPS handler rather than the user's .html editor association.
-            let browser = objc2::rc::autoreleasepool(|_| {
-                let url = NSURL::URLWithString(&NSString::from_str("https://example.com"))
-                    .ok_or_else(|| "failed to construct browser lookup URL".to_owned())?;
-                NSWorkspace::sharedWorkspace()
-                    .URLForApplicationToOpenURL(&url)
-                    .and_then(|app| app.path())
-                    .map(|path| path.to_string())
-                    .ok_or_else(|| "no default browser is configured".to_owned())
-            })?;
-            let status = std::process::Command::new("/usr/bin/open")
-                .arg("-a")
-                .arg(browser)
-                .arg(&file)
-                .status()
-                .map_err(|error| format!("failed to open HTML in browser: {error}"))?;
-            if status.success() {
-                Ok(())
-            } else {
-                Err(format!(
-                    "browser could not open HTML (exit status {status})"
-                ))
-            }
+            open_html_in_default_browser(&file)
         }
         #[cfg(not(target_os = "macos"))]
         {

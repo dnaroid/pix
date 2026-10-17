@@ -124,6 +124,11 @@ without blocking desktop interactions.
   their `.project-icon.*.tmp` write temporaries are treated like other Pix temps.
   The titlebar badge and recent-project badges render the image instead of the
   initials; the unfocused-window titlebar state dims/desaturates the image.
+- Project settings opens from the `Project settings…` footer item of the
+  project switcher menu (titlebar and sidebar variants, shown only with an open
+  workspace) and from right-click on the titlebar project badge; the badge
+  contextmenu is consumed so no native/global context menu appears. The Project
+  panel header no longer has a settings button.
 - Project settings has a `Logo` section with `Initials` and `Image` modes. In
   `Image` mode the user can `Choose file…` (native chooser owned by Rust; the
   webview never passes arbitrary paths) or `Generate with AI`/`Generate another`

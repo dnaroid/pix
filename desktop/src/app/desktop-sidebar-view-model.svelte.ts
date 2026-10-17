@@ -1,5 +1,6 @@
 import type { ComponentProps } from "svelte";
-import type { SessionConfigOption } from "@agentclientprotocol/sdk";
+import type { SessionConfigOption, SessionInfo } from "@agentclientprotocol/sdk";
+import { resolveUsageSessionId, type UsageSessionTarget } from "../lib/usage-stats";
 import DesktopSidebar from "../components/DesktopSidebar.svelte";
 import type { AcpClient } from "../lib/acp-client";
 import ProjectSwitcher from "../components/ProjectSwitcher.svelte";
@@ -18,6 +19,9 @@ import type { createSessionTabController } from "./session-tab-controller";
 import type { createWorkspaceController } from "./workspace-controller";
 
 type SidebarProps = ComponentProps<typeof DesktopSidebar>["props"];
+
+/** Reopening the Git panel within this window reuses the last remote check. */
+const GIT_OPEN_REMOTE_MAX_AGE_MS = 5 * 60_000;
 type ProjectSwitcherProps = Omit<ComponentProps<typeof ProjectSwitcher>, "variant">;
 
 export function createDesktopSidebarViewModel(options: {
@@ -44,6 +48,10 @@ export function createDesktopSidebarViewModel(options: {
   preview: ReturnType<typeof createPreviewStore>;
   attachments: ReturnType<typeof createAttachmentDraftController>;
   sessionTabs: ReturnType<typeof createSessionTabController>;
+  sessions: () => readonly SessionInfo[];
+  refreshSessions: () => Promise<void>;
+  reportError: (error: unknown) => void;
+  openProjectSettings?: () => void;
   workspaceController: ReturnType<typeof createWorkspaceController>;
 }) {
   const projectSwitchDisabled = $derived(
@@ -57,6 +65,16 @@ export function createDesktopSidebarViewModel(options: {
     options.projectWorkspace.refreshColors(options.projectWorkspace.recentProjects);
   };
   const onSelectProject = (path: string) => void options.workspaceController.select(path);
+  /** Usage reports Pi header ids; Desktop sessions are keyed by ACP ids. */
+  async function openUsageSession(target: UsageSessionTarget): Promise<void> {
+    let sessionId = resolveUsageSessionId(target, options.sessions());
+    if (!sessionId) {
+      await options.refreshSessions();
+      sessionId = resolveUsageSessionId(target, options.sessions());
+    }
+    if (sessionId) await options.sessionTabs.loadSession(sessionId);
+    else options.reportError(new Error("This session is not in the current project's session list."));
+  }
   const onChooseWorkspace = () => void options.workspaceController.choose();
   const onChooseWorkspaceInNewWindow = () => void options.workspaceController.chooseInNewWindow();
 
@@ -71,6 +89,7 @@ export function createDesktopSidebarViewModel(options: {
     onOpenProjectInNewWindow: options.workspaceController.openInNewWindow,
     onChooseWorkspace,
     onChooseWorkspaceInNewWindow,
+    onOpenProjectSettings: options.openProjectSettings,
   }));
 
   const props = $derived.by<SidebarProps>(() => ({
@@ -168,6 +187,7 @@ export function createDesktopSidebarViewModel(options: {
     onReorder: options.projectTasks.reorder,
     onRun: (task) => void options.projectActions.runTask(task),
     onOpenSession: (task) => void options.projectActions.openTaskSession(task),
+    onOpenUsageSession: (target) => void openUsageSession(target),
     onOpenProjectDocument: options.projectDocuments.open,
     onListProjectDirectory: options.projectWorkspace.listDirectory,
     onValidateProjectFile: options.preview.validateProjectFile,
@@ -196,6 +216,11 @@ export function createDesktopSidebarViewModel(options: {
     },
     onGitRefresh: () => void (async () => {
       await options.git.refreshRemoteStatus();
+      await options.gitCi.refresh();
+    })(),
+    onGitOpen: () => void (async () => {
+      // Panel open: show local status immediately; reuse a recent remote check.
+      await options.git.refreshRemoteStatus({ maxAgeMs: GIT_OPEN_REMOTE_MAX_AGE_MS });
       await options.gitCi.refresh();
     })(),
     onGitStatusRefresh: options.git.refresh,

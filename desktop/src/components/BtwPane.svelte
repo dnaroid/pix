@@ -197,7 +197,7 @@
         </span>
       {/each}
     </div>
-    <textarea bind:this={textarea} class="min-h-20 w-full resize-y rounded-md border border-input bg-panel-strong px-2.5 py-2 text-sm leading-5 outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+    <textarea bind:this={textarea} class="min-h-20 w-full resize-none rounded-md border border-input bg-panel-strong px-2.5 py-2 text-sm leading-5 outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
       aria-label="BTW question" placeholder="Ask a side question…" maxlength="8000" value={chat.draft}
       oninput={(event) => onDraftChange(event.currentTarget.value)} onkeydown={inputKeydown} rows="3"></textarea>
     <div class="mt-1 flex min-h-7 items-center justify-between gap-2">

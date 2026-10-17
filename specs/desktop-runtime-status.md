@@ -23,9 +23,9 @@ Decision: [Status-bar click popups](../docs/decisions/0048-status-bar-click-popu
 
 ## Behavior
 
-- Usage remains in the left status group. The right group places council (when present), Observer (radar), Subagents, then Plan, with no short vertical separators between groups. The status-bar top border remains; dividers inside popups and context-ring sector separators are unchanged.
+- Usage remains in the left status group. The right group places Observer (radar), Subagents, then Plan, with no short vertical separators between groups. The status-bar top border remains; dividers inside popups and context-ring sector separators are unchanged.
 
-- Status-bar elements and their detail surfaces do not use browser-native `title` tooltips. Accessible labels remain. Usage shows recorded session spend, an integrated weekly cycle/remaining-quota timeline and a short-window Limits scale, not quota-description paragraphs; compact quota indicators remain in its trigger. See [quota limits](desktop-quota-calendar.md) and [decision 0039](../docs/decisions/0039-quota-reset-calendar.md). Context, Usage, Observer and council popup lower edges match Plan, touching the top of their triggers with no visual gap. Sidebar tooltips are unchanged.
+- Status-bar elements and their detail surfaces do not use browser-native `title` tooltips. Accessible labels remain. Usage shows recorded session spend, an integrated weekly cycle/remaining-quota timeline and a short-window Limits scale, not quota-description paragraphs; compact quota indicators remain in its trigger. See [quota limits](desktop-quota-calendar.md) and [decision 0039](../docs/decisions/0039-quota-reset-calendar.md). Context, Usage and Observer popup lower edges match Plan, touching the top of their triggers with no visual gap. Sidebar tooltips are unchanged.
 
 - Once an active Desktop session runtime is ready, the status bar shows a slightly extended horizontal capacity track without an inline numeric percentage.
 - Compact status chrome labels context as `Context`, omits redundant hourly/weekly and `resets` text (window names and reset meaning remain in click details), and shows Claude Code provider model names without the `Claude Code ` prefix in the model/thinking display. Persistent model names use neutral foreground text and thinking uses muted text, leaving provider brand color to the icon; picker and usage-detail model colors are unchanged. Provider IDs and routing are unchanged. Context and quota use content-sized grid groups rather than equal columns; bounded inline controls clip excess content at very narrow widths instead of painting over neighboring controls, while detail panels remain unclipped.
@@ -137,7 +137,6 @@ Decision: [Status-bar click popups](../docs/decisions/0048-status-bar-click-popu
 - `desktop/src/components/StatusBarPopover.svelte`
 - `desktop/src/components/ObserverStatus.svelte`
 - `desktop/src/components/SessionActivityStatusHud.svelte`
-- `desktop/src/components/SessionBrainstormStatus.svelte`
 
 ## Tests
 

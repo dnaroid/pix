@@ -13,6 +13,7 @@
   import type { ProjectFileLineRange } from "../lib/project-files";
   import type { ToolItem } from "../lib/transcript";
   import { languageForToolInput, toolInputText } from "../lib/tool-input";
+  import { subagentToolTargets } from "../lib/subagent-tool-targets";
   import DiffView from "./DiffView.svelte";
   import MarkdownText from "./MarkdownText.svelte";
 
@@ -24,6 +25,7 @@
     onResolveProjectMedia,
     onOpenLocalFile,
     onResolveLocalMedia,
+    onOpenSubagentSession,
   }: {
     tool: ToolItem;
     onValidateProjectFile?: (path: string) => Promise<boolean>;
@@ -32,6 +34,7 @@
     onResolveProjectMedia?: (path: string) => Promise<Attachment | undefined>;
     onOpenLocalFile?: (path: string) => void | Promise<void>;
     onResolveLocalMedia?: (path: string) => Promise<Attachment | undefined>;
+    onOpenSubagentSession?: (runDir: string, agentId: string) => void;
   } = $props();
 
   let language = $derived(languageForReadTool(tool.kind, tool.title, tool.path));
@@ -43,6 +46,7 @@
   let shellDiff = $derived(isShellDiffTool(tool.kind, tool.title) && tool.content ? unifiedDiffModel(tool.content) : undefined);
   let mutationDiffs = $derived(mutationDiffPresentations(tool));
   let mutationLines = $derived(isMutationTool(tool) ? mutationOutputLines(tool.content) : undefined);
+  let subagentTargets = $derived(onOpenSubagentSession ? subagentToolTargets(tool) : []);
 </script>
 
 {#if inputText !== undefined}
@@ -73,7 +77,39 @@
   {/if}
 {/if}
 
+{#if subagentTargets.length > 0 && onOpenSubagentSession}
+  <div class="subagent-targets" role="group" aria-label="Sub-agent sessions">
+    {#each subagentTargets as target (target.runDir + "\0" + target.agentId)}
+      <button
+        type="button"
+        class="subagent-target"
+        title={`Open read-only session of sub-agent ${target.agentId}`}
+        onclick={() => onOpenSubagentSession(target.runDir, target.agentId)}
+      >Open {target.agentId} session</button>
+    {/each}
+  </div>
+{/if}
+
 <style>
+  .subagent-targets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    margin-top: 0.375rem;
+  }
+
+  .subagent-target {
+    border: 1px solid var(--code-border);
+    border-radius: var(--radius-md);
+    padding: 0.125rem 0.5rem;
+    color: var(--foreground);
+    font-size: 12px;
+    line-height: 1.4;
+  }
+
+  .subagent-target:hover { background: var(--accent); }
+  .subagent-target:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+
   .tool-result {
     max-height: min(480px, 60vh);
     margin-top: 0.25rem;

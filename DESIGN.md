@@ -761,6 +761,13 @@ Every new surface, border, text color, and interaction state MUST work in both
 supported palettes: Claude+-derived light mode and the cool high-contrast dark
 mode defined by the semantic tokens in `desktop/src/styles.css`.
 
+Desktop's global `desktop.theme` setting selects **System** (the default),
+**Light**, or **Dark** in Settings → General. Pix applies this preference through
+the native Tauri app theme, so the WebView's `prefers-color-scheme` follows the
+selection. The preference is applied when the app mounts and refreshed when
+the window gains focus or Desktop configuration changes; System follows the
+operating-system appearance.
+
 Dark mode SHOULD favor:
 
 - near-black charcoal canvas surfaces rather than warm brown-black neutrals;

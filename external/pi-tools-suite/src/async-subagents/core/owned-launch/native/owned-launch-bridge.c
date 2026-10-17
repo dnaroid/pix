@@ -335,9 +335,17 @@ int main(int argc, char **argv) {
   char plist_path[OL_PATH_MAX];
   (void)snprintf(plist_path, sizeof(plist_path), "%s/job-supervisor.plist", g_dir);
   const char *bargv[] = { "launchctl", "bootstrap", domain, plist_path, NULL };
-  if (run_launchctl(bargv) != 0) {
+  int bootstrap_rc = run_launchctl(bargv);
+  if (bootstrap_rc != 0) {
     // Already-bootstrapped for a fresh UUID label means corruption; fail
     // closed either way (no supervisor, no worker, nothing released).
+    // launchctl has been reaped, so no orphaned bootstrap can follow; record
+    // the failure durably so the parent can settle the run once both UUID
+    // labels are confirmed absent instead of staying pending forever.
+    char path[OL_PATH_MAX], buf[64];
+    int n = snprintf(buf, sizeof(buf), "role=bootstrap-failed rc=%d\n", bootstrap_rc);
+    if ((size_t)snprintf(path, sizeof(path), "%s/bootstrap_failed", g_dir) < sizeof(path) && n > 0 && (size_t)n < sizeof(buf))
+      (void)ol_write_atomic(path, buf, (size_t)n, 0600, 1);
     bridge_exit(15);
   }
   // Bounded wait for the service to be visible (startup watchdog below

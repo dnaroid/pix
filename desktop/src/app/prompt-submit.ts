@@ -95,14 +95,26 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
     messageId: string,
     payload: unknown,
   ): Promise<"sent" | "queued"> {
+    return submitGeneratedPrompt(sessionId, sandboxSubmissionPrompt(messageId, payload), "a prototype submission");
+  }
+
+  /** A quick-choice block in the latest assistant reply sends the selection. */
+  async function submitChoiceActions(sessionId: string, text: string): Promise<"sent" | "queued"> {
+    return submitGeneratedPrompt(sessionId, text, "a quick choice");
+  }
+
+  async function submitGeneratedPrompt(
+    sessionId: string,
+    text: string,
+    kind: string,
+  ): Promise<"sent" | "queued"> {
     const requestClient = options.client();
     if (!requestClient || sessionId !== options.activeSessionId()
       || options.sessionMutationRunning() || options.sessionHistoryLoading()
       || !options.sessionRuntimeReady(sessionId)
       || pendingSessionSubmits.has(sessionId) || pendingSandboxSubmits.has(sessionId)) {
-      throw new Error("This conversation is not ready for a prototype submission.");
+      throw new Error(`This conversation is not ready for ${kind}.`);
     }
-    const text = sandboxSubmissionPrompt(messageId, payload);
     const blocks = [{ type: "text" as const, text }];
     pendingSandboxSubmits.add(sessionId);
     try {
@@ -427,5 +439,5 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
     if (reloadAfterSlash && sessionId === options.activeSessionId()) await options.reloadResources({ echo: false });
   }
 
-  return { submit, submitHtmlSandbox, get editActive() { return options.messageEditActive?.() ?? false; }, cancelEdit: () => options.cancelMessageEdit?.() };
+  return { submit, submitHtmlSandbox, submitChoiceActions, get editActive() { return options.messageEditActive?.() ?? false; }, cancelEdit: () => options.cancelMessageEdit?.() };
 }

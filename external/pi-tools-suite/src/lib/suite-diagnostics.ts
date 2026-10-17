@@ -51,7 +51,33 @@ const DCP_REASONS = new Set([
 	"auto-disabled", "stale-context-projection", "no-candidate",
 ]);
 export function diagnosticDcpReason(reason: unknown): string {
-	return typeof reason === "string" && DCP_REASONS.has(reason) ? reason : "other";
+	return typeof reason === "string" && (DCP_REASONS.has(reason) || SEARCH_REASONS.has(reason)) ? reason : "other";
+}
+
+// Fixed search failure categories. Classification matches only suite-owned
+// error texts/codes; the message itself is never logged.
+const SEARCH_REASON_PATTERNS: readonly (readonly [RegExp, string])[] = [
+	[/^Search source busy; update deferred$/, "busy"],
+	[/^Search (work|provider) ownership expired$/, "ownership-expired"],
+	[/^Search source selection changed$/, "policy-changed"],
+	[/^Search source \w+ is disabled for this project$/, "source-disabled"],
+	[/search source policy|^Invalid search source selection$/i, "policy-invalid"],
+	[/^Semantic configuration changed$/, "config-changed"],
+	[/embedding identity is incompatible/i, "incompatible"],
+	[/^Invalid task semantic embedding batch$/, "invalid-batch"],
+	[/^Unsafe search (storage|directory)/, "unsafe-storage"],
+	[/database is locked|SQLITE_BUSY|database is busy/i, "locked"],
+];
+const SEARCH_REASONS = new Set([...SEARCH_REASON_PATTERNS.map(([, reason]) => reason), "needs-continue", "aborted"]);
+export function diagnosticSearchReason(error: unknown): string {
+	try {
+		if (!(error instanceof Error)) return "other";
+		if ((error as { code?: unknown }).code === "SEARCH_WORK_NEEDS_CONTINUE") return "needs-continue";
+		if (error.name === "AbortError" || error.name === "TimeoutError") return "aborted";
+		const message = typeof error.message === "string" ? error.message : "";
+		for (const [pattern, reason] of SEARCH_REASON_PATTERNS) if (pattern.test(message)) return reason;
+		return "other";
+	} catch { return "other"; }
 }
 
 const MAX_PENDING = 32;

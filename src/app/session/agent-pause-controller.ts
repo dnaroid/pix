@@ -93,6 +93,9 @@ export class AgentPauseController {
 				|| turn.message.stopReason === "aborted" || turn.message.stopReason === "error") {
 				return priorDecision;
 			}
+			// Pausing while sub-agents still run would let their completion
+			// delivery restart the agent (or strand it); wait for a later boundary.
+			if (hasLiveSubagents(session)) return priorDecision;
 			record.pauseBoundaryReached = true;
 			return { action: "end" };
 		}) as FinishTurn;
@@ -110,6 +113,8 @@ export class AgentPauseController {
 			// A retry remains part of the current turn. Do not settle until Pi
 			// consumes _failedResponse and reaches a resumable retry boundary.
 			if (shouldContinue && internals._failedResponse !== undefined) return true;
+			// Keep an uncommitted Pause pending while sub-agents are live.
+			if (!pauseBoundaryReached && shouldContinue && hasLiveSubagents(session)) return true;
 			if (pauseBoundaryReached || record.state === "pause-requested") {
 				record.pauseBoundaryReached = false;
 				if (shouldContinue) {
@@ -136,6 +141,9 @@ export class AgentPauseController {
 				this.clearPauseRequest(record);
 				return false;
 			}
+			// Before-settle may deliver some completions while others still run:
+			// continue and keep the request pending for the next safe boundary.
+			if (shouldContinue && !record.pauseBoundaryReached && hasLiveSubagents(session)) return true;
 			record.pauseBoundaryReached = false;
 			if (shouldContinue || this.canContinue(session)) {
 				this.pause(record);
@@ -327,6 +335,19 @@ export class AgentPauseController {
 			throw new Error("Agent pause is incompatible with this pi SDK version");
 		}
 		return internals as AgentSessionInternals;
+	}
+}
+
+const PIX_SUBAGENTS_SESSION_LIVE_SYMBOL = Symbol.for("pix.subagents.session-live");
+
+/** Read-only async-subagents bridge published on the owning session manager. */
+export function hasLiveSubagents(session: AgentSession): boolean {
+	try {
+		const manager = session.sessionManager as unknown as Record<symbol, unknown> | undefined;
+		const getter = manager?.[PIX_SUBAGENTS_SESSION_LIVE_SYMBOL];
+		return typeof getter === "function" && (getter as () => unknown)() === true;
+	} catch {
+		return false;
 	}
 }
 

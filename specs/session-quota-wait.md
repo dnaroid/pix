@@ -35,7 +35,10 @@ background sessions cannot steal focus.
 On a session already paused with the ordinary Pause button, scheduled
 continuation invokes the same **Continue** lifecycle, without inserting another
 user or custom message. On a running session the command requests a safe
-turn-boundary pause; it never aborts an in-flight tool batch. Explicit Continue,
+turn-boundary pause; it never aborts an in-flight tool batch. As with a button
+Pause, the request remains pending while the session owns live async sub-agents,
+including terminal completions not yet delivered, and commits only at a later
+boundary with none live. Explicit Continue,
 Stop, a new prompt, or a model change supersedes the scheduled action. Only an
 error/completed assistant tail that cannot be resumed through `Agent.continue()`
 uses the hidden continuation-message fallback.

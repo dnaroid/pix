@@ -146,7 +146,10 @@ function shouldRetry(completion: Parameters<AgentCompletionHandler>[0], retry: R
 
 function writeRetryCount(agentDir: string, count: number): void {
 	try {
-		fs.writeFileSync(path.join(agentDir, "retry_count"), String(count), "utf-8");
+		// Readers treat a missing file as zero retries; do not persist the default.
+		const file = path.join(agentDir, "retry_count");
+		if (count <= 0) fs.rmSync(file, { force: true });
+		else fs.writeFileSync(file, String(count), "utf-8");
 	} catch { /* best-effort */ }
 }
 

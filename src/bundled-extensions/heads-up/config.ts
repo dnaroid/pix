@@ -9,7 +9,7 @@ export interface HeadsUpConfig {
 	noticeTtlMs: number;
 }
 
-export const DEFAULT_HEADS_UP_MODEL = "openai-codex/gpt-6-luna";
+export const DEFAULT_HEADS_UP_MODEL = "";
 export const DEFAULT_HEADS_UP_CONFIG: HeadsUpConfig = {
 	minTurns: 6,
 	minIntervalMs: 60_000,

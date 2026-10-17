@@ -15,7 +15,7 @@ import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { lock } from "proper-lockfile";
 import type { Logger } from "../logging.js";
-import type { BrainstormLink } from "./brainstorm-host.js";
+import type { SubagentSessionLink } from "./subagent-sessions.js";
 
 const FORMAT_VERSION = 1;
 
@@ -38,8 +38,8 @@ export interface SessionMapRecord {
 	title?: string | undefined;
 	/** Actual session name from session_info / explicit name, never a first-message fallback. */
 	namedTitle?: string | undefined;
-	/** Explicit council linkage; session display names are not identities. */
-	brainstorm?: BrainstormLink;
+	/** Read-only async-subagent viewer; the JSONL is owned by the parent. */
+	subagent?: SubagentSessionLink;
 	/** ISO 8601 timestamp of the last activity. */
 	updatedAt: string;
 }
@@ -119,7 +119,7 @@ export class SessionMapStore {
 					...(candidate.title === undefined && existing?.title !== undefined
 						? { title: existing.title, ...(existing.namedTitle ? { namedTitle: existing.namedTitle } : {}) }
 						: {}),
-          ...(existing?.brainstorm ? { brainstorm: existing.brainstorm } : {}),
+          ...(existing?.subagent ? { subagent: existing.subagent } : {}),
         };
         if (options.keepNewerTitles && existing && existing.updatedAt > candidate.updatedAt) {
           next.updatedAt = existing.updatedAt;
@@ -265,7 +265,7 @@ function sameRecord(left: SessionMapRecord, right: SessionMapRecord): boolean {
 		&& left.parentSessionPath === right.parentSessionPath
 		&& left.title === right.title
 		&& left.namedTitle === right.namedTitle
-		&& JSON.stringify(left.brainstorm) === JSON.stringify(right.brainstorm)
+		&& JSON.stringify(left.subagent) === JSON.stringify(right.subagent)
 		&& left.updatedAt === right.updatedAt;
 }
 

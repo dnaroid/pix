@@ -4,6 +4,7 @@
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import FolderPlus from "@lucide/svelte/icons/folder-plus";
+  import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
   import { onDestroy, onMount } from "svelte";
   import {
     isTypeaheadKey,
@@ -32,6 +33,7 @@
     onOpenProjectInNewWindow,
     onChooseWorkspace,
     onChooseWorkspaceInNewWindow,
+    onOpenProjectSettings,
     variant = "sidebar",
   }: {
     workspace: string;
@@ -46,6 +48,8 @@
     onOpenProjectInNewWindow: (path: string) => void;
     onChooseWorkspace: () => void;
     onChooseWorkspaceInNewWindow: () => void;
+    /** Opens the current project's name/color/logo settings. */
+    onOpenProjectSettings?: () => void;
     variant?: "sidebar" | "titlebar";
   } = $props();
 
@@ -131,6 +135,19 @@
   function chooseWorkspaceInNewWindow(): void {
     close();
     onChooseWorkspaceInNewWindow();
+  }
+
+  function openProjectSettings(): void {
+    close();
+    onOpenProjectSettings?.();
+  }
+
+  function handleBadgeContextmenu(event: MouseEvent): void {
+    if (!onOpenProjectSettings || !workspace) return;
+    // The badge has no native context menu; right-click is a settings shortcut.
+    event.preventDefault();
+    event.stopPropagation();
+    openProjectSettings();
   }
 
   function openProjectInNewWindow(project: string): void {
@@ -252,6 +269,7 @@
       data-project-logo={projectIcons.has(workspace) || undefined}
       data-window-inactive={!windowFocused}
       onclick={toggle}
+      oncontextmenu={handleBadgeContextmenu}
       onkeydown={handleTriggerKeydown}
     >{#if projectIcons.get(workspace)}<img class="h-full w-full rounded-[inherit] object-cover" src={projectIcons.get(workspace)} alt="" draggable="false" />{:else}{projectAbbreviation(workspace)}{/if}</button>
   {:else}
@@ -360,6 +378,16 @@
           tabindex="-1"
           onclick={chooseWorkspaceInNewWindow}
         ><ExternalLink class="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" /><span class="truncate">Open folder in new window…</span></button>
+        {#if onOpenProjectSettings && workspace}
+          <button
+            class="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-xs hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+            data-project-option
+            type="button"
+            role="menuitem"
+            tabindex="-1"
+            onclick={openProjectSettings}
+          ><SlidersHorizontal class="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" /><span class="truncate">Project settings…</span></button>
+        {/if}
       </div>
     </div>
   {/if}

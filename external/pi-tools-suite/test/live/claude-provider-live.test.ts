@@ -244,7 +244,7 @@ live("T8 Claude child sub-agent: completes, stop and timeout drain and retire", 
 		await pi.prompt(spawnPrompt("t8ok", "Reply with exactly this text and nothing else: CHILD-OK-42"));
 		await waitFor(() => read(join(agentDirs(env.cwd).get("t8ok") ?? "/nonexistent", "exit_code")).trim() === "0", 240_000, "t8ok exit 0");
 		const ok = agentDirs(env.cwd).get("t8ok")!;
-		const args = read(join(ok, "pi_args")).split("\n");
+		const args = JSON.parse(read(join(ok, "launch.json"))).piArgs as string[];
 		expect(args).toContain("--no-extensions");
 		expect(args.some((a) => a.endsWith(join("pi-claude-code-provider", "extensions", "index.ts")))).toBe(true);
 		expect(args.at(-1)?.endsWith("tool-guard.ts")).toBe(true);

@@ -10,7 +10,7 @@ export type ResumeCommandOptions = {
 export function usage(): string {
 	return `Usage: pix [--cwd <path>] [--no-session] [--session <path>] [--theme dark|light] [--model <provider/model[:thinking]>]
 	       pix update [--check] [--force]
-	       pix install [--check]
+	       pix install [--check] [--models]
 	       npm run dev -- [--cwd <path>] [--no-session] [--session <path>] [--theme dark|light] [--model <provider/model[:thinking]>]
 
 Examples:

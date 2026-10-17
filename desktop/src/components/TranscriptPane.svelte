@@ -25,6 +25,7 @@
     type TranscriptDisplayItem,
     type TranscriptState,
   } from "../lib/transcript";
+  import { latestAssistantMessageId } from "../lib/choice-actions";
   import AttachmentGrid from "./AttachmentGrid.svelte";
   import MarkdownText from "./MarkdownText.svelte";
   import TranscriptActivityGroup from "./TranscriptActivityGroup.svelte";
@@ -62,9 +63,11 @@
     onResolveProjectMedia,
     onOpenLocalFile,
     onResolveLocalMedia,
+    onOpenSubagentSession,
     onLoadToolResult,
     onUserMessageAction,
     onHtmlSandboxSubmit,
+    onChoiceActionsSubmit,
     onOpenClaudeLoginTerminal,
     onClaudeLoginError,
     lspSuggestion,
@@ -97,8 +100,10 @@
     onOpenLocalFile: (path: string) => void | Promise<void>;
     onResolveLocalMedia: (path: string) => Promise<Attachment | undefined>;
     onLoadToolResult: (toolCallId: string) => void;
+    onOpenSubagentSession?: (runDir: string, agentId: string) => void;
     onUserMessageAction: (message: MessageItem, action: UserMessageAction) => void | Promise<void>;
     onHtmlSandboxSubmit?: (messageId: string, payload: unknown) => Promise<"sent" | "queued">;
+    onChoiceActionsSubmit?: (text: string) => Promise<"sent" | "queued">;
     onOpenClaudeLoginTerminal?: (command: string) => Promise<void>;
     onClaudeLoginError?: (error: unknown) => void;
     lspSuggestion?: LspMissingSuggestion;
@@ -107,6 +112,9 @@
   } = $props();
 
   let displayItems = $derived(groupTranscriptItems(transcript.items));
+  // Quick-choice blocks accept input only in the final assistant reply of a
+  // settled turn; any later user message makes them read-only history.
+  const choiceActionsMessageId = $derived(promptRunning ? undefined : latestAssistantMessageId(displayItems));
   let activityNowMs = $state(Date.now());
   const hasActiveActivity = $derived(displayItems.some((item) => item.type === "activity-group" && item.active));
   let pauseToastVisible = $state(false);
@@ -185,7 +193,7 @@
     item: TranscriptDisplayItem,
     next: TranscriptDisplayItem | undefined,
   ): string {
-    if (next?.type === "message" && next.role === "user") return "mb-8";
+    if (next?.type === "message" && next.role === "user") return "mb-5";
     if (isServiceItem(item) && isServiceItem(next)) return "mb-1";
     return isServiceItem(item) || isServiceItem(next) ? "mb-2" : "mb-6";
   }
@@ -328,7 +336,7 @@
               data-transcript-entry-id={item.id}
             >
               <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
-              {#if item.text}<MarkdownText text={item.text} dense fitTables enableHtmlSandbox={!!onHtmlSandboxSubmit} onHtmlSandboxSubmit={onHtmlSandboxSubmit ? (payload) => onHtmlSandboxSubmit(item.id, payload) : undefined} {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
+              {#if item.text}<MarkdownText text={item.text} dense fitTables enableHtmlSandbox={!!onHtmlSandboxSubmit} onHtmlSandboxSubmit={onHtmlSandboxSubmit ? (payload) => onHtmlSandboxSubmit(item.id, payload) : undefined} choiceActionsActive={item.id === choiceActionsMessageId} {onChoiceActionsSubmit} {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
             </article>
           {/if}
         {:else}
@@ -336,7 +344,7 @@
             <TranscriptActivityGroup
               {item} nowMs={item.active ? activityNowMs : undefined} {gapClass} {onLoadToolResult} {onOpenAttachment} {onPrepareAttachment}
               {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile}
-              {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia}
+              {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} {onOpenSubagentSession}
             />
           {/key}
         {/if}

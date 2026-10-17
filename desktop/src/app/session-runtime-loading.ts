@@ -1,5 +1,6 @@
 import type { SessionConfigOption } from "@agentclientprotocol/sdk";
 import type { AcpClient } from "../lib/acp-client";
+import { subagentSessionLink } from "../lib/session-subagent-link";
 import type { SessionRuntimeStoreOptions } from "./session-runtime-options";
 
 export function createSessionRuntimeLoading(options: SessionRuntimeStoreOptions) {
@@ -82,6 +83,9 @@ export function createSessionRuntimeLoading(options: SessionRuntimeStoreOptions)
           || requestWorkspace !== options.workspace()
           || loadsBySessionId.get(sessionId)?.promise !== pending
         ) return;
+        // Sub-agent viewers have no Pi runtime: never mark them ready, so
+        // queue/runtime-status/usage requests are not sent for them.
+        if ("_meta" in response && subagentSessionLink(response._meta)) return;
         const configOptions = response.configOptions ?? [];
         readySessionIds.add(sessionId);
         setConfigOptions(sessionId, configOptions);

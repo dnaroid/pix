@@ -23,8 +23,15 @@ describe("SessionSelector opening and outside dismissal", () => {
     expect(rowSource).toContain("GitFork");
   });
 
+  it("hides sub-agent viewer sessions unless the toggle is enabled", () => {
+    expect(source).toContain("let showSubagents = $state(false)");
+    expect(source).toContain("showSubagents ? sessions : sessions.filter((session) => !isSubagentSession(session))");
+    expect(source).toContain("{#if hasSubagentSessions}");
+    expect(source).toContain("bind:checked={showSubagents}");
+  });
+
   it("uses the shared tree without a query and leaves search results flat", () => {
-    expect(source).toContain("if (!query.trim()) return expandedSessionRows(buildSessionTree(sessions), collapsed)");
+    expect(source).toContain("if (!query.trim()) return expandedSessionRows(buildSessionTree(visibleSessions), collapsed)");
     expect(source).toContain("flatSessionRow(match.value)");
   });
 });

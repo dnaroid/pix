@@ -268,10 +268,10 @@ JSONC/task overlay import or fallback.
   starts a new inspection instead of leaving `Checking…` indefinitely.
 - Registry cleanup is allowlist-based and never resets project state. The
   canonical top-level project directories are `agents/`, `artifacts/`,
-  `plans/`, `search/`, `skills/`, `subagents/`, `task-attachments/`,
-  plus ignored legacy `tasks.d/` (preserved but never read).
+  `plans/`, `search/`, `skills/`, `subagents/`, and `task-attachments/`.
+  Unsupported legacy `tasks.d/` is not canonical and is reclaimable.
 - Cleanup preserves the canonical `agents/`, `plans/`, `search/`, `skills/`, and
-  `task-attachments/` and ignored `tasks.d/` trees, but removes every entry recursively inside
+  `task-attachments/` trees, but removes every entry recursively inside
   `.pi/artifacts/` and `.pi/subagents/` while leaving those two container
   directories in place.
 - `.pi/search/index.sqlite` is durable universal-search state, not disposable
@@ -284,9 +284,9 @@ JSONC/task overlay import or fallback.
   `pi-tools-suite.jsonc`, `pix-desktop.jsonc`, `pix.jsonc`,
   `qa_auth.jsonc`, `registry.json`, `tasks.sqlite`, `tasks.sqlite-wal`,
   `tasks.sqlite-shm`, `tasks.sqlite-journal`, `todo-plan.json`,
-  `workspace.jsonc`, and ignored legacy `tasks.jsonc` are preserved;
-  other ordinary top-level files (for example
-  temporary receipt JSONs) are reclaimable. The existing cleanup of `.DS_Store`
+  and `workspace.jsonc` are preserved; other ordinary top-level files
+  (for example temporary receipt JSONs and unsupported legacy `tasks.jsonc`)
+  are reclaimable. The existing cleanup of `.DS_Store`
   and stale Pix temporary files still applies, while fresh Pix temp files keep
   their stale-age protection.
 - Recursive removal uses no-follow traversal: symbolic-link targets are never
@@ -301,6 +301,19 @@ JSONC/task overlay import or fallback.
   time and every entry in its subtree are at least 72 hours old. The candidate
   is re-checked immediately before deletion so activity that begins during size
   accounting preserves it.
+- Exception for parent-scoped sub-agent sessions
+  ([decision 0072](../docs/decisions/0072-session-native-subagents.md)): a
+  UUID-named `.pi/subagents/<parentSessionId>/` child is never removed by TTL
+  cleanup while its parent session file exists. The parent is found through a
+  child's `subagent_meta.parentSession` path or a `<timestamp>_<id>.jsonl` in the
+  project's default Pi session directory (`PI_CODING_AGENT_DIR` or
+  `~/.pi/agent`). Once the parent is gone, the directory is removed after
+  24 hours of subtree inactivity. Unreadable directories and timestamp-named
+  legacy run directories keep the 72-hour TTL. Manual Clean is unchanged.
+  Deleting a parent session through ACP `session/delete` removes its
+  `.pi/subagents/<parentSessionId>/` directory immediately, except a symlinked
+  or non-UUID target or a directory that still contains `owned/`; a failed
+  removal is logged and left to this background policy.
 - Background cleanup is not run against a bare/uninitialized `.pi` directory.
   After it completes, Registry storage state is refreshed only if that project
   is still the active workspace. Manual Clean remains immediate and ignores the

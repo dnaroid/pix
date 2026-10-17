@@ -237,6 +237,33 @@ describe("AgentPauseController", () => {
 		assert.ok(fixture.toasts.some((toast) => toast.kind === "error" && toast.message.includes("resume failed")));
 	});
 
+	it("defers a requested pause while sub-agents are live", async () => {
+		const fixture = pauseFixture({ postRunResult: true });
+		fixture.controller.bind(fixture.session);
+		fixture.setLiveSubagents(true);
+		await fixture.controller.toggle(fixture.session);
+
+		const decision = await fixture.agent.finishTurn?.({ message: { stopReason: "toolUse" }, toolResults: [{}] } as never, new AbortController().signal);
+		assert.equal(decision, undefined, "the loop keeps running instead of ending at this boundary");
+		assert.equal(await fixture.internals._handlePostAgentRun(), true);
+		assert.equal(fixture.controller.state(fixture.session), "pause-requested");
+
+		fixture.setLiveSubagents(false);
+		assert.deepEqual(await fixture.agent.finishTurn?.({ message: { stopReason: "toolUse" }, toolResults: [{}] } as never, new AbortController().signal), { action: "end" });
+		assert.equal(await fixture.internals._handlePostAgentRun(), false);
+		assert.equal(fixture.controller.state(fixture.session), "paused");
+	});
+
+	it("keeps running through before-settle while other sub-agents are still live", async () => {
+		const fixture = pauseFixture({ hasQueuedMessages: true });
+		fixture.controller.bind(fixture.session);
+		await fixture.controller.toggle(fixture.session);
+		fixture.setLiveSubagents(true);
+
+		assert.equal(await fixture.internals._runBeforeSettleBoundary(), true);
+		assert.equal(fixture.controller.state(fixture.session), "pause-requested");
+	});
+
 	it("does not convert cancellation into a pause", async () => {
 		const fixture = pauseFixture();
 		fixture.controller.bind(fixture.session);
@@ -256,6 +283,7 @@ function pauseFixture(options: { existingFinish?: "continue" | "end"; continueEr
 	let settledCalls = 0;
 	let cancelledRetries = 0;
 	let currentSession = true;
+	let liveSubagents = false;
 	const listeners: Array<(event: never) => void> = [];
 	const toasts: Array<{ message: string; kind: string }> = [];
 	const agent = {
@@ -274,6 +302,7 @@ function pauseFixture(options: { existingFinish?: "continue" | "end"; continueEr
 	} as unknown as AgentSession["agent"];
 	const internals = {
 		agent,
+		sessionManager: { [Symbol.for("pix.subagents.session-live")]: () => liveSubagents },
 		get isStreaming() { return this._isAgentRunActive; },
 		subscribe: (listener: (event: never) => void) => {
 			listeners.push(listener);
@@ -316,5 +345,6 @@ function pauseFixture(options: { existingFinish?: "continue" | "end"; continueEr
 		settledCalls: () => settledCalls,
 		cancelledRetries: () => cancelledRetries,
 		setCurrentSession: (current: boolean) => { currentSession = current; },
+		setLiveSubagents: (live: boolean) => { liveSubagents = live; },
 	};
 }

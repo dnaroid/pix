@@ -36,6 +36,11 @@ expires, without consuming a rotated refresh token behind pi core's back.
 - If refresh fails, the model-usage query rejects instead of returning
   `undefined`; `ModelUsageController` therefore retains its previous status.
 - Missing or non-OAuth credentials still produce no status.
+- Usage statistics also export `resolveOpenAIUsageHeaders()` from
+  `model-usage-status.ts` to obtain ChatGPT/Codex OAuth request headers using
+  the same Pi-owned refresh path; it returns `undefined` when not logged in.
+  Z.ai coding-plan requests use the sibling `resolveZaiUsageHeaders()` for
+  their key headers, also returning `undefined` without login.
 
 ## Persistence invariant
 

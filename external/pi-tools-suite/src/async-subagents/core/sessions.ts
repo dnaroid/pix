@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { hasLaunchedAgentPrompt, isDir } from "./paths.js";
+import { getRunRoot, hasLaunchedAgentPrompt, isDir } from "./paths.js";
 import { listSubagentRunDirs } from "./registry.js";
 import { getAgentState } from "./state.js";
 import type { AgentState } from "./types.js";
@@ -20,8 +20,32 @@ export interface SubagentSessionRecord {
 	state: AgentState | null;
 }
 
+/** Legacy per-agent session directory (`<agentDir>/sessions`), used only without a persisted parent session. */
 export function getAgentSessionDir(agentDir: string): string {
 	return path.join(agentDir, "sessions");
+}
+
+/**
+ * Parent session ids are UUIDs. Legacy run directories are timestamp-named, so
+ * the two kinds of `.pi/subagents/` children never collide (decision 0072).
+ */
+export const PARENT_SESSION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Project-local directory for children of one parent session:
+ * `<cwd>/.pi/subagents/<parentSessionId>/`. Kept out of the global session
+ * store, so resume lists and usage stats never see children, and removing the
+ * directory removes every child of that parent. Undefined for an unsafe id.
+ */
+export function getParentSubagentSessionDir(cwd: string, parentSessionId: string | undefined): string | undefined {
+	const id = parentSessionId?.trim();
+	if (!id || !PARENT_SESSION_ID_PATTERN.test(id)) return undefined;
+	return path.join(getRunRoot(cwd), id);
+}
+
+/** Session directory for a child: the parent-scoped project dir when known, else the legacy agent dir. */
+export function getSubagentSessionDir(agentDir: string, cwd: string, parentSessionId: string | undefined): string {
+	return getParentSubagentSessionDir(cwd, parentSessionId) ?? getAgentSessionDir(agentDir);
 }
 
 export function writeSessionFileLink(agentDir: string, sessionFile: string | undefined): void {

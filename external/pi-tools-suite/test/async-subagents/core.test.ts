@@ -9,8 +9,6 @@ import {
 	createSemaphore,
 	currentModelRef,
 	DEFAULT_AGENT_TIMEOUT_MS,
-	DEFAULT_DEBUG_EVENTS_LOG_MAX_BYTES,
-	DEFAULT_EVENTS_LOG_MAX_BYTES,
 	DEFAULT_RPC_EVENT_LINE_MAX_CHARS,
 	DEFAULT_STDERR_LOG_MAX_BYTES,
 	findCleanupCandidates,
@@ -51,7 +49,6 @@ import {
 	selectSessionModelWithFallback,
 	selectSubagentType,
 	shouldForceCurrentSubagentModel,
-	shouldPersistSubagentSessions,
 	spawnAgent,
 	spawnAgentWithRetry,
 	stopAgents,
@@ -74,9 +71,6 @@ const originalAsyncSubagentsModel = process.env.ASYNC_SUBAGENTS_MODEL;
 const originalPiSubagentsModel = process.env.PI_SUBAGENTS_MODEL;
 const originalAsyncSubagentsForceCurrentModel = process.env.ASYNC_SUBAGENTS_FORCE_CURRENT_MODEL;
 const originalPiSubagentsForceCurrentModel = process.env.PI_SUBAGENTS_FORCE_CURRENT_MODEL;
-const originalAsyncSubagentsEnableSessions = process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS;
-const originalAsyncSubagentsMaxEventsBytes = process.env.ASYNC_SUBAGENTS_MAX_EVENTS_BYTES;
-const originalPiSubagentsMaxEventsBytes = process.env.PI_SUBAGENTS_MAX_EVENTS_BYTES;
 const originalAsyncSubagentsMaxStderrBytes = process.env.ASYNC_SUBAGENTS_MAX_STDERR_BYTES;
 const originalPiSubagentsMaxStderrBytes = process.env.PI_SUBAGENTS_MAX_STDERR_BYTES;
 const originalAsyncSubagentsMaxRpcLineChars = process.env.ASYNC_SUBAGENTS_MAX_RPC_LINE_CHARS;
@@ -157,12 +151,6 @@ afterEach(() => {
 	else process.env.ASYNC_SUBAGENTS_FORCE_CURRENT_MODEL = originalAsyncSubagentsForceCurrentModel;
 	if (originalPiSubagentsForceCurrentModel === undefined) delete process.env.PI_SUBAGENTS_FORCE_CURRENT_MODEL;
 	else process.env.PI_SUBAGENTS_FORCE_CURRENT_MODEL = originalPiSubagentsForceCurrentModel;
-	if (originalAsyncSubagentsEnableSessions === undefined) delete process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS;
-	else process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS = originalAsyncSubagentsEnableSessions;
-	if (originalAsyncSubagentsMaxEventsBytes === undefined) delete process.env.ASYNC_SUBAGENTS_MAX_EVENTS_BYTES;
-	else process.env.ASYNC_SUBAGENTS_MAX_EVENTS_BYTES = originalAsyncSubagentsMaxEventsBytes;
-	if (originalPiSubagentsMaxEventsBytes === undefined) delete process.env.PI_SUBAGENTS_MAX_EVENTS_BYTES;
-	else process.env.PI_SUBAGENTS_MAX_EVENTS_BYTES = originalPiSubagentsMaxEventsBytes;
 	if (originalAsyncSubagentsMaxStderrBytes === undefined) delete process.env.ASYNC_SUBAGENTS_MAX_STDERR_BYTES;
 	else process.env.ASYNC_SUBAGENTS_MAX_STDERR_BYTES = originalAsyncSubagentsMaxStderrBytes;
 	if (originalPiSubagentsMaxStderrBytes === undefined) delete process.env.PI_SUBAGENTS_MAX_STDERR_BYTES;
@@ -380,36 +368,25 @@ describe.serial("core utils and prompt generation", () => {
 		await expect(rejected).rejects.toThrow("Aborted");
 	});
 
-	test.serial("persists sub-agent sessions only when explicitly enabled", () => {
-		expect(shouldPersistSubagentSessions({})).toBe(false);
-		expect(shouldPersistSubagentSessions({ ASYNC_SUBAGENTS_ENABLE_SESSIONS: "0" })).toBe(false);
-		expect(shouldPersistSubagentSessions({ ASYNC_SUBAGENTS_ENABLE_SESSIONS: "1" })).toBe(true);
-		expect(shouldPersistSubagentSessions({ ASYNC_SUBAGENTS_ENABLE_SESSIONS: "true" })).toBe(true);
-	});
-
 	test.serial("resolves bounded sub-agent log limits from env", () => {
 		expect(resolveSubagentLogLimits({})).toEqual({
-			eventsMaxBytes: DEFAULT_EVENTS_LOG_MAX_BYTES,
 			stderrMaxBytes: DEFAULT_STDERR_LOG_MAX_BYTES,
 			rpcEventLineMaxChars: DEFAULT_RPC_EVENT_LINE_MAX_CHARS,
 			debugLogs: false,
 		});
 		expect(resolveSubagentLogLimits({ ASYNC_SUBAGENTS_DEBUG_LOGS: "1" })).toEqual({
-			eventsMaxBytes: DEFAULT_DEBUG_EVENTS_LOG_MAX_BYTES,
 			stderrMaxBytes: DEFAULT_STDERR_LOG_MAX_BYTES,
 			rpcEventLineMaxChars: DEFAULT_RPC_EVENT_LINE_MAX_CHARS,
 			debugLogs: true,
 		});
 		expect(resolveSubagentLogLimits({
-			ASYNC_SUBAGENTS_MAX_EVENTS_BYTES: "123",
 			ASYNC_SUBAGENTS_MAX_STDERR_BYTES: "456",
 			ASYNC_SUBAGENTS_MAX_RPC_LINE_CHARS: "789",
-		})).toEqual({ eventsMaxBytes: 123, stderrMaxBytes: 456, rpcEventLineMaxChars: 789, debugLogs: false });
+		})).toEqual({ stderrMaxBytes: 456, rpcEventLineMaxChars: 789, debugLogs: false });
 		expect(resolveSubagentLogLimits({
-			PI_SUBAGENTS_MAX_EVENTS_BYTES: "321",
 			PI_SUBAGENTS_MAX_STDERR_BYTES: "654",
 			PI_SUBAGENTS_MAX_RPC_LINE_CHARS: "987",
-		})).toEqual({ eventsMaxBytes: 321, stderrMaxBytes: 654, rpcEventLineMaxChars: 987, debugLogs: false });
+		})).toEqual({ stderrMaxBytes: 654, rpcEventLineMaxChars: 987, debugLogs: false });
 	});
 
 	test.serial("formats utility values", () => {
@@ -1196,34 +1173,7 @@ describe.serial("run and agent state", () => {
 		expect(activityFromRpcEvent({ type: "turn_start" }, at)).toBeUndefined();
 	});
 
-	test.serial("restores the latest activity from progress.jsonl without debug logs", () => {
-		const runDir = tempDir();
-		createAgent(runDir, "tool-latest", {
-			"progress.jsonl": [
-				{ at: "2026-09-08T12:00:00.000Z", stage: "rpc_event", type: "message_start", role: "assistant" },
-				{ at: "2026-09-08T12:00:01.000Z", stage: "rpc_event", type: "tool_execution_start", toolName: "Read" },
-				{ at: "2026-09-08T12:00:02.000Z", stage: "rpc_event", type: "turn_end" },
-			].map((record) => JSON.stringify(record)).join("\n") + "\n",
-		});
-		createAgent(runDir, "thinking-latest", {
-			"progress.jsonl": [
-				JSON.stringify({ at: "2026-09-08T12:01:00.000Z", stage: "rpc_event", type: "tool_execution_end", toolName: "Bash" }),
-				JSON.stringify({ at: "2026-09-08T12:01:03.000Z", stage: "rpc_event", type: "message_end", role: "assistant" }),
-				"{partially-written",
-			].join("\n"),
-		});
-
-		expect(getAgentState(runDir, "tool-latest")?.lastActivity).toEqual({
-			label: "Read",
-			at: "2026-09-08T12:00:01.000Z",
-		});
-		expect(getRunState(runDir, ["thinking-latest"]).agents[0]?.lastActivity).toEqual({
-			label: "Thinking",
-			at: "2026-09-08T12:01:03.000Z",
-		});
-	});
-
-		test.serial("detects planned, running, done, failed, stopped, and RPC prompt failures", () => {
+		test.serial("detects planned, running, done, failed, and stopped agents", () => {
 		const runDir = tempDir();
 		writeFile(path.join(runDir, "prompts", "planned.md"), "planned prompt");
 		createAgent(runDir, "done", {
@@ -1232,38 +1182,25 @@ describe.serial("run and agent state", () => {
 			"finished_at": "2024-01-01T00:00:02Z",
 			"result.md": "a\nb\n",
 			"stderr.log": "",
-			"events.jsonl": "{}\n{}",
 		});
 		createAgent(runDir, "failed", { "exit_code": "2" });
 		createAgent(runDir, "stopped", { "exit_code": "not-a-number" });
-		createAgent(runDir, "rpc-failed", {
-			"events.jsonl": `${JSON.stringify({ type: "response", command: "prompt", success: false })}\n`,
-		});
-		createAgent(runDir, "rpc-ok", {
-			"events.jsonl": `${JSON.stringify({ type: "response", command: "prompt", success: true })}\n`,
-		});
-		createAgent(runDir, "rpc-invalid", { "events.jsonl": "{not json" });
 		createAgent(runDir, "running", { pid: String(process.pid), "stderr.log": "warn\nerr" });
 		createAgent(runDir, "dead-pid", { pid: "99999999" });
 
 		expect(getAgentState(runDir, "missing")).toBeNull();
-		expect(getAgentState(runDir, "done")).toMatchObject({ id: "done", status: "done", exitCode: 0, resultLines: 2, eventLines: 2 });
+		expect(getAgentState(runDir, "done")).toMatchObject({ id: "done", status: "done", exitCode: 0, resultLines: 2 });
 		expect(getAgentState(runDir, "failed")).toMatchObject({ id: "failed", status: "failed", exitCode: 2 });
 		expect(getAgentState(runDir, "stopped")).toMatchObject({ id: "stopped", status: "stopped" });
-		expect(getAgentState(runDir, "rpc-failed")).toMatchObject({ id: "rpc-failed", status: "failed", exitCode: 1 });
-		expect(getAgentState(runDir, "rpc-ok")).toMatchObject({ id: "rpc-ok", status: "planned", eventLines: 1 });
-		expect(getAgentState(runDir, "rpc-invalid")).toMatchObject({ id: "rpc-invalid", status: "planned", eventLines: 1 });
 		expect(getAgentState(runDir, "running")).toMatchObject({ id: "running", status: "running", pid: process.pid, stderrLines: 2 });
 		expect(getAgentState(runDir, "dead-pid")).toMatchObject({ id: "dead-pid", status: "stopped", pid: 99999999 });
 
 		expect(getAgentState(runDir, "done", { includeLineCounts: false })).toMatchObject({ id: "done", status: "done", exitCode: 0 });
 		expect(getAgentState(runDir, "done", { includeLineCounts: false })?.resultLines).toBeUndefined();
-		expect(getAgentState(runDir, "done", { includeLineCounts: false })?.eventLines).toBeUndefined();
-		expect(getAgentState(runDir, "rpc-failed", { checkRpcPromptFailure: false })).toMatchObject({ id: "rpc-failed", status: "planned" });
 		expect(getRunState(runDir, ["done"], { includeLineCounts: false }).agents[0].resultLines).toBeUndefined();
 
 		const all = getRunState(runDir).agents.map((a) => a.id).sort();
-		expect(all).toEqual(["dead-pid", "done", "failed", "planned", "rpc-failed", "rpc-invalid", "rpc-ok", "running", "stopped"]);
+		expect(all).toEqual(["dead-pid", "done", "failed", "planned", "running", "stopped"]);
 		expect(getRunState(runDir, ["planned", "done"]).agents.map((a) => a.id).sort()).toEqual(["done", "planned"]);
 		expect(getRunState(path.join(runDir, "missing")).agents).toEqual([]);
 	});
@@ -1531,7 +1468,7 @@ setTimeout(() => {}, 2000);
 						undefined, resolve);
 				}), `Timed out waiting for ${id}`);
 				const payload = JSON.parse(fs.readFileSync(captured, "utf8"));
-				const args = fs.readFileSync(path.join(runDir, id, "pi_args"), "utf8").split("\n");
+				const args = (JSON.parse(fs.readFileSync(path.join(runDir, id, "launch.json"), "utf8")).piArgs as string[]).join("\n").split("\n");
 				expect(payload.message).toBe(generatePrompt(resolved.task));
 				expect(args.filter((arg) => arg === "--no-skills")).toHaveLength(1);
 				expect(args).not.toContain("injected.md");
@@ -1669,19 +1606,19 @@ setTimeout(() => {}, 1000);
 		expect(seenEvent).toMatchObject({ type: "agent_end" });
 		const agentDir = path.join(runDir, "agent-1");
 		expect(fs.readFileSync(path.join(agentDir, "project_cwd"), "utf-8")).toBe(cwd);
-		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).toContain("--no-session");
-		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).not.toContain("--session-dir");
-		expect(fs.existsSync(path.join(agentDir, "session_dir"))).toBe(false);
-		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).toContain("--extension\n");
-		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).toContain(path.join("model-tools", "index.ts"));
-		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).toContain(path.join("todo", "subagent.ts"));
-		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).toContain(path.join("repo-discovery", "subagent.ts"));
-		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).toContain(path.join("dcp", "subagent.ts"));
+		expect((JSON.parse(fs.readFileSync(path.join(agentDir, "launch.json"), "utf-8")).piArgs as string[]).join("\n")).toContain("--session-dir");
+		expect((JSON.parse(fs.readFileSync(path.join(agentDir, "launch.json"), "utf-8")).piArgs as string[]).join("\n")).not.toContain("--no-session");
+		for (const legacy of ["session_dir", "pi_args", "model"]) expect(fs.existsSync(path.join(agentDir, legacy))).toBe(false);
+		expect((JSON.parse(fs.readFileSync(path.join(agentDir, "launch.json"), "utf-8")).piArgs as string[]).join("\n")).toContain("--extension\n");
+		expect((JSON.parse(fs.readFileSync(path.join(agentDir, "launch.json"), "utf-8")).piArgs as string[]).join("\n")).toContain(path.join("model-tools", "index.ts"));
+		expect((JSON.parse(fs.readFileSync(path.join(agentDir, "launch.json"), "utf-8")).piArgs as string[]).join("\n")).toContain(path.join("todo", "subagent.ts"));
+		expect((JSON.parse(fs.readFileSync(path.join(agentDir, "launch.json"), "utf-8")).piArgs as string[]).join("\n")).toContain(path.join("repo-discovery", "subagent.ts"));
+		expect((JSON.parse(fs.readFileSync(path.join(agentDir, "launch.json"), "utf-8")).piArgs as string[]).join("\n")).toContain(path.join("dcp", "subagent.ts"));
 		// Environment fallback models do not opt provider extensions back in.
-		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).not.toContain(path.join("antigravity-auth", "index.ts"));
-		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).toContain("--model\nzai/glm-5-turbo");
-		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).toContain("--models\nzai/glm-5-turbo");
-		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).toContain("--tools\nRead,Grep");
+		expect((JSON.parse(fs.readFileSync(path.join(agentDir, "launch.json"), "utf-8")).piArgs as string[]).join("\n")).not.toContain(path.join("antigravity-auth", "index.ts"));
+		expect((JSON.parse(fs.readFileSync(path.join(agentDir, "launch.json"), "utf-8")).piArgs as string[]).join("\n")).toContain("--model\nzai/glm-5-turbo");
+		expect((JSON.parse(fs.readFileSync(path.join(agentDir, "launch.json"), "utf-8")).piArgs as string[]).join("\n")).toContain("--models\nzai/glm-5-turbo");
+		expect((JSON.parse(fs.readFileSync(path.join(agentDir, "launch.json"), "utf-8")).piArgs as string[]).join("\n")).toContain("--tools\nRead,Grep");
 		expect(fs.readFileSync(path.join(agentDir, "result.md"), "utf-8")).toBe("done result");
 		expect(fs.readFileSync(path.join(agentDir, "exit_code"), "utf-8")).toBe("0");
 		expect(fs.existsSync(path.join(agentDir, "events.jsonl"))).toBe(false);
@@ -1689,7 +1626,7 @@ setTimeout(() => {}, 1000);
 		const progress = fs.readFileSync(path.join(agentDir, "progress.jsonl"), "utf-8");
 		expect(progress).toContain('"stage":"spawned"');
 		expect(progress).toContain('"stage":"prompt_sent"');
-		expect(progress).toContain('"type":"agent_end"');
+		expect(progress).not.toContain('"stage":"rpc_event"');
 		expect(progress).toContain('"stage":"completed"');
 		expect(progress).not.toContain("done result");
 		expect(progress).not.toContain("Do work");
@@ -1716,7 +1653,7 @@ setTimeout(() => {}, 1000);
 			await withTimeout(new Promise<any>((resolve) => {
 				spawnAgent(runDir, task, cwd, extraArgs, undefined, resolve);
 			}), `Timed out waiting for ${id}`);
-			return fs.readFileSync(path.join(runDir, task.id, "pi_args"), "utf-8");
+			return (JSON.parse(fs.readFileSync(path.join(runDir, task.id, "launch.json"), "utf-8")).piArgs as string[]).join("\n");
 		};
 
 		const envOnlyArgs = await spawnAndReadArgs("env-only", { id: "env-only", task: "Do work" });
@@ -1796,17 +1733,16 @@ process.stdin.on("data", () => {
 setTimeout(() => {}, 1000);
 `);
 		process.argv[1] = piScript;
-		process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS = "1";
 
 		await withTimeout(new Promise<any>((resolve) => {
 			spawnAgent(runDir, { id: "agent-1", task: "Do work" }, cwd, [], undefined, resolve);
 		}), "Timed out waiting for session spawn completion");
 
 		const agentDir = path.join(runDir, "agent-1");
-		const piArgs = fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8");
+		const piArgs = (JSON.parse(fs.readFileSync(path.join(agentDir, "launch.json"), "utf-8")).piArgs as string[]).join("\n");
 		expect(piArgs).toContain("--session-dir");
 		expect(piArgs).not.toContain("--no-session");
-		expect(fs.readFileSync(path.join(agentDir, "session_dir"), "utf-8")).toBe(path.join(agentDir, "sessions"));
+		expect(fs.existsSync(path.join(agentDir, "sessions"))).toBe(true);
 	});
 
 	test.serial("captures final assistant text when pi exits without agent_end", async () => {
@@ -1874,7 +1810,6 @@ process.stdin.on("data", () => {
 setTimeout(() => {}, 1000);
 `);
 		process.argv[1] = piScript;
-		process.env.ASYNC_SUBAGENTS_MAX_EVENTS_BYTES = "4096";
 		process.env.ASYNC_SUBAGENTS_MAX_STDERR_BYTES = "256";
 		process.env.ASYNC_SUBAGENTS_MAX_RPC_LINE_CHARS = "4096";
 		process.env.ASYNC_SUBAGENTS_DEBUG_LOGS = "1";
@@ -1886,11 +1821,7 @@ setTimeout(() => {}, 1000);
 		const agentDir = path.join(runDir, "agent-1");
 		expect(completed).toMatchObject({ exitCode: 0, state: { status: "done" } });
 		expect(fs.readFileSync(path.join(agentDir, "result.md"), "utf-8")).toBe("compact final");
-		const events = fs.readFileSync(path.join(agentDir, "events.jsonl"), "utf-8");
-		expect(events).toContain("suppressed_rpc_events");
-		expect(events).toContain("agent_end");
-		expect(events).not.toContain("x".repeat(1000));
-		expect(fs.statSync(path.join(agentDir, "events.jsonl")).size).toBeLessThanOrEqual(4096);
+		expect(fs.existsSync(path.join(agentDir, "events.jsonl"))).toBe(false);
 		const stderr = fs.readFileSync(path.join(agentDir, "stderr.log"), "utf-8");
 		expect(stderr).toContain("truncated");
 		expect(fs.statSync(path.join(agentDir, "stderr.log")).size).toBeLessThanOrEqual(256);
@@ -2083,7 +2014,7 @@ setTimeout(() => {}, 1000);
 		expect(fs.readFileSync(path.join(runDir, "agent-1", "result.md"), "utf-8")).toBe("fallback ok on fallback/model");
 		expect(fs.readFileSync(path.join(runDir, "agent-1", "model_fallback_from"), "utf-8")).toBe("primary/model");
 		expect(fs.readFileSync(path.join(runDir, "agent-1", "model_fallback_to"), "utf-8")).toBe("fallback/model");
-		const fallbackArgs = fs.readFileSync(path.join(runDir, "agent-1", "pi_args"), "utf-8").split("\n");
+		const fallbackArgs = (JSON.parse(fs.readFileSync(path.join(runDir, "agent-1", "launch.json"), "utf-8")).piArgs as string[]).join("\n").split("\n");
 		expect(fallbackArgs).toContain("--no-skills");
 		expect(fallbackArgs).not.toContain("--skill");
 		expect(fallbackArgs).not.toContain("injected-skill.md");
@@ -2097,7 +2028,7 @@ setTimeout(() => {}, 1000);
 
 		expect(secondCompletion).toMatchObject({ exitCode: 0, state: { status: "done" } });
 		expect(JSON.parse(fs.readFileSync(attemptFile, "utf-8"))).toEqual(["primary/model", "fallback/model", "fallback/model"]);
-		expect(fs.readFileSync(path.join(secondRun, "agent-2", "model"), "utf-8")).toBe("fallback/model");
+		expect((JSON.parse(fs.readFileSync(path.join(secondRun, "agent-2", "launch.json"), "utf-8")).task.model as string)).toBe("fallback/model");
 
 		const thirdRun = createRunDir(cwd, "spawn-provider-fallback-session");
 		let thirdCompletion: any;
@@ -2108,7 +2039,7 @@ setTimeout(() => {}, 1000);
 
 		expect(thirdCompletion).toMatchObject({ exitCode: 0, state: { status: "done" } });
 		expect(JSON.parse(fs.readFileSync(attemptFile, "utf-8"))).toEqual(["primary/model", "fallback/model", "fallback/model", "fallback/other"]);
-		expect(fs.readFileSync(path.join(thirdRun, "agent-3", "model"), "utf-8")).toBe("fallback/other");
+		expect((JSON.parse(fs.readFileSync(path.join(thirdRun, "agent-3", "launch.json"), "utf-8")).task.model as string)).toBe("fallback/other");
 	});
 
 	test.serial("waits for Antigravity all-accounts exhaustion before provider fallback", async () => {

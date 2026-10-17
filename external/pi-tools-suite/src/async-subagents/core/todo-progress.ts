@@ -34,6 +34,11 @@ export function todoProgressFromRpcEvent(event: RpcEventRecord): AgentState["tod
 export function writeTodoProgress(agentDir: string, progress: NonNullable<AgentState["todoProgress"]>): void {
 	const file = path.join(agentDir, TODO_PROGRESS_FILE);
 	try {
+		// An empty/cleared plan carries no information; absence means "no plan".
+		if (progress.total === 0) {
+			fs.rmSync(file, { force: true });
+			return;
+		}
 		fs.writeFileSync(`${file}.tmp`, JSON.stringify(progress), "utf8");
 		fs.renameSync(`${file}.tmp`, file);
 	} catch {

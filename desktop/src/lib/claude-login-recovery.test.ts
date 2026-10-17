@@ -6,6 +6,7 @@ describe("Claude sign-in recovery", () => {
   it("recognizes expired and missing Claude login only on host error rows", () => {
     expect(isClaudeLoginError("pix-system:error:1", expired)).toBe(true);
     expect(isClaudeLoginError("pix-system:notification:error:1", "[pi-claude-code-provider] Claude Code is not logged in. Run `claude auth login`" )).toBe(true);
+    expect(isClaudeLoginError("pix-system:error:1", "Claude Code request failed (401): Failed to authenticate: OAuth token revoked. Please log in again or contact your administrator.")).toBe(true);
     for (const id of [undefined, "assistant:1", "pix-system:notification:warning:1", "pix-system:1"]) {
       expect(isClaudeLoginError(id, expired)).toBe(false);
     }

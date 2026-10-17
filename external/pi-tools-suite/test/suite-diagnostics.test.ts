@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import {
-	createSuiteDiagnostics, diagnosticErrorType, type SuiteDiagnosticSink,
+	createSuiteDiagnostics, diagnosticErrorType, diagnosticSearchReason, type SuiteDiagnosticSink,
 } from "../src/lib/suite-diagnostics.js";
 
 type Captured = Parameters<SuiteDiagnosticSink>;
@@ -162,4 +162,22 @@ test("failed loading or broken log sinks cannot affect operations or retry endle
 	broken.report("warn", "todo", "load-failed");
 	await tick();
 	expect(sent).toBe(2);
+});
+
+test("search failure reasons are fixed categories and never carry the message", async () => {
+	expect(diagnosticSearchReason(new Error("Search source busy; update deferred"))).toBe("busy");
+	expect(diagnosticSearchReason(new Error("Search work ownership expired"))).toBe("ownership-expired");
+	expect(diagnosticSearchReason(new Error("Search source selection changed"))).toBe("policy-changed");
+	expect(diagnosticSearchReason(new Error("Semantic configuration changed"))).toBe("config-changed");
+	expect(diagnosticSearchReason(new Error("Task embedding identity is incompatible"))).toBe("incompatible");
+	expect(diagnosticSearchReason(new Error("database is locked"))).toBe("locked");
+	expect(diagnosticSearchReason(Object.assign(new Error("x"), { code: "SEARCH_WORK_NEEDS_CONTINUE" }))).toBe("needs-continue");
+	expect(diagnosticSearchReason(new Error("/Users/me/secret"))).toBe("other");
+	expect(diagnosticSearchReason("busy")).toBe("other");
+	const { records, sink } = capture();
+	const reporter = createSuiteDiagnostics({ enabled: () => true, loadSink: async () => sink });
+	reporter.report("warn", "search", "background-task-index-failed", "/workspace", { source: "tasks", errorType: "Error", reason: "busy" });
+	reporter.report("warn", "search", "background-task-index-failed", "/workspace", { source: "tasks", errorType: "Error", reason: "locked" });
+	await tick();
+	expect(records.map((r) => r[2].reason)).toEqual(["busy", "locked"]);
 });

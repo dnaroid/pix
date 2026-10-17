@@ -55,7 +55,8 @@ test("relocated native CLI uses only release-root dependencies without IDX or AC
   await cp(join(suite, "src/project-search/source-extension-settings.mjs"), join(engine, "source-extension-settings.mjs"));
   for (const name of ["source-work", "source-policy", "source-policy-lock", "settings-policy",
     "federation-reranker", "snapshot-probe", "session-discovery", "session-record", "session-text",
-    "session-revisions", "session-index-revision", "task-snapshot", "repository-snapshot"]) {
+    "session-revisions", "session-index-revision", "task-snapshot", "repository-snapshot",
+    "source-coverage", "commit-stamp"]) {
     assert.ok(packedPaths.has(`external/pi-tools-suite/src/project-search/${name}.mjs`));
     await cp(join(suite, `src/project-search/${name}.mjs`), join(engine, `${name}.mjs`));
   }

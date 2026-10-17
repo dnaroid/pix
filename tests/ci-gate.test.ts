@@ -52,7 +52,7 @@ test("gate executes in order, isolates only configuration-sensitive steps, and s
   const calls: Array<{ command: string; args: string[]; options: { env: NodeJS.ProcessEnv; cwd: string } }> = [];
   const signals = new EventEmitter();
   const env = { HOME: "original-home", USERPROFILE: "original-profile", PIX_CONFIG_PROFILE: "desktop",
-    PIX_BRAINSTORM_HOST_URL: "http://127.0.0.1:1234/", PIX_BRAINSTORM_HOST_TOKEN: "test-token", PATH: process.env.PATH };
+    PATH: process.env.PATH };
   const launch = (command: string, args: string[], options: SpawnOptions) => {
     assert.ok(options.env);
     assert.equal(typeof options.cwd, "string");
@@ -67,8 +67,6 @@ test("gate executes in order, isolates only configuration-sensitive steps, and s
   assert.deepEqual(result.results.map((r: { id: string }) => r.id), ["root", "acp", "tools-suite"]);
   assert.equal(calls[0].options.env.HOME, "original-home");
   assert.ok(calls.every((call) => call.options.env.PIX_CONFIG_PROFILE === undefined));
-  assert.ok(calls.every((call) => call.options.env.PIX_BRAINSTORM_HOST_URL === undefined));
-  assert.ok(calls.every((call) => call.options.env.PIX_BRAINSTORM_HOST_TOKEN === undefined));
   assert.equal(calls[2].options.env.CI, "true");
   assert.ok(calls.every(call => call.options.env.PATH?.startsWith(`${join(repoRoot, "node_modules/.bin")}${delimiter}`)),
     "nested npm scripts must inherit the root ast-grep executable");
@@ -77,8 +75,6 @@ test("gate executes in order, isolates only configuration-sensitive steps, and s
   assert.equal(calls[2].options.env.PI_CODING_AGENT_DIR, join(calls[2].options.env.HOME!, ".pi/agent"));
   assert.equal(env.HOME, "original-home");
   assert.equal(env.PIX_CONFIG_PROFILE, "desktop");
-  assert.equal(env.PIX_BRAINSTORM_HOST_URL, "http://127.0.0.1:1234/");
-  assert.equal(env.PIX_BRAINSTORM_HOST_TOKEN, "test-token");
   assert.equal(signals.listenerCount("SIGINT"), 0);
   assert.equal(signals.listenerCount("SIGTERM"), 0);
   assert.equal(JSON.parse(readFileSync(result.summaryPath, "utf8")).status, "passed");

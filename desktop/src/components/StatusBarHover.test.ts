@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import statusBar from "./StatusBar.svelte?raw";
 import runtimeStatus from "./RuntimeStatusBarItems.svelte?raw";
 import observerStatus from "./ObserverStatus.svelte?raw";
-import brainstormStatus from "./SessionBrainstormStatus.svelte?raw";
 import activityHud from "./SessionActivityStatusHud.svelte?raw";
 import providerIcon from "./ModelProviderIcon.svelte?raw";
 import resetCredits from "./ResetCreditsSection.svelte?raw";
@@ -13,7 +12,6 @@ const sources = {
   StatusBar: statusBar,
   RuntimeStatusBarItems: runtimeStatus,
   ObserverStatus: observerStatus,
-  SessionBrainstormStatus: brainstormStatus,
   SessionActivityStatusHud: activityHud,
   ModelProviderIcon: providerIcon,
   ResetCreditsSection: resetCredits,
@@ -62,7 +60,6 @@ describe("Status bar click surfaces", () => {
   it("places Usage left and Observer before right-hand activity, with a distinct telescope", () => {
     const status = source("StatusBar");
     expect(status.indexOf("<RuntimeStatusBarItems")).toBeLessThan(status.indexOf("<ObserverStatus"));
-    expect(status.indexOf("<SessionBrainstormStatus")).toBeLessThan(status.indexOf("<ObserverStatus"));
     expect(status.indexOf("<ObserverStatus")).toBeLessThan(status.indexOf("<SessionActivityStatusHud"));
     expect(status).not.toContain("leadingSeparator");
     expect(status).not.toContain("trailingSeparator");
@@ -73,13 +70,13 @@ describe("Status bar click surfaces", () => {
     expect(source("SessionActivityStatusHud")).not.toContain('class="mx-1 h-3 w-px');
   });
   it("does not use browser-native tooltips anywhere in status chrome or its details", () => {
-    for (const name of ["StatusBar", "RuntimeStatusBarItems", "ObserverStatus", "SessionBrainstormStatus", "SessionActivityStatusHud", "ModelProviderIcon"] as const) {
+    for (const name of ["StatusBar", "RuntimeStatusBarItems", "ObserverStatus", "SessionActivityStatusHud", "ModelProviderIcon"] as const) {
       expect(source(name), name).not.toMatch(/\btitle\s*=/);
     }
   });
 
   it("opens all status details only on activation, never hover or focus", () => {
-    for (const content of [runtimeStatus, observerStatus, brainstormStatus, activityHud, popover]) {
+    for (const content of [runtimeStatus, observerStatus, activityHud, popover]) {
       expect(content).not.toMatch(/on(?:pointerenter|mouseenter|focusin|focus)=/);
       expect(content).not.toContain("group-hover:block");
       expect(content).not.toContain("group-focus-within:block");
@@ -99,7 +96,7 @@ describe("Status bar click surfaces", () => {
     expect(source("RuntimeStatusBarItems").match(/bottom-full/g)).toHaveLength(2);
     expect(source("SessionActivityStatusHud")).toContain("<StatusBarPopover");
     expect(source("SessionActivityStatusHud")).toContain('"flex h-6 items-center justify-center gap-1');
-    for (const name of ["ObserverStatus", "SessionBrainstormStatus", "RuntimeStatusBarItems"] as const) {
+    for (const name of ["ObserverStatus", "RuntimeStatusBarItems"] as const) {
       expect(source(name)).not.toContain("pb-1.5");
     }
   });
@@ -149,7 +146,6 @@ describe("Status bar click surfaces", () => {
     expect(popover).toContain("overflow-y-auto overscroll-contain");
     expect(runtimeStatus.split(limit)).toHaveLength(3);
     expect(runtimeStatus).not.toContain("640px");
-    expect(brainstormStatus).not.toContain("max-h-[60vh]");
     expect(activityHud).not.toContain("max-h-[min(60vh,24rem)]");
     expect(activityHud).not.toContain("max-h-[min(40vh,18rem)]");
     expect(activityHud.split(limit)).toHaveLength(3);

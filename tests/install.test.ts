@@ -10,8 +10,8 @@ import { formatPixInstallNextSteps, inspectPixOnboarding, parsePixInstallArgs, p
 
 describe("pix install", () => {
 	it("parses install CLI options", () => {
-		assert.deepEqual(parsePixInstallArgs(["--check"]), { checkOnly: true, help: false });
-		assert.deepEqual(parsePixInstallArgs(["-h"]), { checkOnly: false, help: true });
+		assert.deepEqual(parsePixInstallArgs(["--check"]), { checkOnly: true, help: false, models: false });
+		assert.deepEqual(parsePixInstallArgs(["-h"]), { checkOnly: false, help: true, models: false });
 		assert.throws(() => parsePixInstallArgs(["--bad"]), /Unknown pix install argument/u);
 		assert.match(pixInstallUsage(), /pi CLI availability/u);
 	});

@@ -1,13 +1,64 @@
-import * as fs from "node:fs";
-import * as path from "node:path";
+import { readResultText } from "./state.js";
+import { getLive, getRecord, updateRecord } from "./store.js";
 import type { AgentState, StructuredFileReference, StructuredFinding, StructuredResult, StructuredRisk, StructuredSeverity } from "./types.js";
 
 const DEFAULT_MAX_RESULT_BYTES = 100_000;
 const STDERR_PREVIEW_CHARS = 500;
 
-export interface WriteStructuredResultOptions {
-	agentDir: string;
+export interface BuildStructuredResultOptions {
 	agentId: string;
+	state: AgentState;
+	subagentType?: string;
+	model?: string;
+	maxResultBytes?: number;
+	/** Full result text (live final text, parent message, or child session answer). */
+	resultText?: string;
+	stderr?: string;
+}
+
+/** Build a StructuredResult from the agent state and its result/stderr text. */
+export function buildStructuredResult(opts: BuildStructuredResultOptions): StructuredResult {
+	const { agentId, state, subagentType, model, maxResultBytes, resultText, stderr } = opts;
+	const maxBytes = maxResultBytes ?? DEFAULT_MAX_RESULT_BYTES;
+	const structured: StructuredResult = { schemaVersion: 2, agentId, status: state.status };
+	if (state.exitCode !== undefined) structured.exitCode = state.exitCode;
+	if (state.startedAt) structured.startedAt = state.startedAt;
+	if (state.finishedAt) structured.finishedAt = state.finishedAt;
+	if (state.startedAt && state.finishedAt) {
+		const start = new Date(state.startedAt).getTime();
+		const end = new Date(state.finishedAt).getTime();
+		if (!isNaN(start) && !isNaN(end) && end >= start) structured.durationSeconds = Math.round((end - start) / 1000);
+	}
+	if (state.retryCount && state.retryCount > 0) structured.retryCount = state.retryCount;
+	if (subagentType) structured.subagentType = subagentType;
+	if (model) structured.model = model;
+	if (resultText !== undefined) {
+		const originalBytes = Buffer.byteLength(resultText, "utf-8");
+		if (maxBytes > 0 && originalBytes > maxBytes) {
+			structured.resultText = truncateToBytes(resultText, maxBytes);
+			structured.resultTruncated = true;
+			structured.resultOriginalBytes = originalBytes;
+		} else {
+			structured.resultText = resultText;
+		}
+		Object.assign(structured, extractStructuredFields(resultText));
+	}
+	const trimmedStderr = stderr?.trim();
+	if (trimmedStderr) {
+		structured.stderrPreview = trimmedStderr.length > STDERR_PREVIEW_CHARS
+			? trimmedStderr.slice(0, STDERR_PREVIEW_CHARS) + "..."
+			: trimmedStderr;
+	}
+	return structured;
+}
+
+/** Persisted form: everything except the (possibly large) result text. */
+export function compactStructuredResult(structured: StructuredResult): StructuredResult {
+	const { resultText: _resultText, ...compact } = structured;
+	return compact;
+}
+
+export interface SettleStructuredResultOptions {
 	state: AgentState;
 	subagentType?: string;
 	model?: string;
@@ -15,66 +66,25 @@ export interface WriteStructuredResultOptions {
 }
 
 /**
- * Build a StructuredResult from the current agent state and files.
- * Reads result.md and stderr.log from agentDir.
+ * Compute the structured result of a settled agent and persist its compact
+ * form (plus a bounded stderr preview) on the parent-session record.
  */
-export function buildStructuredResult(opts: WriteStructuredResultOptions): StructuredResult {
-	const { agentDir, agentId, state, subagentType, model, maxResultBytes } = opts;
-	const maxBytes = maxResultBytes ?? DEFAULT_MAX_RESULT_BYTES;
-
-	const structured: StructuredResult = {
-		schemaVersion: 2,
+export function settleStructuredResult(runDir: string, agentId: string, opts: SettleStructuredResultOptions): StructuredResult {
+	const record = getRecord(runDir, agentId);
+	const live = getLive(runDir, agentId);
+	const structured = buildStructuredResult({
 		agentId,
-		status: state.status,
-	};
-
-	if (state.exitCode !== undefined) structured.exitCode = state.exitCode;
-	if (state.startedAt) structured.startedAt = state.startedAt;
-	if (state.finishedAt) structured.finishedAt = state.finishedAt;
-
-	// Compute duration
-	if (state.startedAt && state.finishedAt) {
-		const start = new Date(state.startedAt).getTime();
-		const end = new Date(state.finishedAt).getTime();
-		if (!isNaN(start) && !isNaN(end) && end >= start) {
-			structured.durationSeconds = Math.round((end - start) / 1000);
-		}
-	}
-
-	if (state.retryCount && state.retryCount > 0) structured.retryCount = state.retryCount;
-	if (subagentType) structured.subagentType = subagentType;
-	if (model) structured.model = model;
-
-	// Read result.md
-	const resultFile = path.join(agentDir, "result.md");
-	if (fs.existsSync(resultFile)) {
-		const fullText = fs.readFileSync(resultFile, "utf-8");
-		const originalBytes = Buffer.byteLength(fullText, "utf-8");
-		const structuredText = maxBytes > 0 && originalBytes > maxBytes
-			? truncateToBytes(fullText, maxBytes)
-			: fullText;
-		if (maxBytes > 0 && originalBytes > maxBytes) {
-			// Truncate result.json's resultText at a character boundary close to the byte limit.
-			structured.resultText = structuredText;
-			structured.resultTruncated = true;
-			structured.resultOriginalBytes = originalBytes;
-		} else {
-			structured.resultText = structuredText;
-		}
-		Object.assign(structured, extractStructuredFields(fullText));
-	}
-
-	// Read stderr preview
-	const stderrFile = path.join(agentDir, "stderr.log");
-	if (fs.existsSync(stderrFile)) {
-		const stderr = fs.readFileSync(stderrFile, "utf-8").trim();
-		if (stderr) {
-			structured.stderrPreview = stderr.length > STDERR_PREVIEW_CHARS
-				? stderr.slice(0, STDERR_PREVIEW_CHARS) + "..."
-				: stderr;
-		}
-	}
-
+		state: opts.state,
+		subagentType: opts.subagentType ?? record?.subagentType ?? record?.task?.subagentType,
+		model: opts.model ?? record?.model ?? record?.task?.model,
+		maxResultBytes: opts.maxResultBytes ?? record?.maxResultBytes,
+		resultText: readResultText(runDir, agentId),
+		stderr: live?.stderrTail ?? record?.stderrPreview,
+	});
+	updateRecord(runDir, agentId, {
+		structured: compactStructuredResult(structured),
+		...(structured.stderrPreview ? { stderrPreview: structured.stderrPreview } : {}),
+	});
 	return structured;
 }
 
@@ -192,29 +202,6 @@ function trimMarkdownMarker(line: string): string {
 	const boldPrefix = /^\*\*(.*?)\*\*:?\s*(.*)$/.exec(stripped);
 	if (boldPrefix) stripped = `${boldPrefix[1].replace(/:$/, "")}: ${boldPrefix[2]}`.trim();
 	return stripped;
-}
-
-/**
- * Write result.json to the agent directory.
- */
-export function writeStructuredResult(opts: WriteStructuredResultOptions): StructuredResult {
-	const structured = buildStructuredResult(opts);
-	const jsonPath = path.join(opts.agentDir, "result.json");
-	fs.writeFileSync(jsonPath, JSON.stringify(structured, null, 2), "utf-8");
-	return structured;
-}
-
-/**
- * Read result.json from agent directory, if it exists.
- */
-export function readStructuredResult(agentDir: string): StructuredResult | undefined {
-	const jsonPath = path.join(agentDir, "result.json");
-	if (!fs.existsSync(jsonPath)) return undefined;
-	try {
-		return JSON.parse(fs.readFileSync(jsonPath, "utf-8")) as StructuredResult;
-	} catch {
-		return undefined;
-	}
 }
 
 /**

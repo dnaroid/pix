@@ -14,6 +14,11 @@ prototypes and games *inside assistant transcript messages*. Forms and scripts
 can send bounded JSON data back into the same ACP conversation without
 overwriting a user's unfinished composer draft.
 
+Desktop also supports assistant-authored quick-choice actions: a closed
+`pix-actions` fence can present a short checklist of agent-executable next
+steps, and submit the selected steps as a normal user message. This is separate
+from the HTML sandbox and uses its shared generated-prompt submission path.
+
 ## Message contract
 
 - Only assistant transcript text opts into the sandbox via a **closed** fenced
@@ -107,6 +112,10 @@ across actual component destruction/remount or tab switching.
   The tool description repeats these boundaries for tool-inventory discovery.
   Unsupported capabilities require an explanation and an offered alternative,
   not a silent file substitution or a claim that the sandbox supports them.
+- The same Desktop-only capability notice recommends a `pix-actions` checklist
+  when the assistant is ending with two or more alternative next steps it would
+  carry out. Each line should be a GFM task item (`- [x] step` recommended,
+  or `- [ ] step`); steps the user must perform remain ordinary text.
 - A dedicated, read-only `pix_html_guide` tool returns the complete
   fenced-code syntax, JavaScript form-submit bridge, responsive layout
   requirements, examples and sandbox restrictions **only on request**. The
@@ -122,6 +131,31 @@ across actual component destruction/remount or tab switching.
   likely prototype requests, **not** the feature-discovery mechanism.
 
 ## Authoring
+
+### Quick-choice actions
+
+Use a closed `pix-actions` fenced block with a button label in the info string.
+Its body must contain 2–8 GFM task items, with no other content; checked items
+are recommended defaults. For example:
+
+~~~~markdown
+Choose what I should do next:
+
+```pix-actions Continue with
+- [x] Add the missing tests
+- [ ] Update the documentation
+```
+~~~~
+
+Desktop renders a valid block as checkboxes and a submit button. Only a block
+in the latest assistant message is interactive, and only when no prompt is
+running and no later user message exists; older choices are read-only. An
+incomplete or malformed block remains ordinary escaped Markdown/code.
+Submitting sends the selected steps as a normal user message, formatted as
+`<button label>:\n1. item\n3. item` (numbering follows original checklist
+positions). It uses the ordinary prompt path, preserving the composer draft;
+when a prompt is already running at submission, the generated message is
+queued. This interaction is Desktop-only.
 
 Use a fully self-contained block. For example:
 
@@ -245,7 +279,11 @@ session history; it is not a live hidden system prompt.
   with untracked startup and cleanup only on changed HTML or destruction.
 - `desktop/src/lib/html-sandbox.ts`: fence extraction, CSP document,
   encoded guest scripts, scrollbar styling, guest height reporting, bounded
-  submission parsing and ACP formatting.
+  submission parsing and ACP formatting; also segments valid `pix-actions`
+  fences for Desktop rendering.
+- `desktop/src/lib/choice-actions.ts` and
+  `desktop/src/components/ChoiceActions.svelte`: checklist parsing, eligibility
+  support, and the checkbox/submit UI for quick-choice actions.
 - `desktop/src/lib/html-sandbox-layout.ts`: validated content-size packets,
   bounded auto-fit height calculation and prototype-only agent viewport hint.
 - `desktop/src/components/HtmlSandbox.svelte`: Automatic startup and Run/Stop/Restart UI with
@@ -255,7 +293,8 @@ session history; it is not a live hidden system prompt.
   Markdown renderer.
 - `desktop/src/components/TranscriptPane.svelte`: assistant-only enablement.
 - `desktop/src/app/prompt-submit.ts` and
-  `desktop/src/app/desktop-workbench-prop-builders.ts`: scoped ACP delivery.
+  `desktop/src/app/desktop-workbench-prop-builders.ts`: scoped ACP delivery
+  for sandbox and quick-choice submissions.
 - `desktop/src/App.svelte`, `desktop/src/app/desktop-prompt-action-services.ts`,
   `desktop/src/app/prompt-payload.ts`, `desktop/src/app/prompt-queue-actions.svelte.ts`:
   measured snapshot passed into agent-facing prototype prompts.
@@ -273,6 +312,10 @@ session history; it is not a live hidden system prompt.
 ## Verification
 
 - `npm --prefix desktop test -- src/lib/html-sandbox.test.ts src/lib/html-sandbox-layout.test.ts src/app/prompt-submit-html-sandbox.test.ts`
+- `npm --prefix desktop test -- src/lib/choice-actions.test.ts`
+- Native Desktop regression: render a valid checklist, verify its checked
+  defaults and formatting, confirm only the latest settled assistant message is
+  interactive, and verify malformed/incomplete fences remain code.
 - `npm --prefix desktop run check`
 - `npm --prefix desktop run build:web`
 - `node --import tsx --test tests/html-sandbox-extension.test.ts`

@@ -343,7 +343,7 @@ export const PiToolsSuiteConfigSchema = Type.Object(
 			timeoutSeconds: Type.Optional(Type.Integer({ minimum: 30, maximum: 1800, description: "Per-participant timeout for each round; default 600 seconds." })),
 			outputDir: Type.Optional(Type.String({ minLength: 1, maxLength: 200, description: "Project-relative directory for council protocols; default .pi/brainstorms (outside the knowledge base)." })),
 			quorum: Type.Optional(Type.Union([Type.Integer({ minimum: 2, maximum: 6 }), Type.Null()], { description: "Minimum successful participants per round; default max(2, roster − 1). Missing participants are recorded as coverage gaps." })),
-		}, { description: "Multi-model brainstorm council. Requires async-subagents and its research role." })),
+		}, { description: "Multi-model brainstorm council skill settings, read by its council.mjs helper. Requires async-subagents and its research role." })),
 		terminalBell: Type.Optional(TerminalBellConfig),
 		commentChecker: Type.Optional(CommentCheckerConfig),
 		dcp: Type.Optional(DcpConfig),

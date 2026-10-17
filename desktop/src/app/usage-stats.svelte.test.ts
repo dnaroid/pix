@@ -1,0 +1,158 @@
+import { describe, expect, it, vi } from "vitest";
+import type { UsageSourceId, UsageSourceSnapshot, UsageStatsResponse } from "../../../acp/src/acp/usage-stats-contract";
+import { createUsageStatsStore } from "./usage-stats.svelte";
+
+type Call = {
+  cwd: string;
+  options: { sources?: readonly UsageSourceId[]; refresh?: boolean };
+  resolve: (response: UsageStatsResponse) => void;
+  reject: (error: unknown) => void;
+};
+
+function fakeClient() {
+  const calls: Call[] = [];
+  const client = {
+    usageStats: vi.fn((cwd: string, options: Call["options"] = {}) => new Promise<UsageStatsResponse>((resolve, reject) => {
+      calls.push({ cwd, options, resolve, reject });
+    })),
+  };
+  return { client, calls };
+}
+
+function snap(source: UsageSourceId, fetchedAtMs = 1, status: UsageSourceSnapshot["status"] = "ready"): UsageSourceSnapshot {
+  return { source, status, unit: "tokens", coverage: null, buckets: [], fetchedAtMs };
+}
+
+function setup() {
+  const first = fakeClient();
+  let client: ReturnType<typeof fakeClient>["client"] | null = first.client;
+  let workspace = "/w/a";
+  const errors: unknown[] = [];
+  const store = createUsageStatsStore({
+    client: () => client,
+    workspace: () => workspace,
+    reportError: (error) => { errors.push(error); },
+  });
+  return {
+    store, calls: first.calls, errors,
+    setClient: (next: typeof client) => { client = next; },
+    setWorkspace: (next: string) => { workspace = next; },
+  };
+}
+
+const flush = () => new Promise<void>((resolve) => { setTimeout(resolve, 0); });
+
+describe("usage stats store", () => {
+  it("does not request while closed and fetches on open", async () => {
+    const { store, calls } = setup();
+    await store.refresh();
+    store.handleChanged({ source: "pix-sessions" });
+    await flush();
+    expect(calls).toHaveLength(0);
+
+    const opening = store.open();
+    expect(store.busy).toBe(true);
+    expect(calls[0]).toMatchObject({ cwd: "/w/a", options: {} });
+    calls[0]!.resolve({ snapshots: [snap("pix-sessions")] });
+    await opening;
+    expect(store.busy).toBe(false);
+    expect([...store.snapshots.keys()]).toEqual(["pix-sessions"]);
+  });
+
+  it("passes refresh through and lets a newer request for a source win", async () => {
+    const { store, calls } = setup();
+    const older = store.open();
+    const newer = store.refresh();
+    expect(calls[1]!.options).toEqual({ refresh: true });
+    calls[1]!.resolve({ snapshots: [snap("pix-sessions", 2)] });
+    await newer;
+    calls[0]!.resolve({ snapshots: [snap("pix-sessions", 1)] });
+    await older;
+    expect(store.snapshot("pix-sessions")?.fetchedAtMs).toBe(2);
+  });
+
+  it("drops completions after a workspace switch and clears foreign data", async () => {
+    const { store, calls, setWorkspace, errors } = setup();
+    const first = store.open();
+    calls[0]!.resolve({ snapshots: [snap("pix-sessions", 1)] });
+    await first;
+
+    const stale = store.refresh();
+    setWorkspace("/w/b");
+    const synced = store.sync();
+    expect(store.snapshots.size).toBe(0);
+    expect(calls[2]!.cwd).toBe("/w/b");
+    calls[1]!.resolve({ snapshots: [snap("pix-sessions", 9)] });
+    calls[1]!.reject(new Error("late"));
+    await stale;
+    calls[2]!.resolve({ snapshots: [snap("pix-sessions", 3)] });
+    await synced;
+    expect(store.snapshot("pix-sessions")?.fetchedAtMs).toBe(3);
+    expect(errors).toEqual([]);
+  });
+
+  it("drops completions after an ACP reset and requests through the new client", async () => {
+    const { store, calls, setClient } = setup();
+    const stale = store.open();
+    const replacement = fakeClient();
+    setClient(replacement.client);
+    const synced = store.sync();
+    calls[0]!.resolve({ snapshots: [snap("pix-sessions", 1)] });
+    await stale;
+    expect(store.snapshots.size).toBe(0);
+    replacement.calls[0]!.resolve({ snapshots: [snap("pix-sessions", 2)] });
+    await synced;
+    expect(store.snapshot("pix-sessions")?.fetchedAtMs).toBe(2);
+
+    setClient(null);
+    await store.sync();
+    expect(store.snapshots.size).toBe(0);
+    expect(store.busy).toBe(false);
+  });
+
+  it("close discards in-flight results but keeps cached data for reopen", async () => {
+    const { store, calls, errors } = setup();
+    const first = store.open();
+    calls[0]!.resolve({ snapshots: [snap("pix-sessions", 1)] });
+    await first;
+    const pending = store.refresh();
+    store.close();
+    expect(store.busy).toBe(false);
+    calls[1]!.reject(new Error("aborted"));
+    await pending;
+    expect(errors).toEqual([]);
+    expect(store.snapshot("pix-sessions")?.fetchedAtMs).toBe(1);
+  });
+
+  it("coalesces change notifications into one targeted request", async () => {
+    const { store, calls } = setup();
+    const opening = store.open();
+    calls[0]!.resolve({ snapshots: [] });
+    await opening;
+
+    store.handleChanged({ source: "pix-sessions" });
+    store.handleChanged({ source: "pix-sessions" });
+    await flush();
+    expect(calls).toHaveLength(2);
+    expect(calls[1]!.options).toEqual({ sources: ["pix-sessions"] });
+  });
+
+  it("reports current request failures once and stops after dispose", async () => {
+    const { store, calls, errors } = setup();
+    const opening = store.open();
+    const failure = new Error("boom");
+    calls[0]!.reject(failure);
+    await opening;
+    expect(errors).toEqual([failure]);
+    expect(store.busy).toBe(false);
+
+    const pending = store.refresh();
+    store.dispose();
+    calls[1]!.resolve({ snapshots: [snap("pix-sessions")] });
+    await pending;
+    expect(store.snapshots.size).toBe(0);
+    await store.open();
+    await store.refresh();
+    expect(calls).toHaveLength(2);
+  });
+});

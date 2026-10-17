@@ -60,6 +60,7 @@
     onOpenSessionUsage,
     onRefreshClaudeLimits = () => {},
     subagentPathNavigation,
+    onOpenSubagentSession,
   }: {
     status?: RuntimeStatus;
     /** Provider of the currently selected session model, not the historical usage total. */
@@ -77,6 +78,7 @@
     onOpenSessionUsage: () => void;
     onRefreshClaudeLimits?: () => void;
     subagentPathNavigation?: ProjectPathNavigation;
+    onOpenSubagentSession?: (runDir: string, agentId: string) => void;
   } = $props();
 
   let root = $state<HTMLDivElement | null>(null);
@@ -676,7 +678,7 @@
   </div>
 
 {#if subagentUsageOpen && sessionUsage}
-  <SubagentUsageDialog usage={sessionUsage} loading={loadingSessionUsage} failed={sessionUsageFailed} pathNavigation={subagentPathNavigation} onRefresh={onOpenSessionUsage} onClose={() => subagentUsageOpen = false} />
+  <SubagentUsageDialog usage={sessionUsage} loading={loadingSessionUsage} failed={sessionUsageFailed} pathNavigation={subagentPathNavigation} onOpenSession={onOpenSubagentSession} onRefresh={onOpenSessionUsage} onClose={() => subagentUsageOpen = false} />
 {/if}
 
 <style>
@@ -715,7 +717,14 @@
     grid-template-columns: 32px 5ch 10px;
   }
 
+  /* Explicit tracks instead of `subgrid`: WebKit mis-measures subgrid
+     max-content contributions, clipping later windows until a relayout. */
   .quota-values {
-    grid-template-columns: subgrid;
+    grid-template-columns: 56px 5ch;
+    column-gap: 6px;
+  }
+
+  .quota-short-track .quota-values {
+    grid-template-columns: 32px 5ch;
   }
 </style>

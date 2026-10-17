@@ -63,6 +63,7 @@ mod release_smoke;
 mod search_index_status;
 mod sidebar_registry_resource_hash;
 mod startup_theme;
+mod subagent_retention;
 mod window_geometry;
 mod window_restore;
 mod window_tiling;
@@ -118,8 +119,6 @@ const PROJECT_PI_CANONICAL_DIRECTORIES: &[&str] = &[
     "skills",
     "subagents",
     "task-attachments",
-    // Not read/imported: preserve old user data rather than treating it as junk.
-    "tasks.d",
 ];
 const PROJECT_PI_CANONICAL_FILES: &[&str] = &[
     "AGENTS.md",
@@ -141,8 +140,6 @@ const PROJECT_PI_CANONICAL_FILES: &[&str] = &[
     "tasks.sqlite-wal",
     "tasks.sqlite-shm",
     "tasks.sqlite-journal",
-    // Unsupported legacy input: preserve on disk without ever loading it.
-    "tasks.jsonc",
     "todo-plan.json",
     "workspace.jsonc",
 ];
@@ -712,6 +709,14 @@ struct PackageTerminalSnapshot {
     signal: Option<String>,
     output_base64: String,
     started_at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PackageTerminalActivity {
+    id: String,
+    /// True when a foreground job other than the shell itself owns the PTY.
+    busy: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1798,6 +1803,32 @@ async fn package_terminal_stop_workspace(
     run_blocking(move || {
         let root = canonical_workspace(Path::new(&workspace))?;
         stop_package_terminals_for_workspace(&app, &window_label, &root, true)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn package_terminal_activity(
+    app: AppHandle,
+    window_label: String,
+    workspace: String,
+) -> Result<Vec<PackageTerminalActivity>, String> {
+    run_blocking(move || {
+        let root = canonical_workspace(Path::new(&workspace))?;
+        package_terminal_activity_for(&app, &window_label, &root)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn package_terminal_assign_launch(
+    app: AppHandle,
+    window_label: String,
+    terminal_id: String,
+    launch_command_id: Option<String>,
+) -> Result<(), String> {
+    run_blocking(move || {
+        assign_package_terminal_launch(&app, &window_label, &terminal_id, launch_command_id)
     })
     .await
 }
@@ -3061,21 +3092,39 @@ fn git_command_error(label: &str, output: &std::process::Output) -> String {
 
 fn git_status_from(workspace: &Path) -> Result<GitSnapshot, String> {
     let root = git_repository_root(workspace)?;
-    let output = git_output(
-        &root,
-        &[
-            "status",
-            "--porcelain=v2",
-            "-z",
-            "--branch",
-            "--untracked-files=all",
-        ],
-    )?;
-    let mut snapshot = parse_git_status_porcelain(&output.stdout)?;
-    populate_git_line_stats(&root, &mut snapshot);
-    snapshot.branches = git_local_branches(&root, &snapshot.branch)?;
-    snapshot.remotes = git_remotes(&root)?;
-    Ok(snapshot)
+    // These read-only Git invocations are independent; running them
+    // concurrently roughly halves panel-open latency on large worktrees.
+    thread::scope(|scope| {
+        let root = root.as_path();
+        let staged = scope.spawn(move || git_diff_numstat(root, true));
+        let unstaged = scope.spawn(move || git_diff_numstat(root, false));
+        let remotes = scope.spawn(move || git_remotes(root));
+        let status = git_output(
+            root,
+            &[
+                "status",
+                "--porcelain=v2",
+                "-z",
+                "--branch",
+                "--untracked-files=all",
+            ],
+        )
+        .and_then(|output| parse_git_status_porcelain(&output.stdout))
+        .and_then(|mut snapshot| {
+            snapshot.branches = git_local_branches(root, &snapshot.branch)?;
+            Ok(snapshot)
+        });
+        // Line counts are presentation metadata: failures degrade to omitted counts.
+        let staged = staged.join().ok().and_then(Result::ok).unwrap_or_default();
+        let unstaged = unstaged.join().ok().and_then(Result::ok).unwrap_or_default();
+        let remotes = remotes
+            .join()
+            .map_err(|_| "git remote listing panicked".to_owned())?;
+        let mut snapshot = status?;
+        populate_git_line_stats(root, &mut snapshot, &staged, &unstaged);
+        snapshot.remotes = remotes?;
+        Ok(snapshot)
+    })
 }
 
 fn git_current_branch_from(workspace: &Path) -> Result<Option<String>, String> {
@@ -3244,12 +3293,15 @@ fn git_change_from_fields(
     })
 }
 
-fn populate_git_line_stats(root: &Path, snapshot: &mut GitSnapshot) {
+fn populate_git_line_stats(
+    root: &Path,
+    snapshot: &mut GitSnapshot,
+    staged: &HashMap<String, GitLineStats>,
+    unstaged: &HashMap<String, GitLineStats>,
+) {
     // Line counts are presentation metadata. A race with the working tree or a
     // path Git cannot numstat must never make the whole Source Control panel
-    // unavailable, so failures here degrade to omitted counts.
-    let staged = git_diff_numstat(root, true).unwrap_or_default();
-    let unstaged = git_diff_numstat(root, false).unwrap_or_default();
+    // unavailable, so callers degrade numstat failures to empty maps.
     let mut untracked_budget = MAX_GIT_UNTRACKED_STAT_TOTAL_BYTES;
 
     for change in &mut snapshot.changes {
@@ -6724,6 +6776,96 @@ fn wait_for_exit(exited: &ExitSignal, timeout: Duration) -> Result<bool, String>
     Ok(*done || !timeout.timed_out())
 }
 
+fn package_terminal_activity_for(
+    app: &AppHandle,
+    window_label: &str,
+    workspace: &Path,
+) -> Result<Vec<PackageTerminalActivity>, String> {
+    let candidates = {
+        let state = app.state::<PackageTerminalState>();
+        let sessions = state
+            .sessions
+            .lock()
+            .map_err(|_| "package terminal state is poisoned".to_owned())?;
+        sessions
+            .iter()
+            .filter(|(_, session)| {
+                session.window_label == window_label && session.workspace == workspace
+            })
+            .filter_map(|(id, session)| {
+                let running = session.running.as_ref()?;
+                Some((
+                    id.clone(),
+                    session.kind,
+                    running.master.clone(),
+                    running.process_id,
+                ))
+            })
+            .collect::<Vec<_>>()
+    };
+    // Query PTY foreground groups outside the session-map lock.
+    Ok(candidates
+        .into_iter()
+        .map(|(id, kind, master, process_id)| {
+            let busy = match kind {
+                PackageTerminalKind::Script => true,
+                PackageTerminalKind::Shell => shell_terminal_busy(&master, process_id),
+            };
+            PackageTerminalActivity { id, busy }
+        })
+        .collect())
+}
+
+#[cfg(unix)]
+fn shell_terminal_busy(
+    master: &Arc<Mutex<Box<dyn MasterPty + Send>>>,
+    process_id: Option<u32>,
+) -> bool {
+    let Some(shell_pid) = process_id else {
+        return true;
+    };
+    let Ok(master) = master.try_lock() else {
+        return true;
+    };
+    match master.process_group_leader() {
+        Some(foreground) => foreground != shell_pid as i32,
+        None => true,
+    }
+}
+
+#[cfg(not(unix))]
+fn shell_terminal_busy(
+    _master: &Arc<Mutex<Box<dyn MasterPty + Send>>>,
+    _process_id: Option<u32>,
+) -> bool {
+    // Foreground job detection is unavailable; never reuse a shell blindly.
+    true
+}
+
+fn assign_package_terminal_launch(
+    app: &AppHandle,
+    window_label: &str,
+    terminal_id: &str,
+    launch_command_id: Option<String>,
+) -> Result<(), String> {
+    let state = app.state::<PackageTerminalState>();
+    let mut sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "package terminal state is poisoned".to_owned())?;
+    let session = sessions
+        .get_mut(terminal_id)
+        .ok_or_else(|| "package terminal no longer exists".to_owned())?;
+    if session.window_label != window_label {
+        return Err("package terminal belongs to another window".to_owned());
+    }
+    if session.kind != PackageTerminalKind::Shell {
+        return Err("only shell terminals can run launch commands".to_owned());
+    }
+    session.launch_command_id = launch_command_id;
+    Ok(())
+}
+
 fn forget_package_terminal(
     app: &AppHandle,
     window_label: &str,
@@ -7525,6 +7667,19 @@ fn clean_project_pi_from(workspace: &Path) -> Result<u64, String> {
 }
 
 fn auto_clean_project_pi_from(workspace: &Path) -> Result<u64, String> {
+    auto_clean_project_pi_with_agent_dir(
+        workspace,
+        native_repository_semantic_config::pi_agent_dir().as_deref(),
+    )
+}
+
+/// Background TTL cleanup. Parent-scoped `.pi/subagents/<parentSessionId>/`
+/// directories follow [`subagent_retention`]: kept while the parent session
+/// exists, reclaimed after an idle grace once it is gone (decision 0072).
+fn auto_clean_project_pi_with_agent_dir(
+    workspace: &Path,
+    agent_dir: Option<&Path>,
+) -> Result<u64, String> {
     let root = canonical_workspace(workspace)?;
     if initialized_project_pi(&root)?.is_none() {
         return Ok(0);
@@ -7545,17 +7700,30 @@ fn auto_clean_project_pi_from(workspace: &Path) -> Result<u64, String> {
     }
     let project_directory = canonical_project_directory(&root, &project_directory)?;
     let candidates = project_pi_cleanup_targets(&project_directory)?;
+    let subagents_directory = project_directory.join("subagents");
+    let mut parent_sessions =
+        subagent_retention::ParentSessionIndex::new(agent_dir, &[workspace, root.as_path()]);
     let now = SystemTime::now();
     let mut removed_bytes = 0u64;
     for candidate in candidates {
-        if !project_pi_path_is_older_than(&candidate, now, PROJECT_PI_AUTO_CLEAN_TTL)? {
+        let ttl = if candidate.parent() == Some(subagents_directory.as_path()) {
+            match subagent_retention::classify_subagent_dir(&candidate, &mut parent_sessions) {
+                subagent_retention::SubagentDirRetention::ParentPresent => continue,
+                subagent_retention::SubagentDirRetention::ParentMissing => {
+                    subagent_retention::SUBAGENT_ORPHAN_GRACE
+                }
+                subagent_retention::SubagentDirRetention::Legacy => PROJECT_PI_AUTO_CLEAN_TTL,
+            }
+        } else {
+            PROJECT_PI_AUTO_CLEAN_TTL
+        };
+        if !project_pi_path_is_older_than(&candidate, now, ttl)? {
             continue;
         }
         let candidate_bytes = project_pi_path_logical_size(&candidate)?;
         // Re-scan immediately before deletion so activity that started while size
         // accounting was running keeps the candidate alive.
-        if !project_pi_path_is_older_than(&candidate, SystemTime::now(), PROJECT_PI_AUTO_CLEAN_TTL)?
-        {
+        if !project_pi_path_is_older_than(&candidate, SystemTime::now(), ttl)? {
             continue;
         }
         remove_project_pi_path_nofollow(&candidate)?;
@@ -8731,6 +8899,8 @@ pub fn run() {
             package_terminal_stop,
             package_terminal_forget,
             package_terminal_stop_workspace,
+            package_terminal_activity,
+            package_terminal_assign_launch,
             local_file_exists,
             read_local_file,
             resolve_project_media,
@@ -11531,6 +11701,14 @@ mod tests {
             fs::write(workspace.join(".pi").join(canonical_file), b"{}\n")
                 .expect("write canonical project file");
         }
+        // Unsupported legacy task storage is not canonical and is cleaned up.
+        let legacy_tasks_bytes = b"{\"version\":1,\"tasks\":[]}\n";
+        let legacy_tasks = workspace.join(".pi/tasks.jsonc");
+        fs::write(&legacy_tasks, legacy_tasks_bytes).expect("write legacy tasks.jsonc");
+        fs::create_dir_all(workspace.join(".pi/tasks.d")).expect("create legacy tasks.d");
+        let legacy_task_file_bytes = b"{\"id\":\"legacy\"}\n";
+        fs::write(workspace.join(".pi/tasks.d/legacy.json"), legacy_task_file_bytes)
+            .expect("write legacy tasks.d entry");
         let stray_receipt_bytes = b"{\"temporary\":true}\n";
         let stray_receipt = workspace.join(".pi/desktop-skill-reads-receipt.json");
         fs::write(&stray_receipt, stray_receipt_bytes).expect("write non-canonical receipt");
@@ -11558,6 +11736,8 @@ mod tests {
             + b"foreign-data".len() as u64
             + 11
             + stray_receipt_bytes.len() as u64
+            + legacy_tasks_bytes.len() as u64
+            + legacy_task_file_bytes.len() as u64
             + b"stale-temp".len() as u64;
         assert_eq!(storage.cleanup_bytes, expected_cleanup_bytes);
         assert!(storage.cleanup_available);
@@ -11604,6 +11784,8 @@ mod tests {
             assert!(workspace.join(".pi").join(canonical_file).is_file());
         }
         assert!(!stray_receipt.exists());
+        assert!(!legacy_tasks.exists());
+        assert!(!workspace.join(".pi/tasks.d").exists());
         assert!(young_temp.is_file());
         assert!(!workspace.join(".pi/.DS_Store").exists());
         assert!(!stale_temp.exists());
@@ -11751,6 +11933,96 @@ mod tests {
         );
         assert!(workspace.join(".pi/artifacts").is_dir());
         assert!(workspace.join(".pi/subagents").is_dir());
+
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn project_pi_auto_cleanup_keeps_subagent_sessions_while_parent_exists() {
+        fn age_tree(path: &Path, modified: SystemTime) {
+            let metadata = fs::symlink_metadata(path).expect("inspect path to age");
+            if metadata.is_dir() && !metadata.file_type().is_symlink() {
+                for child in fs::read_dir(path).expect("read path to age") {
+                    age_tree(&child.expect("read child to age").path(), modified);
+                }
+            }
+            fs::File::open(path)
+                .expect("open path to age")
+                .set_times(fs::FileTimes::new().set_modified(modified))
+                .expect("set path modification time");
+        }
+        fn write_child(dir: &Path, parent_session: &Path) {
+            fs::create_dir_all(dir).expect("create parent-scoped dir");
+            let meta = serde_json::json!({
+                "type": "custom",
+                "customType": "subagent_meta",
+                "data": { "version": 1, "agentId": "a1", "parentSession": parent_session },
+            });
+            fs::write(
+                dir.join("child.jsonl"),
+                format!("{{\"type\":\"session\",\"id\":\"c\"}}\n{meta}\n"),
+            )
+            .expect("write child session");
+        }
+
+        let workspace = temporary_workspace("project-pi-subagent-retention");
+        initialize_project_pi_from(&workspace).expect("initialize project .pi");
+        let agent_dir = workspace.join("agent-home");
+        let parents = agent_dir.join("sessions/custom");
+        fs::create_dir_all(&parents).expect("create parent session store");
+        let live_parent = parents.join("2026-10-17T00-00-00-000Z_live.jsonl");
+        fs::write(&live_parent, b"{}\n").expect("write live parent");
+        let subagents = workspace.join(".pi/subagents");
+        let live = subagents.join("0199f0c2-0000-7000-8000-000000000001");
+        let stale_orphan = subagents.join("0199f0c2-0000-7000-8000-000000000002");
+        let fresh_orphan = subagents.join("0199f0c2-0000-7000-8000-000000000003");
+        let legacy = subagents.join("2026-10-15T00-00-00-run");
+        write_child(&live, &live_parent);
+        write_child(&stale_orphan, &parents.join("gone.jsonl"));
+        write_child(&fresh_orphan, &parents.join("gone.jsonl"));
+        fs::create_dir_all(&legacy).expect("create legacy run");
+        fs::write(legacy.join("prompt.md"), b"legacy").expect("write legacy run");
+
+        let past_ttl = SystemTime::now()
+            .checked_sub(PROJECT_PI_AUTO_CLEAN_TTL + Duration::from_secs(60))
+            .expect("old timestamp");
+        let past_grace = SystemTime::now()
+            .checked_sub(subagent_retention::SUBAGENT_ORPHAN_GRACE + Duration::from_secs(60))
+            .expect("orphan timestamp");
+        age_tree(&live, past_ttl);
+        age_tree(&stale_orphan, past_grace);
+
+        auto_clean_project_pi_with_agent_dir(&workspace, Some(&agent_dir))
+            .expect("auto clean project .pi");
+        assert!(
+            live.join("child.jsonl").is_file(),
+            "live parent keeps old children"
+        );
+        assert!(
+            !stale_orphan.exists(),
+            "idle orphan is reclaimed after the grace"
+        );
+        assert!(
+            fresh_orphan.join("child.jsonl").is_file(),
+            "recent orphan is kept"
+        );
+        assert!(
+            legacy.join("prompt.md").is_file(),
+            "legacy run keeps the 72h TTL"
+        );
+
+        // Once the parent is gone the old child is reclaimed too.
+        fs::remove_file(&live_parent).expect("delete parent session");
+        auto_clean_project_pi_with_agent_dir(&workspace, Some(&agent_dir))
+            .expect("auto clean project .pi");
+        assert!(!live.exists());
+
+        // Manual Clean ignores retention and empties the directory.
+        clean_project_pi_from(&workspace).expect("manual cleanup");
+        assert!(!fresh_orphan.exists());
+        assert!(!legacy.exists());
+        assert!(subagents.is_dir());
 
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }

@@ -182,7 +182,7 @@
             onclick={() => iconMode = "initials"}
           >
             <span
-              class="project-logo-initials grid h-5 w-5 shrink-0 place-items-center rounded-sm border border-border font-mono text-[10px] font-semibold"
+              class="project-logo-initials grid h-5 w-5 shrink-0 place-items-center rounded-sm border border-border font-mono text-xs font-semibold"
               style:--project-logo-hue={projectFolderHue(workspace)}
               style:--project-logo-color={previewColor}
               aria-hidden="true"
@@ -239,7 +239,7 @@
           <label class="block">
             <span class="sr-only">Optional logo prompt</span>
             <textarea
-              class="block min-h-14 w-full resize-y rounded-md border border-input bg-background px-2 py-1.5 text-xs leading-4 text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/30"
+              class="block min-h-14 w-full resize-none rounded-md border border-input bg-background px-2 py-1.5 text-xs leading-4 text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/30"
               rows="2"
               maxlength={MAX_ICON_PROMPT_CHARS}
               placeholder="Optional prompt, e.g. “minimal fox head, teal on dark”"

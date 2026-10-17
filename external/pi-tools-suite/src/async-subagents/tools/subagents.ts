@@ -14,6 +14,7 @@ import { registerSpawnTool } from "./spawn.js";
 import { registerStatusTool } from "./status.js";
 import { registerStopTool } from "./stop.js";
 import { registerWaitTool } from "./wait.js";
+import { registerSendTool } from "./send.js";
 import type { CompletionDelivery } from "../completion-delivery.js";
 import { suiteDiagnostics } from "../../lib/suite-diagnostics.js";
 
@@ -42,6 +43,7 @@ const ACTION_TO_INTERNAL_TOOL: Record<string, string> = {
 	result: "async_subagents_result",
 	stop: "async_subagents_stop",
 	cleanup: "async_subagents_cleanup",
+	send: "async_subagents_send",
 };
 
 class ToolCollector {
@@ -67,6 +69,10 @@ function validateActionParams(action: string, params: Record<string, unknown>): 
 	if (action === "result") {
 		if (!hasString(params.agentId)) return "result requires agentId.";
 	}
+	if (action === "send") {
+		if (!hasString(params.agentId)) return "send requires agentId.";
+		if (!hasString(params.message)) return "send requires a non-empty message.";
+	}
 	return undefined;
 }
 
@@ -86,16 +92,17 @@ export function registerSubagentsTool(
 	registerWaitTool(collector as any, liveAgents, completionDelivery);
 	registerResultTool(collector as any);
 	registerCleanupTool(collector as any);
+	registerSendTool(collector as any, liveAgents, handleAgentCompletion, onLiveAgentsChange, onAgentRpcEvent);
 
 	pi.registerTool({
 		...toolDescriptions.subagents,
 		...INLINE_RENDERING,
 		parameters: Type.Object({
-			action: Type.String({ description: "Operation to perform: spawn, status, wait, result, stop, or cleanup" }),
+			action: Type.String({ description: "Operation to perform: spawn, status, wait, result, send, stop, or cleanup" }),
 
 			// spawn options
 			tasks: Type.Optional(Type.Array(AgentTaskSchema, { description: "spawn: agent tasks to launch" })),
-			runDir: Type.Optional(Type.String({ description: "spawn/status/wait/result/stop: run directory path. spawn creates one when omitted; status/wait/stop default to the latest project run; result can resolve runDir by agentId through .pi/subagents/registry.json." })),
+			runDir: Type.Optional(Type.String({ description: "spawn/status/wait/result/send/stop: run directory path. spawn creates one when omitted; status/wait/stop default to the latest project run; result/send can resolve runDir by agentId through .pi/subagents/registry.json." })),
 			slug: Type.Optional(Type.String({ description: "spawn: slug for a newly created run directory" })),
 			thinking: Type.Optional(Type.String({ description: "spawn: thinking level for sub-agents (off, minimal, low, medium, high, xhigh, max)" })),
 			extraArgs: Type.Optional(Type.Array(Type.String(), { description: "spawn: additional pi CLI args for sub-agents" })),
@@ -104,7 +111,9 @@ export function registerSubagentsTool(
 
 			// status/wait/stop/result options
 			agentIds: Type.Optional(Type.Array(Type.String(), { description: "status/wait/stop: filter to these agent IDs" })),
-			agentId: Type.Optional(Type.String({ description: "result: agent ID to read" })),
+			agentId: Type.Optional(Type.String({ description: "result/send: agent ID to read or message" })),
+			message: Type.Optional(Type.String({ description: "send: message for the sub-agent (live follow-up when running in this session, otherwise resumes its persisted session)" })),
+			mode: Type.Optional(Type.String({ description: "send: running agents only — followUp (default, after the current turn) or steer (interrupt the current turn)" })),
 			timeout: Type.Optional(Type.Number({ description: "wait: max wait seconds (default 300)", default: 300 })),
 			interval: Type.Optional(Type.Number({ description: "wait: poll interval seconds (default 3)", default: 3 })),
 			failFast: Type.Optional(Type.Boolean({ description: "wait: return immediately on first failure (default false)", default: false })),
@@ -123,7 +132,7 @@ export function registerSubagentsTool(
 			const internalName = action ? ACTION_TO_INTERNAL_TOOL[action] : undefined;
 			if (!action || !internalName) {
 				return {
-					content: [{ type: "text", text: "Invalid subagents action. Use one of: spawn, status, wait, result, stop, cleanup." }],
+					content: [{ type: "text", text: "Invalid subagents action. Use one of: spawn, status, wait, result, send, stop, cleanup." }],
 					isError: true,
 				};
 			}

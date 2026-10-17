@@ -12,7 +12,7 @@ Active implemented contract.
 
 ## Goal
 
-Show live execution Plan, Subagents, and brainstorm activity for the active session in session-scoped IDE chrome, with a runtime-backed Plan clear action, without conflating runtime plans with project tasks. Plan and Subagents are presented through compact status-bar popups, not a persistent Session side pane.
+Show live execution Plan and Subagents activity (brainstorm council participants are ordinary sub-agents) for the active session in session-scoped IDE chrome, with a runtime-backed Plan clear action, without conflating runtime plans with project tasks. Plan and Subagents are presented through compact status-bar popups, not a persistent Session side pane.
 
 ## Scope
 
@@ -28,9 +28,9 @@ Show live execution Plan, Subagents, and brainstorm activity for the active sess
 ## Non-goals
 
 - Creating, editing, or reordering todos from Desktop, or directly mutating todo state outside the runtime command path.
-- Starting, stopping, opening, waiting for, or reading Subagent results from Desktop.
+- Starting, stopping, waiting for, or reading Subagent results from Desktop. (Opening a Subagent's persisted session as a read-only tab is supported; see Sub-agent session viewers.)
 - Moving or changing project tasks stored in `.pi/tasks.sqlite`.
-- Showing historical completed, failed, or stopped Subagents after they leave the live widget.
+- A separate finished-Subagent list in the HUD; finished agents are reachable from the Subagent statistics dialog and `subagents` tool cards.
 - Persisting a second Desktop-owned copy of extension state.
 
 ## Transport contract
@@ -53,7 +53,16 @@ Show live execution Plan, Subagents, and brainstorm activity for the active sess
 - With no active session, including while the selected conversation is a UI-only draft, no session activity HUD is rendered. With a real but activity-empty session, no inert Session status control is rendered.
 - When at least one pending, in-progress, or deferred todo exists, all non-deleted todos are shown in stable hierarchy order, including completed items.
 - The Plan popup offers a compact, accessible Clear session plan action when its active session is ready and idle and has visible todos. It invokes private ACP `pix/session/clear_todos`, which dispatches the existing `/todos-clear` extension handler directly without running a user prompt, adding `/todos-clear` to chat, or creating a user transcript entry. It preserves the composer draft, reports request failures, disables while unavailable or in flight (including after popup remounts or switching away and back), and never mutates the displayed snapshot locally. The ACP session lock is claimed before asynchronous work so duplicate clears cannot race; the existing extension handler remains authoritative for state publishing and persistence. Success depends on that handler, not an unrelated session-list metadata write.
-- Subagents matches the TUI live-panel rule: only planned, running, or retrying agents are visible; terminal agents disappear with the next snapshot, and the section does not invent historical state.
+- Subagents matches the TUI live-panel rule: only planned, running, or retrying agents are visible as live indicators; terminal agents leave the live list with the next snapshot, and the section does not invent historical state.
+
+### Sub-agent session viewers
+
+- Entry points: an "Open session" action in each live agent popup, each run row of the Subagent statistics dialog, and "Open <agentId> session" buttons in an expanded completed `subagents` tool card (targets read only from structured result details `{runDir, agents[]}` / `{runDir, agentId}`, never from result text; at most 12 per card). The async-subagents completion custom message has no Desktop transcript rendering and therefore no entry point. They call private ACP `pix/subagents/open_session { sessionId, runDir, agentId }`, which validates the run/agent path (realpath containment, no symlinked agent dir, session file inside the agent `sessions/` dir), registers or reuses a session-map record carrying `subagent: { runDir, agentId, parentSessionId }`, and returns the viewer session id. Desktop refreshes the catalog and selects it.
+- Viewers never start a Pi process and never open the sub-agent JSONL through a Pi runtime (that could append to a file owned by the parent). `session/load`/`session/resume` return only `_meta["pix.subagent"]` with `{ terminal, revision }`; history comes from the persisted file. Desktop never marks a viewer runtime-ready, so queue/runtime-status/usage requests are not sent; the composer is replaced by a read-only banner. `open_session`/`session_state` may also return display-only `model { provider, modelId, name, thinking? }` and `context { tokens, contextWindow, percent }`, read incrementally from the JSONL (last `model_change`/`thinking_level_change`, last valid assistant usage; compaction resets tokens to unknown) with the context window from ACP's local model catalogue. The status bar shows them instead of skeletons, non-configurable. The banner's run name renders the UTC run-directory stamp in local time, and its Running/Finished state is cached per viewer so re-renders never flash "Checking…". All write paths reject viewer records.
+- The banner shows agent, run, and Running/Finished state, and polls `pix/subagents/session_state` every 2s while non-terminal; when `revision` (file size:mtime) changes it replaces the transcript from persisted history. Polling stops on tab switch, terminal state, or error.
+- "Continue in new session" calls `pix/subagents/fork_session`: ACP copies a snapshot truncated at the last complete line, forks it into the default session directory as an ordinary session whose header points to the original, and Desktop selects it. "Open parent" returns to the parent session when known.
+- Closing a viewer tab only hides it; deleting forgets the map record and never touches the sub-agent files.
+- Viewer sessions are hidden by default from both saved-session lists (titlebar session selector and the session-start "Open a conversation" list); each shows a "Show sub-agent sessions" checkbox (only when such viewers exist, not persisted) to reveal them. Indexed search on the start screen never returns them. When shown, a viewer nests in the saved-session tree under the conversation that opened it (`pix.subagent.parentSessionId`; a missing parent leaves it at the root) and its row carries a Bot icon plus a "Sub-agent · <agentId>" badge. ACP excludes them from project session search/indexing: they are ephemeral, owned by the parent, and their results already appear in the parent transcript.
 - Multiple live runs remain distinct even when they reuse an agent id. Run and task ordering follows the source snapshot.
 - Status-HUD click popups show agent role, identity, status, elapsed time, task/scope, model, latest activity, and retry count. Agent id and run path have accessible labels. Run date/time labels are not displayed; run grouping and accessible run identity remain intact. Model footers show the shared provider icon beside recognized providers.
 - Plan and individual-agent popups grow with their content up to the application

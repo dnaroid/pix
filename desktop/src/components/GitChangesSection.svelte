@@ -12,6 +12,26 @@
     onToggle: (path?: string) => void; onDiscard: (path: string) => void;
   } = $props();
   const visible = $derived(changes.filter((change) => change.path.toLowerCase().includes(query.trim().toLowerCase())));
+  // Large worktrees render hundreds of rows; mount them in pages instead.
+  const PAGE_SIZE = 100;
+  let limit = $state(PAGE_SIZE);
+  let limitQuery: string | undefined;
+  $effect(() => {
+    if (query !== limitQuery) {
+      limitQuery = query;
+      limit = PAGE_SIZE;
+    }
+  });
+  const shown = $derived(visible.length > limit ? visible.slice(0, limit) : visible);
+  const hidden = $derived(visible.length - shown.length);
+  // The observer is recreated per sentinel mount and disconnected on teardown.
+  function loadMoreOnApproach(node: HTMLElement): () => void {
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) limit += PAGE_SIZE;
+    }, { rootMargin: "0px 0px 400px 0px" });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }
   const isStaged = $derived(scope === "staged");
   let expanded = $state(true);
   const formatter = new Intl.NumberFormat("en-US");
@@ -38,7 +58,7 @@
     {/if}
   </header>
   {#if expanded}
-  {#each visible as change (change.path)}
+  {#each shown as change (change.path)}
     {@const stats = gitChangeLineStats(change, scope)}
     {@const separator = change.path.lastIndexOf("/")}
     <div class="group flex h-8 min-w-0 items-center gap-1 px-2 hover:bg-panel-hover focus-within:bg-panel-hover">
@@ -62,5 +82,10 @@
   {:else}
     <p class="px-3 py-2 text-xs text-muted-foreground">{query && changes.length ? "No matching files." : isStaged ? "Choose the files to include in your commit." : "No unstaged changes."}</p>
   {/each}
+  {#if hidden > 0}
+    <!-- Scroll sentinel: mounts the next page before it scrolls into view. -->
+    <!-- Remount per page so a sentinel still in view after growth fires again. -->
+    {#key limit}<div {@attach loadMoreOnApproach} class="h-8" aria-hidden="true"></div>{/key}
+  {/if}
   {/if}
 </section>

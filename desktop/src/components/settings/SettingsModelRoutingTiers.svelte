@@ -19,10 +19,13 @@
   let {
     value,
     models,
+    managedIds = [],
     onChange,
   }: {
     value: readonly ModelRoutingTierDraft[];
     models: readonly ModelThinkingModel[];
+    /** Tiers whose model/thinking are owned by the model setup wizard (shown read-only). */
+    managedIds?: readonly string[];
     onChange: (value: ModelRoutingTierDraft[]) => void;
   } = $props();
 
@@ -75,6 +78,9 @@
           onclick={() => remove(index)}
         ><X class="h-3.5 w-3.5" aria-hidden="true" /></button>
       </div>
+      {#if managedIds.includes(tier.id)}
+        <p class="mt-1.5 truncate px-1 text-xs text-muted-foreground" title={tier.modelRef}>{models.find((model) => model.ref === tier.modelRef)?.name ?? tier.modelRef}{tier.thinking ? ` · ${tier.thinking}` : ""} · set in the model setup wizard</p>
+      {:else}
       <div class="mt-1.5 grid grid-cols-[minmax(0,1fr)_120px] gap-1.5">
         <SettingsModelSelect
           value={tier.modelRef}
@@ -89,6 +95,7 @@
           onChange={(next) => update(index, "thinking", next)}
         />
       </div>
+      {/if}
     </div>
   {/each}
 

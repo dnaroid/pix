@@ -1,4 +1,5 @@
 import type { ListSessionsResponse, SessionInfo } from "@agentclientprotocol/sdk";
+import { subagentSessionLink } from "./session-subagent-link";
 
 const PIX_TABS_META_KEY = "pix.tabs";
 const PIX_IS_FORK_META_KEY = "pix.isFork";
@@ -82,7 +83,9 @@ export function buildSessionTree(sessions: readonly SessionInfo[]): SessionTreeR
 
 function sessionParentSessionId(session: SessionInfo): string | undefined {
   const value = session._meta?.[PIX_PARENT_SESSION_ID_META_KEY];
-  return typeof value === "string" && value.length > 0 ? value : undefined;
+  if (typeof value === "string" && value.length > 0) return value;
+  // Sub-agent viewers nest under the conversation that spawned them.
+  return subagentSessionLink(session._meta)?.parentSessionId;
 }
 
 /** Read the ordered TUI tab ids from Pix's namespaced ACP response metadata. */

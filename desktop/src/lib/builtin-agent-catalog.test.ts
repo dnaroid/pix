@@ -5,7 +5,7 @@ describe("built-in agent catalog", () => {
   it("reads primary models but excludes automatic/frontier profiles", () => {
     for (const agent of BUILTIN_AGENT_CATALOG) {
       if (agent.name === "oracle") expect(agent.defaultModel).toBeUndefined();
-      else expect(agent.defaultModel).toMatch(/^[^\s/]+\/[^\s]+$/u);
+      else if (agent.defaultModel !== undefined) expect(agent.defaultModel).toMatch(/^[^\s/]+\/[^\s]+$/u);
     }
     expect(builtinAgentDefaultModel('---\nmodels: ["provider/model:high", fallback/model]\n---\nBody')).toBe("provider/model:high");
     expect(builtinAgentDefaultModel("---\nmodels: [openrouter/vendor/model:high, fallback/model]\n---\nBody")).toBe("openrouter/vendor/model:high");

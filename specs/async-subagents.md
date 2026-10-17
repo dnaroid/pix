@@ -117,9 +117,9 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 3. **Pi args**: `--mode rpc`, `--session-dir <dir>` or `--no-session`, `--no-extensions`, `--extension <model-tools>`, the allowlisted provider dependencies of the final model (`--extension <antigravity-auth>` or the suite-local `claude-code-provider/index.ts` entrypoint), `--no-skills`, `--model <model>`, `--tools <list>` (or `--no-tools`), `--thinking <level>`, filtered extra user args, `--models <effective-model>`, then `--extension <tool-guard>`. The final model scope prevents persisted `enabledModels` or an extra `--models` value from resolving unrelated providers in the isolated child. Skill flags from `extraArgs` are stripped, so child agents never discover or receive skills. Before anything else, `-m value`, `--model=value` and `--provider=value` in extra args are normalized to `--model value` / `--provider value` (the installed Pi CLI documents the long, space-separated forms), so owned-launch selection, provider dependencies and the child all see the same final model. `[confirmed by code, spawn.ts, provider-extensions.ts; confirmed by tests, core.test.ts, provider-extensions.test.ts]`
 4. **Stdin RPC**: sends two JSONL messages — `{type:"get_state",id:"sub_get_state"}` then `{type:"prompt",id:"sub_prompt",message:<prompt>[,images:<base64[]>]}`. Stdin stays open; EOF = pi shutdown. `[confirmed by code]`
 5. **Extensions** loaded into children: `model-tools` (model-specific tool args) and `tool-guard` (strips parent-only tools: `question`, `subagents`, all `async_subagents_*`). Provider dependencies come from an explicit allowlist in `core/provider-extensions.ts`, recomputed on every attempt (retry and provider-changing fallback) from that attempt's final model:
-   - `todo/subagent.ts` is also loaded for **every role**, including project-local roles, and automatically for future roles. It exposes regular `todo` actions with a private child-session/attempt list. This is a planning exception to work-tool restrictions: restricted/empty role tool selections and extra CLI tool flags retain `todo` while preserving restrictions on work tools. Children neither read nor write the parent's project `.pi/todo-plan.json`. Retries/new attempts start with a new list; optional child session history stores local snapshots, branch navigation replays only that branch, and compaction retains unfinished tasks with a fresh snapshot. For parent progress reporting, todo state is sent as a private telemetry-only RPC `setWidget` notification; no interactive widget or child UI is installed. The parent counts non-deleted tasks (including deferred) and completed tasks, persists a tiny per-child/attempt `todo-progress.json` snapshot independently of bounded logs, and exposes optional progress to Desktop. In the Desktop status bar, each visible compact subagent icon has a 2px progress track above it, positioned 2px from the icon's top with 70% opacity, with completed/total fill (including an empty track at 0/n). Absent, empty, or completed plans have no track. Existing popup progress rings/counts and overflow popup behavior are unchanged; no parent-plan aggregate is added. This progress does not update/share the parent's todo state, and completing a plan does not mean the agent has finished. The lean entrypoint does not load persistence commands, interactive UI widgets, thinking overrides, auto-follow-up turns or the parent's knowledge-audit reminder. Recursive delegation and interactive user questions remain denied. Children use todos for non-trivial multi-step work and report unfinished work/blockers to the parent; trivial work needs no plan. See [decision 0059](../docs/decisions/0059-subagent-private-todos.md), with the common-capability exception expanded by [decision 0060](../docs/decisions/0060-subagent-read-only-repo-tools.md). `[confirmed by todo/subagent.ts, async-subagents/core/todo-progress.ts; tests: test/async-subagents/todo.test.ts, todo-progress.test.ts]`
+    - `todo/subagent.ts` is also loaded for **every role**, including project-local roles, and automatically for future roles. It exposes regular `todo` actions with a private child-session/attempt list. This is a planning exception to work-tool restrictions: restricted/empty role tool selections and extra CLI tool flags retain `todo` while preserving restrictions on work tools. Children neither read nor write the parent's project `.pi/todo-plan.json`. Retries/new attempts start with a new list; optional child session history stores local snapshots, branch navigation replays only that branch, and compaction retains unfinished tasks with a fresh snapshot. For parent progress reporting, todo state is sent as a private telemetry-only RPC `setWidget` notification; no interactive widget or child UI is installed. The parent counts non-deleted tasks (including deferred) and completed tasks, persists a tiny per-child/attempt `todo-progress.json` snapshot independently of bounded logs, and exposes optional progress to Desktop. A zero-task plan is not persisted: missing `todo-progress.json` means no plan; writing a cleared/empty plan removes the file. In the Desktop status bar, each visible compact subagent icon has a 2px progress track above it, positioned 2px from the icon's top with 70% opacity, with completed/total fill (including an empty track at 0/n). Absent, empty, or completed plans have no track. Existing popup progress rings/counts and overflow popup behavior are unchanged; no parent-plan aggregate is added. This progress does not update/share the parent's todo state, and completing a plan does not mean the agent has finished. The lean entrypoint does not load persistence commands, interactive UI widgets, thinking overrides, auto-follow-up turns or the parent's knowledge-audit reminder. Recursive delegation and interactive user questions remain denied. Children use todos for non-trivial multi-step work and report unfinished work/blockers to the parent; trivial work needs no plan. See [decision 0059](../docs/decisions/0059-subagent-private-todos.md), with the common-capability exception expanded by [decision 0060](../docs/decisions/0060-subagent-read-only-repo-tools.md). `[confirmed by todo/subagent.ts, async-subagents/core/todo-progress.ts; tests: test/async-subagents/todo.test.ts, todo-progress.test.ts]`
    - `repo-discovery/subagent.ts` is loaded for every child role and attempt. It registers the same unrestricted `project_search` schema and execution as ordinary Pi: all five sources (`sessions`, `tasks`, `commits`, `code`, `knowledge`), all supported options, and `patch:<literal>`. This applies equally to async children, provider children and council participants. The child facade only suppresses suite setup commands and parent orchestration guidance; ordinary role work-tool restrictions and parent-only delegation guards remain. Repository semantic embedding remains governed by independent user consent and saved-provider safeguards. Legacy external-backend setup/update commands are removed. See [0060](../docs/decisions/0060-subagent-read-only-repo-tools.md), [0066](../docs/decisions/0066-native-repository-semantic-search.md) and [project search](project-search-agent-tool.md). `[confirmed by repo-discovery/subagent.ts, core/child-tools.ts; tests: test/async-subagents/repo-tools.test.ts, provider-child-inventory.test.ts]`
-   - `dcp/subagent.ts` loads DCP for **every role and attempt**, including project-local replacements and read-only council participants. It uses normal DCP configuration/model overrides, prompts, compression and lifecycle hooks but registers no interactive `/dcp` commands. `compress` is a common capability alongside private todo and unrestricted `project_search`: empty/restricted tool lists, CLI exclusions and model changes cannot remove it when DCP is enabled. Read-only guards permit context compression, not product-source mutation. Disabled DCP configuration still suppresses registration. Default `--no-session` children keep DCP decisions only in memory, preserving raw history without session files or journal writes; each retry/new attempt starts fresh. Opted-in persisted child sessions use the normal journal contract. This does not enable session persistence or load the whole suite. See [DCP lifecycle](dcp.md#lifecycle-and-persistence). `[confirmed by dcp/subagent.ts, core/child-tools.ts, core/spawn.ts, brainstorm/research-extension.ts; tests: test/async-subagents/dcp.test.ts, provider-child-inventory.test.ts, work-tools.test.ts, test/brainstorm/research-extension.test.ts]`
+   - `dcp/subagent.ts` loads DCP for **every role and attempt**, including project-local replacements and read-only council participants. It uses normal DCP configuration/model overrides, prompts, compression and lifecycle hooks but registers no interactive `/dcp` commands. `compress` is a common capability alongside private todo and unrestricted `project_search`: empty/restricted tool lists, CLI exclusions and model changes cannot remove it when DCP is enabled. Read-only guards permit context compression, not product-source mutation. Disabled DCP configuration still suppresses registration. Child sessions are always persisted and use the normal journal contract (and survive `send` cold resume). This does not enable session persistence or load the whole suite. See [DCP lifecycle](dcp.md#lifecycle-and-persistence). `[confirmed by dcp/subagent.ts, core/child-tools.ts, core/spawn.ts; tests: test/async-subagents/dcp.test.ts, provider-child-inventory.test.ts, work-tools.test.ts]`
    - Optional work capabilities are tool-driven, not universal or granted by role
      name. Bundled `research`, `implement-core`, `mechanical` and
      `oracle` opt into read-only `ast_grep`; only bundled `research`
@@ -139,13 +139,13 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
      default. Research uses web for public evidence, never secrets/private data
      or local discovery, and reports access gaps rather than configuring keys.
      Existing web adapters, credentials, cancellation and fallback are reused.
-     Council web registration shares this loader; its separate stricter guard
-     still excludes AST and all mutations. Inventory tests do not prove research
+     Brainstorm council participants are ordinary `research` children; the
+     skill's `council-guard.ts` further narrows them to read/grep/web/project_search
+     (see [brainstorm](brainstorm.md)). Inventory tests do not prove research
      quality/live services; privacy guidance is not a network/filesystem sandbox.
      See [decision 0061](../docs/decisions/0061-subagent-scoped-ast-web-tools.md).
      `[confirmed by core/child-tools.ts, core/spawn.ts, work-tools.ts, agents/*.md;
-     tests: test/async-subagents/work-tools.test.ts, provider-child-inventory.test.ts,
-     test/brainstorm/research-extension.test.ts]`
+     tests: test/async-subagents/work-tools.test.ts, provider-child-inventory.test.ts]`
    - `antigravity-auth` is restored after `--no-extensions` only when the effective explicit task/CLI model is `antigravity/<model>`; a model sourced only from `ASYNC_SUBAGENTS_MODEL` / `PI_SUBAGENTS_MODEL` does not opt it in. Later `--model`, `-m`, or `--model=...` extra args override the task model for this decision.
    - A final model on `pi-claude-code-provider` (including the environment model) injects exactly one trusted suite-relative `src/claude-code-provider/index.ts`. No user/project settings or npm package lookup participates. The local manifest retains the characterized `0.5.0` identity; standalone and declared entrypoints must stay inside the module's realpath root. Explicit `--extension`/`-e` entries are inspected against the child cwd: one local entry is reused, distinct local entry aliases or any external/npm copy of this provider are rejected before launch. Owned launch, dependency injection and the child share `selectsClaudeProvider` over the trimmed task/environment model and normalized final CLI model/provider/scope. The legacy locator injection remains only as a test seam, not a production discovery path.
    - A missing local module, invalid metadata or unsupported version raises `ProviderExtensionError` (`provider_not_installed` / `provider_metadata_invalid` / `provider_version_unsupported`, bounded message with model, package and an action hint) before any child artifact or process exists. The synchronous throw is permanent: no retry and no model fallback, the concurrency slot is released and the bounded launch-failure artifacts are written.
@@ -278,7 +278,12 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
     Results contain changed documentation paths and concrete unresolved questions,
     not global knowledge-state reporting. Preserve concurrent work and keep
     disposable reports under `.pi/artifacts/`.
-11. **Session persistence**: only when `ASYNC_SUBAGENTS_ENABLE_SESSIONS` is truthy (child gets `--session-dir <agentDir>/sessions`; otherwise `--no-session`). `[confirmed by code]`
+11. **Session persistence**: always on — every child is a full Pi session launched with `--session-dir <dir>`. The former `ASYNC_SUBAGENTS_ENABLE_SESSIONS` / `shouldPersistSubagentSessions` opt-out and `--no-session` branch are removed; the variable is ignored. With a parent session id (UUID), `<dir>` is the project-local `<cwd>/.pi/subagents/<parentSessionId>/`; otherwise it is the legacy `<agentDir>/sessions`. Session commands (`/sub-open`, `/sub-back`, `/sub-where`) are always registered. A child without a persisted session cannot be resumed; `send` reports “has no persisted session to resume (it never started).” A fresh respawn removes only its own previously linked transcript and the legacy session directory, not the shared parent-scoped directory. Every fresh launch writes `launch.json` (`{task, extraArgs, timeoutMs, maxResultBytes}`) for later resume. `[confirmed by code, core/spawn.ts, core/sessions.ts, commands.ts, tools/send.ts; tests: session-layout.test.ts, core.test.ts, send.test.ts]`
+11a. **Follow-up turns (`send`)**: the parent may continue a child's conversation by `agentId`.
+    - **Live delivery** — while the child process is still running and its live channel is open, the message is written to the child's RPC stdin as `{type:"prompt", message, streamingBehavior: "followUp"|"steer"}` (default `followUp`). Pi queues it while streaming, or starts a new run when idle; the tool returns the reported disposition. A run started by a live send resets per-run completion state (`completedFromAgentEnd`, last error/result, `result.md`), so the final result reflects the latest turn.
+    - **Settled race** — when `agent_settled` arrives while a live send is pending or was accepted during the current run, termination is deferred: the child is asked for `get_state` and terminated only if it is neither streaming nor has pending messages. Once settled termination is scheduled the channel is closing; new live sends are refused and the tool waits (up to 15 s) for the process to finish, then falls back to cold resume.
+    - **Cold resume** — for a terminal (`done`/`failed`/`stopped`) child with an existing `session_file` and `launch.json`: previous turn artifacts (`result.md/json`, `progress.jsonl`, `stderr.log`, `exit_code`, `started_at`, `finished_at`, timeout markers, `turn_message.md`, todo progress) move to `turns/<N>/`, `turn_count` is incremented, the message is stored as `turn_message.md`, and the agent is relaunched under the project concurrency semaphore with `--session <session_file>`, keeping `prompt.md`, the sessions directory and session links. Completion is delivered to the parent like a normal spawn. Launch failures write `result.md`, `exit_code=1` and a structured failed result and log a `resume-failed` diagnostic.
+    - A non-terminal agent without a live channel (e.g. owned by another parent process) is refused rather than relaunched concurrently. `[confirmed by code, core/spawn.ts, core/live-channel.ts, core/turns.ts, tools/send.ts; tests: send.test.ts]`
 12. **Timeout**: default 3 hours (10,800 seconds; `DEFAULT_AGENT_TIMEOUT_MS`) when no task-, spawn-, role-, or global-level timeout is configured. Explicit `timeoutSeconds`/`timeoutMs` values override this default, including values longer than 3 hours; the default is not a hard cap. For macOS owned-launch agents, the supervisor's native watchdog defaults to the same 3 hours and receives the resolved per-agent timeout for explicit overrides. On timeout: writes `timeout_ms`/`timed_out_at`/result.md, SIGTERM, SIGKILL after 5s grace for ordinary agents, exit code 124. `[confirmed by code, spawn.ts, core/config.ts, owned-launch-integration.ts, owned-launch/launcher.ts]`
 13. **agent_end**: writes result.md, SIGTERM after 50ms grace, SIGKILL after 1s fallback. `[confirmed by code]`
 14. **RPC prompt failure** (`success=false`): writes result.md with error, `notifyComplete(1)`, SIGTERM. `[confirmed by code]`
@@ -353,14 +358,14 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 - `spawnAgentWithRetry()` wraps `spawnAgent` with retry + model-fallback loops. `[confirmed by code]`
 - **Retry eligibility** (`shouldRetry`): status not `stopped`, exitCode ≠ 0; if `retryableExitCodes` is set the code must be in it; `undefined` → retry any non-zero; empty array → disable. `[confirmed by code, retry.ts ~140-148]`
 - **Backoff**: exponential `delayMs = retry.backoffMs * 2^(attempt-1)`. `[confirmed by code]`
-- **Retry metadata files**: `retry_count`, `retry_pending` (timestamp), `next_retry_at` (ISO), `retry.log` (append). Cleared on settle. `[confirmed by code]`
+- **Retry metadata files**: `retry_count`, `retry_pending` (timestamp), `next_retry_at` (ISO), `retry.log` (append). `retry_count` is omitted at zero (missing means zero retries); setting it to zero removes the file. Other retry metadata is cleared on settle. `[confirmed by code, retry.ts]`
 - **Model fallback** (before retry): if `isQuotaLimitCompletion` and a fallback exists, respawns immediately (no backoff), logs to `model_fallback.log`/`model_fallback_from`/`model_fallback_to`. `[confirmed by code, retry.ts ~78-97]`
 - `AbortSignal` cancels pending retry timer and settles immediately. Returns `{initial, done}`; `done` resolves when all attempts finish or abort. `[confirmed by code]`
 
 ### Model fallback (`core/model-fallback.ts`)
 - In-memory session state: `exhaustedModels`/`exhaustedProviders` Sets, `fallbackByModel`/`fallbackByProvider` Maps; resettable via `resetSessionModelFallbacks()`. `[confirmed by code]`
 - `selectSessionModelWithFallback` / `nextFallbackModel` walk the resolved chain skipping exhausted models/providers. They do not independently require a different provider; remembered provider exhaustion can exclude same-provider candidates. `[confirmed by code; model-pool-contract.test.ts]`
-- `isQuotaLimitCompletion` scans result.md + stderr.log + last 20 events.jsonl lines for: HTTP 429, "rate limit", "quota exceeded", "insufficient quota", "resource exhausted", "usage limit", "billing limit"; for the antigravity provider also "antigravity_all_accounts_exhausted". `[confirmed by code, model-fallback.ts ~40-66]`
+- `isQuotaLimitCompletion` scans result.md + stderr.log for: HTTP 429, "rate limit", "quota exceeded", "insufficient quota", "resource exhausted", "usage limit", "billing limit"; for the antigravity provider also "antigravity_all_accounts_exhausted". `[confirmed by code, model-fallback.ts ~40-66]`
 - Antigravity providers are **never** marked exhausted at the provider level (`shouldRememberProviderExhaustion` returns false) — each account is tried individually. `[confirmed by code]`
 
 ### State (`core/state.ts`)
@@ -427,6 +432,29 @@ recover by cancelling, and retain responsibility while cleanup is uncertain.
 Signals must use authentic generation-bound audit tokens after membership
 validation. Empty PID enumeration, bridge exit, RPC completion and a stop
 request are not cleanup receipts.
+
+**launchd access fallback.** launchd-started jobs do not inherit Pi/Pix privacy
+(TCC) grants, so a project on an external/removable volume (or another
+TCC-protected location) is unreachable by the supervisor/worker. Before an
+attempt that may select `pi-claude-code-provider`, `tools/spawn.ts` asks
+`core/owned-launch/access-probe.ts` whether a throwaway UUID-labelled launchd
+job (`org.pix.launchd-probe.<uuid>`, plist in a private `/tmp` dir) can list
+both the project cwd and the run directory. Definitive `ok`/`denied` verdicts
+are cached per directory set for the process lifetime; concurrent callers share
+one probe (~0.1 s). On `denied` (including a refused bootstrap, which is not
+cached) the attempt uses the ordinary process-group launch with the provider
+dependency unchanged, writes progress stage `owned_launch_unavailable`, and
+reports `suite:owned-launch-unavailable` (warn). An undecided probe (`unknown`,
+timeout/IO) keeps owned launch (fail closed). The fallback has the ordinary
+process-group containment guarantees only, not durable descendant ownership.
+Parent loss is covered: the child Pi sees RPC stdin EOF and exits, and the
+Claude provider's `process.on("exit")` hook (`claude-process.ts`) synchronously
+SIGKILLs every Claude CLI process group not yet proven terminated, because Pi's
+RPC shutdown calls `process.exit()` without awaiting the SIGTERM→SIGKILL
+escalation. Descendants that left the group (`setsid`/daemonized) are not
+covered. `[tests: provider-parent-loss.test.ts]`
+`[confirmed by code: access-probe.ts, tools/spawn.ts, core/spawn.ts; tests:
+owned-launch/access-probe.test.ts, provider-extensions.test.ts]`
 
 The failure model covers process crashes and ordinary descendant fork/exec,
 not external deletion, renaming or corruption of the private ownership
@@ -1168,7 +1196,7 @@ runtime is unchanged.
 
 ### Structured results (`core/structured-result.ts`) / Log limits (`core/log-limits.ts`)
 - On completion writes `result.json` (summary, findings, file refs, risks, next actions, confidence); `resultText` truncated at `maxResultBytes` (default 100KB); `result.md` is always full. `[confirmed by code]`
-- `events.jsonl` default 0 bytes (32MB only if `ASYNC_SUBAGENTS_DEBUG_LOGS`); `stderr.log` default 8MB; RPC line max 8MB (oversized dropped with a marker). `[confirmed by code]`
+- No RPC event transcript is written (the persisted child session is the full history; `events.jsonl` and `ASYNC_SUBAGENTS_MAX_EVENTS_BYTES` were removed). `progress.jsonl` holds lifecycle stages only (spawned, prompt_sent, live_send, timeout, shutdown_signal, owned_*, completed), not per-event lines; current tool activity is in-memory only and is not restored after a parent restart. `ASYNC_SUBAGENTS_DEBUG_LOGS` only forces keeping `stderr.log`. `stderr.log` default 8MB; RPC line max 8MB (oversized dropped with a marker). `[confirmed by code]`
 
 ## Public contracts / inputs / outputs
 
@@ -1177,9 +1205,15 @@ runtime is unchanged.
 - `ui-qa` is an explicit built-in role and has no compatibility alias. UI-QA tasks require
   confirmed image-capable model candidates even when `imagePaths` is empty.
   `[confirmed by code, routing.ts/model-selection.ts]`
+- **send** `{runDir?, agentId, message, mode?: "followUp"|"steer"}` (internal `async_subagents_send`): live follow-up/steer for a running child, otherwise cold resume of a terminal child's persisted session; returns `details.delivery` (`live` with disposition, or `resume` with `turn`). See Current behavior §11a. `[confirmed by code, tools/send.ts, tools/subagents.ts]`
 - **status** `{runDir?, agentIds?}`, **wait** `{runDir?, agentIds?, timeout?, interval?, failFast?}`, **result** `{runDir?, agentId}`, **stop** `{runDir?, agentIds?, force?, signal?}`, **cleanup** `{runRoot?, days?, keep?, delete?}`. `[confirmed by code]`
 
 ### Disk layout
+
+> **Legacy layout:** New child sessions are stored project-locally at
+> `.pi/subagents/<parentSessionId>/<child>.jsonl`; this run-tree layout remains
+> only for legacy runs. See [decision 0072](../docs/decisions/0072-session-native-subagents.md).
+
 ```
 <cwd>/.pi/subagents/
   registry.json
@@ -1187,18 +1221,35 @@ runtime is unchanged.
   <YYYY-MM-DDTHH-MM-SS>[-slug]/
     prompts/<agentId>.md
     <agentId>/
-      prompt.md, pid, started_at, pi_args, project_cwd, subagent_type, model,
-      image_paths, session_dir?, session_file?, parent_session?, return_session?,
-      events.jsonl, progress.jsonl, stderr.log, result.md, result.json, exit_code, finished_at,
+      prompt.md, pid, started_at, project_cwd, subagent_type, launch.json (task incl. model, extraArgs, piArgs of the latest turn),
+      image_paths, session_file?, parent_session?, return_session?,
+      progress.jsonl, stderr.log, result.md, result.json, exit_code, finished_at,
       process_group?  (non-Windows process-group leader PID),
       stop_requested?, stop_signal?, timeout_ms?, timed_out_at?,
       retry_count?, retry_pending?, next_retry_at?, retry.log?,
       model_fallback_from?, model_fallback_to?, model_fallback.log?,
-      sessions/   (if ASYNC_SUBAGENTS_ENABLE_SESSIONS)
+      launch.json (fresh-launch spec for resume), turn_count?, turn_message.md?,
+      turns/<N>/  (archived artifacts of earlier turns after `send` cold resume)
+      sessions/   (legacy location used only when the parent has no session id;
+                   otherwise the child session lives at `.pi/subagents/<parentSessionId>/`
+                   and `session_file` points there. Child writes one `subagent_meta`
+                   custom entry from `PI_SUBAGENT_META` (incl. parentSession/parentSessionId);
+                   ACP accepts only `.jsonl` files directly in a UUID-named dir of this project.)
+  <parentSessionId>/  (UUID; child session files of one parent; Desktop background
+                   cleanup keeps it while the parent session exists, see
+                   specs/resource-registry-project-state.md)
       ui-qa/flows/ (for ui-qa; unified flows plus native/TUI evidence)
       ui-qa/browser/flows/ (for ui-qa; trusted browser backend workspace)
 ```
 `[confirmed by code]`
+
+`prompts/<agentId>.md` is the queued prompt copy and exists only while the
+agent is planned/queued. Once launched, that copy is deleted; the prompt remains
+at `<agentId>/prompt.md`. The `prompts/` directory itself is retained. A missing
+`retry_count` means zero retries, and the file is removed when the count is set
+to zero. A missing `todo-progress.json` means there is no plan; total-zero
+progress is not written, and clearing the plan removes the file. `started_at`,
+`finished_at`, and `exit_code` remain separate files. `[confirmed by code]`
 
 ## Invariants
 - Agent IDs match `/^[A-Za-z0-9._-]+$/` and must not contain `..`. `[confirmed by code, paths.ts ~36-43]`
@@ -1220,14 +1271,13 @@ runtime is unchanged.
 - **No runDir**: registry `latestRunDir` → mtime scan → throw if nothing. `[confirmed by code]`
 - **Implicit Antigravity model with isolated extensions**: if Antigravity is selected only through the model environment fallback or pi's persisted default, the child keeps `--no-extensions` and does not load `antigravity-auth`; callers must explicitly select an Antigravity model in task/CLI arguments. `[confirmed by code; confirmed by tests]`
 - **Oversized RPC lines**: agent_end oversized lines still trigger termination with a fallback result; others dropped with a marker. `[confirmed by code]`
-- **Prompt failure without exit_code**: `hasRpcPromptFailure` scans events.jsonl for `success=false`. `[confirmed by code]`
 - **Retry + stop**: `stop_requested` cancels pending retries; stop also deletes `retry_pending`/`next_retry_at`. `[confirmed by code]`
 - **Windows termination**: `taskkill /T /F` (tree kill) with 1s timeout, fallback `process.kill`. `[confirmed by code]`
 
 ## Side effects
-- Writes the per-agent files listed above; deletes retry/stop metadata and the `session_dir` tree on respawn. `[confirmed by code]`
+- Writes the per-agent files listed above; deletes retry/stop metadata and the `sessions/` tree on respawn. `[confirmed by code]`
 - Spawns one `pi --mode rpc` child per task; SIGTERM primary, SIGKILL fallback. `[confirmed by code]`
-- On respawn (same runDir/agentId) unlinks prior exit_code/finished_at/result.*/events.jsonl/stderr.log/session links/timeout+stop+retry metadata. `[confirmed by code, spawn.ts ~38-51]`
+- On respawn (same runDir/agentId) unlinks prior exit_code/finished_at/result.*/stderr.log/legacy events.jsonl, pi_args, model, session_dir/session links/timeout+stop+retry metadata. `[confirmed by code, spawn.ts ~38-51]`
 - Sets `PI_MODEL_SUITABLE_TOOLS_PRESERVE_SELECTION`, `PI_TERMINAL_BELL_DISABLED`, `PI_TOOLS_SUITE_DISABLED_MODULES` in child env. `[confirmed by code]`
 
 ## Implementation
@@ -1251,7 +1301,6 @@ runtime is unchanged.
 - `external/pi-tools-suite/src/async-subagents/agents/knowledge-auditor.md`
 - `external/pi-tools-suite/src/todo/subagent.ts`
 - `external/pi-tools-suite/src/repo-discovery/subagent.ts`
-- `external/pi-tools-suite/src/brainstorm/research-extension.ts`
 - `external/pi-tools-suite/src/todo/todo.ts`
 - `external/pi-tools-suite/src/todo/state/store.ts`
 - `external/pi-tools-suite/src/todo/state/replay.ts`
@@ -1297,8 +1346,6 @@ runtime is unchanged.
   restricted and empty selections.
 - `external/pi-tools-suite/test/async-subagents/repo-tools.test.ts`: common repo
   registration, no setup, prerequisite gates, lifecycle selection and adapters.
-- `external/pi-tools-suite/test/brainstorm/research-extension.test.ts`: common
-  repo/todo composition without duplicate registration or weakening council guards.
 - `tests/heads-up-delegated.test.ts`: cross-package report bridge, launch ownership,
   provenance labels, redaction and duplicate suppression.
 - `external/pi-tools-suite/test/async-subagents/completion-delivery.test.ts`:

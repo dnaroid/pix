@@ -119,7 +119,7 @@ export class CompletionReceipts {
 
 	private state(agent: LiveAgent): AgentState | undefined {
 		if (this.live.get(agent.runDir)?.get(agent.agentId) !== agent || agent.awaitingCompletion) return;
-		return getRunState(agent.runDir, [agent.agentId], { includeLineCounts: false, checkRpcPromptFailure: false }).agents[0];
+		return getRunState(agent.runDir, [agent.agentId], { includeLineCounts: false }).agents[0];
 	}
 
 	private sameState(expected: AgentState, actual?: AgentState): boolean {

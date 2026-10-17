@@ -1,5 +1,6 @@
 <script lang="ts">
   import Blocks from "@lucide/svelte/icons/blocks";
+  import ChartColumn from "@lucide/svelte/icons/chart-column";
   import Folder from "@lucide/svelte/icons/folder";
   import GitBranch from "@lucide/svelte/icons/git-branch";
   import ListTodo from "@lucide/svelte/icons/list-todo";
@@ -24,6 +25,7 @@
     "registry",
     "scripts",
     "search",
+    "usage",
     "lsp",
     "logs",
     "settings",
@@ -178,6 +180,16 @@
   >
     <SearchCheck class={["h-5 w-5", sidebarIconTone(indicators.search)]} aria-hidden="true" />
   </button>
+  <button
+    class={["relative grid h-10 w-full place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", selected("usage") ? "border-l-primary bg-background text-foreground" : "border-l-transparent text-muted-foreground"]}
+    type="button" data-sidebar-tab tabindex={activeTab === "usage" ? 0 : -1}
+    title={activityTitle("usage", activeTab === "usage" && !collapsed ? "Hide Usage" : "Usage")}
+    aria-label={activityLabel("usage", "Usage statistics")} aria-controls="workspace-usage-panel"
+    aria-pressed={activeTab === "usage" && !collapsed}
+    onkeydown={(event) => handleKeydown(event, "usage")}
+    oncontextmenu={(event) => onIndicatorContext(event, "usage")}
+    onclick={() => onSelect("usage")}
+  ><ChartColumn class={["h-5 w-5", sidebarIconTone(indicators.usage)]} aria-hidden="true" /></button>
   <button
     class={["relative grid h-10 w-full place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", selected("lsp") ? "border-l-primary bg-background text-foreground" : "border-l-transparent text-muted-foreground"]}
     type="button" data-sidebar-tab tabindex={activeTab === "lsp" ? 0 : -1}

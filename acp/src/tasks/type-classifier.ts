@@ -2,7 +2,7 @@ import { RequestError } from "@agentclientprotocol/sdk";
 import { isAbsolute } from "node:path";
 import { OPENROUTER_JEV_MODEL, requestOpenRouterJevChoice } from "../acp/openrouter-jev.js";
 import { bounded } from "../search/bounded.js";
-import { sharedSearchAuth, type SearchAuth } from "../search/config.js";
+import { loadIntentModelId, sharedSearchAuth, type SearchAuth } from "../search/config.js";
 import {
   isClassifiedTaskType, QUICK_TASK_DEFAULT_TYPE, QUICK_TASK_MAX_LENGTH,
   type TaskTypeClassifyRequest, type TaskTypeClassifyResponse,
@@ -31,16 +31,20 @@ export function parseTaskTypeClassifyRequest(value: unknown): TaskTypeClassifyRe
 export interface TaskTypeClassifierDependencies {
   readonly auth?: Pick<SearchAuth, "key">;
   readonly fetch?: typeof globalThis.fetch;
+  /** OpenRouter model id override; undefined uses the built-in Jev model. */
+  readonly loadModel?: () => Promise<string | undefined>;
 }
 
 /** Stateless classification, with no other task data, session or project-source reads. */
 export class DesktopTaskTypeClassifier {
   private readonly auth: Pick<SearchAuth, "key">;
   private readonly fetch: typeof globalThis.fetch;
+  private readonly loadModel: () => Promise<string | undefined>;
 
   constructor(deps: TaskTypeClassifierDependencies = {}) {
     this.auth = deps.auth ?? sharedSearchAuth();
     this.fetch = deps.fetch ?? globalThis.fetch;
+    this.loadModel = deps.loadModel ?? (() => loadIntentModelId());
   }
 
   async classify(text: string, signal: AbortSignal): Promise<TaskTypeClassifyResponse> {
@@ -53,7 +57,7 @@ export class DesktopTaskTypeClassifier {
         if (!key) return fallback;
         timed.throwIfAborted();
         const choice = await requestOpenRouterJevChoice({
-          model: OPENROUTER_JEV_MODEL,
+          model: (await this.loadModel().catch(() => undefined)) ?? OPENROUTER_JEV_MODEL,
           apiKey: key,
           question: "task_type",
           state: { text: text.trim().slice(0, QUICK_TASK_MAX_LENGTH) },

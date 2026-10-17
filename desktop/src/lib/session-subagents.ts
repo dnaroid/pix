@@ -19,7 +19,6 @@ export interface SessionSubagentAgent {
   readonly pid?: number;
   readonly resultLines?: number;
   readonly stderrLines?: number;
-  readonly eventLines?: number;
   readonly retryCount?: number;
   readonly lastActivity?: SessionSubagentActivity;
   readonly todoProgress?: { readonly completed: number; readonly total: number };
@@ -124,8 +123,23 @@ export function sessionSubagentTaskPreview(
   return run.tasks?.find((task) => task.id === agentId);
 }
 
+const RUN_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})(.*)$/;
+
+/**
+ * Display name of a run directory. Run directories start with a UTC stamp
+ * (`2026-10-17T09-31-31-slug`); it is shown in the user's local time.
+ */
 export function sessionSubagentRunName(runDir: string): string {
-  return runDir.split(/[\\/]/).filter(Boolean).at(-1) ?? runDir;
+  const base = runDir.split(/[\\/]/).filter(Boolean).at(-1) ?? runDir;
+  const match = RUN_TIMESTAMP.exec(base);
+  if (!match) return base;
+  const [, y, mo, d, h, mi, sec, rest] = match;
+  const date = new Date(Date.UTC(+y!, +mo! - 1, +d!, +h!, +mi!, +sec!));
+  if (Number.isNaN(date.getTime())) return base;
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const local = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} `
+    + `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  return `${local}${rest!.replace(/^-/, " ")}`;
 }
 
 export function sessionSubagentModelLabel(preview: SessionSubagentTaskPreview | undefined): string {
@@ -190,7 +204,7 @@ function isSessionSubagentAgent(value: unknown): value is SessionSubagentAgent {
   if (value.finishedAt !== undefined && typeof value.finishedAt !== "string") return false;
   if (value.nextRetryAt !== undefined && typeof value.nextRetryAt !== "string") return false;
   if (value.pid !== undefined && (typeof value.pid !== "number" || !Number.isInteger(value.pid) || value.pid <= 0)) return false;
-  for (const field of ["resultLines", "stderrLines", "eventLines", "retryCount"] as const) {
+  for (const field of ["resultLines", "stderrLines", "retryCount"] as const) {
     if (value[field] !== undefined && !isNonNegativeInteger(value[field])) return false;
   }
   if (value.lastActivity !== undefined) {

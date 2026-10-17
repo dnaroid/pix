@@ -8,6 +8,11 @@ import { embedCommitHTTP, embeddingIdentity, loadCommitEmbeddingConfig, loadComm
 import type { SearchIndexRequest, SearchIndexResponse } from "./contract.js";
 import { parseSearchIndexRequest } from "./request.js";
 import { IndexActions } from "./index-actions.js";
+import { automaticWorkPaused } from "./source-work.js";
+import { canonicalSearchIndexPath } from "./canonical-index.js";
+import { commitStamp } from "./commit-stamp.js";
+import { coverageDigest, readCoverage } from "./source-coverage.js";
+import { isExpectedIndexCancellation, logBackgroundIndexFailure } from "./search-logging.js";
 
 type Request = CommitSearchRequest | SearchIndexRequest;
 type Response = CommitSearchResponse | SearchIndexResponse;
@@ -18,7 +23,16 @@ export interface CommitSearchOptions {
   readonly loadKey?: () => Promise<string | undefined>;
   readonly embed?: CommitEmbedder;
   readonly lockWaitMs?: number;
+  /** Background history poll interval; default 60 s. */
+  readonly pollMs?: number;
+  /** Observes completed background passes (diagnostics only). */
+  readonly onBackgroundResult?: (cwd: string, result: SearchIndexResponse, durationMs: number) => void;
 }
+const MAX_WATCHED = 8;
+/** Retrying these cannot change the outcome until configuration, credentials or lock state change. */
+const transient = (result: SearchIndexResponse) => !result.complete && (result.failurePhase === "configuration"
+  || result.failurePhase === "authorization" || (!result.failurePhase && result.message === SEMANTIC_NOTICE)
+  || /busy/i.test(result.message ?? ""));
 /** One agent-owned instance; cancellation retains the writer until transport actually unwinds. */
 export class DesktopCommitSearchService {
   private readonly options: CommitSearchOptions;
@@ -29,7 +43,49 @@ export class DesktopCommitSearchService {
   private disposed = false;
   private readonly lifetime = new AbortController();
   private readonly indexActions = new IndexActions<SearchIndexResponse>();
+  private readonly watched = new Map<string, { timer: ReturnType<typeof setInterval>; attempted?: string; running?: Promise<void> }>();
   constructor(options: CommitSearchOptions = {}) { this.options = options; }
+  /** Change-driven background indexing: poll the cheap logical history stamp and
+   * index only when it (or the embedding identity) differs from the last attempt.
+   * A failed revision is not retried until it changes; transient gates retry. */
+  watch(cwd: string): void {
+    if (this.disposed) return;
+    if (!this.watched.has(cwd)) {
+      while (this.watched.size >= MAX_WATCHED) {
+        const [oldest, entry] = this.watched.entries().next().value!;
+        clearInterval(entry.timer); this.watched.delete(oldest);
+      }
+      const timer = setInterval(() => this.poll(cwd), this.options.pollMs ?? 60_000);
+      timer.unref?.();
+      this.watched.set(cwd, { timer });
+    }
+    this.poll(cwd);
+  }
+  private poll(cwd: string): void {
+    const entry = this.watched.get(cwd);
+    if (!entry || entry.running || this.disposed) return;
+    const signal = this.lifetime.signal;
+    let root = cwd;
+    const running = (async () => {
+      if (!await sourceEnabled(cwd, "commits")) return;
+      try { root = await realpath(await commitProjectRoot(cwd, signal)); } catch { signal.throwIfAborted(); return; }
+      if (await automaticWorkPaused(root, "commits", signal)) return;
+      const config = await this.config(root);
+      if (!config) return;
+      const digest = coverageDigest("commits", await commitStamp(root, signal), embeddingIdentity(config));
+      if (entry.attempted === digest) return;
+      if ((await readCoverage(canonicalSearchIndexPath(root, "commits"), signal).catch(() => undefined))?.has(digest)) {
+        entry.attempted = digest; return;
+      }
+      const startedAt = Date.now();
+      const result = await this.index({ cwd, source: "commits" }, signal);
+      if (!transient(result)) entry.attempted = digest;
+      try { this.options.onBackgroundResult?.(cwd, result, Date.now() - startedAt); } catch { /* Diagnostics only. */ }
+    })().catch(error => {
+      if (!this.disposed && !isExpectedIndexCancellation(error)) logBackgroundIndexFailure(root, error, "commits");
+    }).finally(() => { if (entry.running === running) delete entry.running; });
+    entry.running = running;
+  }
   changed(cwd: string): void {
     // Cancel all aliases of this project conservatively; no background reindexing.
     for (const [controller, project] of this.active) {
@@ -40,6 +96,10 @@ export class DesktopCommitSearchService {
   async dispose(): Promise<void> {
     this.disposed = true;
     this.lifetime.abort();
+    for (const entry of this.watched.values()) clearInterval(entry.timer);
+    const polls = [...this.watched.values()].map(entry => entry.running);
+    this.watched.clear();
+    await Promise.allSettled(polls);
     for (const controller of this.active.keys()) controller.abort();
     await Promise.allSettled([...this.jobs]);
     await this.indexActions.settled();

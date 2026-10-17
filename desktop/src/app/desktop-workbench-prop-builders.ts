@@ -3,7 +3,9 @@ import type { AcpClient } from "../lib/acp-client";
 import DesktopWorkbenchSurface from "../components/DesktopWorkbenchSurface.svelte";
 import { isWorkspaceProjectFilePath } from "../lib/project-files";
 import { composerActivity } from "../lib/composer-activity";
-import type { BrainstormSessionLink } from "../lib/session-brainstorm";
+import type { SubagentSessionLink } from "../lib/session-subagent-link";
+import { sessionSubagentRunName } from "../lib/session-subagents";
+import type { SubagentSessionNavigation } from "./desktop-subagent-navigation";
 import type { PendingElicitation, createElicitationStore } from "./elicitation.svelte";
 import type { createAttachmentDraftController } from "./attachment-drafts";
 import type { createAutocompleteStore } from "./autocomplete.svelte";
@@ -50,8 +52,8 @@ export type WorkbenchShellBuilderOptions = {
 };
 
 export type WorkbenchConversationBuilderOptions = {
-  brainstormLink?: () => BrainstormSessionLink | undefined;
-  openBrainstormSession?: (sessionId: string) => void | Promise<void>;
+  subagentLink?: () => SubagentSessionLink | undefined;
+  subagentNavigation?: SubagentSessionNavigation;
   transcript: () => DesktopWorkbenchSurfaceViewProps["transcript"]["transcript"];
   activeSessionId: () => string | null;
   workspace: () => string;
@@ -133,10 +135,11 @@ export function buildWorkbenchShellProps(
 
 export function buildWorkbenchConversationProps(
   options: WorkbenchConversationBuilderOptions,
-): Pick<DesktopWorkbenchSurfaceViewProps, "transcript" | "queue" | "composer" | "managedCouncil"> {
+): Pick<DesktopWorkbenchSurfaceViewProps, "transcript" | "queue" | "composer" | "managedSubagent"> {
   const sessionId = options.activeSessionId();
+  const subagentLink = sessionId ? options.subagentLink?.() : undefined;
+  const subagentNavigation = options.subagentNavigation;
   const handoffBusy = !!sessionId && options.handoff?.busySessionId === sessionId;
-  const link = options.brainstormLink?.();
   const pending = options.pendingElicitation();
   const transcript = options.transcript();
   const questionMode = pending?.kind === "question"
@@ -166,7 +169,7 @@ export function buildWorkbenchConversationProps(
       messageMutationRunning: options.promptRunning() || Boolean(sessionId && options.promptRuntime.queueItemsBySession
         .get(sessionId)?.some((item) => item.source === "auto" || item.source === "deferred")),
       agentControlState: options.activeAgentControlState(),
-      operationRunning: options.operationRunning() || handoffBusy || link?.owned === true,
+      operationRunning: options.operationRunning() || handoffBusy,
       historyLoading: options.sessionHistoryLoading(),
       showScrollToBottom: !options.transcriptScroll.followsLatest,
       scrollRestoring: options.transcriptScroll.restoring,
@@ -183,11 +186,17 @@ export function buildWorkbenchConversationProps(
       onOpenLocalFile: options.preview.openLocalFile,
       onResolveLocalMedia: options.preview.resolveLocalMedia,
       onLoadToolResult: (toolCallId) => void options.history.loadDeferredToolResult(toolCallId),
-      onUserMessageAction: (message, action) => { if (!link?.owned) void options.branchActions.runUserMessageContextAction(message, action); },
+      onOpenSubagentSession: subagentNavigation
+        ? (runDir, agentId) => void subagentNavigation.openSubagentSession(runDir, agentId)
+        : undefined,
+      onUserMessageAction: (message, action) => { void options.branchActions.runUserMessageContextAction(message, action); },
       onOpenClaudeLoginTerminal: options.openClaudeLoginTerminal,
       onClaudeLoginError: options.reportClaudeLoginError,
-      onHtmlSandboxSubmit: sessionId && !link?.owned
+      onHtmlSandboxSubmit: sessionId
         ? (messageId, payload) => options.promptSubmit.submitHtmlSandbox(sessionId, messageId, payload)
+        : undefined,
+      onChoiceActionsSubmit: sessionId
+        ? (text) => options.promptSubmit.submitChoiceActions(sessionId, text)
         : undefined,
       lspSuggestion: options.lspOnboarding.activeSuggestion(),
       onInstallLsp: sessionId ? () => void options.lspOnboarding.pauseAndInstall(sessionId) : undefined,
@@ -195,7 +204,7 @@ export function buildWorkbenchConversationProps(
     },
     queue: {
       items: sessionId ? (options.promptRuntime.queueItemsBySession.get(sessionId) ?? []) : [],
-      disabled: options.operationRunning() || handoffBusy || options.promptQueue.actionRunning || link?.owned === true,
+      disabled: options.operationRunning() || handoffBusy || options.promptQueue.actionRunning,
       onAction: (item, action) => void options.promptQueue.actOnQueuedMessage(item, action),
     },
     composer: {
@@ -221,7 +230,7 @@ export function buildWorkbenchConversationProps(
               sessionId!,
               observerNotice,
               () => options.activeSessionId() === sessionId && options.pendingElicitation() === null
-                && !options.brainstormLink?.()?.owned && !options.operationRunning()
+                && !options.operationRunning()
                 && !options.sessionMutationRunning() && options.activeSessionRuntimeReady(),
               options.promptText,
               options.promptAttachments,
@@ -247,7 +256,7 @@ export function buildWorkbenchConversationProps(
       ready: options.statusReady()
         && (!handoffBusy || !!questionMode)
         && !options.conversationActions.promptEnhancing
-        && !link?.owned
+        && !subagentLink
         && !options.sessionMutationRunning()
         && (options.draft.active || sessionId !== null),
       promptRunning: options.promptRunning(),
@@ -284,7 +293,16 @@ export function buildWorkbenchConversationProps(
       onRemoveAttachment: options.attachments.removeAttachment,
       onOpenAttachment: (attachment) => void options.preview.activateAttachment(attachment),
     },
-    managedCouncil: link ? { ...link, onOpenParent: () => void options.openBrainstormSession?.(link.parentSessionId) } : undefined,
+    managedSubagent: sessionId && subagentLink && subagentNavigation ? {
+      sessionId,
+      agentId: subagentLink.agentId,
+      runName: sessionSubagentRunName(subagentLink.runDir),
+      poll: () => subagentNavigation.pollViewer(sessionId),
+      onContinue: () => void subagentNavigation.continueSubagentSession(sessionId),
+      onOpenParent: subagentLink.parentSessionId
+        ? () => void subagentNavigation.openParentSession(subagentLink.parentSessionId!)
+        : undefined,
+    } : undefined,
   };
 }
 

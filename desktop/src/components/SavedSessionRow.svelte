@@ -2,7 +2,9 @@
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import GitFork from "@lucide/svelte/icons/git-fork";
   import Check from "@lucide/svelte/icons/check";
+  import Bot from "@lucide/svelte/icons/bot";
   import { sessionIsFork, type SessionTreeRow } from "../lib/session-tabs";
+  import { subagentSessionLink } from "../lib/session-subagent-link";
 
   let { row, collapsed = false, related = false, selected = false, disabled = false,
     mode = "open", compact = true, date, onSelect, onToggle, onActivate,
@@ -12,6 +14,7 @@
     onSelect: () => void; onToggle: () => void;
     onActivate: (active: boolean, source: "pointer" | "focus") => void;
   } = $props();
+  const subagent = $derived(subagentSessionLink(row.session._meta));
   const title = $derived(row.session.title || "Untitled conversation");
   const height = $derived(compact ? 28 : 44);
   const nodeX = $derived(row.depth * 18 + 9);
@@ -52,7 +55,10 @@
     <span class={["min-w-0 flex-1", compact && "flex items-center gap-1"]}>
       <strong class="flex min-w-0 items-center gap-1 text-xs font-medium">
         {#if selected}<Check class="h-3 w-3 shrink-0 text-primary" aria-hidden="true" />{/if}
-        {#if row.depth === 0 && sessionIsFork(row.session)}<GitFork class="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />{/if}
+        {#if subagent}
+          <Bot class="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <span class="shrink-0 rounded bg-muted px-1 text-[10px] leading-4 font-normal text-muted-foreground">Sub-agent · {subagent.agentId}</span>
+        {:else if row.depth === 0 && sessionIsFork(row.session)}<GitFork class="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />{/if}
         <span class="min-w-0 truncate">{title}</span>
       </strong>
       {#if !compact}<small class="mt-0.5 block truncate text-xs text-muted-foreground">{date}</small>{/if}

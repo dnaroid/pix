@@ -70,7 +70,6 @@ const originalAsyncSubagentsModel = process.env.ASYNC_SUBAGENTS_MODEL;
 const originalPiSubagentsModel = process.env.PI_SUBAGENTS_MODEL;
 const originalAsyncSubagentsForceCurrentModel = process.env.ASYNC_SUBAGENTS_FORCE_CURRENT_MODEL;
 const originalPiSubagentsForceCurrentModel = process.env.PI_SUBAGENTS_FORCE_CURRENT_MODEL;
-const originalAsyncSubagentsEnableSessions = process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS;
 const originalAsyncSubagentsRouting = process.env.ASYNC_SUBAGENTS_ROUTING;
 const originalPiSubagentsRouting = process.env.PI_SUBAGENTS_ROUTING;
 const originalAsyncSubagentsMaxConcurrent = process.env.ASYNC_SUBAGENTS_MAX_CONCURRENT;
@@ -179,8 +178,6 @@ afterEach(async () => {
 	else process.env.ASYNC_SUBAGENTS_FORCE_CURRENT_MODEL = originalAsyncSubagentsForceCurrentModel;
 	if (originalPiSubagentsForceCurrentModel === undefined) delete process.env.PI_SUBAGENTS_FORCE_CURRENT_MODEL;
 	else process.env.PI_SUBAGENTS_FORCE_CURRENT_MODEL = originalPiSubagentsForceCurrentModel;
-	if (originalAsyncSubagentsEnableSessions === undefined) delete process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS;
-	else process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS = originalAsyncSubagentsEnableSessions;
 	if (originalAsyncSubagentsRouting === undefined) delete process.env.ASYNC_SUBAGENTS_ROUTING;
 	else process.env.ASYNC_SUBAGENTS_ROUTING = originalAsyncSubagentsRouting;
 	if (originalPiSubagentsRouting === undefined) delete process.env.PI_SUBAGENTS_ROUTING;
@@ -338,12 +335,11 @@ process.stdin.on("data", (data) => {
 
 	test.serial("registers tools and default commands without UI renderers", async () => {
 		const { default: registerExtension } = await import("../../src/async-subagents/index.js");
-		delete process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS;
 		const pi = new FakePi();
 		registerExtension(pi as any);
 
 		expect([...pi.tools.keys()].sort()).toEqual(["subagents"]);
-		expect([...pi.commands.keys()]).toEqual(["ultrawork", "ulw", "hyperplan", "sub-status", "sub-stop"]);
+		expect([...pi.commands.keys()]).toEqual(["ultrawork", "ulw", "hyperplan", "sub-status", "sub-open", "sub-back", "sub-where", "sub-stop"]);
 		expect([...pi.renderers.keys()]).toEqual([]);
 	});
 
@@ -477,15 +473,6 @@ Check the project conventions before approving changes.
 			{ cwd, model: { provider: "zai", id: "glm-5.2" } },
 		);
 		expect(withoutSubagents.systemPrompt).not.toContain("<available_subagent_types>");
-	});
-
-	test.serial("registers session navigation commands when sub-agent sessions are enabled", async () => {
-		const { default: registerExtension } = await import("../../src/async-subagents/index.js");
-		process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS = "1";
-		const pi = new FakePi();
-		registerExtension(pi as any);
-
-		expect([...pi.commands.keys()]).toEqual(["ultrawork", "ulw", "hyperplan", "sub-status", "sub-open", "sub-back", "sub-where", "sub-stop"]);
 	});
 
 	test.serial("session shutdown kills running sub-agent processes but preserves run state", async () => {
@@ -785,7 +772,7 @@ describe.serial("subagents tool", () => {
 		recordSubagentRun(cwd, projectRunDir, ["registered"]);
 
 		const invalid = await tool.execute("call", { action: "bad" }, undefined, undefined, { cwd });
-		expect(invalid).toEqual({ content: [{ type: "text", text: "Invalid subagents action. Use one of: spawn, status, wait, result, stop, cleanup." }], isError: true });
+		expect(invalid).toEqual({ content: [{ type: "text", text: "Invalid subagents action. Use one of: spawn, status, wait, result, send, stop, cleanup." }], isError: true });
 
 		const status = await tool.execute("call", { action: "status", runDir: "run" }, undefined, undefined, { cwd });
 		expect(status.content[0].text).toContain("[done] done exit=0");
@@ -1138,9 +1125,9 @@ setTimeout(() => {}, 1000);
 		expect(registry.agents["agent-1"].runDir).toBe(runDir);
 		expect(fs.readFileSync(path.join(runDir, "agent-1", "result.md"), "utf-8")).toBe("spawned ok");
 		expect(fs.readFileSync(path.join(runDir, "agent-1", "session_file"), "utf-8")).toBe("/tmp/fake-sub-session.jsonl");
-		expect(fs.readFileSync(path.join(runDir, "agent-1", "pi_args"), "utf-8")).toContain("--no-session");
-		expect(fs.readFileSync(path.join(runDir, "agent-1", "pi_args"), "utf-8")).not.toContain("--session-dir");
-		expect(fs.readFileSync(path.join(runDir, "agent-1", "pi_args"), "utf-8")).toContain("--thinking\nlow\n--some-flag");
+		expect((JSON.parse(fs.readFileSync(path.join(runDir, "agent-1", "launch.json"), "utf-8")).piArgs as string[]).join("\n")).toContain("--session-dir");
+		expect((JSON.parse(fs.readFileSync(path.join(runDir, "agent-1", "launch.json"), "utf-8")).piArgs as string[]).join("\n")).not.toContain("--no-session");
+		expect((JSON.parse(fs.readFileSync(path.join(runDir, "agent-1", "launch.json"), "utf-8")).piArgs as string[]).join("\n")).toContain("--thinking\nlow\n--some-flag");
 		await waitUntil(() => liveAgents.size === 0);
 
 		expect(tool.renderCall().children).toEqual([]);
@@ -1326,13 +1313,19 @@ setTimeout(() => {}, 2000);
 		expect(elapsedMs).toBeLessThan(1200);
 		expect(result.content[0].text).toContain("Scheduled 2 agent(s) in");
 		expect(result.content[0].text).toContain("maxConcurrent=1");
-		expect(fs.existsSync(path.join(result.details.runDir, "prompts", "agent-1.md"))).toBe(true);
+		// Each agent is either still queued (prompts/<id>.md) or launched
+		// (<id>/prompt.md); the queue copy is removed once launched.
+		const { hasAgentPrompt } = await import("../../src/async-subagents/lib.js");
+		expect(hasAgentPrompt(result.details.runDir, "agent-1")).toBe(true);
+		expect(hasAgentPrompt(result.details.runDir, "agent-2")).toBe(true);
 		expect(fs.existsSync(path.join(result.details.runDir, "prompts", "agent-2.md"))).toBe(true);
 		expect(liveAgents.get(result.details.runDir)?.size).toBe(2);
 
 		await waitUntil(() => liveAgents.size === 0, 2500);
 		expect(fs.readFileSync(path.join(result.details.runDir, "agent-1", "result.md"), "utf-8")).toBe("queued ok");
 		expect(fs.readFileSync(path.join(result.details.runDir, "agent-2", "result.md"), "utf-8")).toBe("queued ok");
+		expect(fs.readdirSync(path.join(result.details.runDir, "prompts"))).toEqual([]);
+		expect(fs.existsSync(path.join(result.details.runDir, "agent-1", "prompt.md"))).toBe(true);
 	});
 
 	test.serial("stops queued agents before their concurrency slot opens", async () => {
@@ -1430,7 +1423,7 @@ setTimeout(() => {}, 1000);
 		await waitUntil(() => liveAgents.size === 0);
 
 		expect(JSON.parse(fs.readFileSync(attemptFile, "utf-8"))).toEqual(["alpha/primary", "beta/quick", "beta/quick"]);
-		expect(fs.readFileSync(path.join(second.details.runDir, "agent-2", "model"), "utf-8")).toBe("beta/quick");
+		expect((JSON.parse(fs.readFileSync(path.join(second.details.runDir, "agent-2", "launch.json"), "utf-8")).task.model as string)).toBe("beta/quick");
 	});
 
 	test.serial("does not terminate sub-agent auto-retries after an error agent_end", async () => {
@@ -1526,12 +1519,12 @@ setTimeout(() => {}, 1000);
 		const runDir = result.details.runDir;
 		expect(result.content[0].text).toContain("LLM-routed 2 inferred subagent type(s).");
 		expect(routerCompleteMock).toHaveBeenCalled();
-		const scanArgs = fs.readFileSync(path.join(runDir, "scan-agent", "pi_args"), "utf-8");
+		const scanArgs = (JSON.parse(fs.readFileSync(path.join(runDir, "scan-agent", "launch.json"), "utf-8")).piArgs as string[]).join("\n");
 		expect(scanArgs).toContain("--model\nfast/scan");
 		expect(scanArgs).toContain("--thinking\noff");
 		expect(scanArgs).toContain(`--tools\nRead,Grep,${SUBAGENT_COMMON_TOOLS.join(",")}`);
 		expect(fs.readFileSync(path.join(runDir, "scan-agent", "subagent_type"), "utf-8")).toBe("scan");
-		const reviewArgs = fs.readFileSync(path.join(runDir, "review-agent", "pi_args"), "utf-8");
+		const reviewArgs = (JSON.parse(fs.readFileSync(path.join(runDir, "review-agent", "launch.json"), "utf-8")).piArgs as string[]).join("\n");
 		expect(reviewArgs).toContain("--model\nsmart/review");
 		expect(reviewArgs).toContain("--thinking\nhigh\n--temperature\n0.1");
 		expect(reviewArgs).toContain(`--tools\nRead,Grep,${SUBAGENT_COMMON_TOOLS.join(",")}`);
@@ -1573,7 +1566,7 @@ setTimeout(() => {}, 1000);
 		}, undefined, undefined, { cwd, model: { provider: "zai", id: "glm-5-turbo" } });
 
 		const runDir = result.details.runDir;
-		const piArgs = fs.readFileSync(path.join(runDir, "scan-agent", "pi_args"), "utf-8");
+		const piArgs = (JSON.parse(fs.readFileSync(path.join(runDir, "scan-agent", "launch.json"), "utf-8")).piArgs as string[]).join("\n");
 		expect(piArgs).toContain("--model\nzai/glm-5-turbo");
 		expect(piArgs).toContain("--temperature\n0");
 		expect(piArgs).toContain("--foo");
@@ -1582,7 +1575,7 @@ setTimeout(() => {}, 1000);
 		expect(piArgs).not.toContain("task/model");
 		expect(piArgs).not.toContain("env/fallback-model");
 		expect(piArgs).not.toContain("arg-model");
-		expect(fs.readFileSync(path.join(runDir, "scan-agent", "model"), "utf-8")).toBe("zai/glm-5-turbo");
+		expect((JSON.parse(fs.readFileSync(path.join(runDir, "scan-agent", "launch.json"), "utf-8")).task.model as string)).toBe("zai/glm-5-turbo");
 		await waitUntil(() => liveAgents.size === 0);
 	});
 });

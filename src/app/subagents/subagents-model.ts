@@ -55,7 +55,6 @@ export function isSubagentAgentState(value: unknown): value is SubagentAgentStat
 	if (value.pid !== undefined && typeof value.pid !== "number") return false;
 	if (value.resultLines !== undefined && typeof value.resultLines !== "number") return false;
 	if (value.stderrLines !== undefined && typeof value.stderrLines !== "number") return false;
-	if (value.eventLines !== undefined && typeof value.eventLines !== "number") return false;
 	if (value.retryCount !== undefined && typeof value.retryCount !== "number") return false;
 	if (value.lastActivity !== undefined) {
 		if (!isRecord(value.lastActivity)) return false;

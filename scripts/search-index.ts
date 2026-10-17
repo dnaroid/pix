@@ -1,5 +1,5 @@
 import { realpath } from "node:fs/promises";
-import { createHash } from "node:crypto";
+import { settingsCatalogueDigest } from "../external/pi-tools-suite/src/project-search/source-coverage.mjs";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 import { readSourcePolicy, writeSourcePolicy, SEARCH_SOURCES } from "../external/pi-tools-suite/src/project-search/source-policy.mjs";
@@ -60,7 +60,7 @@ export async function searchIndexMain(args: string[]): Promise<number> {
   const policy = await readSourcePolicy(root);
   const settings = SETTINGS_SEARCH_CATALOG.map(({ id, section, label, description, synonyms }) =>
     ({ id, section, label, description: description ?? "", synonyms: [...synonyms] }));
-  const settingsDigest = createHash("sha256").update(JSON.stringify(settings)).digest("hex");
+  const settingsDigest = settingsCatalogueDigest(settings);
   if (action === "status" || action === "check") {
     const runs = await readManualRuns(root);
     let observations: SnapshotObservations = {};

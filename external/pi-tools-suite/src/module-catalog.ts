@@ -14,7 +14,7 @@ export const PI_TOOLS_SUITE_MODULE_CATALOG: readonly PiToolsSuiteModuleCatalogEn
 	{ name: "coding-discipline", defaultEnabled: true, description: "Injects model-specific coding discipline and lookup guidance into supported main-session prompts." },
 	{ name: "ast-grep", defaultEnabled: true, description: "Adds structural AST search and apply tools for syntax-aware code inspection and edits." },
 	{ name: "async-subagents", defaultEnabled: true, description: "Runs project and bundled subagents, orchestration workflows, retries, and persistent subagent status/results." },
-	{ name: "brainstorm", defaultEnabled: true, description: "Runs a configured multi-model council with independent proposals, cross-critique, and persistent proposal documents." },
+	{ name: "brainstorm", defaultEnabled: true, description: "Ships the brainstorm skill and /brainstorm shortcut: a five-round multi-model council on persistent research sub-agents with a deterministic protocol helper." },
 	{ name: "lsp", defaultEnabled: true, description: "Enriches code mutations with Language Server diagnostics and manages shared LSP lifecycles." },
 	{ name: "comment-checker", defaultEnabled: true, description: "Detects low-value generated comments in code changes and nudges the agent to remove them." },
 	{ name: "session", defaultEnabled: true, description: "Provides session naming and bounded history recovery through one action-based tool." },

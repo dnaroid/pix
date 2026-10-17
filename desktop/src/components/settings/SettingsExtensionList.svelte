@@ -10,4 +10,4 @@
 <textarea aria-label={label} rows={4} value={text} oninput={(event) => {
   text = event.currentTarget.value;
   onChange(split(text));
-}} spellcheck="false" class="w-full resize-y rounded-md border border-input bg-panel-strong px-2 py-1 font-mono text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30"></textarea>
+}} spellcheck="false" class="w-full resize-none rounded-md border border-input bg-panel-strong px-2 py-1 font-mono text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30"></textarea>

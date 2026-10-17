@@ -31,7 +31,8 @@ import {
 import { spawnAgentWithRetry } from "../core/retry.js";
 import { recordSubagentUsage } from "../core/usage.js";
 import { recordSubagentTaskStatistics, recordSubagentStateStatistics, recordSubagentToolStatistics } from "../core/statistics.js";
-import { ensureOwnedLaunchBinaries, maySelectOwnedProvider } from "../core/owned-launch-integration.js";
+import { ensureOwnedLaunchBinaries, maySelectOwnedProvider, type OwnedLaunchBinaries } from "../core/owned-launch-integration.js";
+import { launchdAccess } from "../core/owned-launch/access-probe.js";
 import { ownedArtifactsPresentSync, ownedSlotReleasedSync } from "../core/owned-retirement.js";
 import { DEFAULT_SPAWN_WATCH_SECONDS, DEFAULT_UPDATE_INTERVAL_SECONDS, INLINE_RENDERING } from "../constants.js";
 import { formatAgentStatus } from "../format.js";
@@ -51,6 +52,7 @@ interface LaunchQueuedAgentOptions {
 	runDir: string;
 	cwd: string;
 	parentSession?: string;
+	parentSessionId?: string;
 	semaphore: Semaphore;
 	signal?: AbortSignal;
 	onResult: (result: Pick<SpawnedAgent, "pid" | "agentDir">) => void;
@@ -61,9 +63,23 @@ interface LaunchQueuedAgentOptions {
 	onRpcEvent?: (event: RpcEventRecord) => void;
 }
 
+/**
+ * Owned launch needs launchd-started jobs to reach the project and run
+ * directories. When launchd definitively cannot (TCC on external volumes, no
+ * GUI domain), Claude-provider attempts fall back to the ordinary process-group
+ * launch; an undecided probe keeps owned launch (fail closed).
+ */
+export async function resolveOwnedLaunchOptions(dirs: string[]): Promise<{ ownedBinaries: OwnedLaunchBinaries } | { ownedLaunchUnavailable: true }> {
+	if (process.platform === "darwin" && await launchdAccess(dirs) === "denied") {
+		suiteDiagnostics.report("warn", "subagents", "owned-launch-unavailable", dirs[0]);
+		return { ownedLaunchUnavailable: true };
+	}
+	return { ownedBinaries: await ensureOwnedLaunchBinaries() };
+}
+
 const PROJECT_SEMAPHORES = new Map<string, Semaphore>();
 
-function getProjectSemaphore(cwd: string, limit: number): Semaphore {
+export function getProjectSemaphore(cwd: string, limit: number): Semaphore {
 	const key = path.resolve(cwd);
 	const existing = PROJECT_SEMAPHORES.get(key);
 	if (existing && existing.limit === normalizedLimit(limit)) return existing;
@@ -78,7 +94,7 @@ function normalizedLimit(limit: number): number {
 }
 
 async function launchQueuedAgent(options: LaunchQueuedAgentOptions): Promise<void> {
-	const { resolved, runDir, cwd, parentSession, semaphore, signal, onResult, onComplete, onCancelled, onLaunchError, onUpdate, onRpcEvent } = options;
+	const { resolved, runDir, cwd, parentSession, parentSessionId, semaphore, signal, onResult, onComplete, onCancelled, onLaunchError, onUpdate, onRpcEvent } = options;
 	let slotAcquired = false;
 	try {
 		await semaphore.acquire(signal);
@@ -103,10 +119,11 @@ async function launchQueuedAgent(options: LaunchQueuedAgentOptions): Promise<voi
 
 		const spawnOptions = {
 			parentSession,
+			parentSessionId,
 			maxResultBytes: resolved.maxResultBytes,
 			timeoutMs: resolved.timeoutMs,
 			...(maySelectOwnedProvider(resolved.task, resolved.extraArgs, resolved.fallbackModels)
-				? { ownedBinaries: await ensureOwnedLaunchBinaries() } : {}),
+				? await resolveOwnedLaunchOptions([cwd, runDir]) : {}),
 		};
 		if (signal?.aborted) throw new Error("Aborted");
 		if (resolved.retry.maxRetries > 0 || resolved.fallbackModels.length > 0) {
@@ -333,6 +350,7 @@ export function registerSpawnTool(
 							runDir,
 							cwd: ctx.cwd,
 							parentSession,
+							parentSessionId: parentSessionManager?.getSessionId?.() || undefined,
 							semaphore,
 							signal: signal ?? undefined,
 							onResult: (result) => results.push({ id: task.id, pid: result.pid, agentDir: result.agentDir }),

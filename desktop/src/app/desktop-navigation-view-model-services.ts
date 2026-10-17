@@ -14,6 +14,7 @@ export function createDesktopNavigationViewModelServices(options: DesktopViewMod
     closeWorkbenchTab: options.workbenchGit.workbench.close,
     openSessionStartTab: options.transitions.draft.openStartTab,
     selectorOpen: () => options.sessions.tabs.selectorOpen,
+    // SessionSelector hides sub-agent viewers by default and owns the show toggle.
     sessions: () => options.sessions.catalog.sessions,
     activeSessionId: () => options.state.sessionId,
     activeTitle: () => options.presentation.activeTitle,
@@ -51,7 +52,11 @@ export function createDesktopNavigationViewModelServices(options: DesktopViewMod
     preview: options.project.preview,
     attachments: options.interactions.attachments,
     sessionTabs: options.transitions.sessionTabs,
+    sessions: () => options.sessions.catalog.sessions,
+    refreshSessions: () => options.sessions.catalog.refresh(),
+    reportError: (error) => options.errors.report(error),
     workspaceController: options.workspaceController,
+    openProjectSettings: options.openProjectSettings,
   });
 
   return { titlebar, sidebar };

@@ -54,5 +54,5 @@ Decision: [0012 — Isolate suite module loading](../docs/decisions/0012-isolate
 Run suite typecheck and `bun test test/module-loader.test.ts`. Deterministic tests
 exercise a real parsing failure, rejected asynchronous factories, discarded
 registrations and bus events, stale APIs, unsubscribe, dynamic registration and
-SDK whole-extension isolation. These tests do not certify unfinished brainstorm
+SDK whole-extension isolation. These tests do not certify brainstorm skill
 behavior or replace real UI startup verification.

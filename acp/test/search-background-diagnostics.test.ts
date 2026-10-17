@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { classifyIndexFailure, createBackgroundIndexFailureLogger, isExpectedIndexCancellation } from "../src/search/search-logging.js";
+import { classifyIndexFailure, classifyIndexFailureReason, createBackgroundIndexFailureLogger, createSourceIndexFailureLogger, isExpectedIndexCancellation } from "../src/search/search-logging.js";
 import { SessionChunkSync } from "../src/search/session-chunk-sync.js";
 
 test("background index failure diagnostics coalesce repeats without leaking errors", async () => {
@@ -134,4 +134,36 @@ test("background indexing backs off failed idle retries, then resets after a fre
     await sync.dispose();
     t.mock.timers.reset();
   }
+});
+
+test("settings/task source failures log a fixed reason, never the message", async () => {
+  let now = 1000;
+  const rows: unknown[][] = [];
+  const log = createSourceIndexFailureLogger({ now: () => now, sink: () => (...args: unknown[]) => { rows.push(args); } });
+  log("/project", "tasks", new Error("Search index busy; update deferred"));
+  log("/project", "tasks", new Error("Search index busy; update deferred"));
+  log("/project", "tasks", new Error("/private/path secret token"));
+  log("/project", "tasks", undefined, "watcher_failed");
+  log("/project", "tasks", new Error("Search source selection changed"));
+  log("/project", "sessions" as never, new Error("x"));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(rows.map(row => (row[2] as Record<string, unknown>).reason), ["busy", "other", "watcher_failed"]);
+  assert.equal(rows[0]![1], "search:source-index-failed");
+  assert.deepEqual(rows[0]![3], { project: "/project", module: "search.index" });
+  assert.ok(!JSON.stringify(rows).includes("secret"));
+  now += 300_001;
+  log("/project", "tasks", new Error("Search index busy; update deferred"));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal((rows.at(-1)![2] as Record<string, unknown>).suppressed, 1);
+});
+
+test("source failure reason classification covers known ACP/suite causes", () => {
+  assert.equal(classifyIndexFailureReason(Object.assign(new Error("x"), { code: "SEARCH_WORK_NEEDS_CONTINUE" })), "needs_continue");
+  assert.equal(classifyIndexFailureReason(Object.assign(new Error("x"), { code: "SQLITE_BUSY" })), "locked");
+  assert.equal(classifyIndexFailureReason(new Error("database is locked")), "locked");
+  assert.equal(classifyIndexFailureReason(new Error("Incompatible embedding cache; explicit rebuild required. Local search remains available")), "incompatible");
+  assert.equal(classifyIndexFailureReason(new Error("Search authorization revoked")), "authorization_changed");
+  assert.equal(classifyIndexFailureReason(new Error("Semantic task search unavailable; local task search remains available")), "provider_unavailable");
+  assert.equal(classifyIndexFailureReason(new Error("Invalid task semantic payload")), "corpus_invalid");
+  assert.equal(classifyIndexFailureReason("string"), "other");
 });

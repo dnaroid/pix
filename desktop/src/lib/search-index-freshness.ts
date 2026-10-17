@@ -31,8 +31,8 @@ export function snapshotFreshness(receipt?: SnapshotReceipt, observation?: Snaps
   if (observation.indexPresent && typeof observation.matchesIndex === "boolean") {
     return { state: observation.matchesIndex ? "current" : "changed", coverage, checkedAt: observation.checkedAt,
       detail: (observation.matchesIndex
-        ? "Local source content matches the indexed file manifest. Unchanged file identities reuse published hashes; changed candidates are hashed locally."
-        : "Local source content differs from the indexed file manifest. Run Index/Continue to refresh coverage.")
+        ? "Current source content and embedding configuration match what the index records as covered (file manifest for Code/Knowledge; a completed indexing pass, manual or background, for other sources)."
+        : "Current source content or embedding configuration is not recorded as covered by the index. Background indexing or Index/Continue refreshes coverage.")
         + " This bounded check is not a content audit or proof of semantic coverage. Last-pass coverage remains historical." };
   }
   if (!receipt) return { ...unchecked, state: "untracked", detail: "Metadata read successfully. No recorded manual pass is available for comparison; this does not mean the cache is empty or search is broken." };

@@ -576,7 +576,7 @@ function collectSubagentSessionArtifacts(projectDir) {
     for (const agentId of safeReaddir(runDir)) {
       const agentDir = path.join(runDir, agentId);
       if (!safeIsDirectory(agentDir)) continue;
-      const sessionDir = readOptional(path.join(agentDir, "session_dir")).trim();
+      const sessionDir = safeIsDirectory(path.join(agentDir, "sessions")) ? path.join(agentDir, "sessions") : "";
       const sessionFile = readOptional(path.join(agentDir, "session_file")).trim();
       artifacts.push({
         id: agentId,
@@ -720,7 +720,7 @@ function analyzeSubagentRuns(projectDir) {
     for (const agentId of safeReaddir(runDir)) {
       const agentDir = path.join(runDir, agentId);
       if (!safeIsDirectory(agentDir)) continue;
-      const sessionDir = readOptional(path.join(agentDir, "session_dir")).trim();
+      const sessionDir = safeIsDirectory(path.join(agentDir, "sessions")) ? path.join(agentDir, "sessions") : "";
       const sessionFile = readOptional(path.join(agentDir, "session_file")).trim();
       const result = readOptional(path.join(agentDir, "result.md"));
       const stderr = readOptional(path.join(agentDir, "stderr.log"));

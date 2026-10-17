@@ -32,7 +32,7 @@ describe("inline reuse of universal search", () => {
     expect(client.searchQuery).not.toHaveBeenCalled();
   });
   it("previews authored settings with global BM25 synonyms and partial Russian terms, without config values", () => {
-    expect(previewInlineSearch("settings", "авто-пополн").some(hit => hit.fieldId === "autocomplete-model")).toBe(true);
+    expect(previewInlineSearch("settings", "авто-пополн").some(hit => hit.fieldId === "feature-models")).toBe(true);
     expect(previewInlineSearch("settings", "AGENTS").some(hit => hit.fieldId === "ignore-context-files")).toBe(true);
     expect(previewInlineSearch("settings", "unlistedcredentialvalueX7")).toEqual([]);
     expect(previewInlineSearch("settings", " ")).toEqual([]);
@@ -48,14 +48,14 @@ describe("inline reuse of universal search", () => {
   it("submits the same local ACP source and authored catalog as global search without IDX/Auto/RAG", async () => {
     const client: InlineSearchClient = { searchQuery: vi.fn(async request => ({ status,
       results: request.types[0] === "settings"
-        ? [{ kind: "settings" as const, id: "settings:autocomplete-model", title: "Autocomplete model", snippet: "", score: 0.9, fieldId: "autocomplete-model", section: "desktop-assistant" }]
+        ? [{ kind: "settings" as const, id: "settings:feature-models", title: "Feature models", snippet: "", score: 0.9, fieldId: "feature-models", section: "desktop-assistant" }]
         : [{ kind: "sessions" as const, id: "sessions:1", sessionId: "1", title: "Unrelated title", snippet: "First: interview", boundaryMatch: true, score: 0.7 }],
     })) };
     const signal = new AbortController().signal;
     const settings = await queryInlineSearch("settings", client, "/workspace", "авто-пополнение", signal);
-    expect(settings.results[0]).toMatchObject({ kind: "settings", fieldId: "autocomplete-model" });
+    expect(settings.results[0]).toMatchObject({ kind: "settings", fieldId: "feature-models" });
     expect(client.searchQuery).toHaveBeenCalledWith(expect.objectContaining({ cwd: "/workspace", query: "авто-пополнение", types: ["settings"], settings: expect.arrayContaining([
-      expect.objectContaining({ id: "autocomplete-model", synonyms: expect.arrayContaining(["автодополнение"]) }),
+      expect.objectContaining({ id: "feature-models", synonyms: expect.arrayContaining(["автодополнение"]) }),
     ]) }), signal);
     const sessions = await queryInlineSearch("sessions", client, "/workspace", "interview", signal);
     expect(sessions.results[0]).toMatchObject({ kind: "sessions", sessionId: "1", boundaryMatch: true });

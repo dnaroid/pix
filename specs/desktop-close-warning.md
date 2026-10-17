@@ -15,8 +15,6 @@ status: active
   attempts for that session reuse the pending operation instead of opening another
   dialog. Dialog errors cancel the close and report an error. A workspace/client
   change while awaiting consent invalidates the close.
-- Council participant tabs remain view-only: dismissing one does not stop its
-  council-owned runtime and does not require stop-run consent.
 - Closing a native window with active conversations warns with **Close window**
   and **Cancel**. Closing an idle window does not warn for runs in another window.
 - Application Quit, including macOS Cmd+Q, warns with **Quit Pix** and **Cancel**

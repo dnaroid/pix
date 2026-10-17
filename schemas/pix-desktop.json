@@ -322,6 +322,11 @@
             }
           ],
           "description": "Model thinking budget level."
+        },
+        "intentModelRef": {
+          "type": "string",
+          "default": "",
+          "description": "OpenRouter model (openrouter/<id>) for the Universal Search Auto intent and quick-task type classifiers. Empty uses OpenRouter Jev Latest."
         }
       },
       "description": "Desktop universal search: centralized semantic provider status and independent RAG generation preferences."
@@ -354,7 +359,7 @@
         },
         "model": {
           "type": "string",
-          "default": "openai-codex/gpt-6-luna",
+          "default": "",
           "minLength": 3,
           "maxLength": 256,
           "pattern": "^[^\\s/]+/[^\\s]+$",
@@ -422,6 +427,24 @@
     "desktop": {
       "type": "object",
       "properties": {
+        "theme": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "system"
+            },
+            {
+              "type": "string",
+              "const": "light"
+            },
+            {
+              "type": "string",
+              "const": "dark"
+            }
+          ],
+          "default": "system",
+          "description": "Desktop color theme. 'system' follows the macOS appearance; 'light' or 'dark' override it for all Pix windows. Global user preference only."
+        },
         "logPanelEnabled": {
           "type": "boolean",
           "default": false,

@@ -10,6 +10,7 @@ export type SidebarIndicatorTab =
   | "registry"
   | "scripts"
   | "search"
+  | "usage"
   | "lsp"
   | "logs"
   | "settings";

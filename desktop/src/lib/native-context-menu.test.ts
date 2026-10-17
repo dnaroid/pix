@@ -124,6 +124,16 @@ describe("native desktop context menu commands", () => {
     expect(invoke).toHaveBeenCalledExactlyOnceWith("preview_file_action", { path: "/project/a/my file.md", action: "reveal" });
     expect(labels({ kind: "link", hasSelection: false, fileLinkPath: "~/.config/pi/pix.jsonc" })).toEqual(["Reveal in Finder"]);
   });
+  it("offers Open in Browser only for HTML file links", async () => {
+    const commands = items({ kind: "link", hasSelection: false, fileLinkPath: "/tmp/report page.HTML" });
+    expect(commands.map((item) => "text" in item && item.text)).toEqual(["Open in Browser", "Reveal in Finder"]);
+    const browser = commands[0];
+    if (browser && "action" in browser) browser.action?.("ignored");
+    await Promise.resolve();
+    expect(invoke).toHaveBeenCalledExactlyOnceWith("preview_file_action", { path: "/tmp/report page.HTML", action: "browser" });
+    expect(labels({ kind: "link", hasSelection: false, fileLinkPath: "/tmp/page.htm" })).toContain("Open in Browser");
+    expect(labels({ kind: "link", hasSelection: false, fileLinkPath: "/tmp/page.html.md" })).not.toContain("Open in Browser");
+  });
   it("disables file actions without a local path and never runs stale or detached actions", () => {
     const unavailable = items({ kind: "file", hasSelection: false });
     expect(unavailable).toHaveLength(3);

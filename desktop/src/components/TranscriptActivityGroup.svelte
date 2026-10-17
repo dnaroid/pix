@@ -21,7 +21,7 @@
   let {
     item, nowMs, gapClass = "", onLoadToolResult, onOpenAttachment, onPrepareAttachment,
     onValidateProjectFile, onValidateLocalFile, onOpenProjectFile,
-    onResolveProjectMedia, onOpenLocalFile, onResolveLocalMedia,
+    onResolveProjectMedia, onOpenLocalFile, onResolveLocalMedia, onOpenSubagentSession,
   }: {
     item: ActivityGroupItem;
     /** Shared pane clock, supplied only to live groups. */
@@ -133,7 +133,7 @@
                   {/if}
                   <AttachmentGrid attachments={tool.attachments} variant="tool" onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
                   {#if hasToolInput(tool) || (!tool.resultLoading && (tool.content || tool.diffs.length > 0))}
-                    <ToolResult {tool} {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />
+                    <ToolResult {tool} {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} {onOpenSubagentSession} />
                   {/if}
                   </div>
                 {/if}

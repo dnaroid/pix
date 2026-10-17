@@ -12,6 +12,7 @@ enum FileAction {
     Copy,
     Open,
     Reveal,
+    Browser,
 }
 
 impl TryFrom<&str> for FileAction {
@@ -22,6 +23,7 @@ impl TryFrom<&str> for FileAction {
             "copy" => Ok(Self::Copy),
             "open" => Ok(Self::Open),
             "reveal" => Ok(Self::Reveal),
+            "browser" => Ok(Self::Browser),
             _ => Err(format!("unsupported preview file action: {value}")),
         }
     }
@@ -67,6 +69,12 @@ fn perform_macos_action(
             .opener()
             .open_path(path.to_string_lossy(), None::<&str>)
             .map_err(|error| format!("failed to open preview file: {error}")),
+        FileAction::Browser => {
+            if !super::project_browser::is_html_file(&path) {
+                return Err("browser opening requires an HTML file".to_owned());
+            }
+            super::project_browser::open_html_in_default_browser(&path)
+        }
         FileAction::Reveal => {
             let status = Command::new("/usr/bin/open")
                 .arg("-R")
@@ -129,6 +137,7 @@ mod tests {
         assert_eq!(FileAction::try_from("copy"), Ok(FileAction::Copy));
         assert_eq!(FileAction::try_from("open"), Ok(FileAction::Open));
         assert_eq!(FileAction::try_from("reveal"), Ok(FileAction::Reveal));
+        assert_eq!(FileAction::try_from("browser"), Ok(FileAction::Browser));
         assert!(FileAction::try_from("copy;open").is_err());
         assert!(FileAction::try_from("COPY").is_err());
     }

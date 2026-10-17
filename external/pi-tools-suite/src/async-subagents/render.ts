@@ -43,7 +43,6 @@ function appendDetailLine(text: string, prefix: string, line: string, theme: any
 function outputLineSummary(agent: AgentState): string | undefined {
 	const outputLines = (agent.resultLines ?? 0) + (agent.stderrLines ?? 0);
 	if (outputLines > 0) return `${plural(outputLines, "output line")}`;
-	if (agent.eventLines !== undefined) return `${plural(agent.eventLines, "event line")}`;
 	return undefined;
 }
 

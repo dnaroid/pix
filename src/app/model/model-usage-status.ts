@@ -669,6 +669,26 @@ async function readOpenAIAuth(): Promise<OpenAIAuthData | undefined> {
 	return authData.openai;
 }
 
+/**
+ * Request headers for ChatGPT/Codex `wham` usage endpoints from the same
+ * subscription login as the account usage report (refreshed via Pi core when
+ * expired). `undefined` when no OAuth login exists; throws when refresh fails.
+ */
+export async function resolveOpenAIUsageHeaders(): Promise<Record<string, string> | undefined> {
+	let authData = await readOpenAIAuth();
+	if (!authData || authData.type !== "oauth" || !authData.access) return undefined;
+	if (isExpired(authData)) authData = await refreshOpenAICodexAuth();
+	if (!authData.access) throw new Error("OpenAI Codex OAuth refresh returned no access token");
+	return { ...openAIRequestHeaders(authData.access), Accept: "application/json" };
+}
+
+/** Request headers for the Z.ai monitor API, or `undefined` without a coding-plan key. */
+export async function resolveZaiUsageHeaders(): Promise<Record<string, string> | undefined> {
+	const apiKey = await readZhipuApiKey();
+	if (!apiKey) return undefined;
+	return { Authorization: apiKey, "Content-Type": "application/json", "Accept-Language": "en-US,en", "User-Agent": "pi-ui-extend/0.1.0" };
+}
+
 function accountLabelFromOpenAIAuth(authData: OpenAIAuthData): string {
 	return authData.email || (authData.access ? openAIAccountEmailFromJwt(authData.access) : undefined) || "OpenAI";
 }

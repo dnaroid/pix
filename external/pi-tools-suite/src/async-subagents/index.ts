@@ -43,6 +43,9 @@ function isTerminalAgentStatus(status: AgentState["status"]): boolean {
 const SUBAGENTS_LIVE_COUNT_EVENT = "pi-tools-suite:async-subagents:live-count";
 const SUBAGENTS_LIVE_STATE_EVENT = "pi-tools-suite:async-subagents:live-state";
 export const SUBAGENTS_CATALOG_STATE_EVENT = "pi-tools-suite:async-subagents:catalog";
+/** Session-manager-scoped read-only bridge: hosts defer a requested Pause
+ * while this session still owns live (or terminal-but-undelivered) sub-agents. */
+const PIX_SUBAGENTS_SESSION_LIVE_SYMBOL = Symbol.for("pix.subagents.session-live");
 const SESSION_SHUTDOWN_KILL_GRACE_MS = 500;
 const COMPLETION_WATCH_INTERVAL_MS = 2_000;
 
@@ -70,7 +73,7 @@ function createLiveStatePayload(
 		const matchingLiveAgents = [...liveRun.values()].filter((agent) => agentMatchesSession(agent, sessionFile));
 		if (matchingLiveAgents.length === 0) continue;
 		const agentIds = matchingLiveAgents.map((agent) => agent.agentId);
-		const state = getRunState(runDir, agentIds, { includeLineCounts: false, checkRpcPromptFailure: false });
+		const state = getRunState(runDir, agentIds, { includeLineCounts: false });
 		const liveAgentsById = new Map(matchingLiveAgents.map((agent) => [agent.agentId, agent]));
 		const activeAgents = state.agents
 			.filter((agent) => !isTerminalAgentStatus(agent.status))
@@ -175,7 +178,6 @@ export default function (pi: ExtensionAPI) {
 			const states = new Map(
 				getRunState(runDir, [...liveRun.keys()], {
 					includeLineCounts: false,
-					checkRpcPromptFailure: false,
 				}).agents.map((agent) => [agent.id, agent]),
 			);
 			for (const agentId of [...liveRun.keys()]) {
@@ -197,7 +199,7 @@ export default function (pi: ExtensionAPI) {
 				const message = buildAgentCompletionNotification({
 					agentId, runDir, state,
 					runAgents: getRunState(runDir, undefined, {
-						includeLineCounts: false, checkRpcPromptFailure: false,
+						includeLineCounts: false,
 					}).agents,
 				});
 				if (boundaryMessages) boundaryMessages.push(message);
@@ -215,6 +217,31 @@ export default function (pi: ExtensionAPI) {
 		// Terminal-but-undelivered entries also need a watcher (e.g. completion
 		// during another extension's asynchronous settlement handler).
 		return [...liveAgents.values()].some((run) => [...run.values()].some((agent) => agentMatchesSession(agent, currentSessionFile)));
+	}
+
+	let publishedLiveManager: Record<symbol, unknown> | undefined;
+	let publishedLiveGetter: (() => boolean) | undefined;
+
+	function publishSessionLiveState(ctx: ExtensionContext): void {
+		clearSessionLiveState();
+		const manager = ctx.sessionManager as unknown as Record<symbol, unknown> | undefined;
+		if (!manager) return;
+		// Bind to the session file at publication: a shared runtime may switch
+		// sessions later and must not report another session's agents.
+		const sessionFile = sessionFileFromContext(ctx);
+		const getter = () => [...liveAgents.values()].some((run) =>
+			[...run.values()].some((agent) => agentMatchesSession(agent, sessionFile)));
+		manager[PIX_SUBAGENTS_SESSION_LIVE_SYMBOL] = getter;
+		publishedLiveManager = manager;
+		publishedLiveGetter = getter;
+	}
+
+	function clearSessionLiveState(): void {
+		if (publishedLiveManager && publishedLiveManager[PIX_SUBAGENTS_SESSION_LIVE_SYMBOL] === publishedLiveGetter) {
+			delete publishedLiveManager[PIX_SUBAGENTS_SESSION_LIVE_SYMBOL];
+		}
+		publishedLiveManager = undefined;
+		publishedLiveGetter = undefined;
 	}
 
 	function updateCompletionWatcher(): void {
@@ -256,6 +283,7 @@ export default function (pi: ExtensionAPI) {
 			sawAutoUltraworkCandidate = false;
 			currentSessionFile = sessionFileFromContext(ctx);
 			currentSessionStateContext = ctx;
+			publishSessionLiveState(ctx);
 			publishSubagentCatalogState(ctx);
 			subagentOverlay.restoreRunningAgents(ctx.cwd, currentSessionFile);
 			refreshSubagentOverlay();
@@ -353,6 +381,7 @@ export default function (pi: ExtensionAPI) {
 		try {
 			shuttingDown = true;
 			completionReceipts.clear();
+			clearSessionLiveState();
 			clearSubagentsNativeWidget(ctx);
 			subagentOverlay.dispose();
 			if (completionWatchTimer) {

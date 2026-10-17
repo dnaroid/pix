@@ -205,12 +205,12 @@ const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "ma
 type ConfigThinkingLevel = (typeof THINKING_LEVELS)[number];
 
 const DEFAULT_PROMPT_ENHANCER: PromptEnhancerConfig = {
-	modelRef: "openai-codex/gpt-6-luna",
+	modelRef: "",
 	fallbackModels: [],
 };
 
 const DEFAULT_AUTOCOMPLETE: AutocompleteConfig = {
-	modelRef: "zai/glm-5-turbo",
+	modelRef: "",
 	fallbackModels: [],
 	debounceMs: 350,
 	timeoutMs: 3000,
@@ -254,12 +254,7 @@ const DEFAULT_MODEL_ROUTING: ModelRoutingConfig = {
 };
 
 const DEFAULT_MODEL_COLORS: ModelColorsConfig = {
-	rules: {
-		"zai/*": "success",
-		"openai-codex/*": "modelOpenAI",
-		"antigravity/*": "warning",
-		"antigravity/antigravity-claude-*": "error",
-	},
+	rules: {},
 };
 
 const DEFAULT_DICTATION: DictationConfig = {

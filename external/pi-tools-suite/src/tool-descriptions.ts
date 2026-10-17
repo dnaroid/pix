@@ -71,7 +71,8 @@ export function asyncSubagentToolDescriptions(_options: ToolDescriptionSetOption
 				SUBAGENT_TYPE_SELECTION_GUIDANCE,
 				"Before completing an implementation task, use the available knowledge-auditor to update affected documentation against the final behavior and exact task-changed paths. Obtain its result and handle substantial or ambiguous discrepancies in the parent. No knowledge dirty checks, acknowledgment or exhaustive dependency review is required.",
 				"Use for broad independent tracks, review axes, or hypotheses; repository search does not replace scoped delegation.",
-				"Use action=spawn/status/wait/result/stop/cleanup; .pi/subagents tracks runs so status/wait/stop can omit the latest runDir and result can resolve by agentId. Parent sessions receive completion/failure follow-ups, so spawn can return without polling.",
+				"Use action=spawn/status/wait/result/send/stop/cleanup; .pi/subagents tracks runs so status/wait/stop can omit the latest runDir and result/send can resolve by agentId. Parent sessions receive completion/failure follow-ups, so spawn can return without polling.",
+				"Use action=send with agentId and message to continue a sub-agent instead of spawning a fresh one when its context matters: a running agent in this session gets the message live (mode followUp, or steer to redirect), a finished agent resumes its persisted session as a new turn.",
 				"Results are compact with artifact links. Agents run isolated pi processes with extensions disabled to prevent recursive spawning; spawn/task timeoutSeconds can override the default 3h watchdog, project concurrency queues excess agents, and retry backoff/fallback models/Antigravity account rotation are config-driven.",
 			].join(" "),
 			promptSnippet:
@@ -122,6 +123,16 @@ export function asyncSubagentToolDescriptions(_options: ToolDescriptionSetOption
 			name: "async_subagents_stop",
 			label: "Subagent Stop Action",
 			description: "Stop running async sub-agents in a run directory when the user asks to cancel/stop/kill them. Sends SIGTERM by default or SIGKILL with force=true.",
+		},
+		sendAction: {
+			name: "async_subagents_send",
+			label: "Subagent Send Action",
+			description: [
+				"Send a message to one sub-agent by agentId.",
+				"A running agent owned by this session receives it live (mode followUp after its current turn, or steer to interrupt).",
+				"A finished agent resumes its persisted session in a new turn; previous turn artifacts move to turns/<n>/.",
+				"The result arrives as a completion follow-up.",
+			].join(" "),
 		},
 		cleanupAction: {
 			name: "async_subagents_cleanup",

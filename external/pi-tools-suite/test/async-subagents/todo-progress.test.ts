@@ -48,8 +48,10 @@ test("latest atomic snapshot survives missing/truncated logs and clear replaces 
 	expect(getAgentState(run, "worker", { includeLineCounts: false })?.todoProgress).toEqual({ completed: 1, total: 5 });
 	writeTodoProgress(dir, { completed: 2, total: 6 });
 	expect(readTodoProgress(dir)).toEqual({ completed: 2, total: 6 });
+	// A cleared plan removes the snapshot instead of persisting 0/0.
 	writeTodoProgress(dir, { completed: 0, total: 0 });
-	expect(readTodoProgress(dir)).toEqual({ completed: 0, total: 0 });
+	expect(readTodoProgress(dir)).toBeUndefined();
+	expect(fs.existsSync(path.join(dir, "todo-progress.json"))).toBe(false);
 	for (const invalid of ['{"completed":2,"total":1}', '{"completed":-1,"total":5}',
 		'{"completed":0.5,"total":5}', '{"completed":0,"total":9007199254740992}', "{", " ".repeat(257)]) {
 		fs.writeFileSync(path.join(dir, "todo-progress.json"), invalid);

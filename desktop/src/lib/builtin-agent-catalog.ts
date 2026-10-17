@@ -6,6 +6,8 @@ export interface BuiltinAgentCatalogEntry {
   readonly description?: string;
   /** Current bundled primary; automatic/frontier roles have no per-role picker. */
   readonly defaultModel?: string;
+  /** True for explicit-model roles; frontier-selecting roles have no per-role picker. */
+  readonly selectable: boolean;
 }
 
 const BUILTIN_AGENT_SOURCES = import.meta.glob(
@@ -25,6 +27,7 @@ export const BUILTIN_AGENT_CATALOG: readonly BuiltinAgentCatalogEntry[] = Object
     icon: frontmatterScalar(source, "icon"),
     description: frontmatterScalar(source, "description"),
     defaultModel: builtinAgentDefaultModel(source),
+    selectable: frontmatterScalar(source, "modelSelection") !== "frontier",
   }] : [])
   .sort((left, right) => left.name.localeCompare(right.name));
 

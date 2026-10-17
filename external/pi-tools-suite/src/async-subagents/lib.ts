@@ -66,7 +66,7 @@ export {
 	SUBAGENT_REGISTRY_FILE,
 } from "./core/registry.js";
 export type { SubagentRegistry, SubagentRegistryAgent, SubagentRegistryRun } from "./core/registry.js";
-export { DEFAULT_AGENT_TIMEOUT_MS, shouldPersistSubagentSessions, spawnAgent } from "./core/spawn.js";
+export { DEFAULT_AGENT_TIMEOUT_MS, spawnAgent } from "./core/spawn.js";
 export { getAgentState, getRunState, readResult, waitForAgents } from "./core/state.js";
 export { stopAgents, validateStopSignal } from "./core/stop.js";
 export type { StopAgentResult, StopSignal } from "./core/stop.js";
@@ -77,7 +77,7 @@ export { spawnAgentWithRetry } from "./core/retry.js";
 export type { RetryableSpawnOptions } from "./core/retry.js";
 export { buildStructuredResult, readStructuredResult, writeStructuredResult } from "./core/structured-result.js";
 export type { WriteStructuredResultOptions } from "./core/structured-result.js";
-export { DEFAULT_DEBUG_EVENTS_LOG_MAX_BYTES, DEFAULT_EVENTS_LOG_MAX_BYTES, DEFAULT_RPC_EVENT_LINE_MAX_CHARS, DEFAULT_STDERR_LOG_MAX_BYTES, resolveSubagentLogLimits } from "./core/log-limits.js";
+export { DEFAULT_RPC_EVENT_LINE_MAX_CHARS, DEFAULT_STDERR_LOG_MAX_BYTES, resolveSubagentLogLimits } from "./core/log-limits.js";
 export type { BoundedFileWriter, DeferredFileWriter, SubagentLogLimits } from "./core/log-limits.js";
 export {
 	ensureSessionFileLink,

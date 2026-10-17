@@ -14,6 +14,7 @@ import { DEFAULT_PIX_CONFIG_JSONC } from "../../default-pix-config.js";
 import { logPixEvent } from "../logger.js";
 import { logOperationFailure } from "../logging/operation-errors.js";
 import { withCliDiagnostics } from "./diagnostics.js";
+import { createReadlineIo, listAvailableModels, modelsAlreadyConfigured, runModelWizard } from "../../setup/model-wizard.js";
 
 type PixInstallTestDeps = {
 	existsSync: typeof existsSync;
@@ -48,6 +49,7 @@ export function setPixInstallTestDeps(overrides?: Partial<PixInstallTestDeps>): 
 export type PixInstallCliOptions = {
 	checkOnly: boolean;
 	help: boolean;
+	models: boolean;
 };
 
 export type PixInstallCliContext = {
@@ -166,8 +168,8 @@ function formatProviderSetupStep(providerAuthConfigured: boolean, opencodeDetect
 }
 
 export function pixInstallUsage(): string {
-	return `Usage: pix install [--check]
-       pix setup [--check]
+	return `Usage: pix install [--check] [--models]
+       pix setup [--check] [--models]
 
 Check and install Pix runtime helpers for this user.
 
@@ -181,14 +183,20 @@ What it checks:
 
 Options:
   --check    Only report missing helpers, do not install
+  --models   Re-run the model setup wizard even if models are configured
   -h, --help Show this help`;
 }
 
 export function parsePixInstallArgs(argv: readonly string[]): PixInstallCliOptions {
 	let checkOnly = false;
 	let help = false;
+	let models = false;
 
 	for (const arg of argv) {
+		if (arg === "--models") {
+			models = true;
+			continue;
+		}
 		if (arg === "--check") {
 			checkOnly = true;
 			continue;
@@ -200,7 +208,7 @@ export function parsePixInstallArgs(argv: readonly string[]): PixInstallCliOptio
 		throw new Error(`Unknown pix install argument: ${arg}\n\n${pixInstallUsage()}`);
 	}
 
-	return { checkOnly, help };
+	return { checkOnly, help, models };
 }
 
 export async function runPixInstallCli(argv: readonly string[] = process.argv.slice(2), context: PixInstallCliContext = {}): Promise<number> {
@@ -274,6 +282,24 @@ async function runPixInstall(argv: readonly string[], context: PixInstallCliCont
 			logOperationFailure("install:setup-failed", error, { project: null, module: "cli.install" });
 			console.error(`✗ Failed to create setup config: ${errorMessage(error)}`);
 			failures += 1;
+		}
+	}
+
+	if (!options.checkOnly && !options.models && modelsAlreadyConfigured(homeDir)) {
+		console.log("✓ Models already configured; run `pix install --models` to change them.");
+	} else if (!options.checkOnly && !process.stdin.isTTY) {
+		console.log("○ Model setup skipped (non-interactive). Run `pix install` in a terminal to choose models.");
+	} else if (!options.checkOnly) {
+		const io = createReadlineIo();
+		try {
+			const result = await runModelWizard({ io, models: await listAvailableModels(), homeDir, });
+			if ("skipped" in result) console.log(`○ Model setup skipped: ${result.skipped}`);
+			else for (const path of result.written) console.log(`✓ Configured models in ${path}`);
+		} catch (error) {
+			logOperationFailure("install:model-wizard-failed", error, { project: null, module: "cli.install" });
+			console.warn(`! Model setup failed: ${errorMessage(error)}`);
+		} finally {
+			io.close();
 		}
 	}
 

@@ -5,6 +5,7 @@
   "windows": ["main", "project-*"],
   "permissions": [
     "core:default",
+    "core:app:allow-set-app-theme",
     "core:window:allow-start-dragging",
     "core:window:allow-internal-toggle-maximize",
     "core:webview:allow-create-webview-window",

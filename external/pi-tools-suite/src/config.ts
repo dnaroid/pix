@@ -6,7 +6,6 @@ import { parse as parseJsonc } from "jsonc-parser";
 import { defaultFrontierConfig, normalizeFrontierModels, type FrontierModelEntry } from "./async-subagents/core/frontier-models.js";
 import { DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC } from "./default-pi-tools-suite-config.js";
 import { PI_TOOLS_SUITE_MODULE_CATALOG } from "./module-catalog.js";
-import { defaultBrainstormConfig, mergeBrainstormConfig, type BrainstormConfig } from "./brainstorm/config.js";
 import { isTodoThinkingPolicy, type TodoThinkingPolicy } from "./todo/thinking-policy.js";
 export type { TodoThinkingLevel, TodoThinkingPolicy } from "./todo/thinking-policy.js";
 
@@ -24,7 +23,6 @@ export interface PiToolsSuiteConfig {
 	lookupFallbackModels: string[];
 	/** Ordered frontier models used by frontier-selecting sub-agent roles (oracle, reviews). */
 	frontierModels: FrontierModelEntry[];
-	brainstorm: BrainstormConfig;
 	/** Economy mode: expensive frontier models are excluded from automatic sub-agent selection. */
 	economy: boolean;
 	resourceRegistry: ResourceRegistryConfig;
@@ -49,7 +47,6 @@ type MutableConfig = {
 	lookupModel: string | undefined;
 	lookupFallbackModels: string[];
 	frontierModels: FrontierModelEntry[];
-	brainstorm: BrainstormConfig;
 	economy: boolean;
 	resourceRegistry: ResourceRegistryConfig;
 };
@@ -247,8 +244,6 @@ function mergeConfigLayer(config: MutableConfig, raw: Record<string, unknown>, k
 			: normalizeFrontierModels(raw.frontierModels) ?? config.frontierModels;
 	}
 	if (typeof raw.economy === "boolean") config.economy = raw.economy;
-	// Without an explicit brainstorm.models the council roster tracks enabled frontierModels.
-	config.brainstorm = mergeBrainstormConfig(config.brainstorm, raw.brainstorm, config.frontierModels);
 	mergeResourceRegistry(config, raw.resourceRegistry);
 
 	for (const key of DISABLED_LIST_KEYS) addDisabled(config, raw[key], knownModules);
@@ -324,7 +319,6 @@ export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: 
 		lookupModel: undefined,
 		lookupFallbackModels: [],
 		frontierModels: defaultFrontierConfig().models,
-		brainstorm: defaultBrainstormConfig(),
 		economy: false,
 		resourceRegistry: { branch: DEFAULT_RESOURCE_REGISTRY_BRANCH },
 	};
@@ -352,7 +346,6 @@ export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: 
 		...(config.lookupModel ? { lookupModel: config.lookupModel } : {}),
 		lookupFallbackModels: [...config.lookupFallbackModels],
 		frontierModels: config.frontierModels.map((entry) => ({ ...entry })),
-		brainstorm: { ...config.brainstorm, models: [...config.brainstorm.models], thinkingOverrides: { ...config.brainstorm.thinkingOverrides } },
 		economy: config.economy,
 		resourceRegistry: { ...config.resourceRegistry },
 	};

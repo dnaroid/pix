@@ -214,8 +214,29 @@ test("settings catalogue/configuration and invalid task stores have independent 
   await writeFile(join(f.root, ".pi/tasks.sqlite"), "task-store");
   assert.ok(first.tasks.source);
   assert.ok((await f.check(["tasks"])).tasks.error);
-  await writeFile(f.config, "{ /* model changed */ }");
+  // A configuration file edit without an embedding identity change is not a source change.
+  await writeFile(f.config, "{ /* comment only */ }");
+  assert.equal((await f.check(["settings"])).settings.source, first.settings.source);
+  await writeFile(f.config, JSON.stringify({ search: { embedding: { embeddingProvider: "openrouter", embeddingModel: "fixture/model", vectorSize: 3 } } }));
   assert.notEqual((await f.check(["settings"])).settings.source, first.settings.source);
+});
+
+test("non-repository sources report writer-recorded coverage via matchesIndex", async t => {
+  const f = await fixture(t);
+  const { coverageDigest, recordCoverage, COVERAGE_KEEP } = await import("../src/project-search/source-coverage.mjs");
+  const file = join(f.root, ".pi/search/tasks.sqlite");
+  const db = await openDatabase(file);
+  f.resources.push(db);
+  db.exec("CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+  const absent = (await f.check(["tasks"])).tasks;
+  assert.equal(absent.matchesIndex, undefined); // No coverage table: legacy receipt comparison.
+  recordCoverage(db, "0".repeat(64), COVERAGE_KEEP.tasks);
+  assert.equal((await f.check(["tasks"])).tasks.matchesIndex, false);
+  recordCoverage(db, coverageDigest("tasks", "absent", null), COVERAGE_KEEP.tasks);
+  const covered = (await f.check(["tasks"])).tasks;
+  assert.equal(covered.matchesIndex, true);
+  assert.equal(covered.source, coverageDigest("tasks", "absent", null));
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM pix_source_coverage").get().n, 1); // keep=1 prunes older digests.
 });
 
 test("Tasks revision ignores checkpoint, VACUUM and positions but tracks committed rows", async t => {

@@ -9,6 +9,14 @@ import {
   type RegistryResourceType,
   type RegistrySnapshot,
 } from "./registry";
+import { PIX_USAGE_STATS_METHOD, type UsageSourceId, type UsageStatsResponse } from "../../../acp/src/acp/usage-stats-contract";
+import { parseUsageStatsResponse } from "./usage-stats-parser";
+import {
+  PIX_SUBAGENT_FORK_SESSION_METHOD,
+  PIX_SUBAGENT_OPEN_SESSION_METHOD,
+  PIX_SUBAGENT_SESSION_STATE_METHOD,
+} from "../../../acp/src/acp/subagent-sessions-contract";
+import { parseSubagentSessionState, subagentSessionLink, type SubagentSessionLink, type SubagentSessionState } from "./session-subagent-link";
 import { isRecord, parseClaudeQuotaRefresh, parseLspSnapshot, parseQueueState, parseQueuedUserMessage, parseRuntimeStatus, parseSessionUsageStatus } from "./acp-response-parsers";
 import type {
   AgentControlStatus,
@@ -31,6 +39,28 @@ import type {
   UserMessageAction,
   UserMessageActionResult,
 } from "./acp-client-types";
+
+export interface ModelSetupRoles { readonly main: string; readonly fast: string; readonly strong: string }
+export interface ModelSetupStatus {
+  readonly configured: boolean;
+  readonly models: readonly { ref: string; label: string; vision: boolean }[];
+  readonly suggested: ModelSetupRoles | undefined;
+  readonly current: ModelSetupRoles | undefined;
+  readonly slots: readonly ModelSetupSlot[];
+  readonly currentSlots: Readonly<Record<string, string>>;
+  readonly currentLists: Readonly<Record<string, readonly string[]>>;
+  readonly currentThinking: Readonly<Record<string, string>>;
+  readonly currentSearch: ModelSetupSearch | undefined;
+}
+export interface ModelSetupSlot {
+  readonly id: string; readonly label: string; readonly group: string; readonly role: keyof ModelSetupRoles;
+  readonly optional?: boolean; readonly vision?: boolean;
+  readonly parent?: string; readonly list?: boolean; readonly thinking?: boolean; readonly openrouter?: boolean;
+}
+export interface ModelSetupSearch {
+  readonly provider: "openrouter" | "ollama"; readonly model: string; readonly vectorSize: number;
+  readonly knowledgeModel?: string; readonly reranker?: string;
+}
 
 export type AcpRequest = <Response>(
   method: string,
@@ -214,6 +244,42 @@ export class AcpPixExtensions {
       throw new Error("pix/session/dcp_stats returned an invalid response");
     }
     return { sessionId: response.sessionId, ...(typeof response.dcpStats === "string" ? { dcpStats: response.dcpStats } : {}) };
+  }
+
+  /** Retained per-source usage snapshots; collection continues in the background. */
+  async usageStats(cwd: string, options: { sources?: readonly UsageSourceId[]; refresh?: boolean } = {}): Promise<UsageStatsResponse> {
+    return parseUsageStatsResponse(await this.request<unknown>(PIX_USAGE_STATS_METHOD, {
+      cwd,
+      ...(options.sources ? { sources: [...options.sources] } : {}),
+      ...(options.refresh ? { refresh: true } : {}),
+    }));
+  }
+
+  /** Register (or reuse) a read-only viewer for a sub-agent of `sessionId`. */
+  async openSubagentSession(sessionId: string, runDir: string, agentId: string): Promise<SubagentSessionState & { sessionId: string; link: SubagentSessionLink }> {
+    const response = await this.request<unknown>(PIX_SUBAGENT_OPEN_SESSION_METHOD, { sessionId, runDir, agentId });
+    const state = parseSubagentSessionState(response, PIX_SUBAGENT_OPEN_SESSION_METHOD);
+    const link = isRecord(response) ? subagentSessionLink({ "pix.subagent": response.link }) : undefined;
+    if (!isRecord(response) || typeof response.sessionId !== "string" || !response.sessionId || !link) {
+      throw new Error(`${PIX_SUBAGENT_OPEN_SESSION_METHOD} returned an invalid response`);
+    }
+    return { sessionId: response.sessionId, link, ...state };
+  }
+
+  async subagentSessionState(sessionId: string): Promise<SubagentSessionState> {
+    return parseSubagentSessionState(
+      await this.request<unknown>(PIX_SUBAGENT_SESSION_STATE_METHOD, { sessionId }),
+      PIX_SUBAGENT_SESSION_STATE_METHOD,
+    );
+  }
+
+  /** Continue a viewer in a new ordinary session forked from a snapshot. */
+  async forkSubagentSession(sessionId: string): Promise<string> {
+    const response = await this.request<unknown>(PIX_SUBAGENT_FORK_SESSION_METHOD, { sessionId }, 120_000);
+    if (!isRecord(response) || typeof response.sessionId !== "string" || !response.sessionId) {
+      throw new Error(`${PIX_SUBAGENT_FORK_SESSION_METHOD} returned an invalid response`);
+    }
+    return response.sessionId;
   }
 
   async sessionUsage(sessionId: string): Promise<SessionUsageStatus> {
@@ -438,6 +504,48 @@ export class AcpPixExtensions {
       throw new Error("pix/autocomplete/config returned an invalid response");
     }
     return { enabled: response.enabled, debounceMs: response.debounceMs };
+  }
+
+  async modelSetupStatus(): Promise<ModelSetupStatus> {
+    const response = await this.request<unknown>("pix/setup/models", {}, 60_000);
+    if (!isRecord(response) || typeof response.configured !== "boolean" || !Array.isArray(response.models)) {
+      throw new Error("pix/setup/models returned an invalid response");
+    }
+    const models = response.models.flatMap((m) => isRecord(m) && typeof m.ref === "string" && typeof m.label === "string" ? [{ ref: m.ref, label: m.label, vision: m.vision === true }] : []);
+    const s = response.suggested;
+    const suggested = isRecord(s) && typeof s.main === "string" && typeof s.fast === "string" && typeof s.strong === "string"
+      ? { main: s.main, fast: s.fast, strong: s.strong } : undefined;
+    const c = response.current;
+    const current = isRecord(c) && typeof c.main === "string" && typeof c.fast === "string" && typeof c.strong === "string"
+      ? { main: c.main, fast: c.fast, strong: c.strong } : undefined;
+    const slots = Array.isArray(response.slots)
+      ? response.slots.flatMap((x) => isRecord(x) && typeof x.id === "string" && typeof x.label === "string" && typeof x.group === "string"
+        && (x.role === "main" || x.role === "fast" || x.role === "strong")
+        ? [{ id: x.id, label: x.label, group: x.group, role: x.role, ...(x.optional === true ? { optional: true } : {}), ...(x.vision === true ? { vision: true } : {}), ...(typeof x.parent === "string" ? { parent: x.parent } : {}), ...(x.list === true ? { list: true } : {}), ...(x.thinking === true ? { thinking: true } : {}), ...(x.openrouter === true ? { openrouter: true } : {}) } as ModelSetupSlot] : [])
+      : [];
+    const currentSlots: Record<string, string> = {};
+    if (isRecord(response.currentSlots)) {
+      for (const [k, v] of Object.entries(response.currentSlots)) if (typeof v === "string") currentSlots[k] = v;
+    }
+    const currentThinking: Record<string, string> = {};
+    if (isRecord(response.currentThinking)) {
+      for (const [k, v] of Object.entries(response.currentThinking)) if (typeof v === "string") currentThinking[k] = v;
+    }
+    const currentLists: Record<string, string[]> = {};
+    if (isRecord(response.currentLists)) {
+      for (const [k, v] of Object.entries(response.currentLists)) if (Array.isArray(v)) currentLists[k] = v.filter((e): e is string => typeof e === "string");
+    }
+    const cs = response.currentSearch;
+    const currentSearch = isRecord(cs) && (cs.provider === "openrouter" || cs.provider === "ollama") && typeof cs.model === "string" && typeof cs.vectorSize === "number"
+      ? { provider: cs.provider, model: cs.model, vectorSize: cs.vectorSize,
+          ...(typeof cs.knowledgeModel === "string" ? { knowledgeModel: cs.knowledgeModel } : {}),
+          ...(typeof cs.reranker === "string" ? { reranker: cs.reranker } : {}) } as ModelSetupSearch
+      : undefined;
+    return { configured: response.configured, models, suggested, current, slots, currentSlots, currentLists, currentThinking, currentSearch };
+  }
+
+  async applyModelSetup(roles: ModelSetupRoles, overrides: Readonly<Record<string, string | readonly string[]>> = {}, search?: ModelSetupSearch): Promise<void> {
+    await this.request<unknown>("pix/setup/models/apply", { ...roles, overrides, ...(search ? { search } : {}) }, 30_000);
   }
 
   private async messageList(method: string, sessionId: string, timeoutMs: number | null = 30_000): Promise<ForkMessage[]> {

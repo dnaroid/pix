@@ -848,7 +848,10 @@ validation, and automatic routing.
 profile declares an explicit model. Values are `provider/model` refs, optionally
 with a `:thinking` suffix. User and project suite-config layers merge entries
 by role; `null` clears an inherited choice and restores the current bundled
-default. Fallback order and model-selection policies remain in force. Unknown,
+default. Shipped suite defaults may provide model ids for built-in roles; the
+interactive `pix install --models` wizard can populate or replace role choices
+from the locally available model catalog. Fallback order and model-selection policies
+remain in force. Unknown,
 disabled, and automatic/frontier roles are ignored; configure frontier roles
 through `frontierModels`. Project-local full replacements are unaffected and
 continue to use the project Registry override file. Explicit task/CLI/forced,
@@ -1069,7 +1072,7 @@ instead of silently inheriting the parent model.
 `parentProviderPolicy` supports `any` (default), `prefer-other`,
 `require-other`, and `require-other-if-frontier`. Despite the historical name,
 the policy compares model *vendors* (family owners inferred from the model id:
-`gpt-*` → openai, `glm-*` → zai, `claude-*` → anthropic, `gemini-*` → google,
+`gpt-*` → openai, `glm-*` → zai, `claude-*`/`opus`/`sonnet`/`haiku` → anthropic, `gemini-*` → google,
 ...; the provider id is the fallback), so `openai/gpt-6-astra`,
 `openai-codex/gpt-6-astra`, `github-copilot/gpt-6-astra` and OpenRouter refs are
 one vendor, and the parent's own model is never an "other" candidate.
@@ -1080,9 +1083,11 @@ a frontier parent and `prefer-other` otherwise.
 
 ### Frontier models and economy mode
 
-Frontier models are named once in `pi-tools-suite.jsonc`; roles with
+Frontier models are named once in `pi-tools-suite.jsonc`; shipped suite defaults
+include frontier model ids, and `pix install --models` can replace picks using
+the locally available model catalog. Roles with
 `modelSelection: frontier` (bundled `oracle`) take candidates from this ordered list, so a new frontier
-release is a config edit:
+release can be added as a config edit:
 
 ```jsonc
 {
@@ -1151,7 +1156,7 @@ the top-level `disabledBuiltinAgents` / `enabledBuiltinAgents` lists. Runtime
 retry structures and the separate role router continue to use the term
 `fallbackModels` for actual fallback-only lists, not agent candidates.
 
-Sub-agents run with `--no-session` by default to avoid writing duplicate Pi session JSONL files for fire-and-forget background work. Set `ASYNC_SUBAGENTS_ENABLE_SESSIONS=1` to restore persisted per-agent sessions under each agent's `sessions/` directory; this also registers the session-navigation slash commands (`/sub-open`, `/sub-back`, `/sub-where`) needed for switching and deeper post-mortem navigation.
+Every sub-agent is a full persisted Pi session under its agent's `sessions/` directory; there is no opt-out. The session backs `subagents action=send` cold resume of finished agents, Desktop read-only sub-agent viewer tabs and the session-navigation slash commands (`/sub-open`, `/sub-back`, `/sub-where`).
 
 Every sub-agent role (including project-local and future roles) gets a private `todo` tool for non-trivial multi-step work. Each child attempt owns its list; it cannot read or overwrite the parent's project plan. `todo` remains available even with restricted or empty work-tool selections. Child todos do not enable persistence commands, thinking overrides or automatic follow-up turns; unfinished work and blockers belong in the report to the parent.
 
@@ -1175,7 +1180,15 @@ ordinary Pi. No implicit external-backend setup is attempted.
 
 Sub-agent runs are stored in the current project's `.pi/subagents/` directory and survive main-session shutdown. Each spawn updates `.pi/subagents/registry.json` with the latest run and `agentId -> runDir` mappings. Because of that, `subagents({ action: "status" })`, `wait`, and `stop` can omit `runDir` to target the latest run, and `subagents({ action: "result", agentId: "..." })` can resolve the run from the registry even if the exact `runDir` was lost during compaction or the session closed. Result reads always return a summary-first response with artifact paths; raw `result.md` and `stderr.log` are not inlined, which avoids IPC/socket buffer overflows. Include `runDir` when you need an older or non-latest run, and use `cleanup` with `delete=true` to remove collected old runs. On normal main-session shutdown, Pi stops that session's sub-agents but preserves run files, reports, attachments and registry pointers; reload and fork shutdowns also skip stopping. Desktop's separate 72-hour background TTL and immediate manual Clean remain unchanged. The draft macOS owned launcher prevents explicit cleanup while containment or either UUID launchd service's retirement is uncertain; stopping the bridge alone never authorizes deletion. This candidate remains gated on G1/T3 acceptance (see `specs/async-subagents.md` in the Pix repository).
 
-Runtime logs are minimized by default: successful agents do not keep `events.jsonl`, and `stderr.log` is discarded unless the agent fails. Set `ASYNC_SUBAGENTS_DEBUG_LOGS=1` / `PI_SUBAGENTS_DEBUG_LOGS=1` to keep diagnostic logs for successful agents too; debug event logs store a compact RPC event summary instead of the full streaming transcript. Defaults are 0 bytes for `events.jsonl` without debug, 32 MiB for debug `events.jsonl`, 8 MiB for retained `stderr.log`, and 8 MiB for a single RPC JSON line; override with `ASYNC_SUBAGENTS_MAX_EVENTS_BYTES` / `PI_SUBAGENTS_MAX_EVENTS_BYTES`, `ASYNC_SUBAGENTS_MAX_STDERR_BYTES` / `PI_SUBAGENTS_MAX_STDERR_BYTES`, and `ASYNC_SUBAGENTS_MAX_RPC_LINE_CHARS` / `PI_SUBAGENTS_MAX_RPC_LINE_CHARS`.
+Within a run directory, `prompts/<agentId>.md` is only the queued copy and
+exists only while the agent is planned/queued. Launch deletes that copy; the
+prompt remains at `<agentId>/prompt.md`, and the `prompts/` directory stays.
+Missing `retry_count` means zero retries; setting the count to zero removes the
+file. Missing `todo-progress.json` means no plan: total-zero progress is not
+written, and clearing an empty plan removes the file. `started_at`,
+`finished_at`, and `exit_code` remain separate files.
+
+Runtime logs are minimized by default: no RPC event transcript is written (the persisted child session under `sessions/` is the full history), `progress.jsonl` records only lifecycle stages, and `stderr.log` is discarded unless the agent fails. The child argv of the latest turn is stored as `piArgs` in `launch.json`. Set `ASYNC_SUBAGENTS_DEBUG_LOGS=1` / `PI_SUBAGENTS_DEBUG_LOGS=1` to keep `stderr.log` for successful agents too. Defaults are 8 MiB for retained `stderr.log` and 8 MiB for a single RPC JSON line; override with `ASYNC_SUBAGENTS_MAX_STDERR_BYTES` / `PI_SUBAGENTS_MAX_STDERR_BYTES` and `ASYNC_SUBAGENTS_MAX_RPC_LINE_CHARS` / `PI_SUBAGENTS_MAX_RPC_LINE_CHARS`.
 
 Runtime concurrency defaults to 5 agents per project and the global result summary bound defaults to 100000 bytes. These are internal engine defaults rather than normal user configuration. The fallback watchdog is 3 hours (10,800 seconds) if no timeout is specified. Per-agent `retry`, `maxResultBytes`, and `timeoutMs` belong in agent Markdown; spawn calls and individual task objects can pass `timeoutSeconds` to override the watchdog with a shorter or longer timeout. Explicit timeouts are not capped at 3 hours; the macOS owned-launch supervisor uses the same resolved timeout. Stop requests mark running, queued planned, and retry-pending agents as `stopped` so queued work is not launched later. Completed agents write `result.json` with status/duration/model/retry metadata plus best-effort `summary`, `findings`, `files`, `risks`, `nextActions`, and `confidence` fields for parent-agent chaining.
 

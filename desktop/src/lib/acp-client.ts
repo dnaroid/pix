@@ -1,5 +1,7 @@
 import { PROTOCOL_VERSION } from "@agentclientprotocol/sdk";
 import { PIX_SESSION_CATALOG_CHANGED_METHOD } from "../../../acp/src/acp/session-catalog-contract";
+import { PIX_USAGE_STATS_CHANGED_METHOD, type UsageSourceId, type UsageStatsResponse } from "../../../acp/src/acp/usage-stats-contract";
+import { parseUsageStatsChangedNotification } from "./usage-stats-parser";
 import type {
   ContentBlock,
   CreateElicitationRequest,
@@ -22,7 +24,7 @@ import type { RegistryActionRequest, RegistryDiff, RegistryResourceType, Registr
 import type { AgentControlAction } from "./agent-control";
 import { isRecord, parseQueueState, parseQueuedUserMessage } from "./acp-response-parsers";
 import { AcpIncomingRequestError, AcpJsonRpcConnection } from "./acp-json-rpc";
-import { AcpPixExtensions } from "./acp-pix-extensions";
+import { AcpPixExtensions, type ModelSetupRoles, type ModelSetupSearch } from "./acp-pix-extensions";
 import { SEARCH_CONFIG_METHOD, SEARCH_QUERY_METHOD, SEARCH_SYNC_METHOD, SEARCH_COMMITS_METHOD, SEARCH_INTENT_METHOD, SEARCH_TASKS_METHOD, type SearchIntentRequest, type SearchIntentResponse, type SearchConfigRequest, type SearchSyncRequest, type SearchStatus, type SearchQueryRequest, type SearchQueryResponse, type SemanticTasksRequest, type SemanticTasksResponse } from "../../../acp/src/search/contract";
 import { SEARCH_RAG_METHOD, SEARCH_RAG_DELTA_METHOD, type RagRequest, type RagResponse, type RagProgress } from "../../../acp/src/search/rag-contract";
 import { TASK_TYPE_CLASSIFY_METHOD, isClassifiedTaskType, type TaskTypeClassifyRequest, type TaskTypeClassifyResponse } from "../../../acp/src/tasks/type-classification-contract";
@@ -361,6 +363,14 @@ export class AcpClient {
     return this.pix.autocomplete(sessionId, draft, signal);
   }
 
+  modelSetupStatus() {
+    return this.pix.modelSetupStatus();
+  }
+
+  applyModelSetup(roles: ModelSetupRoles, overrides: Readonly<Record<string, string | readonly string[]>> = {}, search?: ModelSetupSearch) {
+    return this.pix.applyModelSetup(roles, overrides, search);
+  }
+
   autocompleteSettings(sessionId: string): Promise<AutocompleteSettings> {
     return this.pix.autocompleteSettings(sessionId);
   }
@@ -428,6 +438,22 @@ export class AcpClient {
     return this.pix.sessionUsage(sessionId);
   }
 
+  openSubagentSession(sessionId: string, runDir: string, agentId: string) {
+    return this.pix.openSubagentSession(sessionId, runDir, agentId);
+  }
+
+  subagentSessionState(sessionId: string) {
+    return this.pix.subagentSessionState(sessionId);
+  }
+
+  forkSubagentSession(sessionId: string): Promise<string> {
+    return this.pix.forkSubagentSession(sessionId);
+  }
+
+  usageStats(cwd: string, options: { sources?: readonly UsageSourceId[]; refresh?: boolean } = {}): Promise<UsageStatsResponse> {
+    return this.pix.usageStats(cwd, options);
+  }
+
   claudeQuotaRefresh(sessionId: string): Promise<ClaudeQuotaRefreshStatus> {
     return this.pix.claudeQuotaRefresh(sessionId);
   }
@@ -482,6 +508,9 @@ export class AcpClient {
       if (typeof params.cwd === "string" && params.cwd.length > 0) {
         this.handlers.onSessionCatalogChanged?.(params.cwd);
       }
+    } else if (method === PIX_USAGE_STATS_CHANGED_METHOD) {
+      const notification = parseUsageStatsChangedNotification(params);
+      if (notification) this.handlers.onUsageStatsChanged?.(notification);
     } else if (method === PIX_SESSION_STATE_METHOD) {
       const notification = parseSessionStateNotification(params);
       if (notification) this.handlers.onSessionState?.(notification);

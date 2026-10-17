@@ -9,6 +9,7 @@ import { acpCrashReport, cleanAcpDiagnostic } from "../lib/acp-crash-diagnostics
 import type { SessionStateNotification } from "../lib/session-state";
 import type { AcpExit, ForkReadyNotification } from "../lib/acp-client-types";
 import { TauriAcpTransport } from "../lib/tauri-transport";
+import { emitUsageStatsChanged } from "../lib/usage-stats-events";
 import type { DesktopDiagnosticEvent } from "../lib/diagnostic-logging";
 
 export type ConnectionStatus = "starting" | "ready" | "error" | "stopped";
@@ -111,6 +112,9 @@ export function createConnectionStore(options: ConnectionStoreOptions) {
       },
       onForkReady: (notification) => {
         if (client === next) options.onForkReady?.(notification);
+      },
+      onUsageStatsChanged: (notification) => {
+        if (client === next) emitUsageStatsChanged(notification);
       },
       onElicitation: (request): Promise<CreateElicitationResponse> => client === next
         ? options.onElicitation(request)

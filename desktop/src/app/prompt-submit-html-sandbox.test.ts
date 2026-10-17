@@ -76,3 +76,42 @@ describe("HTML sandbox ACP submission", () => {
     await expect(pending).rejects.toThrow("conversation changed");
   });
 });
+
+describe("Quick-choice ACP submission", () => {
+  const choice = "Apply selected:\n1. A\n3. C";
+
+  it("sends the selection verbatim as a user message without touching the draft", async () => {
+    const test = setup();
+    expect(await test.submit.submitChoiceActions("session-a", choice)).toBe("sent");
+    expect(test.append).toHaveBeenCalledWith(choice, "local:sandbox", []);
+    expect(test.sent).toHaveBeenCalledWith(expect.anything(), "session-a", [{ type: "text", text: choice }], [], "local:sandbox");
+    expect(test.queued).not.toHaveBeenCalled();
+    expect(test.draft).toBe("Keep this unfinished draft");
+  });
+
+  it("queues while the agent is running", async () => {
+    const test = setup();
+    test.setRunning(true);
+    expect(await test.submit.submitChoiceActions("session-a", choice)).toBe("queued");
+    expect(test.queued).toHaveBeenCalledWith("session-a", [{ type: "text", text: choice }], choice);
+    expect(test.sent).not.toHaveBeenCalled();
+    expect(test.refreshQueueState).toHaveBeenCalledWith("session-a");
+  });
+
+  it("rejects stale sessions, closed runtimes and overlapping submissions", async () => {
+    const test = setup();
+    test.setSession("session-b");
+    await expect(test.submit.submitChoiceActions("session-a", choice)).rejects.toThrow("not ready for a quick choice");
+    test.setSession("session-a");
+    test.setReady(false);
+    await expect(test.submit.submitChoiceActions("session-a", choice)).rejects.toThrow("not ready");
+    test.setReady(true);
+    test.setRunning(true);
+    let finish!: () => void;
+    test.queued.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const pending = test.submit.submitChoiceActions("session-a", choice);
+    await expect(test.submit.submitHtmlSandbox("session-a", "a", {})).rejects.toThrow("not ready");
+    finish();
+    expect(await pending).toBe("queued");
+  });
+});

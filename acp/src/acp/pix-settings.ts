@@ -27,12 +27,12 @@ const formattingOptions = { insertSpaces: true, tabSize: 2 };
 
 export function loadPixCommandSettings(homeDir = homedir()): PixCommandSettings {
 	const path = pixConfigPath(homeDir);
-	if (!existsSync(path)) return { autocompleteModelRef: "zai/glm-5-turbo", autocompleteFallbackModels: [] };
+	if (!existsSync(path)) return { autocompleteModelRef: "", autocompleteFallbackModels: [] };
 	try {
 		const parsed = parseJsonc(readFileSync(path, "utf8")) as unknown;
 		const configured = defaultModelFromParsed(parsed);
 		const defaultModel = configured ? parseModelRef(configured.modelRef) : undefined;
-		const autocomplete = autocompleteConfigFromParsed(parsed) ?? { modelRef: "zai/glm-5-turbo", fallbackModels: [] };
+		const autocomplete = autocompleteConfigFromParsed(parsed) ?? { modelRef: "", fallbackModels: [] };
 		return {
 			...(configured && defaultModel ? {
 				defaultModel: {
@@ -46,7 +46,7 @@ export function loadPixCommandSettings(homeDir = homedir()): PixCommandSettings 
 			autocompleteFallbackModels: autocomplete.fallbackModels,
 		};
 	} catch {
-		return { autocompleteModelRef: "zai/glm-5-turbo", autocompleteFallbackModels: [] };
+		return { autocompleteModelRef: "", autocompleteFallbackModels: [] };
 	}
 }
 

@@ -3,19 +3,23 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { BROWSER_QA_RUNNER_ENV, getBrowserQaRunnerPath, getUiQaRunnerPath, isUiQaType, UI_QA_RUNNER_ENV } from "./ui-qa.js";
-import { validateBasename } from "./paths.js";
+import { ownedAgentDir, parseRunKey, scopeDir, validateBasename } from "./paths.js";
 import { getPiInvocation } from "./pi-invocation.js";
-import { writePromptFile } from "./prompt.js";
+import { generatePrompt } from "./prompt.js";
+import { PROJECT_ARTIFACTS_DIR } from "../../artifact-paths.js";
+import { getLive, getRecord, updateLive, updateRecord } from "./store.js";
 import { terminateProcessTree } from "./process.js";
-import { getAgentSessionDir, SUBAGENT_PARENT_SESSION_FILE, SUBAGENT_RETURN_SESSION_FILE, SUBAGENT_SESSION_FILE, writeParentSessionLink, writeSessionFileLink } from "./sessions.js";
+import { getAgentSessionDir, getParentSubagentSessionDir } from "./sessions.js";
+import { SUBAGENT_META_ENV, type SubagentMeta } from "./subagent-meta.js";
+import { isPathInside } from "../../model-tools/path-utils.js";
 import { getAgentState } from "./state.js";
-import { writeStructuredResult } from "./structured-result.js";
-import { createBoundedFileWriter, createDeferredFileWriter, resolveSubagentLogLimits } from "./log-limits.js";
+import { settleStructuredResult } from "./structured-result.js";
+import { resolveSubagentLogLimits } from "./log-limits.js";
 import { filterSubagentTools } from "./tool-guard.js";
 import { selectSubagentToolsForModel, subagentWorkTools, SUBAGENT_WORK_TOOLS_ENV, withSubagentCapabilities } from "./child-tools.js";
-import type { AgentCompletionHandler, AgentTask, RpcEventHandler, RpcEventRecord, SpawnedAgent } from "./types.js";
+import type { AgentCompletionHandler, AgentState, AgentTask, RpcEventHandler, RpcEventRecord, SpawnedAgent } from "./types.js";
 import { isRecord, isoNow, serializeJsonLine } from "./utils.js";
-import { forgetOwnedHandle, launchPreparedOwnedAgent, ownedOutcomeSync, readOwnedMetadata, requestOwnedCancel, OWNED_METADATA, type OwnedLaunchBinaries, type OwnedLaunchHandle } from "./owned-launch-integration.js";
+import { forgetOwnedHandle, launchPreparedOwnedAgent, ownedOutcomeSync, readOwnedMetadata, requestOwnedCancel, writeOwnedBootstrapFailureResult, OWNED_METADATA, type OwnedLaunchBinaries, type OwnedLaunchHandle } from "./owned-launch-integration.js";
 import { ownedArtifactsPresentSync, ownedDeletableSync, verifyOwnedRetirementAsync } from "./owned-retirement.js";
 import {
 	normalizeProviderArgs,
@@ -27,13 +31,27 @@ import {
 } from "./provider-extensions.js";
 import { fenceOwnedLaunchRunAsync, ownedLaunchClaimProtocolSync, readOwnedLaunchClaimSync } from "./owned-launch/marker.js";
 import { RPC_SESSION_STATE_ENV } from "../../lib/rpc-session-state.js";
-import { TODO_PROGRESS_FILE, todoProgressFromRpcEvent, writeTodoProgress } from "./todo-progress.js";
+import { todoProgressFromRpcEvent } from "./todo-progress.js";
+import { LiveChannelClosingError, registerLiveChannel, unregisterLiveChannel, type LiveAgentChannel, type LiveSendMode, type LiveSendResult } from "./live-channel.js";
+
+export interface SpawnAgentResumeOptions {
+	/** Message that starts the resumed turn (sent instead of the generated prompt). */
+	message: string;
+	/** Existing pi session file to continue. */
+	sessionFile: string;
+}
 
 export interface SpawnAgentOptions {
+	/** Continue an existing persisted session instead of starting a fresh one. */
+	resume?: SpawnAgentResumeOptions;
 	parentSession?: string;
+	/** Parent session id; selects `.pi/subagents/<parentSessionId>/` for the child session (decision 0072). */
+	parentSessionId?: string;
 	timeoutMs?: number;
 	maxResultBytes?: number;
 	ownedBinaries?: OwnedLaunchBinaries;
+	/** launchd jobs cannot access the project/run directories: skip owned launch. */
+	ownedLaunchUnavailable?: boolean;
 	/** Test seam for Pi's installed-package lookup (provider dependency resolution). */
 	locateProviderPackagesForTest?: InstalledPackageLocator;
 	/** Unit-test-only native boundary; production tool never supplies this. */
@@ -48,18 +66,21 @@ const AGENT_TIMEOUT_EXIT_CODE = 124;
 const AGENT_TIMEOUT_KILL_GRACE_MS = 5_000;
 const AGENT_SETTLED_TERMINATE_GRACE_MS = 50;
 const AGENT_SETTLED_COMPLETION_FALLBACK_MS = 1_000;
+const LIVE_SEND_RESPONSE_TIMEOUT_MS = 30_000;
+const INITIAL_PROMPT_ID = "sub_prompt";
+const SETTLE_CHECK_ID_PREFIX = "sub_settle_check_";
+const LIVE_SEND_ID_PREFIX = "sub_live_send_";
 const EXIT_STDIO_FLUSH_GRACE_MS = 10;
-const PROGRESS_LOG_MAX_BYTES = 1024 * 1024;
+/** In-memory stderr tail per agent (never written to disk). */
+const STDERR_TAIL_MAX_CHARS = 256 * 1024;
+/** Bound of a parent-authored result message persisted in the parent session. */
+const RESULT_MESSAGE_MAX_CHARS = 64 * 1024;
 /** Background drain-settlement poll interval; bounded so the loop stays off the hot path. */
 const OWNED_SETTLE_INTERVAL_MS = 1_000;
 /** Grace after the bridge ended before a never-released run may be probed for absent jobs. */
 const OWNED_BRIDGE_END_GRACE_MS = 2_000;
 /** Bounded launchctl budget while settling a completion (retirement marker caching). */
 const OWNED_SETTLE_RETIREMENT_BUDGET_MS = 10_000;
-
-export function shouldPersistSubagentSessions(env: NodeJS.ProcessEnv = process.env): boolean {
-	return isTruthyEnv(env.ASYNC_SUBAGENTS_ENABLE_SESSIONS);
-}
 
 export function spawnAgent(
 	runDir: string,
@@ -71,8 +92,9 @@ export function spawnAgent(
 	options: SpawnAgentOptions = {},
 ): SpawnedAgent {
 	validateBasename(task.id, "task.id");
-	const agentDir = path.join(runDir, task.id);
-	fs.mkdirSync(agentDir, { recursive: true });
+	// The only per-agent directory: the owned-launch base, created only for
+	// owned launches. Everything else lives in the parent session (decision 0072).
+	const agentDir = ownedAgentDir(runDir, task.id);
 	// Sub-agent roles are self-contained. Never inherit/discover skills, and do
 	// not allow profile/user extra args to re-enable or inject them. Model and
 	// provider override spellings the child CLI rejects are normalized first,
@@ -81,7 +103,10 @@ export function spawnAgent(
 	const configuredModel = task.model?.trim() || subagentEnvModel();
 	const selectedModel = resolveFinalModel(configuredModel, forwardedExtraArgs);
 	const explicitModel = resolveFinalModel(task.model, forwardedExtraArgs);
-	const owned = selectsClaudeProvider(selectedModel, forwardedExtraArgs);
+	const claudeSelected = selectsClaudeProvider(selectedModel, forwardedExtraArgs);
+	// launchd cannot reach the project (TCC/external volume, no GUI domain):
+	// the Claude provider then uses the ordinary process-group launch.
+	const owned = claudeSelected && !options.ownedLaunchUnavailable;
 	// This check MUST precede reuse cleanup and any child spawn, including direct
 	// spawnAgent calls that bypass the asynchronous tool preflight.
 	if (owned && (process.platform !== "darwin" || !options.ownedBinaries))
@@ -90,7 +115,7 @@ export function spawnAgent(
 	// child exists; a ProviderExtensionError is permanent (a synchronous throw
 	// is never retried and never falls back).
 	const providerExtensions = resolveProviderExtensions({
-		selectedModel, explicitModel, claudeSelected: owned, forwardedArgs: forwardedExtraArgs, cwd,
+		selectedModel, explicitModel, claudeSelected, forwardedArgs: forwardedExtraArgs, cwd,
 		locateInstalled: options.locateProviderPackagesForTest,
 	});
 	// Kernel drain and launchd retirement are distinct facts: reuse is refused
@@ -98,53 +123,41 @@ export function spawnAgent(
 	// generations, even without a readable pointer) is both terminal and retired.
 	if (ownedArtifactsPresentSync(agentDir) && !ownedDeletableSync(agentDir))
 		throw new Error("previous owned sub-agent is not verified drained and retired; refusing reuse");
-	prepareUiQaWorkspace(agentDir, task.subagentType);
 
-	// Clean previous state when reusing a run directory/agent id.
-	for (const f of [
-		"exit_code",
-		"finished_at",
-		"result.md",
-		"result.json",
-		"events.jsonl",
-		TODO_PROGRESS_FILE,
-		`${TODO_PROGRESS_FILE}.tmp`,
-		"stderr.log",
-		"session_dir",
-		"image_paths",
-		SUBAGENT_SESSION_FILE,
-		SUBAGENT_PARENT_SESSION_FILE,
-		SUBAGENT_RETURN_SESSION_FILE,
-		"timeout_ms",
-		"timed_out_at",
-		"stop_requested",
-		"stop_signal",
-		"retry_pending",
-		"next_retry_at",
-		"process_group",
-		OWNED_METADATA,
-	]) {
+	const resume = options.resume;
+	const parsedRun = parseRunKey(runDir);
+	const subagentSessionDir = parsedRun
+		? scopeDir(parsedRun.cwd, parsedRun.scope)
+		: getParentSubagentSessionDir(cwd, options.parentSessionId) ?? getAgentSessionDir(path.join(runDir, task.id));
+	if (!resume) {
+		// A fresh attempt drops only its own previous transcript, never the
+		// shared parent-scoped child directory.
+		const previousSessionFile = getRecord(runDir, task.id)?.childSessionFile;
+		if (previousSessionFile && isPathInside(subagentSessionDir, previousSessionFile)) fs.rmSync(previousSessionFile, { force: true });
+	}
+	// Owned control markers of a previous attempt (the owned base is reused
+	// only after the guard above proved it drained and retired).
+	for (const f of ["exit_code", "finished_at", "result.md", "timeout_ms", "timed_out_at", "stop_requested", "stop_signal", OWNED_METADATA]) {
 		try {
 			fs.unlinkSync(path.join(agentDir, f));
 		} catch {
-			/* ignore */
+			/* absent */
 		}
 	}
-	fs.rmSync(getAgentSessionDir(agentDir), { recursive: true, force: true });
-
-	// Write prompt file (also to prompts/ dir for planned status)
-	const promptPath = writePromptFile(runDir, task);
-	fs.copyFileSync(promptPath, path.join(agentDir, "prompt.md"));
+	if (owned) fs.mkdirSync(agentDir, { recursive: true });
+	const uiQaWorkspace = isUiQaType(task.subagentType) ? prepareUiQaWorkspace(cwd, runDir, task.id) : undefined;
 
 	// Build pi args. By default sub-agents use the parent/default model.
 	// E2E/live deployments can pin the real model explicitly through env so
 	// detached subprocesses do not depend on persisted local pi settings.
-	const persistSessions = shouldPersistSubagentSessions();
-	const sessionDir = persistSessions ? getAgentSessionDir(agentDir) : undefined;
-	if (sessionDir) fs.mkdirSync(sessionDir, { recursive: true });
-	let piArgs: string[] = ["--mode", "rpc"];
-	if (sessionDir) piArgs.push("--session-dir", sessionDir);
-	else piArgs.push("--no-session");
+	// Every child is a full persisted Pi session (needed for `send` resume,
+	// session navigation and Desktop viewer tabs).
+	// Children of a persisted parent live in the standard Pi store, nested under
+	// the parent's session directory (decision 0072); otherwise the legacy dir.
+	const sessionDir = subagentSessionDir;
+	fs.mkdirSync(sessionDir, { recursive: true });
+	let piArgs: string[] = ["--mode", "rpc", "--session-dir", sessionDir];
+	if (resume) piArgs.push("--session", resume.sessionFile);
 	piArgs.push("--no-extensions");
 	piArgs.push("--extension", getModelToolsExtensionPath());
 	piArgs.push("--extension", getSubagentTodoExtensionPath());
@@ -177,36 +190,55 @@ export function spawnAgent(
 	// sub-agent extraArgs load additional extensions or override --tools.
 	piArgs.push("--extension", getSubagentToolGuardExtensionPath());
 
-	// Read prompt content for stdin
-	const promptContent = fs.readFileSync(promptPath, "utf-8");
-	const promptImages = task.imagePaths && task.imagePaths.length > 0 ? readPromptImages(task.imagePaths, cwd) : undefined;
+	const promptContent = resume ? resume.message : generatePrompt(task);
+	const promptImages = !resume && task.imagePaths && task.imagePaths.length > 0 ? readPromptImages(task.imagePaths, cwd) : undefined;
 
-	// Write metadata
-	fs.writeFileSync(path.join(agentDir, "project_cwd"), cwd, "utf-8");
-	fs.writeFileSync(path.join(agentDir, "pi_args"), piArgs.join("\n"), "utf-8");
-	if (sessionDir) fs.writeFileSync(path.join(agentDir, "session_dir"), sessionDir, "utf-8");
-	writeParentSessionLink(agentDir, options.parentSession);
-	if (task.subagentType) fs.writeFileSync(path.join(agentDir, "subagent_type"), task.subagentType, "utf-8");
-	if (task.model) fs.writeFileSync(path.join(agentDir, "model"), task.model, "utf-8");
-	if (task.imagePaths && task.imagePaths.length > 0) fs.writeFileSync(path.join(agentDir, "image_paths"), task.imagePaths.join("\n"), "utf-8");
-	fs.writeFileSync(path.join(agentDir, "started_at"), isoNow(), "utf-8");
+	// Durable launch facts go to the parent session; a fresh attempt resets
+	// every outcome field of a reused agent id.
+	updateRecord(runDir, task.id, {
+		...(resume ? {} : { task, extraArgs, timeoutMs: options.timeoutMs, maxResultBytes: options.maxResultBytes, turn: 1, childSessionFile: null }),
+		cwd,
+		subagentType: task.subagentType,
+		model: task.model,
+		parentSession: options.parentSession,
+		status: "running",
+		startedAt: isoNow(),
+		exitCode: null, finishedAt: null, nextRetryAt: null, pid: null, processGroup: null,
+		stopRequested: null, stopSignal: null, timedOut: null, structured: null, message: null, stderrPreview: null,
+	});
+	updateLive(runDir, task.id, { active: true, resultText: undefined, stderrTail: undefined, lastActivity: undefined, todoProgress: undefined });
 
-	const transcriptFile = path.join(agentDir, "events.jsonl");
-	const stderrFile = path.join(agentDir, "stderr.log");
 	const logLimits = resolveSubagentLogLimits();
-
 	const invocation = getPiInvocation(piArgs);
-	const stderrStream = createDeferredFileWriter(stderrFile, logLimits.stderrMaxBytes, "stderr.log");
-	const transcriptStream = createBoundedFileWriter(transcriptFile, logLimits.eventsMaxBytes, "events.jsonl");
-	const progressStream = createBoundedFileWriter(path.join(agentDir, "progress.jsonl"), PROGRESS_LOG_MAX_BYTES, "progress.jsonl");
-	const writeProgress = (stage: string, details: Record<string, unknown> = {}) => {
-		progressStream.write(serializeJsonLine({ at: isoNow(), stage, ...details }));
+	const stderrMaxChars = Math.max(1024, Math.min(logLimits.stderrMaxBytes || STDERR_TAIL_MAX_CHARS, STDERR_TAIL_MAX_CHARS));
+	const appendStderr = (text: string) => {
+		const next = `${getLive(runDir, task.id)?.stderrTail ?? ""}${text}`;
+		updateLive(runDir, task.id, { stderrTail: next.length > stderrMaxChars ? next.slice(-stderrMaxChars) : next });
 	};
+	/** Final result text; `persist` stores a bounded copy for parent-authored outcomes the child session lacks. */
+	const setResult = (text: string, persist: boolean) => {
+		updateLive(runDir, task.id, { resultText: text });
+		if (persist) updateRecord(runDir, task.id, { message: text.length > RESULT_MESSAGE_MAX_CHARS ? `${text.slice(0, RESULT_MESSAGE_MAX_CHARS)}\n…[truncated]` : text });
+	};
+	const resultUnset = () => getLive(runDir, task.id)?.resultText === undefined;
+	const stopRequested = () => getRecord(runDir, task.id)?.stopRequested === true || fs.existsSync(path.join(agentDir, "stop_requested"));
 
-	const env = subagentEnvironment(process.env, isUiQaType(task.subagentType) ? agentDir : undefined);
+	const env = subagentEnvironment(process.env, uiQaWorkspace);
 	// Always overwrite inherited state so retries/nested test processes cannot
 	// carry another child's capability selection into this attempt.
 	env[SUBAGENT_WORK_TOOLS_ENV] = JSON.stringify(workTools);
+	const meta: SubagentMeta = {
+		version: 1,
+		agentId: task.id,
+		batch: parsedRun?.batch ?? path.basename(runDir),
+		...(parsedRun ? { scope: parsedRun.scope } : {}),
+		runDir,
+		cwd,
+		...(task.subagentType ? { subagentType: task.subagentType } : {}),
+		...(options.parentSession ? { parentSession: options.parentSession } : {}),
+		...(options.parentSessionId ? { parentSessionId: options.parentSessionId } : {}),
+	};
+	env[SUBAGENT_META_ENV] = JSON.stringify(meta);
 	const timeoutMs = options.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS;
 	const ownedHandle = owned ? (options.ownedLaunchForTest ?? launchPreparedOwnedAgent)({
 		agentDir, command: invocation.command, args: invocation.args, cwd, env, binaries: options.ownedBinaries!,
@@ -221,7 +253,7 @@ export function spawnAgent(
 	});
 	proc.stdin.on("error", (error: NodeJS.ErrnoException) => {
 		if (error.code === "EPIPE") return;
-		stderrStream.write(`${String(error)}\n`);
+		appendStderr(`${String(error)}\n`);
 	});
 	let completedFromAgentEnd = false;
 	let completionNotified = false;
@@ -238,12 +270,98 @@ export function spawnAgent(
 	let exitFinalizationTimer: NodeJS.Timeout | undefined;
 	let processTermination: { code: number | null; signal: NodeJS.Signals | null } | undefined;
 	let stdoutEnded = false;
-	const suppressedRpcEventCounts = new Map<string, number>();
+	// Live channel: the parent may queue follow-up/steer prompts into this
+	// running RPC child. agent_settled only terminates once no accepted or
+	// pending live send could start another run in the same process.
+	let liveSendSeq = 0;
+	let settleCheckSeq = 0;
+	let runGeneration = 0;
+	let liveSendSinceRunStart = false;
+	let settledAwaitingCheck = false;
+	let channelClosing = false;
+	let channelReleased = false;
+	const pendingLiveSends = new Map<string, { resolve: (result: LiveSendResult) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }>();
+	let resolveInitialPromptAccepted!: () => void;
+	const initialPromptAccepted = new Promise<void>((resolve) => { resolveInitialPromptAccepted = resolve; });
+	let resolveChannelFinished!: () => void;
+	const channelFinished = new Promise<void>((resolve) => { resolveChannelFinished = resolve; });
+	const releaseLiveChannel = () => {
+		channelClosing = true;
+		if (channelReleased) return;
+		channelReleased = true;
+		resolveInitialPromptAccepted();
+		for (const pending of pendingLiveSends.values()) {
+			clearTimeout(pending.timer);
+			pending.reject(new LiveChannelClosingError());
+		}
+		pendingLiveSends.clear();
+		unregisterLiveChannel(liveChannel);
+		resolveChannelFinished();
+	};
+	const sendLive = async (message: string, mode: LiveSendMode): Promise<LiveSendResult> => {
+		if (channelClosing) throw new LiveChannelClosingError();
+		// Never race the initial prompt's preflight: two idle prompts would both start runs.
+		await initialPromptAccepted;
+		if (channelClosing) throw new LiveChannelClosingError();
+		const id = `${LIVE_SEND_ID_PREFIX}${++liveSendSeq}`;
+		liveSendSinceRunStart = true;
+		return await new Promise<LiveSendResult>((resolve, reject) => {
+			const timer = setTimeout(() => {
+				pendingLiveSends.delete(id);
+				reject(new Error("timed out waiting for the sub-agent to accept the message"));
+				requestSettleCheck();
+			}, LIVE_SEND_RESPONSE_TIMEOUT_MS);
+			timer.unref?.();
+			pendingLiveSends.set(id, { resolve, reject, timer });
+			try {
+				proc.stdin.write(serializeJsonLine({ id, type: "prompt", message, streamingBehavior: mode }));
+			} catch (error) {
+				clearTimeout(timer);
+				pendingLiveSends.delete(id);
+				reject(error instanceof Error ? error : new Error(String(error)));
+			}
+		});
+	};
+	const liveChannel: LiveAgentChannel = {
+		agentDir,
+		isClosing: () => channelClosing,
+		finished: channelFinished,
+		send: sendLive,
+	};
+	/** After agent_settled with live sends involved, ask the child whether it is truly idle. */
+	const requestSettleCheck = () => {
+		if (!settledAwaitingCheck || pendingLiveSends.size > 0 || completionNotified) return;
+		const id = `${SETTLE_CHECK_ID_PREFIX}${runGeneration}_${++settleCheckSeq}`;
+		liveSendSinceRunStart = false;
+		try {
+			proc.stdin.write(serializeJsonLine({ id, type: "get_state" }));
+		} catch {
+			settledAwaitingCheck = false;
+			scheduleAgentSettledTermination();
+		}
+	};
+	const handleSettleCheckResponse = (event: RpcEventRecord) => {
+		const id = String(event.id);
+		const generation = Number(id.slice(SETTLE_CHECK_ID_PREFIX.length).split("_")[0]);
+		// A newer run started after this check was requested; its own agent_settled decides.
+		if (!settledAwaitingCheck || generation !== runGeneration) return;
+		if (pendingLiveSends.size > 0 || liveSendSinceRunStart) {
+			requestSettleCheck();
+			return;
+		}
+		const data = isRecord(event.data) ? event.data : {};
+		const busy = data.isStreaming === true || (typeof data.pendingMessageCount === "number" && data.pendingMessageCount > 0);
+		if (busy) {
+			settledAwaitingCheck = false;
+			return;
+		}
+		settledAwaitingCheck = false;
+		scheduleAgentSettledTermination();
+	};
 	const scheduleProcessTreeKill = (reason: string) => {
 		if (processExitTreeKillTimer) return;
 		processExitTreeKillTimer = setTimeout(() => {
 			try {
-				writeProgress("shutdown_signal", { reason, signal: "SIGKILL" });
 				terminateChildProcessTree(proc, "SIGKILL");
 			} catch {
 				/* process group may already be gone */
@@ -254,6 +372,7 @@ export function spawnAgent(
 
 	const notifyComplete = (exitCode: number) => {
 		if (completionNotified) return;
+		releaseLiveChannel();
 		if (ownedHandle) {
 			// Do not release the semaphore or enter retry/fallback while cleanup is
 			// uncertain. Poll tiny durable receipts off the hot path until a
@@ -269,7 +388,6 @@ export function spawnAgent(
 	};
 	let ownedCompletionPending = false;
 	let ownedPendingExitCode = 0;
-	let ownedPendingReported = false;
 	let ownedSettleScheduled = false;
 	let ownedSettleStopped = false;
 	let ownedBridgeEndedAt: number | undefined;
@@ -308,6 +426,12 @@ export function spawnAgent(
 			// The receipt claims terminal failure without kernel proof: settle
 			// only once the exact launchd targets are confirmed absent.
 			if (await verifyOwnedRetirementAsync(agentDir, { overallDeadlineMs: OWNED_SETTLE_RETIREMENT_BUDGET_MS })) {
+				writeOwnedBootstrapFailureResult(agentDir);
+				try {
+					if (resultUnset()) setResult(fs.readFileSync(path.join(agentDir, "result.md"), "utf-8").trim(), true);
+				} catch {
+					/* bootstrap failure text absent */
+				}
 				finishOwnedCompletion(ownedPendingExitCode);
 				return;
 			}
@@ -321,12 +445,6 @@ export function spawnAgent(
 			const meta = readOwnedMetadata(agentDir);
 			if (meta && ownedLaunchClaimProtocolSync(meta.runDir) && readOwnedLaunchClaimSync(meta.runDir) === "none")
 				await fenceOwnedLaunchRunAsync(meta.runDir);
-		}
-		if (!ownedPendingReported) {
-			// Report pending exactly once and keep the progress stream open for
-			// the final completion record.
-			ownedPendingReported = true;
-			writeProgress("owned_drain_pending", { reason: outcome.kind });
 		}
 		scheduleOwnedSettle();
 	};
@@ -344,43 +462,33 @@ export function spawnAgent(
 	const commitCompletion = (exitCode: number) => {
 		if (completionNotified) return;
 		if (exitCode !== 0) shouldKeepStderr = true;
+		releaseLiveChannel();
 		completionNotified = true;
 		if (timeoutTimer) clearTimeout(timeoutTimer);
 		if (agentSettledKillTimer) clearTimeout(agentSettledKillTimer);
 		if (exitFinalizationTimer) clearTimeout(exitFinalizationTimer);
-		writeProgress("completed", { exitCode });
-		progressStream.end();
-		if (!fs.existsSync(agentDir)) {
-			onComplete?.({
-				runDir,
-				agentId: task.id,
-				agentDir,
-				exitCode,
-				state: { id: task.id, status: exitCode === 0 ? "done" : "failed", exitCode },
-			});
+		const stopped = stopRequested();
+		const fallbackState: AgentState = stopped
+			? { id: task.id, status: "stopped" }
+			: { id: task.id, status: exitCode === 0 ? "done" : "failed", exitCode };
+		if (!getRecord(runDir, task.id)) {
+			// The record was removed (cleanup) while the process ran.
+			onComplete?.({ runDir, agentId: task.id, agentDir, exitCode, state: fallbackState });
 			return;
 		}
-		fs.writeFileSync(
-			path.join(agentDir, "exit_code"),
-			fs.existsSync(path.join(agentDir, "stop_requested")) ? "stopped" : String(exitCode),
-			"utf-8",
-		);
-		fs.writeFileSync(path.join(agentDir, "finished_at"), isoNow(), "utf-8");
-		const state = getAgentState(runDir, task.id) ?? {
-			id: task.id,
-			status: exitCode === 0 ? "done" : "failed",
-			exitCode,
-		};
-		// Write structured result.json alongside result.md
+		const finishedAt = isoNow();
+		if (ownedHandle && fs.existsSync(agentDir)) {
+			// Owned recovery reads its exit record from the owned base.
+			fs.writeFileSync(path.join(agentDir, "exit_code"), stopped ? "stopped" : String(exitCode), "utf-8");
+			fs.writeFileSync(path.join(agentDir, "finished_at"), finishedAt, "utf-8");
+		}
+		updateLive(runDir, task.id, { active: false, process: undefined });
+		updateRecord(runDir, task.id, stopped
+			? { status: "stopped", exitCode: null, finishedAt }
+			: { status: exitCode === 0 ? "done" : "failed", exitCode, finishedAt });
+		const state = getAgentState(runDir, task.id) ?? fallbackState;
 		try {
-			writeStructuredResult({
-				agentDir,
-				agentId: task.id,
-				state,
-				subagentType: task.subagentType,
-				model: task.model,
-				maxResultBytes: options.maxResultBytes,
-			});
+			settleStructuredResult(runDir, task.id, { state, subagentType: task.subagentType, model: task.model, maxResultBytes: options.maxResultBytes });
 		} catch {
 			/* non-critical: do not block completion */
 		}
@@ -390,7 +498,6 @@ export function spawnAgent(
 	const finalizeCompletion = (code: number | null, signal: NodeJS.Signals | null) => {
 		if (completionNotified) return;
 		if (!ownedHandle && !timeoutKillTimer && !agentSettledCompletionFallbackTimer) scheduleProcessTreeKill("process_exit");
-		writeSuppressedRpcEventSummary(transcriptStream, suppressedRpcEventCounts);
 		let exitCode = resolveAgentExitCode({
 			timedOut,
 			completedFromAgentEnd,
@@ -404,29 +511,26 @@ export function spawnAgent(
 			// is intentional after RPC completion; preserve an RPC error as failure.
 			if (timedOut) exitCode = AGENT_TIMEOUT_EXIT_CODE;
 			else if (code === 143 && agentSettledRequested && (completedFromAgentEnd || lastAgentEndError) &&
-				!fs.existsSync(path.join(agentDir, "stop_requested"))) exitCode = lastAgentEndError ? 1 : 0;
+				!stopRequested()) exitCode = lastAgentEndError ? 1 : 0;
 			else if (code !== 0) exitCode = code ?? 1;
 			else if (!completedFromAgentEnd || lastAgentEndError) exitCode = 1;
 		}
-		if (fs.existsSync(agentDir)) {
-			if (exitCode === 0 && !fs.existsSync(path.join(agentDir, "result.md")) && lastAssistantResult.trim()) {
-				fs.writeFileSync(path.join(agentDir, "result.md"), lastAssistantResult.trim(), "utf-8");
-			} else if (exitCode !== 0 && !fs.existsSync(path.join(agentDir, "result.md")) && lastAgentEndError) {
-				fs.writeFileSync(path.join(agentDir, "result.md"), lastAgentEndError, "utf-8");
-			}
+		if (resultUnset()) {
+			if (exitCode === 0 && lastAssistantResult.trim()) setResult(lastAssistantResult.trim(), false);
+			else if (exitCode !== 0 && lastAgentEndError) setResult(lastAgentEndError, true);
 		}
-		if (shouldKeepStderr || exitCode !== 0 || logLimits.debugLogs) stderrStream.flush();
-		else stderrStream.discard();
-		transcriptStream.end();
+		// A clean run keeps no stderr; failures/debug keep the bounded tail.
+		if (!shouldKeepStderr && exitCode === 0 && !logLimits.debugLogs) updateLive(runDir, task.id, { stderrTail: undefined });
 		notifyComplete(exitCode);
 	};
 
 	const scheduleAgentSettledTermination = () => {
 		if (agentSettledKillTimer) return;
 		agentSettledRequested = true;
+		channelClosing = true;
 		if (ownedHandle) {
 			agentSettledKillTimer = setTimeout(() => {
-				try { requestOwnedCancel(agentDir); } catch (error) { writeProgress("owned_cancel_pending", { error: String(error) }); }
+				try { requestOwnedCancel(agentDir); } catch (error) { appendStderr(`owned cancel pending: ${String(error)}\n`); }
 			}, AGENT_SETTLED_TERMINATE_GRACE_MS);
 			agentSettledKillTimer.unref?.();
 			return;
@@ -434,7 +538,6 @@ export function spawnAgent(
 		agentSettledKillTimer = setTimeout(() => {
 			agentSettledKillTimer = undefined;
 			try {
-				writeProgress("shutdown_signal", { reason: "agent_settled", signal: "SIGTERM" });
 				terminateChildProcessTree(proc, "SIGTERM");
 			} catch {
 				/* process may have exited before the graceful termination timer fired */
@@ -443,7 +546,6 @@ export function spawnAgent(
 		agentSettledKillTimer.unref?.();
 		agentSettledCompletionFallbackTimer = setTimeout(() => {
 			try {
-				writeProgress("shutdown_signal", { reason: "agent_settled", signal: "SIGKILL" });
 				terminateChildProcessTree(proc, "SIGKILL");
 			} catch {
 				/* process may already be gone */
@@ -463,16 +565,15 @@ export function spawnAgent(
 			if (completionNotified) return;
 			timedOut = true;
 			const timeoutMessage = `Sub-agent timed out after ${Math.round(timeoutMs / 1000)} seconds.`;
-			writeProgress("timeout", { timeoutMs });
-			if (fs.existsSync(agentDir)) {
+			if (ownedHandle && fs.existsSync(agentDir)) {
+				// Owned recovery derives exit 124 from these markers.
 				fs.writeFileSync(path.join(agentDir, "timeout_ms"), String(timeoutMs), "utf-8");
 				fs.writeFileSync(path.join(agentDir, "timed_out_at"), isoNow(), "utf-8");
-				if (!fs.existsSync(path.join(agentDir, "result.md")))
-					fs.writeFileSync(path.join(agentDir, "result.md"), timeoutMessage, "utf-8");
-				stderrStream.write(`${timeoutMessage}\n`);
 			}
+			updateRecord(runDir, task.id, { timedOut: true });
+			if (resultUnset()) setResult(timeoutMessage, true);
+			appendStderr(`${timeoutMessage}\n`);
 			try {
-				writeProgress("shutdown_signal", { reason: "timeout", signal: "SIGTERM" });
 				if (ownedHandle) requestOwnedCancel(agentDir);
 				else terminateChildProcessTree(proc, "SIGTERM");
 			} catch {
@@ -481,7 +582,6 @@ export function spawnAgent(
 			if (!ownedHandle) {
 				timeoutKillTimer = setTimeout(() => {
 				try {
-					writeProgress("shutdown_signal", { reason: "timeout", signal: "SIGKILL" });
 					terminateChildProcessTree(proc, "SIGKILL");
 				} catch {
 					/* process may have exited after SIGTERM */
@@ -493,31 +593,57 @@ export function spawnAgent(
 		timeoutTimer.unref?.();
 	}
 
-	proc.stderr.on("data", (chunk) => stderrStream.write(chunk));
+	proc.stderr.on("data", (chunk) => appendStderr(String(chunk)));
 	attachJsonlLineReader(proc.stdout, (line) => {
 		const suppressedEventType = onRpcEvent ? undefined : suppressedRpcEventType(line);
 		if (suppressedEventType) {
-			suppressedRpcEventCounts.set(suppressedEventType, (suppressedRpcEventCounts.get(suppressedEventType) ?? 0) + 1);
 			return;
 		}
 		try {
 			const event = JSON.parse(line) as RpcEventRecord;
 			const todoProgress = todoProgressFromRpcEvent(event);
-			if (todoProgress) writeTodoProgress(agentDir, todoProgress);
-			const storedEvent = compactRpcEventForTranscript(event, Buffer.byteLength(line, "utf8"));
-			if (storedEvent) transcriptStream.write(serializeJsonLine(storedEvent));
-			const progressEvent = compactRpcEventForProgress(event);
-			if (progressEvent) writeProgress("rpc_event", progressEvent);
+			if (todoProgress) updateLive(runDir, task.id, { todoProgress });
 			onRpcEvent?.(event);
 			const sessionFile = extractSessionFileFromEvent(event);
-			if (sessionFile) writeSessionFileLink(agentDir, sessionFile);
+			if (sessionFile && getRecord(runDir, task.id)?.childSessionFile !== sessionFile) updateRecord(runDir, task.id, { childSessionFile: sessionFile });
 			const assistantResult = extractAssistantResultFromEvent(event);
 			if (assistantResult.trim()) lastAssistantResult = assistantResult;
 			const messageEndError = extractMessageEndErrorMessage(event);
 			if (messageEndError) lastAgentEndError = messageEndError;
+			const responseId = event.type === "response" && typeof event.id === "string" ? event.id : undefined;
+			if (responseId?.startsWith(LIVE_SEND_ID_PREFIX)) {
+				const pending = pendingLiveSends.get(responseId);
+				if (pending) {
+					pendingLiveSends.delete(responseId);
+					clearTimeout(pending.timer);
+					if (event.success === false) pending.reject(new Error(typeof event.error === "string" ? event.error : "sub-agent rejected the message"));
+					else pending.resolve({ disposition: isRecord(event.data) && typeof event.data.disposition === "string" ? event.data.disposition : "queued" });
+				}
+				requestSettleCheck();
+				return;
+			}
+			if (responseId?.startsWith(SETTLE_CHECK_ID_PREFIX)) {
+				handleSettleCheckResponse(event);
+				return;
+			}
+			if (event.type === "response" && event.command === "prompt" && (responseId === INITIAL_PROMPT_ID || responseId === undefined) && event.success !== false) {
+				resolveInitialPromptAccepted();
+			}
+			if (event.type === "agent_start") {
+				runGeneration += 1;
+				settledAwaitingCheck = false;
+				if (runGeneration > 1) {
+					// A live send started another run in this process: drop the previous run's outcome.
+					completedFromAgentEnd = false;
+					lastAgentEndError = "";
+					lastAssistantResult = "";
+					updateLive(runDir, task.id, { resultText: undefined });
+					if (getRecord(runDir, task.id)?.message !== undefined) updateRecord(runDir, task.id, { message: null });
+				}
+			}
 			if (event.type === "response" && event.command === "prompt" && event.success === false) {
 				const errorText = typeof event.error === "string" ? event.error : "RPC prompt failed";
-				fs.writeFileSync(path.join(agentDir, "result.md"), errorText, "utf-8");
+				setResult(errorText, true);
 				try {
 					if (ownedHandle) requestOwnedCancel(agentDir);
 					else terminateChildProcessTree(proc, "SIGTERM");
@@ -536,34 +662,36 @@ export function spawnAgent(
 				}
 				completedFromAgentEnd = true;
 				const result = extractAgentEndResult(event);
-				if (result.trim())
-					fs.writeFileSync(path.join(agentDir, "result.md"), result, "utf-8");
+				if (result.trim()) setResult(result, false);
 			}
 			if (event.type === "agent_settled") {
-				scheduleAgentSettledTermination();
+				if (pendingLiveSends.size > 0 || liveSendSinceRunStart) {
+					// A live send may have started (or queued) another run: confirm idleness first.
+					settledAwaitingCheck = true;
+					requestSettleCheck();
+				} else {
+					scheduleAgentSettledTermination();
+				}
 			}
 		} catch (error) {
-			stderrStream.write(`Invalid RPC JSON line: ${String(error)}\n${previewLine(line)}\n`);
-			transcriptStream.write(serializeJsonLine({ type: "invalid_json", bytes: Buffer.byteLength(line, "utf8") }));
+			appendStderr(`Invalid RPC JSON line: ${String(error)}\n${previewLine(line)}\n`);
 		}
 	}, {
 		maxLineChars: logLimits.rpcEventLineMaxChars,
 		onLineTooLongStart: (linePrefix) => {
 			const suppressedEventType = onRpcEvent ? undefined : suppressedRpcEventType(linePrefix);
 			if (suppressedEventType) {
-				suppressedRpcEventCounts.set(suppressedEventType, (suppressedRpcEventCounts.get(suppressedEventType) ?? 0) + 1);
 				return true;
 			}
 			if (!onRpcEvent && isAgentEndLine(linePrefix)) {
-				transcriptStream.write(serializeJsonLine({ type: "agent_end", oversized: true, bufferedChars: linePrefix.length }));
 				if (lastAgentEndError) {
-					fs.writeFileSync(path.join(agentDir, "result.md"), lastAgentEndError, "utf-8");
+					setResult(lastAgentEndError, true);
 				} else if (lastAssistantResult.trim()) {
 					completedFromAgentEnd = true;
-					fs.writeFileSync(path.join(agentDir, "result.md"), lastAssistantResult.trim(), "utf-8");
+					setResult(lastAssistantResult.trim(), false);
 				} else {
 					lastAgentEndError = "Sub-agent produced an oversized agent_end RPC event before a final result could be captured.";
-					fs.writeFileSync(path.join(agentDir, "result.md"), lastAgentEndError, "utf-8");
+					setResult(lastAgentEndError, true);
 				}
 				return true;
 			}
@@ -571,8 +699,7 @@ export function spawnAgent(
 		},
 		onLineTooLong: (lineChars) => {
 			const message = `RPC JSON line exceeded ${logLimits.rpcEventLineMaxChars} chars; dropped oversized event (${lineChars} chars).`;
-			stderrStream.write(`${message}\n`);
-			transcriptStream.write(serializeJsonLine({ type: "oversized_rpc_event", chars: lineChars }));
+			appendStderr(`${message}\n`);
 		},
 	});
 
@@ -604,13 +731,9 @@ export function spawnAgent(
 	proc.once("error", (error) => {
 		if (ownedHandle) markOwnedBridgeEnded();
 		const message = String(error);
-		stderrStream.write(`${message}\n`);
+		appendStderr(`${message}\n`);
 		shouldKeepStderr = true;
-		if (fs.existsSync(agentDir) && !fs.existsSync(path.join(agentDir, "result.md"))) {
-			fs.writeFileSync(path.join(agentDir, "result.md"), message, "utf-8");
-		}
-		stderrStream.flush();
-		transcriptStream.end();
+		if (resultUnset()) setResult(message, true);
 		if (ownedHandle) {
 			try { requestOwnedCancel(agentDir); } catch { /* supervisor may still be starting; receipt remains required */ }
 		}
@@ -618,9 +741,13 @@ export function spawnAgent(
 	});
 
 	const pid = proc.pid!;
-	fs.writeFileSync(path.join(agentDir, "pid"), String(pid), "utf-8");
-	if (!ownedHandle && process.platform !== "win32") fs.writeFileSync(path.join(agentDir, "process_group"), String(pid), "utf-8");
-	writeProgress("spawned", { pid });
+	updateRecord(runDir, task.id, {
+		pid,
+		...(!ownedHandle && process.platform !== "win32" ? { processGroup: true } : {}),
+		...(ownedHandle ? { owned: true } : {}),
+	});
+	updateLive(runDir, task.id, { process: proc });
+	if (!channelReleased) registerLiveChannel(liveChannel);
 
 	proc.stdin.write([
 		serializeJsonLine({
@@ -628,18 +755,17 @@ export function spawnAgent(
 			type: "get_state",
 		}),
 		serializeJsonLine({
-			id: "sub_prompt",
+			id: INITIAL_PROMPT_ID,
 			type: "prompt",
 			message: promptContent,
 			...(promptImages ? { images: promptImages } : {}),
 		}),
 	].join(""));
-	writeProgress("prompt_sent");
 	// Keep stdin open while the RPC prompt is running. pi RPC mode treats stdin
 	// EOF as a shutdown request, while the prompt command itself is handled
 	// asynchronously after preflight. Closing stdin here can therefore terminate
 	// the child before message_end/agent_end/agent_settled events are emitted,
-	// producing exit 0 with no result.md. The child is terminated explicitly after agent_settled,
+	// producing exit 0 with no result. The child is terminated explicitly after agent_settled,
 	// timeout, stop, or process error.
 
 	return { pid, agentDir, process: proc };
@@ -813,79 +939,6 @@ function attachJsonlLineReader(
 	});
 }
 
-function compactRpcEventForTranscript(event: RpcEventRecord, originalBytes: number): RpcEventRecord | undefined {
-	if (event.type === "message_update" || event.type === "tool_execution_update") return undefined;
-	if (event.type === "response") {
-		return stripUndefined({
-			type: event.type,
-			command: typeof event.command === "string" ? event.command : undefined,
-			success: typeof event.success === "boolean" ? event.success : undefined,
-			error: typeof event.error === "string" ? previewLine(event.error) : undefined,
-			bytes: originalBytes,
-		});
-	}
-	if (event.type === "agent_end") {
-		return {
-			type: event.type,
-			messageCount: Array.isArray(event.messages) ? event.messages.length : 0,
-			bytes: originalBytes,
-		};
-	}
-	if (event.type === "message_end") {
-		return stripUndefined({
-			type: event.type,
-			role: isRecord(event.message) && typeof event.message.role === "string" ? event.message.role : undefined,
-			stopReason: isRecord(event.message) && typeof event.message.stopReason === "string" ? event.message.stopReason : undefined,
-			bytes: originalBytes,
-		});
-	}
-	if (event.type === "turn_end") {
-		return {
-			type: event.type,
-			toolResultCount: Array.isArray(event.toolResults) ? event.toolResults.length : 0,
-			bytes: originalBytes,
-		};
-	}
-	if (event.type === "tool_execution_start" || event.type === "tool_execution_end") {
-		return stripUndefined({
-			type: event.type,
-			toolName: typeof event.toolName === "string" ? event.toolName : undefined,
-			toolCallId: typeof event.toolCallId === "string" ? event.toolCallId : undefined,
-			bytes: originalBytes,
-		});
-	}
-	return { type: event.type, bytes: originalBytes };
-}
-
-function compactRpcEventForProgress(event: RpcEventRecord): Record<string, unknown> | undefined {
-	if (event.type === "message_update" || event.type === "tool_execution_update") return undefined;
-	if (event.type === "response") {
-		return stripUndefined({
-			type: event.type,
-			command: typeof event.command === "string" ? event.command : undefined,
-			success: typeof event.success === "boolean" ? event.success : undefined,
-		});
-	}
-	if (event.type === "tool_execution_start" || event.type === "tool_execution_end") {
-		return stripUndefined({
-			type: event.type,
-			toolName: typeof event.toolName === "string" ? event.toolName : undefined,
-		});
-	}
-	if (event.type === "message_start" || event.type === "message_end") {
-		return stripUndefined({
-			type: event.type,
-			role: typeof event.role === "string"
-				? event.role
-				: isRecord(event.message) && typeof event.message.role === "string"
-					? event.message.role
-					: undefined,
-			stopReason: isRecord(event.message) && typeof event.message.stopReason === "string" ? event.message.stopReason : undefined,
-		});
-	}
-	return { type: event.type };
-}
-
 function suppressedRpcEventType(line: string): string | undefined {
 	if (line.includes('"type":"message_update"') || line.includes('"type": "message_update"')) return "message_update";
 	if (line.includes('"type":"tool_execution_update"') || line.includes('"type": "tool_execution_update"')) return "tool_execution_update";
@@ -896,22 +949,10 @@ function isAgentEndLine(line: string): boolean {
 	return line.includes('"type":"agent_end"') || line.includes('"type": "agent_end"');
 }
 
-function writeSuppressedRpcEventSummary(transcriptStream: { write(chunk: string | Buffer): void }, counts: Map<string, number>): void {
-	for (const [eventType, count] of counts) {
-		if (count > 0) transcriptStream.write(serializeJsonLine({ type: "suppressed_rpc_events", eventType, count }));
-	}
-}
-
 function previewLine(text: string, maxChars = 4096): string {
 	return text.length <= maxChars ? text : `${text.slice(0, maxChars)}… [truncated ${text.length - maxChars} chars]`;
 }
 
-function stripUndefined(record: RpcEventRecord): RpcEventRecord {
-	for (const key of Object.keys(record)) {
-		if (record[key] === undefined) delete record[key];
-	}
-	return record;
-}
 
 function extractAgentEndErrorMessage(event: RpcEventRecord): string {
 	const messages = Array.isArray(event.messages) ? event.messages : [];
@@ -1001,23 +1042,23 @@ function subagentEnvironment(env: NodeJS.ProcessEnv, agentDir?: string): NodeJS.
 	return result;
 }
 
-function prepareUiQaWorkspace(agentDir: string, subagentType: string | undefined): void {
-	const workspace = path.join(agentDir, UI_QA_WORKSPACE_DIR);
+/**
+ * UI/browser QA workspace `.pi/artifacts/subagents/<batch>-<agentId>/` (the
+ * runner's PI_SUBAGENT_AGENT_DIR); created only for ui-qa types.
+ */
+function prepareUiQaWorkspace(cwd: string, runDir: string, agentId: string): string {
+	const batch = parseRunKey(runDir)?.batch ?? path.basename(runDir);
+	const root = path.join(cwd, PROJECT_ARTIFACTS_DIR, "subagents", `${batch}-${agentId}`);
+	const workspace = path.join(root, UI_QA_WORKSPACE_DIR);
 	fs.rmSync(workspace, { recursive: true, force: true });
-	if (!isUiQaType(subagentType)) return;
 	const uiFlows = path.join(workspace, "flows");
 	const browserWorkspace = path.join(workspace, UI_QA_BROWSER_WORKSPACE_DIR);
 	const browserFlows = path.join(browserWorkspace, "flows");
-	fs.mkdirSync(workspace, { recursive: true, mode: 0o700 });
-	fs.mkdirSync(uiFlows, { recursive: true, mode: 0o700 });
-	fs.mkdirSync(browserWorkspace, { recursive: true, mode: 0o700 });
-	fs.mkdirSync(browserFlows, { recursive: true, mode: 0o700 });
-	if (process.platform !== "win32") {
-		fs.chmodSync(workspace, 0o700);
-		fs.chmodSync(uiFlows, 0o700);
-		fs.chmodSync(browserWorkspace, 0o700);
-		fs.chmodSync(browserFlows, 0o700);
+	for (const dir of [workspace, uiFlows, browserWorkspace, browserFlows]) {
+		fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+		if (process.platform !== "win32") fs.chmodSync(dir, 0o700);
 	}
+	return root;
 }
 
 function appendEnvList(value: string | undefined, items: readonly string[]): string {
@@ -1025,6 +1066,3 @@ function appendEnvList(value: string | undefined, items: readonly string[]): str
 	return existing ? `${existing},${items.join(",")}` : items.join(",");
 }
 
-function isTruthyEnv(value: string | undefined): boolean {
-	return /^(1|true|yes|on)$/i.test(value?.trim() ?? "");
-}

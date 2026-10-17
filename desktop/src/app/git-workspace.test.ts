@@ -492,6 +492,21 @@ describe("Git review checkpoints and secondary operations", () => {
     expect(invoke.mock.calls.map(([command]) => command)).toEqual(["git_status"]);
   });
 
+  it("reuses a recent remote check on panel open but always fetches on explicit refresh", async () => {
+    const { store } = fixture();
+
+    await store.refreshRemoteStatus({ maxAgeMs: 60_000 });
+    expect(invoke.mock.calls.map(([command]) => command)).toEqual(["git_status", "git_fetch", "git_status"]);
+
+    invoke.mockClear();
+    await store.refreshRemoteStatus({ maxAgeMs: 60_000 });
+    expect(invoke.mock.calls.map(([command]) => command)).toEqual(["git_status"]);
+
+    invoke.mockClear();
+    await store.refreshRemoteStatus();
+    expect(invoke.mock.calls.map(([command]) => command)).toEqual(["git_status", "git_fetch", "git_status"]);
+  });
+
   it("retains a review when inspecting another file or closing the editor", async () => {
     const { store } = fixture();
     const reviewed = { scope: "staged" as const, content: "+new", truncated: false };

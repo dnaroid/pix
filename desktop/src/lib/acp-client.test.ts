@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { AcpClient, type AcpExit, type AcpTransport, type AcpTransportHandlers } from "./acp-client";
 import { PIX_SESSION_STATE_METHOD } from "./session-state";
 import { PIX_SESSION_CATALOG_CHANGED_METHOD } from "../../../acp/src/acp/session-catalog-contract";
+import { PIX_USAGE_STATS_CHANGED_METHOD } from "../../../acp/src/acp/usage-stats-contract";
 import { createSessionActivityStore } from "../app/session-activity.svelte";
 import { TODO_STATE_CHANNEL } from "./session-todos";
 import { parseQueueState } from "./acp-response-parsers";
@@ -79,6 +80,25 @@ describe("ACP JSON-RPC client", () => {
     transport.message({ jsonrpc: "2.0", method: PIX_SESSION_CATALOG_CHANGED_METHOD, params: { cwd: "" } });
     transport.message({ jsonrpc: "2.0", method: PIX_SESSION_CATALOG_CHANGED_METHOD, params: { cwd: 55 } });
     expect(onSessionCatalogChanged).toHaveBeenCalledExactlyOnceWith("/workspace");
+    await client.dispose();
+  });
+  it("requests usage stats and routes only valid usage change notifications", async () => {
+    const transport = new FakeTransport();
+    const onUsageStatsChanged = vi.fn();
+    const client = await startedClient(transport, { onUsageStatsChanged });
+    const operation = client.usageStats("/workspace", { sources: ["pix-sessions"], refresh: true });
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    expect(requestAt(transport, 1)).toMatchObject({ method: "pix/usage/stats", params: { cwd: "/workspace", sources: ["pix-sessions"], refresh: true } });
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 1).id, result: { snapshots: [
+      { source: "pix-sessions", status: "loading", unit: "tokens", coverage: null, buckets: [], fetchedAtMs: 0 },
+    ] } });
+    await expect(operation).resolves.toEqual({ snapshots: [
+      { source: "pix-sessions", status: "loading", unit: "tokens", coverage: null, buckets: [], fetchedAtMs: 0 },
+    ] });
+    transport.message({ jsonrpc: "2.0", method: PIX_USAGE_STATS_CHANGED_METHOD, params: { source: "pix-sessions" } });
+    transport.message({ jsonrpc: "2.0", method: PIX_USAGE_STATS_CHANGED_METHOD, params: { source: "codex-local" } });
+    transport.message({ jsonrpc: "2.0", method: PIX_USAGE_STATS_CHANGED_METHOD, params: { source: "unknown" } });
+    expect(onUsageStatsChanged.mock.calls).toEqual([[{ source: "pix-sessions" }]]);
     await client.dispose();
   });
   it("keeps commit indexing requests alive beyond the ordinary RPC deadline", async () => {

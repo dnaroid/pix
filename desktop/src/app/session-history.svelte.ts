@@ -177,6 +177,26 @@ export function createSessionHistory(options: SessionHistoryOptions) {
     }
   }
 
+  /**
+   * Replace a read-only viewer transcript with freshly persisted history.
+   * Unlike hydrate it does not merge with cached items (they came from the
+   * same file) and does not toggle the loading state.
+   */
+  async function refreshViewer(requestClient: AcpClient, sessionId: string, requestWorkspace: string): Promise<boolean> {
+    const requestGeneration = generation;
+    if (loading || hydrationBySessionId.has(sessionId)) return false;
+    const history = await requestClient.sessionHistory(sessionId);
+    if (!isCurrent(requestClient, sessionId, requestWorkspace, requestGeneration)
+      || loading || hydrationBySessionId.has(sessionId)) return false;
+    let transcript = applySessionUpdates(emptyTranscript, history.updates);
+    transcript = markDeferredToolResults(transcript, history.deferredToolCallIds);
+    if (history.cursor) olderCursorBySessionId.set(sessionId, history.cursor);
+    else olderCursorBySessionId.delete(sessionId);
+    options.state.setTranscriptFor(sessionId, transcript);
+    incompleteHydrationSessionIds.delete(sessionId);
+    return true;
+  }
+
   async function loadOlder(): Promise<boolean> {
     const requestClient = options.client();
     const sessionId = options.state.sessionId;
@@ -306,6 +326,7 @@ export function createSessionHistory(options: SessionHistoryOptions) {
     needsHydration,
     hydrate,
     primeBackground,
+    refreshViewer,
     waitForHydration,
     loadOlder,
     loadDeferredToolResult,

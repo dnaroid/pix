@@ -15,7 +15,7 @@ const AUTOCOMPLETE_HISTORY_CONTEXT_MAX_CHARS = 3_600;
 const AUTOCOMPLETE_TOKEN_CHARS = 4;
 const AUTOCOMPLETE_EMPTY_SENTINEL = "<EMPTY>";
 const DEFAULT_AUTOCOMPLETE_CONFIG: AutocompleteConfig = {
-	modelRef: "zai/glm-5-turbo",
+	modelRef: "",
 	fallbackModels: [],
 	debounceMs: 350,
 	timeoutMs: 3_000,

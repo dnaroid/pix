@@ -15,7 +15,6 @@ export class SubagentOverlay {
 		for (const runDir of listRunDirs(cwd)) {
 			const running = getRunState(runDir, undefined, {
 				includeLineCounts: false,
-				checkRpcPromptFailure: false,
 			}).agents.filter((agent) => agent.status === "running");
 			if (running.length === 0) continue;
 			const liveRun = getLiveRun(this.liveAgents, runDir);
@@ -37,7 +36,6 @@ export class SubagentOverlay {
 			const states = new Map(
 				getRunState(runDir, ids, {
 					includeLineCounts: false,
-					checkRpcPromptFailure: false,
 				}).agents.map((agent) => [agent.id, agent]),
 			);
 

@@ -58,7 +58,7 @@ describe("desktop visual regressions", () => {
     expect(user).toContain("<AttachmentGrid");
     expect(user).toContain("<MarkdownText");
     expect(user).toContain('aria-label="Message actions"');
-    expect(transcriptSource).toContain('if (next?.type === "message" && next.role === "user") return "mb-8";');
+    expect(transcriptSource).toContain('if (next?.type === "message" && next.role === "user") return "mb-5";');
     expect(transcriptActivityGroupSource).toContain('data-activity-name={label} class="font-normal text-muted-foreground/45"');
     expect(transcriptSource).not.toContain('"border-t border-border pt-3"');
   });
@@ -611,8 +611,7 @@ describe("desktop visual regressions", () => {
 
   it("uses the live model catalog instead of free-form model text fields", () => {
     expect(settingsConfigSource).toContain("modelThinkingConfigState(configOptions).models");
-    expect(desktopSettingsEditorSource).toContain("<SettingsModelSelect");
-    expect(desktopSettingsEditorSource).toContain("<SettingsModelList");
+    expect(desktopSettingsEditorSource).toContain("<SettingsModelSummary");
     expect(desktopSettingsEditorSource).toContain("<SettingsModelVisibility");
     expect(desktopSettingsEditorSource).not.toContain('placeholder="provider/model"');
     expect(desktopSettingsEditorSource).not.toContain("SettingsStringList");
@@ -626,12 +625,11 @@ describe("desktop visual regressions", () => {
     expect(settingsModelListSource).not.toContain("<select");
     expect(settingsModelVisibilitySource).toContain("Choose visible models");
     expect(settingsModelVisibilitySource).toContain("searchSettingsModels");
-    expect(desktopSettingsEditorSource).toContain('ariaLabel="CI fix model"');
+    expect(desktopSettingsEditorSource).toContain('label="Git models"');
     expect(desktopSettingsEditorSource).not.toContain('ariaLabel="Knowledge review model"');
     expect(desktopSettingsEditorSource).not.toContain('["desktop", "knowledge", "reviewModelRef"]');
-    expect(desktopSettingsEditorSource).toContain('emptyLabel="Default model"');
-    expect(desktopSettingsEditorSource).toContain('ariaLabel="Review model"');
-    expect(desktopSettingsEditorSource).toContain('ariaLabel="Commit message model"');
+    expect(desktopSettingsEditorSource).toContain('["desktop", "git", "reviewModelRef"]');
+    expect(desktopSettingsEditorSource).toContain('["desktop", "git", "commitMessageModelRef"]');
   });
 
   it("edits frontier models with the live catalog in the Sub-agents section", () => {
@@ -654,8 +652,8 @@ describe("desktop visual regressions", () => {
   it("exposes semantic first-prompt model routing in curated Desktop settings", () => {
     expect(desktopSettingsEditorSource).toContain('label="Automatic model routing"');
     expect(desktopSettingsEditorSource).toContain('label="Auto by default"');
-    expect(desktopSettingsEditorSource).toContain('label="Router model"');
-    expect(desktopSettingsEditorSource).toContain('label="Router fallbacks"');
+    expect(desktopSettingsEditorSource).toContain('label="Default & router models"');
+    expect(desktopSettingsEditorSource).toContain('["modelRouting", "fallbackModels"]');
     expect(desktopSettingsEditorSource).toContain('label="Routing fallback tier"');
     expect(desktopSettingsEditorSource).toContain('label="Routing tiers"');
     expect(desktopSettingsEditorSource).toContain("<SettingsModelRoutingTiers");
@@ -750,7 +748,9 @@ describe("desktop visual regressions", () => {
     expect(tauriLibSource).not.toContain('command.args(["--noprofile", "--norc"])');
     expect(tauriLibSource).not.toContain('command.env("PROMPT", "pix:%1~ $ ")');
     expect(packageScriptsSource).toContain("{script.name}");
-    expect(packageScriptsSource).not.toContain("{script.command}");
+    // The command may appear inside the run tooltip text, but never as a
+    // visible row label or as the whole tooltip.
+    expect(packageScriptsSource).not.toMatch(/(?<!\$)\{script\.command\}/);
     expect(packageScriptsSource).not.toContain("title={script.command}");
   });
 

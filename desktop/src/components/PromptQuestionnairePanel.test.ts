@@ -5,8 +5,14 @@ import controllerSource from "./prompt-composer-questionnaire-controller.svelte.
 
 describe("Prompt questionnaire preview policy", () => {
   it("wraps choice and preview text instead of inheriting button nowrap", () => {
-    const wrappingText = 'class="min-w-0 flex-1 whitespace-pre-wrap [overflow-wrap:anywhere]"';
+    const wrappingText = 'class="min-w-0 flex-1 [overflow-wrap:anywhere]"';
     expect(panelSource.split(wrappingText)).toHaveLength(3);
+    // pre-wrap belongs on text spans only: on the wrapper it renders template
+    // newlines between label/description as tall blank gaps.
+    expect(panelSource).not.toContain("flex-1 whitespace-pre-wrap");
+    expect(panelSource).toContain('font-medium whitespace-pre-wrap text-foreground">{choice.label}');
+    expect(panelSource).toContain("leading-snug whitespace-pre-wrap text-muted-foreground\">{choice.description}");
+    expect(panelSource).toContain('font-semibold whitespace-pre-wrap text-foreground">{question.label}');
     expect(panelSource).toContain("whitespace-pre-wrap [overflow-wrap:anywhere] text-foreground\">{currentQuestion.prompt}");
   });
 

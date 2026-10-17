@@ -62,10 +62,9 @@ Async-subagent common spawn explicitly loads `dcp/subagent.ts` for every role
 and attempt, without interactive `/dcp` commands or the full suite. The normal
 DCP configuration and model overrides still apply. Enabled `compress` survives
 restricted/empty work-tool lists, CLI exclusions and model selection; read-only
-child/council guards allow this context-only operation. Default `--no-session`
-children keep decisions in memory only: no session file or journal writes, no raw
-history mutation, and no DCP recovery across attempts/process restart. Persisted
-children use the normal journal. See [subagent spawn](async-subagents.md#spawn-corespawnts).
+child/council guards allow this context-only operation. Async children are always
+persisted sessions and use the normal journal. An in-memory (unpersisted) session
+manager keeps decisions in memory only: no journal writes, no raw history mutation. See [subagent spawn](async-subagents.md#spawn-corespawnts).
 
 Full-branch reads fail closed on errors, partial cursors and real session/branch
 changes; they do not fall back to a lazy presentation tail. A bounded retry is

@@ -97,7 +97,7 @@ function readSubagentUsage(projectDir: string): { usage: EvalUsage; count: numbe
 			const agentDir = path.join(runDir, agent);
 			if (!safeIsDirectory(agentDir)) continue;
 			count += 1;
-			const sessionDir = readOptional(path.join(agentDir, "session_dir")).trim();
+			const sessionDir = safeIsDirectory(path.join(agentDir, "sessions")) ? path.join(agentDir, "sessions") : "";
 			const sessionFile = readOptional(path.join(agentDir, "session_file")).trim();
 			addUsage(usage, readUsageFromTree(sessionDir || sessionFile || path.join(agentDir, "session")));
 		}

@@ -260,8 +260,8 @@ function spawnForArgs(task: { id: string; model?: string }, extraArgs: string[] 
 	} catch (error) {
 		if (!(error instanceof OwnedBoundaryReached)) throw error;
 	}
-	const argsFile = path.join(runDir, task.id, "pi_args");
-	return { argv: () => fs.readFileSync(argsFile, "utf8").split("\n"), launched: () => launched, completed, runDir, argsFile };
+	const argsFile = path.join(runDir, task.id, "launch.json");
+	return { argv: () => JSON.parse(fs.readFileSync(argsFile, "utf8")).piArgs as string[], launched: () => launched, completed, runDir, argsFile };
 }
 const count = (argv: string[], value: string) => argv.filter((arg) => arg === value).length;
 const lastModels = (argv: string[]) => argv[argv.lastIndexOf("--models") + 1];
@@ -324,7 +324,7 @@ describeOwnedSpawnMatrix("child pi_args matrix (T1)", () => {
 			ownedLaunchForTest: () => { launched = true; throw new Error("unreachable"); },
 		})).toThrow(ProviderExtensionError);
 		expect(launched).toBe(false);
-		for (const name of ["pi_args", "prompt.md", "started_at", "owned-launch", "owned_launch"])
+		for (const name of ["launch.json", "prompt.md", "started_at", "owned-launch", "owned_launch"])
 			expect(fs.existsSync(path.join(runDir, "missing", name))).toBe(false);
 	});
 
@@ -346,7 +346,7 @@ describeOwnedSpawnMatrix("child pi_args matrix (T1)", () => {
 			if (installed) {
 				expect(failure).toBeInstanceOf(OwnedBoundaryReached);
 				expect(launches.length).toBe(1);
-				const argv = fs.readFileSync(path.join(runDir, "fb", "pi_args"), "utf8").split("\n");
+				const argv = (JSON.parse(fs.readFileSync(path.join(runDir, "fb", "launch.json"), "utf8")).piArgs as string[]).join("\n").split("\n");
 				expect(count(argv, STUB_ENTRY)).toBe(1);
 				expect(lastModels(argv)).toBe(CLAUDE);
 			} else {
@@ -357,6 +357,30 @@ describeOwnedSpawnMatrix("child pi_args matrix (T1)", () => {
 				expect(fs.existsSync(path.join(runDir, "fb", "retry.log"))).toBe(false);
 			}
 		}
+	}, 20_000);
+
+	test("Claude task with owned launch unavailable uses the plain process-group launch and keeps the provider", async () => {
+		fakePi("ok");
+		Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
+		const cwd = tempDir();
+		const runDir = path.join(cwd, "run");
+		fs.mkdirSync(path.join(runDir, "prompts"), { recursive: true });
+		let launched = false;
+		const exitCode = await new Promise<number>((resolve) => {
+			spawnAgent(runDir, { id: "plain", task: "Do work", model: CLAUDE }, cwd, [], undefined, (c) => resolve(c.exitCode), {
+				ownedLaunchUnavailable: true, locateProviderPackagesForTest: () => [STUB],
+				ownedLaunchForTest: () => { launched = true; throw new OwnedBoundaryReached(); },
+			});
+		});
+		const agentDir = path.join(runDir, "plain");
+		expect(launched).toBe(false);
+		expect(exitCode).toBe(0);
+		expect(fs.existsSync(path.join(agentDir, "process_group"))).toBe(true);
+		expect(fs.existsSync(path.join(agentDir, "owned_launch"))).toBe(false);
+		const argv = (JSON.parse(fs.readFileSync(path.join(agentDir, "launch.json"), "utf8")).piArgs as string[]).join("\n").split("\n");
+		expect(count(argv, STUB_ENTRY)).toBe(1);
+		expect(lastModels(argv)).toBe(CLAUDE);
+		expect(fs.readFileSync(path.join(agentDir, "progress.jsonl"), "utf8")).toContain("owned_launch_unavailable");
 	}, 20_000);
 });
 

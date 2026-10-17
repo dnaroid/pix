@@ -80,6 +80,46 @@ export function appendTerminalOutput(current: string, chunk: string, maxChars = 
   return combined.length <= maxChars ? combined : combined.slice(combined.length - maxChars);
 }
 
+export interface PackageTerminalActivity {
+  readonly id: string;
+  readonly busy: boolean;
+}
+
+/** User-visible run state of a launch command or package script. */
+export type LaunchRunState = "running" | "idle" | "succeeded" | "failed" | "stopped";
+
+export interface LaunchRuntime {
+  readonly terminalId: string;
+  readonly state: LaunchRunState;
+}
+
+export function terminalRunState(terminal: PackageTerminalView, busy: boolean): LaunchRunState {
+  if (terminal.status === "running") return terminal.kind === "script" || busy ? "running" : "idle";
+  if (terminal.status === "failed") return "failed";
+  if (terminal.status === "stopped") return "stopped";
+  if (terminal.signal) return "stopped";
+  return terminal.exitCode === undefined || terminal.exitCode === 0 ? "succeeded" : "failed";
+}
+
+/**
+ * Pick the terminal that represents an item: a busy terminal wins, then an
+ * idle live shell, then the most recent finished one.
+ */
+export function pickRuntimeTerminal(
+  terminals: readonly PackageTerminalView[],
+  matches: (terminal: PackageTerminalView) => boolean,
+  isBusy: (terminal: PackageTerminalView) => boolean,
+): PackageTerminalView | undefined {
+  let best: PackageTerminalView | undefined;
+  let bestRank = -1;
+  for (const terminal of terminals) {
+    if (!matches(terminal)) continue;
+    const rank = terminal.status === "running" ? (isBusy(terminal) ? 2 : 1) : 0;
+    if (rank >= bestRank) { best = terminal; bestRank = rank; }
+  }
+  return best;
+}
+
 export function filterPackageScripts(scripts: readonly PackageScript[], query: string): PackageScript[] {
   const needle = query.trim().toLowerCase();
   if (!needle) return [...scripts];

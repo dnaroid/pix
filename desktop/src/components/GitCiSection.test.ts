@@ -21,7 +21,7 @@ describe("Git CI setup UI", () => {
   it("collapses file rows independently without nesting scope actions in the toggle", () => {
     expect(changesSource).toContain("let expanded = $state(true)");
     expect(changesSource).toContain('aria-expanded={expanded} onclick={() => expanded = !expanded}');
-    expect(changesSource).toContain("{#if expanded}\n  {#each visible as change");
+    expect(changesSource).toContain("{#if expanded}\n  {#each shown as change");
     const toggle = changesSource.slice(changesSource.indexOf("aria-expanded={expanded}"), changesSource.indexOf("</button>"));
     expect(toggle).toContain('isStaged ? "Staged" : "Changes"');
     expect(toggle).not.toContain("onToggle");

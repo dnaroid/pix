@@ -27,11 +27,18 @@ describe("SessionStartView", () => {
     expect(source).not.toContain(">New conversation<");
     expect(rowSource).toContain("row.depth === 0 && sessionIsFork(row.session)");
     expect(rowSource).toContain("GitFork");
-    expect(source).toContain("buildSessionTree(sessions)");
+    expect(rowSource).toContain("Sub-agent · {subagent.agentId}");
     expect(source).toContain("flatSessionRow(session)");
-    expect(source).toContain('previewInlineSearch("sessions", query, sessions)');
+    expect(source).toContain('previewInlineSearch("sessions", query, candidateSessions)');
     expect(source).toContain('queryInlineSearch("sessions", searchClient, workspace, submitted, request.signal, publish)');
-    expect(source).toContain("expandedSessionRows(buildSessionTree(sessions), collapsed)");
+    expect(source).toContain("expandedSessionRows(buildSessionTree(candidateSessions), collapsed)");
+  });
+
+  it("hides sub-agent viewer sessions unless the toggle is enabled", () => {
+    expect(source).toContain("let showSubagents = $state(false)");
+    expect(source).toContain("showSubagents ? sessions : sessions.filter((session) => !isSubagentSession(session))");
+    expect(source).toContain("{#if hasSubagentSessions}");
+    expect(source).toContain("bind:checked={showSubagents}");
   });
 
   it("fills the transcript height while keeping header/search fixed and session rows scrollable", () => {

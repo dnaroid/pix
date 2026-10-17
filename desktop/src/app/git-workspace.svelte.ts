@@ -40,6 +40,9 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
   let workbenchOpenedOrder = $state(0);
   let loadGeneration = 0;
   let pendingRefresh: Promise<void> | null = null;
+  // Last successful remote-ref update per workspace (fetch/pull/update/push).
+  const remoteCheckedAt = new Map<string, number>();
+  const REMOTE_REF_COMMANDS = new Set(["git_fetch", "git_pull", "git_update", "git_push"]);
 
   function reset(): void {
     generation += 1;
@@ -117,10 +120,15 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
    * Refresh local status, then update remote refs so ahead/behind reflects the
    * current upstream state. This never pulls or changes working-tree files.
    */
-  async function refreshRemoteStatus(): Promise<void> {
+  async function refreshRemoteStatus(refreshOptions: { maxAgeMs?: number } = {}): Promise<void> {
+    const workspace = options.workspace();
     await refresh();
     const current = snapshot;
     if (!current?.remotes.length) return;
+    // Opening the panel must not pay a network round-trip every time; an
+    // explicit refresh (no maxAgeMs) always checks the remotes.
+    const last = remoteCheckedAt.get(workspace);
+    if (refreshOptions.maxAgeMs !== undefined && last !== undefined && Date.now() - last < refreshOptions.maxAgeMs) return;
     await runMutation("fetch", "git_fetch");
   }
 
@@ -145,6 +153,7 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
     notice = null;
     try {
       const result = await invoke<unknown>(command, { workspace, ...payload });
+      if (REMOTE_REF_COMMANDS.has(command)) remoteCheckedAt.set(workspace, Date.now());
       if (!current()) return false;
       if (command !== "git_fetch" && command !== "git_push" && command !== "git_save_identity") invalidateReview();
       if (mutationOptions.reloadProject) {

@@ -362,7 +362,7 @@
           "description": "Minimum successful participants per round; default max(2, roster − 1). Missing participants are recorded as coverage gaps."
         }
       },
-      "description": "Multi-model brainstorm council. Requires async-subagents and its research role."
+      "description": "Multi-model brainstorm council skill settings, read by its council.mjs helper. Requires async-subagents and its research role."
     },
     "terminalBell": {
       "type": "object",

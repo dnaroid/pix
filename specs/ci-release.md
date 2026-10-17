@@ -91,10 +91,9 @@ remain true when CI or UI-QA tests change.
 - Tools-suite tests receive a fresh HOME/USERPROFILE, XDG config/cache/data
   roots and Pi agent directory under the run's scratch directory. The parent
   environment is not mutated. Ambient live-eval opt-ins must remain unset.
-- Every check clears inherited `PIX_CONFIG_PROFILE`, `PIX_BRAINSTORM_HOST_URL`
-  and `PIX_BRAINSTORM_HOST_TOKEN` from its child environment so launching the
-  gate from Desktop cannot redirect default-profile fixtures or reach the live
-  council host. Tests can still explicitly select a profile or fake host.
+- Every check clears inherited `PIX_CONFIG_PROFILE` from its child environment
+  so launching the gate from Desktop cannot redirect default-profile fixtures.
+  Tests can still explicitly select a profile.
 - Checks execute sequentially and stop on first failure. Nonzero child exit
   codes are preserved; launch failures fail closed. Signal termination and
   gate cancellation are incomplete, never passing, and later checks do not run.

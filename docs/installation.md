@@ -175,6 +175,31 @@ Font, install the standalone `pi` CLI when missing, create non-secret config
 templates and print credential-aware next steps. It never imports provider
 credentials automatically.
 
+In an interactive terminal `pix install` also runs a model setup wizard. It
+lists the models available to your configured providers, suggests `main`,
+`fast` and `strong` roles, and after confirmation writes them to `pix.jsonc`,
+`pi-tools-suite.jsonc` (frontier models, sub-agent role models and per-slot
+overrides) and, when it exists, `pix-desktop.jsonc`. After the roles it asks
+"Customize individual models (fallbacks, lookup, per-feature)?" and walks every
+model slot — Enter keeps the current value and `-` clears an optional slot such
+as a fallback or the vision-only Lookup models, which accept only vision-capable
+entries — then asks "Configure search embeddings?" and writes `search.embedding`
+/ `search.rerankerModel` to `pi-tools-suite.jsonc` on request. The Strong
+model becomes the primary frontier model; existing `frontierModels` entries keep
+their flags and aliases. Shipped defaults contain no model ids; the wizard is skipped when
+models are already configured or stdin is not a TTY;
+run `pix install --models` to repeat it.
+
+Pix Desktop offers the same choice (Main / Fast / Strong) as a first-run dialog when no
+default model is configured and providers are connected. Reopen it from
+**Settings → Models → Edit in wizard…**; a manual run starts with an **In use**
+page that replaces a model everywhere it is configured. The Desktop dialog
+matches the TUI wizard: both can override individual model slots and set optional
+fallback, vision Lookup and search-embedding settings (see
+[Pix Desktop](desktop.md)); skipping the first run is remembered, while cancelling
+a manual run changes nothing. Both write the same config files, including
+`search.embedding` / `search.rerankerModel` into `pi-tools-suite.jsonc` on request.
+
 For provider setup and configuration details, see
 [Configuration and accounts](configuration.md).
 

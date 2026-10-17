@@ -230,7 +230,7 @@ async function requestedLeaf(run: Run) {
 	await until(() => markers(run.home, "request").length === 1 && markers(run.home, "leaf").length === 1,
 		25000, () => `real provider request and detached leaf ${diag(run)}`);
 	// The production default resolution injected the vendored module exactly once.
-	const piArgs = readFileSync(join(run.agentDir, "pi_args"), "utf8").split("\n");
+	const piArgs = (JSON.parse(readFileSync(join(run.agentDir, "launch.json"), "utf8")).piArgs as string[]).join("\n").split("\n");
 	expect(piArgs.filter((arg) => arg === localProviderEntry())).toHaveLength(1);
 	const request = markers(run.home, "request")[0], leaf = markers(run.home, "leaf")[0];
 	expect(request.leafPid).toBe(leaf.pid);

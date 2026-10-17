@@ -34,7 +34,6 @@ afterAll(() => {
 });
 
 const tempDirs: string[] = [];
-const originalAsyncSubagentsEnableSessions = process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS;
 
 function tempDir(): string {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "async-subagents-ui-test-"));
@@ -60,8 +59,6 @@ function theme() {
 }
 
 afterEach(() => {
-	if (originalAsyncSubagentsEnableSessions === undefined) delete process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS;
-	else process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS = originalAsyncSubagentsEnableSessions;
 	for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -221,7 +218,7 @@ describe.serial("rendering", () => {
 			{ id: "done", status: "done", exitCode: 0, resultLines: 2, startedAt: "2024-01-01T00:00:00Z", finishedAt: "2024-01-01T00:00:02Z" },
 			{ id: "failed", status: "failed", exitCode: 1, stderrLines: 1 },
 			{ id: "stopped", status: "stopped" },
-			{ id: "running", status: "running", pid: 123, eventLines: 4, startedAt: new Date(Date.now() - 1500).toISOString() },
+			{ id: "running", status: "running", pid: 123, startedAt: new Date(Date.now() - 1500).toISOString() },
 			{ id: "planned", status: "planned" },
 			{ id: "extra-1", status: "planned" },
 			{ id: "extra-2", status: "planned" },
@@ -297,7 +294,7 @@ describe.serial("rendering", () => {
 	test.serial("truncates every rendered line to the supplied width", async () => {
 		const { renderSubagentRun } = await import("../../src/async-subagents/render.js");
 		const agents: AgentState[] = [
-			{ id: "agent-with-a-very-long-id", status: "running", pid: 12345, eventLines: 554, startedAt: new Date(Date.now() - 68_000).toISOString() },
+			{ id: "agent-with-a-very-long-id", status: "running", pid: 12345, startedAt: new Date(Date.now() - 68_000).toISOString() },
 		];
 		const details = {
 			runDir: "/Volumes/128GBSSD/Projects/ai-mobile-game-idea-generator/.pi/subagents/2026-05-18T12-50-52-cloud-shepherds-config",
@@ -369,11 +366,10 @@ describe.serial("polling", () => {
 describe.serial("slash command registration", () => {
 	test.serial("registers /sub-status and reports usage, empty runs, and agent status", async () => {
 		const { registerCommands } = await import("../../src/async-subagents/commands.js");
-		delete process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS;
 		const registered = new Map<string, any>();
 		const pi = { registerCommand: (name: string, command: any) => { registered.set(name, command); } };
 		registerCommands(pi as any);
-		expect([...registered.keys()]).toEqual(["ultrawork", "ulw", "hyperplan", "sub-status", "sub-stop"]);
+		expect([...registered.keys()]).toEqual(["ultrawork", "ulw", "hyperplan", "sub-status", "sub-open", "sub-back", "sub-where", "sub-stop"]);
 		const command = registered.get("sub-status");
 
 		const cwd = tempDir();
@@ -396,7 +392,6 @@ describe.serial("slash command registration", () => {
 
 	test.serial("opens sub-agent sessions, reports location, and returns", async () => {
 		const { registerCommands } = await import("../../src/async-subagents/commands.js");
-		process.env.ASYNC_SUBAGENTS_ENABLE_SESSIONS = "1";
 		const registered = new Map<string, any>();
 		const pi = { registerCommand: (name: string, command: any) => { registered.set(name, command); } };
 		registerCommands(pi as any);

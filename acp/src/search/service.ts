@@ -12,6 +12,7 @@ import { sessionTitleHits } from "./session-titles.js";
 import { namedSessionTitles, type NamedSessionTitle } from "./session-index.js";
 import { readTaskSemanticCorpus } from "./task-corpus.js";
 import { SettingsTaskIndexer } from "./settings-task-indexer.js";
+import { logSourceIndexFailure } from "./search-logging.js";
 import { withProviderSlot } from "./source-work.js";
 import type { TaskChangeWatcher } from "./task-watcher.js";
 import { SearchCacheCompatibilityError } from "./embedding-cache.js";
@@ -24,6 +25,7 @@ import type { SearchSetting } from "./contract.js";
 import { BackgroundSessionDiscovery, hydrateBackgroundTitle, type BackgroundSessionRecord } from "./background-session-discovery.js";
 import { transcriptUnchanged } from "./session-transcript.js";
 import { beginSessionSweep, completeSessionSweep } from "./session-watermark.js";
+import { coverageDigest } from "./source-coverage.js";
 
 const PROVIDER_WARNING = "Semantic settings search unavailable; local search remains available";
 const SESSION_PROVIDER_WARNING = "Semantic session-title search unavailable; local search remains available";
@@ -257,7 +259,7 @@ export class DesktopSearchService {
       let sessionSnapshot: string | undefined;
       try {
         sessionSnapshot = await bounded(signal, 1500, owned =>
-          this.options.sessionSnapshot?.(request.cwd, owned) ?? this.statusCatalog.snapshot(request.cwd, owned));
+          this.sessionSnapshot(request.cwd, owned));
       } catch {
         // A snapshot only accelerates native freshness checks. Its own deadline
         // or I/O failure must not turn an otherwise healthy status read into an
@@ -268,6 +270,10 @@ export class DesktopSearchService {
     }
     return this.status();
   }
+  /** The same logical session snapshot the native probe observes. */
+  private sessionSnapshot(cwd: string, signal: AbortSignal): Promise<string> {
+    return this.options.sessionSnapshot?.(cwd, signal) ?? this.statusCatalog.snapshot(cwd, signal);
+  }
   private background(w: Workspace): SettingsTaskIndexer | undefined {
     if (!this.current(w) || !this.embeddingConfig || !this.enabled || !this.keyAvailable) return undefined;
     return w.background ??= new SettingsTaskIndexer({ cwd: w.cwd,
@@ -276,6 +282,7 @@ export class DesktopSearchService {
       enabled: source => w.enabled[source],
       authorized: async (signal, source) => await sourceEnabled(w.cwd, source, w.policyRevision) && await this.consent(signal),
       watchTasks: this.options.watchTasks, debounceMs: this.options.taskDebounceMs,
+      failed: (source, error, reason) => { if (this.current(w)) logSourceIndexFailure(w.cwd, source, error, reason); },
       completed: source => {
         if (this.current(w) && source === "settings" && w.error === PROVIDER_WARNING) delete w.error;
       } });
@@ -334,6 +341,8 @@ export class DesktopSearchService {
       const config = this.embeddingConfig!;
       const epoch = this.epoch;
       try {
+        // Best effort: an unavailable snapshot only withholds coverage evidence.
+        const snapshotBefore = source === "sessions" ? await this.sessionSnapshot(w.cwd, owned).catch(() => undefined) : undefined;
         const sweep = source === "sessions" ? await beginSessionSweep(w.cwd,`${SESSION_CHUNK_FORMAT}:${semanticEmbeddingIdentity(config)}`,owned) : undefined;
         let indexed = 0, total = 0;
         let diagnostics: SearchIndexResponse["diagnostics"];
@@ -401,7 +410,12 @@ export class DesktopSearchService {
         if (!await this.consent(owned) || !this.current(w, epoch)) throw new SearchUnavailableError("Search authorization changed");
         if (source === "settings" && settingsFingerprint(w.settings) !== fingerprint) throw new SearchUnavailableError("Settings catalogue changed; retry indexing");
         if (source === "sessions" && namedRevision !== w.namedRevision) throw new SearchUnavailableError("Saved session names changed; retry indexing");
-        if (sweep) await completeSessionSweep(w.cwd,sweep,owned);
+        if (sweep) {
+          const stable = snapshotBefore !== undefined && indexed === total
+            && await this.sessionSnapshot(w.cwd, owned).catch(() => undefined) === snapshotBefore;
+          await completeSessionSweep(w.cwd,sweep,owned,Date.now,
+            stable ? coverageDigest("sessions", snapshotBefore, semanticEmbeddingIdentity(config)) : undefined);
+        }
         if (source === "tasks") {
           // Canonical tasks may change during the final authorization read.
           const tasks = await readTaskSemanticCorpus(w.cwd, owned);
@@ -445,6 +459,7 @@ export class DesktopSearchService {
       discover: signal => this.discover(w,signal,true),
       discoverBackground: signal => this.options.discoverBackground?.(w.cwd,signal) ?? background.list(w.cwd,signal),
       policy: this.idlePolicy(w.cwd),
+      snapshot: signal => this.sessionSnapshot(w.cwd, signal),
       titles: async (record, signal) => {
         const title = await hydrateBackgroundTitle(w.cwd,record,signal);
         if (!title) throw new Error("Session title could not be read");

@@ -1,13 +1,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-export const DEFAULT_EVENTS_LOG_MAX_BYTES = 0;
-export const DEFAULT_DEBUG_EVENTS_LOG_MAX_BYTES = 32 * 1024 * 1024;
 export const DEFAULT_STDERR_LOG_MAX_BYTES = 8 * 1024 * 1024;
 export const DEFAULT_RPC_EVENT_LINE_MAX_CHARS = 8 * 1024 * 1024;
 
 export interface SubagentLogLimits {
-	eventsMaxBytes: number;
 	stderrMaxBytes: number;
 	rpcEventLineMaxChars: number;
 	debugLogs: boolean;
@@ -28,7 +25,6 @@ export interface DeferredFileWriter extends BoundedFileWriter {
 export function resolveSubagentLogLimits(env: NodeJS.ProcessEnv = process.env): SubagentLogLimits {
 	const debugLogs = isTruthyEnv(env.ASYNC_SUBAGENTS_DEBUG_LOGS) || isTruthyEnv(env.PI_SUBAGENTS_DEBUG_LOGS);
 	return {
-		eventsMaxBytes: envLimit(env, ["ASYNC_SUBAGENTS_MAX_EVENTS_BYTES", "PI_SUBAGENTS_MAX_EVENTS_BYTES"], debugLogs ? DEFAULT_DEBUG_EVENTS_LOG_MAX_BYTES : DEFAULT_EVENTS_LOG_MAX_BYTES),
 		stderrMaxBytes: envLimit(env, ["ASYNC_SUBAGENTS_MAX_STDERR_BYTES", "PI_SUBAGENTS_MAX_STDERR_BYTES"], DEFAULT_STDERR_LOG_MAX_BYTES),
 		rpcEventLineMaxChars: envLimit(env, ["ASYNC_SUBAGENTS_MAX_RPC_LINE_CHARS", "PI_SUBAGENTS_MAX_RPC_LINE_CHARS"], DEFAULT_RPC_EVENT_LINE_MAX_CHARS),
 		debugLogs,

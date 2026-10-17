@@ -10,6 +10,37 @@ import type { ClaudeInstallation } from "./types.ts";
 // Enough stderr to explain a failure; error messages carry only a bounded excerpt.
 const MAX_STDERR_CHARS = 64 * 1024;
 
+// Process groups this Pi owns whose death is not yet proven. Pi's RPC shutdown
+// (stdin EOF after the parent dies, SIGTERM) calls process.exit() without
+// awaiting the asynchronous SIGTERM -> SIGKILL escalation of an aborted
+// request, which would leave TERM-resistant group members behind. A group is
+// removed only after terminate() proved it gone, so its ID cannot have been
+// reused while it is still registered.
+const liveGroups = new Set<number>();
+let exitHookInstalled = false;
+
+/** Synchronous last-resort cleanup at Pi exit; exported for tests. */
+export function killLiveClaudeGroupsSync(kill: (pid: number, signal: NodeJS.Signals) => void = process.kill): void {
+  for (const pgid of liveGroups) {
+    try { kill(-pgid, "SIGKILL"); } catch { /* ESRCH: already gone. */ }
+  }
+  liveGroups.clear();
+}
+
+/** Test seam: currently registered group IDs. */
+export function liveClaudeGroupsForTest(): number[] {
+  return [...liveGroups];
+}
+
+function registerLiveGroup(pid: number | undefined): void {
+  if (process.platform === "win32" || pid === undefined) return;
+  liveGroups.add(pid);
+  if (!exitHookInstalled) {
+    exitHookInstalled = true;
+    process.on("exit", () => killLiveClaudeGroupsSync());
+  }
+}
+
 export interface ClaudeProcessOptions {
   installation: ClaudeInstallation;
   args: readonly string[];
@@ -87,10 +118,12 @@ export function spawnClaudeProcess(options: ClaudeProcessOptions): ClaudeProcess
     totalTimeoutMs: options.totalTimeoutMs,
     onFailure: (error) => options.onFailure(vanishedExecutable(error, options.installation.executable) ?? error),
   });
+  registerLiveGroup(child.pid);
   let terminationFailure: unknown;
   const terminate = async (): Promise<void> => {
     try {
       await supervisor.terminate();
+      if (child.pid !== undefined) liveGroups.delete(child.pid);
     } catch (error) {
       terminationFailure ??= error;
       throw error;

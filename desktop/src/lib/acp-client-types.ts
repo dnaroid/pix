@@ -6,6 +6,7 @@ import type {
   SessionUpdate,
   StopReason,
 } from "@agentclientprotocol/sdk";
+import type { UsageStatsChangedNotification } from "../../../acp/src/acp/usage-stats-contract";
 import type { AgentControlState } from "./agent-control";
 import type { SessionStateNotification } from "./session-state";
 
@@ -34,6 +35,8 @@ export interface AcpTransport {
 export interface AcpClientHandlers {
 	readonly onSessionUpdate: (notification: SessionNotification) => void;
 	readonly onSessionCatalogChanged?: (cwd: string) => void;
+  /** A newer usage snapshot for `source` is available; `cwd` only for project-scoped sources. */
+  readonly onUsageStatsChanged?: (notification: UsageStatsChangedNotification) => void;
   readonly onSessionState?: (notification: SessionStateNotification) => void;
   readonly onOpenActivity?: (sessionId: string) => string;
   readonly onBeginActivityRequest?: (owner: string) => void;

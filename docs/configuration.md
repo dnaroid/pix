@@ -31,7 +31,7 @@ Example:
 {
   "$schema": "https://unpkg.com/pi-ui-extend/schemas/pix.json",
   "defaultModel": {
-    "modelRef": "openai-codex/gpt-6.1-sol",
+    "modelRef": "<provider>/<main-model>",
     "fallbackModels": [],
     "thinking": "medium"
   },
@@ -69,18 +69,18 @@ Example:
     ]
   },
   "promptEnhancer": {
-    "modelRef": "openai-codex/gpt-6-luna",
+    "modelRef": "<provider>/<fast-model>",
     "fallbackModels": []
   },
   "autocomplete": {
-    "modelRef": "zai/glm-5-turbo",
+    "modelRef": "<provider>/<fast-model>",
     "fallbackModels": [],
     "debounceMs": 350,
     "timeoutMs": 3000
   },
   "sessionTitle": {
-    "modelRef": "openai-codex/gpt-6-luna",
-    "fallbackModels": ["zai/glm-5-turbo"]
+    "modelRef": "<provider>/<fast-model>",
+    "fallbackModels": ["<provider>/<fast-model>"]
   },
   "dictation": { "language": "en" },
   "ignoreContextFiles": false,
@@ -272,7 +272,7 @@ profile. For example:
 {
   "headsUp": {
     "enabled": false,
-    "model": "openai-codex/gpt-6-luna",
+    "model": "<provider>/<fast-model>",
     "minTurns": 6,
     "minIntervalMs": 60000,
     "maxChecksPerHour": 12
@@ -322,6 +322,16 @@ applies to shaped tool receipts/digests in one compression block; exact
 protected fragments are never silently truncated to satisfy it. Receipts show
 raw output size only; content hashes stay in fragment metadata and are not
 sent to the model.
+
+The model setup wizards write the same suite model keys: TUI `pix install
+--models` and Desktop's model setup dialog both set `frontierModels` (the Strong
+model is the primary; extra frontier models have no role default; an untouched
+list keeps existing entries with their flags and aliases),
+`builtinAgentModels`, the DCP summarizer pair and the vision `lookupModel` /
+`lookupFallbackModels` pair (optional, written only when set or cleared) and,
+on explicit request, `search.embedding` / `search.rerankerModel` in the
+user-level suite config (enabling embeddings sends project code and knowledge
+text to the chosen provider).
 
 ## Model providers
 
@@ -448,3 +458,6 @@ To disable all context-file discovery, including private `.pi/AGENTS.md`:
 Pix stores that project choice as `"ignoreContextFiles": true` in
 `<workspace>/.pi/pix.jsonc`. Start a new session/restart Pix after changing the
 setting.
+
+> Shipped defaults contain no provider/model ids. Choose models with `pix install
+> [--models]` or Desktop's first-run dialog / Settings → **Edit in wizard…**.

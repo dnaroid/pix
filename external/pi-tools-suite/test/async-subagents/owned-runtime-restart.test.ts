@@ -36,7 +36,7 @@ import {
 	OWNED_LAUNCH_CLAIM_PROTOCOL_FILE,
 	readOwnedLaunchClaimSync,
 } from "../../src/async-subagents/core/owned-launch/marker.js";
-import { forgetOwnedHandle, launchPreparedOwnedAgent, ownedOutcomeSync } from "../../src/async-subagents/core/owned-launch-integration.js";
+import { forgetOwnedHandle, launchPreparedOwnedAgent, OWNED_BOOTSTRAP_FAILED_CAUSE, ownedOutcomeSync } from "../../src/async-subagents/core/owned-launch-integration.js";
 import { writeOwnedLaunchSpec, type OwnedLaunchWorkerSpec } from "../../src/async-subagents/core/owned-launch/spec.js";
 import { getAgentState, waitForAgents } from "../../src/async-subagents/core/state.js";
 import { pollRunWithUpdates } from "../../src/async-subagents/polling.js";
@@ -585,6 +585,47 @@ describeOwnedRuntime("bridge prelaunch abort after winning the claim", () => {
 		expect(ownedOutcomeSync(prelaunch("13", { protocol: false }).agentDir).kind).toBe("pending");
 		expect(ownedOutcomeSync(prelaunch("13", { journal: true }).agentDir).kind).toBe("pending");
 		expect(ownedOutcomeSync(prelaunch("13", { claim: "role=bridge-claim pid=x\n" }).agentDir).kind).toBe("pending");
+	});
+});
+
+describeOwnedRuntime("bridge supervisor bootstrap failure after winning the claim", () => {
+	const bootstrapFailed = (options: { protocol?: boolean; journal?: boolean; claim?: string; record?: string; receipt?: boolean } = {}) => {
+		const f = restartFixture();
+		const owner = f.makeRunDir(UUID_A, LABELS_A, { protocol: options.protocol });
+		f.pointer(owner, LABELS_A);
+		fs.writeFileSync(path.join(owner, "claim"), options.claim ?? BRIDGE_CLAIM);
+		fs.writeFileSync(path.join(owner, "bootstrap_failed"), options.record ?? "role=bootstrap-failed rc=5\n");
+		if (options.journal) fs.writeFileSync(path.join(owner, "owned.json"), JOURNAL);
+		if (options.receipt) f.drainedOk(owner);
+		return { ...f, owner };
+	};
+
+	test("is an unproven failure that settles as failed with an explanation only after both labels are absent", async () => {
+		Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
+		const f = bootstrapFailed();
+		expect(ownedOutcomeSync(f.agentDir)).toEqual({ kind: "unproven-fail", cause: OWNED_BOOTSTRAP_FAILED_CAUSE, payloadCode: null });
+		setOwnedRetirementPrintForTest(async () => "present");
+		reconcileOwnedRuns(f.runDir);
+		await wait(200);
+		expect(getAgentState(f.runDir, "agent")?.status).toBe("running");
+		expect(fs.existsSync(path.join(f.agentDir, "result.md"))).toBe(false);
+		setOwnedRetirementPrintForTest(async () => "absent");
+		const state = await waitForAgents(f.runDir, ["agent"], { interval: 0.05, timeout: 15 });
+		expect(state.agents[0]?.status).toBe("failed");
+		const result = fs.readFileSync(path.join(f.agentDir, "result.md"), "utf8");
+		expect(result).toContain("launchctl bootstrap");
+		expect(result).toContain("rc=5");
+		expect(ownedSlotReleasedSync(f.agentDir)).toBe(true);
+	}, 25_000);
+
+	test("journals, receipts, legacy runs, foreign claims or malformed records never qualify", () => {
+		expect(ownedOutcomeSync(bootstrapFailed({ journal: true }).agentDir).kind).toBe("pending");
+		expect(ownedOutcomeSync(bootstrapFailed({ receipt: true }).agentDir).kind).toBe("drained-ok");
+		expect(ownedOutcomeSync(bootstrapFailed({ protocol: false }).agentDir).kind).toBe("pending");
+		expect(ownedOutcomeSync(bootstrapFailed({ claim: FENCE_CLAIM }).agentDir).kind).toBe("never-launched");
+		expect(ownedOutcomeSync(bootstrapFailed({ claim: "role=bridge-claim pid=x\n" }).agentDir).kind).toBe("pending");
+		expect(ownedOutcomeSync(bootstrapFailed({ record: "role=bootstrap-failed rc=x\n" }).agentDir).kind).toBe("pending");
+		expect(ownedOutcomeSync(bootstrapFailed({ record: "role=bootstrap-failed rc=5 extra=1\n" }).agentDir).kind).toBe("pending");
 	});
 });
 

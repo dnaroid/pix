@@ -5,9 +5,9 @@ import { lstat, open, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { scanProject } from "./native-scan.mjs";
+import { commitStamp } from "./commit-stamp.mjs";
+import { coverageDigest, coverageIdentity, readCoverage } from "./source-coverage.mjs";
 import { SessionCandidateCatalog } from "./session-discovery.mjs";
 import { readSessionIndexRevision } from "./session-index-revision.mjs";
 import { semanticConfigurationPath, repositoryEmbeddingSettings } from "./native-embedding-provider.mjs";
@@ -16,7 +16,6 @@ import { sourcePath, sourceDirectories } from "./source-work.mjs";
 import { taskSnapshot } from "./task-snapshot.mjs";
 import { readRepositorySnapshot, repositoryManifest } from "./repository-snapshot.mjs";
 
-const exec = promisify(execFile);
 const SOURCES = ["code", "knowledge", "settings", "sessions", "tasks", "commits"];
 const hash = value => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const identity = s => `${s.dev}:${s.ino}:${s.size}:${s.mtimeMs}:${s.ctimeMs}`;
@@ -72,20 +71,6 @@ async function sessionStamp(root, signal) {
   try { return await catalog.snapshot(root, agent, signal, records.map(r => r.piSessionPath), records); }
   finally { catalog.dispose(); }
 }
-async function commitStamp(root, signal) {
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")));
-  env.GIT_OPTIONAL_LOCKS = "0";
-  env.GIT_TERMINAL_PROMPT = "0";
-  const git = async args => (await exec("git", ["-c", "core.fsmonitor=false", ...args],
-    { cwd: root, env, signal, timeout: 2000, maxBuffer: 128 * 1024 })).stdout.trim();
-  const head = await git(["rev-parse", "--verify", "HEAD"]);
-  if (!/^[a-f0-9]{40,64}$/.test(head)) throw new Error("Invalid HEAD");
-  const replacements = await git(["for-each-ref", "--format=%(refname) %(objectname)", "refs/replace/"]);
-  const shallow = path.resolve(root, await git(["rev-parse", "--git-path", "shallow"]));
-  const grafts = path.resolve(root, await git(["rev-parse", "--git-path", "info/grafts"]));
-  return [head, replacements, await stamp(shallow), await stamp(grafts)];
-}
-
 export async function probeSnapshots(root, request, signal = AbortSignal.timeout(4000)) {
   const sources = request?.sources;
   if (request?.operation !== "snapshot-probe" || !Array.isArray(sources) || !sources.length || sources.length > 6
@@ -101,7 +86,9 @@ export async function probeSnapshots(root, request, signal = AbortSignal.timeout
   const observations = {};
   const initialStores = new Map();
   const repositories = new Map();
-  const repositorySettings = sources.some(source => source === "code" || source === "knowledge") ? await repositoryEmbeddingSettings(root) : undefined;
+  const repositorySettings = await repositoryEmbeddingSettings(root);
+  // Writers record coverage under the ACP semantic identity (knowledge model/prefixes).
+  const sourceIdentity = coverageIdentity(repositorySettings?.configs.knowledge);
   for (const source of sources) {
     try {
       for (const directory of sourceDirectories(root, source)) {
@@ -152,13 +139,20 @@ export async function probeSnapshots(root, request, signal = AbortSignal.timeout
       } else if (source === "tasks") revision = await taskSnapshot(path.join(root, ".pi/tasks.sqlite"), signal);
       else if (source === "sessions") revision = request.sessionSnapshot ?? await sessionStamp(root, signal);
       else revision = await commitStamp(root, signal);
+      // Read between the two store fences: a concurrent writer invalidates the comparison.
+      // Unreadable/legacy coverage is unknown (receipt comparison), never a match.
+      const coverage = await readCoverage(sourcePath(root, source), signal).catch(() => { signal.throwIfAborted(); return undefined; });
       const store = source === "sessions" ? await readSessionIndexRevision(root, signal) : await databaseStamp(sourcePath(root, source));
       const initialStore = initialStores.get(source);
       if (!initialStore || hash(initialStore) !== hash(store)) throw new Error("Index changed during check");
       signal.throwIfAborted();
       if (await stamp(semanticConfigurationPath()) !== config || (await readSourcePolicy(root)).revision !== policy.revision) throw new Error("Configuration changed");
-      const sourceRevision = source === "settings" ? [2, source, revision, config] : [1, root, source, revision, config, policy.revision];
-      observations[source] = { source: hash(sourceRevision), index: hash(store), indexPresent: source === "sessions" ? store.present : store[0] !== "absent", checkedAt };
+      // Logical revision + embedding identity only: configuration file stamps,
+      // policy revisions and paths never make an unchanged source "changed".
+      const digest = coverageDigest(source, revision, sourceIdentity);
+      const indexPresent = source === "sessions" ? store.present : store[0] !== "absent";
+      observations[source] = { source: digest, index: hash(store), indexPresent,
+        ...(indexPresent && coverage ? { matchesIndex: coverage.has(digest) } : {}), checkedAt };
     } catch (error) {
       observations[source] = { checkedAt, error: signal.aborted ? "Metadata check timed out or was cancelled"
         : SAFE_FAILURES.has(error?.message) ? error.message : "Cheap change check unavailable, incomplete, or source disabled" };

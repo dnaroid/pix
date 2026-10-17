@@ -68,13 +68,16 @@ An ACP `pix/search/config` request may include an optional 1.5-second session di
 Each source also displays two independent facts:
 
 - **Unchanged / Changed** compares Code/Knowledge content against the committed
-  indexed file manifest, independently of a manual receipt. Other sources compare
-  their source signature against the last stable manual indexing pass.
-  It is an observation at the tooltip's check time,
+  indexed file manifest, independently of a manual receipt. Settings, Tasks,
+  Sessions and Git commits compare their source digest against the coverage
+  digests recorded in their own index by the last complete, stable writer pass
+  (manual or background); without a coverage table they fall back to the last
+  stable manual receipt. It is an observation at the tooltip's check time,
   not continuous freshness or a content-integrity audit.
 - **No baseline** (`untracked`) means metadata was read successfully but no
-  recorded manual pass exists for comparison (Code/Knowledge with an existing
-  validated index can instead show Unchanged/Changed). It does not mean the cache is empty
+  recorded manual pass exists for comparison (a source whose existing index
+  reports manifest or coverage comparison can instead show Unchanged/Changed).
+  It does not mean the cache is empty
   or search is broken. **Check unavailable** (`unchecked`) means a check could not
   establish a recent observation. **Index changed** (`index-changed`) means the
   physical cache changed or disappeared since the recorded pass; SQLite maintenance
@@ -116,7 +119,32 @@ returned. Old observations (including Cache changing) expire after 120 seconds.
 | Sessions | Creation-age admission (24 hours from native filename timestamp, bounded imported-header timestamp, or filesystem birthtime; never mtime), bounded native-directory enumeration and ACP map metadata, plus mature transcript revisions; young entries retain only minimal age metadata and no title/body hydration |
 | Git commits | HEAD OID, replacement refs and shallow/grafts metadata; no history/log scan |
 
-Configuration/source-selection revisions are included for other sources;
+For Settings, Tasks, Sessions and Git commits the observed source digest is
+`sha256(["source-coverage-v1", source, revision, identity])`, where identity is
+the effective semantic embedding identity (provider, model, dimension, prefixes,
+base URL) or null. It excludes the workspace path, configuration-file timestamps
+and source-selection revisions, so comment-only config edits or Desktop/CLI
+restarts do not report Changed; an embedding change does. The Settings revision is
+the shared `settingsCatalogueDigest` used by Desktop, sync and the CLI.
+
+Writers record coverage digests in a `pix_source_coverage(digest, recorded_at)`
+table inside the source index database, in the same transaction as the final
+write: Settings after a drain with no pending change (keep 16 catalogue
+variants), Tasks after a final pass whose task snapshot is identical before and
+after (keep 1), Sessions when a sweep completes with every admitted session
+indexed and a stable session snapshot (keep 1), and Git commits when every
+commit document has a vector and the commit stamp is unchanged across the pass
+(keep 8). Incomplete, cancelled or racing passes record nothing. The read-only
+probe reads that table between its store fences; read failures simply omit the
+comparison.
+
+Git commits are also indexed in the background: ACP polls the commit stamp of
+each synced workspace (at most eight) every 60 seconds and starts a commit index
+pass only when the stamp differs from the last attempted one and no matching
+coverage is recorded. Failed passes are not retried for the same stamp except
+for transient failures; disabled sources, missing semantic configuration and the
+automatic-work pause suppress polling work.
+
 Code/Knowledge include the effective per-source embedding identity so a model
 change during a manual pass cannot certify the old configuration. Classification
 changes affect the effective file manifest rather than config-file timestamps.
@@ -159,9 +187,12 @@ sidecars created by SQLite readers are equivalent to absent sidecars. A later ca
 change or removed index invalidates current-snapshot verification, while retaining
 the explicitly historical last-pass coverage. The standalone shell
 command and Desktop manual passes both produce shared receipts. Background and
-legacy session-owned `/search-index` indexing do not manufacture receipts; their
-changed caches show Index changed until a new stable shared manual pass (or Changed
-if source metadata also changed). This deliberately favors false invalidation over
+legacy session-owned `/search-index` indexing do not manufacture receipts; the
+historical last-pass row keeps its receipt semantics, but Unchanged/Changed for
+these sources comes from writer-recorded coverage, so complete background passes
+restore Unchanged without a manual run. Without coverage, changed caches show
+Index changed until a new stable shared manual pass (or Changed if source
+metadata also changed). This deliberately favors false invalidation over
 false freshness, and does not promise transactional certification of the index
 between the backend response and the subsequent observation.
 Code/Knowledge instead compare the current content manifest with their index,
@@ -246,6 +277,15 @@ Focused checks: `node --import tsx --test tests/search-index-cli.test.ts`,
 - `acp/src/search/contract.ts`
 - `acp/src/search/request.ts`
 - `acp/src/search/service.ts`
+- `external/pi-tools-suite/src/project-search/snapshot-probe.mjs`
+- `external/pi-tools-suite/src/project-search/source-coverage.mjs` (mirrored to `acp/src/search/source-coverage.js`)
+- `external/pi-tools-suite/src/project-search/commit-stamp.mjs` (mirrored to `acp/src/search/commit-stamp.js`)
+- `external/pi-tools-suite/src/project-search/session-watermark.mjs`
+- `acp/src/search/settings-task-indexer.ts`
+- `acp/src/search/session-chunk-service.ts`
+- `acp/src/search/commit-service.ts`
+- `acp/src/search/commit-worker.ts`
+- `desktop/src/lib/search-index-freshness.ts`
 
 ## Tests
 
@@ -268,3 +308,8 @@ Focused checks: `node --import tsx --test tests/search-index-cli.test.ts`,
 - `acp/test/fixtures/source-policy-writer.mjs`
 - `external/pi-tools-suite/test/source-policy.test.ts`
 - `desktop/src/lib/search-source-selection.test.ts`
+- `external/pi-tools-suite/test/snapshot-probe.test.mjs`
+- `acp/test/commit-search.test.ts`
+- `acp/test/search-task-semantic.test.ts`
+- `acp/test/search-mirror-parity.test.ts`
+- `desktop/src/lib/search-index-freshness.test.ts`

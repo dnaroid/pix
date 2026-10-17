@@ -1,4 +1,5 @@
 import { isClosingFence, parseFence } from "./markdown-fences";
+import { CHOICE_ACTIONS_LANGUAGE, parseChoiceActions, type ChoiceActions } from "./choice-actions";
 import { extractSandboxEngines, loadSandboxEngine, type SandboxEngineLoader } from "./html-sandbox-engines";
 
 // These are deliberately bounded: the source lives in the transcript and each
@@ -8,14 +9,18 @@ export const MAX_SANDBOX_SUBMISSION_CHARS = 16_384;
 
 export type HtmlSandboxSegment =
   | { type: "markdown"; text: string }
-  | { type: "sandbox"; html: string };
+  | { type: "sandbox"; html: string }
+  | { type: "actions"; actions: ChoiceActions };
 
 /**
  * Opt-in fences are recognized only in assistant messages. An incomplete fence
  * remains ordinary (escaped) Markdown until the closing fence arrives.
  * Other code fences are skipped so examples cannot inadvertently run.
  */
-export function splitHtmlSandboxSegments(text: string): HtmlSandboxSegment[] {
+export function splitHtmlSandboxSegments(
+  text: string,
+  options: { sandbox?: boolean; actions?: boolean } = { sandbox: true },
+): HtmlSandboxSegment[] {
   const lines = text.split("\n");
   const segments: HtmlSandboxSegment[] = [];
   let markdownStart = 0;
@@ -26,15 +31,21 @@ export function splitHtmlSandboxSegments(text: string): HtmlSandboxSegment[] {
     let closing = index + 1;
     while (closing < lines.length && !isClosingFence(lines[closing] ?? "", fence)) closing += 1;
     if (closing >= lines.length) break;
-    if (["pix-html", "html-sandbox"].includes(fence.language.toLowerCase())) {
-      const html = lines.slice(index + 1, closing).join("\n");
-      if (html.trim() && html.length <= MAX_SANDBOX_SOURCE_CHARS) {
-        if (index > markdownStart) {
-          segments.push({ type: "markdown", text: lines.slice(markdownStart, index).join("\n") });
-        }
-        segments.push({ type: "sandbox", html });
-        markdownStart = closing + 1;
+    const language = fence.language.toLowerCase();
+    const body = lines.slice(index + 1, closing).join("\n");
+    let segment: HtmlSandboxSegment | undefined;
+    if (options.sandbox && ["pix-html", "html-sandbox"].includes(language)) {
+      if (body.trim() && body.length <= MAX_SANDBOX_SOURCE_CHARS) segment = { type: "sandbox", html: body };
+    } else if (options.actions && language === CHOICE_ACTIONS_LANGUAGE) {
+      const actions = parseChoiceActions(fence.info, body);
+      if (actions) segment = { type: "actions", actions };
+    }
+    if (segment) {
+      if (index > markdownStart) {
+        segments.push({ type: "markdown", text: lines.slice(markdownStart, index).join("\n") });
       }
+      segments.push(segment);
+      markdownStart = closing + 1;
     }
     index = closing + 1;
   }

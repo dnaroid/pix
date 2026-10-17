@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { ignoreStaleExtensionContextError } from "../../context-usage.js";
+import { registerSubagentMetaEntry } from "./subagent-meta.js";
 
 export const SUBAGENT_DENIED_TOOLS = new Set([
 	"question",
@@ -39,6 +40,8 @@ export default function subagentToolGuard(pi: ExtensionAPI): void {
 
 	pi.on("session_start", applyGuard);
 	pi.on("model_select", applyGuard);
+	// Always loaded in every child, so it also owns the lineage entry.
+	registerSubagentMetaEntry(pi);
 	// Defense in depth: a denied tool that becomes active later (lazy
 	// registration, reload) is still never executed.
 	pi.on("tool_call", (event) => SUBAGENT_DENIED_TOOLS.has(event.toolName)

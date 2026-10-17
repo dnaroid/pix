@@ -12,6 +12,8 @@ import { commitHead, patchSearchTerm, rankCommits, readCommitCorpus, readPatchMa
 import { embeddingIdentity, SEMANTIC_NOTICE, validCommitVector, type CommitEmbeddingConfig } from "./commit-provider.js";
 import type { CommitSearchRequest } from "./commit-contract.js";
 import type { SearchIndexRequest } from "./contract.js";
+import { commitStamp } from "./commit-stamp.js";
+import { COVERAGE_KEEP, coverageDigest, recordCoverage } from "./source-coverage.js";
 
 const port = parentPort!;
 const data = workerData as { request: CommitSearchRequest | SearchIndexRequest; root: string; config?: CommitEmbeddingConfig; lockWaitMs: number };
@@ -72,6 +74,9 @@ async function commitIndexPath(root: string): Promise<string> {
 async function run() {
   let head: string | undefined;
   let docs;
+  // Logical revision observed by the native probe; coverage requires it unchanged.
+  let stampBefore: string | undefined;
+  if (indexOnly) { try { stampBefore = JSON.stringify(await commitStamp(data.root, signal)); } catch { signal.throwIfAborted(); } }
   try { head = await commitHead(data.root, signal); docs = await readCommitCorpus(data.root, signal); }
   catch { signal.throwIfAborted(); return indexOnly ? { source: "commits", complete: false, failurePhase: "history", message: "Commit history unavailable (repository may have no HEAD)." }
     : { results: [], notices: ["Commit history unavailable (repository may have no HEAD)."] }; }
@@ -164,6 +169,11 @@ async function run() {
           if (!(await rpc("validate"))) throw new Error(SEMANTIC_NOTICE);
           if (head !== await commitHead(data.root, signal)) throw new Error(SEMANTIC_NOTICE);
           db.exec(`DELETE FROM ${COMMIT_DOCUMENTS} WHERE hash NOT IN (SELECT hash FROM pix_live_commit_ids)`);
+          if (stampBefore && docs.every(doc => vectors.has(doc.contentHash))) {
+            let stampAfter: string | undefined;
+            try { stampAfter = JSON.stringify(await commitStamp(data.root, signal)); } catch { signal.throwIfAborted(); }
+            if (stampAfter === stampBefore) recordCoverage(db, coverageDigest("commits", JSON.parse(stampBefore), embeddingIdentity(c)), COVERAGE_KEEP.commits);
+          }
           signal.throwIfAborted(); db.exec("COMMIT");
         } catch (error) { db.exec("ROLLBACK"); throw error; }
       }

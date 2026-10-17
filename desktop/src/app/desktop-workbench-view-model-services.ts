@@ -1,12 +1,12 @@
 import { externalEditorLabel } from "../lib/desktop-config";
 import type { DesktopViewModelServicesOptions } from "./desktop-view-model-service-options";
 import { createDesktopWorkbenchViewModel } from "./desktop-workbench-view-model.svelte";
-import { createBrainstormSessionOpener } from "./desktop-brainstorm-navigation";
+import type { SubagentSessionNavigation } from "./desktop-subagent-navigation";
 
 export function createDesktopWorkbenchViewModelServices(
   options: DesktopViewModelServicesOptions,
+  subagentNavigation?: SubagentSessionNavigation,
 ) {
-  const openBrainstormSession = createBrainstormSessionOpener(options);
   return createDesktopWorkbenchViewModel({
     layout: {
       conversationVisible: () => options.presentation.activeWorkbenchTab?.kind === "session",
@@ -26,8 +26,8 @@ export function createDesktopWorkbenchViewModelServices(
       sessionTabs: options.transitions.sessionTabs,
     },
     conversation: {
-      brainstormLink: () => options.presentation.activeBrainstormLink,
-      openBrainstormSession,
+      subagentLink: () => options.presentation.activeSubagentLink,
+      subagentNavigation,
       transcript: () => options.state.transcript,
       activeSessionId: () => options.state.sessionId,
       workspace: options.workspace,

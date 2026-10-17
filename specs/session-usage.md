@@ -323,6 +323,12 @@ blocks further BTW inference until reload rather than silently losing known spen
 - Desktop source-contract tests pin click-only popup activation, dismissal and
   Usage content placement; they do not establish rendered or native UI behavior.
 
+## Related
+
+- `specs/desktop-usage-stats.md`: account/machine-wide usage history panel
+  (per-provider sources, never summed); its `pix-sessions` source reuses the
+  session usage extraction described here.
+
 ## Risks / compatibility
 
 - Old sessions created before async-agent usage mirroring cannot reconstruct

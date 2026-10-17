@@ -27,7 +27,8 @@ describe("Desktop Observer settings", () => {
   });
   it("renders labelled model/switch/numbers, seconds and mounted advanced fields for search", () => {
     const output = render(SettingsObserver, { props: { source: "{}", schema: PixDesktopConfigSchema, models: [], onChange: () => {} } }).body;
-    expect(output).toContain('aria-label="Observer model"');
+    expect(output).toContain("Observer model");
+    expect(output).toContain("Edit in wizard");
     expect(output).toContain('aria-label="Enable Observer in new Desktop sessions"');
     expect(output).toContain("Default · 60 seconds");
     expect(output).toContain('aria-label="Observer request timeout in seconds"');

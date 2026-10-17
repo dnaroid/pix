@@ -44,18 +44,9 @@
   } = $props();
 </script>
 
-<div class="border-b border-border bg-panel px-3 pt-2.5">
-  <div class="mb-2 flex items-center justify-between gap-3">
-    <p class="min-w-0 truncate text-xs font-medium text-muted-foreground">{questionMode.message}</p>
-    <button
-      class="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-      type="button"
-      aria-label="Cancel questions"
-      title="Cancel questions"
-      onclick={questionMode.onCancel}
-    ><X class="size-3.5" aria-hidden="true" /></button>
-  </div>
-  <div class="flex min-w-0 gap-1 overflow-x-auto" role="tablist" aria-label="Questions">
+<div class="border-b border-border bg-panel px-3 pt-2">
+  <div class="flex items-end gap-2">
+  <div class="flex min-w-0 flex-1 gap-1 overflow-x-auto" role="tablist" aria-label={questionMode.message || "Questions"}>
     {#each questionMode.questions as question, index}
       {@const complete = questionDraftIsComplete(questionMode.state.drafts[question.id], question)}
       <button
@@ -101,11 +92,19 @@
       ><Eye class="size-3" aria-hidden="true" />Preview</button>
     {/if}
   </div>
+  <button
+    class="mb-0.5 grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+    type="button"
+    aria-label="Cancel questions"
+    title="Cancel questions"
+    onclick={questionMode.onCancel}
+  ><X class="size-3.5" aria-hidden="true" /></button>
+  </div>
 </div>
 
 <div
   id="question-composer-panel"
-  class="max-h-[min(52vh,32rem)] overflow-y-auto px-3 pt-3"
+  class="max-h-[min(52vh,32rem)] overflow-y-auto px-3 pt-2"
   role="tabpanel"
   aria-labelledby={`question-composer-tab-${questionMode.state.activeTab}`}
 >
@@ -120,12 +119,12 @@
         allQuestionsComplete ? "bg-primary/10 text-primary" : "bg-destructive/10 text-destructive",
       ]}>{allQuestionsComplete ? "Ready" : "Incomplete"}</span>
     </div>
-    <div class="mb-3 divide-y divide-border/70 border-t border-border/70">
+    <div class="mb-2 divide-y divide-border/70 border-t border-border/70">
       {#each questionMode.questions as question, index}
         {@const complete = questionDraftIsComplete(questionMode.state.drafts[question.id], question)}
         <button
           class={[
-            "group flex w-full items-start gap-2.5 px-2 py-2 text-left transition-colors focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-ring",
+            "group flex w-full items-start gap-2.5 px-2 py-1.5 text-left transition-colors focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-ring",
             complete ? "hover:bg-panel-hover" : "bg-destructive/5 hover:bg-destructive/10",
           ]}
           type="button"
@@ -135,8 +134,8 @@
             "mt-0.5 grid size-4 shrink-0 place-items-center rounded-full",
             complete ? "bg-primary/10 text-primary" : "bg-destructive/10 text-destructive",
           ]}>{#if complete}<Check class="size-2.5" strokeWidth={2.4} />{:else}<span class="text-xs leading-none">!</span>{/if}</span>
-          <span class="min-w-0 flex-1 whitespace-pre-wrap [overflow-wrap:anywhere]">
-            <span class="block text-xs font-semibold text-foreground">{question.label}</span>
+          <span class="min-w-0 flex-1 [overflow-wrap:anywhere]">
+            <span class="block text-xs font-semibold whitespace-pre-wrap text-foreground">{question.label}</span>
             <span class={[
               "mt-0.5 block text-xs whitespace-pre-wrap break-words",
               complete ? "text-muted-foreground" : "font-medium text-destructive",
@@ -149,7 +148,7 @@
   {:else if currentQuestion && currentDraft}
     {@const maxSelections = currentQuestion.maxSelections ?? currentQuestion.choices.length + 1}
     {@const atSelectionLimit = currentQuestion.multiple && currentSelectionCount >= maxSelections}
-    <div class="mb-3 flex items-start justify-between gap-3">
+    <div class="mb-2 flex items-start justify-between gap-3">
       <div class="min-w-0">
         <p class="text-sm leading-relaxed font-medium whitespace-pre-wrap [overflow-wrap:anywhere] text-foreground">{currentQuestion.prompt}</p>
         {#if currentQuestion.multiple}
@@ -161,7 +160,7 @@
       <span class="mt-0.5 shrink-0 text-xs tabular-nums text-muted-foreground">{questionMode.state.activeTab + 1}/{questionMode.questions.length}</span>
     </div>
     <div
-      class="mb-3 divide-y divide-border/70 border-t border-border/70"
+      class="mb-2 divide-y divide-border/70 border-t border-border/70"
       role={currentQuestion.multiple ? "group" : "radiogroup"}
       aria-label={currentQuestion.label}
       aria-describedby={currentQuestion.multiple ? "question-selection-hint" : undefined}
@@ -171,7 +170,7 @@
         {@const blocked = atSelectionLimit && !selected}
         <button
           class={[
-            "flex w-full items-start gap-2.5 px-2 py-2 text-left transition-colors focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-ring",
+            "flex w-full items-start gap-2.5 px-2 py-1.5 text-left transition-colors focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-ring",
             selected ? "bg-panel-selected" : "hover:bg-panel-hover",
             blocked && "cursor-not-allowed opacity-45",
           ]}
@@ -189,15 +188,15 @@
             currentQuestion.multiple ? "rounded-sm" : "rounded-full",
             selected ? "border-primary" : "border-muted-foreground/50",
           ]}>{#if selected}{#if currentQuestion.multiple}<Check class="size-3 text-primary" strokeWidth={2.4} />{:else}<span class="size-2 rounded-full bg-primary"></span>{/if}{/if}</span>
-          <span class="min-w-0 flex-1 whitespace-pre-wrap [overflow-wrap:anywhere]">
-            <span class="block text-xs font-medium text-foreground">{choice.label}</span>
-            {#if choice.description}<span class="mt-0.5 block text-xs leading-relaxed text-muted-foreground">{choice.description}</span>{/if}
+          <span class="min-w-0 flex-1 [overflow-wrap:anywhere]">
+            <span class="block text-xs font-medium whitespace-pre-wrap text-foreground">{choice.label}</span>
+            {#if choice.description}<span class="mt-0.5 block text-xs leading-snug whitespace-pre-wrap text-muted-foreground">{choice.description}</span>{/if}
           </span>
         </button>
       {/each}
       <button
         class={[
-          "flex w-full items-start gap-2.5 px-2 py-2 text-left transition-colors focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-ring",
+          "flex w-full items-start gap-2.5 px-2 py-1.5 text-left transition-colors focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-ring",
           currentDraft.customSelected ? "bg-panel-selected" : "hover:bg-panel-hover",
           atSelectionLimit && !currentDraft.customSelected && "cursor-not-allowed opacity-45",
         ]}

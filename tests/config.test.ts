@@ -80,11 +80,7 @@ describe("config helpers", () => {
 			dictation?: { apiKey?: string; language?: string; model?: string };
 		};
 		assert.equal(parsedCreated.$schema, PIX_SCHEMA_URL);
-		assert.deepEqual(parsedCreated.defaultModel, {
-			modelRef: "openai-codex/gpt-6.1-sol",
-			fallbackModels: [],
-			thinking: "medium",
-		});
+		assert.equal(parsedCreated.defaultModel, undefined);
 		assert.equal(parsedCreated.modelRouting?.enabled, false);
 		assert.equal(parsedCreated.modelRouting?.default, false);
 		assert.equal(parsedCreated.modelRouting?.modelRef, "openrouter/~typesafe/jev-latest");
@@ -102,27 +98,15 @@ describe("config helpers", () => {
 			"openrouter/~openai/gpt-sol-latest",
 			"openrouter/~openai/gpt-astra-latest",
 		]);
-		assert.deepEqual(parsedCreated.promptEnhancer, {
-			modelRef: "openai-codex/gpt-6-luna",
-			fallbackModels: [],
-		});
+		assert.equal(parsedCreated.promptEnhancer, undefined);
 		assert.deepEqual(parsedCreated.autocomplete?.fallbackModels, []);
-		assert.deepEqual(parsedCreated.desktop, {
-			git: {
-				reviewModelRef: "openai-codex/gpt-6-luna:medium",
-				reviewFallbackModels: [],
-				commitMessageModelRef: "openai-codex/gpt-6-luna:minimal",
-				commitMessageFallbackModels: [],
-			},
-		});
-		assert.deepEqual(parsedCreated.sessionTitle, {
-			modelRef: "openai-codex/gpt-6-luna",
-			fallbackModels: ["zai/glm-5-turbo"],
-		});
+		assert.equal(parsedCreated.desktop?.git?.reviewModelRef, undefined);
+		assert.equal(parsedCreated.desktop?.git?.commitMessageModelRef, undefined);
+		assert.equal(parsedCreated.sessionTitle, undefined);
 		assert.equal(parsedCreated.dictation?.apiKey, "");
 		assert.match(created, /^\{\n  "\$schema":/u);
 		assert.match(created, /pix renderer configuration/u);
-		assert.match(created, /"sessionTitle"/u);
+		assert.match(created, /sessionTitle/u);
 		assert.deepEqual([
 			resolveToolRule("ls", config.toolRenderer),
 			resolveToolRule("grep", config.toolRenderer),
@@ -134,21 +118,21 @@ describe("config helpers", () => {
 			{ previewLines: 0, direction: "head", color: "toolSearch" },
 			{ previewLines: 9999, direction: "head", color: "toolMutation", defaultExpanded: true },
 		]);
-		assert.equal(config.promptEnhancer.modelRef, "openai-codex/gpt-6-luna");
+		assert.equal(config.promptEnhancer.modelRef, "");
 		assert.deepEqual(config.promptEnhancer.fallbackModels, []);
-		assert.equal(config.autocomplete.modelRef, "zai/glm-5-turbo");
+		assert.equal(config.autocomplete.modelRef, "");
 		assert.deepEqual(config.autocomplete.fallbackModels, []);
 		assert.equal(config.autocomplete.debounceMs, 350);
 		assert.equal(config.autocomplete.timeoutMs, 3000);
 		assert.equal(config.autocomplete.maxTokens, 48);
 		assert.equal(config.autocomplete.maxPromptTokens, 1200);
 		assert.equal(config.autocomplete.includeRecentMessages, 0);
-		assert.equal(resolveDefaultModelRef(config), "openai-codex/gpt-6.1-sol:medium");
+		assert.equal(resolveDefaultModelRef(config), undefined);
 		assert.equal(config.modelRouting.enabled, false);
 		assert.equal(config.modelRouting.default, false);
 		assert.equal(config.modelRouting.modelRef, "openrouter/~typesafe/jev-latest");
 		assert.equal(config.modelRouting.defaultTier, "standard");
-		assert.equal(config.modelColors.rules["zai/*"], "success");
+		assert.deepEqual(config.modelColors.rules, {});
 		assert.equal(config.iconTheme.name, "nerdFont");
 		assert.deepEqual(Object.keys(config.dictation.languages), ["en", "ru"]);
 		assert.equal(config.dictation.language, "en");
@@ -247,11 +231,11 @@ describe("config helpers", () => {
 		assert.deepEqual(resolveToolRule("empty", partial.toolRenderer), { previewLines: 0, direction: "head", color: "toolTitle" });
 		assert.deepEqual(partial.outputFilters.patterns, ["x"]);
 		assert.equal(resolveDefaultModelRef(partial), undefined);
-		assert.equal(partial.promptEnhancer.modelRef, "openai-codex/gpt-6-luna");
-		assert.equal(partial.autocomplete.modelRef, "zai/glm-5-turbo");
+		assert.equal(partial.promptEnhancer.modelRef, "");
+		assert.equal(partial.autocomplete.modelRef, "");
 		assert.equal(partial.autocomplete.maxPromptTokens, 1200);
 		assert.equal(partial.autocomplete.includeRecentMessages, 0);
-		assert.equal(partial.modelColors.rules["zai/*"], "success");
+		assert.deepEqual(partial.modelColors.rules, {});
 		assert.equal(partial.iconTheme.name, "nerdFont");
 		assert.deepEqual(Object.keys(partial.dictation.languages), ["en", "ru"]);
 		assert.equal(partial.dictation.model, "nova-3");
@@ -260,8 +244,8 @@ describe("config helpers", () => {
 
 		writeFileSync(testConfigPath, "{");
 		assert.equal(loadPixConfig().toolRenderer.default.previewLines, 0);
-		assert.equal(loadPixConfig().promptEnhancer.modelRef, "openai-codex/gpt-6-luna");
-		assert.equal(loadPixConfig().autocomplete.modelRef, "zai/glm-5-turbo");
+		assert.equal(loadPixConfig().promptEnhancer.modelRef, "");
+		assert.equal(loadPixConfig().autocomplete.modelRef, "");
 	});
 
 	it("loads project pix config from cwd .pi/pix.jsonc over the user config", () => {

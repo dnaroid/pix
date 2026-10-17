@@ -105,7 +105,7 @@ test("detached Pix subagents broker owns RPC pipes after CLI responds (offline f
 				throw new Error(`${error.message}\nOffline fixture: ${(await readFile(fixtureLog, "utf8").catch(() => "never started")).slice(-4000)}`, { cause: error });
 			});
 			const diagnostics = finalStatus === "done" ? "" : await Promise.all(
-				["exit_code", "stderr.log", "progress.jsonl", "events.jsonl"].map(async (file) =>
+				["exit_code", "stderr.log", "progress.jsonl"].map(async (file) =>
 					`${file}: ${(await readFile(path.join(runDir, agentId, file), "utf8").catch(() => "missing")).slice(-2000)}`),
 			);
 			expect(finalStatus, String(diagnostics)).toBe("done");
@@ -118,7 +118,7 @@ test("detached Pix subagents broker owns RPC pipes after CLI responds (offline f
 		const runDir = (spawn.details as { runDir: string }).runDir;
 		expect(runDir).toContain("offline-proof");
 		expect(await readFile(path.join(runDir, "mock-agent", "subagent_type"), "utf8")).toBe("project-specialist");
-		expect(await readFile(path.join(runDir, "mock-agent", "model"), "utf8")).toBe("zai/glm-5-turbo");
+		expect((JSON.parse(await readFile(path.join(runDir, "mock-agent", "launch.json"), "utf8")).task.model as string)).toBe("zai/glm-5-turbo");
 		// execFile has returned only after the initiating CLI exited. Release
 		// the child now, rather than racing that exit against a 350ms timer.
 		expect(await readFile(path.join(runDir, "mock-agent", "result.md"), "utf8").catch(() => undefined)).toBeUndefined();
@@ -145,7 +145,7 @@ test("detached Pix subagents broker owns RPC pipes after CLI responds (offline f
 		expect(visual.isError).not.toBe(true);
 		expect(visual.content[0]?.text).toContain("Scheduled 1 agent");
 		const visualRun = (visual.details as { runDir: string }).runDir;
-		expect(await readFile(path.join(visualRun, "mock-ui-qa", "model"), "utf8")).toBe("zai/glm-5.3-flash");
+		expect((JSON.parse(await readFile(path.join(visualRun, "mock-ui-qa", "launch.json"), "utf8")).task.model as string)).toBe("zai/glm-5.3-flash");
 		await writeFile(releaseFile, "release");
 		await waitForAgent(visualRun, "mock-ui-qa");
 	} finally {

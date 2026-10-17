@@ -81,6 +81,11 @@ describe("desktop session subagents", () => {
     expect(sessionSubagentCount(state)).toBe(2);
     expect(sessionSubagentRunName(runs[0]!.runDir)).toBe("first-run");
     expect(sessionSubagentRunName(runs[1]!.runDir)).toBe("second-run");
+    const local = new Date(Date.UTC(2026, 9, 17, 9, 31, 31));
+    const pad = (value: number) => String(value).padStart(2, "0");
+    expect(sessionSubagentRunName("/p/.pi/subagents/2026-10-17T09-31-31-docs")).toBe(
+      `${local.getFullYear()}-${pad(local.getMonth() + 1)}-${pad(local.getDate())} ${pad(local.getHours())}:${pad(local.getMinutes())}:${pad(local.getSeconds())} docs`,
+    );
     const preview = sessionSubagentTaskPreview(runs[0]!, "agent-1");
     expect(preview?.task).toBe("Inspect API");
     expect(sessionSubagentModelLabel(preview)).toBe("model-a");

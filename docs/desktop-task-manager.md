@@ -25,7 +25,8 @@ session-local todos.
   produces an actionable storage error, never an automatic reset.
 - **No legacy support or migration.** `tasks.jsonc`, `tasks.json`,
   `tasks.d/`, and old attachment markers are not authoritative and cannot
-  supply tasks. Existing ignored files are not deleted.
+  supply tasks. Legacy `tasks.jsonc`/`tasks.d/` are non-canonical and are
+  removed by Desktop `.pi` cleanup.
 - New Registry initialization creates `.pi/tasks.sqlite`, `.pi/plans/` and
   `.pi/task-attachments/`, all project-owned regular entries.
 

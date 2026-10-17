@@ -6,6 +6,7 @@
   import { fuzzySearch } from "../lib/fuzzy";
   import { buildSessionTree, type SessionTreeRow } from "../lib/session-tabs";
   import { expandedSessionRows, flatSessionRow, sessionRowsRelated } from "../lib/saved-session-tree";
+  import { isSubagentSession } from "../lib/session-subagent-link";
   import SavedSessionRow from "./SavedSessionRow.svelte";
 
   let {
@@ -38,10 +39,14 @@
   let collapsed = $state(new Set<string>());
   let hoveredId = $state<string | null>(null);
   let focusedId = $state<string | null>(null);
+  // Read-only sub-agent viewers are hidden unless explicitly requested.
+  let showSubagents = $state(false);
+  const hasSubagentSessions = $derived(sessions.some(isSubagentSession));
+  const visibleSessions = $derived(showSubagents ? sessions : sessions.filter((session) => !isSubagentSession(session)));
   const displayedSessions = $derived.by(() => {
-    if (!query.trim()) return expandedSessionRows(buildSessionTree(sessions), collapsed);
+    if (!query.trim()) return expandedSessionRows(buildSessionTree(visibleSessions), collapsed);
     return fuzzySearch(
-      sessions.map((session) => ({
+      visibleSessions.map((session) => ({
         value: session,
         label: session.title ?? "Untitled conversation",
         aliases: [session.sessionId],
@@ -132,7 +137,8 @@
     ><X class="h-4 w-4" aria-hidden="true" /></button>
   </div>
 
-  <label class="px-3 pb-2.5">
+  <div class="px-3 pb-2.5">
+  <label class="block">
     <span class="sr-only">Search conversations</span>
     <input
       class="h-[34px] w-full rounded-md border border-input bg-background px-2.5 text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/20"
@@ -143,6 +149,18 @@
       onkeydown={handleSearchKeydown}
     />
   </label>
+    {#if hasSubagentSessions}
+      <label class="mt-2 flex w-fit items-center gap-1.5 text-xs text-muted-foreground">
+        <input
+          type="checkbox"
+          class="h-3.5 w-3.5 accent-primary focus-visible:outline-2 focus-visible:outline-ring"
+          data-show-subagent-sessions
+          bind:checked={showSubagents}
+        />
+        Show sub-agent sessions
+      </label>
+    {/if}
+  </div>
 
   <div class="min-h-0 overflow-y-auto border-t border-border/60 px-1.5 pt-1 pb-2" aria-label="Conversations">
     {#if mode === "open"}

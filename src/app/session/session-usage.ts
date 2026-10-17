@@ -70,41 +70,10 @@ export function aggregateSessionUsage(entries: readonly unknown[]): SessionUsage
 	const calls: SessionUsageCall[] = [];
 
 	for (const rawEntry of entries) {
-		if (!isRecord(rawEntry)) continue;
-		if (rawEntry.type === "usage") {
-			const provider = stringValue(rawEntry.provider);
-			const model = stringValue(rawEntry.model);
-			const usage = usageValue(rawEntry.usage, provider, model);
-			if (!usage) continue;
-			addAttributedUsage(provider, model, usage, totals, unattributed, providers);
-			calls.push({ entry: rawEntry, totals: usage });
-			continue;
-		}
-
-		if (rawEntry.type === "message") {
-			const message = isRecord(rawEntry.message) ? rawEntry.message : undefined;
-			if (!message) continue;
-			const usage = usageValue(message.usage,
-				message.role === "assistant" ? stringValue(message.provider) : undefined,
-				message.role === "assistant" ? stringValue(message.model) : undefined);
-			if (!usage) continue;
-			if (message.role === "assistant") {
-				addAttributedUsage(stringValue(message.provider), stringValue(message.model), usage, totals, unattributed, providers);
-			} else if (message.role === "toolResult") {
-				addUsage(totals, usage);
-				addUsage(unattributed, usage);
-			}
-			if (message.role === "assistant" || message.role === "toolResult") calls.push({ entry: rawEntry, totals: usage });
-			continue;
-		}
-
-		if (rawEntry.type === "compaction" || rawEntry.type === "branch_summary") {
-			const usage = usageValue(rawEntry.usage);
-			if (!usage) continue;
-			addUsage(totals, usage);
-			addUsage(unattributed, usage);
-			calls.push({ entry: rawEntry, totals: usage });
-		}
+		const record = usageFromEntry(rawEntry);
+		if (!record) continue;
+		addAttributedUsage(record.provider, record.model, record.totals, totals, unattributed, providers);
+		calls.push({ entry: record.entry, totals: record.totals });
 	}
 
 	return {
@@ -121,6 +90,78 @@ export function aggregateSessionUsage(entries: readonly unknown[]): SessionUsage
 		unattributed,
 		subagents: aggregateSubagentUsage(entries, calls),
 	};
+}
+
+/** One billable record from a persisted session entry. */
+export type SessionUsageEntryRecord = {
+	entry: Record<string, unknown>;
+	/** Missing provider means the usage is `Unattributed`. */
+	provider?: string;
+	model?: string;
+	/** Epoch ms of the call: assistant message timestamp, else the entry timestamp. */
+	timestampMs?: number;
+	totals: SessionUsageTotals;
+};
+
+/**
+ * Normalize one persisted entry into its billable usage. This is the single
+ * accounting rule shared by the per-session report and time-bucketed usage
+ * statistics: explicit `usage` entries and assistant messages carry
+ * provider/model identity; tool-result, compaction and branch-summary usage
+ * stays unattributed. Other entries return `undefined`.
+ */
+export function usageFromEntry(rawEntry: unknown): SessionUsageEntryRecord | undefined {
+	if (!isRecord(rawEntry)) return undefined;
+	if (rawEntry.type === "usage") {
+		const provider = stringValue(rawEntry.provider);
+		const model = stringValue(rawEntry.model);
+		const usage = usageValue(rawEntry.usage, provider, model);
+		return usage ? usageRecord(rawEntry, usage, provider, model, timestampMs(rawEntry.timestamp)) : undefined;
+	}
+	if (rawEntry.type === "message") {
+		const message = isRecord(rawEntry.message) ? rawEntry.message : undefined;
+		if (!message) return undefined;
+		const time = timestampMs(message.timestamp) ?? timestampMs(rawEntry.timestamp);
+		if (message.role === "assistant") {
+			const provider = stringValue(message.provider);
+			const model = stringValue(message.model);
+			const usage = usageValue(message.usage, provider, model);
+			return usage ? usageRecord(rawEntry, usage, provider, model, time) : undefined;
+		}
+		if (message.role === "toolResult") {
+			const usage = usageValue(message.usage);
+			return usage ? usageRecord(rawEntry, usage, undefined, undefined, time) : undefined;
+		}
+		return undefined;
+	}
+	if (rawEntry.type === "compaction" || rawEntry.type === "branch_summary") {
+		const usage = usageValue(rawEntry.usage);
+		return usage ? usageRecord(rawEntry, usage, undefined, undefined, timestampMs(rawEntry.timestamp)) : undefined;
+	}
+	return undefined;
+}
+
+function usageRecord(
+	entry: Record<string, unknown>,
+	totals: SessionUsageTotals,
+	provider: string | undefined,
+	model: string | undefined,
+	time: number | undefined,
+): SessionUsageEntryRecord {
+	return {
+		entry,
+		totals,
+		...(provider === undefined ? {} : { provider }),
+		...(model === undefined ? {} : { model }),
+		...(time === undefined ? {} : { timestampMs: time }),
+	};
+}
+
+function timestampMs(value: unknown): number | undefined {
+	if (typeof value === "number") return Number.isFinite(value) && value > 0 ? value : undefined;
+	if (typeof value !== "string" || !value.trim()) return undefined;
+	const parsed = Date.parse(value);
+	return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 export function formatSessionUsageText(report: SessionUsageReport, options: FormatSessionUsageOptions = {}): string {

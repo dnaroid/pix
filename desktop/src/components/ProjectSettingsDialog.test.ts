@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 import dialogSource from "./ProjectSettingsDialog.svelte?raw";
 import sidebarSource from "./WorkspaceSidebar.svelte?raw";
+import switcherSource from "./ProjectSwitcher.svelte?raw";
 
 describe("project settings dialog", () => {
-  it("exposes project settings from the Project panel header", () => {
-    expect(sidebarSource).toContain('title="Project settings"');
-    expect(sidebarSource).toContain("SlidersHorizontal");
+  it("opens project settings from the project switcher menu and badge right-click", () => {
+    expect(sidebarSource).not.toContain('title="Project settings"');
+    expect(sidebarSource).toContain("export function openProjectSettings");
+    expect(sidebarSource).toContain("onOpenProjectSettings={openProjectSettings}");
     expect(sidebarSource).toContain("<ProjectSettingsDialog");
+    expect(switcherSource).toContain("Project settings…");
+    expect(switcherSource).toContain("oncontextmenu={handleBadgeContextmenu}");
   });
 
   it("offers automatic/custom color modes and a native color picker", () => {

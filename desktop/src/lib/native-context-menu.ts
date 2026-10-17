@@ -145,6 +145,10 @@ export function nativeContextMenuItems(
   const fileLinkPath = context.fileLinkPath;
   if (fileLinkPath) {
     if (items.length) separator();
+    if (/\.html?$/iu.test(fileLinkPath)) {
+      items.push({ id: "desktop.link-file.browser", text: "Open in Browser",
+        action: run(() => invoke("preview_file_action", { path: fileLinkPath, action: "browser" })) });
+    }
     const revealPath = context.fileLinkRevealPath;
     if (revealPath && revealProjectEntry) {
       items.push({ id: "desktop.link-file.explorer", text: "Show in Files",

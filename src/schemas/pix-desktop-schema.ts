@@ -111,6 +111,10 @@ const DictationConfig = Type.Object(
 
 const DesktopAppConfig = Type.Object(
 	{
+		theme: Type.Optional(Type.Union([Type.Literal("system"), Type.Literal("light"), Type.Literal("dark")], {
+			default: "system",
+			description: "Desktop color theme. 'system' follows the macOS appearance; 'light' or 'dark' override it for all Pix windows. Global user preference only.",
+		})),
 		logPanelEnabled: Type.Optional(Type.Boolean({
 			default: false,
 			description: "Show the diagnostic Logs view in the Desktop sidebar. Global user preference only; disabled by default. Does not change log collection.",
@@ -178,6 +182,7 @@ export const PixDesktopConfigSchema = Type.Object(
 			{
 				ragModelRef: Type.Optional(Type.String({ default: "", description: "Answer-generation model for Universal Search RAG, in provider/model format. Empty uses the Desktop default model. This is independent of the Jev Auto classifier." })),
 				ragThinking: Type.Optional(ThinkingLevel),
+				intentModelRef: Type.Optional(Type.String({ default: "", description: "OpenRouter model (openrouter/<id>) for the Universal Search Auto intent and quick-task type classifiers. Empty uses OpenRouter Jev Latest." })),
 			},
 			{ description: "Desktop universal search: centralized semantic provider status and independent RAG generation preferences." },
 		)),

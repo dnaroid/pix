@@ -74,7 +74,9 @@ Decision: [0015 — Canonical disposable harness output](../docs/decisions/0015-
 - No new cleanup mechanism is introduced. The
   [Registry storage contract](resource-registry-project-state.md) cleans
   initialized-project `.pi/artifacts/` and `.pi/subagents/` in Desktop after a
-  72-hour background TTL; manual Clean is immediate. This is not guaranteed
+  72-hour background TTL; parent-scoped `.pi/subagents/<parentSessionId>/`
+  session directories are instead kept while their parent session exists
+  (decision 0072); manual Clean is immediate. This is not guaranteed
   in standalone Pi or uninitialized projects. Export evidence needing retention.
 - Runtime mirrors are generated from authoritative suite sources; do not fix
   an installed/generated prompt copy independently of its source.

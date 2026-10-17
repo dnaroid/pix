@@ -2,14 +2,14 @@ import { createDesktopOverlaysViewModel } from "./desktop-overlays-view-model.sv
 import { createDesktopStatusBarViewModel } from "./desktop-status-bar-view-model.svelte";
 import type { DesktopViewModelServicesOptions } from "./desktop-view-model-service-options";
 import type { createSessionTodoActions } from "./session-todo-actions";
-import { createBrainstormSessionOpener } from "./desktop-brainstorm-navigation";
 import { invoke } from "@tauri-apps/api/core";
+import type { SubagentSessionNavigation } from "./desktop-subagent-navigation";
 
 export function createDesktopShellViewModelServices(
   options: DesktopViewModelServicesOptions,
   todoActions: ReturnType<typeof createSessionTodoActions>,
+  subagentNavigation?: SubagentSessionNavigation,
 ) {
-  const openBrainstormSession = createBrainstormSessionOpener(options);
   const overlays = createDesktopOverlaysViewModel({
     workspace: options.workspace,
     pendingElicitation: () => options.presentation.activePendingElicitation,
@@ -44,7 +44,6 @@ export function createDesktopShellViewModelServices(
     sessionActivity: () => options.presentation.activeSessionActivity,
     sessionSubagentSnapshot: () => options.presentation.activeSubagentSnapshot,
     sessionTodoSnapshot: () => options.presentation.activeTodoSnapshot,
-    sessionBrainstormSnapshot: () => options.presentation.activeBrainstormSnapshot,
     sessionNeedsInput: () => options.presentation.activePendingElicitation !== null,
     canClearTodos: () => Boolean(
       options.state.sessionId && todoActions.canClear(options.state.sessionId),
@@ -56,9 +55,10 @@ export function createDesktopShellViewModelServices(
     quotaWait: options.quotaWait,
     headsUp: options.headsUp,
     openObserverSettings: options.openObserverSettings,
-    openBrainstormParticipant: (sessionId) => {
-      void openBrainstormSession(sessionId).catch(options.errors.report);
-    },
+    subagentViewerState: subagentNavigation?.viewerState,
+    openSubagentSession: subagentNavigation
+      ? (runDir, agentId) => void subagentNavigation.openSubagentSession(runDir, agentId)
+      : undefined,
     subagentPathNavigation: {
       validate: (path, kind) => kind === "directory"
         ? invoke<boolean>("project_directory_exists", { workspace: options.workspace(), path })

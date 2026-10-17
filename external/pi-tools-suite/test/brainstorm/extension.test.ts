@@ -1,113 +1,61 @@
-import { expect, test } from "bun:test";
-import register from "../../src/brainstorm/index.js";
+import { existsSync, readFileSync } from "node:fs";
+import { describe, expect, test } from "bun:test";
 
-function fixture() {
-	const tools = new Map<string, any>(), commands = new Map<string, any>(), messages: string[] = [];
-	register({ registerTool: (tool: any) => tools.set(tool.name, tool), registerCommand: (name: string, command: any) => commands.set(name, command), sendUserMessage: (text: string) => messages.push(text) } as any);
-	return { tool: tools.get("brainstorm"), command: commands.get("brainstorm"), messages };
+import brainstormExtension, { BRAINSTORM_SKILL_PATH } from "../../src/brainstorm/index.ts";
+import councilGuard from "../../src/brainstorm/skill/council-guard.ts";
+
+type Handler = (...args: any[]) => any;
+
+function fakePi(tools: string[] = []) {
+	const handlers = new Map<string, Handler[]>();
+	const commands = new Map<string, { handler: Handler }>();
+	const sent: Array<{ text: string; options: unknown }> = [];
+	let active: string[] = [];
+	const pi = {
+		on(event: string, handler: Handler) { handlers.set(event, [...(handlers.get(event) ?? []), handler]); },
+		registerCommand(name: string, command: { handler: Handler }) { commands.set(name, command); },
+		registerTool() { throw new Error("the council must not register a tool"); },
+		sendUserMessage(text: string, options: unknown) { sent.push({ text, options }); },
+		getAllTools() { return tools.map((name) => ({ name })); },
+		setActiveTools(names: string[]) { active = names; },
+	};
+	return { pi: pi as any, handlers, commands, sent, active: () => active };
 }
 
-test("registration is lazy and exposes only a model-orchestrated tool", () => {
-	const f = fixture();
-	expect(f.tool.exposure).toBe("model-only");
-	expect(f.messages).toHaveLength(0);
-	expect(f.tool.description).toContain("explicitly requested");
-});
+describe("brainstorm skill module", () => {
+	test("ships the skill through resources_discover", () => {
+		const { pi, handlers } = fakePi();
+		brainstormExtension(pi);
+		const [discover] = handlers.get("resources_discover") ?? [];
+		const result = discover!();
+		expect(result.skillPaths).toEqual([BRAINSTORM_SKILL_PATH]);
+		expect(existsSync(BRAINSTORM_SKILL_PATH)).toBe(true);
+		const skill = readFileSync(BRAINSTORM_SKILL_PATH, "utf8");
+		expect(skill).toMatch(/^---\nname: brainstorm\ndescription: .+\ndisable-model-invocation: true\n---\n/);
+		expect(skill).toContain("scripts/council.mjs");
+	});
 
-test("command queues one council request, preserving dissent without implementation", async () => {
-	const f = fixture(); let idle = false;
-	await f.command.handler("Design storage", { waitForIdle: async () => { idle = true; } });
-	expect(idle).toBe(true);
-	expect(f.messages).toHaveLength(1);
-	expect(f.messages[0]).toContain("Design storage");
-	expect(f.messages[0]).toContain("unresolved disagreements/minority views");
-	expect(f.messages[0]).toContain("Do not invent consensus or begin implementation");
-	expect(f.messages[0]).toContain("Ask the user only about material uncertainty");
-	expect(f.messages[0]).toContain("without a mandatory approval round");
-	expect(f.messages[0]).toContain('"Fixed decisions"');
-	expect(f.messages[0]).toContain('or "none"');
-	expect(f.messages[0]).toContain("exact paths and sections to read");
-	expect(f.messages[0]).toContain("action='review'");
-	expect(f.messages[0]).toContain("revisionNotes");
-});
+	test("/brainstorm expands the skill with the raw request", async () => {
+		const { pi, commands, sent } = fakePi();
+		brainstormExtension(pi);
+		const notes: string[] = [];
+		const ctx = { waitForIdle: async () => {}, ui: { notify: (message: string) => notes.push(message) } };
+		await commands.get("brainstorm")!.handler("   ", ctx);
+		expect(sent).toHaveLength(0);
+		expect(notes[0]).toContain("Usage: /brainstorm");
+		await commands.get("brainstorm")!.handler(" --mode audit review docs/x.md ", ctx);
+		expect(sent).toEqual([{ text: "/skill:brainstorm --mode audit review docs/x.md", options: { expandPromptTemplates: true } }]);
+	});
 
-test("empty command gives usage without paid work", async () => {
-	const f = fixture(); const notices: string[] = [];
-	await f.command.handler("  ", { ui: { notify: (text: string) => notices.push(text) } });
-	expect(notices[0]).toContain("five paid rounds");
-	expect(f.messages).toHaveLength(0);
-});
-
-test("missing run/finalize parameters and unavailable subagents fail without writes", async () => {
-	const { tool } = fixture();
-	await expect(tool.execute("id", { action: "finalize" }, undefined, undefined, {})).rejects.toThrow("runDir and proposal");
-	await expect(tool.execute("id", { action: "run" }, undefined, undefined, {})).rejects.toThrow("topic");
-	await expect(tool.execute("id", { action: "review" }, undefined, undefined, {})).rejects.toThrow("runDir and proposal");
-	await expect(tool.execute("id", { action: "run", topic: "test" }, undefined, undefined, {})).rejects.toThrow("brief");
-	await expect(tool.execute("id", { action: "run", topic: "test", brief: "goals", mode: "brainstorm" }, undefined, undefined, { tools: [] })).rejects.toThrow("active async-subagents");
-});
-
-test("command routing is contextual, transparent and respects explicit overrides", async () => {
-	for (const [args, mode, topic] of [["Проверь GDD", "auto", "Проверь GDD"], ["--mode audit Проверь GDD", "audit", "Проверь GDD"], ["--mode=brainstorm Развей идею", "brainstorm", "Развей идею"], ["--mode auto Plan", "auto", "Plan"]]) {
-		const f = fixture();
-		await f.command.handler(args, { waitForIdle: async () => {} });
-		expect(f.messages[0]).toContain(`Requested mode: ${mode}.`);
-		expect(f.messages[0]).toContain(JSON.stringify(topic));
-		expect(f.messages[0]).toContain("not keyword matching");
-		expect(f.messages[0]).toContain("For mixed requests ask");
-		expect(f.messages[0]).toContain("explicit --mode overrides inference");
-		expect(f.messages[0]).toContain("Announce the selected mode");
-		expect(f.messages[0]).toContain("material is missing or inaccessible");
-	}
-});
-
-test("invalid or empty mode commands never queue council work", async () => {
-	for (const args of ["--mode", "--mode invalid Topic", "--mode audit --mode brainstorm Topic", "--mode audit", "--unknown Topic"]) {
-		const f = fixture(); const notices: string[] = [];
-		await f.command.handler(args, { ui: { notify: (text: string) => notices.push(text) }, waitForIdle: async () => { throw new Error("must not queue"); } });
-		expect(f.messages).toHaveLength(0);
-		expect(notices).toHaveLength(1);
-	}
-});
-
-test("tool rejects unresolved mode and continuation overrides before preflight or writes", async () => {
-	const { tool } = fixture();
-	for (const mode of [undefined, "auto", "invalid", null]) {
-		await expect(tool.execute("id", { action: "run", topic: "test", brief: "goals", mode }, undefined, undefined, {})).rejects.toThrow("Run mode");
-	}
-	for (const action of ["review", "finalize"]) {
-		await expect(tool.execute("id", { action, mode: "audit", runDir: "/irrelevant", proposal: "draft", revisionNotes: "none" }, undefined, undefined, {})).rejects.toThrow("Mode is fixed");
-		await expect(tool.execute("id", { action, models: ["p/a:off", "p/b:low"] }, undefined, undefined, {})).rejects.toThrow("Models are fixed");
-	}
-});
-
-test("command passes only an explicit user roster to run, not to continuation or settings", async () => {
-	const f = fixture();
-	await f.command.handler("--models p/a:off,p/b:low --mode audit Topic", { waitForIdle: async () => {} });
-	expect(f.messages[0]).toContain('["p/a:off","p/b:low"]');
-	expect(f.messages[0]).toContain("Pass this exact array as models to action='run'");
-	expect(f.messages[0]).toContain("Omit models on review/finalize");
-	expect(f.messages[0]).toContain("Do not edit configuration");
-	const defaults = fixture();
-	await defaults.command.handler("Topic", { waitForIdle: async () => {} });
-	expect(defaults.messages[0]).toContain("omit models from action='run'");
-	// The full suite's shared TypeBox mock wraps Optional and stores options separately.
-	const raw = f.tool.parameters.properties.models;
-	const schema = raw.schema ?? raw;
-	expect(schema.type ?? schema.kind).toBe("array");
-	expect(schema.options ?? schema).toMatchObject({ minItems: 2, maxItems: 6 });
-});
-
-test("invalid or empty run rosters never queue requests or reach execution preflight", async () => {
-	for (const list of ["p/a:off", "p/a:low,p/a:max", "p/a:wrong,p/b:low", "p/a,p/b", "p/a:low,p/b:low,"]) {
-		const f = fixture(); const notices: string[] = [];
-		await f.command.handler(`--models ${list} Topic`, { ui: { notify: (text: string) => notices.push(text) } });
-		expect(f.messages).toHaveLength(0);
-		expect(notices).toHaveLength(1);
-		await expect(f.tool.execute("id", { action: "run", mode: "brainstorm", topic: "Topic", brief: "Brief", models: list.split(",") }, undefined, undefined, {})).rejects.toThrow(/models|effort/);
-	}
-	const f = fixture(); const notices: string[] = [];
-	await f.command.handler("--models p/a:off,p/b:low", { ui: { notify: (text: string) => notices.push(text) } });
-	expect(f.messages).toHaveLength(0);
-	expect(notices[0]).toContain("Usage:");
+	test("participant guard keeps only read-only tools", () => {
+		const { pi, handlers, active } = fakePi(["read", "grep", "bash", "edit", "web_search", "project_search", "todo", "subagents"]);
+		councilGuard(pi);
+		handlers.get("session_start")![0]!();
+		expect(active()).toEqual(["read", "grep", "web_search", "project_search", "todo"]);
+		const [toolCall] = handlers.get("tool_call")!;
+		expect(toolCall!({ toolName: "read" })).toBeUndefined();
+		expect(toolCall!({ toolName: "Grep" })).toBeUndefined();
+		expect(toolCall!({ toolName: "bash" })).toMatchObject({ block: true });
+		expect(toolCall!({ toolName: "subagents" })).toMatchObject({ block: true });
+	});
 });

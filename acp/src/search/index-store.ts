@@ -14,6 +14,7 @@ import type { SemanticEmbeddingConfig } from "./config.js";
 import { compatibleEmbeddingMetadata, embeddingMetadata, SearchCacheCompatibilityError } from "./embedding-cache.js";
 import { beginWrite, claimWork, safeDirectory, safeFile, sourceDirectories } from "./source-work.js";
 import { importLegacySettings } from "./settings-migration.js";
+import { recordCoverage } from "./source-coverage.js";
 
 const VERSION = "2";
 export interface CachedIndex { vectors: Map<string, number[]>; hashes: Record<string, readonly string[]> }
@@ -62,6 +63,8 @@ export interface IndexTransaction {
   sessionTitles(): SessionIndexTransaction;
   sessionBoundaries(live: readonly string[], updates: readonly SessionBoundaryRow[]): void;
   tasks(): TaskIndexTransaction;
+  /** Record that this transaction's state covers a complete stable source revision. */
+  coverage(digest: string, keep: number): void;
 }
 /** Source-owned durable databases. Settings is shared across projects. */
 export class SearchIndexStore {
@@ -242,6 +245,7 @@ export class SearchIndexStore {
         sessionTitles: () => createSessionIndexTransaction(connection, signal, config),
         sessionBoundaries: (live, updates) => reconcileSessionBoundaries(connection, signal, live, updates),
         tasks: () => taskIndexTransaction(connection, config),
+        coverage: (digest, keep) => { check(); recordCoverage(connection, digest, keep); },
         load: documents => { checkSettings(); return loadConnection(connection, signal, dimension, documents); },
         save: async (documents, vectors) => {
           checkSettings();

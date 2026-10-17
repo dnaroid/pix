@@ -21,6 +21,7 @@
     type SettingsDraftDocument,
   } from "../../lib/settings";
   import { modelThinkingConfigState } from "../../lib/model-thinking";
+  import { userConfigRevision } from "../../lib/model-setup-request.svelte";
   import DesktopSettingsEditor, { type DesktopSettingsSection } from "./DesktopSettingsEditor.svelte";
   import ToolsSuiteSettingsEditor, { type ToolsSuiteSettingsSection } from "./ToolsSuiteSettingsEditor.svelte";
   import SettingsSearchPreferences from "./SettingsSearchPreferences.svelte";
@@ -68,6 +69,18 @@
 
   onMount(() => {
     void loadConfig();
+  });
+
+  // The model wizard writes these files directly; drop a clean cached draft so Settings shows disk state.
+  let seenConfigRevision = untrack(() => userConfigRevision.count);
+  $effect(() => {
+    const revision = userConfigRevision.count;
+    if (revision === seenConfigRevision) return;
+    seenConfigRevision = revision;
+    untrack(() => {
+      if (dirty) error = "Models were updated on disk. Reload this config to see them; saving now would be rejected.";
+      else void loadConfig(true);
+    });
   });
 
   onDestroy(() => {

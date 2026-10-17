@@ -2,7 +2,8 @@
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import Copy from "@lucide/svelte/icons/copy";
   import type { Attachment } from "../lib/attachments";
-  import { splitHtmlSandboxSegments } from "../lib/html-sandbox";
+  import { splitHtmlSandboxSegments, type HtmlSandboxSegment } from "../lib/html-sandbox";
+  import ChoiceActions from "./ChoiceActions.svelte";
   import { renderMarkdown } from "../lib/markdown";
   import type { ProjectFileLineRange } from "../lib/project-files";
   import { createMarkdownContentAction } from "./markdown-content-action";
@@ -19,6 +20,8 @@
     headingAnchors = false,
     enableHtmlSandbox = false,
     onHtmlSandboxSubmit,
+    choiceActionsActive = false,
+    onChoiceActionsSubmit,
     onValidateProjectFile,
     onValidateLocalFile,
     onOpenProjectFile,
@@ -34,6 +37,8 @@
     headingAnchors?: boolean;
     enableHtmlSandbox?: boolean;
     onHtmlSandboxSubmit?: (payload: unknown) => Promise<"sent" | "queued">;
+    choiceActionsActive?: boolean;
+    onChoiceActionsSubmit?: (text: string) => Promise<"sent" | "queued">;
     onValidateProjectFile?: (path: string) => Promise<boolean>;
     onValidateLocalFile?: (path: string) => Promise<boolean>;
     onOpenProjectFile?: (path: string, range?: ProjectFileLineRange) => void | Promise<void>;
@@ -41,9 +46,11 @@
     onOpenLocalFile?: (path: string) => void | Promise<void>;
     onResolveLocalMedia?: (path: string) => Promise<Attachment | undefined>;
   } = $props();
-  let segments = $derived(enableHtmlSandbox && onHtmlSandboxSubmit
-    ? splitHtmlSandboxSegments(text)
-    : [{ type: "markdown" as const, text }]);
+  let segments = $derived.by((): HtmlSandboxSegment[] => {
+    const sandbox = enableHtmlSandbox && !!onHtmlSandboxSubmit;
+    const actions = !!onChoiceActionsSubmit;
+    return sandbox || actions ? splitHtmlSandboxSegments(text, { sandbox, actions }) : [{ type: "markdown", text }];
+  });
   let externalLinkIconTemplate: HTMLSpanElement | undefined;
   let copyIconTemplate: HTMLSpanElement | undefined;
   const codeCopy = createMarkdownCodeCopyAction(() => copyIconTemplate);
@@ -70,6 +77,12 @@
   {#if segment.type === "sandbox"}
     {#if onHtmlSandboxSubmit}
       <HtmlSandbox source={segment.html} onSubmit={onHtmlSandboxSubmit} />
+    {/if}
+  {:else if segment.type === "actions"}
+    {#if onChoiceActionsSubmit}
+      {#key JSON.stringify(segment.actions)}
+        <ChoiceActions actions={segment.actions} active={choiceActionsActive} onSubmit={onChoiceActionsSubmit} />
+      {/key}
     {/if}
   {:else}
     {@const html = renderMarkdown(segment.text, { remoteImages, headingAnchors })}

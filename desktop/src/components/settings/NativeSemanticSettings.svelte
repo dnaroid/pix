@@ -37,8 +37,8 @@
 <SearchExtensionSettings {source} {onChange} />
 <div class="px-2.5 py-2.5">
   <h2 class="text-sm font-semibold text-foreground">Semantic search</h2>
-  <p class="mt-1 text-xs leading-4 text-muted-foreground">This edits <code>~/.config/pi/pi-tools-suite.jsonc</code> at <code>search.embedding</code>. Use Save above. One valid saved configuration enables semantic search across all sources, projects, Pi and Desktop. Saving can upload eligible code/document chunks, paths/headings, task titles/descriptions, saved session names, commit metadata, settings metadata and search queries; charges may apply. Public user/assistant message text on saved session branches is automatically indexed and may be uploaded, including existing history. Tool results, thinking blocks and attachments are excluded. Local search remains available. Removing configuration stops new embedding work but retains existing vectors.</p>
-  <p class="mt-1 text-xs leading-4 text-muted-foreground">After changing models, incompatible history vectors can be discarded with <code>/search-semantic reset-history</code> in the affected project. The next semantic search rebuilds them and may incur charges; tasks, sessions and Git history are preserved.</p>
+  <p class="mt-1 text-xs leading-4 text-muted-foreground">Stored in <code>~/.config/pi/pi-tools-suite.jsonc</code> → <code>search.embedding</code>; applies to all sources, projects, Pi and Desktop. Uploads code/doc chunks, task titles/descriptions, saved session names, commit metadata, settings metadata and queries; charges may apply. Public user/assistant message text on saved session branches is automatically indexed, including existing history. Tool results, thinking blocks and attachments are excluded.</p>
+  <p class="mt-1 text-xs leading-4 text-muted-foreground">After switching models, run <code>/search-semantic reset-history</code> to rebuild history vectors.</p>
 </div>
 <SettingsFieldRow label="Embedding provider" description="Choose Not configured to remove the provider configuration when you save.">
   <TaskFieldSelect value={provider} options={providers} onChange={selectProvider} ariaLabel="Embedding provider" compact />

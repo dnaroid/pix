@@ -17,10 +17,11 @@
  *   inside `session/prompt`.
  */
 
+import { loadModelSetupStatus, parseSetupRequest, writeRoles } from "./model-setup.js";
 import { createHash, randomUUID } from "node:crypto";
 import { BTW_METHOD, BTW_CHANNEL, parseBtwEvent, type BtwRequest, type BtwState } from "../btw/contract.js";
 import { parseDesktopBtwRequest } from "../btw/request.js";
-import { SEARCH_QUERY_METHOD, SEARCH_CONFIG_METHOD, SEARCH_SYNC_METHOD, SEARCH_INDEX_METHOD, SEARCH_COMMITS_METHOD, SEARCH_INTENT_METHOD, SEARCH_TASKS_METHOD } from "../search/contract.js";
+import { SEARCH_QUERY_METHOD, SEARCH_CONFIG_METHOD, SEARCH_SYNC_METHOD, SEARCH_INDEX_METHOD, SEARCH_COMMITS_METHOD, SEARCH_INTENT_METHOD, SEARCH_TASKS_METHOD, type SearchIndexResponse } from "../search/contract.js";
 import { parseSearchQueryRequest, parseSearchConfigRequest, parseSearchSyncRequest, parseSearchIndexRequest, parseSemanticTasksRequest } from "../search/request.js";
 import { DesktopSearchService, SearchUnavailableError, type SearchServiceOptions } from "../search/service.js";
 import { BackgroundSessionDiscovery, hydrateBackgroundTitle, type SessionCandidateSource } from "../search/background-session-discovery.js";
@@ -35,11 +36,11 @@ import { SEARCH_RAG_METHOD, SEARCH_RAG_DELTA_METHOD } from "../search/rag-contra
 import { parseRagRequest } from "../search/rag-request.js";
 import { DesktopRagService } from "../search/rag-service.js";
 import { collectRagEvidence } from "../search/rag-evidence.js";
-import { BrainstormHost, BRAINSTORM_CHANNEL, type BrainstormLink } from "./brainstorm-host.js";
 import { NativeSessionCatalog } from "./native-session-catalog.js";
 import { SessionRefreshScheduler } from "./session-refresh-scheduler.js";
 import { PIX_SESSION_CATALOG_CHANGED_METHOD } from "./session-catalog-contract.js";
-import { brainstormParticipantOptions, freshParticipantAnswer } from "./brainstorm-participant.js";
+import { PIX_USAGE_STATS_CHANGED_METHOD, PIX_USAGE_STATS_METHOD, type UsageStatsChangedNotification } from "./usage-stats-contract.js";
+import { parseUsageStatsRequest, UsageStatsHost } from "./usage-stats-host.js";
 import { spawn } from "node:child_process";
 import { statSync } from "node:fs";
 import { copyFile, mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
@@ -78,6 +79,7 @@ import {
 import {
 	getAgentDir,
 	getPackageDir,
+	ModelRuntime,
 	SessionManager,
 	SettingsManager,
 	type JsonAgentSessionEvent,
@@ -284,6 +286,25 @@ import {
 } from "./slash-commands.js";
 import { SessionMapStore, type SessionMapRecord } from "./session-map.js";
 import {
+	PIX_SUBAGENT_FORK_SESSION_METHOD,
+	PIX_SUBAGENT_META_KEY,
+	PIX_SUBAGENT_OPEN_SESSION_METHOD,
+	PIX_SUBAGENT_SESSION_STATE_METHOD,
+	forkSubagentSession,
+	isSubagentSessionPath,
+	parseDesktopSubagentOpenSessionRequest,
+	readSessionHeaderId,
+	readSubagentSessionState,
+	removeParentSubagentSessions,
+	resolveSubagentSession,
+	type DesktopSubagentForkSessionResponse,
+	type DesktopSubagentOpenSessionRequest,
+	type DesktopSubagentOpenSessionResponse,
+	type DesktopSubagentSessionStateResponse,
+	type SubagentSessionState,
+} from "./subagent-sessions.js";
+import { readSubagentSessionSummary } from "./subagent-session-summary.js";
+import {
 	readPersistedHistoryTail,
 	readPersistedHistoryBefore,
 	readPersistedImage,
@@ -324,6 +345,7 @@ import {
 type ClientCaller = {
 	notify(method: "session/update", params: SessionNotification): Promise<void>;
 	notify(method: typeof PIX_SESSION_CATALOG_CHANGED_METHOD, params: { cwd: string }): Promise<void>;
+	notify(method: typeof PIX_USAGE_STATS_CHANGED_METHOD, params: UsageStatsChangedNotification): Promise<void>;
 	notify(method: typeof PIX_SESSION_STATE_METHOD, params: PixSessionStateNotification): Promise<void>;
 	notify(method: typeof PIX_QUEUE_STATE_METHOD, params: DesktopQueueStateResponse): Promise<void>;
 	notify(method: typeof PIX_QUEUE_CONSUMED_METHOD, params: DesktopQueueConsumedNotification): Promise<void>;
@@ -486,7 +508,7 @@ export interface PixAcpAgentOptions {
 	readonly searchService?: DesktopSearchService;
 	/** Hermetic embedding preferences/auth/embedder for the default search backend (tests only). */
 	readonly searchOverrides?: Pick<SearchServiceOptions, "preferences" | "auth" | "embed">;
-	readonly commitSearchService?: Pick<DesktopCommitSearchService, "query" | "index" | "dispose">;
+	readonly commitSearchService?: Pick<DesktopCommitSearchService, "query" | "index" | "dispose"> & Partial<Pick<DesktopCommitSearchService, "watch">>;
 	/** Stateless search-intent classifier; no session or project-source access. */
 	readonly searchIntentService?: Pick<DesktopSearchIntentService, "classify">;
 	/** Stateless Quick Add type classifier; never reads the task document. */
@@ -530,6 +552,22 @@ export interface PixAcpAgentOptions {
 	readonly copyText?: (text: string) => Promise<void>;
 }
 
+/** Manual and background commit passes share one diagnostic shape. */
+function logCommitIndexResult(cwd: string, result: SearchIndexResponse, durationMs: number, background: boolean): void {
+	const phase = result.failurePhase;
+	const safePhase = phase === "configuration" || phase === "authorization" || phase === "storage"
+		|| phase === "provider" || phase === "history" ? phase : undefined;
+	try {
+		void acpFileLogger.log(result.complete ? "info" : "warn",
+			result.complete ? "search:index-completed" : "search:index-incomplete",
+			{ source: "commits", complete: result.complete, indexed: result.indexed, total: result.total, durationMs,
+				...(background ? { background: true } : {}),
+				...(safePhase ? { phase: safePhase } : {}),
+				...(result.complete ? {} : { reason: "incomplete_coverage" }) },
+			{ project: cwd, module: "search.index" });
+	} catch { /* Diagnostic logging cannot change indexing outcomes. */ }
+}
+
 export class PixAcpAgent {
 	private readonly sessions = new Map<string, AgentSessionState>();
 	private readonly sessionRefreshes = new SessionRefreshScheduler((error) => {
@@ -565,15 +603,17 @@ export class PixAcpAgent {
 		id => this.sessionMap.get(id),
 		(cwd, id, running) => this.searchService.sessionActivity(cwd, id, running),
 	);
-	private readonly commitSearchService: Pick<DesktopCommitSearchService, "query" | "index" | "dispose">;
+	private readonly commitSearchService: Pick<DesktopCommitSearchService, "query" | "index" | "dispose"> & Partial<Pick<DesktopCommitSearchService, "watch">>;
 	private readonly searchIntentService: Pick<DesktopSearchIntentService, "classify">;
 	private readonly taskTypeClassifier: Pick<DesktopTaskTypeClassifier, "classify">;
 	private readonly ragService: Pick<DesktopRagService, "generate">;
-	private readonly brainstormHost: BrainstormHost;
+	private readonly usageStatsHost: UsageStatsHost;
 	private readonly listPiSessions: (cwd?: string, signal?: AbortSignal) => Promise<readonly PiSessionInfo[]>;
 	private readonly loadTuiTabs: (cwd: string) => Promise<TuiTabSnapshot>;
 	private readonly completeAutocomplete: AutocompleteCompleter;
 	private readonly enhancePrompt: PromptEnhancer;
+	/** Lazy local model catalogue for viewer display (context window, names). */
+	private viewerModelRuntime: Promise<ModelRuntime | undefined> | undefined;
 	private readonly gitAssistant: GitAssistant;
 	private readonly queryModelUsage: (state: PiSessionState) => Promise<ModelUsageRefreshResult>;
 	private readonly claudeCodeLoginNudge: () => Promise<boolean>;
@@ -594,7 +634,9 @@ export class PixAcpAgent {
 
 	constructor(options: PixAcpAgentOptions) {
 		this.options = options;
-		this.commitSearchService = options.commitSearchService ?? new DesktopCommitSearchService();
+		this.commitSearchService = options.commitSearchService ?? new DesktopCommitSearchService({
+			onBackgroundResult: (cwd, result, durationMs) => logCommitIndexResult(cwd, result, durationMs, true),
+		});
 		this.searchIntentService = options.searchIntentService ?? new DesktopSearchIntentService();
 		this.taskTypeClassifier = options.taskTypeClassifier ?? new DesktopTaskTypeClassifier();
 		this.ragService = options.ragService ?? new DesktopRagService({
@@ -628,7 +670,11 @@ export class PixAcpAgent {
 			(error) => this.options.logger.warn(`native session discovery failed: ${stringifyUnknown(error)}`),
 			options.nativeSessionRevision,
 		);
-		const backgroundSessions = new BackgroundSessionDiscovery(cwd => this.sessionMap.list(cwd),
+		// Sub-agent viewer sessions are ephemeral, parent-owned and already summarized
+		// in the parent transcript; keep them out of project session search.
+		const searchableSessionRecords = async (cwd: string) =>
+			(await this.sessionMap.list(cwd)).filter((record) => !record.subagent);
+		const backgroundSessions = new BackgroundSessionDiscovery(searchableSessionRecords,
 			options.agentDir ?? getAgentDir(), options.sessionCandidates ?? new SessionCandidateCatalog());
 		this.backgroundSearchSessions = backgroundSessions;
 		this.searchService = options.searchService ?? new DesktopSearchService({
@@ -638,7 +684,7 @@ export class PixAcpAgent {
 					{ source, complete, indexed, total, durationMs, ...(phase ? { phase } : {}), ...(reason ? { reason } : {}) },
 					{ project: cwd, module: "search.index" });
 			},
-			sessionRecords: (cwd) => this.sessionMap.list(cwd),
+			sessionRecords: searchableSessionRecords,
 			discoverBackground: (cwd, signal) => backgroundSessions.list(cwd, signal),
 			sessionSnapshot: (cwd, signal) => backgroundSessions.snapshot(cwd, signal),
 			discover: async (cwd, signal, strict) => {
@@ -651,46 +697,7 @@ export class PixAcpAgent {
 				return records;
 			},
 		});
-		this.brainstormHost = new BrainstormHost({
-			create: async (parent, participant, link, signal) => {
-				const owner = this.sessions.get(parent);
-				if (!owner) throw new Error("brainstorm parent session lost");
-				const startup = await brainstormParticipantOptions(options.piEntry, owner.cwd, options.toolsSuiteExtensionPath, participant.model);
-				signal.throwIfAborted();
-				const session = await this.spawnSession(participant.sessionId, owner.cwd, owner.client, undefined, undefined, startup);
-				if (signal.aborted) { await this.teardownSession(session); signal.throwIfAborted(); }
-				await session.pi.setSessionName(participant.name);
-				if (signal.aborted || this.sessions.get(participant.sessionId) !== session) { await this.teardownSession(session); throw new Error("brainstorm participant startup cancelled"); }
-				await this.registerSessionRecord(participant.sessionId, owner.cwd, session.pi, participant.name, link);
-				if (signal.aborted) {
-					await this.teardownSession(session);
-					const record = await this.sessionMap.get(participant.sessionId);
-					if (record) await this.sessionMap.put({ ...record, brainstorm: this.brainstormHost.metadata(participant.sessionId) ?? link });
-					signal.throwIfAborted();
-				}
-			},
-			round: async (participant, task, signal) => {
-				const session = this.sessions.get(participant.sessionId);
-				if (!session) throw new Error("brainstorm participant session lost; no replacement permitted");
-				const state = await session.pi.getState();
-				if (`${state.model?.provider}/${state.model?.id}` !== participant.model) throw new Error("brainstorm requested model unavailable (no fallback)");
-				await session.pi.setThinkingLevel(task.thinking);
-				signal.throwIfAborted();
-				return freshParticipantAnswer(session.pi, task.task, () => this.prompt({ sessionId: participant.sessionId, prompt: [{ type: "text", text: task.task }] }, true), signal);
-			},
-			stop: async (id) => { const session = this.sessions.get(id); if (session) await this.teardownSession(session); },
-			link: (id, link) => this.withSessionLifecycle(id, async () => {
-				const record = await this.sessionMap.get(id);
-				if (record) await this.sessionMap.put({ ...record, brainstorm: link });
-			}),
-			publish: async (parent, data) => {
-				const session = this.sessions.get(parent);
-				if (!session) return;
-				const envelope: PixSessionStateNotification = { sessionId: parent, channel: BRAINSTORM_CHANNEL, data, ...(session.activityOwner ? { activityOwner: session.activityOwner } : {}) };
-				session.activitySnapshots.set(BRAINSTORM_CHANNEL, envelope);
-				await session.client.notify(PIX_SESSION_STATE_METHOD, envelope).catch(() => {});
-			},
-		});
+		this.usageStatsHost = new UsageStatsHost({ logger: this.options.logger });
 		this.listPiSessions = options.listPiSessions
 			?? ((cwd, signal) => cwd ? SessionManager.list(cwd, undefined, undefined, signal) : SessionManager.listAll(undefined, signal));
 		this.loadTuiTabs = options.loadTuiTabs ?? ((cwd) => loadTuiTabSnapshot(cwd));
@@ -798,7 +805,12 @@ export class PixAcpAgent {
 			}))
 			.onRequest(SEARCH_SYNC_METHOD, parseSearchSyncRequest, async (ctx) => this.withRequestLogging(SEARCH_SYNC_METHOD, ctx.params, ctx.signal, async () => {
 				if (this.clientName !== "pix-desktop") throw new RequestError(ERROR_SERVER, "Desktop search unavailable");
-				try { return await this.searchService.sync(ctx.params, ctx.signal); }
+				try {
+					const result = await this.searchService.sync(ctx.params, ctx.signal);
+					// Change-driven background commit indexing for the synced workspace.
+					this.commitSearchService.watch?.(ctx.params.cwd);
+					return result;
+				}
 				catch (error) {
 					if (error instanceof SearchUnavailableError) throw new RequestError(ERROR_SERVER, error.message);
 					throw error;
@@ -810,20 +822,7 @@ export class PixAcpAgent {
 					if (ctx.params.source !== "commits") return await this.searchService.index(ctx.params, ctx.signal);
 					const startedAt = Date.now();
 					const result = await this.commitSearchService.index(ctx.params, ctx.signal);
-					if (!ctx.signal.aborted) {
-						const phase = result.failurePhase;
-						const safePhase = phase === "configuration" || phase === "authorization" || phase === "storage"
-							|| phase === "provider" || phase === "history" ? phase : undefined;
-						try {
-							void acpFileLogger.log(result.complete ? "info" : "warn",
-								result.complete ? "search:index-completed" : "search:index-incomplete",
-								{ source: "commits", complete: result.complete, indexed: result.indexed, total: result.total,
-									durationMs: Date.now() - startedAt,
-									...(safePhase ? { phase: safePhase } : {}),
-									...(result.complete ? {} : { reason: "incomplete_coverage" }) },
-								{ project: ctx.params.cwd, module: "search.index" });
-						} catch { /* Diagnostic logging cannot change indexing outcomes. */ }
-					}
+					if (!ctx.signal.aborted) logCommitIndexResult(ctx.params.cwd, result, Date.now() - startedAt, false);
 					return result;
 				} catch (error) {
 					if (ctx.signal.aborted) throw error;
@@ -842,7 +841,7 @@ export class PixAcpAgent {
 			.onRequest("session/fork", (ctx) => this.withRequestLogging("session/fork", ctx.params, ctx.signal, () => this.withSessionLifecycle(ctx.params.sessionId, () => this.forkSession(ctx.params, ctx.client))),
 			)
 			.onRequest("session/set_config_option", (ctx) => this.withRequestLogging("session/set_config_option", ctx.params, ctx.signal, () => this.setConfigOption(ctx.params)))
-			.onRequest("session/set_mode", async (ctx) => this.withRequestLogging("session/set_mode", ctx.params, ctx.signal, async () => { await this.assertBrainstormWritable(ctx.params.sessionId); return {}; }))
+			.onRequest("session/set_mode", async (ctx) => this.withRequestLogging("session/set_mode", ctx.params, ctx.signal, async () => { await this.assertSessionWritable(ctx.params.sessionId); return {}; }))
 			.onRequest("session/prompt", (ctx) => this.withRequestLogging("session/prompt", ctx.params, ctx.signal, () => this.prompt(ctx.params)))
 			.onRequest(PIX_AGENT_CONTROL_METHOD, parseDesktopAgentControlRequest, (ctx) => this.withRequestLogging(PIX_AGENT_CONTROL_METHOD, ctx.params, ctx.signal, () => this.desktopAgentControl(ctx.params)),
 			)
@@ -850,6 +849,10 @@ export class PixAcpAgent {
 			)
 			.onRequest(PIX_DCP_STATS_METHOD, parseDesktopSessionRequest, (ctx) => this.withRequestLogging(PIX_DCP_STATS_METHOD, ctx.params, ctx.signal, () => this.desktopDcpStats(ctx.params)),
 			)
+			.onRequest(PIX_USAGE_STATS_METHOD, parseUsageStatsRequest, (ctx) => this.withRequestLogging(PIX_USAGE_STATS_METHOD, ctx.params, ctx.signal, () => {
+				const client = ctx.client;
+				return this.usageStatsHost.stats(ctx.params, (notification) => client.notify(PIX_USAGE_STATS_CHANGED_METHOD, notification));
+			}))
 			.onRequest(PIX_SESSION_USAGE_METHOD, parseDesktopSessionRequest, (ctx) => this.withRequestLogging(PIX_SESSION_USAGE_METHOD, ctx.params, ctx.signal, () => this.desktopSessionUsage(ctx.params)),
 			)
 			.onRequest(PIX_CLAUDE_QUOTA_REFRESH_METHOD, parseDesktopSessionRequest, (ctx) => this.withRequestLogging(PIX_CLAUDE_QUOTA_REFRESH_METHOD, ctx.params, ctx.signal, () => this.desktopClaudeQuotaRefresh(ctx.params)),
@@ -865,6 +868,10 @@ export class PixAcpAgent {
 			.onRequest(PIX_CLEAR_TODOS_METHOD, parseDesktopSessionRequest, (ctx) => this.withRequestLogging(PIX_CLEAR_TODOS_METHOD, ctx.params, ctx.signal, () => this.desktopClearTodos(ctx.params)),
 			)
 			.onRequest(PIX_LSP_CONTROL_METHOD, parseDesktopLspControlRequest, (ctx) => this.withRequestLogging(PIX_LSP_CONTROL_METHOD, ctx.params, ctx.signal, () => this.desktopLspControl(ctx.params)),
+			)
+			.onRequest("pix/setup/models", (value: unknown) => value, (ctx) => this.withRequestLogging("pix/setup/models", ctx.params, ctx.signal, () => loadModelSetupStatus()),
+			)
+			.onRequest("pix/setup/models/apply", parseSetupRequest, (ctx) => this.withRequestLogging("pix/setup/models/apply", ctx.params, ctx.signal, () => ({ written: writeRoles(ctx.params.roles, undefined, ctx.params.overrides, ctx.params.search) })),
 			)
 			.onRequest("pix/autocomplete", parseAutocompleteRequest, (ctx) => this.withRequestLogging("pix/autocomplete", ctx.params, ctx.signal, () => this.autocomplete(ctx.params, ctx.signal)),
 			)
@@ -911,6 +918,12 @@ export class PixAcpAgent {
 			)
 			.onRequest(PIX_SESSION_IMAGE_METHOD, parseDesktopSessionImageRequest, (ctx) => this.withRequestLogging(PIX_SESSION_IMAGE_METHOD, ctx.params, ctx.signal, () => this.desktopSessionImage(ctx.params)),
 			)
+			.onRequest(PIX_SUBAGENT_OPEN_SESSION_METHOD, parseDesktopSubagentOpenSessionRequest, (ctx) => this.withRequestLogging(PIX_SUBAGENT_OPEN_SESSION_METHOD, ctx.params, ctx.signal, () => this.subagentOpenSession(ctx.params)),
+			)
+			.onRequest(PIX_SUBAGENT_FORK_SESSION_METHOD, parseDesktopSessionRequest, (ctx) => this.withRequestLogging(PIX_SUBAGENT_FORK_SESSION_METHOD, ctx.params, ctx.signal, () => this.subagentForkSession(ctx.params)),
+			)
+			.onRequest(PIX_SUBAGENT_SESSION_STATE_METHOD, parseDesktopSessionRequest, (ctx) => this.withRequestLogging(PIX_SUBAGENT_SESSION_STATE_METHOD, ctx.params, ctx.signal, () => this.subagentSessionState(ctx.params)),
+			)
 			.onRequest("session/close", (ctx) => this.withRequestLogging("session/close", ctx.params, ctx.signal, () => this.withSessionLifecycle(ctx.params.sessionId, () => this.closeSession(ctx.params.sessionId))),
 			)
 			.onNotification("session/cancel", (ctx) => this.withRequestLogging("session/cancel", ctx.params, ctx.signal, () => this.cancel(ctx.params.sessionId)));
@@ -935,7 +948,7 @@ export class PixAcpAgent {
 		await this.nativeSessionCatalog.dispose();
 		await this.searchActivity.dispose();
 		await Promise.all([this.searchService.dispose(), this.commitSearchService.dispose()]);
-		await this.brainstormHost.dispose();
+		await this.usageStatsHost.dispose();
 		this.claudeCodeQuotaCache.clear();
 		this.claudeQuotaRefreshes.clear();
 		await Promise.allSettled([...this.pendingSpawns]);
@@ -1077,7 +1090,7 @@ export class PixAcpAgent {
 	private async desktopUserMessageAction(
 		params: DesktopUserMessageActionRequest,
 	): Promise<DesktopUserMessageActionResponse> {
-		if (params.action !== "copy") await this.assertBrainstormWritable(params.sessionId);
+		if (params.action !== "copy") await this.assertSessionWritable(params.sessionId);
 		const session = this.requireDesktopSession(params.sessionId);
 		if (params.action === "copy") return this.performDesktopUserMessageAction(session, params);
 		if (session.activeRun || session.builtinRunning) throw new RequestError(ERROR_SERVER, "message actions are unavailable while the agent is running");
@@ -1167,7 +1180,7 @@ export class PixAcpAgent {
 	}
 
 	private async desktopBash(params: DesktopBashRequest): Promise<Record<string, never>> {
-		await this.assertBrainstormWritable(params.sessionId);
+		await this.assertSessionWritable(params.sessionId);
 		const session = this.requireDesktopSession(params.sessionId);
 		if (session.bashRunning) {
 			throw new RequestError(ERROR_SERVER, "a bash command is already running");
@@ -1205,7 +1218,7 @@ export class PixAcpAgent {
 	}
 
 	private async desktopClearTodos(params: DesktopSessionRequest): Promise<Record<string, never>> {
-		await this.assertBrainstormWritable(params.sessionId);
+		await this.assertSessionWritable(params.sessionId);
 		const session = this.requireDesktopSession(params.sessionId);
 		if (session.activeRun || session.builtinRunning) {
 			throw new RequestError(ERROR_SERVER, "session plan clear is unavailable while the agent is running");
@@ -1228,7 +1241,7 @@ export class PixAcpAgent {
 	}
 
 	private async desktopLspControl(params: DesktopLspControlRequest): Promise<DesktopLspControlResponse> {
-		if (params.action !== "status") await this.assertBrainstormWritable(params.sessionId);
+		if (params.action !== "status") await this.assertSessionWritable(params.sessionId);
 		const session = this.requireDesktopSession(params.sessionId);
 		try {
 			if (!session.pi.lspControl) throw new Error("LSP control is unavailable in this pi client");
@@ -1245,7 +1258,7 @@ export class PixAcpAgent {
 	}
 
 	private async desktopQueueMessage(params: DesktopQueueSubmitRequest): Promise<DesktopQueueSubmitResponse> {
-		await this.assertBrainstormWritable(params.sessionId);
+		await this.assertSessionWritable(params.sessionId);
 		const session = this.requireDesktopSession(params.sessionId);
 		await this.ensureDesktopQueuesLoaded(session);
 		const message = await this.desktopQueuedMessage(params);
@@ -1278,7 +1291,7 @@ export class PixAcpAgent {
 	}
 
 	private async desktopDeferMessage(params: DesktopQueueSubmitRequest): Promise<DesktopQueueSubmitResponse> {
-		await this.assertBrainstormWritable(params.sessionId);
+		await this.assertSessionWritable(params.sessionId);
 		const session = this.requireDesktopSession(params.sessionId);
 		await this.ensureDesktopQueuesLoaded(session);
 		const message = await this.desktopQueuedMessage(params);
@@ -1292,7 +1305,7 @@ export class PixAcpAgent {
 	}
 
 	private async desktopForkMessage(params: DesktopQueueSubmitRequest): Promise<DesktopQueueSubmitResponse> {
-		await this.assertBrainstormWritable(params.sessionId);
+		await this.assertSessionWritable(params.sessionId);
 		const session = this.requireDesktopSession(params.sessionId);
 		await this.ensureDesktopQueuesLoaded(session);
 		const message = await this.desktopQueuedMessage(params);
@@ -1375,7 +1388,7 @@ export class PixAcpAgent {
 	}
 
 	private async desktopTakeAutoMessage(params: DesktopSessionRequest): Promise<DesktopQueueActionResponse> {
-		await this.assertBrainstormWritable(params.sessionId);
+		await this.assertSessionWritable(params.sessionId);
 		const session = this.requireDesktopSession(params.sessionId);
 		await this.ensureDesktopQueuesLoaded(session);
 		const state = await session.pi.getState();
@@ -1393,7 +1406,7 @@ export class PixAcpAgent {
 	}
 
 	private async desktopQueueAction(params: DesktopQueueActionRequest): Promise<DesktopQueueActionResponse> {
-		await this.assertBrainstormWritable(params.sessionId);
+		await this.assertSessionWritable(params.sessionId);
 		const session = this.requireDesktopSession(params.sessionId);
 		await this.ensureDesktopQueuesLoaded(session);
 		if (params.source === "fork") {
@@ -1622,7 +1635,7 @@ export class PixAcpAgent {
 		const cwd = session?.cwd ?? record!.cwd;
 		const context = { sessionId: params.sessionId, cwd };
 		let persisted: Awaited<ReturnType<typeof readPersistedHistoryTail>>;
-		if (!params.full && record?.piSessionPath) {
+		if ((!params.full || (record?.subagent && !session)) && record?.piSessionPath) {
 			persisted = params.cursor
 				? await readPersistedHistoryBefore(record.piSessionPath, params.cursor)
 				: await readPersistedHistoryTail(record.piSessionPath);
@@ -1722,7 +1735,7 @@ export class PixAcpAgent {
 		params: DesktopSessionRequest,
 		client: ClientCaller,
 	): Promise<{ configOptions?: SessionConfigOption[] }> {
-		await this.assertBrainstormWritable(params.sessionId);
+		await this.assertSessionWritable(params.sessionId);
 		const current = this.sessions.get(params.sessionId);
 		if (!current) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
 		if (current.activeRun || current.builtinRunning) {
@@ -1759,7 +1772,7 @@ export class PixAcpAgent {
 	}
 
 	private async resumePath(params: DesktopResumePathRequest): Promise<{ configOptions?: SessionConfigOption[] }> {
-		await this.assertBrainstormWritable(params.sessionId);
+		await this.assertSessionWritable(params.sessionId);
 		const session = this.sessions.get(params.sessionId);
 		if (!session) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
 		if (session.activeRun || session.builtinRunning) {
@@ -1771,7 +1784,7 @@ export class PixAcpAgent {
 		}
 
 		const sessionPath = resolve(session.cwd, commandPathArgument(params.path) ?? params.path);
-		await this.assertBrainstormPathAvailable(sessionPath);
+		await this.assertSessionPathAvailable(sessionPath);
 		const switched = await session.pi.switchSession(sessionPath);
 		if (switched.cancelled) {
 			throw new RequestError(ERROR_SERVER, "session switch cancelled by an extension");
@@ -1784,7 +1797,7 @@ export class PixAcpAgent {
 	}
 
 	private async importSession(params: DesktopImportSessionRequest): Promise<{ configOptions?: SessionConfigOption[] }> {
-		await this.assertBrainstormWritable(params.sessionId);
+		await this.assertSessionWritable(params.sessionId);
 		const session = this.sessions.get(params.sessionId);
 		if (!session) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
 		if (session.activeRun || session.builtinRunning) {
@@ -1797,7 +1810,7 @@ export class PixAcpAgent {
 		if (!state.sessionFile) throw new RequestError(ERROR_SERVER, "current session has no persisted session file");
 
 		const sourcePath = resolve(session.cwd, commandPathArgument(params.path) ?? params.path);
-		await this.assertBrainstormPathAvailable(sourcePath);
+		await this.assertSessionPathAvailable(sourcePath);
 		const sourceStat = await stat(sourcePath).catch(() => undefined);
 		if (!sourceStat?.isFile()) throw new RequestError(ERROR_SERVER, `import file not found: ${sourcePath}`);
 
@@ -1896,8 +1909,8 @@ export class PixAcpAgent {
 	private async loadSession(params: LoadSessionRequest, client: ClientCaller): Promise<LoadSessionResponse> {
 		const lazyHistory = (params as { _meta?: Record<string, unknown> })._meta?.["pix.lazyHistory"] === true;
 		const owner = activityOwnerFromMeta(params._meta);
-		const participant = await this.attachBrainstormSession(params.sessionId, owner, !lazyHistory);
-		if (participant) return participant;
+		const viewer = await this.loadSubagentViewer(params.sessionId);
+		if (viewer) return viewer;
 		if (lazyHistory) {
 			const pendingNew = this.pendingDesktopNewSessions.get(params.sessionId);
 			if (pendingNew) {
@@ -1930,37 +1943,130 @@ export class PixAcpAgent {
 	}
 
 	private async resumeSession(params: ResumeSessionRequest, client: ClientCaller): Promise<ResumeSessionResponse> {
-		const participant = await this.attachBrainstormSession(params.sessionId, activityOwnerFromMeta(params._meta), false);
-		if (participant) return participant;
+		const viewer = await this.loadSubagentViewer(params.sessionId);
+		if (viewer) return viewer;
 		return this.loadOrResumeSession(params, client, { replay: false });
 	}
 
-	private async assertBrainstormWritable(sessionId: string): Promise<void> {
-		const link = this.brainstormHost.metadata(sessionId) ?? (await this.sessionMap.get(sessionId))?.brainstorm;
-		if (link?.owned) throw new RequestError(ERROR_SERVER, "brainstorm participant is owned by its parent; direct mutations are disabled");
+	/** Viewers never spawn Pi: return the link/state so Desktop renders persisted history read-only. */
+	private async loadSubagentViewer(sessionId: string): Promise<LoadSessionResponse | undefined> {
+		if (this.sessions.has(sessionId)) return undefined;
+		const record = await this.sessionMap.get(sessionId);
+		if (!record?.subagent) return undefined;
+		const state = await this.readSubagentRecordState(record);
+		return { _meta: { [PIX_SUBAGENT_META_KEY]: { ...record.subagent, ...state } } };
 	}
 
-	private async assertBrainstormPathAvailable(path: string): Promise<void> {
+	private async readSubagentRecordState(record: SessionMapRecord): Promise<SubagentSessionState> {
+		if (!record.subagent) throw new RequestError(ERROR_SERVER, `session ${record.sessionId} is not a sub-agent viewer`);
+		const resolved = await resolveSubagentSession(record.cwd, record.subagent.runDir, record.subagent.agentId);
+		const [state, summary] = await Promise.all([
+			readSubagentSessionState(resolved),
+			readSubagentSessionSummary(resolved.sessionFile),
+		]);
+		if (!summary.provider || !summary.modelId) return state;
+		const runtime = await this.getViewerModelRuntime();
+		let model: { name?: string; contextWindow?: number } | undefined;
+		try {
+			model = runtime?.getModel(summary.provider, summary.modelId) as typeof model;
+		} catch {
+			model = undefined;
+		}
+		const contextWindow = typeof model?.contextWindow === "number" && model.contextWindow > 0 ? model.contextWindow : undefined;
+		const tokens = summary.contextTokens ?? null;
+		return {
+			...state,
+			model: {
+				provider: summary.provider,
+				modelId: summary.modelId,
+				name: typeof model?.name === "string" && model.name.trim() ? model.name : summary.modelId,
+				...(summary.thinking ? { thinking: summary.thinking } : {}),
+			},
+			...(contextWindow ? {
+				context: { tokens, contextWindow, percent: tokens === null ? null : (tokens / contextWindow) * 100 },
+			} : {}),
+		};
+	}
+
+	private getViewerModelRuntime(): Promise<ModelRuntime | undefined> {
+		this.viewerModelRuntime ??= (async () => {
+			try {
+				const agentDir = this.options.agentDir ?? getAgentDir();
+				const runtime = await ModelRuntime.create({
+					authPath: join(agentDir, "auth.json"),
+					modelsPath: join(agentDir, "models.json"),
+					refreshOnCreate: false,
+				});
+				await runtime.refresh({ allowNetwork: false }).catch(() => undefined);
+				return runtime;
+			} catch (error) {
+				this.options.logger.warn(`sub-agent viewer model catalogue unavailable: ${stringifyUnknown(error)}`);
+				return undefined;
+			}
+		})();
+		return this.viewerModelRuntime;
+	}
+
+	private async subagentOpenSession(params: DesktopSubagentOpenSessionRequest): Promise<DesktopSubagentOpenSessionResponse> {
+		const parent = this.sessions.get(params.sessionId);
+		const parentRecord = parent ? undefined : await this.sessionMap.get(params.sessionId);
+		const cwd = parent?.cwd ?? parentRecord?.cwd;
+		if (!cwd) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
+		const resolved = await resolveSubagentSession(cwd, params.runDir, params.agentId);
+		const link = { runDir: resolved.runDir, agentId: resolved.agentId, parentSessionId: params.sessionId };
+		const existing = (await this.sessionMap.list(cwd)).find((record) => resolve(record.piSessionPath) === resolved.sessionFile);
+		if (existing && !existing.subagent) {
+			throw new RequestError(ERROR_SERVER, "sub-agent session file is already registered as an ordinary session");
+		}
+		const sessionId = existing?.sessionId ?? randomUUID();
+		await this.sessionMap.put({
+			sessionId,
+			piSessionPath: resolved.sessionFile,
+			piSessionId: (await readSessionHeaderId(resolved.sessionFile)) ?? sessionId,
+			cwd,
+			title: existing?.title ?? `Sub-agent ${resolved.agentId}`,
+			subagent: link,
+			updatedAt: existing?.updatedAt ?? new Date().toISOString(),
+		});
+		const state = await readSubagentSessionState(resolved);
+		this.options.logger.info(`subagents/open_session: ${resolved.agentId} → ${sessionId}`);
+		return { sessionId, link, ...state };
+	}
+
+	private async subagentSessionState(params: DesktopSessionRequest): Promise<DesktopSubagentSessionStateResponse> {
+		const record = await this.sessionMap.get(params.sessionId);
+		if (!record) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
+		return await this.readSubagentRecordState(record);
+	}
+
+	private async subagentForkSession(params: DesktopSessionRequest): Promise<DesktopSubagentForkSessionResponse> {
+		const record = await this.sessionMap.get(params.sessionId);
+		if (!record?.subagent) throw new RequestError(ERROR_SERVER, `session ${params.sessionId} is not a sub-agent viewer`);
+		const resolved = await resolveSubagentSession(record.cwd, record.subagent.runDir, record.subagent.agentId);
+		const forked = await forkSubagentSession(resolved.sessionFile, record.cwd);
+		const sessionId = randomUUID();
+		await this.sessionMap.put({
+			sessionId,
+			piSessionPath: forked.sessionFile,
+			piSessionId: forked.piSessionId,
+			cwd: record.cwd,
+			parentSessionPath: resolved.sessionFile,
+			title: `${record.title ?? `Sub-agent ${resolved.agentId}`} (continued)`,
+			updatedAt: new Date().toISOString(),
+		});
+		this.searchService.changed(record.cwd);
+		this.options.logger.info(`subagents/fork_session: ${params.sessionId} → ${sessionId}`);
+		return { sessionId };
+	}
+
+	private async assertSessionWritable(sessionId: string): Promise<void> {
+		const record = await this.sessionMap.get(sessionId);
+		if (record?.subagent) throw new RequestError(ERROR_SERVER, "sub-agent session is read-only; continue it in a new session instead");
+	}
+
+	private async assertSessionPathAvailable(path: string): Promise<void> {
 		const canonical = await realpath(path).catch(() => resolve(path));
-		const owned = (await this.sessionMap.list()).filter((record) => (this.brainstormHost.metadata(record.sessionId) ?? record.brainstorm)?.owned);
-		for (const record of owned) {
-			const candidate = await realpath(record.piSessionPath).catch(() => resolve(record.piSessionPath));
-			if (candidate === canonical) throw new RequestError(ERROR_SERVER, "brainstorm participant history is owned; a second writer is disabled");
-		}
-	}
-
-	private async attachBrainstormSession(sessionId: string, owner: string | undefined, replay: boolean): Promise<LoadSessionResponse | undefined> {
-		const link = this.brainstormHost.metadata(sessionId) ?? (await this.sessionMap.get(sessionId))?.brainstorm;
-		if (!link && !this.brainstormHost.ownsRuns(sessionId)) return undefined;
-		const session = this.sessions.get(sessionId);
-		if (!session) {
-			if (link?.owned) throw new RequestError(ERROR_SERVER, "brainstorm participant session lost; cannot resume or replace while owned");
-			return undefined;
-		}
-		await this.attachActivity(session, owner);
-		if (replay) await replaySessionHistory(session.pi, { sessionId, cwd: session.cwd }, (notification) => session.client.notify("session/update", notification));
-		const configOptions = await this.safeConfigOptions(session.pi);
-		return { ...(configOptions ? { configOptions } : {}), ...(link ? { _meta: { "pix.brainstorm": link } } : {}) };
+		if (isSubagentSessionPath(canonical)) throw new RequestError(ERROR_SERVER, "sub-agent session history is owned by its parent; a second writer is disabled");
 	}
 
 	/** Shared implementation of `session/load` (with replay) and `session/resume`. */
@@ -1973,7 +2079,7 @@ export class PixAcpAgent {
 		if (!record?.piSessionPath) {
 			throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
 		}
-		await this.assertBrainstormPathAvailable(record.piSessionPath);
+		await this.assertSessionPathAvailable(record.piSessionPath);
 		// Reloading a live session reloads it fresh (the client forgot history).
 		if (this.sessions.has(params.sessionId)) await this.closeSession(params.sessionId);
 
@@ -2011,7 +2117,7 @@ export class PixAcpAgent {
 
 		const configOptions = await this.safeConfigOptions(session.pi);
 		this.scheduleAvailableCommands(session);
-		return { ...(configOptions ? { configOptions } : {}), ...(record.brainstorm ? { _meta: { "pix.brainstorm": record.brainstorm } } : {}) };
+		return configOptions ? { configOptions } : {};
 	}
 
 	private async listSessions(params: ListSessionsRequest, client: ClientCaller): Promise<ListSessionsResponse> {
@@ -2043,8 +2149,7 @@ export class PixAcpAgent {
 			const info: SessionInfo = { sessionId: record.sessionId, cwd: record.cwd, updatedAt: record.updatedAt,
 				_meta: { "pix.sessionFile": resolve(record.piSessionPath) } };
 			if (record.title !== undefined) info.title = record.title;
-			const brainstorm = this.brainstormHost.metadata(record.sessionId) ?? record.brainstorm;
-			if (brainstorm) info._meta = { ...info._meta, "pix.brainstorm": brainstorm };
+			if (record.subagent) info._meta = { ...info._meta, [PIX_SUBAGENT_META_KEY]: record.subagent };
 			if (record.parentSessionPath !== undefined) {
 				const parentSessionId = sessionIdByPath.get(resolve(record.parentSessionPath));
 				info._meta = {
@@ -2082,7 +2187,14 @@ export class PixAcpAgent {
 	}
 
 	private async deleteSession(sessionId: string): Promise<void> {
-		await this.assertBrainstormWritable(sessionId);
+		const viewer = await this.sessionMap.get(sessionId);
+		if (viewer?.subagent) {
+			// Forget the viewer only; the parent-owned JSONL is never deleted from Desktop.
+			await this.sessionMap.delete(sessionId);
+			this.options.logger.info(`session/delete: forgot sub-agent viewer ${sessionId}`);
+			return;
+		}
+		await this.assertSessionWritable(sessionId);
 		const record = await this.sessionMap.get(sessionId);
 		this.desktopDeferredToolResults.delete(sessionId);
 		this.desktopDeferredImages.delete(sessionId);
@@ -2090,22 +2202,36 @@ export class PixAcpAgent {
 			await this.closeSession(sessionId);
 		}
 		if (record?.piSessionPath) {
+			const parentPiSessionId = await readSessionHeaderId(record.piSessionPath).catch(() => undefined);
 			await rm(record.piSessionPath, { force: true }).catch((error: unknown) => {
 				throw new RequestError(ERROR_SERVER, `failed to delete session file: ${stringifyUnknown(error)}`);
 			});
+			if (parentPiSessionId) await this.removeChildSubagentSessions(record.cwd, parentPiSessionId);
 		}
 		await this.sessionMap.delete(sessionId);
 		if (record) this.searchService.changed(record.cwd);
 		this.options.logger.info(`session/delete: ${sessionId}`);
 	}
 
+	/** Cascade: a deleted parent session takes its `.pi/subagents/<id>/` children along (decision 0072). */
+	private async removeChildSubagentSessions(cwd: string, parentPiSessionId: string): Promise<void> {
+		try {
+			const outcome = await removeParentSubagentSessions(cwd, parentPiSessionId);
+			if (outcome === "removed") this.options.logger.info(`session/delete: removed sub-agent sessions of ${parentPiSessionId}`);
+			else if (outcome !== "absent") this.options.logger.warn(`session/delete: kept sub-agent sessions of ${parentPiSessionId} (${outcome})`);
+		} catch (error) {
+			// The parent is already gone; background cleanup reclaims the orphan later.
+			this.options.logger.warn(`session/delete: failed to remove sub-agent sessions of ${parentPiSessionId}: ${stringifyUnknown(error)}`);
+		}
+	}
+
 	private async forkSession(params: ForkSessionRequest, client: ClientCaller): Promise<{ sessionId: string; configOptions?: SessionConfigOption[]; _meta?: Record<string, unknown> }> {
-		await this.assertBrainstormWritable(params.sessionId);
+		await this.assertSessionWritable(params.sessionId);
 		const record = await this.sessionMap.get(params.sessionId);
 		if (!record?.piSessionPath) {
 			throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
 		}
-		await this.assertBrainstormPathAvailable(record.piSessionPath);
+		await this.assertSessionPathAvailable(record.piSessionPath);
 		const acpSessionId = randomUUID();
 		const cwd = params.cwd || record.cwd;
 		const session = await this.spawnSession(acpSessionId, cwd, client, undefined, activityOwnerFromMeta(params._meta));
@@ -2147,7 +2273,7 @@ export class PixAcpAgent {
 	}
 
 	private async setConfigOption(params: SetSessionConfigOptionRequest): Promise<SetSessionConfigOptionResponse> {
-		await this.assertBrainstormWritable(params.sessionId);
+		await this.assertSessionWritable(params.sessionId);
 		const session = this.sessions.get(params.sessionId);
 		if (!session) {
 			throw new RequestError(ERROR_SERVER, `session ${params.sessionId} not found`);
@@ -2227,10 +2353,9 @@ export class PixAcpAgent {
 			this.options.headsUpExtensionPath,
 			this.clientName === "pix-desktop" ? this.options.htmlSandboxExtensionPath : undefined,
 		);
-		const hostEnv = !startupOverride && this.clientName === "pix-desktop" ? await this.brainstormHost.environment(acpSessionId) : {};
 		const pi = this.options.createPiClient({
 			...startup,
-			env: { ...startup.env, ...hostEnv, ...(privateAgentsPath ? { PIX_PROJECT_AGENTS_FILE: privateAgentsPath } : {}) },
+			env: { ...startup.env, ...(privateAgentsPath ? { PIX_PROJECT_AGENTS_FILE: privateAgentsPath } : {}) },
 		});
 		const translator = new EventTranslator({ sessionId: acpSessionId, cwd });
 		const updates = new SessionUpdateCoalescer((notification) => {
@@ -2300,7 +2425,6 @@ export class PixAcpAgent {
 				throw new RequestError(ERROR_SERVER, "session closed during startup");
 			}
 		} catch (error) {
-			await this.brainstormHost.cancelParent(acpSessionId, true);
 			await this.teardownSession(session);
 			throw new RequestError(
 				ERROR_SERVER,
@@ -2322,12 +2446,10 @@ export class PixAcpAgent {
 		cwd: string,
 		pi: PiClient,
 		title?: string,
-		brainstorm?: BrainstormLink,
 	): Promise<void> {
 		try {
 			const state = await pi.getState();
 			if (!state.sessionFile) {
-				if (brainstorm) throw new Error("brainstorm participant has no persisted session file");
 				this.options.logger.warn(`pi reported no session file for ${sessionId}; not persisting to session map`);
 				return;
 			}
@@ -2337,13 +2459,11 @@ export class PixAcpAgent {
 				piSessionId: state.sessionId,
 				cwd,
 				title: title ?? state.sessionName,
-				...(brainstorm ? { brainstorm } : {}),
 				updatedAt: new Date().toISOString(),
 			});
 			this.searchService.changed(cwd);
 		} catch (error) {
 			this.options.logger.warn(`failed to persist session map entry for ${sessionId}: ${stringifyUnknown(error)}`);
-			if (brainstorm) throw error;
 		}
 	}
 
@@ -2672,8 +2792,6 @@ export class PixAcpAgent {
 		this.sessionRefreshes.forget(session);
 		this.resetBtw(session);
 		this.retireForkQueue(session);
-		void this.brainstormHost.participantLost(session.acpSessionId);
-		void this.brainstormHost.cancelParent(session.acpSessionId, true);
 		this.sessions.delete(session.acpSessionId);
 		this.pendingDesktopNewSessions.delete(session.acpSessionId);
 		this.desktopDeferredToolResults.delete(session.acpSessionId);
@@ -2708,8 +2826,7 @@ export class PixAcpAgent {
 				}
 			}
 			const activity = state.channel === "pi-tools-suite:todo:state"
-				|| state.channel === "pi-tools-suite:async-subagents:live-state"
-				|| state.channel === BRAINSTORM_CHANNEL;
+				|| state.channel === "pi-tools-suite:async-subagents:live-state";
 			const envelope: PixSessionStateNotification = {
 				sessionId: session.acpSessionId,
 				...state,
@@ -2924,7 +3041,7 @@ export class PixAcpAgent {
 	}
 
 	private async desktopAgentControl(params: DesktopAgentControlRequest): Promise<DesktopAgentControlResponse> {
-		if (params.action !== "state") await this.assertBrainstormWritable(params.sessionId);
+		if (params.action !== "state") await this.assertSessionWritable(params.sessionId);
 		const session = this.sessions.get(params.sessionId);
 		if (!session) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
 
@@ -3435,8 +3552,8 @@ export class PixAcpAgent {
 		if (ownsSettlement()) this.resolveActiveRun(session, run.stopReason ?? "end_turn");
 	}
 
-	private async prompt(params: PromptRequest, brainstormOwned = false): Promise<PromptResponse> {
-		if (!brainstormOwned) await this.assertBrainstormWritable(params.sessionId);
+	private async prompt(params: PromptRequest): Promise<PromptResponse> {
+		await this.assertSessionWritable(params.sessionId);
 		const session = this.sessions.get(params.sessionId);
 		if (!session) {
 			throw new RequestError(ERROR_SERVER, `session ${params.sessionId} not found`);
@@ -3446,7 +3563,7 @@ export class PixAcpAgent {
 			throw new RequestError(ERROR_SERVER, `${PIX_FILE_IMAGES_META_KEY} is reserved for Pix Desktop`);
 		}
 		const input = await collectPromptInput(params.prompt, fileImages);
-		const isSlashPrompt = !brainstormOwned && input.images.length === 0 && /^\/\S/.test(input.text);
+		const isSlashPrompt = input.images.length === 0 && /^\/\S/.test(input.text);
 
 		// Wait controls must not reset an existing paused state or acquire the
 		// active run; they also remain available while that run is streaming.
@@ -3463,7 +3580,7 @@ export class PixAcpAgent {
 		// handling; intercept them here. Everything else starting with "/"
 		// (extension commands, prompt templates, /skill:*) is forwarded to
 		// pi, which expands them natively.
-		const builtin = brainstormOwned ? undefined : parseBuiltinCommand(input.text);
+		const builtin = parseBuiltinCommand(input.text);
 		if (builtin) {
 			if (input.images.length > 0) {
 				throw new RequestError(ERROR_SERVER, `/${builtin.kind} does not accept attachments`);
@@ -3477,14 +3594,14 @@ export class PixAcpAgent {
 				session.builtinRunning = false;
 			}
 		}
-		const rendererCommand = brainstormOwned ? undefined : rendererCommandName(input.text);
+		const rendererCommand = rendererCommandName(input.text);
 		if (rendererCommand) {
 			throw new RequestError(
 				ERROR_SERVER,
 				`/${rendererCommand} requires Pix renderer UI and is not available as an ACP prompt command`,
 			);
 		}
-		const unsupportedCommand = brainstormOwned ? undefined : unsupportedCommandName(input.text);
+		const unsupportedCommand = unsupportedCommandName(input.text);
 		if (unsupportedCommand) {
 			throw new RequestError(
 				ERROR_SERVER,
@@ -4009,8 +4126,6 @@ export class PixAcpAgent {
 	}
 
 	private cancel(sessionId: string): void {
-		if (this.brainstormHost.metadata(sessionId)?.owned) return;
-		void this.brainstormHost.cancelParent(sessionId);
 		const session = this.sessions.get(sessionId);
 		if (!session) return;
 		if (session.activeRun) session.activeRun.cancelled = true;
@@ -4022,8 +4137,9 @@ export class PixAcpAgent {
 	}
 
 	private async closeSession(sessionId: string): Promise<void> {
-		await this.assertBrainstormWritable(sessionId);
-		await this.brainstormHost.cancelParent(sessionId, true);
+		// Viewers have no Pi process; closing the tab has nothing to tear down.
+		if (!this.sessions.has(sessionId) && (await this.sessionMap.get(sessionId))?.subagent) return;
+		await this.assertSessionWritable(sessionId);
 		this.desktopDeferredToolResults.delete(sessionId);
 		this.desktopDeferredImages.delete(sessionId);
 		const pendingNew = this.pendingDesktopNewSessions.get(sessionId);

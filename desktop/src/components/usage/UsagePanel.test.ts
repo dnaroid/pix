@@ -1,0 +1,134 @@
+import { describe, expect, it } from "vitest";
+import { render } from "svelte/server";
+import UsagePanel from "./UsagePanel.svelte";
+import panelSource from "./UsagePanel.svelte?raw";
+import viewSource from "./UsageSourceView.svelte?raw";
+import sectionSource from "./UsageSection.svelte?raw";
+import heatmapSource from "./UsageHeatmap.svelte?raw";
+import barsSource from "./UsageDailyBars.svelte?raw";
+import hourSource from "./UsageHourStrip.svelte?raw";
+import shareSource from "./UsageShareList.svelte?raw";
+import UsageTooltip from "./UsageTooltip.svelte";
+import { activateOnKey } from "./usage-interaction";
+import { formatCompact, formatDayKey, formatHour, formatMetric, formatRelative, localWeekStart, modelLabel, monthLabel, seriesColor, weekdayLabels } from "./usage-format";
+import { OTHER_MODEL, UNATTRIBUTED_MODEL } from "../../lib/usage-stats";
+import { emitUsageStatsChanged, subscribeUsageStatsChanged } from "../../lib/usage-stats-events";
+
+describe("usage format", () => {
+  it("formats compact numbers and metrics", () => {
+    expect(formatCompact(950)).toBe("950");
+    expect(formatCompact(12_300)).toBe("12.3K");
+    expect(formatCompact(4_000_000)).toBe("4M");
+    expect(formatMetric(1.234, "cost", true)).toBe("≈ $1.23");
+    expect(formatMetric(0.004, "cost")).toBe("$<0.01");
+    expect(formatMetric(42, "calls")).toBe("42 calls");
+    expect(formatMetric(1500, "tokens")).toBe("1.5K tok");
+  });
+
+  it("labels special models and keeps Other neutral", () => {
+    expect(modelLabel(OTHER_MODEL)).toBe("Other");
+    expect(modelLabel(UNATTRIBUTED_MODEL)).toBe("Unattributed");
+    expect(seriesColor(OTHER_MODEL, 0)).toBe("var(--tool-neutral)");
+    expect(seriesColor("gpt-5", 0)).toBe("var(--tool-info)");
+  });
+
+  it("localizes weekdays, months, days and hours", () => {
+    expect(weekdayLabels("en-US")).toEqual(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]);
+    expect(weekdayLabels("ru-RU")[0]).toBe("пн");
+    expect(weekdayLabels("en-US", 0)).toEqual(["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]);
+    expect(localWeekStart("en-US")).toBe(0);
+    expect(localWeekStart("ru-RU")).toBe(1);
+    expect(localWeekStart("ar-EG")).toBe(6);
+    expect(localWeekStart("not a locale")).toBe(1);
+    expect(monthLabel(2, "en-US")).toBe("Mar");
+    expect(formatDayKey("2026-03-04", "en-US")).toBe("Mar 4");
+    expect(formatDayKey("2026-03-04", "ru-RU")).toMatch(/^4 мар/u);
+    expect(formatHour(9, "ru-RU")).toMatch(/^0?9:00$/u);
+    expect(formatHour(21, "en-US")).toMatch(/^9:00\sPM$/u);
+  });
+
+  it("formats relative time", () => {
+    expect(formatRelative(0, 10_000)).toBe("just now");
+    expect(formatRelative(0, 5 * 60_000)).toBe("5 min ago");
+    expect(formatRelative(0, 3 * 3_600_000)).toBe("3 h ago");
+  });
+});
+
+describe("usage events", () => {
+  it("fans out and unsubscribes; a throwing listener does not block others", () => {
+    const seen: string[] = [];
+    const off1 = subscribeUsageStatsChanged(() => { throw new Error("boom"); });
+    const off2 = subscribeUsageStatsChanged((n) => seen.push(n.source));
+    emitUsageStatsChanged({ source: "pix-sessions" });
+    off2();
+    emitUsageStatsChanged({ source: "pix-sessions" });
+    off1();
+    expect(seen).toEqual(["pix-sessions"]);
+  });
+});
+
+describe("Usage panel", () => {
+  it("renders a disconnected state without fetching", () => {
+    const { body } = render(UsagePanel, { props: { client: null, workspace: "/tmp/p" } });
+    expect(body).toContain("Usage statistics");
+    expect(body).toContain("Connect to Pix to load usage statistics.");
+    expect(body).toContain("Pix usage");
+    for (const label of ["OpenAI", "Anthropic", "Z.ai"]) expect(body).not.toContain(label);
+  });
+
+  it("subscribes to changes and disposes the store on teardown", () => {
+    expect(panelSource).toContain("subscribeUsageStatsChanged((notification) => store.handleChanged(notification))");
+    expect(panelSource).toContain("store.dispose()");
+    expect(panelSource).not.toContain('role="tablist"');
+    expect(panelSource).toContain('store.snapshot("pix-sessions")');
+  });
+
+  it("uses the Pix listbox and chevron disclosures, never a native select", () => {
+    expect(viewSource).toContain("<TaskFieldSelect");
+    expect(viewSource).not.toMatch(/<select\b/u);
+    expect(sectionSource).toMatch(/<ChevronRight\b[^>]*group-open:rotate-90/u);
+  });
+
+  it("scopes to this project by default and opens only current-project top sessions", () => {
+    expect(viewSource).toContain('let scope = $state<UsageScope>("project")');
+    expect(viewSource).toContain('{ value: "project", label: "This project" }, { value: "all", label: "All projects" }');
+    expect(panelSource).toContain("onOpenSession ? { onOpenSession }");
+    expect(viewSource).toContain("{#if onOpenSession && canOpenSession(session)}");
+    expect(viewSource).toContain("session.projectCwd === undefined || session.projectCwd === workspace");
+  });
+
+  it("cross-filters charts by day, hour and model; each chart ignores its own axis", () => {
+    expect(viewSource).toContain("filterByTime(periodBuckets, timeFilter)");
+    expect(viewSource).toContain("calendarHeatmap(byHour,");
+    expect(viewSource).toContain('period === "7d" ? currentWeekWindow(nowMs, weekStart) : range');
+    expect(heatmapSource).toContain("!day.outside && (day.value > 0 || day.key === selectedDay)");
+    expect(viewSource).toContain("hourOfDayProfile(filterByTime(periodBuckets, { day: selectedDay })");
+    expect(viewSource).toContain("modelShares(filterByTime(selectBuckets(snapshot, { ...selection, model: null }), timeFilter)");
+    expect(viewSource).toContain('aria-label="Active chart filters"');
+    expect(heatmapSource).toContain("onSelectDay?.(day.key === selectedDay ? null : day.key)");
+    expect(barsSource).toContain("onSelectDay?.(day === selectedDay ? null : day)");
+    expect(barsSource).toContain("model !== OTHER_MODEL");
+    expect(hourSource).toContain("onSelectHour?.(hour === selectedHour ? null : hour)");
+    expect(shareSource).toContain("share.key !== OTHER_MODEL");
+    // WebKit button elements shrink-wrap flex content and collapse the bars; rows are role=button divs.
+    expect(shareSource).toContain('role="button"');
+    expect(shareSource).not.toMatch(/<button\b/u);
+    expect(shareSource).toContain("block w-full min-w-0 cursor-pointer");
+    for (const source of [heatmapSource, barsSource, hourSource]) {
+      expect(source).toContain("<UsageTooltip");
+      expect(source).not.toContain("<title>");
+      expect(source).toContain("onfocus=");
+    }
+  });
+
+  it("renders no tooltip without an anchor and activates on Enter/Space only", () => {
+    const { body } = render(UsageTooltip, { props: { anchor: null, onDismiss: () => {}, children: (() => {}) as never } });
+    expect(body).not.toContain('role="tooltip"');
+    const calls: string[] = [];
+    const key = (k: string) => ({ key: k, preventDefault: () => calls.push(`prevent:${k}`) }) as unknown as KeyboardEvent;
+    activateOnKey(key("Enter"), () => calls.push("Enter"));
+    activateOnKey(key(" "), () => calls.push("Space"));
+    activateOnKey(key("a"), () => calls.push("a"));
+    expect(calls).toEqual(["prevent:Enter", "Enter", "prevent: ", "Space"]);
+  });
+});

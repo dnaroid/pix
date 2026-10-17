@@ -37,6 +37,7 @@ import {
 	ownedPrimaryRunDirSync,
 	ownedRecoveredExitSync,
 	readOwnedMetadata,
+	writeOwnedBootstrapFailureResult,
 	type OwnedRunOutcome,
 } from "./owned-launch-integration.js";
 
@@ -402,7 +403,10 @@ async function reconcileOwnedAgent(agentDir: string): Promise<void> {
 	// Terminal failure without kernel proof: only the exact-label launchd
 	// absence may settle it.
 	if (retired && outcome?.kind === "unproven-fail" && !ownedHandleActiveSync(agentDir) &&
-		ownedPrimaryRunDirSync(agentDir) === primary) persistOwnedRecoveredExit(agentDir, { exitCode: 1 });
+		ownedPrimaryRunDirSync(agentDir) === primary) {
+		writeOwnedBootstrapFailureResult(agentDir);
+		persistOwnedRecoveredExit(agentDir, { exitCode: 1 });
+	}
 }
 
 /**

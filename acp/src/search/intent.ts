@@ -1,7 +1,7 @@
 import { RequestError } from "@agentclientprotocol/sdk";
 import { isAbsolute } from "node:path";
 import { OPENROUTER_JEV_MODEL, requestOpenRouterJevChoice } from "../acp/openrouter-jev.js";
-import { sharedSearchAuth, type SearchAuth } from "./config.js";
+import { loadIntentModelId, sharedSearchAuth, type SearchAuth } from "./config.js";
 import type { SearchIntentRequest, SearchIntentResponse } from "./contract.js";
 import { bounded } from "./bounded.js";
 
@@ -25,15 +25,19 @@ const CRITERIA = {
 export interface SearchIntentDependencies {
   readonly auth?: Pick<SearchAuth, "key">;
   readonly fetch?: typeof globalThis.fetch;
+  /** OpenRouter model id override; undefined uses the built-in Jev model. */
+  readonly loadModel?: () => Promise<string | undefined>;
 }
 
 /** Explicit Auto searches only: no source content, indexing or sessions sent to the router. */
 export class DesktopSearchIntentService {
   private readonly auth: Pick<SearchAuth, "key">;
   private readonly fetch: typeof globalThis.fetch;
+  private readonly loadModel: () => Promise<string | undefined>;
   constructor(deps: SearchIntentDependencies = {}) {
     this.auth = deps.auth ?? sharedSearchAuth();
     this.fetch = deps.fetch ?? globalThis.fetch;
+    this.loadModel = deps.loadModel ?? (() => loadIntentModelId());
   }
   async classify(query: string, signal: AbortSignal): Promise<SearchIntentResponse> {
     signal.throwIfAborted();
@@ -47,7 +51,7 @@ export class DesktopSearchIntentService {
         if (!key) return fallback;
         timed.throwIfAborted();
         const choice = await requestOpenRouterJevChoice({
-          model: OPENROUTER_JEV_MODEL,
+          model: (await this.loadModel().catch(() => undefined)) ?? OPENROUTER_JEV_MODEL,
           apiKey: key,
           question: "intent",
           state: { query: query.trim().slice(0, 2048) },

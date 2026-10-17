@@ -7,6 +7,7 @@
   import CirclePause from "@lucide/svelte/icons/circle-pause";
   import Clock3 from "@lucide/svelte/icons/clock-3";
   import Trash2 from "@lucide/svelte/icons/trash-2";
+  import MessageSquareText from "@lucide/svelte/icons/message-square-text";
   import UserRound from "@lucide/svelte/icons/user-round";
   import { agentIcon } from "../lib/agent-icons";
   import { modelProviderBrand } from "../lib/model-display";
@@ -40,6 +41,7 @@
     sessionNeedsInput,
     canClearTodos = false,
     onClearTodos,
+    onOpenSubagentSession,
   }: {
     summary: SessionActivitySummary;
     subagentSnapshot: SessionSubagentSnapshot | undefined;
@@ -48,6 +50,8 @@
     sessionNeedsInput: boolean;
     canClearTodos?: boolean;
     onClearTodos?: () => Promise<boolean>;
+    /** Open the agent's persisted session as a read-only tab. */
+    onOpenSubagentSession?: (runDir: string, agentId: string) => void;
   } = $props();
 
   const hasTodoProgress = $derived(summary.openTodos > 0 && summary.totalTodos > 0);
@@ -224,6 +228,15 @@
                 {/if}
                 {#if indicator.agent.retryCount}
                   <span class="shrink-0 text-tool-warning">retry {indicator.agent.retryCount}</span>
+                {/if}
+                {#if onOpenSubagentSession}
+                  <button
+                    type="button"
+                    class="ml-auto inline-flex shrink-0 items-center gap-1 rounded border border-border px-1.5 py-0.5 text-xs font-normal text-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+                    aria-label={"Open session of subagent " + indicator.agent.id}
+                    data-session-subagent-open
+                    onclick={() => onOpenSubagentSession(indicator.runDir, indicator.agent.id)}
+                  ><MessageSquareText class="h-3 w-3" aria-hidden="true" />Open</button>
                 {/if}
               </div>
             </div>

@@ -444,3 +444,33 @@ test("HTTP model alias, vector validation, cancellation and secret-body redactio
   const c = new AbortController(); globalThis.fetch = async (_url, init) => new Promise((_resolve, reject) => { init!.signal!.addEventListener("abort", () => reject(new Error("SECRET_AUTH_HEADER"))); });
   const pending = embedCommitHTTP(["x"], config, "mock", c.signal); c.abort(); await assert.rejects(pending, e => !String(e).includes("SECRET"));
 });
+
+test("complete commit pass records source coverage for the probe's logical revision", async t => {
+  const { commitStamp } = await import("../src/search/commit-stamp.js");
+  const { coverageDigest, readCoverage } = await import("../src/search/source-coverage.js");
+  const { realpath } = await import("node:fs/promises");
+  const r = await repository(t); await r.commit("first");
+  const s = service(t);
+  assert.equal((await s.index({ cwd: r.cwd, source: "commits" })).complete, true);
+  const root = await realpath(r.cwd);
+  const expected = coverageDigest("commits", await commitStamp(root), embeddingIdentity(config));
+  assert.ok((await readCoverage(canonicalSearchIndexPath(root, "commits")))?.has(expected));
+  await r.commit("second");
+  const moved = coverageDigest("commits", await commitStamp(root), embeddingIdentity(config));
+  assert.equal((await readCoverage(canonicalSearchIndexPath(root, "commits")))?.has(moved), false);
+});
+test("background commit watcher indexes on history change only and never retries an unchanged revision", async t => {
+  const r = await repository(t); await r.commit("first");
+  let calls = 0, results = 0;
+  const s = service(t, { ...options(async texts => { calls += texts.length; return texts.map(() => [1, 0, 0]); }),
+    pollMs: 20, onBackgroundResult: () => { results++; } });
+  const until = async (done: () => boolean) => { const end = Date.now() + 5000; while (!done()) { assert.ok(Date.now() < end, "watch timeout"); await new Promise(res => setTimeout(res, 10)); } };
+  s.watch(r.cwd);
+  await until(() => results === 1);
+  assert.equal(calls, 1);
+  await new Promise(res => setTimeout(res, 120));
+  assert.equal(results, 1, "unchanged history is not re-indexed by polling");
+  await r.commit("second");
+  await until(() => results === 2);
+  assert.equal(calls, 2, "only the new commit is embedded");
+});

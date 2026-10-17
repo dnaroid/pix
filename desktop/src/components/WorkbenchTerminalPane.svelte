@@ -42,8 +42,9 @@
     onOpenShellTerminal={controller.openShellTerminal}
     onWriteTerminal={controller.writeTerminal}
     onResizeTerminal={controller.resizeTerminal}
-    onStopTerminal={controller.stopTerminal}
-    onRestartTerminal={controller.restartTerminal}
+    onStopTerminal={(terminal) => controller.stopProcess(terminal.id)}
+    onRestartTerminal={(terminal) => controller.restartProcess(terminal.id)}
     onCloseTerminal={controller.closeTerminal}
+    isTerminalBusy={controller.isTerminalBusy}
   />
 </section>

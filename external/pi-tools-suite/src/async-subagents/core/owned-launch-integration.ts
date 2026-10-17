@@ -137,9 +137,15 @@ function classifyReceipt(
 	launchFailed: boolean,
 	neverLaunched: boolean,
 	fencedUnjournaled = false,
+	bootstrapFailedUnjournaled = false,
 ): OwnedRunOutcome {
 	if (launchFailed) return { kind: "launch-failed", cause: "bridge_spawn_failed", payloadCode: null };
 	if (!receipt && fencedUnjournaled) return { kind: "never-launched", cause: "never_launched", payloadCode: null };
+	// The claim-owning bridge reaped a failed `launchctl bootstrap`: terminal
+	// failure, but only settled once both exact UUID labels are confirmed
+	// absent (unproven-fail), never deletable. A receipt or journal written by
+	// a supervisor that somehow started anyway always takes precedence.
+	if (!receipt && bootstrapFailedUnjournaled) return { kind: "unproven-fail", cause: OWNED_BOOTSTRAP_FAILED_CAUSE, payloadCode: null };
 	if (neverLaunched && !receipt) return { kind: "pending", cause: "unproven_never_launched", payloadCode: null };
 	const pending: OwnedRunOutcome = { kind: "pending", cause: "", payloadCode: null };
 	if (!receipt || receipt.role !== "drain") return pending;
@@ -180,7 +186,46 @@ export function ownedOutcomeForRunDirSync(runDir: string): OwnedRunOutcome {
 		fs.existsSync(path.join(runDir, "bridge_launch_failed")),
 		fs.existsSync(path.join(runDir, OWNED_NEVER_LAUNCHED_MARKER)),
 		(ownedRunFencedSync(runDir) || ownedPrelaunchAbortedSync(runDir)) && !fs.existsSync(path.join(runDir, "owned.json")),
+		ownedBootstrapFailedSync(runDir) && !fs.existsSync(path.join(runDir, "owned.json")),
 	);
+}
+
+export const OWNED_BOOTSTRAP_FAILED_CAUSE = "bootstrap_failed";
+
+/**
+ * True when the claim-owning bridge durably recorded that `launchctl
+ * bootstrap` of its supervisor failed (exit 15). launchctl was reaped before
+ * the record was written, so no orphaned bootstrap can follow.
+ */
+export function ownedBootstrapFailedSync(runDir: string): boolean {
+	if (!ownedLaunchClaimProtocolSync(runDir) || readOwnedLaunchClaimSync(runDir) !== "bridge") return false;
+	const record = smallRecordSync(path.join(runDir, "bootstrap_failed"));
+	return record?.role === "bootstrap-failed" && /^-?\d+$/.test(record.rc ?? "") && Object.keys(record).length === 2;
+}
+
+/**
+ * Persist the bootstrap-failure explanation as the agent's result when the
+ * primary run failed its supervisor bootstrap and no result exists yet.
+ * Best effort: never throws, never changes the settle outcome.
+ */
+export function writeOwnedBootstrapFailureResult(agentDir: string): void {
+	try {
+		const primary = ownedPrimaryRunDirSync(agentDir);
+		if (!primary || ownedOutcomeForRunDirSync(primary).cause !== OWNED_BOOTSTRAP_FAILED_CAUSE) return;
+		const result = path.join(agentDir, "result.md");
+		if (!fs.existsSync(result)) fs.writeFileSync(result, ownedBootstrapFailureMessage(primary), "utf-8");
+	} catch { /* non-critical */ }
+}
+
+/** User-facing explanation for a failed supervisor bootstrap. */
+export function ownedBootstrapFailureMessage(runDir: string): string {
+	const rc = smallRecordSync(path.join(runDir, "bootstrap_failed"))?.rc ?? "unknown";
+	return [
+		`Claude Code sub-agent could not start: launchctl bootstrap of its launchd supervisor failed (rc=${rc}).`,
+		"On macOS this usually means launchd-started processes cannot access the project location,",
+		"for example a project on an external or removable volume (privacy/TCC restriction).",
+		"Move the project to the internal disk or use a sub-agent model outside pi-claude-code-provider.",
+	].join(" ");
 }
 
 /**

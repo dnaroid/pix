@@ -139,8 +139,6 @@ async function readSubagentAgentState(
 		if (resultLines !== undefined) state.resultLines = resultLines;
 		const stderrLines = await countFileLines(join(agentDir, "stderr.log"));
 		if (stderrLines !== undefined && stderrLines > 0) state.stderrLines = stderrLines;
-		const eventLines = await countFileLines(join(agentDir, "events.jsonl"));
-		if (eventLines !== undefined) state.eventLines = eventLines;
 	}
 
 	const retryCount = await readNumberFile(join(agentDir, "retry_count"));

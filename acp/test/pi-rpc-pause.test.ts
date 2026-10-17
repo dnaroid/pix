@@ -55,6 +55,28 @@ function pauseFixture() {
 
 const turn = { message: { stopReason: "toolUse" } };
 
+test("requested Pause stays pending while sub-agents are live", async () => {
+	const { session, control, setPostRun, setBeforeSettle } = pauseFixture();
+	let live = true;
+	(session as unknown as { sessionManager: Record<symbol, unknown> }).sessionManager = {
+		[Symbol.for("pix.subagents.session-live")]: () => live,
+	};
+	session._failedResponse = undefined;
+	const record = control.bindPause(session);
+	control.requestPause(session);
+	assert.equal(await session.agent.finishTurn(turn), undefined, "no end decision while sub-agents run");
+	setPostRun(async () => true);
+	assert.equal(await session._handlePostAgentRun(), true);
+	setBeforeSettle(async () => true);
+	assert.equal(await session._runBeforeSettleBoundary(), true, "before-settle delivery keeps running");
+	assert.equal(record.state, "pause-requested");
+
+	live = false;
+	assert.equal((await session.agent.finishTurn(turn))?.action, "end");
+	assert.equal(await session._handlePostAgentRun(), false);
+	assert.equal(record.state, "paused");
+});
+
 test("private cancellation clears pending Pause before the turn decision without sending a prompt", async () => {
 	const { session, control, setPostRun } = pauseFixture();
 	const record = control.bindPause(session);

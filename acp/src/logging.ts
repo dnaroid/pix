@@ -51,6 +51,45 @@ export function createLogger(level: LogLevel = "info", sink: (line: string) => v
 	};
 }
 
+let stderrClosed = false;
+let stderrGuarded = false;
+
+/** True for errors meaning the stderr reader is gone (host closed the pipe). */
+export function isClosedPipeError(error: unknown): boolean {
+	const code = (error as { code?: unknown } | null)?.code;
+	return code === "EPIPE" || code === "ERR_STREAM_DESTROYED" || code === "ERR_STREAM_WRITE_AFTER_END";
+}
+
+/**
+ * Diagnostics must never change process behavior: once the host closes the
+ * stderr pipe (e.g. during Desktop shutdown), drop stderr mirroring instead of
+ * surfacing an uncaught EPIPE. The persistent JSONL file log is unaffected.
+ */
+export function writeDiagnosticLine(stream: NodeJS.WritableStream & { destroyed?: boolean; writable?: boolean }, line: string, onClosed: () => void): void {
+	if (stream.destroyed || stream.writable === false) {
+		onClosed();
+		return;
+	}
+	try {
+		stream.write(`${line}\n`);
+	} catch (error) {
+		if (!isClosedPipeError(error)) throw error;
+		onClosed();
+	}
+}
+
 function stderrLine(line: string): void {
-	process.stderr.write(`${line}\n`);
+	if (stderrClosed) return;
+	if (!stderrGuarded) {
+		stderrGuarded = true;
+		process.stderr.on("error", (error) => {
+			if (isClosedPipeError(error)) {
+				stderrClosed = true;
+				return;
+			}
+			// Preserve default behavior for unexpected stream errors.
+			throw error;
+		});
+	}
+	writeDiagnosticLine(process.stderr, line, () => { stderrClosed = true; });
 }

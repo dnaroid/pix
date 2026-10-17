@@ -67,6 +67,8 @@ errors, not invent or approve decisions.
 
 ## Records
 
+- [0072 — Session-native sub-agents without run directories](0072-session-native-subagents.md)
+- [0071 — Brainstorm council as a skill on ordinary sub-agents](0071-brainstorm-skill-on-subagents.md)
 - [0068 — Global semantic configuration is authorization](0068-global-semantic-configuration.md)
 - [0069 — Parent-owned implementation and a smaller role pool](0069-parent-owned-implementation.md)
 - [0067 — Final documentation maintenance without knowledge-state gates](0067-final-documentation-maintenance.md)
@@ -91,7 +93,7 @@ errors, not invent or approve decisions.
 - [0011 — Read-only council research capabilities](0011-council-research-tools.md)
 - [0017 — Brainstorm v4: local protocol storage, quorum and ledger history](0017-brainstorm-v4-protocol-storage.md)
 - [0018 — Identity-only Desktop message actions](0018-desktop-message-action-identity.md)
-- [0019 — Desktop councils own persistent participant sessions](0019-desktop-persistent-council-sessions.md)
+- [0019 — Desktop councils own persistent participant sessions](0019-desktop-persistent-council-sessions.md) (hosting superseded by 0071)
 - [0022 — Run-only council roster and effort](0022-brainstorm-run-roster.md)
 - [0023 — Remove workspace tool](0023-remove-workspace-tool.md)
 - [0024 — Native Desktop close warnings](0024-desktop-close-warning.md)

@@ -13,6 +13,7 @@ import { modelThinkingConfigState } from "../lib/model-thinking";
 import { sessionTabModelDisplayOptions } from "../lib/session-tab-model";
 import type { createSessionTabsState } from "./session-tabs-state.svelte";
 import { scopedProjectPathNavigation, type ProjectPathNavigation } from "../lib/project-path-navigation";
+import type { SubagentSessionState } from "../lib/session-subagent-link";
 
 type StatusBarProps = ComponentProps<typeof DesktopStatusBar>["props"];
 
@@ -32,7 +33,6 @@ export function createDesktopStatusBarViewModel(options: {
   sessionActivity: () => StatusBarProps["sessionActivity"];
   sessionSubagentSnapshot: () => StatusBarProps["sessionSubagentSnapshot"];
   sessionTodoSnapshot: () => StatusBarProps["sessionTodoSnapshot"];
-  sessionBrainstormSnapshot?: () => StatusBarProps["sessionBrainstormSnapshot"];
   sessionNeedsInput: () => boolean;
   canClearTodos: () => boolean;
   clearSessionTodos: (sessionId: string) => Promise<boolean>;
@@ -42,8 +42,10 @@ export function createDesktopStatusBarViewModel(options: {
   quotaWait: QuotaWaitStore;
   headsUp: HeadsUpStore;
   openObserverSettings: () => void;
-  openBrainstormParticipant?: (sessionId: string) => void;
+  openSubagentSession?: (runDir: string, agentId: string) => void;
   subagentPathNavigation?: ProjectPathNavigation;
+  /** Display state of a read-only sub-agent viewer (no Pi runtime). */
+  subagentViewerState?: (sessionId: string) => SubagentSessionState | undefined;
 }) {
   const props = $derived.by<StatusBarProps>(() => {
     const sessionId = options.activeSessionId();
@@ -62,18 +64,28 @@ export function createDesktopStatusBarViewModel(options: {
     const cachedDisplay = !hasLiveModel && savedModel;
     const draftDisplay = draft && !hasLiveModel
       ? options.modelConfig.draftDisplayConfigOptions ?? [] : [];
+    const viewer = !draft && sessionId ? options.subagentViewerState?.(sessionId) : undefined;
     let displayConfigOptions = liveConfigOptions;
-    if (cachedDisplay) displayConfigOptions = sessionTabModelDisplayOptions(cachedDisplay);
+    if (viewer?.model) {
+      displayConfigOptions = sessionTabModelDisplayOptions({
+        modelRef: `${viewer.model.provider}/${viewer.model.modelId}`,
+        modelName: viewer.model.name,
+        thinking: viewer.model.thinking ?? "off",
+      });
+    } else if (cachedDisplay) displayConfigOptions = sessionTabModelDisplayOptions(cachedDisplay);
     else if (draftDisplay.length) displayConfigOptions = draftDisplay;
     const promptRunning = options.promptRunning();
     let runtimeStatus: StatusBarProps["runtimeStatus"];
     if (draft) {
       runtimeStatus = options.modelConfig.draftRuntimeStatus;
+    } else if (viewer && sessionId) {
+      // Viewers never load a Pi runtime: show the recorded model/context only.
+      runtimeStatus = { sessionId, modelUsageRefresh: "skipped", ...(viewer.context ? { context: viewer.context } : {}) };
     } else if (sessionId) {
       runtimeStatus = options.runtime.statuses.get(sessionId);
     }
     const connectionStatus = options.status();
-    const showSkeletons = shouldShowStatusBarSkeletons({
+    const showSkeletons = !viewer && shouldShowStatusBarSkeletons({
       connectionStatus,
       draft,
       historyLoading,
@@ -114,7 +126,7 @@ export function createDesktopStatusBarViewModel(options: {
         onRequestSnapshot: () => { if (sessionId && observerOwnerCurrent()) void options.headsUp.requestSnapshot(sessionId); },
         onOpenSettings: options.openObserverSettings,
       },
-      canConfigure: !cachedDisplay && !draftDisplay.length && options.canUseSession()
+      canConfigure: !viewer && !cachedDisplay && !draftDisplay.length && options.canUseSession()
         && !historyLoading
         && (draft ? options.draftConfigAvailable() : runtimeReady),
       modelThinkingOpen: options.modelConfig.pickerOpen,
@@ -134,8 +146,7 @@ export function createDesktopStatusBarViewModel(options: {
       sessionActivity,
       sessionSubagentSnapshot: options.sessionSubagentSnapshot(),
       sessionTodoSnapshot: options.sessionTodoSnapshot(),
-      sessionBrainstormSnapshot: options.sessionBrainstormSnapshot?.(),
-      onOpenBrainstormParticipant: options.openBrainstormParticipant,
+      onOpenSubagentSession: options.openSubagentSession,
       sessionNeedsInput: options.sessionNeedsInput(),
       canClearTodos: options.canClearTodos(),
       onSetConfig: (option, value) => void options.modelConfig.setConfig(option, value),

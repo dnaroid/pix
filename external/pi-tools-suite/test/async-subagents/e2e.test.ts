@@ -205,11 +205,9 @@ async function expectCompletedDelegatedRun(
 		expect(["done", "failed", "stopped"]).toContain(agent.status);
 		expect(agent.status).toBe("done");
 		const agentDir = path.join(runDir, agent.id);
-		expect(fs.readFileSync(path.join(agentDir, "pi_args"), "utf-8")).toContain(`--model\n${expectedModel}`);
-		const events = readOptionalFile(path.join(agentDir, "events.jsonl"));
-		expect(events.trim().length).toBeGreaterThan(0);
+		expect((JSON.parse(fs.readFileSync(path.join(agentDir, "launch.json"), "utf-8")).piArgs as string[]).join("\n")).toContain(`--model\n${expectedModel}`);
 		const result = readOptionalFile(path.join(agentDir, "result.md"));
-		expect((result || events).trim().length).toBeGreaterThan(40);
+		expect(result.trim().length).toBeGreaterThan(40);
 	}
 }
 
@@ -237,8 +235,7 @@ function readRunText(runDir: string): string {
 		const agentDir = path.join(runDir, agent.id);
 		const prompt = readOptionalFile(path.join(agentDir, "prompt.md"));
 		const result = readOptionalFile(path.join(agentDir, "result.md"));
-		const events = result ? "" : readOptionalFile(path.join(agentDir, "events.jsonl"));
-		return `${agent.id}\n${prompt}\n${result}\n${events}`;
+		return `${agent.id}\n${prompt}\n${result}`;
 	}).join("\n---\n");
 }
 
@@ -265,7 +262,7 @@ Do not inspect files or images in the parent. After spawning, you may finish; th
 
 			const agentDir = path.join(runDir, "image-screenshot");
 			expect(readOptionalFile(path.join(agentDir, "subagent_type")).trim()).toBe("research");
-			expect(readOptionalFile(path.join(agentDir, "model")).trim()).toBe(VISION_E2E_MODEL);
+			expect(JSON.parse(readOptionalFile(path.join(agentDir, "launch.json"))).task.model).toBe(VISION_E2E_MODEL);
 			expect(readOptionalFile(path.join(agentDir, "image_paths")).trim()).toBe(`@${VISION_E2E_IMAGE}`);
 			expect(readOptionalFile(path.join(agentDir, "prompt.md"))).toContain("Visual focus / attention instructions");
 

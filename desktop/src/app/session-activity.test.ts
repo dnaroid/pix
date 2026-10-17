@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { TODO_STATE_CHANNEL } from "../lib/session-todos";
 import { SUBAGENTS_LIVE_STATE_CHANNEL } from "../lib/session-subagents";
-import { BRAINSTORM_STATE_CHANNEL } from "../lib/session-brainstorm";
 import { createSessionActivityStore } from "./session-activity.svelte";
 
 function todo(sessionId: string, checkedAt: number, activityOwner: string) {
@@ -15,12 +14,6 @@ function todo(sessionId: string, checkedAt: number, activityOwner: string) {
 function subagent(sessionId: string, checkedAt: number, activityOwner: string) {
   return { sessionId, activityOwner, channel: SUBAGENTS_LIVE_STATE_CHANNEL, data: {
     version: 1, checkedAt, count: 1, runs: [{ runDir: "run", agents: [{ id: "agent", status: "running" }] }],
-  } };
-}
-
-function brainstorm(sessionId: string, checkedAt: number, activityOwner: string) {
-  return { sessionId, activityOwner, channel: BRAINSTORM_STATE_CHANNEL, data: {
-    version: 1, checkedAt, runs: [{ runId: "r", runDir: "/r", topic: "topic", status: "running", round: 1, participants: [] }],
   } };
 }
 
@@ -102,18 +95,5 @@ describe("session activity attachment ownership", () => {
     store.reset();
     expect(store.ownedSessionCount).toBe(0);
     expect(store.isForgotten("closed-0")).toBe(false);
-  });
-
-  it("stages brainstorm snapshots under activity ownership and clears them on detach", () => {
-    const store = createSessionActivityStore();
-    store.beginRequest("new");
-    store.handle(brainstorm("storm-parent", 30, "new"));
-    store.completeRequest("new", "storm-parent");
-    expect(store.brainstorms.get("storm-parent")?.runs[0]?.runId).toBe("r");
-    store.handle(brainstorm("storm-parent", 29, "new"));
-    expect(store.brainstorms.get("storm-parent")?.checkedAt).toBe(30);
-    store.markForgotten("storm-parent");
-    store.handle(brainstorm("storm-parent", 40, "new"));
-    expect(store.brainstorms.has("storm-parent")).toBe(false);
   });
 });

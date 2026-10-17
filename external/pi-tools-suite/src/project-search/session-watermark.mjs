@@ -1,5 +1,6 @@
 import { lstat } from "node:fs/promises";
 import { beginWrite, openDatabase, sourceDirectories, sourcePath } from "./source-work.mjs";
+import { COVERAGE_KEEP, recordCoverage } from "./source-coverage.mjs";
 
 const TABLE = "pix_session_sweep";
 const schema = `CREATE TABLE IF NOT EXISTS ${TABLE}(singleton INTEGER PRIMARY KEY CHECK(singleton=1), identity TEXT NOT NULL, started_at INTEGER NOT NULL, incarnation TEXT NOT NULL, revision INTEGER NOT NULL)`;
@@ -51,7 +52,9 @@ export async function beginSessionSweep(root, identity, signal, now = Date.now) 
   return { startedAt, since, identity, cacheRevision, incarnation };
 }
 
-export async function completeSessionSweep(root, pass, signal, now = Date.now) {
+/** coverage: optional source-coverage digest of the session snapshot this
+ * complete pass observed unchanged from start to finish. */
+export async function completeSessionSweep(root, pass, signal, now = Date.now, coverage) {
   signal.throwIfAborted();
   if (now() < pass.startedAt) return;
   const db = await openExisting(root, false);
@@ -71,6 +74,7 @@ export async function completeSessionSweep(root, pass, signal, now = Date.now) {
         db.prepare(`INSERT INTO ${TABLE} VALUES(1,?,?,?,?) ON CONFLICT(singleton) DO UPDATE SET
           identity=excluded.identity,started_at=excluded.started_at,incarnation=excluded.incarnation,revision=excluded.revision`)
           .run(pass.identity, pass.startedAt, current.incarnation, current.revision);
+        if (coverage) recordCoverage(db, coverage, COVERAGE_KEEP.sessions);
       }
       db.exec("COMMIT");
     } catch (e) { db.exec("ROLLBACK"); throw e; }

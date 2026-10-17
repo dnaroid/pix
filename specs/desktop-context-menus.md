@@ -102,6 +102,10 @@ browser preview retains browser behavior; this policy belongs to the Tauri host.
   tabs omit it. The captured path and workspace are guarded against stale menu
   callbacks. See [workspace navigation](desktop-workspace-navigation.md) and
   [decision 0058](../docs/decisions/0058-reverse-file-navigation.md).
+- Markdown links to local project files offer **Open in Browser** for `.html` and
+  `.htm` targets, before **Show in Files** / **Reveal in Finder**. The native
+  file-action command revalidates that the resolved target is HTML and opens it
+  using the default HTTPS browser rather than the `.html` file association.
 - On macOS, Copy File places a native file URL on the pasteboard for Finder and
   other applications, not plain path text or Project Explorer's private
   cross-instance clipboard payload. Open uses the OS default application, not
@@ -178,6 +182,8 @@ disposal, and link actions capture their URL rather than reading a later target.
 - `desktop/src/lib/workbench-tabs.ts`
 - `desktop/src/app/workbench-model.ts`
 - `desktop/src-tauri/src/preview_file_action.rs`
+- `desktop/src-tauri/src/project_browser.rs`: shared default HTTPS browser
+  opening for project HTML and local Markdown file-link actions.
 - `desktop/src-tauri/src/lib.rs`: Preview file action command registration and
   approved, size-bounded `read_attachment_base64` for local image copying.
 - `desktop/src-tauri/Cargo.toml`: native pasteboard API flags and PNG decoding.

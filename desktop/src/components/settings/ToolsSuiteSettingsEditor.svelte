@@ -28,13 +28,11 @@
     updateToolsSuiteModuleSource,
   } from "../../lib/tools-suite-module-visibility";
   import SettingsBuiltinAgentVisibility from "./SettingsBuiltinAgentVisibility.svelte";
-  import SettingsBuiltinAgentModels from "./SettingsBuiltinAgentModels.svelte";
+  import SettingsModelSummary from "./SettingsModelSummary.svelte";
   import SettingsClaudeAccounts from "./SettingsClaudeAccounts.svelte";
   import SettingsFieldRow from "./SettingsFieldRow.svelte";
   import SettingsFrontierModels from "./SettingsFrontierModels.svelte";
   import SettingsJsonValue from "./SettingsJsonValue.svelte";
-  import SettingsModelList from "./SettingsModelList.svelte";
-  import SettingsModelSelect from "./SettingsModelSelect.svelte";
   import SettingsModuleVisibility from "./SettingsModuleVisibility.svelte";
   import SettingsNumberInput from "./SettingsNumberInput.svelte";
   import SettingsSelect from "./SettingsSelect.svelte";
@@ -76,6 +74,8 @@
     settingsDefaultValue("pi-tools-suite", schema, ["todoThinkingOverrides"]).value,
     has(["todoThinkingOverrides"]) ? settingsValue(parsed, ["todoThinkingOverrides"]) : undefined,
   ));
+
+  const WIZARD_AGENTS = ["research", "verify", "knowledge-auditor", "ui-qa", "implement-core", "mechanical"];
 
   function has(path: readonly string[]): boolean {
     return settingsHasValue(parsed, path);
@@ -219,8 +219,8 @@
     <SettingsFieldRow label="Economy mode" description="Skip frontier models marked Expensive for every sub-agent role, including explicit model overrides. Applies to the next spawn without a restart." explicit={has(["economy"])} defaultLabel={defaultLabel(["economy"])} onReset={() => reset(["economy"])}>
       <SettingsSwitch value={bool(["economy"])} onChange={(value) => set(["economy"], value)} />
     </SettingsFieldRow>
-    <SettingsFieldRow label="Built-in agent models" description="Choose a primary model per bundled explicit-model role. Automatic/frontier roles use the shared Frontier models list below." explicit={has(["builtinAgentModels"])} defaultLabel="Default / inherited · bundled profiles" onReset={() => reset(["builtinAgentModels"])}>
-      <SettingsBuiltinAgentModels {source} {models} {onChange} />
+    <SettingsFieldRow label="Sub-agent models" description="Primary models of the bundled explicit-model roles. Managed by the model setup wizard; frontier roles use the Frontier models list below.">
+      <SettingsModelSummary {models} rows={WIZARD_AGENTS.map((agent) => ({ label: agent, ref: text(["builtinAgentModels", agent]), emptyLabel: "Bundled default" }))} />
     </SettingsFieldRow>
     <SettingsFieldRow label="Frontier models" description="Preference order for oracle, frontier-review, and delivery-review. A frontier parent gets an oracle from another vendor; add a new frontier release here instead of editing agent files." explicit={has(["frontierModels"])} defaultLabel="Default · built-in list" onReset={() => reset(["frontierModels"])}>
       <SettingsFrontierModels
@@ -269,11 +269,8 @@
         onRemove={removeTodoThinkingOverride}
       />
     </SettingsFieldRow>
-    <SettingsFieldRow label="Lookup model" description="Vision-capable helper model used by image lookup. Use Disable to store null explicitly." explicit={has(["lookupModel"])} defaultLabel={defaultLabel(["lookupModel"])} onReset={() => reset(["lookupModel"])}>
-      <SettingsModelSelect value={text(["lookupModel"])} {models} emptyLabel="Disabled" onChange={(value) => value ? set(["lookupModel"], value) : set(["lookupModel"], null)} />
-    </SettingsFieldRow>
-    <SettingsFieldRow label="Lookup fallbacks" explicit={has(["lookupFallbackModels"])} defaultLabel={defaultLabel(["lookupFallbackModels"])} onReset={() => reset(["lookupFallbackModels"])}>
-      <SettingsModelList value={list(["lookupFallbackModels"])} {models} addLabel="Add fallback" onChange={(value) => set(["lookupFallbackModels"], value)} />
+    <SettingsFieldRow label="Lookup models" description="Vision-capable helper model used by image lookup. Managed by the model setup wizard.">
+      <SettingsModelSummary {models} rows={[{ label: "Lookup", ref: text(["lookupModel"]), fallbacks: list(["lookupFallbackModels"]), emptyLabel: "Disabled" }]} />
     </SettingsFieldRow>
   </div>
 {:else if section === "dcp"}
@@ -396,11 +393,8 @@
     <SettingsFieldRow label="Auto-compress patience" explicit={has(["dcp", "compress", "autoCompress", "patience"])} defaultLabel={defaultLabel(["dcp", "compress", "autoCompress", "patience"])} onReset={() => reset(["dcp", "compress", "autoCompress", "patience"])}>
       <SettingsNumberInput value={number(["dcp", "compress", "autoCompress", "patience"])} min={0} step={1} onChange={(value) => updateNumber(["dcp", "compress", "autoCompress", "patience"], value)} />
     </SettingsFieldRow>
-    <SettingsFieldRow label="Summarizer models" description="Ordered models used for generated compression summaries." explicit={has(["dcp", "compress", "autoCompress", "summarizerModel"])} defaultLabel={defaultLabel(["dcp", "compress", "autoCompress", "summarizerModel"])} onReset={() => reset(["dcp", "compress", "autoCompress", "summarizerModel"])}>
-      <SettingsModelList value={list(["dcp", "compress", "autoCompress", "summarizerModel"])} {models} addLabel="Add summarizer" onChange={(value) => set(["dcp", "compress", "autoCompress", "summarizerModel"], value)} />
-    </SettingsFieldRow>
-    <SettingsFieldRow label="Summarizer fallbacks" explicit={has(["dcp", "compress", "autoCompress", "summarizerFallbackModels"])} defaultLabel={defaultLabel(["dcp", "compress", "autoCompress", "summarizerFallbackModels"])} onReset={() => reset(["dcp", "compress", "autoCompress", "summarizerFallbackModels"])}>
-      <SettingsModelList value={list(["dcp", "compress", "autoCompress", "summarizerFallbackModels"])} {models} addLabel="Add fallback" onChange={(value) => set(["dcp", "compress", "autoCompress", "summarizerFallbackModels"], value)} />
+    <SettingsFieldRow label="Summarizer models" description="Models used for generated compression summaries. Managed by the model setup wizard.">
+      <SettingsModelSummary {models} rows={[{ label: "Summarizer", ref: list(["dcp", "compress", "autoCompress", "summarizerModel"])[0] ?? "", fallbacks: [...list(["dcp", "compress", "autoCompress", "summarizerModel"]).slice(1), ...list(["dcp", "compress", "autoCompress", "summarizerFallbackModels"])] }]} />
     </SettingsFieldRow>
     <SettingsFieldRow label="Summarizer timeout" description="Per-summarizer deadline in milliseconds." explicit={has(["dcp", "compress", "autoCompress", "timeoutMs"])} defaultLabel={defaultLabel(["dcp", "compress", "autoCompress", "timeoutMs"])} onReset={() => reset(["dcp", "compress", "autoCompress", "timeoutMs"])}>
       <SettingsNumberInput value={number(["dcp", "compress", "autoCompress", "timeoutMs"])} min={1} step={1} onChange={(value) => updateNumber(["dcp", "compress", "autoCompress", "timeoutMs"], value)} />

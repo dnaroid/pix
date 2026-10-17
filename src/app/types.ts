@@ -151,7 +151,6 @@ export type SubagentAgentState = {
 	pid?: number;
 	resultLines?: number;
 	stderrLines?: number;
-	eventLines?: number;
 	retryCount?: number;
 	lastActivity?: SubagentActivity;
 	todoProgress?: { completed: number; total: number };

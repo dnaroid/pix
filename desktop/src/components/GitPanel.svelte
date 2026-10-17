@@ -21,10 +21,10 @@
   import TaskFieldSelect from "./TaskFieldSelect.svelte";
 
   let { workspace, snapshot, uninitialized, loading, error, actionId, llmActionId, gitAssistantReady, workflow, ci,
-    onRefresh, onInitialize, onOpenDiff, onStage, onUnstage, onCommit, onPush, onSwitchBranch, onCreateBranch, onGenerateCommitMessage, onReview }: {
+    onRefresh, onOpen = onRefresh, onInitialize, onOpenDiff, onStage, onUnstage, onCommit, onPush, onSwitchBranch, onCreateBranch, onGenerateCommitMessage, onReview }: {
     workspace: string; snapshot: GitSnapshot | undefined; uninitialized: boolean; loading: boolean; error: string | null;
     actionId: string | null; llmActionId: string | null; gitAssistantReady: boolean; workflow: GitPanelWorkflow; ci: GitCiPanelState;
-    onRefresh: () => void; onInitialize: () => void; onOpenDiff: (path: string | undefined, scope: GitDiffScope) => void;
+    onRefresh: () => void; onOpen?: () => void; onInitialize: () => void; onOpenDiff: (path: string | undefined, scope: GitDiffScope) => void;
     onStage: (path?: string) => Promise<boolean>; onUnstage: (path?: string) => void;
     onCommit: (message: string, pushAfterCommit?: boolean) => Promise<boolean>; onPush: () => void;
     onSwitchBranch: (branch: string) => void; onCreateBranch: (branch: string) => void;
@@ -76,7 +76,7 @@
   }
   onMount(() => {
     ci.onActivate();
-    onRefresh();
+    onOpen();
     return () => ci.onDeactivate();
   });
 </script>

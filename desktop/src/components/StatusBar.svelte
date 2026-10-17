@@ -14,8 +14,6 @@
   import TaskFieldSelect from "./TaskFieldSelect.svelte";
   import type { HeadsUpSnapshot } from "../lib/heads-up";
   import SessionActivityStatusHud from "./SessionActivityStatusHud.svelte";
-  import SessionBrainstormStatus from "./SessionBrainstormStatus.svelte";
-  import type { SessionBrainstormSnapshot } from "../lib/session-brainstorm";
 
   type ConfigValue = { value: string; name: string; group?: string };
 
@@ -40,8 +38,7 @@
     sessionActivity,
     sessionSubagentSnapshot,
     sessionTodoSnapshot,
-    sessionBrainstormSnapshot,
-    onOpenBrainstormParticipant,
+    onOpenSubagentSession,
     sessionNeedsInput,
     canClearTodos,
     onSetConfig,
@@ -81,8 +78,7 @@
     sessionActivity: SessionActivitySummary;
     sessionSubagentSnapshot: SessionSubagentSnapshot | undefined;
     sessionTodoSnapshot: SessionTodoSnapshot | undefined;
-    sessionBrainstormSnapshot?: SessionBrainstormSnapshot;
-    onOpenBrainstormParticipant?: (sessionId: string) => void;
+    onOpenSubagentSession?: (runDir: string, agentId: string) => void;
     sessionNeedsInput: boolean;
     canClearTodos: boolean;
     onSetConfig: (option: SessionConfigOption, value: string | boolean) => void;
@@ -165,6 +161,7 @@
       {quotaWaitIndicator}
       onOpenSessionUsage={onOpenSessionUsage}
       {subagentPathNavigation}
+      {onOpenSubagentSession}
       onRefreshClaudeLimits={onRefreshClaudeLimits}
     />
     {/key}
@@ -206,10 +203,6 @@
 
   <div class="flex h-full shrink-0 items-center gap-0.5" data-status-right>
   {#key observer?.sessionId}
-  <SessionBrainstormStatus
-    snapshot={sessionBrainstormSnapshot}
-    onOpenParticipant={onOpenBrainstormParticipant}
-  />
   {#if observer}
     <ObserverStatus {...observer} />
   {/if}
@@ -221,6 +214,7 @@
     {sessionNeedsInput}
     {canClearTodos}
     {onClearTodos}
+    {onOpenSubagentSession}
   />
   {/key}
   </div>

@@ -12,16 +12,6 @@ export function activityFromRpcEvent(event: RpcEventRecord, at = isoNow()): Agen
 	return undefined;
 }
 
-export function activityFromProgressRecord(value: unknown): AgentActivity | undefined {
-	if (!isRecord(value) || value.stage !== "rpc_event") return undefined;
-	const at = nonEmptyString(value.at);
-	if (!at) return undefined;
-	const toolName = nonEmptyString(value.toolName);
-	if (toolName) return { label: toolName, at };
-	if (value.type === "message_start" || value.type === "message_end") return { label: "Thinking", at };
-	return undefined;
-}
-
 function rpcMessageRole(event: RpcEventRecord): string | undefined {
 	const directRole = nonEmptyString(event.role);
 	if (directRole) return directRole;

@@ -160,3 +160,14 @@ describe("status HUD plan popup emphasis", () => {
     expect(articles[3]).not.toContain("opacity-70");
   });
 });
+
+describe("status HUD sub-agent sessions", () => {
+  it("offers an open-session action for active agents", () => {
+    const html = render(SessionActivityStatusHud, { props: {
+      summary: { ...EMPTY_SESSION_ACTIVITY, activeSubagents: 1 },
+      subagentSnapshot: { version: 1, count: 1, checkedAt: 1, runs: [{ runDir: "/run", agents: [{ id: "worker", status: "running" }] }] },
+      todoSnapshot: undefined, promptRunning: false, sessionNeedsInput: false, onOpenSubagentSession: () => {},
+    } }).body;
+    expect(html).toContain("data-session-subagent-open");
+  });
+});

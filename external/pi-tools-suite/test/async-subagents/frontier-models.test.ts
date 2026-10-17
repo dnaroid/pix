@@ -65,6 +65,10 @@ describe("model identity", () => {
 		expect(modelVendor("openrouter/~openai/gpt-astra-latest")).toBe("openai");
 		expect(modelVendor("zai-coding/glm-5.3")).toBe("zai");
 		expect(modelVendor("antigravity/antigravity-claude-opus-4-6-thinking")).toBe("anthropic");
+		// Claude Code provider exposes bare family aliases without "claude".
+		expect(modelVendor("pi-claude-code-provider/opus")).toBe("anthropic");
+		expect(modelVendor("pi-claude-code-provider/sonnet")).toBe("anthropic");
+		expect(modelVendor("pi-claude-code-provider/haiku")).toBe("anthropic");
 		expect(modelVendor("antigravity/antigravity-gemini-3.1-pro")).toBe("google");
 		expect(modelVendor("openai/o4-mini")).toBe("openai");
 		expect(modelVendor("custom/house-model")).toBe("custom");

@@ -2,6 +2,7 @@
   import { compactEmptyStateClass } from "../../lib/status-text";
   import Check from "@lucide/svelte/icons/check";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import Plus from "@lucide/svelte/icons/plus";
   import Search from "@lucide/svelte/icons/search";
   import { tick } from "svelte";
   import ModelProviderIcon from "../ModelProviderIcon.svelte";
@@ -22,6 +23,8 @@
     emptyLabel,
     disabled = false,
     allowCustom = false,
+    popup = false,
+    addTrigger = false,
   }: {
     value: string;
     models?: readonly ModelThinkingModel[];
@@ -31,6 +34,10 @@
     emptyLabel?: string;
     disabled?: boolean;
     allowCustom?: boolean;
+    /** Float the list over following content instead of growing the layout. */
+    popup?: boolean;
+    /** Render a compact dashed "+ label" trigger (used to append to a list). */
+    addTrigger?: boolean;
   } = $props();
 
   const componentId = $props.id();
@@ -42,6 +49,36 @@
   let open = $state(false);
   let query = $state("");
   let selectedIndex = $state(0);
+  // Fixed viewport position for popup mode so scroll containers never clip the list.
+  let popupStyle = $state("");
+  const POPUP_HEIGHT = 290;
+
+  function placePopup(): void {
+    if (!popup || !trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const width = Math.max(rect.width, 280);
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+    const below = window.innerHeight - rect.bottom;
+    const vertical = below < POPUP_HEIGHT && rect.top > below
+      ? `bottom:${window.innerHeight - rect.top + 4}px`
+      : `top:${rect.bottom + 4}px`;
+    popupStyle = `position:fixed;left:${left}px;width:${width}px;${vertical}`;
+  }
+
+  $effect(() => {
+    if (!open || !popup) return;
+    const onScroll = (event: Event) => {
+      if (event.target instanceof Node && root?.contains(event.target)) return;
+      close();
+    };
+    const onResize = () => close();
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onResize);
+    };
+  });
 
   const catalogOptions = $derived(options ?? settingsModelSearchOptions(models));
   const configuredOnly = $derived(value.length > 0 && !catalogOptions.some((option) => option.value === value));
@@ -60,6 +97,7 @@
 
   function show(): void {
     if (triggerDisabled) return;
+    placePopup();
     open = true;
     query = "";
     selectedIndex = Math.max(0, choices.findIndex((option) => option.value === value));
@@ -126,7 +164,9 @@
 <div bind:this={root} class="relative" onfocusout={handleFocusOut}>
   <button
     bind:this={trigger}
-    class="flex h-7 w-full items-center gap-1.5 rounded-md border border-input bg-panel-strong py-0 pr-2 pl-2 text-left text-xs text-foreground outline-none hover:bg-panel-hover focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-default disabled:opacity-55"
+    class={addTrigger
+      ? "inline-flex h-6 items-center gap-1 rounded-md border border-dashed border-border px-2 text-xs text-muted-foreground outline-none hover:border-input hover:bg-panel-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-default disabled:opacity-55"
+      : "flex h-7 w-full items-center gap-1.5 rounded-md border border-input bg-panel-strong py-0 pr-2 pl-2 text-left text-xs text-foreground outline-none hover:bg-panel-hover focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-default disabled:opacity-55"}
     type="button"
     aria-label={ariaLabel}
     aria-haspopup="listbox"
@@ -136,13 +176,17 @@
     onclick={() => open ? close() : show()}
     onkeydown={handleTriggerKeydown}
   >
-    {#if value}<ModelProviderIcon provider={value} />{/if}
-    <span class="min-w-0 flex-1 truncate">{triggerLabel}</span>
-    <ChevronDown class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+    {#if addTrigger}
+      <Plus class="h-3 w-3" aria-hidden="true" /><span>{emptyLabel ?? "Add"}</span>
+    {:else}
+      {#if value}<ModelProviderIcon provider={value} />{/if}
+      <span class="min-w-0 flex-1 truncate">{triggerLabel}</span>
+      <ChevronDown class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+    {/if}
   </button>
 
   {#if open}
-    <div class="mt-1 overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-md">
+    <div style={popup ? popupStyle : undefined} class={[popup ? "z-50" : "mt-1", "overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-md"]}>
       <div class="relative border-b border-border p-1.5">
         <Search class="pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
         <input

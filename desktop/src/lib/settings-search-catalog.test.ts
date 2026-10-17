@@ -28,7 +28,7 @@ describe("authored settings search catalogue", () => {
     expect(searchPreferencesSource).not.toContain("tasksSemanticEnabled");
     expect(searchPreferencesSource).not.toContain("sessionTitlesEnabled");
     expect(searchPreferencesSource).toContain("bounded retrieved source excerpts and the question are sent to the selected RAG model provider");
-    expect(desktopEditorSource).toContain('label="RAG answer model"');
+    expect(desktopEditorSource).toContain('label="Feature models"');
     expect(desktopEditorSource).toContain('label="RAG thinking effort"');
     expect(searchPreferencesSource).not.toContain("SEARCH_FILTER_MODEL");
     expect(searchPreferencesSource).not.toContain("messageFilterEnabled");

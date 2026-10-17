@@ -2,12 +2,16 @@ import { setImmediate as yieldTask } from "node:timers/promises";
 import type { SearchSetting } from "./contract.js";
 import type { SemanticEmbeddingConfig } from "./config.js";
 import { hashText, settingsDocuments, settingsFingerprint, type SearchDocument } from "./documents.js";
-import { SearchIndexBusyError, SearchIndexStore } from "./index-store.js";
+import { SearchIndexBusyError, SearchIndexStore, type IndexTransaction } from "./index-store.js";
 import { SearchCacheCompatibilityError } from "./embedding-cache.js";
 import { readTaskSemanticCorpus } from "./task-corpus.js";
 import type { TaskSemanticDocument } from "./task-index.js";
 import { watchTaskChanges, type TaskChangeWatcher } from "./task-watcher.js";
 import { bounded } from "./bounded.js";
+import { join } from "node:path";
+import { semanticEmbeddingIdentity } from "./config.js";
+import { COVERAGE_KEEP, coverageDigest, settingsCatalogueDigest } from "./source-coverage.js";
+import { taskSnapshot } from "./task-snapshot.js";
 
 type Source = "settings" | "tasks";
 interface Work {
@@ -26,6 +30,8 @@ interface Options {
   authorized(signal: AbortSignal, source: Source): Promise<boolean>;
   enabled?(source: Source): boolean;
   completed?(source: Source): void;
+  /** Diagnostic-only: reports a retained source error; must not throw or change outcomes. */
+  failed?(source: Source, error: unknown, reason?: "watcher_failed"): void;
   watchTasks?: TaskChangeWatcher | undefined;
   debounceMs?: number | undefined;
 }
@@ -43,6 +49,8 @@ export class SettingsTaskIndexer {
   };
   private settings: SearchDocument[] = [];
   private settingsHash?: string;
+  /** Authored-catalogue digest the probe observes; documents may be shared by several catalogues. */
+  private settingsDigest?: string;
   private tasksHash: string | undefined;
   private watchError: string | undefined;
   private stopWatch: (() => void) | undefined;
@@ -69,6 +77,8 @@ export class SettingsTaskIndexer {
     if (this.options.enabled?.("settings") === false) return;
     const documents = settingsDocuments(settings);
     const hash = settingsFingerprint(documents);
+    // Equal documents keep coverage valid for either catalogue digest.
+    this.settingsDigest = settingsCatalogueDigest(settings);
     if (hash !== this.settingsHash) {
       this.settings = documents; this.settingsHash = hash;
       this.invalidate("settings"); this.work.settings.automatic = schedule;
@@ -102,8 +112,11 @@ export class SettingsTaskIndexer {
       delete work.error;
       this.options.completed?.(source);
     })().catch(error => {
-      if (!this.closed && !lifetime.aborted && revision === work.revision) work.error = error instanceof SearchIndexBusyError || error instanceof SearchCacheCompatibilityError
-        ? error.message : `Semantic ${source === "tasks" ? "task" : "settings"} search unavailable; local search remains available`;
+      if (!this.closed && !lifetime.aborted && revision === work.revision) {
+        work.error = error instanceof SearchIndexBusyError || error instanceof SearchCacheCompatibilityError
+          ? error.message : `Semantic ${source === "tasks" ? "task" : "settings"} search unavailable; local search remains available`;
+        this.report(source, error);
+      }
       throw error;
     }).finally(() => {
       if (work.worker === operation) {
@@ -126,11 +139,15 @@ export class SettingsTaskIndexer {
       const stop = (this.options.watchTasks ?? watchTaskChanges)(this.options.cwd, () => this.debounce(), () => {
         failed = true;
         this.watchError = "Task change watcher unavailable; sync to refresh task indexing";
+        this.report("tasks", undefined, "watcher_failed");
         this.stopWatch?.(); this.stopWatch = undefined;
       });
       if (failed) stop(); else this.stopWatch = stop;
     }
     this.refreshTasks(true);
+  }
+  private report(source: Source, error: unknown, reason?: "watcher_failed"): void {
+    try { this.options.failed?.(source, error, reason); } catch { /* Diagnostics never change indexing. */ }
   }
   private invalidate(source: Source): void {
     const work = this.work[source];
@@ -152,12 +169,13 @@ export class SettingsTaskIndexer {
         this.tasksHash = hash;
         this.invalidate("tasks"); this.work.tasks.automatic = true; this.schedule("tasks");
       } else if (retry) { this.work.tasks.automatic = true; this.schedule("tasks"); }
-    }).catch(() => {
+    }).catch(error => {
       if (!this.closed && revision === this.scanRevision) {
         // Invalid canonical content must fence a batch already in flight.
         this.tasksHash = undefined;
         this.invalidate("tasks");
         this.work.tasks.error = "Task corpus unavailable; local task search remains available";
+        this.report("tasks", error);
       }
     }).finally(() => this.scans.delete(operation));
     this.scans.add(operation);
@@ -174,6 +192,7 @@ export class SettingsTaskIndexer {
       if (error instanceof CorpusChanged) { this.refreshTasks(); return; }
       work.error = error instanceof SearchIndexBusyError || error instanceof SearchCacheCompatibilityError ? error.message
         : `Semantic ${source === "tasks" ? "task" : "settings"} search unavailable; local search remains available`;
+      this.report(source, error);
     }).finally(() => {
       if (work.worker === operation) delete work.worker;
       if (!this.closed && revision !== work.revision) this.schedule(source);
@@ -187,7 +206,7 @@ export class SettingsTaskIndexer {
       let pending = false;
       await this.options.store.write(this.options.cwd, signal, async tx => {
         if (source === "settings") {
-          const documents = this.settings;
+          const documents = this.settings, digest = this.settingsDigest;
           const cache = await tx.load(documents);
           const missing = new Map<string, string>();
           for (const document of documents) for (const chunk of document.chunks) {
@@ -203,6 +222,7 @@ export class SettingsTaskIndexer {
             batch.forEach(([hash], index) => cache.vectors.set(hash, vectors[index]!));
           }
           await tx.save(documents, cache.vectors);
+          if (!pending && digest) tx.coverage(coverageDigest("settings", digest, semanticEmbeddingIdentity(this.options.config)), COVERAGE_KEEP.settings);
         } else {
           const documents = await readTaskSemanticCorpus(this.options.cwd, signal);
           if (fingerprintTasks(documents) !== this.tasksHash) throw new CorpusChanged();
@@ -217,12 +237,25 @@ export class SettingsTaskIndexer {
             const latest = await readTaskSemanticCorpus(this.options.cwd, signal);
             if (fingerprintTasks(latest) !== this.tasksHash) throw new CorpusChanged();
             index.save(new Map(batch.map((task, position) => [task.hash, vectors[position]!] as const)));
-          }
+          } else await this.recordTaskCoverage(tx, signal);
         }
       }, this.options.config, { source, retry });
       retry = false;
       if (!pending) return;
       await yieldTask(undefined, { signal });
+    }
+  }
+  /** Final pass only: bind the logical store snapshot to the corpus this index covers. */
+  private async recordTaskCoverage(tx: IndexTransaction, signal: AbortSignal): Promise<void> {
+    const filename = join(this.options.cwd, ".pi", "tasks.sqlite");
+    try {
+      const before = await taskSnapshot(filename, signal);
+      const latest = await readTaskSemanticCorpus(this.options.cwd, signal);
+      if (fingerprintTasks(latest) !== this.tasksHash || await taskSnapshot(filename, signal) !== before) return;
+      tx.coverage(coverageDigest("tasks", before, semanticEmbeddingIdentity(this.options.config)), COVERAGE_KEEP.tasks);
+    } catch {
+      // Coverage is best-effort evidence; the probe then reports a change, never a false match.
+      signal.throwIfAborted();
     }
   }
   private stop = (): void => {
