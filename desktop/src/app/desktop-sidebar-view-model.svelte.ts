@@ -2,7 +2,7 @@ import type { ComponentProps } from "svelte";
 import type { SessionConfigOption, SessionInfo } from "@agentclientprotocol/sdk";
 import { resolveUsageSessionId, type UsageSessionTarget } from "../lib/usage-stats";
 import DesktopSidebar from "../components/DesktopSidebar.svelte";
-import type { AcpClient } from "../lib/acp-client";
+import type { AcpClient, RuntimeStatus } from "../lib/acp-client";
 import ProjectSwitcher from "../components/ProjectSwitcher.svelte";
 import type { createAttachmentDraftController } from "./attachment-drafts";
 import type { createGitAssist } from "./git-assist";
@@ -28,6 +28,7 @@ export function createDesktopSidebarViewModel(options: {
   workspace: () => string;
   client: () => AcpClient | null;
   lspSessionId: () => string | null;
+  providerStatuses?: () => readonly RuntimeStatus[];
   configOptions: () => SessionConfigOption[];
   modelPreferences: ReturnType<typeof createModelPreferencesStore>;
   canUseSession: () => boolean;
@@ -96,6 +97,7 @@ export function createDesktopSidebarViewModel(options: {
     workspace: options.workspace(),
     lspClient: options.client(),
     lspSessionId: options.lspSessionId(),
+    providerStatuses: options.providerStatuses?.() ?? [],
     settingsConfigOptions: options.configOptions(),
     visibleModelRefs: options.modelPreferences.visibleModelRefs,
     rememberedThinkingByModel: options.modelPreferences.rememberedThinkingByModel,

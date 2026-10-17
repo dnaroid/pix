@@ -8,6 +8,7 @@ import { readResultText } from "../../src/async-subagents/core/state.js";
 import { createBatch, getRecord, resetSubagentStoreForTest, resolveScope } from "../../src/async-subagents/core/store.js";
 import { getLiveChannel } from "../../src/async-subagents/core/live-channel.js";
 import { registerSendTool } from "../../src/async-subagents/tools/send.js";
+import { getProjectSemaphore } from "../../src/async-subagents/tools/spawn.js";
 
 const tempDirs: string[] = [];
 const originalArgv1 = process.argv[1];
@@ -124,17 +125,57 @@ describe.serial("sub-agent send/resume", () => {
 			completions.push(completion);
 			resolveDone();
 		});
-		const result = await tool.execute("call", { agentId: "a1", runDir, message: "Continue please" }, undefined, undefined, { cwd });
-		expect(result.isError).toBeUndefined();
-		expect(result.details).toMatchObject({ delivery: "resume", turn: 2 });
-		expect(liveAgents.get(runDir)?.get("a1")?.awaitingCompletion).toBe(true);
+		// Force this turn to queue so no replacement PID can hide stale fields.
+		const semaphore = getProjectSemaphore(cwd, 1);
+		await semaphore.acquire();
+		try {
+			const result = await tool.execute("call", { agentId: "a1", runDir, message: "Continue please" }, undefined, undefined, { cwd });
+			expect(result.isError).toBeUndefined();
+			expect(result.details).toMatchObject({ delivery: "resume", turn: 2 });
+			expect(liveAgents.get(runDir)?.get("a1")?.awaitingCompletion).toBe(true);
+			expect(getRecord(runDir, "a1")).toMatchObject({ status: "planned" });
+			expect(getRecord(runDir, "a1")?.ownerPid).toBe(process.pid);
+			expect(getRecord(runDir, "a1")?.pid).toBeUndefined();
+			expect(getRecord(runDir, "a1")?.processGroup).toBeUndefined();
+			expect(getRecord(runDir, "a1")?.startedAt).toBeUndefined();
+		} finally { semaphore.release(); }
 		await withTimeout(done, "resumed turn did not complete");
+		expect(getRecord(runDir, "a1")?.ownerPid).toBeUndefined();
 		expect(completions[0]).toMatchObject({ agentId: "a1", exitCode: 0, state: { status: "done" } });
 		expect(readResultText(runDir, "a1")).toBe("echo:Continue please");
 		expect(getRecord(runDir, "a1")?.turn).toBe(2);
 
 		const missing = await tool.execute("call", { agentId: "a1", runDir, message: "x", mode: "sideways" }, undefined, undefined, { cwd });
 		expect(missing.isError).toBe(true);
+	});
+
+	test.serial("queued resume honors a stop appended by another headless caller before its slot opens", async () => {
+		const cwd = tempDir(), runDir = newBatch(cwd, "queued-stop"), logFile = path.join(cwd, "prompts.log");
+		installEchoPi(logFile);
+		await withTimeout(new Promise((resolve) => { spawnAgent(runDir, { id: "a1", task: "First" }, cwd, [], undefined, resolve); }), "first turn did not complete");
+		const entries: any[] = [];
+		const sessionManager = {
+			getEntries: () => entries,
+			appendCustomEntry: (customType: string, data: unknown) => { entries.push({ type: "custom", customType, data }); },
+		};
+		let tool: any, completion: any, resolveDone!: () => void;
+		const done = new Promise<void>((resolve) => { resolveDone = resolve; });
+		registerSendTool({ registerTool: (t: any) => { tool = t; } } as any, new Map(), (value) => { completion = value; resolveDone(); });
+		const semaphore = getProjectSemaphore(cwd, 1);
+		await semaphore.acquire();
+		try {
+			const reply = await tool.execute("call", { agentId: "a1", runDir, message: "Must not launch" }, undefined, undefined, { cwd, sessionManager });
+			expect(reply.isError).not.toBe(true);
+			const record = getRecord(runDir, "a1")!;
+			// This is a journal append, NOT a change to the owner's in-memory record.
+			entries.push({ type: "custom", customType: "pi-tools-suite:subagent", data: {
+				version: 1, scope: record.scope, batch: record.batch, agentId: "a1", stopRequested: true,
+			} });
+			expect(record.stopRequested).toBeUndefined();
+		} finally { semaphore.release(); }
+		await withTimeout(done, "queued stop did not complete");
+		expect(completion.state.status).toBe("stopped");
+		expect(readLog(logFile)).toHaveLength(1);
 	});
 
 	test.serial("send tool refuses to resume when the persisted session is missing", async () => {

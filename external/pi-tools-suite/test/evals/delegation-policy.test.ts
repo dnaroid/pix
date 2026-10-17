@@ -32,10 +32,12 @@ test("oracle budget validator rejects spawn-level and task-level watchdog overri
 });
 
 test("delegation cases are model-independent and include negative controls", () => {
-	expect(DELEGATION_POLICY_CASES).toHaveLength(5);
+	expect(DELEGATION_POLICY_CASES).toHaveLength(8);
 	for (const scenario of DELEGATION_POLICY_CASES) {
 		expect(scenario.models).toBeUndefined();
 		expect(scenario.appendSystemPrompt).toContain("duplicated context, briefing and integration");
+		expect(scenario.appendSystemPrompt).toContain("compare the remaining parent work, not the original task size");
+		expect(scenario.appendSystemPrompt).toContain("never overrides explicit user delegation or mandatory gates");
 	}
-	expect(DELEGATION_POLICY_CASES.filter((scenario) => scenario.assert.forbiddenTools?.includes("subagents"))).toHaveLength(2);
+	expect(DELEGATION_POLICY_CASES.filter((scenario) => scenario.assert.forbiddenTools?.includes("subagents"))).toHaveLength(4);
 });

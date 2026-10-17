@@ -29,8 +29,9 @@ Decision rationale: [0069 — Parent-owned implementation and a smaller role poo
 
 Headless system for running isolated async sub-agents. Each sub-agent is a
 separate `pi --mode rpc` child process that receives a task prompt via stdin
-JSONL and streams RPC events back on stdout. The parent tracks state on disk and
-exposes tool + slash-command interfaces. `[confirmed by code]`
+JSONL and streams RPC events back on stdout. The parent persists durable
+lifecycle patches in its session custom entries and overlays live process state
+in memory; it exposes tool + slash-command interfaces. `[confirmed by code]`
 
 ## Current behavior
 
@@ -97,6 +98,13 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
   and integration, not token price alone. Parallel execution can reduce latency
   without reducing total cost; model tier or review success alone is not proof
   of an implementation capability advantage.
+  For optional delegation, compare the remaining parent work, not the original
+  task size, with that full handoff cost. Unclear savings or comparable costs
+  favor continuing in the parent; explicit user delegation and mandatory gates
+  still take precedence. This is a brief judgment, not an extra cost-estimation
+  tool call or verbose justification. Worker briefs state shared context once
+  and prefer exact paths/ranges plus essential facts over copied files or
+  history repeated across `task`, `scope`, and `parentObjective`.
   Research/verification/UI QA/knowledge-auditor/oracle candidate policies are
   unchanged. `[confirmed by agents/*.md, core/agent-strategy.ts;
   tests: test/async-subagents/model-pools.test.ts,
@@ -114,10 +122,10 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 ### Spawn (`core/spawn.ts`)
 1. Each sub-agent is spawned via `node:child_process.spawn()` running the pi binary in RPC mode. `[confirmed by code, spawn.ts ~188]`
 2. **Pi invocation resolution** (`core/pi-invocation.ts`): detects how pi was launched (Bun virtual script, direct node script, or generic runtime). Direct pi entrypoint → `process.execPath + [currentScript, ...args]`; generic node/bun → `pi` from PATH; Windows → `process.execPath args`. `[confirmed by code]`
-3. **Pi args**: `--mode rpc`, `--session-dir <dir>` or `--no-session`, `--no-extensions`, `--extension <model-tools>`, the allowlisted provider dependencies of the final model (`--extension <antigravity-auth>` or the suite-local `claude-code-provider/index.ts` entrypoint), `--no-skills`, `--model <model>`, `--tools <list>` (or `--no-tools`), `--thinking <level>`, filtered extra user args, `--models <effective-model>`, then `--extension <tool-guard>`. The final model scope prevents persisted `enabledModels` or an extra `--models` value from resolving unrelated providers in the isolated child. Skill flags from `extraArgs` are stripped, so child agents never discover or receive skills. Before anything else, `-m value`, `--model=value` and `--provider=value` in extra args are normalized to `--model value` / `--provider value` (the installed Pi CLI documents the long, space-separated forms), so owned-launch selection, provider dependencies and the child all see the same final model. `[confirmed by code, spawn.ts, provider-extensions.ts; confirmed by tests, core.test.ts, provider-extensions.test.ts]`
+3. **Pi args**: `--mode rpc`, `--session-dir <dir>` (and `--session <file>` on resume), `--no-extensions`, `--extension <model-tools>`, the allowlisted provider dependencies of the final model (`--extension <antigravity-auth>` or the suite-local `claude-code-provider/index.ts` entrypoint), `--no-skills`, `--model <model>`, `--tools <list>` (or `--no-tools`), `--thinking <level>`, filtered extra user args, `--models <effective-model>`, then `--extension <tool-guard>`. The final model scope prevents persisted `enabledModels` or an extra `--models` value from resolving unrelated providers in the isolated child. Skill flags from `extraArgs` are stripped, so child agents never discover or receive skills. Before anything else, `-m value`, `--model=value` and `--provider=value` in extra args are normalized to `--model value` / `--provider value` (the installed Pi CLI documents the long, space-separated forms), so owned-launch selection, provider dependencies and the child all see the same final model. `[confirmed by code, spawn.ts, provider-extensions.ts; confirmed by tests, core.test.ts, provider-extensions.test.ts]`
 4. **Stdin RPC**: sends two JSONL messages — `{type:"get_state",id:"sub_get_state"}` then `{type:"prompt",id:"sub_prompt",message:<prompt>[,images:<base64[]>]}`. Stdin stays open; EOF = pi shutdown. `[confirmed by code]`
 5. **Extensions** loaded into children: `model-tools` (model-specific tool args) and `tool-guard` (strips parent-only tools: `question`, `subagents`, all `async_subagents_*`). Provider dependencies come from an explicit allowlist in `core/provider-extensions.ts`, recomputed on every attempt (retry and provider-changing fallback) from that attempt's final model:
-    - `todo/subagent.ts` is also loaded for **every role**, including project-local roles, and automatically for future roles. It exposes regular `todo` actions with a private child-session/attempt list. This is a planning exception to work-tool restrictions: restricted/empty role tool selections and extra CLI tool flags retain `todo` while preserving restrictions on work tools. Children neither read nor write the parent's project `.pi/todo-plan.json`. Retries/new attempts start with a new list; optional child session history stores local snapshots, branch navigation replays only that branch, and compaction retains unfinished tasks with a fresh snapshot. For parent progress reporting, todo state is sent as a private telemetry-only RPC `setWidget` notification; no interactive widget or child UI is installed. The parent counts non-deleted tasks (including deferred) and completed tasks, persists a tiny per-child/attempt `todo-progress.json` snapshot independently of bounded logs, and exposes optional progress to Desktop. A zero-task plan is not persisted: missing `todo-progress.json` means no plan; writing a cleared/empty plan removes the file. In the Desktop status bar, each visible compact subagent icon has a 2px progress track above it, positioned 2px from the icon's top with 70% opacity, with completed/total fill (including an empty track at 0/n). Absent, empty, or completed plans have no track. Existing popup progress rings/counts and overflow popup behavior are unchanged; no parent-plan aggregate is added. This progress does not update/share the parent's todo state, and completing a plan does not mean the agent has finished. The lean entrypoint does not load persistence commands, interactive UI widgets, thinking overrides, auto-follow-up turns or the parent's knowledge-audit reminder. Recursive delegation and interactive user questions remain denied. Children use todos for non-trivial multi-step work and report unfinished work/blockers to the parent; trivial work needs no plan. See [decision 0059](../docs/decisions/0059-subagent-private-todos.md), with the common-capability exception expanded by [decision 0060](../docs/decisions/0060-subagent-read-only-repo-tools.md). `[confirmed by todo/subagent.ts, async-subagents/core/todo-progress.ts; tests: test/async-subagents/todo.test.ts, todo-progress.test.ts]`
+    - `todo/subagent.ts` is also loaded for **every role**, including project-local roles, and automatically for future roles. It exposes regular `todo` actions with a private child-session/attempt list. This is a planning exception to work-tool restrictions: restricted/empty role tool selections and extra CLI tool flags retain `todo` while preserving restrictions on work tools. Children neither read nor write the parent's project `.pi/todo-plan.json`. Retries/new attempts start with a new list; optional child session history stores local snapshots, branch navigation replays only that branch, and compaction retains unfinished tasks with a fresh snapshot. For parent progress reporting, todo state is sent as a private telemetry-only RPC `setWidget` notification; no interactive widget or child UI is installed. The parent progress is live state, not a sidecar file. It exposes optional progress to Desktop: each visible compact subagent icon has a 2px progress track above it, 2px from the icon's top at 70% opacity, showing completed/total fill (including an empty track at 0/n). Absent, empty and completed plans have no track; popup progress rings/counts and overflow behavior are unchanged, with no parent-plan aggregate. This progress does not update/share the parent's todo state, and completing a plan does not mean the agent has finished. The lean entrypoint does not load persistence commands, interactive UI widgets, thinking overrides, auto-follow-up turns or the parent's knowledge-audit reminder. Recursive delegation and interactive user questions remain denied. Children use todos for non-trivial multi-step work and report unfinished work/blockers to the parent; trivial work needs no plan. See [decision 0059](../docs/decisions/0059-subagent-private-todos.md), with the common-capability exception expanded by [decision 0060](../docs/decisions/0060-subagent-read-only-repo-tools.md). `[confirmed by todo/subagent.ts, async-subagents/core/todo-progress.ts; tests: test/async-subagents/todo.test.ts, todo-progress.test.ts]`
    - `repo-discovery/subagent.ts` is loaded for every child role and attempt. It registers the same unrestricted `project_search` schema and execution as ordinary Pi: all five sources (`sessions`, `tasks`, `commits`, `code`, `knowledge`), all supported options, and `patch:<literal>`. This applies equally to async children, provider children and council participants. The child facade only suppresses suite setup commands and parent orchestration guidance; ordinary role work-tool restrictions and parent-only delegation guards remain. Repository semantic embedding remains governed by independent user consent and saved-provider safeguards. Legacy external-backend setup/update commands are removed. See [0060](../docs/decisions/0060-subagent-read-only-repo-tools.md), [0066](../docs/decisions/0066-native-repository-semantic-search.md) and [project search](project-search-agent-tool.md). `[confirmed by repo-discovery/subagent.ts, core/child-tools.ts; tests: test/async-subagents/repo-tools.test.ts, provider-child-inventory.test.ts]`
    - `dcp/subagent.ts` loads DCP for **every role and attempt**, including project-local replacements and read-only council participants. It uses normal DCP configuration/model overrides, prompts, compression and lifecycle hooks but registers no interactive `/dcp` commands. `compress` is a common capability alongside private todo and unrestricted `project_search`: empty/restricted tool lists, CLI exclusions and model changes cannot remove it when DCP is enabled. Read-only guards permit context compression, not product-source mutation. Disabled DCP configuration still suppresses registration. Child sessions are always persisted and use the normal journal contract (and survive `send` cold resume). This does not enable session persistence or load the whole suite. See [DCP lifecycle](dcp.md#lifecycle-and-persistence). `[confirmed by dcp/subagent.ts, core/child-tools.ts, core/spawn.ts; tests: test/async-subagents/dcp.test.ts, provider-child-inventory.test.ts, work-tools.test.ts]`
    - Optional work capabilities are tool-driven, not universal or granted by role
@@ -278,15 +286,16 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
     Results contain changed documentation paths and concrete unresolved questions,
     not global knowledge-state reporting. Preserve concurrent work and keep
     disposable reports under `.pi/artifacts/`.
-11. **Session persistence**: always on — every child is a full Pi session launched with `--session-dir <dir>`. The former `ASYNC_SUBAGENTS_ENABLE_SESSIONS` / `shouldPersistSubagentSessions` opt-out and `--no-session` branch are removed; the variable is ignored. With a parent session id (UUID), `<dir>` is the project-local `<cwd>/.pi/subagents/<parentSessionId>/`; otherwise it is the legacy `<agentDir>/sessions`. Session commands (`/sub-open`, `/sub-back`, `/sub-where`) are always registered. A child without a persisted session cannot be resumed; `send` reports “has no persisted session to resume (it never started).” A fresh respawn removes only its own previously linked transcript and the legacy session directory, not the shared parent-scoped directory. Every fresh launch writes `launch.json` (`{task, extraArgs, timeoutMs, maxResultBytes}`) for later resume. `[confirmed by code, core/spawn.ts, core/sessions.ts, commands.ts, tools/send.ts; tests: session-layout.test.ts, core.test.ts, send.test.ts]`
+11. **Session persistence and parent state**: every child is a full Pi session stored at `<cwd>/.pi/subagents/<parentSessionId>/<childSessionId>.jsonl`. `agentId` is the subagent launch identifier (often supplied as `task.id`), distinct from the UUID Pi assigns to the child session; the parent records the session file reported by the child, and `subagent_meta` maps that session back to `agentId`. The parent stores durable lifecycle/index patches as custom entries in its own session and reconstructs records by folding them in order. Process handles, live activity, full result text and other transient data remain in a live in-memory overlay; there are no regular-agent sidecars or `registry.json`. A batch is an identity label, not a directory. Legacy run directories are ignored and are not migrated. `[confirmed by code and tests]`
 11a. **Follow-up turns (`send`)**: the parent may continue a child's conversation by `agentId`.
-    - **Live delivery** — while the child process is still running and its live channel is open, the message is written to the child's RPC stdin as `{type:"prompt", message, streamingBehavior: "followUp"|"steer"}` (default `followUp`). Pi queues it while streaming, or starts a new run when idle; the tool returns the reported disposition. A run started by a live send resets per-run completion state (`completedFromAgentEnd`, last error/result, `result.md`), so the final result reflects the latest turn.
+    - **Live delivery** — while the child process is still running and its live channel is open, the message is written to the child's RPC stdin as `{type:"prompt", message, streamingBehavior: "followUp"|"steer"}` (default `followUp`). Pi queues it while streaming, or starts a new run when idle; the tool returns the reported disposition. The latest turn's full result text is read from the child session.
     - **Settled race** — when `agent_settled` arrives while a live send is pending or was accepted during the current run, termination is deferred: the child is asked for `get_state` and terminated only if it is neither streaming nor has pending messages. Once settled termination is scheduled the channel is closing; new live sends are refused and the tool waits (up to 15 s) for the process to finish, then falls back to cold resume.
-    - **Cold resume** — for a terminal (`done`/`failed`/`stopped`) child with an existing `session_file` and `launch.json`: previous turn artifacts (`result.md/json`, `progress.jsonl`, `stderr.log`, `exit_code`, `started_at`, `finished_at`, timeout markers, `turn_message.md`, todo progress) move to `turns/<N>/`, `turn_count` is incremented, the message is stored as `turn_message.md`, and the agent is relaunched under the project concurrency semaphore with `--session <session_file>`, keeping `prompt.md`, the sessions directory and session links. Completion is delivered to the parent like a normal spawn. Launch failures write `result.md`, `exit_code=1` and a structured failed result and log a `resume-failed` diagnostic.
-    - A non-terminal agent without a live channel (e.g. owned by another parent process) is refused rather than relaunched concurrently. `[confirmed by code, core/spawn.ts, core/live-channel.ts, core/turns.ts, tools/send.ts; tests: send.test.ts]`
-12. **Timeout**: default 3 hours (10,800 seconds; `DEFAULT_AGENT_TIMEOUT_MS`) when no task-, spawn-, role-, or global-level timeout is configured. Explicit `timeoutSeconds`/`timeoutMs` values override this default, including values longer than 3 hours; the default is not a hard cap. For macOS owned-launch agents, the supervisor's native watchdog defaults to the same 3 hours and receives the resolved per-agent timeout for explicit overrides. On timeout: writes `timeout_ms`/`timed_out_at`/result.md, SIGTERM, SIGKILL after 5s grace for ordinary agents, exit code 124. `[confirmed by code, spawn.ts, core/config.ts, owned-launch-integration.ts, owned-launch/launcher.ts]`
-13. **agent_end**: writes result.md, SIGTERM after 50ms grace, SIGKILL after 1s fallback. `[confirmed by code]`
-14. **RPC prompt failure** (`success=false`): writes result.md with error, `notifyComplete(1)`, SIGTERM. `[confirmed by code]`
+    - **Cold resume** — a terminal child with a persisted session is relaunched under the project concurrency semaphore using that session. The send increments the turn, clears prior process identity while queued, and replaces the current result with the latest turn's text; no turn archives or launch-spec sidecars are created. Launch failures are recorded in the parent session state. In headless mode, cold `send` runs through the detached broker like `spawn`; the broker tracks the resumed `agentId` until its final completion receipt.
+    - Before relaunch, cancellation is refreshed from the parent's durable entries (or a fresh read of the stable-key headless journal), without replacing other in-memory record fields. It is checked after the semaphore wait and again after any awaited owned-provider preflight; a requested stop cancels the queued relaunch without spawning a child.
+    - A non-terminal agent without a live channel (e.g. owned by another parent process) is refused rather than relaunched concurrently. `[confirmed by code, core/spawn.ts, core/live-channel.ts, core/store.ts, tools/send.ts; tests: send.test.ts]`
+12. **Timeout**: default 3 hours (10,800 seconds; `DEFAULT_AGENT_TIMEOUT_MS`) when no task-, spawn-, role-, or global-level timeout is configured. Explicit `timeoutSeconds`/`timeoutMs` values override this default, including values longer than 3 hours; the default is not a hard cap. For macOS owned-launch agents, the supervisor's native watchdog defaults to the same 3 hours and receives the resolved per-agent timeout for explicit overrides. Timeout and terminal outcome are recorded in parent-session entries; ordinary process termination behavior is unchanged. `[confirmed by code]`
+13. **agent_end**: finalizes the parent record; no result sidecar is written. `[confirmed by code]`
+14. **RPC prompt failure** (`success=false`): records failure in parent state, not in a result file. `[confirmed by code]`
 15. **Exit handling**: waits 10ms for stdio flush, then finalizes. Exit-code resolution: timed_out→124, completedFromAgentEnd→0, lastAgentEndError→1, numeric→code, signal→128, else→1. `[confirmed by code]`
 16. **Parent billing accounting**: every finalized child assistant `message_end` with valid provider/model/usage is mirrored into the originating parent session through a durable `appendUsage("async-subagent", ...)` record. The spawn tool uses the captured parent session manager rather than whichever tab/session is active when a background child later finishes. Retries and provider/model fallbacks therefore record every billable child call. `[confirmed by code and async-subagents-usage.test.ts]`
 
@@ -322,16 +331,9 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
   an in-process intermediate disk receipt as terminal while its final
   retry/fallback callback is pending. Successful `result` tool responses also
   acknowledge the matching final state captured before execution. Successful
-  `read` calls acknowledge only a registered launch's complete `result.md`, read
-  from the beginning, whose returned text exactly matches the bounded (50 KiB)
-  artifact captured before execution and rechecked afterward. Partial/truncated,
-  failed, aborted, nonterminal, foreign-session or changed-result reads do not
-  acknowledge completion. Reads of unrelated files and progress/status calls do
-  not acknowledge it. Receipts inspect `tool_execution_end`, after all `tool_result`
-  transformations, so downstream truncation or rejection cannot acknowledge a
-  full artifact read. Tool hooks also cover nested tool calls; acknowledgement is
-  tool-execution evidence, not proof that an outer script printed the result.
-  Reads split across several calls are not accumulated. Already delivered SDK
+  Tool hooks inspect `tool_execution_end`, after all `tool_result`
+  transformations; acknowledgement is tool-execution evidence, not proof that
+  an outer script printed the result. Already delivered SDK
   messages are not retracted. Arbitration is in-memory for the current extension
   instance, not a durable cross-restart delivery ledger.
 - Completion callbacks and the two-second disk watcher share reconciliation:
@@ -358,53 +360,48 @@ exposes tool + slash-command interfaces. `[confirmed by code]`
 - `spawnAgentWithRetry()` wraps `spawnAgent` with retry + model-fallback loops. `[confirmed by code]`
 - **Retry eligibility** (`shouldRetry`): status not `stopped`, exitCode ≠ 0; if `retryableExitCodes` is set the code must be in it; `undefined` → retry any non-zero; empty array → disable. `[confirmed by code, retry.ts ~140-148]`
 - **Backoff**: exponential `delayMs = retry.backoffMs * 2^(attempt-1)`. `[confirmed by code]`
-- **Retry metadata files**: `retry_count`, `retry_pending` (timestamp), `next_retry_at` (ISO), `retry.log` (append). `retry_count` is omitted at zero (missing means zero retries); setting it to zero removes the file. Other retry metadata is cleared on settle. `[confirmed by code, retry.ts]`
-- **Model fallback** (before retry): if `isQuotaLimitCompletion` and a fallback exists, respawns immediately (no backoff), logs to `model_fallback.log`/`model_fallback_from`/`model_fallback_to`. `[confirmed by code, retry.ts ~78-97]`
+- **Retry metadata**: retry count, pending state and next retry time are kept in parent-session custom entries/live state, not sidecar files. `[confirmed by code]`
+- **Model fallback** (before retry): if `isQuotaLimitCompletion` and a fallback exists, respawns immediately (no backoff); fallback metadata is recorded in parent state. `[confirmed by code]`
 - `AbortSignal` cancels pending retry timer and settles immediately. Returns `{initial, done}`; `done` resolves when all attempts finish or abort. `[confirmed by code]`
 
 ### Model fallback (`core/model-fallback.ts`)
 - In-memory session state: `exhaustedModels`/`exhaustedProviders` Sets, `fallbackByModel`/`fallbackByProvider` Maps; resettable via `resetSessionModelFallbacks()`. `[confirmed by code]`
 - `selectSessionModelWithFallback` / `nextFallbackModel` walk the resolved chain skipping exhausted models/providers. They do not independently require a different provider; remembered provider exhaustion can exclude same-provider candidates. `[confirmed by code; model-pool-contract.test.ts]`
-- `isQuotaLimitCompletion` scans result.md + stderr.log for: HTTP 429, "rate limit", "quota exceeded", "insufficient quota", "resource exhausted", "usage limit", "billing limit"; for the antigravity provider also "antigravity_all_accounts_exhausted". `[confirmed by code, model-fallback.ts ~40-66]`
+- `isQuotaLimitCompletion` scans available in-memory result text and stderr tail for quota indicators. `[confirmed by code]`
 - Antigravity providers are **never** marked exhausted at the provider level (`shouldRememberProviderExhaustion` returns false) — each account is tried individually. `[confirmed by code]`
 
-### State (`core/state.ts`)
-- **Statuses**: `planned` (prompt.md in `prompts/`, no agent dir), `running` (pid file + alive pid), `done` (exit_code=0), `failed` (exit_code≠0), `stopped` (exit_code="stopped" or dead pid without exit_code), `retrying` (retry_pending present). `[confirmed by code, state.ts 14-68]`
-- Live pid check via `process.kill(pid, 0)`; ESRCH → `stopped`. `[confirmed by code]`
-- `readResult` returns `{resultAvailable, result?, stderrAvailable, stderr?, exitCode, state, structured?}` (structured from `result.json`). `[confirmed by code]`
-- `waitForAgents` polls `getRunState` until all terminal or timeout. `[confirmed by code]`
+### State (session-native store)
+- Parent-session custom entries hold durable lifecycle patches; live process state overlays them in memory. Results come from the child session or a parent-authored failure message, with compact structured data in the parent record. There is no `result.json`, pid file, or registry. `[confirmed by code]`
+- Planned/queued and retry-pending records may persist optional `ownerPid`, identifying the runtime that owns their semaphore wait or retry timer (not the child PID). External readers report those states while that PID is alive; a missing/dead owner means the queue/timer is no longer owned and the record reads as stopped. Launch clears `ownerPid`; scheduling a retry writes the current runtime PID. These records do not make queued work recoverable after its owner exits.
+- Status reconciliation checks live process state and durable lifecycle records; `wait` polls the scoped read model until terminal or timeout. `[confirmed by code]`
 
-### Registry (`core/registry.ts`)
-- **Location**: `<cwd>/.pi/subagents/registry.json`, `{version:1, latestRunId?, latestRunDir?, runs:{}, agents:{}}`. `[confirmed by code]`
-- **Concurrent writers**: run recording and cleanup removal take a project-local
-  exclusive `registry.json.lock` (owner pid/token). They retry for at most two
-  seconds and reclaim a lock whose owner process is dead. A parseable lock whose
-  PID is still alive is never reclaimed solely because of lock age; this fails
-  closed on PID reuse rather than risking concurrent writers. Malformed owner
-  metadata must remain unchanged for 30 seconds before recovery. Writers then
-  read-modify-write while holding the lock.
-  Registry replacement is same-directory temp-file + rename, so readers see
-  either the previous complete JSON or the replacement, never a truncated write.
-  `[confirmed by code and core.test.ts]`
-- `resolveSubagentRunDir`: provided runDir → registry `latestRunDir` → scan `.pi/subagents/` by mtime. `[confirmed by code]`
-- `loadSubagentRegistry` still treats unreadable or malformed registry content as
-  empty so resolution safely falls back to directory scanning; normal registry
-  writers cannot create that state because replacement is atomic. `[confirmed by code]`
+### Durable records and lookup
+- Parent-session custom entries are folded in order to reconstruct scoped
+  records; the in-memory store overlays process handles and transient state.
+  Headless calls with a stable host session key use a deterministic UUID scope
+  and `.pi/subagents/<scope>/headless-parent.jsonl`; without a key, state is
+  process-local. A journal over 32 MiB or a non-ENOENT read failure is
+  diagnosed (without logging journal contents) and propagated; it is not
+  treated as an empty scope. Store hydration likewise propagates read errors
+  and remains retryable rather than caching a failed empty read. `[confirmed by code]`
+- `runDir` is a compatibility alias for a batch label, not a directory. Lookup
+  is scoped to the current parent session; agent id without a batch resolves to
+  the latest-launched matching record. Legacy timestamp run directories are
+  ignored and not migrated. `[confirmed by code]`
+- `/sub-open` opens only a terminal child session; it refuses a nonterminal
+  child so the interactive session and its running process cannot write the
+  same transcript concurrently. `[confirmed by commands.ts]`
 
 ### Cleanup (`core/cleanup.ts`) / Stop (`core/stop.ts`, `core/process.ts`)
-- Normal session shutdown stops that session's subagents but preserves run
-  directories, reports, QA screenshots/videos, bridged image attachments and
-  registry pointers. A newly opened session can still resolve retained results
-  by agent ID. Sibling-session agents are not stopped; reload/fork continue to
-  skip shutdown stopping. Process cancellation/ownership safeguards are unchanged.
-  Shutdown itself never authorizes evidence deletion. Explicit `subagents cleanup`
-  and Desktop's existing 72-hour background TTL/manual Clean policy remain
-  separate deletion mechanisms; this is not indefinite retention.
+- Session shutdown stops that session's subagents; it does not delete child
+  sessions or parent journal records. Sibling-session agents are not stopped;
+  reload/fork continue to skip shutdown stopping. Process cancellation/ownership
+  safeguards are unchanged. Explicit cleanup and Desktop cleanup are separate
+  deletion mechanisms; see [project-state cleanup](resource-registry-project-state.md).
   `[confirmed by index.ts and tools.test.ts]`
   Decision: [0043 — Preserve subagent evidence on session shutdown](../docs/decisions/0043-subagent-evidence-retention.md).
-- `findCleanupCandidates(runRoot, days=7, keep=20)`: only dirs where **all** agents have `exit_code` files, older than `days` by mtime, skipping the newest `keep`. `[confirmed by code]`
-- `deleteRunDirs` = `fs.rmSync(dir,{recursive:true,force:true})`. Cleanup tool refuses paths outside the canonical `.pi/subagents/` prefix and defaults to **dry-run** (needs `delete=true`). `[confirmed by code, tools/cleanup.ts]`
-- `stopAgents`: planned/retrying → writes `stop_requested`/`stop_signal`, removes retry files, writes result.md, `exit_code="stopped"`; running → signals the owned process group when `process_group` metadata exists, otherwise `terminateProcess(pid, signal)`. POSIX `process.kill`; Windows `taskkill /pid <pid> /T /F`. `validateStopSignal` allows only SIGTERM/SIGINT/SIGKILL. ESRCH handled gracefully. `[confirmed by code]`
+- Explicit `cleanup` removes legacy timestamp run directories and orphan session scopes, while preserving scopes with owned-launch state that must remain. It does not act as a migration or legacy reader. `[confirmed by code]`
+- `stopAgents` records stop state in the parent session and signals the tracked process/process group; it does not write stop/result sidecars. `validateStopSignal` allows only SIGTERM/SIGINT/SIGKILL. ESRCH handled gracefully. `[confirmed by code]`
 - With launcher-owned `process_group` metadata, `stopAgents` uses
   `terminateProcessTree`: POSIX signals the negative Pi PID (its process group),
   not every descendant. A descendant that starts a separate group/session is
@@ -1194,9 +1191,9 @@ supervisor's `alarm(15)` if the harness is slow, same reliance on prompt
 harness action as the existing receipt-gate design. G1/T3 remain blocked;
 runtime is unchanged.
 
-### Structured results (`core/structured-result.ts`) / Log limits (`core/log-limits.ts`)
-- On completion writes `result.json` (summary, findings, file refs, risks, next actions, confidence); `resultText` truncated at `maxResultBytes` (default 100KB); `result.md` is always full. `[confirmed by code]`
-- No RPC event transcript is written (the persisted child session is the full history; `events.jsonl` and `ASYNC_SUBAGENTS_MAX_EVENTS_BYTES` were removed). `progress.jsonl` holds lifecycle stages only (spawned, prompt_sent, live_send, timeout, shutdown_signal, owned_*, completed), not per-event lines; current tool activity is in-memory only and is not restored after a parent restart. `ASYNC_SUBAGENTS_DEBUG_LOGS` only forces keeping `stderr.log`. `stderr.log` default 8MB; RPC line max 8MB (oversized dropped with a marker). `[confirmed by code]`
+### Structured results and logs
+- Full result text is retained only in child sessions; the `result` action response is bounded to at most 50 KiB. Compact structured result data and parent-authored error/timeout/stop messages are stored in parent-session custom entries. Regular agents do not write result, progress, retry, or stderr sidecars. `[confirmed by code]`
+- RPC event transcripts are not written. Current tool activity and stderr tail are live in-memory state and are not restored after parent restart; lifecycle and structured state are represented by session custom entries. `[confirmed by code]`
 
 ## Public contracts / inputs / outputs
 
@@ -1208,55 +1205,40 @@ runtime is unchanged.
 - **send** `{runDir?, agentId, message, mode?: "followUp"|"steer"}` (internal `async_subagents_send`): live follow-up/steer for a running child, otherwise cold resume of a terminal child's persisted session; returns `details.delivery` (`live` with disposition, or `resume` with `turn`). See Current behavior §11a. `[confirmed by code, tools/send.ts, tools/subagents.ts]`
 - **status** `{runDir?, agentIds?}`, **wait** `{runDir?, agentIds?, timeout?, interval?, failFast?}`, **result** `{runDir?, agentId}`, **stop** `{runDir?, agentIds?, force?, signal?}`, **cleanup** `{runRoot?, days?, keep?, delete?}`. `[confirmed by code]`
 
-### Disk layout
-
-> **Legacy layout:** New child sessions are stored project-locally at
-> `.pi/subagents/<parentSessionId>/<child>.jsonl`; this run-tree layout remains
-> only for legacy runs. See [decision 0072](../docs/decisions/0072-session-native-subagents.md).
+### Storage layout
 
 ```
-<cwd>/.pi/subagents/
-  registry.json
-  registry.json.lock  (transient while updating)
-  <YYYY-MM-DDTHH-MM-SS>[-slug]/
-    prompts/<agentId>.md
-    <agentId>/
-      prompt.md, pid, started_at, project_cwd, subagent_type, launch.json (task incl. model, extraArgs, piArgs of the latest turn),
-      image_paths, session_file?, parent_session?, return_session?,
-      progress.jsonl, stderr.log, result.md, result.json, exit_code, finished_at,
-      process_group?  (non-Windows process-group leader PID),
-      stop_requested?, stop_signal?, timeout_ms?, timed_out_at?,
-      retry_count?, retry_pending?, next_retry_at?, retry.log?,
-      model_fallback_from?, model_fallback_to?, model_fallback.log?,
-      launch.json (fresh-launch spec for resume), turn_count?, turn_message.md?,
-      turns/<N>/  (archived artifacts of earlier turns after `send` cold resume)
-      sessions/   (legacy location used only when the parent has no session id;
-                   otherwise the child session lives at `.pi/subagents/<parentSessionId>/`
-                   and `session_file` points there. Child writes one `subagent_meta`
-                   custom entry from `PI_SUBAGENT_META` (incl. parentSession/parentSessionId);
-                   ACP accepts only `.jsonl` files directly in a UUID-named dir of this project.)
-  <parentSessionId>/  (UUID; child session files of one parent; Desktop background
-                   cleanup keeps it while the parent session exists, see
-                   specs/resource-registry-project-state.md)
-      ui-qa/flows/ (for ui-qa; unified flows plus native/TUI evidence)
-      ui-qa/browser/flows/ (for ui-qa; trusted browser backend workspace)
+<cwd>/.pi/subagents/<parent-scope>/
+  <child-session-id>.jsonl       # ordinary Pi session; child sole writer
+  headless-parent.jsonl          # only for stable-key headless scopes
+  owned/<batch>/<agentId>/...    # owned-launch file-based exception only
 ```
-`[confirmed by code]`
 
-`prompts/<agentId>.md` is the queued prompt copy and exists only while the
-agent is planned/queued. Once launched, that copy is deleted; the prompt remains
-at `<agentId>/prompt.md`. The `prompts/` directory itself is retained. A missing
-`retry_count` means zero retries, and the file is removed when the count is set
-to zero. A missing `todo-progress.json` means there is no plan; total-zero
-progress is not written, and clearing the plan removes the file. `started_at`,
-`finished_at`, and `exit_code` remain separate files. `[confirmed by code]`
+Parent state is persisted as custom entries in its Pi session, or in the
+headless journal when a stable host session key exists. No regular-agent
+run directories, sidecars, or registry are created. Disposable UI-QA/browser
+workspaces live at `.pi/artifacts/subagents/<batch>-<agentId>/`. See
+[decision 0072](../docs/decisions/0072-session-native-subagents.md).
+
+### ACP/Desktop child-session viewer
+
+ACP `pix/subagents/open_session` and `pix/subagents/session_state` expose a
+validated private child-todo snapshot read from persisted todo custom entries
+or `todo` tool results, including explicit clears. The scanner incrementally
+reads complete history in bounded chunks; it does not discard middle entries.
+The viewer also reports the child's recorded provider/model/thinking and
+queries quota through the existing model-usage path, with a bounded per-route
+one-minute cache. Viewing never starts a Pi runtime or mutates the child JSONL;
+quota unavailability does not suppress todo or model state. Desktop shows the
+child's quota and private todo in its status bar, never the parent's. Viewer
+configuration, todo clearing, session-usage inspection and manual Claude
+limit refresh remain unavailable. A read-only viewer can open a new draft tab
+(Plus or `session.new`/Cmd+T); this does not make the child writable or permit
+session mutation/startup from the viewer.
 
 ## Invariants
-- Agent IDs match `/^[A-Za-z0-9._-]+$/` and must not contain `..`. `[confirmed by code, paths.ts ~36-43]`
-- `exit_code` is a numeric string or literal `"stopped"`. `[confirmed by code]`
-- Registry `version` is always 1. `[confirmed by code]`
-- Concurrent `recordSubagentRun` and registry cleanup updates preserve unrelated
-  run and agent mappings. `[confirmed by code and core.test.ts]`
+- `agentId` identifies a launch record, not Pi's session UUID; repeated identifiers resolve according
+  to latest-launched order within the relevant scope. `[confirmed by code]`
 - Sub-agents never receive the `subagents` tool → recursive spawning is impossible. `[confirmed by code, tool-guard.ts]`
 - Sub-agents never keep the Claude provider's `pi_claude_code_provider_web_search` tool active (approved policy: no provider web search in any child). The Pix-maintained provider no longer registers it, even during `session_start`; the tool guard still excludes or blocks a copy exposed by a legacy provider as defense in depth. Restricted `--tools` lists also drop it. The opt-in real-Pi test checks the inventory actually handed to the provider for default, restricted and no-tools roles. `[confirmed by code, pi-claude-code-provider.ts and tool-guard.ts; confirmed by tests, extension.case.js and provider-child-inventory.test.ts]`
 - Semaphore is project-wide (keyed by resolved cwd). `[confirmed by code]`
@@ -1268,16 +1250,18 @@ progress is not written, and clearing the plan removes the file. `started_at`,
   agent contract]`
 
 ## Edge cases
-- **No runDir**: registry `latestRunDir` → mtime scan → throw if nothing. `[confirmed by code]`
+- **No runDir**: lookup is scoped to the current parent and resolves the latest-
+  launched matching agent; no project-wide mtime scan occurs. `[confirmed by code]`
 - **Implicit Antigravity model with isolated extensions**: if Antigravity is selected only through the model environment fallback or pi's persisted default, the child keeps `--no-extensions` and does not load `antigravity-auth`; callers must explicitly select an Antigravity model in task/CLI arguments. `[confirmed by code; confirmed by tests]`
 - **Oversized RPC lines**: agent_end oversized lines still trigger termination with a fallback result; others dropped with a marker. `[confirmed by code]`
-- **Retry + stop**: `stop_requested` cancels pending retries; stop also deletes `retry_pending`/`next_retry_at`. `[confirmed by code]`
+- **Retry + stop**: stop cancels pending retries and records stop state in the parent session. `[confirmed by code]`
 - **Windows termination**: `taskkill /T /F` (tree kill) with 1s timeout, fallback `process.kill`. `[confirmed by code]`
 
 ## Side effects
-- Writes the per-agent files listed above; deletes retry/stop metadata and the `sessions/` tree on respawn. `[confirmed by code]`
+- Writes child session transcripts, parent-session custom entries (or stable-key
+  headless journal), and owned-launch files when applicable. Regular agents do
+  not receive registry or lifecycle sidecars. `[confirmed by code]`
 - Spawns one `pi --mode rpc` child per task; SIGTERM primary, SIGKILL fallback. `[confirmed by code]`
-- On respawn (same runDir/agentId) unlinks prior exit_code/finished_at/result.*/stderr.log/legacy events.jsonl, pi_args, model, session_dir/session links/timeout+stop+retry metadata. `[confirmed by code, spawn.ts ~38-51]`
 - Sets `PI_MODEL_SUITABLE_TOOLS_PRESERVE_SELECTION`, `PI_TERMINAL_BELL_DISABLED`, `PI_TOOLS_SUITE_DISABLED_MODULES` in child env. `[confirmed by code]`
 
 ## Implementation
@@ -1318,7 +1302,6 @@ progress is not written, and clearing the plan removes the file. `started_at`,
 - `external/pi-tools-suite/src/async-subagents/core/retry.ts`
 - `external/pi-tools-suite/src/async-subagents/core/concurrency.ts`
 - `external/pi-tools-suite/src/async-subagents/core/state.ts`
-- `external/pi-tools-suite/src/async-subagents/core/registry.ts`
 - `external/pi-tools-suite/src/async-subagents/core/cleanup.ts`
 - `external/pi-tools-suite/src/async-subagents/core/stop.ts`
 - `external/pi-tools-suite/src/async-subagents/core/process.ts`
@@ -1386,25 +1369,21 @@ progress is not written, and clearing the plan removes the file. `started_at`,
 ## Gaps / risks
 1. **pid-check race**: `process.kill(pid,0)` is point-in-time; a process exiting
    between checks flips status on the next poll, not immediately. `[inferred]`
-2. **Externally corrupted registry fallback**: malformed registry content still
-   loads as empty and therefore loses registry history until the next write,
-   although normal writers use atomic replacement and cannot expose partial JSON.
-   `[confirmed by code]`
+2. **Headless recovery**: without a stable host session key, parent records are
+   process-local and cannot be recovered by a later process. `[confirmed by code]`
 3. **`model_fallback_from`/`model_fallback_to` are diagnostic metadata** and are
    not a durable source for later routing decisions. `[confirmed by code]`
 4. **Polling minimum interval is bounded in code**, so very short waits cannot
    become high-frequency busy polling. `[confirmed by code]`
 5. **External process death remains asynchronous**: a child killed outside the
    launcher is observed on the next state reconciliation/poll. `[inferred]`
-6. **`resolveSubagentRunDir` fallback scan is O(n)** over `.pi/subagents/` dirs
-   by mtime. `[inferred]`
 7. **Structured-result file-ref extraction is best-effort** and can produce
    false positives. `[confirmed by code]`
 
 ## Suggested verification
 1. Add an integration test for externally killed children across semaphore/state
    reconciliation boundaries.
-2. Decide whether corrupt `registry.json` should remain fail-open/empty or gain a
-   visible recovery/backup path, then test that contract.
+2. Headless invocations without a stable host session key are process-local;
+   callers needing cross-process recovery must provide a stable key.
 3. Keep opt-in real-subprocess E2E coverage for routing/model fallback and
    cleanup on supported CI/provider environments.

@@ -41,7 +41,11 @@ test("detached Pix subagents broker owns RPC pipes after CLI responds (offline f
 		}), { mode: 0o600 });
 		const fakePiSource = [
 			"#!/usr/bin/env node",
-			"import { appendFileSync, existsSync } from 'node:fs';",
+			"import { appendFileSync, existsSync, writeFileSync } from 'node:fs';",
+			"import path from 'node:path';",
+			"const args = process.argv.slice(2); const opt = name => args[args.indexOf(name)+1];",
+			"const sessionFile = args.includes('--session') ? opt('--session') : path.join(opt('--session-dir'), 'offline-session.jsonl');",
+			"if (!existsSync(sessionFile)) writeFileSync(sessionFile, '');",
 			`const diagnostic = text => { appendFileSync(${JSON.stringify(fixtureLog)}, text + '\\n'); console.error(text); };`,
 			"diagnostic('MOCK_PI_STARTED ' + JSON.stringify({ pid:process.pid, platform:process.platform, bun:process.versions.bun, release:process.env.PIX_HEADLESS_FIXTURE_RELEASE }));",
 			"let buffer = '';",
@@ -53,13 +57,14 @@ test("detached Pix subagents broker owns RPC pipes after CLI responds (offline f
 			"    const index = buffer.indexOf('\\n'); const line = buffer.slice(0,index); buffer = buffer.slice(index+1);",
 			"    const request = JSON.parse(line);",
 			"    diagnostic('MOCK_PI_REQUEST ' + request.type);",
-			"    if (request.type === 'get_state') console.log(JSON.stringify({ type: 'response', id: request.id, command: 'get_state', success: true, data: {} }));",
+			"    if (request.type === 'get_state') console.log(JSON.stringify({ type: 'response', id: request.id, command: 'get_state', success: true, data: { sessionFile } }));",
 			"    if (request.type === 'prompt') { const timer = setInterval(() => {",
 			`      if (!existsSync(${JSON.stringify(scratch)})) process.exit(1);`,
 			"      if (!existsSync(process.env.PIX_HEADLESS_FIXTURE_RELEASE)) return;",
 			"      clearInterval(timer);",
 			"      diagnostic('MOCK_PI_RELEASED');",
 			"      const message = { role:'assistant', content: [{type:'text',text:'MOCK_PI_COMPLETED'}], stopReason:'stop' };",
+			"      appendFileSync(sessionFile, JSON.stringify({ type:'message', message }) + '\\n');",
 			"      console.log(JSON.stringify({ type:'message_end', message }));",
 			"      console.log(JSON.stringify({ type:'agent_end', messages: [message] }));",
 			"      console.log(JSON.stringify({ type:'agent_settled' }));",
@@ -132,6 +137,23 @@ test("detached Pix subagents broker owns RPC pipes after CLI responds (offline f
 		const result = await call("subagents", { action: "result", agentId: "mock-agent", runDir });
 		expect(result.isError).not.toBe(true);
 		expect(result.content[0]?.text).toContain("MOCK_PI_COMPLETED");
+
+		// A cold send also returns after its CLI exits, while a new detached
+		// broker owns the resumed child's stdin and terminal receipt.
+		const firstSession = (await readHeadlessRecord(runDir, "mock-agent"))?.childSessionFile;
+		expect(typeof firstSession).toBe("string");
+		await rm(releaseFile);
+		const resumed = await call("subagents", { action: "send", agentId: "mock-agent", runDir, message: "Offline second turn" });
+		expect(resumed.isError).not.toBe(true);
+		expect(resumed.details).toMatchObject({ delivery: "resume", turn: 2 });
+		const queuedTurn = await readHeadlessRecord(runDir, "mock-agent");
+		expect(queuedTurn?.finishedAt).toBeUndefined();
+		expect(queuedTurn?.childSessionFile).toBe(firstSession);
+		const resumedStatus = await call("subagents", { action: "status", runDir });
+		expect(resumedStatus.details.agents.find((agent: { id: string }) => agent.id === "mock-agent")?.status).toBe("running");
+		await writeFile(releaseFile, "release");
+		await waitForAgent(runDir, "mock-agent");
+		expect((await readHeadlessRecord(runDir, "mock-agent"))?.turn).toBe(2);
 
 		// Previously this always failed with "No configured candidate is
 		// available with confirmed image support": headless omitted the

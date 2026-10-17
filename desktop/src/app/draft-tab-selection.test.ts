@@ -34,7 +34,7 @@ describe("selecting an existing tab during draft materialization", () => {
     let draft!: ReturnType<typeof createDraftSession>;
     draft = createDraftSession({
       client: () => client as never, workspace: () => "/work", statusReady: () => true,
-      operationRunning: () => false, canUseSession: () => false,
+      operationRunning: () => false,
       activeSessionId: () => current, setActiveSessionId: (id) => { current = id; },
       saveActiveTranscript: vi.fn(), resetActiveConversation: vi.fn(), closeProjectSelector: vi.fn(),
       closeSessionSelector: vi.fn(), cancelHistoryLoad: vi.fn(), resetModelDraft: vi.fn(),

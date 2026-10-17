@@ -14,10 +14,10 @@ let scheduled = false;
 let finalized = false;
 await runSubagentsBroker({
 	async execute(_tool, params) {
-		if (params.action === "spawn") {
+		if (params.action === "spawn" || params.action === "send") {
 			for (const task of tasks) updateRecord(runDir, task.id, { status: "running", turn: 1 });
 			if (mode === "multiple") finish("finished-first", "0");
-			return { content: [], details: { runDir, tasks } };
+			return { content: [], details: mode === "resume" ? { runDir, delivery: "resume", agentId: "agent" } : { runDir, tasks } };
 		}
 		if (!scheduled) {
 			scheduled = true;
@@ -45,7 +45,7 @@ await runSubagentsBroker({
 		if (mode === "multiple") agents.unshift({ id: "finished-first", status: "done" });
 		return { content: [], details: { agents } };
 	},
-}, { action: "spawn", tasks: mode === "resolved-id" ? [{}] : tasks }, path.join(cwd, "reply.json"));
+}, { action: mode === "resume" ? "send" : "spawn", tasks: mode === "resolved-id" ? [{}] : tasks }, path.join(cwd, "reply.json"));
 const record = getRecord(runDir, "agent");
 const observed = !record ? "removed" : record.status === "stopped" ? "stopped" : String(record.exitCode);
 writeFileSync(path.join(cwd, "observed-receipt"), observed);

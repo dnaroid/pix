@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { render } from "svelte/server";
+import type { RuntimeStatus } from "../../lib/acp-client";
 import UsagePanel from "./UsagePanel.svelte";
+import UsageProviderLimits from "./UsageProviderLimits.svelte";
 import panelSource from "./UsagePanel.svelte?raw";
 import viewSource from "./UsageSourceView.svelte?raw";
 import sectionSource from "./UsageSection.svelte?raw";
@@ -79,8 +81,78 @@ describe("Usage panel", () => {
   it("subscribes to changes and disposes the store on teardown", () => {
     expect(panelSource).toContain("subscribeUsageStatsChanged((notification) => store.handleChanged(notification))");
     expect(panelSource).toContain("store.dispose()");
+    expect(panelSource).toContain("quotas.dispose()");
+    expect(panelSource).toContain("void quotas.refresh()");
     expect(panelSource).not.toContain('role="tablist"');
     expect(panelSource).toContain('store.snapshot("pix-sessions")');
+    expect(panelSource).toContain("sections.dispose()");
+    expect(sectionSource).toContain("sections?.setOpen(sectionId, event.currentTarget.open)");
+  });
+
+  it("shows the same provider hourly and weekly scales even without historical usage", () => {
+    const now = Date.now();
+    const { body } = render(UsageProviderLimits, { props: { statuses: [{
+      sessionId: "session", modelUsageRefresh: "ready", modelUsage: {
+        provider: "anthropic", modelKey: "pi-claude-code-provider/claude-opus", accountEmail: "user@example.com", updatedAt: now,
+        hourly: { remainingPercent: 0, resetAt: now + 42 * 60_000, windowSeconds: 18_000, hasKnownWindowDuration: true },
+        weekly: { remainingPercent: 58, resetAt: now + 4 * 86_400_000, windowSeconds: 604_800, hasKnownWindowDuration: true },
+      },
+    }] } });
+    for (const text of ["Provider limits", "Anthropic", "user@example.com", "Hourly", "Weekly", "58%", "data-hourly-dividers", "data-quota-cycle-dates", "data-weekly-now-marker"]) {
+      expect(body).toContain(text);
+    }
+    expect(body).not.toContain("claude-opus");
+    expect(body).not.toMatch(/>Limits<|>LIMITS</u);
+    expect(panelSource.indexOf("<UsageProviderLimits")).toBeLessThan(panelSource.indexOf("{#if snapshot && hasData}"));
+  });
+
+  it("uses stable disclosure ids independent of metric labels", () => {
+    for (const id of ["overview", "activity", "daily", "models", "sessions", "cache"]) expect(viewSource).toContain(`sectionId="${id}"`);
+    const { body } = render(UsageProviderLimits, { props: { statuses: [] } });
+    expect(body).toContain("No provider limits available yet.");
+    expect(body).not.toContain("data-hourly-remaining-fill");
+  });
+
+  it("shows Anthropic and Z.ai even when their quota requests are unavailable or pending", () => {
+    const { body } = render(UsageProviderLimits, { props: { statuses: [], entries: [
+      { provider: "anthropic", modelRef: "anthropic/claude", state: "unavailable" },
+      { provider: "zhipu", modelRef: "zai/glm", state: "loading" },
+    ] } });
+    for (const text of ["Anthropic", "Z.ai", "Quota unavailable for this account.", "Loading limits…"]) expect(body).toContain(text);
+    expect(body).not.toContain("Limits appear when a session");
+  });
+
+  it("renders a single Antigravity chart without model names or repeated headings", () => {
+    const now = Date.now();
+    const models = ["antigravity-claude-opus-4-6-thinking", "antigravity-claude-sonnet-4-6-thinking", "antigravity-claude-sonnet-4-6"];
+    const { body } = render(UsageProviderLimits, { props: {
+      statuses: models.map((model): RuntimeStatus => ({ sessionId: model, modelUsageRefresh: "ready", modelUsage: {
+        provider: "google-antigravity", modelKey: `google-antigravity/${model}`, updatedAt: now,
+        weekly: { remainingPercent: 100, resetAt: now + 7 * 86_400_000, windowSeconds: 604_800, hasKnownWindowDuration: true },
+      } })),
+      entries: [
+        { provider: "google-antigravity", modelRef: "google-antigravity/another-model", state: "loading" },
+        { provider: "google-antigravity", modelRef: "google-antigravity/failed-model", state: "failed" },
+      ],
+    } });
+    expect(body.match(/>Antigravity</gu)).toHaveLength(1);
+    expect(body.match(/data-usage-limit-bars/gu)).toHaveLength(1);
+    expect(body.match(/data-quota-calendar/gu)).toHaveLength(1);
+    for (const model of models) expect(body).not.toContain(model);
+    expect(body).not.toMatch(/>Limits<|>LIMITS</u);
+    expect(body).not.toContain("Loading limits…");
+    expect(body).not.toContain("Could not refresh limits.");
+  });
+
+  it("groups multiple missing Antigravity models into one provider placeholder", () => {
+    const { body } = render(UsageProviderLimits, { props: { statuses: [], entries: [
+      { provider: "google-antigravity", modelRef: "google-antigravity/first", state: "unavailable" },
+      { provider: "google-antigravity", modelRef: "google-antigravity/second", state: "loading" },
+      { provider: "google-antigravity", modelRef: "google-antigravity/third", state: "failed" },
+    ] } });
+    expect(body.match(/>Antigravity</gu)).toHaveLength(1);
+    expect(body.match(/Loading limits…/gu)).toHaveLength(1);
+    expect(body).not.toContain("data-usage-limit-bars");
   });
 
   it("uses the Pix listbox and chevron disclosures, never a native select", () => {

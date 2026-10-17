@@ -16,12 +16,15 @@
     windows,
     now,
     stale = false,
+    showHeading = true,
     creditDeadlines = [],
   }: {
     /** Account quota windows only (hourly/weekly); header-derived rate windows do not belong here. */
     windows: readonly { key: string; label: "H" | "W"; window: ModelUsageLimitWindow }[];
     now: number;
     stale?: boolean;
+    /** The Usage panel already identifies the provider above the chart. */
+    showHeading?: boolean;
     /** Expiry instants (ms) of available reset credits; shown on the weekly scale when in range. */
     creditDeadlines?: readonly number[];
   } = $props();
@@ -35,10 +38,12 @@
 
 {#if windows.length}
   <section class="mb-3 border-b border-border pb-3" aria-label="Account usage limits" data-usage-limit-bars>
-    <div class="mb-1.5 flex items-center justify-between gap-2">
-      <span class="text-xs font-medium tracking-wide text-muted-foreground uppercase">Limits</span>
-      {#if stale}<span class="inline-flex items-center gap-1 text-muted-foreground"><Hourglass class="h-2.5 w-2.5" aria-hidden="true" />Cached</span>{/if}
-    </div>
+    {#if showHeading || stale}
+      <div class="mb-1.5 flex items-center justify-between gap-2">
+        {#if showHeading}<span class="text-xs font-medium tracking-wide text-muted-foreground uppercase">Limits</span>{/if}
+        {#if stale}<span class="inline-flex items-center gap-1 text-muted-foreground"><Hourglass class="h-2.5 w-2.5" aria-hidden="true" />Cached</span>{/if}
+      </div>
+    {/if}
     <div class="flex flex-col gap-2">
       {#each windows as { key, label, window } (key)}
         {@const tone = modelUsageTone(window.remainingPercent)}

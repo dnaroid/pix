@@ -776,6 +776,19 @@ setTimeout(() => {}, 1000);
 });
 
 describe.serial("subagents tool", () => {
+	test.serial("describes runDir as a parent-scoped batch, not a filesystem directory", async () => {
+		const { registerSubagentsTool } = await import("../../src/async-subagents/tools/subagents.js");
+		const pi = new FakePi();
+		registerSubagentsTool(pi as any, new Map(), () => {});
+		const properties = pi.tools.get("subagents").parameters.properties;
+		const description = properties.runDir.schema.options.description;
+		expect(description).toContain("batch key");
+		expect(description).toContain("not a directory");
+		expect(description).toContain("parent session entries");
+		expect(description).not.toContain("registry.json");
+		expect(properties.slug.schema.options.description).toContain("batch key");
+	});
+
 		test.serial("dispatches actions through one public tool", async () => {
 		const { registerSubagentsTool } = await import("../../src/async-subagents/tools/subagents.js");
 		const pi = new FakePi();

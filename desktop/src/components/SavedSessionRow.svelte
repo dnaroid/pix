@@ -57,7 +57,6 @@
         {#if selected}<Check class="h-3 w-3 shrink-0 text-primary" aria-hidden="true" />{/if}
         {#if subagent}
           <Bot class="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
-          <span class="shrink-0 rounded bg-muted px-1 text-[10px] leading-4 font-normal text-muted-foreground">Sub-agent · {subagent.agentId}</span>
         {:else if row.depth === 0 && sessionIsFork(row.session)}<GitFork class="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />{/if}
         <span class="min-w-0 truncate">{title}</span>
       </strong>

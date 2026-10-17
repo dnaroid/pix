@@ -16,6 +16,19 @@ function html(index: number, collapsed = false, disabled = false): string {
 }
 
 describe("SavedSessionRow", () => {
+  it("shows the sub-agent icon and session title without a redundant gray badge", () => {
+    const row = buildSessionTree([{ sessionId: "viewer", cwd: "/project", title: "Review results", _meta: {
+      "pix.subagent": { runDir: "/project/.pi/subagents/run", agentId: "reviewer", parentSessionId: "parent" },
+    } }])[0]!;
+    const result = render(SavedSessionRow, { props: {
+      row, date: "09.10.2026", onSelect: () => {}, onToggle: () => {}, onActivate: () => {},
+    } }).body;
+    expect(result).toContain("Review results");
+    expect(result).toContain("lucide-bot");
+    expect(result).not.toContain("Sub-agent ·");
+    expect(result).not.toContain("reviewer");
+  });
+
   it("renders decorative SVG geometry instead of text connectors", () => {
     const child = html(1);
     expect(child).toContain('<svg');

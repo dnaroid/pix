@@ -83,8 +83,13 @@ function deriveRecordStatus(state: AgentState, record: SubagentRecord, activeHer
 		if (status === "retrying" && record.nextRetryAt) state.nextRetryAt = record.nextRetryAt;
 		return;
 	}
-	// Not owned by this process (parent restart/reload in another process):
-	// a live PID keeps it running; a lost queue/retry timer cannot resume.
+	// Separate headless calls can observe a queue/retry owned by a live broker.
+	if ((status === "planned" || status === "retrying") && record.ownerPid !== undefined && pidAlive(record.ownerPid)) {
+		state.status = status;
+		if (status === "retrying" && record.nextRetryAt) state.nextRetryAt = record.nextRetryAt;
+		return;
+	}
+	// A live child PID keeps it running; a dead owner loses its queue/timer.
 	if (status === "running" && record.pid !== undefined && pidAlive(record.pid)) state.status = "running";
 	else state.status = "stopped";
 }

@@ -203,7 +203,7 @@ export function spawnAgent(
 		parentSession: options.parentSession,
 		status: "running",
 		startedAt: isoNow(),
-		exitCode: null, finishedAt: null, nextRetryAt: null, pid: null, processGroup: null,
+		exitCode: null, finishedAt: null, nextRetryAt: null, pid: null, processGroup: null, ownerPid: null,
 		stopRequested: null, stopSignal: null, timedOut: null, structured: null, message: null, stderrPreview: null,
 	});
 	updateLive(runDir, task.id, { active: true, resultText: undefined, stderrTail: undefined, lastActivity: undefined, todoProgress: undefined, launchArgs: [...piArgs] });
@@ -1068,4 +1068,3 @@ function appendEnvList(value: string | undefined, items: readonly string[]): str
 	const existing = value?.trim();
 	return existing ? `${existing},${items.join(",")}` : items.join(",");
 }
-

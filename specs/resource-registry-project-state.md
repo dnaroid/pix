@@ -273,7 +273,10 @@ JSONC/task overlay import or fallback.
 - Cleanup preserves the canonical `agents/`, `plans/`, `search/`, `skills/`, and
   `task-attachments/` trees, but removes every entry recursively inside
   `.pi/artifacts/` and `.pi/subagents/` while leaving those two container
-  directories in place.
+  directories in place. Subagent cleanup preserves any scope containing
+  owned-launch records; Manual Clean removes its other contents but retains
+  `owned/` (unknown ownership fails closed) until async-subagent cleanup proves
+  those launches drained and retired.
 - `.pi/search/index.sqlite` is durable universal-search state, not disposable
   output. Manual Clean and TTL cleanup preserve the complete `search/` tree,
   including SQLite WAL/SHM sidecars. Session deletion prunes index rows; it does

@@ -4,8 +4,10 @@
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import FolderPlus from "@lucide/svelte/icons/folder-plus";
+  import Search from "@lucide/svelte/icons/search";
   import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
-  import { onDestroy, onMount } from "svelte";
+  import { onDestroy, onMount, tick } from "svelte";
+  import { searchRecentProjects } from "../lib/project-switcher-search";
   import {
     isTypeaheadKey,
     menuFocusIndex,
@@ -61,6 +63,10 @@
   let windowFocused = $state(true);
   let reportedMinimumWidth = 0;
   let menu = $state<HTMLDivElement | null>(null);
+  let searchInput = $state<HTMLInputElement | null>(null);
+  let searchQuery = $state("");
+  let menuAvailableHeight = $state(0);
+  const filteredProjects = $derived(searchRecentProjects(recentProjects, searchQuery));
   let menuTypeaheadQuery = "";
   let menuTypeaheadTimer: number | null = null;
   let observedWorkspace: string | undefined;
@@ -68,6 +74,15 @@
   onDestroy(() => {
     if (menuTypeaheadTimer !== null) window.clearTimeout(menuTypeaheadTimer);
   });
+
+  $effect(() => {
+    if (!menu) return;
+    updateMenuHeight();
+  });
+
+  function updateMenuHeight(): void {
+    if (menu) menuAvailableHeight = Math.max(0, window.innerHeight - menu.getBoundingClientRect().top - 8);
+  }
 
   $effect(() => {
     const nextWorkspace = workspace;
@@ -113,9 +128,16 @@
     return Number.isFinite(parsed) ? parsed : 0;
   }
 
-  function toggle(): void {
-    if (!open) onOpen?.();
+  function toggle(focusSearch = true): void {
+    if (!open) {
+      searchQuery = "";
+      menuTypeaheadQuery = "";
+      onOpen?.();
+    }
     open = !open;
+    if (open && focusSearch) void tick().then(() => {
+      if (open) searchInput?.focus();
+    });
   }
 
   export function close(): void {
@@ -175,7 +197,7 @@
   function handleTriggerKeydown(event: KeyboardEvent): void {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
     event.preventDefault();
-    if (!open) toggle();
+    if (!open) toggle(false);
     requestAnimationFrame(() => {
       const items = projectMenuNavigationItems();
       const index = menuFocusIndex(items, -1, event.key);
@@ -213,6 +235,16 @@
       close();
       return;
     }
+    if (event.target === searchInput) {
+      if (event.isComposing) return;
+      if (event.key === "Enter") {
+        event.preventDefault();
+        if (filteredProjects.length && !currentWindowDisabled) selectProject(filteredProjects[0]!);
+        return;
+      }
+      // Preserve native editing, including Home/End and printable characters.
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    }
     const nextIndex = menuFocusIndex(items, currentIndex, event.key);
     if (nextIndex !== null) {
       event.preventDefault();
@@ -246,6 +278,7 @@
   onkeydown={handleWindowKeydown}
   onfocus={() => windowFocused = true}
   onblur={() => windowFocused = false}
+  onresize={updateMenuHeight}
 />
 
 <div
@@ -268,7 +301,7 @@
       data-project-badge
       data-project-logo={projectIcons.has(workspace) || undefined}
       data-window-inactive={!windowFocused}
-      onclick={toggle}
+      onclick={() => toggle()}
       oncontextmenu={handleBadgeContextmenu}
       onkeydown={handleTriggerKeydown}
     >{#if projectIcons.get(workspace)}<img class="h-full w-full rounded-[inherit] object-cover" src={projectIcons.get(workspace)} alt="" draggable="false" />{:else}{projectAbbreviation(workspace)}{/if}</button>
@@ -281,7 +314,7 @@
       aria-label={workspace ? `Change project, current project: ${projectName(workspace)}` : "Choose project"}
       aria-haspopup="menu"
       aria-expanded={open}
-      onclick={toggle}
+      onclick={() => toggle()}
       onkeydown={handleTriggerKeydown}
     >
       <span bind:this={textSlot} class="min-w-0 flex-1">
@@ -302,25 +335,38 @@
     <div
       bind:this={menu}
       class={[
-        "grid max-h-[min(360px,46vh)] grid-rows-[auto_minmax(0,1fr)_auto] bg-sidebar",
+        "grid grid-rows-[auto_minmax(0,1fr)_auto] overflow-y-auto bg-sidebar",
         variant === "titlebar"
           ? "absolute left-0 top-full z-50 mt-1 w-80 max-w-[calc(100vw-16px)] overflow-hidden rounded-md border border-sidebar-border shadow-xl"
           : "border-t border-sidebar-border",
       ]}
+      style:max-height={`${menuAvailableHeight}px`}
       role="menu"
       tabindex="-1"
       aria-label="Select project"
       onkeydown={handleMenuKeydown}
     >
-      <div class="flex h-7 items-center px-2.5 text-xs font-medium text-muted-foreground">
-        <span>Recent projects</span>
-        <span class="ml-auto font-mono font-normal tracking-normal opacity-70">{recentProjects.length}/{MAX_RECENT_PROJECTS}</span>
+      <div>
+        <div class="flex h-7 items-center px-2.5 text-xs font-medium text-muted-foreground">
+          <span>Recent projects</span>
+          <span class="ml-auto font-mono font-normal tracking-normal opacity-70">{recentProjects.length}/{MAX_RECENT_PROJECTS}</span>
+        </div>
+        <label class="mx-1.5 mb-1.5 flex h-8 items-center gap-2 rounded-md border border-input bg-background px-2">
+          <Search class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <input
+            bind:this={searchInput}
+            bind:value={searchQuery}
+            aria-label="Search projects"
+            placeholder="Search projects…"
+            class="min-w-0 flex-1 bg-transparent text-xs outline-none"
+          />
+        </label>
       </div>
 
-      <div class="min-h-0 overflow-y-auto px-1.5 pb-1.5">
-        {#each recentProjects as project (project)}
+      <div class="max-h-[358px] min-h-0 overflow-y-auto px-1.5 pb-1.5">
+        {#each filteredProjects as project (project)}
           {@const selected = project === workspace}
-          <div class={["group grid grid-cols-[minmax(0,1fr)_28px] rounded-md", selected && "bg-panel-selected"]}>
+          <div class={["group grid h-11 grid-cols-[minmax(0,1fr)_28px] rounded-md", selected && "bg-panel-selected"]}>
             <button
               class="grid min-w-0 grid-cols-[22px_minmax(0,1fr)_14px] items-center gap-1.5 rounded-md px-1.5 py-1.5 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:hover:bg-transparent"
               data-project-option
@@ -356,7 +402,7 @@
             ><ExternalLink class="h-3.5 w-3.5" aria-hidden="true" /></button>
           </div>
         {:else}
-          <p class={compactEmptyStateClass}>No recent projects</p>
+          <p class={compactEmptyStateClass}>{searchQuery.trim() ? "No matching projects" : "No recent projects"}</p>
         {/each}
       </div>
 

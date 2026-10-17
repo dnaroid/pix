@@ -13,7 +13,6 @@ type DraftSessionOptions = {
   workspace: () => string;
   statusReady: () => boolean;
   operationRunning: () => boolean;
-  canUseSession: () => boolean;
   activeSessionId: () => string | null;
   setActiveSessionId: (sessionId: string | null) => void;
   saveActiveTranscript: (sessionId: string) => void;
@@ -120,7 +119,7 @@ export function createDraftSession(options: DraftSessionOptions) {
   }
 
   async function openStartTab(): Promise<void> {
-    if (!options.canUseSession()) return;
+    if (!options.statusReady() || !options.workspace() || options.operationRunning() || materializing) return;
     if (open) {
       activate();
       await tick();

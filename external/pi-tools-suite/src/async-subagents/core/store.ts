@@ -38,6 +38,8 @@ export interface SubagentRecordPatch {
 	retryCount?: number;
 	nextRetryAt?: string | null;
 	pid?: number | null;
+	/** Runtime holding the semaphore queue/retry timer (not the child PID). */
+	ownerPid?: number | null;
 	processGroup?: boolean | null;
 	childSessionFile?: string | null;
 	parentSession?: string;
@@ -164,16 +166,12 @@ export function hydrateFromManager(manager: unknown): void {
 	if (typeof manager !== "object" || manager === null) return;
 	const state = store();
 	if (state.hydrated.has(manager)) return;
-	state.hydrated.add(manager);
 	const reader = manager as ManagerLike;
-	let entries: ReadonlyArray<{ type?: string; customType?: string; data?: unknown }>;
-	let fallbackCwd: string | undefined;
-	try {
-		entries = reader.getEntries?.() ?? [];
-		fallbackCwd = reader.getCwd?.();
-	} catch {
-		return;
-	}
+	// A failed journal read must not look like an empty scope or permanently
+	// mark the manager hydrated. The caller may retry after fixing storage.
+	const entries = reader.getEntries?.() ?? [];
+	const fallbackCwd = reader.getCwd?.();
+	state.hydrated.add(manager);
 	const fallbackScope = resolveScope(manager);
 	const folded = new Map<string, SubagentRecord>();
 	for (const entry of entries) {
@@ -243,6 +241,26 @@ export function updateRecord(runDir: string, agentId: string, patch: SubagentRec
 
 export function getRecord(runDir: string, agentId: string): SubagentRecord | undefined {
 	return store().runs.get(runDir)?.get(agentId);
+}
+
+/** Refresh only cancellation before relaunch; live records otherwise remain authoritative.
+ * Headless writers read their append-only journal anew, including stops from another CLI.
+ */
+export function recordStopRequested(runDir: string, agentId: string): boolean {
+	const record = getRecord(runDir, agentId);
+	if (!record) return true;
+	if (record.stopRequested) return true;
+	const writer = store().writers.get(recordKey(runDir, agentId)) as ManagerLike | undefined;
+	let stopped = false;
+	for (const entry of writer?.getEntries?.() ?? []) {
+		if (entry.type !== "custom" || entry.customType !== SUBAGENT_RECORD_ENTRY) continue;
+		const data = entry.data as { version?: number; scope?: string; batch?: string; agentId?: string; stopRequested?: boolean | null } | undefined;
+		if (data?.version !== 1 || data.scope !== record.scope || data.batch !== record.batch || data.agentId !== agentId) continue;
+		if (data.stopRequested !== undefined) stopped = data.stopRequested === true;
+	}
+	// Adopt the remote cancellation in memory without echoing its journal patch.
+	if (stopped) record.stopRequested = true;
+	return stopped;
 }
 
 /** Records of one batch in launch order. */

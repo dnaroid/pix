@@ -281,7 +281,16 @@
                   {#if thoughtDuration}<span class="shrink-0 text-muted-foreground/45">{thoughtDuration}</span>{/if}
                 </span>
               </summary>
-              <div class="ml-[7px] pl-2.5 text-muted-foreground">
+              <div class="relative ml-[7px] pl-2.5 text-muted-foreground">
+                <button
+                  type="button"
+                  aria-label="Collapse thinking"
+                  class="group/thought-gutter absolute inset-y-0 -left-[7px] z-10 flex w-[14px] cursor-pointer justify-center focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-ring"
+                  onclick={(event) => {
+                    const details = (event.currentTarget as HTMLButtonElement).closest("details");
+                    if (details) { details.open = false; details.querySelector("summary")?.focus(); }
+                  }}
+                ><span class="h-full w-px bg-transparent transition-colors duration-150 group-hover/thought-gutter:bg-code-border group-focus-visible/thought-gutter:bg-foreground/50" aria-hidden="true"></span></button>
                 <MarkdownText text={item.text} compact dense fitTables {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />
               </div>
             </details>

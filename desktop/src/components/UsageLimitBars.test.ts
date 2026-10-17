@@ -74,6 +74,15 @@ describe("UsageLimitBars", () => {
     expect(body).toContain("Cached");
   });
 
+  it("can omit the repeated heading without losing the chart or cached indicator", () => {
+    const props = { windows: [{ key: "W", label: "W" as const, window: weekly }], now };
+    expect(render(UsageLimitBars, { props }).body).toContain(">Limits<");
+    const { body } = render(UsageLimitBars, { props: { ...props, showHeading: false, stale: true } });
+    expect(body).not.toContain(">Limits<");
+    expect(body).toContain("Cached");
+    expect(body).toContain("data-quota-calendar");
+  });
+
   it("explains an exhausted passed hourly window without claiming replenishment", () => {
     const { body } = render(UsageLimitBars, { props: { windows: [{ key: "H", label: "H", window: { ...hourly, remainingPercent: 0, resetAt: now } }], now } });
     expect(body).toContain("width: 0%");

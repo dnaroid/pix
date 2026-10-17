@@ -22,8 +22,9 @@
 - Store disposable task output (test logs, scratch reports, mockups, captures)
   in unique run/task directories under the current project's `.pi/artifacts/`.
   Never create project-root `artifacts/` or use `.artifacts/` for agent scratch
-  output. Harness-owned subagent/QA evidence stays under `.pi/subagents/`;
-  release/build pipelines keep their explicitly configured `.artifacts/` paths.
+  output. Subagent QA workspaces/evidence live under `.pi/artifacts/subagents/`;
+  child sessions and protected owned-launch records live under `.pi/subagents/`.
+  Release/build pipelines keep their explicitly configured `.artifacts/` paths.
   User-requested deliverables belong at the requested path, not in disposable
   storage. Apply this rule to new prompts, role profiles, examples and harness
   defaults; custom prompt overrides must repeat it when replacing base guidance.

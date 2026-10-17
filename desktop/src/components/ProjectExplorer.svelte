@@ -1,6 +1,8 @@
 <script lang="ts">
   import { emptyStateClass } from "../lib/status-text";
-  import { dialogCancelButtonClass, dialogPrimaryButtonClass } from "../lib/dialog";
+  import { createDiagnosticLogger } from "../lib/diagnostic-logging";
+  import ProjectExplorerNameInput from "./ProjectExplorerNameInput.svelte";
+  import { createProjectExplorerNameEditor } from "./project-explorer-name-editor.svelte";
   import { invoke, isTauri } from "@tauri-apps/api/core";
   import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
   import { confirmDesktopAction } from "../lib/confirm-action";
@@ -72,8 +74,6 @@
   } = $props();
 
   let treeRoot = $state<HTMLDivElement | null>(null);
-  let nameDialogElement = $state<HTMLDialogElement | null>(null);
-  let nameInputElement = $state<HTMLInputElement | null>(null);
   const operations = createProjectExplorerOperations();
   let operationError = $state<string | null>(null);
   let canIgnoreEntry = $state(false);
@@ -88,12 +88,6 @@
   let searchGeneration = 0;
   let expansionSaveTail: Promise<void> = Promise.resolve();
   let observedOperationWorkspace: string | undefined;
-  let nameDialog = $state<{
-    mode: "rename" | "new-file" | "new-directory";
-    entry: ProjectTreeEntry;
-    value: string;
-    error: string | null;
-  } | null>(null);
   const dragController = createProjectExplorerDragController();
   const treeController = createProjectExplorerTreeController({
     workspace: () => workspace,
@@ -108,6 +102,22 @@
     clearDrag: dragController.clear,
   });
   const treeState = treeController.state;
+  const diagnostics = createDiagnosticLogger(() => ({ workspace }));
+  const nameEditor = createProjectExplorerNameEditor({
+    workspace: () => workspace,
+    operations,
+    tree: treeController,
+    prepare: () => { menuController.close(); clearSearch(); },
+    invoke: (command, args) => invoke<ProjectTreeEntry>(command, args),
+    onOpenFile: (path) => onOpenFile(path),
+    onError: (error) => {
+      diagnostics.report(error, "project-explorer:name-operation-failed");
+      operationError = errorMessage(error);
+    },
+    onSuccess: clearOperationError,
+    onFinish: () => { void gitRefresh.request(); },
+  });
+  const nameState = nameEditor.state;
   export async function revealPath(path: string): Promise<void> {
     searchQuery = "";
     await treeController.revealPath(path);
@@ -162,6 +172,7 @@
   });
 
   onDestroy(() => {
+    nameEditor.dispose();
     operationGeneration += 1;
     operations.invalidate();
     clipboardReader.invalidate();
@@ -190,8 +201,7 @@
     searchError = null;
     entryClipboard = null;
     clipboardReader.invalidate();
-    nameDialogElement?.close();
-    nameDialog = null;
+    nameEditor.invalidate();
     menuController.close();
   });
 
@@ -327,10 +337,6 @@
     return entry.kind === "directory" ? entry.path : parentDirectory(entry.path);
   }
 
-  function sameOrDescendantPath(path: string, prefix: string): boolean {
-    return path === prefix || path.startsWith(`${prefix}/`);
-  }
-
   function canPasteInto(entry: ProjectTreeEntry): boolean {
     return operations.canStart([{ path: destinationDirectory(entry), kind: "tree" }])
       && canPasteProjectEntry(entryClipboard, workspace, destinationDirectory(entry));
@@ -391,12 +397,12 @@
       "Toggle Folder": () => runMenuOpen(entry),
       "Open": () => runMenuOpen(entry),
       "Open in Browser": () => openEntryInBrowser(entry),
-      "New File…": () => openNameDialog("new-file", entry),
-      "New Folder…": () => openNameDialog("new-directory", entry),
+      "New File…": () => nameEditor.open("new-file", entry),
+      "New Folder…": () => nameEditor.open("new-directory", entry),
       "Copy": () => copyEntry(entry),
       "Paste": () => pasteEntry(entry),
       "Duplicate": () => duplicateEntry(entry),
-      "Rename…": () => openNameDialog("rename", entry),
+      "Rename…": () => nameEditor.open("rename", entry),
       "Copy Relative Path": () => copyPath(entry),
       "Copy Absolute Path": () => copyPath(entry, true),
       "Add to .gitignore": () => ignoreEntry(entry),
@@ -436,7 +442,7 @@
     }
     if (!event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.key === "F2") {
       event.preventDefault();
-      if (entry.path) openNameDialog("rename", entry);
+      if (entry.path) nameEditor.open("rename", entry);
       return;
     }
     if (!event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && event.key === "Delete") {
@@ -642,88 +648,6 @@
     }
   }
 
-  function openNameDialog(mode: "rename" | "new-file" | "new-directory", entry: ProjectTreeEntry): void {
-    if (mode === "rename" ? !canMutate(entry) : !canCreateIn(entry)) return;
-    menuController.close();
-    nameDialog = { mode, entry, value: mode === "rename" ? entry.name : "", error: null };
-    const dialog = nameDialog;
-    void tick().then(() => {
-      if (nameDialog !== dialog) return;
-      nameDialogElement?.showModal();
-      nameInputElement?.focus();
-      if (mode === "rename") nameInputElement?.select();
-    });
-  }
-
-  function closeNameDialog(): void {
-    nameDialogElement?.close();
-    nameDialog = null;
-  }
-
-  async function submitNameDialog(): Promise<void> {
-    const dialog = nameDialog;
-    if (!dialog) return;
-    const name = dialog.value.trim();
-    if (!name) {
-      dialog.error = "Enter a file or folder name.";
-      return;
-    }
-    const requestWorkspace = workspace;
-    const parent = dialog.mode === "rename" ? parentDirectory(dialog.entry.path) : destinationDirectory(dialog.entry);
-    const target = parent ? `${parent}/${name}` : name;
-    const claims: ProjectOperationClaim[] = dialog.mode === "rename"
-      ? [{ path: dialog.entry.path, kind: "tree" }, { path: target, kind: "tree" }]
-      : [{ path: parent, kind: "directory" }, { path: target, kind: "tree" }];
-    const operation = operations.begin(`${dialog.mode === "rename" ? "Rename" : "Create"}: ${name}`, claims);
-    if (!operation) {
-      dialog.error = "Another operation is using this path.";
-      return;
-    }
-    dialog.error = null;
-    // The decision is resolved. Do not hold the workbench modal while I/O runs.
-    closeNameDialog();
-    try {
-      if (dialog.mode === "rename") {
-        const oldPath = dialog.entry.path;
-        const selectedBefore = treeState.selectedPath;
-        const renamed = await invoke<ProjectTreeEntry>("rename_project_entry", {
-          workspace: requestWorkspace,
-          path: oldPath,
-          name,
-        });
-        if (!operations.isCurrent(operation) || workspace !== requestWorkspace) return;
-        treeController.remapPath(oldPath, renamed.path);
-        await treeController.refreshDirectory(parentDirectory(renamed.path));
-        if (!operations.isCurrent(operation) || workspace !== requestWorkspace) return;
-        await treeController.focusPath(renamed.path);
-        if (!operations.isCurrent(operation) || workspace !== requestWorkspace) return;
-        if (selectedBefore && sameOrDescendantPath(selectedBefore, oldPath) && treeState.selectedPath) {
-          onOpenFile(treeState.selectedPath);
-        }
-      } else {
-        const parent = destinationDirectory(dialog.entry);
-        const created = await invoke<ProjectTreeEntry>("create_project_entry", {
-          workspace: requestWorkspace,
-          parent: parent || null,
-          name,
-          kind: dialog.mode === "new-file" ? "file" : "directory",
-        });
-        if (!operations.isCurrent(operation) || workspace !== requestWorkspace) return;
-        treeController.ensureDirectoryExpanded(parent);
-        await treeController.refreshDirectory(parent);
-        if (!operations.isCurrent(operation) || workspace !== requestWorkspace) return;
-        await treeController.focusPath(created.path);
-        if (!operations.isCurrent(operation) || workspace !== requestWorkspace) return;
-        if (created.kind === "file") treeController.openFile(created.path);
-      }
-      if (operations.isCurrent(operation) && workspace === requestWorkspace) clearOperationError();
-    } catch (error) {
-      if (operations.isCurrent(operation) && workspace === requestWorkspace) operationError = errorMessage(error);
-    } finally {
-      finishOperation(operation);
-    }
-  }
-
   function runMenuOpen(entry: ProjectTreeEntry): void {
     menuController.close();
     if (!entry.path) return;
@@ -783,6 +707,20 @@
   onkeydown={handleWindowKeydown}
   onresize={menuController.handleWindowResize}
 />
+
+{#snippet inlineNameInput(depth: number)}
+  {#if nameState.edit}
+    {@const edit = nameState.edit}
+    {#key edit}
+      <ProjectExplorerNameInput
+        {edit}
+        {depth}
+        onSubmit={() => void nameEditor.submit(edit)}
+        onCancel={(restoreFocus) => nameEditor.cancel(edit, restoreFocus)}
+      />
+    {/key}
+  {/if}
+{/snippet}
 
 <section class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" aria-label="Project files">
   <div class="border-b border-sidebar-border px-2 py-1.5">
@@ -870,6 +808,9 @@
         {@const hiddenEntry = entry.path !== "" && entry.name.startsWith(".")}
         {@const expanded = entry.kind === "directory" && treeController.isDirectoryExpanded(entry.path)}
         {@const directoryLoading = entry.kind === "directory" && treeState.loadingDirectories.includes(entry.path)}
+        {#if nameState.edit?.mode === "rename" && nameState.edit.entry.path === entry.path}
+          {@render inlineNameInput(row.depth)}
+        {:else}
         <div
           class={[
             "group flex h-7 w-full min-w-max items-center pr-1 hover:bg-panel-hover",
@@ -893,7 +834,7 @@
             aria-expanded={entry.kind === "directory" ? expanded : undefined}
             aria-selected={treeState.selectedPath === entry.path}
             aria-keyshortcuts={entry.path ? "Shift+Enter F2 Delete" : "Shift+Enter"}
-            tabindex={tabbablePath === entry.path ? 0 : -1}
+            tabindex={!nameState.edit && tabbablePath === entry.path ? 0 : -1}
             data-project-tree-path={entry.path}
             data-project-git-status={gitDecoration?.code}
             onfocus={() => treeState.focusedPath = entry.path}
@@ -936,6 +877,10 @@
             <ExternalLink class="h-3 w-3" aria-hidden="true" />
           </button>
         </div>
+        {/if}
+        {#if nameState.edit && nameState.edit.mode !== "rename" && nameState.edit.parent === entry.path && expanded}
+          {@render inlineNameInput(row.depth + 1)}
+        {/if}
         {#if entry.path && entry.kind === "directory" && expanded && treeState.errorByDirectory[entry.path]}
           <div
             class="pr-2 text-xs leading-4 text-tool-error"
@@ -950,7 +895,7 @@
         </div>
       {:else if rootError}
         <div class="mx-2 rounded-md border border-tool-error/25 bg-tool-error/5 px-2.5 py-2 text-xs leading-4 text-tool-error">{rootError}</div>
-      {:else if rootEntries.length === 0}
+      {:else if rootEntries.length === 0 && !nameState.edit}
         <div class={emptyStateClass}>This project folder is empty.</div>
       {/if}
     {/if}
@@ -1008,10 +953,10 @@
 
       {#if menuEntry.kind === "directory"}
         <div class="my-1 h-px bg-border" role="separator"></div>
-        <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" disabled={!canCreateIn(menuEntry)} onclick={() => openNameDialog("new-file", menuEntry)}>
+        <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" disabled={!canCreateIn(menuEntry)} onclick={() => nameEditor.open("new-file", menuEntry)}>
           <FilePlus class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>New File…</span>
         </button>
-        <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" disabled={!canCreateIn(menuEntry)} onclick={() => openNameDialog("new-directory", menuEntry)}>
+        <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" disabled={!canCreateIn(menuEntry)} onclick={() => nameEditor.open("new-directory", menuEntry)}>
           <FolderPlus class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>New Folder…</span>
         </button>
       {/if}
@@ -1031,7 +976,7 @@
         <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" disabled={!canDuplicate(menuEntry)} onclick={() => void duplicateEntry(menuEntry)}>
           <CopyIcon class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Duplicate</span>
         </button>
-        <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" disabled={!canMutate(menuEntry)} onclick={() => openNameDialog("rename", menuEntry)}>
+        <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" disabled={!canMutate(menuEntry)} onclick={() => nameEditor.open("rename", menuEntry)}>
           <Pencil class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Rename…</span>
           <span class="ml-auto font-mono text-xs text-muted-foreground">F2</span>
         </button>
@@ -1070,43 +1015,6 @@
     </div>
   {/if}
 </section>
-
-{#if nameDialog}
-  <dialog
-    bind:this={nameDialogElement}
-    class="w-full max-w-md rounded-lg border border-border bg-popover p-0 text-popover-foreground shadow-md backdrop:bg-background/70"
-    oncancel={() => { nameDialog = null; }}
-  >
-    <form class="p-4" onsubmit={(event) => { event.preventDefault(); void submitNameDialog(); }}>
-      <h2 class="text-sm font-semibold">
-        {nameDialog.mode === "rename" ? "Rename" : nameDialog.mode === "new-file" ? "New File" : "New Folder"}
-      </h2>
-      <p class="mt-1 text-xs text-muted-foreground">
-        {nameDialog.mode === "rename"
-          ? nameDialog.entry.path
-          : `Create in ${destinationDirectory(nameDialog.entry) || "project root"}`}
-      </p>
-      <label class="mt-3 block text-xs font-medium" for="project-entry-name">Name</label>
-      <input
-        bind:this={nameInputElement}
-        bind:value={nameDialog.value}
-        id="project-entry-name"
-        class="mt-1 h-8 w-full rounded-md border border-input bg-panel-strong px-2 font-mono text-xs text-foreground outline-none"
-        autocomplete="off"
-        spellcheck="false"
-      />
-      {#if nameDialog.error}
-        <p class="mt-2 text-xs leading-4 text-tool-error">{nameDialog.error}</p>
-      {/if}
-      <div class="mt-4 flex justify-end gap-2">
-        <button class={dialogCancelButtonClass} type="button" onclick={closeNameDialog}>Cancel</button>
-        <button class={dialogPrimaryButtonClass} type="submit" disabled={!nameDialog.value.trim()}>
-          {nameDialog.mode === "rename" ? "Rename" : "Create"}
-        </button>
-      </div>
-    </form>
-  </dialog>
-{/if}
 
 <style>
   .project-file-menu-item {

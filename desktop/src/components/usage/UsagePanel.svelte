@@ -1,20 +1,25 @@
 <script lang="ts">
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
-  import { onMount, untrack } from "svelte";
-  import type { AcpClient } from "../../lib/acp-client";
+  import { onMount, setContext, untrack } from "svelte";
+  import type { AcpClient, RuntimeStatus } from "../../lib/acp-client";
+  import { createUsagePanelSections } from "../../app/usage-panel-sections.svelte";
+  import { USAGE_SECTIONS_CONTEXT } from "../../lib/usage-panel-sections";
   import { createUsageStatsStore } from "../../app/usage-stats.svelte";
+  import { createProviderUsageStore } from "../../app/provider-usage.svelte";
   import { createDiagnosticLogger } from "../../lib/diagnostic-logging";
   import { iconButtonClass } from "../../lib/icon-button";
   import { subscribeUsageStatsChanged } from "../../lib/usage-stats-events";
   import { hasUsageData, type UsagePeriod, type UsageSessionTarget } from "../../lib/usage-stats";
   import UsageSegmented from "./UsageSegmented.svelte";
   import UsageSourceView from "./UsageSourceView.svelte";
+  import UsageProviderLimits from "./UsageProviderLimits.svelte";
   import { PERIOD_LABELS, STATUS_LABELS } from "./usage-format";
 
-  let { client, workspace, onOpenSession }: {
+  let { client, workspace, providerStatuses = [], onOpenSession }: {
     client: AcpClient | null;
     workspace: string;
+    providerStatuses?: readonly RuntimeStatus[];
     onOpenSession?: (target: UsageSessionTarget) => void;
   } = $props();
 
@@ -23,6 +28,15 @@
   let period = $state<UsagePeriod>("7d");
 
   const diagnostics = createDiagnosticLogger(() => ({ workspace }));
+  const sections = createUsagePanelSections((cause, target) => {
+    if (target === workspace) error = cause instanceof Error ? cause.message : String(cause);
+    createDiagnosticLogger(() => ({ workspace: target })).report(cause, "frontend:usage-panel-state");
+  });
+  setContext(USAGE_SECTIONS_CONTEXT, sections);
+  $effect(() => {
+    const target = workspace;
+    untrack(() => { void sections.load(target); });
+  });
   const store = createUsageStatsStore({
     client: () => client,
     workspace: () => workspace,
@@ -31,6 +45,13 @@
       diagnostics.report(cause);
     },
   });
+  const quotas = createProviderUsageStore({
+    client: () => client,
+    workspace: () => workspace,
+    reportError: (cause) => diagnostics.report(cause, "frontend:provider-usage"),
+  });
+  const quotaStatuses = $derived([...providerStatuses, ...quotas.entries.flatMap((entry) => entry.runtime ? [entry.runtime] : [])]);
+  const refreshing = $derived(store.busy || quotas.busy);
 
   // Re-read the clock whenever data changes; no timers while the panel idles.
   const nowMs = $derived.by(() => { void store.snapshots; return Date.now(); });
@@ -44,6 +65,7 @@
     untrack(() => {
       error = null;
       void (store.active ? store.sync() : store.open());
+      void quotas.refresh();
     });
   });
 
@@ -52,12 +74,15 @@
     return () => {
       unsubscribe();
       store.dispose();
+      quotas.dispose();
+      sections.dispose();
     };
   });
 
   function refresh(): void {
     error = null;
     void store.refresh();
+    void quotas.refresh();
   }
 </script>
 
@@ -67,10 +92,10 @@
     <button
       class={iconButtonClass("sm", "panel")}
       type="button" title="Refresh usage" aria-label="Refresh usage"
-      disabled={!client || !workspace || store.busy}
-      aria-busy={store.busy}
+      disabled={!client || !workspace || refreshing}
+      aria-busy={refreshing}
       onclick={refresh}
-    ><RefreshCw class={["h-3.5 w-3.5", store.busy && "animate-spin motion-reduce:animate-none"]} aria-hidden="true" /></button>
+    ><RefreshCw class={["h-3.5 w-3.5", refreshing && "animate-spin motion-reduce:animate-none"]} aria-hidden="true" /></button>
   </div>
 
   <div class="flex min-h-0 flex-1 flex-col overflow-auto">
@@ -84,6 +109,7 @@
     {:else if !workspace}
       <p class="m-0 px-3 py-6 text-center text-xs text-muted-foreground">Open a project to load usage statistics.</p>
     {:else}
+      <UsageProviderLimits statuses={quotaStatuses} entries={quotas.entries} loading={quotas.busy} failed={quotas.error} />
       <div class="flex flex-wrap items-center gap-1.5 px-3 pt-2">
         <UsageSegmented value={period} options={PERIODS.map((value) => ({ value, label: PERIOD_LABELS[value] }))} ariaLabel="Period" onChange={(value) => period = value} />
       </div>

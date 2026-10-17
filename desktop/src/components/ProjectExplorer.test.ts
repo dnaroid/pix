@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import explorerSource from "./ProjectExplorer.svelte?raw";
 import menuControllerSource from "./project-explorer-menu-controller.svelte.ts?raw";
 import treeControllerSource from "./project-explorer-tree-controller.svelte.ts?raw";
+import nameEditorSource from "./project-explorer-name-editor.svelte.ts?raw";
+import nameInputSource from "./ProjectExplorerNameInput.svelte?raw";
 
 describe("ProjectExplorer keyboard tree", () => {
   it("wires both HTML browser menu surfaces to the guarded backend action", () => {
@@ -39,12 +41,12 @@ describe("ProjectExplorer keyboard tree", () => {
     expect(treeControllerSource).toContain('state.focusedPath !== null && visiblePaths.has(state.focusedPath)');
     expect(explorerSource).toContain('$derived(projectTreeRootEntry(workspace))');
     expect(explorerSource).toContain('treeController.isDirectoryExpanded(entry.path)');
-    expect(explorerSource).toContain('if (entry.path) openNameDialog("rename", entry)');
+    expect(explorerSource).toContain('if (entry.path) nameEditor.open("rename", entry)');
     expect(explorerSource).toContain('if (entry.path) void deleteEntry(entry)');
     expect(explorerSource).toContain('if (entry.path) dragController.start(event, entry)');
     expect(explorerSource).toContain('event.key === "ContextMenu"');
     expect(explorerSource).toContain('event.shiftKey && event.key === "F10"');
-    expect(explorerSource).toContain('treeController.ensureDirectoryExpanded(parent)');
+    expect(nameEditorSource).toContain('options.tree.ensureDirectoryExpanded(parent)');
   });
   it("checks ignore eligibility asynchronously and refreshes Git after a guarded mutation", () => {
     expect(explorerSource).toContain('invoke<boolean>("git_can_ignore"');
@@ -69,7 +71,7 @@ describe("ProjectExplorer keyboard tree", () => {
   it("uses tree semantics with one roving tab stop", () => {
     expect(explorerSource).toContain('role="tree"');
     expect(explorerSource).toContain('role="treeitem"');
-    expect(explorerSource).toContain("tabindex={tabbablePath === entry.path ? 0 : -1}");
+    expect(explorerSource).toContain("tabindex={!nameState.edit && tabbablePath === entry.path ? 0 : -1}");
     expect(explorerSource).toContain("aria-level={row.depth + 1}");
   });
 
@@ -129,8 +131,8 @@ describe("ProjectExplorer keyboard tree", () => {
   });
 
   it("routes filesystem mutations through workspace-scoped Tauri commands", () => {
-    expect(explorerSource).toContain('invoke<ProjectTreeEntry>("create_project_entry"');
-    expect(explorerSource).toContain('invoke<ProjectTreeEntry>("rename_project_entry"');
+    expect(nameEditorSource).toContain('options.invoke("create_project_entry"');
+    expect(nameEditorSource).toContain('options.invoke("rename_project_entry"');
     expect(explorerSource).toContain('invoke<ProjectTreeEntry>("copy_project_entry"');
     expect(explorerSource).toContain('invoke("delete_project_entry"');
     expect(explorerSource).toContain("await confirmDesktopAction");
@@ -144,8 +146,25 @@ describe("ProjectExplorer keyboard tree", () => {
     expect(explorerSource).toContain('operations.begin(`Delete: ${entry.name}`, [{ path: entry.path, kind: "tree" }])');
     expect(explorerSource).toContain('disabled={!canMutate(menuEntry)}');
     expect(explorerSource).toContain('role="status"');
-    const submit = explorerSource.slice(explorerSource.indexOf("async function submitNameDialog"));
-    expect(submit.indexOf("closeNameDialog();")).toBeLessThan(submit.indexOf('invoke<ProjectTreeEntry>("rename_project_entry"'));
+    const submit = nameEditorSource.slice(nameEditorSource.indexOf("async function submit"));
+    expect(submit.indexOf("state.edit = null;")).toBeLessThan(submit.indexOf('options.invoke("rename_project_entry"'));
+  });
+
+  it("edits names in tree rows, without a modal or intercepting text-editing shortcuts", () => {
+    expect(explorerSource).not.toContain("<dialog");
+    expect(explorerSource).not.toContain("showModal");
+    expect(explorerSource).toContain('nameState.edit?.mode === "rename" && nameState.edit.entry.path === entry.path');
+    expect(explorerSource).toContain('nameState.edit.parent === entry.path && expanded');
+    expect(explorerSource).toContain("inlineNameInput(row.depth + 1)");
+    expect(explorerSource).toContain("nameEditor.invalidate()");
+    expect(explorerSource).toContain("nameEditor.dispose()");
+    expect(nameInputSource).toContain("event.stopPropagation()");
+    expect(nameInputSource).toContain("event.isComposing");
+    expect(nameInputSource).toContain('event.key === "Enter"');
+    expect(nameInputSource).toContain('event.key === "Escape"');
+    expect(nameInputSource).toContain("onblur={() => onCancel(false)}");
+    expect(nameInputSource).toContain("input.setSelectionRange(0, projectEntryNameSelection(edit))");
+    expect(nameInputSource).toContain('role="alert"');
   });
 
   it("uses shared clipboard references and rechecks at paste activation", () => {

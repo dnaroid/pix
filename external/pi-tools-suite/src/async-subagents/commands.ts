@@ -6,6 +6,8 @@ import { getAgentState, getRunState, stopAgents, validateBasename } from "./lib.
 import { normalizeRunDir, resolveSubagentRunDir, scopeForContext } from "./core/lookup.js";
 import { findRecordByChildSession, getRecord, listProjectRecords, listRunRecords, listScopeRunDirs } from "./core/store.js";
 import { SUBAGENT_META_ENTRY, type SubagentMeta } from "./core/subagent-meta.js";
+import { isTerminalAgentStatus } from "./core/notifications.js";
+import { suiteDiagnostics } from "../lib/suite-diagnostics.js";
 import { formatAgentStatus } from "./format.js";
 
 interface CommandContext {
@@ -176,6 +178,12 @@ function registerSessionCommands(pi: ExtensionAPI): void {
 			try {
 				const target = await chooseOpenTarget(args, ctx);
 				if (!target) return;
+				const state = getAgentState(target.runDir, target.agentId, { includeLineCounts: false });
+				if (!state || !isTerminalAgentStatus(state.status)) {
+					suiteDiagnostics.report("warn", "subagents", "session-open-active", ctx.cwd, {}, ctx);
+					ctx.ui.notify("Wait for the sub-agent to finish before opening its session; only one process may write its transcript.", "warning");
+					return;
+				}
 
 				const sessionFile = getRecord(target.runDir, target.agentId)?.childSessionFile ?? undefined;
 				if (!sessionFile) {

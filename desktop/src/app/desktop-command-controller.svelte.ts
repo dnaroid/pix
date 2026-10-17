@@ -84,7 +84,7 @@ export function createDesktopCommandController(options: DesktopCommandController
           || options.activeWorkbenchTabKind() === "lsp-install"
           || options.activeWorkbenchTabKind() === "terminal";
       case "session.new":
-        return options.canUseSession();
+        return options.statusReady() && !!options.workspace() && !options.sessionMutationRunning();
       case "session.open":
         return options.statusReady() && !!options.workspace() && !options.sessionMutationRunning();
       case "session.jump":

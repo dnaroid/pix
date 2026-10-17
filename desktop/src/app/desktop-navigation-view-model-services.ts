@@ -9,7 +9,7 @@ export function createDesktopNavigationViewModelServices(options: DesktopViewMod
     newSessionShortcut: () => desktopCommandShortcutLabel("session.new", options.platform),
     tabs: () => options.presentation.workbenchTabs,
     activeId: options.activeWorkbenchTabId,
-    canCreateSession: () => options.presentation.canUseSession,
+    canCreateSession: () => options.presentation.canCreateSession,
     selectWorkbenchTab: options.workbenchGit.workbench.select,
     closeWorkbenchTab: options.workbenchGit.workbench.close,
     openSessionStartTab: options.transitions.draft.openStartTab,
@@ -29,6 +29,13 @@ export function createDesktopNavigationViewModelServices(options: DesktopViewMod
   const sidebar = createDesktopSidebarViewModel({
     client: () => options.status() === "ready" ? options.client() : null,
     lspSessionId: () => options.state.sessionId,
+    providerStatuses: () => {
+      if (options.status() !== "ready") return [];
+      const statuses = [...options.sessions.runtime.statuses.values()];
+      const draft = options.model.config.draftRuntimeStatus;
+      if (draft) statuses.push(draft);
+      return statuses;
+    },
     contextCommands: () => options.state.runtimeReady && options.state.sessionId
       ? options.sessions.metadata.slashCommandsBySession.get(options.state.sessionId) ?? []
       : [],

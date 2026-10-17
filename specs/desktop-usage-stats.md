@@ -35,6 +35,46 @@ The Usage panel header reads **Pix usage** and has a refresh action. There are
 no provider tabs or source switch. The period selector defaults to **7 days**
 and offers the supported periods for the available data.
 
+**Provider limits** is a separate disclosure above historical statistics. It
+uses the same account-quota widgets and `displayModelUsage` precedence as the
+status-bar popover: remaining percentages, hourly segments, reset countdowns,
+weekly calendar/day slices, daily-budget warnings and cached-state labels.
+Day slices describe the aggregate weekly quota, not independently measured daily
+limits. Opening the panel discovers authenticated supported provider routes from
+the sessionless model catalogue and queries their quotas through `draft_config`,
+independently of the active session/model (OpenAI, Anthropic/Claude Code, Z.ai,
+and Antigravity). Account-wide routes use one representative model; Antigravity
+retains model-specific queries. Queries have bounded concurrency, refresh every
+five minutes while open (one minute for pending local Claude Code credentials),
+and also run on header refresh. Closing the panel stops polling; late completions
+from previous workspaces/connections or disposed panels are ignored. Failed
+refreshes retain prior quotas as cached; missing quotas remain visible as loading,
+unavailable or failed provider rows, rather than silently omitting the provider.
+Existing runtime snapshots (including draft telemetry) supplement fetched quotas;
+there are no usage-history-derived quota estimates. The
+newest snapshot wins for each provider/account/model before grouping models into
+one chart block per provider/account, including Antigravity. For each hourly or
+weekly window the summary uses the lowest reported remaining percentage and
+that window's actual reset time, rather than summing or averaging model pools.
+Selected cached windows retain the cached indicator; distinct accounts remain
+separate. Loading/unavailable/error placeholders are also grouped by provider
+and do not duplicate a provider that already has a chart. The panel shows no
+model names or repeated `Limits` headings; the status-bar popover keeps its
+existing heading. Request-header RPM/TPM windows are not
+account quotas and are not rendered here. Missing quota data has an explicit
+empty state; provider limits do not depend on historical usage being present.
+
+Disclosure state is project-local in `.pi/workspace.jsonc` under
+`usagePanel.collapsedSections`. Stable ids (`provider-limits`, `overview`,
+`activity`, `daily`, `models`, `sessions`, `cache`) survive metric/filter changes,
+panel reopening and application restart. Missing ids default to expanded.
+Changes preserve JSONC comments and sibling settings, serialize accepted toggles
+across panel reopening, and retry conditional-write conflicts without dropping
+other sections' changes. Malformed configuration is not overwritten; failures
+remain visible and are sent to Desktop diagnostics. Late restores cannot undo
+user input or apply another project's state; accepted writes remain scoped to
+their original project even after panel teardown.
+
 `UsageSourceView` provides a **This project / All projects** segmented toggle,
 defaulting to **This project**. Project filtering compares normalized
 `projectCwd` values with the current workspace. Metrics are cost, tokens and

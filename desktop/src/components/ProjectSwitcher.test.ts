@@ -2,6 +2,23 @@ import { describe, expect, it } from "vitest";
 import switcherSource from "./ProjectSwitcher.svelte?raw";
 
 describe("ProjectSwitcher project opening actions", () => {
+  it("filters projects through a focused search field without intercepting text editing", () => {
+    expect(switcherSource).toContain('aria-label="Search projects"');
+    expect(switcherSource).toContain("searchRecentProjects(recentProjects, searchQuery)");
+    expect(switcherSource).toContain("{#each filteredProjects as project");
+    expect(switcherSource).toContain('searchQuery = ""');
+    expect(switcherSource).toContain("searchInput?.focus()");
+    expect(switcherSource).toContain('if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;');
+    expect(switcherSource).toContain("No matching projects");
+  });
+
+  it("fits eight 44px project rows plus padding while respecting available window height", () => {
+    expect(switcherSource).toContain("max-h-[358px]");
+    expect(switcherSource).toContain("group grid h-11");
+    expect(switcherSource).toContain("window.innerHeight - menu.getBoundingClientRect().top - 8");
+    expect(switcherSource).toContain("onresize={updateMenuHeight}");
+    expect(switcherSource).not.toContain("46vh");
+  });
   it("offers a system folder picker that opens the chosen project in a new window", () => {
     expect(switcherSource).toContain("onChooseWorkspaceInNewWindow");
     expect(switcherSource).toContain("onclick={chooseWorkspaceInNewWindow}");

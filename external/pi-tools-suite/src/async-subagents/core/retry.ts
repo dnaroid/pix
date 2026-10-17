@@ -6,7 +6,7 @@ import { isQuotaLimitCompletion, nextFallbackModel, rememberSessionModelFallback
 import { spawnAgent, type SpawnAgentOptions } from "./spawn.js";
 import { getAgentState } from "./state.js";
 import { ownedAgentDir } from "./paths.js";
-import { getRecord, updateLive, updateRecord } from "./store.js";
+import { getRecord, recordStopRequested, updateLive, updateRecord } from "./store.js";
 
 export interface RetryableSpawnOptions extends SpawnAgentOptions {
 	retry: RetryConfig;
@@ -75,11 +75,12 @@ export function spawnAgentWithRetry(
 				settle(completion);
 				return;
 			}
-			if (isStopRequested(runDir, completion.agentId)) {
-				settle(refreshedCompletion(completion));
-				return;
-			}
 			try {
+				if (isStopRequested(runDir, completion.agentId)) {
+					updateRecord(runDir, completion.agentId, { status: "stopped" });
+					settle(refreshedCompletion(completion));
+					return;
+				}
 				spawnAgent(runDir, currentTask, cwd, extraArgs, onRpcEvent, handleCompletion, spawnOpts);
 			} catch (error) {
 				settle(completion, error instanceof Error ? error : new Error(String(error)));
@@ -112,12 +113,12 @@ export function spawnAgentWithRetry(
 			abortRetry?.();
 			abortRetry = undefined;
 			if (settled) return;
-			if (signal?.aborted || isStopRequested(runDir, completion.agentId)) {
-				settle(refreshedCompletion(completion));
-				return;
-			}
 			// spawnAgent resets status/nextRetryAt for the relaunch.
 			try {
+				if (signal?.aborted || isStopRequested(runDir, completion.agentId)) {
+					settle(refreshedCompletion(completion));
+					return;
+				}
 				spawnAgent(runDir, currentTask, cwd, extraArgs, onRpcEvent, handleCompletion, spawnOpts);
 			} catch (error) {
 				settle(completion, error instanceof Error ? error : new Error(String(error)));
@@ -153,7 +154,7 @@ function writeRetryCount(runDir: string, agentId: string, count: number): void {
 function writeRetryPending(runDir: string, agentId: string, delayMs: number): void {
 	if (!getRecord(runDir, agentId)) return;
 	const nextRetryAt = new Date(Date.now() + delayMs).toISOString().replace(/\.\d{3}Z$/, "Z");
-	updateRecord(runDir, agentId, { status: "retrying", nextRetryAt });
+	updateRecord(runDir, agentId, { status: "retrying", nextRetryAt, ownerPid: process.pid });
 	updateLive(runDir, agentId, { active: true });
 }
 
@@ -162,7 +163,7 @@ function clearRetryPending(runDir: string, agentId: string): void {
 	const record = getRecord(runDir, agentId);
 	if (!record) return;
 	if (record.status === "retrying") {
-		updateRecord(runDir, agentId, { status: record.exitCode === 0 ? "done" : "failed", nextRetryAt: null });
+		updateRecord(runDir, agentId, { status: record.stopRequested ? "stopped" : record.exitCode === 0 ? "done" : "failed", nextRetryAt: null, ownerPid: null });
 		updateLive(runDir, agentId, { active: false });
 	} else if (record.nextRetryAt) {
 		updateRecord(runDir, agentId, { nextRetryAt: null });
@@ -170,7 +171,7 @@ function clearRetryPending(runDir: string, agentId: string): void {
 }
 
 function isStopRequested(runDir: string, agentId: string): boolean {
-	return getRecord(runDir, agentId)?.stopRequested === true || fs.existsSync(path.join(ownedAgentDir(runDir, agentId), "stop_requested"));
+	return recordStopRequested(runDir, agentId) || fs.existsSync(path.join(ownedAgentDir(runDir, agentId), "stop_requested"));
 }
 
 function refreshedCompletion(completion: Parameters<AgentCompletionHandler>[0]): Parameters<AgentCompletionHandler>[0] {

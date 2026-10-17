@@ -586,6 +586,8 @@ export class PixAcpAgent {
 	private readonly sessionLifecycle = new Map<string, Promise<void>>();
 	/** Deduplicates concurrent account-quota I/O for one Desktop session/model/thinking route. */
 	private readonly modelUsageRefreshes = new Map<string, Promise<ModelUsageRefreshResult>>();
+	/** Viewer polling is 2s; provider quotas need at most one query per route/minute. */
+	private readonly viewerModelUsage = new Map<string, { at: number; result: Promise<ModelUsageRefreshResult> }>();
 	/** Last successful quota snapshot per Claude Code route, resent as `stale` cache while the credential is absent. */
 	private readonly claudeCodeQuotaCache = new Map<string, DesktopModelUsageStatus>();
 	private claudeRateLimits: Promise<ClaudeCodeRateLimitCache | undefined> | undefined;
@@ -951,6 +953,7 @@ export class PixAcpAgent {
 		await this.usageStatsHost.dispose();
 		this.claudeCodeQuotaCache.clear();
 		this.claudeQuotaRefreshes.clear();
+		this.viewerModelUsage.clear();
 		await Promise.allSettled([...this.pendingSpawns]);
 		await Promise.allSettled([...this.sessionLifecycle.values()]);
 		await Promise.all([...this.sessions.values()].map((session) => this.teardownSession(session)));
@@ -1964,7 +1967,8 @@ export class PixAcpAgent {
 			readSubagentSessionState(resolved),
 			readSubagentSessionSummary(resolved.sessionFile),
 		]);
-		if (!summary.provider || !summary.modelId) return state;
+		const displayState = { ...state, ...(summary.todo ? { todo: summary.todo } : {}) };
+		if (!summary.provider || !summary.modelId) return displayState;
 		const runtime = await this.getViewerModelRuntime();
 		let model: { name?: string; contextWindow?: number } | undefined;
 		try {
@@ -1974,8 +1978,15 @@ export class PixAcpAgent {
 		}
 		const contextWindow = typeof model?.contextWindow === "number" && model.contextWindow > 0 ? model.contextWindow : undefined;
 		const tokens = summary.contextTokens ?? null;
+		const recordedModel = { provider: summary.provider, id: summary.modelId };
+		const modelUsage = await this.queryViewerModelUsage({
+			model: recordedModel, thinkingLevel: summary.thinking ?? "off",
+			sessionId: record.piSessionId, isStreaming: false,
+		});
 		return {
-			...state,
+			...displayState,
+			modelUsageRefresh: modelUsage.refresh,
+			...this.modelUsageResponseFields(recordedModel, modelUsage),
 			model: {
 				provider: summary.provider,
 				modelId: summary.modelId,
@@ -2007,6 +2018,20 @@ export class PixAcpAgent {
 		return this.viewerModelRuntime;
 	}
 
+	private queryViewerModelUsage(state: PiSessionState): Promise<ModelUsageRefreshResult> {
+		const key = `${state.model?.provider}/${state.model?.id}/${state.thinkingLevel}`;
+		const cached = this.viewerModelUsage.get(key);
+		if (cached && Date.now() - cached.at < 60_000) return cached.result;
+		const result = this.querySessionModelUsage("viewer", state).catch((error: unknown) => {
+			this.options.logger.warn(`sub-agent viewer quota unavailable: ${stringifyUnknown(error)}`);
+			return { refresh: "failed" as const };
+		});
+		this.viewerModelUsage.delete(key);
+		this.viewerModelUsage.set(key, { at: Date.now(), result });
+		while (this.viewerModelUsage.size > 32) this.viewerModelUsage.delete(this.viewerModelUsage.keys().next().value!);
+		return result;
+	}
+
 	private async subagentOpenSession(params: DesktopSubagentOpenSessionRequest): Promise<DesktopSubagentOpenSessionResponse> {
 		const parent = this.sessions.get(params.sessionId);
 		const parentRecord = parent ? undefined : await this.sessionMap.get(params.sessionId);
@@ -2019,7 +2044,7 @@ export class PixAcpAgent {
 			throw new RequestError(ERROR_SERVER, "sub-agent session file is already registered as an ordinary session");
 		}
 		const sessionId = existing?.sessionId ?? randomUUID();
-		await this.sessionMap.put({
+		const record: SessionMapRecord = {
 			sessionId,
 			piSessionPath: resolved.sessionFile,
 			piSessionId: (await readSessionHeaderId(resolved.sessionFile)) ?? sessionId,
@@ -2027,8 +2052,9 @@ export class PixAcpAgent {
 			title: existing?.title ?? `Sub-agent ${resolved.agentId}`,
 			subagent: link,
 			updatedAt: existing?.updatedAt ?? new Date().toISOString(),
-		});
-		const state = await readSubagentSessionState(resolved);
+		};
+		await this.sessionMap.put(record);
+		const state = await this.readSubagentRecordState(record);
 		this.options.logger.info(`subagents/open_session: ${resolved.agentId} → ${sessionId}`);
 		return { sessionId, link, ...state };
 	}

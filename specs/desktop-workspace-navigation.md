@@ -132,6 +132,18 @@ establish compatibility requirements.
   primary Copy/Paste shortcuts operate on the Project Explorer entry clipboard
   while tree focus is active. These shortcuts do not replace normal text-editing
   shortcuts outside the tree.
+- New File/New Folder and Rename edit the name inline in the tree, without a
+  dialog. Creation expands the destination (including the workspace root) and
+  inserts a temporary input as its first child; rename replaces the targeted
+  row. The input takes focus and is the tree's only Tab stop while editing.
+  Rename selects a file's basename without its final extension, or the full
+  name for folders, extensionless files and dotfiles without a later dot.
+  `Enter` submits, `Escape` cancels and restores row focus; leaving the input
+  cancels without moving focus back. IME composition does not submit or cancel.
+  Clipboard and arrow keys retain native text-input behavior. Empty names,
+  `.`/`..` and path separators show inline validation without filesystem I/O;
+  unchanged rename cancels without a mutation. Workspace replacement and panel
+  teardown discard the input and invalidate stale callbacks/completions.
 - Copy writes a versioned Pix file/folder reference (source workspace, relative
   path and kind) to the system text clipboard. Paste works across project windows
   and independently running Pix instances on the same macOS machine, including
@@ -172,11 +184,14 @@ establish compatibility requirements.
   Ignore operations protect the target and possible ancestor `.gitignore` files.
   Conflict checks apply both to menu availability and action activation.
   Files shows active operation labels/counts without a modal progress window.
-  Create/rename dialogs close after submission, before filesystem I/O; failures
+  Create/rename inline inputs close after submission, before filesystem I/O; failures
   appear in the Files error surface. Each operation owns its completion token;
   finishing one cannot unlock or invalidate another, and workspace replacement
   or panel teardown invalidates all old completions. Late deletion completion
   does not restore tree focus after the user has moved to another row.
+  A pending create/rename completion cannot steal focus from a newer name input
+  or a different focused tree row; created files open only when that completion
+  still owns focus. Name-mutation failures also reach the diagnostic logger.
   See [decision 0028](../docs/decisions/0028-scoped-file-operation-reservations.md).
 - File/folder context menus expose **Add to .gitignore** only after a local Git
   check confirms an exact workspace-root repository and a target not already

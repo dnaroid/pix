@@ -1,7 +1,6 @@
 <script lang="ts">
   import { emptyStateClass } from "../lib/status-text";
   import Search from "@lucide/svelte/icons/search";
-  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import { onMount } from "svelte";
   import type { SessionInfo } from "@agentclientprotocol/sdk";
   import { previewInlineSearch, queryInlineSearch, type InlineSearchClient } from "../lib/inline-search";
@@ -174,43 +173,35 @@
 <section class="h-full min-h-0 min-w-0 overflow-hidden px-6 pt-8 pb-3" aria-label="Open saved conversation">
   <div class="mx-auto grid h-full min-h-0 w-full max-w-[620px] grid-rows-[auto_minmax(0,1fr)] overflow-hidden border-y border-border bg-background">
     <header class="shrink-0 bg-background px-2.5 pt-2.5 pb-2">
-      <div class="flex items-baseline justify-between gap-3">
-        <h2 class="text-xs font-semibold text-foreground">Open a conversation</h2>
-        <span class="text-xs text-muted-foreground">or start typing below</span>
-      </div>
-      <div class="relative mt-2">
-        <label for="saved-session-search" class="sr-only">Search saved conversations</label>
-        <Search class="pointer-events-none absolute top-1/2 left-2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-        <input
-          id="saved-session-search"
-          class="h-7 w-full rounded-md border border-input bg-panel-strong pr-24 pl-7 text-xs text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/25"
-          bind:this={searchInput}
-          bind:value={query}
-          oninput={() => { resetPages(); cancelSearch(); }}
-          onkeydown={(event) => { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); void submitSearch(); } }}
-          type="search"
-          placeholder="Search saved conversations…"
-        />
-        <button type="button" onclick={() => void submitSearch()} disabled={!query.trim() || searching}
-          aria-label={searching ? "Searching saved conversations" : "Search saved conversations"}
-          title="Search session titles and indexed first/final messages (Enter)"
-          class="absolute top-0.5 right-6 flex h-6 items-center gap-1 rounded px-2 text-xs text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-60">
-          {#if searching}<LoaderCircle class="h-3 w-3 animate-spin" aria-hidden="true" />{:else}Search{/if}
-        </button>
+      <div class="flex flex-wrap items-center gap-2">
+        <div class="relative min-w-0 flex-1 basis-[220px]">
+          <label for="saved-session-search" class="sr-only">Search saved conversations</label>
+          <Search class="pointer-events-none absolute top-1/2 left-2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+          <input
+            id="saved-session-search"
+            class="h-7 w-full rounded-md border border-input bg-panel-strong pr-2 pl-7 text-xs text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/25"
+            bind:this={searchInput}
+            bind:value={query}
+            oninput={() => { resetPages(); cancelSearch(); }}
+            onkeydown={(event) => { if (event.key === "Enter" && !event.isComposing) { event.preventDefault(); void submitSearch(); } }}
+            type="search"
+            placeholder="Search saved conversations…"
+          />
+        </div>
+        {#if hasSubagentSessions}
+          <label class="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              class="h-3.5 w-3.5 accent-primary focus-visible:outline-2 focus-visible:outline-ring"
+              data-show-subagent-sessions
+              bind:checked={showSubagents}
+              onchange={resetPages}
+            />
+            Show sub-agent sessions
+          </label>
+        {/if}
       </div>
       {#if searching}<p role="status" class="mt-1 text-xs text-muted-foreground">Searching…</p>{:else if searchNotice}<p role="status" class="mt-1 text-xs text-muted-foreground">{searchNotice}</p>{/if}
-      {#if hasSubagentSessions}
-        <label class="mt-2 flex w-fit items-center gap-1.5 text-xs text-muted-foreground">
-          <input
-            type="checkbox"
-            class="h-3.5 w-3.5 accent-primary focus-visible:outline-2 focus-visible:outline-ring"
-            data-show-subagent-sessions
-            bind:checked={showSubagents}
-            onchange={resetPages}
-          />
-          Show sub-agent sessions
-        </label>
-      {/if}
     </header>
 
     <div bind:this={scrollContainer} class="min-h-0 overflow-y-auto border-t border-border/70" aria-label="Saved conversations">

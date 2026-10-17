@@ -51,6 +51,7 @@ export const TOOL_EVAL_COVERAGE: Record<string, EvalCoverageEntry> = {
 	async_subagents_status: { deterministic: ["test/async-subagents/tools.test.ts"] },
 	async_subagents_wait: { deterministic: ["test/async-subagents/tools.test.ts"] },
 	async_subagents_result: { deterministic: ["test/async-subagents/tools.test.ts"] },
+	async_subagents_send: { deterministic: ["test/async-subagents/send.test.ts"] },
 	async_subagents_stop: { deterministic: ["test/async-subagents/tools.test.ts"] },
 	async_subagents_cleanup: { deterministic: ["test/async-subagents/tools.test.ts"] },
 	project_search: { deterministic: ["test/project-search.test.ts", "test/async-subagents/repo-tools.test.ts", "test/evals/decision-policy.test.ts"], live: ["tool.semantic-repo-search", "tool.architecture-first", "tool.project-search-general", "tool.project-search-contract", "tool.project-search-scoped-review"] },

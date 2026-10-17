@@ -25,7 +25,7 @@ import {
 } from "../lib.js";
 import { settleStructuredResult } from "../core/structured-result.js";
 import { ownedAgentDir, parseRunKey, scopeDir } from "../core/paths.js";
-import { createBatch, getLive, getRecord, updateLive, updateRecord } from "../core/store.js";
+import { createBatch, getLive, getRecord, recordStopRequested, updateLive, updateRecord } from "../core/store.js";
 import { normalizeRunDir, scopeForContext } from "../core/lookup.js";
 import { spawnAgentWithRetry } from "../core/retry.js";
 import { recordSubagentUsage } from "../core/usage.js";
@@ -125,6 +125,13 @@ async function launchQueuedAgent(options: LaunchQueuedAgentOptions): Promise<voi
 				? await resolveOwnedLaunchOptions([cwd, ownedProbeDir(cwd, runDir)]) : {}),
 		};
 		if (signal?.aborted) throw new Error("Aborted");
+		// Owned-provider preparation can await; honor a stop received during it.
+		if (launchSkipReason(runDir, resolved.task.id)) {
+			releaseSlot();
+			onCancelled("agent was stopped before launch");
+			onUpdate();
+			return;
+		}
 		if (resolved.retry.maxRetries > 0 || resolved.fallbackModels.length > 0) {
 			const retryResult = spawnAgentWithRetry(
 				runDir,
@@ -168,6 +175,7 @@ function ownedLaunchHoldsSlot(runDir: string, agentId: string): boolean {
 
 function launchSkipReason(runDir: string, agentId: string): string | undefined {
 	if (!getRecord(runDir, agentId)) return "run was removed before launch";
+	if (recordStopRequested(runDir, agentId)) return "agent was stopped before launch";
 	const state = getAgentState(runDir, agentId, { includeLineCounts: false });
 	if (state?.status === "stopped") return "agent was stopped before launch";
 	return undefined;
@@ -352,7 +360,7 @@ export function registerSpawnTool(
 					const task = resolved.task;
 					updateRecord(runDir, task.id, {
 						cwd: ctx.cwd, task, extraArgs: resolved.extraArgs, timeoutMs: resolved.timeoutMs, maxResultBytes: resolved.maxResultBytes,
-						subagentType: task.subagentType, model: task.model, parentSession, status: "planned", turn: 1,
+						subagentType: task.subagentType, model: task.model, parentSession, status: "planned", ownerPid: process.pid, turn: 1,
 						exitCode: null, startedAt: null, finishedAt: null, nextRetryAt: null, pid: null, processGroup: null, childSessionFile: null,
 						stopRequested: null, stopSignal: null, timedOut: null, structured: null, message: null, stderrPreview: null, retryCount: 0,
 					}, parentSessionManager);

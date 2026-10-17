@@ -46,6 +46,7 @@ async function main(): Promise<void> {
 	process.once("SIGINT", stop);
 	try {
 		const spawnAgents = request.tool === "subagents" && (request.args as { action?: unknown } | undefined)?.action === "spawn";
+		const ownsAgents = spawnAgents || (request.tool === "subagents" && (request.args as { action?: unknown } | undefined)?.action === "send");
 		if (spawnAgents) assertHeadlessSubagentSpawn(request.args);
 		if (spawnAgents && (request.args as { watchSeconds?: unknown }).watchSeconds !== undefined
 			&& (request.args as { watchSeconds?: unknown }).watchSeconds !== 0) {
@@ -54,11 +55,11 @@ async function main(): Promise<void> {
 		if (process.argv.includes("--broker")) {
 			const index = process.argv.indexOf("--broker");
 			const responseFile = process.argv[index + 1];
-			if (!spawnAgents || !responseFile || request.readOnly !== false) throw new Error("Invalid Pix broker invocation");
-			await runSubagentsBroker(api, { ...(request.args as Record<string, unknown>), watchSeconds: 0 }, responseFile);
+			if (!ownsAgents || !responseFile || request.readOnly !== false) throw new Error("Invalid Pix broker invocation");
+			await runSubagentsBroker(api, { ...(request.args as Record<string, unknown>), ...(spawnAgents ? { watchSeconds: 0 } : {}) }, responseFile);
 			return;
 		}
-		const result = spawnAgents && request.readOnly === false
+		const result = ownsAgents && request.readOnly === false
 			? await launchSubagentsBroker(encoded, request.cwd, cancelled.signal)
 			: await api.execute(request.tool, request.args ?? {}, cancelled.signal);
 		// Tool-level isError is still a valid protocol response. Do not replace

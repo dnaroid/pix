@@ -46,7 +46,8 @@ budget; changed product paths are not required in this mode.
 - Never modify product/source code, tests, configuration, lockfiles or generated
   state. Disposable reports/logs belong in unique task directories under the
   target project's `.pi/artifacts/`, never root `artifacts/` or `.artifacts/`.
-  Preserve harness-owned `.pi/subagents/` evidence.
+  QA workspaces/evidence belong under `.pi/artifacts/subagents/`. Preserve child
+  sessions, protected owned-launch records and legacy evidence in `.pi/subagents/`.
 - Preserve unrelated local and concurrent edits. Before changing a document,
   inspect its current diff. If an unassigned document already has local edits,
   report the conflict instead of overwriting it. Re-read a document changed

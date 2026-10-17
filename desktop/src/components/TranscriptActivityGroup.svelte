@@ -51,7 +51,7 @@
     if (details.open && entry.type === "tool" && entry.deferredResult) onLoadToolResult(entry.toolCallId);
   }
 
-  function collapseTool(event: MouseEvent, id: string): void {
+  function collapseEntry(event: MouseEvent, id: string): void {
     const details = (event.currentTarget as HTMLButtonElement).closest("details");
     expandedEntries.delete(id);
     if (details) {
@@ -59,6 +59,7 @@
       details.querySelector("summary")?.focus();
     }
   }
+  const collapseTool = collapseEntry;
 </script>
 
 <details
@@ -81,9 +82,9 @@
       <button
         type="button"
         aria-label="Collapse tool activity"
-        class="group/gutter absolute inset-y-0 -left-[7px] z-10 flex w-[14px] justify-center focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-ring"
+        class="group/gutter absolute inset-y-0 -left-[7px] z-10 flex w-[14px] cursor-pointer justify-center focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-ring"
         onclick={() => { expanded = false; groupSummary.focus(); }}
-      ></button>
+      ><span class="h-full w-px bg-transparent transition-colors duration-150 group-hover/gutter:bg-code-border group-focus-visible/gutter:bg-foreground/50" aria-hidden="true"></span></button>
       {#each item.entries as entry (entry.id)}
         {#if entry.type === "message"}
           <details class="group/thought" data-activity-entry-id={entry.id} open={expandedEntries.has(entry.id)} ontoggle={(event) => toggleEntry(event, entry)}>
@@ -98,7 +99,13 @@
               </span>
             </summary>
             {#if expandedEntries.has(entry.id)}
-              <div class="ml-[7px] pl-2.5 text-muted-foreground">
+              <div class="relative ml-[7px] pl-2.5 text-muted-foreground">
+                <button
+                  type="button"
+                  aria-label="Collapse thinking"
+                  class="group/thought-gutter absolute inset-y-0 -left-[7px] z-10 flex w-[14px] cursor-pointer justify-center focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-ring"
+                  onclick={(event) => collapseEntry(event, entry.id)}
+                ><span class="h-full w-px bg-transparent transition-colors duration-150 group-hover/thought-gutter:bg-code-border group-focus-visible/thought-gutter:bg-foreground/50" aria-hidden="true"></span></button>
                 <MarkdownText text={entry.text} compact dense fitTables {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />
               </div>
             {/if}
@@ -123,9 +130,9 @@
                     <button
                       type="button"
                       aria-label={`Collapse ${presentation.name} tool`}
-                      class="group/tool-gutter absolute inset-y-0 -left-[7px] z-10 flex w-[14px] justify-center focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-ring"
+                      class="group/tool-gutter absolute inset-y-0 -left-[7px] z-10 flex w-[14px] cursor-pointer justify-center focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-ring"
                       onclick={(event) => collapseTool(event, tool.id)}
-                    ></button>
+                    ><span class="h-full w-px bg-transparent transition-colors duration-150 group-hover/tool-gutter:bg-code-border group-focus-visible/tool-gutter:bg-foreground/50" aria-hidden="true"></span></button>
                   {#if tool.resultLoading}
                     <div class="py-0.5 pl-8 text-xs leading-tight text-muted-foreground" role="status">Loading tool result…</div>
                   {:else if tool.resultError}

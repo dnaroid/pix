@@ -49,7 +49,7 @@ export async function writeSubagentsBrokerReply(
 }
 
 /**
- * Spawn must outlive its initiating MCP call: the Pix suite owns live RPC pipes
+ * Spawn/resume must outlive its initiating MCP call: the Pix suite owns live RPC pipes
  * and completion receipts in the process that launched its child agents.
  * A detached broker keeps that original Pix runtime alive until agents settle.
  */
@@ -116,8 +116,11 @@ export async function runSubagentsBroker(
 		return;
 	}
 	if (result.isError) return;
-	const details = result.details as { runDir?: unknown; tasks?: Array<{ id: string }> } | undefined;
+	const details = result.details as { runDir?: unknown; tasks?: Array<{ id: string }>; agentId?: string; delivery?: string } | undefined;
 	if (typeof details?.runDir !== "string") return;
+	// A cold send owns one new turn, while live sends own no new process.
+	const tasks = details.tasks ?? (details.delivery === "resume" && details.agentId ? [{ id: details.agentId }] : []);
+	if (tasks.length === 0) return;
 	const runDir = details.runDir;
 	// `wait` is the original Pix tool and reads durable run artifacts. The broker
 	// must not confuse its dead-PID `stopped` fallback with a final receipt.
@@ -127,7 +130,6 @@ export async function runSubagentsBroker(
 	// terminal state and a receipt, including when wait returns immediately.
 	// IDs can be omitted or normalized by Pix. Its resolved task previews are
 	// authoritative, including queued tasks missing from a transient status.
-	const tasks = details.tasks ?? [];
 	const logFile = brokerLogFile(runDir);
 	const log = (text: string) => mkdir(path.dirname(logFile), { recursive: true })
 		.then(() => appendFile(logFile, `${new Date().toISOString()}: broker_pid=${process.pid} ${text}\n`)).catch(() => {});
@@ -140,7 +142,7 @@ export async function runSubagentsBroker(
 			// paired with a new failed receipt whose callback has already queued
 			// a retry, causing us to abandon its unreferenced backoff timer.
 			const receipts = tasks.map((task) => ({ task, receipt: subagentCompletionReceipt(runDir, task.id) }));
-			const status = await api.execute("subagents", { action: "wait", runDir, timeout: 300, interval: 2 });
+			const status = await api.execute("subagents", { action: "wait", runDir, agentIds: tasks.map((task) => task.id), timeout: 300, interval: 2 });
 			const agents = (status.details as { agents?: Array<{ id: string; status: string }> } | undefined)?.agents ?? [];
 			const pending = receipts.map(({ task, receipt }) => {
 				const agent = agents.find((entry) => entry.id === task.id);

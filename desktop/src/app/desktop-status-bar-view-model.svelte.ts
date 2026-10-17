@@ -14,6 +14,7 @@ import { sessionTabModelDisplayOptions } from "../lib/session-tab-model";
 import type { createSessionTabsState } from "./session-tabs-state.svelte";
 import { scopedProjectPathNavigation, type ProjectPathNavigation } from "../lib/project-path-navigation";
 import type { SubagentSessionState } from "../lib/session-subagent-link";
+import { sessionActivitySummary } from "../lib/session-activity";
 
 type StatusBarProps = ComponentProps<typeof DesktopStatusBar>["props"];
 
@@ -79,8 +80,13 @@ export function createDesktopStatusBarViewModel(options: {
     if (draft) {
       runtimeStatus = options.modelConfig.draftRuntimeStatus;
     } else if (viewer && sessionId) {
-      // Viewers never load a Pi runtime: show the recorded model/context only.
-      runtimeStatus = { sessionId, modelUsageRefresh: "skipped", ...(viewer.context ? { context: viewer.context } : {}) };
+      // Display-only snapshots: never attach a runtime to the child's JSONL.
+      runtimeStatus = {
+        sessionId, modelUsageRefresh: viewer.modelUsageRefresh ?? "skipped",
+        ...(viewer.context ? { context: viewer.context } : {}),
+        ...(viewer.modelUsage ? { modelUsage: viewer.modelUsage } : {}),
+        ...(viewer.modelUsageCredentialPending ? { modelUsageCredentialPending: true } : {}),
+      };
     } else if (sessionId) {
       runtimeStatus = options.runtime.statuses.get(sessionId);
     }
@@ -94,7 +100,7 @@ export function createDesktopStatusBarViewModel(options: {
       runtimeStatusAvailable: runtimeStatus !== undefined,
     });
 
-    const sessionActivity = options.sessionActivity();
+    const sessionActivity = viewer ? sessionActivitySummary(viewer.todo, undefined) : options.sessionActivity();
     const waitState = options.quotaWait.indicator(sessionId);
     const nowMs = options.quotaWait.nowMs;
     const observerSnapshot = draft ? undefined : options.headsUp.state(sessionId);
@@ -134,31 +140,32 @@ export function createDesktopStatusBarViewModel(options: {
       sessionUsage: !draft && sessionId ? options.runtime.sessionUsageBySession.get(sessionId) : undefined,
       sessionUsageRefreshing: !draft && sessionId ? options.runtime.sessionUsageRefreshing.has(sessionId) : false,
       sessionUsageFailed: !draft && sessionId ? options.runtime.sessionUsageFailed.has(sessionId) : false,
-      sessionUsageAvailable: !draft && !!sessionId && runtimeReady,
+      sessionUsageAvailable: !viewer && !draft && !!sessionId && runtimeReady,
       // The manual Claude Code limit refresh exists only for a live (non-draft)
       // session whose active model routes through pi-claude-code-provider.
       claudeCodeRoute: !!sessionId
+        && !viewer
         && !draft
         && modelThinkingConfigState(liveConfigOptions).currentModel?.provider === "pi-claude-code-provider",
       lastClaudeAccountAttempt: sessionId && !draft ? options.runtime.claudeAccountAttempts.get(sessionId)?.name : undefined,
       claudeLimitsRefreshing: sessionId ? options.runtime.claudeLimitsRefreshing.has(sessionId) : false,
       claudeLimitsFailed: sessionId ? options.runtime.claudeLimitsFailed.has(sessionId) : false,
       sessionActivity,
-      sessionSubagentSnapshot: options.sessionSubagentSnapshot(),
-      sessionTodoSnapshot: options.sessionTodoSnapshot(),
+      sessionSubagentSnapshot: viewer ? undefined : options.sessionSubagentSnapshot(),
+      sessionTodoSnapshot: viewer ? viewer.todo : options.sessionTodoSnapshot(),
       onOpenSubagentSession: options.openSubagentSession,
       sessionNeedsInput: options.sessionNeedsInput(),
-      canClearTodos: options.canClearTodos(),
+      canClearTodos: !viewer && options.canClearTodos(),
       onSetConfig: (option, value) => void options.modelConfig.setConfig(option, value),
       onOpenModelThinking: options.modelConfig.openPicker,
-      onOpenSessionUsage: () => void options.sessionCoordinator.refreshActiveSessionUsage(),
+      onOpenSessionUsage: () => { if (!viewer) void options.sessionCoordinator.refreshActiveSessionUsage(); },
       subagentPathNavigation: options.subagentPathNavigation ? scopedProjectPathNavigation(
         workspace,
         () => options.workspace() === workspace && options.activeSessionId() === sessionId,
         options.subagentPathNavigation,
       ) : undefined,
-      onRefreshClaudeLimits: () => void options.sessionCoordinator.refreshActiveClaudeLimits(),
-      onClearTodos: () => sessionId ? options.clearSessionTodos(sessionId) : Promise.resolve(false),
+      onRefreshClaudeLimits: () => { if (!viewer) void options.sessionCoordinator.refreshActiveClaudeLimits(); },
+      onClearTodos: () => !viewer && sessionId ? options.clearSessionTodos(sessionId) : Promise.resolve(false),
     };
   });
 

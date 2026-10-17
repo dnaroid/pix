@@ -12,7 +12,7 @@ import {
 } from "../lib.js";
 import { settleStructuredResult } from "../core/structured-result.js";
 import { ownedAgentDir } from "../core/paths.js";
-import { getRecord, updateLive, updateRecord } from "../core/store.js";
+import { getRecord, recordStopRequested, updateLive, updateRecord } from "../core/store.js";
 import { resolveSubagentAgentRunDir } from "../core/lookup.js";
 import { isTerminalAgentStatus } from "../core/notifications.js";
 import { getLiveChannel, LiveChannelClosingError, type LiveSendMode } from "../core/live-channel.js";
@@ -144,6 +144,7 @@ export function registerSendTool(
 			// Queued until the semaphore opens: non-terminal and owned by this process.
 			updateRecord(runDir, agentId, {
 				turn, status: "planned", exitCode: null, finishedAt: null, nextRetryAt: null, stopRequested: null, stopSignal: null,
+				pid: null, processGroup: null, startedAt: null, ownerPid: process.pid,
 				timedOut: null, structured: null, message: null, stderrPreview: null,
 			}, parentSessionManager);
 			updateLive(runDir, agentId, { active: true, resultText: undefined, stderrTail: undefined });
@@ -186,11 +187,22 @@ export function registerSendTool(
 					slotReleased = true;
 					semaphore.release();
 				};
+				const cancelBeforeLaunch = () => {
+					if (!recordStopRequested(runDir, agentId)) return false;
+					releaseSlot();
+					updateRecord(runDir, agentId, { status: "stopped", stopRequested: true, finishedAt: isoNow(), exitCode: null });
+					updateLive(runDir, agentId, { active: false });
+					const state = getAgentState(runDir, agentId, { includeLineCounts: false })!;
+					finish({ runDir, agentId, agentDir, exitCode: 0, state });
+					return true;
+				};
 				try {
 					await semaphore.acquire();
 					slotAcquired = true;
+					if (cancelBeforeLaunch()) return;
 					const ownedOptions = maySelectOwnedProvider(spec.task, spec.extraArgs, [])
 						? await resolveOwnedLaunchOptions([ctx.cwd, ownedProbeDir(ctx.cwd, runDir)]) : {};
+					if (cancelBeforeLaunch()) return;
 					spawnAgent(runDir, spec.task, ctx.cwd, spec.extraArgs, (event) => {
 						recordSubagentUsage(parentSessionManager, event, agentId, runDir);
 						recordSubagentToolStatistics(parentSessionManager, event, runDir, agentId);

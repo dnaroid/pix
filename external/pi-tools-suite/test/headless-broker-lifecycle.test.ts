@@ -10,6 +10,7 @@ const fixture = path.join(import.meta.dir, "fixtures/headless-broker-lifecycle.m
 
 const scenarios = [
 	{ label: "dead-PID status until durable done receipt", status: "done", receipt: "0" },
+	{ label: "cold send resume until its durable receipt", status: "done", receipt: "0", mode: "resume" },
 	{ label: "dead-PID status until durable failed receipt", status: "failed", receipt: "1" },
 	{ label: "dead-PID status until durable stopped receipt", status: "stopped", receipt: "stopped" },
 	{ label: "retry backoff despite a stale failed receipt", status: "done", receipt: "0", mode: "retry" },

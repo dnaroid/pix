@@ -34,5 +34,16 @@ describe("sub-agent viewer link", () => {
       terminal: false, revision: "1", model: { provider: "", modelId: "x", name: "x" }, context: { tokens: null, contextWindow: 0, percent: null },
     }, "m")).toEqual({ terminal: false, revision: "1" });
   });
-});
 
+  it("validates private plans and provider quota without accepting a false ready state", () => {
+    const todo = { version: 1, checkedAt: 1, details: { action: "create", params: {}, nextId: 2,
+      tasks: [{ id: 1, subject: "Child plan", status: "in_progress" }] } };
+    const modelUsage = { modelKey: "zai/glm", provider: "zhipu", updatedAt: 1,
+      hourly: { remainingPercent: 80, resetAt: 1000, windowSeconds: 3600 } };
+    const state = { terminal: false, revision: "1", todo, modelUsageRefresh: "ready", modelUsage };
+    expect(parseSubagentSessionState(state, "m")).toEqual(state);
+    expect(parseSubagentSessionState({ terminal: false, revision: "1", todo: { bad: true } }, "m")).not.toHaveProperty("todo");
+    expect(() => parseSubagentSessionState({ ...state, modelUsage: undefined }, "m")).toThrow(/ready without/);
+    expect(() => parseSubagentSessionState({ ...state, modelUsageRefresh: "skipped" }, "m")).toThrow(/supporting refresh/);
+  });
+});

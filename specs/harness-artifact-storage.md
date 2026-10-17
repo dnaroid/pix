@@ -30,7 +30,7 @@ project-relative destination, not a directory link followed by bare or inline-co
 filenames. It includes an example and explains that supported local image links
 render as clickable inline previews in Desktop (see
 [Desktop Markdown rendering](desktop-markdown-rendering.md)). Existing evidence
-locations, including `.pi/subagents/`, are preserved; media outside the project
+locations, including `.pi/artifacts/subagents/`, are preserved; media outside the project
 use absolute paths or absolute `file://` Markdown destinations. Video links expose
 inline playback controls. Every new or updated image must use a unique filename;
 previously linked images must not be overwritten because Desktop caches images by
@@ -54,7 +54,8 @@ Decision: [0015 — Canonical disposable harness output](../docs/decisions/0015-
 
 ## Constraints and failure cases
 
-- Harness-managed subagent/QA evidence stays under `.pi/subagents/`.
+- Child session transcripts and parent state live under `.pi/subagents/`;
+  disposable subagent/QA evidence stays under `.pi/artifacts/subagents/`.
 - Installed UI-QA helper executables are infrastructure, not disposable evidence.
   The macOS development helper lives under the OS user's
   `~/Library/Application Support/Pix/ui-qa/helpers/`, outside project Registry
@@ -75,8 +76,10 @@ Decision: [0015 — Canonical disposable harness output](../docs/decisions/0015-
   [Registry storage contract](resource-registry-project-state.md) cleans
   initialized-project `.pi/artifacts/` and `.pi/subagents/` in Desktop after a
   72-hour background TTL; parent-scoped `.pi/subagents/<parentSessionId>/`
-  session directories are instead kept while their parent session exists
-  (decision 0072); manual Clean is immediate. This is not guaranteed
+  session directories are instead kept while their parent session exists, then
+  reclaimed after 24 hours of inactivity. Scopes with owned-launch records are
+  preserved until retired (decision 0072); Manual Clean preserves `owned/`.
+  This is not guaranteed
   in standalone Pi or uninitialized projects. Export evidence needing retention.
 - Runtime mirrors are generated from authoritative suite sources; do not fix
   an installed/generated prompt copy independently of its source.

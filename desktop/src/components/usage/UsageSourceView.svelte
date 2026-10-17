@@ -145,7 +145,7 @@
   {#if periodTotal <= 0 && kpis.length === 0}
     <p class="m-0 border-t border-sidebar-border px-3 py-6 text-center text-xs text-muted-foreground">No usage in this period.</p>
   {:else}
-    <UsageSection title="Overview">
+    <UsageSection title="Overview" sectionId="overview">
       <dl class="m-0 grid grid-cols-2 gap-x-3 gap-y-2">
         {#each kpis as kpi (kpi.label)}
           <div class="min-w-0"><dt class="text-[11px] text-muted-foreground">{kpi.label}</dt><dd class="m-0 truncate text-sm font-medium tabular-nums">{kpi.value}</dd></div>
@@ -153,7 +153,7 @@
       </dl>
     </UsageSection>
     {#if calendar.total > 0 || (hourProfile && hourProfile.total > 0)}
-      <UsageSection title="Activity">
+      <UsageSection title="Activity" sectionId="activity">
         <div class="flex flex-col gap-3">
           <UsageHeatmap {calendar} {metric} {estimated} {selectedDay} onSelectDay={(day) => dayChoice = day} />
           {#if hourProfile && hourProfile.total > 0}<UsageHourStrip profile={hourProfile} {metric} {estimated} {selectedHour} onSelectHour={(hour) => hourChoice = hour} />{/if}
@@ -161,13 +161,13 @@
       </UsageSection>
     {/if}
     {#if daily.days.length > 0 && daily.max > 0}
-      <UsageSection title={`Daily ${METRIC_LABELS[metric].toLowerCase()}`}><UsageDailyBars series={daily} {metric} {estimated} {selectedDay} {selectedModel} onSelectDay={(day) => dayChoice = day} onSelectModel={selectModel} /></UsageSection>
+      <UsageSection title={`Daily ${METRIC_LABELS[metric].toLowerCase()}`} sectionId="daily"><UsageDailyBars series={daily} {metric} {estimated} {selectedDay} {selectedModel} onSelectDay={(day) => dayChoice = day} onSelectModel={selectModel} /></UsageSection>
     {/if}
     {#if shares.length > 1 || selectedModel !== null}
-      <UsageSection title="By model"><UsageShareList {shares} {metric} {estimated} ariaLabel="Share by model" selected={selectedModel} onSelect={selectModel} /></UsageSection>
+      <UsageSection title="By model" sectionId="models"><UsageShareList {shares} {metric} {estimated} ariaLabel="Share by model" selected={selectedModel} onSelect={selectModel} /></UsageSection>
     {/if}
     {#if sessions.length > 0}
-      <UsageSection title="Top sessions">
+      <UsageSection title="Top sessions" sectionId="sessions">
         <ol class="m-0 flex list-none flex-col p-0">
           {#each sessions as session (session.sessionId)}
             <li>
@@ -190,7 +190,7 @@
       </UsageSection>
     {/if}
     {#if cache}
-      <UsageSection title="Cache efficiency">
+      <UsageSection title="Cache efficiency" sectionId="cache">
         <div class="flex flex-col gap-1.5">
           <div class="flex items-baseline justify-between text-xs">
             <span>Cache hit rate</span><span class="font-medium tabular-nums">{Math.round(cache.hitRate * 100)}%</span>

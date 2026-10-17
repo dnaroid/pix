@@ -418,6 +418,11 @@ describe.serial("slash command registration", () => {
 			},
 		};
 
+		updateRecord(runDir, "agent-1", { status: "running", pid: process.pid });
+		await registered.get("sub-open").handler("2026-run agent-1", ctx);
+		expect(switches).toEqual([]);
+		expect(notifications.pop()).toEqual(["Wait for the sub-agent to finish before opening its session; only one process may write its transcript.", "warning"]);
+		updateRecord(runDir, "agent-1", { status: "done", exitCode: 0 });
 		await registered.get("sub-open").handler("2026-run agent-1", ctx);
 		expect(switches).toEqual([subSession]);
 		expect(notifications.pop()[0]).toContain("Opened sub-agent agent-1");

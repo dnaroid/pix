@@ -72,6 +72,14 @@ without blocking desktop interactions.
   disabled current-window actions are skipped without being hidden. Opening the
   menu closes the conversation selector, and top-level session/workspace actions
   can close it through the sidebar component handle.
+- The project menu search fuzzy-matches project names and full paths; an empty
+  query preserves recent-project order. Opening by mouse focuses the search and
+  resets its query. Native text editing remains available in the search field;
+  its ArrowUp/ArrowDown keys move into the filtered command list, and Enter opens
+  the strongest project match unless current-window navigation is disabled.
+  The project list shows up to eight 44 px rows (358 px including list padding)
+  when space permits; menu height is bounded by the actual space below it and
+  updates on window resize. Escape and outside dismissal remain unchanged.
 - The Project activity-rail icon is neutral and follows the same active/muted
   foreground treatment as the other Activity Bar icons. The two-letter titlebar
   badge uses the project identity color. Desktop does not repeat the project name

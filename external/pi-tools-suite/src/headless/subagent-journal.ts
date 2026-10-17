@@ -7,9 +7,10 @@
 // JSONL journal in Pi session format next to its child sessions:
 // `<cwd>/.pi/subagents/<scope>/headless-parent.jsonl`.
 import { createHash, randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { getRunRoot } from "../async-subagents/core/paths.js";
+import { diagnosticErrorType, suiteDiagnostics } from "../lib/suite-diagnostics.js";
 
 export const HEADLESS_PARENT_FILE = "headless-parent.jsonl";
 const MAX_JOURNAL_BYTES = 32 * 1024 * 1024;
@@ -51,11 +52,14 @@ export function createHeadlessSessionManager(root: string, sessionKey?: string):
 		getEntries() {
 			let text: string;
 			try {
+				if (statSync(file).size > MAX_JOURNAL_BYTES) throw new Error("Headless subagent journal exceeds the 32 MiB read limit; archive it before continuing.");
 				text = readFileSync(file, "utf8");
-			} catch {
-				return [];
+				if (Buffer.byteLength(text) > MAX_JOURNAL_BYTES) throw new Error("Headless subagent journal exceeds the 32 MiB read limit; archive it before continuing.");
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+				suiteDiagnostics.report("error", "subagents", "journal-read-failed", root, { errorType: diagnosticErrorType(error) });
+				throw error;
 			}
-			if (Buffer.byteLength(text) > MAX_JOURNAL_BYTES) return [];
 			const entries: Array<{ type?: string; customType?: string; data?: unknown }> = [];
 			// Concurrent appenders may leave a partial trailing line; skip it.
 			for (const line of text.split("\n")) {

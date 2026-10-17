@@ -7,6 +7,7 @@
  */
 
 import { open } from "node:fs/promises";
+import { isSessionTodoSnapshot, type SessionTodoSnapshot } from "./session-todos-contract.js";
 
 export interface SubagentSessionSummary {
 	readonly provider?: string;
@@ -14,11 +15,13 @@ export interface SubagentSessionSummary {
 	readonly thinking?: string;
 	/** Context tokens of the last valid assistant turn; null after compaction. */
 	readonly contextTokens?: number | null;
+	readonly todo?: SessionTodoSnapshot;
 }
 
 interface ScanState {
 	offset: number;
 	summary: SubagentSessionSummary;
+	skipFragment?: boolean;
 }
 
 const MAX_CACHED_FILES = 16;
@@ -54,6 +57,18 @@ export function applySummaryLine(summary: SubagentSessionSummary, line: string):
 		return summary;
 	}
 	if (!isRecord(entry)) return summary;
+	let details: unknown;
+	if (entry.type === "custom" && entry.customType === "pi-tools-suite:todo-state") {
+		details = entry.data;
+	} else if (entry.type === "message" && isRecord(entry.message)
+		&& entry.message.role === "toolResult" && entry.message.toolName === "todo") {
+		details = entry.message.details;
+	}
+	if (details !== undefined) {
+		const timestamp = typeof entry.timestamp === "string" ? Date.parse(entry.timestamp) : NaN;
+		const todo = { version: 1, details, checkedAt: Number.isFinite(timestamp) ? timestamp : 0 };
+		return isSessionTodoSnapshot(todo) ? { ...summary, todo } : summary;
+	}
 	if (entry.type === "model_change") {
 		const provider = text(entry.provider);
 		const modelId = text(entry.modelId);
@@ -87,30 +102,25 @@ export async function readSubagentSessionSummary(sessionFile: string): Promise<S
 		try {
 			const { size } = await handle.stat();
 			if (!state || size < state.offset) state = { offset: 0, summary: {} };
-			let skipFragment = false;
-			// Very large backlogs only need the tail for the latest usage; model
-			// and thinking entries normally sit near the header and the tail.
-			if (size - state.offset > MAX_READ_BYTES) {
-				const head = Buffer.alloc(Math.min(size, 64 * 1024));
-				const { bytesRead } = await handle.read(head, 0, head.length, 0);
-				const headText = head.subarray(0, bytesRead).toString("utf8");
-				for (const line of headText.slice(0, Math.max(0, headText.lastIndexOf("\n"))).split("\n")) {
-					state.summary = applySummaryLine(state.summary, line);
-				}
-				state.offset = size - MAX_READ_BYTES;
-				skipFragment = true;
-			}
-			if (size > state.offset) {
-				const buffer = Buffer.alloc(size - state.offset);
+			// Scan every complete line: the latest todo may be in the middle of
+			// a long transcript. Bound each read rather than skipping the backlog.
+			while (size > state.offset) {
+				const buffer = Buffer.alloc(Math.min(MAX_READ_BYTES, size - state.offset));
 				const { bytesRead } = await handle.read(buffer, 0, buffer.length, state.offset);
 				const chunk = buffer.subarray(0, bytesRead);
 				const end = chunk.lastIndexOf(0x0a);
 				if (end >= 0) {
 					const lines = chunk.subarray(0, end).toString("utf8").split("\n");
-					// A tail read may start mid-line; drop that fragment.
-					if (skipFragment) lines.shift();
+					if (state.skipFragment) lines.shift();
+					state.skipFragment = false;
 					for (const line of lines) state.summary = applySummaryLine(state.summary, line);
 					state.offset += end + 1;
+				} else if (bytesRead === MAX_READ_BYTES) {
+					// Oversized transcript payload, not a bounded display snapshot.
+					state.offset += bytesRead;
+					state.skipFragment = true;
+				} else {
+					break; // An incomplete trailing line belongs to the next poll.
 				}
 			}
 		} finally {

@@ -133,6 +133,6 @@ the run state untouched, `1` run marked incomplete.
 ## Verification
 
 Run `bun test --isolate --timeout 20000 test/brainstorm` and the suite
-`tsc -p tsconfig.source.json`. These tests use synthetic sub-agent run
-directories; they do not prove live model quality, provider availability or
+`tsc -p tsconfig.source.json`. These tests use synthetic session-native
+sub-agent records; they do not prove live model quality, provider availability or
 real five-round cost. A live run is a manual check.

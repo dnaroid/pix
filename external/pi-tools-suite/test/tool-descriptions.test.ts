@@ -298,6 +298,11 @@ describe("tool descriptions", () => {
 		expect(promptText).toContain("seek a bounded read-only oracle opinion first");
 		expect(promptText).toContain("Task size, parallelism, isolation, token price, or worker availability alone do not justify delegation");
 		expect(promptText).toContain("duplicated context, briefing and integration");
+		expect(promptText).toContain("compare the remaining parent work, not the original task size");
+		expect(promptText).toContain("If savings are unclear or costs are comparable, continue in the parent");
+		expect(promptText).toContain("never overrides explicit user delegation or mandatory gates");
+		expect(promptText).toContain("without a separate cost-estimation tool call or a verbose justification");
+		expect(agentStrategyPrompt({ env: {} })).toContain("prefer exact paths/ranges and essential facts over copied files or repeated history");
 		expect(promptText).not.toContain("substantial independent task that can run alongside useful parent work");
 		expect(promptText).not.toContain("prefer implement (Luna");
 		expect(promptText).toContain("Mandatory UI QA, architectural review and final documentation maintenance remain exceptions");

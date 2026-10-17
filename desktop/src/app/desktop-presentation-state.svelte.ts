@@ -48,8 +48,8 @@ export function createDesktopPresentationState(options: DesktopPresentationState
   const activeSubagentLink = $derived(subagentSessionLink(
     options.sessions.catalog.sessions.find((session) => session.sessionId === options.state.sessionId)?._meta,
   ));
-  const canUseSession = $derived(options.statusReady() && !!options.workspace() && !sessionMutationRunning
-    && !activeSubagentLink);
+  const canCreateSession = $derived(options.statusReady() && !!options.workspace() && !sessionMutationRunning);
+  const canUseSession = $derived(canCreateSession && !activeSubagentLink);
   const promptRunning = $derived(
     options.state.sessionId
       ? options.prompt.runtime.runningSessionIds.has(options.state.sessionId)
@@ -164,6 +164,7 @@ export function createDesktopPresentationState(options: DesktopPresentationState
   return {
     get sessionMutationRunning() { return sessionMutationRunning; },
     get canUseSession() { return canUseSession; },
+    get canCreateSession() { return canCreateSession; },
     get promptRunning() { return promptRunning; },
     get activeAgentControlState() { return activeAgentControlState; },
     get anyPromptRunning() { return anyPromptRunning; },

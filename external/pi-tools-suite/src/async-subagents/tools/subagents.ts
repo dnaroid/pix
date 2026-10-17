@@ -102,8 +102,8 @@ export function registerSubagentsTool(
 
 			// spawn options
 			tasks: Type.Optional(Type.Array(AgentTaskSchema, { description: "spawn: agent tasks to launch" })),
-			runDir: Type.Optional(Type.String({ description: "spawn/status/wait/result/send/stop: run directory path. spawn creates one when omitted; status/wait/stop default to the latest project run; result/send can resolve runDir by agentId through .pi/subagents/registry.json." })),
-			slug: Type.Optional(Type.String({ description: "spawn: slug for a newly created run directory" })),
+			runDir: Type.Optional(Type.String({ description: "spawn/status/wait/result/send/stop: batch key (legacy parameter name; not a directory). spawn creates a batch when omitted; status/wait/stop default to the latest batch in the parent scope; result/send resolve the latest-launched record by agentId from parent session entries." })),
+			slug: Type.Optional(Type.String({ description: "spawn: slug for a new batch key" })),
 			thinking: Type.Optional(Type.String({ description: "spawn: thinking level for sub-agents (off, minimal, low, medium, high, xhigh, max)" })),
 			extraArgs: Type.Optional(Type.Array(Type.String(), { description: "spawn: additional pi CLI args for sub-agents" })),
 			timeoutSeconds: Type.Optional(Type.Number({ description: "spawn: wall-clock timeout in seconds for every spawned agent in this call; task timeoutSeconds overrides this." })),

@@ -68,7 +68,6 @@ export function createDesktopSessionTransitionServices(
     workspace: options.workspace,
     statusReady: options.statusReady,
     operationRunning: options.operationRunning,
-    canUseSession: options.canUseSession,
     activeSessionId: () => options.state.sessionId,
     setActiveSessionId: options.state.setSessionId,
     saveActiveTranscript: options.state.saveActiveTranscript,

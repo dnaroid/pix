@@ -5,6 +5,8 @@ import {
   type SubagentSessionModel,
   type SubagentSessionState,
 } from "../../../acp/src/acp/subagent-sessions-contract";
+import { isSessionTodoSnapshot } from "./session-todos";
+import { parseRuntimeStatus } from "./acp-response-parsers";
 
 export type { SubagentSessionContext, SubagentSessionLink, SubagentSessionModel, SubagentSessionState };
 
@@ -32,11 +34,21 @@ export function parseSubagentSessionState(value: unknown, method: string): Subag
   }
   const model = parseModel(value.model);
   const context = parseContext(value.context);
+  const usage = value.modelUsageRefresh === undefined ? undefined : parseRuntimeStatus({
+    sessionId: "viewer", modelUsageRefresh: value.modelUsageRefresh,
+    modelUsage: value.modelUsage, modelUsageCredentialPending: value.modelUsageCredentialPending,
+  });
   return {
     terminal: value.terminal,
     revision: value.revision,
     ...(model ? { model } : {}),
     ...(context ? { context } : {}),
+    ...(isSessionTodoSnapshot(value.todo) ? { todo: value.todo } : {}),
+    ...(usage ? {
+      modelUsageRefresh: usage.modelUsageRefresh,
+      ...(usage.modelUsage ? { modelUsage: usage.modelUsage } : {}),
+      ...(usage.modelUsageCredentialPending ? { modelUsageCredentialPending: true as const } : {}),
+    } : {}),
   };
 }
 

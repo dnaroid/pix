@@ -71,7 +71,7 @@
   import type { UsageSessionTarget } from "../lib/usage-stats";
   import LogsPanel from "./LogsPanel.svelte";
   import { createLogPanelPreference } from "../lib/log-panel-preference.svelte";
-  import type { AcpClient } from "../lib/acp-client";
+  import type { AcpClient, RuntimeStatus } from "../lib/acp-client";
   import GitPanel from "./GitPanel.svelte";
   import ProjectExplorer from "./ProjectExplorer.svelte";
   import PackageScriptsPanel from "./PackageScriptsPanel.svelte";
@@ -126,6 +126,7 @@
     workspace,
     lspClient,
     lspSessionId,
+    providerStatuses = [],
     settingsConfigOptions,
     visibleModelRefs,
     rememberedThinkingByModel = {},
@@ -222,6 +223,7 @@
     workspace: string;
     lspClient: AcpClient | null;
     lspSessionId: string | null;
+    providerStatuses?: readonly RuntimeStatus[];
     settingsConfigOptions: SessionConfigOption[];
     visibleModelRefs?: readonly string[];
     rememberedThinkingByModel?: Readonly<Record<string, string>>;
@@ -1138,7 +1140,7 @@
         </div>
       {:else if activeTab === "usage"}
         <div id="workspace-usage-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Usage">
-          <UsagePanel client={lspClient} {workspace} {...(onOpenUsageSession ? { onOpenSession: onOpenUsageSession } : {})} />
+          {#key workspace}<UsagePanel client={lspClient} {workspace} {providerStatuses} {...(onOpenUsageSession ? { onOpenSession: onOpenUsageSession } : {})} />{/key}
         </div>
       {:else if activeTab === "lsp"}
         <div id="workspace-lsp-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Language Servers">

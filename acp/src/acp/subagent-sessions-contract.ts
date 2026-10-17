@@ -1,3 +1,6 @@
+import type { DesktopModelUsageRefresh, DesktopModelUsageStatus } from "./desktop-commands.js";
+import type { SessionTodoSnapshot } from "./session-todos-contract.js";
+
 /**
  * Desktop wire contract for read-only sub-agent session viewers.
  * Dependency-free so Desktop can import it directly; the Node implementation
@@ -26,6 +29,12 @@ export interface SubagentSessionState {
 	readonly model?: SubagentSessionModel;
 	/** Context usage of the last assistant turn; needs a known context window. */
 	readonly context?: SubagentSessionContext;
+	/** Private child plan from persisted todo snapshots, never the parent's plan. */
+	readonly todo?: SessionTodoSnapshot;
+	/** Provider quota for the child's recorded model, without loading its runtime. */
+	readonly modelUsageRefresh?: DesktopModelUsageRefresh;
+	readonly modelUsage?: DesktopModelUsageStatus;
+	readonly modelUsageCredentialPending?: true;
 }
 
 export interface SubagentSessionModel {

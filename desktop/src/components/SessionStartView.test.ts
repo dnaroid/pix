@@ -27,7 +27,7 @@ describe("SessionStartView", () => {
     expect(source).not.toContain(">New conversation<");
     expect(rowSource).toContain("row.depth === 0 && sessionIsFork(row.session)");
     expect(rowSource).toContain("GitFork");
-    expect(rowSource).toContain("Sub-agent · {subagent.agentId}");
+    expect(rowSource).not.toContain("Sub-agent ·");
     expect(source).toContain("flatSessionRow(session)");
     expect(source).toContain('previewInlineSearch("sessions", query, candidateSessions)');
     expect(source).toContain('queryInlineSearch("sessions", searchClient, workspace, submitted, request.signal, publish)');
@@ -39,6 +39,24 @@ describe("SessionStartView", () => {
     expect(source).toContain("showSubagents ? sessions : sessions.filter((session) => !isSubagentSession(session))");
     expect(source).toContain("{#if hasSubagentSessions}");
     expect(source).toContain("bind:checked={showSubagents}");
+  });
+
+  it("renders search and sub-agent toggle in one compact toolbar without headings or a search button", () => {
+    const html = render(SessionStartView, { props: {
+      sessions: [{ sessionId: "viewer", cwd: "/project", title: "Review", _meta: {
+        "pix.subagent": { runDir: "/project/.pi/subagents/run", agentId: "reviewer", parentSessionId: "parent" },
+      } }], workspace: "/project", onSelect: () => {},
+    } }).body;
+    const search = html.indexOf('id="saved-session-search"');
+    const toggle = html.indexOf("data-show-subagent-sessions");
+    expect(search).toBeGreaterThanOrEqual(0);
+    expect(toggle).toBeGreaterThan(search);
+    expect(html).not.toContain('<button');
+    expect(source).toContain("resetPages(); cancelSearch();");
+    expect(html).not.toContain("Open a conversation");
+    expect(html).not.toContain("or start typing below");
+    expect(html).toContain('aria-label="Open saved conversation"');
+    expect(source).toContain("flex flex-wrap items-center gap-2");
   });
 
   it("fills the transcript height while keeping header/search fixed and session rows scrollable", () => {
