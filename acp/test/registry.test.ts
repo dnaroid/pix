@@ -395,7 +395,7 @@ test("moves agent companions atomically and routes scoped install/update/diff/ma
 test("scope moves preserve a pending remote update and legacy global provenance", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
 	const { project, seed, h } = await scopeFixture();
 	await act(project, { action: "install", type: "skill", name: "demo" }, h.ctx);
-	const provenanceFile = path.join(project, ".pi", "registry.json");
+	const provenanceFile = path.join(project, ".pi", "registry.jsonc");
 	const provenance = JSON.parse(fs.readFileSync(provenanceFile, "utf8"));
 	delete provenance.resources["skill:demo"].publicationScope;
 	fs.writeFileSync(provenanceFile, JSON.stringify(provenance));
@@ -1276,7 +1276,7 @@ test("installs, detects updates, updates, and pushes skills/agents through Git",
 
 	assert.match(fs.readFileSync(path.join(project, ".pi", "skills", "demo", "SKILL.md"), "utf8"), /v1/);
 	assert.match(fs.readFileSync(path.join(project, ".pi", "agents", "reviewer.md"), "utf8"), /Review carefully/);
-	assert.equal(fs.existsSync(path.join(project, ".pi", "registry.json")), true);
+	assert.equal(fs.existsSync(path.join(project, ".pi", "registry.jsonc")), true);
 
 	fs.writeFileSync(path.join(seed, "skills", "demo", "SKILL.md"), "---\ndescription: Demo skill\n---\n\nv2\n");
 	git(seed, ["add", "skills/demo/SKILL.md"]);
@@ -1526,7 +1526,7 @@ test("treats an empty plans directory as removal of registry plans", { timeout: 
 	assert.equal(fs.existsSync(path.join(seed, "projects", "empty-plans", "plans")), false);
 	assert.notEqual(h.notices.at(-1)?.type, "error");
 
-	const provenance = JSON.parse(fs.readFileSync(path.join(project, ".pi", "registry.json"), "utf8"));
+	const provenance = JSON.parse(fs.readFileSync(path.join(project, ".pi", "registry.jsonc"), "utf8"));
 	assert.equal(provenance.projectResources.plans, undefined);
 	const snapshot = await act(project, { action: "refresh" }, h.ctx);
 	assert.equal(snapshot.items.some((entry) => entry.id === "project:plans"), false);
@@ -1571,7 +1571,7 @@ test("uninstalls a local resource, keeps the registry copy, and clears provenanc
 	assert.equal(fs.existsSync(path.join(seed, "skills", "demo", "SKILL.md")), true);
 	assert.match(h.notices.at(-1)?.message ?? "", /Registry copy was kept/);
 
-	const provenance = JSON.parse(fs.readFileSync(path.join(project, ".pi", "registry.json"), "utf8"));
+	const provenance = JSON.parse(fs.readFileSync(path.join(project, ".pi", "registry.jsonc"), "utf8"));
 	assert.equal(provenance.resources["skill:demo"], undefined);
 
 	const snapshot = await act(project, { action: "refresh" }, h.ctx);

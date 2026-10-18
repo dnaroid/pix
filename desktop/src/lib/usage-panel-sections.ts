@@ -1,4 +1,5 @@
 import { applyEdits, modify, parse, type ParseError } from "jsonc-parser";
+import { withWorkspaceSchema } from "./workspace-config-schema";
 
 export const USAGE_SECTION_IDS = ["provider-limits", "overview", "activity", "daily", "models", "sessions", "cache"] as const;
 export type UsageSectionId = typeof USAGE_SECTION_IDS[number];
@@ -30,7 +31,7 @@ export function workspaceConfigWithUsageSection(source: string | undefined, id: 
   const next = applyEdits(base, modify(base, ["usagePanel", "collapsedSections"], [...collapsed], {
     formattingOptions: { insertSpaces: true, tabSize: 2, eol: "\n" },
   }));
-  return next.endsWith("\n") ? next : `${next}\n`;
+  return withWorkspaceSchema(next);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

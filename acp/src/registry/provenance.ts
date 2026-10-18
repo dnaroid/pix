@@ -1,30 +1,91 @@
 import { ProjectContext, resourceKey } from "./paths.js";
-import { PROVENANCE_VERSION, ProjectArtifact, Provenance, RegistryRuntime, ResourceEntry, ResourceType } from "./model.js";
+import { LEGACY_PROVENANCE_FILE, PROVENANCE_VERSION, REGISTRY_SCHEMA_URL, ProjectArtifact, Provenance, RegistryRuntime, ResourceEntry, ResourceType } from "./model.js";
 import { promises as fs } from "node:fs";
 import { provenancePath } from "./config.js";
 import { RegistryContext } from "./context.js";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { applyEdits, modify, parse, type ParseError } from "jsonc-parser";
+import { acpFileLogger } from "../logging.js";
 
-export async function readProvenance(project: ProjectContext): Promise<Provenance> {
-	try {
-		const parsed = JSON.parse(await fs.readFile(provenancePath(project), "utf8")) as Partial<Provenance>;
-		if (parsed.version !== PROVENANCE_VERSION || !parsed.resources || typeof parsed.resources !== "object") {
-			return { version: PROVENANCE_VERSION, resources: {}, projectResources: {} };
+async function readDocument(project: ProjectContext): Promise<{ source: string; path: string; provenance: Provenance }> {
+	const canonical = provenancePath(project);
+	for (const path of [canonical, join(dirname(canonical), LEGACY_PROVENANCE_FILE)]) {
+		let source: string;
+		try {
+			source = await fs.readFile(path, "utf8");
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+			throw error;
 		}
-		return {
+		const errors: ParseError[] = [];
+		const parsed: unknown = parse(source, errors, { allowTrailingComma: true });
+		if (errors.length || !isRecord(parsed) || parsed.version !== PROVENANCE_VERSION
+			|| !isRecord(parsed.resources)
+			|| (parsed.projectResources !== undefined && !isRecord(parsed.projectResources))) {
+			throw new Error(`Invalid Registry provenance in ${path}; fix it before syncing.`);
+		}
+		return { source, path, provenance: {
 			version: PROVENANCE_VERSION,
-			resources: parsed.resources,
-			projectResources: parsed.projectResources && typeof parsed.projectResources === "object" ? parsed.projectResources : {},
-		};
-	} catch {
-		return { version: PROVENANCE_VERSION, resources: {}, projectResources: {} };
+			resources: parsed.resources as Provenance["resources"],
+			projectResources: (parsed.projectResources ?? {}) as Provenance["projectResources"],
+		} };
 	}
+	return { source: "{}\n", path: canonical, provenance: { version: PROVENANCE_VERSION, resources: {}, projectResources: {} } };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export async function readProvenance(project: ProjectContext): Promise<Provenance> {
+	return (await readDocument(project)).provenance;
+}
+
+/** Caller holds the Registry operation lock. Publish complete JSONC before removing legacy state. */
 export async function writeProvenance(ctx: RegistryContext, provenance: Provenance): Promise<void> {
 	const filePath = provenancePath(ctx);
+	const document = await readDocument(ctx);
+	let source = document.source;
+	const formattingOptions = { insertSpaces: true, tabSize: 2, eol: "\n" };
+	const set = (path: string[], value: unknown): void => {
+		source = applyEdits(source, modify(source, path, value, { formattingOptions }));
+	};
+	if (parse(source).$schema === undefined) set(["$schema"], REGISTRY_SCHEMA_URL);
+	set(["version"], PROVENANCE_VERSION);
+	for (const field of ["resources", "projectResources"] as const) {
+		const before: Readonly<Record<string, unknown>> = document.provenance[field];
+		const after: Readonly<Record<string, unknown>> = provenance[field];
+		if (parse(source)[field] === undefined) set([field], {});
+		for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+			if (JSON.stringify(before[key]) !== JSON.stringify(after[key])) {
+				set([field, key], after[key]);
+			}
+		}
+	}
 	await fs.mkdir(dirname(filePath), { recursive: true });
-	await fs.writeFile(filePath, `${JSON.stringify(provenance, null, 2)}\n`, "utf8");
+	const temporary = join(dirname(filePath), `.registry.jsonc.${randomUUID()}.tmp`);
+	try {
+		await fs.writeFile(temporary, source.endsWith("\n") ? source : `${source}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+		if (document.path !== filePath) {
+			// Never overwrite a canonical file created while reading the legacy document.
+			await fs.link(temporary, filePath);
+			try {
+				if (await fs.readFile(document.path, "utf8") === document.source) await fs.unlink(document.path);
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+					// Canonical state is committed; a legacy backup must not turn success into failure.
+					try {
+						await acpFileLogger.log("warn", "registry:legacy-cleanup-failed", { code: (error as NodeJS.ErrnoException).code });
+					} catch { /* Diagnostics never change the committed operation. */ }
+				}
+			}
+		} else {
+			await fs.rename(temporary, filePath);
+		}
+	} finally {
+		await fs.rm(temporary, { force: true });
+	}
 }
 
 export async function recordProvenance(

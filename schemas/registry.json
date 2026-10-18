@@ -1,0 +1,294 @@
+{
+  "type": "object",
+  "required": [
+    "version",
+    "resources"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema URL for editor validation and autocomplete."
+    },
+    "version": {
+      "type": "number",
+      "const": 1
+    },
+    "resources": {
+      "type": "object",
+      "patternProperties": {
+        "^.*$": {
+          "type": "object",
+          "required": [
+            "type",
+            "name",
+            "remote",
+            "branch",
+            "revision",
+            "hash"
+          ],
+          "properties": {
+            "type": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "skill"
+                },
+                {
+                  "type": "string",
+                  "const": "agent"
+                }
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "remote": {
+              "type": "string",
+              "description": "Registry Git remote."
+            },
+            "branch": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "string",
+              "description": "Last synchronized Git revision."
+            },
+            "hash": {
+              "type": "string",
+              "description": "Last synchronized content hash."
+            },
+            "publicationScope": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "global"
+                },
+                {
+                  "type": "string",
+                  "const": "project"
+                }
+              ]
+            },
+            "projectKey": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "projectResources": {
+      "type": "object",
+      "properties": {
+        "tasks": {
+          "type": "object",
+          "required": [
+            "artifact",
+            "projectKey",
+            "remote",
+            "branch",
+            "revision",
+            "hash"
+          ],
+          "properties": {
+            "artifact": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "tasks"
+                },
+                {
+                  "type": "string",
+                  "const": "plans"
+                },
+                {
+                  "type": "string",
+                  "const": "todo"
+                },
+                {
+                  "type": "string",
+                  "const": "workspace"
+                }
+              ]
+            },
+            "projectKey": {
+              "type": "string"
+            },
+            "remote": {
+              "type": "string",
+              "description": "Registry Git remote."
+            },
+            "branch": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "string",
+              "description": "Last synchronized Git revision."
+            },
+            "hash": {
+              "type": "string",
+              "description": "Last synchronized content hash."
+            }
+          }
+        },
+        "plans": {
+          "type": "object",
+          "required": [
+            "artifact",
+            "projectKey",
+            "remote",
+            "branch",
+            "revision",
+            "hash"
+          ],
+          "properties": {
+            "artifact": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "tasks"
+                },
+                {
+                  "type": "string",
+                  "const": "plans"
+                },
+                {
+                  "type": "string",
+                  "const": "todo"
+                },
+                {
+                  "type": "string",
+                  "const": "workspace"
+                }
+              ]
+            },
+            "projectKey": {
+              "type": "string"
+            },
+            "remote": {
+              "type": "string",
+              "description": "Registry Git remote."
+            },
+            "branch": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "string",
+              "description": "Last synchronized Git revision."
+            },
+            "hash": {
+              "type": "string",
+              "description": "Last synchronized content hash."
+            }
+          }
+        },
+        "todo": {
+          "type": "object",
+          "required": [
+            "artifact",
+            "projectKey",
+            "remote",
+            "branch",
+            "revision",
+            "hash"
+          ],
+          "properties": {
+            "artifact": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "tasks"
+                },
+                {
+                  "type": "string",
+                  "const": "plans"
+                },
+                {
+                  "type": "string",
+                  "const": "todo"
+                },
+                {
+                  "type": "string",
+                  "const": "workspace"
+                }
+              ]
+            },
+            "projectKey": {
+              "type": "string"
+            },
+            "remote": {
+              "type": "string",
+              "description": "Registry Git remote."
+            },
+            "branch": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "string",
+              "description": "Last synchronized Git revision."
+            },
+            "hash": {
+              "type": "string",
+              "description": "Last synchronized content hash."
+            }
+          }
+        },
+        "workspace": {
+          "type": "object",
+          "required": [
+            "artifact",
+            "projectKey",
+            "remote",
+            "branch",
+            "revision",
+            "hash"
+          ],
+          "properties": {
+            "artifact": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "tasks"
+                },
+                {
+                  "type": "string",
+                  "const": "plans"
+                },
+                {
+                  "type": "string",
+                  "const": "todo"
+                },
+                {
+                  "type": "string",
+                  "const": "workspace"
+                }
+              ]
+            },
+            "projectKey": {
+              "type": "string"
+            },
+            "remote": {
+              "type": "string",
+              "description": "Registry Git remote."
+            },
+            "branch": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "string",
+              "description": "Last synchronized Git revision."
+            },
+            "hash": {
+              "type": "string",
+              "description": "Last synchronized content hash."
+            }
+          }
+        }
+      }
+    }
+  },
+  "$id": "https://unpkg.com/pi-ui-extend/schemas/registry.json",
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "Pix Registry Provenance",
+  "description": "Synchronization provenance in .pi/registry.jsonc. Managed by Registry operations; remote configuration lives in pi-tools-suite.jsonc.",
+  "additionalProperties": true
+}

@@ -26,7 +26,11 @@ export const PROJECT_WORKSPACE_FILE = "workspace.jsonc";
 
 export const REGISTRY_TASK_ATTACHMENT_SCHEME = "pix-task-attachment:";
 
-export const PROVENANCE_FILE = "registry.json";
+export const PROVENANCE_FILE = "registry.jsonc";
+
+export const LEGACY_PROVENANCE_FILE = "registry.json";
+
+export const REGISTRY_SCHEMA_URL = "https://unpkg.com/pi-ui-extend/schemas/registry.json";
 
 export const PROVENANCE_VERSION = 1;
 

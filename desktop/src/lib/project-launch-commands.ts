@@ -1,4 +1,5 @@
 import { applyEdits, modify, parse, type ParseError } from "jsonc-parser";
+import { withWorkspaceSchema } from "./workspace-config-schema";
 
 export interface LaunchCommand {
   id: string;
@@ -33,5 +34,5 @@ export function workspaceConfigWithLaunchCommands(source: string | undefined, co
   const next = applyEdits(base, modify(base, ["launchCommands"], commands, {
     formattingOptions: { insertSpaces: true, tabSize: 2, eol: "\n" },
   }));
-  return next.endsWith("\n") ? next : `${next}\n`;
+  return withWorkspaceSchema(next);
 }

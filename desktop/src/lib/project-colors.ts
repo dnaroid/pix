@@ -1,4 +1,5 @@
 import { applyEdits, modify, parse, type ParseError } from "jsonc-parser";
+import { withWorkspaceSchema } from "./workspace-config-schema";
 
 export const WORKSPACE_CONFIG_PATH = ".pi/workspace.jsonc";
 
@@ -68,7 +69,7 @@ export function workspaceConfigWithProjectSettings(
     if (settings.icon !== undefined && !icon) throw new Error("Project logo must be a canonical .pi/project-icon file.");
     next = applyEdits(next, modify(next, ["icon"], icon, { formattingOptions }));
   }
-  return next.endsWith("\n") ? next : `${next}\n`;
+  return withWorkspaceSchema(next);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

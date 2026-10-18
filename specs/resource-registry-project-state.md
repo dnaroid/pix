@@ -17,7 +17,8 @@ absolute paths.
 ## Scope
 
 - Desktop Registry push/pull/sync for tasks, plans, TODO, workspace and project.
-- Project provenance in `.pi/registry.json`.
+- Project provenance in canonical `.pi/registry.jsonc` (with read-only legacy
+  lookup of `.pi/registry.json` when the canonical file is absent).
 - Portable synchronization of SQLite task rows and SHA-256 content-addressed
   attachments from `.pi/tasks.sqlite` and `.pi/task-attachments`.
 - Pix Desktop local project-state initialization for workspaces that do not yet
@@ -41,6 +42,19 @@ not by embedded `file://` or portable text markers. There is no legacy
 JSONC/task overlay import or fallback.
 
 ## Behavior
+
+- Registry provenance is JSONC. Status/read operations are side-effect free;
+  malformed or unsupported provenance is an error and is never bypassed by
+  falling back to the legacy file. The first subsequent provenance write
+  migrates legacy state by publishing the complete canonical document
+  atomically without clobbering a concurrently created canonical file, then
+  removes the legacy file only if its contents are unchanged. A failed legacy
+  cleanup is logged but does not undo the successful canonical write. Registry
+  writes add the Registry editor schema reference only when `$schema` is absent.
+- The package generates and exports TypeBox editor schemas at
+  `schemas/workspace.json` and `schemas/registry.json`. Desktop's four workspace
+  config writers add the workspace `$schema` reference when absent; they retain
+  an existing custom `$schema`, comments, and unknown fields.
 
 - Desktop schedules a background catalog refresh three seconds after ACP is
   ready for the active workspace, without requiring the Registry panel to open.
@@ -285,7 +299,7 @@ JSONC/task overlay import or fallback.
   and is removed recursively. Top-level regular files are allowlist-based too:
   `AGENTS.md` (untracked personal rules for Pix context), `TODO.md`,
   `pi-tools-suite.jsonc`, `pix-desktop.jsonc`, `pix.jsonc`,
-  `qa_auth.jsonc`, `registry.json`, `tasks.sqlite`, `tasks.sqlite-wal`,
+  `qa_auth.jsonc`, `registry.json`, `registry.jsonc`, `tasks.sqlite`, `tasks.sqlite-wal`,
   `tasks.sqlite-shm`, `tasks.sqlite-journal`, `todo-plan.json`,
   and `workspace.jsonc` are preserved; other ordinary top-level files
   (for example temporary receipt JSONs and unsupported legacy `tasks.jsonc`)

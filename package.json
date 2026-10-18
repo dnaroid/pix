@@ -28,7 +28,9 @@
     "./schemas/pix.json": "./schemas/pix.json",
     "./schemas/pix-desktop.json": "./schemas/pix-desktop.json",
     "./schemas/pi-tools-suite.json": "./schemas/pi-tools-suite.json",
-    "./schemas/tasks.json": "./schemas/tasks.json"
+    "./schemas/tasks.json": "./schemas/tasks.json",
+    "./schemas/workspace.json": "./schemas/workspace.json",
+    "./schemas/registry.json": "./schemas/registry.json"
   },
   "files": [
     "assets/screenshots",

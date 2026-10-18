@@ -168,7 +168,9 @@ without blocking desktop interactions.
   retries the edit up to three times instead of overwriting a concurrent change.
 - Workspace-config replacement is written to a unique same-directory temporary
   file, flushed, atomically replaced where supported, and followed by a directory
-  sync. Existing `.pi/workspace.jsonc` symlinks are rejected.
+  sync. Workspace writers add the published TypeBox editor-schema reference only
+  when `$schema` is absent, preserving a custom schema reference as well as
+  comments and unknown fields. Existing `.pi/workspace.jsonc` symlinks are rejected.
 - On startup and project switch, only the active project's color override is
   loaded. Inactive recent projects are not accessed just to render the closed
   switcher; their overrides load asynchronously when the switcher opens.

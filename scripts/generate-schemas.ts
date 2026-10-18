@@ -8,6 +8,8 @@
  *   schemas/pix-desktop.json
  *   schemas/pi-tools-suite.json
  *   schemas/tasks.json
+ *   schemas/workspace.json
+ *   schemas/registry.json
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
@@ -17,6 +19,8 @@ import { PixConfigSchema } from "../src/schemas/pix-schema.js";
 import { PixDesktopConfigSchema } from "../src/schemas/pix-desktop-schema.js";
 import { PiToolsSuiteConfigSchema } from "../src/schemas/pi-tools-suite-schema.js";
 import { ProjectTasksSchema } from "../src/schemas/tasks-schema.js";
+import { WorkspaceConfigSchema } from "../src/schemas/workspace-schema.js";
+import { RegistryProvenanceSchema } from "../src/schemas/registry-schema.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const outDir = resolve(__dirname, "..", "schemas");
@@ -30,6 +34,8 @@ const schemas = [
 	{ name: "pix-desktop.json", schema: PixDesktopConfigSchema },
 	{ name: "pi-tools-suite.json", schema: PiToolsSuiteConfigSchema },
 	{ name: "tasks.json", schema: ProjectTasksSchema },
+	{ name: "workspace.json", schema: WorkspaceConfigSchema },
+	{ name: "registry.json", schema: RegistryProvenanceSchema },
 ];
 
 let changed = false;

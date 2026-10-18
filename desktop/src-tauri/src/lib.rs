@@ -135,6 +135,7 @@ const PROJECT_PI_CANONICAL_FILES: &[&str] = &[
     "project-icon.webp",
     "qa_auth.jsonc",
     "registry.json",
+    "registry.jsonc",
     "registry-project-key",
     "tasks.sqlite",
     "tasks.sqlite-wal",
@@ -4321,17 +4322,27 @@ fn sidebar_registry_indicator_state_inner(
     };
     let pi_dir = root.join(".pi");
     let surface_before = sidebar_registry_surface_stamp(&pi_dir)?;
-    let provenance_path = pi_dir.join("registry.json");
+    let canonical_provenance_path = pi_dir.join("registry.jsonc");
+    let canonical_stamp = sidebar_file_stamp(&canonical_provenance_path)?;
+    let provenance_path = if canonical_stamp.is_some() {
+        canonical_provenance_path.clone()
+    } else {
+        pi_dir.join("registry.json")
+    };
     let (provenance, provenance_stamp) =
         match sidebar_read_stable_file(&provenance_path, MAX_SIDEBAR_REGISTRY_PROVENANCE_BYTES)? {
             SidebarStableFileRead::Missing => (SidebarRegistryProvenance::default(), None),
             SidebarStableFileRead::Changed => return Ok(SidebarRegistryIndicatorState::default()),
             SidebarStableFileRead::Stable(bytes, stamp) => {
-                let provenance = serde_json::from_slice::<SidebarRegistryProvenance>(&bytes)
-                    .map_err(|error| format!("invalid .pi/registry.json: {error}"))?;
+                let source = std::str::from_utf8(&bytes)
+                    .map_err(|error| format!("invalid Registry provenance UTF-8: {error}"))?;
+                let normalized = normalize_jsonc(source)
+                    .map_err(|error| format!("invalid {}: {error}", provenance_path.display()))?;
+                let provenance = serde_json::from_str::<SidebarRegistryProvenance>(&normalized)
+                    .map_err(|error| format!("invalid {}: {error}", provenance_path.display()))?;
                 if provenance.version != 1 {
                     return Err(format!(
-                        "unsupported .pi/registry.json version {}",
+                        "unsupported Registry provenance version {}",
                         provenance.version
                     ));
                 }
@@ -4451,11 +4462,12 @@ fn sidebar_registry_indicator_state_inner(
         }
     }
 
-    if let Some(expected) = provenance_stamp {
-        if sidebar_file_stamp(&provenance_path)? != Some(expected) {
-            return Ok(SidebarRegistryIndicatorState::default());
-        }
-    } else if provenance_path.exists() {
+    if !sidebar_registry_provenance_unchanged(
+        &canonical_provenance_path,
+        canonical_stamp,
+        &provenance_path,
+        provenance_stamp,
+    )? {
         return Ok(SidebarRegistryIndicatorState::default());
     }
     if sidebar_registry_surface_stamp(&pi_dir)? != surface_before {
@@ -4542,6 +4554,16 @@ fn sidebar_registry_remote_override(path: &Path) -> Result<SidebarRegistryRemote
         .filter(|value| !value.is_empty())
         .map(str::to_owned);
     Ok(SidebarRegistryRemoteOverride::Present(remote))
+}
+
+fn sidebar_registry_provenance_unchanged(
+    canonical: &Path,
+    canonical_stamp: Option<SidebarFileStamp>,
+    selected: &Path,
+    selected_stamp: Option<SidebarFileStamp>,
+) -> Result<bool, String> {
+    Ok(sidebar_file_stamp(canonical)? == canonical_stamp
+        && sidebar_file_stamp(selected)? == selected_stamp)
 }
 
 fn sidebar_registry_surface_stamp(
@@ -7985,6 +8007,7 @@ fn is_pix_project_temp_name(name: &str) -> bool {
         && (name.starts_with(".tasks.jsonc.")
             || name.starts_with(".tasks.jsonc.initialize.")
             || name.starts_with(".workspace.jsonc.")
+            || name.starts_with(".registry.jsonc.")
             || name.starts_with(".markdown.")
             || name.starts_with(project_icon::PROJECT_ICON_TEMP_PREFIX))
 }
@@ -10068,6 +10091,46 @@ mod tests {
     }
 
     #[test]
+    fn sidebar_registry_indicator_prefers_jsonc_and_rejects_invalid_canonical_state() {
+        let workspace = temporary_workspace("sidebar-registry-jsonc");
+        let home = temporary_workspace("sidebar-registry-jsonc-home");
+        configure_registry_indicator_fixture(&home);
+        fs::create_dir_all(workspace.join(".pi")).unwrap();
+        let legacy = workspace.join(".pi/registry.json");
+        let canonical = workspace.join(".pi/registry.jsonc");
+        fs::write(&legacy, "broken legacy").unwrap();
+        fs::write(&canonical, "{ // comment\n \"$schema\":\"https://unpkg.com/pi-ui-extend/schemas/registry.json\", \"version\":1, \"resources\":{}, \"projectResources\":{}, }\n").unwrap();
+        let state = SidebarIndicatorState::default();
+        let result = sidebar_registry_indicator_state(&state, &workspace, &home);
+        assert!(result.stable);
+        assert!(result.error.is_none());
+        fs::write(&legacy, "{\"version\":1,\"resources\":{}}").unwrap();
+        fs::write(&canonical, "{").unwrap();
+        assert!(sidebar_registry_indicator_state(&state, &workspace, &home).error.is_some());
+        fs::remove_file(&canonical).unwrap();
+        let fallback = sidebar_registry_indicator_state(&state, &workspace, &home);
+        assert!(fallback.stable);
+        assert!(fallback.error.is_none());
+        fs::remove_dir_all(workspace).unwrap();
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn sidebar_registry_provenance_migration_invalidates_a_legacy_sample() {
+        let workspace = temporary_workspace("sidebar-registry-migration");
+        fs::create_dir_all(workspace.join(".pi")).unwrap();
+        let legacy = workspace.join(".pi/registry.json");
+        let canonical = workspace.join(".pi/registry.jsonc");
+        fs::write(&legacy, "{\"version\":1,\"resources\":{}}").unwrap();
+        let before = sidebar_file_stamp(&legacy).unwrap();
+        assert!(sidebar_registry_provenance_unchanged(&canonical, None, &legacy, before).unwrap());
+        // The legacy file itself is unchanged, but a migration appeared mid-sample.
+        fs::write(&canonical, "{\"version\":1,\"resources\":{}}").unwrap();
+        assert!(!sidebar_registry_provenance_unchanged(&canonical, None, &legacy, before).unwrap());
+        fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[test]
     fn sidebar_registry_indicator_ignores_service_files_inside_a_tracked_skill() {
         let workspace = temporary_workspace("sidebar-registry-skill-service-files");
         let home = temporary_workspace("sidebar-registry-skill-service-home");
@@ -11731,6 +11794,7 @@ mod tests {
             "pix.jsonc",
             "project-icon.png",
             "registry.json",
+            "registry.jsonc",
             "registry-project-key",
             "todo-plan.json",
             "workspace.jsonc",
@@ -11814,6 +11878,7 @@ mod tests {
             "pix.jsonc",
             "project-icon.png",
             "registry.json",
+            "registry.jsonc",
             "registry-project-key",
             "todo-plan.json",
             "workspace.jsonc",

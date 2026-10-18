@@ -1,5 +1,6 @@
 import { applyEdits, modify, parse, type ParseError } from "jsonc-parser";
 import { isProjectRelativePath } from "./project-tree";
+import { withWorkspaceSchema } from "./workspace-config-schema";
 
 export const MAX_STORED_EXPANDED_DIRECTORIES = 256;
 
@@ -52,7 +53,7 @@ export function workspaceConfigWithProjectExplorerExpandedDirectories(
         formattingOptions(),
       );
   const next = applyEdits(base, edits);
-  return next.endsWith("\n") ? next : `${next}\n`;
+  return withWorkspaceSchema(next);
 }
 
 export function compactExpandedDirectories(paths: readonly string[]): string[] {
