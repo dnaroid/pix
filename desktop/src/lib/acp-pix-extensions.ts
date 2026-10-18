@@ -17,7 +17,7 @@ import {
   PIX_SUBAGENT_SESSION_STATE_METHOD,
 } from "../../../acp/src/acp/subagent-sessions-contract";
 import { parseSubagentSessionState, subagentSessionLink, type SubagentSessionLink, type SubagentSessionState } from "./session-subagent-link";
-import { isRecord, parseClaudeQuotaRefresh, parseLspSnapshot, parseQueueState, parseQueuedUserMessage, parseRuntimeStatus, parseSessionUsageStatus } from "./acp-response-parsers";
+import { isRecord, parseClaudeQuotaRefresh, parseLspSnapshot, parseModelUsageStatus, parseQueueState, parseQueuedUserMessage, parseRuntimeStatus, parseSessionUsageStatus } from "./acp-response-parsers";
 import type {
   AgentControlStatus,
   AutocompleteSettings,
@@ -88,11 +88,15 @@ export class AcpPixExtensions {
     cwd: string,
     selection?: DraftSessionConfig,
     refreshModelUsage = false,
+    includeUsageCache = false,
   ): Promise<{
     configOptions: SessionConfigOption[];
     modelUsageRefresh: RuntimeStatus["modelUsageRefresh"];
     modelUsage?: RuntimeStatus["modelUsage"];
     modelUsageCredentialPending?: true;
+    usageCache?: { scope: string; routeScopes?: Record<string, string>; snapshots: NonNullable<RuntimeStatus["modelUsage"]>[] };
+    usageCacheInvalidated?: true;
+    usageCacheScope?: string;
     modelRoutingEnabled: boolean;
     modelRoutingDefault: boolean;
   }> {
@@ -103,6 +107,7 @@ export class AcpPixExtensions {
         ...(selection.thinkingLevel ? { thinkingLevel: selection.thinkingLevel } : {}),
       } : {}),
       ...(refreshModelUsage ? { refreshModelUsage: true } : {}),
+      ...(includeUsageCache ? { includeUsageCache: true } : {}),
     });
     if (!isRecord(response) || !Array.isArray(response.configOptions)) {
       throw new Error("pix/session/draft_config returned an invalid response");
@@ -112,11 +117,27 @@ export class AcpPixExtensions {
       sessionId: "draft",
       modelUsageRefresh: response.modelUsageRefresh ?? "skipped",
     });
+    let usageCache: { scope: string; routeScopes?: Record<string, string>; snapshots: NonNullable<RuntimeStatus["modelUsage"]>[] } | undefined;
+    if (response.usageCache !== undefined) {
+      const cache = response.usageCache;
+      if (!isRecord(cache) || typeof cache.scope !== "string" || !/^[a-f0-9]{64}$/.test(cache.scope)
+        || !Array.isArray(cache.snapshots) || cache.snapshots.length > 2048) throw new Error("invalid Pix usage cache");
+      const snapshots = cache.snapshots.map(parseModelUsageStatus);
+      if (snapshots.some((snapshot) => snapshot.stale !== true)) throw new Error("invalid Pix usage cache freshness");
+      if (cache.routeScopes !== undefined && (!isRecord(cache.routeScopes) || Object.keys(cache.routeScopes).length > 128
+        || Object.values(cache.routeScopes).some((scope) => typeof scope !== "string" || !/^[a-f0-9]{64}$/.test(scope)))) throw new Error("invalid Pix usage cache routes");
+      usageCache = { scope: cache.scope, snapshots, ...(cache.routeScopes ? { routeScopes: cache.routeScopes as Record<string, string> } : {}) };
+    }
+    if (response.usageCacheInvalidated !== undefined && response.usageCacheInvalidated !== true) throw new Error("invalid Pix usage cache invalidation");
+    if (response.usageCacheScope !== undefined && (typeof response.usageCacheScope !== "string" || !/^[a-f0-9]{64}$/.test(response.usageCacheScope))) throw new Error("invalid Pix usage cache scope");
     return {
       configOptions: response.configOptions as SessionConfigOption[],
       modelUsageRefresh: runtime.modelUsageRefresh,
       ...(runtime.modelUsage ? { modelUsage: runtime.modelUsage } : {}),
       ...(runtime.modelUsageCredentialPending ? { modelUsageCredentialPending: true } : {}),
+      ...(usageCache ? { usageCache } : {}),
+      ...(response.usageCacheInvalidated === true ? { usageCacheInvalidated: true } : {}),
+      ...(typeof response.usageCacheScope === "string" ? { usageCacheScope: response.usageCacheScope } : {}),
       modelRoutingEnabled: response.modelRoutingEnabled === true,
       modelRoutingDefault: response.modelRoutingDefault === true,
     };

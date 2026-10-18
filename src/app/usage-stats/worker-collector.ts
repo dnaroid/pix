@@ -2,7 +2,7 @@ import { Worker } from "node:worker_threads";
 import type { CollectWorkerData, CollectWorkerRequest, CollectWorkerResponse } from "./collect-worker-protocol.js";
 import type { LocalUsageCollectResult, LocalUsageCollector, LocalUsagePartial } from "./local-source.js";
 import type { UsageStatsLog } from "./service.js";
-import type { UsageSourceId } from "./types.js";
+import type { UsageSourceId, UsageSourceSnapshot } from "./types.js";
 
 type Pending = {
 	resolve: (result: LocalUsageCollectResult) => void;
@@ -21,6 +21,7 @@ export type WorkerCollectorOptions = {
 	/** Test seam; defaults to the sibling `collect-worker` module. */
 	workerUrl?: URL;
 	readyTimeoutMs?: number;
+	snapshotPath?: string;
 };
 
 const DEFAULT_READY_TIMEOUT_MS = 30_000;
@@ -42,6 +43,7 @@ export class WorkerCollector implements LocalUsageCollector {
 	private starting: Promise<Worker | undefined> | undefined;
 	private inProcess: LocalUsageCollector | undefined;
 	private readonly pending = new Map<number, Pending>();
+	private readonly restores = new Map<number, { resolve: (snapshot: UsageSourceSnapshot | undefined) => void; reject: (error: unknown) => void }>();
 	private nextId = 1;
 	private disposed = false;
 
@@ -49,6 +51,19 @@ export class WorkerCollector implements LocalUsageCollector {
 
 	get id(): UsageSourceId {
 		return this.options.id;
+	}
+
+	async restore(): Promise<UsageSourceSnapshot | undefined> {
+		if (this.disposed) return undefined;
+		const worker = this.inProcess ? undefined : await this.ensureWorker();
+		if (this.disposed) return undefined;
+		if (!worker) return this.inProcess?.restore?.();
+		const id = this.nextId++;
+		return new Promise((resolve, reject) => {
+			this.restores.set(id, { resolve, reject });
+			worker.ref();
+			this.post(worker, { type: "restore", id });
+		});
 	}
 
 	async collect(signal?: AbortSignal, onPartial?: LocalUsagePartial): Promise<LocalUsageCollectResult> {
@@ -77,6 +92,8 @@ export class WorkerCollector implements LocalUsageCollector {
 		this.disposed = true;
 		const error = new Error("Usage collector disposed");
 		for (const id of [...this.pending.keys()]) this.settle(id)?.reject(error);
+		for (const entry of this.restores.values()) entry.reject(error);
+		this.restores.clear();
 		void this.worker?.terminate().catch(() => undefined);
 		this.worker = undefined;
 		this.inProcess?.dispose?.();
@@ -91,7 +108,10 @@ export class WorkerCollector implements LocalUsageCollector {
 	private start(): Promise<Worker | undefined> {
 		return new Promise((resolve) => {
 			let worker: Worker;
-			const data: CollectWorkerData = this.options.partialWindowMs === undefined ? {} : { partialWindowMs: this.options.partialWindowMs };
+			const data: CollectWorkerData = {
+				...(this.options.partialWindowMs === undefined ? {} : { partialWindowMs: this.options.partialWindowMs }),
+				...(this.options.snapshotPath ? { snapshotPath: this.options.snapshotPath } : {}),
+			};
 			try {
 				worker = new Worker(this.options.workerUrl ?? defaultCollectWorkerUrl(), { workerData: data });
 			} catch (error) {
@@ -161,10 +181,23 @@ export class WorkerCollector implements LocalUsageCollector {
 		if (this.disposed) return;
 		this.log("warn", "usage_stats.worker_crashed", { source: this.options.id, error: error.name });
 		for (const id of [...this.pending.keys()]) this.settle(id)?.reject(error);
+		for (const entry of this.restores.values()) entry.reject(error);
+		this.restores.clear();
 	}
 
 	private handle(message: CollectWorkerResponse): void {
 		if (message.type === "ready") return;
+		if (message.type === "log") {
+			this.log(message.level, message.event, message.details ?? {});
+			return;
+		}
+		if (message.type === "restored") {
+			const entry = this.restores.get(message.id);
+			this.restores.delete(message.id);
+			entry?.resolve(message.snapshot);
+			this.unrefIfIdle();
+			return;
+		}
 		if (message.type === "partial") {
 			try {
 				this.pending.get(message.id)?.onPartial?.(message.snapshot);
@@ -184,8 +217,12 @@ export class WorkerCollector implements LocalUsageCollector {
 		if (!entry) return undefined;
 		this.pending.delete(id);
 		entry.cleanup();
-		if (this.pending.size === 0) this.worker?.unref();
+		this.unrefIfIdle();
 		return entry;
+	}
+
+	private unrefIfIdle(): void {
+		if (this.pending.size === 0 && this.restores.size === 0) this.worker?.unref();
 	}
 
 	private post(worker: Worker, message: CollectWorkerRequest): void {

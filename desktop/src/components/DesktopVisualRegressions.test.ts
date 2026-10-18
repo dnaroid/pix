@@ -326,7 +326,7 @@ describe("desktop visual regressions", () => {
     expect(sessionActivityStatusHudSource).toContain("task.blockedBy");
     expect(sessionActivityStatusHudSource).toContain("{summary.completedTodos}/{summary.totalTodos}");
     expect(sessionActivityStatusHudSource).toContain('import Trash2 from "@lucide/svelte/icons/trash-2"');
-    expect(sessionActivityStatusHudSource).toContain('aria-label="Clear session plan"');
+    expect(sessionActivityStatusHudSource).toContain('aria-label="Clear session steps"');
     expect(sessionActivityStatusHudSource).toContain("disabled={!canClearTodos || clearingTodos || todoRows.length === 0}");
     expect(statusBarViewModelSource).toContain("canClearTodos: !viewer && options.canClearTodos()");
     expect(statusBarViewModelSource).toContain("options.clearSessionTodos(sessionId)");
@@ -477,7 +477,7 @@ describe("desktop visual regressions", () => {
     expect(runtimeStatusSource).not.toContain("onpointerleave=");
     expect(runtimeStatusSource).toContain('onfocusout={(event) => leaveDetails(event, "usage")}');
     expect(runtimeStatusSource).toContain("region.contains(event.relatedTarget)");
-    // Panels touch their triggers, matching Plan's lower edge without a dead gap.
+    // Panels touch their triggers, matching Steps' lower edge without a dead gap.
     expect(runtimeStatusSource.match(/bottom-full/g)).toHaveLength(2);
     expect(runtimeStatusSource).not.toContain("pb-1.5");
     expect(runtimeStatusSource).not.toContain("bottom-[calc(100%+0.375rem)]");
@@ -512,8 +512,8 @@ describe("desktop visual regressions", () => {
     expect(runtimeStatusSource).toContain('data-context-separator');
   });
 
-  it("keeps Plan clear in the status popup without a Session pane", () => {
-    expect(sessionActivityStatusHudSource).toContain('aria-label="Clear session plan"');
+  it("keeps Steps clear in the status popup without a Session pane", () => {
+    expect(sessionActivityStatusHudSource).toContain('aria-label="Clear session steps"');
     expect(statusBarViewModelSource).not.toContain("sessionActivityOpen");
     expect(statusSource).not.toContain("onOpenSessionActivity");
   });

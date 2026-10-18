@@ -417,6 +417,36 @@ describe("ACP JSON-RPC client", () => {
     await client.dispose();
   });
 
+  it("requests and validates account-scoped stale quota cache data without requesting a refresh", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+    const loading = client.draftConfig("/workspace", undefined, false, true);
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    const request = requestAt(transport, 1);
+    expect(request.params).toEqual({ cwd: "/workspace", includeUsageCache: true });
+    const usageCache = { scope: "a".repeat(64), snapshots: [{
+      modelKey: "openai-codex/gpt", provider: "openai", updatedAt: 1, stale: true,
+      hourly: { remainingPercent: 50, resetAt: 100, windowSeconds: 18_000 },
+    }] };
+    transport.message({ jsonrpc: "2.0", id: request.id, result: { configOptions: [], usageCache } });
+    await expect(loading).resolves.toMatchObject({ modelUsageRefresh: "skipped", usageCache });
+    for (const invalid of [
+      { ...usageCache, scope: "raw-credential" },
+      { ...usageCache, snapshots: [{ ...usageCache.snapshots[0], stale: false }] },
+      { ...usageCache, snapshots: [{ ...usageCache.snapshots[0], hourly: {} }] },
+    ]) {
+      const index = transport.sent.length;
+      const next = client.draftConfig("/workspace", undefined, false, true);
+      // Attach the rejection observer before delivering the response.
+      const rejected = expect(next).rejects.toThrow();
+      await vi.waitFor(() => expect(transport.sent).toHaveLength(index + 1));
+      const pending = requestAt(transport, index);
+      transport.message({ jsonrpc: "2.0", id: pending.id, result: { configOptions: [], usageCache: invalid } });
+      await rejected;
+    }
+    await client.dispose();
+  });
+
   it("routes a draft first prompt through the private model-routing method", async () => {
     const transport = new FakeTransport();
     const client = await startedClient(transport);

@@ -53,12 +53,17 @@ export interface DesktopDraftConfigRequest {
 	readonly modelRef?: string;
 	readonly thinkingLevel?: string;
 	readonly refreshModelUsage?: boolean;
+	readonly includeUsageCache?: boolean;
 }
 
 export interface DesktopDraftConfigResponse {
 	readonly configOptions: SessionConfigOption[];
 	readonly modelUsageRefresh: DesktopModelUsageRefresh;
 	readonly modelUsage?: DesktopModelUsageStatus;
+	/** Account-verified, stale quota snapshots; never an instruction to fetch. */
+	readonly usageCache?: { readonly scope: string; readonly routeScopes?: Readonly<Record<string, string>>; readonly snapshots: readonly DesktopModelUsageStatus[] };
+	readonly usageCacheInvalidated?: true;
+	readonly usageCacheScope?: string;
 	/**
 	 * True when the Claude Code quota refresh was unavailable only because no
 	 * usable Claude Code credential exists locally. A client retry then costs
@@ -599,10 +604,11 @@ export function parseDesktopDraftConfigRequest(value: unknown): DesktopDraftConf
 		|| (value.modelRef !== undefined && (typeof value.modelRef !== "string" || value.modelRef.trim().length === 0))
 		|| (value.thinkingLevel !== undefined && (typeof value.thinkingLevel !== "string" || value.thinkingLevel.trim().length === 0))
 		|| (value.refreshModelUsage !== undefined && typeof value.refreshModelUsage !== "boolean")
+		|| (value.includeUsageCache !== undefined && typeof value.includeUsageCache !== "boolean")
 	) {
 		throw new RequestError(
 			ERROR_INVALID_PARAMS,
-			"pix/session/draft_config requires cwd and optional modelRef, thinkingLevel, and refreshModelUsage",
+			"pix/session/draft_config requires cwd and optional modelRef, thinkingLevel, refreshModelUsage, and includeUsageCache",
 		);
 	}
 	return {
@@ -610,6 +616,7 @@ export function parseDesktopDraftConfigRequest(value: unknown): DesktopDraftConf
 		...(value.modelRef === undefined ? {} : { modelRef: value.modelRef }),
 		...(value.thinkingLevel === undefined ? {} : { thinkingLevel: value.thinkingLevel }),
 		...(value.refreshModelUsage === undefined ? {} : { refreshModelUsage: value.refreshModelUsage }),
+		...(value.includeUsageCache === undefined ? {} : { includeUsageCache: value.includeUsageCache }),
 	};
 }
 

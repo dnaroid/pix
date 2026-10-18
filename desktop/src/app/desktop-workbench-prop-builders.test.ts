@@ -287,6 +287,7 @@ describe("workbench Git diff props", () => {
     } as any;
 
     expect(buildWorkbenchEditorProps(options).preview?.editable).toBe(true);
+    expect(buildWorkbenchEditorProps(options).preview?.workspace).toBe("/workspace");
     options.preview.active = { ...options.preview.active, file: { path: "~/.config/pi/pix.jsonc", content: "{}" } };
     expect(buildWorkbenchEditorProps(options).preview?.editable).toBe(false);
     options.preview.active = {

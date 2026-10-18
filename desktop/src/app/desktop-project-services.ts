@@ -70,6 +70,11 @@ export function createDesktopProjectServices(options: DesktopProjectServicesOpti
       if (file.path === PROJECT_TODO_PATH) registry.scheduleProjectSync("todo");
       else if (isCanonicalProjectPlanPath(file.path)) registry.scheduleProjectSync("plans");
     },
+    afterDelete: (path) => {
+      preview.invalidateFileLoads();
+      if (preview.active?.kind === "file" && preview.active.file.path === path) preview.close();
+      registry.scheduleProjectSync("plans");
+    },
     clearError: options.clearError,
     reportError: options.reportError,
   });

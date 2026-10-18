@@ -19,6 +19,8 @@ export interface WorkbenchSessionTab extends WorkbenchTabBase {
   readonly running: boolean;
   readonly draft: boolean;
   readonly fork: boolean;
+  /** Undefined for regular sessions; neutral agent icon when profile data is unavailable. */
+  readonly subagentIcon?: string;
   readonly statusKind: SessionTabStatusKind;
 }
 

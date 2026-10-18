@@ -1,4 +1,5 @@
 import { emptyTranscript } from "../lib/transcript";
+import { subagentSessionLink } from "../lib/session-subagent-link";
 import { DRAFT_SESSION_TAB_ID } from "./draft-session.svelte";
 import type { SessionTabControllerOptions } from "./session-tab-controller-options";
 
@@ -39,7 +40,11 @@ export function createSessionTabSelection(
       const historyGeneration = options.history.begin();
       void options.history.hydrate(requestClient, sessionId, requestWorkspace, historyGeneration);
     }
-    options.tabs.show(sessionId);
+    const parentSessionId = subagentSessionLink(
+      options.catalog.sessions.find((session) => session.sessionId === sessionId)?._meta,
+    )?.parentSessionId;
+    if (parentSessionId) options.tabs.show(sessionId, parentSessionId);
+    else options.tabs.show(sessionId);
     options.tabs.rememberActive(requestWorkspace, sessionId);
     const runtime = options.runtime.ensure(requestClient, sessionId, requestWorkspace);
     void runtime.then(() => {

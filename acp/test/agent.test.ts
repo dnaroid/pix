@@ -1134,6 +1134,62 @@ test("Desktop draft config includes bundled and workspace extension models witho
 	}
 });
 
+test("Desktop draft Usage cache hydrates across hosts without querying quotas and requests fresh live data", async () => {
+	const artifacts = fileURLToPath(new URL("../../.pi/artifacts/", import.meta.url));
+	await mkdir(artifacts, { recursive: true });
+	const root = mkdtempSync(join(artifacts, "acp-usage-cache-test-"));
+	const workspace = join(root, "workspace");
+	const agentDir = join(root, "agent");
+	const extension = join(root, "provider.ts");
+	const originalNodeEnv = process.env.NODE_ENV;
+	const originalAuthPath = process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH;
+	process.env.NODE_ENV = "test";
+	delete process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH;
+	let queries = 0;
+	try {
+		await mkdir(workspace);
+		await mkdir(agentDir);
+		await writeFile(join(agentDir, "auth.json"), JSON.stringify({ zai: { type: "api_key", key: "usage-account-a" } }));
+		await writeFile(extension, draftProviderExtensionSource("zai", "usage-model"));
+		const options: Partial<ConstructorParameters<typeof PixAcpAgent>[0]> = {
+			agentDir, toolsSuiteExtensionPath: extension,
+			queryModelUsage: async (_state, options) => {
+				queries++;
+				assert.equal(options?.freshOnly, true);
+				return { refresh: "ready", status: {
+					modelKey: "zai/usage-model", provider: "zhipu", updatedAt: Date.now(),
+					hourly: { remainingPercent: 42, resetAt: Date.now() + 3_600_000, windowSeconds: 18_000 },
+				} };
+			},
+		};
+		const first = createTestAdapter(options);
+		await connect(first.adapter, async (cx) => {
+			const catalogue = await cx.request(PIX_DRAFT_CONFIG_METHOD, { cwd: workspace, includeUsageCache: true }) as DesktopDraftConfigResponse;
+			assert.deepEqual(catalogue.usageCache?.snapshots, []);
+			assert.equal(queries, 0);
+			const refreshed = await cx.request(PIX_DRAFT_CONFIG_METHOD, { cwd: workspace, modelRef: "zai/usage-model", refreshModelUsage: true, includeUsageCache: true }) as DesktopDraftConfigResponse;
+			assert.equal(refreshed.modelUsageRefresh, "ready");
+			assert.equal(queries, 1);
+		});
+		const restarted = createTestAdapter(options);
+		const saved = await connect(restarted.adapter, (cx) => cx.request(PIX_DRAFT_CONFIG_METHOD, { cwd: workspace, includeUsageCache: true })) as DesktopDraftConfigResponse;
+		assert.match(saved.usageCache?.scope ?? "", /^[a-f0-9]{64}$/);
+		assert.equal(saved.usageCache?.snapshots[0]?.stale, true);
+		assert.equal(saved.usageCache?.snapshots[0]?.hourly?.remainingPercent, 42);
+		assert.equal(queries, 1);
+		assert.equal(first.clients.length + restarted.clients.length, 0);
+		await writeFile(join(agentDir, "auth.json"), JSON.stringify({ zai: { type: "api_key", key: "usage-account-b" } }));
+		const changed = createTestAdapter(options);
+		const another = await connect(changed.adapter, (cx) => cx.request(PIX_DRAFT_CONFIG_METHOD, { cwd: workspace, includeUsageCache: true })) as DesktopDraftConfigResponse;
+		assert.deepEqual(another.usageCache?.snapshots, []);
+		assert.notEqual(another.usageCache?.scope, saved.usageCache?.scope);
+	} finally {
+		if (originalNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = originalNodeEnv;
+		if (originalAuthPath === undefined) delete process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH; else process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH = originalAuthPath;
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
 test("Desktop uses an installed pi-tools-suite instead of loading the bundled copy twice", async () => {
 	const root = mkdtempSync(join(tmpdir(), "pix-acp-installed-tools-suite-"));
 	const workspace = join(root, "workspace");

@@ -1,11 +1,18 @@
+export interface PlanProgress {
+  readonly completed: number;
+  readonly total: number;
+}
+
 export interface ProjectDocumentsSnapshot {
   readonly plans: string[];
   readonly todoExists: boolean;
+  readonly planProgress?: Readonly<Record<string, PlanProgress | null>>;
 }
 
 export const EMPTY_PROJECT_DOCUMENTS: ProjectDocumentsSnapshot = {
   plans: [],
   todoExists: false,
+  planProgress: {},
 };
 
 export const PROJECT_TODO_PATH = ".pi/TODO.md";

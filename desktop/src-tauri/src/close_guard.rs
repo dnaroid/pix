@@ -22,6 +22,19 @@ enum Action {
 }
 
 impl CloseGuard {
+    fn request_restart(&mut self) -> Action {
+        let action = self.request(None);
+        if action == Action::Allow {
+            self.pending = true;
+        }
+        action
+    }
+
+    fn finish_restart(&mut self, requested: bool) {
+        self.pending = false;
+        self.quit_approved = requested;
+    }
+
     fn request(&mut self, window: Option<&str>) -> Action {
         if self.pending {
             return Action::Wait;
@@ -64,6 +77,35 @@ pub(crate) fn destroyed(app: &AppHandle, label: &str) {
         .remove(label);
 }
 
+/// Watch restarts must obtain consent before publishing the restart marker.
+/// Returning false also covers another close/quit dialog already being open.
+pub(crate) async fn confirm_restart(app: &AppHandle) -> bool {
+    let action = app.state::<CloseGuardState>().0.lock().unwrap().request_restart();
+    match action {
+        Action::Allow => return true,
+        Action::Wait => return false,
+        Action::Ask => {}
+    }
+    let (send, receive) = tokio::sync::oneshot::channel();
+    let handle = app.clone();
+    show_confirmation(app, None, move |confirmed| {
+        // Keep ownership through marker publication so another quit cannot
+        // insert a second confirmation between consent and the actual exit.
+        let state = handle.state::<CloseGuardState>();
+        let mut guard = state.0.lock().unwrap();
+        let delivered = send.send(confirmed).is_ok();
+        if !confirmed || !delivered {
+            guard.finish_restart(false);
+        }
+    });
+    receive.await.unwrap_or(false)
+}
+
+/// Release the reservation, approving exit only after marker publication.
+pub(crate) fn finish_restart(app: &AppHandle, requested: bool) {
+    app.state::<CloseGuardState>().0.lock().unwrap().finish_restart(requested);
+}
+
 /// Returns true when the native request must be prevented. The async native
 /// warning resumes the request only after an explicit affirmative response.
 pub(crate) fn prevent(app: &AppHandle, label: Option<&str>, exit_code: Option<i32>) -> bool {
@@ -80,21 +122,9 @@ pub(crate) fn prevent(app: &AppHandle, label: Option<&str>, exit_code: Option<i3
     }
     let window = label.and_then(|label| app.get_webview_window(label));
     let quitting = label.is_none();
-    let mut dialog = app.dialog().message(if quitting {
-        "Conversations are still running. Quitting Pix will stop all active runs in all windows."
-    } else {
-        "Conversations are still running in this window. Closing it will stop their active runs."
-    }).title(if quitting { "Quit with active runs?" } else { "Close running window?" })
-      .kind(MessageDialogKind::Warning)
-      .buttons(MessageDialogButtons::OkCancelCustom(
-          if quitting { "Quit Pix" } else { "Close window" }.into(), "Cancel".into(),
-      ));
-    // Attach to the affected window when possible. Quit is application-wide.
-    if let Some(window) = &window {
-        dialog = dialog.parent(window);
-    }
-    let app = app.clone();
-    dialog.show(move |confirmed| {
+    let handle = app.clone();
+    show_confirmation(app, label, move |confirmed| {
+        let app = handle;
         {
             let state = app.state::<CloseGuardState>();
             let mut guard = state.0.lock().unwrap();
@@ -121,9 +151,47 @@ pub(crate) fn prevent(app: &AppHandle, label: Option<&str>, exit_code: Option<i3
     true
 }
 
+fn show_confirmation(app: &AppHandle, label: Option<&str>, respond: impl FnOnce(bool) + Send + 'static) {
+    let window = label.and_then(|label| app.get_webview_window(label));
+    let quitting = label.is_none();
+    let mut dialog = app.dialog().message(if quitting {
+        "Conversations are still running. Quitting Pix will stop all active runs in all windows."
+    } else {
+        "Conversations are still running in this window. Closing it will stop their active runs."
+    }).title(if quitting { "Quit with active runs?" } else { "Close running window?" })
+      .kind(MessageDialogKind::Warning)
+      .buttons(MessageDialogButtons::OkCancelCustom(
+          if quitting { "Quit Pix" } else { "Close window" }.into(), "Cancel".into(),
+      ));
+    // Attach to the affected window when possible. Quit is application-wide.
+    if let Some(window) = &window {
+        dialog = dialog.parent(window);
+    }
+    dialog.show(respond);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn restart_reserves_quit_until_marker_publication_and_releases_failed_requests() {
+        let mut guard = CloseGuard::default();
+        assert_eq!(guard.request_restart(), Action::Allow);
+        assert_eq!(guard.request(None), Action::Wait);
+        guard.finish_restart(false);
+        guard.running_windows.insert("main".into());
+        assert_eq!(guard.request_restart(), Action::Ask);
+        assert_eq!(guard.request_restart(), Action::Wait);
+        // Cancellation leaves the next restart protected by confirmation.
+        guard.finish_restart(false);
+        assert_eq!(guard.request_restart(), Action::Ask);
+        // Confirmed consent still owns the guard while writing the marker.
+        assert_eq!(guard.request(None), Action::Wait);
+        guard.finish_restart(true);
+        assert_eq!(guard.request(None), Action::Allow);
+        assert_eq!(guard.request(None), Action::Ask);
+    }
 
     #[test]
     fn idle_and_other_windows_close_without_warning() {

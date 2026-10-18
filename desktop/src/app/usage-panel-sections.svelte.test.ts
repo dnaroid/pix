@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { parse } from "jsonc-parser";
-import { usageCollapsedSections } from "../lib/usage-panel-sections";
+import { usageCollapsedSections, usageProviderOrder } from "../lib/usage-panel-sections";
 import { createUsagePanelSections } from "./usage-panel-sections.svelte";
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -32,6 +32,87 @@ function setup(initial: Record<string, string> = {}) {
 beforeEach(() => { native.invoke.mockReset(); });
 
 describe("usage panel disclosure persistence", () => {
+  it("restores provider order before ready and does not rewrite unchanged order", async () => {
+    const { store, files } = setup({ "/a": '{"usagePanel":{"providerOrder":["zhipu","openai","future"]}}' });
+    await store.setProviderOrder(["anthropic"]);
+    const loading = store.load("/a");
+    expect(store.ready).toBe(false);
+    expect(store.providerOrder).toEqual([]);
+    await loading;
+    expect(store.ready).toBe(true);
+    expect(store.providerOrder).toEqual(["zhipu", "openai", "future"]);
+    await store.setProviderOrder(["zhipu", "openai", "future", "zhipu"]);
+    expect(native.invoke.mock.calls.some(([command]) => command === "write_project_workspace_config_if_unchanged")).toBe(false);
+    store.dispose();
+    await store.setProviderOrder(["anthropic"]);
+    expect(usageProviderOrder(files.get("/a"))).toEqual(["zhipu", "openai", "future"]);
+  });
+
+  it("serializes order changes with toggles and waits for accepted writes on reopen", async () => {
+    const { store, files, errors } = setup({ "/a": '// keep\n{"color":"#112233"}' });
+    await store.load("/a");
+    const implementation = native.invoke.getMockImplementation()!;
+    const started = deferred<void>();
+    const release = deferred<void>();
+    let firstWrite = true;
+    native.invoke.mockImplementation(async (command: string, args: Record<string, string>) => {
+      if (command === "write_project_workspace_config_if_unchanged" && firstWrite) {
+        firstWrite = false;
+        started.resolve(undefined);
+        await release.promise;
+      }
+      return implementation(command, args);
+    });
+    const mutable = ["openai", "anthropic"];
+    const writes = [store.setProviderOrder(mutable), store.setOpen("daily", false), store.setProviderOrder(["zhipu", "openai"])];
+    mutable.reverse();
+    await started.promise;
+    store.dispose();
+    const reopened = createUsagePanelSections(errors);
+    const callsBeforeReopen = native.invoke.mock.calls.length;
+    const restoring = reopened.load("/a");
+    expect(native.invoke.mock.calls).toHaveLength(callsBeforeReopen);
+    expect(reopened.ready).toBe(false);
+    release.resolve(undefined);
+    await Promise.all([...writes, restoring]);
+    expect(reopened.providerOrder).toEqual(["zhipu", "openai"]);
+    expect(reopened.isOpen("daily")).toBe(false);
+    expect(files.get("/a")).toContain("// keep");
+    expect(parse(files.get("/a")!)).toMatchObject({ color: "#112233" });
+    expect(errors).not.toHaveBeenCalled();
+    reopened.dispose();
+  });
+
+  it("merges provider order across write conflicts without overwriting concurrent toggles", async () => {
+    const { store, files } = setup({ "/a": '{"usagePanel":{"providerOrder":["openai"]}}' });
+    await store.load("/a");
+    const implementation = native.invoke.getMockImplementation()!;
+    let conflict = true;
+    native.invoke.mockImplementation((command: string, args: Record<string, string>) => {
+      if (command === "write_project_workspace_config_if_unchanged" && conflict) {
+        conflict = false;
+        files.set("/a", '{"color":"#112233","usagePanel":{"collapsedSections":["cache"],"providerOrder":["anthropic"]}}');
+      }
+      return implementation(command, args);
+    });
+    await store.setProviderOrder(["zhipu", "openai"]);
+    await store.setOpen("daily", false);
+    expect(usageProviderOrder(files.get("/a"))).toEqual(["zhipu", "openai"]);
+    expect(usageCollapsedSections(files.get("/a"))).toEqual(["cache", "daily"]);
+    expect(parse(files.get("/a")!)).toMatchObject({ color: "#112233" });
+  });
+
+  it("keeps pending order writes in their original project after switching workspace", async () => {
+    const { store, files } = setup({ "/a": "{}", "/b": '{"usagePanel":{"providerOrder":["anthropic"]}}' });
+    await store.load("/a");
+    const saving = store.setProviderOrder(["zhipu", "openai"]);
+    await store.load("/b");
+    await saving;
+    expect(store.providerOrder).toEqual(["anthropic"]);
+    expect(usageProviderOrder(files.get("/a"))).toEqual(["zhipu", "openai"]);
+    expect(usageProviderOrder(files.get("/b"))).toEqual(["anthropic"]);
+  });
+
   it("keeps sections asleep until restoration finishes and never saves programmatic restoration", async () => {
     const { store, files } = setup({ "/a": '{"usagePanel":{"collapsedSections":["daily","provider-limits"]}}' });
     expect(store.ready).toBe(false);
@@ -75,15 +156,16 @@ describe("usage panel disclosure persistence", () => {
     native.invoke.mockImplementation(async (command: string, args: { workspace: string }) => {
       if (command === "project_file_exists") return true;
       if (args.workspace === "/a") return late.promise;
-      return { content: '{"usagePanel":{"collapsedSections":["activity"]}}' };
+      return { content: '{"usagePanel":{"collapsedSections":["activity"],"providerOrder":["openai"]}}' };
     });
     const first = store.load("/a");
     await vi.waitFor(() => expect(native.invoke).toHaveBeenCalledWith("read_project_file", expect.objectContaining({ workspace: "/a" })));
     await store.load("/b");
-    late.resolve({ content: '{"usagePanel":{"collapsedSections":["daily"]}}' });
+    late.resolve({ content: '{"usagePanel":{"collapsedSections":["daily"],"providerOrder":["zhipu"]}}' });
     await first;
     expect(store.isOpen("activity")).toBe(false);
     expect(store.isOpen("daily")).toBe(true);
+    expect(store.providerOrder).toEqual(["openai"]);
     const loading = store.load("/a");
     const pendingState = store.isOpen("daily");
     store.dispose();

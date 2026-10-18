@@ -4,7 +4,6 @@
   import { confirmDesktopAction } from "../lib/confirm-action";
   import type { SessionConfigOption } from "@agentclientprotocol/sdk";
   import ExternalLink from "@lucide/svelte/icons/external-link";
-  import FileText from "@lucide/svelte/icons/file-text";
   import Folder from "@lucide/svelte/icons/folder";
   import GripVertical from "@lucide/svelte/icons/grip-vertical";
   import ListTodo from "@lucide/svelte/icons/list-todo";
@@ -32,7 +31,6 @@
     type ProjectTaskType,
     normalizeProjectTaskLink,
   } from "../lib/project-tasks";
-  import { fuzzySearch } from "../lib/fuzzy";
   import type { GitDiffScope, GitSnapshot } from "../lib/git";
   import type { GitCiPanelState } from "../lib/git-ci";
   import type { GitPanelWorkflow } from "../lib/git-workflow";
@@ -41,7 +39,6 @@
   import type { SettingsConfigKind } from "../lib/settings";
   import {
     PROJECT_TODO_PATH,
-    projectDocumentLabel,
     type ProjectDocumentsSnapshot,
   } from "../lib/project-documents";
   import {
@@ -67,7 +64,7 @@
   import RegistryPanel from "./RegistryPanel.svelte";
   import SearchIndexPanel from "./SearchIndexPanel.svelte";
   import LspPanel from "./LspPanel.svelte";
-  import UsagePanel from "./usage/UsagePanel.svelte";
+  import UsagePanel, { type UsagePanelHandle } from "./usage/UsagePanel.svelte";
   import type { UsageSessionTarget } from "../lib/usage-stats";
   import LogsPanel from "./LogsPanel.svelte";
   import { createLogPanelPreference } from "../lib/log-panel-preference.svelte";
@@ -80,7 +77,7 @@
   import ProjectSwitcher from "./ProjectSwitcher.svelte";
   import SettingsPanel from "./SettingsPanel.svelte";
   import WorkspaceSidebarActivityBar from "./WorkspaceSidebarActivityBar.svelte";
-  import WorkspaceSidebarPlanSelector from "./WorkspaceSidebarPlanSelector.svelte";
+  import { createRegistryPlansView } from "./registry-plans-view.svelte";
   import { createWorkspaceSidebarLayoutController } from "./workspace-sidebar-layout-controller.svelte";
   import { createWorkspaceSidebarProjectSettingsController } from "./workspace-sidebar-project-settings-controller.svelte";
   import { createWorkspaceSidebarStatusMenuController } from "./workspace-sidebar-status-menu-controller.svelte";
@@ -163,6 +160,11 @@
     gitCi,
     gitWorkflow,
     projectDocuments,
+    activeProjectDocumentPath = null,
+    planActionsDisabled = false,
+    planRunDisabled = false,
+    onRunPlan = () => {},
+    onDeletePlan = () => {},
     recentProjects,
     projectColors,
     projectIcons = new Map(),
@@ -182,6 +184,7 @@
     onOpenSession,
     onOpenUsageSession,
     onOpenProjectDocument,
+    onRefreshPlans = async () => {},
     onListProjectDirectory,
     onValidateProjectFile,
     onOpenProjectFile,
@@ -260,6 +263,11 @@
     gitCi: GitCiPanelState;
     gitWorkflow: GitPanelWorkflow;
     projectDocuments: ProjectDocumentsSnapshot;
+    activeProjectDocumentPath?: string | null;
+    planActionsDisabled?: boolean;
+    planRunDisabled?: boolean;
+    onRunPlan?: (path: string) => void;
+    onDeletePlan?: (path: string) => void;
     recentProjects: string[];
     projectColors: ReadonlyMap<string, string>;
     projectIcons?: ReadonlyMap<string, string>;
@@ -284,6 +292,7 @@
     onOpenSession: (task: ProjectTask) => void;
     onOpenUsageSession?: (target: UsageSessionTarget) => void;
     onOpenProjectDocument: (path: string, exists?: boolean) => void;
+    onRefreshPlans?: () => Promise<void>;
     onListProjectDirectory: (path: string) => Promise<ProjectTreeEntry[]>;
     onValidateProjectFile: (path: string) => Promise<boolean>;
     onOpenProjectFile: (path: string, range?: ProjectFileLineRange) => void;
@@ -327,6 +336,8 @@
 
   let sidebarElement = $state<HTMLElement | null>(null);
   let packageScriptsPanel = $state<PackageScriptsPanelHandle | null>(null);
+  let usagePanel = $state<UsagePanelHandle | null>(null);
+  const usageRefresh = $derived(usagePanel?.refreshState() ?? { busy: false, disabled: true });
   let settingsPanel = $state<SettingsPanelHandle | null>(null);
   let projectExplorer = $state<{ revealPath: (path: string) => Promise<void> } | null>(null);
   let projectRevealVersion = 0;
@@ -375,18 +386,9 @@
     onDeleteRequest: (taskId) => deleteTaskId = taskId,
   });
   let revealedTaskId = $state<string | null>(null);
-  let planSelectorOpen = $state(false);
-  let planSelectorQuery = $state("");
-  let planSearchInput = $state<HTMLInputElement | null>(null);
-  let planSelectorInvoker: HTMLElement | null = null;
-
-  function dismissPlanSelector(): void {
-    planSelectorOpen = false;
-    planSelectorQuery = "";
-    const invoker = planSelectorInvoker;
-    planSelectorInvoker = null;
-    void tick().then(() => { if (invoker?.isConnected) invoker.focus({ preventScroll: true }); });
-  }
+  const plansView = createRegistryPlansView();
+  let registryPanel = $state<RegistryPanel | null>(null);
+  $effect(() => plansView.selectWorkspace(workspace));
   let projectTreeRefreshKey = $state(0);
   const taskDragController = createWorkspaceSidebarTaskDragController({
     busy: () => busy,
@@ -479,33 +481,13 @@
 
   const activeTabTitle = $derived(SIDEBAR_LABELS[activeTab]);
   const draggedTask = $derived(taskDragController.taskId ? tasks.find((task) => task.id === taskDragController.taskId) : undefined);
-  const visiblePlanChoices = $derived.by(() => {
-    if (!planSelectorQuery.trim()) return projectDocuments.plans;
-    return fuzzySearch(
-      projectDocuments.plans.map((plan) => ({
-        value: plan,
-        label: projectDocumentLabel(plan),
-        aliases: [plan],
-      })),
-      planSelectorQuery,
-      { minScorePerCharacter: 4 },
-    ).map((match) => match.value);
-  });
-
   function openRegistryProjectArtifact(artifact: RegistryProjectArtifact): void {
     if (artifact === "todo") {
       onOpenProjectDocument(PROJECT_TODO_PATH, projectDocuments.todoExists);
       return;
     }
     if (artifact === "plans") {
-      if (projectDocuments.plans.length === 0) {
-        setActiveTab("project");
-        return;
-      }
-      planSelectorQuery = "";
-      planSelectorInvoker = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      planSelectorOpen = true;
-      void tick().then(() => planSearchInput?.focus());
+      void registryPanel?.focusPlans();
       return;
     }
     if (artifact === "workspace") {
@@ -513,12 +495,6 @@
       return;
     }
     setActiveTab("tasks");
-  }
-
-  function choosePlan(plan: string): void {
-    planSelectorOpen = false;
-    planSelectorQuery = "";
-    onOpenProjectDocument(plan);
   }
 
   $effect(() => {
@@ -642,8 +618,6 @@
     indicatorMenuController.close();
     statusMenuController.close();
     revealedTaskId = null;
-    planSelectorOpen = false;
-    planSelectorQuery = "";
     if (activeTab === tab && !layoutController.collapsed) {
       editorOpen = false;
       deleteTaskId = null;
@@ -669,8 +643,6 @@
     if (!isCurrent()) return;
     const requestWorkspace = workspace;
     statusMenuController.close();
-    planSelectorOpen = false;
-    planSelectorQuery = "";
     editorOpen = false;
     deleteTaskId = null;
     setActiveTab("tasks");
@@ -705,7 +677,6 @@
     const requestWorkspace = workspace;
     const request = ++projectRevealVersion;
     statusMenuController.close();
-    planSelectorOpen = false;
     revealIndicatorTab("project");
     await tick();
     if (request !== projectRevealVersion || workspace !== requestWorkspace
@@ -957,14 +928,6 @@
             <button
               class={iconButtonClass("sm", "chrome")}
               type="button"
-              title="Browse plans"
-              aria-label="Browse plans"
-              onclick={() => openRegistryProjectArtifact("plans")}
-              disabled={!workspace}
-            ><FileText class="h-3.5 w-3.5" aria-hidden="true" /></button>
-            <button
-              class={iconButtonClass("sm", "chrome")}
-              type="button"
               title="Configure registry"
               aria-label="Configure registry"
               onclick={() => onRegistryAction({ action: "configure" }, "configure")}
@@ -979,6 +942,14 @@
               disabled={!registryReady || registryActionId !== null}
             ><RefreshCw class={["h-3.5 w-3.5", registryLoading || registryActionId === "refresh" ? "animate-spin" : ""]} aria-hidden="true" /></button>
           </div>
+        {:else if activeTab === "usage"}
+          <button
+            class={iconButtonClass("sm", "chrome")}
+            type="button" title="Refresh usage" aria-label="Refresh usage"
+            onclick={() => usagePanel?.refresh()}
+            disabled={usageRefresh.disabled}
+            aria-busy={usageRefresh.busy}
+          ><RefreshCw class={["h-3.5 w-3.5", usageRefresh.busy && "animate-spin motion-reduce:animate-none"]} aria-hidden="true" /></button>
         {:else if activeTab === "scripts"}
           <button
             class={iconButtonClass("sm", "chrome", { extra: "ml-auto" })}
@@ -1106,7 +1077,19 @@
         </div>
       {:else if activeTab === "registry"}
         <div id="workspace-registry-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Registry">
+          {#key workspace}
           <RegistryPanel
+            bind:this={registryPanel}
+            plans={projectDocuments.plans}
+            planProgress={projectDocuments.planProgress}
+            onRefreshPlans={onRefreshPlans}
+            activePlanPath={activeProjectDocumentPath}
+            {plansView}
+            onChoosePlan={onOpenProjectDocument}
+            {planActionsDisabled}
+            {planRunDisabled}
+            {onRunPlan}
+            {onDeletePlan}
             contextCommands={registryContextCommands}
             agentModels={modelThinkingConfigState(settingsConfigOptions).models}
             snapshot={registrySnapshot}
@@ -1129,6 +1112,7 @@
             onDiff={onRegistryDiff}
             onCloseDiff={onRegistryCloseDiff}
           />
+          {/key}
         </div>
       {:else if activeTab === "scripts"}
         <div id="workspace-scripts-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Launch Commands">
@@ -1140,7 +1124,7 @@
         </div>
       {:else if activeTab === "usage"}
         <div id="workspace-usage-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Usage">
-          {#key workspace}<UsagePanel client={lspClient} {workspace} {providerStatuses} {...(onOpenUsageSession ? { onOpenSession: onOpenUsageSession } : {})} />{/key}
+          {#key workspace}<UsagePanel bind:this={usagePanel} client={lspClient} {workspace} {providerStatuses} {...(onOpenUsageSession ? { onOpenSession: onOpenUsageSession } : {})} />{/key}
         </div>
       {:else if activeTab === "lsp"}
         <div id="workspace-lsp-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Language Servers">
@@ -1156,16 +1140,6 @@
         </div>
       {/if}
     </div>
-
-    {#if planSelectorOpen}
-      <WorkspaceSidebarPlanSelector
-        choices={visiblePlanChoices}
-        bind:query={planSelectorQuery}
-        bind:searchInput={planSearchInput}
-        onClose={dismissPlanSelector}
-        onChoose={choosePlan}
-      />
-    {/if}
 
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->

@@ -67,7 +67,7 @@ export type EvalCase = {
 	prompt: string;
 	/** Current role/policy instructions, separate from the user scenario and expected answer. */
 	appendSystemPrompt?: string;
-	fixture: "demo" | "coding-hypotheses" | "coding-regression" | "coding-async" | "decision-policy";
+	fixture: "demo" | "coding-hypotheses" | "coding-regression" | "coding-async" | "decision-policy" | "plan-guidance";
 	blockTools?: string[];
 	models?: RegExp[];
 	env?: Record<string, string>;

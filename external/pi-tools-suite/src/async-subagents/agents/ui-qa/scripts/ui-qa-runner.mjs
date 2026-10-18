@@ -7,6 +7,7 @@ import { parse as parseJsonc, printParseErrorCode } from "jsonc-parser";
 import { probeBrowserBackend, runBrowserBackend } from "../backends/browser.mjs";
 import { probeDesktopBackend, runDesktopBackend } from "../backends/desktop.mjs";
 import { probeTuiBackend, runTuiBackend } from "../backends/tui.mjs";
+import { probeAndroidBackend, runAndroidBackend } from "../backends/android.mjs";
 
 const AGENT_DIR_ENV = "PI_SUBAGENT_AGENT_DIR";
 const WORKSPACE_RELATIVE = "ui-qa";
@@ -18,6 +19,7 @@ const GUIDE_FILES = {
 	browser: "browser.md",
 	tui: "tui.md",
 	desktop: "desktop.md",
+	android: "android.md",
 };
 const GUIDE_TOPIC_FILES = {
 	browser: {
@@ -34,6 +36,7 @@ const GUIDE_TOPIC_FILES = {
 		"windows-uia": "desktop-windows.md",
 		"linux-at-spi": "desktop-linux.md",
 	},
+	android: { adb: "android-adb.md", "adb-uiautomator": "android-adb.md" },
 };
 const MAX_GUIDE_BYTES = 256 * 1024;
 const FLOW_RELATIVE = "flows";
@@ -140,8 +143,11 @@ async function main() {
 		}
 
 		const runId = safeRunId(args.runId ?? timestamp());
-		const evidenceDir = path.join(workspaceDir, EVIDENCE_RELATIVE, runId);
-		createExclusivePrivateDirectory(workspaceDir, evidenceDir);
+		// Evidence has a different lifetime from disposable flow/progress files.
+		// Keep it outside ui-qa so even a parent loaded before the workspace-resume
+		// fix cannot erase these captures when it reinitializes that directory.
+		const evidenceDir = path.join(agentDir, EVIDENCE_RELATIVE, runId);
+		createExclusivePrivateDirectory(agentDir, evidenceDir);
 		const artifact = (value, kind) => artifactRecord(evidenceDir, value, kind);
 		const context = {
 			...common,
@@ -226,12 +232,13 @@ async function selectBackend(context) {
 		browser: await probeBrowserBackend({ ...context, shallow: detectedTargetKind !== "browser" }),
 		tui: await probeTuiBackend({ ...context, shallow: detectedTargetKind !== "tui" }),
 		desktop: await probeDesktopBackend({ ...context, shallow: detectedTargetKind !== "desktop" }),
+		android: await probeAndroidBackend({ ...context, shallow: detectedTargetKind !== "android" }),
 	};
 	const selected = probes[detectedTargetKind];
 	if (!selected || typeof selected !== "object") {
 		throw new UiQaError("FAILED", `backend probe returned no result for ${detectedTargetKind}`);
 	}
-	const candidateBackends = ["browser", "tui", "desktop"].map((backend) => ({
+	const candidateBackends = ["browser", "tui", "desktop", "android"].map((backend) => ({
 		backend,
 		eligible: backend === detectedTargetKind,
 		available: Boolean(probes[backend]?.available),
@@ -276,6 +283,7 @@ async function runSelectedBackend(backend, context) {
 	if (backend === "browser") return runBrowserBackend(context);
 	if (backend === "tui") return runTuiBackend(context);
 	if (backend === "desktop") return runDesktopBackend(context);
+	if (backend === "android") return runAndroidBackend(context);
 	throw new UiQaError("FAILED", `unsupported backend: ${backend}`);
 }
 
@@ -285,8 +293,9 @@ function detectTargetKind(target) {
 	if (typeof target.url === "string" || typeof target.baseUrl === "string") matches.push("browser");
 	if (isObject(target.command) && Array.isArray(target.command.argv)) matches.push("tui");
 	if (isObject(target.application)) matches.push("desktop");
+	if (isObject(target.android)) matches.push("android");
 	if (matches.length !== 1) {
-		throw new UiQaError("BLOCKED", "target discovery requires exactly one of target.url/baseUrl, target.command.argv, or target.application", 2);
+		throw new UiQaError("BLOCKED", "target discovery requires exactly one of target.url/baseUrl, target.command.argv, target.application, or target.android", 2);
 	}
 	if (target.kind !== undefined && target.kind !== "auto" && target.kind !== matches[0]) {
 		throw new UiQaError("FAILED", `target.kind ${JSON.stringify(target.kind)} contradicts detected target kind ${matches[0]}`);

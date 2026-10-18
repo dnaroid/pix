@@ -125,6 +125,9 @@ describe("WorkbenchTabs desktop interaction", () => {
   });
 
   it("uses semantic IDE icons for session state instead of a color-only activity dot", () => {
+    expect(source).toContain("agentIcon(tab.subagentIcon)");
+    expect(source).toContain('<AgentIcon class="h-3.5 w-3.5 shrink-0 text-muted-foreground"');
+    expect(source).toContain('<SessionTabStatusIcon kind={tab.statusKind} {active} />');
     expect(statusIconSource).toContain("CircleCheck");
     expect(statusIconSource).toContain("LoaderCircle");
     expect(statusIconSource).toContain("Pause");

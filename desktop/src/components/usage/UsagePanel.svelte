@@ -1,5 +1,11 @@
+<script module lang="ts">
+  export interface UsagePanelHandle {
+    refresh(): void;
+    refreshState(): { busy: boolean; disabled: boolean };
+  }
+</script>
+
 <script lang="ts">
-  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { onMount, setContext, untrack } from "svelte";
   import type { AcpClient, RuntimeStatus } from "../../lib/acp-client";
@@ -8,7 +14,7 @@
   import { createUsageStatsStore } from "../../app/usage-stats.svelte";
   import { createProviderUsageStore } from "../../app/provider-usage.svelte";
   import { createDiagnosticLogger } from "../../lib/diagnostic-logging";
-  import { iconButtonClass } from "../../lib/icon-button";
+  import { providerUsageOrder } from "../../lib/provider-usage-rows";
   import { subscribeUsageStatsChanged } from "../../lib/usage-stats-events";
   import type { UsagePeriod, UsageSessionTarget } from "../../lib/usage-stats";
   import UsageSegmented from "./UsageSegmented.svelte";
@@ -52,6 +58,7 @@
   });
   const providerOpen = $derived(sections.ready && sections.isOpen("provider-limits"));
   const historyOpen = $derived(sections.ready && USAGE_SECTION_IDS.some((id) => id !== "provider-limits" && sections.isOpen(id)));
+  const statisticsOpen = $derived(historyOpen || providerOpen);
   const quotaStatuses = $derived(providerOpen ? [...providerStatuses, ...quotas.entries.flatMap((entry) => entry.runtime ? [entry.runtime] : [])] : []);
   const refreshing = $derived(store.busy || quotas.busy);
 
@@ -59,11 +66,11 @@
   const nowMs = $derived.by(() => { void store.snapshots; return Date.now(); });
   const snapshot = $derived(store.snapshot("pix-sessions"));
 
-  // The historical sections share one source. Only visible consumers need updates.
+  // Limits also consume the shared source for popularity, without mounting historical charts.
   $effect(() => {
     void client;
     void workspace;
-    const active = historyOpen;
+    const active = statisticsOpen;
     untrack(() => {
       if (active) void (store.active ? store.sync() : store.open());
       else store.close();
@@ -78,6 +85,11 @@
       else quotas.pause();
     });
   });
+  $effect(() => {
+    const current = providerOpen ? snapshot : undefined;
+    if (!current) return;
+    untrack(() => { void sections.setProviderOrder(providerUsageOrder(current, sections.providerOrder)); });
+  });
 
   onMount(() => {
     const unsubscribe = subscribeUsageStatsChanged((notification) => store.handleChanged(notification));
@@ -89,25 +101,18 @@
     };
   });
 
-  function refresh(): void {
+  export function refresh(): void {
     error = null;
     void store.refresh();
     void quotas.refresh();
   }
+
+  export function refreshState(): { busy: boolean; disabled: boolean } {
+    return { busy: refreshing, disabled: !client || !workspace || refreshing || !statisticsOpen };
+  }
 </script>
 
 <section class="flex min-h-0 min-w-0 flex-col overflow-hidden bg-panel" aria-label="Usage statistics">
-  <div class="flex h-9 shrink-0 items-center gap-1 border-b border-sidebar-border pr-1 pl-2">
-    <h2 class="m-0 min-w-0 flex-1 truncate text-xs font-medium text-foreground">Pix usage</h2>
-    <button
-      class={iconButtonClass("sm", "panel")}
-      type="button" title="Refresh usage" aria-label="Refresh usage"
-      disabled={!client || !workspace || refreshing || (!providerOpen && !historyOpen)}
-      aria-busy={refreshing}
-      onclick={refresh}
-    ><RefreshCw class={["h-3.5 w-3.5", refreshing && "animate-spin motion-reduce:animate-none"]} aria-hidden="true" /></button>
-  </div>
-
   <div class="flex min-h-0 flex-1 flex-col overflow-auto">
     {#if error}
       <div class="flex items-start gap-2 border-b border-sidebar-border border-l-2 border-l-tool-error px-3 py-1.5 text-xs text-tool-error" role="alert">
@@ -119,7 +124,7 @@
     {:else if !workspace}
       <p class="m-0 px-3 py-6 text-center text-xs text-muted-foreground">Open a project to load usage statistics.</p>
     {:else}
-      <UsageProviderLimits statuses={quotaStatuses} entries={quotas.entries} loading={quotas.busy} failed={quotas.error} />
+      <UsageProviderLimits statuses={quotaStatuses} entries={quotas.entries} loading={quotas.busy} failed={quotas.error} order={sections.providerOrder} />
       <div class="flex flex-wrap items-center gap-1.5 px-3 pt-2">
         <UsageSegmented value={period} options={PERIODS.map((value) => ({ value, label: PERIOD_LABELS[value] }))} ariaLabel="Period" onChange={(value) => period = value} />
       </div>

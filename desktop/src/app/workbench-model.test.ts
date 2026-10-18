@@ -4,14 +4,16 @@ import { buildDesktopWorkbenchTabs, buildSessionWorkbenchTabs } from "./workbenc
 import { workbenchSessionTabId } from "../lib/workbench-tabs";
 import { EMPTY_SESSION_ACTIVITY } from "../lib/session-activity";
 import { agentControlShowsPausedTab, type AgentControlState } from "../lib/agent-control";
+import type { SessionSubagentSnapshot } from "../lib/session-subagents";
 
-function build(sessions: SessionInfo[]) {
+function build(sessions: SessionInfo[], subagentsBySessionId?: ReadonlyMap<string, SessionSubagentSnapshot>) {
   return buildSessionWorkbenchTabs({
     sessions,
     draftSessionTabId: "draft",
     pausedSessionIds: new Set(),
     runningSessionIds: new Set(),
     sessionActivityBySessionId: new Map(),
+    subagentsBySessionId,
     pendingElicitationSessionIds: new Set(),
     unseenCompletedSessionIds: new Set(),
     disabled: false,
@@ -20,6 +22,26 @@ function build(sessions: SessionInfo[]) {
 }
 
 describe("session workbench model", () => {
+  it("marks viewers with their own profile icon matched by parent, run and agent, with a bot fallback", () => {
+    const viewer = (id: string, runDir: string, agentId: string): SessionInfo => ({
+      sessionId: id, cwd: "/tmp", _meta: {
+        "pix.subagent": { runDir, agentId, parentSessionId: "parent" },
+      },
+    });
+    const tabs = build([
+      viewer("child", "/right", "worker"),
+      viewer("missing-run", "/missing", "worker"),
+      viewer("missing-agent", "/right", "missing"),
+      { sessionId: "regular", cwd: "/tmp" },
+    ], new Map([["parent", { version: 1, checkedAt: 1, count: 0, runs: [
+      { runDir: "/wrong", agents: [], tasks: [{ id: "worker", icon: "bug" }] },
+      { runDir: "/right", agents: [], tasks: [{ id: "worker", icon: "eye" }] },
+    ] }]]));
+    expect(tabs.map((tab) => tab.subagentIcon)).toEqual(["eye", "agent", "agent", undefined]);
+    expect(tabs[0]?.statusKind).toBe("idle");
+    expect(build([viewer("restored", "/right", "worker")])[0]?.subagentIcon).toBe("agent");
+  });
+
   it("uses authoritative session file metadata, never an ID or draft path", () => {
     const tabs = build([
       { sessionId: "saved", cwd: "/tmp", _meta: { "pix.sessionFile": "/sessions/мой session.jsonl" } },
@@ -114,7 +136,7 @@ describe("session workbench model", () => {
     });
 
     expect(tab?.statusKind).toBe("idle");
-    expect(tab?.title).toContain("Plan 0/1");
+    expect(tab?.title).toContain("Steps 0/1");
   });
 
   it("carries the actual preview path, not the display name, into tab context metadata", () => {

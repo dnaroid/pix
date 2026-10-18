@@ -182,11 +182,12 @@ describe("WorkspaceSidebar project sizing", () => {
     expect(sidebarViewModelSource).toContain("onRegistryInitializeProject: () => void options.registry.initializeProject()");
   });
 
-  it("offers a toolbar shortcut to browse plans regardless of project-sync review state", () => {
-    expect(sidebarSource).toContain('import FileText from "\u0040lucide/svelte/icons/file-text"');
-    expect(sidebarSource).toContain('title="Browse plans"');
-    expect(sidebarSource).toContain('aria-label="Browse plans"');
-    expect(sidebarSource).toContain('onclick={() => openRegistryProjectArtifact("plans")}');
+  it("uses the persistent plans list without a redundant toolbar shortcut", () => {
+    expect(sidebarSource).toContain('plans={projectDocuments.plans}');
+    expect(sidebarSource).not.toContain('title="Browse plans"');
+    expect(sidebarSource).not.toContain('aria-label="Browse plans"');
+    expect(sidebarSource).toContain('title="Configure registry"');
+    expect(sidebarSource).toContain('title="Refresh registry"');
   });
 
   it("wires Registry .pi storage and garbage cleanup through the sidebar", () => {

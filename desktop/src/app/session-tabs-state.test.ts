@@ -23,6 +23,40 @@ describe("session tabs state persistence", () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
+  it("inserts new and reopened children immediately after the parent and persists their order", () => {
+    const tabs = createSessionTabsState();
+    tabs.setSessionTabIds(new Map([["/project", ["before", "parent", "after"]]]));
+    tabs.mergeRestored("/project", null, ["before", "parent", "after", "child", "second"]);
+    tabs.show("child", "parent");
+    tabs.show("second", "parent");
+    const saved = () => parseSessionTabIds(values.get(windowLayoutKey("sessionTabs")) ?? null).get("/project");
+    expect(saved()).toEqual(["before", "parent", "second", "child", "after"]);
+    tabs.show("child", "parent");
+    expect(saved()).toEqual(["before", "parent", "second", "child", "after"]);
+    tabs.markClosed("child");
+    tabs.show("child", "parent");
+    expect(saved()).toEqual(["before", "parent", "child", "second", "after"]);
+    tabs.mergeRestored("/project", ["before", "parent", "after"], ["before", "parent", "after", "child", "second"]);
+    expect(saved()).toEqual(["before", "parent", "child", "second", "after"]);
+
+    const restarted = createSessionTabsState();
+    restarted.setSessionTabIds(new Map([["/project", saved()!]]));
+    restarted.mergeRestored("/project", null, saved()!);
+    expect(restarted.restoredIds).toEqual(saved());
+  });
+
+  it("appends when the parent is closed, missing, or the child itself", () => {
+    const tabs = createSessionTabsState();
+    tabs.setSessionTabIds(new Map([["/project", ["parent", "other"]]]));
+    tabs.mergeRestored("/project", null, ["parent", "other", "child", "second", "third"]);
+    tabs.markClosed("parent");
+    tabs.show("child", "parent");
+    tabs.show("second", "missing");
+    tabs.show("third", "third");
+    expect(parseSessionTabIds(values.get(windowLayoutKey("sessionTabs")) ?? null).get("/project"))
+      .toEqual(["other", "child", "second", "third"]);
+  });
+
   it("keeps the Desktop snapshot authoritative and persists the visible set after tab mutations", () => {
     const tabs = createSessionTabsState();
     tabs.setSessionTabIds(new Map([["/project", ["open"]]]));

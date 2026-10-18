@@ -18,6 +18,12 @@ const QUOTA_PROVIDERS: Readonly<Record<string, ModelUsageStatus["provider"]>> = 
   "google-antigravity": "google-antigravity",
 };
 
+/** Normalize recorded provider routes to their account-quota family. */
+export function quotaProviderForRoute(route: string | null): ModelUsageStatus["provider"] | undefined {
+  if (route === "zhipu") return "zhipu";
+  return route !== null && Object.hasOwn(QUOTA_PROVIDERS, route) ? QUOTA_PROVIDERS[route] : undefined;
+}
+
 /** One representative per credential route; Antigravity quotas are model-specific. */
 export function providerUsageTargets(configOptions: readonly SessionConfigOption[]): ProviderUsageTarget[] {
   const targets = new Map<string, ProviderUsageTarget>();

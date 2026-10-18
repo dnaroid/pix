@@ -43,7 +43,7 @@ function fixture() {
     runtime: { getConfigOptions: () => [], isReady: () => true,
       ensure: vi.fn(async () => {}), schedulePrewarm: vi.fn(), invalidatePrewarm: vi.fn() },
     promptRunning: () => false, setOperationRunning: vi.fn(),
-    refreshQueueState: vi.fn(), catalog: { refresh: vi.fn() }, reportError,
+    refreshQueueState: vi.fn(), catalog: { refresh: vi.fn(), sessions: [] }, reportError,
     tabSessionIds: () => ["source", "target"], history,
   } as unknown as SessionTabControllerOptions);
   return { state, history, selection, sessionHistory, reportError };

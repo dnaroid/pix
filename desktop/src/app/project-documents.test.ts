@@ -5,6 +5,8 @@ import { PROJECT_TODO_PATH } from "../lib/project-documents";
 
 const tauri = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: tauri.invoke }));
+const confirmation = vi.hoisted(() => ({ confirm: vi.fn() }));
+vi.mock("../lib/confirm-action", () => ({ confirmDesktopAction: confirmation.confirm }));
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -86,5 +88,136 @@ describe("project file writes", () => {
     expect(tauri.invoke).toHaveBeenCalledWith("write_project_markdown", expect.objectContaining({
       path: PROJECT_TODO_PATH,
     }));
+  });
+});
+
+describe("plan progress refresh", () => {
+  beforeEach(() => tauri.invoke.mockReset());
+
+  it("updates progress from the native snapshot and ignores a late response after reset", async () => {
+    const { store } = fixture();
+    const path = ".pi/plans/release.md";
+    tauri.invoke.mockResolvedValue({ plans: [path], todoExists: false, planProgress: { [path]: { completed: 1, total: 3 } } });
+    await store.refresh();
+    expect(store.snapshot.planProgress?.[path]).toEqual({ completed: 1, total: 3 });
+    const pending = deferred<unknown>();
+    tauri.invoke.mockReturnValue(pending.promise);
+    const refreshing = store.refresh();
+    store.reset();
+    pending.resolve({ plans: [path], todoExists: false, planProgress: { [path]: { completed: 3, total: 3 } } });
+    await refreshing;
+    expect(store.snapshot.plans).toEqual([]);
+    expect(store.snapshot.planProgress).toEqual({});
+  });
+});
+
+describe("confirmed plan deletion", () => {
+  const path = ".pi/plans/release.md";
+  function deletionFixture() {
+    let workspace = "/project";
+    const afterDelete = vi.fn();
+    const reportError = vi.fn();
+    const store = createProjectDocumentsStore({
+      workspace: () => workspace, openProjectFile: vi.fn(), showEmptyFile: vi.fn(),
+      previewId: () => 1, afterSave: vi.fn(), afterDelete, clearError: vi.fn(), reportError,
+    });
+    return { store, afterDelete, reportError, changeWorkspace: () => { workspace = "/other"; } };
+  }
+
+  beforeEach(() => {
+    confirmation.confirm.mockReset().mockResolvedValue(true);
+    tauri.invoke.mockReset().mockImplementation(async (command) => command === "list_project_documents"
+      ? { plans: [path], todoExists: true } : undefined);
+  });
+
+  it("confirms the full path, deletes only that file, updates Preview and reloads documents", async () => {
+    const { store, afterDelete } = deletionFixture();
+    await store.load("/project");
+    tauri.invoke.mockImplementation(async (command) => command === "list_project_documents" ? { plans: [], todoExists: true } : undefined);
+    await store.removePlan(path);
+    expect(confirmation.confirm).toHaveBeenCalledWith(expect.stringContaining(path), { title: "Delete plan?", okLabel: "Delete" });
+    expect(tauri.invoke).toHaveBeenCalledWith("delete_project_entry", { workspace: "/project", path });
+    expect(afterDelete).toHaveBeenCalledWith(path, "/project");
+    expect(store.snapshot).toEqual({ plans: [], todoExists: true });
+    expect(store.removing).toBeNull();
+  });
+
+  it.each(["cancel", "workspace", "reset"])("does not delete after %s during confirmation", async (reason) => {
+    const { store, changeWorkspace, afterDelete } = deletionFixture();
+    await store.load("/project");
+    const answer = deferred<boolean>();
+    confirmation.confirm.mockReturnValue(answer.promise);
+    const deleting = store.removePlan(path);
+    if (reason === "workspace") changeWorkspace();
+    if (reason === "reset") store.reset();
+    answer.resolve(reason !== "cancel");
+    await deleting;
+    expect(tauri.invoke).not.toHaveBeenCalledWith("delete_project_entry", expect.anything());
+    expect(afterDelete).not.toHaveBeenCalled();
+  });
+
+  it("rejects noncanonical paths and duplicate delete clicks", async () => {
+    const { store } = deletionFixture();
+    await store.load("/project");
+    await store.removePlan("README.md");
+    expect(confirmation.confirm).not.toHaveBeenCalled();
+    const answer = deferred<boolean>();
+    confirmation.confirm.mockReturnValue(answer.promise);
+    const deleting = store.removePlan(path);
+    await store.removePlan(path);
+    expect(confirmation.confirm).toHaveBeenCalledOnce();
+    answer.resolve(false);
+    await deleting;
+  });
+
+  it("waits for an existing save and blocks new saves until deletion completes", async () => {
+    const { store } = deletionFixture();
+    await store.load("/project");
+    const entered = deferred<void>();
+    const saved = deferred<ProjectFilePreview>();
+    tauri.invoke.mockImplementation(async (command) => {
+      if (command === "write_project_markdown") { entered.resolve(); return saved.promise; }
+      if (command === "list_project_documents") return { plans: [], todoExists: true };
+    });
+    const saving = store.save(path, "before delete");
+    await entered.promise;
+    const deleting = store.removePlan(path);
+    await Promise.resolve();
+    expect(await store.save(path, "must not recreate")).toBe(false);
+    expect(tauri.invoke).not.toHaveBeenCalledWith("delete_project_entry", expect.anything());
+    saved.resolve({ path, content: "before delete" });
+    await Promise.all([saving, deleting]);
+    expect(tauri.invoke).toHaveBeenCalledWith("delete_project_entry", { workspace: "/project", path });
+  });
+
+  it("does not apply a late deletion completion after reset", async () => {
+    const { store, afterDelete } = deletionFixture();
+    await store.load("/project");
+    const entered = deferred<void>();
+    const removed = deferred<void>();
+    tauri.invoke.mockImplementation(async (command) => {
+      if (command === "delete_project_entry") { entered.resolve(); return removed.promise; }
+      return { plans: [path], todoExists: true };
+    });
+    const deleting = store.removePlan(path);
+    await entered.promise;
+    store.reset();
+    await store.load("/project");
+    removed.resolve();
+    await deleting;
+    expect(afterDelete).not.toHaveBeenCalled();
+    expect(store.snapshot.plans).toEqual([path]);
+  });
+
+  it("preserves the list on deletion failure and reports the error", async () => {
+    const { store, afterDelete, reportError } = deletionFixture();
+    await store.load("/project");
+    const error = new Error("permission denied");
+    tauri.invoke.mockRejectedValue(error);
+    await store.removePlan(path);
+    expect(store.snapshot.plans).toEqual([path]);
+    expect(afterDelete).not.toHaveBeenCalled();
+    expect(reportError).toHaveBeenCalledWith(error);
+    expect(store.removing).toBeNull();
   });
 });

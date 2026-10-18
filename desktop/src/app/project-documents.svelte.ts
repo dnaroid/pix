@@ -1,9 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
+import { confirmDesktopAction } from "../lib/confirm-action";
 import { isWorkspaceProjectFilePath, type ProjectFilePreview } from "../lib/project-files";
 import {
   EMPTY_PROJECT_DOCUMENTS,
   PROJECT_TODO_PATH,
   isEditableProjectMarkdown,
+  isCanonicalProjectPlanPath,
   type ProjectDocumentsSnapshot,
 } from "../lib/project-documents";
 
@@ -13,6 +15,7 @@ type ProjectDocumentsStoreOptions = {
   showEmptyFile: (file: ProjectFilePreview) => void;
   previewId: () => number | undefined;
   afterSave: (file: ProjectFilePreview, workspace: string, previewId: number | undefined) => void;
+  afterDelete?: (path: string, workspace: string) => void;
   clearError: () => void;
   reportError: (error: unknown) => void;
 };
@@ -22,11 +25,13 @@ export function createProjectDocumentsStore(options: ProjectDocumentsStoreOption
   let generation = 0;
   let workspaceGeneration = 0;
   const writes = new Map<string, Promise<ProjectFilePreview>>();
+  let removing = $state<string | null>(null);
 
   function reset(): void {
     generation += 1;
     workspaceGeneration += 1;
     snapshot = EMPTY_PROJECT_DOCUMENTS;
+    removing = null;
   }
 
   async function load(projectPath: string): Promise<void> {
@@ -42,6 +47,11 @@ export function createProjectDocumentsStore(options: ProjectDocumentsStoreOption
     }
   }
 
+  async function refresh(): Promise<void> {
+    const workspace = options.workspace();
+    if (workspace) await load(workspace);
+  }
+
   function open(path: string, exists = true): void {
     if (!options.workspace() || !isEditableProjectMarkdown(path)) return;
     if (exists) {
@@ -53,7 +63,7 @@ export function createProjectDocumentsStore(options: ProjectDocumentsStoreOption
 
   async function save(path: string, content: string): Promise<boolean> {
     const workspace = options.workspace();
-    if (!workspace || !isWorkspaceProjectFilePath(path)) return false;
+    if (!workspace || !isWorkspaceProjectFilePath(path) || removing === path) return false;
     const requestGeneration = workspaceGeneration;
     const previewId = options.previewId();
     const isCurrent = () => requestGeneration === workspaceGeneration && options.workspace() === workspace;
@@ -79,11 +89,41 @@ export function createProjectDocumentsStore(options: ProjectDocumentsStoreOption
     }
   }
 
+  async function removePlan(path: string): Promise<void> {
+    const workspace = options.workspace();
+    if (!workspace || removing || !isCanonicalProjectPlanPath(path) || !snapshot.plans.includes(path)) return;
+    const requestGeneration = workspaceGeneration;
+    const isCurrent = () => requestGeneration === workspaceGeneration && options.workspace() === workspace;
+    removing = path;
+    try {
+      if (!await confirmDesktopAction(`Delete plan “${path}”?\n\nThe file and any unsaved changes will be lost. This cannot be undone.`, {
+        title: "Delete plan?", okLabel: "Delete",
+      }) || !isCurrent()) return;
+      // Let an in-flight save finish first; new saves of this plan are blocked.
+      await writes.get(`${workspace}\0${path}`)?.catch(() => {});
+      if (!isCurrent()) return;
+      options.clearError();
+      await invoke("delete_project_entry", { workspace, path });
+      if (!isCurrent()) return;
+      generation += 1;
+      snapshot = { ...snapshot, plans: snapshot.plans.filter((candidate) => candidate !== path) };
+      options.afterDelete?.(path, workspace);
+      await load(workspace);
+    } catch (error) {
+      if (isCurrent()) options.reportError(error);
+    } finally {
+      if (isCurrent()) removing = null;
+    }
+  }
+
   return {
     get snapshot() { return snapshot; },
+    get removing() { return removing; },
     reset,
     load,
+    refresh,
     open,
     save,
+    removePlan,
   };
 }

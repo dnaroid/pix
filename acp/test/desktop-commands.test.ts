@@ -48,6 +48,8 @@ test("desktop draft config is workspace-scoped and does not require a session id
 	});
 	assert.throws(() => parseDesktopDraftConfigRequest({ cwd: "" }));
 	assert.throws(() => parseDesktopDraftConfigRequest({ cwd: "/workspace", refreshModelUsage: "yes" }));
+	assert.deepEqual(parseDesktopDraftConfigRequest({ cwd: "/workspace", includeUsageCache: true }), { cwd: "/workspace", includeUsageCache: true });
+	assert.throws(() => parseDesktopDraftConfigRequest({ cwd: "/workspace", includeUsageCache: "yes" }));
 	assert.throws(() => parseDesktopDraftConfigRequest({}));
 });
 

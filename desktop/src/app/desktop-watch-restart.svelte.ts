@@ -41,6 +41,7 @@ export function createDesktopWatchRestart(dependencies: DesktopWatchRestartDepen
   function start() {
     if (timer) clearInterval(timer);
     const current = ++generation;
+    restarting = false;
     void refresh();
     timer = setInterval(() => void refresh(), POLL_MS);
     return () => {
@@ -56,7 +57,9 @@ export function createDesktopWatchRestart(dependencies: DesktopWatchRestartDepen
     const current = generation;
     restarting = true;
     try {
-      await dependencies.invoke("desktop_watch_restart");
+      const requested = await dependencies.invoke<boolean>("desktop_watch_restart");
+      if (current !== generation) return;
+      if (!requested) restarting = false;
     } catch {
       if (current !== generation) return;
       restarting = false;

@@ -3,6 +3,7 @@ import { DECISION_POLICY_CASES } from "./decision-policy.js";
 import { SESSION_EVAL_CASES } from "./session-cases.js";
 import { TODO_CONCISENESS_CASES } from "./todo-conciseness.js";
 import { DELEGATION_POLICY_CASES } from "./delegation-policy.js";
+import { PLAN_GUIDANCE_CASES } from "./plan-guidance.js";
 
 const DIRECT_TOOLS = ["read", "Read", "grep", "Grep", "find", "Glob", "bash", "Bash", "shell", "shell_command"];
 const MUTATION_TOOLS = ["edit", "Edit", "write", "Write", "apply_patch", "ast_apply"];
@@ -14,6 +15,7 @@ export const EVAL_CASES: EvalCase[] = [
 	...SESSION_EVAL_CASES,
 	...TODO_CONCISENESS_CASES,
 	...DELEGATION_POLICY_CASES,
+	...PLAN_GUIDANCE_CASES,
 	{
 		id: "tool.semantic-repo-search",
 		category: "tool-selection",

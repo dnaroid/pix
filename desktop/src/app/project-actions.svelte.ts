@@ -10,8 +10,9 @@ import {
 import { buildPromptPayload } from "./prompt-payload";
 import { materializeComposerTaskAttachments } from "./attachment-io";
 import { parseDesktopModelRef } from "./desktop-helpers";
+import { createProjectPlanActions } from "./project-plan-actions.svelte";
 
-type ProjectActionsOptions = {
+export type ProjectActionsOptions = {
   client: () => AcpClient | null;
   workspace: () => string;
   canUseSession: () => boolean;
@@ -52,12 +53,14 @@ type ProjectActionsOptions = {
   refreshSessions: () => void | Promise<void>;
   loadSession: (sessionId: string) => Promise<void>;
   sessionMutationRunning: () => boolean;
+  planAvailable?: (path: string) => boolean;
   nextLocalMessageId: () => string;
   reportError: (error: unknown) => void;
 };
 
 export function createProjectActions(options: ProjectActionsOptions) {
   let actionId = $state<string | null>(null);
+  const plans = createProjectPlanActions(options, () => actionId !== null);
 
   async function createTaskFromComposer(): Promise<void> {
     if (!options.workspace() || options.tasksSaving() || options.taskLoadFailed()) return;
@@ -119,7 +122,7 @@ export function createProjectActions(options: ProjectActionsOptions) {
       return;
     }
     const requestClient = options.client();
-    if (!requestClient || !options.canUseSession() || options.tasksSaving() || actionId) return;
+    if (!requestClient || !options.canUseSession() || options.tasksSaving() || actionId || plans.actionId) return;
     const requestWorkspace = options.workspace();
     options.closeProjectSelector();
     options.closeSessionSelector();
@@ -201,7 +204,7 @@ export function createProjectActions(options: ProjectActionsOptions) {
   }
 
   async function openTaskSession(task: ProjectTask): Promise<void> {
-    if (!task.sessionId || actionId || options.sessionMutationRunning()) return;
+    if (!task.sessionId || actionId || plans.actionId || options.sessionMutationRunning()) return;
     if (task.sessionId === options.activeSessionId()) return;
     actionId = task.id;
     try {
@@ -213,10 +216,12 @@ export function createProjectActions(options: ProjectActionsOptions) {
 
   function reset(): void {
     actionId = null;
+    plans.reset();
   }
 
   return {
-    get actionId() { return actionId; },
+    get actionId() { return actionId ?? plans.actionId; },
+    runPlan: plans.runPlan,
     createTaskFromComposer,
     runTask,
     openTaskSession,

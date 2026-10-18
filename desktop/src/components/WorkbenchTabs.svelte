@@ -16,6 +16,7 @@
   } from "../lib/workbench-tabs";
   import { titlebarDrag } from "../lib/titlebar-drag";
   import SessionTabStatusIcon from "./SessionTabStatusIcon.svelte";
+  import { agentIcon } from "../lib/agent-icons";
 
   let {
     tabs,
@@ -135,6 +136,10 @@
           >
             {#if tab.kind === "session"}
               <SessionTabStatusIcon kind={tab.statusKind} {active} />
+              {#if tab.subagentIcon}
+                {@const AgentIcon = agentIcon(tab.subagentIcon)}
+                <AgentIcon class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+              {/if}
               {#if tab.fork}
                 <GitFork class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
               {/if}

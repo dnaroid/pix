@@ -66,7 +66,7 @@ describe("selecting an existing tab during draft materialization", () => {
         setSessionTranscript: vi.fn(), sessionTranscript: () => undefined, setTranscript: vi.fn(),
         setConfigOptions: vi.fn(), setRuntimeReady: vi.fn() },
       operationRunning: () => false, setOperationRunning: vi.fn(), promptRunning: () => false,
-      catalog: { refresh: vi.fn() }, tabs, draft,
+      catalog: { refresh: vi.fn(), sessions: [] }, tabs, draft,
       runtime: { getConfigOptions: () => [], isReady: () => false, ensure: vi.fn(async () => {}), schedulePrewarm: vi.fn(), invalidatePrewarm: vi.fn() },
       history: { cancel: vi.fn(), begin: vi.fn(() => 1), hydrate: vi.fn(), needsHydration: vi.fn(() => false) },
       closeProjectSelector: vi.fn(), clearSessionActivity: vi.fn(), resetSessionActivity: vi.fn(), forgetRuntime: vi.fn(),

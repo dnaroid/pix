@@ -562,6 +562,7 @@ Research only this project.
 			"browser.md", "browser-auth.md", "browser-playwright.md", "browser-chrome-devtools.md",
 			"tui.md", "tui-pty.md", "tui-native-terminal.md",
 			"desktop.md", "desktop-macos.md", "desktop-windows.md", "desktop-linux.md",
+			"android.md", "android-adb.md",
 		];
 		for (const guide of guides) {
 			const file = path.join(guidesDir, guide);
@@ -1355,7 +1356,7 @@ setTimeout(() => {}, 2000);
 		}
 	});
 
-	test.serial("provides UI QA with native and browser-backend workspaces and clears stale evidence on reuse", async () => {
+	test.serial("provides UI QA with native and browser-backend workspaces and preserves evidence on reuse", async () => {
 		const cwd = tempDir();
 		const runDir = createBatch(cwd, resolveScope(undefined), "ui-qa-workspace");
 		const agentDir = path.join(cwd, ".pi", "artifacts", "subagents", `${parseRunKey(runDir)!.batch}-qa-agent`);
@@ -1381,8 +1382,8 @@ setTimeout(() => {}, 1000);
 		}), "Timed out waiting for UI QA workspace spawn");
 
 		expect(fs.readFileSync(capturedEnv, "utf8")).toBe(fs.realpathSync(agentDir));
-		expect(fs.existsSync(staleEvidence)).toBe(false);
-		expect(fs.existsSync(staleNativeEvidence)).toBe(false);
+		expect(fs.readFileSync(staleEvidence, "utf8")).toBe("stale");
+		expect(fs.readFileSync(staleNativeEvidence, "utf8")).toBe("stale");
 		expect(fs.statSync(path.join(agentDir, "ui-qa")).isDirectory()).toBe(true);
 		expect(fs.statSync(path.join(agentDir, "ui-qa", "flows")).isDirectory()).toBe(true);
 		expect(fs.statSync(path.join(agentDir, "ui-qa", "browser", "flows")).isDirectory()).toBe(true);

@@ -49,6 +49,108 @@ describe("provider quota targets", () => {
 });
 
 describe("panel-owned provider quota polling", () => {
+  it("shows saved quotas while the first live refresh is pending and keeps them asleep on collapse", async () => {
+    const { store, draftConfig } = setup();
+    const late = deferred<Response>();
+    const saved = { ...quota("openai-codex/gpt"), stale: true as const };
+    draftConfig.mockImplementation((_cwd, selection) => selection ? late.promise : Promise.resolve({
+      ...catalogue([saved.modelKey]), usageCache: { scope: "a".repeat(64), snapshots: [saved] },
+    }));
+    const loading = store.refresh();
+    await flush();
+    expect(store.busy).toBe(true);
+    expect(store.entries[0]?.runtime?.modelUsage).toEqual(saved);
+    expect(store.entries[0]?.state).toBe("ready");
+    store.pause();
+    const paused = store.entries;
+    late.resolve({ ...catalogue(), modelUsageRefresh: "ready", modelUsage: quota(saved.modelKey) });
+    await loading;
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(store.entries).toBe(paused);
+    expect(draftConfig).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
+    store.dispose();
+  });
+
+  it("never reuses another account's retained quota after a cache scope change", async () => {
+    const { store, draftConfig } = setup();
+    let scope = "a".repeat(64);
+    draftConfig.mockImplementation(async (_cwd, selection) => selection
+      ? { ...catalogue(), modelUsageRefresh: "ready", modelUsage: quota(selection.modelRef) }
+      : { ...catalogue(["openai-codex/gpt"]), usageCache: { scope, snapshots: [] } });
+    await store.refresh();
+    expect(store.entries[0]?.runtime?.modelUsage).toBeDefined();
+    scope = "b".repeat(64);
+    const late = deferred<Response>();
+    draftConfig.mockImplementation((_cwd, selection) => selection ? late.promise : Promise.resolve({
+      ...catalogue(["openai-codex/gpt"]), usageCache: { scope, snapshots: [] },
+    }));
+    const loading = store.refresh();
+    await flush();
+    expect(store.entries[0]?.runtime).toBeUndefined();
+    expect(store.entries[0]?.state).toBe("loading");
+    late.resolve({ ...catalogue(), modelUsageRefresh: "unavailable" });
+    await loading;
+    expect(store.entries[0]?.runtime?.modelUsage).toBeUndefined();
+    store.dispose();
+  });
+
+  it("clears a batch invalidated during fetch and ignores its other late completions", async () => {
+    const { store, draftConfig } = setup();
+    const late = deferred<Response>();
+    const invalid = deferred<Response>();
+    const saved = quota("openai-codex/gpt");
+    draftConfig.mockImplementation((_cwd, selection) => {
+      if (!selection) return Promise.resolve({ ...catalogue(), usageCache: { scope: "a".repeat(64), snapshots: [{ ...saved, stale: true }] } });
+      return selection.modelRef === saved.modelKey ? invalid.promise : late.promise;
+    });
+    const loading = store.refresh();
+    await flush();
+    invalid.resolve({ ...catalogue(), modelUsageRefresh: "unavailable", usageCacheInvalidated: true });
+    await flush();
+    expect(store.entries).toEqual([]);
+    late.resolve({ ...catalogue(), modelUsageRefresh: "ready", modelUsage: quota("anthropic/claude") });
+    await loading;
+    expect(store.entries).toEqual([]);
+    expect(store.busy).toBe(false);
+    expect(vi.getTimerCount()).toBe(1);
+    store.dispose();
+  });
+
+  it("immediately rereads the catalogue when accounts change between target requests", async () => {
+    const { store, draftConfig } = setup();
+    const refs = ["openai-codex/gpt", "anthropic/claude"];
+    const a = "a".repeat(64), b = "b".repeat(64);
+    let catalogues = 0;
+    draftConfig.mockImplementation(async (_cwd, selection) => {
+      if (!selection) {
+        const scope = ++catalogues === 1 ? a : b;
+        return { ...catalogue(refs), usageCache: { scope, routeScopes: { "openai-codex": scope, anthropic: scope }, snapshots: [] } };
+      }
+      const scope = catalogues === 1 && selection.modelRef === refs[0] ? a : b;
+      return { ...catalogue(refs), modelUsageRefresh: "ready", usageCacheScope: scope, modelUsage: { ...quota(selection.modelRef), accountEmail: scope === a ? "old" : "new" } };
+    });
+    await store.refresh();
+    expect(catalogues).toBe(2);
+    expect(store.entries).toHaveLength(2);
+    expect(store.entries.every((entry) => entry.runtime?.modelUsage?.accountEmail === "new")).toBe(true);
+    expect(store.busy).toBe(false);
+    expect(vi.getTimerCount()).toBe(1);
+    store.dispose();
+  });
+
+  it("bounds repeated account invalidation to one immediate retry", async () => {
+    const { store, draftConfig } = setup();
+    draftConfig.mockImplementation(async (_cwd, selection) => selection
+      ? { ...catalogue(), modelUsageRefresh: "unavailable", usageCacheInvalidated: true }
+      : catalogue(["openai-codex/gpt"]));
+    await store.refresh();
+    expect(draftConfig).toHaveBeenCalledTimes(4);
+    expect(store.entries).toEqual([]);
+    expect(vi.getTimerCount()).toBe(1);
+    store.dispose();
+  });
+
   it("sleeps while collapsed, retains cached quotas and resumes on expansion", async () => {
     const { store, draftConfig } = setup();
     await store.refresh();
@@ -144,7 +246,7 @@ describe("panel-owned provider quota polling", () => {
     expect(store.entries.map((entry) => entry.provider).sort()).toEqual(["anthropic", "openai", "zhipu"]);
     expect(store.entries.every((entry) => entry.state === "ready" && entry.runtime?.modelUsage)).toBe(true);
     for (const modelRef of ["openai-codex/gpt", "anthropic/claude", "zai/glm"]) {
-      expect(draftConfig).toHaveBeenCalledWith("/a", { modelRef }, true);
+      expect(draftConfig).toHaveBeenCalledWith("/a", { modelRef }, true, true);
     }
     expect(store.busy).toBe(false);
     store.dispose();

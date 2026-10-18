@@ -40,6 +40,8 @@
     failed: "Build failed — see the pix-watch terminal for details",
   };
   const buildHint = $derived(buildHints[buildStatus]);
+  const restartHint = $derived(restartPending ? "Restarting Desktop…" : "Restart Desktop to use the newly built version");
+  const actionHint = $derived(restartPending ? restartHint : [buildHint, restartAvailable ? restartHint : ""].filter(Boolean).join(" — "));
 </script>
 
 <header
@@ -66,36 +68,32 @@
       <Search class="h-4 w-4" aria-hidden="true" />
     </button>
   {/if}
-  {#if restartAvailable || buildStatus !== "idle"}
-    <div class="flex shrink-0 items-center gap-1 px-2">
-      {#if buildStatus !== "idle"}
-        <span
-          class={["grid h-7 w-7 place-items-center", buildStatus === "failed" ? "text-tool-error" : "text-chrome-foreground"]}
-          role="status"
-          aria-label={buildHint}
-          title={buildHint}
-        >
-          {#if buildStatus === "queued"}
-            <Clock class="h-4 w-4" aria-hidden="true" />
-          {:else if buildStatus === "building"}
-            <LoaderCircle class="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" />
-          {:else}
-            <CircleAlert class="h-4 w-4" aria-hidden="true" />
-          {/if}
-        </span>
-      {/if}
-      {#if restartAvailable}
+  {#if restartAvailable || restartPending || buildStatus !== "idle"}
+    <div class="flex shrink-0 items-center px-2" role="status" aria-label={actionHint}>
       <button
         type="button"
-        class="grid h-6 w-6 place-items-center rounded-sm bg-tool-error/10 text-tool-error hover:bg-tool-error/20 focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-wait disabled:opacity-60"
-        title={restartPending ? "Restarting Desktop…" : "Restart Desktop to use the newly built version"}
-        aria-label={restartPending ? "Restarting Desktop" : "Restart Desktop to use the newly built version"}
-        disabled={restartPending}
+        class={iconButtonClass("sm", "chrome", { extra: [
+          restartAvailable ? "bg-tool-error/10 text-tool-error enabled:hover:bg-tool-error/20" : "text-chrome-foreground disabled:opacity-100",
+          buildStatus === "failed" ? "text-tool-error" : "",
+          restartPending ? "disabled:cursor-wait disabled:opacity-60" : "",
+        ].join(" ") })}
+        title={actionHint}
+        aria-label={actionHint}
+        disabled={!restartAvailable || restartPending}
         onclick={onRestart}
       >
-        <RotateCw class={["h-3.5 w-3.5", restartPending ? "animate-spin" : ""]} aria-hidden="true" />
+        {#if restartPending}
+          <RotateCw class="h-3.5 w-3.5 motion-safe:animate-spin" aria-hidden="true" />
+        {:else if buildStatus === "building"}
+          <LoaderCircle class="h-3.5 w-3.5 motion-safe:animate-spin" aria-hidden="true" />
+        {:else if buildStatus === "queued"}
+          <Clock class="h-3.5 w-3.5" aria-hidden="true" />
+        {:else if buildStatus === "failed"}
+          <CircleAlert class="h-3.5 w-3.5" aria-hidden="true" />
+        {:else}
+          <RotateCw class="h-3.5 w-3.5" aria-hidden="true" />
+        {/if}
       </button>
-      {/if}
     </div>
   {/if}
 </header>

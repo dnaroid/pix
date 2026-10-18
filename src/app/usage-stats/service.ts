@@ -3,6 +3,8 @@ import type { UsageSourceId, UsageSourceSnapshot, UsageSourceStatus, UsageUnit }
 
 /** One collectable usage source as seen by the service. */
 export type UsageStatsSource = {
+	/** Restore a complete disk snapshot without collecting or polling. */
+	restore?(): Promise<UsageSourceSnapshot | undefined>;
 	readonly id: UsageSourceId;
 	readonly unit: UsageUnit;
 	/** Automatic refresh interval for `request()` without `refresh`. */
@@ -54,10 +56,25 @@ export class UsageStatsService {
 	private readonly entries = new Map<UsageSourceId, Entry>();
 	private readonly now: () => number;
 	private disposed = false;
+	private restoring: Promise<void> | undefined;
 
 	constructor(private readonly options: UsageStatsServiceOptions) {
 		this.now = options.now ?? Date.now;
 		for (const source of options.sources) this.entries.set(source.id, { source, failures: 0 });
+	}
+
+	/** One coalesced restore before the host's first request; no source collection. */
+	restore(): Promise<void> {
+		return this.restoring ??= Promise.all([...this.entries.values()].map(async (entry) => {
+			try {
+				const snapshot = await entry.source.restore?.();
+				if (!this.disposed && !entry.snapshot && snapshot?.source === entry.source.id && snapshot.status === "ready") {
+					entry.snapshot = { ...snapshot, status: "stale" };
+				}
+			} catch (error) {
+				this.log("warn", "usage_stats.cache_restore_failed", { source: entry.source.id, error: error instanceof Error ? error.name : "Error" });
+			}
+		})).then(() => {});
 	}
 
 	/** Retained snapshots, immediately; schedules collection when due. */
@@ -187,6 +204,7 @@ export function localUsageStatsSource(
 	let lastDiagnostics = "";
 	return {
 		id: source.id,
+		...(source.restore ? { restore: () => source.restore!() } : {}),
 		unit: "tokens",
 		refreshIntervalMs: options.refreshIntervalMs ?? 15_000,
 		minIntervalMs: options.minIntervalMs ?? 2_000,

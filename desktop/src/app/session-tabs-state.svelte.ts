@@ -138,8 +138,18 @@ export function createSessionTabsState() {
     persistCurrentTabs();
   }
 
-  function show(sessionId: string): void {
+  function show(sessionId: string, insertAfterId?: string): void {
+    const visibleIds = currentVisibleIds();
+    const wasVisible = visibleIds?.includes(sessionId) ?? false;
     closedIds = closedIds.filter((closedId) => closedId !== sessionId);
+    if (!wasVisible && visibleIds && insertAfterId && insertAfterId !== sessionId) {
+      const anchorIndex = visibleIds.indexOf(insertAfterId);
+      if (anchorIndex >= 0) {
+        visibleIds.splice(anchorIndex + 1, 0, sessionId);
+        restoredIds = visibleIds;
+        if (!locallyOpenedIds.includes(sessionId)) locallyOpenedIds = [...locallyOpenedIds, sessionId];
+      }
+    }
     if (!restoredIds?.includes(sessionId) && !locallyOpenedIds.includes(sessionId)) {
       locallyOpenedIds = [...locallyOpenedIds, sessionId];
     }

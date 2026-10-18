@@ -64,6 +64,22 @@ describe("usage-stats worker collector", () => {
 		}
 	});
 
+	it("restores a saved snapshot in a fresh worker without scanning session logs", async () => {
+		const snapshotPath = join(dir, "cache", "history.json");
+		const options = { id: "pix-sessions" as const, roots: () => roots, snapshotPath,
+			fallback: () => { throw new Error("worker must be available"); } };
+		const original = new WorkerCollector(options);
+		assert.equal(await original.restore(), undefined);
+		const collected = await original.collect();
+		original.dispose();
+		await rm(join(dir, "sessions"), { recursive: true });
+		const restarted = new WorkerCollector(options);
+		try {
+			assert.deepEqual((await restarted.restore())?.buckets, collected.snapshot.buckets);
+			assert.equal(total((await restarted.collect()).snapshot.buckets), 0, "live scan replaces saved data with the current empty source");
+		} finally { restarted.dispose(); }
+	});
+
 	it("rejects aborted and disposed collections", async () => {
 		const collector = new WorkerCollector({ id: "pix-sessions", roots: () => roots, fallback: () => createPixSessionsSource({ roots: () => roots }) });
 		const controller = new AbortController();

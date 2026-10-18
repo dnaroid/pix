@@ -98,6 +98,7 @@ export function createDesktopProjectActionServices(options: DesktopProjectAction
     refreshSessions: options.sessions.catalog.refresh,
     loadSession: options.transitions.sessionTabs.loadSession,
     sessionMutationRunning: options.sessionMutationRunning,
+    planAvailable: (path) => !options.project.documents.removing && options.project.documents.snapshot.plans.includes(path),
     nextLocalMessageId: options.nextLocalMessageId,
     reportError: options.reportError,
   });

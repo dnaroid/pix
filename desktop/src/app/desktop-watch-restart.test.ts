@@ -4,6 +4,70 @@ import { createDesktopWatchRestart } from "./desktop-watch-restart.svelte";
 afterEach(() => vi.useRealTimers());
 
 describe("Desktop watcher status", () => {
+  it("restores Restart after cancelled confirmation and allows a confirmed retry", async () => {
+    vi.useFakeTimers();
+    let respond!: (requested: boolean) => void;
+    const invoke = vi.fn((command: string) => command === "desktop_watch_status"
+      ? Promise.resolve({ available: true, buildStatus: "building" })
+      : new Promise<boolean>((resolve) => { respond = resolve; }));
+    const watcher = createDesktopWatchRestart({ invoke: invoke as never });
+    const stop = watcher.start();
+    await vi.advanceTimersByTimeAsync(0);
+    const cancelled = watcher.restart();
+    expect(watcher.restarting).toBe(true);
+    await watcher.restart();
+    expect(invoke.mock.calls.filter(([command]) => command === "desktop_watch_restart")).toHaveLength(1);
+    respond(false);
+    await cancelled;
+    expect(watcher.restarting).toBe(false);
+    expect(watcher.available).toBe(true);
+    expect(watcher.buildStatus).toBe("building");
+    const confirmed = watcher.restart();
+    respond(true);
+    await confirmed;
+    expect(watcher.restarting).toBe(true);
+    expect(invoke.mock.calls.filter(([command]) => command === "desktop_watch_restart")).toHaveLength(2);
+    stop();
+  });
+
+  it("ignores cancelled confirmation from an old lifecycle during a new restart", async () => {
+    vi.useFakeTimers();
+    const responses: Array<(requested: boolean) => void> = [];
+    const invoke = vi.fn((command: string) => command === "desktop_watch_status"
+      ? Promise.resolve({ available: true, buildStatus: "idle" })
+      : new Promise<boolean>((resolve) => { responses.push(resolve); }));
+    const watcher = createDesktopWatchRestart({ invoke: invoke as never });
+    const stopOld = watcher.start();
+    await vi.advanceTimersByTimeAsync(0);
+    const oldRestart = watcher.restart();
+    stopOld();
+    const stopNew = watcher.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(watcher.restarting).toBe(false);
+    const newRestart = watcher.restart();
+    responses[0]!(false);
+    await oldRestart;
+    expect(watcher.restarting).toBe(true);
+    responses[1]!(false);
+    await newRestart;
+    expect(watcher.restarting).toBe(false);
+    stopNew();
+  });
+
+  it("restores Restart after a command failure", async () => {
+    vi.useFakeTimers();
+    const invoke = vi.fn((command: string) => command === "desktop_watch_status"
+      ? Promise.resolve({ available: true, buildStatus: "idle" })
+      : Promise.reject(new Error("restart failed")));
+    const watcher = createDesktopWatchRestart({ invoke: invoke as never });
+    const stop = watcher.start();
+    await vi.advanceTimersByTimeAsync(0);
+    await watcher.restart();
+    expect(watcher.restarting).toBe(false);
+    expect(watcher.available).toBe(true);
+    stop();
+  });
+
   it("polls queued, building, failed and ready state without hiding a ready artifact", async () => {
     vi.useFakeTimers();
     const invoke = vi.fn()

@@ -27,7 +27,7 @@ describe("status HUD todo progress ring", () => {
     } }).body;
     expect(html.match(/data-session-subagent-todo-progress/g)).toHaveLength(2);
     expect(html.match(/stroke-dashoffset="80"/g)).toHaveLength(2);
-    expect(html.match(/aria-label="Plan 1\/5"/g)).toHaveLength(2);
+    expect(html.match(/aria-label="Steps 1\/5"/g)).toHaveLength(2);
     // Overflow agents retain their popup progress, but have no individual status icon.
     expect(html.match(/data-session-subagent-status-progress/g)).toHaveLength(1);
     expect(html).toContain('aria-valuenow="1"');

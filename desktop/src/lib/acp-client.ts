@@ -159,8 +159,8 @@ export class AcpClient {
     return owner;
   }
 
-  draftConfig(cwd: string, selection?: DraftSessionConfig, refreshModelUsage = false) {
-    return this.pix.draftConfig(cwd, selection, refreshModelUsage);
+  draftConfig(cwd: string, selection?: DraftSessionConfig, refreshModelUsage = false, includeUsageCache = false) {
+    return this.pix.draftConfig(cwd, selection, refreshModelUsage, includeUsageCache);
   }
 
   routeModel(cwd: string, prompt: string, attachmentCount: number, signal?: AbortSignal) {

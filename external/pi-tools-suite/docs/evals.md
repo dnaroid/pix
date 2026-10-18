@@ -99,6 +99,52 @@ controls (narration without files, unrequested records, historical pruning,
 wrong links/actions, malformed output and unrelated mutations). A single live
 run is a behavioral observation, not a statistical reliability guarantee.
 
+### Plan authoring and execution checkpoints
+
+`plan-guidance.ts` adds six bounded, read-only scheduling checkpoints:
+
+| Case | Decision under test |
+| --- | --- |
+| `plan.independent` | Run useful independent work concurrently, retaining its dependent integration step. |
+| `plan.shared-contract` | Investigate a conflicting shared contract before implementation, even across different files. |
+| `plan.scoped-blocker` | Ask for a missing product decision while keeping proven independent work ready. |
+| `plan.failed-gate` | Keep the protected action No-Go after a failed check and investigate the failure. |
+| `plan.worker-claim` | Require verification after a worker's unsupported completion claim. |
+| `plan.invalidated-evidence` | Reopen the affected flat-checklist item and gate while retaining historical and still-valid evidence. |
+
+The first two cases append the current `docs/plan-writing.md`. Execution cases
+use the actual Desktop `buildProjectPlanPrompt` without loading the authoring
+guide. The test-only import keeps the evaluated Run instructions identical to
+those sent by `project-plan-actions.svelte.ts`. The fixture's explicitly selected
+`plans/` location is separate from the default `.pi/plans/` storage contract.
+
+Each plan supplies an already established current-state snapshot. The model
+must successfully read the named file and report ready, blocked, completed and
+reopened steps, parallel groups, next actions, gate decisions and evidence in a
+single `PLAN_RESULT` JSON line. Expected decisions stay in validators, outside
+the prompt and fixture. File snapshots and a direct saved-plan comparison reject
+changes to saved plans and other tracked fixture files; runner bookkeeping under
+`.pi/` is excluded from snapshots. Real worker dispatch is blocked. Negative controls
+reject global pauses, premature parallelism, false Go/completion, stale evidence,
+unnecessary reopening, malformed reports and missing or failed plan reads.
+
+Run the validator controls first, then the six live cases from this package:
+
+```bash
+npm run test:evals:plans
+PI_TOOLS_SUITE_EVAL_MODELS=zai/glm-5-turbo \
+PI_TOOLS_SUITE_EVAL_CASES=plan.independent,plan.shared-contract,plan.scoped-blocker,plan.failed-gate,plan.worker-claim,plan.invalidated-evidence \
+PI_TOOLS_SUITE_EVAL_KEEP=1 npm run evals:report
+```
+
+These cases evaluate control decisions given supplied facts. They do not certify
+real subagent dispatch, concurrent write isolation, code integration, discovery
+quality or actual checklist editing. Desktop launch and lazy host injection have
+separate deterministic tests. The host guidance is not an extension module or
+tool; its case registration is checked in `plan-guidance.test.ts`, without adding
+a fictitious entry to the module coverage manifest. A single live run is an
+observation, not a statistical reliability guarantee.
+
 ### Session action selection
 
 `session-cases.ts` supplies six bounded live scenarios covering every action:
@@ -135,11 +181,14 @@ test/evals/
   extension-contracts.test.ts
   harness.test.ts
   live-evals.test.ts
+  plan-guidance.ts
+  plan-guidance.test.ts
   run-evals.ts
   fixtures/
     coding-hypotheses/
     coding-regression/
     coding-async/
+    plan-guidance/
   harness/
     types.ts
     runner.ts
@@ -156,6 +205,8 @@ The responsibilities are intentionally separated:
 - `extension-contracts.test.ts` enforces coverage completeness and fills a few
   previously missing deterministic registration contracts.
 - `harness.test.ts` tests the eval machinery itself.
+- `plan-guidance.ts` evaluates current plan-authoring/Run decisions;
+  `plan-guidance.test.ts` checks its registration and validator failure controls.
 - `live-evals.test.ts` exposes the live cases through Bun's test runner.
 - `run-evals.ts` runs a matrix and writes JSON/Markdown comparison artifacts.
 - `runner.ts` creates isolated fixture projects, launches Pi, records events,
@@ -735,9 +786,11 @@ and security failures should remain non-negotiable gates outside that score.
 4. Express as much of the expected behavior as possible using shared assertions.
 5. Use `postRunCommands` for executable correctness and hidden-style regression
    checks.
-6. Add a custom validator only when structured tool arguments need inspection.
+6. Add a custom validator when shared assertions cannot express the required
+   decision, tool arguments or fixture outcome.
 7. Add the live case ID to the relevant extension/tool entries in
-   `coverage-manifest.ts`.
+   `coverage-manifest.ts`. For host-only guidance outside that registry, verify
+   case registration in its focused deterministic tests and document the scope.
 8. Run the deterministic harness tests before spending model tokens.
 9. Run the smallest relevant model/category subset first.
 10. Run the broader matrix before merging a prompt/routing change.

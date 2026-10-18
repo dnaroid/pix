@@ -16,6 +16,7 @@
   import type { Attachment } from "../lib/attachments";
   import { isGlbPath } from "../lib/glb";
   import { previewMediaKindForPath } from "../lib/media";
+  import { copyPreviewFile, copyPreviewMedia, previewCopyFilePath } from "../lib/preview-media-copy";
   import { previewMediaPlayback } from "./audio-playback-action";
   import { glbViewer } from "./glb-viewer-action";
   import "../styles/glb-viewer.css";
@@ -23,6 +24,7 @@
   import type { ProjectFileLineRange, ProjectFilePreview } from "../lib/project-files";
   import { highlightCode, languageForFilePath } from "../lib/syntax-highlight";
   import MarkdownText from "./MarkdownText.svelte";
+  import PreviewCopyButton from "./PreviewCopyButton.svelte";
   import { createPreviewEditorController } from "./preview-editor-controller.svelte";
   import { createPreviewFileSearchController } from "./preview-file-search-controller.svelte";
   import { createPreviewMarkdownController } from "./preview-markdown-controller.svelte";
@@ -31,6 +33,7 @@
   let {
     attachment,
     file,
+    workspace = "",
     lineRange,
     previewId,
     active = true,
@@ -57,6 +60,7 @@
   }: {
     attachment?: Attachment;
     file?: ProjectFilePreview;
+    workspace?: string;
     lineRange?: ProjectFileLineRange;
     previewId: number;
     active?: boolean;
@@ -87,6 +91,16 @@
   let searchInputElement = $state<HTMLInputElement | undefined>();
   let wrapLines = $state(false);
   let audioError = $state(false);
+  let previewImageElement = $state<HTMLImageElement | undefined>();
+
+  async function copyMedia(isCurrent: () => boolean): Promise<void> {
+    if (attachment) await copyPreviewMedia(attachment, previewImageElement, isCurrent);
+  }
+
+  const copyFilePath = $derived(previewCopyFilePath(file?.path ?? attachment?.path, workspace));
+  async function copyFile(isCurrent: () => boolean): Promise<void> {
+    if (copyFilePath) await copyPreviewFile(copyFilePath, isCurrent);
+  }
 
   $effect(() => { source; audioError = false; });
 
@@ -225,6 +239,7 @@
         </span>
       {/if}
       {#if file}
+        <PreviewCopyButton text={editing ? editorState.draft : file.content} {previewId} />
         <button
           class={searchState.open
             ? "grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent text-accent-foreground transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
@@ -235,6 +250,24 @@
           title="Find in file (Ctrl/⌘F)"
           onclick={searchController.open}
         ><Search class="h-4 w-4" aria-hidden="true" /></button>
+      {/if}
+      {#if !file && attachment?.kind === "image"}
+        <PreviewCopyButton
+          text={source}
+          {previewId}
+          label="Copy image"
+          onCopy={copyMedia}
+        />
+      {/if}
+      {#if file || attachment}
+        <PreviewCopyButton
+          text={copyFilePath ?? ""}
+          {previewId}
+          label="Copy file"
+          fileCopy
+          disabled={!copyFilePath}
+          onCopy={copyFile}
+        />
       {/if}
       {#if renderAsMarkdown}
         <span class="rounded border border-border bg-muted px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -406,7 +439,7 @@
         {#if isGlbPath(attachment.path ?? attachment.name)}
           <div class="glb-preview" use:glbViewer={source}></div>
         {:else if attachment.kind === "image"}
-          <img class="max-h-full max-w-full object-contain" src={source} alt={attachment.name} data-image-path={attachment.path} />
+          <img bind:this={previewImageElement} class="max-h-full max-w-full object-contain" src={source} alt={attachment.name} data-image-path={attachment.path} />
         {:else if previewMediaKindForPath(attachment.path ?? attachment.name) === "audio"}
           {#key previewId}
             <div class="flex w-full max-w-lg flex-col gap-3 text-sm text-muted-foreground">

@@ -2,12 +2,12 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { getAgentDir, ModelRuntime, readStoredCredential } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime, readStoredCredential } from "@earendil-works/pi-coding-agent";
 import { formatCompactProgressBar } from "../../context-progress-bar.js";
 import { APP_ICONS } from "../icons.js";
-import { readClaudeCodeUsageToken } from "./claude-code-usage-auth.js";
+import { readClaudeCodeUsageIdentity, readClaudeCodeUsageToken } from "./claude-code-usage-auth.js";
+import { modelUsageAuthPath, withModelUsageAuthScope } from "./model-usage-auth-scope.js";
 import { anthropicResetCreditsFromResponse, openAIResetCreditsFromResponse } from "./model-usage-reset-credits.js";
-import type { SessionModel } from "../types.js";
 
 export { anthropicResetCreditsFromResponse, openAIResetCreditsFromResponse } from "./model-usage-reset-credits.js";
 
@@ -47,9 +47,7 @@ function buildGoogleAntigravityUserAgent(): string {
 }
 
 function getPiAuthPath(): string {
-	return process.env.NODE_ENV === "test" && process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH
-		? process.env.PI_TOOLS_SUITE_TEST_AUTH_PATH
-		: join(getAgentDir(), "auth.json");
+	return modelUsageAuthPath();
 }
 
 const OPENAI_QUOTA_PROVIDERS = new Set(["openai", "openai-codex"]);
@@ -242,6 +240,7 @@ export type OpenAIResetCreditsResponse = {
 };
 
 type JwtPayload = {
+	sub?: string;
 	email?: string;
 	"https://api.openai.com/auth"?: {
 		chatgpt_account_id?: string;
@@ -320,7 +319,7 @@ type GoogleAntigravityModelWindows = {
 	legacy?: ModelUsageLimitWindow;
 };
 
-export function modelUsageDescriptor(model: SessionModel | undefined, thinkingLevel?: string): ModelUsageDescriptor | undefined {
+export function modelUsageDescriptor(model: { provider: string; id: string; name?: string | undefined } | undefined, thinkingLevel?: string): ModelUsageDescriptor | undefined {
 	if (!model) return undefined;
 
 	const provider = model.provider.toLowerCase();
@@ -362,7 +361,11 @@ export function modelUsageDescriptor(model: SessionModel | undefined, thinkingLe
  */
 export { claudeCodeCredentialAvailable } from "./claude-code-usage-auth.js";
 
-export async function queryModelUsageStatus(descriptor: ModelUsageDescriptor, options: { freshOnly?: boolean } = {}): Promise<ModelUsageStatus | undefined> {
+export async function queryModelUsageStatus(descriptor: ModelUsageDescriptor, options: { freshOnly?: boolean; agentDir?: string } = {}): Promise<ModelUsageStatus | undefined> {
+	return withModelUsageAuthScope(options.agentDir, () => queryScopedModelUsageStatus(descriptor, options.freshOnly));
+}
+
+async function queryScopedModelUsageStatus(descriptor: ModelUsageDescriptor, freshOnly?: boolean): Promise<ModelUsageStatus | undefined> {
 	switch (descriptor.kind) {
 		case "openai":
 			return await queryOpenAIModelUsage(descriptor.modelKey);
@@ -376,8 +379,44 @@ export async function queryModelUsageStatus(descriptor: ModelUsageDescriptor, op
 			return await queryAnthropicUsageStatus(accessToken, descriptor.modelKey);
 		}
 		case "google-antigravity":
-			return await queryGoogleAntigravityModelUsage(descriptor, options.freshOnly);
+			return await queryGoogleAntigravityModelUsage(descriptor, freshOnly);
 	}
+}
+
+/** Local-only identity of the credentials the quota resolver actually selects. Never refreshes OAuth. */
+export async function modelUsageCacheIdentity(descriptor: ModelUsageDescriptor): Promise<string | undefined> {
+	let identity: unknown;
+	switch (descriptor.kind) {
+		case "openai": {
+			const auth = await readOpenAIAuth();
+			if (auth?.type === "oauth" && auth.access) {
+				const account = getAccountIdFromJwt(auth.access);
+				const user = parseJwt(auth.access)?.sub || openAIAccountEmailFromJwt(auth.access);
+				identity = typeof account === "string" && account && typeof user === "string" && user
+					? [account, user] : auth.refresh ?? auth.access;
+			}
+			break;
+		}
+		case "anthropic": {
+			const auth = (await readPiAuth()).anthropic;
+			// Avoid getAuth for stored OAuth: it may refresh an expired token.
+			if (auth?.type === "oauth") identity = auth.refresh || auth.access;
+			else {
+				const token = await resolvePiAuthToken("anthropic");
+				if (token && isAnthropicOAuthToken(token)) identity = token;
+			}
+			break;
+		}
+		case "claude-code": identity = await readClaudeCodeUsageIdentity(); break;
+		case "zhipu": identity = await readZhipuApiKey(); break;
+		case "google-antigravity": {
+			const accounts = await readAllAntigravityQuotaAccounts(descriptor.modelKey);
+			if (accounts.length) identity = accounts.map((account) => JSON.stringify([account.refreshToken, account.projectId, account.clientId])).sort();
+			break;
+		}
+	}
+	return identity === undefined ? undefined : createHash("sha256")
+		.update(JSON.stringify(["pix-usage-identity-v1", getPiAuthPath(), descriptor.kind, identity])).digest("hex");
 }
 
 export async function queryAccountUsageReport(now = Date.now()): Promise<AccountUsageReport> {
@@ -695,7 +734,9 @@ function accountLabelFromOpenAIAuth(authData: OpenAIAuthData): string {
 
 async function readOpenCodeAuth(): Promise<AuthData> {
 	try {
-		const content = await readFile(join(homedir(), ".local/share/opencode/auth.json"), "utf8");
+		const path = process.env.NODE_ENV === "test" ? process.env.PI_TOOLS_SUITE_TEST_OPENCODE_AUTH_PATH : join(homedir(), ".local/share/opencode/auth.json");
+		if (!path) return {};
+		const content = await readFile(path, "utf8");
 		return JSON.parse(content) as AuthData;
 	} catch {
 		return {};
@@ -1067,7 +1108,7 @@ async function fetchZhipuQuota(apiKey: string, url: string): Promise<ZhipuQuotaR
 // Google Antigravity quota
 // ---------------------------------------------------------------------------
 
-export function resolveAntigravityQuotaModelKey(model: SessionModel): string | undefined {
+export function resolveAntigravityQuotaModelKey(model: { id: string; name?: string | undefined }): string | undefined {
 	const source = `${model.id} ${model.name ?? ""}`.toLowerCase();
 	const normalized = source.replace(/[_\s]+/gu, "-");
 

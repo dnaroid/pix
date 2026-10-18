@@ -51,6 +51,7 @@ mod native_lifecycle_tests;
 mod native_process;
 mod native_project_search;
 mod native_repository_semantic_config;
+mod plan_progress;
 mod preview_file;
 mod preview_file_action;
 mod project_browser;
@@ -268,7 +269,10 @@ fn read_desktop_watch_status() -> Result<DesktopWatchStatus, String> {
 }
 
 #[tauri::command]
-async fn desktop_watch_restart(app: AppHandle) -> Result<(), String> {
+async fn desktop_watch_restart(app: AppHandle) -> Result<bool, String> {
+    if !close_guard::confirm_restart(&app).await {
+        return Ok(false);
+    }
     let requested = run_blocking(|| {
         if desktop_watch_restart_target()?.is_none() {
             return Ok(false);
@@ -280,11 +284,16 @@ async fn desktop_watch_restart(app: AppHandle) -> Result<(), String> {
             .map_err(|error| format!("could not request desktop restart: {error}"))?;
         Ok(true)
     })
-    .await?;
+    .await;
+    close_guard::finish_restart(&app, matches!(requested, Ok(true)));
+    let requested = requested.map_err(|error| {
+        logging::error(module_path!(), format!("could not restart watch Desktop: {error}"));
+        error
+    })?;
     if requested {
         app.exit(0);
     }
-    Ok(())
+    Ok(requested)
 }
 
 #[derive(Serialize)]
@@ -548,6 +557,7 @@ struct ConditionalWorkspaceConfigWrite {
 struct ProjectDocumentsSnapshot {
     plans: Vec<String>,
     todo_exists: bool,
+    plan_progress: std::collections::BTreeMap<String, Option<plan_progress::PlanProgress>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -1968,6 +1978,7 @@ fn list_project_documents_from(workspace: &Path) -> Result<ProjectDocumentsSnaps
         return Ok(ProjectDocumentsSnapshot {
             plans: Vec::new(),
             todo_exists: false,
+            plan_progress: Default::default(),
         });
     }
     let project_dir = canonical_project_directory(&root, &project_dir)?;
@@ -1998,7 +2009,8 @@ fn list_project_documents_from(workspace: &Path) -> Result<ProjectDocumentsSnaps
         plans.sort();
     }
 
-    Ok(ProjectDocumentsSnapshot { plans, todo_exists })
+    let plan_progress = plan_progress::snapshot(&root, &plans);
+    Ok(ProjectDocumentsSnapshot { plans, todo_exists, plan_progress })
 }
 
 fn collect_project_plan_files(
@@ -9501,13 +9513,16 @@ mod tests {
         let plan = write_project_markdown_from(
             &workspace,
             Path::new(".pi/plans/releases/v2.md"),
-            "# V2\nUpdated\n",
+            "# V2\nUpdated\n- [x] Done\n- [ ] Next\n",
         )
         .expect("update plan");
         assert!(plan.content.contains("Updated"));
 
         let after = list_project_documents_from(&workspace).expect("list project documents again");
         assert!(after.todo_exists);
+        let progress = serde_json::to_value(&after.plan_progress).expect("serialize progress");
+        assert_eq!(progress[".pi/plans/releases/v2.md"], serde_json::json!({ "completed": 1, "total": 2 }));
+        assert_eq!(progress[".pi/plans/alpha.md"], serde_json::json!({ "completed": 0, "total": 0 }));
         assert!(write_project_markdown_from(&workspace, Path::new("README.md"), "nope").is_err());
         assert!(write_project_markdown_from(
             &workspace,

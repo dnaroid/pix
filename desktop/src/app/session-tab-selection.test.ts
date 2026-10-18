@@ -25,6 +25,7 @@ function fixture(overrides: Partial<SessionTabControllerOptions> = {}) {
     draft: { active: false, materializing: false, deactivate: vi.fn() },
     closeProjectSelector: vi.fn(),
     tabs: { closeSelector: vi.fn(), show: vi.fn(), rememberActive: vi.fn() },
+    catalog: { sessions: [] },
     setErrorMessage: vi.fn(),
     switchComposerDraft: vi.fn(),
     history: { cancel: vi.fn(), needsHydration: vi.fn(() => false) },
@@ -42,6 +43,16 @@ function fixture(overrides: Partial<SessionTabControllerOptions> = {}) {
 }
 
 describe("session tab navigation from a managed council participant", () => {
+  it("opens a sub-agent viewer next to its recorded parent, not the active conversation", async () => {
+    const { selection, options } = fixture({
+      catalog: { sessions: [{ sessionId: "child", cwd: "/work", _meta: {
+        "pix.subagent": { runDir: "/run", agentId: "worker", parentSessionId: "parent" },
+      } }] } as unknown as SessionTabControllerOptions["catalog"],
+    });
+    await selection.loadSession("child");
+    expect(options.tabs.show).toHaveBeenCalledWith("child", "parent");
+  });
+
   it("allows returning to the orchestrator without closing or mutating the participant", async () => {
     const { selection, state, client, options } = fixture();
     await selection.loadSession("orchestrator");

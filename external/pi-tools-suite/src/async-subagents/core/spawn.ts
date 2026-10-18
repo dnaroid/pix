@@ -6,7 +6,7 @@ import { BROWSER_QA_RUNNER_ENV, getBrowserQaRunnerPath, getUiQaRunnerPath, isUiQ
 import { ownedAgentDir, parseRunKey, scopeDir, validateBasename } from "./paths.js";
 import { getPiInvocation } from "./pi-invocation.js";
 import { generatePrompt } from "./prompt.js";
-import { PROJECT_ARTIFACTS_DIR } from "../../artifact-paths.js";
+import { prepareUiQaWorkspace } from "./ui-qa-workspace.js";
 import { getLive, getRecord, updateLive, updateRecord } from "./store.js";
 import { terminateProcessTree } from "./process.js";
 import { getAgentSessionDir, getParentSubagentSessionDir } from "./sessions.js";
@@ -59,8 +59,6 @@ export interface SpawnAgentOptions {
 }
 
 export const DEFAULT_AGENT_TIMEOUT_MS = 3 * 60 * 60 * 1000;
-const UI_QA_WORKSPACE_DIR = "ui-qa";
-const UI_QA_BROWSER_WORKSPACE_DIR = "browser";
 const SUBAGENT_AGENT_DIR_ENV = "PI_SUBAGENT_AGENT_DIR";
 const AGENT_TIMEOUT_EXIT_CODE = 124;
 const AGENT_TIMEOUT_KILL_GRACE_MS = 5_000;
@@ -1040,28 +1038,6 @@ function subagentEnvironment(env: NodeJS.ProcessEnv, agentDir?: string): NodeJS.
 		result[UI_QA_RUNNER_ENV] = getUiQaRunnerPath();
 	}
 	return result;
-}
-
-/**
- * UI/browser QA workspace `.pi/artifacts/subagents/<batch>-<agentId>/` (the
- * runner's PI_SUBAGENT_AGENT_DIR); created only for ui-qa types.
- */
-function prepareUiQaWorkspace(cwd: string, runDir: string, agentId: string): string {
-	const batch = parseRunKey(runDir)?.batch ?? path.basename(runDir);
-	const root = path.join(cwd, PROJECT_ARTIFACTS_DIR, "subagents", `${batch}-${agentId}`);
-	const workspace = path.join(root, UI_QA_WORKSPACE_DIR);
-	fs.rmSync(workspace, { recursive: true, force: true });
-	const uiFlows = path.join(workspace, "flows");
-	const browserWorkspace = path.join(workspace, UI_QA_BROWSER_WORKSPACE_DIR);
-	const browserFlows = path.join(browserWorkspace, "flows");
-	for (const dir of [workspace, uiFlows, browserWorkspace, browserFlows]) {
-		fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-		if (process.platform !== "win32") fs.chmodSync(dir, 0o700);
-	}
-	// Workspace identity markers checked by the ui-qa/browser runners (not run state).
-	fs.writeFileSync(path.join(root, "project_cwd"), `${cwd}\n`, "utf-8");
-	fs.writeFileSync(path.join(root, "subagent_type"), "ui-qa\n", "utf-8");
-	return root;
 }
 
 function appendEnvList(value: string | undefined, items: readonly string[]): string {

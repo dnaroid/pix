@@ -17,6 +17,7 @@ type UsageStatsLog = (level: "info" | "warn" | "error", event: string, details?:
 
 /** Structural view of the root `UsageStatsService`. */
 export type UsageStatsServiceLike = {
+	restore(): Promise<void>;
 	request(options: { sources?: readonly UsageSourceId[]; refresh?: boolean }): UsageSourceSnapshot[];
 	settled(): Promise<void>;
 	dispose(): void;
@@ -25,7 +26,7 @@ export type UsageStatsServiceLike = {
 /** Structural view of root `dist/app/usage-stats/index.js`. */
 export type UsageStatsModule = {
 	UsageStatsService: new (options: { sources: readonly unknown[]; onChange?: (source: UsageSourceId) => void; log?: UsageStatsLog }) => UsageStatsServiceLike;
-	createUsageStatsSources(options: { log?: UsageStatsLog }): unknown[];
+	createUsageStatsSources(options: { log?: UsageStatsLog; agentDir?: string }): unknown[];
 };
 
 export type UsageStatsNotifier = (notification: UsageStatsChangedNotification) => Promise<void>;
@@ -67,7 +68,7 @@ export class UsageStatsHost {
 	private disposed = false;
 	private readonly load: () => Promise<UsageStatsModule>;
 
-	constructor(private readonly options: { logger: Logger; load?: () => Promise<UsageStatsModule> }) {
+	constructor(private readonly options: { logger: Logger; agentDir?: string; load?: () => Promise<UsageStatsModule> }) {
 		this.load = options.load ?? loadUsageStatsModule;
 	}
 
@@ -77,10 +78,12 @@ export class UsageStatsHost {
 		const module = await this.module();
 		if (this.disposed) throw new RequestError(ERROR_SERVER, "Usage statistics are unavailable");
 		this.service ??= new module.UsageStatsService({
-			sources: module.createUsageStatsSources({ log: this.log }),
+			sources: module.createUsageStatsSources({ log: this.log, ...(this.options.agentDir ? { agentDir: this.options.agentDir } : {}) }),
 			onChange: (source) => this.emit({ source }),
 			log: this.log,
 		});
+		await this.service.restore();
+		if (this.disposed) throw new RequestError(ERROR_SERVER, "Usage statistics are unavailable");
 		const snapshots = this.service.request({
 			...(request.sources ? { sources: request.sources } : {}),
 			...(request.refresh === true ? { refresh: true } : {}),

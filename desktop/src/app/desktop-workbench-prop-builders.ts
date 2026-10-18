@@ -319,6 +319,7 @@ export function buildWorkbenchEditorProps(
 
   return {
     preview: activePreview ? {
+      workspace: options.workspace(),
       previewId: activePreview.id,
       active: options.activeWorkbenchTabId() === "preview",
       scrollPosition: activePreview.scrollPosition,

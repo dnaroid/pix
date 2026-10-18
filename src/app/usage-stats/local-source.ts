@@ -26,6 +26,7 @@ export type LocalUsagePartial = (snapshot: UsageSourceSnapshot) => void;
 
 /** Collector contract shared by in-process and worker-backed local sources. */
 export type LocalUsageCollector = {
+	restore?(): Promise<UsageSourceSnapshot | undefined>;
 	readonly id: UsageSourceId;
 	collect(signal?: AbortSignal, onPartial?: LocalUsagePartial): Promise<LocalUsageCollectResult>;
 	dispose?(): void;

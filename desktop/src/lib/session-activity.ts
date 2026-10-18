@@ -87,7 +87,7 @@ export function sessionActivityLabel(
   if (state.activeSubagents > 0) {
     parts.push(`${state.activeSubagents} active ${state.activeSubagents === 1 ? "subagent" : "subagents"}`);
   }
-  if (state.openTodos > 0 && state.totalTodos > 0) parts.push(`Plan ${state.completedTodos}/${state.totalTodos}`);
+  if (state.openTodos > 0 && state.totalTodos > 0) parts.push(`Steps ${state.completedTodos}/${state.totalTodos}`);
   if (state.retryingSubagents > 0) parts.push(`${state.retryingSubagents} retrying`);
   if (state.blockedTodos > 0) parts.push(`${state.blockedTodos} blocked`);
   return parts.length > 0 ? parts.join(" · ") : "Session idle";

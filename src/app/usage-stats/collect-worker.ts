@@ -1,6 +1,7 @@
 import { parentPort, workerData } from "node:worker_threads";
 import type { CollectWorkerData, CollectWorkerRequest, CollectWorkerResponse } from "./collect-worker-protocol.js";
 import { createPixSessionsSource } from "./pix-sessions.js";
+import { CachedUsageCollector } from "./snapshot-cache.js";
 
 /**
  * Worker-thread entry: owns the Pix session JSONL cache so cold parsing of
@@ -11,14 +12,21 @@ const port = parentPort;
 if (port) {
 	const data = (workerData ?? {}) as CollectWorkerData;
 	let roots: string[] = [];
-	const source = createPixSessionsSource({
+	const local = createPixSessionsSource({
 		roots: () => roots,
 		...(data.partialWindowMs === undefined ? {} : { partialWindowMs: data.partialWindowMs }),
 	});
 	const controllers = new Map<number, AbortController>();
 	const post = (message: CollectWorkerResponse) => port.postMessage(message);
+	const source = data.snapshotPath ? new CachedUsageCollector(local, data.snapshotPath,
+		(level, event, details) => post({ type: "log", level, event, ...(details ? { details } : {}) })) : local;
 
 	port.on("message", (message: CollectWorkerRequest) => {
+		if (message.type === "restore") {
+			void (source instanceof CachedUsageCollector ? source.restore() : Promise.resolve(undefined))
+				.then((snapshot) => post({ type: "restored", id: message.id, ...(snapshot ? { snapshot } : {}) }));
+			return;
+		}
 		if (message.type === "abort") {
 			controllers.get(message.id)?.abort();
 			return;

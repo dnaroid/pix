@@ -61,6 +61,13 @@
     "usagePanel": {
       "type": "object",
       "properties": {
+        "providerOrder": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Last provider quota-family popularity order, restored before loading usage. Unknown ids are retained for compatibility."
+        },
         "collapsedSections": {
           "type": "array",
           "items": {

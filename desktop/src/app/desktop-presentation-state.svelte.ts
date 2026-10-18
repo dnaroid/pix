@@ -106,6 +106,7 @@ export function createDesktopPresentationState(options: DesktopPresentationState
     pausedSessionIds,
     runningSessionIds: options.prompt.runtime.runningSessionIds,
     sessionActivityBySessionId: options.sessions.activity.summaries,
+    subagentsBySessionId: options.sessions.activity.subagents,
     pendingElicitationSessionIds: options.interactions.pendingElicitationSessionIds,
     unseenCompletedSessionIds: options.tabAttention.unseenCompletedSessionIds,
     disabled: sessionMutationRunning,

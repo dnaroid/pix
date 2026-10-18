@@ -9,21 +9,52 @@ const execFileAsync = promisify(execFile);
 
 /** Claude Code owns and refreshes this login; Pix only borrows a current token for quota polling. */
 export async function readClaudeCodeUsageToken(): Promise<string | undefined> {
+	const readers = credentialReaders();
+	return selectClaudeCodeUsageToken(readers.keychain, readers.file);
+}
+
+function credentialReaders(): { keychain?: () => Promise<string | undefined>; file: () => Promise<string | undefined> } {
 	// Tests never query the developer's environment, Keychain or actual Claude configuration.
 	if (process.env.NODE_ENV === "test") {
-		return selectClaudeCodeUsageToken(undefined, () => readRawCredential(process.env.PI_TOOLS_SUITE_TEST_CLAUDE_AUTH_PATH));
+		return { file: () => readRawCredential(process.env.PI_TOOLS_SUITE_TEST_CLAUDE_AUTH_PATH) };
 	}
 
 	// The adapter's Claude subprocess deliberately allows only CLAUDE_CONFIG_DIR
 	// and a small set of ordinary host variables through. In particular, Pi's
 	// ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN never reach this route.
 	const configDir = process.env.CLAUDE_CONFIG_DIR?.trim();
-	return selectClaudeCodeUsageToken(
-		process.platform === "darwin"
-			? () => readKeychainCredential(claudeCodeKeychainService(configDir))
-			: undefined,
-		() => readRawCredential(join(configDir || join(homedir(), ".claude"), ".credentials.json")),
-	);
+	return {
+		...(process.platform === "darwin" ? { keychain: () => readKeychainCredential(claudeCodeKeychainService(configDir)) } : {}),
+		file: () => readRawCredential(join(configDir || join(homedir(), ".claude"), ".credentials.json")),
+	};
+}
+
+/** Same local source precedence as token selection; expired logins may still identify a cache. */
+export async function readClaudeCodeUsageIdentity(): Promise<string | undefined> {
+	const readers = credentialReaders();
+	return selectClaudeCodeUsageIdentity(readers.keychain, readers.file);
+}
+
+export async function selectClaudeCodeUsageIdentity(
+	readKeychain: (() => Promise<string | undefined>) | undefined,
+	readFile: () => Promise<string | undefined>,
+): Promise<string | undefined> {
+	const keychain = await readKeychain?.().catch(() => undefined);
+	const keychainIdentity = identityFromClaudeCredential(keychain);
+	if (keychain !== undefined && tokenFromClaudeCredential(keychain)) return keychainIdentity;
+	const file = await readFile().catch(() => undefined);
+	const fileIdentity = identityFromClaudeCredential(file);
+	if (file !== undefined && tokenFromClaudeCredential(file)) return fileIdentity;
+	// Two expired, disagreeing logins cannot establish which account owns a quota.
+	if (keychainIdentity && fileIdentity && keychainIdentity !== fileIdentity) return undefined;
+	return keychainIdentity ?? fileIdentity;
+}
+
+function identityFromClaudeCredential(raw: string | undefined): string | undefined {
+	if (raw === undefined || !tokenFromClaudeCredential(raw, Number.NEGATIVE_INFINITY)) return undefined;
+	const login = JSON.parse(raw).claudeAiOauth;
+	const identity = typeof login.refreshToken === "string" && login.refreshToken ? login.refreshToken : login.accessToken;
+	return createHash("sha256").update(JSON.stringify(["pix-claude-usage-v1", claudeCodeKeychainService(process.env.CLAUDE_CONFIG_DIR?.trim()), identity])).digest("hex");
 }
 
 export function claudeCodeKeychainService(configDir?: string): string {

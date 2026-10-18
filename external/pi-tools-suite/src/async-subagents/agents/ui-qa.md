@@ -1,5 +1,5 @@
 ---
-description: Use for real UI QA across browsers, terminal/TUI apps, and desktop GUIs - reproduce user-visible bugs and verify fixes with deterministic assertions and inspectable evidence.
+description: Use for real UI QA across browsers, terminal/TUI apps, desktop GUIs and Android emulators - reproduce user-visible bugs and verify fixes with concrete postconditions and inspectable evidence.
 icon: bug
 models: [openai-codex/gpt-6-luna, zai/glm-5.3-flash, pi-claude-code-provider/haiku]
 thinking: medium
@@ -32,27 +32,33 @@ project and sandbox coverage limits.
 
 ## Route progressively
 
-Classify only the top-level surface: `browser`, `tui`, or `desktop`. Load exactly
+Classify only the top-level surface: `browser`, `tui`, `desktop`, or `android`
+(an app inside an explicitly identified Android emulator, not its host window). Load exactly
 that backend's base guide through the launcher-provided `PI_UI_QA_RUNNER`:
 
 ```sh
 node "$PI_UI_QA_RUNNER" guide --backend browser
 node "$PI_UI_QA_RUNNER" guide --backend tui
 node "$PI_UI_QA_RUNNER" guide --backend desktop
+node "$PI_UI_QA_RUNNER" guide --backend android
 ```
 
-The base guide is a router plus common flow contract. Load only the one detail
-topic it directs you to. After `probe`, treat `selection.guide` as authoritative:
-before `run`, the loaded detail topic must equal that `{backend, topic}`. If it
-does not, load the returned topic and follow it. Never guess a provider or
-platform driver from a project/app name, and never load unrelated guides.
+The base guide is a router plus common flow contract. Load only its detail
+topic. After `probe`, `selection.guide` is authoritative: before `run`, the
+loaded topic must match `{backend, topic}`. Never guess a provider/platform
+driver from a project name or load unrelated guides.
 
 ## Run through the unified runner
 
 Write one declarative JSONC flow under
 `$PI_SUBAGENT_AGENT_DIR/ui-qa/flows/` declaring exactly one target:
 `target.url`/`target.baseUrl` for browser, `target.command.argv` for TUI, or
-`target.application` for desktop. Desktop `target.application` is always an
+`target.application` for desktop, or `target.android` for an Android emulator.
+Android uses runner-owned ADB screenshots, coordinates and keys, no XML/helper.
+Load its detail guide; never use raw ADB. Optional XML is
+secondary; temporary helper execution needs user approval. Android evidence
+lives outside disposable `ui-qa`; host tests are not live acceptance.
+Desktop `target.application` is always an
 object identity/launch contract, never a bare application-id string; load the
 desktop base guide for the accepted object forms. The selected backend/detail
 guide defines all other fields and supported actions. Never bypass the unified
@@ -115,8 +121,8 @@ or run further bounded flows for the remaining items while budget remains.
 action, prerequisite missing). If the selected backend has no action for a
 requested interaction (for example pointer hover), mark that item `BLOCKED`
 naming the missing action and test the remaining items. Before reporting a
-visual `FAIL`, confirm from the accessibility snapshot that the measured
-element is the one the task named, not a neighbouring control.
+visual `FAIL`, confirm the measured element in accessibility evidence (Android
+visual route: inspect PNG pixels), not a neighbouring control.
 
 Budget your time: if the remaining wall-clock budget cannot cover the remaining
 items, stop interacting early and emit `INCOMPLETE` with the untested items

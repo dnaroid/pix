@@ -42,9 +42,11 @@ Make the newest successfully built Vite bundle available to the Desktop process 
 - The same debug-only state carries `buildStatus` (`idle`, `queued`, `building`,
   `failed`; absent means `idle` for older watcher state). Desktop shows a clock
   for queued work, a reduced-motion-aware spinner during a build, and a red
-  failure icon with a tooltip pointing to the watcher terminal. These passive
-  indicators sit immediately left of Restart and also appear when no restart
-  is available. Successful completion clears the indicator; any previously
+  failure icon with a tooltip pointing to the watcher terminal. Build status
+  and Restart share one compact titlebar control: its icon reflects the build
+  state, and its tooltip includes the restart action when a ready artifact exists.
+  Without a ready artifact it is a disabled, passive status indicator.
+  Successful completion clears the build icon; any previously
   ready artifact stays restartable while subsequent work is queued/building or
   fails. Edits during a build keep the building indicator until that cycle
   finishes, then show queued work. State writes are serialized so older
@@ -53,6 +55,11 @@ Make the newest successfully built Vite bundle available to the Desktop process 
   completion after teardown (a new lifecycle need not wait for an abandoned poll);
   watcher file/target inspection runs on a native blocking worker, not the UI
   thread. A late restart error after teardown does not restart polling.
+  Restart obtains the native active-run confirmation before publishing its
+  watcher request. Cancellation (including an already-open confirmation) returns
+  the control to its non-pending state without publishing a restart marker;
+  a confirmed request keeps the restart animation until exit. Confirmation
+  completion from an obsolete frontend lifecycle cannot change a newer restart.
 - `watch:all` disables Tauri's `beforeBuildCommand` because it has already built the web bundle once in the ordered build plan.
 - Watch web builds write directly to `frontend-dist` inside that watcher's
   unique temporary runtime root, with Vite's explicit `--outDir` and

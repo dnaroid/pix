@@ -14,12 +14,30 @@ function config(source: string | undefined): Record<string, unknown> {
   if (collapsed !== undefined && (!Array.isArray(collapsed) || collapsed.some((id) => typeof id !== "string"))) {
     throw new Error(".pi/workspace.jsonc has an invalid usagePanel.collapsedSections field.");
   }
+  const order = isRecord(parsed.usagePanel) ? parsed.usagePanel.providerOrder : undefined;
+  if (order !== undefined && (!Array.isArray(order) || order.some((id) => typeof id !== "string"))) {
+    throw new Error(".pi/workspace.jsonc has an invalid usagePanel.providerOrder field.");
+  }
   return parsed;
 }
 
 export function usageCollapsedSections(source: string | undefined): string[] {
   const panel = config(source).usagePanel;
   return isRecord(panel) && Array.isArray(panel.collapsedSections) ? [...new Set(panel.collapsedSections as string[])] : [];
+}
+
+export function usageProviderOrder(source: string | undefined): string[] {
+  const panel = config(source).usagePanel;
+  return isRecord(panel) && Array.isArray(panel.providerOrder) ? [...new Set(panel.providerOrder as string[])] : [];
+}
+
+/** Cache provider-family order without changing disclosure state or sibling settings. */
+export function workspaceConfigWithUsageProviderOrder(source: string | undefined, order: readonly string[]): string {
+  config(source);
+  const base = source?.trim() ? source : "{}\n";
+  return withWorkspaceSchema(applyEdits(base, modify(base, ["usagePanel", "providerOrder"], [...new Set(order)], {
+    formattingOptions: { insertSpaces: true, tabSize: 2, eol: "\n" },
+  })));
 }
 
 /** Change one stable section id, preserving comments, sibling settings and other windows' toggles. */

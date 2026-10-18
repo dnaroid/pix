@@ -41,6 +41,7 @@ import { SessionRefreshScheduler } from "./session-refresh-scheduler.js";
 import { PIX_SESSION_CATALOG_CHANGED_METHOD } from "./session-catalog-contract.js";
 import { PIX_USAGE_STATS_CHANGED_METHOD, PIX_USAGE_STATS_METHOD, type UsageStatsChangedNotification } from "./usage-stats-contract.js";
 import { parseUsageStatsRequest, UsageStatsHost } from "./usage-stats-host.js";
+import { ProviderUsageCacheHost } from "./provider-usage-cache.js";
 import { spawn } from "node:child_process";
 import { statSync } from "node:fs";
 import { copyFile, mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
@@ -525,7 +526,7 @@ export interface PixAcpAgentOptions {
 	/** Direct workspace Registry backend (overridable for transport tests). */
 	readonly registryService?: Pick<DesktopRegistryService, "action" | "diff">;
 	/** Shared model-usage query (overridable for deterministic concurrency tests). */
-	readonly queryModelUsage?: (state: PiSessionState) => Promise<ModelUsageRefreshResult>;
+	readonly queryModelUsage?: (state: PiSessionState, options?: { freshOnly?: boolean }) => Promise<ModelUsageRefreshResult>;
 	/**
 	 * Headless Claude CLI login nudge for the manual Claude Code quota
 	 * refresh (overridable for tests; the default launches a bounded child
@@ -610,6 +611,7 @@ export class PixAcpAgent {
 	private readonly taskTypeClassifier: Pick<DesktopTaskTypeClassifier, "classify">;
 	private readonly ragService: Pick<DesktopRagService, "generate">;
 	private readonly usageStatsHost: UsageStatsHost;
+	private readonly providerUsageCache: ProviderUsageCacheHost;
 	private readonly listPiSessions: (cwd?: string, signal?: AbortSignal) => Promise<readonly PiSessionInfo[]>;
 	private readonly loadTuiTabs: (cwd: string) => Promise<TuiTabSnapshot>;
 	private readonly completeAutocomplete: AutocompleteCompleter;
@@ -617,7 +619,7 @@ export class PixAcpAgent {
 	/** Lazy local model catalogue for viewer display (context window, names). */
 	private viewerModelRuntime: Promise<ModelRuntime | undefined> | undefined;
 	private readonly gitAssistant: GitAssistant;
-	private readonly queryModelUsage: (state: PiSessionState) => Promise<ModelUsageRefreshResult>;
+	private readonly queryModelUsage: (state: PiSessionState, options?: { freshOnly?: boolean }) => Promise<ModelUsageRefreshResult>;
 	private readonly claudeCodeLoginNudge: () => Promise<boolean>;
 	private readonly parseAnthropicUsageHeaders: (record: PiAnthropicUsageRecord) => Promise<DesktopModelUsageStatus | undefined>;
 	private readonly loadAutocompleteConfig: (cwd: string) => AutocompleteConfig;
@@ -699,7 +701,8 @@ export class PixAcpAgent {
 				return records;
 			},
 		});
-		this.usageStatsHost = new UsageStatsHost({ logger: this.options.logger });
+		this.usageStatsHost = new UsageStatsHost({ logger: this.options.logger, ...(options.agentDir ? { agentDir: options.agentDir } : {}) });
+		this.providerUsageCache = new ProviderUsageCacheHost({ logger: this.options.logger, ...(options.agentDir ? { agentDir: options.agentDir } : {}) });
 		this.listPiSessions = options.listPiSessions
 			?? ((cwd, signal) => cwd ? SessionManager.list(cwd, undefined, undefined, signal) : SessionManager.listAll(undefined, signal));
 		this.loadTuiTabs = options.loadTuiTabs ?? ((cwd) => loadTuiTabSnapshot(cwd));
@@ -716,7 +719,7 @@ export class PixAcpAgent {
 		});
 		this.enhancePrompt = options.enhancePrompt ?? createPromptEnhancer();
 		this.gitAssistant = options.gitAssistant ?? createGitAssistant();
-		this.queryModelUsage = options.queryModelUsage ?? queryPixModelUsage;
+		this.queryModelUsage = options.queryModelUsage ?? ((state, queryOptions) => queryPixModelUsage(state, options.agentDir, queryOptions?.freshOnly));
 		this.claudeCodeLoginNudge = options.claudeCodeLoginNudge ?? launchClaudeCodeLoginNudge;
 		this.parseAnthropicUsageHeaders = options.parseAnthropicUsageHeaders ?? parsePixAnthropicUsageHeaders;
 		this.app = agent({ name: "pix-acp" })
@@ -3312,28 +3315,36 @@ export class PixAcpAgent {
 				}
 			}
 			current ??= models[0];
-			if (!current) return { configOptions: [], modelUsageRefresh: "unavailable", modelRoutingEnabled, modelRoutingDefault };
+			const usageCache = params.includeUsageCache && !params.refreshModelUsage ? await this.providerUsageCache.read(models) : undefined;
+			if (!current) return { configOptions: [], modelUsageRefresh: "unavailable", modelRoutingEnabled, modelRoutingDefault, ...(usageCache ? { usageCache } : {}) };
 
 			const levels = supportedThinkingLevels(current);
 			if (params.thinkingLevel && !levels.includes(params.thinkingLevel)) {
 				throw new RequestError(ERROR_INVALID_PARAMS, `${params.modelRef ?? `${current.provider}/${current.id}`} does not support ${params.thinkingLevel} thinking`);
 			}
 			const thinkingLevel = params.thinkingLevel ?? selectedDefault?.thinkingLevel ?? levels[0] ?? "off";
-			const modelUsage = params.refreshModelUsage
-				? await this.querySessionModelUsage(`draft:${params.cwd}`, {
-					model: current,
-					thinkingLevel,
-					sessionId: "draft",
-					isStreaming: false,
-				})
-				: { refresh: "skipped" as const };
+			const state = { model: current, thinkingLevel, sessionId: "draft", isStreaming: false };
+			let modelUsage: (ModelUsageRefreshResult & { cacheInvalidated?: true; cacheScope?: string }) | { refresh: "skipped" } = { refresh: "skipped" };
+			if (params.refreshModelUsage) {
+				// Panel quotas must not merge route-only telemetry from another login.
+				modelUsage = params.includeUsageCache
+					? await this.providerUsageCache.query(current, () => this.queryModelUsage(state, { freshOnly: true }))
+					: await this.querySessionModelUsage(`draft:${params.cwd}`, state);
+			}
+			const usageFields = params.includeUsageCache ? {
+				...(modelUsage.refresh === "ready" && modelUsage.status ? { modelUsage: modelUsage.status } : {}),
+				...("credentialPending" in modelUsage && modelUsage.credentialPending ? { modelUsageCredentialPending: true as const } : {}),
+			} : this.modelUsageResponseFields(current, modelUsage);
 			return {
 				configOptions: [
 					modelOption(current, models),
 					thoughtLevelOption(thinkingLevel, levels),
 				],
 				modelUsageRefresh: modelUsage.refresh,
-				...this.modelUsageResponseFields(current, modelUsage),
+				...usageFields,
+				...(usageCache ? { usageCache } : {}),
+				...("cacheInvalidated" in modelUsage && modelUsage.cacheInvalidated ? { usageCacheInvalidated: true } : {}),
+				...("cacheScope" in modelUsage && modelUsage.cacheScope ? { usageCacheScope: modelUsage.cacheScope } : {}),
 				modelRoutingEnabled,
 				modelRoutingDefault,
 			};
@@ -4477,7 +4488,7 @@ function formatUsageStats(stats: PiSessionStats): string {
 
 type SharedModelUsageModule = {
 	modelUsageDescriptor?: (model: PiSessionState["model"], thinkingLevel?: string) => unknown;
-	queryModelUsageStatus?: (descriptor: unknown) => Promise<DesktopModelUsageStatus | undefined>;
+	queryModelUsageStatus?: (descriptor: unknown, options?: { agentDir?: string; freshOnly?: boolean }) => Promise<DesktopModelUsageStatus | undefined>;
 	/** Local-only Claude Code credential probe (never performs provider network I/O). */
 	claudeCodeCredentialAvailable?: () => Promise<boolean>;
 };
@@ -4594,14 +4605,14 @@ type ModelUsageRefreshResult = {
 	readonly credentialPending?: true;
 };
 
-async function queryPixModelUsage(state: PiSessionState): Promise<ModelUsageRefreshResult> {
+async function queryPixModelUsage(state: PiSessionState, agentDir?: string, freshOnly = false): Promise<ModelUsageRefreshResult> {
 	try {
 		const moduleUrl = new URL("../../../dist/app/model/model-usage-status.js", import.meta.url).href;
 		const usage = await import(moduleUrl) as SharedModelUsageModule;
 		if (!usage.modelUsageDescriptor || !usage.queryModelUsageStatus) return { refresh: "unavailable" };
 		const descriptor = usage.modelUsageDescriptor(state.model, state.thinkingLevel);
 		if (!descriptor) return { refresh: "unavailable" };
-		const status = await usage.queryModelUsageStatus(descriptor);
+		const status = await usage.queryModelUsageStatus(descriptor, { ...(agentDir ? { agentDir } : {}), ...(freshOnly ? { freshOnly } : {}) });
 		if (status) return { refresh: "ready", status };
 		// A Claude Code quota miss with no local credential is worth a faster
 		// client retry: until Claude Code refreshes its login, each retry costs

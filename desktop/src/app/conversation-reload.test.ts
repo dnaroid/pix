@@ -89,6 +89,7 @@ function setup(busy: { prompt?: boolean; history?: boolean } = {}) {
     switchComposerDraft: vi.fn(),
     closeProjectSelector: vi.fn(),
     tabs: { closeSelector: vi.fn(), show: vi.fn(), rememberActive: vi.fn() },
+    catalog: { sessions: [] },
     history: { needsHydration: () => false, cancel: vi.fn() },
     setErrorMessage: vi.fn(),
     tabSessionIds: () => [],

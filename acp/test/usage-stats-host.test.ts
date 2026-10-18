@@ -13,7 +13,7 @@ type FakeService = UsageStatsServiceLike & {
 	change(source: UsageSourceId): void;
 };
 
-function fakeModule() {
+function fakeModule(restore: () => Promise<void> = async () => {}) {
 	const services: FakeService[] = [];
 	const module: UsageStatsModule = {
 		createUsageStatsSources: () => ["pix"],
@@ -22,6 +22,7 @@ function fakeModule() {
 				const service: FakeService = {
 					disposed: false,
 					requests: [],
+					restore,
 					request(request) {
 						service.requests.push(request);
 						return (request.sources ?? ["pix-sessions"]).map((source): UsageSourceSnapshot => ({
@@ -51,6 +52,38 @@ test("serves every workspace from one shared service", async () => {
 	assert.equal(services.length, 1, "cwd does not create per-project services");
 	assert.deepEqual(services[0]!.requests, [{}, { sources: ["pix-sessions"], refresh: true }]);
 	await host.dispose();
+});
+
+test("gates all concurrent requests on restore and forwards the selected profile", async () => {
+	let release!: () => void;
+	const restore = new Promise<void>((resolve) => { release = resolve; });
+	const { module, services } = fakeModule(() => restore);
+	let profile: string | undefined;
+	module.createUsageStatsSources = (options) => { profile = options.agentDir; return []; };
+	const host = new UsageStatsHost({ logger: silentLogger, agentDir: "/profile", load: async () => module });
+	const requests = [host.stats({ cwd: "/a" }, async () => {}), host.stats({ cwd: "/b" }, async () => {})];
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.equal(services.length, 1);
+	assert.equal(services[0]?.requests.length, 0);
+	assert.equal(profile, "/profile");
+	release();
+	await Promise.all(requests);
+	assert.equal(services[0]?.requests.length, 2);
+	await host.dispose();
+});
+
+test("does not collect when disposed during a disk restore", async () => {
+	let release!: () => void;
+	const restore = new Promise<void>((resolve) => { release = resolve; });
+	const { module, services } = fakeModule(() => restore);
+	const host = new UsageStatsHost({ logger: silentLogger, load: async () => module });
+	const pending = host.stats({ cwd: "/a" }, async () => {});
+	const rejected = assert.rejects(pending, RequestError);
+	await new Promise((resolve) => setImmediate(resolve));
+	await host.dispose();
+	release();
+	await rejected;
+	assert.equal(services[0]?.requests.length, 0);
 });
 
 test("notifies only the latest requester and stops after dispose", async () => {

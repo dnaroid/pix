@@ -31,8 +31,9 @@ per-project services or an LRU. The host disposes the service with the agent.
 
 ## Desktop behavior
 
-The Usage panel header reads **Pix usage** and has a refresh action. There are
-no provider tabs or source switch. The period selector defaults to **7 days**
+The outer sidebar header reads **Usage**, with the refresh action immediately
+before Close. There is no duplicate **Pix usage** toolbar inside the panel,
+nor provider tabs or a source switch. The period selector defaults to **7 days**
 and offers the supported periods for the available data.
 
 **Provider limits** is a separate disclosure above historical statistics. It
@@ -66,6 +67,21 @@ existing heading. Request-header RPM/TPM windows are not
 account quotas and are not rendered here. Missing quota data has an explicit
 empty state; provider limits do not depend on historical usage being present.
 
+Provider rows (both quota charts and missing/loading placeholders) are ordered
+by descending call count across all available Pix usage history, across projects
+and dates, independently of historical chart filters. Credential-route aliases
+share their quota-provider family's score; accounts within a provider share
+that score. The last order is saved per project as `usagePanel.providerOrder`
+in `.pi/workspace.jsonc`, restored together with disclosure state before quota
+requests start, and used throughout loading. Partial, stale, failed or empty
+history never resets that order. Only a complete `ready` snapshot with valid
+calls can update it. Equal call counts retain the saved relative provider order;
+new providers without a saved rank and accounts within each provider use a stable
+provider/account fallback. Tokens and cost are not popularity proxies. While
+**Provider limits** is expanded it also consumes the shared history snapshot
+for this ordering, without mounting or calculating collapsed historical charts.
+Quotas still render if history is empty or unavailable.
+
 Disclosure state is project-local in `.pi/workspace.jsonc` under
 `usagePanel.collapsedSections`. Stable ids (`provider-limits`, `overview`,
 `activity`, `daily`, `models`, `sessions`, `cache`) survive metric/filter changes,
@@ -83,9 +99,10 @@ explicit summary activation changes/persists disclosure state; native toggle
 events caused by rendering or restoration do not. Collapsed section content is
 unmounted and its chart-specific derivations sleep until expansion. Provider
 quota polling and its minute clock also stop while **Provider limits** is
-collapsed. Historical sections share one source: it remains active while any
-historical section is expanded, but stops accepting completions and requesting
-source-change updates when all are collapsed. Re-expansion requests the current
+collapsed. Historical sections and provider popularity share one source: it
+remains active while any historical section or **Provider limits** is expanded,
+but stops accepting completions and requesting source-change updates when all
+are collapsed. Re-expansion requests the current
 snapshot; data retained for other expanded sections is rendered only on expansion.
 Header refresh does not wake collapsed sections and is disabled when all sleep.
 
@@ -145,6 +162,79 @@ daily bars and the coverage date use the system locale through
 `weekdayLabels`, `monthLabel`, `formatHour`, `formatHourTick`). Formatting uses
 `Intl`, without a hardcoded `en-US` locale.
 
+## Persistent cache
+
+Usage data is cached globally within the selected Pi agent profile, not in a
+project's `.pi/usage-cache`. The versioned directory is
+`<agentDir>/cache/usage/v1/`, where `agentDir` is the profile directory selected
+by ACP (or the SDK default). `history.json` holds the last complete
+`pix-sessions` snapshot for the whole profile; quota persistence uses one
+hashed model slot per profile containing its credential scope and quota.
+Project filters, metrics and charts derive from the same saved history rather than caching
+duplicate per-project views. Disclosure state and the saved provider order
+remain project-local preferences in `.pi/workspace.jsonc`.
+
+On first use, ACP restores history before answering the first Usage request,
+marks it `stale`, and starts normal collection without replacing saved charts
+with cold skeletons. `UsageStatsService.restore()` coalesces concurrent restores
+and cannot overwrite a newer live snapshot or resurrect a disposed service.
+The collector persists complete `ready` results only: partial scans, errors
+and failed refreshes cannot replace the last complete history. JSON parsing
+and serialization run in the existing collection worker by default; the
+existing in-process fallback remains available when worker startup fails.
+
+The sessionless draft catalogue accepts `includeUsageCache: true` to return
+account-verified stale quota snapshots without contacting quota endpoints.
+The panel hydrates them before live queries finish. Quota cache keys include
+profile and locally resolved credential identity: OpenAI OAuth uses the tuple
+of verified JWT `chatgpt_account_id` and `sub` (or JWT `email` when `sub` is
+absent); if either claim is missing, it falls back to refresh/access token
+identity. Anthropic/Claude has no proven stable account id and therefore uses
+conservative token identity.
+Other supported identities include API keys, Claude CLI credential source
+and login, and the entire enabled Antigravity refresh-credential/project set
+(not a fallback email). Identity lookup does not refresh OAuth or use quota
+network calls. Missing or changed identity cannot read another login's cache.
+Credential identity crosses the Desktop boundary only as an opaque hash. The
+saved model slot is restored only when its saved scope matches the current
+identity; a successful refresh for another account replaces it, bounding
+orphaned quota files. Persisted quota payloads contain
+display windows and account labels, never credentials, authorization headers,
+raw endpoint responses or reset-credit counts. Expired saved windows are
+removed and remaining windows retain their original observation timestamp.
+
+Cached panel queries bypass the older route-only Claude telemetry fallback
+and request `freshOnly` provider results, so Antigravity's legacy embedded
+credential-file quota cache cannot be relabelled as a new successful refresh.
+The native cache checks identity again after a live query and before returning
+its result. A login change invalidates the batch (`usageCacheInvalidated`),
+clears retained panel quotas and ignores peer responses. Catalogue responses
+may include `usageCache.routeScopes`, mapping routes to opaque identity hashes;
+individual query responses may include `usageCacheScope`. These optional,
+validated fields detect account changes between requests in one batch and
+remain backward compatible when omitted. Invalidation immediately re-reads
+the catalogue and starts one fresh generation without waiting for abandoned
+requests; repeated invalidation falls back to the one-minute retry. Ordinary
+polling remains five minutes.
+
+Cache writes use private files (`0600`) and atomic unique-temp-file renames;
+new cache directories use `0700`. Files are versioned, size-bounded and
+validated. Missing, corrupt, unsupported or unwritable cache files do not
+prevent live collection; handled failures are reported once per owner and
+operation with sanitized diagnostics. Failed Antigravity live probes remain
+failed while previously displayed bars are retained; the failed response itself
+is not reported as a cache diagnostic. This is a disposable last-success cache,
+not an archive or credential store; deleting
+the directory simply makes the next expanded section cold.
+
+Restoring data is not permission to wake collapsed sections. Quota cache
+hydration/live polling starts only with **Provider limits** expanded; history
+restoration/collection starts only while an expanded historical section or
+provider popularity needs the shared source. All-collapsed panels have no
+refresh timers, subscriptions or quota requests. Closing/pausing ignores late
+frontend completions; existing cache data remains available on reopening or
+application restart.
+
 ## Lifecycle and derivation
 
 Cold collection is progressive. The first unprimed `LocalUsageSource`
@@ -178,7 +268,8 @@ refresh about 0.2 seconds; maximum host event-loop lag was about 1 ms (versus
 about 36 ms in-process). These are measured observations, not timing
 guarantees.
 
-The Desktop store requests usage while at least one historical section is expanded,
+The Desktop store requests usage while at least one historical section or
+**Provider limits** (for popularity ordering) is expanded,
 refreshes on demand and reacts to source-change notifications only while active.
 Local-day bucketing and project
 scope filtering are derived on Desktop; no request is needed to switch project
@@ -188,7 +279,11 @@ other-project rows non-clickable.
 ## Tests
 
 Focused coverage is in `tests/usage-stats-local-sources.test.ts`,
-`tests/usage-stats-service.test.ts`, `acp/test/usage-stats-host.test.ts`,
+`tests/usage-stats-service.test.ts`, `tests/usage-snapshot-cache.test.ts`,
+`tests/usage-stats-worker-collector.test.ts`, `tests/model-usage-cache.test.ts`,
+`acp/test/usage-stats-host.test.ts`,
 Desktop usage derivation/store tests, and `UsagePanel.test.ts`. These cover
 the source contract, whole-tree collection, single-service host, project
-filtering, local calendar formatting and panel behavior.
+filtering, local calendar formatting, persisted stale-first hydration,
+profile/account isolation, invalidation and teardown races, corrupt cache
+handling, and panel behavior.

@@ -7,6 +7,7 @@ import UsageSection from "./UsageSection.svelte";
 import UsageSourceView from "./UsageSourceView.svelte";
 import type { UsageSourceSnapshot } from "../../../../acp/src/acp/usage-stats-contract";
 import panelSource from "./UsagePanel.svelte?raw";
+import sidebarSource from "../WorkspaceSidebar.svelte?raw";
 import viewSource from "./UsageSourceView.svelte?raw";
 import sectionSource from "./UsageSection.svelte?raw";
 import heatmapSource from "./UsageHeatmap.svelte?raw";
@@ -112,6 +113,8 @@ describe("Usage panel", () => {
   it("gates shared history and provider requests on restored disclosure state", () => {
     expect(panelSource).toContain('sections.ready && sections.isOpen("provider-limits")');
     expect(panelSource).toContain('id !== "provider-limits" && sections.isOpen(id)');
+    expect(panelSource).toContain("const statisticsOpen = $derived(historyOpen || providerOpen)");
+    expect(panelSource).toContain("const active = statisticsOpen");
     expect(panelSource).toContain("else store.close()");
     expect(panelSource).toContain("void quotas.resume()");
     expect(panelSource).toContain("else quotas.pause()");
@@ -123,8 +126,38 @@ describe("Usage panel", () => {
     const { body } = render(UsagePanel, { props: { client: null, workspace: "/tmp/p" } });
     expect(body).toContain("Usage statistics");
     expect(body).toContain("Connect to Pix to load usage statistics.");
-    expect(body).toContain("Pix usage");
+    expect(body).not.toContain("Pix usage");
+    expect(body).not.toContain("Refresh usage");
     for (const label of ["OpenAI", "Anthropic", "Z.ai"]) expect(body).not.toContain(label);
+  });
+
+  it("hosts the sole refresh action in the outer sidebar header immediately before Close", () => {
+    expect(panelSource).not.toContain("<h2");
+    expect(sidebarSource.match(/aria-label="Refresh usage"/gu)).toHaveLength(1);
+    const action = sidebarSource.indexOf('aria-label="Refresh usage"');
+    expect(action).toBeLessThan(sidebarSource.indexOf('aria-label={`Close ${activeTabTitle}`}'));
+    expect(sidebarSource).toContain("<UsagePanel bind:this={usagePanel}");
+    expect(sidebarSource).toContain("usagePanel?.refreshState()");
+    expect(sidebarSource).toContain("onclick={() => usagePanel?.refresh()}");
+    expect(sidebarSource).toContain("disabled={usageRefresh.disabled}");
+    expect(sidebarSource).toContain("aria-busy={usageRefresh.busy}");
+    expect(panelSource).toContain("disabled: !client || !workspace || refreshing || !statisticsOpen");
+  });
+
+  it("renders providers in popularity order, including unavailable providers ahead of live quotas", () => {
+    const now = Date.now();
+    const { body } = render(UsageProviderLimits, { props: {
+      statuses: [{ sessionId: "s", modelUsageRefresh: "ready", modelUsage: {
+        provider: "anthropic", modelKey: "anthropic/claude", updatedAt: now,
+        hourly: { remainingPercent: 40, resetAt: now + 3_600_000, windowSeconds: 18_000 },
+      } }],
+      entries: [{ provider: "zhipu", modelRef: "zai/glm", state: "unavailable" }],
+      order: ["zhipu", "anthropic"],
+    } });
+    expect(body.indexOf(">Z.ai<")).toBeLessThan(body.indexOf(">Anthropic<"));
+    expect(panelSource).toContain("const current = providerOpen ? snapshot : undefined");
+    expect(panelSource).toContain("sections.setProviderOrder(providerUsageOrder(current, sections.providerOrder))");
+    expect(panelSource).toContain("order={sections.providerOrder}");
   });
 
   it("subscribes to changes and disposes the store on teardown", () => {

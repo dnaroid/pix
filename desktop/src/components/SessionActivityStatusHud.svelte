@@ -158,7 +158,7 @@
             <span
               class="pointer-events-none absolute top-[2px] right-0.5 left-0.5 h-[2px] overflow-hidden rounded-full bg-muted-foreground/25 opacity-70"
               role="progressbar"
-              aria-label={"Subagent " + indicator.agent.id + " plan"}
+              aria-label={"Subagent " + indicator.agent.id + " steps"}
               aria-valuemin="0"
               aria-valuemax={indicator.agent.todoProgress.total}
               aria-valuenow={indicator.agent.todoProgress.completed}
@@ -290,7 +290,7 @@
     {/if}
 
     {#if hasTodoProgress}
-      <StatusBarPopover label="Session plan" onOpen={scrollTodoTooltipToCurrent}>
+      <StatusBarPopover label="Session steps" onOpen={scrollTodoTooltipToCurrent}>
         {#snippet trigger({ open, toggle, id })}
         <button
           class={[
@@ -298,7 +298,7 @@
             activityToneClass(),
           ]}
           type="button"
-          aria-label={"Plan " + summary.completedTodos + "/" + summary.totalTodos + (currentTodo ? ". Current item " + currentTodo.subject : "")}
+          aria-label={"Steps " + summary.completedTodos + "/" + summary.totalTodos + (currentTodo ? ". Current item " + currentTodo.subject : "")}
           aria-haspopup="dialog"
           aria-expanded={open}
           aria-controls={id}
@@ -334,11 +334,11 @@
             data-session-todo-tooltip
           >
             <div class="flex shrink-0 items-center gap-2">
-              <span class="font-semibold text-foreground">Plan</span>
+              <span class="font-semibold text-foreground">Steps</span>
               <button
                 class={iconButtonClass("sm", "panel", { tone: "danger", extra: "ml-auto" })}
                 type="button"
-                aria-label="Clear session plan"
+                aria-label="Clear session steps"
                 disabled={!canClearTodos || clearingTodos || todoRows.length === 0}
                 onclick={() => { void clearTodos(); }}
               ><Trash2 class="h-3.5 w-3.5" aria-hidden="true" /></button>
@@ -346,14 +346,14 @@
                 {summary.completedTodos}/{summary.totalTodos}
               </span>
             </div>
-            <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard access to scrollable Plan tasks) -->
+            <!-- svelte-ignore a11y_no_noninteractive_tabindex (keyboard access to scrollable session steps) -->
             <div
               bind:this={todoTooltipBody}
               class="mt-1 min-h-0 overflow-y-auto overscroll-contain pr-1"
               data-session-todo-tooltip-body
               tabindex="0"
               role="region"
-              aria-label="Plan tasks"
+              aria-label="Session step list"
             >
               <div class="space-y-0.5">
                 {#each todoRows as row (row.task.id)}

@@ -24,6 +24,9 @@ export const WorkspaceConfigSchema = Type.Object({
 		})),
 	})),
 	usagePanel: Type.Optional(Type.Object({
+		providerOrder: Type.Optional(Type.Array(Type.String(), {
+			description: "Last provider quota-family popularity order, restored before loading usage. Unknown ids are retained for compatibility.",
+		})),
 		collapsedSections: Type.Optional(Type.Array(Type.String(), {
 			description: "Collapsed usage section ids: provider-limits, overview, activity, daily, models, sessions, cache. Unknown ids are retained for compatibility.",
 		})),

@@ -17,6 +17,8 @@ import {
   type WorkbenchTerminalTab,
 } from "../lib/workbench-tabs";
 import { sessionIsFork } from "../lib/session-tabs";
+import { subagentSessionLink } from "../lib/session-subagent-link";
+import type { SessionSubagentSnapshot } from "../lib/session-subagents";
 
 export function workbenchTabLabel(value: string): string {
   const normalized = value.replaceAll("\\", "/").replace(/\/$/u, "");
@@ -37,6 +39,7 @@ export function buildSessionWorkbenchTabs(options: {
   pausedSessionIds: ReadonlySet<string>;
   runningSessionIds: ReadonlySet<string>;
   sessionActivityBySessionId: ReadonlyMap<string, SessionActivitySummary>;
+  subagentsBySessionId?: ReadonlyMap<string, SessionSubagentSnapshot>;
   pendingElicitationSessionIds: ReadonlySet<string>;
   unseenCompletedSessionIds: ReadonlySet<string>;
   disabled: boolean;
@@ -49,6 +52,13 @@ export function buildSessionWorkbenchTabs(options: {
     const activity = options.sessionActivityBySessionId.get(session.sessionId);
     const needsInput = options.pendingElicitationSessionIds.has(session.sessionId);
     const draft = session.sessionId === options.draftSessionTabId;
+    const link = subagentSessionLink(session._meta);
+    const agentRun = link?.parentSessionId
+      ? options.subagentsBySessionId?.get(link.parentSessionId)?.runs.find((run) => run.runDir === link.runDir)
+      : undefined;
+    const subagentIcon = link
+      ? agentRun?.tasks?.find((task) => task.id === link.agentId)?.icon || "agent"
+      : undefined;
     const activityLabel = sessionActivityLabel(activity, running, needsInput);
     const statusKind = sessionTabStatusKind({
       activity,
@@ -73,6 +83,7 @@ export function buildSessionWorkbenchTabs(options: {
       running,
       draft,
       fork: sessionIsFork(session),
+      subagentIcon,
       statusKind,
     };
   });

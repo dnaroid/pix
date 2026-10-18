@@ -831,7 +831,7 @@ process.stdin.on("data", (data) => {
 		expect(video.format).toBe("asciicast-v2");
 		expect(video.truncated).toBe(false);
 		expect(video.path.endsWith("terminal-recording.cast")).toBe(true);
-		expect(video.path.startsWith(path.join(project, ".pi", "artifacts", "subagents", "run-qa", "ui-qa", "evidence", "recording"))).toBe(true);
+		expect(video.path.startsWith(path.join(project, ".pi", "artifacts", "subagents", "run-qa", "evidence", "recording"))).toBe(true);
 		const stat = fs.statSync(video.path);
 		expect(stat.isFile()).toBe(true);
 		if (process.platform !== "win32") expect(stat.mode & 0o777).toBe(0o600);

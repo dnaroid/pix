@@ -57,7 +57,7 @@ describe("session activity summary", () => {
       blockedTodos: 1,
     });
     expect(sessionActivityTone(summary)).toBe("warning");
-    expect(sessionActivityLabel(summary)).toBe("2 active subagents · Plan 1/3 · 1 retrying · 1 blocked");
+    expect(sessionActivityLabel(summary)).toBe("2 active subagents · Steps 1/3 · 1 retrying · 1 blocked");
   });
 
   it("uses info for active work and idle for a pending-only plan", () => {
@@ -73,8 +73,8 @@ describe("session activity summary", () => {
     expect(sessionActivityTone(pending)).toBe("idle");
     expect(sessionActivityTone(pending, true)).toBe("info");
     expect(sessionActivityTone(pending, false, true)).toBe("warning");
-    expect(sessionActivityLabel(pending)).toBe("Plan 0/1");
-    expect(sessionActivityLabel(pending, false, true)).toBe("Needs input · Plan 0/1");
+    expect(sessionActivityLabel(pending)).toBe("Steps 0/1");
+    expect(sessionActivityLabel(pending, false, true)).toBe("Needs input · Steps 0/1");
   });
 
   it("updates only the changed session summary for background tab indicators", () => {
