@@ -192,7 +192,7 @@ test("background task indexing reports a redacted warning without retries or cha
     expect(calls).toBe(1);
     expect(records).toEqual([{
       event: "suite:background-task-index-failed",
-      details: { source: "tasks", errorType: "Error" },
+      details: { source: "tasks", errorType: "Error", reason: "other" },
       scope: { project: f.root, module: "suite.search" },
     }]);
     expect(h.timers.size).toBe(0);

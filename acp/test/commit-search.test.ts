@@ -29,9 +29,24 @@ after(async () => {
 const config: CommitEmbeddingConfig = { provider: "openrouter", model: "test/model", dimension: 3, queryPrefix: "Q:", documentPrefix: "D:", baseUrl: "https://openrouter.ai/api/v1" };
 const signal = () => new AbortController().signal;
 const options = (embed: CommitEmbedder = async texts => texts.map(() => [1, 0, 0])) => ({ loadConfig: async () => config, loadKey: async () => "mock-key", embed });
+// Node runs t.after hooks in registration order. Repository teardown is
+// registered before service teardown, so it must retire all workers itself
+// before deleting their Git/SQLite fixture (Windows keeps open handles locked).
+const ownedServices = new WeakMap<object, Set<DesktopCommitSearchService>>();
+async function retireRepository(t: object, cwd: string): Promise<void> {
+  const services = ownedServices.get(t);
+  const active = [...(services ?? [])];
+  services?.clear();
+  const settled = await Promise.allSettled(active.map(service => service.dispose()));
+  await rm(cwd, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 });
+  const failure = settled.find(result => result.status === "rejected");
+  if (failure?.status === "rejected") throw failure.reason;
+}
 async function repository(t: { after: (fn: () => Promise<void>) => void }) {
   const base = fileURLToPath(new URL("../../.pi/artifacts/central-semantics-acp/commit-fixtures/", import.meta.url)); await mkdir(base, { recursive: true });
-  const cwd = await mkdtemp(join(base, "fixture-")); t.after(() => rm(cwd, { recursive: true, force: true }));
+  const cwd = await mkdtemp(join(base, "fixture-"));
+  if (!ownedServices.has(t)) ownedServices.set(t, new Set());
+  t.after(() => retireRepository(t, cwd));
   await enableSearchSources(cwd);
   const git = async (...args: string[]) => {
     const pending = exec("git", args, { cwd, env: { ...process.env, GIT_AUTHOR_NAME: "Test Author", GIT_AUTHOR_EMAIL: "test@example.invalid", GIT_COMMITTER_NAME: "Test Author", GIT_COMMITTER_EMAIL: "test@example.invalid" } });
@@ -46,7 +61,11 @@ async function repository(t: { after: (fn: () => Promise<void>) => void }) {
   return { cwd, git, commit };
 }
 function service(t: { after: (fn: () => Promise<void>) => void }, opts: CommitSearchOptions = options()) {
-  const s = new DesktopCommitSearchService(opts); t.after(() => s.dispose()); return s;
+  const services = ownedServices.get(t);
+  assert.ok(services, "Create the repository fixture before its commit-search service");
+  const s = new DesktopCommitSearchService(opts);
+  services.add(s);
+  return s;
 }
 const query = (s: DesktopCommitSearchService, cwd: string, text = "target") => s.query({ cwd, query: text, limit: 20 }, signal());
 function snapshot(cwd: string) {

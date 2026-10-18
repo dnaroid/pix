@@ -2,6 +2,7 @@ import { canonicalSearchIndexPath } from "../src/search/canonical-index.js";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
@@ -59,10 +60,16 @@ async function fixture(t: TestContext) {
     const status = await service.config({ cwd });
     return !status.indexing && !status.checkingSources?.tasks;
   });
-  const rows = (table: string) => {
+  const rows = (table: string, allowAbsent = false) => {
     const source = table.startsWith("pix_session_") ? "sessions" : table.startsWith("pix_task_") ? "tasks" : "settings";
-    const db = new DatabaseSync(canonicalSearchIndexPath(cwd, source), { readOnly: true });
-    try { return db.prepare(`SELECT * FROM ${table}`).all(); } finally { db.close(); }
+    const file = canonicalSearchIndexPath(cwd, source);
+    // Revocation before an index write may leave no database or vectors table.
+    if (allowAbsent && !existsSync(file)) return [];
+    const db = new DatabaseSync(file, { readOnly: true });
+    try {
+      if (allowAbsent && !db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table)) return [];
+      return db.prepare(`SELECT * FROM ${table}`).all();
+    } finally { db.close(); }
   };
   t.after(async () => { await Promise.all(services.map(service => service.dispose())); await rm(cwd, { recursive: true, force: true }); restoreHome(); });
   return { cwd, path, configure, calls, embed, make, request, idle, rows, record };
@@ -172,7 +179,7 @@ test("configuration removed during key lookup suppresses the provider request wi
   assert.deepEqual((await query).results, []); await f.idle(service);
   assert.deepEqual(f.calls, []);
   assert.equal((await service.config({ cwd: f.cwd })).enabled, false);
-  assert.deepEqual(f.rows("vectors"), []);
+  assert.deepEqual(f.rows("vectors", true), [], "revocation cannot persist vectors, even if the table was never created");
 });
 
 test("revocation during discovery suppresses a previously cached semantic query", async t => {

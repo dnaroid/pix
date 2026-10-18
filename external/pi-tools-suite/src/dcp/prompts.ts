@@ -9,29 +9,23 @@
  * Appended to the existing system prompt when DCP is enabled (automatic mode).
  */
 export const SYSTEM_PROMPT = `
-Keep live context high-signal. \`compress\` is the only DCP context tool; use it
-only when a closed stale slice materially reduces context pressure. Low context
-usage alone does not require compression. Good boundaries include completed
-implementation, verification, investigation, config/docs, or understood logs.
-Use \`messages\` for one large stale message.
+Keep live context high-signal. Use \`compress\` only for substantial closed
+stale work; low usage alone is no reason. Completed implementation, verification,
+investigation, config/docs or understood logs qualify. Use \`messages\` for
+one large stale message. Batch closed stages; rewrite summaries only for
+corrections or context-limit recovery.
 
-Batch newly closed stages early when substantial work remains, not each small
-result. Keep prior summaries unchanged unless correction or context-limit
-recovery requires rewriting them.
+Cache invalidation may raise cost. Skip near-finish housekeeping with headroom;
+prioritize context-limit recovery and explicit user requests.
 
-Compression can invalidate prompt caches; fewer tokens need not mean lower cost.
-Skip optional near-finish housekeeping with ample headroom.
-Context-limit recovery and explicit user requests take priority.
-
-Do not compress active work or raw code/errors/output needed next. If unfinished
-work is compressed, preserve the active objective and next step. A summary must
-preserve user intent/constraints, decisions, relevant files/symbols, actionable
-errors, verification state, and next steps. Do not infer, invent, or add facts;
-drop duplicate transcript detail, full logs, and long code/JSON/diffs.
+Never compress active work or code/errors/output still needed. Summaries keep
+user intent/constraints, decisions, relevant files/symbols, actionable errors,
+verification and next steps. For unfinished work retain its objective/next step.
+Do not invent facts; omit duplicate transcripts, logs and long code/JSON/diffs.
 
 \`mNNN\`/\`bN\` IDs and \`<dcp-system-reminder>\` tags are injected metadata;
-never quote or output them. Critical/high-pressure reminders take priority;
-routine reminders may be skipped when no safe useful slice exists.
+never output them. Critical reminders win; skip routine reminders
+without a safe useful slice.
 `.trim()
 
 /**
