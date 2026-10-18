@@ -3,6 +3,7 @@
   import { iconButtonClass } from "../lib/icon-button";
   import { confirmDesktopAction } from "../lib/confirm-action";
   import type { SessionConfigOption } from "@agentclientprotocol/sdk";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import Folder from "@lucide/svelte/icons/folder";
   import GripVertical from "@lucide/svelte/icons/grip-vertical";
@@ -88,7 +89,11 @@
   import WorkspaceSidebarTaskEditor from "./WorkspaceSidebarTaskEditor.svelte";
   import WorkspaceSidebarTaskQuickAdd from "./WorkspaceSidebarTaskQuickAdd.svelte";
   import WorkspaceSidebarTasksPanel from "./WorkspaceSidebarTasksPanel.svelte";
+  import RegistryPlansPanel from "./RegistryPlansPanel.svelte";
   import { createWorkspaceSidebarTasksViewController } from "./workspace-sidebar-tasks-view-controller.svelte";
+  import { createWorkPanelSections } from "../app/work-panel-sections.svelte";
+  import type { WorkSectionId } from "../lib/work-panel-sections";
+  import { createDiagnosticLogger } from "../lib/diagnostic-logging";
 
   type TaskDraft = {
     title: string;
@@ -108,7 +113,7 @@
   type PackageScriptsPanelHandle = { refresh: () => void };
   type SettingsPanelHandle = { openSection: (id: string) => Promise<void>; openField: (section: string, fieldId: string) => Promise<void> };
   const SIDEBAR_LABELS: Record<SidebarTab, string> = {
-    tasks: "Tasks",
+    tasks: "Work",
     project: "Project",
     git: "Source Control",
     registry: "Registry",
@@ -165,6 +170,12 @@
     planRunDisabled = false,
     onRunPlan = () => {},
     onDeletePlan = () => {},
+    planOwners = {},
+    planLinkTargets = [],
+    planRuns = {},
+    onLinkTaskPlan,
+    onOpenPlanRun,
+    onResumePlan,
     recentProjects,
     projectColors,
     projectIcons = new Map(),
@@ -182,6 +193,7 @@
     onReorder,
     onRun,
     onOpenSession,
+    onCreateTaskPlan,
     onOpenUsageSession,
     onOpenProjectDocument,
     onRefreshPlans = async () => {},
@@ -268,6 +280,12 @@
     planRunDisabled?: boolean;
     onRunPlan?: (path: string) => void;
     onDeletePlan?: (path: string) => void;
+    planOwners?: Readonly<Record<string, string>>;
+    planLinkTargets?: readonly { value: string; label: string }[];
+    planRuns?: Readonly<Record<string, readonly import("../lib/project-task-plans").PlanRun[]>>;
+    onLinkTaskPlan?: (taskId: string, path: string) => void;
+    onOpenPlanRun?: (sessionId: string) => void;
+    onResumePlan?: (path: string) => void;
     recentProjects: string[];
     projectColors: ReadonlyMap<string, string>;
     projectIcons?: ReadonlyMap<string, string>;
@@ -290,6 +308,7 @@
     ) => void;
     onRun: (task: ProjectTask) => void;
     onOpenSession: (task: ProjectTask) => void;
+    onCreateTaskPlan?: (task: ProjectTask) => void;
     onOpenUsageSession?: (target: UsageSessionTarget) => void;
     onOpenProjectDocument: (path: string, exists?: boolean) => void;
     onRefreshPlans?: () => Promise<void>;
@@ -387,7 +406,14 @@
   });
   let revealedTaskId = $state<string | null>(null);
   const plansView = createRegistryPlansView();
-  let registryPanel = $state<RegistryPanel | null>(null);
+  // The Work tab stacks Plans and Tasks accordions; Registry stays a resource catalog.
+  const workSections = createWorkPanelSections((cause, target) => {
+    createDiagnosticLogger(() => ({ workspace: target })).report(cause, "frontend:work-panel-state");
+  });
+  $effect(() => { void workSections.load(workspace); });
+  $effect(() => () => workSections.dispose());
+  const workSectionOpen = (id: WorkSectionId) => workSections.ready && workSections.isOpen(id);
+  let plansPanel = $state<RegistryPlansPanel | null>(null);
   $effect(() => plansView.selectWorkspace(workspace));
   let projectTreeRefreshKey = $state(0);
   const taskDragController = createWorkspaceSidebarTaskDragController({
@@ -487,7 +513,7 @@
       return;
     }
     if (artifact === "plans") {
-      void registryPanel?.focusPlans();
+      void openPlansSegment();
       return;
     }
     if (artifact === "workspace") {
@@ -638,6 +664,16 @@
     selectTab(activeTab);
   }
 
+  async function openPlansSegment(): Promise<void> {
+    const requestWorkspace = workspace;
+    tasksView.selectWorkspace(requestWorkspace);
+    void workSections.setOpen("plans", true);
+    setActiveTab("tasks");
+    if (layoutController.collapsed) layoutController.setCollapsed(false);
+    await tick();
+    if (requestWorkspace === workspace && activeTab === "tasks" && workSectionOpen("plans")) plansPanel?.focusSearch();
+  }
+
   /** Open the project Tasks view for actions initiated outside the sidebar. */
   export async function openTasksPanel(taskId?: string, isCurrent: () => boolean = () => true): Promise<void> {
     if (!isCurrent()) return;
@@ -645,6 +681,7 @@
     statusMenuController.close();
     editorOpen = false;
     deleteTaskId = null;
+    void workSections.setOpen("tasks", true);
     setActiveTab("tasks");
     if (layoutController.collapsed) layoutController.setCollapsed(false);
     revealedTaskId = taskId ?? null;
@@ -903,7 +940,7 @@
       <div class="flex min-w-0 items-center gap-2 border-b border-sidebar-border bg-sidebar pl-3 pr-1">
         <strong class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs font-semibold tracking-wide text-muted-foreground uppercase">{activeTabTitle}</strong>
         {#if activeTab === "tasks"}
-          <span class="shrink-0 text-xs text-muted-foreground">{tasks.length} {tasks.length === 1 ? "task" : "tasks"} · {doneCount} done</span>
+          <span class="shrink-0 text-xs text-muted-foreground">{projectDocuments.plans.length} {projectDocuments.plans.length === 1 ? "plan" : "plans"} · {tasks.length} {tasks.length === 1 ? "task" : "tasks"}</span>
         {:else if activeTab === "project"}
           <div class="ml-auto flex shrink-0 items-center gap-0.5">
             <button
@@ -970,7 +1007,51 @@
       </div>
 
       {#if activeTab === "tasks"}
-        <div class="grid min-h-0 grid-rows-[auto_minmax(0,1fr)]">
+        <div class="flex min-h-0 min-w-0 flex-col overflow-hidden" data-work-sections>
+        {#snippet workSectionHeader(id: WorkSectionId, label: string, count: string)}
+          <button
+            type="button"
+            class="flex h-8 w-full shrink-0 items-center gap-1.5 border-b border-sidebar-border px-3 text-left text-xs font-semibold text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+            aria-expanded={workSectionOpen(id)}
+            aria-controls={`workspace-${id}-panel`}
+            data-work-section-toggle={id}
+            onclick={() => void workSections.toggle(id)}
+          >
+            <ChevronRight class={["h-3.5 w-3.5 shrink-0 transition-transform motion-reduce:transition-none", workSectionOpen(id) ? "rotate-90" : "rotate-0"]} aria-hidden="true" />
+            <span class="min-w-0 flex-1 truncate uppercase tracking-wide">{label}</span>
+            <span class="shrink-0 font-normal">{count}</span>
+          </button>
+        {/snippet}
+        <section class={["flex min-w-0 flex-col", !workSectionOpen("plans") ? "shrink-0" : ["min-h-0 flex-initial", workSectionOpen("tasks") && "max-h-[50%]"]]} aria-label="Plans" data-work-section="plans">
+        {@render workSectionHeader("plans", "Plans", `${projectDocuments.plans.length}`)}
+        {#if workSectionOpen("plans")}
+        <div id="workspace-plans-panel" class="flex min-h-0 min-w-0 flex-initial flex-col overflow-hidden [&>section]:flex-initial">
+          <RegistryPlansPanel
+            bind:this={plansPanel}
+            plans={projectDocuments.plans}
+            planProgress={projectDocuments.planProgress}
+            onRefresh={onRefreshPlans}
+            activePath={activeProjectDocumentPath}
+            view={plansView}
+            onChoose={onOpenProjectDocument}
+            actionsDisabled={planActionsDisabled}
+            runDisabled={planRunDisabled}
+            onRun={onRunPlan}
+            onDelete={onDeletePlan}
+            owners={planOwners}
+            linkTargets={planLinkTargets}
+            runs={planRuns}
+            onLinkTask={onLinkTaskPlan}
+            onOpenRun={onOpenPlanRun}
+            onResume={onResumePlan}
+          />
+        </div>
+        {/if}
+        </section>
+        <section class={["flex min-w-0 flex-col", workSectionOpen("tasks") ? "min-h-0 flex-1 basis-0" : "shrink-0"]} aria-label="Tasks" data-work-section="tasks">
+        {@render workSectionHeader("tasks", "Tasks", `${tasks.length} · ${doneCount} done`)}
+        {#if workSectionOpen("tasks")}
+        <div id="workspace-tasks-panel" class="grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)]">
           {#if workspace && !initialLoading && !storageError}
             <WorkspaceSidebarTaskQuickAdd {workspace} client={lspClient} {busy} onCreate={createQuickTask} />
           {/if}
@@ -1010,7 +1091,13 @@
           onCreate={openCreate}
           onEdit={openEdit}
           onDeleteRequest={statusMenuController.requestDelete}
+          onCreatePlan={onCreateTaskPlan ? (task) => { statusMenuController.close(); onCreateTaskPlan(task); } : undefined}
+          onOpenPlan={(path) => { statusMenuController.close(); onOpenProjectDocument(path, projectDocuments.plans.includes(path)); }}
+          planProgress={projectDocuments.planProgress ?? {}}
         />
+        </div>
+        {/if}
+        </section>
         </div>
       {:else if activeTab === "project"}
         <section id="workspace-project-panel" class="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden" aria-label="Project">
@@ -1079,17 +1166,6 @@
         <div id="workspace-registry-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Registry">
           {#key workspace}
           <RegistryPanel
-            bind:this={registryPanel}
-            plans={projectDocuments.plans}
-            planProgress={projectDocuments.planProgress}
-            onRefreshPlans={onRefreshPlans}
-            activePlanPath={activeProjectDocumentPath}
-            {plansView}
-            onChoosePlan={onOpenProjectDocument}
-            {planActionsDisabled}
-            {planRunDisabled}
-            {onRunPlan}
-            {onDeletePlan}
             contextCommands={registryContextCommands}
             agentModels={modelThinkingConfigState(settingsConfigOptions).models}
             snapshot={registrySnapshot}

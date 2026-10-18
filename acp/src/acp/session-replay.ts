@@ -287,7 +287,9 @@ function toolCallNotification(
 		title: toolTitle(name || "tool", args),
 		kind: toolKind(name || "tool") as ToolKind,
 		status: "in_progress",
-		...(includeRawInput || name === "question" ? { rawInput: args } : {}),
+		// Question and todo inputs are small and drive Desktop UI (answers, step
+		// navigation) without hydrating the deferred result.
+		...(includeRawInput || name === "question" || name === "todo" ? { rawInput: args } : {}),
 		locations: toolLocations(context, name, args),
 	} as SessionUpdate, timing);
 	return { sessionId: context.sessionId, update };

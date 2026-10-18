@@ -46,6 +46,17 @@ function messageUpdate(type: string, delta: string): JsonAgentSessionEvent {
 	} as unknown as JsonAgentSessionEvent;
 }
 
+test("Stop suppresses late answer/thinking deltas and authoritative block endings", () => {
+	const translator = new EventTranslator(CONTEXT);
+	assert.equal(translator.translate(messageUpdate("text_delta", "before")).length, 1);
+	for (const type of ["text_delta", "thinking_delta", "thinking_start", "text_end", "thinking_end"]) {
+		const event = messageUpdate(type, "late");
+		(event as unknown as { assistantMessageEvent: { content: string } }).assistantMessageEvent.content = "beforelate";
+		assert.deepEqual(translator.translate(event, true), [], type);
+	}
+	assert.equal(translator.translate(messageUpdate("text_delta", "next run")).length, 1);
+});
+
 test("text deltas stream as agent_message_chunk", () => {
 	const [update] = one(messageUpdate("text_delta", "Hello"));
 	assert.equal(update.sessionUpdate, "agent_message_chunk");

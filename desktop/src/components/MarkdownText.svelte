@@ -21,6 +21,7 @@
     enableHtmlSandbox = false,
     onHtmlSandboxSubmit,
     choiceActionsActive = false,
+    choiceActionsScope,
     onChoiceActionsSubmit,
     onValidateProjectFile,
     onValidateLocalFile,
@@ -38,6 +39,7 @@
     enableHtmlSandbox?: boolean;
     onHtmlSandboxSubmit?: (payload: unknown) => Promise<"sent" | "queued">;
     choiceActionsActive?: boolean;
+    choiceActionsScope?: string;
     onChoiceActionsSubmit?: (text: string) => Promise<"sent" | "queued">;
     onValidateProjectFile?: (path: string) => Promise<boolean>;
     onValidateLocalFile?: (path: string) => Promise<boolean>;
@@ -82,8 +84,8 @@
     <div class="py-2 text-xs text-muted-foreground" role="status">HTML preview · awaiting complete block…</div>
   {:else if segment.type === "actions"}
     {#if onChoiceActionsSubmit}
-      {#key JSON.stringify(segment.actions)}
-        <ChoiceActions actions={segment.actions} active={choiceActionsActive} onSubmit={onChoiceActionsSubmit} />
+      {#key JSON.stringify([choiceActionsScope, segment.actions])}
+        <ChoiceActions actions={segment.actions} active={choiceActionsActive} onSubmit={onChoiceActionsSubmit} stateScope={choiceActionsScope} blockIndex={index} />
       {/key}
     {/if}
   {:else}

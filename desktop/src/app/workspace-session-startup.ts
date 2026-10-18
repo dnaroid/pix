@@ -25,6 +25,8 @@ type WorkspaceSessionStartupOptions = {
   state: ActiveSessionState;
   setErrorMessage: (message: string | null) => void;
   reportError: (error: unknown) => void;
+  /** Reports whether initial workspace session restoration is in flight. */
+  onOpeningChange?: (opening: boolean) => void;
 };
 
 export function createWorkspaceSessionStartup(options: WorkspaceSessionStartupOptions) {
@@ -47,9 +49,12 @@ export function createWorkspaceSessionStartup(options: WorkspaceSessionStartupOp
       return activeOpening.promise;
     }
     const pending = openNow(requestClient, requestWorkspace).finally(() => {
-      if (opening?.promise === pending) opening = null;
+      if (opening?.promise !== pending) return;
+      opening = null;
+      options.onOpeningChange?.(false);
     });
     opening = { client: requestClient, workspace: requestWorkspace, promise: pending };
+    options.onOpeningChange?.(true);
     return pending;
   }
 

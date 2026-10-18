@@ -23,6 +23,7 @@ describe("transcript history paging", () => {
     let currentPane: HTMLDivElement | null = pane as unknown as HTMLDivElement;
     const loadOlder = vi.fn(async () => false);
     const afterRender = vi.fn(async () => {});
+    const onScroll = vi.fn();
     const pager = createTranscriptHistoryPager({
       pane: () => currentPane,
       activeSessionId: () => sessionId,
@@ -30,9 +31,10 @@ describe("transcript history paging", () => {
       restoring: () => restoring,
       loadOlder,
       afterRender,
+      onScroll,
     });
     return {
-      pager, pane, loadOlder, afterRender,
+      pager, pane, loadOlder, afterRender, onScroll,
       setEntryTop: (top: number) => { entryTop = top; },
       setFollowing: (value: boolean) => { followsLatest = value; },
       setRestoring: (value: boolean) => { restoring = value; },
@@ -46,6 +48,34 @@ describe("transcript history paging", () => {
     await pager.loadAtTop(); // New Conversation destroyed the old pane; restore RAF has not run yet.
     expect(loadOlder).not.toHaveBeenCalled();
   });
+
+  it("pages after a single scroll to the top propagates reader mode to the pane", async () => {
+    const { pager, loadOlder, afterRender, onScroll, setFollowing } = setup();
+    // The parent updates follow state synchronously, but the child's prop only
+    // changes in Svelte's next flush. There may be no second scroll event at 0.
+    onScroll.mockImplementation(() => {
+      afterRender.mockImplementation(async () => { setFollowing(false); });
+    });
+    await pager.handleScroll();
+    expect(onScroll).toHaveBeenCalledTimes(1);
+    expect(loadOlder).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["disposed", "replaced pane", "changed session"])(
+    "ignores a queued scroll for a %s owner", async (change) => {
+      const { pager, pane, loadOlder, afterRender, setFollowing, setPane, setSession } = setup();
+      setFollowing(false);
+      let finish!: () => void;
+      afterRender.mockImplementation(() => new Promise<void>((resolve) => { finish = resolve; }));
+      const pending = pager.handleScroll();
+      if (change === "disposed") pager.dispose();
+      if (change === "replaced pane") setPane({ ...pane } as unknown as HTMLDivElement);
+      if (change === "changed session") setSession("session-2");
+      finish();
+      await pending;
+      expect(loadOlder).not.toHaveBeenCalled();
+    },
+  );
 
   it("waits for a saved reader offset before deciding whether to fetch older history", async () => {
     const { pager, pane, loadOlder, setFollowing, setRestoring } = setup();

@@ -11,13 +11,9 @@
   import RegistryDiffPanel from "./RegistryDiffPanel.svelte";
   import RegistryProjectStatus from "./RegistryProjectStatus.svelte";
   import RegistryCatalog from "./RegistryCatalog.svelte";
-  import RegistryPlansPanel from "./RegistryPlansPanel.svelte";
-  import type { RegistryPlansView } from "./registry-plans-view.svelte";
-  import { tick } from "svelte";
   import type { RegistryBackgroundSyncState } from "../lib/registry-background-sync";
   import type { AvailableCommand } from "@agentclientprotocol/sdk";
   import type { ModelThinkingModel } from "../lib/model-thinking";
-  import type { PlanProgress } from "../lib/project-documents";
 
   let {
     snapshot,
@@ -41,16 +37,6 @@
     onOpenProjectArtifact,
     onDiff,
     onCloseDiff,
-    plans = [],
-    planProgress = {},
-    onRefreshPlans = async () => {},
-    activePlanPath = null,
-    plansView,
-    onChoosePlan = () => {},
-    planActionsDisabled = false,
-    planRunDisabled = false,
-    onRunPlan = () => {},
-    onDeletePlan = () => {},
   }: {
     snapshot: RegistrySnapshot | undefined;
     contextCommands?: readonly AvailableCommand[];
@@ -73,26 +59,9 @@
     onOpenProjectArtifact: (artifact: RegistryProjectArtifact) => void;
     onDiff: (item: RegistryItem) => void;
     onCloseDiff: () => void;
-    plans?: readonly string[];
-    planProgress?: Readonly<Record<string, PlanProgress | null>>;
-    onRefreshPlans?: () => Promise<void>;
-    activePlanPath?: string | null;
-    plansView?: RegistryPlansView;
-    onChoosePlan?: (path: string) => void;
-    planActionsDisabled?: boolean;
-    planRunDisabled?: boolean;
-    onRunPlan?: (path: string) => void;
-    onDeletePlan?: (path: string) => void;
   } = $props();
 
   let panelRoot = $state<HTMLElement | null>(null);
-  let plansPanel = $state<RegistryPlansPanel | null>(null);
-
-  export async function focusPlans(): Promise<void> {
-    if (diff) onCloseDiff();
-    await tick();
-    if (panelRoot?.isConnected) plansPanel?.focusSearch();
-  }
   let lastDiffTriggerId = $state<string | null>(null);
   const remoteBusy = $derived(remoteDisabled || actionId !== null);
 
@@ -149,10 +118,6 @@
       {onAction}
       {onOpenProjectArtifact}
     />
-    {#if plansView}
-      <RegistryPlansPanel bind:this={plansPanel} {plans} {planProgress} onRefresh={onRefreshPlans} activePath={activePlanPath} view={plansView} onChoose={onChoosePlan}
-        actionsDisabled={planActionsDisabled} runDisabled={planRunDisabled} onRun={onRunPlan} onDelete={onDeletePlan} />
-    {/if}
     <RegistryCatalog
       {snapshot}
       {contextCommands}

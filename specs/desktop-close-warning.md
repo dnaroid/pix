@@ -20,6 +20,11 @@ status: active
 - Application Quit, including macOS Cmd+Q, warns with **Quit Pix** and **Cancel**
   when any window reports active conversations. Confirmation applies to all
   windows. Only one native window/quit warning can be pending at a time.
+- The `watch:all` development Restart excludes windows whose only running
+  prompts are waiting for recoverable question-tool answers. Other running
+  sessions, non-question forms, and draft first-prompt materialization still
+  require Restart consent. This exception does not change window-close or
+  ordinary Quit warnings; answering a question restores Restart protection.
 - Cancellation never starts backend teardown or freezes the window restore
   snapshot. Confirmation continues existing clean-exit/resource cleanup and
   persistence behavior. Closing the last window asks only once.

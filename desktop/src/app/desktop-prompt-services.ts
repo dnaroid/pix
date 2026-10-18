@@ -82,6 +82,7 @@ export function createDesktopPromptServices(options: DesktopPromptServicesOption
     state: options.state,
     promptEndedAt: runtime.endedAt,
     promptRunning: runtime.isRunning,
+    promptCancellation: runtime.cancellationState,
     clearPromptEndedAt: runtime.clearEndedAt,
     followsLatest: options.followsLatest,
     scheduleScrollToLatest: options.scheduleScrollToLatest,

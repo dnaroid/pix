@@ -208,6 +208,11 @@
     aria-controls={open ? optionsId : undefined}
     title={triggerLabel}
     disabled={disabled}
+    onmousedown={(event) => {
+      // WebKit does not focus a clicked button: the press would blur the popup's
+      // search to document.body, focusout would close it, and click would reopen.
+      if (open) event.preventDefault();
+    }}
     onclick={() => open ? close() : show()}
     onkeydown={(event) => {
       if (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") {

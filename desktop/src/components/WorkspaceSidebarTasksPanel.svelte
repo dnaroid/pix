@@ -15,6 +15,10 @@
   import Crown from "@lucide/svelte/icons/crown";
   import BrainCircuit from "@lucide/svelte/icons/brain-circuit";
   import Play from "@lucide/svelte/icons/play";
+  import FileCheck2 from "@lucide/svelte/icons/file-check-2";
+  import FilePlus2 from "@lucide/svelte/icons/file-plus-2";
+  import { linkedTaskPlan } from "../lib/project-task-plans";
+  import type { PlanProgress } from "../lib/project-documents";
   import Plus from "@lucide/svelte/icons/plus";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import Trash2 from "@lucide/svelte/icons/trash-2";
@@ -88,6 +92,9 @@
     onCreate,
     onEdit,
     onDeleteRequest,
+    onCreatePlan,
+    onOpenPlan,
+    planProgress = {},
     onSetTaskPriority = () => {},
     isStatusCollapsed = (status: ProjectTaskStatus) => status === "done",
     onToggleStatusCollapsed = () => {},
@@ -124,6 +131,11 @@
     onCreate: (type: ProjectTaskType, status?: ProjectTaskStatus) => void;
     onEdit: (task: ProjectTask) => void;
     onDeleteRequest: (taskId: string) => void;
+    /** Start a planning session that writes the task's linked plan. */
+    onCreatePlan?: (task: ProjectTask) => void;
+    onOpenPlan?: (path: string) => void;
+    /** Saved checklist progress per plan path (task completion hint). */
+    planProgress?: Readonly<Record<string, PlanProgress | null>>;
     onSetTaskPriority?: (taskId: string, priority: ProjectTaskPriority) => void;
     isStatusCollapsed?: (status: ProjectTaskStatus) => boolean;
     onToggleStatusCollapsed?: (status: ProjectTaskStatus) => void;
@@ -241,6 +253,9 @@
                 {@const typeGroup = TASK_GROUPS.find((group) => group.type === task.type)!}
                 {@const typeLabel = taskTypeLabel(task.type)}
                 {@const TypeIcon = TYPE_ICONS[task.type]}
+                {@const planPath = linkedTaskPlan(task)}
+                {@const linkedProgress = planPath ? planProgress[planPath] : undefined}
+                {@const planComplete = task.status !== "done" && !!linkedProgress && linkedProgress.total > 0 && linkedProgress.completed >= linkedProgress.total}
                 {#if isDropPlaceholder(group.status, task.id, "before")}
                   <div
                     data-task-drop-placeholder
@@ -283,6 +298,7 @@
                     {#if parent}<span data-task-subtask class="shrink-0 text-primary/80" aria-label={`Subtask of ${projectTaskDisplayLabel(parent)}`} title={`Subtask of ${projectTaskDisplayLabel(parent)}`}><GitBranch class="h-3.5 w-3.5" aria-hidden="true" /></span>{/if}
                     {#if attachmentCounts[task.id]}<span data-task-attachments class="inline-flex shrink-0 items-center gap-0.5 text-muted-foreground" aria-label={`${attachmentCounts[task.id]} attachments`} title={`${attachmentCounts[task.id]} attachments`}><Paperclip class="h-3 w-3" aria-hidden="true" />{#if attachmentCounts[task.id]! > 1}<span class="font-mono text-xs">{attachmentCounts[task.id]}</span>{/if}</span>{/if}
                     {#if linkCount}<span data-task-links class="inline-flex shrink-0 items-center gap-0.5 text-muted-foreground" aria-label={`${linkCount} links`} title={[...(task.links ?? []), ...(task.relatedTaskIds ?? []), ...(linksToTask ? ["Linked from other tasks"] : [])].join("\n")}><Link2 class="h-3 w-3" aria-hidden="true" />{#if linkCount > 1}<span class="font-mono text-xs">{linkCount}</span>{/if}</span>{/if}
+                    {#if planPath}<span data-task-plan class="shrink-0 text-tool-success" aria-label={`Plan: ${planPath}`} title={`Plan: ${planPath}`}><FileCheck2 class="h-3 w-3" aria-hidden="true" /></span>{/if}
                     {#if task.modelRef}<span data-task-model class="shrink-0 text-muted-foreground" aria-label={`Assigned model: ${task.modelRef}`} title={`Model: ${task.modelRef}`}><BrainCircuit class="h-3 w-3" aria-hidden="true" /></span>{/if}
                     {#if task.priority !== "medium"}
                       <button
@@ -371,6 +387,11 @@
                                 >{taskPriorityLabel(priority)}</button>
                               {/each}
                             </div>
+                            {#if statusMenuSection === "all" && planPath && onOpenPlan}
+                              <button class="flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-xs text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring" type="button" role="menuitem" tabindex="-1" data-task-open-plan aria-label={`Open plan for ${taskLabel}`} onclick={() => onOpenPlan(planPath)}><FileCheck2 class="h-3 w-3" aria-hidden="true" />Open plan</button>
+                            {:else if statusMenuSection === "all" && onCreatePlan}
+                              <button class="flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-xs text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50" type="button" role="menuitem" tabindex="-1" data-task-create-plan aria-label={`Create plan for ${taskLabel}`} disabled={!sessionReady || busy} onclick={() => onCreatePlan(task)}><FilePlus2 class="h-3 w-3" aria-hidden="true" />Create plan</button>
+                            {/if}
                             {#if statusMenuSection === "all"}
                               <button class="flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-xs text-tool-error hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring" type="button" role="menuitem" tabindex="-1" title="Delete task" aria-label={`Delete ${taskLabel}`} onclick={() => onDeleteRequest(task.id)}><Trash2 class="h-3 w-3" aria-hidden="true" />Delete task</button>
                             {/if}
@@ -379,6 +400,20 @@
                       </div>
                     </div>
                   </div>
+                  {#if planComplete}
+                    <div class="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" data-task-plan-complete>
+                      <CheckCircle2 class="h-3 w-3 shrink-0 text-tool-success" aria-hidden="true" />
+                      <span class="min-w-0 flex-1 truncate">All plan items checked</span>
+                      <button
+                        class="shrink-0 rounded-sm border border-border px-1.5 py-0.5 text-xs text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50"
+                        type="button"
+                        data-task-mark-done
+                        aria-label={`Mark ${taskLabel} done`}
+                        disabled={busy}
+                        onclick={() => onSetTaskStatus(task.id, "done")}
+                      >Mark done</button>
+                    </div>
+                  {/if}
                 </div>
 
                 {#if isDropPlaceholder(group.status, task.id, "after")}

@@ -10,6 +10,7 @@ pub(crate) struct CloseGuardState(Mutex<CloseGuard>);
 #[derive(Default)]
 struct CloseGuard {
     running_windows: HashSet<String>,
+    restart_blocking_windows: HashSet<String>,
     pending: bool,
     quit_approved: bool,
 }
@@ -23,7 +24,14 @@ enum Action {
 
 impl CloseGuard {
     fn request_restart(&mut self) -> Action {
-        let action = self.request(None);
+        let action = if self.pending {
+            Action::Wait
+        } else if self.restart_blocking_windows.is_empty() {
+            Action::Allow
+        } else {
+            self.pending = true;
+            Action::Ask
+        };
         if action == Action::Allow {
             self.pending = true;
         }
@@ -59,6 +67,7 @@ pub(crate) fn desktop_set_running_activity(
     window: WebviewWindow,
     state: tauri::State<'_, CloseGuardState>,
     running: bool,
+    restart_blocking: Option<bool>,
 ) {
     let mut guard = state.0.lock().unwrap();
     if running {
@@ -66,15 +75,18 @@ pub(crate) fn desktop_set_running_activity(
     } else {
         guard.running_windows.remove(window.label());
     }
+    if running && restart_blocking.unwrap_or(running) {
+        guard.restart_blocking_windows.insert(window.label().into());
+    } else {
+        guard.restart_blocking_windows.remove(window.label());
+    }
 }
 
 pub(crate) fn destroyed(app: &AppHandle, label: &str) {
-    app.state::<CloseGuardState>()
-        .0
-        .lock()
-        .unwrap()
-        .running_windows
-        .remove(label);
+    let state = app.state::<CloseGuardState>();
+    let mut guard = state.0.lock().unwrap();
+    guard.running_windows.remove(label);
+    guard.restart_blocking_windows.remove(label);
 }
 
 /// Watch restarts must obtain consent before publishing the restart marker.
@@ -175,12 +187,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn recoverable_question_waits_skip_restart_warning_but_not_quit_warning() {
+        let mut guard = CloseGuard::default();
+        guard.running_windows.insert("question-window".into());
+        assert_eq!(guard.request_restart(), Action::Allow);
+        assert_eq!(guard.request(None), Action::Wait);
+        guard.finish_restart(false);
+        assert_eq!(guard.request(None), Action::Ask);
+        guard.pending = false;
+        guard.restart_blocking_windows.insert("background-run".into());
+        assert_eq!(guard.request_restart(), Action::Ask);
+        guard.finish_restart(true);
+        assert_eq!(guard.request(None), Action::Allow);
+    }
+
+    #[test]
     fn restart_reserves_quit_until_marker_publication_and_releases_failed_requests() {
         let mut guard = CloseGuard::default();
         assert_eq!(guard.request_restart(), Action::Allow);
         assert_eq!(guard.request(None), Action::Wait);
         guard.finish_restart(false);
         guard.running_windows.insert("main".into());
+        guard.restart_blocking_windows.insert("main".into());
         assert_eq!(guard.request_restart(), Action::Ask);
         assert_eq!(guard.request_restart(), Action::Wait);
         // Cancellation leaves the next restart protected by confirmation.

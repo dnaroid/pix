@@ -13,6 +13,17 @@ describe("Claude login action presentation", () => {
     expect(onOpenTerminal).not.toHaveBeenCalled();
   });
 
+  it("offers Continue only when a resume handler is provided", () => {
+    const base = { onOpenTerminal: vi.fn(), onError: vi.fn() };
+    expect(render(ClaudeLoginAction, { props: base }).body).not.toContain("data-claude-login-continue");
+    const onContinue = vi.fn(async () => "sent");
+    const html = render(ClaudeLoginAction, { props: { ...base, onContinue } }).body;
+    expect(html).toContain("data-claude-login-continue");
+    expect(html).toContain("then press Continue to resume");
+    expect(onContinue).not.toHaveBeenCalled();
+    expect(transcriptSource).toContain("item.id === claudeLoginContinueItemId ? () => onChoiceActionsSubmit(\"Continue\")");
+  });
+
   it("gates recovery to recognized error notices and tears down on session changes", () => {
     expect(transcriptSource).toContain("isClaudeLoginError(item.messageId, item.text)");
     expect(transcriptSource).toContain("{#key activeSessionId}\n                      <ClaudeLoginAction");

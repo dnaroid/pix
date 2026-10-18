@@ -16,7 +16,10 @@ Show live execution Plan and Subagents activity (brainstorm council participants
 
 ## Scope
 
-- Keep session activity out of the workspace Activity Bar; Project, Tasks, Source Control, Registry, Package Scripts, Search indexes, and Settings remain workspace/tool destinations.
+- Keep session activity out of the workspace Activity Bar; Project, Work,
+  Source Control, Registry, Package Scripts, Search indexes, and Settings remain
+  workspace/tool destinations. Work contains the project Tasks and Plans views;
+  session activity steps remain distinct from project work.
 - Give every visible session tab a compact semantic status icon derived from that session's own snapshots, prompt-running state, input attention, and unseen successful completion.
 - Keep **Session activity** at the far-right edge of the status bar only when it conveys live Plan/Subagent activity. A compact summary shows active agents' configured icons and completed/total Plan progress; each activity popup is independently accessible from the status bar.
 - Do not mount or persist a Session inspector. HUD availability depends only on active-session activity; no prior pane preference can hide it.
@@ -53,6 +56,7 @@ Show live execution Plan and Subagents activity (brainstorm council participants
 - With no active session, including while the selected conversation is a UI-only draft, no session activity HUD is rendered. With a real but activity-empty session, no inert Session status control is rendered.
 - When at least one pending, in-progress, or deferred todo exists, all non-deleted todos are shown in stable hierarchy order, including completed items.
 - The **Session steps** popup offers a compact, accessible **Clear session steps** action when its active session is ready and idle and has visible todos. It invokes private ACP `pix/session/clear_todos`, which dispatches the existing `/todos-clear` extension handler directly without running a user prompt, adding `/todos-clear` to chat, or creating a user transcript entry. It preserves the composer draft, reports request failures, disables while unavailable or in flight (including after popup remounts or switching away and back), and never mutates the displayed snapshot locally. The ACP session lock is claimed before asynchronous work so duplicate clears cannot race; the existing extension handler remains authoritative for state publishing and persistence. Success depends on that handler, not an unrelated session-list metadata write.
+- Each Steps row offers two quiet icon actions. **Go to where step #N started** scrolls the transcript to the newest successful `todo` call that set the step `in_progress` (falling back to the call that created it), expanding its collapsed activity group and briefly highlighting the revealed entry (~1.6 s primary tint via `data-transcript-highlight`; a newer reveal moves the mark, teardown clears it, and reduced motion disables the fade). The scan runs newest-first and stops at a plan boundary (`clear`, or `create`/`batch_create`/`import` with `replace: true`) so superseded plans with colliding ids are not matched; while no boundary is loaded it pages older history in (bounded, superseded by a newer jump or session switch) and reports an error if the start is not found. ACP lazy history keeps `rawInput` for `todo` calls (as for `question`) so this works without hydrating deferred results. **Rerun step #N in this session** sends a same-session generated prompt asking the agent to redo only that step and track it via the todo tool; it uses the same ready/idle gate as Clear session steps and is disabled while a prompt runs. Both are absent for read-only sub-agent viewers and drafts.
 - Subagents matches the TUI live-panel rule: only planned, running, or retrying agents are visible as live indicators; terminal agents leave the live list with the next snapshot, and the section does not invent historical state.
 
 ### Sub-agent session viewers
@@ -76,6 +80,8 @@ Show live execution Plan and Subagents activity (brainstorm council participants
 - Status precedence is `needs-input` → `warning` → `running` → `unseen-complete` → `idle`, so a stale completion badge never masks current execution or attention. Fork identity remains a separate `GitFork` marker between the status icon and title.
 - Elicitation attention stays attached to each requesting session when another tab becomes active, including when several background sessions are independently waiting for input.
 - Tab activity never changes tab membership or order and does not replace the existing active-tab affordance.
+- The Steps popup's `Task:` label for an executing plan wraps long task names and
+  does not use a native title tooltip.
 - Session todo progress is labeled **Steps** in the status HUD, tab activity labels and subagent todo progress; project-scoped work continues to use **Tasks**. The popup label is **Session steps**, its heading is **Steps**, and its accessible scroll region is **Session step list**.
 - Desktop updates the derived activity summary only for the session whose Todo/Subagent snapshot changed. A live activity event does not rescan every retained session plan/run merely to refresh the tab strip or status HUD.
 
@@ -84,6 +90,29 @@ to a compact circular progress ring in place of the todo icon. The ring fills
 clockwise from the top according to the completed fraction; no linear progress
 track is rendered. Visibility depends only on live activity; click popup behavior
 follows decision 0048.
+
+- A session launched from a saved plan shows an **Executing plan** status-bar
+  chip immediately left of the session activity/Steps HUD, only for live,
+  non-draft, non-viewer sessions whose plan still exists in the current project
+  documents snapshot. The chip shows `FileCheck2`, saved checklist progress as a
+  linear bar and `N/M`; its click popup identifies the plan, explains that this
+  is saved-file checklist progress distinct from live session Steps, and offers
+  **Open plan** to open Preview. While mounted it refreshes project documents
+  every three seconds in the foreground. Deleted or renamed plans no longer show
+  the chip. Launch association is workspace-scoped in localStorage under
+  `pix.desktop.planLaunches:<workspace>`, retaining at most 50 newest canonical
+  `.pi/plans` launches; stale/reset launches are not recorded.
+- If the executing plan is linked to a project task, the chip's popover includes
+  **Task › Plan › This session** breadcrumbs, with the Task segment omitted when
+  unlinked. The Steps popup's **Executing plan** block also shows
+  `Task: <label>`. Breadcrumbs live in the chip popover because Desktop has no
+  session header.
+- In the Steps popup, the **Executing plan** block appears above the **Steps**
+  header. Its plan-label button opens the plan Preview, and its linear progress
+  is saved-file checklist progress distinct from live session Steps. The Run
+  prompt and `external/pi-tools-suite/docs/plan-writing.md` require saving each
+  verified checklist item as `[x]` immediately; finer sub-steps stay in session
+  Steps.
 
 ## Related files
 

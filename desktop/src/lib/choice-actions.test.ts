@@ -16,7 +16,8 @@ describe("pix-actions blocks", () => {
   });
 
   it("rejects malformed or out-of-bounds blocks", () => {
-    expect(parseChoiceActions("pix-actions", "- [x] Only one")).toBeUndefined();
+    expect(parseChoiceActions("pix-actions", "")).toBeUndefined();
+    expect(parseChoiceActions("pix-actions Go", "- [x] Only one")).toEqual({ submitLabel: "Go", items: [{ label: "Only one", checked: true }] });
     expect(parseChoiceActions("pix-actions", "- [x] A\nplain text")).toBeUndefined();
     expect(parseChoiceActions("pix-actions", Array.from({ length: 9 }, (_, i) => `- [ ] ${i}`).join("\n"))).toBeUndefined();
   });

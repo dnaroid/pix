@@ -119,7 +119,7 @@ across actual component destruction/remount or tab switching.
   Unsupported capabilities require an explanation and an offered alternative,
   not a silent file substitution or a claim that the sandbox supports them.
 - The same Desktop-only capability notice recommends a `pix-actions` checklist
-  when the assistant is ending with two or more alternative next steps it would
+  when the assistant is ending with one or more next steps it would
   carry out. Each line should be a GFM task item (`- [x] step` recommended,
   or `- [ ] step`); steps the user must perform remain ordinary text.
 - A dedicated, read-only `pix_html_guide` tool returns the complete
@@ -141,7 +141,8 @@ across actual component destruction/remount or tab switching.
 ### Quick-choice actions
 
 Use a closed `pix-actions` fenced block with a button label in the info string.
-Its body must contain 2–8 GFM task items, with no other content; checked items
+Its body must contain 1–8 GFM task items (a single item is a one-click
+confirmation), with no other content; checked items
 are recommended defaults. For example:
 
 ~~~~markdown
@@ -162,6 +163,26 @@ Submitting sends the selected steps as a normal user message, formatted as
 positions). It uses the ordinary prompt path, preserving the composer draft;
 when a prompt is already running at submission, the generated message is
 queued. This interaction is Desktop-only.
+
+Checkbox edits (including an empty selection) survive transcript remounts when
+switching session tabs within the same Desktop window. State is scoped to the
+session, assistant message, block position and parsed block content; identical
+checklists in other sessions/messages do not share edits. Changed blocks start
+from their recommended defaults. Pending/submitted status and submission errors
+also survive remounts, so switching away and back cannot re-enable a pending
+submission. This is a window-local, 512-block LRU cache, not durable session
+history: restarting Desktop or evicting an old entry resets it. In-flight
+submissions are not evicted.
+
+In user-message history, an exact generated quick-choice reply is displayed as
+a static checkbox receipt: all source options are shown, checked only if they
+were actually selected in the reply. These rows have no interactive controls or
+submit button. This is presentation-only; stored/sent user text, copy/edit and
+agent input retain the original numbered-list payload. Receipts are reconstructed
+from the preceding assistant's parsed block and the exact reply, independently
+of the window-local selection cache, including after restart. If the source is
+not loaded, the reply differs from the generated format, or multiple blocks
+match ambiguously, the user message remains ordinary Markdown.
 
 Use a fully self-contained block. For example:
 

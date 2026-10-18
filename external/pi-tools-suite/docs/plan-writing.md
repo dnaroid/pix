@@ -145,6 +145,9 @@ Gates and blockers must be usable from the plan alone, without this guide:
   evidence honestly; do not imply it was rerun in the current session.
   For reused evidence, name its source and the checked state/scope or environment
   needed to establish applicability.
+- While executing, save each verified item as `[x]` in the plan file as soon as
+  its step completes, so saved progress stays current for readers. Track finer
+  sub-steps in the session checklist instead of duplicating plan items there.
 - If later work invalidates earlier completion or verification, reopen the
   affected checklist items and state why. Mark affected gates as No-Go until
   their required evidence is valid again or an explicit exception is recorded

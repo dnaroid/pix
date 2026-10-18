@@ -271,3 +271,21 @@ test("desktop replay carries persisted activity timing for one thinking block an
 		{ endedAtMs: 5_000 },
 	]);
 });
+
+test("lazy history keeps small todo inputs for Desktop step navigation", () => {
+	const messages = [
+		{
+			role: "assistant",
+			content: [
+				{ type: "toolCall", id: "todo-1", name: "todo", arguments: { action: "update", id: 2, status: "in_progress" } },
+				{ type: "toolCall", id: "read-1", name: "read", arguments: { path: "/repo/a.ts" } },
+			],
+		},
+		{ role: "toolResult", toolCallId: "todo-1", toolName: "todo", isError: false, content: [{ type: "text", text: "ok" }] },
+		{ role: "toolResult", toolCallId: "read-1", toolName: "read", isError: false, content: [{ type: "text", text: "x" }] },
+	] as unknown as PiAgentMessage[];
+	const history = deferredSessionHistoryFromMessages(messages, { sessionId: "session-todo", cwd: "/repo" });
+	const starts = history.updates.filter((update) => update.sessionUpdate === "tool_call") as Array<{ toolCallId: string; rawInput?: unknown }>;
+	assert.deepEqual(starts.find((update) => update.toolCallId === "todo-1")?.rawInput, { action: "update", id: 2, status: "in_progress" });
+	assert.equal(starts.find((update) => update.toolCallId === "read-1")?.rawInput, undefined);
+});

@@ -1,9 +1,14 @@
+import { planRunResumable, planRunStatus } from "../lib/plan-launches";
 import { createDesktopOverlaysViewModel } from "./desktop-overlays-view-model.svelte";
 import { createDesktopStatusBarViewModel } from "./desktop-status-bar-view-model.svelte";
 import type { DesktopViewModelServicesOptions } from "./desktop-view-model-service-options";
 import type { createSessionTodoActions } from "./session-todo-actions";
 import { invoke } from "@tauri-apps/api/core";
+import { planOwners } from "../lib/project-task-plans";
+import { projectTaskDisplayLabel } from "../lib/project-tasks";
 import type { SubagentSessionNavigation } from "./desktop-subagent-navigation";
+import { createSessionStepNavigation } from "./session-step-navigation";
+import { buildSessionStepRerunPrompt } from "../lib/session-step-prompt";
 
 export function createDesktopShellViewModelServices(
   options: DesktopViewModelServicesOptions,
@@ -28,6 +33,14 @@ export function createDesktopShellViewModelServices(
     focusComposer: options.focusComposer,
   });
 
+  const stepNavigation = createSessionStepNavigation({
+    activeSessionId: () => options.state.sessionId,
+    transcript: () => options.state.transcript,
+    loadOlder: options.sessions.history.loadOlder,
+    revealActivityEntry: options.transcriptScroll.revealActivityEntry,
+    reportError: (error) => options.errors.report(error),
+  });
+
   const statusBar = createDesktopStatusBarViewModel({
     status: options.status,
     workspace: options.workspace,
@@ -49,6 +62,38 @@ export function createDesktopShellViewModelServices(
       options.state.sessionId && todoActions.canClear(options.state.sessionId),
     ),
     clearSessionTodos: todoActions.clear,
+    sessionPlan: (workspace, sessionId) => {
+      const launches = options.project.planLaunches;
+      const launch = launches.launch(workspace, sessionId);
+      const snapshot = options.project.documents.snapshot;
+      // A deleted/renamed plan simply drops the HUD context.
+      if (!launch || !snapshot.plans.includes(launch.path)) return undefined;
+      const path = launch.path;
+      const owner = planOwners(options.project.tasks.document.tasks)[path];
+      const running = options.prompt.runtime.runningSessionIds;
+      const progress = snapshot.planProgress?.[path] ?? null;
+      const status = planRunStatus(launch, launch.live || running.has(sessionId), progress);
+      // Resume only from the newest run of the plan, and never while one is active.
+      const runs = launches.sessionsFor(workspace, path);
+      const resumable = planRunResumable(status)
+        && runs[0]?.sessionId === sessionId
+        && !runs.some((run) => run.live || running.has(run.sessionId));
+      return { path, progress, status, resumable, ...(owner ? { task: projectTaskDisplayLabel(owner) } : {}) };
+    },
+    resumePlan: (path) => void options.projectActions.actions.resumePlan(path),
+    canJumpToSteps: () => options.state.runtimeReady && !options.sessions.history.loading,
+    // Same idle/ready gate as clearing steps: no running prompt, mutation or history load.
+    canRerunSteps: () => Boolean(options.state.sessionId && todoActions.canClear(options.state.sessionId)),
+    jumpToStep: (sessionId, task) => void stepNavigation.jumpToStep(sessionId, task),
+    rerunStep: (sessionId, task) => {
+      options.promptActions.submit.submitStepRerun(sessionId, buildSessionStepRerunPrompt(task))
+        .catch((error: unknown) => options.errors.report(error));
+    },
+    planRunDisabled: () => !(options.status() === "ready" && options.clientAvailable() && !options.workspaceOpening?.())
+      || !options.presentation.canUseSession || options.presentation.sessionMutationRunning
+      || options.projectActions.actions.actionId !== null,
+    openPlan: (path) => options.project.documents.open(path),
+    refreshPlans: options.project.documents.refresh,
     runtime: options.sessions.runtime,
     modelConfig: options.model.config,
     sessionCoordinator: options.orchestration.coordinator,

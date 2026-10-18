@@ -5,6 +5,7 @@ type HistoryPagerOptions = {
   restoring: () => boolean;
   loadOlder: () => Promise<boolean>;
   afterRender: () => Promise<void>;
+  onScroll: () => void;
 };
 
 const OLDER_HISTORY_THRESHOLD_PX = 96;
@@ -12,6 +13,18 @@ const OLDER_HISTORY_THRESHOLD_PX = 96;
 export function createTranscriptHistoryPager(options: HistoryPagerOptions) {
   let pending = false;
   let disposed = false;
+
+  async function handleScroll(): Promise<void> {
+    if (disposed) return;
+    const pane = options.pane();
+    const sessionId = options.activeSessionId();
+    options.onScroll();
+    // Follow state is owned by the parent. Wait for its updated props before
+    // deciding: one scroll straight to the top may be the last event we get.
+    await options.afterRender();
+    if (disposed || pane !== options.pane() || sessionId !== options.activeSessionId()) return;
+    await loadAtTop();
+  }
 
   function viewportAnchor(pane: HTMLDivElement): { id: string; top: number } | null {
     const paneTop = pane.getBoundingClientRect().top;
@@ -74,5 +87,5 @@ export function createTranscriptHistoryPager(options: HistoryPagerOptions) {
     }
   }
 
-  return { loadAtTop, dispose: () => { disposed = true; } };
+  return { handleScroll, loadAtTop, dispose: () => { disposed = true; } };
 }

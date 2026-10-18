@@ -58,6 +58,10 @@ export class EventTranslator {
 	private eventToUpdates(event: JsonAgentSessionEvent, cancellationRequested: boolean): SessionUpdate[] {
 		switch (event.type) {
 			case "message_update":
+				if (cancellationRequested) {
+					this.assistantBlocks.clear();
+					return [];
+				}
 				return this.messageUpdateToUpdates(event.assistantMessageEvent);
 			case "message_end": {
 				const error = assistantFailureUpdate(event.message, "unknown", cancellationRequested);

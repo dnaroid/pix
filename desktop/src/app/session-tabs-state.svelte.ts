@@ -147,10 +147,11 @@ export function createSessionTabsState() {
       if (anchorIndex >= 0) {
         visibleIds.splice(anchorIndex + 1, 0, sessionId);
         restoredIds = visibleIds;
-        if (!locallyOpenedIds.includes(sessionId)) locallyOpenedIds = [...locallyOpenedIds, sessionId];
       }
     }
-    if (!restoredIds?.includes(sessionId) && !locallyOpenedIds.includes(sessionId)) {
+    // Selecting an already restored/TUI-discovered tab also claims Desktop
+    // ownership; visibility alone must not leave it subject to TUI removal.
+    if (!locallyOpenedIds.includes(sessionId)) {
       locallyOpenedIds = [...locallyOpenedIds, sessionId];
     }
     persistCurrentTabs();

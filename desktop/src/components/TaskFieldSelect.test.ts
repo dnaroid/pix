@@ -51,6 +51,12 @@ describe("Pix task dropdowns", () => {
     ]) expect(linkInputSource).toContain(contract);
   });
 
+  it("lets the open trigger close the popup without focusout reopening it", () => {
+    // WebKit: pressing an unfocused button blurs search → focusout closes → click reopens.
+    expect(selectorSource).toMatch(/onmousedown=\{\(event\) => \{[\s\S]*?if \(open\) event\.preventDefault\(\);/);
+    expect(selectorSource).toContain("onclick={() => open ? close() : show()}");
+  });
+
   it("keeps keyboard, search, outside dismissal and scroll positioning for narrow editor popups", () => {
     for (const control of [
       'aria-haspopup="listbox"', 'role="combobox"', 'role="listbox"',

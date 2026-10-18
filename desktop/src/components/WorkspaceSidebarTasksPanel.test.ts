@@ -160,4 +160,23 @@ describe("interactive project Tasks panel", () => {
     expect(html).toContain(tone);
     expect(html).toContain(icon);
   });
+
+  it("suggests marking a task done only when its linked plan checklist is complete", () => {
+    const plan = ".pi/plans/ship.md";
+    const linked = { ...task, links: [plan] };
+    const complete = markup({ tasks: [linked], planProgress: { [plan]: { completed: 3, total: 3 } }, isStatusCollapsed: () => false });
+    expect(complete).toContain("data-task-mark-done");
+    expect(complete).toContain('aria-label="Mark Existing task done"');
+    for (const [tasks, progress] of [
+      [[linked], { [plan]: { completed: 2, total: 3 } }],
+      [[linked], { [plan]: { completed: 0, total: 0 } }],
+      [[linked], { [plan]: null }],
+      [[{ ...linked, status: "done" as const }], { [plan]: { completed: 3, total: 3 } }],
+      [[task], { [plan]: { completed: 3, total: 3 } }],
+    ] as const) {
+      expect(markup({ tasks: [...tasks], planProgress: progress, isStatusCollapsed: () => false })).not.toContain("data-task-mark-done");
+    }
+    expect(markup({ tasks: [linked], busy: true, planProgress: { [plan]: { completed: 3, total: 3 } }, isStatusCollapsed: () => false }))
+      .toMatch(/data-task-mark-done[^>]*disabled/);
+  });
 });

@@ -4,7 +4,7 @@
   import { createComposerMessageEdit } from "./app/composer-message-edit.svelte";
   import { onDestroy, onMount, tick, untrack } from "svelte";
   import { invoke, isTauri } from "@tauri-apps/api/core";
-  import { createWindowRunActivitySync } from "./app/window-run-activity";
+  import { createWindowRunActivitySync, hasRestartBlockingRun } from "./app/window-run-activity";
   import { installDesktopContextMenu } from "./lib/desktop-context-menu";
   import type { DesktopShortcutPlatform } from "./lib/desktop-commands";
   import type { Attachment } from "./lib/attachments";
@@ -48,6 +48,7 @@
   import { createDesktopRootEffects } from "./app/desktop-root-effects.svelte";
   import { createSessionTabAttentionStore } from "./app/session-tab-attention.svelte";
   import { createDesktopTrayAttention } from "./lib/desktop-tray-attention";
+  import { planLaunchOutcome } from "./lib/plan-launches";
   import { createDesktopViewModelServices } from "./app/desktop-view-model-services";
   import {
     createDesktopAgentNotificationCoordinator,
@@ -321,9 +322,16 @@
     onPromptStarted: (sessionId) => {
       sessionTabAttention.clear(sessionId);
       agentNotifications.promptStarted(sessionId);
+      projectServices.planLaunches.started(sessionId);
     },
-    onPromptSettled: agentNotifications.promptSettled,
-    onPromptError: agentNotifications.promptError,
+    onPromptSettled: (sessionId, stopReason) => {
+      agentNotifications.promptSettled(sessionId, stopReason);
+      projectServices.planLaunches.settle(sessionId, planLaunchOutcome(stopReason));
+    },
+    onPromptError: (sessionId, error) => {
+      agentNotifications.promptError(sessionId, error);
+      projectServices.planLaunches.settle(sessionId, "failed");
+    },
     onAgentPaused: agentNotifications.paused,
     onSessionCleared: (sessionId) => {
       sessionTabAttention.clear(sessionId);
@@ -546,6 +554,8 @@
   const activateDraftSessionTab = draftSession.activate;
   const openSessionStartTab = draftSession.openStartTab;
 
+  /** Startup restoration may replace the active session; plan runs wait for it. */
+  let workspaceOpening = $state(false);
   const workspaceSessionStartup = createDesktopWorkspaceSessionStartup({
     client: () => client,
     workspace: () => workspace,
@@ -554,6 +564,7 @@
     state: activeSessionState,
     setErrorMessage: errors.set,
     reportError,
+    onOpeningChange: (opening) => workspaceOpening = opening,
   });
 
   const transcriptAttachments = createTranscriptAttachmentController({
@@ -563,6 +574,7 @@
   const projectActionServices = createDesktopProjectActionServices({
     client: () => client,
     workspace: () => workspace,
+    workspaceOpening: () => workspaceOpening,
     canUseSession: () => canUseSession,
     sessionMutationRunning: () => sessionMutationRunning,
     state: activeSessionState,
@@ -876,6 +888,7 @@
     status: () => status,
     clientAvailable: () => Boolean(client),
     client: () => client,
+    workspaceOpening: () => workspaceOpening,
     operationRunning: () => operationRunning,
     dragActive: () => dragActive,
     activeWorkbenchTabId: () => activeWorkbenchTabId,
@@ -931,11 +944,20 @@
   onMount(desktopWatchRestart.start);
 
   const windowRunActivity = createWindowRunActivitySync(
-    (running) => invoke("desktop_set_running_activity", { running }),
+    (running, restartBlocking) => invoke("desktop_set_running_activity", { running, restartBlocking }),
     reportError,
   );
   $effect(() => {
-    if (isTauri()) windowRunActivity.update(promptRuntime.runningSessionIds.size > 0 || draftSessionMaterializing);
+    if (isTauri()) windowRunActivity.update(
+      promptRuntime.runningSessionIds.size > 0 || draftSessionMaterializing,
+      hasRestartBlockingRun(
+        promptRuntime.runningSessionIds,
+        interactionServices.elicitation.pendingBySession,
+        interactionServices.elicitation.pendingUnscoped,
+        activeSessionState.sessionId,
+        draftSessionMaterializing,
+      ),
+    );
   });
   onMount(() => windowRunActivity.dispose);
 

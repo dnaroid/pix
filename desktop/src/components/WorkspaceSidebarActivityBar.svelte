@@ -107,8 +107,8 @@
     type="button"
     data-sidebar-tab
     tabindex={activeTab === "tasks" ? 0 : -1}
-    title={activityTitle("tasks", activeTab === "tasks" && !collapsed ? "Hide Tasks" : "Tasks")}
-    aria-label={activityLabel("tasks", "Tasks")}
+    title={activityTitle("tasks", activeTab === "tasks" && !collapsed ? "Hide Work" : "Work")}
+    aria-label={activityLabel("tasks", "Work")}
     aria-controls="workspace-tasks-panel"
     aria-pressed={activeTab === "tasks" && !collapsed}
     onkeydown={(event) => handleKeydown(event, "tasks")}

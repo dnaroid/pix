@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AcpClient } from "../lib/acp-client";
 import { createProjectPlanActions } from "./project-plan-actions.svelte";
-import { buildProjectPlanPrompt } from "./project-plan-prompt";
+import { buildProjectPlanPrompt, buildProjectPlanResumePrompt } from "./project-plan-prompt";
 
 const path = ".pi/plans/releases/rollout.md";
 
@@ -24,6 +24,7 @@ function fixture() {
     activateSession: vi.fn((id) => { sessionId = id; }),
     appendUserMessage: vi.fn().mockReturnValue("message"), scrollToLatest: vi.fn().mockResolvedValue(undefined),
     runPrompt: vi.fn().mockResolvedValue(undefined), refreshSessions: vi.fn(), reportError: vi.fn(),
+    recordPlanLaunch: vi.fn(), settlePlanLaunch: vi.fn(),
   };
   const actions = createProjectPlanActions(options, () => false);
   return { client, options, actions, changeWorkspace: (next: string) => { workspace = next; }, navigate: () => { sessionId = "other"; } };
@@ -45,9 +46,10 @@ describe("plan launch in a new session", () => {
     expect(actions.actionId).toBeNull();
   });
 
-  it.each(["offline", "mutation", "missing", "invalid", "busy"])("does not launch when %s", async (reason) => {
+  it.each(["offline", "opening", "mutation", "missing", "invalid", "busy"])("does not launch when %s", async (reason) => {
     const { client, options } = fixture();
     if (reason === "offline") options.canUseSession = () => false;
+    if (reason === "opening") options.workspaceOpening = () => true;
     if (reason === "mutation") options.sessionMutationRunning = () => true;
     if (reason === "missing") options.planAvailable = () => false;
     const actions = createProjectPlanActions(options, () => reason === "busy");
@@ -79,7 +81,14 @@ describe("plan launch in a new session", () => {
     expect(client.closeSession).toHaveBeenCalledWith("late");
     expect(options.forgetRuntime).toHaveBeenCalledWith("late");
     expect(options.activateSession).not.toHaveBeenCalled();
+    expect(options.recordPlanLaunch).not.toHaveBeenCalled();
     expect(options.runPrompt).not.toHaveBeenCalled();
+  });
+
+  it("remembers the launched plan for the new session only", async () => {
+    const { actions, options } = fixture();
+    await actions.runPlan(path);
+    expect(options.recordPlanLaunch).toHaveBeenCalledExactlyOnceWith("/project", "new", path);
   });
 
   it.each(["runtime", "scroll"])("does not send after navigating away during %s preparation", async (stage) => {
@@ -88,6 +97,20 @@ describe("plan launch in a new session", () => {
     else options.scrollToLatest = async () => { navigate(); };
     await actions.runPlan(path);
     expect(options.runPrompt).not.toHaveBeenCalled();
+  });
+
+  it("does not send the prompt when the plan is deleted during the launch", async () => {
+    const { actions, options } = fixture();
+    let available = true;
+    options.planAvailable = () => available;
+    options.ensureRuntime = async () => { available = false; };
+    await actions.runPlan(path);
+    expect(options.activateSession).toHaveBeenCalledWith("new", "/project", false);
+    expect(options.appendUserMessage).not.toHaveBeenCalled();
+    expect(options.runPrompt).not.toHaveBeenCalled();
+    expect(options.setErrorMessage).toHaveBeenLastCalledWith(`Plan ${path} was removed before the run started.`);
+    expect(options.setOperationRunning).toHaveBeenLastCalledWith(false);
+    expect(actions.actionId).toBeNull();
   });
 
   it("does not let an old completion unlock a replacement launch after reset", async () => {
@@ -114,5 +137,47 @@ describe("plan launch in a new session", () => {
     expect(options.reportError).toHaveBeenCalledWith(error);
     expect(options.setOperationRunning).toHaveBeenLastCalledWith(false);
     expect(actions.actionId).toBeNull();
+  });
+
+  it("resumes with a continuation prompt that keeps the execution rules", async () => {
+    const { actions, options } = fixture();
+    await actions.resumePlan(path);
+    const prompt = buildProjectPlanResumePrompt(path);
+    expect(prompt).toContain("first unchecked item");
+    expect(prompt).toContain(buildProjectPlanPrompt(path));
+    expect(options.appendUserMessage).toHaveBeenCalledWith("new", prompt, []);
+    expect(options.recordPlanLaunch).toHaveBeenCalledExactlyOnceWith("/project", "new", path);
+  });
+
+  it("leaves the outcome to the prompt lifecycle once the prompt was sent", async () => {
+    const { actions, options } = fixture();
+    await actions.runPlan(path);
+    expect(options.settlePlanLaunch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["removed", "failed"],
+    ["navigated", "cancelled"],
+    ["runtime failed", "failed"],
+    ["runtime threw", "failed"],
+  ] as const)("settles a recorded launch whose prompt never started (%s → %s)", async (reason, outcome) => {
+    const { actions, options, navigate } = fixture();
+    let available = true;
+    options.planAvailable = () => available;
+    if (reason === "removed") options.ensureRuntime = async () => { available = false; };
+    if (reason === "navigated") options.ensureRuntime = async () => { navigate(); };
+    if (reason === "runtime failed") options.runtimeReady = () => false;
+    if (reason === "runtime threw") options.ensureRuntime = async () => { throw new Error("boom"); };
+    await actions.runPlan(path);
+    expect(options.runPrompt).not.toHaveBeenCalled();
+    expect(options.settlePlanLaunch).toHaveBeenCalledExactlyOnceWith("new", outcome, "/project");
+  });
+
+  it("does not settle when the session was never recorded", async () => {
+    const { actions, options, client } = fixture();
+    client.newSession.mockRejectedValueOnce(new Error("offline"));
+    await actions.runPlan(path);
+    expect(options.recordPlanLaunch).not.toHaveBeenCalled();
+    expect(options.settlePlanLaunch).not.toHaveBeenCalled();
   });
 });

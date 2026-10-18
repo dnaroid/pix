@@ -161,6 +161,29 @@ describe("status HUD plan popup emphasis", () => {
   });
 });
 
+describe("status HUD executing plan block", () => {
+  const todoSnapshot: SessionTodoSnapshot = {
+    version: 1, checkedAt: 1,
+    details: { action: "list", params: {}, nextId: 2, tasks: [{ id: 1, subject: "Current", status: "in_progress" }] },
+  };
+  const props = {
+    summary: { ...EMPTY_SESSION_ACTIVITY, completedTodos: 0, totalTodos: 1, openTodos: 1 },
+    subagentSnapshot: undefined, todoSnapshot, promptRunning: false, sessionNeedsInput: false,
+  };
+
+  it("shows the launched plan above Steps with file checklist progress", () => {
+    const html = render(SessionActivityStatusHud, { props: { ...props, sessionPlan: { path: ".pi/plans/releases/rollout.md", progress: { completed: 2, total: 5 } }, onOpenPlan: () => {} } }).body;
+    expect(html).toContain("data-session-todo-plan");
+    expect(html).toContain('aria-label="Open plan releases/rollout.md"');
+    expect(html).toContain("data-plan-checklist-progress");
+    expect(html.indexOf("data-session-todo-plan")).toBeLessThan(html.indexOf(">Steps</span>"));
+  });
+
+  it("omits the block for sessions not launched from a plan", () => {
+    expect(render(SessionActivityStatusHud, { props }).body).not.toContain("data-session-todo-plan");
+  });
+});
+
 describe("status HUD sub-agent sessions", () => {
   it("offers an open-session action for active agents", () => {
     const html = render(SessionActivityStatusHud, { props: {
@@ -169,5 +192,39 @@ describe("status HUD sub-agent sessions", () => {
       todoSnapshot: undefined, promptRunning: false, sessionNeedsInput: false, onOpenSubagentSession: () => {},
     } }).body;
     expect(html).toContain("data-session-subagent-open");
+  });
+});
+
+describe("status HUD step actions", () => {
+  const todoSnapshot: SessionTodoSnapshot = {
+    version: 1, checkedAt: 1,
+    details: { action: "list", params: {}, nextId: 3, tasks: [
+      { id: 1, subject: "Done", status: "completed" },
+      { id: 2, subject: "Current", status: "in_progress" },
+    ] },
+  };
+  const base = {
+    summary: { ...EMPTY_SESSION_ACTIVITY, completedTodos: 1, totalTodos: 2, openTodos: 1 },
+    subagentSnapshot: undefined, todoSnapshot, sessionNeedsInput: false,
+  };
+
+  it("offers jump and rerun per step only when handlers exist", () => {
+    expect(render(SessionActivityStatusHud, { props: { ...base, promptRunning: false } }).body).not.toContain("data-session-todo-actions");
+    const html = render(SessionActivityStatusHud, { props: {
+      ...base, promptRunning: false, canJumpToSteps: true, canRerunSteps: true, onJumpToStep: () => {}, onRerunStep: () => {},
+    } }).body;
+    expect(html.match(/data-session-todo-jump/g)).toHaveLength(2);
+    expect(html.match(/data-session-todo-rerun/g)).toHaveLength(2);
+    expect(html).toContain('aria-label="Go to where step #2 started"');
+    expect(html).toContain('aria-label="Rerun step #2 in this session"');
+    expect(html).not.toMatch(/data-session-todo-(jump|rerun)[^>]*disabled/);
+  });
+
+  it("disables rerun while a prompt runs and jump when navigation is unavailable", () => {
+    const html = render(SessionActivityStatusHud, { props: {
+      ...base, promptRunning: true, canJumpToSteps: false, canRerunSteps: true, onJumpToStep: () => {}, onRerunStep: () => {},
+    } }).body;
+    expect(html.match(/data-session-todo-rerun[^>]*disabled/g)).toHaveLength(2);
+    expect(html.match(/data-session-todo-jump[^>]*disabled/g)).toHaveLength(2);
   });
 });

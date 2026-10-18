@@ -3,6 +3,7 @@ import path from "node:path";
 import { androidInputCommand, createAndroidClient, validateAndroidTarget } from "../drivers/android/adb.mjs";
 import { androidTapPoint, parseAndroidHierarchy, rotatedAndroidSize, selectAndroidNodes, validateAndroidPng, validateAndroidSelector } from "../drivers/android/hierarchy.mjs";
 import { noIdleHierarchyCommand, noIdleHierarchyFailure, parseNoIdleHierarchyResult, requireStableAndroidNode, verifyNoIdleHelperBundle } from "../drivers/android/no-idle.mjs";
+import { createAndroidLifecycle, resumesAndroidApp, validateAndroidLifecycle } from "../drivers/android/lifecycle.mjs";
 
 const CAPABILITIES = ["attach", "boundedActions", "coordinateInput", "accessibilitySnapshot", "semanticActivation", "keyboardInput", "valueInput", "stateAssertions", "windowScreenshot"];
 const FIELDS = {
@@ -12,6 +13,7 @@ const FIELDS = {
 	pressKey: ["key"], inputText: ["text"],
 	tapPoint: ["x", "y", "name"], swipe: ["startX", "startY", "endX", "endY", "durationMs", "name"],
 	assertHelperCleanup: ["runId"],
+	appLifecycle: ["operation", "name"], wait: ["durationMs"],
 };
 const STATE_ATTRIBUTES = new Set(["enabled", "checked", "selected", "focused", "clickable"]);
 const REMEDIATION = "Use the documented dedicated emulator launcher; open the target app on that AVD, then retry. Never fall back to a physical device, change permissions, or run raw ADB outside the unified runner.";
@@ -24,8 +26,9 @@ export async function probeAndroidBackend(context = {}) {
 		const target = validateAndroidTarget(context.flow.target.android);
 		if (target.hierarchyMode === "no-idle") verifyNoIdleHelperBundle();
 		const client = createAndroidClient(target, context);
-		await client.identity();
-		await client.foreground();
+		const boot = await client.identity();
+		if (resumesAndroidApp(context.flow.steps)) await createAndroidLifecycle(client, target, boot, context).guardBackground();
+		else await client.foreground();
 		await client.screenSize();
 		return { ...base, available: true, reason: "explicit AVD identity and foreground package verified" };
 	} catch (error) {
@@ -43,6 +46,7 @@ export function validateAndroidSteps(steps) {
 		if (["tap", "assertState"].includes(step.action)) validateAndroidSelector(step.selector);
 		if (step.action === "assertState" && (!STATE_ATTRIBUTES.has(step.attribute) || typeof step.equals !== "boolean")) throw new Error("invalid Android state assertion");
 		if (["pressKey", "inputText", "tapPoint", "swipe"].includes(step.action)) androidInputCommand(step);
+		validateAndroidLifecycle(step);
 		if (step.runId !== undefined && (typeof step.runId !== "string" || !/^[0-9a-f]{32}$/.test(step.runId))) throw new Error("invalid Android helper runId");
 	}
 }
@@ -56,13 +60,17 @@ export async function runAndroidBackend(context) {
 	let client;
 	let target;
 	let size;
+	let lifecycle;
+	let background = resumesAndroidApp(context.flow.steps);
 	const stepContext = { ...context, stageTimeoutMs: Math.min(15_000, context.stageTimeoutMs ?? 15_000) };
 	async function guard() {
 		if (await client.identity() !== boot) throw new Error("Android emulator identity changed during QA; no further input allowed");
-		await client.foreground();
+		if (background) await lifecycle.guardBackground();
+		else await client.foreground();
 	}
 	async function hierarchy() {
 		await guard();
+		await client.foreground();
 		const temporary = target.hierarchyMode === "no-idle";
 		let raw;
 		if (temporary) {
@@ -78,6 +86,7 @@ export async function runAndroidBackend(context) {
 			raw = completion.body;
 		} else raw = await client.command(["exec-out", "uiautomator", "dump", "/proc/self/fd/1"]);
 		await guard();
+		await client.foreground();
 		const output = raw.toString("utf8");
 		try {
 			const view = parseAndroidHierarchy(output);
@@ -120,7 +129,8 @@ export async function runAndroidBackend(context) {
 		if (target.hierarchyMode === "no-idle") verifyNoIdleHelperBundle();
 		client = createAndroidClient(target, stepContext);
 		boot = await client.identity();
-		await client.foreground();
+		lifecycle = createAndroidLifecycle(client, target, boot, stepContext);
+		await guard();
 		size = await client.screenSize();
 		observations.push({ action: "attach", platformDriver: "adb-screenshot", adbPath: target.adbPath });
 		for (const [index, step] of context.flow.steps.entries()) {
@@ -128,7 +138,19 @@ export async function runAndroidBackend(context) {
 			context.progress?.("android_step", { index, action: step.action });
 			await guard();
 			const name = `${String(index + 1).padStart(3, "0")}-${step.name ?? step.action}`;
-			if (step.action === "assertHelperCleanup") {
+			if (step.action === "appLifecycle") {
+				await screenshot(`${name}-before`);
+				await lifecycle.run(step.operation);
+				background = step.operation === "background";
+				await screenshot(`${name}-after`);
+			} else if (step.action === "wait") {
+				const until = Date.now() + step.durationMs;
+				if (until + 100 > stepContext.deadline) throw new Error("Android wait exceeds remaining step deadline");
+				while (Date.now() < until) {
+					await guard();
+					await new Promise((resolve) => setTimeout(resolve, Math.min(500, Math.max(0, until - Date.now()))));
+				}
+			} else if (step.action === "assertHelperCleanup") {
 				const runs = step.runId ? [step.runId] : [...helperRuns];
 				if (!runs.length) throw new Error("Android helper cleanup assertion requires an owned run or explicit runId");
 				for (const runId of runs) {
@@ -159,6 +181,7 @@ export async function runAndroidBackend(context) {
 				const pixels = await screenshot(`${name}-before`);
 				const command = androidInputCommand(step, pixels);
 				await guard();
+				await client.foreground();
 				await client.command(command);
 				await screenshot(`${name}-after`);
 			}
@@ -186,6 +209,7 @@ export async function runAndroidBackend(context) {
 					}
 					const point = androidTapPoint(nodes[0], view.size);
 					await guard();
+					await client.foreground();
 					await client.command(["shell", "input", "tap", ...point.map(String)]);
 				} else {
 					const passed = nodes[0][step.attribute] === String(step.equals);
@@ -206,10 +230,11 @@ export async function runAndroidBackend(context) {
 					}
 				}
 				await guard();
+				await client.foreground();
 				await client.command(androidInputCommand(step));
 			}
 			await guard();
-			observations.push({ action: step.action, step: index + 1 });
+			observations.push({ action: step.action, step: index + 1, ...(step.action === "appLifecycle" ? { operation: step.operation } : {}) });
 		}
 		return { status: "PASSED", artifacts, assertions, observations };
 	} catch (error) {

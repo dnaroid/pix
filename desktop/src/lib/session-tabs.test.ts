@@ -192,7 +192,7 @@ describe("restoreDesktopSessionTabs", () => {
       "closed", "open", "desktop-only",
     ])).toEqual({
       restoredIds: ["open", "desktop-only"],
-      locallyOpenedIds: ["desktop-only"],
+      locallyOpenedIds: ["open", "desktop-only"],
       closedIds: ["closed"],
     });
   });

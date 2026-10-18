@@ -3,6 +3,7 @@ import { render } from "svelte/server";
 import RegistryPlansPanel from "./RegistryPlansPanel.svelte";
 import { createRegistryPlansView } from "./registry-plans-view.svelte";
 import panelSource from "./RegistryPlansPanel.svelte?raw";
+import rowSource from "./RegistryPlanRow.svelte?raw";
 import registrySource from "./RegistryPanel.svelte?raw";
 import sidebarSource from "./WorkspaceSidebar.svelte?raw";
 import viewModelSource from "../app/desktop-sidebar-view-model.svelte.ts?raw";
@@ -26,7 +27,8 @@ describe("persistent Registry plan navigation", () => {
     expect(html).toContain(">design<");
     expect(html.match(/aria-current="page"/g)).toHaveLength(1);
     expect(markup("", plans, null)).not.toContain('aria-current="page"');
-    expect(panelSource).toContain("break-words");
+    expect(rowSource).toContain("break-words");
+    expect(rowSource).not.toMatch(/text-foreground">\{label\.slice\(slash \+ 1\)\}[^\n]*truncate/);
     expect(panelSource).not.toContain("truncate");
   });
 
@@ -45,8 +47,8 @@ describe("persistent Registry plan navigation", () => {
     expect(html).toContain('aria-label="Delete plan releases/rollout.md"');
     expect(html).toContain('title="Run plan in a new session"');
     expect(html).not.toMatch(/<button\b[^>]*>(?:(?!<\/button>)[\s\S])*<button\b/);
-    expect(panelSource).toContain("onclick={() => onRun(plan)}");
-    expect(panelSource).toContain("onclick={() => onDelete(plan)}");
+    expect(rowSource).toContain("onclick={() => onRun(plan)}");
+    expect(rowSource).toContain("onclick={() => onDelete(plan)}");
     expect(viewModelSource).toContain("options.projectActions.runPlan(path)");
     expect(viewModelSource).toContain("options.projectDocuments.removePlan(path)");
   });
@@ -75,24 +77,32 @@ describe("persistent Registry plan navigation", () => {
     expect(busy).toMatch(/aria-label="Delete plan [^"]+" disabled/);
   });
 
-  it("hides the entire section when the project has no plans, even with a retained query", () => {
+  it("shows an empty state instead of No matching plans when the project has no plans", () => {
     for (const query of ["", "release"]) {
       const html = markup(query, []);
-      expect(html).not.toContain('aria-label="Project plans"');
-      expect(html).not.toContain('aria-label="Find plan"');
-      expect(html).not.toContain('aria-label="Plans"');
+      expect(html).toContain('aria-label="Project plans"');
+      expect(html).toContain("data-plans-empty");
+      expect(html).toContain("No plans yet");
       expect(html).not.toContain("No matching plans");
     }
+    expect(markup("zzzz-no-match")).toContain("No matching plans");
   });
 
   it("keeps navigation alongside the existing Markdown preview rather than a closing popup", () => {
-    expect(registrySource).toContain("<RegistryPlansPanel");
+    // Plans live in the Work sidebar tab, not in the Registry resource catalog.
+    expect(registrySource).not.toContain("RegistryPlansPanel");
+    expect(registrySource).not.toContain("focusPlans");
+    expect(sidebarSource).toContain('data-work-section="plans"');
+    expect(sidebarSource).toContain('data-work-section="tasks"');
+    expect(sidebarSource.indexOf('data-work-section="plans"')).toBeLessThan(sidebarSource.indexOf('data-work-section="tasks"'));
+    expect(sidebarSource).not.toContain('aria-label="Work view"');
     expect(sidebarSource).toContain("const plansView = createRegistryPlansView()");
-    expect(sidebarSource).toContain("onChoosePlan={onOpenProjectDocument}");
-    expect(sidebarSource).toContain("activePlanPath={activeProjectDocumentPath}");
+    expect(sidebarSource).toContain("onChoose={onOpenProjectDocument}");
+    expect(sidebarSource).toContain("activePath={activeProjectDocumentPath}");
     expect(viewModelSource).toContain('options.preview.active?.kind === "file" ? options.preview.active.file.path : null');
     expect(sidebarSource).not.toContain("planSelector");
-    expect(sidebarSource).toContain("void registryPanel?.focusPlans()");
+    expect(sidebarSource).toContain("void openPlansSegment()");
+    expect(sidebarSource).toContain("plansPanel?.focusSearch()");
     expect(panelSource).toContain('linearFocusIndex(current, event.key, rows.length, "vertical", false)');
   });
 });
@@ -147,5 +157,61 @@ describe("Registry plan view memory", () => {
     node.scrollTop = 400;
     remounted.destroy();
     expect(view.scrollTop).toBe(0);
+  });
+});
+
+describe("task-linked plan groups and runs", () => {
+  function grouped(owners: Record<string, string>) {
+    const view = createRegistryPlansView();
+    view.selectWorkspace("/project");
+    return render(RegistryPlansPanel, { props: {
+      plans, activePath: null, view, onChoose: vi.fn(), owners,
+      linkTargets: [{ value: "t1", label: "T-1 Free task" }],
+      runs: { [plans[0]!]: [{ sessionId: "s1", title: "Run one", launchedAt: 1, status: "done" }] },
+      onLinkTask: vi.fn(), onOpenRun: vi.fn(),
+    } }).body;
+  }
+
+  it("groups owned plans apart from plans without a task", () => {
+    const html = grouped({ [plans[0]!]: "T-9 Owner" });
+    expect(html).toContain("Task plans");
+    expect(html).toContain("Plans without a task");
+    expect(html).toContain("T-9 Owner");
+    expect(html.indexOf("Task plans")).toBeLessThan(html.indexOf("Plans without a task"));
+    expect(html.match(/data-plan-link/g)).toHaveLength(2);
+    expect(html).toContain('aria-label="Link plan design/rollout.md to task"');
+  });
+
+  it("stays flat with no owners and lists recorded runs", () => {
+    const html = grouped({});
+    expect(html).not.toContain("data-plan-group");
+    expect(html).toContain('data-plan-run="s1"');
+    expect(html).toContain("Run one");
+  });
+
+  function withRuns(runs: { sessionId: string; status: "running" | "done" | "failed" | "interrupted" }[], extra: Record<string, unknown> = {}) {
+    const view = createRegistryPlansView();
+    view.selectWorkspace("/project");
+    return render(RegistryPlansPanel, { props: {
+      plans, activePath: null, view, onChoose: vi.fn(),
+      runs: { [plans[0]!]: runs.map((run, index) => ({ ...run, title: `Run ${run.sessionId}`, launchedAt: 10 - index })) },
+      onOpenRun: vi.fn(), onResume: vi.fn(), ...extra,
+    } }).body;
+  }
+
+  it("shows each run status and offers Resume only for the newest unfinished run", () => {
+    const html = withRuns([{ sessionId: "s2", status: "interrupted" }, { sessionId: "s1", status: "done" }]);
+    expect(html).toContain('data-plan-run-status="interrupted"');
+    expect(html).toContain('data-plan-run-status="done"');
+    expect(html).toContain("data-plan-resume");
+    expect(html).toContain('aria-label="Resume plan releases/rollout.md"');
+    expect(withRuns([{ sessionId: "s2", status: "failed" }])).toContain("data-plan-resume");
+    expect(withRuns([{ sessionId: "s2", status: "done" }, { sessionId: "s1", status: "failed" }])).not.toContain("data-plan-resume");
+    expect(withRuns([{ sessionId: "s2", status: "interrupted" }, { sessionId: "s1", status: "running" }])).not.toContain("data-plan-resume");
+  });
+
+  it("disables Resume together with Run", () => {
+    const html = withRuns([{ sessionId: "s2", status: "failed" }], { runDisabled: true });
+    expect(html).toMatch(/data-plan-resume[^>]*disabled/);
   });
 });

@@ -6,7 +6,7 @@
   import { AUTO_MODEL_REF, modelThinkingConfigState } from "../lib/model-thinking";
   import type { SessionActivitySummary } from "../lib/session-activity";
   import type { SessionSubagentSnapshot } from "../lib/session-subagents";
-  import type { SessionTodoSnapshot } from "../lib/session-todos";
+  import type { SessionTodoSnapshot, SessionTodoTask } from "../lib/session-todos";
   import ModelProviderIcon from "./ModelProviderIcon.svelte";
   import FrontierModelBadge from "./FrontierModelBadge.svelte";
   import RuntimeStatusBarItems from "./RuntimeStatusBarItems.svelte";
@@ -14,6 +14,8 @@
   import TaskFieldSelect from "./TaskFieldSelect.svelte";
   import type { HeadsUpSnapshot } from "../lib/heads-up";
   import SessionActivityStatusHud from "./SessionActivityStatusHud.svelte";
+  import SessionPlanStatus from "./SessionPlanStatus.svelte";
+  import type { PlanProgress } from "../lib/project-documents";
 
   type ConfigValue = { value: string; name: string; group?: string };
 
@@ -47,6 +49,15 @@
     subagentPathNavigation,
     onRefreshClaudeLimits = () => {},
     onClearTodos,
+    sessionPlan,
+    onOpenPlan,
+    onRefreshPlans,
+    onResumePlan,
+    planRunDisabled = false,
+    canJumpToSteps = false,
+    canRerunSteps = false,
+    onJumpToStep,
+    onRerunStep,
   }: {
     showSkeletons?: boolean;
     configOptions: SessionConfigOption[];
@@ -87,6 +98,16 @@
     subagentPathNavigation?: import("../lib/project-path-navigation").ProjectPathNavigation;
     onRefreshClaudeLimits?: () => void;
     onClearTodos: () => Promise<boolean>;
+    /** Saved plan this session was launched from, when it still exists. */
+    sessionPlan?: { path: string; progress: PlanProgress | null; task?: string; status?: import("../lib/plan-launches").PlanRunStatus; resumable?: boolean };
+    onOpenPlan?: (path: string) => void;
+    onRefreshPlans?: () => Promise<void>;
+    onResumePlan?: (path: string) => void;
+    planRunDisabled?: boolean;
+    canJumpToSteps?: boolean;
+    canRerunSteps?: boolean;
+    onJumpToStep?: (task: SessionTodoTask) => void;
+    onRerunStep?: (task: SessionTodoTask) => void;
   } = $props();
 
   const modelThinking = $derived(modelThinkingConfigState(configOptions));
@@ -206,6 +227,9 @@
   {#if observer}
     <ObserverStatus {...observer} />
   {/if}
+  {#if sessionPlan}
+    <SessionPlanStatus plan={sessionPlan} onOpen={onOpenPlan} onRefresh={onRefreshPlans} onResume={onResumePlan} resumeDisabled={planRunDisabled} />
+  {/if}
   <SessionActivityStatusHud
     summary={sessionActivity}
     subagentSnapshot={sessionSubagentSnapshot}
@@ -215,6 +239,12 @@
     {canClearTodos}
     {onClearTodos}
     {onOpenSubagentSession}
+    {sessionPlan}
+    {onOpenPlan}
+    {canJumpToSteps}
+    {canRerunSteps}
+    {onJumpToStep}
+    {onRerunStep}
   />
   {/key}
   </div>

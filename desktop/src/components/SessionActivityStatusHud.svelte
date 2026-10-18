@@ -9,10 +9,15 @@
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import MessageSquareText from "@lucide/svelte/icons/message-square-text";
   import UserRound from "@lucide/svelte/icons/user-round";
+  import LocateFixed from "@lucide/svelte/icons/locate-fixed";
+  import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import { agentIcon } from "../lib/agent-icons";
   import { modelProviderBrand } from "../lib/model-display";
   import ModelProviderIcon from "./ModelProviderIcon.svelte";
   import StatusBarPopover from "./StatusBarPopover.svelte";
+  import PlanProgressIndicator from "./PlanProgressIndicator.svelte";
+  import FileCheck2 from "@lucide/svelte/icons/file-check-2";
+  import { projectDocumentLabel, type PlanProgress } from "../lib/project-documents";
   import {
     sessionActivityLabel,
     sessionActivityTone,
@@ -31,6 +36,7 @@
     visibleSessionTodoRows,
     type SessionTodoSnapshot,
     type SessionTodoStatus,
+    type SessionTodoTask,
   } from "../lib/session-todos";
 
   let {
@@ -42,6 +48,12 @@
     canClearTodos = false,
     onClearTodos,
     onOpenSubagentSession,
+    sessionPlan,
+    onOpenPlan,
+    canJumpToSteps = false,
+    canRerunSteps = false,
+    onJumpToStep,
+    onRerunStep,
   }: {
     summary: SessionActivitySummary;
     subagentSnapshot: SessionSubagentSnapshot | undefined;
@@ -52,6 +64,15 @@
     onClearTodos?: () => Promise<boolean>;
     /** Open the agent's persisted session as a read-only tab. */
     onOpenSubagentSession?: (runDir: string, agentId: string) => void;
+    /** Saved plan this session executes; shown above the live Steps list. */
+    sessionPlan?: { path: string; progress: PlanProgress | null; task?: string };
+    onOpenPlan?: (path: string) => void;
+    /** Scroll the transcript to where a step started (loads older history). */
+    canJumpToSteps?: boolean;
+    onJumpToStep?: (task: SessionTodoTask) => void;
+    /** Send a same-session prompt redoing one step; only while the session is idle. */
+    canRerunSteps?: boolean;
+    onRerunStep?: (task: SessionTodoTask) => void;
   } = $props();
 
   const hasTodoProgress = $derived(summary.openTodos > 0 && summary.totalTodos > 0);
@@ -333,6 +354,24 @@
             class="flex max-h-[max(0px,calc(100dvh-70px))] flex-col overflow-y-auto rounded-md border border-border bg-popover px-2.5 py-2 text-popover-foreground shadow-md"
             data-session-todo-tooltip
           >
+            {#if sessionPlan}
+              <div class="mb-2 flex shrink-0 flex-col gap-1 border-b border-border pb-2" data-session-todo-plan>
+                <span class="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Executing plan</span>
+                {#if sessionPlan.task}
+                  <span class="min-w-0 break-words text-xs text-muted-foreground" data-session-todo-plan-task>Task: {sessionPlan.task}</span>
+                {/if}
+                <div class="flex min-w-0 items-center gap-2">
+                  <FileCheck2 class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                  <button
+                    class="min-w-0 flex-1 truncate rounded-sm text-left text-xs font-medium text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+                    type="button"
+                    aria-label={`Open plan ${projectDocumentLabel(sessionPlan.path)}`}
+                    onclick={() => onOpenPlan?.(sessionPlan.path)}
+                  >{projectDocumentLabel(sessionPlan.path)}</button>
+                  <PlanProgressIndicator progress={sessionPlan.progress} />
+                </div>
+              </div>
+            {/if}
             <div class="flex shrink-0 items-center gap-2">
               <span class="font-semibold text-foreground">Steps</span>
               <button
@@ -382,6 +421,30 @@
                             <span class="mr-1 font-mono text-muted-foreground">#{task.id}</span>{task.subject}
                           </h4>
                           <span class={["shrink-0 text-xs font-medium", todoStatusTone(task.status)]}>{todoStatusLabel(task.status)}</span>
+                          {#if onJumpToStep || onRerunStep}
+                            <span class="-my-1 flex shrink-0 items-center" data-session-todo-actions>
+                              {#if onJumpToStep}
+                                <button
+                                  class={iconButtonClass("sm", "popover")}
+                                  type="button"
+                                  data-session-todo-jump
+                                  aria-label={`Go to where step #${task.id} started`}
+                                  disabled={!canJumpToSteps}
+                                  onclick={() => onJumpToStep(task)}
+                                ><LocateFixed class="h-3 w-3" aria-hidden="true" /></button>
+                              {/if}
+                              {#if onRerunStep}
+                                <button
+                                  class={iconButtonClass("sm", "popover")}
+                                  type="button"
+                                  data-session-todo-rerun
+                                  aria-label={`Rerun step #${task.id} in this session`}
+                                  disabled={!canRerunSteps || promptRunning}
+                                  onclick={() => onRerunStep(task)}
+                                ><RotateCcw class="h-3 w-3" aria-hidden="true" /></button>
+                              {/if}
+                            </span>
+                          {/if}
                         </div>
                         {#if task.activeForm}
                           <p class="mt-0.5 break-words text-xs leading-4 text-foreground/80">{task.activeForm}</p>

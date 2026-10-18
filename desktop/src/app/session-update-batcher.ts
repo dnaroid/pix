@@ -10,9 +10,18 @@ type SessionUpdateBatcherOptions = {
   state: Pick<ActiveSessionState, "sessionId" | "transcript" | "sessionTranscript" | "setSessionTranscript" | "setTranscript">;
   promptEndedAt: (sessionId: string) => number | undefined;
   promptRunning: (sessionId: string) => boolean;
+  promptCancellation?: (sessionId: string) => { readonly requested: boolean } | undefined;
   clearPromptEndedAt: (sessionId: string) => void;
   followsLatest: () => boolean;
   scheduleScrollToLatest: () => void;
+};
+
+type PendingSessionUpdate = {
+  sessionId: string;
+  update: SessionUpdate;
+  occurredAtMs: number;
+  /** Keep the original run's token even if another run starts before paint. */
+  cancellation?: { readonly requested: boolean };
 };
 
 // A suspended/background window can accumulate much more than one IPC batch.
@@ -20,7 +29,7 @@ type SessionUpdateBatcherOptions = {
 const MAX_UPDATES_PER_FRAME = 128;
 
 export function createSessionUpdateBatcher(options: SessionUpdateBatcherOptions) {
-  let pending: Array<{ sessionId: string; update: SessionUpdate; occurredAtMs: number }> = [];
+  let pending: PendingSessionUpdate[] = [];
   const pendingCounts = new Map<string, number>();
   let pendingOffset = 0;
   let frame: number | null = null;
@@ -33,6 +42,7 @@ export function createSessionUpdateBatcher(options: SessionUpdateBatcherOptions)
       sessionId: notification.sessionId,
       update: notification.update,
       occurredAtMs: Date.now(),
+      cancellation: options.promptCancellation?.(notification.sessionId),
     });
     pendingCounts.set(notification.sessionId, (pendingCounts.get(notification.sessionId) ?? 0) + 1);
     schedule();
@@ -68,6 +78,13 @@ export function createSessionUpdateBatcher(options: SessionUpdateBatcherOptions)
       const remaining = (pendingCounts.get(entry.sessionId) ?? 1) - 1;
       if (remaining > 0) pendingCounts.set(entry.sessionId, remaining);
       else pendingCounts.delete(entry.sessionId);
+      // Check at paint time, not admission: Stop also cuts off buffered chunks.
+      const update = entry.update;
+      if (entry.cancellation?.requested
+        && (update.sessionUpdate === "agent_message_chunk" || update.sessionUpdate === "agent_thought_chunk")
+        && !update.messageId?.startsWith("pix-system:")) {
+        continue;
+      }
       const updates = updatesBySession.get(entry.sessionId);
       if (updates) updates.push({ update: entry.update, occurredAtMs: entry.occurredAtMs });
       else updatesBySession.set(entry.sessionId, [{ update: entry.update, occurredAtMs: entry.occurredAtMs }]);

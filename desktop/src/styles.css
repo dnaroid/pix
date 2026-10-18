@@ -336,6 +336,19 @@ html, body, #app {
   -webkit-user-select: none;
   user-select: none;
 }
+/* Step navigation briefly marks the revealed entry (transcript-scroll). */
+.transcript-pane [data-activity-entry-id],
+.transcript-pane .transcript-entry {
+  transition: background-color 400ms ease-out;
+}
+.transcript-pane [data-transcript-highlight] {
+  border-radius: var(--radius-sm, 4px);
+  background-color: color-mix(in oklab, var(--color-primary) 18%, transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .transcript-pane [data-activity-entry-id],
+  .transcript-pane .transcript-entry { transition: none; }
+}
 .transcript-pane .transcript-entry :is(.markdown-text, .tool-result, .diff-content) {
   -webkit-user-select: text;
   user-select: text;

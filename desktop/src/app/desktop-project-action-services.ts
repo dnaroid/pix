@@ -12,6 +12,7 @@ import { createProjectActions } from "./project-actions.svelte";
 type DesktopProjectActionServicesOptions = {
   client: () => AcpClient | null;
   workspace: () => string;
+  workspaceOpening?: () => boolean;
   canUseSession: () => boolean;
   sessionMutationRunning: () => boolean;
   state: ActiveSessionState;
@@ -98,7 +99,10 @@ export function createDesktopProjectActionServices(options: DesktopProjectAction
     refreshSessions: options.sessions.catalog.refresh,
     loadSession: options.transitions.sessionTabs.loadSession,
     sessionMutationRunning: options.sessionMutationRunning,
+    workspaceOpening: options.workspaceOpening,
     planAvailable: (path) => !options.project.documents.removing && options.project.documents.snapshot.plans.includes(path),
+    recordPlanLaunch: (workspace, sessionId, path) => options.project.planLaunches.record(workspace, sessionId, path),
+    settlePlanLaunch: (sessionId, outcome, workspace) => options.project.planLaunches.settle(sessionId, outcome, workspace),
     nextLocalMessageId: options.nextLocalMessageId,
     reportError: options.reportError,
   });

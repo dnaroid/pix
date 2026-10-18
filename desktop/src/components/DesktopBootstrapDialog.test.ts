@@ -8,6 +8,7 @@ describe("DesktopBootstrapDialog", () => {
     expect(bootstrapSource).toContain("oncancel={retainUntilContinue}");
     expect(bootstrapSource).not.toContain("oncancel={(event) => { event.preventDefault(); finish(); }}");
     expect(bootstrapSource).toContain("onclick={finish}");
-    expect(bootstrapSource).toContain("disabled={busy !== null}");
+    expect(bootstrapSource).toContain("disabled={busy !== null || saving}");
+    expect(bootstrapSource).not.toContain("localStorage");
   });
 });

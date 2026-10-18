@@ -4,7 +4,7 @@
 import type { TranscriptDisplayItem } from "./transcript-types";
 
 export const CHOICE_ACTIONS_LANGUAGE = "pix-actions";
-export const MIN_CHOICE_ACTIONS = 2;
+export const MIN_CHOICE_ACTIONS = 1;
 export const MAX_CHOICE_ACTIONS = 8;
 export const MAX_CHOICE_ACTION_CHARS = 300;
 export const MAX_CHOICE_SUBMIT_LABEL_CHARS = 40;

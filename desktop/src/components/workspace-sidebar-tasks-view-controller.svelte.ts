@@ -1,7 +1,7 @@
 import type { ProjectTaskPriority, ProjectTaskStatus, ProjectTaskType } from "../lib/project-tasks";
 import { defaultProjectTasksCollapsedStatuses, loadProjectTasksCollapsedStatuses, saveProjectTasksCollapsedStatuses, type ProjectTasksViewStorage } from "../lib/project-tasks-view-storage";
 
-/** Filters are window-local; group visibility is workspace-persisted UI state. */
+/** Filters are window-local; status-group visibility is workspace-persisted UI state. */
 export function createWorkspaceSidebarTasksViewController(storage?: ProjectTasksViewStorage) {
   let workspace = "";
   let collapsedStatuses = $state(defaultProjectTasksCollapsedStatuses());

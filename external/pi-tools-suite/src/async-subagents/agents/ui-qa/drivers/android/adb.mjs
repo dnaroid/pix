@@ -121,7 +121,7 @@ export function createAndroidClient(target, context) {
 		if (!/^[a-f0-9-]{36}$/i.test(boot)) throw new Error("emulator boot identity missing");
 		return boot;
 	}
-	async function foreground() {
+	async function focusedPackage() {
 		let windows = await text(["shell", "dumpsys", "window", "windows"]);
 		// Android versions differ in whether the windows-only section includes
 		// display-owned focus. Query the complete dump only if the field is absent.
@@ -129,9 +129,13 @@ export function createAndroidClient(target, context) {
 		const lines = windows.split(/\r?\n/).filter((entry) => entry.includes("mCurrentFocus="));
 		if (!lines.length) throw new Error("Android window dump has no mCurrentFocus field; foreground could not be verified; no input sent");
 		const packages = lines.map((line) => line.match(/\s([A-Za-z][\w.]*)\/[\w.$]+\}/)?.[1]);
-		if (packages.some((name) => name !== target.package)) {
-			const observed = [...new Set(packages.map((name) => name ?? "null-or-unparseable"))].join(", ");
-			throw new Error(`target Android package is not the focused application (observed: ${observed}); no input sent`);
+		if (packages.some((name) => !name || name !== packages[0])) throw new Error("Android focused package is null, unparseable or inconsistent; no input sent");
+		return packages[0];
+	}
+	async function foreground() {
+		const focused = await focusedPackage();
+		if (focused !== target.package) {
+			throw new Error(`target Android package is not the focused application (observed: ${focused}); no input sent`);
 		}
 	}
 	async function screenSize() {
@@ -141,5 +145,5 @@ export function createAndroidClient(target, context) {
 		if (!width || +width < 1 || +height < 1 || +width > 16384 || +height > 16384) throw new Error("invalid emulator screen size");
 		return { width: +width, height: +height };
 	}
-	return { command, identity, foreground, screenSize };
+	return { command, identity, foreground, focusedPackage, screenSize };
 }

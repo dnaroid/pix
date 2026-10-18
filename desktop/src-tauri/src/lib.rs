@@ -31,6 +31,7 @@ mod acp_diagnostics;
 mod backend_runtime;
 mod close_guard;
 mod desktop_bootstrap;
+mod desktop_onboarding;
 mod desktop_context_menu;
 mod desktop_notification;
 mod desktop_notification_sound;
@@ -8880,6 +8881,7 @@ pub fn run() {
             desktop_notification_sound::desktop_play_notification_sound,
             desktop_tray::desktop_set_tray_attention,
             desktop_bootstrap::desktop_bootstrap_inspect,
+            desktop_onboarding::desktop_onboarding_status,
             desktop_bootstrap::desktop_bootstrap_import_opencode,
             desktop_bootstrap::desktop_bootstrap_import_codex_api_key,
             desktop_watch_restart_available,

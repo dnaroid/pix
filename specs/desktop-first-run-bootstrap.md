@@ -28,7 +28,7 @@ Make a packaged Pix Desktop usable on a clean computer without requiring a syste
 
 ## First-run behavior
 
-- Desktop shows the bootstrap dialog until the user presses **Continue**. Completion is stored in the Desktop webview profile as pix.desktop.bootstrap.v1.completed; normal launches after completion do not reopen it automatically.
+- Desktop shows the bootstrap dialog until the user presses **Continue** and the native completion write succeeds. Completion is stored globally for the OS user in `~/.config/pi/desktop-onboarding.json` (`version: 1`, `completed: true`), shared across projects and WebView profiles. Normal launches after completion do not reopen it automatically. localStorage is not consulted or migrated. Storage failures keep the dialog open with an error and are logged.
 - The dialog reports bundled Pi/tools-suite readiness, the Pi agent directory and configured provider IDs, compatible OpenCode credential presence, and Codex file-auth presence. Inspection returns metadata only and never returns credential/token values.
 - Import/install actions are independent and optional. A failure stays in the dialog and does not mark setup complete.
 - A successful credential import reconnects Desktop ACP so newly available auth can be observed by a fresh runtime.

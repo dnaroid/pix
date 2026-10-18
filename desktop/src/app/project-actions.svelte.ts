@@ -11,6 +11,9 @@ import { buildPromptPayload } from "./prompt-payload";
 import { materializeComposerTaskAttachments } from "./attachment-io";
 import { parseDesktopModelRef } from "./desktop-helpers";
 import { createProjectPlanActions } from "./project-plan-actions.svelte";
+import { buildProjectPlanPrompt } from "./project-plan-prompt";
+import { buildTaskPlanAuthoringPrompt, linkedTaskPlan, planOwners, taskPlanPath, taskPlanRunContext, withTaskPlanLink } from "../lib/project-task-plans";
+import { isCanonicalProjectPlanPath } from "../lib/project-documents";
 
 export type ProjectActionsOptions = {
   client: () => AcpClient | null;
@@ -53,7 +56,13 @@ export type ProjectActionsOptions = {
   refreshSessions: () => void | Promise<void>;
   loadSession: (sessionId: string) => Promise<void>;
   sessionMutationRunning: () => boolean;
+  /** Startup restoration may replace the active session while it runs. */
+  workspaceOpening?: () => boolean;
   planAvailable?: (path: string) => boolean;
+  /** Remember which saved plan a new session executes (HUD context). */
+  recordPlanLaunch?: (workspace: string, sessionId: string, path: string) => void;
+  /** Settle a recorded launch whose prompt never started. */
+  settlePlanLaunch?: (sessionId: string, outcome: import("../lib/plan-launches").PlanLaunchOutcome, workspace: string) => void;
   nextLocalMessageId: () => string;
   reportError: (error: unknown) => void;
 };
@@ -130,7 +139,13 @@ export function createProjectActions(options: ProjectActionsOptions) {
     actionId = task.id;
     options.setErrorMessage(null);
     try {
-      const basePrompt = projectTaskPromptDraft(task);
+      const taskDraft = projectTaskPromptDraft(task);
+      // A task with a saved linked plan executes that plan instead of the raw task text.
+      const planPath = linkedTaskPlan(task);
+      const runsPlan = Boolean(planPath && options.planAvailable?.(planPath));
+      const basePrompt = runsPlan && planPath
+        ? { ...taskDraft, text: buildProjectPlanPrompt(planPath) + taskPlanRunContext(task) }
+        : taskDraft;
       const taskFiles = await (options.taskAttachments
         ? options.taskAttachments(requestWorkspace, task.id)
         : invoke<AttachmentFile[]>("read_project_task_attachments", { workspace: requestWorkspace, id: task.id }));
@@ -159,6 +174,7 @@ export function createProjectActions(options: ProjectActionsOptions) {
         return;
       }
       options.activateSession(response.sessionId, requestWorkspace, false);
+      if (runsPlan && planPath) options.recordPlanLaunch?.(requestWorkspace, response.sessionId, planPath);
       await options.ensureRuntime(requestClient, response.sessionId, requestWorkspace);
       if (!options.runtimeReady(response.sessionId)) return;
       void options.refreshSessions();
@@ -203,6 +219,74 @@ export function createProjectActions(options: ProjectActionsOptions) {
     }
   }
 
+  /** Start a planning session whose output path is linked to the task up front. */
+  async function createTaskPlan(task: ProjectTask): Promise<void> {
+    const requestClient = options.client();
+    const requestWorkspace = options.workspace();
+    if (!requestClient || !requestWorkspace || !options.canUseSession() || options.tasksSaving()
+      || options.taskLoadFailed() || options.sessionMutationRunning() || actionId || plans.actionId) return;
+    if (linkedTaskPlan(task)) return;
+    const path = taskPlanPath(task);
+    const current = () => options.client() === requestClient && options.workspace() === requestWorkspace;
+    options.closeProjectSelector();
+    options.closeSessionSelector();
+    options.setOperationRunning(true);
+    actionId = task.id;
+    options.setErrorMessage(null);
+    try {
+      const document = options.taskDocument();
+      const latest = document.tasks.find((candidate) => candidate.id === task.id);
+      if (!latest) return;
+      const timestamp = new Date().toISOString();
+      const linked = withTaskPlanLink(latest, path, timestamp);
+      const saved = await options.saveProjectTasks({
+        ...document,
+        tasks: document.tasks.map((candidate) => candidate.id === task.id ? linked : candidate),
+      });
+      if (!saved || !current()) return;
+      const response = await requestClient.newSession(requestWorkspace);
+      if (!current()) {
+        options.forgetRuntime(response.sessionId);
+        void requestClient.closeSession(response.sessionId).catch(() => undefined);
+        return;
+      }
+      options.activateSession(response.sessionId, requestWorkspace, false);
+      await options.ensureRuntime(requestClient, response.sessionId, requestWorkspace);
+      if (!current() || options.activeSessionId() !== response.sessionId || !options.runtimeReady(response.sessionId)) return;
+      void options.refreshSessions();
+      const text = buildTaskPlanAuthoringPrompt(linked, path);
+      const messageId = options.appendUserMessage(response.sessionId, text, []);
+      await options.scrollToLatest();
+      if (!current() || options.activeSessionId() !== response.sessionId) return;
+      options.setOperationRunning(false);
+      await options.runPrompt(requestClient, response.sessionId, [{ type: "text", text }], [], messageId);
+      if (current()) void options.refreshSessions();
+    } catch (error) {
+      if (current()) options.reportError(error);
+    } finally {
+      if (options.workspace() === requestWorkspace) {
+        options.setOperationRunning(false);
+        actionId = null;
+      }
+    }
+  }
+
+  /** Attach an existing saved plan to a task that has no plan; one owner per plan. */
+  async function linkTaskPlan(taskId: string, path: string): Promise<boolean> {
+    const requestWorkspace = options.workspace();
+    if (!requestWorkspace || !isCanonicalProjectPlanPath(path) || options.tasksSaving() || options.taskLoadFailed()) return false;
+    if (options.planAvailable?.(path) === false) return false;
+    const document = options.taskDocument();
+    const task = document.tasks.find((candidate) => candidate.id === taskId);
+    if (!task || linkedTaskPlan(task) || planOwners(document.tasks)[path]) return false;
+    const linked = withTaskPlanLink(task, path, new Date().toISOString());
+    const saved = await options.saveProjectTasks({
+      ...document,
+      tasks: document.tasks.map((candidate) => candidate.id === taskId ? linked : candidate),
+    });
+    return saved && options.workspace() === requestWorkspace;
+  }
+
   async function openTaskSession(task: ProjectTask): Promise<void> {
     if (!task.sessionId || actionId || plans.actionId || options.sessionMutationRunning()) return;
     if (task.sessionId === options.activeSessionId()) return;
@@ -222,8 +306,11 @@ export function createProjectActions(options: ProjectActionsOptions) {
   return {
     get actionId() { return actionId ?? plans.actionId; },
     runPlan: plans.runPlan,
+    resumePlan: plans.resumePlan,
     createTaskFromComposer,
     runTask,
+    createTaskPlan,
+    linkTaskPlan,
     openTaskSession,
     reset,
   };

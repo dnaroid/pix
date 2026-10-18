@@ -26,6 +26,8 @@
     type TranscriptState,
   } from "../lib/transcript";
   import { latestAssistantMessageId } from "../lib/choice-actions";
+  import { choiceActionsReplies } from "../lib/choice-actions-replies";
+  import ChoiceActionsReply from "./ChoiceActionsReply.svelte";
   import AttachmentGrid from "./AttachmentGrid.svelte";
   import MarkdownText from "./MarkdownText.svelte";
   import TranscriptActivityGroup from "./TranscriptActivityGroup.svelte";
@@ -112,9 +114,12 @@
   } = $props();
 
   let displayItems = $derived(groupTranscriptItems(transcript.items));
+  const choiceReplies = $derived(choiceActionsReplies(displayItems));
   // Quick-choice blocks accept input only in the final assistant reply of a
   // settled turn; any later user message makes them read-only history.
   const choiceActionsMessageId = $derived(promptRunning ? undefined : latestAssistantMessageId(displayItems));
+  // Sign-in recovery may resume only from the final notice of a settled turn.
+  const claudeLoginContinueItemId = $derived(promptRunning ? undefined : displayItems.at(-1)?.id);
   let activityNowMs = $state(Date.now());
   const hasActiveActivity = $derived(displayItems.some((item) => item.type === "activity-group" && item.active));
   let pauseToastVisible = $state(false);
@@ -219,13 +224,11 @@
     restoring: () => scrollRestoring,
     loadOlder: () => onLoadOlderHistory(),
     afterRender: tick,
+    onScroll: handlePaneScroll,
   });
   onDestroy(historyPager.dispose);
 
-  function handleTranscriptPaneScroll(): void {
-    handlePaneScroll();
-    void historyPager.loadAtTop();
-  }
+  const handleTranscriptPaneScroll = historyPager.handleScroll;
 
   $effect(() => {
     const sessionId = activeSessionId;
@@ -295,6 +298,7 @@
               </div>
             </details>
           {:else if item.role === "user"}
+            {@const choiceReply = choiceReplies.get(item.id)}
             <div
               class={["transcript-entry group/user-message relative", gapClass]}
               data-transcript-entry-id={item.id}
@@ -304,7 +308,11 @@
                 oncontextmenu={(event) => openUserMessageContextMenu(event, item.id)}
               >
                 <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
-                {#if item.text}<MarkdownText text={item.text} dense fitTables {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
+                {#if choiceReply}
+                  <ChoiceActionsReply actions={choiceReply} />
+                {:else if item.text}
+                  <MarkdownText text={item.text} dense fitTables {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />
+                {/if}
               </article>
               <button
                 type="button"
@@ -328,7 +336,11 @@
                   <p class="mt-1 whitespace-pre-wrap break-words font-mono text-muted-foreground">{item.text}</p>
                   {#if onOpenClaudeLoginTerminal && onClaudeLoginError && isClaudeLoginError(item.messageId, item.text)}
                     {#key activeSessionId}
-                      <ClaudeLoginAction onOpenTerminal={onOpenClaudeLoginTerminal} onError={onClaudeLoginError} />
+                      <ClaudeLoginAction
+                        onOpenTerminal={onOpenClaudeLoginTerminal}
+                        onError={onClaudeLoginError}
+                        onContinue={onChoiceActionsSubmit && item.id === claudeLoginContinueItemId ? () => onChoiceActionsSubmit("Continue") : undefined}
+                      />
                     {/key}
                   {/if}
                 </div>
@@ -345,7 +357,7 @@
               data-transcript-entry-id={item.id}
             >
               <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
-              {#if item.text}<MarkdownText text={item.text} dense fitTables enableHtmlSandbox={!!onHtmlSandboxSubmit} onHtmlSandboxSubmit={onHtmlSandboxSubmit ? (payload) => onHtmlSandboxSubmit(item.id, payload) : undefined} choiceActionsActive={item.id === choiceActionsMessageId} {onChoiceActionsSubmit} {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
+              {#if item.text}<MarkdownText text={item.text} dense fitTables enableHtmlSandbox={!!onHtmlSandboxSubmit} onHtmlSandboxSubmit={onHtmlSandboxSubmit ? (payload) => onHtmlSandboxSubmit(item.id, payload) : undefined} choiceActionsActive={item.id === choiceActionsMessageId} choiceActionsScope={activeSessionId ? JSON.stringify([activeSessionId, item.id]) : undefined} {onChoiceActionsSubmit} {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
             </article>
           {/if}
         {:else}

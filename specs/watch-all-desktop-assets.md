@@ -55,6 +55,11 @@ Make the newest successfully built Vite bundle available to the Desktop process 
   completion after teardown (a new lifecycle need not wait for an abandoned poll);
   watcher file/target inspection runs on a native blocking worker, not the UI
   thread. A late restart error after teardown does not restart polling.
+  Restart excludes sessions waiting for a recoverable question-tool answer from
+  active-run confirmation. Other running sessions (including background tabs or
+  windows), non-question forms, and draft first-prompt materialization still
+  require consent. Answering the question restores ordinary run protection.
+  Window close and ordinary Quit retain their existing warning policy.
   Restart obtains the native active-run confirmation before publishing its
   watcher request. Cancellation (including an already-open confirmation) returns
   the control to its non-pending state without publishing a restart marker;

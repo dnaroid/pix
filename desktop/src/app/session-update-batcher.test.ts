@@ -23,6 +23,7 @@ function notification(text: string, sessionId = "active"): SessionNotification {
 function fixture() {
   let transcript: TranscriptState = emptyTranscript;
   const transcripts = new Map<string, TranscriptState>();
+  const cancellation = { requested: false };
   const state = {
     sessionId: "active",
     get transcript() { return transcript; },
@@ -34,11 +35,12 @@ function fixture() {
     state,
     promptEndedAt: vi.fn<(id: string) => number | undefined>(() => undefined),
     promptRunning: () => false,
+    promptCancellation: vi.fn((id: string) => id === "active" ? cancellation : undefined),
     clearPromptEndedAt: vi.fn(),
     followsLatest: () => true,
     scheduleScrollToLatest: vi.fn(),
   };
-  return { state, options, transcripts, batcher: createSessionUpdateBatcher(options) };
+  return { state, options, transcripts, cancellation, batcher: createSessionUpdateBatcher(options) };
 }
 
 describe("session update frame queue", () => {
@@ -66,6 +68,57 @@ describe("session update frame queue", () => {
     while (frames.size) runFrame();
     expect(state.transcript.items[0]).toMatchObject({ text: chunks.join("") });
     expect(state.setTranscript.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it("cuts off queued and late answer/thinking chunks only for the stopped session", () => {
+    const { batcher, options, cancellation, state, transcripts } = fixture();
+    batcher.enqueue(notification("visible"));
+    runFrame();
+    for (let index = 0; index < 300; index += 1) batcher.enqueue(notification("buffered"));
+    batcher.enqueue({ sessionId: "active", update: {
+      sessionUpdate: "agent_thought_chunk", messageId: "thought", content: { type: "text", text: "buffered thinking" },
+    } });
+    cancellation.requested = true;
+    batcher.enqueue(notification("late"));
+    batcher.enqueue(notification("other session", "background"));
+    while (frames.size) runFrame();
+    expect(state.transcript.items).toHaveLength(1);
+    expect(state.transcript.items[0]).toMatchObject({ text: "visible" });
+    expect(transcripts.get("background")?.items[0]).toMatchObject({ text: "other session" });
+
+    options.promptCancellation.mockReturnValue({ requested: false });
+    batcher.enqueue(notification("new run"));
+    runFrame();
+    expect(state.transcript.items[0]).toMatchObject({ text: "visiblenew run" });
+  });
+
+  it("keeps system notices and tool settlement after Stop", () => {
+    const { batcher, cancellation, state } = fixture();
+    cancellation.requested = true;
+    batcher.enqueue({ sessionId: "active", update: {
+      sessionUpdate: "agent_message_chunk", messageId: "pix-system:notice:1", content: { type: "text", text: "notice" },
+    } });
+    batcher.enqueue({ sessionId: "active", update: {
+      sessionUpdate: "tool_call", toolCallId: "tool-1", title: "Read", kind: "read", status: "in_progress",
+    } });
+    batcher.enqueue({ sessionId: "active", update: {
+      sessionUpdate: "tool_call_update", toolCallId: "tool-1", status: "failed",
+    } });
+    runFrame();
+    expect(state.transcript.items[0]).toMatchObject({ text: "notice" });
+    expect(state.transcript.items[1]).toMatchObject({ status: "failed" });
+  });
+
+  it("does not revive stopped buffered chunks when a new run starts before paint", () => {
+    const { batcher, cancellation, options, state } = fixture();
+    batcher.enqueue(notification("old run"));
+    cancellation.requested = true;
+    batcher.enqueue(notification("late old run"));
+    options.promptCancellation.mockReturnValue({ requested: false });
+    batcher.enqueue(notification("new run"));
+    runFrame();
+    expect(state.transcript.items).toHaveLength(1);
+    expect(state.transcript.items[0]).toMatchObject({ text: "new run" });
   });
 
   it("retains the completion boundary until the final queued chunk", () => {

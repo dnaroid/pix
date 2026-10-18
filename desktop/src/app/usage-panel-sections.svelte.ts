@@ -1,30 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
-import type { ProjectFilePreview } from "../lib/project-files";
-import { WORKSPACE_CONFIG_PATH } from "../lib/project-colors";
 import { USAGE_SECTION_IDS, usageCollapsedSections, usageProviderOrder, workspaceConfigWithUsageProviderOrder, workspaceConfigWithUsageSection, type UsageSectionId } from "../lib/usage-panel-sections";
-
-// A panel may unmount/reopen before its final write completes. New instances
-// wait for accepted preference changes, without retaining component state in this queue.
-const saves = new Map<string, Promise<void>>();
-type ConfigEdit = (source: string | undefined) => string;
-
-async function readConfig(workspace: string): Promise<ProjectFilePreview | undefined> {
-  const exists = await invoke<boolean>("project_file_exists", { workspace, path: WORKSPACE_CONFIG_PATH });
-  return exists ? invoke<ProjectFilePreview>("read_project_file", { workspace, path: WORKSPACE_CONFIG_PATH }) : undefined;
-}
-
-async function saveConfig(workspace: string, edit: ConfigEdit): Promise<void> {
-  let current = await readConfig(workspace);
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const content = edit(current?.content);
-    const result = await invoke<{ written: boolean; document: ProjectFilePreview | null }>("write_project_workspace_config_if_unchanged", {
-      workspace, expectedContent: current?.content ?? null, content,
-    });
-    if (result.written) return;
-    current = result.document ?? undefined;
-  }
-  throw new Error(".pi/workspace.jsonc changed repeatedly while usage panel state was being saved.");
-}
+import { pendingWorkspaceConfigSaves, persistWorkspaceConfigEdit, readWorkspaceConfig, type WorkspaceConfigEdit } from "./workspace-config-persistence";
 
 export function createUsagePanelSections(reportError: (error: unknown, workspace: string) => void) {
   let collapsed = $state<ReadonlySet<string>>(new Set(USAGE_SECTION_IDS));
@@ -46,9 +21,9 @@ export function createUsagePanelSections(reportError: (error: unknown, workspace
     touched = new Map();
     if (!workspace) return;
     try {
-      await saves.get(nextWorkspace);
+      await pendingWorkspaceConfigSaves(nextWorkspace);
       if (disposed || owner !== generation) return;
-      const document = await readConfig(nextWorkspace);
+      const document = await readWorkspaceConfig(nextWorkspace);
       if (disposed || owner !== generation) return;
       const next = new Set(usageCollapsedSections(document?.content));
       providerOrder = usageProviderOrder(document?.content);
@@ -86,14 +61,8 @@ export function createUsagePanelSections(reportError: (error: unknown, workspace
     return persist(workspace, (source) => workspaceConfigWithUsageProviderOrder(source, next));
   }
 
-  function persist(target: string, edit: ConfigEdit): Promise<void> {
-    // Persist accepted changes to their original project, even if the panel closes.
-    const pending = (saves.get(target) ?? Promise.resolve())
-      .then(() => saveConfig(target, edit))
-      .catch((error) => reportError(error, target));
-    saves.set(target, pending);
-    void pending.then(() => { if (saves.get(target) === pending) saves.delete(target); });
-    return pending;
+  function persist(target: string, edit: WorkspaceConfigEdit): Promise<void> {
+    return persistWorkspaceConfigEdit(target, edit, "usage panel state", reportError);
   }
 
   return {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { parseSessionTabIds } from "../lib/session-tabs";
+import { buildTabSessions, parseSessionTabIds } from "../lib/session-tabs";
 import { windowLayoutKey } from "../lib/window-layout-storage";
 import { createSessionTabsState } from "./session-tabs-state.svelte";
 import { restoreProjectWorkspace } from "./project-workspace.svelte";
@@ -22,6 +22,39 @@ describe("session tabs state persistence", () => {
   });
 
   afterEach(() => vi.unstubAllGlobals());
+
+  it.each([false, true])("keeps restored Desktop tabs across refresh and navigation (selected: %s)", (selected) => {
+    const tabs = createSessionTabsState();
+    const sessions = ["old", "new"].map((sessionId) => ({ sessionId, cwd: "/project" }));
+    tabs.setSessionTabIds(new Map([["/project", ["old"]]]));
+    tabs.mergeRestored("/project", ["old"], ["old"]);
+    if (selected) tabs.show("old");
+    tabs.show("new");
+    // A later catalog response still knows both sessions, but its independent
+    // TUI snapshot no longer contains the old Desktop tab.
+    tabs.mergeRestored("/project", [], ["old", "new"]);
+    const visible = (active: string) => buildTabSessions(
+      sessions, tabs.restoredIds, tabs.locallyOpenedIds, tabs.closedIds, active,
+    ).map((session) => session.sessionId);
+    expect(visible("old")).toContain("old");
+    expect(visible("new")).toEqual(["old", "new"]);
+    expect(parseSessionTabIds(values.get(windowLayoutKey("sessionTabs")) ?? null).get("/project"))
+      .toEqual(["old", "new"]);
+  });
+
+  it("owns a selected TUI-discovered tab without disabling reconciliation of unselected TUI tabs", () => {
+    const tabs = createSessionTabsState();
+    tabs.mergeRestored("/project", [], ["selected", "unselected"]);
+    tabs.mergeRestored("/project", ["selected", "unselected"], ["selected", "unselected"]);
+    tabs.show("selected");
+    tabs.mergeRestored("/project", [], ["selected", "unselected"]);
+    expect(parseSessionTabIds(values.get(windowLayoutKey("sessionTabs")) ?? null).get("/project"))
+      .toEqual(["selected"]);
+    tabs.markClosed("selected");
+    tabs.mergeRestored("/project", ["selected"], ["selected", "unselected"]);
+    expect(parseSessionTabIds(values.get(windowLayoutKey("sessionTabs")) ?? null).get("/project"))
+      .toEqual([]);
+  });
 
   it("inserts new and reopened children immediately after the parent and persists their order", () => {
     const tabs = createSessionTabsState();

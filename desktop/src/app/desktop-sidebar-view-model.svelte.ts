@@ -12,6 +12,10 @@ import type { createPreviewStore } from "./preview.svelte";
 import type { createProjectActions } from "./project-actions.svelte";
 import type { createProjectDocumentsStore } from "./project-documents.svelte";
 import type { createProjectTasksStore } from "./project-tasks.svelte";
+import type { createPlanLaunchesStore } from "./plan-launches.svelte";
+import { linkedTaskPlan, planOwners, type PlanRun } from "../lib/project-task-plans";
+import { planRunStatus } from "../lib/plan-launches";
+import { projectTaskDisplayLabel } from "../lib/project-tasks";
 import type { createModelPreferencesStore } from "./model-preferences.svelte";
 import type { createProjectWorkspaceStore } from "./project-workspace.svelte";
 import type { createRegistryStore } from "./registry.svelte";
@@ -32,6 +36,8 @@ export function createDesktopSidebarViewModel(options: {
   configOptions: () => SessionConfigOption[];
   modelPreferences: ReturnType<typeof createModelPreferencesStore>;
   canUseSession: () => boolean;
+  /** ACP client initialized and workspace session restoration finished. */
+  planRunReady?: () => boolean;
   registryReady: () => boolean;
   contextCommands?: () => readonly import("@agentclientprotocol/sdk").AvailableCommand[];
   gitAssistantReady: () => boolean;
@@ -42,6 +48,9 @@ export function createDesktopSidebarViewModel(options: {
   projectWorkspace: ReturnType<typeof createProjectWorkspaceStore>;
   projectActions: ReturnType<typeof createProjectActions>;
   projectDocuments: ReturnType<typeof createProjectDocumentsStore>;
+  planLaunches?: ReturnType<typeof createPlanLaunchesStore>;
+  /** Sessions with a prompt in flight (plan run status). */
+  runningSessionIds?: () => ReadonlySet<string>;
   registry: ReturnType<typeof createRegistryStore>;
   git: ReturnType<typeof createGitWorkspaceStore>;
   gitCi: ReturnType<typeof createGitCiStore>;
@@ -76,6 +85,34 @@ export function createDesktopSidebarViewModel(options: {
     if (sessionId) await options.sessionTabs.loadSession(sessionId);
     else options.reportError(new Error("This session is not in the current project's session list."));
   }
+  const planOwnerLabels = $derived.by(() => {
+    const labels: Record<string, string> = {};
+    for (const [path, task] of Object.entries(planOwners(options.projectTasks.document.tasks))) labels[path] = projectTaskDisplayLabel(task);
+    return labels;
+  });
+  const planLinkTargets = $derived(options.projectTasks.document.tasks
+    .filter((task) => !linkedTaskPlan(task) && task.status !== "done")
+    .map((task) => ({ value: task.id, label: projectTaskDisplayLabel(task) })));
+  const planRuns = $derived.by(() => {
+    const workspace = options.workspace();
+    const launches = options.planLaunches;
+    const runs: Record<string, PlanRun[]> = {};
+    if (!launches || !workspace) return runs;
+    const titles = new Map(options.sessions().map((session) => [session.sessionId, session.title]));
+    const running = options.runningSessionIds?.() ?? new Set<string>();
+    const snapshot = options.projectDocuments.snapshot;
+    for (const path of snapshot.plans) {
+      // Runs whose session was deleted are not listed: there is nothing to open.
+      const entries = launches.sessionsFor(workspace, path).filter((run) => titles.has(run.sessionId));
+      if (entries.length) runs[path] = entries.map((run) => ({
+        sessionId: run.sessionId,
+        launchedAt: run.launchedAt,
+        title: titles.get(run.sessionId) || "Untitled conversation",
+        status: planRunStatus(run, run.live || running.has(run.sessionId), snapshot.planProgress?.[path]),
+      }));
+    }
+    return runs;
+  });
   const onChooseWorkspace = () => void options.workspaceController.choose();
   const onChooseWorkspaceInNewWindow = () => void options.workspaceController.chooseInNewWindow();
 
@@ -174,7 +211,7 @@ export function createDesktopSidebarViewModel(options: {
     projectDocuments: options.projectDocuments.snapshot,
     activeProjectDocumentPath: options.preview.active?.kind === "file" ? options.preview.active.file.path : null,
     planActionsDisabled: options.projectActions.actionId !== null || options.projectDocuments.removing !== null,
-    planRunDisabled: !options.canUseSession() || options.sessionMutationRunning(),
+    planRunDisabled: !(options.planRunReady?.() ?? true) || !options.canUseSession() || options.sessionMutationRunning(),
     recentProjects: options.projectWorkspace.recentProjects,
     projectColors: options.projectWorkspace.projectColors,
     projectIcons: options.projectWorkspace.projectIcons,
@@ -192,11 +229,18 @@ export function createDesktopSidebarViewModel(options: {
     onReorder: options.projectTasks.reorder,
     onRun: (task) => void options.projectActions.runTask(task),
     onOpenSession: (task) => void options.projectActions.openTaskSession(task),
+    onCreateTaskPlan: (task) => void options.projectActions.createTaskPlan(task),
     onOpenUsageSession: (target) => void openUsageSession(target),
     onOpenProjectDocument: options.projectDocuments.open,
     onRefreshPlans: options.projectDocuments.refresh,
     onRunPlan: (path) => void options.projectActions.runPlan(path),
+    onResumePlan: (path) => void options.projectActions.resumePlan(path),
     onDeletePlan: (path) => void options.projectDocuments.removePlan(path),
+    planOwners: planOwnerLabels,
+    planLinkTargets,
+    planRuns,
+    onLinkTaskPlan: (taskId, path) => void options.projectActions.linkTaskPlan(taskId, path),
+    onOpenPlanRun: (sessionId) => void options.sessionTabs.loadSession(sessionId),
     onListProjectDirectory: options.projectWorkspace.listDirectory,
     onValidateProjectFile: options.preview.validateProjectFile,
     onOpenProjectFile: (path, range) => void options.preview.openProjectFile(path, "replace", range),

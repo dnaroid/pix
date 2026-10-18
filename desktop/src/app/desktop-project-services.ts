@@ -7,6 +7,7 @@ import { createGitCiStore } from "./git-ci.svelte";
 import { createGitWorkspaceStore } from "./git-workspace.svelte";
 import { createPreviewStore } from "./preview.svelte";
 import { createProjectDocumentsStore } from "./project-documents.svelte";
+import { createPlanLaunchesStore } from "./plan-launches.svelte";
 import { createProjectTasksStore } from "./project-tasks.svelte";
 import { createProjectWorkspaceStore } from "./project-workspace.svelte";
 import { createRegistryStore } from "./registry.svelte";
@@ -113,11 +114,14 @@ export function createDesktopProjectServices(options: DesktopProjectServicesOpti
     nextWorkbenchAuxOrder: options.nextWorkbenchAuxOrder,
   });
 
+  const planLaunches = createPlanLaunchesStore();
+
   return {
     tasks,
     workspace: projectWorkspace,
     preview,
     documents,
+    planLaunches,
     registry,
     git,
     gitCi,

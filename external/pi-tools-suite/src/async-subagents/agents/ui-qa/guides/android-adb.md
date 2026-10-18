@@ -1,9 +1,26 @@
 # Android ADB screenshots and coordinate input
 
-An attach-only, emulator-only runner route. The app must already be foreground.
-No APK installation, app-data access, launch/stop, permission/settings changes,
-root, reboot, provider calls or raw ADB commands are supported. Never bypass the
-runner with direct ADB. If prerequisites are missing, return BLOCKED to parent.
+An emulator-only runner route. Ordinary interaction requires the selected app
+foreground. No APK installation, app-data access, permission/settings changes,
+root, reboot, provider calls or raw ADB commands are supported. The runner
+issues no direct app-data read/clear commands; app lifecycle may naturally save
+state. Never bypass the runner with direct ADB. If prerequisites are missing,
+return BLOCKED to parent.
+The separately user-authorized `appLifecycle` action is the only launch/lifecycle
+exception and requires explicit user authorization in the QA task; there is no
+flow-level `lifecycle` grant field. It accepts
+`operation: background|resume|restart` and optional safe `name`. It captures
+screenshots before and after. Background sends HOME only through this action;
+HOME is not an allowed `pressKey`. Lifecycle steps enforce target identity;
+read-only checks while backgrounded allow only the target or resolved HOME,
+while normal input and XML require the target foreground. Resume can recover
+from HOME. Restart resolves the selected package launcher and runs `am start -S`
+to force-stop/relaunch that app only; no app-data clear command is issued. No automatic
+replay/cleanup mutation follows failures, which can leave the app backgrounded
+or stopped. Existing screenshot-to-input TOCTOU limits remain.
+
+`wait` accepts `durationMs` 100..20000 and is bounded by the runner deadline;
+set `timeoutMs: 30000` for a 20-second wait. Do not use long external sleeps.
 The primary visual route needs no XML/helper and writes no device files.
 Do not start with `capture`, XML assertions or selector taps. First run a
 `screenshot` flow and inspect the returned PNG with `read`. Choose coordinates

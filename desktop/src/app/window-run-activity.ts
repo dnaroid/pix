@@ -1,10 +1,27 @@
+// Only persisted question-tool waits are recoverable across a watch restart.
+export function hasRestartBlockingRun(
+  runningSessionIds: ReadonlySet<string>,
+  pendingBySession: ReadonlyMap<string, { kind: string }>,
+  pendingUnscoped: { kind: string } | null,
+  activeSessionId: string | null,
+  draftSessionMaterializing: boolean,
+): boolean {
+  if (draftSessionMaterializing) return true;
+  for (const sessionId of runningSessionIds) {
+    const pending = pendingBySession.get(sessionId)
+      ?? (sessionId === activeSessionId ? pendingUnscoped : null);
+    if (pending?.kind !== "question") return true;
+  }
+  return false;
+}
+
 // Serialize IPC writes and coalesce intermediate activity updates. An older
 // completion must never overwrite the current native close-warning state.
 export function createWindowRunActivitySync(
-  write: (running: boolean) => Promise<unknown>,
+  write: (running: boolean, restartBlocking: boolean) => Promise<unknown>,
   reportError: (error: unknown) => void,
 ) {
-  let pending: boolean | undefined;
+  let pending: { running: boolean; restartBlocking: boolean } | undefined;
   let writing = false;
   let disposed = false;
 
@@ -12,9 +29,9 @@ export function createWindowRunActivitySync(
     writing = true;
     try {
       while (!disposed && pending !== undefined) {
-        const running = pending;
+        const activity = pending;
         pending = undefined;
-        await write(running);
+        await write(activity.running, activity.restartBlocking);
       }
     } catch (error) {
       if (!disposed) reportError(error);
@@ -25,9 +42,9 @@ export function createWindowRunActivitySync(
   }
 
   return {
-    update(running: boolean) {
+    update(running: boolean, restartBlocking = running) {
       if (disposed) return;
-      pending = running;
+      pending = { running, restartBlocking };
       if (!writing) void flush();
     },
     dispose() { disposed = true; pending = undefined; },

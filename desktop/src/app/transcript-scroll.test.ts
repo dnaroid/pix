@@ -629,3 +629,58 @@ describe("transcript scroll resize controller", () => {
     }
   });
 });
+
+describe("transcript step reveal highlight", () => {
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+  function fakeElement() {
+    const attrs = new Set<string>();
+    return {
+      attrs,
+      isConnected: true,
+      scrollIntoView: vi.fn(),
+      setAttribute: (name: string) => { attrs.add(name); },
+      removeAttribute: (name: string) => { attrs.delete(name); },
+      querySelector: vi.fn(),
+    };
+  }
+
+  function setup() {
+    vi.useFakeTimers();
+    vi.stubGlobal("CSS", { escape: (value: string) => value });
+    vi.stubGlobal("HTMLDetailsElement", class {});
+    vi.stubGlobal("requestAnimationFrame", () => 1);
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    const first = fakeElement();
+    const second = fakeElement();
+    const group = fakeElement();
+    group.querySelector.mockImplementation((selector: string) => selector.includes("first") ? first : selector.includes("second") ? second : null);
+    const pane = { clientHeight: 300, scrollHeight: 600, scrollTop: 0, querySelector: vi.fn(() => group) };
+    const controller = createTranscriptScrollController({
+      activeSessionId: () => "s1",
+      pane: () => pane as unknown as HTMLDivElement,
+      content: () => null,
+    });
+    return { controller, first, second };
+  }
+
+  it("highlights the revealed entry briefly and moves the mark to a newer reveal", async () => {
+    const { controller, first, second } = setup();
+    await expect(controller.revealActivityEntry("group", "first")).resolves.toBe(true);
+    expect(first.scrollIntoView).toHaveBeenCalled();
+    expect(first.attrs.has("data-transcript-highlight")).toBe(true);
+    await controller.revealActivityEntry("group", "second");
+    expect(first.attrs.has("data-transcript-highlight")).toBe(false);
+    expect(second.attrs.has("data-transcript-highlight")).toBe(true);
+    vi.advanceTimersByTime(1600);
+    expect(second.attrs.has("data-transcript-highlight")).toBe(false);
+  });
+
+  it("clears a pending highlight on dispose", async () => {
+    const { controller, first } = setup();
+    await controller.revealActivityEntry("group", "first");
+    controller.dispose();
+    expect(first.attrs.has("data-transcript-highlight")).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});

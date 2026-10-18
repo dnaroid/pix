@@ -182,10 +182,11 @@ export function restoreDesktopSessionTabs(
   const available = new Set(availableIds);
   const restoredIds = [...new Set(desktopIds ?? [])].filter((sessionId) => available.has(sessionId));
   const restored = new Set(restoredIds);
-  const incoming = incomingIds === null ? new Set<string>() : new Set(incomingIds);
   return {
     restoredIds,
-    locallyOpenedIds: restoredIds.filter((sessionId) => !incoming.has(sessionId)),
+    // Every persisted Desktop tab is locally owned, even when TUI also has it
+    // open. A later TUI snapshot must not silently close it in Desktop.
+    locallyOpenedIds: [...restoredIds],
     closedIds: incomingIds === null
       ? []
       : [...new Set(incomingIds)].filter((sessionId) => available.has(sessionId) && !restored.has(sessionId)),

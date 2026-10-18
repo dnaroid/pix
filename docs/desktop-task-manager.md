@@ -76,6 +76,12 @@ session-local todos.
   the full editor with that status; Composer also has **Create task**.
 - Row actions include **Run** for unlinked tasks or **Open session** for linked
   tasks, status/priority controls, and **Delete** with confirmation.
+- The task `…` menu offers **Create plan** when no canonical `.pi/plans` link
+  exists and **Open plan** when one does. Create plan saves the task link at
+  `.pi/plans/tasks/<id-slug>-<title-slug>.md` before creating a new session;
+  if saving fails, no session is created. That session is prompted only to
+  author the plan, not implement it. A task card with a plan link shows a
+  `FileCheck2` icon.
   An unavailable ACP session disables Run/Open without disabling editing.
 - Drag-and-drop supports both moving between status groups and ordering
   within a group. The view shows drop placeholders and preserves per-status
@@ -118,6 +124,34 @@ session-local todos.
    paths are not embedded in SQLite task description strings.
 5. Errors in saving a final status must be reported; interrupted turns do not
    automatically mark a task failed.
+
+- If the task's first canonical `.pi/plans` link is present in the project
+  documents snapshot, Run sends the saved-plan execution prompt with task
+  context and the task's existing completion-status authorization. The new
+  session is associated with the task as usual and its plan launch is recorded
+  for the **Executing plan** HUD. If the plan file is absent from the snapshot,
+  Run uses the ordinary task prompt.
+- In the status HUD's Steps popup, an **Executing plan** block appears above
+  **Steps** for sessions launched from a saved plan. Its plan-label button opens
+  the saved plan and its checklist progress is separate from session Steps.
+  When linked to a task, the block also shows `Task: <label>`; the status-bar
+  **Executing plan** chip popover shows **Task › Plan › This session** (without
+  the Task segment when unlinked). The popover hosts breadcrumbs because Desktop
+  has no session header.
+  The Run prompt and `external/pi-tools-suite/docs/plan-writing.md` require
+  saving each verified item as `[x]` immediately; sub-steps stay in session
+  Steps.
+- In Work → Plans, owned plans are grouped under **Task plans** and display the
+  task label; other plans are under **Plans without a task**. If there are no
+  owned plans, the list remains flat without headings. An unowned plan's Pix
+  searchable **Link to task** picker lists tasks that are not done and have no
+  plan. Linking stores the plan path in the task's `links` and is rejected when
+  the task already has a plan, the plan already has an owner, the plan file is
+  missing/non-canonical, or tasks are saving/failed to load.
+- Each plan row lists up to three recorded runs (session title and launch time),
+  newest first, followed by `+N earlier` when applicable. Deleted sessions are
+  hidden; selecting a run opens its session. Run records come from the persisted
+  per-workspace plan-launch map.
 
 ## Attachment semantics
 

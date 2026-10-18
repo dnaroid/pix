@@ -12,8 +12,7 @@
     type DesktopBootstrapSnapshot,
   } from "../lib/desktop-bootstrap";
   import { activateModalDialog } from "../lib/modal-dialog";
-
-  const COMPLETED_KEY = "pix.desktop.bootstrap.v1.completed";
+  import { completeDesktopOnboarding, desktopOnboardingCompleted } from "../lib/desktop-onboarding";
 
   let {
     onCredentialsChanged,
@@ -25,6 +24,7 @@
   let finishButton = $state<HTMLButtonElement | null>(null);
   let visible = $state(false);
   let loading = $state(false);
+  let saving = $state(false);
   let snapshot = $state<DesktopBootstrapSnapshot | null>(null);
   let busy = $state<"opencode" | "codex" | null>(null);
   let error = $state<string | null>(null);
@@ -39,9 +39,19 @@
   });
 
   onMount(() => {
-    if (localStorage.getItem(COMPLETED_KEY) === "1") return;
-    visible = true;
-    void refresh();
+    let disposed = false;
+    void (async () => {
+      try {
+        if (await desktopOnboardingCompleted() || disposed) return;
+        visible = true;
+        await refresh();
+      } catch (cause) {
+        if (disposed) return;
+        visible = true;
+        error = cause instanceof Error ? cause.message : String(cause);
+      }
+    })();
+    return () => { disposed = true; };
   });
 
   async function refresh(): Promise<void> {
@@ -57,7 +67,7 @@
   }
 
   async function runAction(kind: "opencode" | "codex"): Promise<void> {
-    if (busy) return;
+    if (busy || saving) return;
     busy = kind;
     error = null;
     message = null;
@@ -90,9 +100,18 @@
     }
   }
 
-  function finish(): void {
-    localStorage.setItem(COMPLETED_KEY, "1");
-    visible = false;
+  async function finish(): Promise<void> {
+    if (saving || busy) return;
+    saving = true;
+    error = null;
+    try {
+      await completeDesktopOnboarding();
+      visible = false;
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : String(cause);
+    } finally {
+      saving = false;
+    }
   }
 
   function retainUntilContinue(event: Event): void {
@@ -159,7 +178,7 @@
             <button
               class="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-panel px-2.5 text-xs font-medium hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
               type="button"
-              disabled={!opencodeDetected || busy !== null}
+              disabled={!opencodeDetected || busy !== null || saving}
               onclick={() => void runAction("opencode")}
             >
               {#if busy === "opencode"}<RotateCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />{/if}
@@ -183,7 +202,7 @@
             <button
               class="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-panel px-2.5 text-xs font-medium hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
               type="button"
-              disabled={!snapshot?.codex.apiKeyDetected || busy !== null}
+              disabled={!snapshot?.codex.apiKeyDetected || busy !== null || saving}
               onclick={() => void runAction("codex")}
             >
               {#if busy === "codex"}<RotateCw class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />{/if}
@@ -202,7 +221,7 @@
           bind:this={finishButton}
           class="inline-flex h-8 min-w-24 items-center justify-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
           type="button"
-          disabled={busy !== null}
+          disabled={busy !== null || saving}
           onclick={finish}
         >Continue</button>
       </footer>

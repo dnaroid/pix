@@ -2,18 +2,17 @@
   import FileText from "@lucide/svelte/icons/file-text";
   import Search from "@lucide/svelte/icons/search";
   import X from "@lucide/svelte/icons/x";
-  import Play from "@lucide/svelte/icons/play";
-  import Trash2 from "@lucide/svelte/icons/trash-2";
+  import RegistryPlanRow from "./RegistryPlanRow.svelte";
+  import type { PlanRun } from "../lib/project-task-plans";
   import { iconButtonClass } from "../lib/icon-button";
   import { projectDocumentLabel } from "../lib/project-documents";
   import { linearFocusIndex } from "../lib/keyboard-navigation";
   import type { RegistryPlansView } from "./registry-plans-view.svelte";
   import type { PlanProgress } from "../lib/project-documents";
-  import PlanProgressIndicator from "./PlanProgressIndicator.svelte";
   import { onMount } from "svelte";
   import { createProjectFilesRefresh } from "../lib/project-files-refresh";
 
-  let { plans, activePath, view, onChoose, planProgress = {}, onRefresh = async () => {}, actionsDisabled = false, runDisabled = false, onRun = () => {}, onDelete = () => {} }: {
+  let { plans, activePath, view, onChoose, planProgress = {}, onRefresh = async () => {}, actionsDisabled = false, runDisabled = false, onRun = () => {}, onDelete = () => {}, owners = {}, linkTargets = [], runs = {}, onLinkTask, onOpenRun, onResume }: {
     plans: readonly string[];
     activePath: string | null;
     view: RegistryPlansView;
@@ -24,10 +23,24 @@
     runDisabled?: boolean;
     onRun?: (path: string) => void;
     onDelete?: (path: string) => void;
+    /** Plan path -> owning task label. */
+    owners?: Readonly<Record<string, string>>;
+    /** Tasks that can still receive a plan. */
+    linkTargets?: readonly { value: string; label: string }[];
+    runs?: Readonly<Record<string, readonly PlanRun[]>>;
+    onLinkTask?: (taskId: string, path: string) => void;
+    onOpenRun?: (sessionId: string) => void;
+    onResume?: (path: string) => void;
   } = $props();
 
   let searchInput = $state<HTMLInputElement>();
   const choices = $derived(view.visible(plans));
+  const linked = $derived(choices.filter((plan) => owners[plan]));
+  const unlinked = $derived(choices.filter((plan) => !owners[plan]));
+  // Group headings only help once at least one plan belongs to a task.
+  const groups = $derived(linked.length > 0
+    ? [{ id: "linked", title: "Task plans", plans: linked }, { id: "unlinked", title: "Plans without a task", plans: unlinked }].filter((group) => group.plans.length > 0)
+    : [{ id: "all", title: "", plans: unlinked }]);
   onMount(() => createProjectFilesRefresh(() => onRefresh(), undefined, 3_000).dispose);
 
   export function focusSearch(): void {
@@ -45,8 +58,7 @@
   }
 </script>
 
-{#if plans.length > 0}
-<section class="flex max-h-[45%] min-h-0 shrink-0 flex-col border-b border-sidebar-border" aria-label="Project plans">
+<section class="flex min-h-0 min-w-0 flex-1 flex-col" aria-label="Project plans">
   <div class="flex h-9 min-w-0 shrink-0 items-center gap-2 px-3">
     <FileText class="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
     <h3 class="shrink-0 text-xs font-semibold">Plans</h3>
@@ -83,40 +95,42 @@
     aria-label="Plans"
     use:view.restoreList={{ workspace: view.workspace, query: view.query }}
   >
-    {#each choices as plan (plan)}
-      {@const label = projectDocumentLabel(plan)}
-      {@const slash = label.lastIndexOf("/")}
-      <div class={["flex min-h-8 min-w-0 items-start rounded-sm border-l-2 hover:bg-sidebar-accent", activePath === plan ? "border-l-primary bg-sidebar-accent text-foreground" : "border-l-transparent text-muted-foreground"]}>
-        <button
-          class="flex min-w-0 flex-1 items-start gap-2 rounded-sm px-2 py-1.5 text-left focus-visible:outline-2 focus-visible:outline-ring"
-          type="button"
-          data-plan-path={plan}
-          aria-current={activePath === plan ? "page" : undefined}
-          title={plan}
-          onclick={() => onChoose(plan)}
-          onkeydown={focusPlan}
-        >
-          <FileText class="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          <span class="min-w-0 flex-1">
-            <span class="block break-words text-xs font-medium text-foreground">{label.slice(slash + 1)}</span>
-            {#if slash >= 0}<span class="block break-words text-[11px] text-muted-foreground">{label.slice(0, slash)}</span>{/if}
-          </span>
-        </button>
-        <div class="flex shrink-0 items-center gap-0.5 pt-1 pr-1">
-          <PlanProgressIndicator progress={planProgress[plan]} />
-          <button class={iconButtonClass("sm", "chrome")} type="button" title="Run plan in a new session"
-            aria-label={`Run plan ${label}`} disabled={actionsDisabled || runDisabled} onclick={() => onRun(plan)}>
-            <Play class="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
-          <button class={iconButtonClass("sm", "chrome", { extra: "hover:text-destructive" })} type="button" title="Delete plan"
-            aria-label={`Delete plan ${label}`} disabled={actionsDisabled} onclick={() => onDelete(plan)}>
-            <Trash2 class="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
-        </div>
-      </div>
+    {#if choices.length > 0}
+      {#each groups as group (group.id)}
+        {#if group.title}
+          <h4 class="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground" data-plan-group={group.id}>{group.title}</h4>
+        {/if}
+        {#each group.plans as plan (plan)}
+          <RegistryPlanRow
+            {plan}
+            label={projectDocumentLabel(plan)}
+            active={activePath === plan}
+            progress={planProgress[plan]}
+            owner={owners[plan] ?? null}
+            {linkTargets}
+            runs={runs[plan] ?? []}
+            {actionsDisabled}
+            {runDisabled}
+            {onChoose}
+            onKeydown={focusPlan}
+            {onRun}
+            {onDelete}
+            {onLinkTask}
+            {onOpenRun}
+            {onResume}
+          />
+        {/each}
+      {/each}
     {:else}
-      <p class="px-2 py-3 text-xs text-muted-foreground">No matching plans</p>
-    {/each}
+      {#if plans.length === 0}
+        <div class="px-4 py-8 text-center" data-plans-empty>
+          <FileText class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" />
+          <p class="text-xs font-medium">No plans yet</p>
+          <p class="mt-1 text-xs leading-4 text-muted-foreground">Ask the agent to write a plan; Markdown files in .pi/plans/ appear here.</p>
+        </div>
+      {:else}
+        <p class="px-2 py-3 text-xs text-muted-foreground">No matching plans</p>
+      {/if}
+    {/if}
   </nav>
 </section>
-{/if}

@@ -37,6 +37,8 @@ export type DesktopViewModelServicesOptions = {
   status: () => ConnectionStatus;
   clientAvailable: () => boolean;
   client: () => AcpClient | null;
+  /** True while startup restores the workspace's active session. */
+  workspaceOpening?: () => boolean;
   operationRunning: () => boolean;
   dragActive: () => boolean;
   activeWorkbenchTabId: () => WorkbenchTabId | null;

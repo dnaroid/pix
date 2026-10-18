@@ -12,6 +12,7 @@ describe("workspace session startup", () => {
     const listing = deferred<{ sessions: never[] }>();
     const listNow = vi.fn(() => listing.promise);
     const client = {};
+    const openingChanges: boolean[] = [];
     const startup = createWorkspaceSessionStartup({
       client: () => client,
       workspace: () => "/project",
@@ -41,10 +42,12 @@ describe("workspace session startup", () => {
       },
       setErrorMessage: vi.fn(),
       reportError: vi.fn(),
+      onOpeningChange: (opening: boolean) => openingChanges.push(opening),
     } as any);
 
     const first = startup.open();
     const second = startup.open();
+    expect(openingChanges).toEqual([true]);
 
     expect(first).toBe(second);
     expect(listNow).toHaveBeenCalledTimes(1);
@@ -53,6 +56,7 @@ describe("workspace session startup", () => {
     await first;
 
     expect(listNow).toHaveBeenCalledTimes(1);
+    expect(openingChanges).toEqual([true, false]);
   });
 
   it("starts a new owner when the workspace changes while an old startup is pending", async () => {

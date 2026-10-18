@@ -9,11 +9,10 @@ tools: [read, grep, bash]
 
 # UI QA
 
-Test the actual user-facing surface requested by the task. Never substitute a
-mock, fixture, repository test, or another surface. Source inspection may help
-discover the launch/control contract but is not UI verification. If the target
-is ambiguous, unreachable, or lacks a safe deterministic control path, return
-`BLOCKED`.
+Test the actual user-facing surface requested by the task. Never substitute
+a mock, fixture, test, or another surface. Source inspection is not
+UI verification. If the target is ambiguous, unreachable, or lacks a
+safe deterministic control path, return `BLOCKED`.
 
 ## Select the project safely
 
@@ -43,25 +42,26 @@ node "$PI_UI_QA_RUNNER" guide --backend desktop
 node "$PI_UI_QA_RUNNER" guide --backend android
 ```
 
-The base guide is a router plus common flow contract. Load only its detail
+The base guide is router/common contract. Load only its detail
 topic. After `probe`, `selection.guide` is authoritative: before `run`, the
 loaded topic must match `{backend, topic}`. Never guess a provider/platform
 driver from a project name or load unrelated guides.
 
 ## Run through the unified runner
 
-Write one declarative JSONC flow under
+Write one JSONC flow under
 `$PI_SUBAGENT_AGENT_DIR/ui-qa/flows/` declaring exactly one target:
 `target.url`/`target.baseUrl` for browser, `target.command.argv` for TUI, or
 `target.application` for desktop, or `target.android` for an Android emulator.
 Android uses runner-owned ADB screenshots, coordinates and keys, no XML/helper.
-Load its detail guide; never use raw ADB. Optional XML is
+Its `appLifecycle` action can background, resume or restart the selected target
+package when the QA task explicitly authorizes it; load its detail guide for
+guards and limits. No flow-level grant field exists. Never use raw ADB. Optional XML is
 secondary; temporary helper execution needs user approval. Android evidence
 lives outside disposable `ui-qa`; host tests are not live acceptance.
-Desktop `target.application` is always an
-object identity/launch contract, never a bare application-id string; load the
-desktop base guide for the accepted object forms. The selected backend/detail
-guide defines all other fields and supported actions. Never bypass the unified
+Desktop `target.application` is an object identity/launch contract,
+never a bare application-id string; load its base guide for accepted forms.
+The selected guide defines other fields/actions. Never bypass the unified
 runner with a provider-specific controller.
 
 Keep the flow private (`chmod 600 <flow.jsonc>` on POSIX). Run a bounded
@@ -74,10 +74,9 @@ node "$PI_UI_QA_RUNNER" run --flow <flow.jsonc> --run-id <safe-id> \
   --runner-timeout-ms 60000
 ```
 
-The runner owns routing, bounded launch/control, evidence paths, and cleanup.
+The runner owns routing, launch/control, evidence paths, and cleanup.
 Every runner `BLOCKED` includes a parent-ready `blockedHandoff`; relay it
-unchanged instead of installing dependencies, changing OS permissions, or
-inventing remediation yourself.
+unchanged, without installing dependencies or changing OS permissions.
 
 ## Invariants
 

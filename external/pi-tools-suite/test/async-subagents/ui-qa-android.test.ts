@@ -78,6 +78,10 @@ else if (cmd === 'shell dumpsys window windows' && s.displayOwnedFocus) out = 'W
 else if (cmd === 'shell dumpsys window' && s.noFullFocus) out = 'WINDOW MANAGER';
 else if (cmd === 'shell dumpsys window windows' || cmd === 'shell dumpsys window') out = 'mCurrentFocus=Window{42 u0 ' + (s.focusAt && s.calls >= s.focusAt ? 'com.android.permissioncontroller' : s.foreground ?? 'your.app') + '/.MainActivity}';
 else if (cmd === 'shell wm size') out = 'Physical size: 80x40';
+else if (cmd.includes('cmd package resolve-activity') && cmd.includes('android.intent.category.HOME')) out = s.homeComponent ?? 'com.android.launcher3/.Launcher';
+else if (cmd.includes('cmd package resolve-activity') && cmd.includes('android.intent.category.LAUNCHER')) out = s.launchComponent ?? 'your.app/.MainActivity';
+else if (cmd === 'shell input keyevent KEYCODE_HOME') s.foreground = 'com.android.launcher3';
+else if (cmd.startsWith('shell am start -W --user current ')) { s.foreground = 'your.app'; out = 'Status: ok\\nComplete\\n'; if (s.bootOnLaunch) s.bootChanged = true; }
 else if (cmd === 'exec-out uiautomator dump /proc/self/fd/1' || cmd.startsWith('exec-out umask 077\\n')) {
   const helper = cmd.startsWith('exec-out umask 077\\n');
   if (helper) s.helperCalls = (s.helperCalls ?? 0) + 1;
@@ -91,6 +95,7 @@ else if (cmd === 'exec-out uiautomator dump /proc/self/fd/1' || cmd.startsWith('
     if (s.helperDuplicateTrailer) out += trailer;
     // Real exec: loses remote exit codes. The adb client ALWAYS exits zero.
   }
+  if (s.homeAfterHierarchy) s.foreground = 'com.android.launcher3';
 }
 else if (cmd.startsWith('shell if test ! -e /data/local/tmp/pi-ui-qa-')) { if (!s.helperResidue) out = 'PIQA-CLEAN:' + cmd.match(/pi-ui-qa-([0-9a-f]{32})/)[1] + '\\n'; }
 else if (cmd.startsWith('shell ps -A -o ARGS && printf')) out = (s.helperProcess ? 'app_process /system/bin dev.pix.uiqa.HierarchyDump your.app' : 'unrelated process') + (s.helperPsUnframed ? '' : '\\nPIQA-PS-DONE\\n');
@@ -100,7 +105,7 @@ else if (cmd === 'shell input tap 40 20' || cmd === 'shell input tap 20 40') s.s
 else if (/^shell input swipe [0-9]+ [0-9]+ [0-9]+ [0-9]+ [0-9]+$/.test(cmd)) s.screen = 'Scrolled';
 else if (cmd === 'shell input keyevent KEYCODE_BACK') s.screen = 'Home';
 else if (cmd === "shell input text 'Hello'") s.screen = 'Typed';
-else if (cmd === 'exec-out screencap -p') { const p = Buffer.alloc(45); Buffer.from('89504e470d0a1a0a', 'hex').copy(p); p.writeUInt32BE(13,8); p.write('IHDR',12); p.writeUInt32BE(width,16); p.writeUInt32BE(height,20); p.write('IEND',37); if (s.focusAfterScreenshot) s.foreground = 'com.android.permissioncontroller'; if (s.swapAfterScreenshot) s.bootChanged = true; fs.writeFileSync(statePath,JSON.stringify(s)); process.stdout.write(p); process.exit(0); }
+else if (cmd === 'exec-out screencap -p') { const p = Buffer.alloc(45); Buffer.from('89504e470d0a1a0a', 'hex').copy(p); p.writeUInt32BE(13,8); p.write('IHDR',12); p.writeUInt32BE(width,16); p.writeUInt32BE(height,20); p.write('IEND',37); if (s.appAfterHomeScreenshot && s.foreground === 'com.android.launcher3') s.foreground = 'your.app'; if (s.focusAfterScreenshot) s.foreground = 'com.android.permissioncontroller'; if (s.swapAfterScreenshot) s.bootChanged = true; fs.writeFileSync(statePath,JSON.stringify(s)); process.stdout.write(p); process.exit(0); }
 else { process.stderr.write('unexpected fixture command: ' + cmd); process.exit(9); }
 fs.writeFileSync(statePath, JSON.stringify(s));
 process.stdout.write(out);
@@ -170,6 +175,52 @@ describe("bounded Android hierarchy", () => {
 });
 
 describe("unified Android runner", () => {
+	test("bounded lifecycle captures background/resume/restart without XML or app-data access", () => {
+		const f = fixture({ xml: "ERROR: could not get idle state.\n" });
+		const result = f.run([
+			{ action: "screenshot" },
+			{ action: "appLifecycle", operation: "background" },
+			{ action: "wait", durationMs: 100, timeoutMs: 5000 },
+			{ action: "screenshot" },
+			{ action: "appLifecycle", operation: "resume" },
+			{ action: "appLifecycle", operation: "restart" },
+			{ action: "screenshot" },
+		]);
+		expect(result.payload.reason ?? result.payload.status).toBe("PASSED");
+		expect(result.payload.artifacts.screenshots).toHaveLength(9);
+		expect(f.calls().some((args) => /uiautomator|app_process|clear|uninstall/.test(args.join(" ")))).toBe(false);
+		expect(f.calls().filter((args) => args.includes("KEYCODE_HOME"))).toHaveLength(1);
+		expect(f.calls().filter((args) => args.includes("-S"))).toHaveLength(1);
+	});
+	test("only an explicit first resume can attach to the resolved HOME", () => {
+		const f = fixture({ foreground: "com.android.launcher3" });
+		expect(f.run([{ action: "screenshot" }]).payload.status).toBe("BLOCKED");
+		expect(f.run([{ action: "appLifecycle", operation: "resume" }, { action: "screenshot" }]).payload.status).toBe("PASSED");
+	});
+	test.each([{ action: "tapPoint", x: 40, y: 20 }, { action: "pressKey", key: "BACK" }])("HOME observation never grants input to the launcher: %j", (step) => {
+		const f = fixture();
+		const result = f.run([{ action: "appLifecycle", operation: "background" }, step]);
+		expect(result.payload.status).toBe("FAILED");
+		expect(result.payload.reason).toContain("not the focused application");
+		expect(f.calls().filter((args) => args.includes("input"))).toEqual([
+			expect.arrayContaining(["KEYCODE_HOME"]),
+		]);
+	});
+	test("boot change during lifecycle retains before evidence but forbids later input", () => {
+		const f = fixture({ bootOnLaunch: true });
+		const result = f.run([{ action: "appLifecycle", operation: "restart" }, { action: "tapPoint", x: 40, y: 20 }]);
+		expect(result.payload.status).toBe("FAILED");
+		expect(result.payload.reason).toContain("identity changed");
+		expect(result.payload.artifacts.screenshots).toHaveLength(1);
+		expect(f.calls().some((args) => args.includes("input"))).toBe(false);
+	});
+	test("background mode cannot turn app selector geometry into HOME input", () => {
+		const f = fixture({ appAfterHomeScreenshot: true, homeAfterHierarchy: true });
+		const result = f.run([{ action: "appLifecycle", operation: "background" }, { action: "tap", selector: { text: "Open" } }]);
+		expect(result.payload.status).toBe("FAILED");
+		expect(result.payload.reason).toContain("not the focused application");
+		expect(f.calls().filter((args) => args.includes("input"))).toEqual([expect.arrayContaining(["KEYCODE_HOME"])]);
+	});
 	test("visual ADB route taps, swipes and keys without XML/helper even on idle failure", () => {
 		const f = fixture({ xml: "ERROR: could not get idle state.\n", helperExit: 1 });
 		const result = f.run([

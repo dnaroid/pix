@@ -2,7 +2,9 @@
 
 Use this backend for an Android app inside an explicitly identified emulator,
 not for the emulator's host window. No host Accessibility or extra dependency
-installation is needed. This route only attaches to an existing foreground app.
+installation is needed. This route attaches to an existing emulator. A fresh flow normally requires
+the target app foreground; its first `appLifecycle: resume` step may attach
+from HOME to recover a backgrounded app.
 
 Declare exactly one target: `target.android` with absolute `adbPath`, an explicit
 `emulator-NNNN` serial, exact `avdName`, and app `package`. Never autodiscover or
@@ -13,7 +15,14 @@ choose current image-pixel coordinates, run a bounded interaction, then inspect
 the retained before/after PNGs. Stop on visible overlays or unexpected screens.
 Probe only checks the existing emulator/app; it never deploys a helper.
 XML selectors/assertions are secondary, not a prerequisite or automatic fallback.
-The optional `hierarchyMode: "no-idle"` helper requires separate user approval;
+`appLifecycle` is a separately user-authorized bounded extension, not general
+device control: obtain explicit user authorization in the QA task before using
+it; no flow-level grant field exists. It supports background/resume/restart of
+only the selected package and captures before/after screenshots. The runner
+issues no direct app-data read/clear commands; ordinary lifecycle state may be
+saved by the app. Without that user authorization,
+use the existing foreground-only route. The optional
+`hierarchyMode: "no-idle"` helper requires separate user approval;
 see the detail guide for its limits. Do not use it to unblock coordinate input.
 
 Load the selected detail before probe/run:

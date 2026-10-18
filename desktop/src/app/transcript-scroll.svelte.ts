@@ -166,11 +166,7 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
     }
   }
 
-  function scrollToEntry(entryId: string): void {
-    const target = options.pane()?.querySelector<HTMLElement>(
-      `[data-transcript-entry-id="${CSS.escape(entryId)}"]`,
-    );
-    if (!target) return;
+  function scrollElementIntoView(target: HTMLElement): void {
     scrollRevision += 1;
     followsLatest = false;
     restorePending = false;
@@ -179,6 +175,59 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
       frame = 0;
     }
     target.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  const HIGHLIGHT_MS = 1600;
+  let highlighted: HTMLElement | undefined;
+  let highlightTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function clearHighlight(): void {
+    if (highlightTimer) clearTimeout(highlightTimer);
+    highlightTimer = undefined;
+    highlighted?.removeAttribute("data-transcript-highlight");
+    highlighted = undefined;
+  }
+
+  /** Briefly mark a revealed entry so the reader finds it after scrolling. */
+  function highlightElement(target: HTMLElement): void {
+    clearHighlight();
+    highlighted = target;
+    target.setAttribute("data-transcript-highlight", "");
+    highlightTimer = setTimeout(clearHighlight, HIGHLIGHT_MS);
+  }
+
+  function scrollToEntry(entryId: string): void {
+    const target = options.pane()?.querySelector<HTMLElement>(
+      `[data-transcript-entry-id="${CSS.escape(entryId)}"]`,
+    );
+    if (target) scrollElementIntoView(target);
+  }
+
+  /**
+   * Expand a collapsed activity group and scroll to one entry inside it.
+   * Resolves false when the pane, session or group changed or is missing.
+   */
+  async function revealActivityEntry(groupId: string, entryId: string): Promise<boolean> {
+    const pane = options.pane();
+    const sessionId = options.activeSessionId();
+    const group = pane?.querySelector<HTMLElement>(`[data-transcript-entry-id="${CSS.escape(groupId)}"]`);
+    if (!pane || !group) return false;
+    if (group instanceof HTMLDetailsElement && !group.open) {
+      // bind:open updates on the toggle event; entries render after that.
+      await new Promise<void>((resolve) => {
+        const done = () => { clearTimeout(timer); group.removeEventListener("toggle", done); resolve(); };
+        const timer = setTimeout(done, 250);
+        group.addEventListener("toggle", done);
+        group.open = true;
+      });
+      await tick();
+    }
+    if (pane !== options.pane() || sessionId !== options.activeSessionId() || !group.isConnected) return false;
+    const entry = group.querySelector<HTMLElement>(`[data-activity-entry-id="${CSS.escape(entryId)}"]`);
+    const target = entry ?? group;
+    scrollElementIntoView(target);
+    highlightElement(target);
+    return true;
   }
 
   $effect(() => {
@@ -206,6 +255,7 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
   });
 
   function dispose(): void {
+    clearHighlight();
     scrollRevision += 1;
     sessionPositions.clear();
     if (!frame) return;
@@ -223,6 +273,7 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
     scheduleScrollToLatest,
     scrollToLatest,
     scrollToEntry,
+    revealActivityEntry,
     dispose,
   };
 }
