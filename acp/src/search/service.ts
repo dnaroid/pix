@@ -12,7 +12,7 @@ import { sessionTitleHits } from "./session-titles.js";
 import { namedSessionTitles, type NamedSessionTitle } from "./session-index.js";
 import { readTaskSemanticCorpus } from "./task-corpus.js";
 import { SettingsTaskIndexer } from "./settings-task-indexer.js";
-import { logSourceIndexFailure } from "./search-logging.js";
+import { logSourceIndexFailure } from "./source-index-failure-logging.js";
 import { withProviderSlot } from "./source-work.js";
 import type { TaskChangeWatcher } from "./task-watcher.js";
 import { SearchCacheCompatibilityError } from "./embedding-cache.js";

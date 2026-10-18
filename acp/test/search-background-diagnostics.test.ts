@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { classifyIndexFailure, classifyIndexFailureReason, createBackgroundIndexFailureLogger, createSourceIndexFailureLogger, isExpectedIndexCancellation } from "../src/search/search-logging.js";
+import { classifyIndexFailure, createBackgroundIndexFailureLogger, isExpectedIndexCancellation } from "../src/search/search-logging.js";
+import { classifyIndexFailureReason, createSourceIndexFailureLogger } from "../src/search/source-index-failure-logging.js";
 import { SessionChunkSync } from "../src/search/session-chunk-sync.js";
 
 test("background index failure diagnostics coalesce repeats without leaking errors", async () => {
