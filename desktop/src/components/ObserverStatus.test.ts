@@ -11,7 +11,9 @@ describe("Observer icon", () => {
   it("uses only a telescope, with accessible status but no visible text or badge", () => {
     const body = html();
     expect(body).toContain('aria-label="Observer waiting ·');
-    expect(body).toContain("lucide-telescope");
+    expect(body).toContain('viewBox="0 0 24 24"');
+    expect(body).toContain('d="M13.73 4a2');
+    expect(body.match(/<svg\b/g)).toHaveLength(1);
     expect(body).not.toContain("<span");
     expect(body).toContain("text-primary");
     expect(body).not.toContain("animate-pulse");
@@ -34,7 +36,7 @@ describe("Observer icon", () => {
   });
   it("pulses the telescope only during a real check, respecting reduced motion", () => {
     const body = html({ phase: "checking" });
-    expect(body).toContain("lucide-telescope");
+    expect(body).toContain('d="M13.73 4a2');
     expect(body).toContain("animate-pulse motion-reduce:animate-none");
     expect(body).not.toContain("animate-spin");
     expect(html({ phase: "checking", enabled: false })).not.toContain("animate-pulse");

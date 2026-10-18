@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { parse } from "jsonc-parser";
 import { usageCollapsedSections } from "../lib/usage-panel-sections";
 import { createUsagePanelSections } from "./usage-panel-sections.svelte";
 
@@ -127,7 +128,7 @@ describe("usage panel disclosure persistence", () => {
     await store.load("/a");
     await store.setOpen("daily", false);
     expect(usageCollapsedSections(files.get("/a"))).toEqual(["activity", "daily"]);
-    expect(files.get("/a")).toContain('"color":"#112233"');
+    expect(parse(files.get("/a")!)).toMatchObject({ color: "#112233" });
   });
 
   it("reports invalid config without overwriting it or blocking disclosure use", async () => {

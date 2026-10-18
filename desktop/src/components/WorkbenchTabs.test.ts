@@ -72,7 +72,7 @@ describe("WorkbenchTabs desktop interaction", () => {
     expect(sidebarSource).not.toContain("bg-[var(--workspace-chrome-background)]");
     expect(sidebarSource).toContain("border-r border-sidebar-border bg-sidebar");
     expect(sidebarSource).toContain("border-b border-sidebar-border bg-sidebar");
-    expect(activityBarSource.match(/border-l-primary bg-background/g)).toHaveLength(9);
+    expect(activityBarSource.match(/border-l-primary bg-background/g)).toHaveLength(10);
     expect(source).toContain('? "bg-background"');
   });
 

@@ -115,7 +115,8 @@ describe("council protocol", () => {
 		expect(done.status).toBe("complete");
 		expect(readFileSync(done.proposalPath, "utf8")).toContain("# Final");
 		expect(existsSync(done.publishedPath)).toBe(true);
-		expect(path.dirname(done.publishedPath)).toBe(path.join(base.cwd, "docs", "brainstorms"));
+		expect(realpathSync(path.dirname(done.publishedPath)))
+			.toBe(realpathSync(path.join(base.cwd, "docs", "brainstorms")));
 		expect(readFileSync(path.join(run, "draft-proposal.md"), "utf8")).toBe(draft);
 		expect((await failure(finalizeCouncil({ ...base, run, proposal: "again", notes: "again" }))).code).toBe(2);
 		expect((await councilStatus({ ...base, run })).status).toBe("complete");

@@ -281,8 +281,8 @@ describe("desktop visual regressions", () => {
     expect(statusSource).not.toContain('import ListChevronsUpDown from "@lucide/svelte/icons/list-chevrons-up-down"');
     expect(statusSource).not.toContain('import Activity from "@lucide/svelte/icons/activity"');
     expect(statusSource).toContain("<SessionActivityStatusHud");
-    expect(statusBarViewModelSource).toContain("sessionSubagentSnapshot: options.sessionSubagentSnapshot()");
-    expect(statusBarViewModelSource).toContain("sessionTodoSnapshot: options.sessionTodoSnapshot()");
+    expect(statusBarViewModelSource).toContain("sessionSubagentSnapshot: viewer ? undefined : options.sessionSubagentSnapshot()");
+    expect(statusBarViewModelSource).toContain("sessionTodoSnapshot: viewer ? viewer.todo : options.sessionTodoSnapshot()");
     expect(sessionActivityStatusHudSource).toContain("sessionSubagentIndicators(subagentSnapshot)");
     expect(sessionActivityStatusHudSource).toContain('(indicator.agent.status === "running" || indicator.agent.status === "retrying")');
     expect(sessionActivityStatusHudSource).toContain('"animate-pulse motion-reduce:animate-none"');
@@ -328,7 +328,7 @@ describe("desktop visual regressions", () => {
     expect(sessionActivityStatusHudSource).toContain('import Trash2 from "@lucide/svelte/icons/trash-2"');
     expect(sessionActivityStatusHudSource).toContain('aria-label="Clear session plan"');
     expect(sessionActivityStatusHudSource).toContain("disabled={!canClearTodos || clearingTodos || todoRows.length === 0}");
-    expect(statusBarViewModelSource).toContain("canClearTodos: options.canClearTodos()");
+    expect(statusBarViewModelSource).toContain("canClearTodos: !viewer && options.canClearTodos()");
     expect(statusBarViewModelSource).toContain("options.clearSessionTodos(sessionId)");
     expect(statusSource).not.toContain('disabled={!canOpenSessionActivity}');
     expect(statusSource).not.toContain('title={`Session activity · ${activityLabel}`}');
@@ -445,7 +445,7 @@ describe("desktop visual regressions", () => {
     expect(runtimeStatusSource).toContain(">Retry</button>");
     expect(runtimeStatusSource).not.toContain("Usage has not been loaded yet.");
     expect(statusBarViewModelSource).toContain("refreshActiveSessionUsage");
-    expect(statusBarViewModelSource).toContain("sessionUsageAvailable: !draft && !!sessionId && runtimeReady");
+    expect(statusBarViewModelSource).toContain("sessionUsageAvailable: !viewer && !draft && !!sessionId && runtimeReady");
     expect(statusBarViewModelSource).not.toContain("refreshDraftModelUsage");
   });
 

@@ -1,12 +1,14 @@
 import { afterEach, expect, test } from "bun:test";
-import { runKey } from "../../src/async-subagents/core/paths.js";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { parseRunKey, runKey } from "../../src/async-subagents/core/paths.js";
 import { getAgentState } from "../../src/async-subagents/core/state.js";
 import {
 	SUBAGENT_RECORD_ENTRY, findLatestAgentRecord, getLive, getRecord, hydrateFromManager,
 	resetSubagentStoreForTest, updateLive, updateRecord,
 } from "../../src/async-subagents/core/store.js";
 
-const cwd = "/session-store-fixture";
+const cwd = join(tmpdir(), "session-store-fixture");
 const scope = "11111111-1111-4111-8111-111111111111";
 const key = (batch: string) => runKey(cwd, scope, batch);
 const entry = (batch: string, patch: Record<string, unknown>) => ({
@@ -17,6 +19,10 @@ const manager = (entries: ReturnType<typeof entry>[]) => ({
 	getEntries: () => entries, getCwd: () => cwd, getSessionId: () => scope,
 });
 afterEach(resetSubagentStoreForTest);
+
+test("session-native fixture keys round-trip on the host platform", () => {
+	expect(parseRunKey(key("batch"))?.cwd).toBe(cwd);
+});
 
 test("hydration folds patches and null deletions without using last-update order for lookup", () => {
 	const entries = [

@@ -9,7 +9,7 @@ describe("native window interaction defaults", () => {
     for (const window of config.app.windows) {
       expect(window.minHeight).toBe(380);
       expect(window.minHeight).toBeGreaterThan(requiredHeight);
-      expect(window.minWidth).toBe(860);
+      expect(window.minWidth).toBe(660);
     }
   });
 
