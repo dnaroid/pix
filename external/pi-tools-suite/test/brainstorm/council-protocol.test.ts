@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
@@ -115,8 +115,11 @@ describe("council protocol", () => {
 		expect(done.status).toBe("complete");
 		expect(readFileSync(done.proposalPath, "utf8")).toContain("# Final");
 		expect(existsSync(done.publishedPath)).toBe(true);
-		expect(realpathSync(path.dirname(done.publishedPath)))
-			.toBe(realpathSync(path.join(base.cwd, "docs", "brainstorms")));
+		// A Windows temp root may mix 8.3 and long user-directory names even
+		// after realpath. Compare the actual directory identity, not its alias.
+		const publishedDir = statSync(path.dirname(done.publishedPath));
+		const expectedDir = statSync(path.join(base.cwd, "docs", "brainstorms"));
+		expect([publishedDir.dev, publishedDir.ino]).toEqual([expectedDir.dev, expectedDir.ino]);
 		expect(readFileSync(path.join(run, "draft-proposal.md"), "utf8")).toBe(draft);
 		expect((await failure(finalizeCouncil({ ...base, run, proposal: "again", notes: "again" }))).code).toBe(2);
 		expect((await councilStatus({ ...base, run })).status).toBe("complete");
