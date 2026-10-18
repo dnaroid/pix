@@ -168,10 +168,14 @@ bridge independently of its generic completion messages, wait delivery and
 parent follow-up arbitration. Capture starts synchronously at spawn execution,
 before routing/authentication awaits, with a unique launch ID, captured parent
 session/branch anchor and child ID. The final retry/fallback completion binds the
-actual run directory and asynchronously reads at most 128 KiB of `result.json`.
-Only the final visible report (or summary fallback) is used, never hidden thinking,
-full logs or shared-working-tree diffs. Oversized/unreadable/mismatched results
-produce no evidence. No replay or adoption of previously launched workers occurs.
+actual run directory and reads the child result from the session-native store:
+live final text, a parent-authored completion message, the last non-error assistant
+message in the child session JSONL, or an owned-launch result. A compact structured
+summary is the fallback; the retired per-agent `result.json` sidecar is not read.
+Only the final visible report is used, never hidden thinking, full logs or
+shared-working-tree diffs. The bridge clips reports at 6,000 characters and marks
+them as clipped; unreadable, empty, foreign or mismatched results produce no
+evidence. No replay or adoption of previously launched workers occurs.
 Prelaunch exits (routing/model errors, aborts or setup errors) retire unbound
 captures; cancelled/failed launches retire their captures without invented reports.
 Returning from a successful spawn does not retire background children.

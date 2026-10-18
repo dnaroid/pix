@@ -89,8 +89,11 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   Search remains the existing direct source lookup without an intent classifier.
   Auto calls the private ACP `pix/search/intent` method **only after an explicit
   search submission** (never while typing). The stateless classifier uses
-  OpenRouter Decisions API and `~typesafe/jev-latest` with a single constrained
-  `search | ask` choice. Only the entered query is sent; no workspace path,
+  OpenRouter Decisions API and `~typesafe/jev-latest` by default, with an optional
+  OpenRouter model override in Desktop `search.intentModelRef` (empty selects
+  Jev). This preference is also used by the quick-task type classifier, independently
+  of `search.ragModelRef` and `search.ragThinking`. The search intent request
+  makes a single constrained `search | ask` choice. Only the entered query is sent; no workspace path,
   source results, transcripts, snippets or files are included in the request.
   Auto has a visible OpenRouter/cost disclosure and requires a saved OpenRouter
   credential. It is independent of semantic embedding configuration.

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DelegatedEvidence } from "../src/bundled-extensions/heads-up/delegated.js";
 import { beginDelegatedEvidence } from "../external/pi-tools-suite/src/async-subagents/delegated-evidence.js";
+import { createBatch, forgetRecord, resolveScope, updateRecord } from "../external/pi-tools-suite/src/async-subagents/core/store.js";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
 
@@ -43,6 +44,7 @@ test("reports are bounded, redacted and generic custom notices supply no evidenc
 test("suite producer captures launch synchronously and forwards final structured report once", async () => {
 	await mkdir(".pi/artifacts", { recursive: true });
 	const dir = await mkdtemp(".pi/artifacts/delegated-bridge-");
+	const runDir = createBatch(path.resolve(dir), resolveScope(), "heads-up-bridge");
 	try {
 		const evidence = new DelegatedEvidence(); const events: any[] = [];
 		let finish!: () => void; const received = new Promise<void>((resolve) => { finish = resolve; });
@@ -51,13 +53,21 @@ test("suite producer captures launch synchronously and forwards final structured
 			if ((value as any).phase === "completed") finish();
 		} }, { sessionId: "parent", anchorId: "spawn-entry" }, "child");
 		assert.equal(events.length, 1); // before routing/auth awaits or a run directory exists
-		await writeFile(path.join(dir, "result.json"), JSON.stringify({ agentId: "child", resultText: "Originally broke getUser; then restored User return and reran tests. Done." }));
-		const completed = capture.bind("/run/one");
+		const childSessionFile = path.join(dir, "child.jsonl");
+		await writeFile(childSessionFile, [
+			JSON.stringify({ type: "message", message: { role: "assistant", content: [{ type: "text", text: "Originally broke getUser." }] } }),
+			JSON.stringify({ type: "message", message: { role: "assistant", content: [{ type: "text", text: "Then restored User return and reran tests. Done." }] } }),
+		].join("\n") + "\n");
+		updateRecord(runDir, "child", { status: "done", childSessionFile });
+		const completed = capture.bind(runDir);
 		capture.releaseUnbound(); // A successful spawn returning must not retire background ownership.
-		const result = { runDir: "/run/one", agentId: "child", agentDir: dir, exitCode: 0, state: { id: "child", status: "done" as const } };
+		const result = { runDir, agentId: "child", agentDir: dir, exitCode: 0, state: { id: "child", status: "done" as const } };
 		completed({ ...result, agentId: "wrong" }); completed(result); completed(result); await received;
-		assert.equal(events.length, 2); assert.match(evidence.records(new Set(["spawn-entry"]))[0]!.text, /then restored/);
-	} finally { await rm(dir, { recursive: true, force: true }); }
+		assert.equal(events.length, 2);
+		const record = evidence.records(new Set(["spawn-entry"]))[0]!;
+		assert.match(record.text, /Then restored/);
+		assert.doesNotMatch(record.text, /Originally broke/); // Only the last final answer is evidence.
+	} finally { forgetRecord(runDir, "child"); await rm(dir, { recursive: true, force: true }); }
 });
 
 test("retired preflight captures do not evict legitimate in-flight children", () => {
@@ -76,22 +86,59 @@ test("retired preflight captures do not evict legitimate in-flight children", ()
 	assert.deepEqual(events.map((event) => event.phase), ["started", "retired"]);
 });
 
-test("unreadable, oversized or foreign results cannot become delegated evidence", async () => {
+test("missing, unreadable, foreign or errored child sessions cannot become delegated evidence", async () => {
 	await mkdir(".pi/artifacts", { recursive: true });
 	const dir = await mkdtemp(".pi/artifacts/delegated-invalid-");
 	try {
-		for (const content of [undefined, "not json", JSON.stringify({ agentId: "other", resultText: "wrong child" }), JSON.stringify({ agentId: "child", resultText: "x".repeat(128 * 1024) })]) {
-			if (content !== undefined) await writeFile(path.join(dir, "result.json"), content);
+		const scenarios = [
+			{ content: undefined },
+			{ content: "not json" },
+			{ content: JSON.stringify({ type: "message", message: { role: "assistant", content: [{ type: "text", text: "not this child" }] } }), agentId: "other" },
+			{ content: JSON.stringify({ type: "message", message: { role: "assistant", stopReason: "error", content: [{ type: "text", text: "failed response" }] } }) },
+		];
+		for (const [index, scenario] of scenarios.entries()) {
+			const runDir = createBatch(path.resolve(dir), resolveScope(), `heads-up-invalid-${index}`);
+			const childSessionFile = path.join(dir, `child-${index}.jsonl`);
+			if (scenario.content !== undefined) await writeFile(childSessionFile, scenario.content);
+			updateRecord(runDir, scenario.agentId ?? "child", { status: "done", childSessionFile });
 			const evidence = new DelegatedEvidence();
 			let finish!: (value: unknown) => void;
 			const received = new Promise<unknown>((resolve) => { finish = resolve; });
 			const complete = beginDelegatedEvidence({ emit: (_channel, value) => {
 				evidence.accept(value, "parent");
 				if ((value as { phase: string }).phase === "completed") finish(value);
-			} }, { sessionId: "parent", anchorId: "spawn-entry" }, "child").bind("/run/one");
-			complete({ runDir: "/run/one", agentId: "child", agentDir: dir, exitCode: 0, state: { id: "child", status: "done" } });
+			} }, { sessionId: "parent", anchorId: "spawn-entry" }, "child").bind(runDir);
+			complete({ runDir, agentId: "child", agentDir: dir, exitCode: 0, state: { id: "child", status: "done" } });
 			assert.equal((await received as { report?: string }).report, undefined);
 			assert.deepEqual(evidence.records(new Set(["spawn-entry"])), []);
+			forgetRecord(runDir, scenario.agentId ?? "child");
 		}
 	} finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("oversized session-native child reports are clipped before reaching the observer", async () => {
+	await mkdir(".pi/artifacts", { recursive: true });
+	const dir = await mkdtemp(".pi/artifacts/delegated-large-");
+	const runDir = createBatch(path.resolve(dir), resolveScope(), "heads-up-large");
+	try {
+		const childSessionFile = path.join(dir, "child.jsonl");
+		await writeFile(childSessionFile, JSON.stringify({
+			type: "message", message: { role: "assistant", content: [{ type: "text", text: "x".repeat(128 * 1024) }] },
+		}) + "\n");
+		updateRecord(runDir, "child", { status: "done", childSessionFile });
+		const evidence = new DelegatedEvidence();
+		let resolveCompletion!: (value: any) => void;
+		const received = new Promise<any>((resolve) => { resolveCompletion = resolve; });
+		const complete = beginDelegatedEvidence({ emit: (_channel, value) => {
+			evidence.accept(value, "parent");
+			if ((value as { phase: string }).phase === "completed") resolveCompletion(value);
+		} }, { sessionId: "parent", anchorId: "spawn-entry" }, "child").bind(runDir);
+		complete({ runDir, agentId: "child", agentDir: dir, exitCode: 0, state: { id: "child", status: "done" } });
+		const result = await received as { report?: string; clipped?: boolean };
+		assert.equal(result.report?.length, 6000);
+		assert.equal(result.clipped, true);
+		const record = evidence.records(new Set(["spawn-entry"]))[0]!;
+		assert.equal(record.clipped, true);
+		assert.ok(record.text.length <= 3000);
+	} finally { forgetRecord(runDir, "child"); await rm(dir, { recursive: true, force: true }); }
 });
