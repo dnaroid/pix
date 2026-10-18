@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { removeDirsWithRetry } from "../../external/pi-tools-suite/test/support/fs-retry.mjs";
 import { DesktopSessionChunks } from "../src/search/session-chunk-service.js";
 import { BackgroundSessionDiscovery, hydrateBackgroundTitle } from "../src/search/background-session-discovery.js";
-import { nativeSessionDirectory } from "../src/search/session-discovery.js";
+import { nativeSessionDirectory, SessionCandidateCatalog } from "../src/search/session-discovery.js";
 import { createSessionIndexTransaction } from "../src/search/session-index.js";
 import { SessionIdlePolicy, SESSION_IDLE_MS } from "../src/search/session-idle.js";
 import { SearchWorkNeedsContinueError, claimWork } from "../src/search/source-work.js";
@@ -36,7 +36,12 @@ async function fixture(t: { after(fn: () => Promise<unknown>): void }) {
       {type:"session_info",id:"title",parentId:"m",name:`Title ${id}`}].map(r=>JSON.stringify(r)).join("\n")+"\n");
     if (id !== "recent") await utimes(path,old,old);
   }
-  const policy = new SessionIdlePolicy(root), discovery = new BackgroundSessionDiscovery(async()=>[],agent);
+  // The real watcher is exercised by session-revisions tests. Fixture writes can
+  // deliver late FSEvents while this suite makes its first catalog pass; use
+  // full metadata reconciliation here to test background candidate ownership
+  // without a nondeterministic watcher-generation interruption.
+  const policy = new SessionIdlePolicy(root),
+    discovery = new BackgroundSessionDiscovery(async()=>[],agent,new SessionCandidateCatalog({watching:false}));
   let discoveries=0, manual=0; const titles:string[]=[], errors:unknown[]=[];
   const chunks = new DesktopSessionChunks(root,{
     signal:signal(),policy,embedding:async()=>undefined,

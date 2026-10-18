@@ -90,8 +90,13 @@ fn detect_icon_format(bytes: &[u8]) -> Option<IconFormat> {
         // A multibyte character may be split at the 1 KB boundary.
         std::str::from_utf8(&head[..head.len().saturating_sub(3)]).ok()
     })?;
-    let text = text.trim_start_matches('\u{feff}').trim_start().to_ascii_lowercase();
-    if text.starts_with("<svg") || ((text.starts_with("<?xml") || text.starts_with("<!--")) && text.contains("<svg")) {
+    let text = text
+        .trim_start_matches('\u{feff}')
+        .trim_start()
+        .to_ascii_lowercase();
+    if text.starts_with("<svg")
+        || ((text.starts_with("<?xml") || text.starts_with("<!--")) && text.contains("<svg"))
+    {
         return Some(IconFormat::Svg);
     }
     None
@@ -110,7 +115,8 @@ fn icon_image(bytes: &[u8]) -> Result<ProjectIconImage, String> {
 }
 
 fn read_bounded_file(path: &Path, max_bytes: u64) -> Result<Vec<u8>, String> {
-    let metadata = fs::metadata(path).map_err(|error| format!("failed to inspect image: {error}"))?;
+    let metadata =
+        fs::metadata(path).map_err(|error| format!("failed to inspect image: {error}"))?;
     if !metadata.is_file() {
         return Err("selected path is not a file".to_owned());
     }
@@ -132,7 +138,9 @@ fn read_bounded_file(path: &Path, max_bytes: u64) -> Result<Vec<u8>, String> {
 /// Open a native image chooser and return the validated image for preview.
 /// Nothing is written until the user saves project settings.
 #[tauri::command]
-pub(crate) async fn pick_project_icon_image(app: AppHandle) -> Result<Option<ProjectIconImage>, String> {
+pub(crate) async fn pick_project_icon_image(
+    app: AppHandle,
+) -> Result<Option<ProjectIconImage>, String> {
     crate::run_blocking(move || {
         let Some(selected) = app
             .dialog()
@@ -153,9 +161,17 @@ pub(crate) async fn pick_project_icon_image(app: AppHandle) -> Result<Option<Pro
 }
 
 fn readme_excerpt(root: &Path) -> Option<String> {
-    for name in ["README.md", "readme.md", "Readme.md", "README", "README.txt"] {
+    for name in [
+        "README.md",
+        "readme.md",
+        "Readme.md",
+        "README",
+        "README.txt",
+    ] {
         let path = root.join(name);
-        let Ok(metadata) = fs::symlink_metadata(&path) else { continue };
+        let Ok(metadata) = fs::symlink_metadata(&path) else {
+            continue;
+        };
         if !metadata.is_file() || metadata.file_type().is_symlink() {
             continue;
         }
@@ -176,7 +192,11 @@ fn readme_excerpt(root: &Path) -> Option<String> {
     None
 }
 
-fn project_icon_prompt(project_name: &str, readme: Option<&str>, user_prompt: Option<&str>) -> String {
+fn project_icon_prompt(
+    project_name: &str,
+    readme: Option<&str>,
+    user_prompt: Option<&str>,
+) -> String {
     let mut prompt = format!(
         "Design a square app icon / logo for a software project named \"{project_name}\". \
 It will be displayed tiny (16-24 px) in a dark desktop titlebar, so legibility at that size matters most. \
@@ -188,11 +208,13 @@ and must not be near-black or dark gray; avoid dark-on-dark and low-contrast pal
 flat design, no text, letters, words, watermarks, frames, borders, rounded-corner masks, or drop shadows."
     );
     if let Some(user_prompt) = user_prompt {
-        prompt.push_str("\n\nAdditional user requirements (take priority over the default style):\n");
+        prompt
+            .push_str("\n\nAdditional user requirements (take priority over the default style):\n");
         prompt.push_str(user_prompt);
     }
     if let Some(readme) = readme {
-        prompt.push_str("\n\nProject README excerpt for context (do not render any of this text):\n");
+        prompt
+            .push_str("\n\nProject README excerpt for context (do not render any of this text):\n");
         prompt.push_str(readme);
     }
     prompt
@@ -216,7 +238,9 @@ fn image_from_openrouter_response(body: &Value) -> Result<Vec<u8>, String> {
                     .and_then(Value::as_str)
             })
         })
-        .ok_or_else(|| "The selected model returned no image. Choose an image-capable model.".to_owned())?;
+        .ok_or_else(|| {
+            "The selected model returned no image. Choose an image-capable model.".to_owned()
+        })?;
     let (_, data) = url
         .strip_prefix("data:")
         .and_then(|rest| rest.split_once(";base64,"))
@@ -248,7 +272,9 @@ fn normalize_user_prompt(prompt: Option<&str>) -> Result<Option<String>, String>
         return Ok(None);
     };
     if prompt.chars().count() > MAX_USER_PROMPT_CHARS {
-        return Err(format!("logo prompt is too long (maximum {MAX_USER_PROMPT_CHARS} characters)"));
+        return Err(format!(
+            "logo prompt is too long (maximum {MAX_USER_PROMPT_CHARS} characters)"
+        ));
     }
     Ok(Some(prompt.to_owned()))
 }
@@ -263,9 +289,11 @@ pub(crate) async fn generate_project_icon_image(
 ) -> Result<ProjectIconImage, String> {
     crate::run_blocking(move || {
         let root = crate::canonical_workspace(Path::new(&workspace))?;
-        let api_key = crate::native_repository_semantic_config::openrouter_api_key().ok_or_else(|| {
-            "Set OPENROUTER_API_KEY or add an OpenRouter key to Pi auth to generate a logo.".to_owned()
-        })?;
+        let api_key =
+            crate::native_repository_semantic_config::openrouter_api_key().ok_or_else(|| {
+                "Set OPENROUTER_API_KEY or add an OpenRouter key to Pi auth to generate a logo."
+                    .to_owned()
+            })?;
         let model = model
             .map(|value| value.trim().to_owned())
             .filter(|value| !value.is_empty())
@@ -322,12 +350,20 @@ fn project_pi_directory(root: &Path) -> Result<PathBuf, String> {
             fs::create_dir(&directory)
                 .map_err(|error| format!("failed to create {}: {error}", directory.display()))?;
         }
-        Err(error) => return Err(format!("failed to inspect {}: {error}", directory.display())),
+        Err(error) => {
+            return Err(format!(
+                "failed to inspect {}: {error}",
+                directory.display()
+            ))
+        }
     }
     crate::canonical_project_directory(root, &directory)
 }
 
-pub(crate) fn save_project_icon_from(workspace: &Path, data_base64: &str) -> Result<String, String> {
+pub(crate) fn save_project_icon_from(
+    workspace: &Path,
+    data_base64: &str,
+) -> Result<String, String> {
     let bytes = BASE64
         .decode(data_base64.trim())
         .map_err(|_| "project icon data is malformed".to_owned())?;
@@ -348,14 +384,20 @@ pub(crate) fn save_project_icon_from(workspace: &Path, data_base64: &str) -> Res
         std::process::id()
     ));
     let write = (|| -> std::io::Result<()> {
-        let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&temp)?;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)?;
         file.write_all(&bytes)?;
         file.sync_all()?;
         fs::rename(&temp, &target)
     })();
     if let Err(error) = write {
         let _ = fs::remove_file(&temp);
-        return Err(format!("failed to save .pi/{}: {error}", format.file_name()));
+        return Err(format!(
+            "failed to save .pi/{}: {error}",
+            format.file_name()
+        ));
     }
     // Keep exactly one canonical icon so stale variants cannot reappear.
     for name in PROJECT_ICON_FILE_NAMES {
@@ -373,11 +415,17 @@ pub(crate) fn save_project_icon_from(workspace: &Path, data_base64: &str) -> Res
 /// Store a previewed logo as the canonical `.pi/project-icon.<ext>` file and
 /// return its workspace-relative path for `.pi/workspace.jsonc`.
 #[tauri::command]
-pub(crate) async fn save_project_icon(workspace: String, data_base64: String) -> Result<String, String> {
+pub(crate) async fn save_project_icon(
+    workspace: String,
+    data_base64: String,
+) -> Result<String, String> {
     crate::run_blocking(move || save_project_icon_from(Path::new(&workspace), &data_base64)).await
 }
 
-pub(crate) fn read_project_icon_from(workspace: &Path, relative_path: &str) -> Result<ProjectIconImage, String> {
+pub(crate) fn read_project_icon_from(
+    workspace: &Path,
+    relative_path: &str,
+) -> Result<ProjectIconImage, String> {
     let name = relative_path
         .strip_prefix(".pi/")
         .filter(|name| PROJECT_ICON_FILE_NAMES.contains(name))
@@ -400,7 +448,10 @@ pub(crate) fn read_project_icon_from(workspace: &Path, relative_path: &str) -> R
 }
 
 #[tauri::command]
-pub(crate) async fn read_project_icon(workspace: String, path: String) -> Result<ProjectIconImage, String> {
+pub(crate) async fn read_project_icon(
+    workspace: String,
+    path: String,
+) -> Result<ProjectIconImage, String> {
     crate::run_blocking(move || read_project_icon_from(Path::new(&workspace), &path)).await
 }
 
@@ -431,11 +482,23 @@ mod tests {
     #[test]
     fn detects_supported_formats_by_content() {
         assert_eq!(detect_icon_format(PNG), Some(IconFormat::Png));
-        assert_eq!(detect_icon_format(&[0xFF, 0xD8, 0xFF, 0xE0]), Some(IconFormat::Jpeg));
+        assert_eq!(
+            detect_icon_format(&[0xFF, 0xD8, 0xFF, 0xE0]),
+            Some(IconFormat::Jpeg)
+        );
         assert_eq!(detect_icon_format(b"GIF89a..."), Some(IconFormat::Gif));
-        assert_eq!(detect_icon_format(b"RIFF\0\0\0\0WEBPVP8 "), Some(IconFormat::Webp));
-        assert_eq!(detect_icon_format(b"<?xml version=\"1.0\"?><svg/>"), Some(IconFormat::Svg));
-        assert_eq!(detect_icon_format(b"  <svg xmlns=\"x\"/>"), Some(IconFormat::Svg));
+        assert_eq!(
+            detect_icon_format(b"RIFF\0\0\0\0WEBPVP8 "),
+            Some(IconFormat::Webp)
+        );
+        assert_eq!(
+            detect_icon_format(b"<?xml version=\"1.0\"?><svg/>"),
+            Some(IconFormat::Svg)
+        );
+        assert_eq!(
+            detect_icon_format(b"  <svg xmlns=\"x\"/>"),
+            Some(IconFormat::Svg)
+        );
         assert_eq!(detect_icon_format(b"<html></html>"), None);
         assert_eq!(detect_icon_format(b"plain"), None);
     }
@@ -454,7 +517,12 @@ mod tests {
         let leftovers = fs::read_dir(workspace.0.join(".pi"))
             .unwrap()
             .filter_map(Result::ok)
-            .filter(|entry| entry.file_name().to_string_lossy().starts_with(PROJECT_ICON_TEMP_PREFIX))
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(PROJECT_ICON_TEMP_PREFIX)
+            })
             .count();
         assert_eq!(leftovers, 0);
     }
@@ -503,7 +571,10 @@ mod tests {
             } }] } }]
         });
         assert_eq!(image_from_openrouter_response(&body).unwrap(), PNG);
-        assert!(image_from_openrouter_response(&serde_json::json!({"choices": [{"message": {"content": "no"}}]})).is_err());
+        assert!(image_from_openrouter_response(
+            &serde_json::json!({"choices": [{"message": {"content": "no"}}]})
+        )
+        .is_err());
         let prompt = project_icon_prompt("pix", Some("# Pix\nAgent harness"), Some("a blue fox"));
         assert!(prompt.contains("\"pix\""));
         assert!(prompt.contains("Agent harness"));
@@ -512,7 +583,10 @@ mod tests {
         assert!(prompt.contains("must not be near-black"));
         assert!(!project_icon_prompt("pix", None, None).contains("Additional user requirements"));
         assert_eq!(normalize_user_prompt(Some("  ")).unwrap(), None);
-        assert_eq!(normalize_user_prompt(Some(" fox ")).unwrap().as_deref(), Some("fox"));
+        assert_eq!(
+            normalize_user_prompt(Some(" fox ")).unwrap().as_deref(),
+            Some("fox")
+        );
         assert!(normalize_user_prompt(Some(&"x".repeat(MAX_USER_PROMPT_CHARS + 1))).is_err());
         assert_eq!(
             openrouter_error_message(402, r#"{"error":{"message":"Insufficient credits"}}"#),
@@ -524,6 +598,9 @@ mod tests {
     fn readme_excerpt_is_bounded() {
         let workspace = TestDirectory::new("readme");
         fs::write(workspace.0.join("README.md"), "x".repeat(5000)).unwrap();
-        assert_eq!(readme_excerpt(&workspace.0).unwrap().chars().count(), MAX_README_EXCERPT_CHARS);
+        assert_eq!(
+            readme_excerpt(&workspace.0).unwrap().chars().count(),
+            MAX_README_EXCERPT_CHARS
+        );
     }
 }

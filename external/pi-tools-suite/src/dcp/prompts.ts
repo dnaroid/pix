@@ -73,7 +73,7 @@ errors that are still actionable, verification, blockers and next steps.
 For unfinished work include \`Active objective\` and \`Next step\`.
 Do not infer, invent, or add facts; preserve
 uncertainty. Do not copy long raw code, JSON, diffs, logs or tool output.
-Drop incidental log lines without quoting their markers. Write \`summary\` yourself
+Drop incidental log lines without quoting their markers or narrating their removal. Write \`summary\` yourself
 unless a summarizer is configured; omitting it yields a coarse extractive record.
 
 MODES:

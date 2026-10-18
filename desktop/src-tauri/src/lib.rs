@@ -3117,7 +3117,11 @@ fn git_status_from(workspace: &Path) -> Result<GitSnapshot, String> {
         });
         // Line counts are presentation metadata: failures degrade to omitted counts.
         let staged = staged.join().ok().and_then(Result::ok).unwrap_or_default();
-        let unstaged = unstaged.join().ok().and_then(Result::ok).unwrap_or_default();
+        let unstaged = unstaged
+            .join()
+            .ok()
+            .and_then(Result::ok)
+            .unwrap_or_default();
         let remotes = remotes
             .join()
             .map_err(|_| "git remote listing panicked".to_owned())?;
@@ -10106,7 +10110,9 @@ mod tests {
         assert!(result.error.is_none());
         fs::write(&legacy, "{\"version\":1,\"resources\":{}}").unwrap();
         fs::write(&canonical, "{").unwrap();
-        assert!(sidebar_registry_indicator_state(&state, &workspace, &home).error.is_some());
+        assert!(sidebar_registry_indicator_state(&state, &workspace, &home)
+            .error
+            .is_some());
         fs::remove_file(&canonical).unwrap();
         let fallback = sidebar_registry_indicator_state(&state, &workspace, &home);
         assert!(fallback.stable);
@@ -11808,8 +11814,11 @@ mod tests {
         fs::write(&legacy_tasks, legacy_tasks_bytes).expect("write legacy tasks.jsonc");
         fs::create_dir_all(workspace.join(".pi/tasks.d")).expect("create legacy tasks.d");
         let legacy_task_file_bytes = b"{\"id\":\"legacy\"}\n";
-        fs::write(workspace.join(".pi/tasks.d/legacy.json"), legacy_task_file_bytes)
-            .expect("write legacy tasks.d entry");
+        fs::write(
+            workspace.join(".pi/tasks.d/legacy.json"),
+            legacy_task_file_bytes,
+        )
+        .expect("write legacy tasks.d entry");
         let stray_receipt_bytes = b"{\"temporary\":true}\n";
         let stray_receipt = workspace.join(".pi/desktop-skill-reads-receipt.json");
         fs::write(&stray_receipt, stray_receipt_bytes).expect("write non-canonical receipt");
