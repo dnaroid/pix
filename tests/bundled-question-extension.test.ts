@@ -9,6 +9,7 @@ import {
 	bundledModelUsageExtensionPath,
 	bundledQuotaWaitExtensionPath,
 	bundledHeadsUpExtensionPath,
+	bundledChoiceActionsExtensionPath,
 	bundledQuestionExtensionPath,
 	bundledSkillsInstallPath,
 	bundledSkillsSourcePath,
@@ -382,11 +383,12 @@ describe("bundled extensions", () => {
 			modelUsageExtensionPath,
 			quotaWaitExtensionPath,
 			bundledHeadsUpExtensionPath(),
+			bundledChoiceActionsExtensionPath(),
 		]);
 
 		const result = await loadBundledExtensions();
 		assert.deepEqual(result.errors, []);
-		assert.equal(result.extensions.length, 6);
+		assert.equal(result.extensions.length, 7);
 		assert.ok(result.extensions.some((extension) => extension.resolvedPath.startsWith(bundledHeadsUpExtensionPath())));
 		assert.ok(result.extensions.every((extension) => !extension.tools.has("workspace")));
 		assert.ok(result.extensions.some((extension) => extension.tools.has("question")));

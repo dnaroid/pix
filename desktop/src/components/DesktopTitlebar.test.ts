@@ -8,6 +8,7 @@ function titlebar(buildStatus: DesktopBuildStatus, restartAvailable = false, res
     isMacOS: true, buildStatus, restartAvailable, restartPending,
     onRestart: () => {}, projectSwitcher: null, selector: null,
     workbench: {
+      onReorder: () => {},
       tabs: [], activeId: null, canCreateSession: false,
       onSelect: () => {}, onClose: () => true, onCreateSession: () => {},
     },

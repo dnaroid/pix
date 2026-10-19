@@ -5023,7 +5023,7 @@ test("Pix Desktop deferred queue persists and edit returns the paused message", 
 	});
 });
 
-test("Pix Desktop queues Enter during streaming as Pi steering and reports consumption", async () => {
+for (const mode of ["text", "image-only", "consumed-before-response", "steer-fails-once"] as const) test(`Pix Desktop steering reports consumption and clears its row: ${mode}`, async () => {
 	const harness = createTestAdapter({
 		loadDesktopQueues: async () => ({ auto: [], deferred: [] }),
 		saveDesktopQueues: async () => {},
@@ -5037,24 +5037,48 @@ test("Pix Desktop queues Enter during streaming as Pi steering and reports consu
 			const created = await cx.request("session/new", { cwd: "/tmp/queue-steering", mcpServers: [] }) as { sessionId: string };
 			const pi = harness.clients[0]!;
 			pi.state = { ...pi.state, isStreaming: true };
+			const text = mode === "text" ? "steer me next" : "(image message)";
+			const displayText = mode === "text" ? text : "";
+			const consume = async () => {
+				await pi.clearQueue();
+				pi.emit({ type: "message_start", message: { role: "user", content: text } } as PiEvent);
+			};
+			if (mode === "consumed-before-response") {
+				const steer = pi.steer.bind(pi);
+				pi.steer = async (message) => { await steer(message); await consume(); };
+			}
 
-			const queued = await cx.request(PIX_QUEUE_MESSAGE_METHOD, {
+			const params = {
 				sessionId: created.sessionId,
-				prompt: [{ type: "text", text: "steer me next" }],
-				displayText: "steer me next",
-			}) as { disposition: string };
+				prompt: mode === "text" ? [{ type: "text", text }] : [{ type: "image", data: "aW1hZ2U=", mimeType: "image/png" }],
+				displayText,
+			};
+			if (mode === "steer-fails-once") {
+				const steer = pi.steer;
+				pi.steer = async () => { throw new Error("steer rejected"); };
+				await assert.rejects(cx.request(PIX_QUEUE_MESSAGE_METHOD, params), /Internal error/);
+				pi.steer = steer;
+			}
+			const queued = await cx.request(PIX_QUEUE_MESSAGE_METHOD, params) as { disposition: string; itemId: string };
 			assert.equal(queued.disposition, "steering");
-			assert.deepEqual(pi.steerCalls, ["steer me next"]);
+			assert.deepEqual(pi.steerCalls, [text]);
 
 			const state = await cx.request(PIX_QUEUE_STATE_METHOD, { sessionId: created.sessionId }) as DesktopQueueStateResponse;
-			assert.equal(state.items[0]?.source, "sdk-steering");
-			assert.equal(state.items[0]?.message?.displayText, "steer me next");
+			if (mode !== "consumed-before-response") {
+				assert.equal(state.items[0]?.source, "sdk-steering");
+				assert.equal(state.items[0]?.message?.displayText, displayText);
+				assert.equal(state.items[0]?.message?.promptText, mode === "text" ? text : "");
+				await consume();
+			}
 
-			await pi.clearQueue();
-			pi.emit({ type: "message_start", message: { role: "user", content: "steer me next" } } as PiEvent);
 			await waitFor(() => consumed.length === 1);
 			assert.equal(consumed[0]?.sessionId, created.sessionId);
-			assert.equal(consumed[0]?.message.displayText, "steer me next");
+			assert.equal(consumed[0]?.message.id, queued.itemId);
+			assert.equal(consumed[0]?.message.displayText, displayText);
+			assert.equal(consumed[0]?.message.promptText, mode === "text" ? text : "");
+			assert.equal(consumed[0]?.message.images.length, mode === "text" ? 0 : 1);
+			const after = await cx.request(PIX_QUEUE_STATE_METHOD, { sessionId: created.sessionId }) as DesktopQueueStateResponse;
+			assert.deepEqual(after.items, []);
 		},
 		(app) => {
 			const customNotifications = app as unknown as {
@@ -5071,6 +5095,28 @@ test("Pix Desktop queues Enter during streaming as Pi steering and reports consu
 			);
 		},
 	);
+});
+
+test("Pix Desktop deferred image-only edit preserves an empty text draft", async () => {
+	const harness = createTestAdapter({
+		loadDesktopQueues: async () => ({ auto: [], deferred: [] }),
+		saveDesktopQueues: async () => {},
+	});
+	await connectAs(harness.adapter, "pix-desktop", async (cx) => {
+		const { sessionId } = await cx.request("session/new", { cwd: "/tmp/image-only-draft", mcpServers: [] }) as { sessionId: string };
+		await cx.request(PIX_DEFER_MESSAGE_METHOD, {
+			sessionId, displayText: "",
+			prompt: [{ type: "image", data: "aW1hZ2U=", mimeType: "image/png" }],
+		});
+		const state = await cx.request(PIX_QUEUE_STATE_METHOD, { sessionId }) as DesktopQueueStateResponse;
+		assert.equal(state.items[0]?.message?.promptText, "");
+		const edited = await cx.request(PIX_QUEUE_ACTION_METHOD, {
+			sessionId, source: "deferred", index: 0, text: "", action: "edit",
+		}) as { message: DesktopQueuedUserMessage };
+		assert.equal(edited.message.promptText, "");
+		assert.equal(edited.message.displayText, "");
+		assert.equal(edited.message.images.length, 1);
+	});
 });
 
 test("Pix Desktop auto queue waits while Pi is idle-but-admitted and can be taken for the next turn", async () => {

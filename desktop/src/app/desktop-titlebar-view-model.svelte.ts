@@ -12,6 +12,8 @@ export function createDesktopTitlebarViewModel(options: {
   canCreateSession: () => boolean;
   selectWorkbenchTab: WorkbenchProps["onSelect"];
   closeWorkbenchTab: WorkbenchProps["onClose"];
+  reorderWorkbenchTab: WorkbenchProps["onReorder"];
+  workspace: () => string;
   openSessionStartTab: () => void | Promise<void>;
   selectorOpen: () => boolean;
   sessions: () => SelectorProps["sessions"];
@@ -31,6 +33,8 @@ export function createDesktopTitlebarViewModel(options: {
     newSessionShortcut: options.newSessionShortcut(),
     onSelect: options.selectWorkbenchTab,
     onClose: options.closeWorkbenchTab,
+    onReorder: options.reorderWorkbenchTab,
+    workspace: options.workspace(),
     onCreateSession: () => void options.openSessionStartTab(),
   }));
 

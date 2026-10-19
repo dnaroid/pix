@@ -26,7 +26,7 @@
     type TranscriptState,
   } from "../lib/transcript";
   import { latestAssistantMessageId } from "../lib/choice-actions";
-  import { choiceActionsReplies } from "../lib/choice-actions-replies";
+  import { choiceActionsPresentation } from "../lib/choice-actions-replies";
   import ChoiceActionsReply from "./ChoiceActionsReply.svelte";
   import AttachmentGrid from "./AttachmentGrid.svelte";
   import MarkdownText from "./MarkdownText.svelte";
@@ -114,7 +114,8 @@
   } = $props();
 
   let displayItems = $derived(groupTranscriptItems(transcript.items));
-  const choiceReplies = $derived(choiceActionsReplies(displayItems));
+  const choicePresentation = $derived(choiceActionsPresentation(displayItems));
+  const choiceReplies = $derived(choicePresentation.replies);
   // Quick-choice blocks accept input only in the final assistant reply of a
   // settled turn; any later user message makes them read-only history.
   const choiceActionsMessageId = $derived(promptRunning ? undefined : latestAssistantMessageId(displayItems));
@@ -357,7 +358,7 @@
               data-transcript-entry-id={item.id}
             >
               <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
-              {#if item.text}<MarkdownText text={item.text} dense fitTables enableHtmlSandbox={!!onHtmlSandboxSubmit} onHtmlSandboxSubmit={onHtmlSandboxSubmit ? (payload) => onHtmlSandboxSubmit(item.id, payload) : undefined} choiceActionsActive={item.id === choiceActionsMessageId} choiceActionsScope={activeSessionId ? JSON.stringify([activeSessionId, item.id]) : undefined} {onChoiceActionsSubmit} {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
+              {#if item.text}<MarkdownText text={item.text} dense fitTables enableHtmlSandbox={!!onHtmlSandboxSubmit} onHtmlSandboxSubmit={onHtmlSandboxSubmit ? (payload) => onHtmlSandboxSubmit(item.id, payload) : undefined} choiceActionsActive={item.id === choiceActionsMessageId} answeredChoiceActions={choicePresentation.answeredBlocks.get(item.id)} choiceActionsScope={activeSessionId ? JSON.stringify([activeSessionId, item.id]) : undefined} {onChoiceActionsSubmit} {onValidateProjectFile} {onValidateLocalFile} {onOpenProjectFile} {onResolveProjectMedia} {onOpenLocalFile} {onResolveLocalMedia} />{/if}
             </article>
           {/if}
         {:else}

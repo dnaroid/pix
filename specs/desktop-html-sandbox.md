@@ -118,7 +118,8 @@ across actual component destruction/remount or tab switching.
   The tool description repeats these boundaries for tool-inventory discovery.
   Unsupported capabilities require an explanation and an offered alternative,
   not a silent file substitution or a claim that the sandbox supports them.
-- The same Desktop-only capability notice recommends a `pix-actions` checklist
+- The same Desktop-only capability notice (and, in the TUI, the bundled
+  `choice-actions` extension) recommends a `pix-actions` checklist
   when the assistant is ending with one or more next steps it would
   carry out. Each line should be a GFM task item (`- [x] step` recommended,
   or `- [ ] step`); steps the user must perform remain ordinary text.
@@ -139,6 +140,11 @@ across actual component destruction/remount or tab switching.
 ## Authoring
 
 ### Quick-choice actions
+
+Choice rule: `pix-actions` offers optional next steps after the turn's work is
+finished; the turn ends and the selection arrives as a new user prompt. When the
+agent needs the user's answer before it can continue, it calls the blocking
+`question` tool instead. The same choice is never offered both ways.
 
 Use a closed `pix-actions` fenced block with a button label in the info string.
 Its body must contain 1–8 GFM task items (a single item is a one-click
@@ -162,7 +168,20 @@ Submitting sends the selected steps as a normal user message, formatted as
 `<button label>:\n1. item\n3. item` (numbering follows original checklist
 positions). It uses the ordinary prompt path, preserving the composer draft;
 when a prompt is already running at submission, the generated message is
-queued. This interaction is Desktop-only.
+queued.
+
+The Pix TUI supports the same contract through the bundled `choice-actions`
+extension (`src/bundled-extensions/choice-actions/`, parser shared with
+Desktop via its `contract.ts`). In `tui` mode it appends the same choice-rule
+guidance to the system prompt. The transcript renders a valid block as
+`☑ 1. item` / `☐ 2. item` lines plus `↳ <button label>`, and malformed blocks
+stay code. After an agent run ends, the last valid block of the final assistant
+message appears as a non-blocking widget above the editor. While the composer
+is empty, digits 1–8 toggle items, Enter submits the selection through
+`sendUserMessage` (it refuses an empty selection), and Esc dismisses the widget.
+Typing a printable character dismisses the widget and keeps the keystroke. A
+non-empty draft owns every key. A new run, user input, session start or
+shutdown clears the widget. TUI selection state is not persisted.
 
 Checkbox edits (including an empty selection) survive transcript remounts when
 switching session tabs within the same Desktop window. State is scoped to the
@@ -183,6 +202,12 @@ from the preceding assistant's parsed block and the exact reply, independently
 of the window-local selection cache, including after restart. If the source is
 not loaded, the reply differs from the generated format, or multiple blocks
 match ambiguously, the user message remains ordinary Markdown.
+
+When a user reply is recognized as a receipt, Desktop hides only its matched
+source `pix-actions` block in the assistant message to avoid a duplicate checklist.
+Other assistant text and unanswered blocks remain visible. This is reconstructed
+from loaded history after restart as well; ambiguous or altered replies do not
+hide source blocks, and stored conversation text is unchanged.
 
 Use a fully self-contained block. For example:
 

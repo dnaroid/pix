@@ -12,6 +12,8 @@ export function createDesktopNavigationViewModelServices(options: DesktopViewMod
     canCreateSession: () => options.presentation.canCreateSession,
     selectWorkbenchTab: options.workbenchGit.workbench.select,
     closeWorkbenchTab: options.workbenchGit.workbench.close,
+    reorderWorkbenchTab: options.presentation.reorderWorkbenchTab,
+    workspace: options.workspace,
     openSessionStartTab: options.transitions.draft.openStartTab,
     selectorOpen: () => options.sessions.tabs.selectorOpen,
     // SessionSelector hides sub-agent viewers by default and owns the show toggle.

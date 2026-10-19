@@ -255,7 +255,7 @@ describe("Usage panel", () => {
 
   it("cross-filters charts by day, hour and model; each chart ignores its own axis", () => {
     expect(viewSource).toContain("filterByTime(periodBuckets, timeFilter)");
-    expect(viewSource).toContain("calendarHeatmap(byHour,");
+    expect(viewSource).toContain('filterByTime(selectBuckets(snapshot, { ...selection, period: "all" }), { hour: selectedHour })');
     expect(viewSource).toContain('period === "7d" ? currentWeekWindow(nowMs, weekStart) : range');
     expect(heatmapSource).toContain("!day.outside && (day.value > 0 || day.key === selectedDay)");
     expect(viewSource).toContain("hourOfDayProfile(filterByTime(periodBuckets, { day: selectedDay })");
@@ -275,6 +275,32 @@ describe("Usage panel", () => {
       expect(source).not.toContain("<title>");
       expect(source).toContain("onfocus=");
     }
+  });
+
+  it("feeds neighboring-day history to the calendar without expanding overview totals", () => {
+    // Start the period one day after the locale's week start so the first cell is context.
+    const first = new Date(2026, 8, 18);
+    first.setDate(first.getDate() + (localWeekStart() + 1 - first.getDay() + 7) % 7);
+    const context = new Date(first);
+    context.setDate(context.getDate() - 1);
+    const now = new Date(first);
+    now.setDate(now.getDate() + 29);
+    const snapshot: UsageSourceSnapshot = {
+      source: "pix-sessions", status: "ready", unit: "tokens", coverage: null, fetchedAtMs: now.getTime(),
+      buckets: [
+        { startMs: context.getTime(), width: "day", provider: "anthropic", model: "opus", projectCwd: "/tmp/p", values: { totalTokens: 30 } },
+        { startMs: now.getTime(), width: "day", provider: "anthropic", model: "opus", projectCwd: "/tmp/p", values: { totalTokens: 10 } },
+        { startMs: context.getTime(), width: "day", provider: "anthropic", model: "opus", projectCwd: "/tmp/other", values: { totalTokens: 1000 } },
+      ],
+    };
+    const { body } = render(UsageSourceView, { props: { snapshot, period: "30d", nowMs: now.getTime(), workspace: "/tmp/p" } });
+    const calendar = body.match(/<svg\b[^>]*aria-label="Daily activity calendar:[^"]*"[^>]*>[\s\S]*?<\/svg>/u)?.[0];
+    expect(calendar).toContain("1 of 30 days active, 10 tok total.");
+    const firstCell = calendar?.match(/<rect\b[^>]*>/u)?.[0];
+    expect(firstCell).toContain('fill="var(--tool-info)"');
+    expect(firstCell).toContain('fill-opacity="1"');
+    expect(firstCell).not.toContain('role="button"');
+    expect(body).toContain('tabular-nums">10 tok</dd>');
   });
 
   it("renders no tooltip without an anchor and activates on Enter/Space only", () => {

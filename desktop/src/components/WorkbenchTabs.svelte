@@ -7,7 +7,8 @@
   import Plus from "@lucide/svelte/icons/plus";
   import SquareTerminal from "@lucide/svelte/icons/square-terminal";
   import X from "@lucide/svelte/icons/x";
-  import { tick } from "svelte";
+  import { onDestroy, tick } from "svelte";
+  import { createWorkbenchTabMove, workbenchTabMove, type WorkbenchTabMoveState } from "../lib/workbench-tab-move";
   import { linearFocusIndex } from "../lib/keyboard-navigation";
   import {
     workbenchTabCloseFallback,
@@ -26,6 +27,8 @@
     onSelect,
     onClose,
     onCreateSession,
+    onReorder,
+    workspace = "",
   }: {
     tabs: readonly WorkbenchTab[];
     activeId: WorkbenchTabId | null;
@@ -34,9 +37,50 @@
     onSelect: (id: WorkbenchTabId) => void;
     onClose: (id: WorkbenchTabId, fallbackId: WorkbenchTabId | null) => boolean | Promise<boolean>;
     onCreateSession: () => void;
+    onReorder: (id: WorkbenchTabId, beforeId: WorkbenchTabId | null) => void;
+    workspace?: string;
   } = $props();
 
   let tablist = $state<HTMLElement | null>(null);
+  let moving = $state<WorkbenchTabMoveState | null>(null);
+  let moveWorkspace = "";
+  const tabMove = createWorkbenchTabMove({
+    tablist: () => tablist,
+    ids: () => tabs.map((tab) => tab.id),
+    changed: (state) => { moving = state; },
+    commit: (id, beforeId) => void reorderTab(id, beforeId),
+    focus: focusTab,
+  });
+  onDestroy(tabMove.destroy);
+  $effect(() => {
+    if (!moving) return;
+    const source = tabs.find((tab) => tab.id === moving?.id);
+    const targetMissing = moving.beforeId !== null && !tabs.some((tab) => tab.id === moving?.beforeId);
+    if (workspace !== moveWorkspace || tabs.length < 2 || !source || source.disabled || targetMissing) tabMove.cancel();
+  });
+
+  function startMove(id: WorkbenchTabId): void {
+    moveWorkspace = workspace;
+    tabMove.start(id);
+  }
+
+  async function reorderTab(id: WorkbenchTabId, beforeId: WorkbenchTabId | null): Promise<void> {
+    const owner = tablist;
+    const currentWorkspace = workspace;
+    const previousFocus = owner?.ownerDocument.activeElement;
+    onReorder(id, beforeId);
+    await tick();
+    // Keyed DOM moves can drop browser focus; never restore into another workspace/unmount.
+    if (!owner?.isConnected || tablist !== owner || workspace !== currentWorkspace) return;
+    const currentFocus = owner.ownerDocument.activeElement;
+    if (currentFocus === previousFocus || currentFocus === owner.ownerDocument.body) focusTab(id);
+  }
+
+  const movePosition = $derived.by(() => {
+    if (!moving) return 0;
+    if (moving.beforeId === null) return tabs.length;
+    return tabs.filter((tab) => tab.id !== moving?.id).findIndex((tab) => tab.id === moving?.beforeId) + 1;
+  });
 
   function focusTab(id: WorkbenchTabId): void {
     const tab = tablist?.querySelector<HTMLButtonElement>(`[data-workbench-tab-id="${CSS.escape(id)}"]`);
@@ -91,6 +135,7 @@
   <div class="flex min-w-0 w-fit flex-[0_1_auto] items-stretch">
     <div
       bind:this={tablist}
+      class:moving-tab={moving !== null}
       class="flex min-w-0 w-max flex-[0_1_auto] items-stretch border-l border-border overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       role="tablist"
       aria-label="Open workbench tabs"
@@ -104,15 +149,22 @@
             active
               ? "bg-background"
               : "border-b border-b-border hover:bg-chrome-hover",
+            moving?.id === tab.id && "ring-1 ring-inset ring-primary opacity-60",
           ]}
           role="presentation"
           onmousedown={(event) => handleTabMouseDown(event, tab)}
         >
+          {#if moving?.beforeId === tab.id}
+            <span class="pointer-events-none absolute inset-y-0 left-0 z-20 w-0.5 bg-primary" aria-hidden="true"></span>
+          {:else if moving && moving.beforeId === null && index === tabs.length - 1}
+            <span class="pointer-events-none absolute inset-y-0 right-0 z-20 w-0.5 bg-primary" aria-hidden="true"></span>
+          {/if}
           {#if active}
             <span class="pointer-events-none absolute inset-x-0 top-0 h-px bg-primary" aria-hidden="true"></span>
           {/if}
           <button
             use:titlebarDrag
+            use:workbenchTabMove={tabs.length > 1 && !tab.disabled ? () => startMove(tab.id) : undefined}
             class={[
               "flex h-full w-full items-center gap-2 bg-transparent pl-3 text-left text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:z-10 focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring disabled:cursor-default disabled:opacity-40",
               tab.closable ? "pr-8" : "pr-3",
@@ -194,3 +246,13 @@
 
   <div class="min-w-3 flex-1 self-stretch" data-tauri-drag-region></div>
 </nav>
+
+{#if moving}
+  <div class="pointer-events-none fixed left-1/2 top-11 z-50 max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-md" role="status">
+    Move tab: {tabs.find((tab) => tab.id === moving?.id)?.label} · Position {movePosition} of {tabs.length} · Click to place · ←/→ · Enter · Esc to cancel
+  </div>
+{/if}
+
+<style>
+  .moving-tab, .moving-tab :global(button) { cursor: grabbing; }
+</style>

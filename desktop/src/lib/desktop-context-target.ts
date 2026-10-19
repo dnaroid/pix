@@ -1,7 +1,8 @@
 import { normalizeExternalHref } from "./markdown-links";
 import { isWorkspaceProjectFilePath } from "./project-files";
+import { workbenchTabMoveCommand } from "./workbench-tab-move";
 
-export type DesktopContextKind = "editable" | "readonly" | "password" | "selection" | "link" | "terminal" | "image" | "file" | "session";
+export type DesktopContextKind = "editable" | "readonly" | "password" | "selection" | "link" | "terminal" | "image" | "file" | "session" | "workbench";
 
 export interface DesktopContextTarget {
   kind: DesktopContextKind;
@@ -18,6 +19,7 @@ export interface DesktopContextTarget {
   filePath?: string;
   sessionId?: string;
   sessionFile?: string;
+  moveTab?: () => void;
   projectRevealPath?: string;
   sourceReference?: string;
   hasSelection: boolean;
@@ -137,8 +139,11 @@ export function desktopContextTarget(target: EventTarget | null, workspace = "")
   const sessionId = sessionTab?.dataset.contextSessionId;
   if (sessionTab && sessionId) {
     const sessionFile = contextFilePath(sessionTab.dataset.contextSessionFile, "");
-    return { kind: "session", element: sessionTab, sessionId, sessionFile, editor: null, hasSelection: false, readOnly: true };
+    return { kind: "session", element: sessionTab, sessionId, sessionFile, moveTab: workbenchTabMoveCommand(sessionTab), editor: null, hasSelection: false, readOnly: true };
   }
+
+  const workbenchTab = element.closest<HTMLElement>("[data-workbench-tab]");
+  const moveTab = workbenchTab ? workbenchTabMoveCommand(workbenchTab) : undefined;
 
   const image = element.closest("img");
   if (image instanceof HTMLImageElement && image.getAttribute("src")) {
@@ -168,9 +173,10 @@ export function desktopContextTarget(target: EventTarget | null, workspace = "")
     if (hasSelection) kind = "selection";
     return {
       kind, element, editor: null, linkUrl, fileLinkPath, fileLinkRevealPath, sourceReference,
-      filePath, projectRevealPath: revealPath, hasSelection, readOnly: true,
+      filePath, projectRevealPath: revealPath, moveTab, hasSelection, readOnly: true,
     };
   }
+  if (workbenchTab && moveTab) return { kind: "workbench", element: workbenchTab, moveTab, editor: null, hasSelection: false, readOnly: true };
   return null;
 }
 

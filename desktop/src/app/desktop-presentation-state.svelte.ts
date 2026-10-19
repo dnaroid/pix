@@ -1,6 +1,7 @@
 import type { SessionInfo } from "@agentclientprotocol/sdk";
 import { agentControlShowsPausedTab } from "../lib/agent-control";
 import { subagentSessionLink } from "../lib/session-subagent-link";
+import { moveWorkbenchTab, orderedWorkbenchTabs } from "../lib/workbench-tab-order";
 import {
   DESKTOP_SLASH_COMMANDS,
   mergeSlashCommands,
@@ -113,7 +114,8 @@ export function createDesktopPresentationState(options: DesktopPresentationState
     selectionDisabled: options.operationRunning(),
     realSessionCount: tabSessions.length,
   }));
-  const workbenchTabs = $derived.by(() => buildDesktopWorkbenchTabs({
+  let customTabOrder = $state<{ workspace: string; ids: WorkbenchTabId[] } | null>(null);
+  const canonicalWorkbenchTabs = $derived.by(() => buildDesktopWorkbenchTabs({
     sessionTabs: workbenchSessionTabs,
     preview: options.project.preview.active,
     previewDirty: options.project.preview.dirty,
@@ -136,6 +138,17 @@ export function createDesktopPresentationState(options: DesktopPresentationState
       openedOrder: options.workbenchTerminal.openedOrder,
     } : null,
   }));
+  const workbenchTabs = $derived(orderedWorkbenchTabs(
+    canonicalWorkbenchTabs,
+    customTabOrder?.workspace === options.workspace() ? customTabOrder.ids : [],
+  ));
+  $effect(() => {
+    if (!customTabOrder) return;
+    if (customTabOrder.workspace !== options.workspace()) { customTabOrder = null; return; }
+    const present = new Set(canonicalWorkbenchTabs.map((tab) => tab.id));
+    const ids = customTabOrder.ids.filter((id) => present.has(id));
+    if (ids.length !== customTabOrder.ids.length) customTabOrder = { workspace: options.workspace(), ids };
+  });
   const activeWorkbenchTab = $derived(
     workbenchTabs.find((tab) => tab.id === options.activeWorkbenchTabId()),
   );
@@ -163,6 +176,9 @@ export function createDesktopPresentationState(options: DesktopPresentationState
   );
 
   return {
+    reorderWorkbenchTab(id: WorkbenchTabId, beforeId: WorkbenchTabId | null): void {
+      customTabOrder = { workspace: options.workspace(), ids: moveWorkbenchTab(workbenchTabs, id, beforeId) };
+    },
     get sessionMutationRunning() { return sessionMutationRunning; },
     get canUseSession() { return canUseSession; },
     get canCreateSession() { return canCreateSession; },

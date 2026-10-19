@@ -46,6 +46,12 @@ reference for extensions that need to work in Pix while remaining usable in
 other Pi contexts. Suite-spawned sub-agents intentionally use a smaller isolated
 extension set rather than inheriting the complete parent UI environment.
 
+Pix also bundles the TUI-only `choice-actions` extension. It advertises optional
+next-step checklists in the system prompt and presents valid `pix-actions`
+blocks from the final assistant message as a selectable widget above the editor.
+The shared contract and Desktop behavior are documented in the
+[HTML Sandbox specification](../specs/desktop-html-sandbox.md#quick-choice-actions).
+
 ## Development
 
 See [Development](development.md) for the source checkout and build/test

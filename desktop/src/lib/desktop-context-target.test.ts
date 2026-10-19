@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { contextFilePath, desktopContextTarget, linkedFilePath, previewSourceReference, projectRevealPath, relativeImagePath } from "./desktop-context-target";
 import previewSource from "../components/PreviewPane.svelte?raw";
 import tabsSource from "../components/WorkbenchTabs.svelte?raw";
+import { workbenchTabMove } from "./workbench-tab-move";
 
 describe("session tab context targets", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -29,6 +30,32 @@ describe("session tab context targets", () => {
         editor: null, hasSelection: false, readOnly: true,
       });
     }
+  });
+
+  it("exposes the registered move command on utility tabs and removes it when disabled/unmounted", () => {
+    class ElementStub {
+      ownerDocument = { getSelection: () => null };
+      closest(selector: string): ElementStub | null {
+        return selector === "[data-workbench-tab]" ? tab : null;
+      }
+    }
+    const tab = new ElementStub();
+    vi.stubGlobal("Element", ElementStub);
+    vi.stubGlobal("HTMLElement", ElementStub);
+    vi.stubGlobal("HTMLInputElement", class {});
+    vi.stubGlobal("HTMLTextAreaElement", class {});
+    vi.stubGlobal("HTMLImageElement", class {});
+    const move = vi.fn();
+    const action = workbenchTabMove(tab as unknown as HTMLElement, move);
+    const target = desktopContextTarget(new ElementStub() as unknown as EventTarget);
+    expect(target?.kind).toBe("workbench");
+    target?.moveTab?.();
+    expect(move).toHaveBeenCalledOnce();
+    action.update(undefined);
+    target?.moveTab?.();
+    expect(desktopContextTarget(tab as unknown as EventTarget)).toBeNull();
+    expect(move).toHaveBeenCalledOnce();
+    action.destroy();
   });
 });
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import source from "./ChoiceActionsReply.svelte?raw";
 import transcript from "./TranscriptPane.svelte?raw";
+import markdown from "./MarkdownText.svelte?raw";
 
 describe("quick-choice reply presentation", () => {
   it("uses the same checkbox visuals with no interactive controls", () => {
@@ -14,8 +15,13 @@ describe("quick-choice reply presentation", () => {
   });
 
   it("renders recognized user replies without replacing their stored text", () => {
-    expect(transcript).toContain("const choiceReplies = $derived(choiceActionsReplies(displayItems));");
+    expect(transcript).toContain("const choicePresentation = $derived(choiceActionsPresentation(displayItems));");
     expect(transcript).toContain("<ChoiceActionsReply actions={choiceReply} />");
     expect(transcript).toContain("{:else if item.text}");
+  });
+
+  it("hides only answered source checklists while retaining the user receipt", () => {
+    expect(transcript).toContain("answeredChoiceActions={choicePresentation.answeredBlocks.get(item.id)}");
+    expect(markdown).toContain("onChoiceActionsSubmit && !answeredChoiceActions?.has(actionSegments.indexOf(segment))");
   });
 });

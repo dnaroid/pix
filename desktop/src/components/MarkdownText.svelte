@@ -22,6 +22,7 @@
     onHtmlSandboxSubmit,
     choiceActionsActive = false,
     choiceActionsScope,
+    answeredChoiceActions,
     onChoiceActionsSubmit,
     onValidateProjectFile,
     onValidateLocalFile,
@@ -40,6 +41,7 @@
     onHtmlSandboxSubmit?: (payload: unknown) => Promise<"sent" | "queued">;
     choiceActionsActive?: boolean;
     choiceActionsScope?: string;
+    answeredChoiceActions?: ReadonlySet<number>;
     onChoiceActionsSubmit?: (text: string) => Promise<"sent" | "queued">;
     onValidateProjectFile?: (path: string) => Promise<boolean>;
     onValidateLocalFile?: (path: string) => Promise<boolean>;
@@ -54,6 +56,7 @@
     return sandbox || actions ? splitHtmlSandboxSegments(text, { sandbox, actions }) : [{ type: "markdown", text }];
   });
   let externalLinkIconTemplate: HTMLSpanElement | undefined;
+  const actionSegments = $derived(segments.filter((segment) => segment.type === "actions"));
   let copyIconTemplate: HTMLSpanElement | undefined;
   const codeCopy = createMarkdownCodeCopyAction(() => copyIconTemplate);
   const markdownContent = createMarkdownContentAction({
@@ -83,7 +86,7 @@
   {:else if segment.type === "sandbox-pending"}
     <div class="py-2 text-xs text-muted-foreground" role="status">HTML preview · awaiting complete block…</div>
   {:else if segment.type === "actions"}
-    {#if onChoiceActionsSubmit}
+    {#if onChoiceActionsSubmit && !answeredChoiceActions?.has(actionSegments.indexOf(segment))}
       {#key JSON.stringify([choiceActionsScope, segment.actions])}
         <ChoiceActions actions={segment.actions} active={choiceActionsActive} onSubmit={onChoiceActionsSubmit} stateScope={choiceActionsScope} blockIndex={index} />
       {/key}

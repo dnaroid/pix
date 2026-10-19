@@ -315,8 +315,15 @@ in memory; it exposes tool + slash-command interfaces. `[confirmed by code]`
   boundary, still-unconsumed completions become `async-subagents-agent-completion`
   custom-message drafts with one continuation request. An idle parent is woken
   via `triggerTurn: true`, `deliverAs: "followUp"`; only one idle wakeup is submitted
-  per reconciliation. Completions arriving after the boundary remain eligible at
-  settlement or the next two-second watcher tick. `[confirmed by code,
+  per reconciliation. Autonomous watcher/reconciliation wakeups are gated from
+  `agent_start` until this extension's `agent_settled` hook observes the outcome;
+  this prevents an idle-looking SDK state from waking the parent while earlier
+  asynchronous settlement hooks are still running. A normal settlement releases
+  the gate, preserving ordinary idle wakeups. An aborted settlement keeps it held
+  until the next `agent_start`: completions remain pending (not acknowledged or
+  discarded) and are delivered exactly once at the next run's normal
+  `agent_before_settle` boundary. Completions arriving after the boundary remain
+  eligible at settlement or the next two-second watcher tick. `[confirmed by code,
   index.ts/core/notifications.ts/completion-delivery.ts]`
 - `wait` reserves only its selected tracked agents in the originating session;
   `spawn` reserves its newly scheduled agents before launch. During that call,
@@ -350,6 +357,10 @@ in memory; it exposes tool + slash-command interfaces. `[confirmed by code]`
   watched spawn/wait callbacks, filtered waits, timeout-boundary races, abort,
   error, fail-fast, busy-parent boundary delivery and result/artifact receipts are covered in
   `external/pi-tools-suite/test/async-subagents/completion-delivery.test.ts`.
+  Normal-settlement release, aborted-settlement hold, idle-before-settled-hook
+  suppression, and next-run exactly-once delivery are covered by
+  `external/pi-tools-suite/test/async-subagents/completion-delivery.test.ts` and
+  the real-SDK regression `external/pi-tools-suite/test/async-subagents/completion-abort-sdk.test.ts`.
 
 ### Concurrency (`core/concurrency.ts`)
 - `createSemaphore(limit)`: `limit ≤ 0` = unlimited. `acquire(signal?)` queues when full, rejects on abort. `[confirmed by code]`

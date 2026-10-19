@@ -29,8 +29,13 @@ browser preview retains browser behavior; this policy belongs to the Tauri host.
   absolute JSONL file path from `session/list` metadata (`pix.sessionFile`), without
   selecting or closing it. Drafts and tabs without a known file disable the action;
   no path is guessed from the session ID. Nested labels/icons and Context Menu / Shift+F10 use the same
-  action. Non-session tabs retain their existing menus. Copy uses the native
-  clipboard and existing error reporting and stale-callback guards.
+  action. Workbench tab buttons also offer **Move Tab** when at least two tabs
+  exist and the source is enabled; this command starts explicit move mode and is
+  available alongside existing session/file commands where applicable. Other
+  non-session tabs retain their existing menus. Copy uses the native clipboard
+  and existing error reporting and stale-callback guards. See
+  [unified workbench tabs](desktop-workbench-tabs.md) for placement and cancel
+  behavior and for the window-local, non-persistent visual-order contract.
 - Editable text inputs, textareas and contenteditable editors offer native Undo,
   Redo, Cut, Copy, Paste and Select All. Read-only text inputs offer Copy and
   Select All. Password fields never expose Cut or Copy; read-only passwords have
@@ -179,6 +184,7 @@ disposal, and link actions capture their URL rather than reading a later target.
 - `desktop/src/components/AttachmentGrid.svelte`
 - `desktop/src/components/markdown-content-action.ts`
 - `desktop/src/components/WorkbenchTabs.svelte`
+- `desktop/src/lib/workbench-tab-move.ts`
 - `desktop/src/lib/workbench-tabs.ts`
 - `desktop/src/app/workbench-model.ts`
 - `desktop/src-tauri/src/preview_file_action.rs`
@@ -198,14 +204,17 @@ disposal, and link actions capture their URL rather than reading a later target.
   the system clipboard. Run with `cargo test --manifest-path
   desktop/src-tauri/Cargo.toml --test image_clipboard` on macOS.
 - `desktop/src/lib/native-context-menu.test.ts`: command policies, password and
-  read-only safety, link actions, failures, inactive callbacks and Linux dispatch.
+  read-only safety, link actions, Move Tab composition and stale/detached guards,
+  failures, inactive callbacks and Linux dispatch.
+- `desktop/src/lib/workbench-tab-move.test.ts`: menu-initiated placement,
+  keyboard selection, cancellation and lifecycle cleanup.
 - `desktop/src/lib/project-explorer-native-menu.test.ts`: file-menu preparation,
   OS coordinates, serialized registration, stale callbacks and resource teardown.
 - `desktop/src/lib/image-context-actions.test.ts`: image pixel copying, approved
   local-byte re-decoding, embedded data preservation, local/remote opening,
   conversion bounds, stale read/decode/copy/cache completions and decode cleanup.
-- `desktop/src/lib/desktop-context-target.test.ts`: trusted local path resolution
-  and source references.
+- `desktop/src/lib/desktop-context-target.test.ts`: trusted local path resolution,
+  source references, utility-tab move registration routing and stale callbacks.
 - `desktop/src/app/workbench-model.test.ts`: Preview tab file metadata.
 - `desktop/src-tauri/src/preview_file_action.rs`: closed action policy and local
   existing-file validation tests.

@@ -31,6 +31,27 @@ describe("native desktop context menu commands", () => {
   it("uses native editing roles instead of replacing values or synthesizing paste", () => {
     expect(labels({})).toEqual(["Undo", "Redo", "Separator", "Cut", "Copy", "Paste", "Separator", "SelectAll"]);
   });
+  it("adds Move Tab without replacing session or Preview commands, with stale/detached guards", async () => {
+    const moveTab = vi.fn();
+    for (const kind of ["session", "file", "workbench"] as const) {
+      const commands = items({ kind, moveTab, sessionFile: "/session.jsonl", hasSelection: false });
+      expect(commands[0]).toMatchObject({ id: "desktop.workbench.move-tab", text: "Move Tab" });
+      if (kind === "session") expect(commands[1]).toMatchObject({ text: "Copy Session File Path" });
+      if (kind === "file") expect(commands).toContainEqual(expect.objectContaining({ text: "Copy File" }));
+      const command = commands[0];
+      if (command && "action" in command) command.action?.("ignored");
+    }
+    expect(moveTab).toHaveBeenCalledTimes(3);
+    for (const commands of [
+      items({ kind: "workbench", moveTab }, false, () => false),
+      items({ kind: "workbench", moveTab, element: { isConnected: false } as HTMLElement }),
+    ]) {
+      const command = commands[0];
+      if (command && "action" in command) command.action?.("ignored");
+    }
+    await Promise.resolve();
+    expect(moveTab).toHaveBeenCalledTimes(3);
+  });
   it("offers only session file path copy and copies the captured absolute path", async () => {
     const target = context({ kind: "session", sessionFile: "/sessions/мой session.jsonl", hasSelection: false });
     const commands = nativeContextMenuItems(target, false, reportError, () => true);

@@ -7,6 +7,7 @@ import {
 	type ToolBodySyntaxHighlight,
 	type ToolBodySyntaxHighlights,
 } from "./syntax-highlight.js";
+import { isChoiceActionsInfo, parseChoiceActions } from "./bundled-extensions/choice-actions/contract.js";
 
 export type RenderedMarkdownLine = {
 	text: string;
@@ -256,6 +257,14 @@ export function renderMarkdownTextLines(text: string, width: number, start = 0, 
 				continue;
 			}
 		}
+		if (!fence && nextFence && isChoiceActionsInfo(nextFence.info)) {
+			const checklist = renderChoiceActionsBlock(rawLines, lineIndex, nextFence, width, options);
+			if (checklist) {
+				lines.push(...checklist.lines);
+				lineIndex = checklist.nextLineIndex;
+				continue;
+			}
+		}
 
 		const closesFence = Boolean(fence && nextFence && fence.marker === nextFence.marker && nextFence.length >= fence.length);
 		const opensFence = !fence && nextFence !== undefined;
@@ -309,6 +318,37 @@ export function renderMarkdownTextLines(text: string, width: number, start = 0, 
 	if (fence && !fenceHasBodyLine) lines.push({ text: "", codeBlock: true });
 
 	return lines;
+}
+
+function renderChoiceActionsBlock(
+	rawLines: readonly string[],
+	openingLineIndex: number,
+	openingFence: MarkdownFence,
+	width: number,
+	options: RenderMarkdownTextLinesOptions,
+): { lines: RenderedMarkdownTextLine[]; nextLineIndex: number } | undefined {
+	for (let index = openingLineIndex + 1; index < rawLines.length; index += 1) {
+		const candidate = markdownFence(rawLines[index] ?? "");
+		if (!candidate || candidate.marker !== openingFence.marker || candidate.length < openingFence.length || candidate.info.trim()) continue;
+		// Malformed blocks stay ordinary code fences, matching Desktop.
+		const actions = parseChoiceActions(openingFence.info, rawLines.slice(openingLineIndex + 1, index).join("\n"));
+		if (!actions) return undefined;
+		const lines: RenderedMarkdownTextLine[] = [];
+		const logical = [
+			...actions.items.map((item, itemIndex) => `${item.checked ? "☑" : "☐"} ${itemIndex + 1}. ${item.label}`),
+			`↳ ${actions.submitLabel}`,
+		];
+		for (const text of logical) {
+			for (const wrapped of wrapRenderedMarkdownLine({ text, segments: [], links: [] }, width, options)) {
+				lines.push({
+					text: wrapped.text,
+					...(wrapped.continuesOnNextLine ? { continuesOnNextLine: true } : {}),
+				});
+			}
+		}
+		return { lines, nextLineIndex: index + 1 };
+	}
+	return undefined;
 }
 
 function renderMermaidBlock(

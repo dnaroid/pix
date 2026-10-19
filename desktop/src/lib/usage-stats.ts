@@ -148,7 +148,7 @@ export function modelOptions(snapshot: UsageSourceSnapshot, metric: UsageMetric)
     .sort((a, b) => b.value - a.value || (a.label ?? "").localeCompare(b.label ?? ""));
 }
 
-/** `outside`: padding day before the window or after today; drawn faint, never counted. */
+/** `outside`: contextual day before the window or future padding; never counted or selectable. */
 export type UsageCalendarDay = { key: string; value: number; outside?: true };
 export type UsageCalendar = {
   /** Whole week columns starting on `weekStart`; days outside the window are `outside`. */
@@ -178,7 +178,9 @@ function weekdayOffset(dayKey: string, weekStart: number): number {
   return (new Date(y ?? 1970, (m ?? 1) - 1, d ?? 1).getDay() - weekStart + 7) % 7;
 }
 
-/** Per-day calendar (weeks × weekday) from timed buckets of any width. */
+/** Per-day calendar from scope/model/hour-filtered history, before period filtering.
+ * Leading week context uses real values but is excluded from `total`.
+ */
 export function calendarHeatmap(
   buckets: readonly UsageBucket[],
   metric: UsageMetric,
@@ -194,7 +196,14 @@ export function calendarHeatmap(
   }, null);
   if (firstKey === null) return { weeks: [], weekStart, max: 0, total: 0 };
   const days = dayKeysBetween(firstKey, localDayKey(nowMs)).slice(-CALENDAR_MAX_DAYS);
-  const values = new Map(days.map((day) => [day, 0]));
+  if (days.length === 0) return { weeks: [], weekStart, max: 0, total: 0 };
+  const cells: UsageCalendarDay[] = [];
+  const lead = weekdayOffset(days[0]!, weekStart);
+  for (let offset = lead; offset > 0; offset -= 1) cells.push({ key: shiftDayKey(days[0]!, -offset), value: 0, outside: true });
+  for (const day of days) cells.push({ key: day, value: 0 });
+  // Future days complete the final column, but cannot carry activity.
+  const values = new Map(cells.map((day) => [day.key, 0]));
+  for (let offset = 1; cells.length % 7 !== 0; offset += 1) cells.push({ key: shiftDayKey(days[days.length - 1]!, offset), value: 0, outside: true });
   let total = 0;
   for (const bucket of timed) {
     const key = bucketDayKey(bucket);
@@ -202,15 +211,9 @@ export function calendarHeatmap(
     if (current === undefined) continue;
     const value = metricValue(bucket.values, metric);
     values.set(key, current + value);
-    total += value;
+    if (key >= days[0]!) total += value;
   }
-  const cells: (UsageCalendarDay | null)[] = [];
-  if (days.length > 0) {
-    const lead = weekdayOffset(days[0]!, weekStart);
-    for (let offset = lead; offset > 0; offset -= 1) cells.push({ key: shiftDayKey(days[0]!, -offset), value: 0, outside: true });
-  }
-  for (const day of days) cells.push({ key: day, value: values.get(day) ?? 0 });
-  for (let offset = 1; cells.length % 7 !== 0; offset += 1) cells.push({ key: shiftDayKey(days[days.length - 1]!, offset), value: 0, outside: true });
+  for (const day of cells) day.value = values.get(day.key) ?? 0;
   const weeks: (UsageCalendarDay | null)[][] = [];
   for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
   const max = [...values.values()].reduce((best, value) => Math.max(best, value), 0);

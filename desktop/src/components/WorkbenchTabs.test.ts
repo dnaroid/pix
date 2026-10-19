@@ -53,6 +53,21 @@ describe("WorkbenchTabs desktop interaction", () => {
     expect(navigationViewModelSource).not.toContain("projectColors.get(options.workspace())");
   });
 
+  it("opts into menu-only tab movement while retaining native titlebar drag on ordinary gestures", () => {
+    expect(source).toContain("use:titlebarDrag");
+    expect(source).not.toContain("draggable=");
+    expect(source).toContain("use:workbenchTabMove={tabs.length > 1 && !tab.disabled");
+    expect(source).toContain("onDestroy(tabMove.destroy)");
+    expect(source).toContain("workspace !== moveWorkspace");
+    expect(source).toContain("source.disabled || targetMissing");
+    expect(source).toContain("Esc to cancel");
+    expect(source).toContain("Position {movePosition} of {tabs.length}");
+    expect(source).toContain("const currentWorkspace = workspace;");
+    expect(source).toContain("workspace !== currentWorkspace");
+    expect(source).toContain("currentFocus === previousFocus || currentFocus === owner.ownerDocument.body");
+    expect(titlebarViewModelSource).toContain("onReorder: options.reorderWorkbenchTab");
+  });
+
   it("subtly tints the window titlebar with the active project identity color", async () => {
     // @ts-expect-error Node fs import in Vitest runner
     const fs = (await import(/* @vite-ignore */ "node:fs")).default;
@@ -92,7 +107,8 @@ describe("WorkbenchTabs desktop interaction", () => {
     expect(source).toContain("min-w-0 w-fit flex-[0_1_auto]");
     expect(source).toContain("min-w-0 w-max flex-[0_1_auto]");
     expect(source).not.toContain("flex-[1_1_auto]");
-    expect(source).not.toContain("max-w-[calc(");
+    // A viewport-bounded floating move hint must not constrain the tab strip.
+    expect(source.slice(source.indexOf("<nav"), source.indexOf("</nav>"))).not.toContain("max-w-[calc(");
     // Fixed 24px non-shrinking button: literal or shared iconButtonClass("sm", …) (includes shrink-0).
     expect(source).toMatch(/w-6 shrink-0|iconButtonClass\("sm"/u);
     expect(tablistStart).toBeGreaterThanOrEqual(0);

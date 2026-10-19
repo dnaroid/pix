@@ -88,7 +88,7 @@
       {/each}
       {#each calendar.weeks as week, column (column)}
         {#each week as day, row (row)}
-          {#if day?.outside}
+          {#if !day || (day.outside && day.value === 0)}
             <rect
               x={LABEL + column * step + 0.5} y={TOP + row * step + 0.5} width={cell - 1} height={cell - 1} rx="2"
               fill="none" stroke="var(--foreground)" stroke-opacity="0.12" stroke-width="1" aria-hidden="true"
@@ -125,6 +125,7 @@
     {#if hovered}
       <div class="font-medium">{formatDayKey(hovered.day.key)}</div>
       <div class="tabular-nums">{formatMetric(hovered.day.value, metric, estimated)}</div>
+      {#if hovered.day.outside}<div class="mt-0.5 text-muted-foreground">Outside selected period</div>{/if}
       {#if interactive(hovered.day)}
         <div class="mt-0.5 text-muted-foreground">{hovered.day.key === selectedDay ? "Click to clear the day filter" : "Click to filter by this day"}</div>
       {/if}

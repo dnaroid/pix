@@ -1,15 +1,38 @@
 import { describe, expect, it } from "vitest";
-import { choiceActionsReplies } from "./choice-actions-replies";
+import { choiceActionsPresentation } from "./choice-actions-replies";
 import type { MessageItem } from "./transcript-types";
 
 function message(id: string, role: MessageItem["role"], text: string): MessageItem {
   return { type: "message", id, role, text, attachments: [] };
 }
 
+const choiceActionsReplies = (items: MessageItem[]) => choiceActionsPresentation(items).replies;
+
 const block = "```pix-actions Далее\n- [x] Первый\n- [ ] Второй\n- [ ] Третий\n```";
 const source = message("a", "assistant", block);
 
 describe("quick-choice visual replies", () => {
+  it("hides the matched source block, including after history reload", () => {
+    const items = [source, message("u", "user", "Далее:\n2. Второй")];
+    for (const history of [items, JSON.parse(JSON.stringify(items))]) {
+      const presentation = choiceActionsPresentation(history);
+      expect(presentation.answeredBlocks.get("a")).toEqual(new Set([0]));
+      expect(presentation.replies.has("u")).toBe(true);
+    }
+    expect(choiceActionsPresentation([source]).answeredBlocks.size).toBe(0);
+  });
+
+  it("keeps unanswered, altered and ambiguous source blocks visible", () => {
+    const user = message("u", "user", "Далее:\n2. Второй");
+    const other = block.replace("Далее", "Другое");
+    const html = "```pix-html\n<p>Preview</p>\n```";
+    const multiple = message("a", "assistant", `${html}\n${other}\n${block}`);
+    expect(choiceActionsPresentation([multiple, user]).answeredBlocks.get("a")).toEqual(new Set([1]));
+    expect(choiceActionsPresentation([source, message("u", "user", "Something else")]).answeredBlocks.size).toBe(0);
+    expect(choiceActionsPresentation([message("a", "assistant", `${block}\n${block}`), user]).answeredBlocks.size).toBe(0);
+    expect(choiceActionsPresentation([source, user, message("a2", "assistant", block)]).answeredBlocks.has("a2")).toBe(false);
+  });
+
   it("shows actual selected and unselected items rather than recommended defaults", () => {
     const user = message("u", "user", "Далее:\n2. Второй\n3. Третий");
     expect(choiceActionsReplies([source, user]).get("u")).toEqual({

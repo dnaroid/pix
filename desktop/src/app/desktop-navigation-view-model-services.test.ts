@@ -21,6 +21,7 @@ it("withholds the sidebar ACP client until initialization, and clears it on fail
     status: () => status, client: () => client,
     transitions: { draft: { openStartTab: noop }, sessionTabs: { deleteSelectedSession: noop, selectSession: noop, closeSessionSelector: noop } },
     workbenchGit: { workbench: { select: noop, close: noop } },
+    presentation: { reorderWorkbenchTab: noop },
     model: { config: { draftRuntimeStatus: draft } }, project: {}, projectActions: {}, interactions: {},
     sessions: { runtime: { statuses: new Map([["live", live]]) } },
   } as unknown as DesktopViewModelServicesOptions;
@@ -55,6 +56,7 @@ it("keeps plan runs unavailable until the client is ready and workspace restorat
     workspaceOpening: () => opening,
     transitions: { draft: { openStartTab: noop }, sessionTabs: { deleteSelectedSession: noop, selectSession: noop, closeSessionSelector: noop } },
     workbenchGit: { workbench: { select: noop, close: noop } },
+    presentation: { reorderWorkbenchTab: noop },
     model: { config: {} }, project: {}, projectActions: {}, interactions: {}, sessions: {},
   } as unknown as DesktopViewModelServicesOptions;
   createDesktopNavigationViewModelServices(options);

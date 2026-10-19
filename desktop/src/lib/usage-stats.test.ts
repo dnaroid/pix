@@ -143,6 +143,36 @@ describe("usage stats derivations", () => {
     expect(week.weeks[0]![6]).toEqual({ key: "2026-10-18", value: 0, outside: true });
   });
 
+  it("colors neighboring days with real activity without counting them in period totals", () => {
+    const calendar = calendarHeatmap([
+      bucket({ startMs: local(2026, 10, 4), values: { totalTokens: 500 } }), // Before the first column.
+      bucket({ startMs: local(2026, 10, 10, 9), values: { totalTokens: 20 } }),
+      bucket({ startMs: local(2026, 10, 10, 10), values: { totalTokens: 10 } }),
+      bucket({ startMs: local(2026, 10, 17, 9), values: { totalTokens: 5 } }),
+      bucket({ startMs: local(2026, 10, 18, 9), values: { totalTokens: 500 } }), // Future padding.
+    ], "tokens", periodWindow("7d", NOW, null), NOW, 1);
+    expect(calendar.weeks[0]![5]).toEqual({ key: "2026-10-10", value: 30, outside: true });
+    expect(calendar.weeks[1]![6]).toEqual({ key: "2026-10-18", value: 0, outside: true });
+    expect(calendar).toMatchObject({ max: 30, total: 5 });
+  });
+
+  it("keeps scope, model and hour filters on contextual calendar activity", () => {
+    const context = { startMs: local(2026, 10, 10, 9), model: "a", projectCwd: "/w/a" };
+    const data = snapshot([
+      bucket({ ...context, values: { totalTokens: 20 } }),
+      bucket({ ...context, projectCwd: "/w/b", values: { totalTokens: 1000 } }),
+      bucket({ ...context, model: "b", values: { totalTokens: 1000 } }),
+      bucket({ ...context, startMs: local(2026, 10, 10, 10), values: { totalTokens: 1000 } }),
+      bucket({ ...context, startMs: local(2026, 10, 17, 9), values: { totalTokens: 5 } }),
+    ]);
+    const history = filterByTime(selectBuckets(data, {
+      period: "all", nowMs: NOW, scope: "project", cwd: "/w/a", model: "a",
+    }), { hour: 9 });
+    const calendar = calendarHeatmap(history, "tokens", periodWindow("7d", NOW, null), NOW, 1);
+    expect(calendar.weeks[0]![5]).toMatchObject({ value: 20, outside: true });
+    expect(calendar).toMatchObject({ max: 20, total: 5 });
+  });
+
   it("starts calendar weeks on the locale first day", () => {
     const window = periodWindow("7d", NOW, null);
     const sunday = calendarHeatmap([bucket({ startMs: local(2026, 10, 17, 9) })], "tokens", window, NOW, 0);

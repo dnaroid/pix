@@ -1274,13 +1274,21 @@ export class PixAcpAgent {
 		const state = await session.pi.getState();
 		if (state.isStreaming && !state.isCompacting) {
 			const revision = session.queueRevision;
-			await session.pi.steer(message.promptText, queueMessageImages(message));
-			session.trackedSteeringMessages.push(cloneQueuedUserMessage(message));
+			const steerText = sdkSteeringMessageText(message);
+			const tracked = cloneQueuedUserMessage(message);
+			session.trackedSteeringMessages.push(tracked);
+			try {
+				await session.pi.steer(steerText, queueMessageImages(message));
+			} catch (error) {
+				const index = session.trackedSteeringMessages.indexOf(tracked);
+				if (index >= 0) session.trackedSteeringMessages.splice(index, 1);
+				throw error;
+			}
 			// queue_update normally arrives before the RPC response. Keep an
 			// optimistic copy only when it did not, so the Desktop never shows a
 			// missing row after Enter during streaming.
-			if (session.queueRevision === revision) {
-				session.steeringQueue.push(message.promptText);
+			if (session.queueRevision === revision && session.trackedSteeringMessages.includes(tracked)) {
+				session.steeringQueue.push(steerText);
 				session.queueRevision += 1;
 			}
 			await this.notifyDesktopQueueState(session);
@@ -2643,7 +2651,7 @@ export class PixAcpAgent {
 		}
 		if (event.type === "message_start" && event.message.role === "user") {
 			const text = queuedUserMessageText(event.message);
-			const index = session.trackedSteeringMessages.findIndex((message) => message.promptText === text);
+			const index = session.trackedSteeringMessages.findIndex((message) => sdkSteeringMessageText(message) === text);
 			if (index >= 0) {
 				const [message] = session.trackedSteeringMessages.splice(index, 1);
 				if (message) {
@@ -4891,6 +4899,12 @@ function queueMessageImages(message: DesktopQueuedUserMessage): PiImageContent[]
 		: undefined;
 }
 
+function sdkSteeringMessageText(message: DesktopQueuedUserMessage): string {
+	// SDK 1.3 only consumes queued messages with nonempty text. Keep this
+	// compatibility marker out of the original payload used by edit/fork/send-now.
+	return message.promptText || (message.images.length > 0 ? "(image message)" : "");
+}
+
 function textOnlyQueuedMessage(text: string): DesktopQueuedUserMessage {
 	return { id: randomUUID(), promptText: text, displayText: text, images: [] };
 }
@@ -4912,7 +4926,7 @@ function trackedSteeringMessageAt(
 	const text = queue[index];
 	if (text === undefined) return undefined;
 	const occurrence = queue.slice(0, index).filter((candidate) => candidate === text).length;
-	return tracked.filter((message) => message.promptText === text)[occurrence];
+	return tracked.filter((message) => sdkSteeringMessageText(message) === text)[occurrence];
 }
 
 function takeTrackedSteeringMessage(

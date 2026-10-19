@@ -25,6 +25,9 @@ Present conversations, file/media Preview, Source Control Git Diff, interactive 
 - Conversation tabs are derived from the existing `buildTabSessions` order plus the UI-only draft conversation. Their session membership, restart restore, Desktop/TUI reconciliation, and active-session persistence follow [desktop-session-tabs.md](./desktop-session-tabs.md); the unified workbench layer does not give Preview, Git Diff, Terminal, or LSP installer tabs any role in that state. Runtime ownership and ACP close semantics remain session-owned.
 - Preview, Git Diff, Terminal, and the LSP installer are UI-only workbench tabs. They never enter `buildTabSessions`, restored/local session id arrays, saved-session selectors, active-session persistence, ACP session maps, or TUI `pix.tabs` metadata.
 - UI-only workbench tabs are inserted beside the visible tab that opened them when possible while the relative order of the canonical session list remains authoritative. If the opener disappears, the UI-only tab remains workspace-scoped and falls back to a valid location in the same strip.
+- A tab's context menu additionally offers **Move Tab** when there is more than one tab and the target is not mutation-disabled. This explicitly picks up the tab: moving the pointer previews an insertion marker; clicking inside the tab strip places it. Left/Right and Home/End choose a position, Enter/Space places, and Escape cancels; move-mode status announces the target position. Tab, an outside pointer press, a new context menu, window blur, pointer cancellation, source/target removal, disabling the source, workspace change, or unmount cancels without moving tabs. The picked-up tab stays selected/unselected as before; placement does not activate or close another tab. After placement, focus returns to the keyed tab element after the UI update, unless the workspace changed, the component unmounted, or another action took focus.
+- Explicit reordering overrides only this window's visible workbench order for the current workspace lifetime; it does not change canonical session membership/order, ACP/TUI state, or restart persistence. Newly opened tabs still insert beside their canonical neighbor; closed ids are pruned. Switching workspace or restarting resets the visual override. Session, draft, Preview, Diff, Terminal, and installer tabs share this behavior.
+- Outside this explicit move mode, dragging a tab, its close control, New Conversation, or free titlebar space still moves the native window. During move mode only pointer gestures inside the tab strip are intercepted; an outside press cancels and remains available to the original control/window drag behavior.
 - Exactly one workbench tab is visually/ARIA selected. Selecting a session tab activates/loads that conversation and displays `conversation-workspace`. Selecting Preview, Git Diff, Terminal, or LSP installer changes only the visible central work surface; the active conversation runtime remains available in the background.
 - Opening a bounded project/home/absolute UTF-8 text file or supported media creates/updates the single Preview tab and selects it. Interactive non-media files over 256 KiB or 2,000 source lines open in the configured external editor without creating/selecting Preview or adding history; missing editor configuration prompts Desktop Settings. Absolute local directories and small binary/non-UTF-8 files retain the system-opener fallback. Preview retains its existing browser-like back/forward history instead of opening one tab per followed link. See [desktop-markdown-rendering.md](./desktop-markdown-rendering.md) for the bounded-read and editor-launch contract.
 - Opening Source Control diff/review creates/updates the single Git Diff tab and selects it. Opening a file reference from Git Diff selects Preview while Git Diff remains open.
@@ -100,6 +103,8 @@ Present conversations, file/media Preview, Source Control Git Diff, interactive 
 - `desktop/src/components/LspInstallPane.svelte`
 - `desktop/src/app/lsp-onboarding.svelte.ts`
 - `desktop/src/lib/workbench-tabs.ts`
+- `desktop/src/lib/workbench-tab-order.ts`
+- `desktop/src/lib/workbench-tab-move.ts`
 - `desktop/src/lib/session-tabs.ts`
 - `desktop/src/lib/session-tab-status.ts`
 - `desktop/src/lib/preview-history.ts`
@@ -120,6 +125,8 @@ Present conversations, file/media Preview, Source Control Git Diff, interactive 
 - `desktop/src/lib/glb-source.test.ts`
 
 - `desktop/src/lib/workbench-tabs.test.ts` covers mixed insertion, session-id separation, close fallback, and stale-active normalization.
+- `desktop/src/lib/workbench-tab-order.test.ts` covers workspace-lifetime visual ordering, canonical neighbor insertion, and pruning removed tabs.
+- `desktop/src/lib/workbench-tab-move.test.ts` covers explicit menu-initiated placement, keyboard positioning, cancellation, listener ownership, and lifecycle cleanup.
 - `desktop/src/components/WorkbenchTabs.test.ts` covers the unified roving tablist, shrink-wrapped non-growing tablist/action layout, tab preferred-width/flex-basis consistency, semantic session-status icon set, and kind-specific close dispatch.
 - `desktop/src/components/DesktopEditorSurfaces.test.ts` covers top-level editor surfaces, `!!` Terminal routing, Preview edit/find wiring, and active-Preview shortcut gating.
 - `desktop/src/app/workbench-terminal.test.ts` covers Terminal tab reuse, opener anchoring, and close/reset state.

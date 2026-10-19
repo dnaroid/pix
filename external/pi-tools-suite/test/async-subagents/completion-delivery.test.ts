@@ -123,20 +123,22 @@ async function entryHarness(ids = ["child"]) {
 	const tools = new Map<string, any>();
 	const handlers = new Map<string, any>();
 	const messages: any[] = [];
+	const messageOptions: unknown[] = [];
 	const evidenceEvents: any[] = [];
 	register({
 		events: { emit: (channel: string, event: unknown) => { if (channel === "async-subagents:delegated-evidence") evidenceEvents.push(event); } },
 		registerTool: (tool: any) => tools.set(tool.name, tool),
 		registerCommand() {},
 		on: (event: string, handler: any) => handlers.set(event, handler),
-		sendMessage: (message: any) => messages.push(message),
+		sendMessage: (message: any, options: unknown) => { messages.push(message); messageOptions.push(options); },
 	} as any);
 	await handlers.get("session_start")({}, ctx);
 	return {
-		ctx, runDir, messages, evidenceEvents,
+		ctx, runDir, messages, messageOptions, evidenceEvents,
 		setBusy: (value: boolean) => { busy = value; },
 		boundary: (context = ctx, outcome = "completed", canContinue = true) => handlers.get("agent_before_settle")({ outcome, context: { canContinue } }, context),
-		settle: () => { busy = false; return handlers.get("agent_settled")({}, ctx); },
+		settle: (aborted = false) => { busy = false; return handlers.get("agent_settled")({ aborted }, ctx); },
+		start: () => { busy = true; return handlers.get("agent_start")({}, ctx); },
 		startTool: (event: any, context = ctx) => handlers.get("tool_call")(event, context),
 		endTool: (event: any, context = ctx) => handlers.get("tool_execution_end")({ ...event, result: { content: event.content, details: event.details } }, context),
 		result: () => tools.get("subagents").execute("result", { action: "result", runDir, agentId: "child" }, undefined, undefined, ctx),
@@ -157,6 +159,57 @@ async function entryHarness(ids = ["child"]) {
 }
 
 describe.serial("completion delivery through the entrypoint", () => {
+	test("normal settlement releases the watcher gate and wakes the parent once", async () => {
+		const h = await entryHarness();
+		try {
+			await h.start();
+			h.finish();
+			h.setBusy(false);
+			await h.refresh();
+			expect(h.messages).toHaveLength(0);
+			await h.settle(false);
+			await h.refresh();
+			expect(h.messages).toHaveLength(1);
+			expect(h.messageOptions[0]).toMatchObject({ triggerTurn: true, deliverAs: "followUp" });
+		} finally { await h.close(); }
+	});
+
+	test("watcher cannot wake an idle-looking parent before its aborted settlement hook", async () => {
+		const h = await entryHarness();
+		try {
+			await h.start();
+			h.finish();
+			// The SDK exposes idle while an earlier extension's asynchronous
+			// agent_settled handler is still pending.
+			h.setBusy(false);
+			await h.refresh();
+			expect(h.messages).toHaveLength(0);
+			await h.settle(true);
+			await h.refresh();
+			expect(h.messages).toHaveLength(0);
+		} finally { await h.close(); }
+	});
+
+	for (const timing of ["before-abort", "after-abort"] as const) {
+		test(`completion ${timing} cannot restart an interrupted parent`, async () => {
+			const h = await entryHarness();
+			try {
+				h.setBusy(true);
+				if (timing === "before-abort") h.finish();
+				await h.settle(true);
+				if (timing === "after-abort") h.finish();
+				await h.refresh();
+				await h.refresh();
+				expect(h.messages).toHaveLength(0);
+				await h.start();
+				expect(h.boundary().entries).toHaveLength(1);
+				expect(h.boundary()).toBeUndefined();
+				await h.settle();
+				expect(h.messages).toHaveLength(0);
+			} finally { await h.close(); }
+		});
+	}
+
 	test("result consumed after busy completion does not schedule a second report", async () => {
 		const h = await entryHarness();
 		try {

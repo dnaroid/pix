@@ -41,6 +41,7 @@ const BUNDLED_TERMINAL_BELL_EXTENSION_DIR = resolve(BUNDLED_EXTENSIONS_DIR, "ter
 const BUNDLED_MODEL_USAGE_EXTENSION_DIR = resolve(BUNDLED_EXTENSIONS_DIR, "model-usage");
 const BUNDLED_QUOTA_WAIT_EXTENSION_DIR = resolve(BUNDLED_EXTENSIONS_DIR, "quota-wait");
 const BUNDLED_HEADS_UP_EXTENSION_DIR = resolve(BUNDLED_EXTENSIONS_DIR, "heads-up");
+const BUNDLED_CHOICE_ACTIONS_EXTENSION_DIR = resolve(BUNDLED_EXTENSIONS_DIR, "choice-actions");
 const PI_TOOLS_SUITE_SOURCE_DIR = resolve(
 	dirname(fileURLToPath(import.meta.url)),
 	"../..",
@@ -105,6 +106,10 @@ export function bundledQuotaWaitExtensionPath(): string {
 
 export function bundledHeadsUpExtensionPath(): string {
 	return BUNDLED_HEADS_UP_EXTENSION_DIR;
+}
+
+export function bundledChoiceActionsExtensionPath(): string {
+	return BUNDLED_CHOICE_ACTIONS_EXTENSION_DIR;
 }
 
 export function piToolsSuiteExtensionSourcePath(): string {
@@ -211,6 +216,7 @@ export function getBundledExtensionPaths(): string[] {
 		bundledModelUsageExtensionPath(),
 		BUNDLED_QUOTA_WAIT_EXTENSION_DIR,
 		BUNDLED_HEADS_UP_EXTENSION_DIR,
+		BUNDLED_CHOICE_ACTIONS_EXTENSION_DIR,
 	].filter(extensionEntryExists);
 }
 
@@ -222,6 +228,7 @@ export async function getBundledExtensionPathsAsync(): Promise<string[]> {
 		bundledModelUsageExtensionPath(),
 		BUNDLED_QUOTA_WAIT_EXTENSION_DIR,
 		BUNDLED_HEADS_UP_EXTENSION_DIR,
+		BUNDLED_CHOICE_ACTIONS_EXTENSION_DIR,
 	].map(async (extensionPath) => await extensionEntryExistsAsync(extensionPath) ? extensionPath : undefined));
 	return paths.filter((path): path is string => path !== undefined);
 }

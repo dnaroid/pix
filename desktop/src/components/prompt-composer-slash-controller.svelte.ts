@@ -15,6 +15,7 @@ interface PromptComposerSlashControllerOptions {
   readonly editorMode: () => boolean;
   readonly ready: () => boolean;
   readonly activeSessionId: () => string | null;
+  readonly draftSession: () => boolean;
   readonly promptRunning: () => boolean;
   readonly questionMode: () => boolean;
   readonly composing: () => boolean;
@@ -35,7 +36,7 @@ export function createPromptComposerSlashController(options: PromptComposerSlash
     if (
       options.editorMode()
       || !options.ready()
-      || !options.activeSessionId()
+      || (!options.activeSessionId() && !options.draftSession())
       || options.promptRunning()
       || options.questionMode()
       || options.composing()

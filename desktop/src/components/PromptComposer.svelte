@@ -166,6 +166,7 @@
     ready: () => ready,
     activeSessionId: () => activeSessionId,
     promptRunning: () => promptRunning,
+    draftSession: () => draftSession,
     questionMode: () => !!questionMode,
     composing: () => textareaController.composing,
     attachmentsCount: () => attachments.length,

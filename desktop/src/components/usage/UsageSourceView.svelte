@@ -74,7 +74,11 @@
   const totals = $derived(sumValues(buckets));
   // Each chart applies every filter except its own axis.
   const byHour = $derived(filterByTime(periodBuckets, { hour: selectedHour }));
-  const calendar = $derived(isOpen("activity") ? calendarHeatmap(byHour, metric, calendarRange, nowMs, weekStart) : null);
+  // The calendar can show neighboring days in its first week without expanding period totals.
+  const calendar = $derived(isOpen("activity") ? calendarHeatmap(
+    filterByTime(selectBuckets(snapshot, { ...selection, period: "all" }), { hour: selectedHour }),
+    metric, calendarRange, nowMs, weekStart,
+  ) : null);
   const daily = $derived(isOpen("daily") ? dailyByModel(byHour, metric, range, nowMs) : null);
   const hourProfile = $derived(isOpen("activity") ? hourOfDayProfile(filterByTime(periodBuckets, { day: selectedDay }), metric) : null);
   const shares = $derived(isOpen("models") ? modelShares(filterByTime(selectBuckets(snapshot, { ...selection, model: null }), timeFilter), metric) : []);

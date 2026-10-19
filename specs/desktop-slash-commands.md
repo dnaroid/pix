@@ -76,6 +76,12 @@ Make Pi/Pix slash commands discoverable and keyboard-first in Pix Desktop while 
 - Pi's interactive `/bug` issue-reporting flow is intentionally excluded from Pix Desktop alongside `/trust`, `/login`, and `/logout`; ACP does not expose the matching interactive/browser workflow.
 - Extension commands and input hooks that consume a prompt without starting an agent run still complete the ACP turn, including prompts with attachments.
 - The composer popup opens only for a slash command name at the end of the current draft, supports fuzzy ranking and keyboard navigation, keeps textarea focus, and exposes listbox semantics.
+- The popup is available both in a real session and in a ready UI-only New
+  Conversation draft; it must not require a session id or materialize a session
+  just to show, navigate, or complete Desktop-owned commands. Sessionless drafts
+  use the Desktop-owned catalogue; ACP/runtime commands join after session
+  creation. Readiness, running-prompt, editor, questionnaire, IME, selection,
+  and attachment eligibility guards still apply.
 - Enter executes commands with no required input. Optional hints still add a trailing space on Tab completion, while argument-free interactive commands open their picker. Commands with required input remain in the composer unless Desktop supplies a matching picker.
 
 ### Prompt enhancement
@@ -99,6 +105,7 @@ request or overwrite another context's draft.
 - `desktop/src/app/conversation-session-actions.test.ts`
 - `desktop/src/app/desktop-workbench-prop-builders.test.ts`
 - `desktop/src/components/PromptComposerControls.test.ts`
+- `desktop/src/components/prompt-composer-slash-controller.test.ts`
 
 ## Related files
 

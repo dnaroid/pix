@@ -140,6 +140,8 @@ export default function (pi: ExtensionAPI) {
 	let currentSessionStateContext: ExtensionContext | undefined;
 	let completionWatchTimer: ReturnType<typeof setInterval> | undefined;
 	let shuttingDown = false;
+	let parentRunAwaitingSettlement = false;
+	let wakeupHeldByAbort = false;
 	const completionDelivery = new CompletionDelivery(liveAgents, refreshSubagentOverlay);
 	const completionReceipts = new CompletionReceipts(liveAgents, completionDelivery);
 
@@ -173,6 +175,9 @@ export default function (pi: ExtensionAPI) {
 		if (shuttingDown) return;
 		// Keep busy-parent completions retractable here, not in the SDK follow-up
 		// queue. A result/read/wait can still consume them before settlement.
+		// SDK isIdle becomes true before asynchronous settlement hooks finish.
+		// Hold timer wakeups until our hook observes whether this run was aborted.
+		if (!boundaryMessages && (parentRunAwaitingSettlement || wakeupHeldByAbort)) return;
 		if (!boundaryMessages && currentSessionStateContext?.isIdle?.() === false) return;
 		for (const [runDir, liveRun] of [...liveAgents.entries()]) {
 			const states = new Map(
@@ -280,6 +285,8 @@ export default function (pi: ExtensionAPI) {
 			shuttingDown = true;
 			completionReceipts.clear();
 			shuttingDown = false;
+			parentRunAwaitingSettlement = false;
+			wakeupHeldByAbort = false;
 			sawAutoUltraworkCandidate = false;
 			currentSessionFile = sessionFileFromContext(ctx);
 			currentSessionStateContext = ctx;
@@ -320,7 +327,15 @@ export default function (pi: ExtensionAPI) {
 		updateCompletionWatcher();
 		return { entries: messages.map((message) => ({ type: "custom_message" as const, ...message })), continue: true };
 	});
-	pi.on("agent_settled", () => refreshSubagentOverlay());
+	pi.on("agent_start", () => {
+		parentRunAwaitingSettlement = true;
+		wakeupHeldByAbort = false;
+	});
+	pi.on("agent_settled", (event) => {
+		if (event.aborted) wakeupHeldByAbort = true;
+		parentRunAwaitingSettlement = false;
+		refreshSubagentOverlay();
+	});
 
 	pi.on("before_agent_start", async (event, ctx) => {
 		const strategyPrompt = agentStrategyPrompt({
@@ -380,6 +395,8 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_shutdown", async (event, ctx) => {
 		try {
 			shuttingDown = true;
+			parentRunAwaitingSettlement = false;
+			wakeupHeldByAbort = false;
 			completionReceipts.clear();
 			clearSessionLiveState();
 			clearSubagentsNativeWidget(ctx);

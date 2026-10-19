@@ -4,7 +4,8 @@ export const QUESTION_TOOL_DESCRIPTION = {
 	description: "Ask the user one to five structured single- or multi-select questions, each with two to five choices plus an implicit custom answer path.",
 	promptSnippet: "Gather structured user feedback with predefined single- or multi-select choices and an always-available custom answer path.",
 	promptGuidelines: [
-		"Use question to gather feedback, choose alternatives, confirm direction, or resolve ambiguity when you can provide at least two meaningful choices.",
+		"Use question when you need the user's answer before you can continue: choose alternatives, confirm direction or a risky step, or resolve ambiguity, with at least two meaningful choices.",
+		"Do not use question merely to offer optional follow-ups after finishing; end the turn instead (in Pix Desktop, with a pix-actions checklist).",
 		"question accepts 1–5 questions with 2–5 choices each and an implicit custom answer path; set multiple: true with optional minSelections/maxSelections when several answers may apply.",
 		"For multi-select questions, the custom answer can be combined with predefined choices and counts as one selection toward the limits.",
 	],

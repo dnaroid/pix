@@ -21,24 +21,35 @@ function replySelection(text: string, actions: ChoiceActions): ChoiceActions | u
   };
 }
 
-/** Derive a visual receipt from persisted conversation text, without rewriting it. */
-export function choiceActionsReplies(items: readonly TranscriptDisplayItem[]): ReadonlyMap<string, ChoiceActions> {
+/** Derive receipts and their hidden source blocks from persisted text. */
+export function choiceActionsPresentation(items: readonly TranscriptDisplayItem[]): {
+  replies: ReadonlyMap<string, ChoiceActions>;
+  answeredBlocks: ReadonlyMap<string, ReadonlySet<number>>;
+} {
   const replies = new Map<string, ChoiceActions>();
-  let candidates: ChoiceActions[] = [];
+  const answeredBlocks = new Map<string, Set<number>>();
+  let candidates: { actions: ChoiceActions; messageId: string; blockIndex: number }[] = [];
   for (const item of items) {
     if (item.type !== "message") continue;
     if (item.role === "assistant") {
       candidates = splitHtmlSandboxSegments(item.text, { actions: true })
-        .flatMap((segment) => segment.type === "actions" ? [segment.actions] : []);
+        .filter((segment) => segment.type === "actions")
+        .map((segment, blockIndex) => ({ actions: segment.actions, messageId: item.id, blockIndex }));
     } else if (item.role === "user") {
-      const matches = candidates.flatMap((actions) => {
-        const reply = replySelection(item.text, actions);
-        return reply ? [reply] : [];
+      const matches = candidates.flatMap((candidate) => {
+        const reply = replySelection(item.text, candidate.actions);
+        return reply ? [{ ...candidate, reply }] : [];
       });
       // Ambiguous or missing source blocks stay ordinary Markdown.
-      if (matches.length === 1) replies.set(item.id, matches[0]!);
+      if (matches.length === 1) {
+        const match = matches[0]!;
+        replies.set(item.id, match.reply);
+        const blocks = answeredBlocks.get(match.messageId) ?? new Set<number>();
+        blocks.add(match.blockIndex);
+        answeredBlocks.set(match.messageId, blocks);
+      }
       candidates = [];
     }
   }
-  return replies;
+  return { replies, answeredBlocks };
 }

@@ -75,6 +75,15 @@ export function nativeContextMenuItems(
   const writable = context.kind === "editable" || context.kind === "password";
   const readonlyPassword = context.kind === "password" && context.readOnly;
 
+  if (context.moveTab) {
+    const moveTab = context.moveTab;
+    items.push({
+      id: "desktop.workbench.move-tab",
+      text: "Move Tab",
+      action: run(async () => moveTab()),
+    });
+  }
+
   if (context.kind === "session") {
     const sessionFile = context.sessionFile;
     items.push({

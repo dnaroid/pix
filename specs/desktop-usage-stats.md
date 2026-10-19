@@ -152,9 +152,14 @@ The activity calendar uses local-time day buckets and shows localized date,
 month and weekday labels. Week columns start on the system locale's first day
 of week (`localWeekStart` via `Intl.Locale` week info; Monday when the runtime
 does not expose it), and the Mon/Wed/Fri row labels follow that order. The
-grid is always padded to whole weeks: days before the window or after today
-are `outside` cells drawn as faint outlines, never counted, hovered or
-selectable. For the 7d period the calendar shows the current local week
+grid is always padded to whole weeks. Days before the window in the first
+column show their real activity from the same project/model/hour-filtered
+history, using the same color scale, and support value tooltips. These context
+days are marked `outside`: they cannot be selected and are excluded from the
+calendar summary and period totals. Other charts and KPIs keep the selected
+period. Context days without activity, missing dates and future padding cells
+remain faint noninteractive outlines; future days never carry activity.
+For the 7d period the calendar shows the current local week
 (`currentWeekWindow`), while KPIs and other charts keep the rolling 7 days.
 Hour-of-day strips use localized ticks and tooltips;
 daily bars and the coverage date use the system locale through
