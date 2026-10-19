@@ -169,10 +169,25 @@ function quiesceChild(child: ChildProcess): void {
 
 function ignoreRetainedChildError(): void {}
 
+export interface ProcessGroupMember {
+  pid: number;
+  stat: string;
+}
+
+export interface ProcessGroupTerminationOptions {
+  /** Extra wait after a persistent EPERM probe before inspecting membership. */
+  permissionSettleMs?: number;
+  /** Lists live process-table entries whose process group is `pgid`. */
+  listProcessGroup?: (pgid: number) => Promise<readonly ProcessGroupMember[]>;
+}
+
+const DEFAULT_PERMISSION_SETTLE_MS = 2_000;
+
 export async function terminateProcessGroup(
   child: ChildProcess,
   graceMs = 500,
   killProcess: ProcessKiller = process.kill,
+  options: ProcessGroupTerminationOptions = {},
 ): Promise<void> {
   const pid = child.pid;
   if (!pid) return;
@@ -182,6 +197,8 @@ export async function terminateProcessGroup(
     return;
   }
 
+  const confirmExit = (): Promise<boolean> => confirmProcessGroupExit(pid, graceMs, killProcess, options);
+
   try {
     killProcess(-pid, "SIGTERM");
   } catch (error) {
@@ -190,21 +207,22 @@ export async function terminateProcessGroup(
       return;
     }
     // macOS can report EPERM while the last group member is exiting, before
-    // Node observes child.exitCode. Accept only a subsequent ESRCH for the
-    // exact owned group: leader exit or continued EPERM cannot prove tree death.
-    if (isPermissionDenied(error) && await waitForProcessGroupExit(pid, graceMs, killProcess)) return;
+    // Node observes child.exitCode. Accept only a subsequent ESRCH or a process
+    // table showing no non-terminal member of the exact owned group: leader
+    // exit alone cannot prove tree death.
+    if (isPermissionDenied(error) && await confirmExit()) return;
     throw processGroupCleanupError(pid, "SIGTERM", child, error);
   }
 
-  if (await waitForProcessGroupExit(pid, graceMs, killProcess)) return;
+  if (await confirmExit()) return;
   try {
     killProcess(-pid, "SIGKILL");
   } catch (error) {
     if (isMissingProcess(error)) return;
-    if (isPermissionDenied(error) && await waitForProcessGroupExit(pid, graceMs, killProcess)) return;
+    if (isPermissionDenied(error) && await confirmExit()) return;
     throw processGroupCleanupError(pid, "SIGKILL", child, error);
   }
-  if (!(await waitForProcessGroupExit(pid, graceMs, killProcess))) {
+  if (!(await confirmExit())) {
     throw new Error(
       `Process group ${pid} did not terminate after SIGKILL ` +
       `(child exitCode=${String(child.exitCode)}, signalCode=${String(child.signalCode)})`,
@@ -279,26 +297,91 @@ async function runTaskkill(executable: string, pid: number): Promise<void> {
   });
 }
 
+type ProcessGroupProbe = "gone" | "alive" | "denied";
+
 async function waitForProcessGroupExit(
   pid: number,
   timeoutMs: number,
   killProcess: ProcessKiller,
-): Promise<boolean> {
+): Promise<ProcessGroupProbe> {
   const deadline = Date.now() + timeoutMs;
+  let last: ProcessGroupProbe = "alive";
   while (Date.now() < deadline) {
     try {
       killProcess(-pid, 0);
+      last = "alive";
     } catch (error) {
-      if (isMissingProcess(error)) return true;
+      if (isMissingProcess(error)) return "gone";
       // POSIX signal 0 performs an existence/permission probe. EPERM therefore
       // means the group may still exist, not that cleanup itself was denied.
-      // Keep polling; signal permission failures remain fatal unless a later
-      // ESRCH positively establishes that the owned group disappeared.
+      // Keep polling; signal permission failures remain fatal unless later
+      // evidence positively establishes that the owned group disappeared.
       if (!isPermissionDenied(error)) throw processGroupProbeError(pid, error);
+      last = "denied";
     }
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
   }
-  return false;
+  return last;
+}
+
+async function confirmProcessGroupExit(
+  pid: number,
+  graceMs: number,
+  killProcess: ProcessKiller,
+  options: ProcessGroupTerminationOptions,
+): Promise<boolean> {
+  const first = await waitForProcessGroupExit(pid, graceMs, killProcess);
+  if (first !== "denied") return first === "gone";
+  // Darwin keeps answering EPERM for a group whose remaining members are
+  // zombies or already exiting. Give teardown a wider window, then inspect the
+  // process table for the exact group. Any lister failure fails closed.
+  const settled = await waitForProcessGroupExit(
+    pid,
+    options.permissionSettleMs ?? DEFAULT_PERMISSION_SETTLE_MS,
+    killProcess,
+  );
+  if (settled !== "denied") return settled === "gone";
+  return processGroupHasOnlyTerminalMembers(pid, options.listProcessGroup ?? listProcessGroupMembers);
+}
+
+async function processGroupHasOnlyTerminalMembers(
+  pgid: number,
+  listProcessGroup: (pgid: number) => Promise<readonly ProcessGroupMember[]>,
+): Promise<boolean> {
+  let members: readonly ProcessGroupMember[];
+  try {
+    members = await listProcessGroup(pgid);
+  } catch {
+    return false;
+  }
+  return members.every((member) => isTerminalProcessState(member.stat));
+}
+
+/** Zombie (Z), dead (X, Linux) or exiting (E, Darwin) entries cannot run code. */
+export function isTerminalProcessState(stat: string): boolean {
+  const state = stat.trim();
+  if (state.startsWith("Z") || state.startsWith("X")) return true;
+  return process.platform === "darwin" && state.includes("E");
+}
+
+export async function listProcessGroupMembers(pgid: number): Promise<ProcessGroupMember[]> {
+  const stdout = await new Promise<string>((resolve, reject) => {
+    execFile(
+      "/bin/ps",
+      ["-A", "-o", "pid=,pgid=,stat="],
+      { timeout: 5_000, maxBuffer: 8 * 1024 * 1024 },
+      (error, out) => error ? reject(error) : resolve(String(out)),
+    );
+  });
+  const members: ProcessGroupMember[] = [];
+  for (const line of stdout.split("\n")) {
+    if (!line.trim()) continue;
+    const match = /^\s*(\d+)\s+(\d+)\s+(\S+)/.exec(line);
+    // An unparsable process table cannot prove absence; fail closed.
+    if (!match) throw new Error(`Unexpected ps output line: ${line}`);
+    if (Number(match[2]) === pgid) members.push({ pid: Number(match[1]), stat: match[3]! });
+  }
+  return members;
 }
 
 async function terminateDirectChild(child: ChildProcess, graceMs: number): Promise<void> {

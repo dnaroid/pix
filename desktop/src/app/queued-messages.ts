@@ -4,6 +4,7 @@ import {
   extractAttachmentMarkers,
   type Attachment,
 } from "../lib/attachments";
+import { stripSandboxViewportHint } from "../lib/html-sandbox-layout";
 import {
   appendLocalUserMessage,
   emptyTranscript,
@@ -22,7 +23,7 @@ type QueuedMessageControllerOptions = {
 
 export function createQueuedMessageController(options: QueuedMessageControllerOptions) {
   function draft(message: QueuedUserMessage): { text: string; attachments: Attachment[] } {
-    const parsed = extractAttachmentMarkers(message.promptText, `queue:${message.id}`);
+    const parsed = extractAttachmentMarkers(stripSandboxViewportHint(message.promptText), `queue:${message.id}`);
     const images = message.images.map((image) =>
       attachmentFromImage(image.data, image.mimeType, options.nextAttachmentId()));
     return {

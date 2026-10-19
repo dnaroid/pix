@@ -66,12 +66,18 @@ describe("composer activity row rendering", () => {
     for (const button of buttons) expect(button).not.toMatch(/\sdisabled(?:[=\s>])/);
   });
 
-  it.each(["paused", "continuable"] as const)("keeps the row with Continue while %s without live activity", (state) => {
+  it.each(["paused", "continuable"] as const)("keeps Continue in the Pause slot and Stop on the right while %s", (state) => {
     const html = renderRow(state, false);
     expect(html).toContain(state === "paused" ? "Agent paused" : "Ready to continue");
     expect(html).toContain('aria-label="Continue response"');
-    expect(html).not.toContain('aria-label="Stop response"');
+    expect(html).toContain('aria-label="Stop response"');
     expect(html).not.toContain('aria-label="Pause after current turn"');
+    const buttons = html.match(/<button\b[^>]*>/g) ?? [];
+    expect(buttons).toHaveLength(2);
+    expect(buttons[0]).toContain('aria-label="Continue response"');
+    expect(buttons[0]).toContain("col-start-2");
+    expect(buttons[1]).toContain('aria-label="Stop response"');
+    expect(buttons[1]).toContain("col-start-3");
   });
 
   it("hides the row after normal completion or cancellation", () => {

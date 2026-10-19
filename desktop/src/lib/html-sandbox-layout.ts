@@ -6,13 +6,6 @@
 export const SANDBOX_INITIAL_HEIGHT = 380;
 export const SANDBOX_MIN_HEIGHT = 180;
 
-export interface HtmlSandboxViewport {
-  /** Available content width (not the entire Desktop window), in CSS px. */
-  readonly width: number;
-  /** Maximum normal inline sandbox height, in CSS px. */
-  readonly maxHeight: number;
-}
-
 function safeWindowHeight(height: number): number {
   return Number.isFinite(height) && height > 0 ? height : 800;
 }
@@ -43,21 +36,18 @@ export function sandboxFrameHeight(
   ));
 }
 
-/**
- * Runtime hint, supplied only for likely HTML/prototype requests.
- * The actual iframe viewport remains responsive to subsequent window resizes.
- */
-export function sandboxViewportHint(text: string, viewport: HtmlSandboxViewport | undefined): string | undefined {
-  if (!viewport || !Number.isFinite(viewport.width) || !Number.isFinite(viewport.maxHeight)
-    || viewport.width < 200 || viewport.width > 10000
-    || viewport.maxHeight < 200 || viewport.maxHeight > 10000) return undefined;
-  if (!/(?:\bpix-html\b|\bhtml[- ]sandbox\b|\bcanvas\b|\bphaser\b|\bthree\.js\b|\banimat(?:e|ion|ed)\b|\b[23]d\s+scene\b|\binteractive\b|\bprototype\b|\bgame\b|анимаци|анимиру|[23]д.{0,8}сцен|прототип|интерактивн|мини.игр|игру|игра|игры|игре|калькулятор)/iu.test(text)) return undefined;
+const SANDBOX_VIEWPORT_HINT_PREFIX =
+  "[Pix Desktop HTML Sandbox layout context, measured when this prompt was submitted]: ";
 
-  return "[Pix Desktop HTML Sandbox layout context, measured when this prompt was submitted]: "
-    + `An inline \`pix-html\` preview has approximately ${Math.round(viewport.width)} CSS px of width and can auto-grow up to ${Math.round(viewport.maxHeight)} CSS px before it scrolls internally. `
-    + "Make self-contained HTML/CSS/JS prototypes responsive: max-width: 100%, no fixed min-width, "
-    + "and size Canvas using its parent width and window resize rather than assuming a full browser tab. "
-    + "These dimensions are a snapshot; viewport dimensions may change at runtime.";
+/**
+ * Legacy Desktop builds appended a keyword-triggered viewport hint as the final
+ * prompt block. It is no longer sent; strip it from persisted history so it
+ * never appears in user bubbles or restored composer drafts.
+ */
+export function stripSandboxViewportHint(promptText: string): string {
+  const index = promptText.lastIndexOf(SANDBOX_VIEWPORT_HINT_PREFIX);
+  if (index < 0 || (index > 0 && promptText[index - 1] !== "\n")) return promptText;
+  return promptText.slice(0, index).trimEnd();
 }
 
 export interface SandboxContentSize {

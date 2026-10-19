@@ -6,7 +6,6 @@ import { commandPickerState, type CommandPickerState } from "../lib/command-inte
 import { parseDesktopSlashCommand } from "../lib/slash-commands";
 import { parseDesktopTerminalCommand } from "../lib/terminal-commands";
 import { sandboxSubmissionPrompt } from "../lib/html-sandbox";
-import type { HtmlSandboxViewport } from "../lib/html-sandbox-layout";
 import { buildPromptPayload } from "./prompt-payload";
 import type { createPromptRuntime } from "./prompt-runtime.svelte";
 
@@ -66,7 +65,6 @@ type PromptSubmitOptions = {
     draftGeneration: number,
   ) => Promise<void>;
   imagePromptSupported: () => boolean;
-  htmlSandboxViewport?: () => HtmlSandboxViewport | undefined;
   invalidateAttachmentDraft: () => void;
   nextLocalMessageId: () => string;
   appendUserMessage: (text: string, id: string, attachments: readonly Attachment[]) => () => void;
@@ -296,7 +294,7 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
       if (!options.draftSessionTabActive()) return;
       if (!terminalCommand) {
         try {
-          const payload = buildPromptPayload(text, attachments, options.imagePromptSupported(), options.htmlSandboxViewport?.());
+          const payload = buildPromptPayload(text, attachments, options.imagePromptSupported());
           if (!options.beginOptimisticDraftSubmit(text, attachments)) return;
           options.setErrorMessage(null);
           options.setPromptText("");
@@ -332,7 +330,7 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
         pendingSessionSubmits.delete(sessionId);
       };
       try {
-        const payload = buildPromptPayload(text, attachments, options.imagePromptSupported(), options.htmlSandboxViewport?.());
+        const payload = buildPromptPayload(text, attachments, options.imagePromptSupported());
         pendingSessionSubmits.add(sessionId);
         pendingStartup = true;
         options.setErrorMessage(null);
@@ -412,7 +410,7 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
     options.setErrorMessage(null);
     try {
       if (!preparedPrompt) {
-        const payload = buildPromptPayload(text, attachments, options.imagePromptSupported(), options.htmlSandboxViewport?.());
+        const payload = buildPromptPayload(text, attachments, options.imagePromptSupported());
         if (
           sessionId !== options.activeSessionId()
           || draftKey !== options.attachmentDraftKey()

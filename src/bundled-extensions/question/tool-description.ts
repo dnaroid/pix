@@ -6,6 +6,7 @@ export const QUESTION_TOOL_DESCRIPTION = {
 	promptGuidelines: [
 		"Use question when you need the user's answer before you can continue: choose alternatives, confirm direction or a risky step, or resolve ambiguity, with at least two meaningful choices.",
 		"Do not use question merely to offer optional follow-ups after finishing; end the turn instead (in Pix Desktop, with a pix-actions checklist).",
+		"Put any needed context and explanation in the assistant message before calling question, without repeating the question or listing its choices there. Keep each tool prompt a short, self-contained question and supply the answer choices in the tool; do not copy the preceding explanation into the form. Always include the question prompt, not just choices.",
 		"question accepts 1–5 questions with 2–5 choices each and an implicit custom answer path; set multiple: true with optional minSelections/maxSelections when several answers may apply.",
 		"For multi-select questions, the custom answer can be combined with predefined choices and counts as one selection toward the limits.",
 	],

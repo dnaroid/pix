@@ -3,7 +3,6 @@ import type { AcpClient } from "../lib/acp-client";
 import type { Attachment } from "../lib/attachments";
 import type { CommandPickerState } from "../lib/command-interactions";
 import { appendLocalUserMessage } from "../lib/transcript";
-import type { HtmlSandboxViewport } from "../lib/html-sandbox-layout";
 import type { ActiveSessionState } from "./active-session-state.svelte";
 import type { createAttachmentDraftController } from "./attachment-drafts";
 import type { DesktopPromptServices } from "./desktop-prompt-services";
@@ -52,7 +51,6 @@ type DesktopPromptActionServicesOptions = {
   setPromptText: (text: string) => void;
   setPromptAttachments: (attachments: Attachment[]) => void;
   imagePromptSupported: () => boolean;
-  htmlSandboxViewport?: () => HtmlSandboxViewport | undefined;
   focusComposer: () => void | Promise<void>;
   conversation: ConversationActionsRef;
   requestLocalTextInput: (message: string, title: string) => Promise<string | undefined>;
@@ -85,7 +83,6 @@ export function createDesktopPromptActionServices(options: DesktopPromptActionSe
     invalidateAttachmentDraft: options.attachments.invalidate,
     bumpAttachmentGeneration: options.attachments.bumpGeneration,
     imagePromptSupported: options.imagePromptSupported,
-    htmlSandboxViewport: options.htmlSandboxViewport,
     promptRuntime: options.prompt.runtime,
     appendQueuedMessage: options.prompt.queue.appendToTranscript,
     restoreQueuedMessage: options.prompt.queue.restoreToComposer,
@@ -168,7 +165,6 @@ export function createDesktopPromptActionServices(options: DesktopPromptActionSe
     runtimeExtensionCommand,
     queueDraftForCurrentRun: queue.queueDraftForCurrentRun,
     imagePromptSupported: options.imagePromptSupported,
-    htmlSandboxViewport: options.htmlSandboxViewport,
     invalidateAttachmentDraft: options.attachments.invalidate,
     nextLocalMessageId: options.nextLocalMessageId,
     appendUserMessage,

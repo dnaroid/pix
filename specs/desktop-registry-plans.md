@@ -147,6 +147,9 @@
   without duplicate hints or capturing an active project's absolute path.
 - The permanent hint directs durable implementation plans to `.pi/plans/` unless
   the user requested another location. It does not require a plan for trivial work.
+  It also states that `.pi/plans/` is tracked by the Pix project registry even
+  when `.pi/` is gitignored, so agents must not treat plans as scratch or delete
+  them during cleanup.
 - Detailed, project-neutral authoring rules live in the shipped suite resource
   `external/pi-tools-suite/docs/plan-writing.md`. The prompt references the
   installed resource's absolute path, resolved relative to the running module

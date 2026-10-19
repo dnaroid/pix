@@ -51,18 +51,9 @@
           >
             <Pause class="h-3.5 w-3.5" aria-hidden="true" />
           </button>
-          <button
-            class="col-start-3 grid h-7 w-7 shrink-0 place-items-center rounded-md bg-panel text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-            type="button"
-            aria-label="Stop response"
-            title="Stop response"
-            onclick={onCancel}
-          >
-            <Square class="h-3 w-3 fill-current" aria-hidden="true" />
-          </button>
         {:else if canContinue}
           <button
-            class="col-start-3 grid h-7 w-7 shrink-0 place-items-center rounded-md bg-panel text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            class="col-start-2 grid h-7 w-7 shrink-0 place-items-center rounded-md bg-panel text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             type="button"
             aria-label="Continue response"
             title="Continue response"
@@ -71,6 +62,15 @@
             <Play class="h-3.5 w-3.5 fill-current" aria-hidden="true" />
           </button>
         {/if}
+        <button
+          class="col-start-3 grid h-7 w-7 shrink-0 place-items-center rounded-md bg-panel text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          type="button"
+          aria-label="Stop response"
+          title="Stop response"
+          onclick={onCancel}
+        >
+          <Square class="h-3 w-3 fill-current" aria-hidden="true" />
+        </button>
       </div>
     {/if}
   </div>

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import test from "node:test";
-import { ProcessTerminationError, superviseProcess, terminateProcessGroup } from "../../../../src/claude-code-provider/src/process-utils.ts";
+import { ProcessTerminationError, isTerminalProcessState, listProcessGroupMembers, superviseProcess, terminateProcessGroup } from "../../../../src/claude-code-provider/src/process-utils.ts";
 import { nodeFixtureArgs } from "../support/node-fixture.js";
 
 async function assertProcessGone(pid) {
@@ -154,7 +154,7 @@ test("process-group termination reports signal permission failures with context"
     };
     try {
         await assert.rejects(
-            terminateProcessGroup(child, 500, denySignal),
+            terminateProcessGroup(child, 500, denySignal, { permissionSettleMs: 30 }),
             new RegExp(`Process group ${child.pid} cleanup failed during SIGTERM.*code=EPERM.*syscall=kill`),
         );
     }
@@ -197,9 +197,74 @@ for (const probe of ["live", "EPERM", "EIO"]) {
             if (signal === 0 && probe === "live") return true;
             throw Object.assign(new Error("synthetic group uncertainty"), { code: signal === 0 ? probe : "EPERM" });
         };
-        await assert.rejects(terminateProcessGroup(child, 30, killProcess), /cleanup failed|status probe failed/);
+        // A live non-terminal member keeps the persistent-EPERM fallback closed.
+        const options = { permissionSettleMs: 30, listProcessGroup: async () => [{ pid: 43211, stat: "S" }] };
+        await assert.rejects(terminateProcessGroup(child, 30, killProcess, options), /cleanup failed|status probe failed/);
     });
 }
+for (const phase of ["SIGTERM", "SIGKILL"]) {
+    for (const [label, members] of [["empty", []], ["zombie-only", [{ pid: 43211, stat: "Z" }, { pid: 43212, stat: "Z+" }]]]) {
+        test(`process-group persistent ${phase} EPERM accepts ${label} process table`, { skip: process.platform === "win32" }, async () => {
+            // Regression: Darwin answered EPERM to every group signal/probe while the
+            // only remaining members were zombies, failing cleanup with unknown liveness.
+            const child = { pid: 43210, exitCode: 143, signalCode: null };
+            const listed = [];
+            const killProcess = (pid, signal) => {
+                assert.equal(pid, -child.pid);
+                if (signal === 0 && phase === "SIGKILL") return true;
+                if (signal === "SIGTERM" && phase === "SIGKILL") return true;
+                throw Object.assign(new Error("synthetic persistent EPERM"), { code: "EPERM" });
+            };
+            // For the SIGKILL phase the group stays "alive" until SIGKILL, then EPERM forever.
+            let killed = false;
+            const killer = phase === "SIGKILL"
+                ? (pid, signal) => {
+                    if (signal === "SIGKILL") killed = true;
+                    if (killed) throw Object.assign(new Error("synthetic persistent EPERM"), { code: "EPERM" });
+                    return killProcess(pid, signal);
+                }
+                : killProcess;
+            await terminateProcessGroup(child, 30, killer, {
+                permissionSettleMs: 30,
+                listProcessGroup: async (pgid) => { listed.push(pgid); return members; },
+            });
+            assert.deepEqual(listed, [child.pid]);
+        });
+    }
+}
+test("process-group persistent EPERM fails closed when the process table is unavailable", { skip: process.platform === "win32" }, async () => {
+    const child = { pid: 43210, exitCode: 143, signalCode: null };
+    const killProcess = () => { throw Object.assign(new Error("synthetic persistent EPERM"), { code: "EPERM" }); };
+    await assert.rejects(
+        terminateProcessGroup(child, 30, killProcess, {
+            permissionSettleMs: 30,
+            listProcessGroup: async () => { throw new Error("ps unavailable"); },
+        }),
+        /cleanup failed during SIGTERM/,
+    );
+});
+test("process-group live probe never consults the process table", { skip: process.platform === "win32" }, async () => {
+    const child = { pid: 43210, exitCode: null, signalCode: null };
+    let listed = false;
+    const killProcess = (_pid, signal) => {
+        if (signal === "SIGKILL") throw Object.assign(new Error("synthetic EPERM"), { code: "EPERM" });
+        return true;
+    };
+    await assert.rejects(
+        terminateProcessGroup(child, 30, killProcess, { permissionSettleMs: 30, listProcessGroup: async () => { listed = true; return []; } }),
+        /cleanup failed during SIGKILL/,
+    );
+    assert.equal(listed, false);
+});
+test("default process-group lister reports a live owned group", { skip: process.platform === "win32" }, async () => {
+    const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { detached: true, stdio: "ignore" });
+    try {
+        const members = await listProcessGroupMembers(child.pid);
+        assert.ok(members.some((member) => member.pid === child.pid && !isTerminalProcessState(member.stat)));
+    } finally {
+        await terminateProcessGroup(child);
+    }
+});
 test("process-group termination removes a descendant after its leader exits", { skip: process.platform === "win32" }, async () => {
     const body = `const {spawn}=require("node:child_process"); const child=spawn(process.execPath,["-e","setInterval(()=>{},1000)"],{stdio:"ignore"}); child.unref(); process.stdout.write(String(child.pid)+"\\n");`;
     const parent = spawn(process.execPath, nodeFixtureArgs(["-e", body]), { detached: true, stdio: ["ignore", "pipe", "ignore"] });

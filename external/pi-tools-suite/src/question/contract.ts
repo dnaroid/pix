@@ -14,7 +14,7 @@ export const questionParameters = Type.Object({
 	questions: Type.Array(Type.Object({
 		id: Type.String({ description: "Unique stable question id." }),
 		label: Type.String({ description: "Short label for the question." }),
-		prompt: Type.String({ description: "Full question prompt to show the user." }),
+		prompt: Type.String({ description: "Short, self-contained question to show above the choices. Put background explanation in the preceding assistant message, not here." }),
 		choices: Type.Array(Type.Object({
 			value: Type.String({ description: "Value returned if this choice is selected." }),
 			label: Type.String({ description: "Display label for this choice." }),

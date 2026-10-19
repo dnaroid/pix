@@ -4,6 +4,12 @@ import transcript from "./TranscriptPane.svelte?raw";
 import markdown from "./MarkdownText.svelte?raw";
 
 describe("quick-choice reply presentation", () => {
+  it("keeps selected user-reply text bright and dims only unselected text", () => {
+    expect(source).toContain('!item.checked && "opacity-60"');
+    expect(source).not.toMatch(/<li[^>]*opacity-60/);
+    expect(source).toContain("rounded-sm border opacity-60");
+  });
+
   it("uses the same checkbox visuals with no interactive controls", () => {
     expect(source).toContain("cursor-default");
     expect(source).toContain("opacity-60");

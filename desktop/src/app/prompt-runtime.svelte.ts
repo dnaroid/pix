@@ -19,6 +19,8 @@ export function createPromptRuntime(options: PromptRuntimeOptions) {
     onPromptSettled: options.onPromptSettled,
     onPromptError: options.onPromptError,
     flushAutoQueue: (sessionId) => queue.flushAutoQueue(sessionId),
+    canCancelIdle: (sessionId) => options.runtimeReady(sessionId)
+      && (agent.agentState(sessionId) === "paused" || agent.agentState(sessionId) === "continuable"),
   });
 
   queue = createPromptQueueRuntime({

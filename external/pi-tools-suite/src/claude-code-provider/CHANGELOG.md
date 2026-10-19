@@ -9,6 +9,7 @@
 ### Fixed
 
 - On macOS, process-group termination no longer treats a transient `EPERM` while an owned group is disappearing as proof of cleanup. It accepts termination only after a subsequent `ESRCH` probe confirms that exact group is gone; otherwise cleanup remains an error.
+- On macOS, cleanup no longer fails with "process liveness is unknown" when every signal and probe to the owned group keeps returning `EPERM` because only zombie or exiting members remain. After a persistent `EPERM`, the provider waits up to 2 more seconds. It then checks the process table for that exact group and accepts cleanup only if the group is empty or contains only zombie (`Z`), dead (`X`) or Darwin-exiting (`E`) entries. A live member or a failure to read the process table keeps cleanup an error.
 
 ## [0.5.0] - 2026-09-24
 

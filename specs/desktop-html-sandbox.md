@@ -134,8 +134,6 @@ across actual component destruction/remount or tab switching.
   `PIX_ACP_HTML_SANDBOX_EXTENSION`. ACP accepts it only for Pi RPC sessions
   whose initialized client name is exactly `pix-desktop`. Other ACP clients
   and the Pix TUI do not load this bundled capability by default.
-- The measured viewport hint described below is optional extra context for
-  likely prototype requests, **not** the feature-discovery mechanism.
 
 ## Authoring
 
@@ -240,17 +238,13 @@ and custom interfaces. Async handlers can listen for the
 window message if they need confirmation. Otherwise the native sandbox footer
 shows feedback.
 
-When an ordinary Desktop prompt appears to ask for a prototype, HTML Sandbox,
-interactive game, animation, Phaser, Three.js, or Canvas implementation, the ACP prompt payload includes a
-**separate agent-facing context block** with the measured inline
-content width and maximum auto-fit height at submit time. This applies to
-normal, opening-draft, queued, deferred, and forked user prompts through the
-shared prompt builder; it does not rewrite the user's visible composer text or
-force the agent to emit HTML. Normal coding prompts receive no such block.
-The context explicitly asks for responsive HTML/Canvas and warns that later
-window/sidebar resizing can change the actual viewport. As with other ACP
-prompt content, the appended block may be recorded in the conversation's
-session history; it is not a live hidden system prompt.
+Desktop does **not** append any keyword-triggered layout context to user
+prompts; the user's submitted text is sent unchanged. The `pix-html` guide
+instead tells the agent to design for the maximum chat-column width (about
+850 CSS px, narrower on small windows) and a reasonable height no taller than
+that width. Persisted history from older builds may still contain the legacy
+`[Pix Desktop HTML Sandbox layout context …]` block; Desktop strips it from
+user message bubbles and restored composer drafts.
 
 ## Offline animation engines
 
@@ -337,7 +331,7 @@ session history; it is not a live hidden system prompt.
   `desktop/src/components/ChoiceActions.svelte`: checklist parsing, eligibility
   support, and the checkbox/submit UI for quick-choice actions.
 - `desktop/src/lib/html-sandbox-layout.ts`: validated content-size packets,
-  bounded auto-fit height calculation and prototype-only agent viewport hint.
+  bounded auto-fit height calculation and legacy viewport-hint stripping.
 - `desktop/src/components/HtmlSandbox.svelte`: Automatic startup and Run/Stop/Restart UI with
   scoped message listener, theme syncing, width monitoring and auto-fit.
 - `desktop/src/components/MarkdownText.svelte`:

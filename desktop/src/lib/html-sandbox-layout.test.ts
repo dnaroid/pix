@@ -4,7 +4,7 @@ import {
   sandboxExpandedHeightLimit,
   sandboxFrameHeight,
   sandboxInlineHeightLimit,
-  sandboxViewportHint,
+  stripSandboxViewportHint,
 } from "./html-sandbox-layout";
 import { buildPromptPayload } from "../app/prompt-payload";
 
@@ -41,32 +41,17 @@ describe("HTML sandbox automatic height", () => {
   });
 });
 
-describe("agent-facing HTML Sandbox viewport context", () => {
-  const viewport = { width: 642.8, maxHeight: 1080 };
-
-  it("adds the measured inline viewport only for prototyping/game requests", () => {
-    const hint = sandboxViewportHint("Сделай интерактивную игру на Canvas", viewport);
-    expect(hint).toContain("643 CSS px");
-    expect(hint).toContain("1080 CSS px");
-    expect(hint).toContain("window resize");
-    expect(sandboxViewportHint("Fix the TypeScript compiler error", viewport)).toBeUndefined();
-    for (const prompt of ["Animate a cube in chat", "Three.js scene", "Phaser demo", "Анимация в чате"]) {
-      expect(sandboxViewportHint(prompt, viewport)).toContain("643 CSS px");
+describe("HTML Sandbox prompt layout context", () => {
+  it("never appends a keyword-triggered layout block to user prompts", () => {
+    for (const source of ["Создай мини-игру на Canvas", "прогнать хедлесс игры", "Fix a refactor"]) {
+      expect(buildPromptPayload(source, [], false).blocks).toEqual([{ type: "text", text: source }]);
     }
-    expect(sandboxViewportHint("Create pix-html prototype", { width: NaN, maxHeight: 1080 })).toBeUndefined();
   });
 
-  it("adds a separate, ephemeral agent content block, keeping the user's visible text unchanged", () => {
-    const source = "Создай мини-игру на Canvas";
-    const result = buildPromptPayload(source, [], false, viewport);
-    expect(result.blocks).toHaveLength(2);
-    expect(result.blocks[0]).toEqual({ type: "text", text: source });
-    expect(result.blocks[1]).toEqual({
-      type: "text",
-      text: expect.stringContaining("643 CSS px"),
-    });
-    expect(buildPromptPayload("Fix a refactor", [], false, viewport).blocks).toEqual([
-      { type: "text", text: "Fix a refactor" },
-    ]);
+  it("strips the legacy hint from persisted history", () => {
+    const source = "Сделай игру\n\nв конце прогнать хедлесс игры";
+    const legacy = `${source}\n\n[Pix Desktop HTML Sandbox layout context, measured when this prompt was submitted]: An inline \`pix-html\` preview has approximately 848 CSS px of width.`;
+    expect(stripSandboxViewportHint(legacy)).toBe(source);
+    expect(stripSandboxViewportHint(source)).toBe(source);
   });
 });

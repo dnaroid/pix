@@ -14,6 +14,7 @@ type PromptRunLifecycleOptions = Pick<
   | "onPromptError"
 > & {
   flushAutoQueue: (sessionId: string) => void | Promise<void>;
+  canCancelIdle?: (sessionId: string) => boolean;
 };
 
 export type PromptRunCompletion = {
@@ -177,9 +178,11 @@ export function createPromptRunLifecycle(options: PromptRunLifecycleOptions) {
   async function cancelActivePrompt(): Promise<void> {
     const requestClient = options.client();
     const sessionId = options.activeSessionId();
-    if (!requestClient || !sessionId || !runningSessionIds.has(sessionId)) return;
+    if (!requestClient || !sessionId
+      || (!runningSessionIds.has(sessionId) && !options.canCancelIdle?.(sessionId))) return;
     const cancellation = cancellationBySessionId.get(sessionId);
     if (cancellation) cancellation.requested = true;
+    else cancellationBySessionId.set(sessionId, { requested: true });
     cancelSnapshotWaits.get(generation(sessionId))?.();
     try {
       await requestClient.cancel(sessionId);

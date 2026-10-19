@@ -23,6 +23,14 @@ describe("ChoiceActions quick-choice block", () => {
     expect(choiceSource).not.toMatch(/selected ·|type your own reply/);
   });
 
+  it("dims only unselected inactive text while keeping all checkboxes inactive", () => {
+    expect(choiceSource).toContain('!enabled && !isSelected && "opacity-60"');
+    expect(choiceSource).not.toContain('!enabled && "cursor-default opacity-60"');
+    expect(choiceSource).toContain('!enabled && "opacity-60"');
+    expect(choiceSource).toContain("aria-disabled={!enabled || undefined}");
+    expect(choiceSource).toContain("if (!enabled) return;");
+  });
+
   it("sends the formatted selection and surfaces submission errors", () => {
     expect(choiceSource).toContain("await onSubmit(choiceActionsPrompt(actions.submitLabel, actions.items, state.selected));");
     expect(choiceSource).toContain("state.submitted = true;");

@@ -6,7 +6,6 @@ import type {
   QueuedUserMessage,
 } from "../lib/acp-client";
 import type { createPromptRuntime } from "./prompt-runtime.svelte";
-import type { HtmlSandboxViewport } from "../lib/html-sandbox-layout";
 import { buildPromptPayload } from "./prompt-payload";
 import { queuedMessageBlocks } from "./prompt-queue-runtime.svelte";
 
@@ -24,7 +23,6 @@ type PromptQueueActionsOptions = {
   invalidateAttachmentDraft: () => void;
   bumpAttachmentGeneration: () => void;
   imagePromptSupported: () => boolean;
-  htmlSandboxViewport?: () => HtmlSandboxViewport | undefined;
   promptRuntime: PromptRuntime;
   appendQueuedMessage: (sessionId: string, message: QueuedUserMessage) => string;
   restoreQueuedMessage: (message: QueuedUserMessage) => void;
@@ -55,7 +53,7 @@ export function createPromptQueueActions(options: PromptQueueActionsOptions) {
       const text = options.promptText().trim();
       const attachments = options.promptAttachments();
       if (!text && attachments.length === 0) return;
-      const { blocks, fileImages } = buildPromptPayload(text, attachments, options.imagePromptSupported(), options.htmlSandboxViewport?.());
+      const { blocks, fileImages } = buildPromptPayload(text, attachments, options.imagePromptSupported());
       options.setErrorMessage(null);
       options.setPromptText("");
       options.invalidateAttachmentDraft();
@@ -90,7 +88,7 @@ export function createPromptQueueActions(options: PromptQueueActionsOptions) {
     const sessionId = options.activeSessionId();
     if (!requestClient || !sessionId) return;
     try {
-      const { blocks, fileImages } = buildPromptPayload(text, attachments, options.imagePromptSupported(), options.htmlSandboxViewport?.());
+      const { blocks, fileImages } = buildPromptPayload(text, attachments, options.imagePromptSupported());
       if (
         requestClient !== options.client()
         || sessionId !== options.activeSessionId()
@@ -129,7 +127,7 @@ export function createPromptQueueActions(options: PromptQueueActionsOptions) {
     const draftKey = options.attachmentDraftKey();
     const draftGeneration = options.attachmentGeneration();
     try {
-      const { blocks, fileImages } = buildPromptPayload(text, attachments, options.imagePromptSupported(), options.htmlSandboxViewport?.());
+      const { blocks, fileImages } = buildPromptPayload(text, attachments, options.imagePromptSupported());
       if (
         requestClient !== options.client()
         || sessionId !== options.activeSessionId()

@@ -9,6 +9,7 @@ import {
   type Attachment,
 } from "./attachments";
 import type { ToolDiff } from "./diff";
+import { stripSandboxViewportHint } from "./html-sandbox-layout";
 import type { MessageRole } from "./transcript-types";
 
 export function agentMessageRole(messageId: string | undefined): Extract<MessageRole, "assistant" | "system"> {
@@ -24,7 +25,7 @@ export function messageContent(
   switch (content.type) {
     case "text":
       return role === "user"
-        ? extractAttachmentMarkers(content.text, idPrefix, attachmentOffset)
+        ? extractAttachmentMarkers(stripSandboxViewportHint(content.text), idPrefix, attachmentOffset)
         : { text: content.text, attachments: [] };
     case "image":
       return {

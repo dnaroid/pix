@@ -52,7 +52,7 @@
         class={[
           "flex w-full items-start gap-2.5 px-2.5 py-2 text-left text-sm transition-colors focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-ring",
           isSelected ? "bg-panel-selected" : enabled && "hover:bg-panel-hover",
-          !enabled && "cursor-default opacity-60",
+          !enabled && "cursor-default",
         ]}
         type="button"
         role="checkbox"
@@ -64,8 +64,12 @@
         <span class={[
           "mt-0.5 grid size-4 shrink-0 place-items-center rounded-sm border",
           isSelected ? "border-primary" : "border-muted-foreground/50",
+          !enabled && "opacity-60",
         ]}>{#if isSelected}<Check class="size-3 text-primary" strokeWidth={2.4} />{/if}</span>
-        <span class="min-w-0 flex-1 whitespace-pre-wrap [overflow-wrap:anywhere] text-foreground">
+        <span class={[
+          "min-w-0 flex-1 whitespace-pre-wrap [overflow-wrap:anywhere] text-foreground",
+          !enabled && !isSelected && "opacity-60",
+        ]}>
           <span class="text-muted-foreground tabular-nums">{index + 1}.</span> {item.label}
         </span>
       </button>
