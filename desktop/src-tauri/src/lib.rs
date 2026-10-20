@@ -31,10 +31,10 @@ mod acp_diagnostics;
 mod backend_runtime;
 mod close_guard;
 mod desktop_bootstrap;
-mod desktop_onboarding;
 mod desktop_context_menu;
 mod desktop_notification;
 mod desktop_notification_sound;
+mod desktop_onboarding;
 mod desktop_tray;
 mod desktop_tray_attention;
 mod desktop_tray_icon;
@@ -288,7 +288,10 @@ async fn desktop_watch_restart(app: AppHandle) -> Result<bool, String> {
     .await;
     close_guard::finish_restart(&app, matches!(requested, Ok(true)));
     let requested = requested.map_err(|error| {
-        logging::error(module_path!(), format!("could not restart watch Desktop: {error}"));
+        logging::error(
+            module_path!(),
+            format!("could not restart watch Desktop: {error}"),
+        );
         error
     })?;
     if requested {
@@ -2011,7 +2014,11 @@ fn list_project_documents_from(workspace: &Path) -> Result<ProjectDocumentsSnaps
     }
 
     let plan_progress = plan_progress::snapshot(&root, &plans);
-    Ok(ProjectDocumentsSnapshot { plans, todo_exists, plan_progress })
+    Ok(ProjectDocumentsSnapshot {
+        plans,
+        todo_exists,
+        plan_progress,
+    })
 }
 
 fn collect_project_plan_files(
@@ -9527,8 +9534,14 @@ mod tests {
         let after = list_project_documents_from(&workspace).expect("list project documents again");
         assert!(after.todo_exists);
         let progress = serde_json::to_value(&after.plan_progress).expect("serialize progress");
-        assert_eq!(progress[".pi/plans/releases/v2.md"], serde_json::json!({ "completed": 1, "total": 2 }));
-        assert_eq!(progress[".pi/plans/alpha.md"], serde_json::json!({ "completed": 0, "total": 0 }));
+        assert_eq!(
+            progress[".pi/plans/releases/v2.md"],
+            serde_json::json!({ "completed": 1, "total": 2 })
+        );
+        assert_eq!(
+            progress[".pi/plans/alpha.md"],
+            serde_json::json!({ "completed": 0, "total": 0 })
+        );
         assert!(write_project_markdown_from(&workspace, Path::new("README.md"), "nope").is_err());
         assert!(write_project_markdown_from(
             &workspace,
@@ -11352,8 +11365,8 @@ mod tests {
     fn resolves_audio_with_the_same_media_boundaries() {
         let workspace = temporary_workspace("audio-media");
         for extension in [
-            "aac", "aif", "aiff", "flac", "m4a", "m4b", "mp3", "mpga", "oga", "ogg",
-            "opus", "wav", "wave", "weba",
+            "aac", "aif", "aiff", "flac", "m4a", "m4b", "mp3", "mpga", "oga", "ogg", "opus", "wav",
+            "wave", "weba",
         ] {
             let name = format!("track.{}", extension.to_uppercase());
             let file = workspace.join(&name);

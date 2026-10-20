@@ -261,7 +261,11 @@ pub(crate) fn log_desktop_diagnostic(
     let media_warning = event == "media:playback-unavailable";
     record_scoped(
         if media_warning { "warn" } else { "error" },
-        if media_warning { "frontend.media" } else { "frontend" },
+        if media_warning {
+            "frontend.media"
+        } else {
+            "frontend"
+        },
         &event,
         json!({"diagnostic": diagnostic}),
         workspace.as_deref(),
@@ -474,8 +478,12 @@ mod tests {
         assert_eq!(frontend_event_level("acp:ready token=private"), None);
         assert!(log_desktop_event("unknown".into(), None, None).is_err());
         assert!(log_desktop_diagnostic(
-            "media:playback-unavailable".into(), "Audio unavailable".into(), None, None,
-        ).is_ok());
+            "media:playback-unavailable".into(),
+            "Audio unavailable".into(),
+            None,
+            None,
+        )
+        .is_ok());
         assert!(log_desktop_event("acp:ready".into(), None, Some("x".repeat(257))).is_err());
     }
     #[test]

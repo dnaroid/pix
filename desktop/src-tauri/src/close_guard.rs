@@ -92,7 +92,12 @@ pub(crate) fn destroyed(app: &AppHandle, label: &str) {
 /// Watch restarts must obtain consent before publishing the restart marker.
 /// Returning false also covers another close/quit dialog already being open.
 pub(crate) async fn confirm_restart(app: &AppHandle) -> bool {
-    let action = app.state::<CloseGuardState>().0.lock().unwrap().request_restart();
+    let action = app
+        .state::<CloseGuardState>()
+        .0
+        .lock()
+        .unwrap()
+        .request_restart();
     match action {
         Action::Allow => return true,
         Action::Wait => return false,
@@ -115,7 +120,11 @@ pub(crate) async fn confirm_restart(app: &AppHandle) -> bool {
 
 /// Release the reservation, approving exit only after marker publication.
 pub(crate) fn finish_restart(app: &AppHandle, requested: bool) {
-    app.state::<CloseGuardState>().0.lock().unwrap().finish_restart(requested);
+    app.state::<CloseGuardState>()
+        .0
+        .lock()
+        .unwrap()
+        .finish_restart(requested);
 }
 
 /// Returns true when the native request must be prevented. The async native
@@ -163,7 +172,11 @@ pub(crate) fn prevent(app: &AppHandle, label: Option<&str>, exit_code: Option<i3
     true
 }
 
-fn show_confirmation(app: &AppHandle, label: Option<&str>, respond: impl FnOnce(bool) + Send + 'static) {
+fn show_confirmation(
+    app: &AppHandle,
+    label: Option<&str>,
+    respond: impl FnOnce(bool) + Send + 'static,
+) {
     let window = label.and_then(|label| app.get_webview_window(label));
     let quitting = label.is_none();
     let mut dialog = app.dialog().message(if quitting {
@@ -195,7 +208,9 @@ mod tests {
         guard.finish_restart(false);
         assert_eq!(guard.request(None), Action::Ask);
         guard.pending = false;
-        guard.restart_blocking_windows.insert("background-run".into());
+        guard
+            .restart_blocking_windows
+            .insert("background-run".into());
         assert_eq!(guard.request_restart(), Action::Ask);
         guard.finish_restart(true);
         assert_eq!(guard.request(None), Action::Allow);
