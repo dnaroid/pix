@@ -101,7 +101,7 @@ e2eTest("runs public QA without auth, then records form login and private action
 			"--flow", publicFlowPath,
 			"--run-id", "real-public",
 		], agentDir);
-		expect(publicResult.code).toBe(0);
+		expect(publicResult.code, `Public browser QA failed: ${JSON.stringify(publicResult.json)}; ${publicResult.stderr}`).toBe(0);
 		expect(publicResult.json).toMatchObject({ status: "QA_PASSED", profile: "public" });
 		expect(publicResult.json.artifacts.screenshots).toHaveLength(1);
 		expect(publicResult.json.artifacts.videos).toHaveLength(1);
@@ -328,7 +328,7 @@ function writePrivateJson(file: string, value: unknown): void {
 }
 
 function createBrowserQaAgent(project: string): string {
-	const agentDir = path.join(project, ".pi", "subagents", "browser-qa-e2e", "qa-agent");
+	const agentDir = path.join(project, ".pi", "artifacts", "subagents", "browser-qa-e2e", "qa-agent");
 	const workspace = path.join(agentDir, "ui-qa", "browser");
 	const flows = path.join(workspace, "flows");
 	fs.mkdirSync(flows, { recursive: true, mode: 0o700 });
