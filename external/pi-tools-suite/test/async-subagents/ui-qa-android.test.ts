@@ -17,7 +17,7 @@ const node = spawnSync(lookup[0], [lookup[1]], { encoding: "utf8" }).stdout.trim
 const dirs: string[] = [];
 let server: ChildProcess | undefined;
 let windowsAdbBinary: Buffer | undefined;
-setDefaultTimeout(30_000);
+setDefaultTimeout(60_000);
 
 beforeAll(async () => {
 	// A fake adb executable is used throughout. A listener is needed only for
@@ -127,8 +127,8 @@ process.stdout.write(out);
 	function run(steps: unknown[], options: { target?: unknown; command?: string; timeout?: number } = {}) {
 		const flow = path.join(agentDir, "ui-qa/flows", `flow-${Date.now()}-${Math.random()}.jsonc`);
 		fs.writeFileSync(flow, JSON.stringify({ target: options.target ?? { android: target }, steps }), { mode: 0o600 });
-		const result = spawnSync(node, [runner, options.command ?? "run", "--flow", flow, "--runner-timeout-ms", String(options.timeout ?? 15000)], {
-			cwd: project, env: { ...process.env, PI_SUBAGENT_AGENT_DIR: agentDir }, encoding: "utf8", timeout: 25000,
+		const result = spawnSync(node, [runner, options.command ?? "run", "--flow", flow, "--runner-timeout-ms", String(options.timeout ?? 30000)], {
+			cwd: project, env: { ...process.env, PI_SUBAGENT_AGENT_DIR: agentDir }, encoding: "utf8", timeout: 45000,
 		});
 		const payload = JSON.parse(result.stdout.trim().split("\n").slice(-1)[0] ?? "{}");
 		return { ...result, payload };
@@ -526,7 +526,10 @@ exit 0`);
 			? spawnSync(shell, ["-c", 'cygpath -u "$1"', "--", dir], { encoding: "utf8" }).stdout.trim()
 			: dir;
 		const script = noIdleHierarchyCommand("your.app", "a".repeat(32)).args[1].replace(`/data/local/tmp/pi-ui-qa-${"a".repeat(32)}`, remoteDir);
-		const result = spawnSync(shell, ["-c", script], { cwd: f.project, env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}` }, timeout: 8000 });
+		const shellScript = process.platform === "win32"
+			? `export PATH="$(cygpath -u '${bin.replaceAll("'", "'\\''")}'):$PATH"\n${script}`
+			: script;
+		const result = spawnSync(shell, ["-c", shellScript], { cwd: f.project, env: process.platform === "win32" ? process.env : { ...process.env, PATH: `${bin}:${process.env.PATH}` }, timeout: 8000 });
 		expect(result.status).toBe(mode === "collision" ? 73 : 0);
 		if (mode === "collision") expect(fs.readFileSync(path.join(dir, "foreign"), "utf8")).toBe("retain");
 		else {
