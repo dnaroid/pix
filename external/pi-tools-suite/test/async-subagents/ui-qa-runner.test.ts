@@ -3,6 +3,7 @@ import { spawn, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { removeDirsWithRetry } from "../support/fs-retry.js";
 import { probeBrowserBackend, resolveBrowserDriver, runBrowserBackend } from "../../src/async-subagents/agents/ui-qa/backends/browser.mjs";
 import { desktopEvidenceName, desktopPlatformContract, desktopStepTimeout, launchedApplicationSelector, terminateOwnedProcessTree, validateDesktopStepCapabilities } from "../../src/async-subagents/agents/ui-qa/backends/desktop.mjs";
 import { releaseWindowsPtyResources, resolveTuiPresentation, terminateOwnedPty, validateNativeTerminalSteps } from "../../src/async-subagents/agents/ui-qa/backends/tui.mjs";
@@ -25,11 +26,11 @@ const children: Array<ReturnType<typeof spawn>> = [];
 
 setDefaultTimeout(60_000);
 
-afterEach(() => {
+afterEach(async () => {
 	for (const child of children.splice(0)) {
 		try { child.kill("SIGKILL"); } catch { /* already exited */ }
 	}
-	for (const directory of tempDirs.splice(0)) fs.rmSync(directory, { recursive: true, force: true });
+	await removeDirsWithRetry(tempDirs);
 });
 
 function createProject(type = "ui-qa") {
