@@ -21,7 +21,8 @@ describe("composer action grid", () => {
     expect(activity).toContain("pr-[9px]");
     expect(queue).toContain("border-input bg-panel-strong px-2");
     expect(composer).toContain('"px-2 py-1.5"');
-    expect(activity.match(/col-start-2/g)).toHaveLength(1);
-    expect(activity.match(/col-start-3/g)).toHaveLength(2);
+    // Pause and Continue occupy the same column in mutually exclusive states.
+    expect(activity.match(/col-start-2/g)).toHaveLength(2);
+    expect(activity.match(/col-start-3/g)).toHaveLength(1);
   });
 });

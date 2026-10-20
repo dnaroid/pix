@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMarkdownContentAction } from "./markdown-content-action";
 import type { Attachment } from "../lib/attachments";
 
-vi.mock("@tauri-apps/api/core", () => ({ convertFileSrc: (path: string) => `asset:${path}` }));
+vi.mock("@tauri-apps/api/core", () => ({ convertFileSrc: (path: string) => `asset:${path}`, invoke: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("../lib/mermaid", () => ({ renderMermaidDiagram: vi.fn() }));
 const glb = vi.hoisted(() => ({ mount: vi.fn(() => vi.fn()) }));
 vi.mock("./glb-viewer-action", () => ({ mountGlbViewer: glb.mount }));
@@ -18,6 +18,8 @@ class Element {
   naturalWidth = 0;
   naturalHeight = 0;
   src = "";
+  readyState = 0;
+  error: { code: number } | null = null;
   controls = false;
   preload = "";
   pause = vi.fn();
@@ -29,6 +31,7 @@ class Element {
   getAttribute(name: string) { return this.attributes[name] ?? null; }
   removeAttribute(name: string) { delete this.attributes[name]; }
   addEventListener(name: string, callback: () => void) { this.listeners.set(name, callback); }
+  removeEventListener(name: string, callback: () => void) { if (this.listeners.get(name) === callback) this.listeners.delete(name); }
   contains(child: Element): boolean { return this.children.some((item) => item === child || item.contains(child)); }
   replaceWith(next: Element) {
     if (!this.parent) return;
@@ -158,9 +161,10 @@ describe("Markdown natural image reservation", () => {
     intersect(first);
     await flush();
     const player = first.children[0]!.children[0]!;
+    player.error = { code: 4 };
     player.listeners.get("error")!();
     expect(first.dataset.mediaState).toBe("error");
-    expect(player.pause).toHaveBeenCalledOnce();
+    expect(player.pause).toHaveBeenCalledTimes(2);
     root.replaceChildren(preview("project", "track.mp3", "audio"));
     action.update("more streaming");
     await flush();
@@ -168,7 +172,7 @@ describe("Markdown natural image reservation", () => {
     await flush();
     expect(first.children[0]!.children[0]!.textContent).toBe("Preview unavailable");
     action.destroy();
-    expect(player.pause).toHaveBeenCalledOnce();
+    expect(player.pause).toHaveBeenCalledTimes(2);
   });
 
   it("retains GLB viewers and camera ownership across streaming, releasing removed occurrences", async () => {
