@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { attachmentKind, mimeTypeForName } from "./attachments";
 import { previewMediaKindForPath } from "./media";
 
-const AUDIO_EXTENSIONS = ["aac", "aif", "aiff", "flac", "m4a", "mp3", "oga", "ogg", "opus", "wav"];
+const AUDIO_EXTENSIONS = ["aac", "aif", "aiff", "flac", "m4a", "m4b", "mp3", "mpga", "oga", "ogg", "opus", "wav", "wave", "weba"];
 
 describe("Preview media classification", () => {
   it.each(AUDIO_EXTENSIONS)("supports %s without changing prompt attachment kinds", (extension) => {

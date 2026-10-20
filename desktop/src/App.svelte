@@ -19,6 +19,7 @@
   import DesktopStatusBar from "./components/DesktopStatusBar.svelte";
   import DesktopUpdateBanner from "./components/DesktopUpdateBanner.svelte";
   import DesktopBootstrapDialog from "./components/DesktopBootstrapDialog.svelte";
+  import DeleteConfirmationHost from "./components/DeleteConfirmationHost.svelte";
   import ModelSetupDialog from "./components/ModelSetupDialog.svelte";
   import { workbenchSessionTabId, type WorkbenchTabId } from "./lib/workbench-tabs";
   import { createTranscriptAttachmentController } from "./app/transcript-attachments";
@@ -693,6 +694,7 @@
     loadSession: sessionTabController.loadSession,
     activateSession: (id) => { activeWorkbenchTabId = workbenchSessionTabId(id); },
     hydrate: sessionHistory.waitForHydration,
+    openPlan: (path) => previewStore.openProjectFile(path, "push"),
     fileExists: previewStore.validateProjectFile,
     openFile: (path, range) => previewStore.openProjectFile(path, "push", range),
     openCommit: async (hit, isCurrent) => {
@@ -995,5 +997,6 @@
     }} />
 {/if}
 <DesktopBootstrapDialog onCredentialsChanged={reconnect} />
+<DeleteConfirmationHost />
 <ModelSetupDialog client={client ?? undefined} onApplied={reconnect} catalog={modelThinkingConfigState(displayedConfigOptions).models} />
 <DesktopUpdateBanner {updater} />

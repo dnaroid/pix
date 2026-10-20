@@ -141,16 +141,13 @@ session-local todos.
   The Run prompt and `external/pi-tools-suite/docs/plan-writing.md` require
   saving each verified item as `[x]` immediately; sub-steps stay in session
   Steps.
-- In Work → Plans, owned plans are grouped under **Task plans** and display the
-  task label; other plans are under **Plans without a task**. If there are no
-  owned plans, the list remains flat without headings. An unowned plan's Pix
-  searchable **Link to task** picker lists tasks that are not done and have no
-  plan. Linking stores the plan path in the task's `links` and is rejected when
-  the task already has a plan, the plan already has an owner, the plan file is
-  missing/non-canonical, or tasks are saving/failed to load.
-- Each plan row lists up to three recorded runs (session title and launch time),
-  newest first, followed by `+N earlier` when applicable. Deleted sessions are
-  hidden; selecting a run opens its session. Run records come from the persisted
+- In Work → Plans, plans whose path appears in a task's `links` show a small
+  ListTodo owner icon with that task's label in a tooltip. Plans are not grouped
+  by ownership and cannot be manually linked from the Plans panel.
+- Plan cards stay on one line: a spinner replaces the file icon while a run is
+  active. The card's three-dot menu (like task cards) holds **Open session**
+  (the running run, otherwise the newest recorded run; deleted sessions are
+  ignored), **Resume** and **Delete plan**. Run records come from the persisted
   per-workspace plan-launch map.
 
 ## Attachment semantics

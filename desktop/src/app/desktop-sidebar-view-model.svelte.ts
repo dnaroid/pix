@@ -13,7 +13,7 @@ import type { createProjectActions } from "./project-actions.svelte";
 import type { createProjectDocumentsStore } from "./project-documents.svelte";
 import type { createProjectTasksStore } from "./project-tasks.svelte";
 import type { createPlanLaunchesStore } from "./plan-launches.svelte";
-import { linkedTaskPlan, planOwners, type PlanRun } from "../lib/project-task-plans";
+import { planOwners, type PlanRun } from "../lib/project-task-plans";
 import { planRunStatus } from "../lib/plan-launches";
 import { projectTaskDisplayLabel } from "../lib/project-tasks";
 import type { createModelPreferencesStore } from "./model-preferences.svelte";
@@ -90,9 +90,6 @@ export function createDesktopSidebarViewModel(options: {
     for (const [path, task] of Object.entries(planOwners(options.projectTasks.document.tasks))) labels[path] = projectTaskDisplayLabel(task);
     return labels;
   });
-  const planLinkTargets = $derived(options.projectTasks.document.tasks
-    .filter((task) => !linkedTaskPlan(task) && task.status !== "done")
-    .map((task) => ({ value: task.id, label: projectTaskDisplayLabel(task) })));
   const planRuns = $derived.by(() => {
     const workspace = options.workspace();
     const launches = options.planLaunches;
@@ -237,9 +234,7 @@ export function createDesktopSidebarViewModel(options: {
     onResumePlan: (path) => void options.projectActions.resumePlan(path),
     onDeletePlan: (path) => void options.projectDocuments.removePlan(path),
     planOwners: planOwnerLabels,
-    planLinkTargets,
     planRuns,
-    onLinkTaskPlan: (taskId, path) => void options.projectActions.linkTaskPlan(taskId, path),
     onOpenPlanRun: (sessionId) => void options.sessionTabs.loadSession(sessionId),
     onListProjectDirectory: options.projectWorkspace.listDirectory,
     onValidateProjectFile: options.preview.validateProjectFile,

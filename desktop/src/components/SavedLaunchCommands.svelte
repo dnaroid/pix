@@ -1,6 +1,6 @@
 <script lang="ts">
   import { iconButtonClass } from "../lib/icon-button";
-  import { confirmDesktopAction } from "../lib/confirm-action";
+  import { confirmDesktopDeletion } from "../lib/confirm-deletion";
   import Play from "@lucide/svelte/icons/play";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
@@ -89,7 +89,7 @@
     const requestWorkspace = workspace;
     busy = true;
     try {
-      if (!await confirmDesktopAction(`Delete “${command.name}” launch command?`, {
+      if (!await confirmDesktopDeletion(`Delete “${command.name}” launch command?`, {
         title: "Delete launch command?", okLabel: "Delete",
       })) return;
       if (workspace !== requestWorkspace || !commands.some(item => item.id === command.id)) return;

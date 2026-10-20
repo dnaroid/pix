@@ -216,10 +216,12 @@ Neither a saved OpenRouter key nor a repository-search index is required for tho
 
 Under Desktop Settings → Search, `search.tasksSemanticEnabled` is a separate,
 **off-by-default** opt-in. When enabled, an explicit Tasks search can send
-project-task **titles and descriptions** (up to 2,000 characters per task) and
-the query to OpenRouter for semantic embeddings, which may incur charges.
-Other task fields, filenames and attachment contents are excluded from task
-embedding inputs. The first search indexes up to 64 new task texts; later
+project-task **titles and descriptions** (up to 2,000 characters per task), saved
+plan paths/titles and plan Markdown (chunked, up to 64 chunks of 2,000 characters
+per plan), and the query
+to OpenRouter for semantic embeddings, which may incur charges. Plan content is
+uploaded when this setting is enabled. Other task fields and attachment contents
+are excluded from task embedding inputs. The first search indexes up to 64 new task texts; later
 searches continue the index. The durable cache is kept under
 `.pi/search/index.sqlite`, not in the authoritative task database. Task status,
 priority, links and model changes do not trigger re-embedding when the title

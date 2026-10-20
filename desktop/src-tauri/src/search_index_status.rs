@@ -120,7 +120,16 @@ fn read_status_with_settings(
             "tasks",
             "tasks.sqlite",
             &[
-                ("taskDocuments", "SELECT count(*) FROM pix_task_documents"),
+                // Saved plans share this store as `plan:<path>#<chunk>` rows:
+                // count task rows and distinct plans separately, not chunks.
+                (
+                    "taskDocuments",
+                    "SELECT count(*) FROM pix_task_documents WHERE substr(task_id,1,5)<>'plan:'",
+                ),
+                (
+                    "taskPlans",
+                    "SELECT count(DISTINCT rtrim(rtrim(task_id,'0123456789'),'#')) FROM pix_task_documents WHERE substr(task_id,1,5)='plan:'",
+                ),
                 ("taskVectors", "SELECT count(*) FROM pix_task_vectors"),
             ][..],
         ),
@@ -553,6 +562,29 @@ mod tests {
                 .get("sessions"),
             Some(&3)
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn counts_tasks_and_distinct_plans_separately_from_plan_chunks() {
+        let root = temp_root();
+        let path = root.join(".pi/search/tasks.sqlite");
+        let db = Connection::open(&path).unwrap();
+        db.execute_batch(
+            "CREATE TABLE pix_task_documents(task_id TEXT PRIMARY KEY, content_hash TEXT);
+             INSERT INTO pix_task_documents VALUES
+               ('task-a','a'),('task-b','b'),
+               ('plan:.pi/plans/one.md#0','p0'),('plan:.pi/plans/one.md#1','p1'),
+               ('plan:.pi/plans/one.md#12','p12'),('plan:.pi/plans/v2/two.md#0','q0');",
+        )
+        .unwrap();
+        drop(db);
+        let before = fs::read(&path).unwrap();
+        let status = read_status(root.to_str().unwrap()).unwrap();
+        let tasks = status.stores.iter().find(|s| s.id == "tasks").unwrap();
+        assert_eq!(tasks.counts.get("taskDocuments"), Some(&2));
+        assert_eq!(tasks.counts.get("taskPlans"), Some(&2));
+        assert_eq!(fs::read(&path).unwrap(), before);
         fs::remove_dir_all(root).unwrap();
     }
 

@@ -185,7 +185,7 @@ describe("workbench composer props", () => {
       expect(options.setPromptText).not.toHaveBeenCalled();
       options.sessionMutationRunning = () => false;
       props.composer.headsUp?.onDiscuss();
-      expect(options.setPromptText).toHaveBeenCalledWith(expect.stringContaining("Please check this observer note"));
+      expect(options.setPromptText).toHaveBeenCalledWith(expect.not.stringContaining("Evidence:"));
       expect(options.promptSubmit.submit).not.toHaveBeenCalled();
     } finally { options.headsUp.reset(); }
   });

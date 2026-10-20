@@ -18,6 +18,7 @@
   import { previewMediaKindForPath } from "../lib/media";
   import { copyPreviewFile, copyPreviewMedia, previewCopyFilePath } from "../lib/preview-media-copy";
   import { previewMediaPlayback } from "./audio-playback-action";
+  import { audioSource } from "./audio-source-action";
   import { glbViewer } from "./glb-viewer-action";
   import "../styles/glb-viewer.css";
   import type { PreviewScrollPosition } from "../lib/preview-history";
@@ -448,11 +449,10 @@
                 class="w-full [color-scheme:light_dark]"
                 data-context-file-path={attachment.path ?? ""}
                 aria-label={attachment.name}
-                src={source}
                 controls
                 preload="metadata"
-                use:previewMediaPlayback={{ active, autoplay, onAutoplayConsumed }}
-                onerror={() => { audioError = true; }}
+                use:audioSource={{ source, path: attachment.path ?? attachment.name, active, autoplay, onAutoplayConsumed,
+                  onUnavailable: () => { audioError = true; } }}
               ></audio>
               {#if audioError}
                 <p role="status">Audio unavailable. The file may be damaged or its codec unsupported.</p>

@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { confirmRunningTabClose } from "../lib/close-confirmation";
-import { confirmDesktopAction } from "../lib/confirm-action";
+import { confirmDesktopDeletion } from "../lib/confirm-deletion";
 import { createSessionActionTracker, createSessionTabClosure } from "./session-tab-closure";
 import type { SessionTabControllerOptions } from "./session-tab-controller-options";
 
 vi.mock("../lib/close-confirmation", () => ({ confirmRunningTabClose: vi.fn() }));
-vi.mock("../lib/confirm-action", () => ({ confirmDesktopAction: vi.fn() }));
+vi.mock("../lib/confirm-deletion", () => ({ confirmDesktopDeletion: vi.fn() }));
 beforeEach(() => {
   vi.mocked(confirmRunningTabClose).mockReset().mockResolvedValue(true);
-  vi.mocked(confirmDesktopAction).mockReset().mockResolvedValue(true);
+  vi.mocked(confirmDesktopDeletion).mockReset().mockResolvedValue(true);
 });
 
 function deferred<T>() {
@@ -310,7 +310,7 @@ describe("session tab closure", () => {
 
   it("never deletes a session before asynchronous consent or after cancellation", async () => {
     const consent = deferred<boolean>();
-    vi.mocked(confirmDesktopAction).mockReturnValueOnce(consent.promise);
+    vi.mocked(confirmDesktopDeletion).mockReturnValueOnce(consent.promise);
     const h = createHarness("active", ["active", "deleting"], async () => ({}));
     const pending = h.closure.deleteSelectedSession("deleting");
     expect(h.client.deleteSession).not.toHaveBeenCalled();
@@ -323,17 +323,17 @@ describe("session tab closure", () => {
   it("deduplicates delete confirmations and retains the session lock through a pending delete", async () => {
     const consent = deferred<boolean>();
     const deletion = deferred<Record<string, never>>();
-    vi.mocked(confirmDesktopAction).mockReturnValueOnce(consent.promise);
+    vi.mocked(confirmDesktopDeletion).mockReturnValueOnce(consent.promise);
     const h = createHarness("active", ["active", "deleting"], async () => ({}));
     h.client.deleteSession.mockReturnValueOnce(deletion.promise);
     const first = h.closure.deleteSelectedSession("deleting");
     await h.closure.deleteSelectedSession("deleting");
-    expect(confirmDesktopAction).toHaveBeenCalledOnce();
+    expect(confirmDesktopDeletion).toHaveBeenCalledOnce();
     expect(h.client.deleteSession).not.toHaveBeenCalled();
     consent.resolve(true);
     await vi.waitFor(() => expect(h.client.deleteSession).toHaveBeenCalledTimes(1));
     await h.closure.deleteSelectedSession("deleting");
-    expect(confirmDesktopAction).toHaveBeenCalledOnce();
+    expect(confirmDesktopDeletion).toHaveBeenCalledOnce();
     expect(h.client.deleteSession).toHaveBeenCalledTimes(1);
     deletion.resolve({});
     await first;
@@ -343,19 +343,19 @@ describe("session tab closure", () => {
 
   it("allows delete confirmation to retry after cancellation", async () => {
     const consent = deferred<boolean>();
-    vi.mocked(confirmDesktopAction).mockReturnValueOnce(consent.promise).mockResolvedValueOnce(false);
+    vi.mocked(confirmDesktopDeletion).mockReturnValueOnce(consent.promise).mockResolvedValueOnce(false);
     const h = createHarness("active", ["active", "deleting"], async () => ({}));
     const first = h.closure.deleteSelectedSession("deleting");
     consent.resolve(false);
     await first;
     await h.closure.deleteSelectedSession("deleting");
-    expect(confirmDesktopAction).toHaveBeenCalledTimes(2);
+    expect(confirmDesktopDeletion).toHaveBeenCalledTimes(2);
     expect(h.client.deleteSession).not.toHaveBeenCalled();
   });
 
   it("does not delete a session after confirmation for a replaced workspace", async () => {
     const consent = deferred<boolean>();
-    vi.mocked(confirmDesktopAction).mockReturnValueOnce(consent.promise);
+    vi.mocked(confirmDesktopDeletion).mockReturnValueOnce(consent.promise);
     const h = createHarness("active", ["active", "deleting"], async () => ({}));
     const pending = h.closure.deleteSelectedSession("deleting");
     h.setWorkspace("/replaced");

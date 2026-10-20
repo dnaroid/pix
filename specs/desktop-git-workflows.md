@@ -47,9 +47,10 @@ CI refresh is independent from local `git status`. A new workspace/HEAD/upstream
   This explicit command always stages all working-tree changes (including
   previously unstaged files), generates a message using the workspace assistant,
   then commits and pushes without an intermediate composer step. It does not open
-  the Git panel and keeps one mutation lock throughout. Opening Source Control is
-  not a prerequisite: an unloaded full status does not disable this self-refreshing
-  command. It is
+  the Git panel and keeps one mutation lock throughout. The sidebar menu only
+  offers this command and Push when the current Git snapshot confirms a configured
+  remote; neither is offered for missing or unloaded remote configuration.
+  Local change review remains available. The combined command is
   disabled while Git is busy, the assistant is unavailable, or publication is
   known to be unsafe. Unknown status is checked by the transaction before any
   staging; failure or unsafe fresh status aborts without mutating the index.

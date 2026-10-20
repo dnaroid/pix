@@ -252,14 +252,16 @@ pub(crate) fn log_desktop_diagnostic(
             "frontend:error",
             "frontend:uncaught",
             "frontend:unhandled-rejection",
+            "media:playback-unavailable",
         ]
         .contains(&event.as_str())
     {
         return Err("invalid diagnostic".into());
     }
+    let media_warning = event == "media:playback-unavailable";
     record_scoped(
-        "error",
-        "frontend",
+        if media_warning { "warn" } else { "error" },
+        if media_warning { "frontend.media" } else { "frontend" },
         &event,
         json!({"diagnostic": diagnostic}),
         workspace.as_deref(),
@@ -279,7 +281,7 @@ fn frontend_event_level(event: &str) -> Option<&'static str> {
         | "updater:restart-failed" => Some("warn"),
         "acp:ready" | "acp:stopped" | "updater:available" | "updater:ready" => Some("info"),
         "acp:connecting" | "acp:reconnecting" | "updater:checking" | "updater:current"
-        | "updater:installing" => Some("debug"),
+        | "updater:installing" | "media:ogg-fallback" => Some("debug"),
         _ => None,
     }
 }
@@ -298,6 +300,8 @@ pub(crate) fn log_desktop_event(
     }
     let module = if event.starts_with("acp:") {
         "frontend.acp"
+    } else if event.starts_with("media:") {
+        "frontend.media"
     } else {
         "frontend.updater"
     };
@@ -464,10 +468,14 @@ mod tests {
         assert_eq!(frontend_event_level("acp:connecting"), Some("debug"));
         assert_eq!(frontend_event_level("acp:ready"), Some("info"));
         assert_eq!(frontend_event_level("acp:unexpected-exit"), Some("warn"));
+        assert_eq!(frontend_event_level("media:ogg-fallback"), Some("debug"));
         assert_eq!(frontend_event_level("updater:install-failed"), Some("warn"));
         assert_eq!(frontend_event_level("frontend:error"), None);
         assert_eq!(frontend_event_level("acp:ready token=private"), None);
         assert!(log_desktop_event("unknown".into(), None, None).is_err());
+        assert!(log_desktop_diagnostic(
+            "media:playback-unavailable".into(), "Audio unavailable".into(), None, None,
+        ).is_ok());
         assert!(log_desktop_event("acp:ready".into(), None, Some("x".repeat(257))).is_err());
     }
     #[test]

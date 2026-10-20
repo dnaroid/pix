@@ -1,8 +1,9 @@
 import { join } from "node:path";
 import { lstat } from "node:fs/promises";
 import { openTaskDatabase } from "../registry/task-database.js";
-import { hashText } from "./documents.js";
+import { chunkText, hashText } from "./documents.js";
 import type { TaskSemanticDocument } from "./task-index.js";
+import { readPlanFiles } from "./task-snapshot.js";
 
 const MAX_TASKS = 10_000;
 const MAX_SNAPSHOT_BYTES = 32 * 1024 * 1024;
@@ -30,10 +31,11 @@ function validateReferences(references: ReadonlyMap<string, References>): void {
   }
 }
 
-/** An intentionally narrow semantic projection: ONLY title+description are
+/** An intentionally narrow task projection: ONLY title+description are
  * eligible for provider upload. Paths, status, other-task text, links, models,
- * session IDs and attachment metadata/bytes are not part of embedding input. */
-export async function readTaskSemanticCorpus(cwd: string, signal: AbortSignal): Promise<TaskSemanticDocument[]> {
+ * session IDs and attachment metadata/bytes are not part of embedding input.
+ * Saved plans (readPlanDocuments) are separate documents of the same source. */
+async function readTaskRows(cwd: string, signal: AbortSignal): Promise<TaskSemanticDocument[]> {
   signal.throwIfAborted();
   const filename = join(cwd, ".pi", "tasks.sqlite");
   try {
@@ -95,4 +97,35 @@ export async function readTaskSemanticCorpus(cwd: string, signal: AbortSignal): 
       return docs;
     } catch (error) { db.exec("ROLLBACK"); throw error; }
   } finally { db.close(); }
+}
+
+/** Bounds provider work for one oversized plan (~115 KB of Markdown). */
+const MAX_PLAN_CHUNKS = 64;
+
+/** Saved plans share the task source: path, heading and Markdown body are
+ * eligible for provider upload. Each plan is split into overlapping chunks
+ * (chunkText); every chunk is a separate vector document `plan:<path>#<n>`
+ * carrying the plan path/title as context. Queries collapse chunks per plan. */
+async function readPlanDocuments(cwd: string, signal: AbortSignal): Promise<TaskSemanticDocument[]> {
+  const plans = await readPlanFiles(cwd, signal);
+  return plans.flatMap(plan => {
+    const body = plan.content.trim();
+    const name = plan.path.slice(plan.path.lastIndexOf("/") + 1).replace(/\.md$/i, "");
+    const heading = /^#{1,6}\s+(.+)$/m.exec(body)?.[1]?.trim();
+    const title = (heading || name).slice(0, 200);
+    const chunks = (body ? chunkText(body) : [""]).slice(0, MAX_PLAN_CHUNKS);
+    return chunks.map((chunk, index) => {
+      const text = `Plan path: ${plan.path}\nPlan title: ${title}\nPlan content: ${chunk}`;
+      const excerpt = chunk.replace(/^#{1,6}\s+.+$/gm, "").replace(/\s+/g, " ").trim().slice(0, 300);
+      return { id: `plan:${plan.path}#${index}`, planPath: plan.path, title,
+        snippet: `Plan · ${plan.path}${excerpt ? `\n${excerpt}` : ""}`, text, hash: hashText(text) };
+    });
+  });
+}
+
+/** Task source corpus: canonical tasks followed by saved plans. */
+export async function readTaskSemanticCorpus(cwd: string, signal: AbortSignal): Promise<TaskSemanticDocument[]> {
+  const tasks = await readTaskRows(cwd, signal);
+  const plans = await readPlanDocuments(cwd, signal);
+  return [...tasks, ...plans];
 }

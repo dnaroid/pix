@@ -13,6 +13,7 @@ import type {
 import * as piAi from "@earendil-works/pi-ai";
 import { bridgeArgv, formatBridgeArgv, providerArgs, thinkingDisplay, transcriptBreakpointEnabled } from "./claude-args.ts";
 import { claimClaudeLaunch, settleFailure, spawnClaudeProcess, type ClaudeProcess } from "./claude-process.ts";
+import { loadClaudeTranscriptConfig, type ClaudeTranscriptConfig } from "./account-rotation.ts";
 import { prepareRequest } from "./context-serializer.ts";
 import { appendCleanupFailure, ClaudeCodeError, errorCode, errorText } from "./errors.ts";
 import { JsonlParser } from "./jsonl.ts";
@@ -76,6 +77,8 @@ export interface ClaudeStreamDependencies {
   claudeConfigDir?: string;
   /** Raw structured notice used for bounded account failover, independent of UI. */
   onAccountRateLimitNotice?: RateLimitNoticeSink;
+  /** Experimental transcript settings; read per request so a settings toggle applies to the next turn. */
+  loadTranscriptConfig?: () => ClaudeTranscriptConfig;
 }
 
 export function createClaudeStream(installation: ClaudeInstallation, dependencies: ClaudeStreamDependencies = {}) {
@@ -314,7 +317,11 @@ function createClaudeAttempt(
         const systemPromptTokens = estimateTransportTokens(0, 0, systemPromptBytes, 0);
         metrics.estimatedInputTokens = systemPromptTokens;
         validateSystemPromptBudget(model, systemPromptTokens);
-        prepared = await prepareRequest(effectiveContext, imageLease);
+        const transcriptConfig = (dependencies.loadTranscriptConfig ?? loadClaudeTranscriptConfig)();
+        prepared = await prepareRequest(effectiveContext, imageLease, {
+          pruneHistoricalThinking: transcriptConfig.pruneHistoricalThinking,
+        });
+        metrics.prunedThinkingBlocks = prepared.prunedThinkingBlocks;
         metrics.cleanupComplete = false;
         metrics.lastPhase = "prepared";
         metrics.imageCount = prepared.imageCount;

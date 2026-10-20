@@ -10,6 +10,8 @@ export interface TaskSemanticDocument {
   text: string;
   hash: string;
   snippet: string;
+  /** Set for saved plan documents indexed with the task source. */
+  planPath?: string;
 }
 
 export interface TaskIndexTransaction {

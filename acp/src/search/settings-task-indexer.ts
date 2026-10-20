@@ -11,7 +11,7 @@ import { bounded } from "./bounded.js";
 import { join } from "node:path";
 import { semanticEmbeddingIdentity } from "./config.js";
 import { COVERAGE_KEEP, coverageDigest, settingsCatalogueDigest } from "./source-coverage.js";
-import { taskSnapshot } from "./task-snapshot.js";
+import { taskSourceRevision } from "./task-snapshot.js";
 
 type Source = "settings" | "tasks";
 interface Work {
@@ -247,11 +247,10 @@ export class SettingsTaskIndexer {
   }
   /** Final pass only: bind the logical store snapshot to the corpus this index covers. */
   private async recordTaskCoverage(tx: IndexTransaction, signal: AbortSignal): Promise<void> {
-    const filename = join(this.options.cwd, ".pi", "tasks.sqlite");
     try {
-      const before = await taskSnapshot(filename, signal);
+      const before = await taskSourceRevision(this.options.cwd, signal);
       const latest = await readTaskSemanticCorpus(this.options.cwd, signal);
-      if (fingerprintTasks(latest) !== this.tasksHash || await taskSnapshot(filename, signal) !== before) return;
+      if (fingerprintTasks(latest) !== this.tasksHash || await taskSourceRevision(this.options.cwd, signal) !== before) return;
       tx.coverage(coverageDigest("tasks", before, semanticEmbeddingIdentity(this.options.config)), COVERAGE_KEEP.tasks);
     } catch {
       // Coverage is best-effort evidence; the probe then reports a change, never a false match.

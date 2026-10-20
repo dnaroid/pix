@@ -3,7 +3,7 @@ import { render } from "svelte/server";
 import PlanProgressIndicator from "./PlanProgressIndicator.svelte";
 
 describe("plan checklist indicator", () => {
-  it("renders a document icon and static linear bar with accessible completion counts", () => {
+  it("renders a Steps-style ring in the plan colour with accessible counts and no icon", () => {
     const html = render(PlanProgressIndicator, { props: { progress: { completed: 13, total: 17 } } }).body;
     expect(html).toContain("13/17");
     expect(html).toContain('role="progressbar"');
@@ -11,13 +11,11 @@ describe("plan checklist indicator", () => {
     expect(html).toContain('aria-valuenow="13"');
     expect(html).toContain('aria-valuetext="13 of 17 checklist items completed"');
     expect(html).toContain("data-plan-checklist-progress");
-    expect(html).toContain("lucide-file-check");
-    expect(html).toContain(`width: ${(13 / 17) * 100}%`);
-    expect(html).not.toContain("animate-spin");
-    // Must stay visually distinct from the session Steps ring.
-    expect(html).not.toContain("<circle");
-    expect(html).not.toContain("stroke-dashoffset");
+    expect(html).toContain("<circle");
+    expect(html).toContain("text-tool-skill");
     expect(html).not.toContain("text-tool-info");
+    expect(html).not.toContain("lucide-file-check");
+    expect(html).not.toContain("animate-spin");
   });
 
   it("distinguishes zero, complete, empty and unavailable progress", () => {
@@ -30,7 +28,7 @@ describe("plan checklist indicator", () => {
     for (const completed of [0, 3]) {
       const html = render(PlanProgressIndicator, { props: { progress: { completed, total: 3 } } }).body;
       expect(html).toContain(`${completed}/3`);
-      expect(html).toContain(`width: ${completed === 3 ? 100 : 0}%`);
+      expect(html).toContain(`stroke-dashoffset="${completed === 3 ? 0 : 100}"`);
     }
   });
 });

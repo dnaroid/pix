@@ -79,7 +79,7 @@ describe("RegistryProjectStatus quiet-by-default sync row", () => {
     expect(projectStatusSource).toContain("storageSummary()");
     expect(projectStatusSource).toContain("projectPiCleanupAvailable");
     expect(projectStatusSource).toContain('actionId === "cleanup-project"');
-    expect(projectStatusSource).toContain("await confirmDesktopAction");
+    expect(projectStatusSource).toContain("await confirmDesktopDeletion");
     expect(projectStatusSource).toContain("clears all contents of artifacts/ and subagents/");
     expect(projectStatusSource).toContain("removes non-canonical top-level files and directories");
     expect(projectStatusSource).toContain("Canonical project state, config, agents/, plans/, skills/ and task-attachments/ are preserved");

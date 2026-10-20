@@ -121,7 +121,7 @@ describe("Heads up session mirror", () => {
     attachments = [{} as Attachment]; expect(insert()).toBe(false); expect(attachments).toHaveLength(1);
     attachments = []; text = " "; expect(insert()).toBe(false); expect(text).toBe(" ");
     text = ""; owned = false; expect(insert()).toBe(false); owned = true; expect(insert()).toBe(true);
-    expect(text).toContain("Please check this observer note"); expect(h.prompt).not.toHaveBeenCalled();
+    expect(text).toBe(`${note.title}\n${note.consequence}`); expect(text).not.toContain("Evidence:"); expect(h.prompt).not.toHaveBeenCalled();
     text = ""; vi.advanceTimersByTime(30000); expect(insert()).toBe(false); h.store.reset();
   });
   it("rejects stale feedback before making a command", async () => {

@@ -602,15 +602,19 @@ export class DesktopSearchService {
     if (!await this.consent(owned)) return { results: [], pendingIndex: false };
     owned.throwIfAborted();
     if (!this.current(w, epoch)) return { results: [], pendingIndex: false };
-    const results: SemanticTaskHit[] = [];
+    // Plan chunks collapse to one hit per plan: best-scoring chunk wins.
+    const best = new Map<string, SemanticTaskHit>();
     for (const task of currentDocuments) {
       const vector = saved.get(task.hash);
       if (!vector) continue;
       const similarity = cosine(queryVector, vector);
       if (similarity < 0.25) continue;
-      results.push({ kind: "tasks", id: `tasks:${task.id}`, taskId: task.id, title: task.title,
-        snippet: task.snippet, score: similarity, semantic: true });
+      const taskId = task.planPath ? `plan:${task.planPath}` : task.id;
+      if ((best.get(taskId)?.score ?? -Infinity) >= similarity) continue;
+      best.set(taskId, { kind: "tasks", id: `tasks:${taskId}`, taskId, ...(task.planPath ? { planPath: task.planPath } : {}),
+        title: task.title, snippet: task.snippet, score: similarity, semantic: true });
     }
+    const results = [...best.values()];
     results.sort((a, b) => b.score - a.score || a.taskId.localeCompare(b.taskId));
     await requireSourceEnabled(w.cwd, "tasks", owned, w.policyRevision);
     return { results: results.slice(0, request.limit), pendingIndex: currentDocuments.some(task => !saved.has(task.hash)) };

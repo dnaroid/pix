@@ -106,6 +106,30 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
   and video pause when hidden, never auto-resume on return, and release their
   source on navigation/close, including late playback completions.
   Audio remains a plain `file` attachment for model/provider prompt handling.
+- Audio recognition is case-insensitive and shared by Markdown and Preview:
+  `.aac`, `.aif`, `.aiff`, `.flac`, `.m4a`, `.m4b`, `.mp3`, `.mpga`, `.oga`,
+  `.ogg`, `.opus`, `.wav`, `.wave`, and `.weba`. M4B uses MP4 audio, MPGA uses
+  MPEG audio, WAVE uses WAV audio, and WEBA uses WebM audio. Recognition routes
+  files to the player; most codec playback depends on the macOS WebView and
+  system version. Ogg Vorbis and Ogg Opus (`.ogg`, `.oga`, `.opus`) additionally
+  have an offline compatibility decoder: if native playback reports an
+  unsupported source (or a decode error before metadata), a bundled WASM decoder
+  converts it to 16-bit PCM WAV in a
+  dedicated worker. Markdown and Preview share this path and retain native audio
+  controls. The decoder initializes playback on metadata or can-play readiness;
+  a user's play intent survives one native-to-decoded fallback. Files autoplay
+  is consumed when the player mounts and does not restart on same-key source
+  updates. No external FFmpeg installation or network download is required.
+  Compatibility jobs are serialized and limited to 32 MiB compressed input,
+  64 MiB decoded float PCM (about 175 seconds at 48 kHz stereo) and 30 seconds
+  per active worker. Inline hydration is already viewport-lazy, including audio.
+  Closing/removing or changing the source cancels queued/active work and releases
+  decoded object URLs. Worker message errors are handled as decoder failures.
+  A pending Files autoplay survives decoding, but hiding the tab cancels that
+  intent so returning never starts playback. Final decoding/size/timeout failures
+  retain the existing readable unavailable state and emit a warning diagnostic
+  (`media:playback-unavailable`); the recoverable fallback attempt is debug-level
+  (`media:ogg-fallback`). Diagnostic messages omit stack traces and media paths.
 - Unchanged inline audio players retain their actual DOM and playback position
   through streaming updates, including pending resolution and error state, using
   the same original-markup/occurrence identity policy as local images. Duplicate

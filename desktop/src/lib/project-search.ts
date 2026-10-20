@@ -5,6 +5,8 @@ export interface TaskSearchHit {
   kind: "tasks";
   id: string;
   taskId: string;
+  /** Saved plan (.pi/plans/**) indexed with the task source; opens the plan preview. */
+  planPath?: string;
   title: string;
   snippet: string;
   score: number;
@@ -50,6 +52,17 @@ export function searchProjectTasks(document: ProjectTaskDocument, query: string,
     const score = matchScore(query, title, `${task.id} ${task.description ?? ""} ${task.type} ${task.status} ${task.priority} ${references}`);
     return score ? [{ kind: "tasks" as const, id: `tasks:${task.id}`, taskId: task.id, title, score,
       snippet: `${task.status} · ${task.type} · ${task.priority}${task.description ? `\n${task.description.slice(0, 500)}` : ""}${references ? `\n${references.slice(0, 350)}` : ""}` }] : [];
+  }).sort((a, b) => b.score - a.score).slice(0, 20);
+}
+
+/** Saved plans share the Tasks source. Local matching uses names/paths; plan
+ * content is matched by the semantic task index. IDs match semantic plan hits. */
+export function searchProjectPlans(paths: readonly string[], query: string): TaskSearchHit[] {
+  return paths.flatMap(path => {
+    const name = path.slice(path.lastIndexOf("/") + 1).replace(/\.md$/i, "");
+    const score = matchScore(query, name, path.replace(/[/._-]+/g, " "));
+    return score ? [{ kind: "tasks" as const, id: `tasks:plan:${path}`, taskId: `plan:${path}`, planPath: path,
+      title: name, snippet: `Plan · ${path}`, score }] : [];
   }).sort((a, b) => b.score - a.score).slice(0, 20);
 }
 

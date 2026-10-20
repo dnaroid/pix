@@ -359,3 +359,27 @@ describe("panel-owned provider quota polling", () => {
     store.dispose();
   });
 });
+
+describe("provider quota remount cache", () => {
+  it("renders the last rows immediately in a remounted store before polling completes", async () => {
+    const { store, draftConfig, setWorkspace, setClient } = setup();
+    const client = { draftConfig };
+    setClient(client);
+    setWorkspace("/cache");
+    await store.refresh();
+    const rows = store.entries;
+    expect(rows.length).toBeGreaterThan(0);
+    store.dispose();
+    const late = deferred<Response>();
+    draftConfig.mockImplementation(() => late.promise);
+    const remounted = createProviderUsageStore({ client: () => client, workspace: () => "/cache", reportError: vi.fn() });
+    expect(remounted.entries).toEqual(rows);
+    void remounted.resume();
+    await flush();
+    expect(remounted.entries).toEqual(rows);
+    const otherConnection = createProviderUsageStore({ client: () => ({ draftConfig }), workspace: () => "/cache", reportError: vi.fn() });
+    expect(otherConnection.entries).toHaveLength(0);
+    remounted.dispose();
+    otherConnection.dispose();
+  });
+});

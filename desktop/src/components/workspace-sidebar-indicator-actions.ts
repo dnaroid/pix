@@ -10,6 +10,7 @@ interface Options {
   workspace: () => string;
   reasons: () => SidebarIndicatorReasonMap;
   enabled: () => Partial<Record<SidebarIndicatorActionId, boolean>>;
+  gitRemotes?: () => readonly string[];
   beforeOpen: () => void;
   reveal: (tab: SidebarIndicatorTab) => void;
   handlers: Partial<Record<SidebarIndicatorActionId, () => void>>;
@@ -20,7 +21,7 @@ export function createWorkspaceSidebarIndicatorActions(options: Options) {
   let popupWorkspace = "";
   let popupCommands = "";
   function groupsFor(tab: SidebarIndicatorTab): readonly SidebarIndicatorActionGroup[] {
-    return sidebarIndicatorActionGroups(options.reasons()[tab], options.enabled());
+    return sidebarIndicatorActionGroups(options.reasons()[tab], options.enabled(), options.gitRemotes?.());
   }
   const menu = createSidebarIndicatorMenuController({ items: (tab) => groupsFor(tab).flatMap((group) => group.actions) });
 

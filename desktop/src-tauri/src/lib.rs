@@ -7060,11 +7060,15 @@ fn is_supported_project_media(path: &Path) -> bool {
             | "aiff"
             | "flac"
             | "m4a"
+            | "m4b"
             | "mp3"
+            | "mpga"
             | "oga"
             | "ogg"
             | "opus"
             | "wav"
+            | "wave"
+            | "weba"
     )
 }
 
@@ -11348,7 +11352,8 @@ mod tests {
     fn resolves_audio_with_the_same_media_boundaries() {
         let workspace = temporary_workspace("audio-media");
         for extension in [
-            "aac", "aif", "aiff", "flac", "m4a", "mp3", "oga", "ogg", "opus", "wav",
+            "aac", "aif", "aiff", "flac", "m4a", "m4b", "mp3", "mpga", "oga", "ogg",
+            "opus", "wav", "wave", "weba",
         ] {
             let name = format!("track.{}", extension.to_uppercase());
             let file = workspace.join(&name);

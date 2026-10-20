@@ -101,11 +101,6 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
     return submitGeneratedPrompt(sessionId, text, "a quick choice");
   }
 
-  /** A HUD step action reruns one session step in the same idle session. */
-  async function submitStepRerun(sessionId: string, text: string): Promise<"sent" | "queued"> {
-    return submitGeneratedPrompt(sessionId, text, "a step rerun");
-  }
-
   async function submitGeneratedPrompt(
     sessionId: string,
     text: string,
@@ -442,5 +437,5 @@ export function createPromptSubmit(options: PromptSubmitOptions) {
     if (reloadAfterSlash && sessionId === options.activeSessionId()) await options.reloadResources({ echo: false });
   }
 
-  return { submit, submitHtmlSandbox, submitChoiceActions, submitStepRerun, get editActive() { return options.messageEditActive?.() ?? false; }, cancelEdit: () => options.cancelMessageEdit?.() };
+  return { submit, submitHtmlSandbox, submitChoiceActions, get editActive() { return options.messageEditActive?.() ?? false; }, cancelEdit: () => options.cancelMessageEdit?.() };
 }

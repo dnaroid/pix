@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
-import { lstat, realpath } from "node:fs/promises";
+import { lstat, open, readdir, realpath } from "node:fs/promises";
+import { constants } from "node:fs";
+import path from "node:path";
 
 const MAX_BYTES = 64 * 1024 * 1024;
 const TASK_SCHEMA = "CREATE TABLE tasks (id TEXT PRIMARY KEY, payload TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1, position INTEGER NOT NULL DEFAULT 0)";
@@ -49,4 +51,57 @@ export async function taskSnapshot(filename, signal) {
   } finally {
     try { db.exec("ROLLBACK"); } finally { db.close(); }
   }
+}
+
+const MAX_PLANS = 500;
+const MAX_PLAN_BYTES = 2 * 1024 * 1024;
+const MAX_PLAN_TOTAL = 32 * 1024 * 1024;
+
+/** Canonical saved plans (.pi/plans/**\/*.md) indexed with the task source.
+ * Bounded and deterministic: symlinks, non-files and oversized files are
+ * skipped, never followed; entries are sorted so every reader agrees. */
+export async function readPlanFiles(root, signal) {
+  const base = path.join(root, ".pi", "plans");
+  for (const dir of [path.join(root, ".pi"), base]) {
+    try {
+      const info = await lstat(dir);
+      if (!info.isDirectory() || info.isSymbolicLink()) return [];
+    } catch (error) { if (error.code === "ENOENT") return []; throw error; }
+  }
+  const plans = [];
+  let total = 0;
+  const walk = async directory => {
+    const entries = (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+    for (const entry of entries) {
+      signal.throwIfAborted();
+      if (plans.length >= MAX_PLANS) return;
+      const full = path.join(directory, entry.name);
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) { await walk(full); continue; }
+      if (!entry.isFile() || !/\.md$/i.test(entry.name)) continue;
+      let handle;
+      try { handle = await open(full, constants.O_RDONLY | constants.O_NOFOLLOW); }
+      catch (error) { if (error.code === "ENOENT" || error.code === "ELOOP") continue; throw error; }
+      try {
+        const info = await handle.stat();
+        if (!info.isFile() || info.size > MAX_PLAN_BYTES || total + info.size > MAX_PLAN_TOTAL) continue;
+        total += info.size;
+        const content = await handle.readFile("utf8");
+        plans.push({ path: path.relative(root, full).split(path.sep).join("/"), content });
+      } finally { await handle.close(); }
+    }
+  };
+  await walk(base);
+  return plans;
+}
+
+/** Logical revision of the task search source: canonical tasks plus saved
+ * plans. Without plans it equals taskSnapshot() so prior coverage survives. */
+export async function taskSourceRevision(root, signal) {
+  const tasks = await taskSnapshot(path.join(root, ".pi", "tasks.sqlite"), signal);
+  const plans = await readPlanFiles(root, signal);
+  if (!plans.length) return tasks;
+  const digest = createHash("sha256").update("tasks-plans-logical-v1\n").update(tasks + "\n");
+  for (const plan of plans) digest.update(JSON.stringify([plan.path, createHash("sha256").update(plan.content).digest("hex")]) + "\n");
+  return digest.digest("hex");
 }

@@ -20,15 +20,23 @@ export type UsageStatsStoreOptions = {
  * and a per-source sequence, so completions after a workspace switch, ACP
  * reset, close or a newer request for the same source are discarded.
  */
+type SnapshotMap = ReadonlyMap<UsageSourceId, UsageSourceSnapshot>;
+/** Last snapshots per connection and project, so a remounted panel renders cached data before its refetch completes. */
+const snapshotCache = new WeakMap<UsageStatsClient, Map<string, SnapshotMap>>();
+
+function cachedSnapshots(client: UsageStatsClient | null, cwd: string): SnapshotMap {
+  return (client && cwd ? snapshotCache.get(client)?.get(cwd) : undefined) ?? new Map();
+}
+
 export function createUsageStatsStore(options: UsageStatsStoreOptions) {
-  let snapshots = $state<ReadonlyMap<UsageSourceId, UsageSourceSnapshot>>(new Map());
+  let scopeClient: UsageStatsClient | null = options.client();
+  let scopeCwd = options.workspace();
+  let snapshots = $state<SnapshotMap>(cachedSnapshots(scopeClient, scopeCwd));
   let busy = $state(false);
   let active = false;
   let disposed = false;
   let epoch = 0;
   let inflight = 0;
-  let scopeClient: UsageStatsClient | null = null;
-  let scopeCwd = "";
   const sequence = new Map<UsageSourceId, number>();
   let pendingChanged = new Set<UsageSourceId>();
   let changeScheduled = false;
@@ -39,7 +47,7 @@ export function createUsageStatsStore(options: UsageStatsStoreOptions) {
     busy = false;
     sequence.clear();
     pendingChanged = new Set();
-    if (client !== scopeClient || cwd !== scopeCwd) snapshots = new Map();
+    if (client !== scopeClient || cwd !== scopeCwd) snapshots = cachedSnapshots(client, cwd);
     scopeClient = client;
     scopeCwd = cwd;
   }
@@ -78,7 +86,12 @@ export function createUsageStatsStore(options: UsageStatsStoreOptions) {
         next ??= new Map(snapshots);
         next.set(snapshot.source, snapshot);
       }
-      if (next) snapshots = next;
+      if (next) {
+        snapshots = next;
+        let byCwd = snapshotCache.get(scope.client);
+        if (!byCwd) snapshotCache.set(scope.client, byCwd = new Map());
+        byCwd.set(scope.cwd, next);
+      }
     } catch (error) {
       if (owner === epoch && !disposed) options.reportError(error);
     } finally {

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { dialogCancelButtonClass, dialogDestructiveButtonClass } from "../lib/dialog";
+  import DeleteConfirmationDialog from "./DeleteConfirmationDialog.svelte";
   import { onMount, tick } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import Pause from "@lucide/svelte/icons/pause";
@@ -8,7 +8,6 @@
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import TaskFieldSelect from "./TaskFieldSelect.svelte";
-  import { activateModalDialog } from "../lib/modal-dialog";
   import { formatDiagnosticLogTime } from "../lib/diagnostic-log-time";
   import { createHistoryScrollTracker } from "../lib/index-history-scroll";
   import { createDiagnosticLogMonitor, filterDiagnosticLogs, type DiagnosticLogSnapshot, type DiagnosticLogState } from "../lib/diagnostic-log-monitor";
@@ -25,8 +24,6 @@
   let clearing = $state(false);
   let clearError = $state<string | null>(null);
   let mounted = false;
-  let clearDialog = $state<HTMLDialogElement>();
-  let cancelClearButton = $state<HTMLButtonElement>();
   let recordsPane = $state<HTMLDivElement>();
   let scrollTracker = $state<ReturnType<typeof createHistoryScrollTracker>>();
   const levelOptions = [
@@ -78,9 +75,6 @@
       if (mounted) { clearing = false; sync(); }
     }
   }
-  $effect(() => {
-    if (clearDialog) return activateModalDialog(clearDialog, () => cancelClearButton);
-  });
   onMount(() => {
     mounted = true;
     const tracker = recordsPane ? createHistoryScrollTracker(recordsPane) : undefined;
@@ -138,12 +132,11 @@
 </section>
 
 {#if confirmingClear}
-  <dialog bind:this={clearDialog} class="fixed inset-0 z-50 m-auto max-w-[calc(100vw-32px)] rounded-lg border border-border bg-popover p-4 text-popover-foreground shadow-md backdrop:bg-overlay" aria-label="Clear all diagnostic logs" oncancel={(event) => { event.preventDefault(); confirmingClear = false; }}>
-    <h2 class="text-sm font-semibold">Clear all logs?</h2>
-    <p class="mt-2 max-w-80 text-xs text-muted-foreground">Delete diagnostic logs for all projects and sources, not just the filtered records. This cannot be undone. Logging stays enabled, so new records may appear.</p>
-    <div class="mt-4 flex justify-end gap-2">
-      <button bind:this={cancelClearButton} type="button" class={dialogCancelButtonClass} onclick={() => confirmingClear = false}>Cancel</button>
-      <button type="button" class={dialogDestructiveButtonClass} onclick={() => void clearLogs()}>Clear all logs</button>
-    </div>
-  </dialog>
+  <DeleteConfirmationDialog
+    title="Clear all logs?"
+    message="Delete diagnostic logs for all projects and sources, not just the filtered records. This cannot be undone. Logging stays enabled, so new records may appear."
+    okLabel="Clear all logs"
+    onconfirm={() => void clearLogs()}
+    oncancel={() => confirmingClear = false}
+  />
 {/if}

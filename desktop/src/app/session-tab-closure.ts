@@ -1,6 +1,6 @@
 import { DRAFT_SESSION_TAB_ID } from "./draft-session.svelte";
 import { confirmRunningTabClose } from "../lib/close-confirmation";
-import { confirmDesktopAction } from "../lib/confirm-action";
+import { confirmDesktopDeletion } from "../lib/confirm-deletion";
 import type { SessionLoader, SessionTabControllerOptions } from "./session-tab-controller-options";
 
 export type SessionActionTracker = {
@@ -177,7 +177,7 @@ export function createSessionTabClosure(
     if (!sessionActions.begin(sessionId)) return;
     let confirmed: boolean;
     try {
-      confirmed = await confirmDesktopAction(`Permanently delete “${title}”?\n\nThis removes the Pi session file and its DCP sidecar state.`, {
+      confirmed = await confirmDesktopDeletion(`Permanently delete “${title}”?\n\nThis removes the Pi session file and its DCP sidecar state.`, {
         title: "Delete conversation?", okLabel: "Delete",
       });
     } finally {

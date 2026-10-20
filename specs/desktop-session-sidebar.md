@@ -56,7 +56,7 @@ Show live execution Plan and Subagents activity (brainstorm council participants
 - With no active session, including while the selected conversation is a UI-only draft, no session activity HUD is rendered. With a real but activity-empty session, no inert Session status control is rendered.
 - When at least one pending, in-progress, or deferred todo exists, all non-deleted todos are shown in stable hierarchy order, including completed items.
 - The **Session steps** popup offers a compact, accessible **Clear session steps** action when its active session is ready and idle and has visible todos. It invokes private ACP `pix/session/clear_todos`, which dispatches the existing `/todos-clear` extension handler directly without running a user prompt, adding `/todos-clear` to chat, or creating a user transcript entry. It preserves the composer draft, reports request failures, disables while unavailable or in flight (including after popup remounts or switching away and back), and never mutates the displayed snapshot locally. The ACP session lock is claimed before asynchronous work so duplicate clears cannot race; the existing extension handler remains authoritative for state publishing and persistence. Success depends on that handler, not an unrelated session-list metadata write.
-- Each Steps row offers two quiet icon actions. **Go to where step #N started** scrolls the transcript to the newest successful `todo` call that set the step `in_progress` (falling back to the call that created it), expanding its collapsed activity group and briefly highlighting the revealed entry (~1.6 s primary tint via `data-transcript-highlight`; a newer reveal moves the mark, teardown clears it, and reduced motion disables the fade). The scan runs newest-first and stops at a plan boundary (`clear`, or `create`/`batch_create`/`import` with `replace: true`) so superseded plans with colliding ids are not matched; while no boundary is loaded it pages older history in (bounded, superseded by a newer jump or session switch) and reports an error if the start is not found. ACP lazy history keeps `rawInput` for `todo` calls (as for `question`) so this works without hydrating deferred results. **Rerun step #N in this session** sends a same-session generated prompt asking the agent to redo only that step and track it via the todo tool; it uses the same ready/idle gate as Clear session steps and is disabled while a prompt runs. Both are absent for read-only sub-agent viewers and drafts.
+- Each Steps row offers one quiet icon action. **Go to where step #N started** scrolls the transcript to the newest successful `todo` call that set the step `in_progress` (falling back to the call that created it), expanding its collapsed activity group and briefly highlighting the revealed entry (~1.6 s primary tint via `data-transcript-highlight`; a newer reveal moves the mark, teardown clears it, and reduced motion disables the fade). The scan runs newest-first and stops at a plan boundary (`clear`, or `create`/`batch_create`/`import` with `replace: true`) so superseded plans with colliding ids are not matched; while no boundary is loaded it pages older history in (bounded, superseded by a newer jump or session switch) and reports an error if the start is not found. ACP lazy history keeps `rawInput` for `todo` calls (as for `question`) so this works without hydrating deferred results. Jump navigation remains available while a prompt runs. The action is absent for read-only sub-agent viewers and drafts.
 - Subagents matches the TUI live-panel rule: only planned, running, or retrying agents are visible as live indicators; terminal agents leave the live list with the next snapshot, and the section does not invent historical state.
 
 ### Sub-agent session viewers
@@ -94,8 +94,9 @@ follows decision 0048.
 - A session launched from a saved plan shows an **Executing plan** status-bar
   chip immediately left of the session activity/Steps HUD, only for live,
   non-draft, non-viewer sessions whose plan still exists in the current project
-  documents snapshot. The chip shows `FileCheck2`, saved checklist progress as a
-  linear bar and `N/M`; its click popup identifies the plan, explains that this
+  documents snapshot. The chip shows saved checklist progress as the same ring
+  as the Steps HUD (no icon) in the plan colour (`text-tool-skill`) and `N/M`,
+  or `—` without checklist items; its click popup identifies the plan, explains that this
   is saved-file checklist progress distinct from live session Steps, and offers
   **Open plan** to open Preview. While mounted it refreshes project documents
   every three seconds in the foreground. Deleted or renamed plans no longer show
@@ -108,8 +109,9 @@ follows decision 0048.
   `Task: <label>`. Breadcrumbs live in the chip popover because Desktop has no
   session header.
 - In the Steps popup, the **Executing plan** block appears above the **Steps**
-  header. Its plan-label button opens the plan Preview, and its linear progress
-  is saved-file checklist progress distinct from live session Steps. The Run
+  header. Its plan-label button opens the plan Preview, and its progress ring
+  (same ring as Steps, no icon, plan colour `text-tool-skill`) is saved-file
+  checklist progress distinct from live session Steps. The Run
   prompt and `external/pi-tools-suite/docs/plan-writing.md` require saving each
   verified checklist item as `[x]` immediately; finer sub-steps stay in session
   Steps.

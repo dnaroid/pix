@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { parse } from "jsonc-parser";
 import { usageCollapsedSections, usageProviderOrder } from "../lib/usage-panel-sections";
-import { createUsagePanelSections } from "./usage-panel-sections.svelte";
+import { clearUsagePanelSectionsCache, createUsagePanelSections } from "./usage-panel-sections.svelte";
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: native.invoke }));
@@ -29,7 +29,7 @@ function setup(initial: Record<string, string> = {}) {
   return { files, errors, store: createUsagePanelSections(errors) };
 }
 
-beforeEach(() => { native.invoke.mockReset(); });
+beforeEach(() => { native.invoke.mockReset(); clearUsagePanelSectionsCache(); });
 
 describe("usage panel disclosure persistence", () => {
   it("restores provider order before ready and does not rewrite unchanged order", async () => {
@@ -72,7 +72,10 @@ describe("usage panel disclosure persistence", () => {
     const callsBeforeReopen = native.invoke.mock.calls.length;
     const restoring = reopened.load("/a");
     expect(native.invoke.mock.calls).toHaveLength(callsBeforeReopen);
-    expect(reopened.ready).toBe(false);
+    // The remounted panel renders the last known state at once while disk restoration waits for writes.
+    expect(reopened.ready).toBe(true);
+    expect(reopened.providerOrder).toEqual(["zhipu", "openai"]);
+    expect(reopened.isOpen("daily")).toBe(false);
     release.resolve(undefined);
     await Promise.all([...writes, restoring]);
     expect(reopened.providerOrder).toEqual(["zhipu", "openai"]);

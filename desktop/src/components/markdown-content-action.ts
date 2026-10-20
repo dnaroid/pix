@@ -6,7 +6,7 @@ import { MarkdownImageRetention } from "./markdown-image-retention";
 import { mountGlbViewer } from "./glb-viewer-action";
 import { isGlbPath } from "../lib/glb";
 import { previewMediaKindForPath } from "../lib/media";
-import { audioPlayback } from "./audio-playback-action";
+import { audioSource } from "./audio-source-action";
 import "../styles/glb-viewer.css";
 import {
   FileLinkValidationCache,
@@ -258,7 +258,16 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
           audio.controls = true;
           audio.preload = "metadata";
           audio.setAttribute("aria-label", label);
-          audioPlayers.set(preview, audioPlayback(audio).destroy);
+          audioPlayers.set(preview, audioSource(audio, {
+            source: convertFileSrc(attachment.path), path: attachment.path,
+            onUnavailable: () => {
+              if (!isCurrent()) return;
+              audioPlayers.get(preview)?.();
+              audioPlayers.delete(preview);
+              const currentFrame = preview.querySelector<HTMLElement>(".markdown-media-frame");
+              if (currentFrame) showMediaError(currentFrame, preview);
+            },
+          }).destroy);
           media = audio;
         } else {
           const video = document.createElement("video");
@@ -268,10 +277,10 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
           video.setAttribute("aria-label", label);
           media = video;
         }
-        media.src = convertFileSrc(attachment.path);
+        if (kind !== "audio") media.src = convertFileSrc(attachment.path);
         if (kind === "image") media.dataset.imagePath = attachment.path;
         media.className = "markdown-media-content";
-        media.addEventListener(
+        if (kind !== "audio") media.addEventListener(
           "error",
           () => {
             if (!isCurrent()) return;

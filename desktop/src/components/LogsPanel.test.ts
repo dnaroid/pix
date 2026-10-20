@@ -36,7 +36,7 @@ describe("Logs panel controls", () => {
 
   it("requires a Pix confirmation with safe initial focus and explicit global scope", () => {
     expect(source).toContain("{#if confirmingClear}");
-    expect(source).toContain("activateModalDialog(clearDialog, () => cancelClearButton)");
+    expect(source).toContain("<DeleteConfirmationDialog");
     expect(source).toContain("all projects and sources, not just the filtered records");
     expect(source).toContain("Logging stays enabled");
     expect(source).not.toContain("window.confirm");

@@ -1,7 +1,7 @@
 import type { LocalSearchHit, SearchQueryRequest, SearchQueryResponse, SearchSetting, SearchStatus, SemanticTasksResponse } from "../../../acp/src/search/contract";
 import type { GitHistoryEntry } from "./git-workflow";
 import type { ProjectTaskDocument } from "./project-tasks";
-import { searchProjectTasks, searchRecentCommits, type TaskSearchHit, type CommitSearchHit } from "./project-search";
+import { searchProjectPlans, searchProjectTasks, searchRecentCommits, type TaskSearchHit, type CommitSearchHit } from "./project-search";
 import { rankSearchHits } from "./search-relevance";
 import { normalizeSearchConcepts, patchSearchTerm } from "./search-query";
 import { pendingSearchNotice, runSearchSource } from "./search-source-deadline";
@@ -24,6 +24,8 @@ export interface SearchSources {
   local?: (request: SearchQueryRequest, signal: AbortSignal) => Promise<SearchQueryResponse>;
   tasks?: (workspace: string) => Promise<ProjectTaskDocument>;
   taskAttachmentNames?: (workspace: string) => Promise<Readonly<Record<string, readonly string[]>>>;
+  /** Saved plan paths; plans are searched as part of the Tasks source. */
+  plans?: (workspace: string) => Promise<readonly string[]>;
   taskSemantic?: (workspace: string, query: string, signal: AbortSignal) => Promise<SemanticTasksResponse>;
   commits?: (workspace: string, query: string) => Promise<GitHistoryEntry[]>;
   commitHybrid?: (workspace: string, query: string, signal: AbortSignal) => Promise<CommitSearchResponse>;
@@ -168,9 +170,11 @@ export async function queryUniversalSearch(
       try {
         if (!sources.tasks) throw new Error("Task source unavailable");
         const metadata = sources.taskAttachmentNames?.(workspace).catch(() => ({}));
+        const planPaths = sources.plans?.(workspace).catch(() => [] as readonly string[]);
         const tasks = await sources.tasks(workspace);
         const attachmentNames = metadata ? await metadata : {};
-        if (!signal.aborted) groups.set("tasks", searchProjectTasks(tasks, query, attachmentNames));
+        const plans = planPaths ? await planPaths : [];
+        if (!signal.aborted) groups.set("tasks", [...searchProjectTasks(tasks, query, attachmentNames), ...searchProjectPlans(plans, query)]);
       } catch (error) {
         if (!signal.aborted) result.notices.push(`Tasks search failed: ${searchErrorDetail(error)}`);
       }

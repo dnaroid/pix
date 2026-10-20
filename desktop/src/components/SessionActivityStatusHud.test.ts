@@ -208,23 +208,32 @@ describe("status HUD step actions", () => {
     subagentSnapshot: undefined, todoSnapshot, sessionNeedsInput: false,
   };
 
-  it("offers jump and rerun per step only when handlers exist", () => {
+  it("offers only jump per step when its handler exists", () => {
     expect(render(SessionActivityStatusHud, { props: { ...base, promptRunning: false } }).body).not.toContain("data-session-todo-actions");
     const html = render(SessionActivityStatusHud, { props: {
-      ...base, promptRunning: false, canJumpToSteps: true, canRerunSteps: true, onJumpToStep: () => {}, onRerunStep: () => {},
+      ...base, promptRunning: false, canJumpToSteps: true, onJumpToStep: () => {},
     } }).body;
     expect(html.match(/data-session-todo-jump/g)).toHaveLength(2);
-    expect(html.match(/data-session-todo-rerun/g)).toHaveLength(2);
+    expect(html).not.toContain("data-session-todo-rerun");
     expect(html).toContain('aria-label="Go to where step #2 started"');
-    expect(html).toContain('aria-label="Rerun step #2 in this session"');
-    expect(html).not.toMatch(/data-session-todo-(jump|rerun)[^>]*disabled/);
+    expect(html).not.toContain("Rerun step");
+    expect(html).not.toMatch(/data-session-todo-jump[^>]*disabled/);
   });
 
-  it("disables rerun while a prompt runs and jump when navigation is unavailable", () => {
+  it("keeps jump available while a prompt runs", () => {
     const html = render(SessionActivityStatusHud, { props: {
-      ...base, promptRunning: true, canJumpToSteps: false, canRerunSteps: true, onJumpToStep: () => {}, onRerunStep: () => {},
+      ...base, promptRunning: true, canJumpToSteps: true, onJumpToStep: () => {},
     } }).body;
-    expect(html.match(/data-session-todo-rerun[^>]*disabled/g)).toHaveLength(2);
+    expect(html.match(/data-session-todo-jump/g)).toHaveLength(2);
+    expect(html).not.toMatch(/data-session-todo-jump[^>]*disabled/);
+    expect(html).not.toContain("data-session-todo-rerun");
+  });
+
+  it("disables jump when navigation is unavailable", () => {
+    const html = render(SessionActivityStatusHud, { props: {
+      ...base, promptRunning: true, canJumpToSteps: false, onJumpToStep: () => {},
+    } }).body;
+    expect(html).not.toContain("data-session-todo-rerun");
     expect(html.match(/data-session-todo-jump[^>]*disabled/g)).toHaveLength(2);
   });
 });

@@ -5,19 +5,24 @@ import source from "./SessionPlanStatus.svelte?raw";
 import statusBarSource from "./StatusBar.svelte?raw";
 
 describe("status bar Executing plan chip", () => {
-  it("shows the plan file progress distinct from the Steps ring", () => {
+  it("shows the plan file progress as a Steps-style ring in the plan colour, without an icon", () => {
     const html = render(SessionPlanStatus, { props: { plan: { path: ".pi/plans/releases/rollout.md", progress: { completed: 4, total: 9 } } } }).body;
     expect(html).toContain("data-session-plan-status");
     expect(html).toContain('aria-label="Executing plan releases/rollout.md, 4/9 checklist items"');
-    expect(html).toContain("data-plan-checklist-progress");
+    expect(html).toContain("data-session-plan-progress");
     expect(html).toContain("4/9");
-    expect(html).not.toContain("<circle");
+    expect(html).toContain("<circle");
+    expect(html).toContain("text-tool-skill");
+    expect(html).not.toContain("text-tool-info");
+    const trigger = html.slice(html.indexOf("<button"), html.indexOf("</button>"));
+    expect(trigger).toContain("data-session-plan-progress");
+    expect(trigger).not.toContain("lucide-file-check");
   });
 
   it("labels plans without checklist progress and avoids native tooltips", () => {
     const html = render(SessionPlanStatus, { props: { plan: { path: ".pi/plans/x.md", progress: null } } }).body;
     expect(html).toContain('aria-label="Executing plan x.md"');
-    expect(html).toContain("Checklist progress unavailable");
+    expect(html).toContain("—");
     expect(source).not.toMatch(/\stitle=/);
     expect(source).toContain("createProjectFilesRefresh");
   });

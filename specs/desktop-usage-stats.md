@@ -106,6 +106,15 @@ are collapsed. Re-expansion requests the current
 snapshot; data retained for other expanded sections is rendered only on expansion.
 Header refresh does not wake collapsed sections and is disabled when all sleep.
 
+The Usage panel is remounted when switching workbench tabs. To avoid a cold
+render on each remount, the frontend retains disclosure state and provider order
+in a module-level per-project cache, usage-stat snapshots per ACP client and
+project, and provider quota rows per client and project. Cached values render
+immediately; disclosure state is re-read from workspace configuration in the
+background, and opening still refetches usage statistics and resumes quota
+polling. Refresh indicators display over retained data. These in-memory caches
+are remount optimizations, not persistent storage.
+
 Historical disclosure headers remain mounted through loading, empty results and
 refreshes; empty sections explain the lack of data inside their expanded body.
 Cold loads use skeletons and expanded sections show a small update spinner.
@@ -179,9 +188,15 @@ Project filters, metrics and charts derive from the same saved history rather th
 duplicate per-project views. Disclosure state and the saved provider order
 remain project-local preferences in `.pi/workspace.jsonc`.
 
-On first use, ACP restores history before answering the first Usage request,
-marks it `stale`, and starts normal collection without replacing saved charts
-with cold skeletons. `UsageStatsService.restore()` coalesces concurrent restores
+ACP restores history before answering the first Usage request, marks it
+`stale`, and starts normal collection without replacing saved charts with cold
+skeletons. To keep that first request fast, ACP warms the host once per process
+about 3 s after a `pix-desktop` `initialize` (unref'd timer, skipped after
+dispose): `UsageStatsHost.warm()` loads the usage module and restores the disk
+snapshot without collecting; failures are swallowed and retried by the next
+real request. The root usage-stats module never imports the Pi SDK barrel;
+`agentDir` is a required option that the ACP host supplies
+(`options.agentDir ?? getAgentDir()`). `UsageStatsService.restore()` coalesces concurrent restores
 and cannot overwrite a newer live snapshot or resurrect a disposed service.
 The collector persists complete `ready` results only: partial scans, errors
 and failed refreshes cannot replace the last complete history. JSON parsing

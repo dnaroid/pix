@@ -12,8 +12,7 @@ import { materializeComposerTaskAttachments } from "./attachment-io";
 import { parseDesktopModelRef } from "./desktop-helpers";
 import { createProjectPlanActions } from "./project-plan-actions.svelte";
 import { buildProjectPlanPrompt } from "./project-plan-prompt";
-import { buildTaskPlanAuthoringPrompt, linkedTaskPlan, planOwners, taskPlanPath, taskPlanRunContext, withTaskPlanLink } from "../lib/project-task-plans";
-import { isCanonicalProjectPlanPath } from "../lib/project-documents";
+import { buildTaskPlanAuthoringPrompt, linkedTaskPlan, taskPlanPath, taskPlanRunContext, withTaskPlanLink } from "../lib/project-task-plans";
 
 export type ProjectActionsOptions = {
   client: () => AcpClient | null;
@@ -271,22 +270,6 @@ export function createProjectActions(options: ProjectActionsOptions) {
     }
   }
 
-  /** Attach an existing saved plan to a task that has no plan; one owner per plan. */
-  async function linkTaskPlan(taskId: string, path: string): Promise<boolean> {
-    const requestWorkspace = options.workspace();
-    if (!requestWorkspace || !isCanonicalProjectPlanPath(path) || options.tasksSaving() || options.taskLoadFailed()) return false;
-    if (options.planAvailable?.(path) === false) return false;
-    const document = options.taskDocument();
-    const task = document.tasks.find((candidate) => candidate.id === taskId);
-    if (!task || linkedTaskPlan(task) || planOwners(document.tasks)[path]) return false;
-    const linked = withTaskPlanLink(task, path, new Date().toISOString());
-    const saved = await options.saveProjectTasks({
-      ...document,
-      tasks: document.tasks.map((candidate) => candidate.id === taskId ? linked : candidate),
-    });
-    return saved && options.workspace() === requestWorkspace;
-  }
-
   async function openTaskSession(task: ProjectTask): Promise<void> {
     if (!task.sessionId || actionId || plans.actionId || options.sessionMutationRunning()) return;
     if (task.sessionId === options.activeSessionId()) return;
@@ -310,7 +293,6 @@ export function createProjectActions(options: ProjectActionsOptions) {
     createTaskFromComposer,
     runTask,
     createTaskPlan,
-    linkTaskPlan,
     openTaskSession,
     reset,
   };

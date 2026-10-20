@@ -43,11 +43,9 @@ export function createDesktopStatusBarViewModel(options: {
   refreshPlans?: () => Promise<void>;
   resumePlan?: (path: string) => void;
   planRunDisabled?: () => boolean;
-  /** Session step actions (HUD): jump to where a step started, rerun one step. */
+  /** Session step navigation (HUD): jump to where a step started. */
   canJumpToSteps?: () => boolean;
-  canRerunSteps?: () => boolean;
   jumpToStep?: (sessionId: string, task: SessionTodoTask) => void;
-  rerunStep?: (sessionId: string, task: SessionTodoTask) => void;
   runtime: ReturnType<typeof createSessionRuntimeStore>;
   modelConfig: ReturnType<typeof createModelConfig>;
   sessionCoordinator: ReturnType<typeof createSessionCoordinator>;
@@ -173,9 +171,7 @@ export function createDesktopStatusBarViewModel(options: {
       onResumePlan: options.resumePlan,
       planRunDisabled: options.planRunDisabled?.() ?? false,
       canJumpToSteps: !viewer && !draft && !!sessionId && !!options.jumpToStep && (options.canJumpToSteps?.() ?? false),
-      canRerunSteps: !viewer && !draft && !!sessionId && !!options.rerunStep && (options.canRerunSteps?.() ?? false),
       onJumpToStep: sessionId && options.jumpToStep ? (task) => options.jumpToStep!(sessionId, task) : undefined,
-      onRerunStep: sessionId && options.rerunStep ? (task) => options.rerunStep!(sessionId, task) : undefined,
       onSetConfig: (option, value) => void options.modelConfig.setConfig(option, value),
       onOpenModelThinking: options.modelConfig.openPicker,
       onOpenSessionUsage: () => { if (!viewer) void options.sessionCoordinator.refreshActiveSessionUsage(); },

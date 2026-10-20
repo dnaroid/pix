@@ -357,6 +357,8 @@ type ClientCaller = {
 // JSON-RPC server-error range; plain `throw new Error(...)` would surface
 // to the client as an opaque "Internal error".
 const ERROR_SERVER = -32000;
+/** Past the initialize/session-restore burst, so warmup does not compete with it. */
+const USAGE_STATS_WARMUP_DELAY_MS = 3_000;
 const ERROR_INVALID_PARAMS = -32602;
 const WORKSPACE_UNDO_RPC_COMMAND = "__pix-workspace-undo";
 const MESSAGE_REWIND_RPC_COMMAND = "__pix-message-rewind";
@@ -635,6 +637,7 @@ export class PixAcpAgent {
 	/** Advertised by the client during `initialize`; gates dialog bridging. */
 	private clientCapabilities: ClientCapabilities | null | undefined;
 	private clientName: string | undefined;
+	private usageStatsWarmupScheduled = false;
 
 	constructor(options: PixAcpAgentOptions) {
 		this.options = options;
@@ -701,7 +704,7 @@ export class PixAcpAgent {
 				return records;
 			},
 		});
-		this.usageStatsHost = new UsageStatsHost({ logger: this.options.logger, ...(options.agentDir ? { agentDir: options.agentDir } : {}) });
+		this.usageStatsHost = new UsageStatsHost({ logger: this.options.logger, agentDir: options.agentDir ?? getAgentDir() });
 		this.providerUsageCache = new ProviderUsageCacheHost({ logger: this.options.logger, ...(options.agentDir ? { agentDir: options.agentDir } : {}) });
 		this.listPiSessions = options.listPiSessions
 			?? ((cwd, signal) => cwd ? SessionManager.list(cwd, undefined, undefined, signal) : SessionManager.listAll(undefined, signal));
@@ -728,6 +731,7 @@ export class PixAcpAgent {
 				this.clientName = typeof ctx.params.clientInfo?.name === "string"
 					? ctx.params.clientInfo.name
 					: undefined;
+				if (this.clientName === "pix-desktop") this.scheduleUsageStatsWarmup();
 				return {
 					protocolVersion: PROTOCOL_VERSION,
 					agentCapabilities: {
@@ -4276,6 +4280,19 @@ export class PixAcpAgent {
 			?? (typeof value?.cwd === "string" ? value.cwd : typeof value?.workspace === "string" ? value.workspace : null);
 		return withLoggedRequest(this.options.logger, method,
 			{ project, ...(sessionId ? { sessionId } : {}), module: "requests" }, signal, operation);
+	}
+
+	/**
+	 * Desktop's Usage panel otherwise pays the usage module import and disk
+	 * restore on first open. Defer past the initialize burst, once per process.
+	 */
+	private scheduleUsageStatsWarmup(): void {
+		if (this.usageStatsWarmupScheduled) return;
+		this.usageStatsWarmupScheduled = true;
+		const timer = setTimeout(() => {
+			if (!this.disposed) void this.usageStatsHost.warm();
+		}, USAGE_STATS_WARMUP_DELAY_MS);
+		timer.unref?.();
 	}
 
 	/** Queue lifecycle mutations so two requests cannot replace one another. */

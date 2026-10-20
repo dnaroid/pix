@@ -293,7 +293,7 @@ test("explain uses existing data; discuss preserves attachments and existing tex
 	await h.command("explain"); assert.equal(h.requests.length, 1);
 	h.setDraft({ text: "", images: [{}] }); await h.command("discuss"); assert.equal(h.draft.text, ""); assert.equal(h.draft.images.length, 1);
 	h.setDraft({ text: " ", images: [] }); await h.command("discuss"); assert.equal(h.draft.text, " ");
-	h.setDraft({ text: "", images: [] }); await h.command("discuss"); assert.match(h.draft.text, /Please check this observer note/);
+	h.setDraft({ text: "", images: [] }); await h.command("discuss"); assert.ok(h.draft.text.length > 0); assert.doesNotMatch(h.draft.text, /Evidence:|Please check/);
 	assert.equal(h.requests.length, 1);
 	h.emit("input", { text: "different task", source: "interactive" }); assert.equal(h.snapshots.at(-1)?.notice, null);
 });

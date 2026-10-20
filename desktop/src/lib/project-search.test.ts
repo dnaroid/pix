@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { searchProjectTasks, searchRecentCommits } from "./project-search";
+import { searchProjectPlans, searchProjectTasks, searchRecentCommits } from "./project-search";
 import type { ProjectTask, ProjectTaskDocument } from "./project-tasks";
 import type { GitHistoryEntry } from "./git-workflow";
 
@@ -13,6 +13,13 @@ const commit = (index = 1, changes: Partial<GitHistoryEntry> = {}): GitHistoryEn
 });
 
 describe("local project search metadata", () => {
+  it("finds saved plans by name/path as Tasks-source hits that merge with semantic plan hits", () => {
+    const hits = searchProjectPlans([".pi/plans/kinetic-device-migration.md", ".pi/plans/other.md"], "kinetic migration");
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ kind: "tasks", id: "tasks:plan:.pi/plans/kinetic-device-migration.md",
+      taskId: "plan:.pi/plans/kinetic-device-migration.md", planPath: ".pi/plans/kinetic-device-migration.md", title: "kinetic-device-migration" });
+    expect(searchProjectPlans([".pi/plans/a.md"], "zzz")).toEqual([]);
+  });
   it("finds completed tasks by title, description, stable ID and metadata", () => {
     for (const query of ["RENDERER", "cancellation", "stable-123", "bug", "done", "high"]) {
       const hits = searchProjectTasks(document([task("stable-123")]), query);

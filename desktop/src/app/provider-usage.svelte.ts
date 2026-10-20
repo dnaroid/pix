@@ -20,21 +20,39 @@ function failedEntry(entry: ProviderUsageEntry): ProviderUsageEntry {
   };
 }
 
+type QuotaCacheEntry = { entries: readonly ProviderUsageEntry[]; cacheScope: string | undefined };
+/** Last quota rows per connection and project, so a remounted panel renders them before polling completes. */
+const quotaCache = new WeakMap<UsageClient, Map<string, QuotaCacheEntry>>();
+
+function cachedQuota(client: UsageClient | null, workspace: string): QuotaCacheEntry | undefined {
+  return client && workspace ? quotaCache.get(client)?.get(workspace) : undefined;
+}
+
 /** Sessionless quota polling while Provider limits is expanded, not tied to the active model. */
 export function createProviderUsageStore(options: {
   client: () => UsageClient | null;
   workspace: () => string;
   reportError: (error: unknown) => void;
 }) {
-  let entries = $state<readonly ProviderUsageEntry[]>([]);
+  let scopeClient: UsageClient | null = options.client();
+  let scopeWorkspace = options.workspace();
+  const initial = cachedQuota(scopeClient, scopeWorkspace);
+  let entries = $state<readonly ProviderUsageEntry[]>(initial?.entries ?? []);
+  let cacheScope: string | undefined = initial?.cacheScope;
   let busy = $state(false);
   let error = $state(false);
   let disposed = false;
   let active = true;
   let generation = 0;
-  let scopeClient: UsageClient | null = null;
-  let scopeWorkspace = "";
-  let cacheScope: string | undefined;
+
+  /** Updates rows for the current scope and remembers them for the next mount. */
+  function setEntries(next: readonly ProviderUsageEntry[]): void {
+    entries = next;
+    if (!scopeClient || !scopeWorkspace) return;
+    let byWorkspace = quotaCache.get(scopeClient);
+    if (!byWorkspace) quotaCache.set(scopeClient, byWorkspace = new Map());
+    byWorkspace.set(scopeWorkspace, { entries: next, cacheScope });
+  }
   let pending: Promise<void> | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -54,9 +72,10 @@ export function createProviderUsageStore(options: {
     scopeClient = client;
     scopeWorkspace = workspace;
     if (!sameScope) {
-      entries = [];
+      const cached = cachedQuota(client, workspace);
+      cacheScope = cached?.cacheScope;
+      entries = cached?.entries ?? [];
       error = false;
-      cacheScope = undefined;
     }
     busy = false;
     pending = undefined;
@@ -81,14 +100,14 @@ export function createProviderUsageStore(options: {
         const previous = new Map((cacheScope === nextScope ? entries : []).map((entry) => [entry.modelRef, entry]));
         cacheScope = nextScope;
         const saved = new Map(catalogue.usageCache?.snapshots.map((snapshot) => [snapshot.modelKey, snapshot]));
-        entries = providerUsageTargets(catalogue.configOptions).map((target) => {
+        setEntries(providerUsageTargets(catalogue.configOptions).map((target) => {
           const existing = previous.get(target.modelRef);
           const cached = saved.get(target.modelRef);
           if (cached && (!existing?.runtime?.modelUsage || cached.updatedAt > existing.runtime.modelUsage.updatedAt)) {
             return { ...target, state: "ready", runtime: { sessionId: `quota:${target.modelRef}`, modelUsageRefresh: "skipped", modelUsage: cached } };
           }
           return { ...target, state: existing?.state ?? "loading", runtime: existing?.runtime };
-        });
+        }));
         const queue = [...entries];
         // Bound concurrent provider queries/catalogue runtimes, including model-specific pools.
         async function worker(): Promise<void> {
@@ -105,8 +124,8 @@ export function createProviderUsageStore(options: {
               if (result.usageCacheInvalidated || mismatched) {
                 cacheInvalidated = true;
                 retryCredentials = true;
-                entries = [];
                 cacheScope = undefined;
+                setEntries([]);
                 signalInvalidation();
                 return;
               }
@@ -128,7 +147,7 @@ export function createProviderUsageStore(options: {
               options.reportError(cause);
               next = failedEntry(target);
             }
-            entries = entries.map((entry) => entry.modelRef === target.modelRef ? next : entry);
+            setEntries(entries.map((entry) => entry.modelRef === target.modelRef ? next : entry));
           }
         }
         // Do not wait for abandoned peers before rereading a changed login.
@@ -136,7 +155,7 @@ export function createProviderUsageStore(options: {
       } catch (cause) {
         if (!current()) return;
         error = true;
-        entries = entries.map(failedEntry);
+        setEntries(entries.map(failedEntry));
         options.reportError(cause);
       } finally {
         if (current()) {

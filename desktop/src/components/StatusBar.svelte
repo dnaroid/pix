@@ -55,9 +55,7 @@
     onResumePlan,
     planRunDisabled = false,
     canJumpToSteps = false,
-    canRerunSteps = false,
     onJumpToStep,
-    onRerunStep,
   }: {
     showSkeletons?: boolean;
     configOptions: SessionConfigOption[];
@@ -105,9 +103,7 @@
     onResumePlan?: (path: string) => void;
     planRunDisabled?: boolean;
     canJumpToSteps?: boolean;
-    canRerunSteps?: boolean;
     onJumpToStep?: (task: SessionTodoTask) => void;
-    onRerunStep?: (task: SessionTodoTask) => void;
   } = $props();
 
   const modelThinking = $derived(modelThinkingConfigState(configOptions));
@@ -242,9 +238,7 @@
     {sessionPlan}
     {onOpenPlan}
     {canJumpToSteps}
-    {canRerunSteps}
     {onJumpToStep}
-    {onRerunStep}
   />
   {/key}
   </div>

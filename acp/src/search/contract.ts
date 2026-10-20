@@ -113,6 +113,8 @@ export interface SemanticTaskHit {
   readonly kind: "tasks";
   readonly id: string;
   readonly taskId: string;
+  /** Present when the hit is a saved plan (.pi/plans/**), not a task row. */
+  readonly planPath?: string;
   readonly title: string;
   readonly snippet: string;
   readonly score: number;

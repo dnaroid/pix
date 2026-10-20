@@ -1,6 +1,6 @@
 <script lang="ts">
   import { iconButtonClass } from "../lib/icon-button";
-  import { confirmDesktopAction } from "../lib/confirm-action";
+  import { confirmDesktopDeletion } from "../lib/confirm-deletion";
   import CircleArrowDown from "@lucide/svelte/icons/circle-arrow-down";
   import CircleArrowUp from "@lucide/svelte/icons/circle-arrow-up";
   import EllipsisVertical from "@lucide/svelte/icons/ellipsis-vertical";
@@ -117,8 +117,9 @@
     menuOpen = false;
     if (actionId !== null || projectPiStorageLoading || projectPiStorageError || !projectPiCleanupAvailable) return;
     const requestSnapshot = snapshot, requestedBytes = projectPiCleanupBytes;
-    const confirmed = await confirmDesktopAction(
+    const confirmed = await confirmDesktopDeletion(
       `Clean ${formatPiSize(projectPiCleanupBytes)} from .pi? This clears all contents of artifacts/ and subagents/ and removes non-canonical top-level files and directories. Canonical project state, config, agents/, plans/, skills/ and task-attachments/ are preserved.`,
+      { title: "Clean project data?", okLabel: "Clean" },
     );
     if (confirmed && snapshot === requestSnapshot && projectPiCleanupBytes === requestedBytes
       && actionId === null && !projectPiStorageLoading

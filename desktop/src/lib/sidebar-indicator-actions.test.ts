@@ -19,10 +19,18 @@ describe("sidebar indicator reason actions", () => {
   });
   it("adds combined staging, AI commit and push only to dirty Git, with a capability guard", () => {
     const reasons = [{ id: "git.dirty" as const, tone: "info" as const, reason: "Changes" }];
-    const actions = sidebarIndicatorActionGroups(reasons, { "git.commit-push": false })[0]!.actions;
+    const actions = sidebarIndicatorActionGroups(reasons, { "git.commit-push": false }, ["origin"])[0]!.actions;
     expect(actions.map((action) => action.id)).toEqual(["git.changes", "git.commit-push"]);
     expect(actions[1]).toMatchObject({ label: "Stage all, AI commit & push", disabled: true });
-    expect(sidebarIndicatorActionGroups([{ id: "git.ahead", tone: "info", reason: "Ahead" }])[0]!.actions.map((action) => action.id)).toEqual(["git.push"]);
+    expect(sidebarIndicatorActionGroups([{ id: "git.ahead", tone: "info", reason: "Ahead" }], {}, ["origin"])[0]!.actions.map((action) => action.id)).toEqual(["git.push"]);
+  });
+  it.each([undefined, []])("omits push commands without confirmed remotes (%s), keeping local review", (remotes) => {
+    const groups = sidebarIndicatorActionGroups([
+      { id: "git.dirty", tone: "info", reason: "Changes" },
+      { id: "git.ahead", tone: "info", reason: "Ahead" },
+    ], { "git.commit-push": true, "git.push": true }, remotes);
+    expect(groups[0]!.actions.map((action) => action.id)).toEqual(["git.changes"]);
+    expect(groups[1]!.actions).toEqual([]);
   });
   it("has no menu in a healthy state and never infers review from counters", () => {
     expect(sidebarIndicatorReasons(base)).toEqual({});
@@ -62,7 +70,7 @@ describe("sidebar indicator reason actions", () => {
     ["scripts.error", "scripts.inspect"], ["scripts.failed", "scripts.inspect"], ["scripts.running", "scripts.running"],
     ["settings.error", "settings.inspect"],
   ])("maps %s to its cause-specific command", (id, action) => {
-    expect(sidebarIndicatorActionGroups([{ id: id as SidebarIndicatorReasonId, tone: "error", reason: "copy may change" }])[0]?.actions[0]?.id)
+    expect(sidebarIndicatorActionGroups([{ id: id as SidebarIndicatorReasonId, tone: "error", reason: "copy may change" }], {}, ["origin"])[0]?.actions[0]?.id)
       .toBe(action);
   });
 });

@@ -6,7 +6,7 @@ import { PROJECT_TODO_PATH } from "../lib/project-documents";
 const tauri = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: tauri.invoke }));
 const confirmation = vi.hoisted(() => ({ confirm: vi.fn() }));
-vi.mock("../lib/confirm-action", () => ({ confirmDesktopAction: confirmation.confirm }));
+vi.mock("../lib/confirm-deletion", () => ({ confirmDesktopDeletion: confirmation.confirm }));
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;

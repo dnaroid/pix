@@ -1333,6 +1333,11 @@
           "maximum": 300,
           "description": "Non-blocking pause (seconds) before trying another OAuth profile after an explicit subscription quota rejection. Defaults to 60; 0 skips the pause. Cancel stops waiting; the pause counts toward the request timeout."
         },
+        "pruneHistoricalThinking": {
+          "type": "boolean",
+          "default": false,
+          "description": "Experimental. Omit thinking from assistant turns before the latest user message when replaying the transcript to Claude Code. Saves input tokens; thinking of the current tool loop is kept. Disabled by default; applies to the next request."
+        },
         "accounts": {
           "type": "array",
           "items": {

@@ -25,7 +25,8 @@ describe("WorkspaceSidebar project sizing", () => {
     expect(sidebarSource).toContain('tasksView.selectWorkspace(workspace)');
   });
   it("keeps the authoritative unfiltered task counter only in the sidebar header", () => {
-    expect(sidebarSource).toContain('{tasks.length} {tasks.length === 1 ? "task" : "tasks"} · {doneCount} done');
+    expect(sidebarSource).toContain('{tasks.length} {tasks.length === 1 ? "task" : "tasks"}</span>');
+    expect(sidebarSource).toContain('`${tasks.length} · ${doneCount} done`');
     expect(tasksPanelSource).not.toContain("tasks ·");
     expect(tasksPanelSource).toContain('aria-haspopup="menu"');
     expect(tasksPanelSource).toContain('onSetTaskPriority(task.id, priority)');

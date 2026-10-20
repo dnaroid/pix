@@ -129,4 +129,12 @@ describe("buildSearchSourceRows", () => {
     expect(row(rows, "tasks").localSummary).toBe("3 tasks");
     expect(row(rows, "code").localSummary).toBe("3 files");
   });
+  it("shows saved plans next to tasks instead of counting plan chunks as tasks", () => {
+    const summary = (counts: Record<string, number>) =>
+      row(buildSearchSourceRows(status({}, { state: "present", counts }), consent({ configured: true })), "tasks").localSummary;
+    expect(summary({ taskDocuments: 8, taskPlans: 1, taskVectors: 12 })).toBe("8 tasks · 1 plan");
+    expect(summary({ taskDocuments: 8, taskPlans: 3 })).toBe("8 tasks · 3 plans");
+    expect(summary({ taskDocuments: 0, taskPlans: 2 })).toBe("0 tasks · 2 plans");
+    expect(summary({ taskDocuments: 8, taskPlans: 0 })).toBe("8 tasks");
+  });
 });

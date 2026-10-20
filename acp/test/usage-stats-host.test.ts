@@ -43,7 +43,7 @@ function fakeModule(restore: () => Promise<void> = async () => {}) {
 
 test("serves every workspace from one shared service", async () => {
 	const { module, services } = fakeModule();
-	const host = new UsageStatsHost({ logger: silentLogger, load: async () => module });
+	const host = new UsageStatsHost({ logger: silentLogger, agentDir: "/agent", load: async () => module });
 	const notify = async () => {};
 
 	const all = await host.stats({ cwd: "/work/a" }, notify);
@@ -76,7 +76,7 @@ test("does not collect when disposed during a disk restore", async () => {
 	let release!: () => void;
 	const restore = new Promise<void>((resolve) => { release = resolve; });
 	const { module, services } = fakeModule(() => restore);
-	const host = new UsageStatsHost({ logger: silentLogger, load: async () => module });
+	const host = new UsageStatsHost({ logger: silentLogger, agentDir: "/agent", load: async () => module });
 	const pending = host.stats({ cwd: "/a" }, async () => {});
 	const rejected = assert.rejects(pending, RequestError);
 	await new Promise((resolve) => setImmediate(resolve));
@@ -88,7 +88,7 @@ test("does not collect when disposed during a disk restore", async () => {
 
 test("notifies only the latest requester and stops after dispose", async () => {
 	const { module, services } = fakeModule();
-	const host = new UsageStatsHost({ logger: silentLogger, load: async () => module });
+	const host = new UsageStatsHost({ logger: silentLogger, agentDir: "/agent", load: async () => module });
 	const first: UsageStatsChangedNotification[] = [];
 	const latest: UsageStatsChangedNotification[] = [];
 	await host.stats({ cwd: "/work/a" }, async (n) => { first.push(n); });
@@ -110,6 +110,7 @@ test("module load failure maps to a server error and is retried", async () => {
 	const errors: string[] = [];
 	let attempts = 0;
 	const host = new UsageStatsHost({
+		agentDir: "/agent",
 		logger: { ...silentLogger, error: (message) => { errors.push(message); } },
 		load: async () => {
 			attempts += 1;
@@ -135,4 +136,32 @@ test("parseUsageStatsRequest validates cwd, sources and refresh", () => {
 	for (const invalid of [null, [], {}, { cwd: " " }, { cwd: "/a", sources: ["codex-local"] }, { cwd: "/a", sources: "pix-sessions" }, { cwd: "/a", refresh: "yes" }]) {
 		assert.throws(() => parseUsageStatsRequest(invalid), (error: unknown) => error instanceof RequestError && error.code === -32602);
 	}
+});
+
+test("warm loads and restores once without collecting; later stats reuse it", async () => {
+	const { module, services } = fakeModule();
+	let loads = 0;
+	const host = new UsageStatsHost({ logger: silentLogger, agentDir: "/agent", load: async () => { loads += 1; return module; } });
+	await host.warm();
+	assert.equal(loads, 1);
+	assert.equal(services.length, 1);
+	assert.equal(services[0]!.requests.length, 0, "warmup never collects");
+	await host.stats({ cwd: "/a" }, async () => {});
+	assert.equal(loads, 1);
+	assert.equal(services.length, 1);
+	assert.equal(services[0]!.requests.length, 1);
+	await host.dispose();
+});
+
+test("warm swallows load failures and is a no-op after dispose", async () => {
+	const { module, services } = fakeModule();
+	let fail = true;
+	const host = new UsageStatsHost({ logger: silentLogger, agentDir: "/agent", load: async () => { if (fail) throw new Error("x"); return module; } });
+	await host.warm();
+	fail = false;
+	const response = await host.stats({ cwd: "/a" }, async () => {});
+	assert.equal(response.snapshots.length, 1);
+	await host.dispose();
+	await host.warm();
+	assert.equal(services.length, 1);
 });

@@ -23,28 +23,27 @@
   **Hide Work**. Its subtitle reports `N plans · M tasks`.
 - Saved project plans appear in Work → Plans, not in Registry. The Plans accordion uses
   the existing canonical project-document snapshot and works without a
-  configured remote registry or ready conversation session. It remains visible
-  when empty, showing **No plans yet** with guidance; a non-matching search shows
-  **No matching plans**.
+  configured remote registry or ready conversation session. When there are no
+  plans, its header is disabled and remains collapsed.
 - Registry contains only its resource catalog and project status. The
   project-sync **plans** artifact action opens Work, expands the Plans accordion and the
-  sidebar if collapsed, and focuses plan search; stale-workspace actions are
+  sidebar if collapsed; stale-workspace actions are
   ignored.
-- Search matches plan names and paths. Rows wrap file names rather than truncating
-  them; a separate directory label distinguishes equally named plans.
 - Choosing a plan opens the existing main-workspace Preview tab, leaving the
   Registry list and search intact. Markdown uses Preview's existing rendered
   reading mode and explicit editing controls; no second document viewer is added.
 - The selected row follows the actual Preview file, not an optimistic click.
   Failed or stale reads therefore do not falsely select a different plan.
-- Each row has separate, keyboard-accessible **Run** (Play) and **Delete** (Trash)
-  icon buttons; neither action opens the plan in Preview as a side effect.
-  The first line holds the wrapping plan name (`overflow-wrap:anywhere`, never
-  truncated) and the two action buttons only; the progress indicator and task
-  owner sit on a metadata line under the name, so long names never overlap
-  controls. Progress shows a Lucide `FileCheck2` document icon, a compact static
-  linear checklist-progress bar, and completed/total text. The bar uses a
-  tool-success fill and muted track; it does not animate or invoke an LLM.
+- Each card is a single line with a file icon (a spinner instead while a run of
+  the plan is Running), truncated name without `.md`, optional task-owner icon
+  and circular `N/M` checklist progress ring. **Run** and a three-dot actions
+  menu (like task cards) appear on hover/focus; the menu holds **Open session**,
+  **Resume** and **Delete plan** and closes on Escape, outside click or choice.
+  The actions menu is portalled to the document body as a fixed-position overlay,
+  positioned beside the trigger and flipped above when needed; it closes on
+  outside pointer/focus, scroll, resize, Escape or Tab. The linear checklist
+  indicator remains for the session HUD/status surfaces.
+  The ring does not animate or invoke an LLM.
   Progress is exposed as an accessible progressbar with completed/total
   value text and `data-plan-checklist-progress`; no native title tooltip is
   shown. Counts describe saved
@@ -74,35 +73,26 @@
 - Plan actions reject duplicate launches/deletes. Stale confirmation, runtime
   preparation and completion cannot mutate a different workspace or conversation;
   a session created after launch invalidation is closed instead of activated.
-- Search and list scroll survive Plans-panel remounts within the current workspace
-  (including switching sidebar panels or closing/reopening the sidebar). Changing
-  workspace resets both. Changing search resets list scroll to the top.
+- List scroll survives Plans-panel remounts within the current workspace and is
+  remembered per workspace. There is no plan search field.
 - Registry has no plans controls or plan-list props; the Plans accordion is the
-  persistent plan navigator. Switching from Registry via the project-sync plans
-  action focuses the persistent search.
-- Plan buttons support normal keyboard activation and Up/Down/Home/End focus
-  movement. Escape clears a nonempty search; the clear button returns focus to it.
+  persistent plan navigator. Opening it does not focus search.
 - The plan list fills the Work panel height with no 45% height cap or bottom
   border. It is not a floating picker or dialog.
-- Plans with a task owner are grouped under **Task plans** and show the task
-  label; remaining plans appear under **Plans without a task**. The headings are
-  omitted and the list stays flat when no plan has an owner. Ownership is the
-  first task, in task order, whose first saved-plan link is that canonical path.
+- Plans owned by a task show a small owner icon with the task label in its
+  tooltip. Ownership comes from task `links` containing the canonical plan path;
+  there are no owner-group headings or manual plan-to-task linking.
 - A task card whose linked plan has a saved checklist with every item checked
   (`total > 0`, `completed >= total`) and whose status is not `done` shows
   **All plan items checked** with a **Mark done** button. The status changes only
   when the user clicks it (same path as the status menu); it is disabled while
   tasks are busy. Plans with no checklist or unavailable progress show no hint.
-- An unowned plan offers the Pix searchable **Link to task** picker when eligible
-  tasks exist. It lists tasks not marked done and without a plan. Linking saves
-  the plan path to the task's `links`; it is rejected for an existing owner or
-  task plan, a missing/non-canonical path, or while tasks are saving or failed
-  to load. The picker is unavailable when task loading is not safe.
-- Each plan row lists up to three recorded runs newest first, with session title
-  and launch time; `+N earlier` summarizes older records. Runs whose session is
-  no longer present are hidden. Selecting a run opens that session. Records
-  come from the workspace's persisted plan-launch map (`planLaunches.sessionsFor`).
-- Each run shows a status icon (with screen-reader label): **Running** while
+- Plan cards list no run rows. **Open session** in the menu opens the Running
+  run's session, otherwise the newest recorded run's session; it is absent when
+  the plan has no recorded runs. Runs whose session is no longer present are
+  ignored. Records come from the workspace's persisted plan-launch map
+  (`planLaunches.sessionsFor`).
+- Run status (shown as the card spinner and on the status-bar chip) is **Running** while
   its start sequence is live (in memory, cleared when the prompt starts) or its
   prompt is in flight; otherwise the latest recorded prompt outcome decides:
   `failed` (prompt error or non-`end_turn`/`cancelled` stop reason) → **Failed**,
@@ -113,7 +103,7 @@
   the status. A recorded launch whose prompt never starts settles as
   `cancelled` (navigated away) or `failed` (runtime not ready, plan removed,
   error).
-- **Resume** appears under the runs only when the newest run is Failed or
+- **Resume** appears in the menu only when the newest run is Failed or
   Interrupted and no run of the plan is Running; it shares Run's disabled state.
   It opens a new session with a continuation prompt (inspect partial changes,
   re-verify `[x]` items, continue from the first unchecked item) followed by the
@@ -242,5 +232,5 @@ per-plan cache in this list; only the navigator's scroll is retained here.
 Checklist progress is native saved-file metadata: `list_project_documents`
 returns `planProgress`, a plan-path map of `{ completed, total }` or `null`.
 `desktop/src-tauri/src/plan_progress.rs` implements the bounded counter/cache;
-the list displays a FileCheck2 icon, static linear bar and completed/total
-counts, not verification that plan gates passed. No real UI QA was performed.
+each one-line plan card displays a progress ring (`PlanProgressRing`) and
+completed/total counts, not verification that plan gates passed. No real UI QA was performed.

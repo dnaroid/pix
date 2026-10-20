@@ -26,7 +26,7 @@ export type UsageStatsServiceLike = {
 /** Structural view of root `dist/app/usage-stats/index.js`. */
 export type UsageStatsModule = {
 	UsageStatsService: new (options: { sources: readonly unknown[]; onChange?: (source: UsageSourceId) => void; log?: UsageStatsLog }) => UsageStatsServiceLike;
-	createUsageStatsSources(options: { log?: UsageStatsLog; agentDir?: string }): unknown[];
+	createUsageStatsSources(options: { log?: UsageStatsLog; agentDir: string }): unknown[];
 };
 
 export type UsageStatsNotifier = (notification: UsageStatsChangedNotification) => Promise<void>;
@@ -68,23 +68,28 @@ export class UsageStatsHost {
 	private disposed = false;
 	private readonly load: () => Promise<UsageStatsModule>;
 
-	constructor(private readonly options: { logger: Logger; agentDir?: string; load?: () => Promise<UsageStatsModule> }) {
+	constructor(private readonly options: { logger: Logger; agentDir: string; load?: () => Promise<UsageStatsModule> }) {
 		this.load = options.load ?? loadUsageStatsModule;
+	}
+
+	/**
+	 * Background prefetch after startup: loads the module and restores the disk
+	 * snapshot without collecting, so the first panel request answers at once.
+	 * Never throws; a failure is retried by the next real request.
+	 */
+	async warm(): Promise<void> {
+		try {
+			await this.ready();
+		} catch {
+			// module() already logged; stats() retries and reports to the caller.
+		}
 	}
 
 	async stats(request: UsageStatsRequest, notify: UsageStatsNotifier): Promise<UsageStatsResponse> {
 		if (this.disposed) throw new RequestError(ERROR_SERVER, "Usage statistics are unavailable");
 		this.notifier = notify;
-		const module = await this.module();
-		if (this.disposed) throw new RequestError(ERROR_SERVER, "Usage statistics are unavailable");
-		this.service ??= new module.UsageStatsService({
-			sources: module.createUsageStatsSources({ log: this.log, ...(this.options.agentDir ? { agentDir: this.options.agentDir } : {}) }),
-			onChange: (source) => this.emit({ source }),
-			log: this.log,
-		});
-		await this.service.restore();
-		if (this.disposed) throw new RequestError(ERROR_SERVER, "Usage statistics are unavailable");
-		const snapshots = this.service.request({
+		const service = await this.ready();
+		const snapshots = service.request({
 			...(request.sources ? { sources: request.sources } : {}),
 			...(request.refresh === true ? { refresh: true } : {}),
 		});
@@ -101,6 +106,20 @@ export class UsageStatsHost {
 		this.notifier = undefined;
 		this.service?.dispose();
 		this.service = undefined;
+	}
+
+	private async ready(): Promise<UsageStatsServiceLike> {
+		if (this.disposed) throw new RequestError(ERROR_SERVER, "Usage statistics are unavailable");
+		const module = await this.module();
+		if (this.disposed) throw new RequestError(ERROR_SERVER, "Usage statistics are unavailable");
+		const service = this.service ??= new module.UsageStatsService({
+			sources: module.createUsageStatsSources({ log: this.log, agentDir: this.options.agentDir }),
+			onChange: (source) => this.emit({ source }),
+			log: this.log,
+		});
+		await service.restore();
+		if (this.disposed) throw new RequestError(ERROR_SERVER, "Usage statistics are unavailable");
+		return service;
 	}
 
 	private async module(): Promise<UsageStatsModule> {

@@ -218,8 +218,13 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   changes index task documents in the background, independently of searches.
   Enabling/changing the global provider resynchronizes the workspace. Queries
   rank existing document vectors and may send the entered query; background
-  indexing sends only the task `title`+`description` (2,000-character combined cap
-  per task) to the configured knowledge embedding model. Status, priority,
+  indexing sends task `title`+`description` (2,000-character combined cap per
+  task) and saved plan Markdown to the configured knowledge embedding model.
+  Each plan is split into overlapping chunks (2,000-character window, 1,800
+  stride, at most 64 chunks per plan); every chunk is embedded with the plan
+  path and title as context, and query results collapse to one hit per plan
+  (best chunk). Plan content is therefore uploaded when
+  task semantic search is enabled. Status, priority,
   IDs, hierarchy, links/paths, session/model assignment, attachment filenames
   and bytes are never included in the embedding input; existing user-authored
   description text remains eligible even if it itself contains paths.

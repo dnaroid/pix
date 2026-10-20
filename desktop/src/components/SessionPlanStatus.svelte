@@ -1,5 +1,4 @@
 <script lang="ts">
-  import FileCheck2 from "@lucide/svelte/icons/file-check-2";
   import { onMount } from "svelte";
   import { createProjectFilesRefresh } from "../lib/project-files-refresh";
   import { projectDocumentLabel, type PlanProgress } from "../lib/project-documents";
@@ -21,6 +20,7 @@
   const heading = $derived(plan.status && plan.status !== "running" ? "Plan run" : "Executing plan");
 
   const label = $derived(projectDocumentLabel(plan.path));
+  const ratio = $derived(plan.progress?.total ? Math.min(1, plan.progress.completed / plan.progress.total) : 0);
   const counts = $derived(plan.progress && plan.progress.total > 0 ? `${plan.progress.completed}/${plan.progress.total}` : undefined);
   // Keep saved checklist progress fresh only while this chip is mounted in the foreground.
   onMount(() => onRefresh ? createProjectFilesRefresh(() => onRefresh(), undefined, 3_000).dispose : undefined);
@@ -29,7 +29,7 @@
 <StatusBarPopover label="Executing plan">
   {#snippet trigger({ open, toggle, id })}
     <button
-      class="flex h-6 items-center gap-1 rounded-sm bg-transparent px-1.5 text-muted-foreground transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+      class="flex h-6 items-center gap-1 rounded-sm bg-transparent px-1.5 font-mono tabular-nums text-tool-skill transition-colors hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
       type="button"
       aria-label={`${heading} ${label}${plan.status ? `, ${STATUS_LABEL[plan.status]}` : ""}${counts ? `, ${counts} checklist items` : ""}`}
       aria-haspopup="dialog"
@@ -38,12 +38,12 @@
       data-session-plan-status
       onclick={toggle}
     >
-      {#if plan.progress && plan.progress.total > 0}
-        <PlanProgressIndicator progress={plan.progress} />
-      {:else}
-        <FileCheck2 class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-        <PlanProgressIndicator progress={plan.progress} />
-      {/if}
+      <!-- Same ring as session Steps; the plan colour tells them apart. -->
+      <svg class="h-3.5 w-3.5 shrink-0 -rotate-90" viewBox="0 0 16 16" fill="none" aria-hidden="true" data-session-plan-progress>
+        <circle class="text-muted-foreground/25" cx="8" cy="8" r="6" stroke="currentColor" stroke-width="2" />
+        <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="2" pathLength="100" stroke-dasharray="100" stroke-dashoffset={100 - ratio * 100} />
+      </svg>
+      <span>{counts ?? "—"}</span>
     </button>
   {/snippet}
   {#snippet children()}
@@ -60,7 +60,6 @@
         <span class="text-foreground" aria-current="page">This session</span>
       </nav>
       <div class="flex min-w-0 items-start gap-2">
-        <FileCheck2 class="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
         <span class="min-w-0 flex-1 break-words text-xs font-medium text-foreground">{label}</span>
         <PlanProgressIndicator progress={plan.progress} />
       </div>

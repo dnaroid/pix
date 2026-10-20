@@ -63,6 +63,7 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
   tools("general", "Secret redaction notifications", "Show a warning when secret material is redacted.", "alerts"),
   tools("claude", "Automatic Claude account rotation", "Switch to an eligible Claude Code OAuth profile only after a confirmed subscription quota rejection.", "Claude", "OAuth", "quota"),
   tools("claude", "Pause before switching (seconds)", "Wait after a confirmed Claude quota rejection before attempting another profile.", "rotation delay", "cooldown"),
+  tools("claude", "Prune historical thinking (experimental)", "Do not replay thinking from earlier turns to Claude Code to save input tokens.", "thinking", "tokens", "experimental"),
   tools("claude", "Claude OAuth profiles", "Ordered, independently authenticated Claude Code account profiles.", "accounts", "subscriptions"),
   tools("subagents", "Economy mode", "Skip frontier models marked Expensive for sub-agent roles.", "cost"),
   tools("subagents", "Sub-agent models", "Primary models of bundled explicit-model roles, managed by the model setup wizard.", "bundled", "agent", "role", "override", "reset"),

@@ -5,6 +5,7 @@ export type DiagnosticContext = { workspace: string; sessionId?: string | null }
 export type DesktopDiagnosticEvent =
   | "acp:connecting" | "acp:ready" | "acp:reconnecting" | "acp:stopped"
   | "acp:unexpected-exit" | "acp:connect-failed"
+  | "media:ogg-fallback"
   | "updater:checking" | "updater:available" | "updater:current" | "updater:check-failed"
   | "updater:installing" | "updater:ready" | "updater:install-failed" | "updater:restart-failed";
 

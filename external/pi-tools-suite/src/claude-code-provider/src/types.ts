@@ -40,6 +40,8 @@ export interface PreparedRequest {
   imageCount: number;
   /** Bytes actually written, so identical images are counted once. */
   imageBytes: number;
+  /** Historical thinking blocks omitted by the experimental pruning setting. */
+  prunedThinkingBlocks: number;
 }
 
 export interface RequestMetrics {
@@ -64,6 +66,8 @@ export interface RequestMetrics {
   transcriptBytes: number;
   catalogBytes: number;
   imageBytes: number;
+  /** Historical thinking blocks omitted from the transcript (experimental setting). */
+  prunedThinkingBlocks?: number;
   estimatedInputTokens: number;
   servedContextWindow?: number;
   servedMaxOutputTokens?: number;

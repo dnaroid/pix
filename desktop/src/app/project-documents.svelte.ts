@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { confirmDesktopAction } from "../lib/confirm-action";
+import { confirmDesktopDeletion } from "../lib/confirm-deletion";
 import { isWorkspaceProjectFilePath, type ProjectFilePreview } from "../lib/project-files";
 import {
   EMPTY_PROJECT_DOCUMENTS,
@@ -96,7 +96,7 @@ export function createProjectDocumentsStore(options: ProjectDocumentsStoreOption
     const isCurrent = () => requestGeneration === workspaceGeneration && options.workspace() === workspace;
     removing = path;
     try {
-      if (!await confirmDesktopAction(`Delete plan “${path}”?\n\nThe file and any unsaved changes will be lost. This cannot be undone.`, {
+      if (!await confirmDesktopDeletion(`Delete plan “${path}”?\n\nThe file and any unsaved changes will be lost. This cannot be undone.`, {
         title: "Delete plan?", okLabel: "Delete",
       }) || !isCurrent()) return;
       // Let an in-flight save finish first; new saves of this plan are blocked.

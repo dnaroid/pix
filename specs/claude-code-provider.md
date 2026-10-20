@@ -142,6 +142,22 @@ remain preflight errors; a nonzero exit never enables the provider. Auth status
 payloads/identity fields are not copied into the login notice. The unavailable
 notice is emitted once for consecutive startup bindings of the same session.
 
+### Experimental historical thinking pruning
+
+`claudeCodeProvider.pruneHistoricalThinking` (boolean, default `false`; Desktop
+toggle "Prune historical thinking (experimental)" under Claude settings) is read
+from the user-owned config on every request, so a change applies to the next
+turn. When enabled, the transcript serializer omits `thinking` blocks from
+assistant messages that precede the latest user message; thinking of the
+current turn's tool loop is kept. Blocks are still validated before omission,
+and an assistant message left empty is dropped while its tool calls, results
+and text stay. The rule is deterministic, so the replayed history prefix stays
+byte-stable within a turn and remains cacheable; the cache prefix changes only
+when a new user message moves the boundary. An invalid value fails the request
+like other malformed provider configuration. Request metrics record
+`prunedThinkingBlocks`. Offline replay of recent local sessions reduced the
+transcript by roughly 1–10%, depending on how much thinking a session carries.
+
 ### Desktop sign-in recovery
 
 Claude authentication error cards offer **Sign in to Claude**. This is an

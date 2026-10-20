@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { dialogCancelButtonClass, dialogDestructiveButtonClass } from "../lib/dialog";
+  import DeleteConfirmationDialog from "./DeleteConfirmationDialog.svelte";
   import { iconButtonClass } from "../lib/icon-button";
   import { confirmDesktopAction } from "../lib/confirm-action";
   import type { SessionConfigOption } from "@agentclientprotocol/sdk";
@@ -171,9 +171,7 @@
     onRunPlan = () => {},
     onDeletePlan = () => {},
     planOwners = {},
-    planLinkTargets = [],
     planRuns = {},
-    onLinkTaskPlan,
     onOpenPlanRun,
     onResumePlan,
     recentProjects,
@@ -281,9 +279,7 @@
     onRunPlan?: (path: string) => void;
     onDeletePlan?: (path: string) => void;
     planOwners?: Readonly<Record<string, string>>;
-    planLinkTargets?: readonly { value: string; label: string }[];
     planRuns?: Readonly<Record<string, readonly import("../lib/project-task-plans").PlanRun[]>>;
-    onLinkTaskPlan?: (taskId: string, path: string) => void;
     onOpenPlanRun?: (sessionId: string) => void;
     onResumePlan?: (path: string) => void;
     recentProjects: string[];
@@ -387,6 +383,7 @@
   });
   let editingTaskId = $state<string | null>(null);
   let deleteTaskId = $state<string | null>(null);
+  let deleteTaskWorkspace = $state("");
   let title = $state("");
   let description = $state("");
   let editorAttachments = $state<Attachment[]>([]);
@@ -402,7 +399,11 @@
     menu: () => statusMenu,
     onStatusChange: (taskId, status) => onStatusChange(taskId, status),
     onPriorityChange: (taskId, priority) => onPriorityChange(taskId, priority),
-    onDeleteRequest: (taskId) => deleteTaskId = taskId,
+    onDeleteRequest: (taskId) => {
+      if (busy) return;
+      deleteTaskWorkspace = workspace;
+      deleteTaskId = taskId;
+    },
   });
   let revealedTaskId = $state<string | null>(null);
   const plansView = createRegistryPlansView();
@@ -412,8 +413,9 @@
   });
   $effect(() => { void workSections.load(workspace); });
   $effect(() => () => workSections.dispose());
-  const workSectionOpen = (id: WorkSectionId) => workSections.ready && workSections.isOpen(id);
-  let plansPanel = $state<RegistryPlansPanel | null>(null);
+  // An empty Plans section stays collapsed: there is nothing to expand.
+  const workSectionEmpty = (id: WorkSectionId) => id === "plans" && projectDocuments.plans.length === 0;
+  const workSectionOpen = (id: WorkSectionId) => workSections.ready && !workSectionEmpty(id) && workSections.isOpen(id);
   $effect(() => plansView.selectWorkspace(workspace));
   let projectTreeRefreshKey = $state(0);
   const taskDragController = createWorkspaceSidebarTaskDragController({
@@ -476,6 +478,7 @@
     workspace: () => workspace,
     reasons: () => indicatorReasons,
     enabled: () => indicatorActionEnabled,
+    gitRemotes: () => gitSnapshot?.remotes ?? [],
     beforeOpen: () => statusMenuController.close(),
     reveal: revealIndicatorTab,
     handlers: {
@@ -670,8 +673,6 @@
     void workSections.setOpen("plans", true);
     setActiveTab("tasks");
     if (layoutController.collapsed) layoutController.setCollapsed(false);
-    await tick();
-    if (requestWorkspace === workspace && activeTab === "tasks" && workSectionOpen("plans")) plansPanel?.focusSearch();
   }
 
   /** Open the project Tasks view for actions initiated outside the sidebar. */
@@ -907,7 +908,7 @@
   }
 
   function confirmDelete(): void {
-    if (!deleteTaskId || busy) return;
+    if (!deleteTaskId || busy || workspace !== deleteTaskWorkspace || !tasks.some(task => task.id === deleteTaskId)) return;
     onDelete(deleteTaskId);
     deleteTaskId = null;
   }
@@ -1011,8 +1012,9 @@
         {#snippet workSectionHeader(id: WorkSectionId, label: string, count: string)}
           <button
             type="button"
-            class="flex h-8 w-full shrink-0 items-center gap-1.5 border-b border-sidebar-border px-3 text-left text-xs font-semibold text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+            class="flex h-8 w-full shrink-0 items-center gap-1.5 border-b border-sidebar-border px-3 text-left text-xs font-semibold text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
             aria-expanded={workSectionOpen(id)}
+            disabled={workSectionEmpty(id)}
             aria-controls={`workspace-${id}-panel`}
             data-work-section-toggle={id}
             onclick={() => void workSections.toggle(id)}
@@ -1027,7 +1029,6 @@
         {#if workSectionOpen("plans")}
         <div id="workspace-plans-panel" class="flex min-h-0 min-w-0 flex-initial flex-col overflow-hidden [&>section]:flex-initial">
           <RegistryPlansPanel
-            bind:this={plansPanel}
             plans={projectDocuments.plans}
             planProgress={projectDocuments.planProgress}
             onRefresh={onRefreshPlans}
@@ -1039,9 +1040,7 @@
             onRun={onRunPlan}
             onDelete={onDeletePlan}
             owners={planOwners}
-            linkTargets={planLinkTargets}
             runs={planRuns}
-            onLinkTask={onLinkTaskPlan}
             onOpenRun={onOpenPlanRun}
             onResume={onResumePlan}
           />
@@ -1291,23 +1290,15 @@
     />
   {/if}
 
-  {#if deleteTaskId && !layoutController.collapsed}
+  {#if deleteTaskId && workspace === deleteTaskWorkspace && !layoutController.collapsed}
     {@const deleteTask = tasks.find((task) => task.id === deleteTaskId)}
-    <div
-      class="absolute inset-y-0 right-0 left-12 z-30 grid place-items-center border-r border-sidebar-border bg-overlay/20 p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Delete task"
-    >
-      <div class="w-full rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-md">
-        <strong class="text-xs font-semibold">Delete task?</strong>
-        <p class="mt-1.5 break-words text-xs leading-4 text-muted-foreground">“{deleteTask ? projectTaskDisplayLabel(deleteTask) : "This task"}”</p>
-        <div class="mt-3 flex justify-end gap-2">
-          <button class={dialogCancelButtonClass} type="button" onclick={() => deleteTaskId = null}>Cancel</button>
-          <button class={dialogDestructiveButtonClass} type="button" onclick={confirmDelete} disabled={busy}>Delete</button>
-        </div>
-      </div>
-    </div>
+    <DeleteConfirmationDialog
+      title="Delete task?"
+      message={`“${deleteTask ? projectTaskDisplayLabel(deleteTask) : "This task"}”\n\nThis cannot be undone.`}
+      disabled={busy}
+      onconfirm={confirmDelete}
+      oncancel={() => deleteTaskId = null}
+    />
   {/if}
 
   {#if projectSettingsController.open && workspace}

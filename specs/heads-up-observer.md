@@ -206,6 +206,10 @@ appended after projected parent records, not a global chronological event stream
 Missing or clipped run evidence means unknown, not failed/not run; default to
 silence without a concrete supported conflict. Conversely, an explicit failure
 for the same run/check is not overridden by an unsupported parent success claim.
+Diagnostics (LSP, lint, type errors) inside one tool result or script can be
+stale: a later step of the same output, or a later result showing the file
+exists, the check passes or the agent verified it, supersedes them. Superseded
+diagnostics are not grounds for a notice.
 
 Common credential patterns, private-key blocks and control sequences are
 filtered. This is best-effort redaction, not proof that arbitrary project text
@@ -335,8 +339,9 @@ links wait for asynchronously loaded sections and focus the Observer heading.
 
 `/heads-up discuss` in Pix TUI, or Desktop's Insert question action, only fills
 an empty composer with no attachments and no blocking dialogue. It never sends
-the draft, overwrites user text or starts a parent turn. Copied evidence is
-labelled untrusted; attachment mentions and effort-shortcut words are neutralized.
+the draft, overwrites user text or starts a parent turn. The draft contains only
+the note title and consequence (no wrapper, evidence records or internal IDs);
+attachment mentions and effort-shortcut words are neutralized.
 No number-key interception, automatic modal dialogue, generated learning page
 or auto-fix exists in this experiment.
 

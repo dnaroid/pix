@@ -143,21 +143,6 @@ describe("task plans", () => {
     expect(options.recordPlanLaunch).toHaveBeenCalledExactlyOnceWith("/project", "session-1", ".pi/plans/a.md");
   });
 
-  it("links an unowned plan to a task without a plan", async () => {
-    const { options } = reviewHarness();
-    const owner = { ...task, id: "task-2", links: [".pi/plans/owned.md"] };
-    let document = { version: 1 as const, tasks: [task, owner] as typeof task[] };
-    options.taskDocument = () => document;
-    options.saveProjectTasks = vi.fn(async (next) => { document = next as typeof document; return true; });
-    const actions = createProjectActions(options);
-    expect(await actions.linkTaskPlan("task-1", ".pi/plans/owned.md")).toBe(false);
-    expect(await actions.linkTaskPlan("task-1", "docs/x.md")).toBe(false);
-    expect(await actions.linkTaskPlan("task-2", ".pi/plans/free.md")).toBe(false);
-    expect(options.saveProjectTasks).not.toHaveBeenCalled();
-    expect(await actions.linkTaskPlan("task-1", ".pi/plans/free.md")).toBe(true);
-    expect(document.tasks[0]).toMatchObject({ links: [".pi/plans/free.md"] });
-  });
-
   it("falls back to the task prompt when the linked plan file is missing", async () => {
     const { options, appendUserMessage } = reviewHarness();
     const linked = { ...task, links: [".pi/plans/gone.md"] };

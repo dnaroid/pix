@@ -5,7 +5,7 @@
   import { createProjectExplorerNameEditor } from "./project-explorer-name-editor.svelte";
   import { invoke, isTauri } from "@tauri-apps/api/core";
   import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
-  import { confirmDesktopAction } from "../lib/confirm-action";
+  import { confirmDesktopDeletion } from "../lib/confirm-deletion";
   import {
     canPasteProjectEntry,
     createProjectEntryClipboardReader,
@@ -623,7 +623,7 @@
     menuController.close();
     const kind = entry.kind === "directory" ? "folder" : "file";
     const requestWorkspace = workspace;
-    if (!await confirmDesktopAction(`Delete ${kind} “${entry.name}”?\n\nThis cannot be undone.`, {
+    if (!await confirmDesktopDeletion(`Delete ${kind} “${entry.name}”?\n\nThis cannot be undone.`, {
       title: `Delete ${kind}?`, okLabel: "Delete",
     })) return;
     if (workspace !== requestWorkspace || !canMutate(entry)) return;

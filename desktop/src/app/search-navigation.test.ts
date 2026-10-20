@@ -14,12 +14,24 @@ function options(): SearchNavigationOptions {
   return {
     workspace: () => "/project", connection: () => "connection", activeSession: () => "session",
     openSetting: vi.fn(async () => {}), loadSession: vi.fn(async () => {}), activateSession: vi.fn(),
-    taskExists: vi.fn(async () => true), openTask: vi.fn(async () => {}),
+    taskExists: vi.fn(async () => true), openTask: vi.fn(async () => {}), openPlan: vi.fn(async () => {}),
     hydrate: vi.fn(async () => {}), fileExists: vi.fn(async () => true), openFile: vi.fn(async () => {}),
     openCommit: vi.fn(async () => {}),
   };
 }
 describe("exact search navigation", () => {
+  it("opens a plan hit from the Tasks source as a plan preview, not a task", async () => {
+    const plan: SearchHit = { kind: "tasks", id: "tasks:plan:.pi/plans/a.md", taskId: "plan:.pi/plans/a.md",
+      planPath: ".pi/plans/a.md", title: "a", snippet: "", score: 1 };
+    const api = options();
+    await createSearchNavigation(api).open(plan);
+    expect(api.fileExists).toHaveBeenCalledExactlyOnceWith(".pi/plans/a.md");
+    expect(api.openPlan).toHaveBeenCalledExactlyOnceWith(".pi/plans/a.md");
+    expect(api.taskExists).not.toHaveBeenCalled();
+    const gone = options();
+    gone.fileExists = vi.fn(async () => false);
+    await expect(createSearchNavigation(gone).open(plan)).rejects.toThrow("This plan is no longer available.");
+  });
   it("opens an exact commit diff instead of treating commit clicks as inert metadata", async () => {
     const api = options();
     await createSearchNavigation(api).open(commit);

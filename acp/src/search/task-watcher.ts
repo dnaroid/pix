@@ -10,6 +10,8 @@ export const watchTaskChanges: TaskChangeWatcher = (cwd, changed, failed) => {
   let closed = false;
   let root: FSWatcher | undefined;
   let tasks: FSWatcher | undefined;
+  let plans: FSWatcher | undefined;
+  let planRevision = 0;
   let revision = 0;
   let fileRevision = 0;
   const files = new Map<string, { watcher: FSWatcher; identity: string }>();
@@ -44,9 +46,27 @@ export const watchTaskChanges: TaskChangeWatcher = (cwd, changed, failed) => {
     // new inode watch. Re-read once after installation closes that window.
     if (rebound && !closed && own === fileRevision) changed();
   };
+  // Saved plans share the task search source; watch .pi/plans recursively.
+  const attachPlans = async () => {
+    const own = ++planRevision;
+    plans?.close(); plans = undefined;
+    try {
+      const path = join(cwd, ".pi", "plans");
+      const directory = await lstat(path);
+      if (closed || own !== planRevision) return;
+      if (!directory.isDirectory() || directory.isSymbolicLink()) return;
+      plans = watch(path, { recursive: true }, () => changed());
+      plans.on("error", error => { if (!closed) failed(error); });
+      // Close the race between creating the directory and installing the watch.
+      changed();
+    } catch (error) {
+      if (!closed && own === planRevision && (error as NodeJS.ErrnoException).code !== "ENOENT") failed(error);
+    }
+  };
   const attach = async () => {
     const own = ++revision;
     tasks?.close(); tasks = undefined;
+    planRevision++; plans?.close(); plans = undefined;
     closeFiles();
     try {
       const path = join(cwd, ".pi");
@@ -55,9 +75,11 @@ export const watchTaskChanges: TaskChangeWatcher = (cwd, changed, failed) => {
       if (!directory.isDirectory() || directory.isSymbolicLink()) throw new Error("Unsafe task directory");
       tasks = watch(path, (_event, filename) => {
         if (!filename || /^tasks\.sqlite(?:-(?:wal|journal))?$/.test(String(filename))) { changed(); void attachFiles(); }
+        if (!filename || String(filename) === "plans") { changed(); void attachPlans(); }
       });
       tasks.on("error", error => { if (!closed) failed(error); });
       void attachFiles();
+      void attachPlans();
       // Close the race between the root event and installing the child watch.
       changed();
     } catch (error) {
@@ -71,5 +93,5 @@ export const watchTaskChanges: TaskChangeWatcher = (cwd, changed, failed) => {
     root.on("error", error => { if (!closed) failed(error); });
     void attach();
   } catch (error) { failed(error); }
-  return () => { closed = true; revision++; root?.close(); tasks?.close(); closeFiles(); };
+  return () => { closed = true; revision++; planRevision++; root?.close(); tasks?.close(); plans?.close(); closeFiles(); };
 };

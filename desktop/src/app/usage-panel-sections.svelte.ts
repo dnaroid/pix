@@ -1,6 +1,12 @@
 import { USAGE_SECTION_IDS, usageCollapsedSections, usageProviderOrder, workspaceConfigWithUsageProviderOrder, workspaceConfigWithUsageSection, type UsageSectionId } from "../lib/usage-panel-sections";
 import { pendingWorkspaceConfigSaves, persistWorkspaceConfigEdit, readWorkspaceConfig, type WorkspaceConfigEdit } from "./workspace-config-persistence";
 
+type UsagePanelSectionsSnapshot = { collapsed: ReadonlySet<string>; providerOrder: readonly string[] };
+/** Last known state per project, so a remounted panel renders immediately and re-reads disk in the background. */
+const sectionsCache = new Map<string, UsagePanelSectionsSnapshot>();
+
+export function clearUsagePanelSectionsCache(): void { sectionsCache.clear(); }
+
 export function createUsagePanelSections(reportError: (error: unknown, workspace: string) => void) {
   let collapsed = $state<ReadonlySet<string>>(new Set(USAGE_SECTION_IDS));
   let providerOrder = $state<readonly string[]>([]);
@@ -15,9 +21,10 @@ export function createUsagePanelSections(reportError: (error: unknown, workspace
     if (nextWorkspace === workspace && ready) return;
     const owner = ++generation;
     workspace = nextWorkspace;
-    ready = false;
-    collapsed = new Set(USAGE_SECTION_IDS);
-    providerOrder = [];
+    const cached = nextWorkspace ? sectionsCache.get(nextWorkspace) : undefined;
+    ready = cached !== undefined;
+    collapsed = cached?.collapsed ?? new Set(USAGE_SECTION_IDS);
+    providerOrder = cached?.providerOrder ?? [];
     touched = new Map();
     if (!workspace) return;
     try {
@@ -33,9 +40,10 @@ export function createUsagePanelSections(reportError: (error: unknown, workspace
         else next.add(id);
       }
       collapsed = next;
+      remember();
     } catch (error) {
       if (!disposed && owner === generation) {
-        collapsed = new Set([...touched].filter(([, open]) => !open).map(([id]) => id));
+        if (!cached) collapsed = new Set([...touched].filter(([, open]) => !open).map(([id]) => id));
         reportError(error, nextWorkspace);
       }
     } finally {
@@ -50,6 +58,7 @@ export function createUsagePanelSections(reportError: (error: unknown, workspace
     else next.add(id);
     collapsed = next;
     touched.set(id, open);
+    if (ready) remember();
     return persist(workspace, (source) => workspaceConfigWithUsageSection(source, id, open));
   }
 
@@ -58,7 +67,12 @@ export function createUsagePanelSections(reportError: (error: unknown, workspace
     const next = [...new Set(order)];
     if (next.length === providerOrder.length && next.every((id, index) => id === providerOrder[index])) return Promise.resolve();
     providerOrder = next;
+    remember();
     return persist(workspace, (source) => workspaceConfigWithUsageProviderOrder(source, next));
+  }
+
+  function remember(): void {
+    if (workspace) sectionsCache.set(workspace, { collapsed, providerOrder });
   }
 
   function persist(target: string, edit: WorkspaceConfigEdit): Promise<void> {

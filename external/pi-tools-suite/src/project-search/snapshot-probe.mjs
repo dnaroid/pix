@@ -13,7 +13,7 @@ import { readSessionIndexRevision } from "./session-index-revision.mjs";
 import { semanticConfigurationPath, repositoryEmbeddingSettings } from "./native-embedding-provider.mjs";
 import { readSourcePolicy } from "./source-policy.mjs";
 import { sourcePath, sourceDirectories } from "./source-work.mjs";
-import { taskSnapshot } from "./task-snapshot.mjs";
+import { taskSourceRevision } from "./task-snapshot.mjs";
 import { readRepositorySnapshot, repositoryManifest } from "./repository-snapshot.mjs";
 
 const SOURCES = ["code", "knowledge", "settings", "sessions", "tasks", "commits"];
@@ -136,7 +136,7 @@ export async function probeSnapshots(root, request, signal = AbortSignal.timeout
       } else if (source === "settings") {
         if (!request.settingsDigest) throw new Error("Catalogue unknown");
         revision = request.settingsDigest;
-      } else if (source === "tasks") revision = await taskSnapshot(path.join(root, ".pi/tasks.sqlite"), signal);
+      } else if (source === "tasks") revision = await taskSourceRevision(root, signal);
       else if (source === "sessions") revision = request.sessionSnapshot ?? await sessionStamp(root, signal);
       else revision = await commitStamp(root, signal);
       // Read between the two store fences: a concurrent writer invalidates the comparison.

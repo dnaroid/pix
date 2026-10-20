@@ -121,6 +121,9 @@ export function buildSearchSourceRows(
     if (local === "ready") {
       if (empty) localSummary = "0 items";
       else if (entityCount !== undefined) localSummary = `${n(entityCount)} ${entityUnit}`;
+      // Saved plans share the task store; show them next to tasks, not as extra tasks.
+      const plans = id === "tasks" ? history?.counts.taskPlans ?? 0 : 0;
+      if (localSummary && plans > 0) localSummary += ` · ${n(plans)} plan${plans === 1 ? "" : "s"}`;
     }
     const sem = semanticFor(history, consent, vectorCount, true);
     const semanticActive = id !== "commits" && activity?.indexingSources?.[id] === true;

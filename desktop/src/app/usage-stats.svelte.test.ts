@@ -192,3 +192,22 @@ describe("usage stats store", () => {
     expect(calls).toHaveLength(2);
   });
 });
+
+describe("usage stats remount cache", () => {
+  it("renders the last snapshots immediately in a remounted store for the same connection and project", async () => {
+    const { client, calls } = fakeClient();
+    const options = { client: () => client, workspace: () => "/w/cache", reportError: () => {} };
+    const first = createUsageStatsStore(options);
+    const opening = first.open();
+    calls[0]!.resolve({ snapshots: [snap("pix-sessions", 7)] });
+    await opening;
+    first.dispose();
+    const second = createUsageStatsStore(options);
+    expect(second.snapshot("pix-sessions")?.fetchedAtMs).toBe(7);
+    void second.open();
+    expect(second.snapshot("pix-sessions")?.fetchedAtMs).toBe(7);
+    expect(calls).toHaveLength(2);
+    const other = createUsageStatsStore({ ...options, workspace: () => "/w/other" });
+    expect(other.snapshots.size).toBe(0);
+  });
+});

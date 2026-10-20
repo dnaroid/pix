@@ -78,6 +78,7 @@ const REASON_ACTIONS: Record<SidebarIndicatorReasonId, readonly SidebarIndicator
 export function sidebarIndicatorActionGroups(
   reasons: readonly SidebarIndicatorReason[] = [],
   enabled: Partial<Record<SidebarIndicatorActionId, boolean>> = {},
+  gitRemotes: readonly string[] = [],
 ): readonly SidebarIndicatorActionGroup[] {
   const groups = new Map<SidebarIndicatorReasonId, SidebarIndicatorActionGroup>();
   for (const reason of reasons) {
@@ -86,7 +87,9 @@ export function sidebarIndicatorActionGroups(
       id: reason.id,
       reason: previous && previous.reason !== reason.reason
         ? `${previous.reason}; ${reason.reason}` : reason.reason,
-      actions: REASON_ACTIONS[reason.id].map((id) => ({ id, label: ACTIONS[id], disabled: enabled[id] === false })),
+      actions: REASON_ACTIONS[reason.id]
+        .filter((id) => gitRemotes.length > 0 || (id !== "git.push" && id !== "git.commit-push"))
+        .map((id) => ({ id, label: ACTIONS[id], disabled: enabled[id] === false })),
     });
   }
   return [...groups.values()];

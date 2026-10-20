@@ -8,7 +8,6 @@ import { planOwners } from "../lib/project-task-plans";
 import { projectTaskDisplayLabel } from "../lib/project-tasks";
 import type { SubagentSessionNavigation } from "./desktop-subagent-navigation";
 import { createSessionStepNavigation } from "./session-step-navigation";
-import { buildSessionStepRerunPrompt } from "../lib/session-step-prompt";
 
 export function createDesktopShellViewModelServices(
   options: DesktopViewModelServicesOptions,
@@ -82,13 +81,7 @@ export function createDesktopShellViewModelServices(
     },
     resumePlan: (path) => void options.projectActions.actions.resumePlan(path),
     canJumpToSteps: () => options.state.runtimeReady && !options.sessions.history.loading,
-    // Same idle/ready gate as clearing steps: no running prompt, mutation or history load.
-    canRerunSteps: () => Boolean(options.state.sessionId && todoActions.canClear(options.state.sessionId)),
     jumpToStep: (sessionId, task) => void stepNavigation.jumpToStep(sessionId, task),
-    rerunStep: (sessionId, task) => {
-      options.promptActions.submit.submitStepRerun(sessionId, buildSessionStepRerunPrompt(task))
-        .catch((error: unknown) => options.errors.report(error));
-    },
     planRunDisabled: () => !(options.status() === "ready" && options.clientAvailable() && !options.workspaceOpening?.())
       || !options.presentation.canUseSession || options.presentation.sessionMutationRunning
       || options.projectActions.actions.actionId !== null,

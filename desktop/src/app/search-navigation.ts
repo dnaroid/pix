@@ -7,6 +7,7 @@ export interface SearchNavigationOptions {
   openSetting: (section: string, fieldId: string) => Promise<void>;
   taskExists: (taskId: string) => Promise<boolean>;
   openTask: (taskId: string, isCurrent: () => boolean) => Promise<void>;
+  openPlan: (path: string) => Promise<void>;
   loadSession: (id: string) => Promise<void>;
   activateSession: (id: string) => void;
   hydrate: (id: string) => Promise<void>;
@@ -34,6 +35,11 @@ export function createSearchNavigation(options: SearchNavigationOptions) {
       const sessionCurrent = () => current() && options.activeSession() === hit.sessionId;
       await options.hydrate(hit.sessionId);
       if (!sessionCurrent()) return;
+    } else if (hit.kind === "tasks" && hit.planPath) {
+      const exists = await options.fileExists(hit.planPath);
+      if (!current()) return;
+      if (!exists) throw new Error("This plan is no longer available.");
+      await options.openPlan(hit.planPath);
     } else if (hit.kind === "tasks") {
       const exists = await options.taskExists(hit.taskId);
       if (!current()) return;

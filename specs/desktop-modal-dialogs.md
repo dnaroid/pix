@@ -21,8 +21,10 @@ Keep true modal UI limited to bounded decisions, configuration and search, with 
 
 ## Behavior
 
-- Destructive-action confirmations use the shared asynchronous `confirmDesktopAction` helper. In Tauri, the supported `@tauri-apps/plugin-dialog` API invokes the native `message` command (authorized by `dialog:allow-message`); the plugin's injected `window.confirm` shim is asynchronous and invokes a removed `confirm` command, so no native action may rely on its truthiness. Browser previews may use the browser's synchronous `window.confirm` only when its return value is exactly `true`.
-- A missing/rejected native dialog fails closed and records a handled diagnostic. Destructive operations must await consent before reserving/mutating state, recheck workspace/operation ownership after asynchronous consent, and never treat a Promise as approval. Running-conversation tab closure keeps its separate native dialog and user-visible error path described in `desktop-close-warning.md`.
+- Deletion confirmations (tasks, conversations, files/folders, plans, saved launch commands, diagnostic logs and project scratch cleanup) share `DeleteConfirmationDialog.svelte`: a Pix-styled native HTML `<dialog>`, Cancel first and initially focused, destructive action second, Escape cancels, and focus restores on dismissal. Action-specific titles, messages and destructive labels retain the operation's scope and consequences. Backdrop clicks do not approve or dismiss deletion.
+- Imperative deletion callers await `confirmDesktopDeletion`, presented by the window's `DeleteConfirmationHost`. Overlapping requests fail closed instead of queuing stale decisions; host teardown cancels pending consent, and a missing host or modal-open failure cancels with a handled diagnostic. Task and log UI use the same dialog component directly with their existing state owners and busy guards.
+- Non-deletion confirmations (such as discarding edits) retain `confirmDesktopAction`. In Tauri it uses the supported `@tauri-apps/plugin-dialog` API rather than the legacy injected `window.confirm` bridge; browser previews accept only a synchronous result exactly equal to `true`. A missing/rejected native dialog fails closed and records a handled diagnostic.
+- Destructive operations must await consent before mutating state, recheck workspace/operation ownership after asynchronous consent, and never treat a Promise as approval. Running-conversation tab closure keeps its separate native dialog and user-visible error path described in `desktop-close-warning.md`.
 
 - File/media Preview and Git Diff are explicitly not modal dialogs; they are UI-only tabs in the unified titlebar workbench governed by `specs/desktop-workbench-tabs.md`.
 - General form elicitation, Project settings, Command Picker/Palette and [Universal search](desktop-universal-search.md) use native HTML `<dialog>` with `showModal()` rather than a hand-built fullscreen `role=dialog` overlay. Model + Thinking is instead a [nonmodal status-bar popup](desktop-model-picker-popup.md), per [decision 0049](../docs/decisions/0049-nonmodal-model-picker.md).
@@ -44,6 +46,10 @@ Keep true modal UI limited to bounded decisions, configuration and search, with 
 ## Implementation
 
 - `desktop/src/lib/modal-dialog.ts`
+- `desktop/src/lib/confirm-deletion.ts`
+- `desktop/src/components/DeleteConfirmationDialog.svelte`
+- `desktop/src/components/DeleteConfirmationHost.svelte`
+- `desktop/src/App.svelte` (window-level host)
 - `desktop/src/components/ElicitationDialog.svelte`
 - `desktop/src/components/ProjectSettingsDialog.svelte`
 - `desktop/src/components/CommandPicker.svelte`
@@ -52,6 +58,8 @@ Keep true modal UI limited to bounded decisions, configuration and search, with 
 ## Tests
 
 - `desktop/src/lib/modal-dialog.test.ts`
+- `desktop/src/lib/confirm-deletion.test.ts`
+- `desktop/src/components/DeleteConfirmationDialog.test.ts`
 - `desktop/src/components/DesktopModalDialogs.test.ts`
 
 ## Verification

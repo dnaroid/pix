@@ -25,25 +25,53 @@ export const MAX_ROTATION_DELAY_SECONDS = 300;
 const UNKNOWN_RESET_COOLDOWN_MS = 2 * 60_000;
 const MAX_RESET_WAIT_MS = 8 * 24 * 60 * 60_000;
 
-/** The provider reads only user-owned config. A workspace cannot insert OAuth profiles. */
-export function loadClaudeAccountRotationConfig(
-  filePath = join(process.env.HOME?.trim() || homedir(), ".config", "pi", "pi-tools-suite.jsonc"),
-  home = process.env.HOME?.trim() || homedir(),
-): ClaudeAccountRotationConfig {
+function defaultUserConfigPath(): string {
+  return join(process.env.HOME?.trim() || homedir(), ".config", "pi", "pi-tools-suite.jsonc");
+}
+
+/** Reads `claudeCodeProvider` from the user-owned file; undefined when the file is absent. */
+function readUserProviderSection(filePath: string, label: string): unknown {
   let raw: string;
   try {
     if (statSync(filePath).size > MAX_CONFIG_BYTES) throw new Error("config exceeds 1 MiB");
     raw = readFileSync(filePath, "utf8");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { enabled: false, accounts: [] };
-    throw new Error(`Claude account rotation: cannot read user config: ${String(error)}`);
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw new Error(`${label}: cannot read user config: ${String(error)}`);
   }
   const errors: ParseError[] = [];
   const parsed: unknown = parseJsonc(raw, errors, { allowTrailingComma: true });
   if (errors.length !== 0 || !parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("Claude account rotation: invalid user JSONC configuration");
+    throw new Error(`${label}: invalid user JSONC configuration`);
   }
-  return parseClaudeAccountRotationConfig((parsed as Record<string, unknown>).claudeCodeProvider, home);
+  return (parsed as Record<string, unknown>).claudeCodeProvider;
+}
+
+/** The provider reads only user-owned config. A workspace cannot insert OAuth profiles. */
+export function loadClaudeAccountRotationConfig(
+  filePath = defaultUserConfigPath(),
+  home = process.env.HOME?.trim() || homedir(),
+): ClaudeAccountRotationConfig {
+  return parseClaudeAccountRotationConfig(readUserProviderSection(filePath, "Claude account rotation"), home);
+}
+
+/** Experimental transcript settings, read per request from the same user-owned section. */
+export interface ClaudeTranscriptConfig {
+  pruneHistoricalThinking: boolean;
+}
+
+export function parseClaudeTranscriptConfig(raw: unknown): ClaudeTranscriptConfig {
+  if (raw === undefined) return { pruneHistoricalThinking: false };
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("claudeCodeProvider must be an object");
+  const value = (raw as Record<string, unknown>).pruneHistoricalThinking;
+  if (value !== undefined && typeof value !== "boolean") {
+    throw new Error("claudeCodeProvider.pruneHistoricalThinking must be a boolean");
+  }
+  return { pruneHistoricalThinking: value === true };
+}
+
+export function loadClaudeTranscriptConfig(filePath = defaultUserConfigPath()): ClaudeTranscriptConfig {
+  return parseClaudeTranscriptConfig(readUserProviderSection(filePath, "Claude transcript settings"));
 }
 
 export function parseClaudeAccountRotationConfig(raw: unknown, home = homedir()): ClaudeAccountRotationConfig {

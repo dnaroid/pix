@@ -263,7 +263,7 @@ describe("renderMarkdown", () => {
   });
 
   it("embeds audio for both link syntaxes with safe captions and local resolvers", () => {
-    for (const extension of ["aac", "aif", "aiff", "flac", "m4a", "mp3", "oga", "ogg", "opus", "wav"]) {
+    for (const extension of ["aac", "aif", "aiff", "flac", "m4a", "m4b", "mp3", "mpga", "oga", "ogg", "opus", "wav", "wave", "weba"]) {
       for (const prefix of ["", "!"]) {
         const project = renderMarkdown(`${prefix}[Track](music/track.${extension.toUpperCase()})`);
         expect(project).toContain('data-project-media="audio"');
