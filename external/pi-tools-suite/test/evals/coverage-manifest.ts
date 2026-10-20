@@ -32,6 +32,7 @@ export const EXTENSION_EVAL_COVERAGE: Record<string, EvalCoverageEntry> = {
 	"prompt-commands": { deterministic: ["test/evals/extension-contracts.test.ts"] },
 	"credential-firewall": { deterministic: ["test/credential-firewall.test.ts"] },
 	"codex-reasoning-fix": { deterministic: ["test/codex-reasoning-fix.test.ts"] },
+	"historical-thinking-prune": { deterministic: ["test/historical-thinking-prune.test.ts"] },
 	"claude-code-provider": {
 		deterministic: [
 			"test/claude-code-provider/image-count.test.ts",
