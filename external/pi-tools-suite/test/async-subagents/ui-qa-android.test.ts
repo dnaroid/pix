@@ -16,6 +16,7 @@ const lookup = process.platform === "win32" ? ["where.exe", "node.exe"] : ["whic
 const node = spawnSync(lookup[0], [lookup[1]], { encoding: "utf8" }).stdout.trim().split(/\r?\n/)[0];
 const dirs: string[] = [];
 let server: ChildProcess | undefined;
+let windowsAdbBinary: Buffer | undefined;
 setDefaultTimeout(30_000);
 
 beforeAll(async () => {
@@ -49,16 +50,17 @@ function fixture(config = {}) {
 	const project = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "android-qa-")));
 	dirs.push(project);
 	const agentDir = prepareUiQaWorkspace(project, "run", "qa");
-	const adbPath = path.join(project, "adb");
+	const adbPath = path.join(project, process.platform === "win32" ? "adb.exe" : "adb");
 	const log = path.join(project, "argv.jsonl");
 	const state = path.join(project, "state.json");
 	fs.writeFileSync(state, JSON.stringify({ calls: 0, screen: "Home", ...config }));
 	// Fixed fixture paths are serialized, never composed into a shell command.
-	fs.writeFileSync(adbPath, `#!${node}
+	const fakeAdbSource = `#!${node}
 const fs = require('node:fs');
-const statePath = ${JSON.stringify(state)};
-const log = ${JSON.stringify(log)};
-const a = process.argv.slice(2);
+const path = require('node:path');
+const statePath = path.join(process.cwd(), 'state.json');
+const log = path.join(process.cwd(), 'argv.jsonl');
+const a = process.argv.slice(process.platform === 'win32' ? 1 : 2);
 fs.appendFileSync(log, JSON.stringify(a) + '\\n');
 const s = JSON.parse(fs.readFileSync(statePath));
 s.calls++;
@@ -110,7 +112,16 @@ else { process.stderr.write('unexpected fixture command: ' + cmd); process.exit(
 fs.writeFileSync(statePath, JSON.stringify(s));
 process.stdout.write(out);
 }
-`, { mode: 0o700 });
+`;
+	if (process.platform === "win32") {
+		if (!windowsAdbBinary) {
+			const sourcePath = path.join(project, "fake-adb.cjs");
+			fs.writeFileSync(sourcePath, fakeAdbSource);
+			const compiled = spawnSync("bun", ["build", "--compile", sourcePath, "--outfile", adbPath], { encoding: "utf8", timeout: 60_000 });
+			if (compiled.status !== 0) throw new Error(`Windows fake ADB compilation failed: ${compiled.stderr || compiled.error}`);
+			windowsAdbBinary = fs.readFileSync(adbPath);
+		} else fs.writeFileSync(adbPath, windowsAdbBinary);
+	} else fs.writeFileSync(adbPath, fakeAdbSource, { mode: 0o700 });
 	const target = { adbPath, serial: "emulator-5580", avdName: "test_avd", package: "your.app" };
 	function run(steps: unknown[], options: { target?: unknown; command?: string; timeout?: number } = {}) {
 		const flow = path.join(agentDir, "ui-qa/flows", `flow-${Date.now()}-${Math.random()}.jsonc`);
