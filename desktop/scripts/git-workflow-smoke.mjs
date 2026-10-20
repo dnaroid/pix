@@ -106,8 +106,9 @@ try {
   assert.deepEqual(await calls(), ["commit:manual commit"]);
   await reset("no-remote");
   await message.fill("local only");
-  assert(await panel.getByRole("button", { name: "Commit & push", exact: true }).isDisabled());
+  assert.equal(await panel.getByRole("button", { name: "Commit & push", exact: true }).count(), 0, "no push action without a remote");
   assert(!(await panel.getByRole("button", { name: "Commit", exact: true }).isDisabled()));
+  assert.equal(await panel.getByText("Local repository · no remote", { exact: true }).count(), 1);
   await reset("conflict");
   await message.fill("must not commit conflicts");
   assert(await panel.getByRole("button", { name: "Commit", exact: true }).isDisabled());

@@ -28,6 +28,8 @@
   const staged = $derived(stagedGitChanges(snapshot).length);
   const conflicts = $derived(snapshot.changes.some((change) => change.conflicted));
   const pushBlocked = $derived(gitPushBlockedReason(snapshot));
+  // Without any remote, pushing is not an option at all: show a single local Commit action.
+  const noRemote = $derived(snapshot.remotes.length === 0);
   const locked = $derived(busy || submitting || generating || llmActionId !== null);
   const canCommit = $derived(staged > 0 && Boolean(message.trim()) && !locked && !conflicts);
   const canPrepare = $derived(gitAssistantReady && !locked && snapshot.changes.length > 0 && !conflicts);
@@ -124,16 +126,19 @@
   {#if draftNotice}<p class="text-xs leading-4 text-tool-warning" role="status">{draftNotice}</p>{/if}
   <div class="flex gap-1.5">
     <button class={["inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md border px-2 text-xs font-medium focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40", pushBlocked ? "border-transparent bg-primary text-primary-foreground hover:brightness-110" : "border-border bg-panel-strong text-foreground hover:bg-panel-hover"]}
-      type="button" disabled={!canCommit} title={`${commitHint}. Ctrl/Cmd+Shift+Enter`} onclick={() => void commit(false)}>
+      type="button" disabled={!canCommit} title={`${commitHint}. ${noRemote ? "Ctrl/Cmd+Enter" : "Ctrl/Cmd+Shift+Enter"}`} onclick={() => void commit(false)}>
       <GitCommitHorizontal class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />Commit
     </button>
+    {#if !noRemote}
     <button class="inline-flex h-8 flex-[1.6] items-center justify-center gap-1.5 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground hover:brightness-110 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
       type="button" disabled={!canCommit || Boolean(pushBlocked)} title={pushBlocked ?? `${commitHint}, then push. Ctrl/Cmd+Enter`} onclick={() => void commit(true)}>
       {#if submitting}<RefreshCw class="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />{:else}<Upload class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />{/if}
       {submitting ? actionId === "push" ? "Pushing…" : "Committing…" : "Commit & push"}
     </button>
+    {/if}
   </div>
   {#if !gitAssistantReady}<p class="text-xs leading-4 text-muted-foreground">AI actions need a ready connection. Manual Git actions remain available.</p>
+  {:else if noRemote}<p class="text-xs leading-4 text-muted-foreground">No remote configured — commits stay local.</p>
   {:else if pushBlocked}<p class="text-xs leading-4 text-muted-foreground">{pushBlocked}. You can commit locally.</p>
   {:else if staged === 0}<p class="text-xs leading-4 text-muted-foreground">Choose files above, or explicitly stage all when generating.</p>{/if}
 </section>

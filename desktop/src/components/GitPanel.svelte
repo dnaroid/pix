@@ -45,6 +45,9 @@
   const busy = $derived(actionId !== null || llmActionId !== null || workflow.resolveRunning);
   const pushBlocked = $derived(gitPushBlockedReason(snapshot));
   const updateBlocked = $derived(gitUpdateBlockedReason(snapshot));
+  const noRemote = $derived(Boolean(snapshot && snapshot.remotes.length === 0));
+  const upstreamLabel = $derived(snapshot?.upstream ?? (noRemote ? "Local repository · no remote" : "Local branch · not published"));
+  const upstreamTitle = $derived(snapshot?.upstream ?? (noRemote ? "No Git remote configured. Commits stay local." : "Branch has no upstream yet. Push publishes it."));
   const diverged = $derived(Boolean(snapshot && snapshot.ahead > 0 && snapshot.behind > 0));
   const branchOptions = $derived((snapshot?.branches ?? []).map((branch) => ({ value: branch.name, label: branch.name })));
   const tool = "inline-flex h-7 min-w-7 shrink-0 items-center justify-center gap-1 rounded-sm px-1.5 text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:opacity-40";
@@ -124,7 +127,7 @@
     </div>
     {#if snapshot}
       <div class="flex h-7 min-w-0 items-center gap-2 border-t border-sidebar-border/60 px-2 text-xs text-muted-foreground">
-        <span class="min-w-0 flex-1 truncate font-mono" title={snapshot.upstream ?? "No upstream configured"}>{snapshot.upstream ?? "Local branch · no upstream"}</span>
+        <span class="min-w-0 flex-1 truncate font-mono" title={upstreamTitle}>{upstreamLabel}</span>
         {#if snapshot.head}
           <button class={["inline-flex h-5 shrink-0 items-center gap-1 rounded-sm px-1 hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40", ciStatusClass(ciStatus)]}
             type="button" disabled={ci.loading} title={ci.snapshot?.error ?? ci.error ?? `CI status for ${snapshot.head.slice(0, 8)} · click to refresh`} onclick={ci.onRefresh}>
@@ -177,7 +180,11 @@
         </section>
       {/if}
       {#if snapshot.changes.length === 0}
-        <div class="flex items-start gap-2 px-3 py-5 text-muted-foreground"><Check class="mt-0.5 h-4 w-4 shrink-0 text-tool-success" aria-hidden="true" /><div><p class="text-xs font-medium text-foreground">Working tree clean</p><p class="mt-1 text-xs">{snapshot.ahead ? "Local commits are ready to push." : "No uncommitted changes."}</p></div></div>
+        <p class="flex min-w-0 items-center gap-1.5 border-b border-sidebar-border/60 px-3 py-1.5 text-xs text-muted-foreground" role="status">
+          <Check class="h-3.5 w-3.5 shrink-0 text-tool-success" aria-hidden="true" />
+          <span class="shrink-0 font-medium text-foreground">Working tree clean</span>
+          {#if snapshot.ahead}<span class="min-w-0 truncate">· {snapshot.ahead} local commit{snapshot.ahead === 1 ? "" : "s"}{pushBlocked ? ", not pushed" : " to push"}</span>{/if}
+        </p>
       {:else}
         <div class="flex gap-1 border-b border-sidebar-border/60 px-2 py-2">
           <input type="search" class="h-7 min-w-0 flex-1 rounded-md border border-input bg-panel-strong px-2 text-xs outline-none placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring/30" aria-label="Filter changed files" placeholder="Filter changed files…" bind:value={query} />

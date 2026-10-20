@@ -37,7 +37,7 @@
       conflicted: mode === "conflict" && index === 0,
       stagedAdditions: 12, stagedDeletions: 3, unstagedAdditions: 42, unstagedDeletions: 7,
     }));
-    return { branch: "feature/git-workflows", detached: false, head: "abc", upstream: "origin/feature/git-workflows", ahead: mode === "clean" ? 1 : 0, behind: 0,
+    return { branch: "feature/git-workflows", detached: false, head: "abc", upstream: mode === "no-remote" ? undefined : "origin/feature/git-workflows", ahead: mode === "clean" ? 1 : 0, behind: 0,
       branches: [{ name: "feature/git-workflows", current: true }, { name: "main", current: false }], remotes: mode === "no-remote" ? [] : ["origin"], changes: mode === "clean" ? [] : changes };
   }
 
@@ -88,7 +88,7 @@
     if (push) calls.push("push");
     snapshot = { ...snapshot, ahead: push && !pushFails ? 0 : 1, changes: snapshot.changes.filter((change) => !change.staged) };
     if (push && pushFails) error = "Commit created, but push failed. Retry Push; do not commit again.";
-    else notice = push ? "Committed and pushed successfully." : "Commit created locally. Ready to push.";
+    else notice = push ? "Committed and pushed successfully." : "Commit created locally.";
     return true;
   }
 
