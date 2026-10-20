@@ -25,6 +25,8 @@ export interface PiToolsSuiteConfig {
 	frontierModels: FrontierModelEntry[];
 	/** Economy mode: expensive frontier models are excluded from automatic sub-agent selection. */
 	economy: boolean;
+	/** Experimental: omit thinking of earlier turns from model requests (all providers). */
+	pruneHistoricalThinking: boolean;
 	resourceRegistry: ResourceRegistryConfig;
 }
 
@@ -48,6 +50,7 @@ type MutableConfig = {
 	lookupFallbackModels: string[];
 	frontierModels: FrontierModelEntry[];
 	economy: boolean;
+	pruneHistoricalThinking: boolean;
 	resourceRegistry: ResourceRegistryConfig;
 };
 type Env = Record<string, string | undefined>;
@@ -244,6 +247,7 @@ function mergeConfigLayer(config: MutableConfig, raw: Record<string, unknown>, k
 			: normalizeFrontierModels(raw.frontierModels) ?? config.frontierModels;
 	}
 	if (typeof raw.economy === "boolean") config.economy = raw.economy;
+	if (typeof raw.pruneHistoricalThinking === "boolean") config.pruneHistoricalThinking = raw.pruneHistoricalThinking;
 	mergeResourceRegistry(config, raw.resourceRegistry);
 
 	for (const key of DISABLED_LIST_KEYS) addDisabled(config, raw[key], knownModules);
@@ -293,6 +297,9 @@ function applyEnv(config: MutableConfig, env: Env, knownModules: ReadonlySet<str
 	const economy = boolFromEnv(env.PI_TOOLS_SUITE_ECONOMY);
 	if (economy !== undefined) config.economy = economy;
 
+	const pruneThinking = boolFromEnv(env.PI_TOOLS_SUITE_PRUNE_HISTORICAL_THINKING);
+	if (pruneThinking !== undefined) config.pruneHistoricalThinking = pruneThinking;
+
 	const todoThinking = boolFromEnv(env.PI_TOOLS_SUITE_TODO_THINKING);
 	if (todoThinking !== undefined) config.todoThinking = todoThinking;
 
@@ -320,6 +327,7 @@ export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: 
 		lookupFallbackModels: [],
 		frontierModels: defaultFrontierConfig().models,
 		economy: false,
+		pruneHistoricalThinking: false,
 		resourceRegistry: { branch: DEFAULT_RESOURCE_REGISTRY_BRANCH },
 	};
 	if (options.includeUserConfig !== false) {
@@ -347,6 +355,7 @@ export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: 
 		lookupFallbackModels: [...config.lookupFallbackModels],
 		frontierModels: config.frontierModels.map((entry) => ({ ...entry })),
 		economy: config.economy,
+		pruneHistoricalThinking: config.pruneHistoricalThinking,
 		resourceRegistry: { ...config.resourceRegistry },
 	};
 }

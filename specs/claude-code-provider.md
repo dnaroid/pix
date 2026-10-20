@@ -144,19 +144,11 @@ notice is emitted once for consecutive startup bindings of the same session.
 
 ### Experimental historical thinking pruning
 
-`claudeCodeProvider.pruneHistoricalThinking` (boolean, default `false`; Desktop
-toggle "Prune historical thinking (experimental)" under Claude settings) is read
-from the user-owned config on every request, so a change applies to the next
-turn. When enabled, the transcript serializer omits `thinking` blocks from
-assistant messages that precede the latest user message; thinking of the
-current turn's tool loop is kept. Blocks are still validated before omission,
-and an assistant message left empty is dropped while its tool calls, results
-and text stay. The rule is deterministic, so the replayed history prefix stays
-byte-stable within a turn and remains cacheable; the cache prefix changes only
-when a new user message moves the boundary. An invalid value fails the request
-like other malformed provider configuration. Request metrics record
-`prunedThinkingBlocks`. Offline replay of recent local sessions reduced the
-transcript by roughly 1–10%, depending on how much thinking a session carries.
+This transport has no provider-specific pruning setting. The suite-wide
+experimental `pruneHistoricalThinking` setting (module
+`historical-thinking-prune`, see `specs/historical-thinking-prune.md`) removes
+earlier-turn thinking in Pi's `context` event, before this serializer runs, so
+it applies to Claude Code like any other provider.
 
 ### Desktop sign-in recovery
 

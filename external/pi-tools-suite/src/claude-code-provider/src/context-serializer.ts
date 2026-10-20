@@ -134,29 +134,8 @@ function recordField(value: unknown, field: string): unknown {
  * tied to the current MCP catalog, while UI-only result details remain outside the
  * model transcript. See DESIGN.md for the maintained transport boundary.
  */
-export async function prepareRequest(
-  context: Context,
-  imageStore?: ImageStoreLease,
-  options: RequestPreparationOptions = {},
-): Promise<PreparedRequest> {
-  return prepareRequestWithLimits(context, {}, undefined, imageStore, options);
-}
-
-export interface RequestPreparationOptions {
-  /**
-   * Experimental: omit thinking blocks from assistant messages that precede the
-   * latest user message. Thinking of the current turn (its tool loop) is kept.
-   * The rule is deterministic, so an unchanged history prefix stays cacheable.
-   */
-  pruneHistoricalThinking?: boolean;
-}
-
-/** Index of the last user message, or -1. Thinking before it is historical. */
-function lastUserMessageIndex(messages: readonly unknown[]): number {
-  for (let index = messages.length - 1; index >= 0; index--) {
-    if ((messages[index] as { role?: unknown } | null)?.role === "user") return index;
-  }
-  return -1;
+export async function prepareRequest(context: Context, imageStore?: ImageStoreLease): Promise<PreparedRequest> {
+  return prepareRequestWithLimits(context, {}, undefined, imageStore);
 }
 
 /** Internal test seam; production callers use the frozen defaults above. */
@@ -165,7 +144,6 @@ export async function prepareRequestWithLimits(
   overrides: Partial<RequestPreparationLimits> = {},
   temporaryRoot?: string,
   imageStore?: ImageStoreLease,
-  options: RequestPreparationOptions = {},
 ): Promise<PreparedRequest> {
   const limits = { ...DEFAULT_REQUEST_PREPARATION_LIMITS, ...overrides };
   const directory = await createRuntimeDirectory("provider_request", { temporaryRoot });
@@ -272,26 +250,16 @@ export async function prepareRequestWithLimits(
     };
 
     const messages: unknown[] = [];
-    const historicalThinkingBoundary = options.pruneHistoricalThinking === true
-      ? lastUserMessageIndex(context.messages)
-      : -1;
-    let prunedThinkingBlocks = 0;
-    for (const [messageIndex, message] of context.messages.entries()) {
+    for (const message of context.messages) {
       if (!message || typeof message !== "object" || Array.isArray(message)) {
         throw new ClaudeCodeError("content_shape", "Pi context contained an invalid message");
       }
       if (message.role === "user") {
         messages.push({ role: "user", content: await serializeContent(message.content, "user") });
       } else if (message.role === "assistant") {
-        const serialized = await serializeContent(message.content, "assistant");
-        if (!Array.isArray(serialized)) {
+        const content = await serializeContent(message.content, "assistant");
+        if (!Array.isArray(content)) {
           throw new ClaudeCodeError("content_shape", "Pi assistant content must be an array of content blocks");
-        }
-        // Validation above still covers every block; only the replay omits it.
-        let content: unknown[] = serialized;
-        if (messageIndex < historicalThinkingBoundary) {
-          content = serialized.filter((block) => (block as { type?: unknown }).type !== "thinking");
-          prunedThinkingBlocks += serialized.length - content.length;
         }
         if (content.length > 0) messages.push({ role: "assistant", content });
       } else if (message.role === "toolResult") {
@@ -365,7 +333,6 @@ export async function prepareRequestWithLimits(
       catalogBytes,
       imageCount,
       imageBytes,
-      prunedThinkingBlocks,
     };
   } catch (error) {
     await rm(directory, { recursive: true, force: true });

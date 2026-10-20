@@ -80,6 +80,9 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   // Economy mode: no sub-agent role selects an "expensive" frontier model.
   // Also toggled by PI_TOOLS_SUITE_ECONOMY=1/0.
   "economy": false,
+  // Experimental: omit thinking of earlier turns from model requests for every
+  // provider. The session and transcript keep it. PI_TOOLS_SUITE_PRUNE_HISTORICAL_THINKING=1/0.
+  "pruneHistoricalThinking": false,
   // /brainstorm council. Without "models" the roster is the enabled frontierModels
   // (in order, max 6); set "models" to pin an explicit 2–6 model roster instead.
   // Unavailable models never substitute: a round needs "quorum" successful

@@ -2,10 +2,6 @@
 
 ## [Unreleased]
 
-### Added
-
-- Experimental `claudeCodeProvider.pruneHistoricalThinking` (default `false`, also a Desktop toggle under Claude settings): omits thinking blocks from assistant turns before the latest user message when replaying the transcript. Thinking of the current tool loop is kept, and the rule is deterministic, so the unchanged history prefix stays cacheable. Request metrics record `prunedThinkingBlocks`.
-
 ### Changed
 
 - Claude Code 2.1.300's `rate_limit_info.unifiedWindows` now updates the five-hour and weekly quota from each `rate_limit_event`, including `allowed` events, rather than waiting for OAuth polling. Invalid windows are ignored individually; these telemetry-only updates do not show user-facing warnings. Older CLI versions continue to use polling and warning/429 observations.

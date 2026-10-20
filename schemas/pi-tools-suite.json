@@ -234,6 +234,11 @@
       "type": "boolean",
       "description": "Economy mode: no sub-agent role selects a frontier model marked expensive. PI_TOOLS_SUITE_ECONOMY overrides it."
     },
+    "pruneHistoricalThinking": {
+      "type": "boolean",
+      "default": false,
+      "description": "Experimental. Omit thinking from assistant turns before the latest user turn in every model request, for all providers. Saves input tokens; the current tool loop keeps its thinking, and the session/transcript keep everything. Applies to the next request. PI_TOOLS_SUITE_PRUNE_HISTORICAL_THINKING overrides it."
+    },
     "brainstorm": {
       "type": "object",
       "properties": {
@@ -1332,11 +1337,6 @@
           "minimum": 0,
           "maximum": 300,
           "description": "Non-blocking pause (seconds) before trying another OAuth profile after an explicit subscription quota rejection. Defaults to 60; 0 skips the pause. Cancel stops waiting; the pause counts toward the request timeout."
-        },
-        "pruneHistoricalThinking": {
-          "type": "boolean",
-          "default": false,
-          "description": "Experimental. Omit thinking from assistant turns before the latest user message when replaying the transcript to Claude Code. Saves input tokens; thinking of the current tool loop is kept. Disabled by default; applies to the next request."
         },
         "accounts": {
           "type": "array",

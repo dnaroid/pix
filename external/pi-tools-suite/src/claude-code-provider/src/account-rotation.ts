@@ -55,24 +55,6 @@ export function loadClaudeAccountRotationConfig(
   return parseClaudeAccountRotationConfig(readUserProviderSection(filePath, "Claude account rotation"), home);
 }
 
-/** Experimental transcript settings, read per request from the same user-owned section. */
-export interface ClaudeTranscriptConfig {
-  pruneHistoricalThinking: boolean;
-}
-
-export function parseClaudeTranscriptConfig(raw: unknown): ClaudeTranscriptConfig {
-  if (raw === undefined) return { pruneHistoricalThinking: false };
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("claudeCodeProvider must be an object");
-  const value = (raw as Record<string, unknown>).pruneHistoricalThinking;
-  if (value !== undefined && typeof value !== "boolean") {
-    throw new Error("claudeCodeProvider.pruneHistoricalThinking must be a boolean");
-  }
-  return { pruneHistoricalThinking: value === true };
-}
-
-export function loadClaudeTranscriptConfig(filePath = defaultUserConfigPath()): ClaudeTranscriptConfig {
-  return parseClaudeTranscriptConfig(readUserProviderSection(filePath, "Claude transcript settings"));
-}
 
 export function parseClaudeAccountRotationConfig(raw: unknown, home = homedir()): ClaudeAccountRotationConfig {
   if (raw === undefined) return { enabled: false, accounts: [] };

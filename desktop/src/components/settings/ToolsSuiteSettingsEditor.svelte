@@ -246,9 +246,6 @@
     <SettingsFieldRow label="Pause before switching (seconds)" description="Wait after a confirmed quota rejection before trying another profile. Default 60 seconds; range 0–300. Cancel stops the wait, and it counts toward the request timeout. A pause does not guarantee compliance with Anthropic's terms." explicit={has(["claudeCodeProvider", "rotationDelaySeconds"])} defaultLabel={defaultLabel(["claudeCodeProvider", "rotationDelaySeconds"])} onReset={() => reset(["claudeCodeProvider", "rotationDelaySeconds"])}>
       <SettingsNumberInput value={number(["claudeCodeProvider", "rotationDelaySeconds"])} min={0} max={300} step={10} ariaLabel="Claude account rotation pause in seconds" onChange={(value) => updateNumber(["claudeCodeProvider", "rotationDelaySeconds"], value)} />
     </SettingsFieldRow>
-    <SettingsFieldRow label="Prune historical thinking (experimental)" description="Do not replay thinking from turns before your latest message. Saves input tokens; thinking of the current tool loop is kept. The model no longer sees its earlier reasoning. Applies to the next request." explicit={has(["claudeCodeProvider", "pruneHistoricalThinking"])} defaultLabel={defaultLabel(["claudeCodeProvider", "pruneHistoricalThinking"])} onReset={() => reset(["claudeCodeProvider", "pruneHistoricalThinking"])}>
-      <SettingsSwitch value={bool(["claudeCodeProvider", "pruneHistoricalThinking"])} onChange={(value) => set(["claudeCodeProvider", "pruneHistoricalThinking"], value)} />
-    </SettingsFieldRow>
     <SettingsFieldRow label="Claude OAuth profiles" description="Ordered list of independently authenticated Claude Code configuration folders. The first eligible account is used until it runs out of subscription quota." explicit={has(["claudeCodeProvider", "accounts"])} defaultLabel={defaultLabel(["claudeCodeProvider", "accounts"])} onReset={() => reset(["claudeCodeProvider", "accounts"])}>
       <SettingsClaudeAccounts value={claudeAccountRows(json(["claudeCodeProvider", "accounts"]))} onChange={updateClaudeAccounts} />
     </SettingsFieldRow>
@@ -282,6 +279,9 @@
     <p class="mt-0.5 text-xs leading-4 text-muted-foreground">Compression thresholds, automatic summaries, emergency cleanup, and model-specific policy.</p>
   </div>
   <div class="border-y border-sidebar-border/70 bg-panel">
+    <SettingsFieldRow label="Prune historical thinking (experimental)" description="Do not send thinking from turns before your latest message to any model provider. Saves input tokens; the current tool loop keeps its thinking, and the chat and session file keep everything. Applies to the next request." explicit={has(["pruneHistoricalThinking"])} defaultLabel={defaultLabel(["pruneHistoricalThinking"])} onReset={() => reset(["pruneHistoricalThinking"])}>
+      <SettingsSwitch value={bool(["pruneHistoricalThinking"])} onChange={(value) => set(["pruneHistoricalThinking"], value)} />
+    </SettingsFieldRow>
     <SettingsFieldRow label="DCP" description="Enable Dynamic Context Pruning." explicit={has(["dcp", "enabled"])} defaultLabel={defaultLabel(["dcp", "enabled"])} onReset={() => reset(["dcp", "enabled"])}>
       <SettingsSwitch value={bool(["dcp", "enabled"])} onChange={(value) => set(["dcp", "enabled"], value)} />
     </SettingsFieldRow>
