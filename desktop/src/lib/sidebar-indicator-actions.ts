@@ -88,8 +88,8 @@ export function sidebarIndicatorActionGroups(
       reason: previous && previous.reason !== reason.reason
         ? `${previous.reason}; ${reason.reason}` : reason.reason,
       actions: REASON_ACTIONS[reason.id]
-        .filter((id) => gitRemotes.length > 0 || (id !== "git.push" && id !== "git.commit-push"))
-        .map((id) => ({ id, label: ACTIONS[id], disabled: enabled[id] === false })),
+        .filter((id) => gitRemotes.length > 0 || id !== "git.push")
+        .map((id) => ({ id, label: id === "git.commit-push" && !gitRemotes.length ? "Stage all, AI commit" : ACTIONS[id], disabled: enabled[id] === false })),
     });
   }
   return [...groups.values()];

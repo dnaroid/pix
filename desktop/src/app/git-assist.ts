@@ -123,7 +123,7 @@ export function createGitAssist(options: GitAssistOptions) {
     }
   }
 
-  async function stageGenerateCommitPush(): Promise<boolean> {
+  async function stageGenerateCommitPush(pushAfterCommit = true): Promise<boolean> {
     const client = options.client();
     const workspace = options.workspace();
     const generation = options.git.generation;
@@ -133,7 +133,7 @@ export function createGitAssist(options: GitAssistOptions) {
       if (!current() || !options.gitAssistantReady()) return undefined;
       const message = await client.gitAssist(workspace, "commit-message", gitDiffForLlm(diff));
       return current() ? message : undefined;
-    });
+    }, pushAfterCommit);
   }
 
   async function generateCommitMessage(): Promise<string | undefined> {

@@ -343,7 +343,7 @@
     onGitSwitchBranch: (branch: string) => void;
     onGitCreateBranch: (branch: string) => void;
     onGitGenerateCommitMessage: () => Promise<string | undefined>;
-    onGitStageGenerateCommitPush?: () => Promise<boolean>;
+    onGitStageGenerateCommitPush?: (pushAfterCommit?: boolean) => Promise<boolean>;
     onGitReview: (path: string | undefined, scope: GitDiffScope) => void;
   } = $props();
 
@@ -468,7 +468,7 @@
     "git.refresh": !gitBusy,
     "git.fetch": !gitBusy && Boolean(gitSnapshot?.remotes.length),
     "git.push": !gitBusy && !gitPushBlockedReason(gitSnapshot) && !gitSnapshot?.changes.some((change) => change.conflicted),
-    "git.commit-push": Boolean(onGitStageGenerateCommitPush) && gitAssistantReady && !gitBusy && !gitStageGenerateCommitPushBlockedReason(gitSnapshot),
+    "git.commit-push": Boolean(onGitStageGenerateCommitPush) && gitAssistantReady && !gitBusy && !gitStageGenerateCommitPushBlockedReason(gitSnapshot, Boolean(gitSnapshot?.remotes.length)),
     "git.fix-ci": gitCi.canFixWithAi,
     "registry.refresh": registryReady && !registryLoading && !registryActionId,
     "registry.push-project-resources": registryReady && !registryLoading && !registryActionId
@@ -494,7 +494,7 @@
       "git.changes": () => onGitOpenDiff(undefined, "all"),
       "git.conflicts": () => onGitOpenDiff(undefined, "all"),
       "git.push": () => onGitPush(),
-      "git.commit-push": () => { void onGitStageGenerateCommitPush?.(); },
+      "git.commit-push": () => { void onGitStageGenerateCommitPush?.(Boolean(gitSnapshot?.remotes.length)); },
       "registry.refresh": () => onRegistryRefresh(),
       "registry.push-project-resources": () => onRegistryAction({ action: "push-project-resources" }, "push-project-resources"),
     },

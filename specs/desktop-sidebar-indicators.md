@@ -83,11 +83,13 @@ Decision: [0027 — Cause-specific sidebar quick actions](../docs/decisions/0027
   Dirty working-tree changes additionally offer **Stage all, AI commit & push**:
   explicitly stage every change, generate the message, commit and push under one
   Git mutation lock. The command leaves the current panel/collapsed state unchanged
-  and does not require navigating to Source Control to run. Push and the combined
-  commit/push command are omitted unless the current Git snapshot confirms at
-  least one configured remote (including while status is unloaded). Local change
-  review remains available. Unavailable AI, busy Git or other known unsafe
-  publication states disable the combined command when it is shown.
+  and does not require navigating to Source Control to run. Without a confirmed
+  remote (including while status is unloaded), the same command is labelled
+  **Stage all, AI commit** and only stages, generates and commits locally; it
+  never pushes, even if fresh status later discovers a remote. Standalone Push
+  is omitted without a confirmed remote. Local review remains available.
+  Unavailable AI, busy Git or conflicts disable the combined command; publication
+  guards additionally apply when pushing is requested.
   Progress and failure details remain available in Source Control on request. See
   [Git workflow safety](desktop-git-workflows.md) for freshness and partial-success behavior.
 - Tasks offer load retry, planned-task view, or opening the running task's linked

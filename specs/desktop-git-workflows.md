@@ -48,11 +48,14 @@ CI refresh is independent from local `git status`. A new workspace/HEAD/upstream
   previously unstaged files), generates a message using the workspace assistant,
   then commits and pushes without an intermediate composer step. It does not open
   the Git panel and keeps one mutation lock throughout. The sidebar menu only
-  offers this command and Push when the current Git snapshot confirms a configured
-  remote; neither is offered for missing or unloaded remote configuration.
+  labels it **Stage all, AI commit** when no remote is confirmed (including
+  unloaded status), performing the same preparation and local commit without
+  pushing. That local-only intent is preserved even if fresh status discovers a
+  remote. Standalone Push is omitted without a confirmed remote.
   Local change review remains available. The combined command is
   disabled while Git is busy, the assistant is unavailable, or publication is
-  known to be unsafe. Unknown status is checked by the transaction before any
+  known to be unsafe for the requested mode (publication guards apply only to
+  commit-and-push). Unknown status is checked by the transaction before any
   staging; failure or unsafe fresh status aborts without mutating the index.
   Fresh status is required before staging and again before committing;
   stale workspace/assistant results, changed staged content, changed branch/HEAD

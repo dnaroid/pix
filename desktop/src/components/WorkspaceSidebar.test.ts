@@ -44,8 +44,8 @@ describe("WorkspaceSidebar project sizing", () => {
   });
 
   it("uses self-refreshing eligibility for the combined Git command and does not open a panel", () => {
-    expect(sidebarSource).toContain('"git.commit-push": Boolean(onGitStageGenerateCommitPush) && gitAssistantReady && !gitBusy && !gitStageGenerateCommitPushBlockedReason(gitSnapshot)');
-    expect(sidebarSource).toContain('"git.commit-push": () => { void onGitStageGenerateCommitPush?.(); }');
+    expect(sidebarSource).toContain('"git.commit-push": Boolean(onGitStageGenerateCommitPush) && gitAssistantReady && !gitBusy && !gitStageGenerateCommitPushBlockedReason(gitSnapshot, Boolean(gitSnapshot?.remotes.length))');
+    expect(sidebarSource).toContain('"git.commit-push": () => { void onGitStageGenerateCommitPush?.(Boolean(gitSnapshot?.remotes.length)); }');
   });
   it("does not reveal panels for work commands; inspection remains separate", () => {
     const workActions = ["project.retry", "tasks.reload", "git.refresh", "git.fix-ci", "git.fetch", "git.push", "git.commit-push", "registry.refresh", "registry.push-project-resources"];

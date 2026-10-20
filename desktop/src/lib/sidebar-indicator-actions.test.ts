@@ -24,12 +24,13 @@ describe("sidebar indicator reason actions", () => {
     expect(actions[1]).toMatchObject({ label: "Stage all, AI commit & push", disabled: true });
     expect(sidebarIndicatorActionGroups([{ id: "git.ahead", tone: "info", reason: "Ahead" }], {}, ["origin"])[0]!.actions.map((action) => action.id)).toEqual(["git.push"]);
   });
-  it.each([undefined, []])("omits push commands without confirmed remotes (%s), keeping local review", (remotes) => {
+  it.each([undefined, []])("offers local AI commit without confirmed remotes (%s), but no Push", (remotes) => {
     const groups = sidebarIndicatorActionGroups([
       { id: "git.dirty", tone: "info", reason: "Changes" },
       { id: "git.ahead", tone: "info", reason: "Ahead" },
     ], { "git.commit-push": true, "git.push": true }, remotes);
-    expect(groups[0]!.actions.map((action) => action.id)).toEqual(["git.changes"]);
+    expect(groups[0]!.actions.map((action) => action.id)).toEqual(["git.changes", "git.commit-push"]);
+    expect(groups[0]!.actions[1]).toEqual({ id: "git.commit-push", label: "Stage all, AI commit", disabled: false });
     expect(groups[1]!.actions).toEqual([]);
   });
   it("has no menu in a healthy state and never infers review from counters", () => {

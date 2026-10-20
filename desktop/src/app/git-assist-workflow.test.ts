@@ -82,14 +82,15 @@ function fixture() {
 beforeEach(() => invoke.mockReset());
 
 describe("Git assistant freshness", () => {
-  it("combined action generates a message from staged changes without a conversation", async () => {
+  it.each([true, false])("combined action preserves push intent (%s) and generates without a conversation", async (pushAfterCommit) => {
     const { assist, git, client } = fixture();
     const diff: GitDiff = { scope: "staged", content: "+staged", truncated: false };
-    vi.spyOn(git, "stageGenerateCommitPush").mockImplementation(async (generate) => {
+    vi.spyOn(git, "stageGenerateCommitPush").mockImplementation(async (generate, push) => {
+      expect(push).toBe(pushAfterCommit);
       expect(await generate(diff)).toBe(findings);
       return true;
     });
-    await expect(assist.stageGenerateCommitPush()).resolves.toBe(true);
+    await expect(assist.stageGenerateCommitPush(pushAfterCommit)).resolves.toBe(true);
     expect(client.gitAssist).toHaveBeenCalledWith("/one", "commit-message", "+staged");
     expect(client.newSession).not.toHaveBeenCalled();
   });

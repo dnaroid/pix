@@ -5,6 +5,13 @@ import { gitPushBlockedReason, gitStageGenerateCommitPushBlockedReason, gitRevie
 const snapshot: GitSnapshot = { branch: "main", detached: false, head: "abc", upstream: "origin/main", ahead: 1, behind: 0, changes: [], branches: [], remotes: ["origin"] };
 
 describe("Git workflow decisions", () => {
+  it("enables local AI commits without a remote but still blocks conflicts", () => {
+    expect(gitStageGenerateCommitPushBlockedReason({ ...snapshot, remotes: [] }, false)).toBeNull();
+    expect(gitStageGenerateCommitPushBlockedReason(undefined, false)).toBeNull();
+    expect(gitStageGenerateCommitPushBlockedReason({ ...snapshot, remotes: [], changes: [
+      { path: "a", indexStatus: "U", worktreeStatus: "U", staged: false, unstaged: true, untracked: false, conflicted: true },
+    ] }, false)).toMatch(/conflicts/);
+  });
   it("allows the self-refreshing combined command before the panel loads status, but preserves known safety guards", () => {
     expect(gitStageGenerateCommitPushBlockedReason(undefined)).toBeNull();
     expect(gitStageGenerateCommitPushBlockedReason(snapshot)).toBeNull();

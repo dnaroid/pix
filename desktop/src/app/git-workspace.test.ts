@@ -6,11 +6,12 @@ import { sameGitDiff, type GitCommitDiff } from "../lib/git-workflow";
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke, isTauri: () => false }));
 
-function fixture() {
+function fixture(overrides: Partial<GitSnapshot> = {}) {
   let workspace = "/one";
   const snapshot: GitSnapshot = {
     branch: "main", detached: false, head: "abc", upstream: "origin/main", ahead: 0, behind: 0, remotes: ["origin"], branches: [],
     changes: [{ path: "file.ts", indexStatus: "M", worktreeStatus: ".", staged: true, unstaged: false, untracked: false, conflicted: false }],
+    ...overrides,
   };
   invoke.mockImplementation(async (command: string) => {
     if (command === "git_status") return snapshot;
@@ -40,6 +41,31 @@ beforeEach(() => { invoke.mockReset(); vi.stubGlobal("window", { confirm: vi.fn(
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Git commit transaction and lifecycle", () => {
+  it("stages and AI commits locally without a remote, never pushing", async () => {
+    const { store } = fixture({ remotes: [], upstream: undefined });
+    await store.refresh();
+    const generate = vi.fn(async () => "Local AI message");
+    await expect(store.stageGenerateCommitPush(generate, false)).resolves.toBe(true);
+    expect(generate).toHaveBeenCalledOnce();
+    expect(invoke).toHaveBeenCalledWith("git_stage", { workspace: "/one", path: null });
+    expect(invoke).toHaveBeenCalledWith("git_commit", { workspace: "/one", message: "Local AI message" });
+    expect(invoke.mock.calls.some(([command]) => command === "git_push")).toBe(false);
+    expect(store.error).toBeNull();
+    expect(store.notice).toBe("Commit created locally.");
+  });
+
+  it("keeps a local-only request local even when fresh status discovers a remote", async () => {
+    const { store } = fixture();
+    await expect(store.stageGenerateCommitPush(async () => "Local message", false)).resolves.toBe(true);
+    expect(invoke.mock.calls.some(([command]) => command === "git_push")).toBe(false);
+  });
+
+  it("still rejects conflicts for a local AI commit", async () => {
+    const { snapshot } = fixture();
+    const { store } = fixture({ remotes: [], changes: snapshot.changes.map((change) => ({ ...change, conflicted: true })) });
+    await expect(store.stageGenerateCommitPush(vi.fn(), false)).resolves.toBe(false);
+    expect(invoke.mock.calls.some(([command]) => command === "git_stage" || command === "git_commit" || command === "git_push")).toBe(false);
+  });
   it("saves repository identity under the shared mutation lock without staging or committing", async () => {
     const { store } = fixture();
     let finish!: () => void;

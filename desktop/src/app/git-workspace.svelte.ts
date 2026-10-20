@@ -193,8 +193,8 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
     return commitTransaction(message, pushAfterCommit);
   }
 
-  function stageGenerateCommitPush(generate: (diff: GitDiff) => Promise<string | undefined>): Promise<boolean> {
-    return commitTransaction("", true, generate);
+  function stageGenerateCommitPush(generate: (diff: GitDiff) => Promise<string | undefined>, pushAfterCommit = true): Promise<boolean> {
+    return commitTransaction("", pushAfterCommit, generate);
   }
 
   async function commitTransaction(message: string, pushAfterCommit: boolean, generate?: (diff: GitDiff) => Promise<string | undefined>): Promise<boolean> {
@@ -212,7 +212,8 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
       return false;
     }
     let committed = false;
-    actionId = generate ? "stage-generate-commit-push" : "commit";
+    const preparationAction = pushAfterCommit ? "stage-generate-commit-push" : "stage-generate-commit";
+    actionId = generate ? preparationAction : "commit";
     error = null;
     notice = null;
     try {
@@ -221,7 +222,7 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
         await refreshFresh();
         if (!current()) return false;
         if (loading || error || !snapshot) throw new Error(error ?? "A fresh Git status is required before staging.");
-        const blocked = gitPushBlockedReason(snapshot);
+        const blocked = pushAfterCommit ? gitPushBlockedReason(snapshot) : null;
         if (blocked || snapshot.changes.some((change) => change.conflicted)) {
           throw new Error(blocked ?? "Resolve merge conflicts before committing");
         }
@@ -242,7 +243,7 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
           || snapshot.remotes.join("\n") !== preparedSnapshot.remotes.join("\n")) {
           throw new Error("Git branch or publication target changed during generation. Nothing was committed; try again.");
         }
-        const pushBlocked = gitPushBlockedReason(snapshot);
+        const pushBlocked = pushAfterCommit ? gitPushBlockedReason(snapshot) : null;
         if (pushBlocked || snapshot.changes.some((change) => change.conflicted)) {
           throw new Error(pushBlocked ?? "Resolve merge conflicts before committing");
         }
@@ -260,7 +261,7 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
         actionId = "push";
         await invoke("git_push", { workspace });
       }
-      if (current()) notice = pushAfterCommit ? "Committed and pushed successfully." : "Commit created locally. Ready to push.";
+      if (current()) notice = pushAfterCommit ? "Committed and pushed successfully." : "Commit created locally.";
     } catch (reason) {
       if (current()) {
         const detail = reason instanceof Error ? reason.message : String(reason);

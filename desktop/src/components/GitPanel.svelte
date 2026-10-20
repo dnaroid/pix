@@ -50,6 +50,7 @@
   const tool = "inline-flex h-7 min-w-7 shrink-0 items-center justify-center gap-1 rounded-sm px-1.5 text-muted-foreground hover:bg-panel-hover hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:opacity-40";
   const progressLabel = $derived.by(() => {
     switch (actionId) {
+      case "stage-generate-commit":
       case "stage-generate-commit-push": return "Staging all & generating commit message…";
       case "commit": return "Committing…";
       case "push": return "Pushing…";

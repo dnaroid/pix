@@ -44,10 +44,10 @@ export function gitPushBlockedReason(snapshot: GitSnapshot | undefined): string 
 }
 
 /** This command loads its own status before staging; opening Source Control is not a prerequisite. */
-export function gitStageGenerateCommitPushBlockedReason(snapshot: GitSnapshot | undefined): string | null {
+export function gitStageGenerateCommitPushBlockedReason(snapshot: GitSnapshot | undefined, pushAfterCommit = true): string | null {
   if (!snapshot) return null;
   if (snapshot.changes.some((change) => change.conflicted)) return "Resolve merge conflicts before committing";
-  return gitPushBlockedReason(snapshot);
+  return pushAfterCommit ? gitPushBlockedReason(snapshot) : null;
 }
 
 export function gitReviewStatus(review: string | undefined): "none" | "failed" | "empty" | "complete" {
