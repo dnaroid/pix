@@ -529,7 +529,16 @@ exit 0`);
 		const shellScript = process.platform === "win32"
 			? `export PATH="$(cygpath -u '${bin.replaceAll("'", "'\\''")}'):$PATH"\n${script}`
 			: script;
-		const result = spawnSync(shell, ["-c", shellScript], { cwd: f.project, env: process.platform === "win32" ? process.env : { ...process.env, PATH: `${bin}:${process.env.PATH}` }, timeout: 8000 });
+		let shellArgs = ["-c", shellScript];
+		if (process.platform === "win32") {
+			// Windows process creation has an argument-length ceiling. The embedded
+			// helper bundle can exceed it, so pass a script filename instead.
+			const scriptPath = path.join(f.project, "remote-helper.sh");
+			fs.writeFileSync(scriptPath, shellScript);
+			const posixPath = spawnSync(shell, ["-c", 'cygpath -u "$1"', "--", scriptPath], { encoding: "utf8" }).stdout.trim();
+			shellArgs = [posixPath];
+		}
+		const result = spawnSync(shell, shellArgs, { cwd: f.project, env: process.platform === "win32" ? process.env : { ...process.env, PATH: `${bin}:${process.env.PATH}` }, timeout: 8000 });
 		expect(result.status, `remote shell ${mode}: ${result.stderr?.toString("utf8") ?? ""}`).toBe(mode === "collision" ? 73 : 0);
 		if (mode === "collision") expect(fs.readFileSync(path.join(dir, "foreign"), "utf8")).toBe("retain");
 		else {
