@@ -410,7 +410,8 @@ describe("unified Android runner", () => {
 		expect(result.payload.artifacts.screenshots).toHaveLength(2);
 		for (const bucket of ["screenshots", "accessibilitySnapshots"]) for (const item of result.payload.artifacts[bucket]) {
 			expect(fs.existsSync(item.path)).toBe(true);
-			expect(fs.statSync(item.path).mode & 0o077).toBe(0);
+			// NTFS ACLs are not represented by POSIX stat mode bits on Windows.
+			if (process.platform !== "win32") expect(fs.statSync(item.path).mode & 0o077).toBe(0);
 		}
 		expect(f.calls().every((args) => args.slice(0, 6).join(" ") === "-H 127.0.0.1 -P 5037 -s emulator-5580")).toBe(true);
 		expect(f.calls().some((args) => args.includes("install") || args.includes("run-as") || args.includes("settings"))).toBe(false);
@@ -515,13 +516,17 @@ exit 0`);
 		const f = fixture();
 		const bin = path.join(f.project, "bin"); fs.mkdirSync(bin);
 		const dir = path.join(f.project, "remote");
-		const tool = (name: string, source: string) => fs.writeFileSync(path.join(bin, name), `#!${node}\n${source}`, { mode: 0o700 });
+		const tool = (name: string, source: string) => fs.writeFileSync(path.join(bin, name), `#!/usr/bin/env node\n${source}`, { mode: 0o700 });
 		tool("sha256sum", `const fs=require('fs'),c=require('crypto'); console.log(c.createHash('sha256').update(fs.readFileSync(process.argv[2])).digest('hex')+'  '+process.argv[2]);`);
 		tool("app_process", mode === "timeout" ? "setInterval(()=>{},1000);" : `process.stdout.write(${JSON.stringify(XML)});`);
-		tool("timeout", `const cp=require('child_process'); const child=cp.spawn(process.argv[5],process.argv.slice(6),{stdio:'inherit'}); const timer=setTimeout(()=>child.kill('SIGKILL'),2000); child.on('exit',(code,signal)=>{clearTimeout(timer);process.exit(signal?137:code);});`);
+		tool("timeout", `const cp=require('child_process'),path=require('path'); const child=cp.spawn(process.execPath,[path.join(process.cwd(),'bin','app_process'),...process.argv.slice(6)],{stdio:'inherit'}); const timer=setTimeout(()=>child.kill('SIGKILL'),2000); child.on('exit',(code,signal)=>{clearTimeout(timer);process.exit(signal?137:code);});`);
 		if (mode === "collision") { fs.mkdirSync(dir); fs.writeFileSync(path.join(dir, "foreign"), "retain"); }
-		const script = noIdleHierarchyCommand("your.app", "a".repeat(32)).args[1].replace(`/data/local/tmp/pi-ui-qa-${"a".repeat(32)}`, dir);
-		const result = spawnSync("/bin/sh", ["-c", script], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, timeout: 8000 });
+		const shell = process.platform === "win32" ? "bash" : "/bin/sh";
+		const remoteDir = process.platform === "win32"
+			? spawnSync(shell, ["-c", 'cygpath -u "$1"', "--", dir], { encoding: "utf8" }).stdout.trim()
+			: dir;
+		const script = noIdleHierarchyCommand("your.app", "a".repeat(32)).args[1].replace(`/data/local/tmp/pi-ui-qa-${"a".repeat(32)}`, remoteDir);
+		const result = spawnSync(shell, ["-c", script], { cwd: f.project, env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}` }, timeout: 8000 });
 		expect(result.status).toBe(mode === "collision" ? 73 : 0);
 		if (mode === "collision") expect(fs.readFileSync(path.join(dir, "foreign"), "utf8")).toBe("retain");
 		else {
