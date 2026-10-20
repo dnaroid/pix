@@ -530,7 +530,7 @@ exit 0`);
 			? `export PATH="$(cygpath -u '${bin.replaceAll("'", "'\\''")}'):$PATH"\n${script}`
 			: script;
 		const result = spawnSync(shell, ["-c", shellScript], { cwd: f.project, env: process.platform === "win32" ? process.env : { ...process.env, PATH: `${bin}:${process.env.PATH}` }, timeout: 8000 });
-		expect(result.status).toBe(mode === "collision" ? 73 : 0);
+		expect(result.status, `remote shell ${mode}: ${result.stderr?.toString("utf8") ?? ""}`).toBe(mode === "collision" ? 73 : 0);
 		if (mode === "collision") expect(fs.readFileSync(path.join(dir, "foreign"), "utf8")).toBe("retain");
 		else {
 			expect(fs.existsSync(dir)).toBe(false);
