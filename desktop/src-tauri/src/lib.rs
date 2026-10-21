@@ -1854,6 +1854,11 @@ async fn local_file_exists(path: String) -> Result<bool, String> {
 }
 
 #[tauri::command]
+async fn local_path_kind(path: String) -> Result<Option<String>, String> {
+    run_blocking(move || Ok(local_path_kind_from(Path::new(&path)).map(str::to_string))).await
+}
+
+#[tauri::command]
 async fn read_local_file(path: String) -> Result<ProjectFilePreview, String> {
     run_blocking(move || read_local_file_from(Path::new(&path), MAX_PROJECT_FILE_PREVIEW_BYTES))
         .await
@@ -1956,6 +1961,15 @@ fn read_local_file_from(path: &Path, max_bytes: u64) -> Result<ProjectFilePrevie
     let file_path = resolve_local_file_path(path)?;
     let display_path = file_path.to_string_lossy().into_owned();
     read_text_file_from(&file_path, display_path, max_bytes)
+}
+
+fn local_path_kind_from(path: &Path) -> Option<&'static str> {
+    let resolved = resolve_local_open_path(path).ok()?;
+    Some(if resolved.is_dir() {
+        "directory"
+    } else {
+        "file"
+    })
 }
 
 fn resolve_local_open_path(path: &Path) -> Result<PathBuf, String> {
@@ -8991,6 +9005,7 @@ pub fn run() {
             package_terminal_activity,
             package_terminal_assign_launch,
             local_file_exists,
+            local_path_kind,
             read_local_file,
             resolve_project_media,
             resolve_home_media,
@@ -11245,6 +11260,14 @@ mod tests {
         let directory = temporary_workspace("local-link-path");
         let file_path = directory.join("artifact.log");
         fs::write(&file_path, "complete\n").expect("write local artifact");
+
+        assert_eq!(local_path_kind_from(&file_path), Some("file"));
+        assert_eq!(local_path_kind_from(&directory), Some("directory"));
+        assert_eq!(
+            local_path_kind_from(Path::new("relative/artifact.log")),
+            None
+        );
+        assert_eq!(local_path_kind_from(&directory.join("missing.log")), None);
 
         assert_eq!(
             resolve_local_open_path(&file_path).expect("resolve local file link"),

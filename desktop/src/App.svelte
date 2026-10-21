@@ -695,7 +695,7 @@
     activateSession: (id) => { activeWorkbenchTabId = workbenchSessionTabId(id); },
     hydrate: sessionHistory.waitForHydration,
     openPlan: (path) => previewStore.openProjectFile(path, "push"),
-    fileExists: previewStore.validateProjectFile,
+    fileExists: async (path) => Boolean(await previewStore.validateProjectFile(path)),
     openFile: (path, range) => previewStore.openProjectFile(path, "push", range),
     openCommit: async (hit, isCurrent) => {
       if (!workspaceSidebar) throw new Error("Source Control is unavailable.");

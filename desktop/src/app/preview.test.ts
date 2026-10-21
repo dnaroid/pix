@@ -35,6 +35,22 @@ function fixture(revealProjectEntry?: (path: string) => Promise<void>) {
 }
 
 describe("Preview async ownership", () => {
+  it.each(["file", "directory", null] as const)("preserves local target kind %s for Markdown icons", async (kind) => {
+    const { preview } = fixture();
+    tauri.invoke.mockResolvedValue(kind);
+    expect(await preview.validateLocalFile("/tmp/folder.ts")).toBe(kind === "directory" ? "directory" : kind === "file");
+    expect(tauri.invoke).toHaveBeenCalledWith("local_path_kind", { path: "/tmp/folder.ts" });
+  });
+
+  it("rejects stale directory validation after switching workspace", async () => {
+    const { preview, setWorkspace } = fixture();
+    const directory = deferred<boolean>();
+    tauri.invoke.mockImplementation((command: string) => command === "project_file_exists" ? false : directory.promise);
+    const pending = preview.validateProjectFile("folder");
+    setWorkspace("/two");
+    directory.resolve(true);
+    expect(await pending).toBe(false);
+  });
   it.each(["track.mp3", "track.ogg", "clip.mp4"])("requests one Files playback for %s, not history or ordinary opens", async (name) => {
     const { preview } = fixture();
     tauri.invoke.mockResolvedValue({ name, path: `/one/${name}` });
@@ -138,7 +154,7 @@ describe("Preview async ownership", () => {
     const before = preview.active;
     options.setActiveWorkbenchTabId.mockClear();
     tauri.invoke.mockImplementation(async (command: string) => command === "project_directory_exists");
-    expect(await preview.validateProjectFile(path)).toBe(true);
+    expect(await preview.validateProjectFile(path)).toBe("directory");
     await preview.openProjectFile(path);
     expect(reveal).toHaveBeenCalledExactlyOnceWith(path);
     expect(preview.active).toBe(before);

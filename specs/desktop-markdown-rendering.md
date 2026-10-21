@@ -80,6 +80,19 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
   workspace-confined existence validation succeeds. Missing or rejected targets
   remain ordinary inline code.
 - External Markdown links are marked with an external-link icon in both transcripts and the Preview editor.
+- Successfully validated project and home/local file links prepend a decorative,
+  aria-hidden Lucide icon classified by destination extension (HTML `.html` and
+  `.htm` files, case-insensitively, use Globe; code/config,
+  text/Markdown, image, audio, video, archive, PDF, or generic file). Validated
+  project and absolute local directories use the Folder icon based on validation
+  metadata, including directories whose names contain dots. Missing or otherwise
+  unvalidated candidates remain plain labels without a file icon. External links
+  retain their existing trailing external-link icon. Icons do not replace link
+  labels or navigation/line-range metadata; shared `MarkdownText` applies this in
+  transcripts and Preview. Lazy validation preserves the file/directory kind;
+  Preview resolves project targets workspace-root-first, then document-relative.
+  Home-directory links retain their existing behavior; home directories are not
+  supported as directory links.
 - Explicit Markdown links with relative destinations and inline-code values that look like relative file paths become project-file links. Explicit links preserve GitHub-style `#Lline` and `#Lstart-Lend` fragments as source line ranges; other fragments remain ordinary fragment-free project links. Inline-code references may carry `:line`, `:start-end`, or `:line:column` suffixes; the column is ignored and the line/range is preserved for preview navigation. Activating a project link reads the target only when its canonical path remains inside the active workspace, then activates the Preview editor with syntax highlighting and line numbers. A preserved line range opens the source view (including for Markdown files), highlights the requested lines, and reveals the first requested line on an otherwise fresh preview entry.
 - Explicit Markdown links and inline-code values beginning with `~/` become home-file links. Activating one expands `~` in the trusted Tauri backend, requires the canonical target to remain inside the user's home directory, and opens text or supported media in the existing Preview editor tab.
 - Trailing prose punctuation is not included in a bare URL; balanced URL parentheses remain part of it.
@@ -263,6 +276,9 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - `desktop/src/lib/project-files.ts`
 - `desktop/src/lib/external-links.ts`
 - `desktop/src/components/MarkdownText.svelte`
+- `desktop/src/components/markdown-file-link.ts`
+- `desktop/src/lib/file-link-kind.ts`
+- `desktop/src/components/file-link-validation-cache.ts`
 - `desktop/src/components/markdown-content-action.ts`
 - `desktop/src/components/markdown-image-retention.ts`
 - `desktop/src/components/audio-playback-action.ts`
@@ -300,6 +316,9 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 ## Tests
 
 - `desktop/src/components/MarkdownText.test.ts`
+- `desktop/src/components/markdown-file-link.test.ts`
+- `desktop/src/lib/file-link-kind.test.ts`
+- `desktop/src/components/file-link-validation-cache.test.ts`
 - `desktop/src/lib/markdown.test.ts`
 - `desktop/src/lib/media.test.ts`
 - `desktop/src/components/audio-playback-action.test.ts`

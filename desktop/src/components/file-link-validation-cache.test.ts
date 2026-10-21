@@ -2,6 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 import { FileLinkValidationCache } from "./file-link-validation-cache";
 
 describe("FileLinkValidationCache", () => {
+  it("retains directory metadata across streamed candidate replacement", async () => {
+    const cache = new FileLinkValidationCache();
+    const validator = vi.fn(async () => "directory" as const);
+    await expect(cache.validate("project", "folder.ts", validator)).resolves.toBe("directory");
+    expect(cache.peek("project", "folder.ts", validator)).toBe("directory");
+    expect(cache.validate("project", "folder.ts", validator)).toBe("directory");
+    expect(validator).toHaveBeenCalledTimes(1);
+  });
   it("shares in-flight checks and retains resolved true and false results", async () => {
     const cache = new FileLinkValidationCache();
     const validator = vi.fn(async () => true);

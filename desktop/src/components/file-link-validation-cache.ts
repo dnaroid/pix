@@ -1,7 +1,8 @@
 export type FileLinkScope = "project" | "local";
-export type FileLinkValidator = (path: string) => Promise<boolean>;
+import type { FileLinkValidation } from "../lib/file-link-kind";
+export type FileLinkValidator = (path: string) => Promise<FileLinkValidation>;
 
-type CachedValidation = boolean | Promise<boolean>;
+type CachedValidation = FileLinkValidation | Promise<FileLinkValidation>;
 
 /**
  * Keeps lazy file-link checks stable while Markdown replaces its rendered DOM.

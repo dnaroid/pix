@@ -70,7 +70,7 @@
     onOpenAttachment: (attachment: Attachment) => void;
     onOpenRelatedTask?: (task: ProjectTask) => void;
     onOpenLink?: (link: string) => void | Promise<void>;
-    onValidateProjectFile?: (path: string) => Promise<boolean>;
+    onValidateProjectFile?: (path: string) => Promise<boolean | "directory">;
     onClose: () => void;
     onSubmit: () => void;
   } = $props();

@@ -10,11 +10,12 @@ import type { SettingsConfigDocument, SettingsConfigKind } from "../lib/settings
 import type { PreviewStoreOptions } from "./preview-options";
 import type { PreviewNavigation, PreviewState } from "./preview-state.svelte";
 import { previewMediaKindForPath } from "../lib/media";
+import type { FileLinkValidation } from "../lib/file-link-kind";
 
 type PreviewRead = { kind: "text"; file: ProjectFilePreview } | { kind: "external" };
 
 export function createPreviewFileIo(options: PreviewStoreOptions, state: PreviewState) {
-  const fileValidationRequests = new Map<string, Promise<boolean>>();
+  const fileValidationRequests = new Map<string, Promise<FileLinkValidation>>();
 
   async function openLargeFile(path: string, workspace: string | null, isCurrent: () => boolean): Promise<void> {
     const editor = await options.loadExternalEditor();
@@ -56,7 +57,7 @@ export function createPreviewFileIo(options: PreviewStoreOptions, state: Preview
     }
   }
 
-  function sharedFileValidation(key: string, request: () => Promise<boolean>): Promise<boolean> {
+  function sharedFileValidation(key: string, request: () => Promise<FileLinkValidation>): Promise<FileLinkValidation> {
     const existing = fileValidationRequests.get(key);
     if (existing) return existing;
     const promise = request()
@@ -68,20 +69,24 @@ export function createPreviewFileIo(options: PreviewStoreOptions, state: Preview
     return promise;
   }
 
-  async function validateProjectFile(path: string): Promise<boolean> {
+  async function validateProjectFile(path: string): Promise<FileLinkValidation> {
     const workspace = options.workspace();
     if (!workspace) return false;
     const exists = await sharedFileValidation(
       `project\0${workspace}\0${path}`,
       async () => await invoke<boolean>("project_file_exists", { workspace, path })
-        || await invoke<boolean>("project_directory_exists", { workspace, path }),
+        || (await invoke<boolean>("project_directory_exists", { workspace, path }) ? "directory" : false),
     );
     return options.workspace() === workspace && exists;
   }
 
-  async function validateLocalFile(path: string): Promise<boolean> {
-    const command = path.startsWith("~/") ? "home_file_exists" : "local_file_exists";
-    return sharedFileValidation(`${command}\0${path}`, () => invoke<boolean>(command, { path }));
+  async function validateLocalFile(path: string): Promise<FileLinkValidation> {
+    const command = path.startsWith("~/") ? "home_file_exists" : "local_path_kind";
+    return sharedFileValidation(`${command}\0${path}`, async () => {
+      if (command === "home_file_exists") return invoke<boolean>(command, { path });
+      const kind = await invoke<"file" | "directory" | null>(command, { path });
+      return kind === "directory" ? "directory" : kind === "file";
+    });
   }
 
   async function openProjectFile(

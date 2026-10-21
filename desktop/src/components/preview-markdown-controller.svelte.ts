@@ -3,14 +3,14 @@ import type { ProjectFileLineRange, ProjectFilePreview } from "../lib/project-fi
 interface PreviewMarkdownControllerOptions {
   readonly previewId: () => number;
   readonly file: () => ProjectFilePreview | undefined;
-  readonly onValidateProjectFile: () => ((path: string) => Promise<boolean>) | undefined;
+  readonly onValidateProjectFile: () => ((path: string) => Promise<boolean | "directory">) | undefined;
   readonly onOpenProjectFile: () => ((path: string, range?: ProjectFileLineRange) => void | Promise<void>) | undefined;
   readonly onOpenLocalFile: () => ((path: string) => void | Promise<void>) | undefined;
   readonly rememberScroll: () => void;
 }
 
 export function createPreviewMarkdownController(options: PreviewMarkdownControllerOptions) {
-  const resolvedProjectPaths = new Map<string, string>();
+  const resolvedProjectPaths = new Map<string, { path: string; validation: true | "directory" }>();
 
   $effect(() => {
     options.previewId();
@@ -25,7 +25,7 @@ export function createPreviewMarkdownController(options: PreviewMarkdownControll
     return directory ? `${directory}/${path}` : path;
   }
 
-  async function resolveProject(path: string): Promise<string | undefined> {
+  async function resolveProject(path: string): Promise<{ path: string; validation: true | "directory" } | undefined> {
     const cached = resolvedProjectPaths.get(path);
     if (cached) return cached;
     const validate = options.onValidateProjectFile();
@@ -39,9 +39,11 @@ export function createPreviewMarkdownController(options: PreviewMarkdownControll
     const candidates = relative === path ? [path] : [path, relative];
     for (const candidate of candidates) {
       try {
-        if (!await validate(candidate)) continue;
-        resolvedProjectPaths.set(path, candidate);
-        return candidate;
+        const validation = await validate(candidate);
+        if (!validation) continue;
+        const resolved = { path: candidate, validation };
+        resolvedProjectPaths.set(path, resolved);
+        return resolved;
       } catch {
         // Try the next interpretation; validation is intentionally best-effort.
       }
@@ -52,11 +54,11 @@ export function createPreviewMarkdownController(options: PreviewMarkdownControll
   async function openProject(path: string, range?: ProjectFileLineRange): Promise<void> {
     options.rememberScroll();
     const resolved = await resolveProject(path);
-    if (resolved) await options.onOpenProjectFile()?.(resolved, range);
+    if (resolved) await options.onOpenProjectFile()?.(resolved.path, range);
   }
 
-  async function validateProject(path: string): Promise<boolean> {
-    return Boolean(await resolveProject(path));
+  async function validateProject(path: string): Promise<boolean | "directory"> {
+    return (await resolveProject(path))?.validation ?? false;
   }
 
   function openLocal(path: string): void | Promise<void> {

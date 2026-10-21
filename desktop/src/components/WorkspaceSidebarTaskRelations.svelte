@@ -30,7 +30,7 @@
     links: string[];
     relatedTaskIds?: string[];
     projectFileSuggestions?: readonly string[];
-    onValidateProjectFile?: (path: string) => Promise<boolean>;
+    onValidateProjectFile?: (path: string) => Promise<boolean | "directory">;
     onOpenTask: (task: ProjectTask) => void;
     onOpenLink: (link: string) => void | Promise<void>;
   } = $props();

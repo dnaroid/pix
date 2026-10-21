@@ -7,6 +7,8 @@ import { mountGlbViewer } from "./glb-viewer-action";
 import { isGlbPath } from "../lib/glb";
 import { previewMediaKindForPath } from "../lib/media";
 import { audioSource } from "./audio-source-action";
+import { replaceFileLinkCandidate } from "./markdown-file-link";
+import { fileLinkIconKind, type FileLinkIconKind, type FileLinkValidation } from "../lib/file-link-kind";
 import "../styles/glb-viewer.css";
 import {
   FileLinkValidationCache,
@@ -15,9 +17,10 @@ import {
 } from "./file-link-validation-cache";
 
 interface MarkdownContentActionOptions {
+  readonly fileLinkIconTemplate?: (kind: FileLinkIconKind) => SVGElement | undefined;
   readonly externalLinkIconTemplate: () => HTMLSpanElement | undefined;
-  readonly onValidateProjectFile: () => ((path: string) => Promise<boolean>) | undefined;
-  readonly onValidateLocalFile: () => ((path: string) => Promise<boolean>) | undefined;
+  readonly onValidateProjectFile: () => ((path: string) => Promise<boolean | "directory">) | undefined;
+  readonly onValidateLocalFile: () => ((path: string) => Promise<boolean | "directory">) | undefined;
   readonly onResolveProjectMedia: () => ((path: string) => Promise<Attachment | undefined>) | undefined;
   readonly onResolveLocalMedia: () => ((path: string) => Promise<Attachment | undefined>) | undefined;
 }
@@ -25,6 +28,12 @@ interface MarkdownContentActionOptions {
 export function createMarkdownContentAction(options: MarkdownContentActionOptions) {
   const mediaCache = new Map<string, Promise<Attachment | undefined>>();
   const mediaDimensions = new Map<string, ImageDimensions>();
+
+  function decorateFileLink(candidate: HTMLElement, target: FileLinkTarget, validation: FileLinkValidation): void {
+    const kind = fileLinkIconKind(target.path, validation);
+    const template = options.fileLinkIconTemplate?.(kind);
+    replaceFileLinkCandidate(candidate, target, template);
+  }
 
   function decorateExternalLinks(node: HTMLElement): void {
     const template = options.externalLinkIconTemplate()?.querySelector("svg");
@@ -91,8 +100,8 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
           return false;
         }
         const cached = fileLinkValidationCache.peek(target.scope, target.path, target.validator);
-        if (cached === true) {
-          replaceFileLinkCandidate(candidate, target);
+        if (cached === true || cached === "directory") {
+          decorateFileLink(candidate, target, cached);
           return false;
         }
         if (cached === false) {
@@ -124,7 +133,7 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
     async function validateFileLink(candidate: HTMLElement): Promise<void> {
       const target = fileLinkTarget(candidate);
       if (!target) return;
-      let exists = false;
+      let exists: FileLinkValidation = false;
       try {
         exists = await fileLinkValidationCache.validate(target.scope, target.path, target.validator);
       } catch {
@@ -135,7 +144,7 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
         invalidateFileLink(candidate);
         return;
       }
-      replaceFileLinkCandidate(candidate, target);
+      decorateFileLink(candidate, target, exists);
     }
 
     function fileLinkTarget(candidate: HTMLElement): FileLinkTarget | undefined {
@@ -409,23 +418,6 @@ function invalidateFileLink(candidate: HTMLElement): void {
   candidate.dataset.fileValidationState = "invalid";
   delete candidate.dataset.projectFileCandidate;
   delete candidate.dataset.localFileCandidate;
-}
-
-function replaceFileLinkCandidate(candidate: HTMLElement, target: FileLinkTarget): void {
-  const link = document.createElement("a");
-  link.href = "#";
-  link.title = `${target.projectPath ? "Preview" : "Open"} ${target.path}`;
-  if (target.projectPath) {
-    link.dataset.projectFile = target.path;
-    const startLine = candidate.dataset.projectFileStartLine;
-    const endLine = candidate.dataset.projectFileEndLine;
-    if (startLine) link.dataset.projectFileStartLine = startLine;
-    if (endLine) link.dataset.projectFileEndLine = endLine;
-  } else {
-    link.dataset.localFile = target.path;
-  }
-  while (candidate.firstChild) link.append(candidate.firstChild);
-  candidate.replaceWith(link);
 }
 
 function showMermaidError(canvas: HTMLElement, diagram: HTMLElement) {

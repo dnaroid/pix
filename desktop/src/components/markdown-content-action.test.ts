@@ -9,6 +9,6 @@ describe("markdown file-link validation", () => {
     expect(markdownContentActionSource).toContain(
       "const cached = fileLinkValidationCache.peek(target.scope, target.path, target.validator)",
     );
-    expect(markdownContentActionSource).toContain("replaceFileLinkCandidate(candidate, target)");
+    expect(markdownContentActionSource).toContain("decorateFileLink(candidate, target, cached)");
   });
 });

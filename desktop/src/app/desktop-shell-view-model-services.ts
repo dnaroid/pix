@@ -98,9 +98,9 @@ export function createDesktopShellViewModelServices(
       ? (runDir, agentId) => void subagentNavigation.openSubagentSession(runDir, agentId)
       : undefined,
     subagentPathNavigation: {
-      validate: (path, kind) => kind === "directory"
+      validate: async (path, kind) => kind === "directory"
         ? invoke<boolean>("project_directory_exists", { workspace: options.workspace(), path })
-        : options.project.preview.validateProjectFile(path),
+        : Boolean(await options.project.preview.validateProjectFile(path)),
       open: (path) => options.project.preview.openProjectFile(path, "push"),
     },
   });

@@ -74,8 +74,8 @@
     externalEditorLabel?: string;
     onBack?: () => void;
     onForward?: () => void;
-    onValidateProjectFile?: (path: string) => Promise<boolean>;
-    onValidateLocalFile?: (path: string) => Promise<boolean>;
+    onValidateProjectFile?: (path: string) => Promise<boolean | "directory">;
+    onValidateLocalFile?: (path: string) => Promise<boolean | "directory">;
     onOpenProjectFile?: (path: string, range?: ProjectFileLineRange) => void | Promise<void>;
     onResolveProjectMedia?: (path: string) => Promise<Attachment | undefined>;
     onOpenLocalFile?: (path: string) => void | Promise<void>;

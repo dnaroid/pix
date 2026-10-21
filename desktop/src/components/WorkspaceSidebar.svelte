@@ -309,7 +309,7 @@
     onOpenProjectDocument: (path: string, exists?: boolean) => void;
     onRefreshPlans?: () => Promise<void>;
     onListProjectDirectory: (path: string) => Promise<ProjectTreeEntry[]>;
-    onValidateProjectFile: (path: string) => Promise<boolean>;
+    onValidateProjectFile: (path: string) => Promise<boolean | "directory">;
     onOpenProjectFile: (path: string, range?: ProjectFileLineRange) => void;
     onOpenFilesFile?: (path: string) => void;
     onOpenUserConfig: (kind: SettingsConfigKind) => void;

@@ -1,6 +1,15 @@
 <script lang="ts">
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import Copy from "@lucide/svelte/icons/copy";
+  import Folder from "@lucide/svelte/icons/folder";
+  import Globe from "@lucide/svelte/icons/globe";
+  import File from "@lucide/svelte/icons/file";
+  import FileText from "@lucide/svelte/icons/file-text";
+  import FileCode from "@lucide/svelte/icons/file-code";
+  import FileImage from "@lucide/svelte/icons/file-image";
+  import FileAudio from "@lucide/svelte/icons/file-audio";
+  import FileVideo from "@lucide/svelte/icons/file-video";
+  import FileArchive from "@lucide/svelte/icons/file-archive";
   import type { Attachment } from "../lib/attachments";
   import { splitHtmlSandboxSegments, type HtmlSandboxSegment } from "../lib/html-sandbox";
   import ChoiceActions from "./ChoiceActions.svelte";
@@ -43,8 +52,8 @@
     choiceActionsScope?: string;
     answeredChoiceActions?: ReadonlySet<number>;
     onChoiceActionsSubmit?: (text: string) => Promise<"sent" | "queued">;
-    onValidateProjectFile?: (path: string) => Promise<boolean>;
-    onValidateLocalFile?: (path: string) => Promise<boolean>;
+    onValidateProjectFile?: (path: string) => Promise<boolean | "directory">;
+    onValidateLocalFile?: (path: string) => Promise<boolean | "directory">;
     onOpenProjectFile?: (path: string, range?: ProjectFileLineRange) => void | Promise<void>;
     onResolveProjectMedia?: (path: string) => Promise<Attachment | undefined>;
     onOpenLocalFile?: (path: string) => void | Promise<void>;
@@ -56,10 +65,13 @@
     return sandbox || actions ? splitHtmlSandboxSegments(text, { sandbox, actions }) : [{ type: "markdown", text }];
   });
   let externalLinkIconTemplate: HTMLSpanElement | undefined;
+  let fileLinkIconTemplates: HTMLSpanElement | undefined;
+  const fileLinkIcons = { folder: Folder, file: File, text: FileText, code: FileCode, globe: Globe, image: FileImage, audio: FileAudio, video: FileVideo, archive: FileArchive, pdf: FileText };
   const actionSegments = $derived(segments.filter((segment) => segment.type === "actions"));
   let copyIconTemplate: HTMLSpanElement | undefined;
   const codeCopy = createMarkdownCodeCopyAction(() => copyIconTemplate);
   const markdownContent = createMarkdownContentAction({
+    fileLinkIconTemplate: (kind) => fileLinkIconTemplates?.querySelector<SVGElement>(`[data-file-link-icon="${kind}"] svg`) ?? undefined,
     externalLinkIconTemplate: () => externalLinkIconTemplate,
     onValidateProjectFile: () => onValidateProjectFile,
     onValidateLocalFile: () => onValidateLocalFile,
@@ -72,6 +84,11 @@
   });
 </script>
 
+<span class="external-link-icon-template" aria-hidden="true" bind:this={fileLinkIconTemplates}>
+  {#each Object.entries(fileLinkIcons) as [kind, Icon]}
+    <span data-file-link-icon={kind}><Icon size={14} strokeWidth={2} /></span>
+  {/each}
+</span>
 <span class="external-link-icon-template" aria-hidden="true" bind:this={externalLinkIconTemplate}>
   <ExternalLink size={14} strokeWidth={2} />
 </span>
@@ -217,6 +234,14 @@
   }
   .markdown-text :global(a:hover) { text-decoration-color: currentColor; }
   .external-link-icon-template { display: none; }
+  .markdown-text :global(.markdown-file-link-icon) {
+    display: inline-block;
+    width: 1em;
+    height: 1em;
+    margin-inline-end: 0.3em;
+    vertical-align: -0.15em;
+    color: var(--muted-foreground);
+  }
   .markdown-text :global(.markdown-external-link-icon) {
     display: inline-block;
     width: 0.82em;
