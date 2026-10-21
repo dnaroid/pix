@@ -1,6 +1,13 @@
 //! Catch microphone-position F5 before macOS Dictation. No I/O in the HID callback.
 use tauri::{AppHandle, WebviewWindow};
 
+/// Function-row F5 (`0x60`) and the dedicated microphone/Dictation key (`0xB0`),
+/// which Apple keyboards send for the F5-position mic key without Fn.
+#[cfg(any(target_os = "macos", test))]
+fn is_dictation_key(keycode: i64) -> bool {
+    matches!(keycode, 0x60 | 0xB0)
+}
+
 #[cfg(any(target_os = "macos", test))]
 #[derive(Debug, PartialEq)]
 enum KeyAction {
@@ -45,7 +52,7 @@ impl WindowOwners {
 #[cfg(any(target_os = "macos", test))]
 impl KeyFilter {
     fn route(&mut self, keycode: i64, down: bool, eligible: bool, repeat: bool) -> KeyAction {
-        if keycode != 0x60 {
+        if !is_dictation_key(keycode) {
             return KeyAction::Keep;
         }
         if !down {
@@ -310,7 +317,7 @@ mod macos {
             return CallbackResult::Keep;
         }
         let keycode = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
-        if keycode != 0x60 {
+        if !is_dictation_key(keycode) {
             return CallbackResult::Keep;
         }
         let modifiers = CGEventFlags::CGEventFlagShift
@@ -374,6 +381,15 @@ mod tests {
         assert_eq!(keys.route(0x60, true, false, true), KeyAction::Drop);
         assert_eq!(keys.route(0x60, false, false, false), KeyAction::Drop);
         assert_eq!(keys.route(0x60, true, true, false), KeyAction::Toggle);
+    }
+
+    #[test]
+    fn dedicated_microphone_keycode_toggles_like_f5() {
+        let mut keys = KeyFilter::default();
+        assert_eq!(keys.route(0xB0, true, true, false), KeyAction::Toggle);
+        assert_eq!(keys.route(0xB0, false, true, false), KeyAction::Drop);
+        assert_eq!(keys.route(0xB0, true, false, false), KeyAction::Keep);
+        assert_eq!(keys.route(0xB0, false, false, false), KeyAction::Keep);
     }
 
     #[test]

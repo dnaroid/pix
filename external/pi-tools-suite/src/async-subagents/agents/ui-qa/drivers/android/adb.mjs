@@ -4,21 +4,33 @@ import net from "node:net";
 import path from "node:path";
 
 const MAX_OUTPUT = 3 * 1024 * 1024;
-const TARGET_FIELDS = new Set(["adbPath", "serial", "avdName", "package", "hierarchyMode"]);
+const TARGET_FIELDS = new Set(["adbPath", "serial", "avdName", "package", "hierarchyMode", "deviceType", "deviceSerial"]);
 const KEYS = new Set(["BACK", "ENTER", "DEL", "TAB", "DPAD_UP", "DPAD_DOWN", "DPAD_LEFT", "DPAD_RIGHT", "DPAD_CENTER", "ESCAPE"]);
 
 export function validateAndroidTarget(target) {
 	if (!target || typeof target !== "object" || Array.isArray(target)
 		|| Object.keys(target).some((key) => !TARGET_FIELDS.has(key))) throw new Error("invalid target.android fields");
 	if (target.hierarchyMode !== undefined && !["stock", "no-idle"].includes(target.hierarchyMode)) throw new Error("invalid Android hierarchyMode");
-	if (typeof target.serial !== "string" || !/^emulator-\d{4,5}$/.test(target.serial)) throw new Error("Android QA accepts only an explicit emulator serial");
-	if (typeof target.avdName !== "string" || !/^[A-Za-z0-9._-]{1,120}$/.test(target.avdName)) throw new Error("explicit avdName required");
+	const deviceType = target.deviceType === undefined ? "emulator" : target.deviceType;
+	if (!["emulator", "physical"].includes(deviceType)) throw new Error("invalid Android deviceType");
+	if (deviceType === "physical") {
+		// Explicit opt-in only: never infer a physical target from a serial.
+		if (typeof target.serial !== "string" || !/^[A-Za-z0-9\[][-A-Za-z0-9._:\[\]]{0,254}$/.test(target.serial)
+			|| /^(?:emulator-|(?:usb|model|product|device|tcp|udp):)/.test(target.serial)) throw new Error("physical Android QA requires an explicit safe non-emulator serial");
+		if (typeof target.deviceSerial !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/.test(target.deviceSerial)) throw new Error("physical Android target requires its exact hardware deviceSerial (ro.serialno)");
+		if (Object.hasOwn(target, "avdName")) throw new Error("physical Android target cannot specify avdName");
+		if (target.hierarchyMode === "no-idle") throw new Error("no-idle helper is supported only on an approved AVD");
+	} else {
+		if (Object.hasOwn(target, "deviceSerial")) throw new Error("deviceSerial is only valid for physical Android targets");
+		if (typeof target.serial !== "string" || !/^emulator-\d{4,5}$/.test(target.serial)) throw new Error("Android QA accepts only an explicit emulator serial unless deviceType is physical");
+		if (typeof target.avdName !== "string" || !/^[A-Za-z0-9._-]{1,120}$/.test(target.avdName)) throw new Error("explicit avdName required");
+	}
 	if (typeof target.package !== "string" || !/^[A-Za-z]\w*(?:\.[A-Za-z]\w*)+$/.test(target.package)) throw new Error("invalid Android package");
 	if (typeof target.adbPath !== "string" || !path.isAbsolute(target.adbPath)) throw new Error("adbPath must be absolute");
 	const adbPath = fs.realpathSync(target.adbPath);
 	if (!fs.statSync(adbPath).isFile() || !/^adb(?:\.exe)?$/.test(path.basename(adbPath))) throw new Error("adbPath must resolve to the adb executable");
 	fs.accessSync(adbPath, fs.constants.X_OK);
-	return { ...target, adbPath };
+	return { ...target, deviceType, adbPath };
 }
 
 // adb shell itself interprets a command string. Only fixed templates and
@@ -61,7 +73,7 @@ export async function requireAdbServer(deadline, expectedVersion) {
 			done();
 		});
 		socket.once("end", () => done(new Error("local ADB server closed its version handshake")));
-		socket.once("error", () => done(new Error("existing local ADB server required; start the dedicated emulator through its documented launcher")));
+		socket.once("error", () => done(new Error("existing local ADB server required; establish the explicitly selected Android target through its documented setup")));
 	});
 }
 
@@ -112,13 +124,24 @@ export function createAndroidClient(target, context) {
 	}
 	async function property(name) { return text(["shell", "getprop", name]); }
 	async function identity() {
-		if (await text(["get-state"]) !== "device") throw new Error("expected emulator is not online");
-		const qemu = await property("ro.kernel.qemu") || await property("ro.boot.qemu");
-		if (qemu !== "1") throw new Error("target is not a verified Android emulator");
-		const avd = await property("ro.boot.qemu.avd_name") || await property("ro.kernel.qemu.avd_name");
-		if (avd !== target.avdName) throw new Error("AVD name mismatch or missing identity property");
+		if (await text(["get-state"]) !== "device") throw new Error("expected Android target is not online");
+		if (target.deviceType === "physical") {
+			// -s also understands transport selectors. Require the exact transport
+			// label AND the independent hardware serial, including for Wi-Fi ADB.
+			if (await text(["get-serialno"]) !== target.serial) throw new Error("Android transport serial mismatch; no input sent");
+			if (await property("ro.serialno") !== target.deviceSerial) throw new Error("Android hardware serial mismatch or missing; no input sent");
+			const kernelQemu = await property("ro.kernel.qemu");
+			const bootQemu = await property("ro.boot.qemu");
+			if (![kernelQemu, bootQemu].every((value) => value === "" || value === "0")
+				|| await property("ro.boot.qemu.avd_name") || await property("ro.kernel.qemu.avd_name")) throw new Error("target is not a verified non-emulator Android device");
+		} else {
+			const qemu = await property("ro.kernel.qemu") || await property("ro.boot.qemu");
+			if (qemu !== "1") throw new Error("target is not a verified Android emulator");
+			const avd = await property("ro.boot.qemu.avd_name") || await property("ro.kernel.qemu.avd_name");
+			if (avd !== target.avdName) throw new Error("AVD name mismatch or missing identity property");
+		}
 		const boot = await text(["shell", "cat", "/proc/sys/kernel/random/boot_id"]);
-		if (!/^[a-f0-9-]{36}$/i.test(boot)) throw new Error("emulator boot identity missing");
+		if (!/^[a-f0-9-]{36}$/i.test(boot)) throw new Error("Android boot identity missing");
 		return boot;
 	}
 	async function focusedPackage() {
@@ -142,7 +165,7 @@ export function createAndroidClient(target, context) {
 		const value = await text(["shell", "wm", "size"]);
 		const matches = [...value.matchAll(/(?:Physical|Override) size: (\d+)x(\d+)/g)];
 		const [, width, height] = matches.at(-1) ?? [];
-		if (!width || +width < 1 || +height < 1 || +width > 16384 || +height > 16384) throw new Error("invalid emulator screen size");
+		if (!width || +width < 1 || +height < 1 || +width > 16384 || +height > 16384) throw new Error("invalid Android screen size");
 		return { width: +width, height: +height };
 	}
 	return { command, identity, foreground, focusedPackage, screenSize };

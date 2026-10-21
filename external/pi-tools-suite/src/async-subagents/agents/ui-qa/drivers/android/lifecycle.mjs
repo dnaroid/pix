@@ -1,4 +1,4 @@
-// Explicit, emulator-only lifecycle intents. No arbitrary components/commands,
+// Explicit, selected-target lifecycle intents. No arbitrary components/commands,
 // app-data access, force-stop of another package, or system configuration.
 export function validateAndroidLifecycle(step) {
 	if (step.action === "appLifecycle" && !["background", "resume", "restart"].includes(step.operation)) throw new Error("invalid Android appLifecycle operation");
@@ -12,7 +12,7 @@ export function resumesAndroidApp(steps) {
 export function createAndroidLifecycle(client, target, expectedBoot, context) {
 	let homePackage;
 	async function identity() {
-		if (await client.identity() !== expectedBoot) throw new Error("Android emulator identity changed during lifecycle; no further command allowed");
+		if (await client.identity() !== expectedBoot) throw new Error("Android target identity changed during lifecycle; no further command allowed");
 	}
 	async function resolve(category, appOnly) {
 		await identity();
@@ -49,6 +49,7 @@ export function createAndroidLifecycle(client, target, expectedBoot, context) {
 	}
 	async function run(operation) {
 		validateAndroidLifecycle({ action: "appLifecycle", operation });
+		if (target.deviceType === "physical" && operation === "restart") throw new Error("physical Android restart is not supported");
 		if (operation === "background") {
 			await identity();
 			const launcher = await home();

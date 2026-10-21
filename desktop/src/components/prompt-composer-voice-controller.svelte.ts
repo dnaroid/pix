@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { onMount, tick } from "svelte";
-import { attachDictationShortcut, DICTATION_SHORTCUT_EVENT } from "../lib/dictation-shortcut";
+import { attachDictationShortcut, DICTATION_SHORTCUT_EVENT, hasBlockingModal } from "../lib/dictation-shortcut";
 import {
   browserDeepgramSupported,
   DeepgramDictationController,
@@ -47,7 +47,7 @@ export function createPromptComposerVoiceController(options: PromptComposerVoice
       listen: (handler) => getCurrentWebviewWindow().listen(DICTATION_SHORTCUT_EVENT, handler),
       setNativeEnabled: (enabled) => invoke("desktop_set_dictation_shortcut", { enabled, owner: shortcutOwner }),
       canToggle: () => document.hasFocus()
-        && !document.querySelector('[role="dialog"], dialog[open]')
+        && !hasBlockingModal()
         && (canStart() || state !== "idle"),
       toggle,
       onError: (reason) => { error = String(reason); },

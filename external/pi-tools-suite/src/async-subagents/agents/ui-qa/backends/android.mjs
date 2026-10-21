@@ -16,21 +16,30 @@ const FIELDS = {
 	appLifecycle: ["operation", "name"], wait: ["durationMs"],
 };
 const STATE_ATTRIBUTES = new Set(["enabled", "checked", "selected", "focused", "clickable"]);
-const REMEDIATION = "Use the documented dedicated emulator launcher; open the target app on that AVD, then retry. Never fall back to a physical device, change permissions, or run raw ADB outside the unified runner.";
+const REMEDIATION = "Establish the explicitly selected Android target through its documented setup and open the target app, then retry. Physical devices require deviceType: physical, an explicit transport serial and hardware deviceSerial. Never discover or substitute another target, install an APK, change permissions/settings, or run raw ADB outside the unified runner.";
+
+function validateTargetActions(target, steps) {
+	if (target.deviceType !== "physical") return;
+	if (steps.some((step) => step.action === "assertHelperCleanup"
+		|| step.action === "appLifecycle" && step.operation === "restart")) {
+		throw new Error("physical Android QA does not support restart or helper cleanup actions");
+	}
+}
 
 export async function probeAndroidBackend(context = {}) {
 	const base = { platformDriver: "adb-screenshot", guideTopic: "adb", supportedCapabilities: CAPABILITIES, missingCapabilities: [] };
 	// Non-Android QA must never start ADB or contact a device.
-	if (context.shallow) return { ...base, available: true, reason: "explicit Android emulator attachment available; prerequisites not probed" };
+	if (context.shallow) return { ...base, available: true, reason: "explicit Android target attachment available; prerequisites not probed" };
 	try {
 		const target = validateAndroidTarget(context.flow.target.android);
+		validateTargetActions(target, context.flow.steps);
 		if (target.hierarchyMode === "no-idle") verifyNoIdleHelperBundle();
 		const client = createAndroidClient(target, context);
 		const boot = await client.identity();
 		if (resumesAndroidApp(context.flow.steps)) await createAndroidLifecycle(client, target, boot, context).guardBackground();
 		else await client.foreground();
 		await client.screenSize();
-		return { ...base, available: true, reason: "explicit AVD identity and foreground package verified" };
+		return { ...base, available: true, reason: "explicit Android target identity and foreground package verified" };
 	} catch (error) {
 		return { ...base, available: false, reason: error.message, remediation: REMEDIATION };
 	}
@@ -64,7 +73,7 @@ export async function runAndroidBackend(context) {
 	let background = resumesAndroidApp(context.flow.steps);
 	const stepContext = { ...context, stageTimeoutMs: Math.min(15_000, context.stageTimeoutMs ?? 15_000) };
 	async function guard() {
-		if (await client.identity() !== boot) throw new Error("Android emulator identity changed during QA; no further input allowed");
+		if (await client.identity() !== boot) throw new Error("Android target identity changed during QA; no further input allowed");
 		if (background) await lifecycle.guardBackground();
 		else await client.foreground();
 	}
@@ -126,6 +135,7 @@ export async function runAndroidBackend(context) {
 	try {
 		validateAndroidSteps(context.flow.steps);
 		target = validateAndroidTarget(context.flow.target.android);
+		validateTargetActions(target, context.flow.steps);
 		if (target.hierarchyMode === "no-idle") verifyNoIdleHelperBundle();
 		client = createAndroidClient(target, stepContext);
 		boot = await client.identity();

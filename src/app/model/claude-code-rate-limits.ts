@@ -67,12 +67,18 @@ export class ClaudeCodeRateLimitCache {
 	merge(previous: ModelUsageStatus | undefined, modelKey: string, now = Date.now()): ModelUsageStatus | undefined {
 		if (!CLAUDE_CODE_ROUTE.test(modelKey) || !this.samples.size) return previous;
 		let status = previous?.modelKey === modelKey ? previous : undefined;
+		const baselineAt = status?.updatedAt ?? 0;
 		for (const [type, sample] of this.samples) {
 			const field = type === "five_hour" ? "hourly" : "weekly";
 			const baseline = status?.[field];
 			// CLI resets have whole-second precision; OAuth can include fractions.
 			const tolerance = sample.resetPrecision === "minute" ? 59_999 : 999;
-			if (sample.resetsAt <= now || (baseline && !baseline.resetAtEstimated && baseline.resetAt > sample.resetsAt + tolerance)) {
+			const authoritative = baseline && !baseline.resetAtEstimated;
+			// A newer authoritative endpoint reading of the same window supersedes
+			// the sample: providers may lower usage early (e.g. a granted reset).
+			const superseded = authoritative && baselineAt > sample.observedAt
+				&& Math.abs(baseline.resetAt - sample.resetsAt) <= tolerance;
+			if (sample.resetsAt <= now || superseded || (authoritative && baseline.resetAt > sample.resetsAt + tolerance)) {
 				this.samples.delete(type);
 				continue;
 			}

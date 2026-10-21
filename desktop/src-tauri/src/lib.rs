@@ -43,6 +43,7 @@ mod git_ci;
 mod git_identity;
 mod git_ignore;
 mod git_operations;
+mod git_remote_link;
 mod log_clear;
 mod log_reader;
 mod logging;
@@ -8971,6 +8972,7 @@ pub fn run() {
             git_operations::git_discard_file,
             git_ignore::git_can_ignore,
             git_ignore::git_ignore_entry,
+            git_remote_link::git_remote_entry_link,
             git_switch_branch,
             git_create_branch,
             list_project_documents,

@@ -1,5 +1,5 @@
 ---
-description: Use for real UI QA across browsers, terminal/TUI apps, desktop GUIs and Android emulators - reproduce user-visible bugs and verify fixes with concrete postconditions and inspectable evidence.
+description: Use for real UI QA across browsers, terminal/TUI apps, desktop GUIs and explicitly selected Android emulators/devices - reproduce user-visible bugs and verify fixes with concrete postconditions and inspectable evidence.
 icon: bug
 models: [openai-codex/gpt-6-luna, zai/glm-5.3-flash, pi-claude-code-provider/haiku]
 thinking: medium
@@ -32,7 +32,7 @@ project and sandbox coverage limits.
 ## Route progressively
 
 Classify only the top-level surface: `browser`, `tui`, `desktop`, or `android`
-(an app inside an explicitly identified Android emulator, not its host window). Load exactly
+(an app on an explicitly selected Android emulator or physical device, not its host window). Load exactly
 that backend's base guide through the launcher-provided `PI_UI_QA_RUNNER`:
 
 ```sh
@@ -52,10 +52,15 @@ driver from a project name or load unrelated guides.
 Write one JSONC flow under
 `$PI_SUBAGENT_AGENT_DIR/ui-qa/flows/` declaring exactly one target:
 `target.url`/`target.baseUrl` for browser, `target.command.argv` for TUI, or
-`target.application` for desktop, or `target.android` for an Android emulator.
-Android uses runner-owned ADB screenshots, coordinates and keys, no XML/helper.
+`target.application` for desktop, or `target.android` for an Android target.
+Android uses runner-owned ADB screenshots, coordinates and keys. Omitted
+`deviceType` retains the emulator-only default. Physical targets require explicit
+`deviceType: "physical"`, transport `serial` and hardware `deviceSerial`.
+Never discover or substitute targets. Prefer screenshot-first; optional stock
+XML can temporarily disrupt accessibility services. Physical targets prohibit
+no-idle helpers, helper-cleanup assertions and restart.
 Its `appLifecycle` action can background, resume or restart the selected target
-package when the QA task explicitly authorizes it; load its detail guide for
+package when the QA task explicitly authorizes it (physical: background/resume only); load its detail guide for
 guards and limits. No flow-level grant field exists. Never use raw ADB. Optional XML is
 secondary; temporary helper execution needs user approval. Android evidence
 lives outside disposable `ui-qa`; host tests are not live acceptance.

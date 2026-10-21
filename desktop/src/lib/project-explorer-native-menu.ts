@@ -27,6 +27,7 @@ export function projectExplorerMenuActions(
     let id = item.label;
     if (item.label === revealLabel) id = "reveal";
     else if (item.label === "Open in Browser") id = "browser";
+    else if (item.label === "Open on GitHub" || item.label === "Open on GitLab") id = "remote";
     else if (item.label.startsWith("Open ")) id = "external";
     return {
       ...item, id, action,

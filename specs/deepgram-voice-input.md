@@ -66,7 +66,8 @@ The permanent key must stay outside UI/browser runtime code.
 - The normal message composer exposes a microphone action when browser media
   APIs are available. Editor mode and questionnaire/custom-answer mode do not
   expose voice input.
-- On macOS, the microphone-position F5 key toggles the same recording in the
+- On macOS, the microphone-position F5 key (virtual keycode `0xB0`, or `0x60`
+  for Fn+F5 / standard function-key mode) toggles the same recording in the
   active Pix window, including when a text input has focus. This uses a HID
   head-insert event tap with Accessibility permission, not a WebView keydown
   handler; see [the permission decision](../docs/decisions/0062-macos-dictation-key.md).

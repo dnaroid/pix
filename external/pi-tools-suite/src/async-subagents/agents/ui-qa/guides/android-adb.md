@@ -1,6 +1,6 @@
 # Android ADB screenshots and coordinate input
 
-An emulator-only runner route. Ordinary interaction requires the selected app
+An Android runner route for an explicitly selected emulator or physical device. Ordinary interaction requires the selected app
 foreground. No APK installation, app-data access, permission/settings changes,
 root, reboot, provider calls or raw ADB commands are supported. The runner
 issues no direct app-data read/clear commands; app lifecycle may naturally save
@@ -14,7 +14,8 @@ screenshots before and after. Background sends HOME only through this action;
 HOME is not an allowed `pressKey`. Lifecycle steps enforce target identity;
 read-only checks while backgrounded allow only the target or resolved HOME,
 while normal input and XML require the target foreground. Resume can recover
-from HOME. Restart resolves the selected package launcher and runs `am start -S`
+from HOME. Physical devices prohibit restart and helper-cleanup assertions.
+Emulator restart resolves the selected package launcher and runs `am start -S`
 to force-stop/relaunch that app only; no app-data clear command is issued. No automatic
 replay/cleanup mutation follows failures, which can leave the app backgrounded
 or stopped. Existing screenshot-to-input TOCTOU limits remain.
@@ -22,6 +23,8 @@ or stopped. Existing screenshot-to-input TOCTOU limits remain.
 `wait` accepts `durationMs` 100..20000 and is bounded by the runner deadline;
 set `timeoutMs: 30000` for a 20-second wait. Do not use long external sleeps.
 The primary visual route needs no XML/helper and writes no device files.
+Stock UIAutomator XML may temporarily disrupt accessibility services, so prefer
+screenshot-first. Screenshots can include notifications or other personal data.
 Do not start with `capture`, XML assertions or selector taps. First run a
 `screenshot` flow and inspect the returned PNG with `read`. Choose coordinates
 from that image, not from source code or a guessed layout; then run one bounded
@@ -48,6 +51,37 @@ illustrative, not a safe universal target):
   ]
 }
 ```
+
+### Physical target opt-in
+
+Omitting `deviceType` preserves the AVD-only default. For a physical device,
+replace the example's target with the following (placeholder identities, not a
+usable target):
+
+```jsonc
+"android": {
+  "adbPath": "/absolute/android-sdk/platform-tools/adb",
+  "deviceType": "physical",
+  "serial": "EXACT_TRANSPORT_SERIAL",
+  "deviceSerial": "EXPECTED_HARDWARE_SERIAL",
+  "package": "your.app.package"
+}
+```
+
+Omit `avdName`. `serial` must exactly match ADB's transport label (USB, TCP/IP,
+IPv6 or mDNS); selector prefixes such as `model:`/`usb:`/`tcp:` are rejected.
+`deviceSerial` must match `ro.serialno`, independently of a network address.
+The parent/user supplies these identities; unknown identity means BLOCKED, not
+auto-discovery. Every guard checks exact transport and hardware identities,
+non-emulator properties and boot ID. Missing/mismatched properties block.
+Hardware serials may be generic on some boards; they are not cryptographic
+identity. Focus checks and boot ID checks remain mandatory, but do not make
+the final guard-to-input interval atomic.
+
+Physical devices support screenshot/coordinate input and optional stock XML.
+`appLifecycle` supports only separately authorized background/resume; restart,
+`hierarchyMode: "no-idle"` and `assertHelperCleanup` are rejected before device
+I/O. No APK installation, data clear, system changes or daemon start is added.
 
 Primary steps (only these fields plus `action`, optional `timeoutMs` 100..30000):
 
@@ -92,7 +126,8 @@ required by the visual route; idle or helper failures do not block `tapPoint`,
 ## Explicit no-idle helper
 
 An exact `Android UIAutomator idle timeout; hierarchy unavailable` can occur
-when an interface keeps emitting accessibility events. Do not keep retrying
+when an interface keeps emitting accessibility events. Physical devices do not
+support this helper or helper-cleanup assertions. Do not keep retrying
 stock dump or change animation/global settings. After the user explicitly
 approves temporary helper files/execution on this dedicated AVD, set
 `target.android.hierarchyMode` to `"no-idle"`. The default is `"stock"`; other
@@ -136,7 +171,7 @@ never builds or downloads helper dependencies at runtime.
 
 Before device commands the runner checks the existing server's read-only
 `host:version` protocol against local `adb version`; mismatch blocks without
-letting adb connect/restart a shared daemon. It verifies emulator identity/boot
+letting adb connect/restart a shared daemon. It verifies emulator or opted-in physical identity/boot
 and focused app before and after steps. For Android versions where the
 windows-only dump omits `mCurrentFocus`, the runner checks full `dumpsys window`;
 missing, null, unparseable or different-package focus blocks. Screenshot
@@ -152,7 +187,7 @@ System/permission-dialog controls cannot be selected. Non-focusable system
 overlays may still intercept coordinates despite the foreground check; stop if
 an overlay is visible, rather than claiming complete overlay isolation.
 XML is bounded and
-password text redacted; PNG must match natural or transposed emulator dimensions. Artifacts are private
+password text redacted; PNG must match natural or transposed Android screen dimensions. Artifacts are private
 and may contain other visible personal data: do not navigate to credentials.
 There is no video capability in this backend; report that limit honestly.
 

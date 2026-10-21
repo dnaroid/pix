@@ -12,7 +12,7 @@ Active implemented contract.
 
 Provide a cheap, fast `ui-qa` async-subagent that reproduces user-visible bugs
 and proves fixes across browser/web UI, terminal/TUI applications, and native
-desktop GUIs. Browser QA selects between the existing trusted Playwright runner
+desktop GUIs and explicitly selected Android apps/devices. Browser QA selects between the existing trusted Playwright runner
 for ordinary isolated E2E/auth/video/trace work and a capability-probed Chrome
 DevTools CLI provider for DevTools-specific AX, console, network, performance,
 Lighthouse, and memory diagnostics. Native/TUI QA uses a real PTY or
@@ -77,6 +77,27 @@ current-session model availability.
   projects must explicitly carry forward every bundled field/instruction they
   still require. Runtime protections remain in the runner and are not prompt
   boundaries.
+
+## Android target contract
+
+Android QA defaults to the existing AVD-only contract: explicit emulator
+transport serial, exact AVD name and target package. Physical-device QA is
+opt-in with `deviceType: "physical"`, exact transport `serial` and expected
+hardware `deviceSerial` (`ro.serialno`); omit `avdName`. The parent/user must
+supply identities; unknown targets are BLOCKED, never discovered/substituted.
+Explicit USB, TCP/IP, IPv6 and mDNS transport labels are supported. The runner
+checks exact transport serial, hardware identity, non-emulator properties,
+boot ID and focused target package at guards. Generic hardware serials are not
+cryptographic identity; the final guard-to-input TOCTOU interval remains.
+
+Use runner-owned screenshots/coordinate input first. Stock XML is optional and
+may temporarily disrupt accessibility services; screenshots may capture
+notifications or other visible personal data. Physical targets prohibit the
+no-idle helper, helper-cleanup assertions and restart. Separately authorized
+background/resume remains available. There is no support for installation,
+data clear, permission/settings changes, root, reboot or starting an ADB daemon.
+The base/detail guides are `android.md`/`android-adb.md`, loaded through
+`guide --backend android` and `guide --backend android --topic adb`.
 
 ## Browser launch contract
 

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { attachDictationShortcut } from "./dictation-shortcut";
+import { attachDictationShortcut, hasBlockingModal } from "./dictation-shortcut";
 
 function setup() {
   let handler = () => {};
@@ -121,5 +121,29 @@ describe("native dictation shortcut", () => {
     expect(owner.setNativeEnabled).toHaveBeenCalledTimes(1);
     complete();
     await vi.waitFor(() => expect(owner.setNativeEnabled).toHaveBeenLastCalledWith(false));
+  });
+});
+
+describe("hasBlockingModal", () => {
+  type Fake = { hidden: boolean };
+  function root(map: Record<string, Fake[]>, modalUnsupported = false): ParentNode {
+    const wrap = (items: Fake[]) => items.map((item) => ({ closest: () => (item.hidden ? {} : null) }));
+    return {
+      querySelectorAll: (selector: string) => {
+        if (selector === "dialog:modal" && modalUnsupported) throw new SyntaxError("unsupported");
+        return wrap(map[selector] ?? []);
+      },
+    } as unknown as ParentNode;
+  }
+
+  it("ignores always-mounted hidden non-modal role=dialog popovers", () => {
+    expect(hasBlockingModal(root({ '[role="dialog"]': [{ hidden: true }] }))).toBe(false);
+    expect(hasBlockingModal(root({ '[aria-modal="true"]': [{ hidden: true }] }))).toBe(false);
+  });
+
+  it("blocks visible modal dialogs", () => {
+    expect(hasBlockingModal(root({ "dialog:modal": [{ hidden: false }] }))).toBe(true);
+    expect(hasBlockingModal(root({ '[aria-modal="true"]': [{ hidden: false }] }))).toBe(true);
+    expect(hasBlockingModal(root({ "dialog[open]": [{ hidden: false }] }, true))).toBe(true);
   });
 });

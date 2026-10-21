@@ -9,6 +9,21 @@ interface DictationShortcutOptions {
   readonly onError: (error: unknown) => void;
 }
 
+/**
+ * True only for a visible modal dialog. Always-mounted non-modal popovers
+ * (e.g. hidden status-bar `role="dialog"` panels) must not block the shortcut.
+ */
+export function hasBlockingModal(root: ParentNode = document): boolean {
+  const candidates: Element[] = [...root.querySelectorAll('[aria-modal="true"]')];
+  try {
+    candidates.push(...root.querySelectorAll("dialog:modal"));
+  } catch {
+    // Engines without :modal: fall back to open <dialog> elements.
+    candidates.push(...root.querySelectorAll("dialog[open]"));
+  }
+  return candidates.some((element) => !element.closest("[hidden]"));
+}
+
 /** Mount synchronously so a late native listener registration can be disposed. */
 export function attachDictationShortcut(options: DictationShortcutOptions) {
   let disposed = false;

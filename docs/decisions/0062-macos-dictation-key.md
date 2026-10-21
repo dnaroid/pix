@@ -28,9 +28,11 @@ when no Desktop Deepgram credential is configured.
   `AXIsProcessTrustedWithOptions`.
 - [Karabiner microphone-key work](https://github.com/pqrs-org/Karabiner-Elements/pull/3913)
   identifies microphone-position F5; the Carbon virtual F5 key is `0x60`.
-- Missing evidence: physical-key delivery to the tap on the user's specific
-  macOS/keyboard combination. Do not assume an undocumented `systemDefined`
-  payload or alternate virtual keycode; hardware compatibility needs native QA.
+- Native probe (2026-10-21, user's Apple keyboard): the microphone-position
+  F5 key without Fn reaches the HID tap as ordinary KeyDown/KeyUp with virtual
+  keycode `0xB0` (flags only `NX_SECONDARYFNMASK`), not `0x60` and not a
+  `systemDefined` payload. Pix accepts both `0x60` (Fn+F5 / function-key mode)
+  and `0xB0`.
 
 ## Decision
 
@@ -57,8 +59,8 @@ resources. External config edits refresh on the next Pix activation.
 Accessibility grants broader process trust than this narrowly scoped feature
 uses. Pix must neither log unrelated keystrokes nor expose the credential to JS.
 Only key presence is checked; an invalid configured key can still intercept F5
-and then produce a normal Deepgram error. A HID tap observes F5 at the virtual
-key level rather than proving microphone-key identity for every keyboard mode.
+and then produce a normal Deepgram error. A HID tap observes F5 (`0x60`) and the dedicated microphone key (`0xB0`) at the
+virtual-key level; other keyboards may use other codes.
 The event callback must remain short to avoid macOS disabling the tap.
 
 ## Revisit when

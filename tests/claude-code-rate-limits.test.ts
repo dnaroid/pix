@@ -85,6 +85,17 @@ describe("Claude Code structured quota telemetry", () => {
 		assert.equal(cache.merge(baseline(), MODEL, NOW + 1)?.hourly?.remainingPercent, 0);
 	});
 
+	it("lets a newer endpoint reading of the same window lower stale observed usage (early reset)", () => {
+		const cache = new ClaudeCodeRateLimitCache();
+		const resetsAt = NOW + 7 * 86400_000;
+		cache.observe(sample({ rateLimitType: "seven_day", utilization: 0.9, resetsAt }), NOW);
+		const older = baseline();
+		assert.ok(Math.abs(cache.merge(older, MODEL, NOW)!.weekly!.remainingPercent - 10) < 0.001);
+		const fresh = { ...older, updatedAt: NOW + 5, weekly: { ...older.weekly!, remainingPercent: 100, resetAt: resetsAt + 400 } };
+		assert.equal(cache.merge(fresh, MODEL, NOW + 5), fresh);
+		assert.equal(cache.merge(older, MODEL, NOW + 5), older, "superseded sample is dropped");
+	});
+
 	it("creates a partial snapshot without credentials and never invents the unobserved window", () => {
 		const cache = new ClaudeCodeRateLimitCache();
 		cache.observe(sample({ rateLimitType: "seven_day", status: "rejected", utilization: undefined }), NOW);

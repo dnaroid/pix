@@ -145,6 +145,18 @@ describe("native desktop context menu commands", () => {
     expect(invoke).toHaveBeenCalledExactlyOnceWith("preview_file_action", { path: "/project/a/my file.md", action: "reveal" });
     expect(labels({ kind: "link", hasSelection: false, fileLinkPath: "~/.config/pi/pix.jsonc" })).toEqual(["Reveal in Finder"]);
   });
+  it("offers Open on GitHub/GitLab for project file links with a resolved remote", async () => {
+    const commands = nativeContextMenuItems(context({ kind: "link", hasSelection: false,
+      fileLinkPath: "/project/a.md", fileLinkRevealPath: "a.md" }), false, reportError, () => true, vi.fn(async () => {}),
+    { provider: "gitlab", url: "https://gitlab.com/g/r/-/blob/main/a.md" });
+    expect(commands.map((item) => "text" in item && item.text)).toEqual(["Show in Files", "Open on GitLab", "Reveal in Finder"]);
+    const remote = commands[1];
+    if (remote && "action" in remote) remote.action?.("ignored");
+    await Promise.resolve();
+    expect(openUrl).toHaveBeenCalledExactlyOnceWith("https://gitlab.com/g/r/-/blob/main/a.md");
+    // Files outside the project never get a remote link.
+    expect(labels({ kind: "link", hasSelection: false, fileLinkPath: "/tmp/x.md" })).toEqual(["Reveal in Finder"]);
+  });
   it("offers Open in Browser only for HTML file links", async () => {
     const commands = items({ kind: "link", hasSelection: false, fileLinkPath: "/tmp/report page.HTML" });
     expect(commands.map((item) => "text" in item && item.text)).toEqual(["Open in Browser", "Reveal in Finder"]);
@@ -303,6 +315,24 @@ describe("native menu registration ownership", () => {
     release({ popup: vi.fn(), close: vi.fn() } as unknown as Menu);
     await Promise.all([first, second]);
     expect(Menu.new).toHaveBeenCalledTimes(2);
+  });
+
+  it("resolves remote links only for project file links and hides them on lookup failure", async () => {
+    vi.mocked(Menu.new).mockResolvedValue({ popup: vi.fn(), close: vi.fn() } as unknown as Menu);
+    const resolve = vi.fn().mockResolvedValueOnce({ provider: "github", url: "https://github.com/o/r/blob/main/a.md" })
+      .mockRejectedValueOnce(new Error("no repo"));
+    const create = createNativeContextMenuFactory(reportError, vi.fn(async () => {}), resolve);
+    const fileLink = context({ kind: "link", hasSelection: false, fileLinkPath: "/p/a.md", fileLinkRevealPath: "a.md" });
+    const texts = (call: number) => vi.mocked(Menu.new).mock.calls[call]![0]!.items!
+      .map((item) => "text" in item ? item.text : "");
+    await create(fileLink, () => true);
+    expect(texts(0)).toContain("Open on GitHub");
+    await create(fileLink, () => true);
+    expect(texts(1)).not.toContain("Open on GitHub");
+    await create(context({ kind: "link", hasSelection: false, linkUrl: "https://example.com/" }), () => true);
+    expect(resolve).toHaveBeenCalledTimes(2);
+    expect(resolve).toHaveBeenCalledWith("a.md");
+    expect(reportError).not.toHaveBeenCalled();
   });
 
   it("allows the next menu to open after a registration failure", async () => {

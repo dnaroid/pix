@@ -128,6 +128,24 @@ establish compatibility requirements.
   Desktop the label is **Reveal in Finder**, and Finder selects the targeted
   entry. The native command validates the target
   against the workspace and rejects symlink targets or escaped paths.
+- In the Tauri Desktop chat context menu, a Markdown project-file link also offers
+  **Open on GitHub** or **Open on GitLab** between **Show in Files** and
+  **Reveal in Finder** when its workspace-relative target resolves to a supported
+  Git remote link. Links outside the current project do not offer this action.
+  Remote lookup is ordered with native menu registration; lookup failures silently
+  hide the item. Activating it opens the resolved URL in the external browser.
+- When Git is available and the repository's selected remote is hosted on
+  GitHub or GitLab (including self-hosted instances), the context menu offers
+  **Open on GitHub** or **Open on GitLab** for files, folders and the project
+  root. Remote selection matches Git CI: branch upstream remote, otherwise
+  `origin`, otherwise the sole configured remote. The link targets the current
+  branch, or the detached HEAD commit, and uses a file or tree URL with
+  percent-encoded path segments. SSH remotes open over HTTPS without the SSH
+  port; HTTP(S) remotes retain their scheme and port. Unsupported/missing
+  remotes, unavailable Git or failed lookups hide the item. Lookup results are
+  generation-guarded so stale results cannot populate a newer menu; failures
+  opening the link are logged as `project-explorer:open-remote-failed` and
+  shown through the explorer operation error surface.
 - `F2` renames the focused entry, `Delete` requests deletion, and the platform
   primary Copy/Paste shortcuts operate on the Project Explorer entry clipboard
   while tree focus is active. These shortcuts do not replace normal text-editing
@@ -311,7 +329,8 @@ establish compatibility requirements.
   descendant expansion reset on parent/root collapse, persistence and sibling preservation.
 - `desktop/src/app/preview.test.ts` covers directory-link routing without Preview
   changes and stale classification cancellation.
-- `desktop/src/lib/native-context-menu.test.ts` covers captured tab reveal actions.
+- `desktop/src/lib/native-context-menu.test.ts` covers captured tab reveal actions
+  and remote-link actions for project Markdown links.
 - `desktop/src-tauri/src/project_directory_link.rs` tests directory confinement,
   file/missing-path rejection and symbolic-link rejection.
 - `desktop/src/components/project-explorer-menu-controller.test.ts` covers

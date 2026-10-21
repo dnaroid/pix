@@ -64,7 +64,7 @@ impl GitCiProcessState {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
-enum GitCiProvider {
+pub(crate) enum GitCiProvider {
     Github,
     Gitlab,
 }
@@ -156,11 +156,11 @@ pub(crate) struct GitCiJobsResult {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct RemoteInfo {
-    name: String,
-    host: String,
-    project: String,
-    provider: GitCiProvider,
+pub(crate) struct RemoteInfo {
+    pub(crate) name: String,
+    pub(crate) host: String,
+    pub(crate) project: String,
+    pub(crate) provider: GitCiProvider,
 }
 
 struct CliOutput {
@@ -568,7 +568,7 @@ fn current_head_matches(root: &Path, expected_head: &str) -> Result<bool, String
     Ok(head == expected_head)
 }
 
-fn resolve_remote(root: &Path) -> Result<Option<RemoteInfo>, String> {
+pub(crate) fn resolve_remote(root: &Path) -> Result<Option<RemoteInfo>, String> {
     let remote_names = git_output(root, &["remote"])?;
     let mut names = String::from_utf8_lossy(&remote_names.stdout)
         .lines()

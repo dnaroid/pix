@@ -5,6 +5,7 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { DesktopContextTarget } from "./desktop-context-target";
 import { copyContextImage, openContextImage } from "./image-context-actions";
+import { gitRemoteLinkLabel, type GitRemoteEntryLink } from "./project-git-remote-link";
 
 export interface ContextMenuPosition { x: number; y: number }
 export interface NativeContextMenu {
@@ -40,6 +41,7 @@ export function nativeContextMenuItems(
   reportError: (error: unknown) => void,
   isActive: () => boolean,
   revealProjectEntry?: (path: string) => Promise<void>,
+  remoteLink?: GitRemoteEntryLink | null,
 ): ContextMenuItem[] {
   const items: ContextMenuItem[] = [];
   const run = (action: () => Promise<unknown>) => () => {
@@ -163,6 +165,11 @@ export function nativeContextMenuItems(
       items.push({ id: "desktop.link-file.explorer", text: "Show in Files",
         action: run(() => revealProjectEntry(revealPath)) });
     }
+    if (revealPath && remoteLink) {
+      const url = remoteLink.url;
+      items.push({ id: "desktop.link-file.remote", text: gitRemoteLinkLabel(remoteLink.provider),
+        action: run(() => openUrl(url)) });
+    }
     items.push({ id: "desktop.link-file.reveal", text: "Reveal in Finder",
       action: run(() => invoke("preview_file_action", { path: fileLinkPath, action: "reveal" })) });
   }
@@ -185,6 +192,7 @@ export function nativeContextMenuItems(
 export function createNativeContextMenuFactory(
   reportError: (error: unknown) => void,
   revealProjectEntry?: (path: string) => Promise<void>,
+  resolveRemoteLink?: (path: string) => Promise<GitRemoteEntryLink | null>,
 ): (context: DesktopContextTarget, isActive: () => boolean) => Promise<NativeContextMenu> {
   // Tauri's callback registry is app-wide, not per WebView. Each mounted owner
   // needs a namespace so secondary windows cannot overwrite each other's actions.
@@ -196,7 +204,12 @@ export function createNativeContextMenuFactory(
     // Keep native registration ordered as well as guarding JS completions: a
     // late obsolete creation must not overwrite a newer menu's stable callback ids.
     const result = pending.then(async () => {
-      const items = nativeContextMenuItems(context, linux, reportError, isActive, revealProjectEntry)
+      // Lookup stays inside the ordered chain so registration order is unchanged.
+      // Unsupported remotes, non-repositories and Git failures just hide the item.
+      const revealPath = context.fileLinkRevealPath;
+      const remoteLink = revealPath && resolveRemoteLink
+        ? await resolveRemoteLink(revealPath).catch(() => null) : null;
+      const items = nativeContextMenuItems(context, linux, reportError, isActive, revealProjectEntry, remoteLink)
         .map((item) => "id" in item ? { ...item, id: `${namespace}:${item.id}` } : item);
       const menu = await Menu.new({ items });
       return {

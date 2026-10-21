@@ -39,6 +39,8 @@
   import { createProjectGitRefresh } from "../lib/project-git-refresh";
   import { createProjectFilesRefresh } from "../lib/project-files-refresh";
   import { createProjectGitIgnoreEligibility } from "../lib/project-git-ignore";
+  import { createProjectGitRemoteLink, gitRemoteLinkLabel, type GitRemoteEntryLink, type ProjectEntryRemoteLink } from "../lib/project-git-remote-link";
+  import { openExternalHref } from "../lib/external-links";
   import {
     projectExplorerExpandedDirectoriesFromWorkspaceConfig,
     workspaceConfigWithProjectExplorerExpandedDirectories,
@@ -77,6 +79,7 @@
   const operations = createProjectExplorerOperations();
   let operationError = $state<string | null>(null);
   let canIgnoreEntry = $state(false);
+  let remoteLink = $state<ProjectEntryRemoteLink | null>(null);
   let searchInputElement = $state<HTMLInputElement | null>(null);
   let searchQuery = $state("");
   let searchResults = $state<ProjectSearchMatch[]>([]);
@@ -149,17 +152,25 @@
     native: nativeMenus ? {
       items: nativeMenuActions,
       prepare: async (entry) => {
-        await Promise.all([refreshEntryClipboard(entry), ignoreEligibility.request(workspace, entry.path)]);
+        await Promise.all([
+          refreshEntryClipboard(entry),
+          ignoreEligibility.request(workspace, entry.path),
+          remoteLinks.request(workspace, entry.path),
+        ]);
       },
       reportError: (error) => { operationError = errorMessage(error); },
     } : undefined,
-    onClose: () => { clipboardReader.invalidate(); ignoreEligibility.invalidate(); },
+    onClose: () => { clipboardReader.invalidate(); ignoreEligibility.invalidate(); remoteLinks.invalidate(); },
   });
   onMount(menuController.installNativeCancellation);
   const menuState = menuController.state;
   const ignoreEligibility = createProjectGitIgnoreEligibility(
     (workspace, path) => invoke<boolean>("git_can_ignore", { workspace, path }),
     (allowed) => { canIgnoreEntry = allowed; },
+  );
+  const remoteLinks = createProjectGitRemoteLink(
+    (workspace, path) => invoke<GitRemoteEntryLink | null>("git_remote_entry_link", { workspace, path }),
+    (link) => { remoteLink = link; },
   );
 
   $effect(() => {
@@ -170,6 +181,13 @@
     void ignoreEligibility.request(workspace, menuState.entry?.path ?? "");
     return ignoreEligibility.invalidate;
   });
+  $effect(() => {
+    if (nativeMenus) return;
+    // Branch switches arrive through snapshots and change the link's ref.
+    gitSnapshot;
+    void remoteLinks.request(workspace, menuState.entry?.path ?? null);
+    return remoteLinks.invalidate;
+  });
 
   onDestroy(() => {
     nameEditor.dispose();
@@ -177,6 +195,7 @@
     operations.invalidate();
     clipboardReader.invalidate();
     ignoreEligibility.invalidate();
+    remoteLinks.invalidate();
     gitRefresh.dispose();
     treeController.dispose();
     dragController.clear();
@@ -373,6 +392,8 @@
     if (entry.path) items.push({ label: entry.kind === "directory" ? "Toggle Folder" : "Open" });
     items.push({ label: entry.path ? `Open in ${externalEditorLabel}` : `Open Project in ${externalEditorLabel}` });
     if (canOpenProjectEntryInBrowser(entry)) items.push({ label: "Open in Browser" });
+    const remote = entryRemoteLink(entry);
+    if (remote) items.push({ label: gitRemoteLinkLabel(remote.provider) });
     items.push({ label: revealLabel });
     if (entry.kind === "directory") {
       items.push({ label: "New File…", disabled: !canCreateIn(entry) }, { label: "New Folder…", disabled: !canCreateIn(entry) });
@@ -397,6 +418,8 @@
       "Toggle Folder": () => runMenuOpen(entry),
       "Open": () => runMenuOpen(entry),
       "Open in Browser": () => openEntryInBrowser(entry),
+      "Open on GitHub": () => openEntryOnRemote(entry),
+      "Open on GitLab": () => openEntryOnRemote(entry),
       "New File…": () => nameEditor.open("new-file", entry),
       "New Folder…": () => nameEditor.open("new-directory", entry),
       "Copy": () => copyEntry(entry),
@@ -667,6 +690,25 @@
     }
   }
 
+  function entryRemoteLink(entry: ProjectTreeEntry): ProjectEntryRemoteLink | null {
+    const link = remoteLink;
+    return link && link.workspace === workspace && link.path === entry.path ? link : null;
+  }
+
+  async function openEntryOnRemote(entry: ProjectTreeEntry): Promise<void> {
+    const link = entryRemoteLink(entry);
+    menuController.close();
+    if (!link) return;
+    const requestWorkspace = workspace;
+    const generation = operationGeneration;
+    try {
+      await openExternalHref(link.url);
+    } catch (error) {
+      diagnostics.report(error, "project-explorer:open-remote-failed");
+      if (generation === operationGeneration && workspace === requestWorkspace) operationError = errorMessage(error);
+    }
+  }
+
   function handleWindowKeydown(event: KeyboardEvent): void {
     const primary = isMacOS ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
     if (
@@ -918,6 +960,7 @@
   {#if menuState.entry && menuState.position}
     {@const menuEntry = menuState.entry}
     {@const pasteEnabled = canPasteInto(menuEntry)}
+    {@const menuRemoteLink = entryRemoteLink(menuEntry)}
     <div
       bind:this={menuState.menuElement}
       use:menuController.observeMenu
@@ -944,6 +987,12 @@
         <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" onclick={() => void openEntryInBrowser(menuEntry)}>
           <ExternalLink class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           <span>Open in Browser</span>
+        </button>
+      {/if}
+      {#if menuRemoteLink}
+        <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" onclick={() => void openEntryOnRemote(menuEntry)}>
+          <ExternalLink class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span>{gitRemoteLinkLabel(menuRemoteLink.provider)}</span>
         </button>
       {/if}
       <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" onclick={() => void revealEntry(menuEntry)}>

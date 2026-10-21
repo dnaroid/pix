@@ -17,7 +17,7 @@ describe("ProjectExplorer keyboard tree", () => {
   it("uses OS file menus in Desktop and retains DOM navigation only for browser preview", () => {
     expect(explorerSource).toContain("const nativeMenus = isTauri()");
     expect(explorerSource).toContain("native: nativeMenus ?");
-    expect(explorerSource).toContain("await Promise.all([refreshEntryClipboard(entry), ignoreEligibility.request(workspace, entry.path)])");
+    expect(explorerSource).toContain("refreshEntryClipboard(entry),\n          ignoreEligibility.request(workspace, entry.path),\n          remoteLinks.request(workspace, entry.path),\n        ]);");
     expect(explorerSource).toContain("if (!nativeMenus) void refreshEntryClipboard(entry)");
     expect(explorerSource).toContain("if (nativeMenus) return");
   });

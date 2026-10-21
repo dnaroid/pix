@@ -74,8 +74,11 @@ else if (s.flood) { process.stdout.write('x'.repeat(4*1024*1024)); }
 else {
 if (cmd === 'version') out = 'Android Debug Bridge version 1.0.' + (s.version ?? 41);
 else if (cmd === 'get-state') out = 'device';
+else if (cmd === 'get-serialno') out = s.transportSerial ?? a[5];
+else if (cmd === 'shell getprop ro.serialno') out = s.deviceSerial ?? 'HARDWARE-123';
 else if (cmd === 'shell getprop ro.kernel.qemu') out = s.qemu ?? '1';
-else if (cmd.includes('qemu.avd_name')) out = s.avd ?? 'test_avd';
+else if (cmd === 'shell getprop ro.boot.qemu') out = s.bootQemu ?? '';
+else if (cmd.includes('qemu.avd_name')) out = s.avd ?? (a[5].startsWith('emulator-') ? 'test_avd' : '');
 else if (cmd === 'shell cat /proc/sys/kernel/random/boot_id') out = s.bootChanged || s.swapAt && s.calls >= s.swapAt ? '22222222-2222-2222-2222-222222222222' : '11111111-1111-1111-1111-111111111111';
 else if (cmd === 'shell dumpsys window windows' && s.displayOwnedFocus) out = 'WINDOW MANAGER WINDOWS';
 else if (cmd === 'shell dumpsys window' && s.noFullFocus) out = 'WINDOW MANAGER';
@@ -146,6 +149,19 @@ describe("Android target and command safety", () => {
 		expect(result.payload.status).toBe("BLOCKED");
 		expect(f.calls()).toHaveLength(0);
 	});
+	test("physical targets require explicit opt-in and reject unsafe or conflicting descriptors", () => {
+		const f = fixture();
+		const { avdName, ...base } = f.target;
+		for (const serial of ["USB-123", "192.0.2.1:5555", "[2001:db8::1]:5555", "adb-device._adb-tls-connect._tcp"])
+			expect(validateAndroidTarget({ ...base, deviceType: "physical", deviceSerial: "HARDWARE-123", serial }).deviceType).toBe("physical");
+		expect(validateAndroidTarget(f.target).deviceType).toBe("emulator");
+		for (const serial of ["", "-s", "emulator-5580", "USB 123", "USB\n123", "x;id", "$(id)", "x/../y", "model:phone", "usb:1-2", "product:phone", "device:phone", "tcp:host:5555", "udp:host:5555", "a".repeat(256)])
+			expect(() => validateAndroidTarget({ ...base, deviceType: "physical", deviceSerial: "HARDWARE-123", serial })).toThrow();
+		for (const deviceType of [null, "", "usb", true]) expect(() => validateAndroidTarget({ ...f.target, deviceType })).toThrow();
+		for (const change of [{ avdName }, { hierarchyMode: "no-idle" }, { deviceSerial: undefined }, { deviceSerial: "" }, { deviceSerial: "bad;id" }])
+			expect(() => validateAndroidTarget({ ...base, deviceType: "physical", deviceSerial: "HARDWARE-123", serial: "USB-123", ...change })).toThrow();
+		expect(f.calls()).toHaveLength(0);
+	});
 	test("unselected shallow probe performs no IO", async () => {
 		expect((await probeAndroidBackend({ shallow: true })).available).toBe(true);
 	});
@@ -183,6 +199,58 @@ describe("bounded Android hierarchy", () => {
 	});
 	test("accepts both known status spellings on the stdout descriptor", () => {
 		for (const spelling of ["hierchary", "hierarchy"]) expect(parseAndroidHierarchy(XML + `\nUI ${spelling} dumped to: /proc/self/fd/1\n`).nodes).toHaveLength(2);
+	});
+});
+
+describe("explicit physical Android runner", () => {
+	function physicalTarget(f: ReturnType<typeof fixture>) {
+		const { avdName, ...base } = f.target;
+		return { android: { ...base, deviceType: "physical", deviceSerial: "HARDWARE-123", serial: "USB-123" } };
+	}
+	test.each(["0", ""])("physical screenshot/navigation uses only selected serial, qemu=%j", (qemu) => {
+		const f = fixture({ qemu });
+		const target = physicalTarget(f);
+		expect(f.run([], { command: "probe", target }).payload.status).toBe("AVAILABLE");
+		const result = f.run([{ action: "screenshot" }, { action: "tapPoint", x: 40, y: 20 },
+			{ action: "assertText", text: "Schedules" }], { target });
+		expect(result.payload.reason ?? result.payload.status).toBe("PASSED");
+		expect(result.payload.artifacts.screenshots).toHaveLength(3);
+		expect(f.calls().every((a) => a.slice(0, 6).join(" ") === "-H 127.0.0.1 -P 5037 -s USB-123")).toBe(true);
+		expect(f.calls().some((a) => a.some((v) => ["devices", "install", "uninstall", "run-as", "settings", "reboot", "root", "start-server", "kill-server"].includes(v)))).toBe(false);
+	});
+	test.each([{ qemu: "1" }, { qemu: "unexpected" }, { qemu: "", bootQemu: "1" }, { qemu: "0", bootQemu: "1" }, { qemu: "0", avd: "test_avd" },
+		{ qemu: "0", transportSerial: "OTHER-TRANSPORT" }, { qemu: "0", deviceSerial: "OTHER-HARDWARE" }, { qemu: "0", deviceSerial: "" },
+		{ qemu: "0", foreground: "com.android.permissioncontroller" }])("physical identity/focus fails closed %j", (config) => {
+		const f = fixture(config);
+		const result = f.run([{ action: "tapPoint", x: 40, y: 20 }], { target: physicalTarget(f) });
+		expect(result.payload.status).toBe("BLOCKED");
+		expect(f.calls().some((a) => a.includes("input"))).toBe(false);
+	});
+	test.each([{ swapAfterScreenshot: true }, { focusAfterScreenshot: true }])("physical target changes prevent input %j", (config) => {
+		const f = fixture({ qemu: "0", ...config });
+		const result = f.run([{ action: "tapPoint", x: 40, y: 20 }], { target: physicalTarget(f) });
+		expect(result.payload.status).toBe("FAILED");
+		expect(f.calls().some((a) => a.includes("input"))).toBe(false);
+	});
+	test("physical lifecycle stays confined to selected package", () => {
+		const f = fixture({ qemu: "0" });
+		const result = f.run([{ action: "appLifecycle", operation: "background" },
+			{ action: "appLifecycle", operation: "resume" }], { target: physicalTarget(f) });
+		expect(result.payload.reason ?? result.payload.status).toBe("PASSED");
+		expect(f.calls().filter((a) => a.includes("start")).every((a) => a.at(-1) === "your.app/.MainActivity")).toBe(true);
+	});
+	test.each([{ action: "appLifecycle", operation: "restart" }, { action: "assertHelperCleanup" }])("physical risky actions rejected before IO %j", (step) => {
+		const f = fixture({ qemu: "0" });
+		const result = f.run([step], { target: physicalTarget(f) });
+		expect(result.payload.status).toBe("BLOCKED");
+		expect(f.calls()).toHaveLength(0);
+	});
+	test("physical no-idle helper is rejected without device IO", () => {
+		const f = fixture({ qemu: "0" });
+		const target = physicalTarget(f);
+		const result = f.run([{ action: "screenshot" }], { target: { android: { ...target.android, hierarchyMode: "no-idle" } } });
+		expect(result.payload.status).toBe("BLOCKED");
+		expect(f.calls()).toHaveLength(0);
 	});
 });
 

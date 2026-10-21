@@ -1,5 +1,6 @@
-import { isTauri } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import { contextElement, desktopContextTarget, focusContextTarget, nativeSpellingContextTarget, type DesktopContextTarget } from "./desktop-context-target";
+import type { GitRemoteEntryLink } from "./project-git-remote-link";
 import { createNativeContextMenuFactory, type ContextMenuPosition, type NativeContextMenu } from "./native-context-menu";
 
 interface ContextMenuOptions {
@@ -13,7 +14,11 @@ interface ContextMenuOptions {
 export function installDesktopContextMenu({ reportError, createMenu, workspace, revealProjectEntry }: ContextMenuOptions): () => void {
   // A plain Vite browser preview is still a browser, not a privileged desktop host.
   if (!createMenu && !isTauri()) return () => {};
-  const create = createMenu ?? createNativeContextMenuFactory(reportError, revealProjectEntry);
+  const resolveRemoteLink = workspace ? (path: string): Promise<GitRemoteEntryLink | null> => {
+    const current = workspace();
+    return current ? invoke<GitRemoteEntryLink | null>("git_remote_entry_link", { workspace: current, path }) : Promise.resolve(null);
+  } : undefined;
+  const create = createMenu ?? createNativeContextMenuFactory(reportError, revealProjectEntry, resolveRemoteLink);
   let generation = 0;
   let disposed = false;
   let active: { menu: NativeContextMenu; valid: boolean } | null = null;
