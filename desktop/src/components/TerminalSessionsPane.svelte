@@ -36,6 +36,7 @@
     onCloseTerminal,
     isTerminalBusy = (terminal: PackageTerminalView) => terminal.status === "running",
     terminalLabel = (terminal: PackageTerminalView) => terminal.script,
+    collapseWhenEmpty = false,
   }: {
     workspace: string;
     terminals: readonly PackageTerminalView[];
@@ -57,7 +58,11 @@
     onCloseTerminal: (terminal: PackageTerminalView) => void | Promise<void>;
     isTerminalBusy?: (terminal: PackageTerminalView) => boolean;
     terminalLabel?: (terminal: PackageTerminalView) => string;
+    /** Shrink to the tab strip when no terminal exists. */
+    collapseWhenEmpty?: boolean;
   } = $props();
+
+  const collapsed = $derived(collapseWhenEmpty && terminals.length === 0 && !loading);
 
   function statusLabel(terminal: PackageTerminalView): string {
     if (terminal.status === "running" && terminal.kind === "shell" && !isTerminalBusy(terminal)) return "Idle";
@@ -72,7 +77,10 @@
   }
 </script>
 
-<div class="relative grid h-full min-h-0 min-w-0 w-full max-w-full grid-rows-[32px_minmax(0,1fr)] overflow-hidden bg-code">
+<div class={[
+  "relative grid h-full min-h-0 min-w-0 w-full max-w-full overflow-hidden bg-code",
+  collapsed ? "grid-rows-[32px]" : "grid-rows-[32px_minmax(0,1fr)]",
+]}>
   <div class="flex min-w-0 items-stretch border-b border-code-border bg-chrome">
     <div
       class="flex min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
@@ -105,6 +113,12 @@
           ><X class="h-3 w-3" aria-hidden="true" /></button>
         </div>
       {/each}
+      {#if collapsed}
+        <span class="flex min-w-0 items-center gap-1.5 truncate px-2.5 text-xs text-muted-foreground" title={emptyDescription}>
+          <TerminalSquare class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span class="truncate">No terminal open</span>
+        </span>
+      {/if}
     </div>
 
     {#if activeTerminal}
@@ -142,6 +156,7 @@
     ><Plus class="h-3.5 w-3.5" aria-hidden="true" /></button>
   </div>
 
+  {#if !collapsed}
   <div class="relative min-h-0 min-w-0 w-full max-w-full overflow-hidden bg-code">
     {#if activeTerminal}
       {#key activeTerminal.id}
@@ -172,6 +187,7 @@
       </div>
     {/if}
   </div>
+  {/if}
 
   {#if error}
     <div

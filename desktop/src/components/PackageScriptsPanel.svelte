@@ -32,6 +32,9 @@
   const launchCommands = $derived(controller.launchCommands);
   const launchRuntimes = $derived(controller.launchRuntimes);
   const scriptRuntimes = $derived(controller.scriptRuntimes);
+  // With no terminals the terminal pane collapses to its tab strip and the
+  // command lists take the freed height.
+  const terminalCollapsed = $derived(terminals.length === 0 && !loading);
 
   function terminalLabel(terminal: PackageTerminalView): string {
     const launch = terminal.launchCommandId ? launchCommands.find((item) => item.id === terminal.launchCommandId) : undefined;
@@ -48,8 +51,11 @@
   }
 </script>
 
-<section class="relative grid min-h-0 min-w-0 w-full max-w-full grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-sidebar" aria-label="Launch commands and terminals">
-  <div class="min-w-0 overflow-hidden border-b border-sidebar-border bg-panel">
+<section class={[
+  "relative grid min-h-0 min-w-0 w-full max-w-full overflow-hidden bg-sidebar",
+  terminalCollapsed ? "grid-rows-[minmax(0,1fr)_auto]" : "grid-rows-[auto_minmax(0,1fr)]",
+]} aria-label="Launch commands and terminals">
+  <div class={["min-w-0 border-b border-sidebar-border bg-panel", terminalCollapsed ? "overflow-y-auto" : "overflow-hidden"]}>
     {#key workspace}
       <SavedLaunchCommands
         commands={launchCommands}
@@ -160,6 +166,7 @@
     {terminalActionId}
     bind:terminalView
     ariaLabel="Launch terminals"
+    collapseWhenEmpty
     emptyDescription="Run a launch command or package script, or press + to open an interactive shell."
     onSelectTerminal={controller.selectTerminal}
     onOpenShellTerminal={controller.openShellTerminal}
