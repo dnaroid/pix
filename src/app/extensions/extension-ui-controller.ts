@@ -37,15 +37,34 @@ type CustomUiFactory<T> = (
 	done: (result: T) => void,
 ) => FocusedCustomComponent | Promise<FocusedCustomComponent>;
 
-type ActiveCustomUi = {
-	key: string;
+type DialogBase = {
 	scopeKey: string;
-	component?: FocusedCustomComponent;
-	savedInput?: InputEditorDraftState;
 	settled: boolean;
 	resolve(value: unknown): void;
 	reject(error: unknown): void;
 };
+
+/** Focused custom UI (ctx.ui.custom, input, editor) rendered in the editor area. */
+type ActiveCustomUi = DialogBase & {
+	kind: "custom";
+	key: string;
+	component?: FocusedCustomComponent;
+	savedInput?: InputEditorDraftState;
+};
+
+/** select/confirm shown through the shared host popup menu. */
+type MenuDialog = DialogBase & {
+	kind: "menu";
+	open(): Promise<unknown>;
+	/** True while this dialog owns the host popup menu. */
+	showing: boolean;
+	/** Bumped on every show/suspend so stale host resolutions are ignored. */
+	generation: number;
+};
+
+type ExtensionDialog = ActiveCustomUi | MenuDialog;
+
+type DialogOutcome = { resolve: true; value: unknown } | { resolve: false; error: unknown };
 
 type ScopedWidgetRegistration = ExtensionWidgetRegistration & {
 	scopeKey: string;
@@ -89,7 +108,12 @@ export class ExtensionUiController {
 	private readonly extensionWidgets = new Map<string, ScopedWidgetRegistration>();
 	private readonly quotaWaitStatuses = new Map<string, { label: string | undefined }>();
 	private readonly terminalInputHandlers = new Set<ScopedTerminalInputHandler>();
-	private readonly activeCustomUis = new Map<string, ActiveCustomUi>();
+	/**
+	 * Per-scope dialog stacks. Only the top dialog is visible and receives input;
+	 * a newer dialog hides (not settles) the one below, and settling the top shows
+	 * the previous one again.
+	 */
+	private readonly dialogStacks = new Map<string, ExtensionDialog[]>();
 	constructor(private readonly host: ExtensionUiControllerHost) {}
 
 	get widgets(): ReadonlyMap<string, ExtensionWidgetRegistration> {
@@ -390,20 +414,17 @@ export class ExtensionUiController {
 	}
 
 	private async selectDialog(title: string, options: string[], opts?: ExtensionUIDialogOptions, scopeKey = this.activeScopeKey()): Promise<string | undefined> {
-		if (opts?.signal?.aborted || !this.isScopeActive(scopeKey)) return undefined;
-		return await this.withDialogAutoDismiss(
-			this.host.menuController.select(title, options, { preserveStatus: true }),
+		const selected = await this.menuDialog(
+			() => this.host.menuController.select(title, options, { preserveStatus: true }),
 			opts,
-			() => {
-				if (this.isScopeActive(scopeKey)) this.host.menuController.close();
-			},
+			scopeKey,
 		);
+		return typeof selected === "string" ? selected : undefined;
 	}
 
 	private async confirmDialog(title: string, message: string, opts?: ExtensionUIDialogOptions, scopeKey = this.activeScopeKey()): Promise<boolean> {
-		if (opts?.signal?.aborted || !this.isScopeActive(scopeKey)) return false;
-		const selected = await this.withDialogAutoDismiss(
-			this.host.menuController.show(
+		const selected = await this.menuDialog(
+			() => this.host.menuController.show(
 				[
 					{ value: true, label: "Yes", description: message },
 					{ value: false, label: "No" },
@@ -411,11 +432,51 @@ export class ExtensionUiController {
 				{ title, searchable: false, preserveStatus: true },
 			),
 			opts,
-			() => {
-				if (this.isScopeActive(scopeKey)) this.host.menuController.close();
-			},
+			scopeKey,
 		);
 		return selected === true;
+	}
+
+	private async menuDialog(open: () => Promise<unknown>, opts: ExtensionUIDialogOptions | undefined, scopeKey: string): Promise<unknown> {
+		if (opts?.signal?.aborted || !this.isScopeActive(scopeKey) || !this.host.isRunning()) return undefined;
+		let dialog!: MenuDialog;
+		const promise = new Promise<unknown>((resolve, reject) => {
+			dialog = { kind: "menu", scopeKey, settled: false, resolve, reject, open, showing: false, generation: 0 };
+		});
+		this.pushDialog(dialog);
+		this.showMenuDialog(dialog);
+		return await this.withDialogAutoDismiss(promise, opts, () => {
+			this.finishDialog(dialog, { resolve: true, value: undefined });
+		});
+	}
+
+	private showMenuDialog(dialog: MenuDialog): void {
+		const generation = ++dialog.generation;
+		dialog.showing = true;
+		const isCurrent = (): boolean => !dialog.settled && dialog.showing && dialog.generation === generation;
+		let opened: Promise<unknown>;
+		try {
+			opened = dialog.open();
+		} catch (error) {
+			this.finishDialog(dialog, { resolve: false, error });
+			return;
+		}
+		opened.then(
+			(value) => {
+				if (isCurrent()) this.finishDialog(dialog, { resolve: true, value });
+			},
+			(error: unknown) => {
+				if (isCurrent()) this.finishDialog(dialog, { resolve: false, error });
+			},
+		);
+	}
+
+	/** Hide a menu dialog without settling it; its host resolution becomes stale. */
+	private suspendMenuDialog(dialog: MenuDialog): void {
+		if (!dialog.showing) return;
+		dialog.showing = false;
+		dialog.generation += 1;
+		if (this.isScopeActive(dialog.scopeKey)) this.host.menuController.close();
 	}
 
 	private async inputDialog(title: string, placeholder?: string, opts?: ExtensionUIDialogOptions, scopeKey = this.activeScopeKey()): Promise<string | undefined> {
@@ -447,8 +508,7 @@ export class ExtensionUiController {
 		if (options.opts?.signal?.aborted) return undefined;
 		if (!this.host.isRunning()) return undefined;
 		if (!this.isScopeActive(scopeKey)) return undefined;
-		if (this.activeCustomUis.has(scopeKey)) throw new Error("Another extension custom UI is already active.");
-		const promise = this.showCustomUi<string | undefined>((_tui, _theme, _keybindings, done) => {
+		const { dialog, promise } = this.pushCustomUi<string | undefined>((_tui, _theme, _keybindings, done) => {
 			let settled = false;
 			const finish = (value: string | undefined): void => {
 				if (settled) return;
@@ -477,7 +537,7 @@ export class ExtensionUiController {
 			promise,
 			options.opts,
 			() => {
-				this.cancelActiveCustomUi(scopeKey);
+				this.finishDialog(dialog, { resolve: true, value: undefined });
 			},
 		);
 	}
@@ -526,12 +586,19 @@ export class ExtensionUiController {
 		options: { editorInput?: string; savedInput?: InputEditorDraftState; scopeKey?: string } = {},
 	): Promise<T> {
 		if (!this.host.isRunning()) return undefined as T;
-		const scopeKey = this.normalizeScopeKey(options.scopeKey);
-		if (this.activeCustomUis.has(scopeKey)) throw new Error("Another extension custom UI is already active.");
-		const savedInput = options.savedInput ?? (this.isScopeActive(scopeKey) ? this.host.getInputState() : undefined);
+		return await this.pushCustomUi(factory, options).promise;
+	}
 
-		return await new Promise<T>((resolve, reject) => {
-			const active: ActiveCustomUi = {
+	private pushCustomUi<T>(
+		factory: CustomUiFactory<T>,
+		options: { editorInput?: string; savedInput?: InputEditorDraftState; scopeKey?: string } = {},
+	): { dialog: ActiveCustomUi; promise: Promise<T> } {
+		const scopeKey = this.normalizeScopeKey(options.scopeKey);
+		const savedInput = options.savedInput ?? (this.isScopeActive(scopeKey) ? this.host.getInputState() : undefined);
+		let dialog!: ActiveCustomUi;
+		const promise = new Promise<T>((resolve, reject) => {
+			dialog = {
+				kind: "custom",
 				key: CUSTOM_UI_WIDGET_KEY,
 				scopeKey,
 				...(savedInput === undefined ? {} : { savedInput }),
@@ -539,76 +606,153 @@ export class ExtensionUiController {
 				resolve: (value) => resolve(value as T),
 				reject,
 			};
-			this.activeCustomUis.set(scopeKey, active);
-			if (options.editorInput !== undefined) this.host.setInputState({ text: options.editorInput, cursor: options.editorInput.length });
-
-			const done = (value: T): void => {
-				if (active.settled || this.activeCustomUis.get(scopeKey) !== active) return;
-				this.finishActiveCustomUi(active, value, { resolve: true });
-			};
-
-			void (async () => {
-				try {
-					const component = await factory(
-						this.widgetTuiHandle(scopeKey) as never,
-						this.createExtensionTheme() as never,
-						{} as never,
-						done as never,
-					);
-
-					if (active.settled || this.activeCustomUis.get(scopeKey) !== active) {
-						component.dispose?.();
-						return;
-					}
-
-					active.component = component;
-					if (this.host.isRunning() && this.isScopeActive(scopeKey)) this.host.render();
-				} catch (error) {
-					if (active.settled || this.activeCustomUis.get(scopeKey) !== active) return;
-					this.finishActiveCustomUi(active, error, { resolve: false });
-				}
-			})();
 		});
+		this.pushDialog(dialog);
+		if (options.editorInput !== undefined) this.host.setInputState({ text: options.editorInput, cursor: options.editorInput.length });
+
+		const done = (value: T): void => {
+			this.finishDialog(dialog, { resolve: true, value });
+		};
+
+		void (async () => {
+			try {
+				const component = await factory(
+					this.widgetTuiHandle(scopeKey) as never,
+					this.createExtensionTheme() as never,
+					{} as never,
+					done as never,
+				);
+
+				if (dialog.settled) {
+					component.dispose?.();
+					return;
+				}
+
+				dialog.component = component;
+				if (this.host.isRunning() && this.isScopeActive(scopeKey) && this.topDialog(scopeKey) === dialog) this.host.render();
+			} catch (error) {
+				this.finishDialog(dialog, { resolve: false, error });
+			}
+		})();
+		return { dialog, promise };
 	}
 
+	private topDialog(scopeKey: string): ExtensionDialog | undefined {
+		return this.dialogStacks.get(scopeKey)?.at(-1);
+	}
+
+	private pushDialog(dialog: ExtensionDialog): void {
+		const previous = this.topDialog(dialog.scopeKey);
+		const stack = this.dialogStacks.get(dialog.scopeKey) ?? [];
+		stack.push(dialog);
+		this.dialogStacks.set(dialog.scopeKey, stack);
+		if (previous?.kind === "menu") this.suspendMenuDialog(previous);
+	}
+
+	/**
+	 * Settle one dialog anywhere in its scope stack. Settling the top dialog shows
+	 * the previous one again; settling a hidden dialog leaves the top untouched.
+	 */
+	private finishDialog(dialog: ExtensionDialog, outcome: DialogOutcome): void {
+		if (dialog.settled) return;
+		const stack = this.dialogStacks.get(dialog.scopeKey);
+		const index = stack?.indexOf(dialog) ?? -1;
+		if (!stack || index < 0) return;
+		dialog.settled = true;
+		const wasTop = index === stack.length - 1;
+		stack.splice(index, 1);
+		if (stack.length === 0) this.dialogStacks.delete(dialog.scopeKey);
+
+		if (dialog.kind === "custom") {
+			this.releaseCustomInput(dialog, stack.slice(index));
+			this.disposeCustomUi(dialog);
+		} else {
+			this.suspendMenuDialog(dialog);
+		}
+
+		if (outcome.resolve) dialog.resolve(outcome.value);
+		else dialog.reject(outcome.error);
+		if (wasTop) this.activateTopDialog(dialog.scopeKey);
+		if (this.host.isRunning() && this.isScopeActive(dialog.scopeKey)) this.host.render();
+	}
+
+	/**
+	 * A custom dialog's saved draft belongs to whatever editor owner it covered.
+	 * When a newer custom dialog still owns the editor, hand the draft over to it
+	 * so it is restored when that dialog closes; otherwise restore it now.
+	 */
+	private releaseCustomInput(dialog: ActiveCustomUi, above: readonly ExtensionDialog[]): void {
+		const nextEditorOwner = above.find((entry): entry is ActiveCustomUi => entry.kind === "custom");
+		if (nextEditorOwner) {
+			if (dialog.savedInput !== undefined) nextEditorOwner.savedInput = dialog.savedInput;
+			return;
+		}
+		if (this.isScopeActive(dialog.scopeKey) && dialog.savedInput !== undefined) {
+			this.host.setInputState(dialog.savedInput);
+		}
+	}
+
+	private activateTopDialog(scopeKey: string): void {
+		const top = this.topDialog(scopeKey);
+		if (top?.kind !== "menu" || top.showing) return;
+		// The shared host popup can only be shown for the visible scope. A hidden
+		// select/confirm that resurfaces in an inactive scope is cancelled, matching
+		// select/confirm requested from an inactive scope.
+		if (!this.host.isRunning() || !this.isScopeActive(scopeKey)) {
+			this.finishDialog(top, { resolve: true, value: undefined });
+			return;
+		}
+		this.showMenuDialog(top);
+	}
+
+	private disposeCustomUi(dialog: ActiveCustomUi): void {
+		try {
+			dialog.component?.dispose?.();
+		} catch {
+			// Ignore extension cleanup failures while closing focused UI.
+		}
+		try {
+			dialog.component?.invalidate?.();
+		} catch {
+			// Ignore extension invalidation failures while closing focused UI.
+		}
+	}
+
+	/** Scope cleanup: cancel the whole dialog stack and restore the oldest saved draft. */
 	private cancelActiveCustomUi(scopeKey = this.activeScopeKey()): void {
-		const active = this.activeCustomUis.get(scopeKey);
-		if (active) this.finishActiveCustomUi(active, undefined, { resolve: true });
+		const stack = this.dialogStacks.get(scopeKey);
+		if (!stack) return;
+		this.dialogStacks.delete(scopeKey);
+		let restoreInput: InputEditorDraftState | undefined;
+		for (const dialog of [...stack].reverse()) {
+			if (dialog.settled) continue;
+			dialog.settled = true;
+			if (dialog.kind === "custom") {
+				if (dialog.savedInput !== undefined) restoreInput = dialog.savedInput;
+				this.disposeCustomUi(dialog);
+			} else {
+				this.suspendMenuDialog(dialog);
+			}
+			dialog.resolve(undefined);
+		}
+		const active = this.isScopeActive(scopeKey);
+		if (active && restoreInput !== undefined) this.host.setInputState(restoreInput);
+		if (this.host.isRunning() && active) this.host.render();
 	}
 
 	private rejectActiveCustomUi(error: unknown): void {
 		const active = this.activeCustomUiForActiveScope();
 		if (!active) return;
-		this.finishActiveCustomUi(active, error, { resolve: false });
+		this.finishDialog(active, { resolve: false, error });
 	}
 
-	private finishActiveCustomUi(active: ActiveCustomUi, value: unknown, options: { resolve: boolean }): void {
-		if (active.settled || this.activeCustomUis.get(active.scopeKey) !== active) return;
-		active.settled = true;
-		this.activeCustomUis.delete(active.scopeKey);
-		if (this.isScopeActive(active.scopeKey) && active.savedInput !== undefined) {
-			this.host.setInputState(active.savedInput);
-		}
-		try {
-			active.component?.dispose?.();
-		} catch {
-			// Ignore extension cleanup failures while closing focused UI.
-		}
-		try {
-			active.component?.invalidate?.();
-		} catch {
-			// Ignore extension invalidation failures while closing focused UI.
-		}
-		if (options.resolve) active.resolve(value);
-		else active.reject(value);
-		if (this.host.isRunning() && this.isScopeActive(active.scopeKey)) this.host.render();
-	}
-
+	/** The focused custom UI: the top dialog of the active scope when it is a custom UI. */
 	private activeCustomUiForActiveScope(): ActiveCustomUi | undefined {
 		const scopeKey = this.activeScopeKey();
 		if (!this.isScopeActive(scopeKey)) return undefined;
-		const active = this.activeCustomUis.get(scopeKey);
-		if (active && active.savedInput === undefined) active.savedInput = this.host.getInputState();
+		const active = this.topDialog(scopeKey);
+		if (active?.kind !== "custom") return undefined;
+		if (active.savedInput === undefined) active.savedInput = this.host.getInputState();
 		return active;
 	}
 

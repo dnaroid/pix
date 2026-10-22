@@ -182,7 +182,6 @@ describe("ExtensionUiController custom UI", () => {
 			resolveFactory = resolve;
 		})) as never);
 
-		await assert.rejects(ctxA.custom(async () => ({ render: () => ["duplicate"] }) as never), /already active/u);
 		activeScope.value = "tab-b";
 		input.value = "tab b draft";
 		resolveFactory({ render: () => ["late panel"], dispose: () => { disposed += 1; } });
@@ -477,6 +476,247 @@ describe("ExtensionUiController custom UI", () => {
 	});
 
 });
+
+describe("ExtensionUiController concurrent dialogs", () => {
+	it("stacks custom UIs: the newer one hides the older, closing it shows the older again", async () => {
+		const { controller } = createController();
+		const ctx = controller.createExtensionUIContext();
+		const inputsA: string[] = [];
+		let doneA!: (value: string) => void;
+		let doneB!: (value: string) => void;
+		let disposedA = 0;
+
+		const first = ctx.custom<string>(((_tui, _theme, _keys, done) => {
+			doneA = done;
+			return { render: () => ["panel A"], handleInput: (data: string) => { inputsA.push(data); }, dispose: () => { disposedA += 1; } };
+		}) as never);
+		await Promise.resolve();
+		const second = ctx.custom<string>(((_tui, _theme, _keys, done) => {
+			doneB = done;
+			return { render: () => ["panel B"] };
+		}) as never);
+		await Promise.resolve();
+
+		assert.deepEqual(controller.renderActiveCustomUi(80), ["panel B"]);
+		controller.handleTerminalInput("x");
+		assert.deepEqual(inputsA, [], "hidden dialogs receive no input");
+
+		doneB("b");
+		assert.equal(await second, "b");
+		assert.equal(disposedA, 0, "the hidden dialog stays alive");
+		assert.deepEqual(controller.renderActiveCustomUi(80), ["panel A"]);
+		controller.handleTerminalInput("y");
+		assert.deepEqual(inputsA, ["y"]);
+
+		doneA("a");
+		assert.equal(await first, "a");
+		assert.equal(disposedA, 1);
+		assert.equal(controller.renderActiveCustomUi(80), undefined);
+	});
+
+	it("restores nested editor drafts in LIFO order", async () => {
+		const { controller, input } = createController("draft");
+		const ctx = controller.createExtensionUIContext();
+
+		const name = ctx.input("Name");
+		await Promise.resolve();
+		input.value = "Ada";
+		const note = ctx.editor("Note", "prefill");
+		await Promise.resolve();
+		assert.equal(input.value, "prefill");
+		assert.equal(controller.renderActiveCustomUi(80)?.[0], "Note");
+
+		input.value = "my note";
+		controller.handleTerminalInput("\r");
+		assert.equal(await note, "my note");
+		assert.equal(input.value, "Ada", "the lower dialog gets its typed text back");
+		assert.equal(controller.renderActiveCustomUi(80)?.[0], "Name");
+
+		controller.handleTerminalInput("\r");
+		assert.equal(await name, "Ada");
+		assert.equal(input.value, "draft");
+	});
+
+	it("settles an aborted hidden dialog without disturbing the visible one and hands its draft upward", async () => {
+		const { controller, input } = createController("draft");
+		const ctx = controller.createExtensionUIContext();
+		const abort = new AbortController();
+
+		const lower = ctx.input("Lower", undefined, { signal: abort.signal });
+		await Promise.resolve();
+		const upper = ctx.input("Upper");
+		await Promise.resolve();
+		input.value = "upper text";
+
+		abort.abort();
+		assert.equal(await lower, undefined);
+		assert.equal(input.value, "upper text", "the visible dialog keeps its editor text");
+		assert.equal(controller.renderActiveCustomUi(80)?.[0], "Upper");
+
+		controller.handleTerminalInput("\r");
+		assert.equal(await upper, "upper text");
+		assert.equal(input.value, "draft", "the original draft survives the out-of-order close");
+		assert.equal(controller.renderActiveCustomUi(80), undefined);
+	});
+
+	it("suspends a select under a newer custom UI and shows it again afterwards", async () => {
+		const { controller, menu } = createController();
+		const popup = installControllableMenu(menu);
+		const ctx = controller.createExtensionUIContext();
+		let doneCustom!: (value: string) => void;
+
+		const selected = ctx.select("Pick", ["one", "two"]);
+		assert.equal(popup.title(), "Pick");
+
+		const custom = ctx.custom<string>(((_tui, _theme, _keys, done) => {
+			doneCustom = done;
+			return { render: () => ["panel"] };
+		}) as never);
+		await Promise.resolve();
+		assert.equal(popup.title(), undefined, "the select popup is hidden, not answered");
+		assert.deepEqual(controller.renderActiveCustomUi(80), ["panel"]);
+
+		doneCustom("done");
+		assert.equal(await custom, "done");
+		assert.equal(popup.title(), "Pick", "the select is shown again");
+		popup.pick("two");
+		assert.equal(await selected, "two");
+		assert.equal(popup.title(), undefined);
+	});
+
+	it("hides a custom UI while a newer select is on top and routes input back after it closes", async () => {
+		const { controller, menu } = createController();
+		const popup = installControllableMenu(menu);
+		const ctx = controller.createExtensionUIContext();
+		const inputs: string[] = [];
+
+		void ctx.custom(((() => ({ render: () => ["panel"], handleInput: (data: string) => { inputs.push(data); } })) as never));
+		await Promise.resolve();
+		const confirmed = ctx.confirm("Sure?", "really");
+		assert.equal(popup.title(), "Sure?");
+		assert.equal(controller.renderActiveCustomUi(80), undefined);
+		assert.deepEqual(controller.handleTerminalInput("x"), { consume: false }, "the popup owns input");
+		assert.deepEqual(inputs, []);
+
+		popup.pick(true);
+		assert.equal(await confirmed, true);
+		assert.deepEqual(controller.renderActiveCustomUi(80), ["panel"]);
+		controller.handleTerminalInput("y");
+		assert.deepEqual(inputs, ["y"]);
+	});
+
+	it("stacks select over confirm: Esc on the top answers only the top dialog", async () => {
+		const { controller, menu } = createController();
+		const popup = installControllableMenu(menu);
+		const ctx = controller.createExtensionUIContext();
+
+		const first = ctx.confirm("First", "really");
+		const second = ctx.select("Second", ["a", "b"]);
+		assert.equal(popup.title(), "Second");
+
+		popup.dismiss();
+		assert.equal(await second, undefined);
+		assert.equal(popup.title(), "First", "the earlier dialog is still pending and visible again");
+		popup.pick(true);
+		assert.equal(await first, true);
+	});
+
+	it("ignores late completion from a hidden dialog's superseded host popup", async () => {
+		const { controller, menu } = createController();
+		const popup = installControllableMenu(menu);
+		const ctx = controller.createExtensionUIContext();
+		let settled = false;
+
+		const first = ctx.select("First", ["x"]);
+		void first.then(() => { settled = true; });
+		const staleResolve = popup.currentResolve();
+		const second = ctx.select("Second", ["y"]);
+		staleResolve("x");
+		await Promise.resolve();
+		await Promise.resolve();
+		assert.equal(settled, false, "a stale popup resolution must not answer the hidden dialog");
+		assert.equal(popup.title(), "Second");
+
+		popup.pick("y");
+		assert.equal(await second, "y");
+		popup.pick("x");
+		assert.equal(await first, "x");
+	});
+
+	it("cancels the whole stack on scope cleanup and restores the original draft", async () => {
+		const { controller, menu, input } = createController("draft");
+		const popup = installControllableMenu(menu);
+		const ctx = controller.createExtensionUIContext();
+
+		const name = ctx.input("Name");
+		await Promise.resolve();
+		input.value = "typed";
+		const picked = ctx.select("Pick", ["a"]);
+		const note = ctx.editor("Note", "prefill");
+		await Promise.resolve();
+
+		controller.cancelCustomUi();
+		assert.deepEqual(await Promise.all([name, picked, note]), [undefined, undefined, undefined]);
+		assert.equal(input.value, "draft");
+		assert.equal(controller.renderActiveCustomUi(80), undefined);
+		assert.equal(popup.title(), undefined);
+	});
+
+	it("cancels a select that resurfaces while its scope is inactive", async () => {
+		const { controller, menu, activeScope } = createController();
+		const popup = installControllableMenu(menu);
+		activeScope.value = "tab-a";
+		const ctx = controller.createExtensionUIContext("tab-a");
+		let doneCustom!: (value: string) => void;
+
+		const selected = ctx.select("Pick", ["one"]);
+		const custom = ctx.custom<string>(((_tui, _theme, _keys, done) => {
+			doneCustom = done;
+			return { render: () => ["panel"] };
+		}) as never);
+		await Promise.resolve();
+		activeScope.value = "tab-b";
+
+		doneCustom("ok");
+		assert.equal(await custom, "ok");
+		assert.equal(await selected, undefined);
+		assert.equal(popup.title(), undefined, "an inactive scope never opens the shared popup");
+	});
+});
+
+/** Single-slot popup mock with real replace/close semantics, like the host SDK menu. */
+function installControllableMenu(menu: PixMenuController): {
+	title(): string | undefined;
+	pick(value: unknown): void;
+	dismiss(): void;
+	currentResolve(): (value: unknown) => void;
+} {
+	let current: { title: string | undefined; resolve(value: unknown): void } | undefined;
+	const open = (title: string | undefined): Promise<unknown> => {
+		current?.resolve(undefined);
+		return new Promise((resolve) => {
+			current = { title, resolve };
+		});
+	};
+	const settle = (value: unknown): void => {
+		const request = current;
+		current = undefined;
+		request?.resolve(value);
+	};
+	menu.show = (async (_items: unknown, options: { title?: string }) => await open(options.title)) as PixMenuController["show"];
+	menu.select = (async (title: string) => await open(title)) as PixMenuController["select"];
+	menu.close = () => settle(undefined);
+	return {
+		title: () => current?.title,
+		pick: settle,
+		dismiss: () => settle(undefined),
+		currentResolve: () => {
+			const request = current;
+			if (!request) throw new Error("no open popup");
+			return (value) => request.resolve(value);
+		},
+	};
+}
 
 function createController(initialInput = ""): {
 	controller: ExtensionUiController;
