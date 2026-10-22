@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AcpClient, ModelUsageStatus } from "../lib/acp-client";
 import { providerUsageTargets } from "../lib/provider-usage-targets";
-import { createProviderUsageStore } from "./provider-usage.svelte";
+import { createProviderUsageStore, resetProviderUsageCacheForTests } from "./provider-usage.svelte";
 
 type Response = Awaited<ReturnType<AcpClient["draftConfig"]>>;
 function catalogue(refs = ["openai-codex/gpt", "anthropic/claude", "zai/glm"]): Response {
@@ -37,7 +37,7 @@ function setup() {
   };
 }
 
-beforeEach(() => { vi.useFakeTimers(); });
+beforeEach(() => { vi.useFakeTimers(); resetProviderUsageCacheForTests(); });
 afterEach(() => { vi.useRealTimers(); });
 
 describe("provider quota targets", () => {
@@ -361,7 +361,7 @@ describe("panel-owned provider quota polling", () => {
 });
 
 describe("provider quota remount cache", () => {
-  it("renders the last rows immediately in a remounted store before polling completes", async () => {
+  it("renders the last account-wide rows immediately in any remounted store before polling completes", async () => {
     const { store, draftConfig, setWorkspace, setClient } = setup();
     const client = { draftConfig };
     setClient(client);
@@ -377,9 +377,29 @@ describe("provider quota remount cache", () => {
     void remounted.resume();
     await flush();
     expect(remounted.entries).toEqual(rows);
-    const otherConnection = createProviderUsageStore({ client: () => ({ draftConfig }), workspace: () => "/cache", reportError: vi.fn() });
-    expect(otherConnection.entries).toHaveLength(0);
+    // Quotas are account-wide: another project or connection shows the same snapshot instantly.
+    const otherConnection = createProviderUsageStore({ client: () => ({ draftConfig }), workspace: () => "/other", reportError: vi.fn() });
+    expect(otherConnection.entries).toEqual(rows);
     remounted.dispose();
     otherConnection.dispose();
+  });
+
+  it("restores the persisted snapshot after an app restart and ignores malformed storage", () => {
+    const items = new Map<string, string>();
+    vi.stubGlobal("localStorage", { getItem: (k: string) => items.get(k) ?? null, setItem: (k: string, v: string) => { items.set(k, v); } });
+    try {
+      const saved = { modelRef: "openai-codex/gpt", provider: "openai", state: "ready", runtime: { sessionId: "quota:openai-codex/gpt", modelUsageRefresh: "ready", modelUsage: quota("openai-codex/gpt") } };
+      items.set("pix.desktop.providerUsageQuota.v1", JSON.stringify({ entries: [saved, { modelRef: "zai/glm", provider: "zhipu", state: "loading" }], cacheScope: "a".repeat(64) }));
+      const restored = createProviderUsageStore({ client: () => null, workspace: () => "", reportError: vi.fn() });
+      expect(restored.entries).toEqual([saved]);
+      restored.dispose();
+      resetProviderUsageCacheForTests();
+      items.set("pix.desktop.providerUsageQuota.v1", JSON.stringify({ entries: [{ modelRef: 1 }] }));
+      const rejected = createProviderUsageStore({ client: () => null, workspace: () => "", reportError: vi.fn() });
+      expect(rejected.entries).toEqual([]);
+      rejected.dispose();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

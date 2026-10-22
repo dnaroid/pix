@@ -1,4 +1,5 @@
 import type { AcpClient, RuntimeStatus } from "../lib/acp-client";
+import { createDiagnosticLogger } from "../lib/diagnostic-logging";
 import { providerUsageTargets, type ProviderUsageTarget } from "../lib/provider-usage-targets";
 
 export interface ProviderUsageEntry extends ProviderUsageTarget {
@@ -21,11 +22,57 @@ function failedEntry(entry: ProviderUsageEntry): ProviderUsageEntry {
 }
 
 type QuotaCacheEntry = { entries: readonly ProviderUsageEntry[]; cacheScope: string | undefined };
-/** Last quota rows per connection and project, so a remounted panel renders them before polling completes. */
-const quotaCache = new WeakMap<UsageClient, Map<string, QuotaCacheEntry>>();
+const QUOTA_STORAGE_KEY = "pix.desktop.providerUsageQuota.v1";
+const MAX_CACHED_ROWS = 64;
+const diagnostics = createDiagnosticLogger(() => ({ workspace: "" }));
+/**
+ * Account quotas are global (not per project or connection): one app-wide snapshot,
+ * persisted so a remount, project switch, reconnect or restart renders rows immediately.
+ * Credential scope checks on refresh still discard rows from another login.
+ */
+let quotaCache: QuotaCacheEntry | undefined;
 
-function cachedQuota(client: UsageClient | null, workspace: string): QuotaCacheEntry | undefined {
-  return client && workspace ? quotaCache.get(client)?.get(workspace) : undefined;
+function storage(): Storage | undefined {
+  try { return typeof localStorage === "undefined" ? undefined : localStorage; } catch { return undefined; }
+}
+
+function isCachedEntry(value: unknown): value is ProviderUsageEntry {
+  if (!value || typeof value !== "object") return false;
+  const entry = value as Record<string, unknown>;
+  return typeof entry.modelRef === "string" && typeof entry.provider === "string"
+    && (entry.state === "ready" || entry.state === "unavailable" || entry.state === "failed" || entry.state === "loading")
+    && (entry.runtime === undefined || (typeof entry.runtime === "object" && entry.runtime !== null));
+}
+
+function cachedQuota(): QuotaCacheEntry | undefined {
+  if (quotaCache) return quotaCache;
+  try {
+    const raw = storage()?.getItem(QUOTA_STORAGE_KEY);
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw) as { entries?: unknown; cacheScope?: unknown };
+    if (!Array.isArray(parsed.entries) || parsed.entries.length > MAX_CACHED_ROWS || !parsed.entries.every(isCachedEntry)) return undefined;
+    const cacheScope = typeof parsed.cacheScope === "string" ? parsed.cacheScope : undefined;
+    // Never restore an in-flight skeleton as if it were data.
+    const entries = parsed.entries.filter((entry) => entry.state !== "loading" || entry.runtime?.modelUsage);
+    return quotaCache = { entries, cacheScope };
+  } catch (error) {
+    diagnostics.report(error, "frontend:provider-usage-cache");
+    return undefined;
+  }
+}
+
+function rememberQuota(next: QuotaCacheEntry): void {
+  quotaCache = next;
+  try {
+    storage()?.setItem(QUOTA_STORAGE_KEY, JSON.stringify(next));
+  } catch (error) {
+    diagnostics.report(error, "frontend:provider-usage-cache");
+  }
+}
+
+/** Test hook: forget the in-memory app-wide quota snapshot. */
+export function resetProviderUsageCacheForTests(): void {
+  quotaCache = undefined;
 }
 
 /** Sessionless quota polling while Provider limits is expanded, not tied to the active model. */
@@ -36,7 +83,7 @@ export function createProviderUsageStore(options: {
 }) {
   let scopeClient: UsageClient | null = options.client();
   let scopeWorkspace = options.workspace();
-  const initial = cachedQuota(scopeClient, scopeWorkspace);
+  const initial = cachedQuota();
   let entries = $state<readonly ProviderUsageEntry[]>(initial?.entries ?? []);
   let cacheScope: string | undefined = initial?.cacheScope;
   let busy = $state(false);
@@ -49,9 +96,7 @@ export function createProviderUsageStore(options: {
   function setEntries(next: readonly ProviderUsageEntry[]): void {
     entries = next;
     if (!scopeClient || !scopeWorkspace) return;
-    let byWorkspace = quotaCache.get(scopeClient);
-    if (!byWorkspace) quotaCache.set(scopeClient, byWorkspace = new Map());
-    byWorkspace.set(scopeWorkspace, { entries: next, cacheScope });
+    rememberQuota({ entries: next, cacheScope });
   }
   let pending: Promise<void> | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -72,7 +117,8 @@ export function createProviderUsageStore(options: {
     scopeClient = client;
     scopeWorkspace = workspace;
     if (!sameScope) {
-      const cached = cachedQuota(client, workspace);
+      // Quotas are account-wide: keep showing the app-wide snapshot across projects/reconnects.
+      const cached = cachedQuota();
       cacheScope = cached?.cacheScope;
       entries = cached?.entries ?? [];
       error = false;

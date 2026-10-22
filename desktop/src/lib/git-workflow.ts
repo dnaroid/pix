@@ -14,7 +14,6 @@ export interface GitPanelWorkflow {
   review: GitReviewResult | null;
   resolveRunning: boolean;
   canResolve: boolean;
-  notice: string | null;
   details: GitRepositoryDetails | null;
   detailsLoading: boolean;
   selectedCommit: GitHistoryEntry | null;

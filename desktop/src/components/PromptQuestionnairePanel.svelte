@@ -1,5 +1,6 @@
 <script lang="ts">
   import Check from "@lucide/svelte/icons/check";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Eye from "@lucide/svelte/icons/eye";
   import X from "@lucide/svelte/icons/x";
   import {
@@ -19,6 +20,8 @@
     currentSelectionCount,
     selectedChoiceIndex,
     answerLabel,
+    collapsed = false,
+    onToggleCollapsed,
     onSelectTab,
     onEditAnswer,
     onChooseChoice,
@@ -35,6 +38,8 @@
     currentSelectionCount: number;
     selectedChoiceIndex: number;
     answerLabel: (question: DesktopQuestion) => string;
+    collapsed?: boolean;
+    onToggleCollapsed?: () => void;
     onSelectTab: (index: number) => void;
     onEditAnswer: (index: number) => void;
     onChooseChoice: (choiceValue: string) => void;
@@ -92,6 +97,21 @@
       ><Eye class="size-3" aria-hidden="true" />Preview</button>
     {/if}
   </div>
+  {#if onToggleCollapsed}
+    <button
+      class="mb-0.5 grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+      type="button"
+      data-question-collapse-toggle
+      aria-label={collapsed ? "Expand questions" : "Collapse questions"}
+      title={collapsed ? "Expand questions" : "Collapse questions"}
+      aria-expanded={!collapsed}
+      aria-controls="question-composer-panel"
+      onclick={onToggleCollapsed}
+    ><ChevronRight
+      class={["size-3.5 transition-transform motion-reduce:transition-none", collapsed ? "-rotate-90" : "rotate-90"]}
+      aria-hidden="true"
+    /></button>
+  {/if}
   <button
     class="mb-0.5 grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
     type="button"
@@ -105,6 +125,7 @@
 <div
   id="question-composer-panel"
   class="max-h-[min(52vh,32rem)] overflow-y-auto px-3 pt-2"
+  hidden={collapsed}
   role="tabpanel"
   aria-labelledby={`question-composer-tab-${questionMode.state.activeTab}`}
 >

@@ -140,4 +140,37 @@ describe("question TUI", () => {
 		assert.ok(renderedLines.some((line) => line.includes("full explanation")));
 		assert.ok(renderedLines.some((line) => line.includes("visible across wrapped lines.")));
 	});
+	it("collapses and expands the questionnaire with Ctrl+O and the header toggle", async () => {
+		const questions: NormalizedQuestion[] = [
+			{ id: "pick", label: "Pick", prompt: "Pick one?", choices: [{ value: "a", label: "Alpha" }, { value: "b", label: "Beta" }] },
+		];
+		const theme: QuestionTheme = { fg: (_c, t) => t, bg: (_c, t) => t, bold: (t) => t, style: (t) => t };
+		const ctx: QuestionUiContext = {
+			ui: {
+				custom<T>(factory: (tui: { requestRender(): void }, theme: QuestionTheme, keybindings: unknown, done: (value: T) => void) => QuestionComponent): Promise<T> {
+					return new Promise<T>((resolve) => {
+						const component = factory({ requestRender() {} }, theme, {}, resolve);
+						assert.ok(component.render(80)[0]!.endsWith(" ▾ "));
+						component.handleInput("\u000f");
+						let lines = component.render(80);
+						assert.equal(lines.length, 2);
+						assert.ok(lines[0]!.endsWith(" ▸ "));
+						assert.ok(lines[1]!.includes("Collapsed"));
+						assert.ok(!lines.some((line) => line.includes("Alpha")));
+						// Choice keys are ignored while collapsed.
+						component.handleInput("2");
+						component.handleInput("\r");
+						lines = component.render(80);
+						assert.ok(lines.some((line) => line.includes("Alpha")));
+						// Mouse click on the header toggle collapses again.
+						component.handleMouse?.({ released: true, localRow: 0, localColumn: 79 } as never);
+						assert.equal(component.render(80).length, 2);
+						component.handleMouse?.({ released: true, localRow: 0, localColumn: 79 } as never);
+						component.handleInput("2");
+					});
+				},
+			},
+		};
+		assert.deepEqual(await runQuestionnaire(questions, ctx), [{ id: "pick", choiceValue: "b" }]);
+	});
 });

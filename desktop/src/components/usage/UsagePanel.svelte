@@ -13,6 +13,7 @@
   import { USAGE_SECTIONS_CONTEXT, USAGE_SECTION_IDS } from "../../lib/usage-panel-sections";
   import { createUsageStatsStore } from "../../app/usage-stats.svelte";
   import { createProviderUsageStore } from "../../app/provider-usage.svelte";
+  import { createOpenRouterUsageStore } from "../../app/openrouter-usage.svelte";
   import { createDiagnosticLogger } from "../../lib/diagnostic-logging";
   import { providerUsageOrder } from "../../lib/provider-usage-rows";
   import { subscribeUsageStatsChanged } from "../../lib/usage-stats-events";
@@ -56,11 +57,14 @@
     workspace: () => workspace,
     reportError: (cause) => diagnostics.report(cause, "frontend:provider-usage"),
   });
+  const openRouter = createOpenRouterUsageStore({
+    reportError: (cause) => diagnostics.report(cause, "frontend:openrouter-usage"),
+  });
   const providerOpen = $derived(sections.ready && sections.isOpen("provider-limits"));
   const historyOpen = $derived(sections.ready && USAGE_SECTION_IDS.some((id) => id !== "provider-limits" && sections.isOpen(id)));
   const statisticsOpen = $derived(historyOpen || providerOpen);
   const quotaStatuses = $derived(providerOpen ? [...providerStatuses, ...quotas.entries.flatMap((entry) => entry.runtime ? [entry.runtime] : [])] : []);
-  const refreshing = $derived(store.busy || quotas.busy);
+  const refreshing = $derived(store.busy || quotas.busy || openRouter.busy);
 
   // Re-read the clock whenever data changes; no timers while the panel idles.
   const nowMs = $derived.by(() => { void store.snapshots; return Date.now(); });
@@ -83,6 +87,8 @@
     untrack(() => {
       if (active) void quotas.resume();
       else quotas.pause();
+      if (active) void openRouter.resume();
+      else openRouter.pause();
     });
   });
   $effect(() => {
@@ -97,6 +103,7 @@
       unsubscribe();
       store.dispose();
       quotas.dispose();
+      openRouter.dispose();
       sections.dispose();
     };
   });
@@ -105,6 +112,7 @@
     error = null;
     void store.refresh();
     void quotas.refresh();
+    void openRouter.refresh();
   }
 
   export function refreshState(): { busy: boolean; disabled: boolean } {
@@ -124,7 +132,7 @@
     {:else if !workspace}
       <p class="m-0 px-3 py-6 text-center text-xs text-muted-foreground">Open a project to load usage statistics.</p>
     {:else}
-      <UsageProviderLimits statuses={quotaStatuses} entries={quotas.entries} loading={quotas.busy} failed={quotas.error} order={sections.providerOrder} />
+      <UsageProviderLimits statuses={quotaStatuses} entries={quotas.entries} loading={quotas.busy} failed={quotas.error} order={sections.providerOrder} openRouter={openRouter.usage} openRouterStale={openRouter.error} />
       <div class="flex flex-wrap items-center gap-1.5 px-3 pt-2">
         <UsageSegmented value={period} options={PERIODS.map((value) => ({ value, label: PERIOD_LABELS[value] }))} ariaLabel="Period" onChange={(value) => period = value} />
       </div>

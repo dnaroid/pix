@@ -53,6 +53,21 @@ but their late completions are ignored, including after a same-workspace reopen.
 Completions from previous workspaces/connections or disposed panels are ignored. Failed
 refreshes retain prior quotas as cached; missing quotas remain visible as loading,
 unavailable or failed provider rows, rather than silently omitting the provider.
+Provider quota rows are app-wide, not owned by an ACP connection or workspace, and
+persist in localStorage under `pix.desktop.providerUsageQuota.v1`. Remounts,
+project switches, reconnects and application restarts can therefore render the
+last rows immediately. Refresh-time credential-scope checks still discard rows
+belonging to a different login; persisted loading rows without quota data are
+not restored.
+When an OpenRouter API key is configured (`OPENROUTER_API_KEY` or Pi
+`auth.json`'s `openrouter.api_key`), Provider limits also shows an OpenRouter
+row. Its Tauri `openrouter_usage` command requests `/api/v1/key` and
+`/api/v1/credits` (credits 403/404 are tolerated) and returns balance
+(`total_credits - total_usage`), key spend for today/week/month, key limit and
+effective budget. Neither the key nor its label is returned. The frontend polls
+every five minutes only while Provider limits is expanded and persists its
+snapshot in localStorage under `pix.desktop.openRouterUsage.v1`; on failure,
+available cached values remain visible with a **Cached** marker.
 Existing runtime snapshots (including draft telemetry) supplement fetched quotas;
 there are no usage-history-derived quota estimates. The
 newest snapshot wins for each provider/account/model before grouping models into
@@ -109,11 +124,11 @@ Header refresh does not wake collapsed sections and is disabled when all sleep.
 The Usage panel is remounted when switching workbench tabs. To avoid a cold
 render on each remount, the frontend retains disclosure state and provider order
 in a module-level per-project cache, usage-stat snapshots per ACP client and
-project, and provider quota rows per client and project. Cached values render
+project, and app-wide provider quota rows in localStorage. Cached values render
 immediately; disclosure state is re-read from workspace configuration in the
 background, and opening still refetches usage statistics and resumes quota
-polling. Refresh indicators display over retained data. These in-memory caches
-are remount optimizations, not persistent storage.
+polling. Refresh indicators display over retained data. Usage-stat snapshots
+remain in-memory remount optimizations; quota rows persist across restarts.
 
 Historical disclosure headers remain mounted through loading, empty results and
 refreshes; empty sections explain the lack of data inside their expanded body.

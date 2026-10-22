@@ -99,6 +99,12 @@ while Pix TUI and Pix Desktop keep their existing renderer/bridge ownership.
 - While the questionnaire is active, a native terminal-input listener routes
   keyboard input to the questionnaire and consumes it before the composer.
   Ctrl+C remains owned by Pi's normal interrupt path.
+- The questionnaire header has a clickable ▾/▸ collapse toggle; Ctrl+O also
+  toggles collapse. While collapsed, only the header and a status line remain
+  (`Collapsed · N/M answered · Ctrl+O or Enter to expand · Esc to cancel`).
+  Enter, Space, or Ctrl+O expands; Esc cancels; other keys and mouse input are
+  ignored. The shared editor is released while collapsed, with any custom-answer
+  draft retained for expansion.
 - The suite keeps the above-editor order `todo -> subagents -> question`.
   Todo/subagent refreshes re-assert the active question as the final
   above-editor widget, so background-agent progress cannot slip between the

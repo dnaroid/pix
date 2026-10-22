@@ -53,6 +53,7 @@ mod native_lifecycle_tests;
 mod native_process;
 mod native_project_search;
 mod native_repository_semantic_config;
+mod openrouter_usage;
 mod plan_progress;
 mod preview_file;
 mod preview_file_action;
@@ -8922,6 +8923,7 @@ pub fn run() {
             read_attachment_base64,
             project_icon::pick_project_icon_image,
             project_icon::generate_project_icon_image,
+            openrouter_usage::openrouter_usage,
             project_icon::save_project_icon,
             project_icon::read_project_icon,
             cache_attachment,

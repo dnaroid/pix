@@ -10,9 +10,14 @@
   import UsageLimitBars from "../UsageLimitBars.svelte";
   import UsageSection from "./UsageSection.svelte";
   import UsageSkeleton from "./UsageSkeleton.svelte";
+  import UsageOpenRouterBalance from "./UsageOpenRouterBalance.svelte";
+  import type { OpenRouterUsage } from "../../app/openrouter-usage.svelte";
 
-  let { statuses, entries = [], loading = false, failed = false, order = [] }: {
+  let { statuses, entries = [], loading = false, failed = false, order = [], openRouter, openRouterStale = false }: {
     statuses: readonly RuntimeStatus[];
+    /** Present only when an OpenRouter key is configured. */
+    openRouter?: OpenRouterUsage | undefined;
+    openRouterStale?: boolean;
     entries?: readonly ProviderUsageEntry[];
     loading?: boolean;
     failed?: boolean;
@@ -59,9 +64,10 @@
       <UsageLimitBars windows={windows(row.usage)} {now} showHeading={false} stale={row.usage.stale === true} creditDeadlines={(row.usage.resetCredits ?? []).flatMap((credit) => credit.expiresAt !== undefined && credit.expiresAt > now ? [credit.expiresAt] : [])} />
     {/if}
   {/each}
+  {#if openRouter}<UsageOpenRouterBalance usage={openRouter} stale={openRouterStale} />{/if}
   {#if failed}
     <p class="m-0 text-xs leading-4 text-muted-foreground" role="status">Could not load provider limits. Try refreshing.</p>
-  {:else if rows.length === 0}
+  {:else if rows.length === 0 && !openRouter}
     {#if loading}<UsageSkeleton label="Loading provider limits…" tall />{:else}<p class="m-0 text-xs leading-4 text-muted-foreground">No provider limits available yet. Connect a supported provider to load its quota.</p>{/if}
   {/if}
 </UsageSection>

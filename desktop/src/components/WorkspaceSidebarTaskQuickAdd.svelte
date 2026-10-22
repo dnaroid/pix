@@ -10,6 +10,7 @@
   import { taskTypeLabel } from "../lib/project-tasks";
   import { QUICK_TASK_MAX_LENGTH } from "../../../acp/src/tasks/type-classification-contract";
   import { TaskQuickAddController, type QuickTaskDraft, type TaskTypeClient } from "../lib/task-quick-add-controller";
+  import { toasts } from "../app/toasts.svelte";
 
   let { workspace, client = null, busy = false, onCreate }: {
     workspace: string;
@@ -21,7 +22,6 @@
   let text = $state("");
   let textarea = $state<HTMLTextAreaElement | null>(null);
   let sending = $state(false);
-  let notice = $state("");
   let error = $state("");
   let voiceSupported = $state(false);
   let voiceState = $state<DeepgramDictationState>("idle");
@@ -44,7 +44,6 @@
   function reset() {
     cancelPending();
     text = "";
-    notice = "";
     error = "";
   }
 
@@ -87,7 +86,6 @@
       else if (previousClient !== currentClient) {
         // Reconnecting ACP must not erase unsent task text.
         cancelPending();
-        notice = "";
       }
     }
     previousWorkspace = currentWorkspace;
@@ -96,7 +94,6 @@
 
   function manualInput() {
     if (voiceState !== "idle") voice?.cancel();
-    notice = "";
     error = "";
   }
 
@@ -112,7 +109,6 @@
     const ownerWorkspace = workspace;
     const ownerClient = client;
     sending = true;
-    notice = "";
     error = "";
     const finalized = voice ? await voice.stop() : true;
     if (!finalized || disposed || owner !== generation || workspace !== ownerWorkspace || client !== ownerClient) {
@@ -127,9 +123,11 @@
     sending = false;
     if (result.status === "created") {
       text = "";
-      notice = result.fallback
-        ? `Added as ${taskTypeLabel(result.type)} · Jev unavailable`
-        : `Added as ${taskTypeLabel(result.type)}`;
+      toasts.success({
+        message: `Task added as ${taskTypeLabel(result.type)}`,
+        detail: result.fallback ? "Jev classification unavailable; default type used." : undefined,
+        source: "Tasks",
+      });
       await tick();
       if (!disposed && owner === generation) textarea?.focus();
     } else if (result.status === "failed") {
@@ -165,6 +163,5 @@
   </form>
   {#if sending}<p class="mt-1 text-xs text-muted-foreground" role="status">Classifying and saving task…</p>
   {:else if voiceState !== "idle"}<p class="mt-1 text-xs text-muted-foreground" role="status">{voiceState === "starting" ? "Starting microphone…" : "Listening…"} {voiceInterim}</p>
-  {:else if error || voiceError}<p class="mt-1 text-xs text-tool-error" role="alert">{error || voiceError}</p>
-  {:else if notice}<p class="mt-1 text-xs text-muted-foreground" role="status">{notice}</p>{/if}
+  {:else if error || voiceError}<p class="mt-1 text-xs text-tool-error" role="alert">{error || voiceError}</p>{/if}
 </section>

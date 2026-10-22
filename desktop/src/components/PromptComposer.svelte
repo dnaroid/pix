@@ -189,6 +189,26 @@
     if (composerMenuTypeaheadTimer !== null) window.clearTimeout(composerMenuTypeaheadTimer);
   });
 
+  let questionCollapsed = $state(false);
+  let questionCollapseKey: string | undefined;
+  $effect.pre(() => {
+    // A new questionnaire always opens expanded. Key by content, not object
+    // identity: state updates may rebuild the mode/questions objects.
+    const key = questionMode
+      ? `${questionMode.message}\u0000${questionMode.questions.map((question) => question.id).join("\u0000")}`
+      : undefined;
+    if (key !== questionCollapseKey) {
+      questionCollapseKey = key;
+      questionCollapsed = false;
+    }
+  });
+
+  function handleQuestionnaireKeydown(event: KeyboardEvent): void {
+    // Collapsed: let Enter activate the focused expand button instead of submitting.
+    if (questionCollapsed) return;
+    questionnaireController.handleKeydown(event);
+  }
+
   const editorMode = $derived(variant === "editor" && !questionMode);
   const textareaValue = $derived(composerText());
   const conversationContextKey = $derived(activeSessionId ?? (draftSession ? "pix:desktop-draft-session" : undefined));
@@ -668,7 +688,7 @@
   bind:this={composerForm}
   aria-busy={promptEnhancing}
   data-pix-project-path-drop-target="true"
-  onkeydowncapture={questionnaireController.handleKeydown}
+  onkeydowncapture={handleQuestionnaireKeydown}
   onsubmit={handleSubmit}
 >
   {#if questionMode}
@@ -682,6 +702,8 @@
       currentSelectionCount={questionnaireController.currentSelectionCount}
       selectedChoiceIndex={questionnaireController.selectedChoiceIndex()}
       answerLabel={questionnaireController.answerLabel}
+      collapsed={questionCollapsed}
+      onToggleCollapsed={() => { questionCollapsed = !questionCollapsed; }}
       onSelectTab={questionnaireController.selectTab}
       onEditAnswer={questionnaireController.editAnswer}
       onChooseChoice={questionnaireController.chooseChoice}
@@ -691,7 +713,7 @@
     />
   {/if}
 
-  <div class={questionMode ? "px-3 pt-2 pb-2" : editorMode ? "px-3 pt-2.5 pb-2" : "px-2 py-1.5"}>
+  <div class={questionMode ? "px-3 pt-2 pb-2" : editorMode ? "px-3 pt-2.5 pb-2" : "px-2 py-1.5"} hidden={!!questionMode && questionCollapsed}>
     {#if !questionMode || questionnaireController.currentDraft?.customSelected}
       <div inert={promptEnhancing}>
         <AttachmentGrid

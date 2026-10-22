@@ -29,4 +29,13 @@ describe("Prompt questionnaire preview policy", () => {
     expect(composerSource).toContain("questionnaireController.previewing");
     expect(composerSource).toContain("Submit answers");
   });
+
+  it("offers a state-rotating collapse toggle that hides the body and footer", () => {
+    expect(panelSource).toContain("data-question-collapse-toggle");
+    expect(panelSource).toContain("aria-expanded={!collapsed}");
+    expect(panelSource).toMatch(/collapsed \? "-rotate-90" : "rotate-90"/);
+    expect(panelSource).toContain("hidden={collapsed}");
+    expect(composerSource).toContain("hidden={!!questionMode && questionCollapsed}");
+    expect(composerSource).toContain("if (questionCollapsed) return;");
+  });
 });

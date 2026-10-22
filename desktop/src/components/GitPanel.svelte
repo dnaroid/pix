@@ -145,7 +145,6 @@
 
   <div class="min-h-0 flex-1 overflow-y-auto">
     {#if error}<div class="border-b border-tool-error/25 bg-tool-error/5 px-3 py-2 text-xs leading-4 text-tool-error break-words" role="alert">{error}</div>{/if}
-    {#if workflow.notice && !error}<div class="border-b border-sidebar-border px-3 py-2 text-xs leading-4 text-tool-success" role="status">{workflow.notice}</div>{/if}
     {#if workflow.selectedCommit}
       <section class="space-y-1.5 border-b border-sidebar-border bg-panel px-3 py-2.5" aria-label="Selected Git commit">
         <div class="flex items-center gap-2 text-xs">

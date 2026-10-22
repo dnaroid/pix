@@ -15,6 +15,7 @@
   import type { HeadsUpSnapshot } from "../lib/heads-up";
   import SessionActivityStatusHud from "./SessionActivityStatusHud.svelte";
   import SessionPlanStatus from "./SessionPlanStatus.svelte";
+  import NotificationCenter from "./NotificationCenter.svelte";
   import type { PlanProgress } from "../lib/project-documents";
 
   type ConfigValue = { value: string; name: string; group?: string };
@@ -241,5 +242,6 @@
     {onJumpToStep}
   />
   {/key}
+  <NotificationCenter />
   </div>
 </footer>

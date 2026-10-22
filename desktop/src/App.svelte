@@ -18,6 +18,8 @@
   import DesktopOverlays from "./components/DesktopOverlays.svelte";
   import DesktopStatusBar from "./components/DesktopStatusBar.svelte";
   import DesktopUpdateBanner from "./components/DesktopUpdateBanner.svelte";
+  import ToastViewport from "./components/ToastViewport.svelte";
+  import { toasts } from "./app/toasts.svelte";
   import DesktopBootstrapDialog from "./components/DesktopBootstrapDialog.svelte";
   import DeleteConfirmationHost from "./components/DeleteConfirmationHost.svelte";
   import ModelSetupDialog from "./components/ModelSetupDialog.svelte";
@@ -917,6 +919,7 @@
   }));
   onMount(desktopLifecycle.start);
   onMount(diagnosticLogger.start);
+  onMount(() => toasts.setReporter(diagnosticLogger.report));
   onMount(() => startThemePreference((error) => diagnosticLogger.report(error, "frontend:theme-preference")));
   onDestroy(headsUp.reset);
   onDestroy(btw.reset);
@@ -1000,3 +1003,4 @@
 <DeleteConfirmationHost />
 <ModelSetupDialog client={client ?? undefined} onApplied={reconnect} catalog={modelThinkingConfigState(displayedConfigOptions).models} />
 <DesktopUpdateBanner {updater} />
+<ToastViewport />

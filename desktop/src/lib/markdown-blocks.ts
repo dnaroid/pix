@@ -143,7 +143,7 @@ function parseList(
     const task = item.text.match(/^\[([ xX])\][ \t]+(.*)$/);
     if (task) {
       const checked = task[1]?.toLowerCase() === "x" ? " checked" : "";
-      items.push(`<li class="task-item"><input type="checkbox" disabled${checked}>${renderInline(task[2] ?? "", 0, true, context)}</li>`);
+      items.push(`<li class="task-item"><input type="checkbox" disabled${checked}><span class="task-text">${renderInline(task[2] ?? "", 0, true, context)}</span></li>`);
     } else {
       items.push(`<li>${renderInline(item.text, 0, true, context)}</li>`);
     }

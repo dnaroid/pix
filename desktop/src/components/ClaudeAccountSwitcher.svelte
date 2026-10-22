@@ -5,14 +5,13 @@
   import UserRound from "@lucide/svelte/icons/user-round";
   import { claudeAccountSwitcherConfig, selectClaudeAccountInSource, type ClaudeAccountSwitcherConfig } from "../lib/claude-account-switcher";
   import { parseSettingsSchema, settingsSourceIssues, type SettingsConfigDocument } from "../lib/settings";
+  import { toasts } from "../app/toasts.svelte";
 
   let { lastAttemptedAccount }: { lastAttemptedAccount?: string } = $props();
 
   let config = $state<ClaudeAccountSwitcherConfig>({ accounts: [], selectedAccount: "", autoRotate: false });
   let loading = $state(true);
   let saving = $state(false);
-  let error = $state("");
-  let notice = $state("");
   let alive = false;
   let requestGeneration = 0;
 
@@ -24,7 +23,7 @@
       if (!alive || generation !== requestGeneration || saving) return;
       config = next;
     } catch (caught) {
-      if (alive && generation === requestGeneration) error = caught instanceof Error ? caught.message : String(caught);
+      if (alive && generation === requestGeneration) toasts.warning({ message: "Could not read Claude accounts.", detail: caught instanceof Error ? caught.message : String(caught), source: "Claude", key: "claude:account-read" });
     } finally {
       if (alive && generation === requestGeneration) loading = false;
     }
@@ -46,8 +45,6 @@
   async function switchAccount(name: string): Promise<void> {
     if (saving || loading || (name === config.selectedAccount)) return;
     saving = true;
-    error = "";
-    notice = "";
     let reloadAfterConflict = false;
     try {
       // Always reread before editing. Another Settings editor may have saved
@@ -68,10 +65,14 @@
       }
       if (!alive) return;
       config = claudeAccountSwitcherConfig(result.document.content);
-      notice = `Next Claude request: ${name || (config.autoRotate ? "automatic selection" : "default login")}. Existing quota figures may still belong to the prior profile.`;
+      toasts.success({
+        message: `Next Claude request: ${name || (config.autoRotate ? "automatic selection" : "default login")}.`,
+        detail: "Existing quota figures may still belong to the prior profile.",
+        source: "Claude", key: "claude:account-switch",
+      });
       window.dispatchEvent(new CustomEvent("pix-semantic-config-changed"));
     } catch (caught) {
-      if (alive) error = caught instanceof Error ? caught.message : String(caught);
+      if (alive) toasts.error({ message: "Could not switch Claude account.", detail: caught instanceof Error ? caught.message : String(caught), source: "Claude", key: "claude:account-switch" });
     } finally {
       saving = false;
       if (reloadAfterConflict && alive) void reload();
@@ -96,13 +97,6 @@
   </div>
   {#if lastAttemptedAccount}
     <span class="max-w-36 truncate text-xs text-muted-foreground" aria-label={`Last attempted Claude account: ${lastAttemptedAccount}`}>Last: {lastAttemptedAccount}</span>
-  {/if}
-  {#if notice}
-    <span class="max-w-36 truncate text-xs text-tool-warning" role="status" aria-live="polite">Saved · limits cached</span>
-    <span class="sr-only">{notice}</span>
-  {/if}
-  {#if error}
-    <span class="max-w-36 truncate text-xs text-tool-error" role="alert" aria-label={error}>Switch failed</span>
   {/if}
 </div>
 {/if}

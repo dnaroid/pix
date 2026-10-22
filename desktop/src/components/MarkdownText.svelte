@@ -212,6 +212,11 @@
     height: 0.8rem;
     margin: 0;
     accent-color: var(--primary);
+    flex: none;
+  }
+  .markdown-text :global(.task-text) {
+    flex: 1 1 auto;
+    min-width: 0;
   }
   .markdown-text :global(blockquote) {
     margin: 0.65rem 0;

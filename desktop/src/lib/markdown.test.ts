@@ -36,9 +36,20 @@ describe("renderMarkdown", () => {
     expect(html).toContain("<strong><em>both</em></strong>");
     expect(html).toContain("<del>old</del>");
     expect(html).toContain("<code>code</code>");
-    expect(html).toContain("<ul><li>first</li><li class=\"task-item\"><input type=\"checkbox\" disabled checked>done</li></ul>");
+    expect(html).toContain("<ul><li>first</li><li class=\"task-item\"><input type=\"checkbox\" disabled checked><span class=\"task-text\">done</span></li></ul>");
     expect(html).toContain("<blockquote><p>quoted</p></blockquote>");
     expect(html).not.toContain('class="selection-ink"');
+  });
+
+  it("keeps mixed inline task-item content inside one text wrapper", () => {
+    const html = renderMarkdown("- [ ] **1. Step — depends on B1.** Use `not is_active` and `ORDER BY id`, then done.");
+
+    expect(html).toContain(
+      "<li class=\"task-item\"><input type=\"checkbox\" disabled><span class=\"task-text\">"
+        + "<strong>1. Step — depends on B1.</strong> Use <code>not is_active</code> and <code>ORDER BY id</code>, then done."
+        + "</span></li>",
+    );
+    expect(html.match(/<span class="task-text">/g)).toHaveLength(1);
   });
 
   it("typesets inline math and display fractions with Cyrillic labels", () => {

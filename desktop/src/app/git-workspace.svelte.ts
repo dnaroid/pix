@@ -13,6 +13,8 @@ type GitWorkspaceStoreOptions = {
   activeConversationWorkbenchTabId: () => WorkbenchTabId | null;
   setActiveWorkbenchTabId: (id: WorkbenchTabId | null) => void;
   nextWorkbenchAuxOrder: () => number;
+  /** One-shot success results are shown as toasts, not inline panel state. */
+  notify?: (message: string) => void;
 };
 
 type GitRepositoryState = {
@@ -30,7 +32,6 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
   let resolveRunning = $state(false);
   let diffPreview = $state<GitDiff | null>(null);
   let reviewResult = $state<GitReviewResult | null>(null);
-  let notice = $state<string | null>(null);
   let details = $state<GitRepositoryDetails | null>(null);
   let detailsLoading = $state(false);
   let detailsGeneration = 0;
@@ -58,7 +59,6 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
     llmActionId = null;
     resolveRunning = false;
     reviewResult = null;
-    notice = null;
     details = null;
     detailsLoading = false;
     closeDiff();
@@ -150,7 +150,6 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
     if (!current() || actionId !== null || llmActionId !== null || resolveRunning) return false;
     actionId = nextActionId;
     error = null;
-    notice = null;
     try {
       const result = await invoke<unknown>(command, { workspace, ...payload });
       if (REMOTE_REF_COMMANDS.has(command)) remoteCheckedAt.set(workspace, Date.now());
@@ -162,9 +161,10 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
       }
       await refreshFresh();
       if (!current()) return false;
-      notice = typeof mutationOptions.success === "function"
+      const success = typeof mutationOptions.success === "function"
         ? mutationOptions.success(result)
-        : mutationOptions.success ?? null;
+        : mutationOptions.success;
+      if (success) options.notify?.(success);
       if (details) void loadDetails();
       return true;
     } catch (reason) {
@@ -215,7 +215,6 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
     const preparationAction = pushAfterCommit ? "stage-generate-commit-push" : "stage-generate-commit";
     actionId = generate ? preparationAction : "commit";
     error = null;
-    notice = null;
     try {
       if (generate) {
         // One mutation lock spans staging, AI and commit, including awaited gaps.
@@ -261,7 +260,7 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
         actionId = "push";
         await invoke("git_push", { workspace });
       }
-      if (current()) notice = pushAfterCommit ? "Committed and pushed successfully." : "Commit created locally.";
+      if (current()) options.notify?.(pushAfterCommit ? "Committed and pushed successfully." : "Commit created locally.");
     } catch (reason) {
       if (current()) {
         const detail = reason instanceof Error ? reason.message : String(reason);
@@ -460,7 +459,6 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
     get diffPreview() { return diffPreview; },
     get diffReview() { return sameGitDiff(reviewResult?.diff, diffPreview) ? reviewResult?.text : undefined; },
     get reviewResult() { return reviewResult; },
-    get notice() { return notice; },
     get details() { return details; },
     get detailsLoading() { return detailsLoading; },
     get generation() { return generation; },

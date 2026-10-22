@@ -29,7 +29,7 @@ import type { ClaudeInstallation, LogicalProviderPayload, MutableOutput, Request
 
 import { IMAGE_READ_CORRECTION, PRIVATE_TRANSPORT_ERROR, onlyAttachedImageReads, recoverImageRead, type ImageReadAttempt } from "./image-read-recovery.ts";
 
-const DEFAULT_MCP_READY_TIMEOUT_MS = 5_000;
+const DEFAULT_MCP_READY_TIMEOUT_MS = 15_000;
 const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_TOTAL_TIMEOUT_MS = 30 * 60_000;
 /** Internal dependency seam for deterministic cleanup-failure tests. */

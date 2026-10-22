@@ -5,6 +5,7 @@
 ### Changed
 
 - Claude Code 2.1.300's `rate_limit_info.unifiedWindows` now updates the five-hour and weekly quota from each `rate_limit_event`, including `allowed` events, rather than waiting for OAuth polling. Invalid windows are ignored individually; these telemetry-only updates do not show user-facing warnings. Older CLI versions continue to use polling and warning/429 observations.
+- The default MCP tool-catalog readiness timeout rises from 5 to 15 seconds, so a bridge whose cold start is slowed by concurrent load no longer fails the request. `PI_CLAUDE_CODE_PROVIDER_MCP_READY_TIMEOUT_MS` still overrides it, capped by the total request timeout.
 
 ### Fixed
 

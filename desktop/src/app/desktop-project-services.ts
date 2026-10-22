@@ -5,6 +5,7 @@ import type { TranscriptState } from "../lib/transcript";
 import type { WorkbenchTabId } from "../lib/workbench-tabs";
 import { createGitCiStore } from "./git-ci.svelte";
 import { createGitWorkspaceStore } from "./git-workspace.svelte";
+import { toasts } from "./toasts.svelte";
 import { createPreviewStore } from "./preview.svelte";
 import { createProjectDocumentsStore } from "./project-documents.svelte";
 import { createPlanLaunchesStore } from "./plan-launches.svelte";
@@ -112,6 +113,7 @@ export function createDesktopProjectServices(options: DesktopProjectServicesOpti
     activeConversationWorkbenchTabId: options.activeConversationWorkbenchTabId,
     setActiveWorkbenchTabId: options.setActiveWorkbenchTabId,
     nextWorkbenchAuxOrder: options.nextWorkbenchAuxOrder,
+    notify: (message) => { toasts.success({ message, source: "Git", key: `git:${message}` }); },
   });
 
   const planLaunches = createPlanLaunchesStore();

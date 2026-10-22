@@ -20,7 +20,10 @@ type ClickZone =
 	| { kind: "choice"; index: number; row: number; startColumn: number; endColumn: number }
 	| { kind: "custom"; row: number; startColumn: number; endColumn: number }
 	| { kind: "review"; index: number; row: number; startColumn: number; endColumn: number }
-	| { kind: "submit"; row: number; startColumn: number; endColumn: number };
+	| { kind: "submit"; row: number; startColumn: number; endColumn: number }
+	| { kind: "collapse"; row: number; startColumn: number; endColumn: number };
+
+const COLLAPSE_KEY = "ctrl+o";
 
 function isKey(data: string, key: string): boolean {
 	const tui = PiTui as unknown as { Key?: Record<string, string | ((value: string) => string)>; matchesKey?: (data: string, key: string) => boolean };
@@ -37,6 +40,7 @@ function isKey(data: string, key: string): boolean {
 		backspace: ["\u007f", "\b"],
 		tab: ["\t"],
 		"shift+tab": ["\u001b[Z"],
+		"ctrl+o": ["\u000f"],
 		"shift+enter": ["\u001b[13;2u", "\u001b[13;2~", "\u001b[27;2;13~", "\u001b\r", "\u001b\n"],
 	};
 	return aliases[key]?.includes(data) ?? false;
@@ -145,6 +149,7 @@ export async function runQuestionnaire(questions: NormalizedQuestion[], ctx: Que
 		let selectedReviewIndex = reviewSubmitIndex;
 		let mode: QuestionMode = "choices";
 		let customError: string | undefined;
+		let collapsed = false;
 		let cachedWidth: number | undefined;
 		let cachedLines: string[] | undefined;
 		let clickZones: ClickZone[] = [];
@@ -647,7 +652,36 @@ export async function runQuestionnaire(questions: NormalizedQuestion[], ctx: Que
 		}
 
 		function renderHeader(add: AddLine, title: string, width: number): void {
-			add(paintLine(theme, formatHeader(title, width), width, { foreground: "accent", background: "headerBg", bold: true }));
+			const toggle = collapsed ? " ▸ " : " ▾ ";
+			if (width <= toggle.length + 1) {
+				add(paintLine(theme, formatHeader(title, width), width, { foreground: "accent", background: "headerBg", bold: true }));
+				return;
+			}
+			const titleWidth = width - toggle.length;
+			const row = add(paintLine(theme, formatHeader(title, titleWidth), titleWidth, { foreground: "accent", background: "headerBg", bold: true }) + theme.fg("muted", toggle));
+			clickZones.push({ kind: "collapse", row, startColumn: titleWidth + 1, endColumn: width + 1 });
+		}
+
+		function setCollapsed(value: boolean): void {
+			if (collapsed === value) return;
+			if (value) captureCustomDraft();
+			collapsed = value;
+			refresh();
+		}
+
+		function handleCollapsedInput(data: string): void {
+			if (isKey(data, COLLAPSE_KEY) || isKey(data, "enter") || data === " ") {
+				setCollapsed(false);
+				return;
+			}
+			if (isKey(data, "escape")) done(null);
+		}
+
+		function renderCollapsed(add: AddLine, width: number): void {
+			const answered = questions.filter((question) => selectionIsComplete(question, selections.get(question.id))).length;
+			const title = mode === "review" ? "Review answers" : `${questionIndex + 1}/${questions.length} ${currentQuestion().label}`;
+			renderHeader(add, title, width);
+			add(paintLine(theme, ` Collapsed · ${answered}/${questions.length} answered · Ctrl+O or Enter to expand · Esc to cancel`, width, { foreground: "muted" }));
 		}
 
 		function renderTabs(add: AddLine, width: number): void {
@@ -748,6 +782,11 @@ export async function runQuestionnaire(questions: NormalizedQuestion[], ctx: Que
 				&& event.localColumn < candidate.endColumn
 			));
 			if (!zone) return false;
+			if (zone.kind === "collapse") {
+				setCollapsed(!collapsed);
+				return true;
+			}
+			if (collapsed) return false;
 
 			switch (zone.kind) {
 				case "tab":
@@ -776,6 +815,14 @@ export async function runQuestionnaire(questions: NormalizedQuestion[], ctx: Que
 
 		return {
 			handleInput(data: string): void | QuestionInputHandlingResult {
+				if (collapsed) {
+					handleCollapsedInput(data);
+					return;
+				}
+				if (isKey(data, COLLAPSE_KEY)) {
+					setCollapsed(true);
+					return;
+				}
 				switch (mode) {
 					case "custom":
 						return handleCustomInput(data);
@@ -788,7 +835,7 @@ export async function runQuestionnaire(questions: NormalizedQuestion[], ctx: Que
 			},
 			handleMouse,
 			usesEditor() {
-				return mode === "custom" && usesSharedEditor;
+				return mode === "custom" && usesSharedEditor && !collapsed;
 			},
 			invalidate() {
 				invalidateCache();
@@ -809,7 +856,8 @@ export async function runQuestionnaire(questions: NormalizedQuestion[], ctx: Que
 					for (const line of wrapped.length > 0 ? wrapped : [""]) lines.push(truncateLine(line, safeWidth));
 					return row;
 				};
-				if (mode === "review") renderReview(add, addWrapped, safeWidth);
+				if (collapsed) renderCollapsed(add, safeWidth);
+				else if (mode === "review") renderReview(add, addWrapped, safeWidth);
 				else renderQuestion(add, addWrapped, safeWidth);
 				cachedWidth = width;
 				cachedLines = lines;

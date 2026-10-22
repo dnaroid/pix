@@ -19,12 +19,13 @@ function fixture(overrides: Partial<GitSnapshot> = {}) {
     if (command === "git_history" || command === "git_stash_list") return [];
   });
   const setActiveWorkbenchTabId = vi.fn();
+  const notify = vi.fn();
   const store = createGitWorkspaceStore({
     workspace: () => workspace, previewDirty: () => false, reloadProject: vi.fn(async () => {}),
     activeWorkbenchTabId: () => null, activeConversationWorkbenchTabId: () => null,
-    setActiveWorkbenchTabId, nextWorkbenchAuxOrder: () => 1,
+    setActiveWorkbenchTabId, nextWorkbenchAuxOrder: () => 1, notify,
   });
-  return { store, snapshot, setActiveWorkbenchTabId, setWorkspace(value: string) { workspace = value; store.reset(); } };
+  return { store, snapshot, notify, setActiveWorkbenchTabId, setWorkspace(value: string) { workspace = value; store.reset(); } };
 }
 
 const historicalHash = "0123456789abcdef0123456789abcdef01234567";
@@ -42,7 +43,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("Git commit transaction and lifecycle", () => {
   it("stages and AI commits locally without a remote, never pushing", async () => {
-    const { store } = fixture({ remotes: [], upstream: undefined });
+    const { store, notify } = fixture({ remotes: [], upstream: undefined });
     await store.refresh();
     const generate = vi.fn(async () => "Local AI message");
     await expect(store.stageGenerateCommitPush(generate, false)).resolves.toBe(true);
@@ -51,7 +52,7 @@ describe("Git commit transaction and lifecycle", () => {
     expect(invoke).toHaveBeenCalledWith("git_commit", { workspace: "/one", message: "Local AI message" });
     expect(invoke.mock.calls.some(([command]) => command === "git_push")).toBe(false);
     expect(store.error).toBeNull();
-    expect(store.notice).toBe("Commit created locally.");
+    expect(notify).toHaveBeenCalledWith("Commit created locally.");
   });
 
   it("keeps a local-only request local even when fresh status discovers a remote", async () => {
@@ -67,7 +68,7 @@ describe("Git commit transaction and lifecycle", () => {
     expect(invoke.mock.calls.some(([command]) => command === "git_stage" || command === "git_commit" || command === "git_push")).toBe(false);
   });
   it("saves repository identity under the shared mutation lock without staging or committing", async () => {
-    const { store } = fixture();
+    const { store, notify } = fixture();
     let finish!: () => void;
     invoke.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
     const save = store.saveIdentity("dnaroid", "dnaroid@gmail.com");
@@ -78,12 +79,12 @@ describe("Git commit transaction and lifecycle", () => {
     finish();
     await expect(save).resolves.toBe(true);
     expect(store.actionId).toBeNull();
-    expect(store.notice).toContain("saved for this repository");
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("saved for this repository"));
     expect(invoke.mock.calls.map(([command]) => command)).toEqual(["git_save_identity", "git_status"]);
   });
 
   it("an old identity save cannot release the new A lifecycle mutation lock", async () => {
-    const { store, setWorkspace } = fixture();
+    const { store, notify, setWorkspace } = fixture();
     let finishOld!: () => void;
     invoke.mockImplementationOnce(() => new Promise<void>((resolve) => { finishOld = resolve; }));
     const oldSave = store.saveIdentity("old", "old@example.invalid");
@@ -94,7 +95,7 @@ describe("Git commit transaction and lifecycle", () => {
     finishOld();
     await expect(oldSave).resolves.toBe(false);
     expect(store.actionId).toBe("save-identity");
-    expect(store.notice).toBeNull();
+    expect(notify).not.toHaveBeenCalled();
     finishNew();
     await expect(newSave).resolves.toBe(true);
     expect(store.actionId).toBeNull();
@@ -179,7 +180,7 @@ describe("Git commit transaction and lifecycle", () => {
   });
 
   it("stages all, generates, commits and pushes under one lock", async () => {
-    const { store } = fixture();
+    const { store, notify } = fixture();
     await store.refresh();
     const generate = vi.fn(async () => {
       expect(store.actionId).toBe("stage-generate-commit-push");
@@ -195,7 +196,7 @@ describe("Git commit transaction and lifecycle", () => {
       ["git_push", { workspace: "/one" }],
     ]);
     expect(generate).toHaveBeenCalledOnce();
-    expect(store.notice).toMatch(/Committed and pushed/);
+    expect(notify).toHaveBeenCalledWith(expect.stringMatching(/Committed and pushed/));
     expect(store.actionId).toBeNull();
   });
 
@@ -309,7 +310,7 @@ describe("Git commit transaction and lifecycle", () => {
   });
 
   it("detects an uninitialized workspace and initializes it explicitly", async () => {
-    const { store, snapshot } = fixture();
+    const { store, notify, snapshot } = fixture();
     let initialized = false;
     invoke.mockImplementation(async (command: string) => {
       if (command === "git_status") {
@@ -331,7 +332,7 @@ describe("Git commit transaction and lifecycle", () => {
     await expect(store.initialize()).resolves.toBe(true);
     expect(store.uninitialized).toBe(false);
     expect(store.snapshot).toEqual(snapshot);
-    expect(store.notice).toMatch(/initialized on main/i);
+    expect(notify).toHaveBeenCalledWith(expect.stringMatching(/initialized on main/i));
     expect(invoke.mock.calls.map(([command]) => command)).toEqual([
       "git_status",
       "git_repository_state",
@@ -353,11 +354,11 @@ describe("Git commit transaction and lifecycle", () => {
   });
 
   it("commits then pushes under one lock, never implicitly staging", async () => {
-    const { store } = fixture();
+    const { store, notify } = fixture();
     await store.refresh();
     await expect(store.commit("message", true)).resolves.toBe(true);
     expect(invoke.mock.calls.map(([command]) => command)).toEqual(["git_status", "git_commit", "git_push", "git_status"]);
-    expect(store.notice).toMatch(/Committed and pushed/);
+    expect(notify).toHaveBeenCalledWith(expect.stringMatching(/Committed and pushed/));
     expect(store.actionId).toBeNull();
   });
   it("does not push when commit fails", async () => {
@@ -490,7 +491,7 @@ describe("Git review checkpoints and secondary operations", () => {
     expect(sameGitDiff(commitPatch, { ...commitPatch, commit: { ...historicalCommit.commit, hash: "f".repeat(40) } })).toBe(false);
   });
   it("fetches remotes before reporting current incoming commits", async () => {
-    const { store, snapshot } = fixture();
+    const { store, notify, snapshot } = fixture();
     let fetched = false;
     invoke.mockImplementation(async (command: string) => {
       if (command === "git_fetch") {
@@ -506,7 +507,7 @@ describe("Git review checkpoints and secondary operations", () => {
 
     expect(invoke.mock.calls.map(([command]) => command)).toEqual(["git_status", "git_fetch", "git_status"]);
     expect(store.snapshot?.behind).toBe(2);
-    expect(store.notice).toBeNull();
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it("skips remote fetch when no Git remote is configured", async () => {

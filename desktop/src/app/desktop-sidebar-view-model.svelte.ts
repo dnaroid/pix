@@ -186,8 +186,7 @@ export function createDesktopSidebarViewModel(options: {
       review: options.git.reviewResult,
       resolveRunning: options.git.resolveRunning,
       canResolve: options.canUseSession() && !options.sessionMutationRunning() && !options.anyPromptRunning(),
-      notice: options.git.notice,
-      details: options.git.details,
+            details: options.git.details,
       detailsLoading: options.git.detailsLoading,
       selectedCommit: options.git.diffPreview?.commit ?? null,
       onShowCommitDiff: () => {

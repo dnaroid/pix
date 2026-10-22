@@ -258,6 +258,13 @@ Typical local spacing SHOULD cluster around Tailwind's standard 1–4 spacing st
 
 Do not create large empty whitespace solely to make the UI look "premium".
 
+### One-shot action feedback
+
+Show one-shot action results (success, information, warning, or error) through
+the shared Desktop toast/notification center rather than temporary inline panel
+status. Keep form validation and persistent state beside the control that owns
+them.
+
 ## 8. Application layout
 
 Prefer persistent desktop regions:
