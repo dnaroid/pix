@@ -1,8 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AcpClient } from "../lib/acp-client";
 import { createProjectActions } from "./project-actions.svelte";
+import type { ProjectTaskDocument } from "../lib/project-tasks";
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
 
 function reviewHarness() {
+    let activeSessionId: string | null = null;
     const client = {
       newSession: vi.fn().mockResolvedValue({ sessionId: "session-1" }),
       closeSession: vi.fn().mockResolvedValue(undefined),
@@ -24,7 +33,7 @@ function reviewHarness() {
       promptText: () => "",
       promptAttachments: () => [],
       setPromptText: () => {},
-      activeSessionId: () => null,
+      activeSessionId: () => activeSessionId,
       invalidateAttachmentDraft: () => {},
       openTasksPanel: () => {},
       closeProjectSelector: () => {},
@@ -34,7 +43,7 @@ function reviewHarness() {
       ensureRuntime: async () => {},
       runtimeReady: () => true,
       forgetRuntime: () => {},
-      activateSession: () => {},
+      activateSession: (id) => { activeSessionId = id; },
       prepareTranscriptAttachment: async () => {},
       imagePromptSupported: () => true,
       appendUserMessage,
@@ -99,6 +108,147 @@ describe("SQLite project task launch", () => {
   });
 });
 
+describe("concurrent task sessions", () => {
+  function fixture() {
+    const harness = reviewHarness();
+    const tasks = ["task-1", "task-2"].map((id) => ({
+      id, title: id, type: "feature" as const, status: "todo" as const, priority: "medium" as const,
+      createdAt: "2026-10-10T00:00:00Z", updatedAt: "2026-10-10T00:00:00Z",
+    }));
+    let document: ProjectTaskDocument = { version: 1, tasks };
+    harness.options.taskDocument = () => document;
+    harness.options.saveProjectTasks = vi.fn(async (next) => { document = next; return true; });
+    harness.options.taskAttachments = async () => [];
+    harness.options.setOperationRunning = vi.fn();
+    harness.options.loadSession = vi.fn().mockResolvedValue(undefined);
+    let sessionNumber = 0;
+    vi.mocked(harness.client.newSession).mockImplementation(async () => ({
+      sessionId: `session-${++sessionNumber}`,
+    }));
+    return { ...harness, tasks, actions: createProjectActions(harness.options) };
+  }
+
+  it("starts another task in its own session before the first prompt finishes", async () => {
+    const { tasks, actions, options, runPrompt, appendUserMessage, client } = fixture();
+    const started = deferred<void>();
+    const finished = deferred<void>();
+    runPrompt.mockImplementationOnce(() => { started.resolve(); return finished.promise; });
+    const first = actions.runTask(tasks[0]!);
+    await started.promise;
+    expect(actions.actionId).toBeNull();
+    expect(options.setOperationRunning).toHaveBeenLastCalledWith(false);
+
+    await actions.runTask(tasks[1]!);
+    expect(client.newSession).toHaveBeenCalledTimes(2);
+    expect(runPrompt.mock.calls.map((call) => call[1])).toEqual(["session-1", "session-2"]);
+    expect(appendUserMessage).toHaveBeenCalledWith("session-1", expect.stringContaining("Task id: task-1"), []);
+    expect(appendUserMessage).toHaveBeenCalledWith("session-2", expect.stringContaining("Task id: task-2"), []);
+    expect(options.taskDocument().tasks).toEqual([
+      expect.objectContaining({ id: "task-1", sessionId: "session-1", status: "in-progress" }),
+      expect.objectContaining({ id: "task-2", sessionId: "session-2", status: "in-progress" }),
+    ]);
+    finished.resolve();
+    await first;
+  });
+
+  it.each(["completed", "failed"])("does not unlock the next preparation when the old prompt %s", async (outcome) => {
+    const { tasks, actions, options, runPrompt, client } = fixture();
+    const started = deferred<void>();
+    const finished = deferred<void>();
+    const creating = deferred<void>();
+    const created = deferred<{ sessionId: string }>();
+    runPrompt.mockImplementationOnce(() => { started.resolve(); return finished.promise; });
+    const first = actions.runTask(tasks[0]!);
+    await started.promise;
+    vi.mocked(client.newSession).mockImplementationOnce(() => { creating.resolve(); return created.promise; });
+    const second = actions.runTask(tasks[1]!);
+    await creating.promise;
+    expect(actions.actionId).toBe("task-2");
+    if (outcome === "failed") finished.reject(new Error("First prompt failed"));
+    else finished.resolve();
+    await first;
+    expect(actions.actionId).toBe("task-2");
+    expect(options.setOperationRunning).toHaveBeenLastCalledWith(true);
+    expect(options.reportError).toHaveBeenCalledTimes(outcome === "failed" ? 1 : 0);
+    await actions.runTask(tasks[1]!);
+    expect(client.newSession).toHaveBeenCalledTimes(2);
+    created.resolve({ sessionId: "session-2" });
+    await second;
+    expect(actions.actionId).toBeNull();
+  });
+
+  it("blocks repeated clicks during preparation and opens the saved session for a stale row afterward", async () => {
+    const { tasks, actions, options, client } = fixture();
+    const reading = deferred<void>();
+    const attachments = deferred<[]>();
+    options.taskAttachments = () => { reading.resolve(); return attachments.promise; };
+    const first = actions.runTask(tasks[0]!);
+    await reading.promise;
+    await actions.runTask(tasks[0]!);
+    expect(client.newSession).not.toHaveBeenCalled();
+    attachments.resolve([]);
+    await first;
+    options.activeSessionId = () => "another-session";
+    await actions.runTask(tasks[0]!);
+    expect(client.newSession).toHaveBeenCalledOnce();
+    expect(options.loadSession).toHaveBeenCalledWith("session-1");
+  });
+
+  it("discards a stale created session without unlocking a replacement after reset", async () => {
+    const { tasks, actions, options, client, runPrompt } = fixture();
+    const creating = deferred<void>();
+    const created = deferred<{ sessionId: string }>();
+    vi.mocked(client.newSession).mockImplementationOnce(() => { creating.resolve(); return created.promise; });
+    const first = actions.runTask(tasks[0]!);
+    await creating.promise;
+    actions.reset();
+    const reading = deferred<void>();
+    const attachments = deferred<[]>();
+    options.taskAttachments = () => { reading.resolve(); return attachments.promise; };
+    const second = actions.runTask(tasks[1]!);
+    await reading.promise;
+    created.resolve({ sessionId: "stale" });
+    await first;
+    expect(client.closeSession).toHaveBeenCalledWith("stale");
+    expect(actions.actionId).toBe("task-2");
+    expect(options.setOperationRunning).toHaveBeenLastCalledWith(true);
+    expect(runPrompt).not.toHaveBeenCalled();
+    attachments.resolve([]);
+    await second;
+  });
+
+  it.each(["runtime", "save", "scroll"])("does not send after reset during %s preparation", async (stage) => {
+    const { tasks, actions, options, runPrompt } = fixture();
+    if (stage === "runtime") options.ensureRuntime = async () => { actions.reset(); };
+    if (stage === "save") options.saveProjectTasks = async () => { actions.reset(); return true; };
+    if (stage === "scroll") options.scrollToLatest = async () => { actions.reset(); };
+    await actions.runTask(tasks[0]!);
+    expect(runPrompt).not.toHaveBeenCalled();
+  });
+
+  it.each(["runtime", "save", "scroll"])("does not send into another conversation after navigating during %s preparation", async (stage) => {
+    const { tasks, actions, options, runPrompt } = fixture();
+    const navigate = () => { options.activeSessionId = () => "another-session"; };
+    if (stage === "runtime") options.ensureRuntime = async () => { navigate(); };
+    if (stage === "save") options.saveProjectTasks = async () => { navigate(); return true; };
+    if (stage === "scroll") options.scrollToLatest = async () => { navigate(); };
+    await actions.runTask(tasks[0]!);
+    expect(runPrompt).not.toHaveBeenCalled();
+    expect(actions.actionId).toBeNull();
+  });
+
+  it("releases preparation after a failed save so another task can start", async () => {
+    const { tasks, actions, options, runPrompt } = fixture();
+    vi.mocked(options.saveProjectTasks).mockResolvedValueOnce(false);
+    await actions.runTask(tasks[0]!);
+    expect(runPrompt).not.toHaveBeenCalled();
+    expect(actions.actionId).toBeNull();
+    expect(options.setOperationRunning).toHaveBeenLastCalledWith(false);
+    await actions.runTask(tasks[1]!);
+    expect(runPrompt).toHaveBeenCalledOnce();
+  });
+});
+
 describe("task plans", () => {
   const task = {
     id: "task-1", title: "Plan it", type: "feature" as const,
@@ -153,5 +303,21 @@ describe("task plans", () => {
     await createProjectActions(options).runTask(linked);
     expect(appendUserMessage.mock.calls[0]![1]).toContain("Work on this project task.");
     expect(options.recordPlanLaunch).not.toHaveBeenCalled();
+  });
+
+  it.each(["cancelled", "failed"] as const)("settles a linked plan when preparation is %s before sending", async (outcome) => {
+    const { options, runPrompt } = reviewHarness();
+    const linked = { ...task, links: [".pi/plans/a.md"] };
+    options.taskDocument = () => ({ version: 1, tasks: [linked] });
+    options.taskAttachments = async () => [];
+    options.planAvailable = () => true;
+    options.recordPlanLaunch = vi.fn();
+    options.settlePlanLaunch = vi.fn();
+    const actions = createProjectActions(options);
+    if (outcome === "cancelled") options.ensureRuntime = async () => { actions.reset(); };
+    else options.runtimeReady = () => false;
+    await actions.runTask(linked);
+    expect(runPrompt).not.toHaveBeenCalled();
+    expect(options.settlePlanLaunch).toHaveBeenCalledExactlyOnceWith("session-1", outcome, "/project");
   });
 });

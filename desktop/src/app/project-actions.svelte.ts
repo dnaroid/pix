@@ -13,6 +13,7 @@ import { parseDesktopModelRef } from "./desktop-helpers";
 import { createProjectPlanActions } from "./project-plan-actions.svelte";
 import { buildProjectPlanPrompt } from "./project-plan-prompt";
 import { buildTaskPlanAuthoringPrompt, linkedTaskPlan, taskPlanPath, taskPlanRunContext, withTaskPlanLink } from "../lib/project-task-plans";
+import type { PlanLaunchOutcome } from "../lib/plan-launches";
 
 export type ProjectActionsOptions = {
   client: () => AcpClient | null;
@@ -68,6 +69,7 @@ export type ProjectActionsOptions = {
 
 export function createProjectActions(options: ProjectActionsOptions) {
   let actionId = $state<string | null>(null);
+  let generation = 0;
   const plans = createProjectPlanActions(options, () => actionId !== null);
 
   async function createTaskFromComposer(): Promise<void> {
@@ -125,13 +127,29 @@ export function createProjectActions(options: ProjectActionsOptions) {
   }
 
   async function runTask(task: ProjectTask): Promise<void> {
+    // A caller may still hold the pre-launch row after its session was saved.
+    task = options.taskDocument().tasks.find((candidate) => candidate.id === task.id) ?? task;
     if (task.sessionId) {
       await openTaskSession(task);
       return;
     }
     const requestClient = options.client();
-    if (!requestClient || !options.canUseSession() || options.tasksSaving() || actionId || plans.actionId) return;
     const requestWorkspace = options.workspace();
+    if (!requestClient || !requestWorkspace || !options.canUseSession() || options.tasksSaving()
+      || options.taskLoadFailed() || options.workspaceOpening?.() || actionId || plans.actionId) return;
+    const requestGeneration = generation;
+    const current = () => requestGeneration === generation
+      && requestClient === options.client() && requestWorkspace === options.workspace();
+    let preparing = true;
+    let unsentPlanSession: string | null = null;
+    let unsentPlanOutcome: PlanLaunchOutcome = "cancelled";
+    const finishPreparation = () => {
+      if (!preparing) return;
+      preparing = false;
+      if (requestGeneration !== generation) return;
+      if (current()) options.setOperationRunning(false);
+      actionId = null;
+    };
     options.closeProjectSelector();
     options.closeSessionSelector();
     options.setOperationRunning(true);
@@ -148,7 +166,7 @@ export function createProjectActions(options: ProjectActionsOptions) {
       const taskFiles = await (options.taskAttachments
         ? options.taskAttachments(requestWorkspace, task.id)
         : invoke<AttachmentFile[]>("read_project_task_attachments", { workspace: requestWorkspace, id: task.id }));
-      if (requestClient !== options.client() || requestWorkspace !== options.workspace()) return;
+      if (!current()) return;
       const taskPrompt = {
         ...basePrompt,
         attachments: [
@@ -158,7 +176,7 @@ export function createProjectActions(options: ProjectActionsOptions) {
       };
       await Promise.all(taskPrompt.attachments.map((attachment) => options.prepareTranscriptAttachment(attachment)));
       const payload = buildPromptPayload(taskPrompt.text, taskPrompt.attachments, options.imagePromptSupported());
-      if (options.client() !== requestClient || options.workspace() !== requestWorkspace) return;
+      if (!current()) return;
       const chosenModel = task.modelRef ? parseDesktopModelRef(task.modelRef) : undefined;
       if (task.modelRef && !chosenModel) throw new Error("Assigned task model must use provider/model[:thinking] format.");
       const response = chosenModel
@@ -167,15 +185,23 @@ export function createProjectActions(options: ProjectActionsOptions) {
             ...(chosenModel.thinking ? { thinkingLevel: chosenModel.thinking } : {}),
           })
         : await requestClient.newSession(requestWorkspace);
-      if (options.client() !== requestClient || options.workspace() !== requestWorkspace) {
+      if (!current()) {
         options.forgetRuntime(response.sessionId);
-        void requestClient.closeSession(response.sessionId).catch(() => undefined);
+        void requestClient.closeSession(response.sessionId).catch(options.reportError);
         return;
       }
       options.activateSession(response.sessionId, requestWorkspace, false);
-      if (runsPlan && planPath) options.recordPlanLaunch?.(requestWorkspace, response.sessionId, planPath);
+      if (runsPlan && planPath) {
+        options.recordPlanLaunch?.(requestWorkspace, response.sessionId, planPath);
+        unsentPlanSession = response.sessionId;
+      }
+      const active = () => current() && options.activeSessionId() === response.sessionId;
       await options.ensureRuntime(requestClient, response.sessionId, requestWorkspace);
-      if (!options.runtimeReady(response.sessionId)) return;
+      if (!active()) return;
+      if (!options.runtimeReady(response.sessionId)) {
+        unsentPlanOutcome = "failed";
+        return;
+      }
       void options.refreshSessions();
 
       const timestamp = new Date().toISOString();
@@ -191,30 +217,34 @@ export function createProjectActions(options: ProjectActionsOptions) {
             }
           : candidate),
       });
-      if (!saved || options.client() !== requestClient || options.workspace() !== requestWorkspace) return;
+      if (!saved || !active()) return;
 
-      options.setOperationRunning(false);
       const transcriptMessageId = options.appendUserMessage(
         response.sessionId,
         taskPrompt.text,
         taskPrompt.attachments,
       );
       await options.scrollToLatest();
-      await options.runPrompt(
+      if (!active()) return;
+      const promptRun = options.runPrompt(
         requestClient,
         response.sessionId,
         payload.blocks,
         payload.fileImages,
         transcriptMessageId,
       );
-      void options.refreshSessions();
+      unsentPlanSession = null;
+      // Only session preparation is exclusive. The per-session prompt lifecycle
+      // now owns the run; its completion must not unlock a later task launch.
+      finishPreparation();
+      await promptRun;
+      if (current()) void options.refreshSessions();
     } catch (error) {
-      options.reportError(error);
+      unsentPlanOutcome = "failed";
+      if (current()) options.reportError(error);
     } finally {
-      if (options.workspace() === requestWorkspace) {
-        options.setOperationRunning(false);
-        actionId = null;
-      }
+      if (unsentPlanSession) options.settlePlanLaunch?.(unsentPlanSession, unsentPlanOutcome, requestWorkspace);
+      finishPreparation();
     }
   }
 
@@ -282,6 +312,7 @@ export function createProjectActions(options: ProjectActionsOptions) {
   }
 
   function reset(): void {
+    generation += 1;
     actionId = null;
     plans.reset();
   }

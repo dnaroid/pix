@@ -182,6 +182,16 @@ describe("ProjectExplorer keyboard tree", () => {
     expect(explorerSource).toContain("opacity-55 transition-opacity hover:opacity-100 focus-visible:opacity-100");
   });
 
+  it("emphasizes Pix entries without muting them or overriding Git name colors", () => {
+    expect(explorerSource).toContain("const emphasis = projectEntryEmphasis(entry)");
+    expect(explorerSource).toContain("hiddenEntry && !emphasis && treeState.selectedPath !== entry.path");
+    expect(explorerSource).toContain('data-project-entry-emphasis={emphasis}');
+    expect(explorerSource).toContain('<FolderCog class="h-3.5 w-3.5 shrink-0 text-primary"');
+    expect(explorerSource).toContain('<FileCog class="h-3.5 w-3.5 shrink-0 text-primary"');
+    expect(explorerSource).toContain('gitDecoration?.color ?? (emphasis ? "text-primary" : "")');
+    expect(explorerSource).toContain('emphasis ? "font-medium" : ""');
+  });
+
   it("restores sparse project expansion state from workspace.jsonc and refreshes only visible expanded branches", () => {
     expect(treeControllerSource).toContain("const workspaceChanged = currentWorkspace !== observedWorkspace");
     expect(treeControllerSource).toContain("if (!workspaceChanged && !refreshChanged) return");

@@ -229,6 +229,7 @@ establish compatibility requirements.
   check hides it; changing targets clears the previous target's eligibility.
 - Existing pointer drag/drop behavior and lazy directory loading remain unchanged.
 - Project Explorer keeps dotfiles and dotfolders in the normal tree. Entries whose basename starts with `.` use muted opacity by default so ordinary source files retain visual priority; hover, keyboard focus, and selected/open state restore normal readability.
+- The workspace-root `.pi` directory, root `AGENTS.md`, direct canonical files in `.pi`, and durable canonical `.pi` directories are emphasized with primary-colored, medium-weight names and `FolderCog`/`FileCog` icons. Canonical entries are limited to the native cleanup allowlists; ephemeral containers such as `artifacts` and `subagents` are excluded. Descendants are not blanket-emphasized, and unknown paths remain unchanged. Emphasized dot entries bypass default muting. Git status name colors retain precedence over emphasis, while icons remain primary-colored; row tooltips describe the entry's role. This is visual-only and does not change focus, navigation or selection.
 - Project Explorer colors changed file names from the shared workspace Git snapshot, without displaying status letters or badges. Added/untracked files use success, deleted files warning, conflicts error, and other changes info semantic colors. Working-tree status takes color precedence over staged status; tooltips and accessible row labels describe both scopes. Existing folders containing changed descendants use info-colored names, even when collapsed, with conflicts taking error-color priority. Renames color both source and destination ancestor folders; absent/deleted files are not invented in the filesystem tree. Clean files and unavailable/non-repository snapshots have no decorations.
 - While Files is mounted, local Git status refreshes on opening/workspace change, Files Refresh, window focus, file-operation completion, and about every five seconds after the previous read completes. Reads are serialized and repeated triggers coalesce; closing the panel stops scheduling. This reuses the workspace-guarded Git store and does not fetch remotes or traverse/expand the lazy tree. Git errors do not prevent file browsing or change its health indicator.
 - While Files is mounted and the window is focused and visible, directory listings
@@ -293,6 +294,7 @@ establish compatibility requirements.
 - `desktop/src/lib/keyboard-navigation.ts`
 - `desktop/src/lib/project-tree.ts`
 - `desktop/src/lib/project-git-decorations.ts`
+- `desktop/src/lib/project-entry-emphasis.ts`
 - `desktop/src/lib/project-git-refresh.ts`
 - `desktop/src/lib/project-files-refresh.ts`
 - `desktop/src/lib/project-git-ignore.ts`
@@ -319,7 +321,9 @@ establish compatibility requirements.
 - `desktop/src/lib/project-explorer-expansion.test.ts` covers compact per-project
   expansion persistence, malformed state rejection, and storage bounds.
 - `desktop/src/components/ProjectExplorer.test.ts` covers tree semantics and the
-  keyboard external-editor route.
+  keyboard external-editor route and emphasized Pix-entry presentation.
+- `desktop/src/lib/project-entry-emphasis.test.ts` covers canonical entry matching
+  and excluded/unknown paths.
 - `desktop/src/components/project-explorer-operations.test.ts` covers independent
   mutations during deferred deletion, ancestor/destination conflicts, partially
   copied output protection, out-of-order completion and workspace/teardown invalidation.

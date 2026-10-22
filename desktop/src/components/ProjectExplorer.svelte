@@ -23,6 +23,8 @@
   import FilePlus from "@lucide/svelte/icons/file-plus";
   import FileText from "@lucide/svelte/icons/file-text";
   import Folder from "@lucide/svelte/icons/folder";
+  import FolderCog from "@lucide/svelte/icons/folder-cog";
+  import FileCog from "@lucide/svelte/icons/file-cog";
   import FolderPlus from "@lucide/svelte/icons/folder-plus";
   import FolderSearch from "@lucide/svelte/icons/folder-search";
   import ImageIcon from "@lucide/svelte/icons/image";
@@ -36,6 +38,7 @@
   import { canOpenProjectEntryInBrowser, projectExplorerMenuActions, type ProjectExplorerMenuAction } from "../lib/project-explorer-native-menu";
   import type { GitSnapshot } from "../lib/git";
   import { projectGitDecorations } from "../lib/project-git-decorations";
+  import { projectEntryEmphasis } from "../lib/project-entry-emphasis";
   import { createProjectGitRefresh } from "../lib/project-git-refresh";
   import { createProjectFilesRefresh } from "../lib/project-files-refresh";
   import { createProjectGitIgnoreEligibility } from "../lib/project-git-ignore";
@@ -847,6 +850,7 @@
       {#each rows as row, index (row.entry.path)}
         {@const entry = row.entry}
         {@const gitDecoration = (entry.kind === "directory" ? gitDecorations.directories : gitDecorations.files).get(entry.path)}
+        {@const emphasis = projectEntryEmphasis(entry)}
         {@const hiddenEntry = entry.path !== "" && entry.name.startsWith(".")}
         {@const expanded = entry.kind === "directory" && treeController.isDirectoryExpanded(entry.path)}
         {@const directoryLoading = entry.kind === "directory" && treeState.loadingDirectories.includes(entry.path)}
@@ -864,13 +868,13 @@
           <button
             class={[
               "flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-sm text-left text-xs text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
-              hiddenEntry && treeState.selectedPath !== entry.path
+              hiddenEntry && !emphasis && treeState.selectedPath !== entry.path
                 ? "opacity-55 transition-opacity hover:opacity-100 focus-visible:opacity-100"
                 : "",
             ]}
             type="button"
             role="treeitem"
-            title={`${entry.path || workspace}${gitDecoration ? ` · ${gitDecoration.label}` : ""} · Shift+Enter opens in ${externalEditorLabel}`}
+            title={`${entry.path || workspace}${emphasis ? ` · ${emphasis}` : ""}${gitDecoration ? ` · ${gitDecoration.label}` : ""} · Shift+Enter opens in ${externalEditorLabel}`}
             aria-label={gitDecoration ? `${entry.name} · ${gitDecoration.label}` : entry.name}
             aria-level={row.depth + 1}
             aria-expanded={entry.kind === "directory" ? expanded : undefined}
@@ -878,6 +882,7 @@
             aria-keyshortcuts={entry.path ? "Shift+Enter F2 Delete" : "Shift+Enter"}
             tabindex={!nameState.edit && tabbablePath === entry.path ? 0 : -1}
             data-project-tree-path={entry.path}
+            data-project-entry-emphasis={emphasis}
             data-project-git-status={gitDecoration?.code}
             onfocus={() => treeState.focusedPath = entry.path}
             onkeydown={(event) => handleEntryKeydown(event, index, entry)}
@@ -896,16 +901,21 @@
                   <ChevronRight class={["h-3.5 w-3.5 transition-transform", expanded ? "rotate-90" : ""]} aria-hidden="true" />
                 {/if}
               </span>
-              <Folder class="h-3.5 w-3.5 shrink-0 text-primary/75" aria-hidden="true" />
+              {#if emphasis}
+                <FolderCog class="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+              {:else}
+                <Folder class="h-3.5 w-3.5 shrink-0 text-primary/75" aria-hidden="true" />
+              {/if}
             {:else}
               <span class="w-4 shrink-0" aria-hidden="true"></span>
               {@const iconKind = fileIconKind(entry.path)}
-              {#if iconKind === "text"}<FileText class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+              {#if emphasis}<FileCog class="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+              {:else if iconKind === "text"}<FileText class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
               {:else if iconKind === "code"}<FileCode class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
               {:else if iconKind === "image"}<ImageIcon class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
               {:else}<File class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />{/if}
             {/if}
-            <span class={["min-w-0 flex-1 truncate", gitDecoration?.color ?? ""]}>{entry.name}</span>
+            <span class={["min-w-0 flex-1 truncate", gitDecoration?.color ?? (emphasis ? "text-primary" : ""), emphasis ? "font-medium" : ""]}>{entry.name}</span>
           </button>
 
           <button

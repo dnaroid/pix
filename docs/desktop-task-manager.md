@@ -125,6 +125,12 @@ session-local todos.
 5. Errors in saving a final status must be reported; interrupted turns do not
    automatically mark a task failed.
 
+- **Tasks Run** serializes session preparation to prevent duplicate launches.
+  Once a task prompt starts, another saved task may run concurrently in its own
+  session; completion of the earlier prompt cannot clear the later launch's
+  busy state. This also applies to Tasks Run for tasks with linked plans, not
+  standalone Plans Run or Create plan.
+
 - If the task's first canonical `.pi/plans` link is present in the project
   documents snapshot, Run sends the saved-plan execution prompt with task
   context and the task's existing completion-status authorization. The new
