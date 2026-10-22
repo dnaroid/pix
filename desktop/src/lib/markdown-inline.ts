@@ -61,6 +61,9 @@ export function renderInline(
       if (end >= 0) {
         const code = text.slice(index + markerLength, end).replace(/\n/g, " ");
         const codeLabel = `<code>${escapeHtml(code)}</code>`;
+        const externalHref = allowLinks && hasAutomaticLinkPrefix(code, 0) && !/\s/u.test(code)
+          ? normalizeExternalHref(code)
+          : undefined;
         const homePath = allowLinks ? normalizeInlineHomeFilePath(code) : undefined;
         const localPath = allowLinks && !homePath
           ? normalizeLocalFileDestination(code.replace(/:\d+(?::\d+)?$/u, ""))
@@ -68,7 +71,9 @@ export function renderInline(
         const projectReference = allowLinks && !homePath && !localPath
           ? normalizeInlineProjectFileReference(code)
           : undefined;
-        if (homePath) {
+        if (externalHref) {
+          output += externalLink(externalHref, codeLabel);
+        } else if (homePath) {
           output += homeFileLink(homePath, codeLabel);
         } else if (localPath) {
           const kind = mediaKindForPath(localPath);

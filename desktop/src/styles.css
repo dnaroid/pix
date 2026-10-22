@@ -435,23 +435,19 @@ html, body, #app {
   background: var(--selection);
 }
 
-/* WebKit can paint a selected inline element across an entire wrapped line.
- * Keep native selection/copy, but color only selected glyphs in document and
- * Preview editor surfaces; no descendant may paint the line or gutter gaps. */
-:is(.transcript-pane, .preview-text-surface, .preview-editor)::selection,
-:is(.transcript-pane, .preview-text-surface) *::selection {
+/* Layout boxes must not paint native selection gaps into transcript margins.
+ * Opt actual text surfaces back in, including all nested code/link tokens. */
+.transcript-pane::selection,
+.transcript-pane *::selection {
   background: transparent;
-  color: var(--primary);
+  color: var(--selection-foreground);
 }
-/* Links and inline code already use primary: invert their selection glyphs
- * to foreground so they still visibly change without painting line gaps. */
-.transcript-pane :is(a, a *, code, code *)::selection {
-  color: var(--foreground);
-}
-/* Preview also renders Markdown and syntax-highlighted source with primary
- * tokens. Change those glyphs to foreground when selected. */
-.preview-text-surface :is(a, a *, .markdown-text code, .markdown-text code *, .sh__token--keyword, .sh__token--jsxliterals)::selection {
-  color: var(--foreground);
+.transcript-pane :is(.markdown-text, .tool-result, .diff-content)::selection,
+.transcript-pane :is(.markdown-text, .tool-result, .diff-content) *::selection,
+:is(.preview-text-surface, .preview-editor)::selection,
+.preview-text-surface *::selection {
+  background: var(--selection);
+  color: var(--selection-foreground);
 }
 
 /* Shared project-tinted window and sidebar surface. */

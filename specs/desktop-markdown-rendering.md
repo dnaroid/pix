@@ -66,6 +66,11 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
 - Recognized LaTeX math delimiters use KaTeX with bundled fonts; code spans and
   fences remain literal, and malformed/streaming formulas retain escaped source.
 - Explicit Markdown links and bare URLs with `http`, `https`, or `mailto` schemes become links.
+- A standalone `http://`, `https://`, or `mailto:` URL inside inline code also
+  becomes an external link, preserving its code styling and full destination
+  (including localhost ports, queries, and fragments). Inline code containing
+  commands or whitespace, fenced code, and unsupported schemes remain literal;
+  code labels inside explicit Markdown links do not gain nested links.
 - Relative project links may also name existing directories. Activation uses
   Files reverse navigation instead of Preview or the OS opener: open the panel,
   clear search, expand ancestors and the folder, select and scroll to it while

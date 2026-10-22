@@ -153,13 +153,16 @@ Use `selection` plus `selection-foreground` for native text selection. Selection
 must remain clearly visible without becoming a saturated primary block; in dark
 mode prefer a restrained blue-tinted layer while keeping normal readable text.
 
-Exception: WebKit paints selected inline content across the full width of a
-wrapped line, so document-style surfaces (the transcript and Preview
-Markdown/source text and its edit textarea) use transparent selection
-backgrounds and paint selected glyphs in primary instead; primary-colored
-links, code, and source tokens invert to foreground so their glyphs stay
-distinct. Interaction chrome and other editable controls keep the normal
-`selection`/`selection-foreground` paint.
+Document-style surfaces (the transcript and Preview Markdown/source text and
+its edit textarea) use the same background highlight, including links, inline
+code and syntax tokens. Do not replace the background with glyph-only color
+changes: selection must remain visible across mixed content. Native WebKit
+wrapped-line selection geometry inside text surfaces is accepted, but transcript
+layout boxes and outer margins must not paint selection backgrounds. Keep the
+chat's horizontal gutters outside the text container (margins, not padding),
+preserving alignment with the composer. The inner transcript column is a paint
+containment boundary; margins alone do not bound WebKit selection-gap painting.
+Keep native selection and Copy.
 
 Use `muted` for generic subdued content only when none of the more specific
 workbench roles above applies.

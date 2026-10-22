@@ -270,7 +270,7 @@
       </p>
     </section>
   {:else}
-    <div class="mx-auto w-full max-w-4xl px-6 pt-[22px] pb-8 max-[760px]:px-3" bind:this={content}>
+    <div class="transcript-content mx-auto w-[calc(100%-3rem)] max-w-[53rem] pt-[22px] pb-8 max-[760px]:w-[calc(100%-1.5rem)]" bind:this={content}>
       {#each displayItems as item, index (item.id)}
         {@const gapClass = transcriptGapClass(item, displayItems[index + 1])}
         {#if item.type === "message"}
@@ -465,6 +465,12 @@
 </div>
 
 <style>
+  /* Margins alone do not bound WebKit's native selection-gap painting. Keep
+   * it inside the text column without clipping the pane's sibling overlays. */
+  .transcript-content {
+    contain: paint;
+  }
+
   /* Keep live iframe surfaces painted when scrolling across message bounds. */
   .transcript-entry:not(:has(:global([data-html-sandbox]))) {
     content-visibility: auto;

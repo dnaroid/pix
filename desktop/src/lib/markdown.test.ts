@@ -207,16 +207,53 @@ describe("renderMarkdown", () => {
     expect(html).toContain('>mailto:pix@example.com</a>.');
   });
 
-  it("does not auto-link URLs inside code or create nested links", () => {
+  it.each([
+    ["http://127.0.0.1:4181/", "http://127.0.0.1:4181/"],
+    ["https://example.com/a?q=1&b=2#part", "https://example.com/a?q=1&amp;b=2#part"],
+    ["mailto:pix@example.com", "mailto:pix@example.com"],
+  ])("links a standalone inline-code URL: %s", (url, href) => {
+    const html = renderMarkdown(`Open \`${url}\`.`);
+
+    expect(html).toContain(
+      `<a href="${href}" data-external-link rel="noopener noreferrer"><code>${url.replaceAll("&", "&amp;")}</code></a>.`,
+    );
+    expect(html).not.toContain("data-project-file-candidate");
+    expect(html).not.toContain("data-local-file-candidate");
+  });
+
+  it.each([
+    "bun run voice:review",
+    "curl https://example.com",
+    "https://example.com more text",
+    "javascript:alert(1)",
+    "data:text/html,test",
+    "https://",
+  ])("keeps non-URL inline code non-interactive: %s", (code) => {
+    const html = renderMarkdown(`\`${code}\``);
+
+    expect(html).toContain(`<code>${code}</code>`);
+    expect(html).not.toContain("<a ");
+  });
+
+  it("does not auto-link URLs in fenced code", () => {
+    const html = renderMarkdown("```text\nhttp://127.0.0.1:4181/\n```");
+
+    expect(html).toContain("http://127.0.0.1:4181/");
+    expect(html).not.toContain("<a ");
+  });
+
+  it("does not create nested links around inline-code labels", () => {
     const html = renderMarkdown(
-      "`https://code.example` [`src/App.svelte`](https://destination.example)",
+      "[`https://code.example`](https://destination.example) [`src/App.svelte`](https://destination.example)",
     );
 
-    expect(html).toContain("<code>https://code.example</code>");
+    expect(html).toContain(
+      '<a href="https://destination.example/" data-external-link rel="noopener noreferrer"><code>https://code.example</code></a>',
+    );
     expect(html).toContain(
       '<a href="https://destination.example/" data-external-link rel="noopener noreferrer"><code>src/App.svelte</code></a>',
     );
-    expect(html.match(/data-external-link/g)).toHaveLength(1);
+    expect(html.match(/data-external-link/g)).toHaveLength(2);
     expect(html).not.toContain("data-project-file");
   });
 

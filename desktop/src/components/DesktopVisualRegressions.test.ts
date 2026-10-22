@@ -174,7 +174,7 @@ describe("desktop visual regressions", () => {
     expect(previewSource).toContain('<strong class="select-text min-w-0 flex-1 truncate text-xs font-medium" title={title}>{title}</strong>');
   });
 
-  it("colors transcript selection glyphs without painting wrapped-line or side gaps", async () => {
+  it("highlights transcript text without painting layout margins", async () => {
     // @ts-expect-error Node fs import in Vitest runner
     const fs = (await import(/* @vite-ignore */ "node:fs")).default;
     // @ts-expect-error Node path import in Vitest runner
@@ -183,14 +183,15 @@ describe("desktop visual regressions", () => {
     const styles = fs.readFileSync(path.resolve(__dirname, "../styles.css"), "utf-8");
 
     expect(transcriptSource).toContain('class="transcript-pane h-full min-h-0 overflow-auto"');
-    expect(transcriptSource).toContain('class="mx-auto w-full max-w-4xl px-6');
-    expect(styles).toMatch(/:is\(\.transcript-pane, \.preview-text-surface, \.preview-editor\)::selection,\s*:is\(\.transcript-pane, \.preview-text-surface\) \*::selection\s*\{\s*background: transparent;\s*color: var\(--primary\);\s*\}/);
-    expect(styles).toMatch(/\.transcript-pane :is\(a, a \*, code, code \*\)::selection\s*\{\s*color: var\(--foreground\);\s*\}/);
+    expect(transcriptSource).toContain('class="transcript-content mx-auto w-[calc(100%-3rem)] max-w-[53rem]');
+    expect(transcriptSource).toContain("max-[760px]:w-[calc(100%-1.5rem)]");
+    expect(styles).toMatch(/\.transcript-pane::selection,\s*\.transcript-pane \*::selection\s*\{\s*background: transparent;\s*color: var\(--selection-foreground\);\s*\}/);
+    expect(styles).toMatch(/\.transcript-pane :is\(\.markdown-text, \.tool-result, \.diff-content\)::selection,\s*\.transcript-pane :is\(\.markdown-text, \.tool-result, \.diff-content\) \*::selection,[^{}]*\{\s*background: var\(--selection\);\s*color: var\(--selection-foreground\);\s*\}/);
     expect(styles).not.toContain(".selection-ink");
-    expect(styles).not.toMatch(/\.transcript-pane[^{}]*::selection\s*\{[^}]*background:\s*var\(--selection\)/);
+    expect(styles).not.toMatch(/::selection\s*\{[^}]*(?:color:\s*var\(--primary\)|color:\s*var\(--foreground\))/);
   });
 
-  it("colors Preview document and editor selections without painting line gaps or changing find input selection", async () => {
+  it("uses the same background selection for Preview documents and editor without a find input override", async () => {
     // @ts-expect-error Node fs import in Vitest runner
     const fs = (await import(/* @vite-ignore */ "node:fs")).default;
     // @ts-expect-error Node path import in Vitest runner
@@ -200,8 +201,7 @@ describe("desktop visual regressions", () => {
 
     expect(previewSource.match(/class="preview-text-surface/g)).toHaveLength(2);
     expect(previewSource).toContain('class="preview-editor ');
-    expect(styles).toMatch(/:is\(\.transcript-pane, \.preview-text-surface, \.preview-editor\)::selection,\s*:is\(\.transcript-pane, \.preview-text-surface\) \*::selection\s*\{\s*background: transparent;\s*color: var\(--primary\);\s*\}/);
-    expect(styles).toMatch(/\.preview-text-surface :is\(a, a \*, \.markdown-text code, \.markdown-text code \*, \.sh__token--keyword, \.sh__token--jsxliterals\)::selection\s*\{\s*color: var\(--foreground\);\s*\}/);
+    expect(styles).toMatch(/:is\(\.preview-text-surface, \.preview-editor\)::selection,\s*\.preview-text-surface \*::selection\s*\{\s*background: var\(--selection\);\s*color: var\(--selection-foreground\);\s*\}/);
     expect(styles).not.toContain(".preview-file-search::selection");
   });
 

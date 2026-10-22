@@ -10,8 +10,11 @@ import transcript from "./TranscriptPane.svelte?raw";
 describe("pinned composer activity wiring", () => {
   it("aligns the entire conversation dock with the transcript column without constraining task editors", () => {
     const column = "mx-auto w-full max-w-4xl px-6";
-    expect(transcript).toContain(column);
-    expect(transcript).toContain("max-[760px]:px-3");
+    // The transcript uses outer margins instead of selectable inner padding.
+    // Its 53rem content cap matches the dock's 56rem minus two 1.5rem gutters.
+    expect(transcript).toContain("transcript-content mx-auto w-[calc(100%-3rem)] max-w-[53rem]");
+    expect(transcript).toContain("max-[760px]:w-[calc(100%-1.5rem)]");
+    expect(transcript).toMatch(/\.transcript-content\s*\{\s*contain:\s*paint;\s*\}/);
     expect(composer).toContain(`editorMode ? "" : "relative ${column} max-[760px]:px-3"`);
     expect(composer.indexOf(column)).toBeLessThan(composer.indexOf("<PromptComposerActivityRow"));
     expect(composer).not.toContain("relative bg-panel px-3 py-2");
