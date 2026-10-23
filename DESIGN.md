@@ -482,7 +482,10 @@ introduce raw HTML `<select>` controls or
 system option menus in application panels, toolbars, filters, dialogs, or settings.
 `appearance-none`, a semantic background, or a custom chevron over a native
 `<select>` is NOT a substitute: the opened menu must also match Pix. Exceptions
-require an explicit user requirement, not implementation convenience. All
+require an explicit user requirement, not implementation convenience. A
+specific explicit user requirement may call for a native/system macOS menu;
+such a menu is limited to that specified action surface. Browser previews may
+retain a styled DOM fallback. All
 legacy native selects have been migrated; keep the native-select regression
 inventory empty. Verify both closed and opened states in light and dark Desktop
 WebViews.

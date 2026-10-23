@@ -7,8 +7,30 @@ process.emitWarning = () => {};
 const { installPixProcessLogging, logPixEvent } = await import("../../../dist/app/logger.js");
 installPixProcessLogging({ project: process.cwd(), module: "rpc-process" });
 
+const { traceRpcStartup, formatRpcStartupProgress } = await import("./startup-diagnostics.js");
+const reportStartup = (progress) => {
+	process.stderr.write(formatRpcStartupProgress(progress));
+	if (progress.status !== "started") logPixEvent(
+		progress.status === "failed" || progress.elapsedMs >= 1000 ? "warn" : "debug",
+		"rpc:startup-stage", progress, { project: process.cwd(), module: "rpc-process" },
+	);
+};
 const codingAgentIndex = import.meta.resolve("@earendil-works/pi-coding-agent");
-const { AgentSession, DefaultResourceLoader, ModelRuntime } = await import("@earendil-works/pi-coding-agent");
+const { AgentSession, DefaultResourceLoader, ModelRuntime } = await traceRpcStartup(
+	"sdk-import", () => import("@earendil-works/pi-coding-agent"), reportStartup,
+);
+// Observe public startup boundaries, not SDK internals or extension payloads.
+const startupMethods = [
+	[ModelRuntime, "create", "model-runtime"],
+	[DefaultResourceLoader.prototype, "reload", "resources"],
+	[AgentSession.prototype, "bindExtensions", "session-start"],
+];
+for (const [target, method, stage] of startupMethods) {
+	const original = target[method];
+	target[method] = function (...args) {
+		return traceRpcStartup(stage, () => original.apply(this, args), reportStartup);
+	};
+}
 const { installContextInventoryHost } = await import("./context-inventory-host.js");
 const { installBtwHost, handleBtwPrompt } = await import("./btw-host.js");
 installContextInventoryHost(AgentSession, {
@@ -16,6 +38,8 @@ installContextInventoryHost(AgentSession, {
 	onReadError: (path, error) => logPixEvent("warn", "context:project-agents-read-failed", { path, error }, { project: process.cwd(), module: "resources" }),
 });
 installBtwHost(AgentSession);
+const { installTaskRunHost, handleTaskRunResponse } = await import("./task-run-host.js");
+installTaskRunHost(AgentSession);
 const { installRpcQuestionRecovery } = await import("../../../dist/bundled-extensions/question/recovery.js");
 installRpcQuestionRecovery(AgentSession);
 
@@ -531,6 +555,10 @@ async function handleQuotaControl(session, action, isCurrent) {
 
 const originalPrompt = AgentSession.prototype.prompt;
 AgentSession.prototype.prompt = async function pixPrompt(text, options) {
+  if (typeof text === "string" && text.startsWith("\u0000pix:task-run-response:")) {
+    handleTaskRunResponse(this, text, options);
+    return;
+  }
 	if (typeof text === "string" && text.startsWith(PIX_BTW_RPC_PREFIX)) {
 		handleBtwPrompt(this, text, options);
 		return;

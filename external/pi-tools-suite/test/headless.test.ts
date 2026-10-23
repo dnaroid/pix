@@ -115,6 +115,7 @@ describe("headless Pix tool API", () => {
 		expect(result.content[0]?.text).toContain("hello");
 		await expect(api.execute("ast_apply", { pattern: "return 42", lang: "ts", paths: ["test.ts"] }))
 			.rejects.toThrow("not available");
+		await expect(api.execute("project_tasks", { op: "run", id: "task" })).rejects.toThrow("Pix Desktop");
 		await expect(api.execute("project_tasks", { op: "create", type: "todo", title: "no" }))
 			.rejects.toThrow("read-only");
 		await expect(api.execute("ast_grep", { pattern: "secret", lang: "ts", paths: [outside] }))

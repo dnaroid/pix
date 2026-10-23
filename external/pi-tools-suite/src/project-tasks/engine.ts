@@ -9,7 +9,7 @@ import {
 } from "./schema.js";
 
 export interface ProjectTasksParams {
-  op: "list" | "get" | "update" | "create" | "delete";
+  op: "list" | "get" | "update" | "create" | "delete" | "run";
   id?: string;
   title?: string;
   description?: string;
@@ -21,13 +21,13 @@ export interface ProjectTasksParams {
 export function parseProjectTasksParams(value: unknown, allowDelete = false): ProjectTasksParams {
   const label = "Invalid project_tasks request";
   const input = object(value, label);
-  enumValue(input.op, allowDelete ? ["list", "get", "update", "create", "delete"] : ["list", "get", "update", "create"], `${label}.op`);
+  enumValue(input.op, allowDelete ? ["list", "get", "update", "create", "delete", "run"] : ["list", "get", "update", "create", "run"], `${label}.op`);
   const fields = input.op === "list" ? ["status", "priority", "type"]
-    : (input.op === "get" || input.op === "delete") ? ["id"]
+    : (input.op === "get" || input.op === "delete" || input.op === "run") ? ["id"]
     : input.op === "update" ? ["id", "status", "priority", "title", "description"]
     : ["type", "status", "priority", "title", "description"];
   onlyKeys(input, ["op", ...fields], label);
-  if (input.op === "get" || input.op === "update" || input.op === "delete") string(input.id, 1, 128, `${label}.id`);
+  if (input.op === "get" || input.op === "update" || input.op === "delete" || input.op === "run") string(input.id, 1, 128, `${label}.id`);
   if (input.type !== undefined || input.op === "create") enumValue(input.type, TASK_TYPES, `${label}.type`);
   if (input.status !== undefined) enumValue(input.status, TASK_STATUSES, `${label}.status`);
   if (input.priority !== undefined) enumValue(input.priority, TASK_PRIORITIES, `${label}.priority`);
@@ -53,6 +53,7 @@ export interface ProjectTasksResponse {
 export async function runProjectTasks(cwd: string, input: unknown, signal?: AbortSignal, services?: ProjectTasksServices): Promise<ProjectTasksResponse> {
   // Delete is supported by the engine for explicit user commands, not the agent tool.
   const params = parseProjectTasksParams(input, true);
+  if (params.op === "run") throw new Error("Task launch must use the Pix Desktop host, not the storage engine");
   signal?.throwIfAborted();
   const root = await realpath(cwd);
   const rootInfo = await lstat(root);

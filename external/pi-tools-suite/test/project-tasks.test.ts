@@ -40,6 +40,45 @@ async function rows(root: string): Promise<unknown> {
 }
 
 describe("project_tasks SQLite-only storage", () => {
+  test("run is id-only, delegates to Desktop without mutating SQLite, and fails closed in other hosts", async () => {
+    const root = await fixture([task()]);
+    const before = await rows(root);
+    const key = Symbol.for("pix.project-tasks.run");
+    const previous = (globalThis as any)[key];
+    let tool: any;
+    registerProjectTasks({ registerTool: (definition: any) => { tool = definition; }, registerCommand() {} } as any);
+    const ctx = { cwd: root, sessionManager: { getSessionId: () => "owner" } };
+    try {
+      delete (globalThis as any)[key];
+      expect((await tool.execute("r", { op: "run", id: "A" }, undefined, undefined, ctx)).isError).toBe(true);
+      const calls: unknown[] = [];
+      (globalThis as any)[key] = async (...args: unknown[]) => { calls.push(args); return { sessionId: "child", outcome: "started" }; };
+      const controller = new AbortController();
+      const result = await tool.execute("r", { op: "run", id: "A" }, controller.signal, undefined, ctx);
+      expect(result.details).toEqual({ op: "run", id: "A", sessionId: "child", outcome: "started" });
+      expect(calls).toEqual([[{ taskId: "A", sessionId: "owner" }, controller.signal]]);
+      controller.abort();
+      expect((await tool.execute("r", { op: "run", id: "A" }, controller.signal, undefined, ctx)).isError).toBe(true);
+      expect(calls).toHaveLength(1);
+      const previousAgentDir = process.env.PI_SUBAGENT_AGENT_DIR;
+      try {
+        process.env.PI_SUBAGENT_AGENT_DIR = "/subagent";
+        const denied = await tool.execute("r", { op: "run", id: "A" }, undefined, undefined, ctx);
+        expect(denied.isError).toBe(true);
+        expect(calls).toHaveLength(1);
+      } finally {
+        if (previousAgentDir === undefined) delete process.env.PI_SUBAGENT_AGENT_DIR;
+        else process.env.PI_SUBAGENT_AGENT_DIR = previousAgentDir;
+      }
+      for (const bad of [{ op: "run" }, { op: "run", id: "A", status: "in-progress" }, { op: "run", id: "A", title: "override" }]) {
+        expect(() => parseProjectTasksParams(bad)).toThrow();
+      }
+      await expect(runProjectTasks(root, { op: "run", id: "A" })).rejects.toThrow("host");
+      expect(await rows(root)).toEqual(before);
+    } finally {
+      if (previous) (globalThis as any)[key] = previous; else delete (globalThis as any)[key];
+    }
+  });
   test("accepts an already-unlinked SQLite WAL/SHM inode but still rejects actual hard-linked sidecars", async () => {
     expect(safeSqliteSidecarNlink(0)).toBe(true);
     expect(safeSqliteSidecarNlink(1)).toBe(true);

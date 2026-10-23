@@ -1,4 +1,4 @@
-import { lstat, readdir, rm } from "node:fs/promises";
+import { lstat, readFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { bytes, files, packages } from "./payload-files.mjs";
 
@@ -22,6 +22,21 @@ export function foreignPackage(name, target) {
 export async function cleanBuildOutputs(projectRoot, withDesktop = true) {
   for (const output of withDesktop ? ["dist", "acp/dist"] : ["dist"]) {
     await rm(join(projectRoot, output), { recursive: true, force: true, maxRetries: 5 });
+  }
+}
+
+/** Prune only the extracted release copy; dev generations may still serve lazy imports. */
+export async function pruneSuiteRuntime(app) {
+  const runtime = join(app, "external/pi-tools-suite/build/runtime");
+  const manifest = JSON.parse(await readFile(join(runtime, "manifest.json"), "utf8"));
+  if (manifest.version !== 1 || !Array.isArray(manifest.outputs) || manifest.outputs.length === 0
+    || !manifest.outputs.includes(manifest.entry)
+    || !manifest.outputs.every((path) => typeof path === "string" && /^build\/runtime\/[^/\\]+\.mts$/.test(path))) {
+    throw new Error("Invalid suite runtime manifest in release staging");
+  }
+  const keep = new Set(["manifest.json", ...manifest.outputs.map((path) => path.slice("build/runtime/".length))]);
+  for (const name of await readdir(runtime)) {
+    if (!keep.has(name)) await rm(join(runtime, name), { recursive: true, force: true });
   }
 }
 

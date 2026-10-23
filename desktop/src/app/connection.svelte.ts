@@ -11,10 +11,12 @@ import type { AcpExit, ForkReadyNotification } from "../lib/acp-client-types";
 import { TauriAcpTransport } from "../lib/tauri-transport";
 import { emitUsageStatsChanged } from "../lib/usage-stats-events";
 import type { DesktopDiagnosticEvent } from "../lib/diagnostic-logging";
+import type { TaskRunRequest, TaskRunResult } from "../../../acp/src/acp/task-run-contract";
 
 export type ConnectionStatus = "starting" | "ready" | "error" | "stopped";
 
 type ConnectionStoreOptions = {
+  onTaskRun?: (request: TaskRunRequest, signal: AbortSignal) => Promise<TaskRunResult>;
   workspace: () => string;
   onSessionUpdate: (notification: SessionNotification) => void;
   onSessionCatalogChanged?: (cwd: string) => void;
@@ -91,6 +93,10 @@ export function createConnectionStore(options: ConnectionStoreOptions) {
     options.setErrorMessage(null);
     const transport = new TauriAcpTransport();
     const next: AcpClient = new AcpClient(transport, {
+      onTaskRun: async (request, signal) => {
+        if (client !== next || !options.onTaskRun) throw new Error("Task launch connection is unavailable");
+        return options.onTaskRun(request, signal);
+      },
       onSessionUpdate: (notification) => {
         if (client === next) options.onSessionUpdate(notification);
       },

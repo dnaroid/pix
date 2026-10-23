@@ -7,10 +7,12 @@ export function createWorkspaceSidebarTasksViewController(storage?: ProjectTasks
   let collapsedStatuses = $state(defaultProjectTasksCollapsedStatuses());
   let typeFilter = $state<ProjectTaskType | "all">("all");
   let priorityFilter = $state<ProjectTaskPriority | "all">("all");
+  let expandedTaskIds = $state<Set<string>>(new Set());
   return {
     selectWorkspace(nextWorkspace: string) {
       if (workspace === nextWorkspace) return;
       workspace = nextWorkspace;
+      expandedTaskIds = new Set();
       collapsedStatuses = loadProjectTasksCollapsedStatuses(workspace, storage);
     },
     isStatusCollapsed(status: ProjectTaskStatus) { return collapsedStatuses[status]; },
@@ -25,5 +27,6 @@ export function createWorkspaceSidebarTasksViewController(storage?: ProjectTasks
     },
     get typeFilter() { return typeFilter; }, set typeFilter(value) { typeFilter = value; },
     get priorityFilter() { return priorityFilter; }, set priorityFilter(value) { priorityFilter = value; },
+    get expandedTaskIds() { return expandedTaskIds; }, set expandedTaskIds(value: Set<string>) { expandedTaskIds = value; },
   };
 }

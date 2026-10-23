@@ -8,7 +8,9 @@
 
 import type { Writable } from "node:stream";
 import type { ChildProcess } from "node:child_process";
+import { rpcStartupFailure } from "./startup-diagnostics.js";
 import { parseBtwState, type BtwCommand, type BtwEvent, type BtwState } from "../btw/contract.js";
+import { TASK_RUN_RESPONSE_PREFIX, type TaskRunResult } from "../acp/task-run-contract.js";
 import {
 	RpcClient,
 	type JsonAgentSessionEvent,
@@ -49,7 +51,9 @@ export interface PiImageContent {
 export type PiEvent = ((JsonAgentSessionEvent | RpcExtensionUIRequest) & {
 	readonly pixForkLeafId?: string | null;
 	readonly pixForkSessionPath?: string;
-}) | { readonly type: "pix_btw_event"; readonly data: BtwEvent };
+}) | { readonly type: "pix_btw_event"; readonly data: BtwEvent }
+  | { readonly type: "pix_task_run_request"; readonly requestId: string; readonly taskId: string }
+  | { readonly type: "pix_task_run_cancel"; readonly requestId: string };
 
 export type PiEventListener = (event: PiEvent) => void;
 
@@ -219,6 +223,7 @@ export interface PiClient {
 	start(): Promise<void>;
 	stop(): Promise<void>;
 	onEvent(listener: PiEventListener): () => void;
+  respondToTaskRun?(requestId: string, response: { result?: TaskRunResult; error?: string }): Promise<void>;
 	/**
 	 * Observe the pi process dying (crash or graceful exit). The listener is
 	 * invoked at most once, after which no further events can arrive; it lets
@@ -300,6 +305,7 @@ export class PiRpcClient implements PiClient {
 	private unsubscribeClientEvents: (() => void) | undefined;
 	private readonly exitListeners = new Set<(error: Error) => void>();
 	private exitError: Error | undefined;
+	private receivedState = false;
 
 	constructor(options: PiRpcClientOptions) {
 		this.options = toSdkOptions(options);
@@ -311,6 +317,7 @@ export class PiRpcClient implements PiClient {
 
 	async start(): Promise<void> {
 		if (this.client) return;
+		this.receivedState = false;
 		const client = new RpcClient(this.options);
 		this.client = client;
 		// Subscribe before spawning: extensions can emit session_start UI events
@@ -394,6 +401,15 @@ export class PiRpcClient implements PiClient {
 		const response = await rawClient.send({ type: "prompt", message: "\u0000pix:clear-todos" });
 		rawClient.getData<Record<string, never>>(response);
 	}
+
+  async respondToTaskRun(requestId: string, response: { result?: TaskRunResult; error?: string }): Promise<void> {
+    const client = this.requireClient() as unknown as {
+      send(command: { type: "prompt"; message: string }): Promise<unknown>;
+      getData<T>(response: unknown): T;
+    };
+    const reply = await client.send({ type: "prompt", message: TASK_RUN_RESPONSE_PREFIX + JSON.stringify({ requestId, ...response }) });
+    client.getData<Record<string, never>>(reply);
+  }
 
 	async lspControl(action: "status", id?: string, root?: string): Promise<PiLspControlSnapshot> {
 		if (action !== "status") throw new Error("LSP monitoring only supports status");
@@ -508,8 +524,16 @@ export class PiRpcClient implements PiClient {
 		stdin.write(`${JSON.stringify(response)}\n`);
 	}
 
-	getState(): Promise<PiSessionState> {
-		return this.requireClient().getState();
+	async getState(): Promise<PiSessionState> {
+		const client = this.requireClient();
+		try {
+			const state = await client.getState();
+			if (this.client === client) this.receivedState = true;
+			return state;
+		} catch (error) {
+			if (this.receivedState) throw error;
+			throw rpcStartupFailure(error, client.getStderr());
+		}
 	}
 
 	switchSession(sessionPath: string): Promise<{ cancelled: boolean }> {

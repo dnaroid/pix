@@ -26,3 +26,4 @@ __pycache__/
 .artifacts/
 desktop/src-tauri/resources/pix-runtime/
 artifacts/
+external/pi-tools-suite/build/runtime/

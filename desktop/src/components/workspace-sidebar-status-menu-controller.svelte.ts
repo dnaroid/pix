@@ -1,4 +1,6 @@
 import { tick } from "svelte";
+import { isTauri } from "@tauri-apps/api/core";
+import { createTaskNativeMenu } from "../lib/task-native-menu";
 import {
   TASK_STATUSES,
   TASK_PRIORITIES,
@@ -20,6 +22,13 @@ interface WorkspaceSidebarStatusMenuControllerOptions {
   readonly onStatusChange: (taskId: string, status: ProjectTaskStatus) => void;
   readonly onPriorityChange: (taskId: string, priority: ProjectTaskPriority) => void;
   readonly onDeleteRequest: (taskId: string) => void;
+  readonly workspace?: () => string;
+  readonly task?: (taskId: string) => ProjectTask | undefined;
+  readonly busy?: () => boolean;
+  readonly onCreatePlan?: (task: ProjectTask) => void;
+  readonly onOpenPlan?: (path: string) => void;
+  readonly canCreatePlan?: () => boolean;
+  readonly reportError: (error: unknown) => void;
 }
 
 export function createWorkspaceSidebarStatusMenuController(
@@ -32,6 +41,12 @@ export function createWorkspaceSidebarStatusMenuController(
   let taskStatus: ProjectTaskStatus | null = null;
   let typeaheadQuery = "";
   let typeaheadTimer: number | null = null;
+  const nativeMenu = createTaskNativeMenu({
+    setStatus, setPriority, requestDelete,
+    get createPlan() { return options.onCreatePlan; },
+    get openPlan() { return options.onOpenPlan; },
+    canCreatePlan: () => options.canCreatePlan?.() ?? false,
+  }, options.reportError);
 
   function items(): MenuNavigationItem[] {
     return [
@@ -64,6 +79,7 @@ export function createWorkspaceSidebarStatusMenuController(
   }
 
   function close(restoreFocus = false): void {
+    nativeMenu.close();
     const request = ++generation;
     const focusTarget = trigger;
     taskId = null;
@@ -77,6 +93,19 @@ export function createWorkspaceSidebarStatusMenuController(
 
   function toggle(event: MouseEvent, task: ProjectTask, nextSection: "all" | "priority" = "all"): void {
     const nextTrigger = event.currentTarget as HTMLButtonElement;
+    if (isTauri()) {
+      if (options.busy?.()) return;
+      close();
+      trigger = nextTrigger;
+      taskStatus = task.status;
+      const targetWorkspace = options.workspace?.();
+      const rect = nextTrigger.getBoundingClientRect();
+      void nativeMenu.show(task, nextSection, { x: rect.left, y: rect.bottom }, () =>
+        nextTrigger.isConnected && !nextTrigger.disabled && !options.busy?.()
+        && options.workspace?.() === targetWorkspace
+        && (!options.task || !!options.task(task.id)));
+      return;
+    }
     if (taskId === task.id && section === nextSection) {
       close();
       return;
@@ -200,6 +229,7 @@ export function createWorkspaceSidebarStatusMenuController(
 
   function dispose(): void {
     close();
+    nativeMenu.dispose();
   }
 
   return {

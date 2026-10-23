@@ -20,6 +20,7 @@ import { homedir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { migrateSettingsFile } from "./migrate-claude-provider.mjs";
+import { buildPiToolsSuite } from "./build-pi-tools-suite.mjs";
 import {
 	ensurePiToolsSuiteDependencies,
 	piToolsSuiteDependenciesCurrent,
@@ -39,6 +40,8 @@ const MIRROR_ENTRIES = [
 	"licenses",
 	"scripts",
 	"index.ts",
+	"runtime-loader.mjs",
+	"build/runtime",
 	"package.json",
 	"package-lock.json",
 	"README.md",
@@ -178,6 +181,7 @@ async function main() {
 		return;
 	}
 
+	if (!options.check) await buildPiToolsSuite(options.source);
 	const plan = await computeSyncPlan(options.source, options.target);
 	const additions = plan.filter((c) => c.status === "add");
 	const updates = plan.filter((c) => c.status === "update");

@@ -60,7 +60,9 @@ export the full Pi parent prompt, `coding-discipline`, DCP or other
   is authorized by `search.embedding` in the shared global `~/.config/pi/pi-tools-suite.jsonc` config.
 
 - `src/project-tasks` — default-enabled `project_tasks` reads and edits saved
-  cwd `.pi/tasks.sqlite` tasks (`list`, `get`, `update`, `create`),
+  cwd `.pi/tasks.sqlite` tasks (`list`, `get`, `update`, `create`), plus
+  explicit-user-request `run` via Pix Desktop Tasks Run (separate session or
+  open an already-linked session; no duplicate prompt),
   independently of repository search. Updates are scoped to a single row and protected by
   SQLite transactions plus optimistic task revisions. The agent tool cannot
   delete or write SQL; user-invoked `/tasks list`, `/task get|add|update|delete`

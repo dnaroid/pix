@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { tick } from "svelte";
+import { isTauri } from "@tauri-apps/api/core";
+import { Menu } from "@tauri-apps/api/menu";
 import { createWorkspaceSidebarStatusMenuController } from "./workspace-sidebar-status-menu-controller.svelte";
 import { TASK_PRIORITIES, TASK_STATUSES, type ProjectTask } from "../lib/project-tasks";
+
+vi.mock("@tauri-apps/api/core", () => ({ isTauri: vi.fn(() => false) }));
+vi.mock("@tauri-apps/api/menu", () => ({ Menu: { new: vi.fn() } }));
 
 // Deterministic DOM doubles; WebView interaction is a separate QA gate.
 class ElementDouble {
@@ -10,12 +15,13 @@ class ElementDouble {
   focus = vi.fn();
   closest = () => this;
   contains = (target: unknown) => target === this;
+  getBoundingClientRect = () => ({ left: 20, bottom: 60 });
 }
 const task: ProjectTask = {
   id: "task", title: "Task", type: "feature", status: "todo", priority: "high",
   createdAt: "2026-09-13T12:00:00.000Z", updatedAt: "2026-09-13T12:00:00.000Z",
 };
-function fixture() {
+function fixture(options: Partial<Parameters<typeof createWorkspaceSidebarStatusMenuController>[0]> = {}) {
   vi.stubGlobal("Element", ElementDouble);
   vi.stubGlobal("window", { setTimeout, clearTimeout });
   const trigger = new ElementDouble();
@@ -25,7 +31,7 @@ function fixture() {
   vi.stubGlobal("document", { querySelector });
   const onStatusChange = vi.fn(), onPriorityChange = vi.fn(), onDeleteRequest = vi.fn();
   const controller = createWorkspaceSidebarStatusMenuController({
-    menu: () => menu as unknown as HTMLDivElement, onStatusChange, onPriorityChange, onDeleteRequest,
+    menu: () => menu as unknown as HTMLDivElement, onStatusChange, onPriorityChange, onDeleteRequest, reportError: vi.fn(), ...options,
   });
   const event = { currentTarget: trigger } as unknown as MouseEvent;
   const key = (value: string, target = buttons[0]) => controller.handleKeydown({
@@ -34,9 +40,44 @@ function fixture() {
   return { controller, trigger, event, key, onStatusChange, onPriorityChange, onDeleteRequest, querySelector,
     get buttons() { return buttons; }, priorityOnly() { buttons = buttons.slice(0, 4); } };
 }
-afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); vi.mocked(isTauri).mockReturnValue(false); vi.mocked(Menu.new).mockReset(); });
 
 describe("unified task-card menu", () => {
+  it("uses the system menu in Tauri without opening the DOM popup and preserves focus after selection", async () => {
+    vi.mocked(isTauri).mockReturnValue(true);
+    const native = { popup: vi.fn().mockResolvedValue(undefined), close: vi.fn().mockResolvedValue(undefined) };
+    vi.mocked(Menu.new).mockResolvedValue(native as unknown as Menu);
+    const f = fixture();
+    f.controller.toggle(f.event, task);
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    expect(f.controller.taskId).toBeNull();
+    expect(native.popup).toHaveBeenCalledWith(expect.objectContaining({ x: 20, y: 60 }));
+    const items = vi.mocked(Menu.new).mock.calls[0]![0]!.items as { text: string; action?: () => void }[];
+    items.find((item) => item.text === "Done")!.action!();
+    await tick();
+    expect(f.onStatusChange).toHaveBeenCalledWith(task.id, "done");
+    expect(f.trigger.focus).toHaveBeenCalled();
+    f.controller.dispose();
+    expect(native.close).toHaveBeenCalledOnce();
+  });
+
+  it.each(["workspace", "busy", "deleted", "detached"])("rejects a native callback after %s changes", async (reason) => {
+    vi.mocked(isTauri).mockReturnValue(true);
+    vi.mocked(Menu.new).mockResolvedValue({ popup: vi.fn().mockResolvedValue(undefined), close: vi.fn().mockResolvedValue(undefined) } as unknown as Menu);
+    let workspace = "/first", busy = false, currentTask: ProjectTask | undefined = task;
+    const f = fixture({ workspace: () => workspace, busy: () => busy, task: () => currentTask });
+    f.controller.toggle(f.event, task);
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    if (reason === "workspace") workspace = "/second";
+    if (reason === "busy") busy = true;
+    if (reason === "deleted") currentTask = undefined;
+    if (reason === "detached") f.trigger.isConnected = false;
+    const items = vi.mocked(Menu.new).mock.calls[0]![0]!.items as { text: string; action?: () => void }[];
+    items.find((item) => item.text === "Done")!.action!();
+    expect(f.onStatusChange).not.toHaveBeenCalled();
+    f.controller.dispose();
+  });
+
   it("focuses current status from ellipsis and current priority from a badge", async () => {
     const f = fixture();
     f.controller.toggle(f.event, task);

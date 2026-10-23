@@ -48,6 +48,26 @@ describe("workspace task presentation persistence", () => {
     expect(reopened.priorityFilter).toBe("all");
   });
 
+  it("retains expanded task details across panel lifetimes and same-workspace reloads", () => {
+    const view = createWorkspaceSidebarTasksViewController(storage());
+    view.selectWorkspace("/alpha");
+    view.expandedTaskIds = new Set(["task-1", "task-2"]);
+    // Recreated panel reads the owner's state, independent of task row objects.
+    view.selectWorkspace("/alpha");
+    expect([...view.expandedTaskIds]).toEqual(["task-1", "task-2"]);
+    view.toggleStatusCollapsed("todo");
+    view.typeFilter = "bug";
+    view.priorityFilter = "high";
+    expect([...view.expandedTaskIds]).toEqual(["task-1", "task-2"]);
+    view.expandedTaskIds = new Set(["task-2"]);
+    expect(view.expandedTaskIds.has("task-1")).toBe(false);
+    expect(view.expandedTaskIds.has("task-2")).toBe(true);
+    view.selectWorkspace("/beta");
+    expect(view.expandedTaskIds.size).toBe(0);
+    view.selectWorkspace("/alpha");
+    expect(view.expandedTaskIds.size).toBe(0);
+  });
+
   it("stays usable with unavailable, throwing, or corrupt storage", () => {
     for (const persisted of [undefined, { getItem: () => { throw new Error("denied"); }, setItem: () => { throw new Error("quota"); } }, { getItem: () => "invalid", setItem: () => {} }]) {
       vi.stubGlobal("localStorage", undefined);

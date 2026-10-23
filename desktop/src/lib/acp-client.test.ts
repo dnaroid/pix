@@ -6,6 +6,7 @@ import { PIX_USAGE_STATS_CHANGED_METHOD } from "../../../acp/src/acp/usage-stats
 import { createSessionActivityStore } from "../app/session-activity.svelte";
 import { TODO_STATE_CHANNEL } from "./session-todos";
 import { parseQueueState } from "./acp-response-parsers";
+import { TASK_RUN_METHOD, TASK_RUN_CANCEL_METHOD } from "../../../acp/src/acp/task-run-contract";
 
 class FakeTransport implements AcpTransport {
   handlers?: AcpTransportHandlers;
@@ -48,6 +49,43 @@ async function startedClient(transport: FakeTransport, overrides: Record<string,
 }
 
 describe("ACP JSON-RPC client", () => {
+  it("routes validated agent task requests and acknowledges launch without another user prompt", async () => {
+    const transport = new FakeTransport();
+    const onTaskRun = vi.fn(async () => ({ sessionId: "child", outcome: "started" }));
+    const client = await startedClient(transport, { onTaskRun });
+    const request = { requestId: "r1", taskId: "task", sourceSessionId: "parent", cwd: "/workspace" };
+    transport.message({ jsonrpc: "2.0", id: 100, method: TASK_RUN_METHOD, params: request });
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    expect(onTaskRun).toHaveBeenCalledWith(request, expect.any(AbortSignal));
+    expect(requestAt(transport, 1)).toMatchObject({ id: 100, result: { sessionId: "child", outcome: "started" } });
+    transport.message({ jsonrpc: "2.0", id: 101, method: TASK_RUN_METHOD, params: { taskId: "task" } });
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(3));
+    expect(requestAt(transport, 2)).toHaveProperty("error");
+    expect(onTaskRun).toHaveBeenCalledOnce();
+    await client.dispose();
+  });
+
+  it.each(["cancel", "dispose", "exit"])("cancels in-flight task preparation on %s and rejects duplicate request ids", async (reason) => {
+    const transport = new FakeTransport();
+    let signal!: AbortSignal;
+    let finish!: () => void;
+    const client = await startedClient(transport, { onTaskRun: async (_request: unknown, abort: AbortSignal) => {
+      signal = abort;
+      await new Promise<void>((resolve) => { finish = resolve; });
+      return { sessionId: "child", outcome: "started" };
+    } });
+    const request = { requestId: "r1", taskId: "task", sourceSessionId: "parent", cwd: "/workspace" };
+    transport.message({ jsonrpc: "2.0", id: 100, method: TASK_RUN_METHOD, params: request });
+    transport.message({ jsonrpc: "2.0", id: 101, method: TASK_RUN_METHOD, params: request });
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    expect(requestAt(transport, 1)).toHaveProperty("error");
+    if (reason === "cancel") transport.message({ jsonrpc: "2.0", method: TASK_RUN_CANCEL_METHOD, params: { requestId: "r1" } });
+    else if (reason === "dispose") await client.dispose();
+    else transport.exit({ generation: 1, code: 1, success: false, requested: false, error: null });
+    expect(signal.aborted).toBe(true);
+    finish();
+    await client.dispose();
+  });
   it("routes explicit per-source indexing separately from queries and forwards cancellation", async () => {
     const transport = new FakeTransport();
     const client = await startedClient(transport);
@@ -977,6 +1015,53 @@ describe("ACP JSON-RPC client", () => {
     expect(transport.sent[1]).not.toContain("base64");
     transport.message({ jsonrpc: "2.0", id: request.id, result: { stopReason: "end_turn" } });
     await expect(prompt).resolves.toEqual({ stopReason: "end_turn" });
+    await client.dispose();
+  });
+
+  it("preserves the backend readiness error when session/load exceeds 30 seconds", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+    vi.useFakeTimers();
+    try {
+      const loading = client.loadSession("session-1", "/workspace");
+      const rejected = expect(loading).rejects.toThrow("startup stage: resources");
+      await vi.advanceTimersByTimeAsync(30_001);
+      expect(transport.sent).toHaveLength(2);
+      transport.message({ jsonrpc: "2.0", id: requestAt(transport, 1).id,
+        error: { code: -32603, message: "Pi RPC readiness failed; startup stage: resources" } });
+      await rejected;
+    } finally {
+      vi.useRealTimers();
+      await client.dispose();
+    }
+  });
+
+  it("retains a long session/load backstop for hung backend local waits", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+    vi.useFakeTimers();
+    try {
+      const loading = client.loadSession("session-1", "/workspace");
+      const rejected = expect(loading).rejects.toThrow("session/load");
+      let settled = false;
+      void loading.then(() => { settled = true; }, () => { settled = true; });
+      await vi.advanceTimersByTimeAsync(119_999);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await rejected;
+    } finally {
+      vi.useRealTimers();
+      await client.dispose();
+    }
+  });
+
+  it("rejects a pending session/load when the transport exits", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+    const loading = client.loadSession("session-1", "/workspace");
+    const rejected = expect(loading).rejects.toThrow();
+    transport.exit({ generation: 1, code: 1, success: false, requested: false, error: null });
+    await rejected;
     await client.dispose();
   });
 

@@ -14,6 +14,7 @@ import { createProjectPlanActions } from "./project-plan-actions.svelte";
 import { buildProjectPlanPrompt } from "./project-plan-prompt";
 import { buildTaskPlanAuthoringPrompt, linkedTaskPlan, taskPlanPath, taskPlanRunContext, withTaskPlanLink } from "../lib/project-task-plans";
 import type { PlanLaunchOutcome } from "../lib/plan-launches";
+import type { TaskRunResult } from "../../../acp/src/acp/task-run-contract";
 
 export type ProjectActionsOptions = {
   client: () => AcpClient | null;
@@ -126,11 +127,15 @@ export function createProjectActions(options: ProjectActionsOptions) {
     }
   }
 
-  async function runTask(task: ProjectTask): Promise<void> {
+  async function runTask(task: ProjectTask, launch?: { signal: AbortSignal; started: (result: TaskRunResult) => void }): Promise<void> {
+    launch?.signal.throwIfAborted();
     // A caller may still hold the pre-launch row after its session was saved.
     task = options.taskDocument().tasks.find((candidate) => candidate.id === task.id) ?? task;
     if (task.sessionId) {
+      if (launch && (actionId || plans.actionId || options.sessionMutationRunning())) throw new Error("Task launch is busy");
       await openTaskSession(task);
+      launch?.signal.throwIfAborted();
+      if (options.activeSessionId() === task.sessionId) launch?.started({ sessionId: task.sessionId, outcome: "opened" });
       return;
     }
     const requestClient = options.client();
@@ -138,8 +143,12 @@ export function createProjectActions(options: ProjectActionsOptions) {
     if (!requestClient || !requestWorkspace || !options.canUseSession() || options.tasksSaving()
       || options.taskLoadFailed() || options.workspaceOpening?.() || actionId || plans.actionId) return;
     const requestGeneration = generation;
-    const current = () => requestGeneration === generation
+    const ownsRuntime = () => requestGeneration === generation
       && requestClient === options.client() && requestWorkspace === options.workspace();
+    // Once linking begins it may already have committed in SQLite, even before
+    // its promise resolves. Cancellation must not strand a linked, unsent task.
+    let committing = false;
+    const current = () => ownsRuntime() && (committing || !launch?.signal.aborted);
     let preparing = true;
     let unsentPlanSession: string | null = null;
     let unsentPlanOutcome: PlanLaunchOutcome = "cancelled";
@@ -147,7 +156,7 @@ export function createProjectActions(options: ProjectActionsOptions) {
       if (!preparing) return;
       preparing = false;
       if (requestGeneration !== generation) return;
-      if (current()) options.setOperationRunning(false);
+      if (ownsRuntime()) options.setOperationRunning(false);
       actionId = null;
     };
     options.closeProjectSelector();
@@ -206,6 +215,7 @@ export function createProjectActions(options: ProjectActionsOptions) {
 
       const timestamp = new Date().toISOString();
       const document = options.taskDocument();
+      committing = true;
       const saved = await options.saveProjectTasks({
         ...document,
         tasks: document.tasks.map((candidate) => candidate.id === task.id
@@ -237,15 +247,27 @@ export function createProjectActions(options: ProjectActionsOptions) {
       // Only session preparation is exclusive. The per-session prompt lifecycle
       // now owns the run; its completion must not unlock a later task launch.
       finishPreparation();
+      launch?.started({ sessionId: response.sessionId, outcome: "started" });
       await promptRun;
       if (current()) void options.refreshSessions();
     } catch (error) {
       unsentPlanOutcome = "failed";
       if (current()) options.reportError(error);
+      if (launch) throw error;
     } finally {
       if (unsentPlanSession) options.settlePlanLaunch?.(unsentPlanSession, unsentPlanOutcome, requestWorkspace);
       finishPreparation();
     }
+  }
+
+  /** Resolve on prompt dispatch, never on the child agent's eventual completion. */
+  function runTaskFromAgent(task: ProjectTask, signal: AbortSignal): Promise<TaskRunResult> {
+    return new Promise((resolve, reject) => {
+      let started = false;
+      void runTask(task, { signal, started: (result) => { started = true; resolve(result); } }).then(() => {
+        if (!started) reject(new Error("Task launch did not start; inspect the task sessionId and Desktop diagnostics before retrying"));
+      }, reject);
+    });
   }
 
   /** Start a planning session whose output path is linked to the task up front. */
@@ -323,6 +345,7 @@ export function createProjectActions(options: ProjectActionsOptions) {
     resumePlan: plans.resumePlan,
     createTaskFromComposer,
     runTask,
+    runTaskFromAgent,
     createTaskPlan,
     openTaskSession,
     reset,

@@ -259,6 +259,13 @@ export function filterProjectTasks(
   );
 }
 
+/** Higher priorities first; keep the saved/manual order for equal priorities. */
+export function sortProjectTasksByPriority(tasks: readonly ProjectTask[]): ProjectTask[] {
+  return [...tasks].sort((left, right) =>
+    TASK_PRIORITIES.indexOf(right.priority) - TASK_PRIORITIES.indexOf(left.priority)
+  );
+}
+
 export function moveProjectTask(
   tasks: readonly ProjectTask[],
   taskId: string,

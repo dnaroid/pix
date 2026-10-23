@@ -397,6 +397,13 @@
   let statusMenu = $state<HTMLDivElement | null>(null);
   const statusMenuController = createWorkspaceSidebarStatusMenuController({
     menu: () => statusMenu,
+    workspace: () => workspace,
+    task: (taskId) => tasks.find((task) => task.id === taskId),
+    busy: () => busy,
+    get onCreatePlan() { return onCreateTaskPlan ? (task: ProjectTask) => { statusMenuController.close(); onCreateTaskPlan?.(task); } : undefined; },
+    onOpenPlan: (path) => { statusMenuController.close(); onOpenProjectDocument(path, projectDocuments.plans.includes(path)); },
+    canCreatePlan: () => sessionReady && !busy,
+    reportError: (cause) => createDiagnosticLogger(() => ({ workspace })).report(cause, "frontend:task-menu"),
     onStatusChange: (taskId, status) => onStatusChange(taskId, status),
     onPriorityChange: (taskId, priority) => onPriorityChange(taskId, priority),
     onDeleteRequest: (taskId) => {
@@ -1085,6 +1092,7 @@
           onToggleStatusCollapsed={tasksView.toggleStatusCollapsed}
           bind:typeFilter={tasksView.typeFilter}
           bind:priorityFilter={tasksView.priorityFilter}
+          bind:expandedTaskIds={tasksView.expandedTaskIds}
           {onRun}
           {onOpenSession}
           onCreate={openCreate}

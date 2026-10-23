@@ -40,12 +40,27 @@ session-local todos.
   **visible rotating Lucide chevron** in both states. Done starts collapsed;
   the others start expanded. Collapse state is workspace-local UI preference,
   never persisted in SQLite.
-- Compact one-line task cards show type icon/tone, title (or description
-  preview for untitled tasks), and compact, labeled indicators for real SQLite
+- Task cards show type icon/tone, title (or description preview for untitled
+  tasks), and compact, labeled indicators for real SQLite
   attachments, related files/tasks, a parent/subtask branch, optional assigned
   model and an epic crown. A linked-files icon replaces the ambiguous bare
   numeric link badge. High/urgent/low priority badges are conditional; medium
-  is hidden. Status belongs to the task group. Filters do not change totals.
+  is hidden. Task-card headers keep titles to one truncated line in both
+  collapsed and expanded states; expanded details repeat the full title as a
+  wrapped paragraph above the description. Status belongs to the task group.
+  Filters do not change totals.
+- Cards start with details collapsed. An always-visible, rotating Lucide
+  chevron expands the full description and read-only metadata inline: type,
+  status, priority, parent, model, attachment count, related task names in both
+  directions, and links. Details are selectable and do not activate editing or
+  dragging; the card/title remains the editor activation target. Expanded task
+  ids are owned by the workspace sidebar task-view controller, not the
+  transient Tasks panel, so expansion survives panel unmount/remount (including
+  switching sidebar tabs or collapsing/reopening the Tasks section), row
+  refreshes, filters, and status/type/priority regrouping. This state is
+  window-local, resets when the workspace changes, and is not persisted across
+  restarts. Filters remain outside
+  the task-list scroll region and stationary while its contents scroll.
 - Clicking or keyboard-activating a card opens its full editor; the separate
   pencil action was removed. A pointer gesture becomes a drag only once its
   movement exceeds the drag threshold, with click suppression after a real
@@ -83,9 +98,22 @@ session-local todos.
   author the plan, not implement it. A task card with a plan link shows a
   `FileCheck2` icon.
   An unavailable ACP session disables Run/Open without disabling editing.
-- Drag-and-drop supports both moving between status groups and ordering
-  within a group. The view shows drop placeholders and preserves per-status
-  group and filter presentation while dragging.
+- The task ellipsis and priority badge open ordinary native/system macOS menus
+  in the Tauri host, preserving checked status/priority and plan/delete actions.
+  Plain browser preview uses the existing styled DOM-menu fallback.
+- Within each expanded status group, cards are ordered by priority **Urgent,
+  High, Medium, Low**, then by type **Bug, Feature, Improvement, Idea**. These
+  are ordering rules only: priority and type are not shown as section headings,
+  and there are no visible priority or type separators. Same-priority,
+  same-type ties retain their saved/manual array order; display sorting does not
+  rewrite SQLite order or task fields. Filters apply before ordering. Collapsed
+  statuses hide their contents but retain their headers. Status-header totals
+  remain unfiltered.
+- Drag-and-drop remains available for moving tasks between status groups.
+  Manual ordering affects only displayed order among tasks with the same
+  priority and type; it cannot override the automatic priority/type ordering. The
+  view shows drop placeholders and preserves per-status group and filter
+  presentation while dragging.
 - An expanded visible panel reloads from native SQLite initially and every
   two seconds through one `read_project_tasks_panel` IPC snapshot containing
   task rows and attachment counts from the same SQLite read transaction.
@@ -102,6 +130,16 @@ session-local todos.
   or invalidating their content revisions.
 
 ## Running a saved task
+
+Agents can request this same flow in Pix Desktop with
+`project_tasks {"op":"run","id":"<task-id>"}` after an explicit user request.
+Desktop reloads the saved row and uses the same Run/Open action as the sidebar;
+the tool returns `sessionId` and `outcome: "started" | "opened"` on prompt
+dispatch/opening, not after execution finishes. Already-linked tasks are never
+restarted. Other hosts do not support this launch bridge. After interrupted
+launches inspect the task's session link before retrying; cancellation may arrive
+after the session was linked or started. See the
+[agent launch contract](../specs/project-tasks-agent-tool.md#agent-initiated-desktop-launch).
 
 1. If a linked session exists, open it without creating another session or
    emitting another prompt; a stale session is an actionable error.

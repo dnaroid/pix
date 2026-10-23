@@ -52,7 +52,9 @@ status: active
   - `list` with optional status/priority/type filters (compact results);
   - `get` with id (full task and attachment metadata);
   - `create` with type and content, **only at an explicit user request**;
-  - `update` with id and at least one of status/priority/title/description.
+  - `update` with id and at least one of status/priority/title/description;
+  - `run` with id, **only when the user asks to execute that saved task**,
+    in Pix Desktop only.
 - Tool schema **does not expose delete, bulk modification, reorder, arbitrary
   SQL, project-root override, attachment write, raw file write or storage
   reset**. Unsupported fields are errors. Type, id, links, sessionId and
@@ -66,6 +68,32 @@ status: active
   privileged shell/file tool could still modify SQLite directly if its
   permissions allow it. Agent system guidance must prohibit bypassing the
   task API; stronger guarantees require OS-level capabilities.
+
+### Agent-initiated Desktop launch
+
+`project_tasks {"op":"run","id":"<task-id>"}` delegates to the existing
+Desktop **Tasks Run** action. It creates a separate normal ACP session, not a
+subagent, and uses the saved task's model/thinking, attachments and linked-plan
+behavior. A linked task only opens its existing session without another prompt.
+No prompt/model overrides or cross-project cwd are accepted.
+
+- The receipt is `{op:"run", id, sessionId, outcome:"started"|"opened"}`.
+  `started` means prompt dispatch, **not task completion**; the caller does not
+  wait for the child agent's response. Completion/status authorization stays in
+  the existing task launch prompt.
+- Desktop reloads SQLite before selecting the row, rejects busy/unavailable or
+  foreign workspaces, and reuses the launch preparation guard. The source
+  runtime owns correlated requests/replies; cancellation, disposal and stale
+  runtime replies cannot submit a control envelope as a model prompt.
+- Cancellation is best effort once launch is accepted. On cancellation, timeout
+  or transport failure, inspect `get`/the task's `sessionId` before retrying:
+  a session may already have been linked or started. No automatic retry occurs.
+  Cancellation is honored before the task-link save begins; once linking starts,
+  dispatch continues while the same workspace/runtime and target session own the
+  operation, so a late abort cannot leave a linked task with no prompt.
+- Standalone TUI, headless/MCP (even with writes enabled), and subagent runtimes
+  cannot use this Desktop capability. They return an explicit unsupported-host
+  error; the storage engine never launches a session or edits `sessionId`.
 
 ## Database contract
 
@@ -144,6 +172,10 @@ CREATE TABLE task_attachments (
 ## Evidence and owners
 
 - `external/pi-tools-suite/src/project-tasks/{index,commands,engine,storage,attachments}.ts`
+- `external/pi-tools-suite/src/project-tasks/launch.ts`
+- `acp/src/acp/task-run-{contract,bridge}.ts`, `acp/src/pi/task-run-host.js`
+- `acp/test/{task-run-bridge,pi-rpc-task-run}.test.ts`
+- `desktop/src/app/desktop-agent-task-run.test.ts`
 - `external/pi-tools-suite/test/project-tasks.test.ts`
 - `external/pi-tools-suite/src/project-search/engine.ts`
 - `desktop/src-tauri/src/project_tasks_sqlite.rs`

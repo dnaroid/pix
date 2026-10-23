@@ -20,6 +20,7 @@ import {
 } from "../../src/async-subagents/core/frontier-models.js";
 import { buildSubagentCatalogPrompt } from "../../src/async-subagents/core/agent-catalog.js";
 import { loadPiToolsSuiteConfig } from "../../src/config.js";
+import { generatePrompt } from "../../src/async-subagents/core/prompt.js";
 
 const dirs: string[] = [];
 
@@ -136,6 +137,46 @@ describe("oracle frontier selection", () => {
 		const config = configWith();
 		expect(() => oracle(config)).toThrow(/known, permitted parent model/);
 		expect(filterSubagentConfigForParentModel(config, undefined).types.oracle).toBeUndefined();
+	});
+
+	test("oracle receives runtime confirmation without parent identity in the brief, including prompt overrides", () => {
+		const config = configWith();
+		for (const promptOverride of [undefined, "Custom brief: {task}"]) {
+			const resolved = resolveAgentTaskConfig({
+				id: "o", task: "Brainstorm three kitchen layouts", subagentType: "oracle",
+				promptOverride, promptAppend: "Keep the ideas compact.",
+			}, config, { parentModel: "pi-claude-code-provider/opus" });
+			const prompt = generatePrompt(resolved.task);
+			expect(prompt).toContain("Runtime model-selection confirmation:");
+			expect(prompt).toContain("Parent model: pi-claude-code-provider/opus; vendor: anthropic.");
+			expect(prompt).toContain("every eligible fallback use a different vendor than the parent");
+			expect(prompt).toContain("Do not ask the parent to reconfirm model/provider independence");
+			expect(prompt).toContain("Keep the ideas compact.");
+			expect(prompt).toContain("Model/vendor eligibility is enforced by the runtime before launch");
+			expect(prompt).not.toContain("Missing parent identity or no\neligible other-vendor model fails closed.");
+			if (promptOverride) expect(prompt).toStartWith("Custom brief: Brainstorm three kitchen layouts");
+		}
+	});
+
+	test("confirmation covers the filtered fallback chain, not just the initial model", () => {
+		const config = configWith();
+		const resolved = resolveAgentTaskConfig({ id: "o", task: "Second opinion", subagentType: "oracle" }, config, { parentModel: "zai/glm-5.3" });
+		expect(resolved.fallbackModels.length).toBeGreaterThan(0);
+		for (const model of [resolved.task.model!, ...resolved.fallbackModels]) {
+			expect(modelVendor(model, config.frontier!)).not.toBe("zai");
+			const prompt = generatePrompt({ ...resolved.task, model });
+			expect(prompt).toContain("Parent model: zai/glm-5.3; vendor: zai.");
+			expect(prompt).toContain("Runtime model-selection confirmation:");
+		}
+	});
+
+	test("non-strict vendor policies do not claim a runtime cross-vendor guarantee", () => {
+		const config = configWith();
+		for (const parentProviderPolicy of ["any", "prefer-other"] as const) {
+			config.types.oracle = { ...config.types.oracle, parentProviderPolicy };
+			const resolved = resolveAgentTaskConfig({ id: "o", task: "Second opinion", subagentType: "oracle" }, config, { parentModel: "zai/glm-5.3" });
+			expect(generatePrompt(resolved.task)).not.toContain("Runtime model-selection confirmation:");
+		}
 	});
 
 	test("a new frontier release is a config edit, not an oracle edit", () => {

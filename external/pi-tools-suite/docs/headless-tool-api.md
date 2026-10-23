@@ -164,6 +164,9 @@ no-referenced-handles window using a Node subprocess, on every CI platform.
   The writable headless CLI enables these original Pix operations only with
   the independent `--allow-write` host flag. Callers must ensure task changes
   follow an explicit user request.
+- `project_tasks run` is Desktop-only and is never advertised or accepted by
+  headless/MCP, including writable hosts. Use the Desktop Tasks Run entry point
+  for normal task sessions; async subagents remain a separate API.
 - The **host** sets an absolute canonical cwd for every call. Relative paths
   resolve from this root; absolute paths are accepted for `read`/`apply_patch`
   only when they stay within it. The wrapper rejects `../` escapes, symlink

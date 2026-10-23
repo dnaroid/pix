@@ -129,6 +129,7 @@
   const scrollToTranscriptEntry = transcriptScroll.scrollToEntry;
 
   const connection = createDesktopConnectionServices({
+    onTaskRun: (request, signal) => projectActionServices.runTaskFromAgent(request, signal),
     workspace: () => workspace,
     onSessionCatalogChanged: (cwd) => sessionServices.catalog.nativeCatalogChanged(cwd),
     sessionCoordinator: () => sessionCoordinator,

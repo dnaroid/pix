@@ -155,8 +155,14 @@ than repeatedly running the entire CI matrix.
 npm run dev -- --cwd /path/to/project
 npm run check
 npm run test:tools-suite
+npm run build:tools-suite
 npm run build:pix
 ```
+
+The bundled pi-tools-suite runtime is built from source by
+`npm run build:tools-suite`. `node scripts/sync-pi-tools-suite.mjs` rebuilds it
+before mirroring source and runtime outputs to the live extension; pass
+`--check` to inspect drift without building or writing.
 
 The tools-suite's default Bun command uses `--isolate` to keep per-file module
 mocks from leaking into unrelated tests. For the complete suite use the

@@ -28,6 +28,7 @@
   import Wrench from "@lucide/svelte/icons/wrench";
   import Lightbulb from "@lucide/svelte/icons/lightbulb";
   import TaskFieldSelect from "./TaskFieldSelect.svelte";
+  import WorkspaceSidebarTaskDetails from "./WorkspaceSidebarTaskDetails.svelte";
   import {
     TASK_STATUSES,
     TASK_PRIORITIES,
@@ -57,6 +58,7 @@
     { type: "idea", label: "Idea", tone: "text-tool-warning/75" },
   ];
   const STATUS_GROUP_ORDER: readonly ProjectTaskStatus[] = ["in-progress", "todo", "backlog", "done", "failed"];
+  const PRIORITY_GROUP_ORDER = [...TASK_PRIORITIES].reverse();
   const TYPE_ICONS = { bug: Bug, feature: Sparkles, improvement: Wrench, idea: Lightbulb };
   const typeFilterOptions = [{ value: "all", label: "All types" }, ...TASK_GROUPS.map((item) => ({ value: item.type, label: item.label }))];
   const priorityFilterOptions = [{ value: "all", label: "All priorities" }, ...TASK_PRIORITIES.map((priority) => ({ value: priority, label: taskPriorityLabel(priority) }))];
@@ -100,6 +102,7 @@
     onToggleStatusCollapsed = () => {},
     typeFilter = $bindable<ProjectTaskType | "all">("all"),
     priorityFilter = $bindable<ProjectTaskPriority | "all">("all"),
+    expandedTaskIds = $bindable<Set<string>>(new Set()),
   }: {
     workspace: string;
     tasks: ProjectTask[];
@@ -141,6 +144,7 @@
     onToggleStatusCollapsed?: (status: ProjectTaskStatus) => void;
     typeFilter?: ProjectTaskType | "all";
     priorityFilter?: ProjectTaskPriority | "all";
+    expandedTaskIds?: Set<string>;
   } = $props();
 
   const visibleTasks = $derived(filterProjectTasks(tasks, {
@@ -149,6 +153,12 @@
   const groups = STATUS_GROUP_ORDER.map((status) => ({ status,
     label: taskStatusLabel(status) }));
   let hoveredTaskId = $state<string | null>(null);
+
+  function toggleTaskDetails(taskId: string): void {
+    const next = new Set(expandedTaskIds);
+    if (!next.delete(taskId)) next.add(taskId);
+    expandedTaskIds = next;
+  }
 
   function priorityTone(priority: ProjectTaskPriority): string {
     if (priority === "urgent") return "bg-tool-error/15 text-tool-error font-semibold";
@@ -173,7 +183,7 @@
 
   // Preserve direct card drag without intercepting buttons and menu controls.
   function isInteractiveTarget(target: EventTarget | null): boolean {
-    return target instanceof Element && target.closest("button, select, a, input, [role=\"menu\"]") !== null;
+    return target instanceof Element && target.closest("button, select, a, input, [role=\"menu\"], [data-task-details]") !== null;
   }
 
   function startCardDrag(event: PointerEvent, taskId: string): void {
@@ -185,11 +195,11 @@
 
 <section
   id="workspace-tasks-panel"
-  class="min-h-0 select-none overflow-y-auto p-2"
+  class="flex min-h-0 flex-col select-none overflow-hidden p-2"
   aria-label="Tasks"
   onpointerdown={onPanelPointerDown}
 >
-  <div class="min-h-0">
+  <div class="flex min-h-0 flex-1 flex-col">
     {#if loading}
       <div class="flex items-center justify-center gap-2 py-8 text-xs text-muted-foreground"><RotateCw class="h-4 w-4 animate-spin" aria-hidden="true" />Loading tasks…</div>
     {:else if storageError}
@@ -202,7 +212,7 @@
     {:else if !workspace}
       <div class="px-4 py-8 text-center"><Folder class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" /><p class="text-xs font-medium">Choose a project</p><p class="mt-1 text-xs text-muted-foreground">Tasks are stored inside its .pi folder.</p></div>
     {:else}
-      <div class="mb-2.5 flex flex-wrap items-center gap-1 p-1 text-xs" data-task-filters>
+      <div class="mb-2.5 flex shrink-0 flex-wrap items-center gap-1 p-1 text-xs" data-task-filters>
         <div class="w-[112px] max-w-full min-w-0">
           <TaskFieldSelect value={typeFilter} options={typeFilterOptions} ariaLabel="Filter tasks by type" compact onChange={(value) => typeFilter = value as ProjectTaskType | "all"} />
         </div>
@@ -210,7 +220,7 @@
           <TaskFieldSelect value={priorityFilter} options={priorityFilterOptions} ariaLabel="Filter tasks by priority" compact onChange={(value) => priorityFilter = value as ProjectTaskPriority | "all"} />
         </div>
       </div>
-      <div class="space-y-3">
+      <div class="min-h-0 flex-1 space-y-3 overflow-y-auto" data-task-list-scroll>
         {#each groups as group (group.status)}
           {@const collapsed = isStatusCollapsed(group.status)}
           {@const groupTasks = collapsed ? [] : visibleTasks.filter((task) => task.status === group.status)}
@@ -240,189 +250,212 @@
                 groupTasks.length || draggedTaskId ? "min-h-8" : "",
                 draggedTaskId && taskDropTarget?.status === group.status ? "bg-panel-hover/35" : "",
               ]}
-              role="list"
             >
 
-              {#each groupTasks as task (task.id)}
-                {@const taskLabel = projectTaskDisplayLabel(task)}
-                {@const parent = task.parentId ? tasks.find((candidate) => candidate.id === task.parentId) : undefined}
-                {@const subtaskCount = tasks.filter((candidate) => candidate.parentId === task.id).length}
-                {@const relation = taskHierarchyHoverRelation(task, hoveredTaskId, tasks)}
-                {@const linksToTask = tasks.filter((candidate) => candidate.id !== task.id && candidate.relatedTaskIds?.includes(task.id)).length}
-                {@const linkCount = (task.links?.length ?? 0) + (task.relatedTaskIds?.length ?? 0) + linksToTask}
-                {@const typeGroup = TASK_GROUPS.find((group) => group.type === task.type)!}
-                {@const typeLabel = taskTypeLabel(task.type)}
-                {@const TypeIcon = TYPE_ICONS[task.type]}
-                {@const planPath = linkedTaskPlan(task)}
-                {@const linkedProgress = planPath ? planProgress[planPath] : undefined}
-                {@const planComplete = task.status !== "done" && !!linkedProgress && linkedProgress.total > 0 && linkedProgress.completed >= linkedProgress.total}
-                {#if isDropPlaceholder(group.status, task.id, "before")}
-                  <div
-                    data-task-drop-placeholder
-                    class="grid place-items-center rounded-md border border-dashed border-primary/60 bg-panel-selected text-xs font-medium text-primary"
-                    style:min-height={`${draggedTaskHeight}px`}
-                    role="presentation"
-                  >Move to {group.label}</div>
-                {/if}
-                <div
-                  data-task-card
-                  data-task-id={task.id}
-                  data-task-parent-id={task.parentId ?? undefined}
-                  class={[
-                    "group relative touch-none rounded-lg border border-border/60 bg-panel-strong/30 px-2 py-1 shadow-xs transition-[background-color,border-color,opacity,box-shadow] duration-150 hover:border-border hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring",
-                    "cursor-pointer active:cursor-grabbing",
-                    draggedTaskId === task.id ? "cursor-grabbing border-dashed border-primary/40 bg-primary/5 opacity-25" : "",
-                    revealedTaskId === task.id ? "border-primary/50 bg-panel-selected ring-1 ring-primary/30" : "",
-                    relation === "parent" ? "border-primary/80 bg-primary/15 ring-1 ring-primary/40" : "",
-                    relation === "sibling" ? "opacity-40" : "",
-                  ]}
-                  role="button"
-                  tabindex="0"
-                  aria-label={`${taskLabel}. Open task editor. Drag to reorder or change status.`}
-                  onpointerdown={(event) => startCardDrag(event, task.id)}
-                  onpointermove={onTaskDragMove}
-                  onpointerup={onTaskDragFinish}
-                  onpointercancel={onTaskDragCancel}
-                  onlostpointercapture={onTaskDragCancel}
-                  onmouseenter={() => hoveredTaskId = task.id}
-                  onmouseleave={() => { if (hoveredTaskId === task.id) hoveredTaskId = null; }}
-                  onfocus={(event) => { if (event.target === event.currentTarget) hoveredTaskId = task.id; }}
-                  onblur={(event) => { if (event.target === event.currentTarget && hoveredTaskId === task.id) hoveredTaskId = null; }}
-                  onclick={(event) => { if (onCardDragClickConsumed() || isInteractiveTarget(event.target)) return; if (!busy) onEdit(task); }}
-                  onkeydown={(event) => { if (event.target !== event.currentTarget || busy) return; if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onEdit(task); } }}
-                >
-                  <div class="flex min-w-0 items-center gap-1.5" data-task-title-row>
-                    <span class={["shrink-0", typeGroup.tone]} aria-label={`Type: ${typeLabel}`} title={typeLabel}><TypeIcon class="h-3 w-3" aria-hidden="true" /></span>
-                    <h3 class="min-w-0 flex-1 truncate text-xs leading-4 font-medium text-foreground" title={taskLabel}>{taskLabel}</h3>
-                    {#if task.epic}<span data-task-epic class="inline-flex shrink-0 items-center gap-0.5 text-tool-warning" aria-label={`Epic with ${subtaskCount} subtasks`} title={`Epic · ${subtaskCount} subtasks`}><Crown class="h-3 w-3" aria-hidden="true" />{#if subtaskCount}<span class="font-mono text-xs">{subtaskCount}</span>{/if}</span>{/if}
-                    {#if parent}<span data-task-subtask class="shrink-0 text-primary/80" aria-label={`Subtask of ${projectTaskDisplayLabel(parent)}`} title={`Subtask of ${projectTaskDisplayLabel(parent)}`}><GitBranch class="h-3.5 w-3.5" aria-hidden="true" /></span>{/if}
-                    {#if attachmentCounts[task.id]}<span data-task-attachments class="inline-flex shrink-0 items-center gap-0.5 text-muted-foreground" aria-label={`${attachmentCounts[task.id]} attachments`} title={`${attachmentCounts[task.id]} attachments`}><Paperclip class="h-3 w-3" aria-hidden="true" />{#if attachmentCounts[task.id]! > 1}<span class="font-mono text-xs">{attachmentCounts[task.id]}</span>{/if}</span>{/if}
-                    {#if linkCount}<span data-task-links class="inline-flex shrink-0 items-center gap-0.5 text-muted-foreground" aria-label={`${linkCount} links`} title={[...(task.links ?? []), ...(task.relatedTaskIds ?? []), ...(linksToTask ? ["Linked from other tasks"] : [])].join("\n")}><Link2 class="h-3 w-3" aria-hidden="true" />{#if linkCount > 1}<span class="font-mono text-xs">{linkCount}</span>{/if}</span>{/if}
-                    {#if planPath}<span data-task-plan class="shrink-0 text-tool-success" aria-label={`Plan: ${planPath}`} title={`Plan: ${planPath}`}><FileCheck2 class="h-3 w-3" aria-hidden="true" /></span>{/if}
-                    {#if task.modelRef}<span data-task-model class="shrink-0 text-muted-foreground" aria-label={`Assigned model: ${task.modelRef}`} title={`Model: ${task.modelRef}`}><BrainCircuit class="h-3 w-3" aria-hidden="true" /></span>{/if}
-                    {#if task.priority !== "medium"}
-                      <button
-                        type="button"
-                        class={["shrink-0 rounded px-1.5 py-0.5 text-xs focus-visible:outline-2 focus-visible:outline-ring", priorityTone(task.priority)]}
-                        data-task-priority-badge
-                        title={`Priority: ${taskPriorityLabel(task.priority)}`}
-                        aria-label={`Priority for ${taskLabel}`}
-                        aria-haspopup="menu"
-                        aria-expanded={statusMenuTaskId === task.id && statusMenuSection === "priority"}
-                        disabled={busy}
-                        onclick={(event) => onToggleStatusMenu(event, task, "priority")}
-                      >{taskPriorityLabel(task.priority)}</button>
-                    {/if}
-                    <div data-task-actions class={["ml-auto flex shrink-0 items-center gap-0.5 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none", revealedTaskId === task.id || statusMenuTaskId === task.id ? "opacity-100" : "opacity-0"]}>
-                      <button
-                        class={[
-                          "grid h-6 w-6 place-items-center rounded-md hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring",
-                          !sessionReady ? "opacity-35" : "",
-                          activeTaskId === task.id || task.sessionId ? "text-primary" : "text-muted-foreground hover:text-primary",
-                        ]}
-                        type="button"
-                        title={task.sessionId ? "Open session" : "Run task"}
-                        aria-label={`${task.sessionId ? "Open session for" : "Run"} ${taskLabel}`}
-                        onclick={() => task.sessionId ? onOpenSession(task) : onRun(task)}
-                        disabled={!sessionReady || busy}
-                      >
-                        {#if activeTaskId === task.id}<RotateCw class="h-3 w-3 animate-spin" aria-hidden="true" />
-                        {:else if task.sessionId}<Folder class="h-3 w-3" aria-hidden="true" />
-                        {:else}<Play class="h-3 w-3" aria-hidden="true" />{/if}
-                      </button>
-                      <div class="relative" data-task-status-control>
-                        <button
-                          class={iconButtonClass("sm", "popover")}
-                          type="button"
-                          title={`Status: ${taskStatusLabel(task.status)}`}
-                          aria-label={`Change status for ${taskLabel}. Current status: ${taskStatusLabel(task.status)}`}
-                          aria-haspopup="menu"
-                          aria-expanded={statusMenuTaskId === task.id && statusMenuSection === "all"}
-                          onclick={(event) => onToggleStatusMenu(event, task)}
-                          disabled={busy}
-                        ><Ellipsis class="h-3.5 w-3.5" aria-hidden="true" /></button>
-                        {#if statusMenuTaskId === task.id}
+              {#each PRIORITY_GROUP_ORDER as priority (priority)}
+                {@const priorityTasks = TASK_GROUPS.flatMap(({ type }) => groupTasks.filter((task) => task.priority === priority && task.type === type))}
+                {#if priorityTasks.length}
+                  <section class="space-y-1" data-task-priority-group={priority} aria-label={`${taskPriorityLabel(priority)} tasks`}>
+                    <div class="space-y-1.5" role="list">
+                      {#each priorityTasks as task (task.id)}
+                        {@const typeGroup = TASK_GROUPS.find((group) => group.type === task.type)!}
+                        {@const taskLabel = projectTaskDisplayLabel(task)}
+                        {@const detailsExpanded = expandedTaskIds.has(task.id)}
+                        {@const parent = task.parentId ? tasks.find((candidate) => candidate.id === task.parentId) : undefined}
+                        {@const subtaskCount = tasks.filter((candidate) => candidate.parentId === task.id).length}
+                        {@const relation = taskHierarchyHoverRelation(task, hoveredTaskId, tasks)}
+                        {@const linksToTask = tasks.filter((candidate) => candidate.id !== task.id && candidate.relatedTaskIds?.includes(task.id)).length}
+                        {@const linkCount = (task.links?.length ?? 0) + (task.relatedTaskIds?.length ?? 0) + linksToTask}
+                        {@const typeLabel = taskTypeLabel(task.type)}
+                        {@const TypeIcon = TYPE_ICONS[task.type]}
+                        {@const planPath = linkedTaskPlan(task)}
+                        {@const linkedProgress = planPath ? planProgress[planPath] : undefined}
+                        {@const planComplete = task.status !== "done" && !!linkedProgress && linkedProgress.total > 0 && linkedProgress.completed >= linkedProgress.total}
+                        {#if isDropPlaceholder(group.status, task.id, "before")}
                           <div
-                            bind:this={statusMenu}
-                            class="absolute top-7 right-0 z-40 w-40 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
-                            role="menu"
-                            tabindex="-1"
-                            aria-label={`${statusMenuSection === "priority" ? "Priority" : "Actions"} for ${taskLabel}`}
-                            onkeydown={onStatusMenuKeydown}
-                          >
-                            {#if statusMenuSection === "all"}
-                              <div role="group" aria-label="Status">
-                                <p class="px-2 py-1 text-xs font-semibold text-muted-foreground">Status</p>
-                                {#each TASK_STATUSES as status}
-                                  <button
-                                    class={["flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-xs leading-none whitespace-nowrap hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring", status === task.status ? "bg-accent text-foreground" : "text-muted-foreground"]}
-                                    type="button"
-                                    role="menuitemradio"
-                                    tabindex="-1"
-                                    aria-checked={status === task.status}
-                                    onclick={() => onSetTaskStatus(task.id, status)}
-                                  >
-                                    <span class={["grid h-4 w-4 shrink-0 place-items-center", statusTone(status)]}>
-                                      {#if status === "done"}<CheckCircle2 class="h-3 w-3" aria-hidden="true" />
-                                      {:else if status === "failed"}<CircleX class="h-3 w-3" aria-hidden="true" />
-                                      {:else if status === "in-progress"}<Clock3 class="h-3 w-3" aria-hidden="true" />
-                                      {:else if status === "backlog"}<CircleDashed class="h-3 w-3" aria-hidden="true" />
-                                      {:else}<Circle class="h-3 w-3" aria-hidden="true" />{/if}
-                                    </span>
-                                    <span class="truncate">{taskStatusLabel(status)}</span>
-                                  </button>
-                                {/each}
-                              </div>
+                            data-task-drop-placeholder
+                            class="grid place-items-center rounded-md border border-dashed border-primary/60 bg-panel-selected text-xs font-medium text-primary"
+                            style:min-height={`${draggedTaskHeight}px`}
+                            role="presentation"
+                          >Move to {group.label}</div>
+                        {/if}
+                        <div
+                          data-task-card
+                          data-task-id={task.id}
+                          data-task-parent-id={task.parentId ?? undefined}
+                          class={[
+                            "group relative touch-none rounded-lg border border-border/60 bg-panel-strong/30 px-2 py-1 shadow-xs transition-[background-color,border-color,opacity,box-shadow] duration-150 hover:border-border hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring",
+                            "cursor-pointer active:cursor-grabbing",
+                            draggedTaskId === task.id ? "cursor-grabbing border-dashed border-primary/40 bg-primary/5 opacity-25" : "",
+                            revealedTaskId === task.id ? "border-primary/50 bg-panel-selected ring-1 ring-primary/30" : "",
+                            relation === "parent" ? "border-primary/80 bg-primary/15 ring-1 ring-primary/40" : "",
+                            relation === "sibling" ? "opacity-40" : "",
+                          ]}
+                          role="button"
+                          tabindex="0"
+                          aria-label={`${taskLabel}. Open task editor. Drag to reorder or change status.`}
+                          onpointerdown={(event) => startCardDrag(event, task.id)}
+                          onpointermove={onTaskDragMove}
+                          onpointerup={onTaskDragFinish}
+                          onpointercancel={onTaskDragCancel}
+                          onlostpointercapture={onTaskDragCancel}
+                          onmouseenter={() => hoveredTaskId = task.id}
+                          onmouseleave={() => { if (hoveredTaskId === task.id) hoveredTaskId = null; }}
+                          onfocus={(event) => { if (event.target === event.currentTarget) hoveredTaskId = task.id; }}
+                          onblur={(event) => { if (event.target === event.currentTarget && hoveredTaskId === task.id) hoveredTaskId = null; }}
+                          onclick={(event) => { if (onCardDragClickConsumed() || isInteractiveTarget(event.target)) return; if (!busy) onEdit(task); }}
+                          onkeydown={(event) => { if (event.target !== event.currentTarget || busy) return; if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onEdit(task); } }}
+                        >
+                          <div class="flex min-w-0 items-center gap-1.5" data-task-title-row>
+                            <button
+                              type="button"
+                              class="grid h-6 w-5 shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                              data-task-details-toggle
+                              aria-label={`Toggle details for ${taskLabel}`}
+                              aria-expanded={detailsExpanded}
+                              aria-controls={`task-details-${task.id}`}
+                              onclick={() => toggleTaskDetails(task.id)}
+                            ><ChevronDown class={["h-3.5 w-3.5 transition-transform motion-reduce:transition-none", detailsExpanded ? "rotate-0" : "-rotate-90"]} aria-hidden="true" /></button>
+                            <span class={["shrink-0", typeGroup.tone]} aria-label={`Type: ${typeLabel}`} title={typeLabel}><TypeIcon class="h-3 w-3" aria-hidden="true" /></span>
+                            <h3 class="min-w-0 flex-1 truncate text-xs leading-4 font-medium text-foreground" title={taskLabel}>{taskLabel}</h3>
+                            {#if task.epic}<span data-task-epic class="inline-flex shrink-0 items-center gap-0.5 text-tool-warning" aria-label={`Epic with ${subtaskCount} subtasks`} title={`Epic · ${subtaskCount} subtasks`}><Crown class="h-3 w-3" aria-hidden="true" />{#if subtaskCount}<span class="font-mono text-xs">{subtaskCount}</span>{/if}</span>{/if}
+                            {#if parent}<span data-task-subtask class="shrink-0 text-primary/80" aria-label={`Subtask of ${projectTaskDisplayLabel(parent)}`} title={`Subtask of ${projectTaskDisplayLabel(parent)}`}><GitBranch class="h-3.5 w-3.5" aria-hidden="true" /></span>{/if}
+                            {#if attachmentCounts[task.id]}<span data-task-attachments class="inline-flex shrink-0 items-center gap-0.5 text-muted-foreground" aria-label={`${attachmentCounts[task.id]} attachments`} title={`${attachmentCounts[task.id]} attachments`}><Paperclip class="h-3 w-3" aria-hidden="true" />{#if attachmentCounts[task.id]! > 1}<span class="font-mono text-xs">{attachmentCounts[task.id]}</span>{/if}</span>{/if}
+                            {#if linkCount}<span data-task-links class="inline-flex shrink-0 items-center gap-0.5 text-muted-foreground" aria-label={`${linkCount} links`} title={[...(task.links ?? []), ...(task.relatedTaskIds ?? []), ...(linksToTask ? ["Linked from other tasks"] : [])].join("\n")}><Link2 class="h-3 w-3" aria-hidden="true" />{#if linkCount > 1}<span class="font-mono text-xs">{linkCount}</span>{/if}</span>{/if}
+                            {#if planPath}<span data-task-plan class="shrink-0 text-tool-success" aria-label={`Plan: ${planPath}`} title={`Plan: ${planPath}`}><FileCheck2 class="h-3 w-3" aria-hidden="true" /></span>{/if}
+                            {#if task.modelRef}<span data-task-model class="shrink-0 text-muted-foreground" aria-label={`Assigned model: ${task.modelRef}`} title={`Model: ${task.modelRef}`}><BrainCircuit class="h-3 w-3" aria-hidden="true" /></span>{/if}
+                            {#if task.priority !== "medium"}
+                              <button
+                                type="button"
+                                class={["shrink-0 rounded px-1.5 py-0.5 text-xs focus-visible:outline-2 focus-visible:outline-ring", priorityTone(task.priority)]}
+                                data-task-priority-badge
+                                title={`Priority: ${taskPriorityLabel(task.priority)}`}
+                                aria-label={`Priority for ${taskLabel}`}
+                                aria-haspopup="menu"
+                                aria-expanded={statusMenuTaskId === task.id && statusMenuSection === "priority"}
+                                disabled={busy}
+                                onclick={(event) => onToggleStatusMenu(event, task, "priority")}
+                              >{taskPriorityLabel(task.priority)}</button>
                             {/if}
-                            <div role="group" aria-label="Priority">
-                              <p class="px-2 py-1 text-xs font-semibold text-muted-foreground">Priority</p>
-                              {#each TASK_PRIORITIES as priority}
+                            <div data-task-actions class={["ml-auto flex shrink-0 items-center gap-0.5 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none", revealedTaskId === task.id || statusMenuTaskId === task.id ? "opacity-100" : "opacity-0"]}>
+                              <button
+                                class={[
+                                  "grid h-6 w-6 place-items-center rounded-md hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring",
+                                  !sessionReady ? "opacity-35" : "",
+                                  activeTaskId === task.id || task.sessionId ? "text-primary" : "text-muted-foreground hover:text-primary",
+                                ]}
+                                type="button"
+                                title={task.sessionId ? "Open session" : "Run task"}
+                                aria-label={`${task.sessionId ? "Open session for" : "Run"} ${taskLabel}`}
+                                onclick={() => task.sessionId ? onOpenSession(task) : onRun(task)}
+                                disabled={!sessionReady || busy}
+                              >
+                                {#if activeTaskId === task.id}<RotateCw class="h-3 w-3 animate-spin" aria-hidden="true" />
+                                {:else if task.sessionId}<Folder class="h-3 w-3" aria-hidden="true" />
+                                {:else}<Play class="h-3 w-3" aria-hidden="true" />{/if}
+                              </button>
+                              <div class="relative" data-task-status-control>
                                 <button
-                                  class={["flex h-7 w-full items-center rounded-sm px-2 text-left text-xs hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring", priorityTone(priority), priority === task.priority ? "bg-accent" : ""]}
+                                  class={iconButtonClass("sm", "popover")}
                                   type="button"
-                                  role="menuitemradio"
-                                  tabindex="-1"
-                                  aria-checked={priority === task.priority}
-                                  onclick={() => onSetTaskPriority(task.id, priority)}
-                                >{taskPriorityLabel(priority)}</button>
-                              {/each}
+                                  title={`Status: ${taskStatusLabel(task.status)}`}
+                                  aria-label={`Change status for ${taskLabel}. Current status: ${taskStatusLabel(task.status)}`}
+                                  aria-haspopup="menu"
+                                  aria-expanded={statusMenuTaskId === task.id && statusMenuSection === "all"}
+                                  onclick={(event) => onToggleStatusMenu(event, task)}
+                                  disabled={busy}
+                                ><Ellipsis class="h-3.5 w-3.5" aria-hidden="true" /></button>
+                                {#if statusMenuTaskId === task.id}
+                                  <div
+                                    bind:this={statusMenu}
+                                    class="absolute top-7 right-0 z-40 w-40 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+                                    role="menu"
+                                    tabindex="-1"
+                                    aria-label={`${statusMenuSection === "priority" ? "Priority" : "Actions"} for ${taskLabel}`}
+                                    onkeydown={onStatusMenuKeydown}
+                                  >
+                                    {#if statusMenuSection === "all"}
+                                      <div role="group" aria-label="Status">
+                                        <p class="px-2 py-1 text-xs font-semibold text-muted-foreground">Status</p>
+                                        {#each TASK_STATUSES as status}
+                                          <button
+                                            class={["flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-xs leading-none whitespace-nowrap hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring", status === task.status ? "bg-accent text-foreground" : "text-muted-foreground"]}
+                                            type="button"
+                                            role="menuitemradio"
+                                            tabindex="-1"
+                                            aria-checked={status === task.status}
+                                            onclick={() => onSetTaskStatus(task.id, status)}
+                                          >
+                                            <span class={["grid h-4 w-4 shrink-0 place-items-center", statusTone(status)]}>
+                                              {#if status === "done"}<CheckCircle2 class="h-3 w-3" aria-hidden="true" />
+                                              {:else if status === "failed"}<CircleX class="h-3 w-3" aria-hidden="true" />
+                                              {:else if status === "in-progress"}<Clock3 class="h-3 w-3" aria-hidden="true" />
+                                              {:else if status === "backlog"}<CircleDashed class="h-3 w-3" aria-hidden="true" />
+                                              {:else}<Circle class="h-3 w-3" aria-hidden="true" />{/if}
+                                            </span>
+                                            <span class="truncate">{taskStatusLabel(status)}</span>
+                                          </button>
+                                        {/each}
+                                      </div>
+                                    {/if}
+                                    <div role="group" aria-label="Priority">
+                                      <p class="px-2 py-1 text-xs font-semibold text-muted-foreground">Priority</p>
+                                      {#each TASK_PRIORITIES as priority}
+                                        <button
+                                          class={["flex h-7 w-full items-center rounded-sm px-2 text-left text-xs hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring", priorityTone(priority), priority === task.priority ? "bg-accent" : ""]}
+                                          type="button"
+                                          role="menuitemradio"
+                                          tabindex="-1"
+                                          aria-checked={priority === task.priority}
+                                          onclick={() => onSetTaskPriority(task.id, priority)}
+                                        >{taskPriorityLabel(priority)}</button>
+                                      {/each}
+                                    </div>
+                                    {#if statusMenuSection === "all" && planPath && onOpenPlan}
+                                      <button class="flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-xs text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring" type="button" role="menuitem" tabindex="-1" data-task-open-plan aria-label={`Open plan for ${taskLabel}`} onclick={() => onOpenPlan(planPath)}><FileCheck2 class="h-3 w-3" aria-hidden="true" />Open plan</button>
+                                    {:else if statusMenuSection === "all" && onCreatePlan}
+                                      <button class="flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-xs text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50" type="button" role="menuitem" tabindex="-1" data-task-create-plan aria-label={`Create plan for ${taskLabel}`} disabled={!sessionReady || busy} onclick={() => onCreatePlan(task)}><FilePlus2 class="h-3 w-3" aria-hidden="true" />Create plan</button>
+                                    {/if}
+                                    {#if statusMenuSection === "all"}
+                                      <button class="flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-xs text-tool-error hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring" type="button" role="menuitem" tabindex="-1" title="Delete task" aria-label={`Delete ${taskLabel}`} onclick={() => onDeleteRequest(task.id)}><Trash2 class="h-3 w-3" aria-hidden="true" />Delete task</button>
+                                    {/if}
+                                  </div>
+                                {/if}
+                              </div>
                             </div>
-                            {#if statusMenuSection === "all" && planPath && onOpenPlan}
-                              <button class="flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-xs text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring" type="button" role="menuitem" tabindex="-1" data-task-open-plan aria-label={`Open plan for ${taskLabel}`} onclick={() => onOpenPlan(planPath)}><FileCheck2 class="h-3 w-3" aria-hidden="true" />Open plan</button>
-                            {:else if statusMenuSection === "all" && onCreatePlan}
-                              <button class="flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-xs text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50" type="button" role="menuitem" tabindex="-1" data-task-create-plan aria-label={`Create plan for ${taskLabel}`} disabled={!sessionReady || busy} onclick={() => onCreatePlan(task)}><FilePlus2 class="h-3 w-3" aria-hidden="true" />Create plan</button>
-                            {/if}
-                            {#if statusMenuSection === "all"}
-                              <button class="flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-xs text-tool-error hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring" type="button" role="menuitem" tabindex="-1" title="Delete task" aria-label={`Delete ${taskLabel}`} onclick={() => onDeleteRequest(task.id)}><Trash2 class="h-3 w-3" aria-hidden="true" />Delete task</button>
+                          </div>
+                          <div id={`task-details-${task.id}`} hidden={!detailsExpanded} data-task-details class="select-text touch-auto cursor-auto">
+                            {#if detailsExpanded}
+                              <WorkspaceSidebarTaskDetails {task} {parent} {tasks} attachmentCount={attachmentCounts[task.id] ?? 0} />
                             {/if}
                           </div>
-                        {/if}
-                      </div>
-                    </div>
-                  </div>
-                  {#if planComplete}
-                    <div class="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" data-task-plan-complete>
-                      <CheckCircle2 class="h-3 w-3 shrink-0 text-tool-success" aria-hidden="true" />
-                      <span class="min-w-0 flex-1 truncate">All plan items checked</span>
-                      <button
-                        class="shrink-0 rounded-sm border border-border px-1.5 py-0.5 text-xs text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50"
-                        type="button"
-                        data-task-mark-done
-                        aria-label={`Mark ${taskLabel} done`}
-                        disabled={busy}
-                        onclick={() => onSetTaskStatus(task.id, "done")}
-                      >Mark done</button>
-                    </div>
-                  {/if}
-                </div>
+                          {#if planComplete}
+                            <div class="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" data-task-plan-complete>
+                              <CheckCircle2 class="h-3 w-3 shrink-0 text-tool-success" aria-hidden="true" />
+                              <span class="min-w-0 flex-1 truncate">All plan items checked</span>
+                              <button
+                                class="shrink-0 rounded-sm border border-border px-1.5 py-0.5 text-xs text-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50"
+                                type="button"
+                                data-task-mark-done
+                                aria-label={`Mark ${taskLabel} done`}
+                                disabled={busy}
+                                onclick={() => onSetTaskStatus(task.id, "done")}
+                              >Mark done</button>
+                            </div>
+                          {/if}
+                        </div>
 
-                {#if isDropPlaceholder(group.status, task.id, "after")}
-                  <div
-                    data-task-drop-placeholder
-                    class="grid place-items-center border border-dashed border-primary/60 bg-panel-selected text-xs font-medium text-primary"
-                    style:min-height={`${draggedTaskHeight}px`}
-                    role="presentation"
-                  >Move to {group.label}</div>
+                        {#if isDropPlaceholder(group.status, task.id, "after")}
+                          <div
+                            data-task-drop-placeholder
+                            class="grid place-items-center border border-dashed border-primary/60 bg-panel-selected text-xs font-medium text-primary"
+                            style:min-height={`${draggedTaskHeight}px`}
+                            role="presentation"
+                          >Move to {group.label}</div>
+                        {/if}
+                      {/each}
+                    </div>
+                  </section>
                 {/if}
               {/each}
               {#if !collapsed && isDropPlaceholder(group.status, null, "after")}

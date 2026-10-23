@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { hostTarget, npm, outputPaths, readJson, root, run, targetInfo, version } from "./common.mjs";
 import { installNode } from "./node-runtime.mjs";
-import { cleanBuildOutputs, pruneDependencies } from "./prune.mjs";
+import { cleanBuildOutputs, pruneDependencies, pruneSuiteRuntime } from "./prune.mjs";
 import { dedupePackages } from "./dedupe.mjs";
 import { recordSize } from "./size-budget.mjs";
 import { compileMacosHelper } from "./ui-qa-helper.mjs";
@@ -14,6 +14,7 @@ export async function prepare(name = hostTarget(), { withDesktop = true } = {}) 
   run(process.execPath, [join(root, "scripts/release/sync-version.mjs"), "--check"]);
   await cleanBuildOutputs(root, withDesktop);
   npm(["run", "build:pix"]);
+  npm(["run", "build:tools-suite"]);
   if (withDesktop) npm(["run", "build:acp"]);
   await rm(work, { recursive: true, force: true, maxRetries: 5 });
   const app = join(payload, "app");
@@ -26,6 +27,7 @@ export async function prepare(name = hostTarget(), { withDesktop = true } = {}) 
   }));
   const tarball = join(work, packed[0].filename);
   run("tar", ["-xzf", tarball, "-C", app, "--strip-components=1"]);
+  await pruneSuiteRuntime(app);
   await copyFile(join(root, "package-lock.json"), join(app, "package-lock.json"));
   npm(["ci", "--omit=dev", "--include=optional", "--ignore-scripts", "--no-audit", "--no-fund"], { cwd: app });
   const trimmed = await pruneDependencies(app, target);

@@ -29,7 +29,7 @@ export type RegisteredPiToolsSuiteModule = PiToolsSuiteModuleCatalogEntry & {
  */
 export const MODULES: readonly RegisteredPiToolsSuiteModule[] = PI_TOOLS_SUITE_MODULE_CATALOG.map((module) => ({
 	...module,
-	load: () => import(`./${module.name}/index`) as Promise<ExtensionModule>,
+	load: () => import(`./${module.name}/index.ts`) as Promise<ExtensionModule>,
 }));
 
 export default async function piToolsSuite(pi: ExtensionAPI) {

@@ -397,7 +397,13 @@ export function resolveAgentTaskConfig(
 			subagentType: selectedType,
 			model,
 			thinking: trimString(globalOptions.thinking) || trimString(task.thinking) || trimString(globalOptions.defaultThinking) || trimString(profile?.thinking),
-			promptAppend,
+			// Communicate the runtime-owned check even when the caller replaces the brief.
+			// Do not name the initial child model: availability/quota fallback may change it.
+			promptAppend: parentProviderPolicy === "require-other"
+				? joinTextBlocks(promptAppend, `Runtime model-selection confirmation:
+Parent model: ${parentModelRef}; vendor: ${parentVendor}.
+The runtime has enforced parentProviderPolicy=require-other: the selected model and every eligible fallback use a different vendor than the parent. This check is complete; proceed with the assigned task. Do not ask the parent to reconfirm model/provider independence or infer missing identity from the task brief.`)
+				: promptAppend,
 			promptOverride: trimString(task.promptOverride) || trimString(profile?.promptOverride),
 			tools: task.tools && task.tools.length > 0 ? task.tools : arrayOfStrings(profile?.tools),
 			extraArgs: taskExtraArgs.length > 0 ? taskExtraArgs : undefined,

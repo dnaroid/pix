@@ -16,6 +16,7 @@ import type {
   SetSessionConfigOptionResponse,
 } from "@agentclientprotocol/sdk";
 import type { BtwCommand, BtwState } from "../../../acp/src/btw/contract";
+import { TASK_RUN_METHOD, TASK_RUN_CANCEL_METHOD, parseTaskRunRequest, parseTaskRunResult } from "../../../acp/src/acp/task-run-contract";
 import {
   PIX_SESSION_STATE_METHOD,
   parseSessionStateNotification,
@@ -95,6 +96,7 @@ export type {
 } from "./acp-client-types";
 
 export class AcpClient {
+  private readonly taskRuns = new Map<string, AbortController>();
   private readonly rpc: AcpJsonRpcConnection;
   private readonly pix: AcpPixExtensions;
   private readonly ragUpdates = new Map<string, (update: RagProgress) => void>();
@@ -107,7 +109,7 @@ export class AcpClient {
       onNotification: (method, params) => this.handleNotification(method, params),
       onRequest: (method, params) => this.handleIncomingRequest(method, params),
       onDiagnostic: (message) => this.handlers.onDiagnostic?.(message),
-      onExit: (exit) => this.handlers.onExit?.(exit),
+      onExit: (exit) => { this.cancelTaskRuns(); this.handlers.onExit?.(exit); },
     });
     this.pix = new AcpPixExtensions((method, params, timeoutMs, signal) => (
       this.request(method, params, timeoutMs, signal)
@@ -180,7 +182,10 @@ export class AcpClient {
         "pix.lazyHistory": true,
         ...(this.handlers.onOpenActivity ? { "pix.activityOwner": this.handlers.onOpenActivity(sessionId) } : {}),
       },
-    });
+    // The backend owns bounded RPC readiness and fallback cleanup. A competing
+    // 30s timer here hides its actionable startup error behind session/load.
+    // Keep a longer backstop for hung local lifecycle/file-I/O waits.
+    }, 120_000);
   }
 
   sessionHistory(sessionId: string, full = false, cursor?: string): Promise<LazySessionHistory> {
@@ -478,6 +483,7 @@ export class AcpClient {
   }
 
   async dispose(): Promise<void> {
+    this.cancelTaskRuns();
     this.ragUpdates.clear();
     await this.rpc.dispose();
   }
@@ -496,6 +502,10 @@ export class AcpClient {
   }
 
   private handleNotification(method: string, params: unknown): void {
+    if (method === TASK_RUN_CANCEL_METHOD && isRecord(params) && typeof params.requestId === "string") {
+      this.taskRuns.get(params.requestId)?.abort();
+      return;
+    }
     if (method === SEARCH_RAG_DELTA_METHOD && isRecord(params)) {
       const listener = typeof params.requestId === "string" ? this.ragUpdates.get(params.requestId) : undefined;
       if (!listener) return;
@@ -534,10 +544,23 @@ export class AcpClient {
   }
 
   private async handleIncomingRequest(method: string, params: unknown): Promise<unknown> {
+    if (method === TASK_RUN_METHOD && this.handlers.onTaskRun) {
+      const request = parseTaskRunRequest(params);
+      if (this.taskRuns.has(request.requestId)) throw new Error("Duplicate task launch request");
+      const controller = new AbortController();
+      this.taskRuns.set(request.requestId, controller);
+      try { return parseTaskRunResult(await this.handlers.onTaskRun(request, controller.signal)); }
+      finally { this.taskRuns.delete(request.requestId); }
+    }
     if (method !== "elicitation/create" || !isRecord(params)) {
       throw new AcpIncomingRequestError(-32601, `unsupported client method: ${method}`);
     }
     return this.handlers.onElicitation(params as CreateElicitationRequest);
+  }
+
+  private cancelTaskRuns(): void {
+    for (const controller of this.taskRuns.values()) controller.abort();
+    this.taskRuns.clear();
   }
 }
 

@@ -216,6 +216,13 @@ in memory; it exposes tool + slash-command interfaces. `[confirmed by code]`
    is never an oracle candidate. The vendor map orders vendors first, then
    candidates follow `frontierModels` order within each vendor. A new frontier
    model is a `frontierModels` config entry, not an oracle edit.
+   After strict `require-other` validation, the runtime appends a model-selection
+   confirmation with the parent model/vendor and the cross-vendor guarantee for
+   the selected candidate and eligible fallback chain, including when a prompt
+   override replaces the task brief. Non-strict policies do not receive this
+   guarantee. Oracle relies on that runtime check instead of refusing work when
+   the task brief omits the parent's identity; unknown-parent and same-vendor
+   launches remain blocked by model selection.
    The shipped frontier list is Astra, GLM-5.3, and
    `anthropic/claude-opus-5-5` with alias `*opus*` (any serving provider).
    Sol is not frontier. Astra is enabled for `oracle` in the default list.

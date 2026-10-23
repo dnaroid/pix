@@ -59,6 +59,84 @@ function reviewHarness() {
 }
 
 describe("SQLite project task launch", () => {
+  it.each(["save", "scroll"])("finishes prompt dispatch if cancellation arrives during %s after linking begins", async (phase) => {
+    const { options, runPrompt, client } = reviewHarness();
+    const task = { id: "a", title: "Do work", type: "feature" as const, status: "todo" as const,
+      priority: "medium" as const, createdAt: "2026-10-10T00:00:00Z", updatedAt: "2026-10-10T00:00:00Z" };
+    let document: ProjectTaskDocument = { version: 1, tasks: [task] };
+    const controller = new AbortController();
+    options.taskDocument = () => document;
+    options.taskAttachments = async () => [];
+    options.saveProjectTasks = async (next) => {
+      document = next;
+      if (phase === "save") controller.abort();
+      return true;
+    };
+    options.scrollToLatest = async () => { if (phase === "scroll") controller.abort(); };
+    const actions = createProjectActions(options);
+    await expect(actions.runTaskFromAgent(task, controller.signal)).resolves.toEqual({ sessionId: "session-1", outcome: "started" });
+    expect(runPrompt).toHaveBeenCalledOnce();
+    expect(document.tasks[0]?.sessionId).toBe("session-1");
+    await expect(actions.runTaskFromAgent(task, new AbortController().signal)).resolves.toEqual({ sessionId: "session-1", outcome: "opened" });
+    expect(runPrompt).toHaveBeenCalledOnce();
+    expect(client.newSession).toHaveBeenCalledOnce();
+  });
+  it("returns an agent launch receipt before the child prompt finishes and never reruns a linked task", async () => {
+    const { options, runPrompt, client } = reviewHarness();
+    const task = { id: "agent-task", title: "Do work", type: "feature" as const, status: "todo" as const,
+      priority: "medium" as const, createdAt: "2026-10-10T00:00:00Z", updatedAt: "2026-10-10T00:00:00Z" };
+    let document: ProjectTaskDocument = { version: 1, tasks: [task] };
+    options.taskDocument = () => document;
+    options.saveProjectTasks = async (next) => { document = next; return true; };
+    options.taskAttachments = async () => [];
+    const finished = deferred<void>();
+    runPrompt.mockReturnValueOnce(finished.promise);
+    const actions = createProjectActions(options);
+    const signal = new AbortController().signal;
+    await expect(actions.runTaskFromAgent(task, signal)).resolves.toEqual({ sessionId: "session-1", outcome: "started" });
+    expect(actions.actionId).toBeNull();
+    await expect(actions.runTaskFromAgent(task, signal)).resolves.toEqual({ sessionId: "session-1", outcome: "opened" });
+    expect(client.newSession).toHaveBeenCalledOnce();
+    expect(runPrompt).toHaveBeenCalledOnce();
+    finished.resolve();
+  });
+
+  it("rejects a busy or failed agent launch instead of returning a false success", async () => {
+    const { options, client } = reviewHarness();
+    const task = { id: "a", title: "Do work", type: "feature" as const, status: "todo" as const,
+      priority: "medium" as const, createdAt: "2026-10-10T00:00:00Z", updatedAt: "2026-10-10T00:00:00Z" };
+    options.taskDocument = () => ({ version: 1, tasks: [task] });
+    options.taskAttachments = async () => [];
+    options.tasksSaving = () => true;
+    const actions = createProjectActions(options);
+    await expect(actions.runTaskFromAgent(task, new AbortController().signal)).rejects.toThrow("did not start");
+    expect(client.newSession).not.toHaveBeenCalled();
+    options.tasksSaving = () => false;
+    vi.mocked(client.newSession).mockRejectedValue(new Error("model unavailable"));
+    await expect(actions.runTaskFromAgent(task, new AbortController().signal)).rejects.toThrow("model unavailable");
+  });
+
+  it("cancels an agent launch during preparation and closes a late-created session", async () => {
+    const { options, client, runPrompt } = reviewHarness();
+    options.setOperationRunning = vi.fn();
+    const task = { id: "a", title: "Do work", type: "feature" as const, status: "todo" as const,
+      priority: "medium" as const, createdAt: "2026-10-10T00:00:00Z", updatedAt: "2026-10-10T00:00:00Z" };
+    options.taskDocument = () => ({ version: 1, tasks: [task] });
+    options.taskAttachments = async () => [];
+    const creating = deferred<void>();
+    const created = deferred<{ sessionId: string }>();
+    vi.mocked(client.newSession).mockImplementation(() => { creating.resolve(); return created.promise; });
+    const controller = new AbortController();
+    const launched = createProjectActions(options).runTaskFromAgent(task, controller.signal);
+    const rejected = expect(launched).rejects.toThrow("did not start");
+    await creating.promise;
+    controller.abort();
+    created.resolve({ sessionId: "late-child" });
+    await rejected;
+    expect(client.closeSession).toHaveBeenCalledWith("late-child");
+    expect(runPrompt).not.toHaveBeenCalled();
+    expect(options.setOperationRunning).toHaveBeenLastCalledWith(false);
+  });
   it.each([
     [undefined, null],
     ["provider/smart-model", { modelRef: "provider/smart-model" }],

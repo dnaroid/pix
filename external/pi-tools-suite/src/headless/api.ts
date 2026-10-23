@@ -266,9 +266,9 @@ export async function createHeadlessToolApi(options: HeadlessApiOptions): Promis
 		active.includes(tool.name) && !(readOnly && MUTATING_TOOLS.has(tool.name) && tool.name !== "todo"));
 	const listTools = (): HeadlessTool[] => visible.map((tool) => {
 		const schema = structuredClone(tool.parameters);
-		if (!taskWrites && tool.name === "project_tasks") {
+		if (tool.name === "project_tasks") {
 			const op = (schema.properties as Record<string, any>).op;
-			op.enum = ["list", "get"];
+			op.enum = taskWrites ? ["list", "get", "update", "create"] : ["list", "get"];
 		}
 		if (readOnly && tool.name === "todo") {
 			(schema.properties as Record<string, any>).action.enum = ["list", "get", "export"];
@@ -304,6 +304,9 @@ export async function createHeadlessToolApi(options: HeadlessApiOptions): Promis
 			if (!tool || !visible.includes(tool)) throw new Error(`Headless tool not available: ${name}`);
 			if (!rawArgs || typeof rawArgs !== "object" || Array.isArray(rawArgs)) throw new Error("Tool arguments must be an object");
 			const args = tool.prepareArguments ? tool.prepareArguments(rawArgs) : rawArgs;
+			if (name === "project_tasks" && (args as Record<string, unknown>)?.op === "run") {
+				throw new Error("project_tasks run requires Pix Desktop");
+			}
 			if (!taskWrites && name === "project_tasks" && args && typeof args === "object"
 				&& !Array.isArray(args) && !["list", "get"].includes(String((args as Record<string, unknown>).op))) {
 				throw new Error("Headless project_tasks is read-only; only list/get are allowed");

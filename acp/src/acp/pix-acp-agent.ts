@@ -48,6 +48,8 @@ import { copyFile, mkdir, readFile, realpath, rename, rm, stat, writeFile } from
 import { basename, dirname, join, parse, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setText as copyTextToClipboard } from "@mariozechner/clipboard";
+import { TASK_RUN_METHOD, TASK_RUN_CANCEL_METHOD, type TaskRunRequest, type TaskRunResult } from "./task-run-contract.js";
+import { forwardTaskRun } from "./task-run-bridge.js";
 import {
 	PROTOCOL_VERSION,
 	RequestError,
@@ -352,6 +354,8 @@ type ClientCaller = {
 	notify(method: typeof PIX_QUEUE_CONSUMED_METHOD, params: DesktopQueueConsumedNotification): Promise<void>;
 	notify(method: typeof PIX_FORK_READY_METHOD, params: DesktopForkReadyNotification): Promise<void>;
 	request(method: "elicitation/create", params: CreateElicitationRequest): Promise<CreateElicitationResponse>;
+  request(method: typeof TASK_RUN_METHOD, params: TaskRunRequest): Promise<TaskRunResult>;
+  notify(method: typeof TASK_RUN_CANCEL_METHOD, params: { requestId: string }): Promise<void>;
 };
 
 // JSON-RPC server-error range; plain `throw new Error(...)` would surface
@@ -400,10 +404,10 @@ function orderedSessionClient(client: ClientCaller, updates: SessionUpdateCoales
 			updates.flush();
 			return (client.notify as (method: string, params: unknown) => Promise<void>)(method, params);
 		}) as ClientCaller["notify"],
-		request: (method, params) => {
+		request: ((method: string, params: unknown) => {
 			updates.flush();
-			return client.request(method, params);
-		},
+			return (client.request as (method: string, params: unknown) => Promise<unknown>)(method, params);
+		}) as ClientCaller["request"],
 	};
 }
 
@@ -2612,9 +2616,19 @@ export class PixAcpAgent {
 	}
 
 	private onPiEvent(session: AgentSessionState, event: PiEvent): void {
+    // A retiring runtime still owns cancellation of its random request ids.
+    if (event.type === "pix_task_run_cancel") {
+      void session.client.notify(TASK_RUN_CANCEL_METHOD, { requestId: event.requestId })
+        .catch(() => this.options.logger.warn("task launch cancellation delivery failed"));
+      return;
+    }
 		// A replaced process may still flush events while it is stopping. Never
 		// route those events into the newer process registered under the same id.
 		if (this.sessions.get(session.acpSessionId) !== session) return;
+    if (event.type === "pix_task_run_request") {
+      void forwardTaskRun(session, event, () => this.sessions.get(session.acpSessionId) === session, this.options.logger);
+      return;
+    }
 		if (event.type === "pix_btw_event") {
 			const data = parseBtwEvent(event.data);
 			if (data) this.btwOwners.set(session, data.runtimeId);

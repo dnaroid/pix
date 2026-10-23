@@ -8,6 +8,7 @@ import type { DesktopSessionServices } from "./desktop-session-services";
 import type { DesktopSessionTransitionServices } from "./desktop-session-transition-services";
 import { DRAFT_SESSION_TAB_ID } from "./draft-session.svelte";
 import { createProjectActions } from "./project-actions.svelte";
+import type { TaskRunRequest, TaskRunResult } from "../../../acp/src/acp/task-run-contract";
 
 type DesktopProjectActionServicesOptions = {
   client: () => AcpClient | null;
@@ -107,7 +108,20 @@ export function createDesktopProjectActionServices(options: DesktopProjectAction
     reportError: options.reportError,
   });
 
-  return { actions };
+  async function runTaskFromAgent(request: TaskRunRequest, signal: AbortSignal): Promise<TaskRunResult> {
+    const client = options.client();
+    const current = () => client && client === options.client() && options.workspace() === request.cwd && !signal.aborted;
+    if (!current() || !options.canUseSession() || options.workspaceOpening?.() || actions.actionId
+      || options.project.tasks.saving || options.project.tasks.loading) throw new Error("Task launch workspace is unavailable or busy");
+    // Agent writes can precede the sidebar's next poll. Launch only the saved row.
+    await options.project.tasks.load(request.cwd);
+    if (!current() || options.project.tasks.loadFailed) throw new Error("Task launch workspace changed or tasks could not be loaded");
+    const task = options.project.tasks.document.tasks.find((candidate) => candidate.id === request.taskId);
+    if (!task) throw new Error(`Unknown project task id: ${request.taskId}`);
+    return actions.runTaskFromAgent(task, signal);
+  }
+
+  return { actions, runTaskFromAgent };
 }
 
 export type DesktopProjectActionServices = ReturnType<typeof createDesktopProjectActionServices>;
