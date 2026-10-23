@@ -72,14 +72,14 @@ describe("RegistryBackgroundSyncCoordinator", () => {
     coordinator.mark("tasks");
     await vi.advanceTimersByTimeAsync(100);
     expect(coordinator.state.phase).toBe("syncing");
-    coordinator.mark("todo");
+    coordinator.mark("workspace");
     resolveFirst();
     await Promise.resolve();
     await Promise.resolve();
     expect(coordinator.state.phase).toBe("pending");
     await vi.advanceTimersByTimeAsync(100);
     expect(sync).toHaveBeenCalledTimes(2);
-    expect(sync.mock.calls[1]?.[0]).toBe("todo");
+    expect(sync.mock.calls[1]?.[0]).toBe("workspace");
   });
 
   it("keeps pending work while the session is busy and retries later", async () => {
@@ -118,7 +118,7 @@ describe("RegistryBackgroundSyncCoordinator", () => {
     coordinator.mark("tasks");
     await vi.advanceTimersByTimeAsync(100);
     expect(coordinator.state).toMatchObject({ phase: "error", error: "remote changed" });
-    coordinator.mark("todo");
+    coordinator.mark("workspace");
     await vi.advanceTimersByTimeAsync(100);
     expect(sync.mock.calls[1]?.[0]).toBe("project");
     expect(coordinator.state.phase).toBe("idle");

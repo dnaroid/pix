@@ -46,7 +46,9 @@ establish compatibility requirements.
   selected files remain unchanged.
 - Right-click or Context Menu / `Shift+F10` on the root offers New File/New Folder
   and Paste in the project root, plus external-editor and file-manager commands,
-  without requiring empty space below the file list. The root cannot be renamed,
+  and Copy Project Name / Copy Absolute Path, without requiring empty space below
+  the file list. Copy Project Name copies the root entry's name; Copy Absolute
+  Path copies the active workspace path verbatim. The root cannot be renamed,
   deleted, copied, duplicated or dragged. It remains reachable in empty, loading
   and failed-listing states. Root collapse is transient and is not stored among
   relative expanded-directory paths; successful create/paste expands its target.
@@ -98,8 +100,9 @@ establish compatibility requirements.
   stop per row. Right-click, the Context Menu key, and `Shift+F10` open the same
   command surface for the focused row. The command set includes Open/Open in
   External Editor, New File/New Folder for directory targets, Copy/Paste,
-  Duplicate, Rename, Copy Relative Path, Copy Absolute Path, and Delete where applicable.
-  Both path commands apply to files and folders below the workspace root and copy
+  Duplicate, Rename, Copy Relative Path, Copy Project Name for the root,
+  Copy Absolute Path, and Delete where applicable. Relative-path copying applies
+  to files and folders below the workspace root and copies
   plain filesystem text without quoting or URI escaping. Absolute paths include
   the active workspace root; relative paths retain the existing project-relative form.
 - HTML files (`.html` and `.htm`, case-insensitive) additionally offer **Open in
@@ -238,7 +241,14 @@ establish compatibility requirements.
   read, without recursively scanning the project or adding a filesystem watcher.
   Polling preserves existing rows, expansion, selection and focus, skips directories
   already loading, and uses the tree's generation/request guards against stale
-  workspace or mutation completions. Background/hidden windows stop scheduling;
+  workspace or mutation completions. Cached directory polls are quiet: no loading
+  spinner or error clear/reappear cycle while waiting. Successful reads clear old
+  errors; initial uncached loads and explicit directory reloads retain loading
+  feedback. Equal listings retain array/map identity and do not invalidate tree
+  rendering; changed listings reuse unchanged entries. Git polls likewise reuse
+  equal snapshots and omit repeated branch/remote listings after metadata bootstrap
+  (see [Git status reads](desktop-git-workflows.md#explorer-local-status-reads)).
+  Background/hidden windows stop scheduling;
   closing Files removes timers and activity listeners. Search results are not polled.
 - Expanding a previously loaded directory rereads it and its visible expanded
   descendants, retaining cached rows until completion. Reopening the workspace

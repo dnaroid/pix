@@ -243,7 +243,7 @@ const ResourceRegistryConfig = Type.Object(
 	{
 		remote: Type.Optional(Type.String({ description: "Git remote URL for the private registry. The repository contains reusable top-level skills/ and agents/ plus project-scoped state under projects/." })),
 		branch: Type.Optional(Type.String({ description: "Registry branch used for install/update/push/pull. Defaults to main." })),
-		projectKey: Type.Optional(Type.String({ description: "Optional explicit key for this project's projects/<key>/tasks.jsonc, plans/, and TODO.md state. Normally derived from the current Git origin." })),
+		projectKey: Type.Optional(Type.String({ description: "Optional explicit key for this project's projects/<key>/tasks.sqlite, plans/, and workspace.jsonc state. Normally derived from the current Git origin." })),
 	},
 	{ description: "Private Git-backed registry for reusable skills/agents and project-scoped tasks/plans state." },
 );

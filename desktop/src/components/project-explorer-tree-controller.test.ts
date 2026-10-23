@@ -52,6 +52,103 @@ describe("Project Explorer external directory changes", () => {
     f.controller.dispose();
   });
 
+  it("keeps equal cached listings and loading state untouched during background polls", async () => {
+    let finish!: (entries: ProjectTreeEntry[]) => void;
+    const f = fixture(() => new Promise<ProjectTreeEntry[]>((resolve) => { finish = resolve; }));
+    f.controller.state.entriesByDirectory = { "": [directory("a")] };
+    const previous = f.controller.state.entriesByDirectory;
+    const loading = f.controller.state.loadingDirectories;
+    const pending = f.controller.refreshVisibleDirectories();
+    expect(f.controller.state.loadingDirectories).toBe(loading);
+    const coalesced = f.controller.refreshVisibleDirectories();
+    finish([directory("a")]);
+    await Promise.all([pending, coalesced]);
+    expect(f.controller.state.entriesByDirectory).toBe(previous);
+    expect(f.controller.state.entriesByDirectory[""]).toBe(previous[""]);
+    expect(f.controller.state.loadingDirectories).toBe(loading);
+    f.controller.dispose();
+  });
+
+  it("still shows loading for an initial uncached listing and explicit reload", async () => {
+    let finish!: (entries: ProjectTreeEntry[]) => void;
+    const f = fixture(() => new Promise<ProjectTreeEntry[]>((resolve) => { finish = resolve; }));
+    const pending = f.controller.refreshVisibleDirectories();
+    expect(f.controller.rootLoading).toBe(true);
+    finish([]);
+    await pending;
+    expect(f.controller.rootLoading).toBe(false);
+    const explicit = f.controller.refreshDirectory("");
+    expect(f.controller.rootLoading).toBe(true);
+    finish([]);
+    await explicit;
+    expect(f.controller.rootLoading).toBe(false);
+    f.controller.dispose();
+  });
+
+  it("updates changed listings while retaining unchanged entry identities", async () => {
+    const f = fixture(async () => [directory("a"), directory("new")]);
+    f.controller.state.entriesByDirectory = { "": [directory("a"), directory("removed")] };
+    const unchanged = f.controller.state.entriesByDirectory[""]![0];
+    f.controller.state.expandedDirectories = ["removed"];
+    await f.controller.refreshVisibleDirectories();
+    expect(f.controller.state.entriesByDirectory[""]![0]).toBe(unchanged);
+    expect(f.controller.state.entriesByDirectory[""]!.map((entry) => entry.path)).toEqual(["a", "new"]);
+    expect(f.controller.state.expandedDirectories).not.toContain("removed");
+    f.controller.dispose();
+  });
+
+  it("does not let an older quiet poll overwrite a forced reload or clear its spinner", async () => {
+    const completions: ((entries: ProjectTreeEntry[]) => void)[] = [];
+    const f = fixture(() => new Promise((resolve) => { completions.push(resolve); }));
+    f.controller.state.entriesByDirectory = { "": [directory("old")] };
+    const previous = f.controller.state.entriesByDirectory;
+    const quiet = f.controller.refreshVisibleDirectories();
+    const explicit = f.controller.refreshDirectory("");
+    expect(f.controller.rootLoading).toBe(true);
+    completions[0]!([directory("stale")]);
+    await quiet;
+    expect(f.controller.state.entriesByDirectory).toBe(previous);
+    expect(f.controller.rootLoading).toBe(true);
+    completions[1]!([directory("fresh")]);
+    await explicit;
+    expect(f.controller.state.entriesByDirectory[""]).toEqual([directory("fresh")]);
+    expect(f.controller.rootLoading).toBe(false);
+    f.controller.dispose();
+  });
+
+  it("retains a background error until success, then clears it without replacing equal entries", async () => {
+    const list = vi.fn<() => Promise<ProjectTreeEntry[]>>().mockRejectedValueOnce(new Error("offline"));
+    const f = fixture(list);
+    f.controller.state.entriesByDirectory = { "": [directory("a")] };
+    const previous = f.controller.state.entriesByDirectory;
+    await f.controller.refreshVisibleDirectories();
+    expect(f.controller.rootError).toBe("offline");
+    let finish!: (entries: ProjectTreeEntry[]) => void;
+    list.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const retry = f.controller.refreshVisibleDirectories();
+    expect(f.controller.rootError).toBe("offline");
+    expect(f.controller.rootLoading).toBe(false);
+    finish([directory("a")]);
+    await retry;
+    expect(f.controller.rootError).toBeUndefined();
+    expect(f.controller.state.entriesByDirectory).toBe(previous);
+    f.controller.dispose();
+  });
+
+  it.each(["workspace", "dispose"])("ignores a slow background listing after %s change", async (change) => {
+    let finish!: (entries: ProjectTreeEntry[]) => void;
+    const f = fixture(() => new Promise<ProjectTreeEntry[]>((resolve) => { finish = resolve; }));
+    f.controller.state.entriesByDirectory = { "": [directory("a")] };
+    const previous = f.controller.state.entriesByDirectory;
+    const pending = f.controller.refreshVisibleDirectories();
+    if (change === "workspace") f.replaceWorkspace();
+    else f.controller.dispose();
+    finish([directory("wrong-workspace")]);
+    await pending;
+    expect(f.controller.state.entriesByDirectory).toBe(previous);
+    f.controller.dispose();
+  });
+
   it("reloads cached root children when reopening a collapsed workspace root", async () => {
     let rootEntries = [directory("a")];
     let childEntries: ProjectTreeEntry[] = [];

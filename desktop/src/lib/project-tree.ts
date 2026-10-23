@@ -11,6 +11,24 @@ export interface ProjectTreeRow {
   readonly depth: number;
 }
 
+/** Reuse equal listing arrays and unchanged entries within an updated listing. */
+export function reconcileProjectTreeEntries(
+  previous: ProjectTreeEntry[] | undefined,
+  next: ProjectTreeEntry[],
+): ProjectTreeEntry[] {
+  if (!previous) return next;
+  if (previous.length === next.length && next.every((entry, index) => {
+    const old = previous[index]!;
+    return old.path === entry.path && old.name === entry.name && old.kind === entry.kind;
+  })) return previous;
+  const byPath = new Map(previous.map((entry) => [entry.path, entry]));
+  const entries = next.map((entry) => {
+    const old = byPath.get(entry.path);
+    return old?.name === entry.name && old.kind === entry.kind ? old : entry;
+  });
+  return entries;
+}
+
 export interface ProjectSearchMatch {
   readonly path: string;
   readonly line?: number;

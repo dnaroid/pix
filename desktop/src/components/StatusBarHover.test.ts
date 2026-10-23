@@ -24,6 +24,12 @@ function source(name: keyof typeof sources): string {
 }
 
 describe("Status bar click surfaces", () => {
+  it("aligns the provider icon with the sidebar activity icon column", () => {
+    // 3.5px footer inset + 4px button padding + 8px icon half-width = 15.5px.
+    // The 30px activity rail has a 1px right border and 2px left button border.
+    expect(statusBar).toContain("bg-chrome pl-[3.5px] pr-2.5");
+    expect(statusBar).toContain("bg-transparent px-1 transition-colors");
+  });
   it("connects keyboard-accessible usage headers to table-only sorting with direction indicators", () => {
     expect(runtimeStatus).toContain('let usageSort = $state<SessionUsageSort>("totalTokens")');
     expect(runtimeStatus).toContain("sortSessionUsageProviders(sessionUsage?.providers ?? [], usageSort)");

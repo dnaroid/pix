@@ -127,7 +127,6 @@ const PROJECT_PI_CANONICAL_DIRECTORIES: &[&str] = &[
 const PROJECT_PI_CANONICAL_FILES: &[&str] = &[
     "AGENTS.md",
     "agent-model-overrides.json",
-    "TODO.md",
     "pi-tools-suite.jsonc",
     "pix-desktop.jsonc",
     "pix.jsonc",
@@ -1466,8 +1465,19 @@ async fn reveal_project_entry(workspace: String, path: Option<String>) -> Result
 }
 
 #[tauri::command]
-async fn git_status(workspace: String) -> Result<GitSnapshot, String> {
-    run_blocking(move || git_status_from(Path::new(&workspace))).await
+async fn git_status(
+    workspace: String,
+    include_line_stats: Option<bool>,
+    include_repository_details: Option<bool>,
+) -> Result<GitSnapshot, String> {
+    run_blocking(move || {
+        git_status_with_options_from(
+            Path::new(&workspace),
+            include_line_stats.unwrap_or(true),
+            include_repository_details.unwrap_or(true),
+        )
+    })
+    .await
 }
 
 #[tauri::command]
@@ -3128,14 +3138,29 @@ fn git_command_error(label: &str, output: &std::process::Output) -> String {
 }
 
 fn git_status_from(workspace: &Path) -> Result<GitSnapshot, String> {
+    git_status_with_line_stats_from(workspace, true)
+}
+
+fn git_status_with_line_stats_from(
+    workspace: &Path,
+    include_line_stats: bool,
+) -> Result<GitSnapshot, String> {
+    git_status_with_options_from(workspace, include_line_stats, true)
+}
+
+fn git_status_with_options_from(
+    workspace: &Path,
+    include_line_stats: bool,
+    include_repository_details: bool,
+) -> Result<GitSnapshot, String> {
     let root = git_repository_root(workspace)?;
     // These read-only Git invocations are independent; running them
     // concurrently roughly halves panel-open latency on large worktrees.
     thread::scope(|scope| {
         let root = root.as_path();
-        let staged = scope.spawn(move || git_diff_numstat(root, true));
-        let unstaged = scope.spawn(move || git_diff_numstat(root, false));
-        let remotes = scope.spawn(move || git_remotes(root));
+        let staged = include_line_stats.then(|| scope.spawn(move || git_diff_numstat(root, true)));
+        let unstaged = include_line_stats.then(|| scope.spawn(move || git_diff_numstat(root, false)));
+        let remotes = include_repository_details.then(|| scope.spawn(move || git_remotes(root)));
         let status = git_output(
             root,
             &[
@@ -3148,22 +3173,31 @@ fn git_status_from(workspace: &Path) -> Result<GitSnapshot, String> {
         )
         .and_then(|output| parse_git_status_porcelain(&output.stdout))
         .and_then(|mut snapshot| {
-            snapshot.branches = git_local_branches(root, &snapshot.branch)?;
+            if include_repository_details {
+                snapshot.branches = git_local_branches(root, &snapshot.branch)?;
+            }
             Ok(snapshot)
         });
         // Line counts are presentation metadata: failures degrade to omitted counts.
-        let staged = staged.join().ok().and_then(Result::ok).unwrap_or_default();
+        let staged = staged
+            .and_then(|task| task.join().ok())
+            .and_then(Result::ok)
+            .unwrap_or_default();
         let unstaged = unstaged
-            .join()
-            .ok()
+            .and_then(|task| task.join().ok())
             .and_then(Result::ok)
             .unwrap_or_default();
         let remotes = remotes
-            .join()
-            .map_err(|_| "git remote listing panicked".to_owned())?;
+            .map(|task| {
+                task.join()
+                    .map_err(|_| "git remote listing panicked".to_owned())?
+            })
+            .transpose()?;
         let mut snapshot = status?;
-        populate_git_line_stats(root, &mut snapshot, &staged, &unstaged);
-        snapshot.remotes = remotes?;
+        if include_line_stats {
+            populate_git_line_stats(root, &mut snapshot, &staged, &unstaged);
+        }
+        snapshot.remotes = remotes.unwrap_or_default();
         Ok(snapshot)
     })
 }
@@ -4445,7 +4479,7 @@ fn sidebar_registry_indicator_state_inner(
 
     let mut project_changes = Vec::new();
     let mut project_stamps = std::collections::BTreeMap::new();
-    for artifact in ["tasks", "plans", "todo", "workspace"] {
+    for artifact in ["tasks", "plans", "workspace"] {
         let tracked = provenance.project_resources.get(artifact);
         let path = sidebar_registry_project_artifact_path(root, artifact);
         let exists = sidebar_registry_project_artifact_exists(&path, artifact, tracked.is_some())?;
@@ -4808,7 +4842,6 @@ fn sidebar_registry_project_artifact_path(root: &Path, artifact: &str) -> PathBu
     match artifact {
         "tasks" => root.join(".pi/tasks.sqlite"),
         "plans" => root.join(".pi/plans"),
-        "todo" => root.join(".pi/TODO.md"),
         "workspace" => root.join(".pi/workspace.jsonc"),
         _ => root.join(".pi"),
     }
@@ -10511,7 +10544,7 @@ mod tests {
         let hash = sidebar_registry_hash_path(&settings).expect("hash workspace settings");
         fs::write(
             workspace.join(".pi/registry.json"),
-            format!("{{\"version\":1,\"resources\":{{}},\"projectResources\":{{\"workspace\":{{\"hash\":\"{hash}\"}}}}}}\n"),
+            format!("{{\"version\":1,\"resources\":{{}},\"projectResources\":{{\"workspace\":{{\"hash\":\"{hash}\"}},\"todo\":{{\"hash\":\"retired\"}}}}}}\n"),
         )
         .expect("write workspace provenance");
         let state = SidebarIndicatorState::default();
@@ -10519,6 +10552,13 @@ mod tests {
         assert!(clean.stable);
         assert!(!clean.local_changes);
         assert!(clean.project_changes.is_empty());
+
+        fs::write(workspace.join(".pi/TODO.md"), "retired TODO changed\n")
+            .expect("write retired TODO");
+        let ignored_todo = sidebar_registry_indicator_state(&state, &workspace, &home);
+        assert!(ignored_todo.stable);
+        assert!(!ignored_todo.local_changes);
+        assert!(ignored_todo.project_changes.is_empty());
 
         fs::write(&settings, "{\"version\":1,\"updated\":true}\n").expect("external settings edit");
         let changed = sidebar_registry_indicator_state(&state, &workspace, &home);
@@ -10630,6 +10670,41 @@ mod tests {
             .expect("deleted change");
         assert_eq!(deleted.unstaged_additions, Some(0));
         assert_eq!(deleted.unstaged_deletions, Some(3));
+
+        let lean = git_status_with_line_stats_from(&workspace, false).expect("read Explorer status");
+        assert_eq!(lean.branch, before.branch);
+        assert_eq!(lean.head, before.head);
+        assert_eq!(lean.remotes, before.remotes);
+        assert_eq!(lean.branches.len(), before.branches.len());
+        assert_eq!(lean.changes.len(), before.changes.len());
+        let minimal = git_status_with_options_from(&workspace, false, false)
+            .expect("read decorations without repository details");
+        assert!(minimal.branches.is_empty());
+        assert!(minimal.remotes.is_empty());
+        assert_eq!(minimal.branch, before.branch);
+        assert_eq!(minimal.head, before.head);
+        assert_eq!(minimal.upstream, before.upstream);
+        assert_eq!(minimal.ahead, before.ahead);
+        assert_eq!(minimal.behind, before.behind);
+        assert_eq!(minimal.changes.len(), before.changes.len());
+        for (minimal, light) in minimal.changes.iter().zip(&lean.changes) {
+            assert_eq!(minimal.path, light.path);
+            assert_eq!(minimal.index_status, light.index_status);
+            assert_eq!(minimal.worktree_status, light.worktree_status);
+            assert_eq!(minimal.untracked, light.untracked);
+            assert_eq!(minimal.staged_additions, None);
+            assert_eq!(minimal.unstaged_additions, None);
+        }
+        for (light, full) in lean.changes.iter().zip(&before.changes) {
+            assert_eq!(light.path, full.path);
+            assert_eq!(light.index_status, full.index_status);
+            assert_eq!(light.worktree_status, full.worktree_status);
+            assert_eq!(light.untracked, full.untracked);
+            assert_eq!(light.staged_additions, None);
+            assert_eq!(light.staged_deletions, None);
+            assert_eq!(light.unstaged_additions, None);
+            assert_eq!(light.unstaged_deletions, None);
+        }
 
         let working = git_diff_from(&workspace, Some("tracked.txt"), GitDiffScope::Unstaged)
             .expect("read working diff");
@@ -11856,7 +11931,6 @@ mod tests {
             .expect("write QA auth config");
         for canonical_file in [
             "AGENTS.md",
-            "TODO.md",
             "agent-model-overrides.json",
             "pi-tools-suite.jsonc",
             "pix-desktop.jsonc",
@@ -11872,6 +11946,9 @@ mod tests {
                 .expect("write canonical project file");
         }
         // Unsupported legacy task storage is not canonical and is cleaned up.
+        let legacy_todo_bytes = b"# Old project TODO\n";
+        let legacy_todo = workspace.join(".pi/TODO.md");
+        fs::write(&legacy_todo, legacy_todo_bytes).expect("write retired TODO");
         let legacy_tasks_bytes = b"{\"version\":1,\"tasks\":[]}\n";
         let legacy_tasks = workspace.join(".pi/tasks.jsonc");
         fs::write(&legacy_tasks, legacy_tasks_bytes).expect("write legacy tasks.jsonc");
@@ -11909,6 +11986,7 @@ mod tests {
             + b"foreign-data".len() as u64
             + 11
             + stray_receipt_bytes.len() as u64
+            + legacy_todo_bytes.len() as u64
             + legacy_tasks_bytes.len() as u64
             + legacy_task_file_bytes.len() as u64
             + b"stale-temp".len() as u64;
@@ -11943,7 +12021,6 @@ mod tests {
         assert!(workspace.join(".pi/qa_auth.jsonc").is_file());
         for canonical_file in [
             "AGENTS.md",
-            "TODO.md",
             "agent-model-overrides.json",
             "pi-tools-suite.jsonc",
             "pix-desktop.jsonc",
@@ -11958,6 +12035,7 @@ mod tests {
             assert!(workspace.join(".pi").join(canonical_file).is_file());
         }
         assert!(!stray_receipt.exists());
+        assert!(!legacy_todo.exists());
         assert!(!legacy_tasks.exists());
         assert!(!workspace.join(".pi/tasks.d").exists());
         assert!(young_temp.is_file());

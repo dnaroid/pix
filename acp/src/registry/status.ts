@@ -88,7 +88,7 @@ export async function collectStatuses(executor: RegistryExecutor, project: Proje
 }
 
 export function projectArtifacts(scope: ProjectScope): ProjectArtifact[] {
-	return scope === "project" ? ["tasks", "plans", "todo", "workspace"] : [scope];
+	return scope === "project" ? ["tasks", "plans", "workspace"] : [scope];
 }
 
 export async function collectProjectStatuses(
@@ -107,7 +107,7 @@ export async function collectProjectStatuses(
 	}
 	const provenance = await readProvenance(cwd);
 	const statuses: ProjectArtifactStatus[] = [];
-	for (const artifact of ["tasks", "plans", "todo", "workspace"] as const) {
+	for (const artifact of ["tasks", "plans", "workspace"] as const) {
 		const localPath = projectArtifactLocalPath(cwd, artifact);
 		const remotePath = projectArtifactRegistryPath(runtime.cacheDir, projectKey, artifact);
 		const [localPathExists, remoteExists] = await Promise.all([

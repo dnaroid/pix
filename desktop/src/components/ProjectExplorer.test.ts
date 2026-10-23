@@ -30,7 +30,7 @@ describe("ProjectExplorer keyboard tree", () => {
   it("polls only visible directory listings through the mounted explorer lifecycle", () => {
     expect(explorerSource).toContain("onMount(() => createProjectFilesRefresh(() => treeController.refreshVisibleDirectories()).dispose)");
     expect(treeControllerSource).toContain("async function refreshVisibleDirectories(): Promise<void>");
-    expect(treeControllerSource).toContain('["", ...visibleExpandedDirectories()].map((path) => loadDirectory(path, requestGeneration))');
+    expect(treeControllerSource).toContain('["", ...visibleExpandedDirectories()].map((path) => loadDirectory(path, requestGeneration, false, true))');
     expect(treeControllerSource).toContain("if (!force && directoryLoads.has(path)) return directoryLoads.get(path)!");
   });
   it("exposes a default-expanded workspace root without persisting or mutating it", () => {
@@ -51,12 +51,31 @@ describe("ProjectExplorer keyboard tree", () => {
   it("checks ignore eligibility asynchronously and refreshes Git after a guarded mutation", () => {
     expect(explorerSource).toContain('invoke<boolean>("git_can_ignore"');
     expect(explorerSource).toContain('return ignoreEligibility.invalidate');
-    expect(explorerSource).toContain('ignoreEligibility.request(workspace, menuState.entry?.path ?? "")');
+    expect(explorerSource).toContain('untrack(() => void ignoreEligibility.request(requestWorkspace, path))');
     expect(explorerSource).toContain('if (canIgnoreEntry) items.push({ label: "Add to .gitignore", disabled: !canIgnore(entry) })');
     expect(explorerSource).toContain('{#if canIgnoreEntry}');
     expect(explorerSource).toContain('invoke("git_ignore_entry"');
     expect(explorerSource).toContain('!operations.isCurrent(operation) || workspace !== requestWorkspace');
     expect(explorerSource).toContain('void gitRefresh.request()');
+  });
+  it("offers path copying for the workspace root without enabling root mutations", () => {
+    const menuPolicy = explorerSource.slice(
+      explorerSource.indexOf("function menuNavigationItems("),
+      explorerSource.indexOf("function nativeMenuActions("),
+    );
+    expect(menuPolicy).toContain('}\n    items.push({ label: entry.path ? "Copy Relative Path" : "Copy Project Name" }, { label: "Copy Absolute Path" });\n    if (entry.path) {');
+    const pathCopy = explorerSource.slice(
+      explorerSource.indexOf("async function copyPath("),
+      explorerSource.indexOf("async function revealEntry("),
+    );
+    expect(pathCopy).not.toContain("if (!entry.path) return");
+    expect(pathCopy).toContain('let path = entry.path || entry.name');
+    expect(explorerSource).toContain('"Copy Project Name": () => copyPath(entry)');
+    expect(explorerSource).toContain('{menuEntry.path ? "Copy Relative Path" : "Copy Project Name"}');
+    expect(pathCopy).toContain('if (absolute) path = entry.path ? projectTreeAbsolutePath(requestWorkspace, entry.path) : requestWorkspace');
+    expect(pathCopy).toContain("await writeText(path)");
+    expect(explorerSource).toMatch(/\{\/if\}\s*<button[^>]+onclick=\{\(\) => void copyPath\(menuEntry\)\}/u);
+    expect(explorerSource).toMatch(/<span>Copy Absolute Path<\/span>\s*<\/button>\s*\{#if menuEntry.path\}/u);
   });
   it("uses shared Git snapshots for accessible decorations without changing tab stops", () => {
     expect(explorerSource).toContain("projectGitDecorations(gitSnapshot?.changes)");
@@ -209,7 +228,8 @@ describe("ProjectExplorer keyboard tree", () => {
 
   it("invalidates stale directory requests and preserves tree state across rename/delete", () => {
     expect(treeControllerSource).toContain("directoryRequestVersions");
-    expect(treeControllerSource).toContain("directoryRequestVersions.get(path) !== requestVersion");
+    expect(treeControllerSource).toContain("directoryRequestVersions.get(path) === requestVersion");
+    expect(treeControllerSource).toContain("if (!isCurrentRequest()) return;");
     expect(treeControllerSource).toContain("async function refreshDirectory(path: string)");
     expect(treeControllerSource).toContain("function remapPath(oldPath: string, newPath: string)");
     expect(treeControllerSource).toContain("function focusFallbackAfterRemoval(path: string)");

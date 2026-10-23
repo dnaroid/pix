@@ -86,7 +86,6 @@
 
   function projectEditTitle(item: RegistryItem): string {
     if (item.artifact === "workspace") return "Open project settings";
-    if (item.artifact === "todo") return "Open/edit TODO.md";
     if (item.artifact === "plans") return "Browse project plans";
     return "Open project tasks";
   }

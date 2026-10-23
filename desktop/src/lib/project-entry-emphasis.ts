@@ -4,7 +4,7 @@ import type { ProjectTreeEntry } from "./project-tree";
 // are canonical storage locations, but intentionally receive no visual accent.
 const durableDirectories = new Set(["agents", "plans", "search", "skills", "task-attachments"]);
 const canonicalFiles = new Set([
-  "AGENTS.md", "agent-model-overrides.json", "TODO.md", "pi-tools-suite.jsonc",
+  "AGENTS.md", "agent-model-overrides.json", "pi-tools-suite.jsonc",
   "pix-desktop.jsonc", "pix.jsonc", "project-icon.gif", "project-icon.jpg",
   "project-icon.png", "project-icon.svg", "project-icon.webp", "qa_auth.jsonc",
   "registry.json", "registry.jsonc", "registry-project-key", "tasks.sqlite",

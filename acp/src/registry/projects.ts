@@ -1,5 +1,5 @@
 import { RegistryContext, RegistryExecutor, confirmOverwrite, notify } from "./context.js";
-import { PROJECT_PLANS_DIR, PROJECT_TASKS_FILE, PROJECT_TODO_FILE, ProjectArtifact, ProjectScope, REGISTRY_PROJECTS_DIR } from "./model.js";
+import { PROJECT_PLANS_DIR, PROJECT_TASKS_FILE, PROJECT_WORKSPACE_FILE, ProjectArtifact, ProjectScope, REGISTRY_PROJECTS_DIR } from "./model.js";
 import { loadRuntimeConfig } from "./config.js";
 import { ensureRegistryCache, projectArtifactRevision, resolveProjectKey, runGit } from "./git.js";
 import { projectArtifacts } from "./status.js";
@@ -47,7 +47,7 @@ export async function pushProjectState(executor: RegistryExecutor, ctx: Registry
 		if (scope === "plans" && alreadyAbsent.includes("plans")) {
 			notify(ctx, `Project registry already has no ${PROJECT_PLANS_DIR}/ state for ${projectKey}.`);
 		} else {
-			notify(ctx, `No .pi/${PROJECT_TASKS_FILE}, .pi/${PROJECT_PLANS_DIR}/, or .pi/${PROJECT_TODO_FILE} state exists to push.`);
+			notify(ctx, `No .pi/${PROJECT_TASKS_FILE}, .pi/${PROJECT_PLANS_DIR}/, or .pi/${PROJECT_WORKSPACE_FILE} state exists to push.`);
 		}
 		return;
 	}
@@ -130,7 +130,7 @@ export async function pullProjectState(executor: RegistryExecutor, ctx: Registry
 		else if (scope !== "project") throw new Error(`Registry has no ${artifact} state for project ${projectKey}.`);
 	}
 	if (targets.length === 0) {
-		notify(ctx, `Registry has no ${PROJECT_TASKS_FILE}, ${PROJECT_PLANS_DIR}/, or ${PROJECT_TODO_FILE} state for project ${projectKey}.`);
+		notify(ctx, `Registry has no ${PROJECT_TASKS_FILE}, ${PROJECT_PLANS_DIR}/, or ${PROJECT_WORKSPACE_FILE} state for project ${projectKey}.`);
 		return;
 	}
 

@@ -31,6 +31,33 @@ Staged and working-tree changes retain file status, per-scope additions/deletion
 
 When there are no changed files, the panel presents a compact “Working tree clean” status. If the branch is ahead, it appends the local commit count and says “to push”, or “not pushed” when publication is blocked.
 
+### Explorer local status reads
+
+The mounted Project Explorer refreshes Git decorations about five seconds after
+each completed read while the window is visible and focused, or thirty seconds
+in the background. Refocusing and Pix-owned file operations request an immediate
+read. Reads serialize and coalesce; unmounting stops scheduling, including after
+an in-flight completion. Loading-state updates from the parent sidebar do not
+restart this completion-based cadence. The lifecycle effect enqueues another read
+only when the workspace or explicit refresh key changes, and runs its I/O callback
+outside dependency collection so loading writes cannot enqueue redundant work.
+
+Explorer requests `git_status` with `includeLineStats: false`: neither
+`diff --numstat` nor untracked-file content reads for line counts run. The first
+successful read bootstraps local branches and remotes. Subsequent Explorer reads
+also set `includeRepositoryDetails: false`, skipping branch/remote listings while
+still reading status paths and branch/upstream/HEAD/ahead/behind. The store keeps
+cached branch/remote metadata; a branch or upstream switch triggers a metadata
+reload. Other external branch-list/remote-config changes are picked up by the
+next full read. Equal snapshots retain their identity and do not republish Git
+decorations.
+
+Both options default to true for Source Control, explicit Git retries and mutation
+safety checkpoints. Explorer may share an in-flight full read; a full reader
+arriving during a lean read waits for a subsequent full read. Workspace resets
+discard cached metadata, queued upgrades and stale results, including metadata
+reload completions.
+
 ### Remote CI for the current HEAD
 
 When HEAD exists, Source Control shows a compact CI state beside the upstream/ahead/behind summary. CI is bound to the exact full HEAD SHA, never merely the branch name, so a previous green run on the same branch cannot be presented as the result for unpublished local commits. The detail disclosure is collapsed by default and lists matching GitHub Actions workflow runs or GitLab pipelines. Runs have no nested disclosure: metadata and jobs are visible together when the CI section is open. Jobs are fetched lazily when the CI section opens, including new runs arriving while it is open; observed runs are refreshed again after later CI-status polls so queued/running jobs can settle without reopening the app. Job lookups remain serialized, and background job refresh keeps the previous rows visible instead of replacing them with a loading placeholder.

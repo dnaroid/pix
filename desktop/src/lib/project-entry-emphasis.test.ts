@@ -38,6 +38,8 @@ describe("Project Explorer Pix emphasis", () => {
   });
 
   it("does not accent scratch, unknown entries, or whole descendant trees", () => {
+    expect(nativeAllowlist("PROJECT_PI_CANONICAL_FILES")).not.toContain("TODO.md");
+    expect(emphasis(".pi/TODO.md")).toBeUndefined();
     for (const path of [".pi/artifacts", ".pi/subagents", ".pi/tasks.d", ".pi/unknown.json", ".pi/.scratch", ".pi/search-sources.json", ".pi/skills/demo/SKILL.md", ".pi/artifacts/AGENTS.md", "app/.pi/plans", ".pi/plans-old"]) {
       expect(emphasis(path), path).toBeUndefined();
       expect(emphasis(path, "directory"), path).toBeUndefined();

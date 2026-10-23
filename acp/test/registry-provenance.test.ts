@@ -72,6 +72,20 @@ test("missing provenance starts in JSONC with schema metadata", async (t) => {
   assert.deepEqual(parse(await fs.readFile(canonical, "utf8")), { $schema: REGISTRY_SCHEMA_URL, ...provenance });
 });
 
+test("retired TODO provenance is ignored on read and removed on the next write", async (t) => {
+  const { ctx, canonical } = await fixture(t);
+  const source = '{ // preserve comment\n "version":1,"resources":{},"projectResources":{"todo":{"artifact":"todo"}},"future":true}\n';
+  await fs.writeFile(canonical, source);
+  const provenance = await readProvenance(ctx);
+  assert.deepEqual(provenance.projectResources, {});
+  assert.equal(await fs.readFile(canonical, "utf8"), source);
+  await writeProvenance(ctx, provenance);
+  const next = await fs.readFile(canonical, "utf8");
+  assert.deepEqual(parse(next).projectResources, {});
+  assert.equal(parse(next).future, true);
+  assert.ok(next.includes("// preserve comment"));
+});
+
 test("migration refuses to replace canonical state created by another writer", async (t) => {
   const { ctx, canonical, legacy } = await fixture(t);
   const source = '{"version":1,"resources":{}}';

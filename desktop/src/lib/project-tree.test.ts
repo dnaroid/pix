@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   flattenProjectTree,
+  reconcileProjectTreeEntries,
   insertPromptPaths,
   insertProjectTreePromptPath,
   parseProjectTreeDrag,
@@ -14,6 +15,24 @@ import {
 } from "./project-tree";
 
 describe("project tree", () => {
+  it("reuses equal arrays, but detects entry name/kind/order changes", () => {
+    const previous: ProjectTreeEntry[] = [
+      { name: "a", path: "a", kind: "directory" },
+      { name: "b", path: "b", kind: "file" },
+    ];
+    expect(reconcileProjectTreeEntries(previous, structuredClone(previous))).toBe(previous);
+    expect(reconcileProjectTreeEntries(previous, [...previous].reverse())).not.toBe(previous);
+    for (const update of [{ name: "renamed" }, { kind: "file" as const }]) {
+      const next = [{ ...previous[0]!, ...update }, { ...previous[1]! }];
+      const result = reconcileProjectTreeEntries(previous, next);
+      expect(result[0]).toBe(next[0]);
+      expect(result[1]).toBe(previous[1]);
+    }
+    const empty: ProjectTreeEntry[] = [];
+    expect(reconcileProjectTreeEntries(empty, [])).toBe(empty);
+    expect(reconcileProjectTreeEntries(undefined, previous)).toBe(previous);
+  });
+
   it("names the workspace root independently of its empty relative path", () => {
     expect(projectTreeRootEntry("/projects/my-app/")).toEqual({ name: "my-app", path: "", kind: "directory" });
     expect(projectTreeRootEntry("/").name).toBe("Project");

@@ -6,7 +6,7 @@ export const REGISTRY_STATE_CHANNEL = "pi-tools-suite:resource-registry:state";
 
 export type RegistryResourceType = "skill" | "agent" | "project";
 export type RegistryCatalogSection = "installed" | "available";
-export type RegistryProjectArtifact = "tasks" | "plans" | "todo" | "workspace";
+export type RegistryProjectArtifact = "tasks" | "plans" | "workspace";
 export type RegistryPublicationScope = "global" | "project";
 export type RegistryStatus =
   | "up-to-date"
@@ -88,7 +88,7 @@ export type RegistryActionRequest =
     };
 
 const RESOURCE_TYPES = new Set<RegistryResourceType>(["skill", "agent", "project"]);
-const PROJECT_ARTIFACTS = new Set<RegistryProjectArtifact>(["tasks", "plans", "todo", "workspace"]);
+const PROJECT_ARTIFACTS = new Set<RegistryProjectArtifact>(["tasks", "plans", "workspace"]);
 const PUBLICATION_SCOPES = new Set<RegistryPublicationScope>(["global", "project"]);
 const STATUSES = new Set<RegistryStatus>([
   "up-to-date",

@@ -1,5 +1,9 @@
 /** Visible explorer only: serialize local reads and stop scheduling on teardown. */
-export function createProjectGitRefresh(refresh: () => Promise<void>, intervalMs = 5_000) {
+export function createProjectGitRefresh(
+  refresh: () => Promise<void>,
+  intervalMs = 5_000,
+  foreground = () => typeof document === "undefined" || (document.visibilityState === "visible" && document.hasFocus()),
+) {
   let disposed = false;
   let running = false;
   let pending = false;
@@ -23,7 +27,7 @@ export function createProjectGitRefresh(refresh: () => Promise<void>, intervalMs
         if (pending) {
           pending = false;
           void request();
-        } else timer = setTimeout(() => void request(), intervalMs);
+        } else timer = setTimeout(() => void request(), foreground() ? intervalMs : 30_000);
       }
     }
   }

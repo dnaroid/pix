@@ -463,7 +463,7 @@ export interface DesktopQueueConsumedNotification {
 }
 
 export type DesktopRegistryResourceType = "skill" | "agent";
-export type DesktopRegistryProjectScope = "tasks" | "plans" | "todo" | "workspace" | "project";
+export type DesktopRegistryProjectScope = "tasks" | "plans" | "workspace" | "project";
 
 export type DesktopRegistryActionRequest = { readonly cwd: string } & (
 	| { readonly action: "set-agent-model"; readonly type: "agent"; readonly name: string; readonly model: string }
@@ -788,7 +788,7 @@ export function parseDesktopRegistryActionRequest(value: unknown): DesktopRegist
 		};
 	}
 	if (value.action === "push-project" || value.action === "pull-project" || value.action === "sync-project") {
-		if (!["tasks", "plans", "todo", "workspace", "project"].includes(String(value.scope))) {
+		if (!["tasks", "plans", "workspace", "project"].includes(String(value.scope))) {
 			throw new RequestError(ERROR_INVALID_PARAMS, "invalid registry project scope");
 		}
 		return {

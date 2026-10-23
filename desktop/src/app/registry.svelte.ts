@@ -129,7 +129,7 @@ export function createRegistryStore(options: RegistryStoreOptions) {
   function reloadLocalProjectState(scope: RegistryProjectSyncScope, workspace: string): void {
     if (scope === "workspace" || scope === "project") void options.loadWorkspaceSettings?.(workspace);
     if (scope === "tasks" || scope === "project") void options.loadProjectTasks(workspace);
-    if (scope === "plans" || scope === "todo" || scope === "project") {
+    if (scope === "plans" || scope === "project") {
       void options.loadProjectDocuments(workspace);
     }
   }

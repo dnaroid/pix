@@ -1,7 +1,7 @@
 /** Editor schema for Registry synchronization provenance, not Registry configuration. */
 import { Type } from "typebox";
 
-const Artifact = Type.Union(["tasks", "plans", "todo", "workspace"].map((value) => Type.Literal(value)));
+const Artifact = Type.Union(["tasks", "plans", "workspace"].map((value) => Type.Literal(value)));
 const Origin = {
 	remote: Type.String({ description: "Registry Git remote." }),
 	branch: Type.String(),
@@ -20,7 +20,7 @@ export const RegistryProvenanceSchema = Type.Object({
 		projectKey: Type.Optional(Type.String()),
 	})),
 	projectResources: Type.Optional(Type.Object(Object.fromEntries(
-		["tasks", "plans", "todo", "workspace"].map((key) => [key, Type.Optional(Type.Object({
+		["tasks", "plans", "workspace"].map((key) => [key, Type.Optional(Type.Object({
 			artifact: Artifact,
 			projectKey: Type.String(),
 			...Origin,

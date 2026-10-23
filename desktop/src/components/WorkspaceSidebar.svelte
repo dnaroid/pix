@@ -17,7 +17,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { windowLayoutKey } from "../lib/window-layout-storage";
   import { modelThinkingConfigState } from "../lib/model-thinking";
-  import { onMount, tick } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
   import { createWorkspaceSearchIndexOwner } from "../lib/workspace-search-index-owner.svelte";
   import {
     attachmentFromFile,
@@ -38,10 +38,7 @@
   import type { ProjectFileLineRange } from "../lib/project-files";
   import type { ProjectTreeEntry } from "../lib/project-tree";
   import type { SettingsConfigKind } from "../lib/settings";
-  import {
-    PROJECT_TODO_PATH,
-    type ProjectDocumentsSnapshot,
-  } from "../lib/project-documents";
+  import type { ProjectDocumentsSnapshot } from "../lib/project-documents";
   import {
     type RegistryActionRequest,
     type RegistryDiffState,
@@ -59,6 +56,7 @@
     type SidebarIndicatorTab,
   } from "../lib/sidebar-indicators";
   import { gitPushBlockedReason, gitStageGenerateCommitPushBlockedReason } from "../lib/git-workflow";
+  import { sidebarGitSignature } from "../lib/sidebar-git-signature";
   import { createWorkspaceSidebarIndicatorActions } from "./workspace-sidebar-indicator-actions";
   import { createSidebarProjectRetry } from "./sidebar-project-retry";
   import SidebarIndicatorMenu from "./SidebarIndicatorMenu.svelte";
@@ -221,6 +219,7 @@
     onGitRefresh,
     onGitOpen,
     onGitStatusRefresh,
+    onGitExplorerStatusRefresh,
     onGitInitialize,
     onGitOpenDiff,
     onGitStage,
@@ -334,6 +333,7 @@
     onGitRefresh: () => void;
     onGitOpen?: () => void;
     onGitStatusRefresh?: () => Promise<void>;
+    onGitExplorerStatusRefresh?: () => Promise<void>;
     onGitInitialize: () => void;
     onGitOpenDiff: (path: string | undefined, scope: GitDiffScope) => void;
     onGitStage: (path?: string) => Promise<boolean>;
@@ -374,11 +374,16 @@
   let editorGeneration = 0;
   let editorCreateStatus = $state<ProjectTaskStatus>("todo");
   const tasksView = createWorkspaceSidebarTasksViewController();
-  $effect(() => { tasksView.selectWorkspace(workspace); });
+  const effectWorkspace = $derived(workspace);
+  const observeTasks = $derived(activeTab === "tasks" && !layoutController.collapsed && !editorOpen && Boolean(workspace));
   $effect(() => {
-    workspace;
-    if (activeTab === "tasks" && !layoutController.collapsed && !editorOpen && workspace) {
-      return onObserveTasks?.();
+    const target = effectWorkspace;
+    untrack(() => tasksView.selectWorkspace(target));
+  });
+  $effect(() => {
+    effectWorkspace;
+    if (observeTasks) {
+      return untrack(() => onObserveTasks?.());
     }
   });
   let editingTaskId = $state<string | null>(null);
@@ -418,12 +423,18 @@
   const workSections = createWorkPanelSections((cause, target) => {
     createDiagnosticLogger(() => ({ workspace: target })).report(cause, "frontend:work-panel-state");
   });
-  $effect(() => { void workSections.load(workspace); });
+  $effect(() => {
+    const target = effectWorkspace;
+    untrack(() => void workSections.load(target));
+  });
   $effect(() => () => workSections.dispose());
   // An empty Plans section stays collapsed: there is nothing to expand.
   const workSectionEmpty = (id: WorkSectionId) => id === "plans" && projectDocuments.plans.length === 0;
   const workSectionOpen = (id: WorkSectionId) => workSections.ready && !workSectionEmpty(id) && workSections.isOpen(id);
-  $effect(() => plansView.selectWorkspace(workspace));
+  $effect(() => {
+    const target = effectWorkspace;
+    untrack(() => plansView.selectWorkspace(target));
+  });
   let projectTreeRefreshKey = $state(0);
   const taskDragController = createWorkspaceSidebarTaskDragController({
     busy: () => busy,
@@ -518,10 +529,6 @@
   const activeTabTitle = $derived(SIDEBAR_LABELS[activeTab]);
   const draggedTask = $derived(taskDragController.taskId ? tasks.find((task) => task.id === taskDragController.taskId) : undefined);
   function openRegistryProjectArtifact(artifact: RegistryProjectArtifact): void {
-    if (artifact === "todo") {
-      onOpenProjectDocument(PROJECT_TODO_PATH, projectDocuments.todoExists);
-      return;
-    }
     if (artifact === "plans") {
       void openPlansSegment();
       return;
@@ -550,31 +557,29 @@
     indicatorService?.setViewedTab(viewedTab);
   });
 
+  const gitIndicatorSignature = $derived(sidebarGitSignature(gitSnapshot, gitError));
+  const gitRemoteTarget = $derived(gitSnapshot ? `${gitSnapshot.branch}\0${gitSnapshot.upstream ?? ""}` : "");
   $effect(() => {
-    // Full Git refreshes already happen after Pix-owned mutations. Use them as
-    // an invalidation signal so the cheap Activity Bar snapshot does not wait
-    // for its next timer tick. A branch/upstream switch forces one remote probe;
-    // ordinary local refreshes only recheck the network while an update hint is
-    // already active.
-    const nextRemoteTarget = gitSnapshot
-      ? `${gitSnapshot.branch}\0${gitSnapshot.upstream ?? ""}`
-      : "";
+    // Equal snapshots (including Explorer polls) must not trigger another
+    // native Git/config/Registry poll. Svelte compares these derived strings.
+    gitIndicatorSignature;
+    const nextRemoteTarget = gitRemoteTarget;
     const remoteTargetChanged = observedGitRemoteTarget !== ""
       && nextRemoteTarget !== ""
       && nextRemoteTarget !== observedGitRemoteTarget;
     observedGitRemoteTarget = nextRemoteTarget;
-    gitError;
     queueMicrotask(() => {
       indicatorService?.invalidateFast();
       indicatorService?.invalidateGitRemote(remoteTargetChanged);
     });
   });
 
+  const effectRegistrySnapshot = $derived(registrySnapshot);
   $effect(() => {
     // Registry session-state remains authoritative for remote state, but a
     // pushed refresh/action result is also a good point to recheck the cheap
     // local-dirty signal instead of waiting for the next fast poll.
-    registrySnapshot;
+    effectRegistrySnapshot;
     queueMicrotask(() => indicatorService?.invalidateFast());
   });
 
@@ -1131,7 +1136,7 @@
                 bind:this={projectExplorer}
                 {workspace}
                 {gitSnapshot}
-                {onGitStatusRefresh}
+                onGitStatusRefresh={onGitExplorerStatusRefresh ?? onGitStatusRefresh}
                 {externalEditorLabel}
                 refreshKey={projectTreeRefreshKey}
                 onListDirectory={onListProjectDirectory}
@@ -1284,7 +1289,7 @@
       {visibleModelRefs}
       {rememberedThinkingByModel}
       {onVisibleModelsChange}
-      projectFileSuggestions={[...projectDocuments.plans, ...(projectDocuments.todoExists ? [PROJECT_TODO_PATH] : [])]}
+      projectFileSuggestions={projectDocuments.plans}
       onValidateProjectFile={onValidateProjectFile}
       onOpenRelatedTask={openRelatedTask}
       onOpenLink={openTaskLink}

@@ -151,13 +151,14 @@ test("desktop registry actions are workspace-scoped and validate resource/projec
 	assert.deepEqual(parseDesktopRegistryActionRequest({
 		cwd: "/workspace",
 		action: "pull-project",
-		scope: "todo",
+		scope: "plans",
 	}), {
 		cwd: "/workspace",
 		action: "pull-project",
-		scope: "todo",
+		scope: "plans",
 	});
 	for (const action of ["push-project", "pull-project", "sync-project"] as const) {
+		assert.throws(() => parseDesktopRegistryActionRequest({ cwd: "/workspace", action, scope: "todo" }));
 		assert.deepEqual(parseDesktopRegistryActionRequest({ cwd: "/workspace", action, scope: "workspace" }), {
 			cwd: "/workspace",
 			action,

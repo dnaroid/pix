@@ -95,10 +95,10 @@ describe("registry session state", () => {
             actions: ["update", "uninstall", "remove"],
           },
           {
-            id: "project:todo",
+            id: "project:workspace",
             type: "project",
-            name: "TODO.md",
-            artifact: "todo",
+            name: "workspace.jsonc",
+            artifact: "workspace",
             status: "local-changes",
             statusLabel: "LOCAL CHANGES",
             icon: "↑",
@@ -223,10 +223,10 @@ describe("registry session state", () => {
       actions: ["install"],
     };
     const project: RegistryItem = {
-      id: "project:todo",
+      id: "project:workspace",
       type: "project",
-      name: "TODO.md",
-      artifact: "todo",
+      name: "workspace.jsonc",
+      artifact: "workspace",
       status: "up-to-date",
       statusLabel: "UP TO DATE",
       icon: "✓",
@@ -280,10 +280,10 @@ describe("registry session state", () => {
   it("fuzzy search narrows project resources by name", () => {
     const items = [
       {
-        id: "project:todo",
+        id: "project:workspace",
         type: "project" as const,
-        name: "TODO.md",
-        artifact: "todo" as const,
+        name: "workspace.jsonc",
+        artifact: "workspace" as const,
         status: "local-only" as const,
         statusLabel: "LOCAL ONLY",
         icon: "+",
@@ -317,7 +317,7 @@ describe("registry session state", () => {
       },
     ];
 
-    expect(searchRegistryItems(items, "todo").map((item) => item.id)).toEqual(["project:todo"]);
+    expect(searchRegistryItems(items, "workspace").map((item) => item.id)).toEqual(["project:workspace"]);
     expect(searchRegistryItems(items, "plan").map((item) => item.id)).toEqual(["project:plans"]);
     expect(searchRegistryItems(items, "task").map((item) => item.id)).toEqual(["project:tasks"]);
   });
@@ -469,7 +469,7 @@ describe("registry resource diff", () => {
     expect(registryDiffAvailable({
       ...diffableItem(),
       type: "project",
-      artifact: "todo",
+      artifact: "workspace",
       status: "local-changes",
     })).toBe(false);
   });

@@ -102,10 +102,6 @@
                 },
                 {
                   "type": "string",
-                  "const": "todo"
-                },
-                {
-                  "type": "string",
                   "const": "workspace"
                 }
               ]
@@ -153,61 +149,6 @@
                 },
                 {
                   "type": "string",
-                  "const": "todo"
-                },
-                {
-                  "type": "string",
-                  "const": "workspace"
-                }
-              ]
-            },
-            "projectKey": {
-              "type": "string"
-            },
-            "remote": {
-              "type": "string",
-              "description": "Registry Git remote."
-            },
-            "branch": {
-              "type": "string"
-            },
-            "revision": {
-              "type": "string",
-              "description": "Last synchronized Git revision."
-            },
-            "hash": {
-              "type": "string",
-              "description": "Last synchronized content hash."
-            }
-          }
-        },
-        "todo": {
-          "type": "object",
-          "required": [
-            "artifact",
-            "projectKey",
-            "remote",
-            "branch",
-            "revision",
-            "hash"
-          ],
-          "properties": {
-            "artifact": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "const": "tasks"
-                },
-                {
-                  "type": "string",
-                  "const": "plans"
-                },
-                {
-                  "type": "string",
-                  "const": "todo"
-                },
-                {
-                  "type": "string",
                   "const": "workspace"
                 }
               ]
@@ -252,10 +193,6 @@
                 {
                   "type": "string",
                   "const": "plans"
-                },
-                {
-                  "type": "string",
-                  "const": "todo"
                 },
                 {
                   "type": "string",

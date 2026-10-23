@@ -10,13 +10,13 @@ Implemented; this is the current project-state registry contract.
 
 ## Goal
 
-Synchronize project-scoped tasks, plans, TODO, and workspace state through the
+Synchronize project-scoped tasks, plans, and workspace state through the
 private Git registry without making task attachments depend on machine-specific
 absolute paths.
 
 ## Scope
 
-- Desktop Registry push/pull/sync for tasks, plans, TODO, workspace and project.
+- Desktop Registry push/pull/sync for tasks, plans, workspace and project.
 - Project provenance in canonical `.pi/registry.jsonc` (with read-only legacy
   lookup of `.pi/registry.json` when the canonical file is absent).
 - Portable synchronization of SQLite task rows and SHA-256 content-addressed
@@ -32,8 +32,10 @@ For project key `<key>`, the registry stores:
 - `projects/<key>/task-attachments/<sha256>` for blobs referenced by the
   synchronized SQLite attachment association table
 - `projects/<key>/plans/`
-- `projects/<key>/TODO.md`
 - `projects/<key>/workspace.jsonc`
+
+Legacy `projects/<key>/TODO.md` files are ignored; Registry does not publish,
+fetch, report or delete them.
 
 The Registry SQLite copy is a consistent transport snapshot: neither side
 copies a live database's raw bytes without its WAL. Task descriptions contain
@@ -86,15 +88,15 @@ JSONC/task overlay import or fallback.
    disposable clone. Other project keys and reusable skills/agents are not
    included.
 8. Pix Desktop owns one background project-state sync coordinator. A successful
-   per-row SQLite task write marks `tasks` dirty; saving `.pi/TODO.md` marks `todo`
-   dirty; saving a canonical Markdown plan (`.pi/plans/**/*.md`, excluding
+   per-row SQLite task write marks `tasks` dirty; saving a canonical Markdown
+   plan (`.pi/plans/**/*.md`, excluding
    generated/temporary paths) marks `plans` dirty; successful
    Desktop saves of `.pi/workspace.jsonc` mark `workspace` dirty. The fast sidebar
    Registry poll also reports project artifacts that changed outside those
    Desktop save paths, so agent/external edits enter the same coordinator. Those
    external-change signals also refresh the corresponding local Desktop store
-   before sync: `tasks` reloads the SQLite task view, while `plans` and `todo`
-   reload the project-document snapshot. A queued signal is discarded if the
+   before sync: `tasks` reloads the SQLite task view, while `plans` reloads the
+   plan document snapshot. A queued signal is discarded if the
    workspace changed before it is applied.
    Canonical changes are determined by the Registry payload, **not directory
    timestamps or SQLite sidecar activity**. The native poll and ACP use the same
@@ -121,7 +123,7 @@ JSONC/task overlay import or fallback.
    artifact collapses into one project operation. The automatic request is
    `sync-project`, handled directly by the ACP Registry service; it never
    opens confirmation dialogs or emits successful-push notifications. It syncs
-   tasks/plans/TODO/workspace and also saves newly discovered Local-only project
+   tasks/plans/workspace and also saves newly discovered Local-only project
    skills/agents under `projects/<key>/skills|agents`. Published resource edits
    and unsafe/conflict/removal states are not automatically pushed. It never
    promotes a resource to Global (see publication/tags spec).
@@ -156,13 +158,13 @@ JSONC/task overlay import or fallback.
     creates `.pi/tasks.sqlite` with schema v1 and WAL plus
     `.pi/plans/` and `.pi/task-attachments/`, then reloads project tasks and
     documents. Remote Registry setup remains a separate action.
-15. Saving a TODO or plan never creates a missing `.pi` directory. Those
-    project-document writes require the explicit local initialization action,
-    so a document edit cannot silently create incomplete Registry state.
+15. Legacy TODO and plan document saves never create a missing `.pi` directory.
+    Those project-document writes require the explicit local initialization
+    action; plans, but not TODO, participate in Registry project-state sync.
 16. `.pi/workspace.jsonc` is a project artifact with the same project-key,
-    provenance, status, conflict confirmation, and push/pull semantics as TODO;
-    its remote path is `projects/<key>/workspace.jsonc`. Pulling it refreshes
-    Desktop project settings; switching back to the scripts panel loads the
+    provenance, status, conflict confirmation, and push/pull semantics as tasks
+    and plans; its remote path is `projects/<key>/workspace.jsonc`.
+    Pulling it refreshes Desktop project settings; switching back to the scripts panel loads the
     pulled launch commands. The whole file is synchronized without redaction:
     do not put credentials or private shell arguments in it unless the private
     Registry remote is trusted to hold them. The Desktop ACP Registry request
@@ -297,7 +299,7 @@ JSONC/task overlay import or fallback.
   not delete the database. See [Desktop universal search](desktop-universal-search.md).
 - Any other regular top-level directory directly under `.pi/` is non-canonical
   and is removed recursively. Top-level regular files are allowlist-based too:
-  `AGENTS.md` (untracked personal rules for Pix context), `TODO.md`,
+  `AGENTS.md` (untracked personal rules for Pix context),
   `pi-tools-suite.jsonc`, `pix-desktop.jsonc`, `pix.jsonc`,
   `qa_auth.jsonc`, `registry.json`, `registry.jsonc`, `tasks.sqlite`, `tasks.sqlite-wal`,
   `tasks.sqlite-shm`, `tasks.sqlite-journal`, `todo-plan.json`,
@@ -305,7 +307,15 @@ JSONC/task overlay import or fallback.
   (for example temporary receipt JSONs and unsupported legacy `tasks.jsonc`)
   are reclaimable. The existing cleanup of `.DS_Store`
   and stale Pix temporary files still applies, while fresh Pix temp files keep
-  their stale-age protection.
+  their stale-age protection. `.pi/TODO.md` is non-canonical and is eligible
+  for Clean and normal 72-hour TTL cleanup; it is not eagerly deleted merely
+  because Registry synchronization was retired. Desktop retains legacy TODO
+  document read/edit compatibility, but TODO is not a Registry task-link
+  suggestion or Registry project artifact.
+- Previously recorded `projectResources.todo` provenance is ignored when read;
+  provenance reads remain side-effect free. The next provenance write prunes
+  that retired entry. Existing remote TODO files remain ignored and are not
+  destructively removed.
 - Recursive removal uses no-follow traversal: symbolic-link targets are never
   traversed or deleted. A root `.pi` symbolic link or non-directory is rejected
   rather than followed.

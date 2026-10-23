@@ -20,8 +20,6 @@ export const PROJECT_TASK_ATTACHMENTS_DIR = "task-attachments";
 
 export const PROJECT_PLANS_DIR = "plans";
 
-export const PROJECT_TODO_FILE = "TODO.md";
-
 export const PROJECT_WORKSPACE_FILE = "workspace.jsonc";
 
 export const REGISTRY_TASK_ATTACHMENT_SCHEME = "pix-task-attachment:";
@@ -69,7 +67,7 @@ export type PublicationScope = "global" | "project";
 
 export type ResourceScope = ResourceType | "all";
 
-export type ProjectArtifact = "tasks" | "plans" | "todo" | "workspace";
+export type ProjectArtifact = "tasks" | "plans" | "workspace";
 
 export type ProjectScope = ProjectArtifact | "project";
 

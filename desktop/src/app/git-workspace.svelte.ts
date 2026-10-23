@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { confirmDesktopAction } from "../lib/confirm-action";
 import type { GitDiff, GitDiffScope, GitSnapshot } from "../lib/git";
+import { sameGitSnapshot } from "../lib/git-snapshot";
 import { sameGitDiff, gitPushBlockedReason, gitStageGenerateCommitPushBlockedReason, gitUpdateNotice, type GitUpdateResult, type GitRepositoryAction, type GitRepositoryDetails, type GitHistoryEntry, type GitCommitDiff, type GitStashEntry, type GitReviewResult } from "../lib/git-workflow";
 import type { WorkbenchTabId } from "../lib/workbench-tabs";
 
@@ -41,6 +42,7 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
   let workbenchOpenedOrder = $state(0);
   let loadGeneration = 0;
   let pendingRefresh: Promise<void> | null = null;
+  let pendingRefreshIncludesLineStats = true;
   // Last successful remote-ref update per workspace (fetch/pull/update/push).
   const remoteCheckedAt = new Map<string, number>();
   const REMOTE_REF_COMMANDS = new Set(["git_fetch", "git_pull", "git_update", "git_push"]);
@@ -64,11 +66,21 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
     closeDiff();
   }
 
-  function refresh(): Promise<void> {
-    if (pendingRefresh) return pendingRefresh;
+  function refresh(includeLineStats = true): Promise<void> {
+    if (pendingRefresh) {
+      if (!includeLineStats || pendingRefreshIncludesLineStats) return pendingRefresh;
+      // A panel/safety checkpoint must not settle for an Explorer-only read.
+      const workspace = options.workspace();
+      const requestGeneration = generation;
+      return pendingRefresh.then(() => {
+        if (generation !== requestGeneration || options.workspace() !== workspace) return;
+        return refresh();
+      });
+    }
     const workspace = options.workspace();
     if (!workspace) return Promise.resolve();
-    const request = loadStatus(workspace).finally(() => {
+    pendingRefreshIncludesLineStats = includeLineStats;
+    const request = loadStatus(workspace, includeLineStats).finally(() => {
       if (pendingRefresh === request) pendingRefresh = null;
     });
     pendingRefresh = request;
@@ -85,15 +97,32 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
     await refresh();
   }
 
-  async function loadStatus(workspace: string): Promise<void> {
+  async function loadStatus(workspace: string, includeLineStats: boolean): Promise<void> {
     const requestGeneration = ++loadGeneration;
+    // Bootstrap repository metadata once. Explorer subsequently needs only
+    // porcelain status; panel reads and mutation checkpoints always read all.
+    const previous = snapshot;
+    const includeRepositoryDetails = includeLineStats || !previous;
     loading = true;
     error = null;
     try {
-      const next = await invoke<GitSnapshot>("git_status", { workspace });
+      let next = await invoke<GitSnapshot>("git_status", {
+        workspace,
+        ...(!includeLineStats ? { includeLineStats: false } : {}),
+        ...(!includeRepositoryDetails ? { includeRepositoryDetails: false } : {}),
+      });
       if (requestGeneration !== loadGeneration || options.workspace() !== workspace) return;
-      snapshot = next;
-      options.onSnapshotChange?.(next);
+      if (!includeRepositoryDetails && previous) {
+        if (next.branch !== previous.branch || next.upstream !== previous.upstream) {
+          // External branch/upstream switches need fresh branch/remote metadata.
+          next = await invoke<GitSnapshot>("git_status", { workspace, includeLineStats: false });
+          if (requestGeneration !== loadGeneration || options.workspace() !== workspace) return;
+        } else next = { ...next, branches: previous.branches, remotes: previous.remotes };
+      }
+      if (!sameGitSnapshot(snapshot, next)) {
+        snapshot = next;
+        options.onSnapshotChange?.(next);
+      }
       uninitialized = false;
       const review = reviewResult;
       if (review && !review.stale && llmActionId === null) {
@@ -466,6 +495,7 @@ export function createGitWorkspaceStore(options: GitWorkspaceStoreOptions) {
     get workbenchOpenedOrder() { return workbenchOpenedOrder; },
     reset,
     refresh,
+    refreshExplorer: () => refresh(false),
     refreshRemoteStatus,
     runMutation,
     stage,

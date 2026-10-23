@@ -42,6 +42,71 @@ beforeEach(() => { invoke.mockReset(); vi.stubGlobal("window", { confirm: vi.fn(
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Git commit transaction and lifecycle", () => {
+  it("uses lean Explorer reads, but keeps full reads for Source Control", async () => {
+    const { store } = fixture();
+    await store.refreshExplorer();
+    expect(invoke).toHaveBeenLastCalledWith("git_status", { workspace: "/one", includeLineStats: false });
+    await store.refresh();
+    expect(invoke).toHaveBeenLastCalledWith("git_status", { workspace: "/one" });
+  });
+
+  it("upgrades a lean in-flight read once for concurrent full readers", async () => {
+    const { store, snapshot } = fixture();
+    let finish!: (value: GitSnapshot) => void;
+    invoke.mockImplementationOnce(() => new Promise<GitSnapshot>((resolve) => { finish = resolve; }));
+    const lean = store.refreshExplorer();
+    const full = store.refresh();
+    const otherFull = store.refresh();
+    expect(invoke).toHaveBeenCalledTimes(1);
+    finish(snapshot);
+    await Promise.all([lean, full, otherFull]);
+    expect(invoke.mock.calls).toEqual([
+      ["git_status", { workspace: "/one", includeLineStats: false }],
+      ["git_status", { workspace: "/one" }],
+    ]);
+  });
+
+  it("lets Explorer share an in-flight full read without a second request", async () => {
+    const { store, snapshot } = fixture();
+    let finish!: (value: GitSnapshot) => void;
+    invoke.mockImplementationOnce(() => new Promise<GitSnapshot>((resolve) => { finish = resolve; }));
+    const full = store.refresh();
+    const lean = store.refreshExplorer();
+    expect(lean).toBe(full);
+    finish(snapshot);
+    await Promise.all([lean, full]);
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not start a queued full upgrade after workspace reset", async () => {
+    const { store, snapshot, setWorkspace } = fixture();
+    let finish!: (value: GitSnapshot) => void;
+    invoke.mockImplementationOnce(() => new Promise<GitSnapshot>((resolve) => { finish = resolve; }));
+    const lean = store.refreshExplorer();
+    const full = store.refresh();
+    setWorkspace("/two");
+    finish(snapshot);
+    await Promise.all([lean, full]);
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(store.snapshot).toBeUndefined();
+  });
+
+  it("gets a fresh full status after mutation even when Explorer was reading", async () => {
+    const { store, snapshot } = fixture();
+    let finish!: (value: GitSnapshot) => void;
+    invoke.mockImplementationOnce(() => new Promise<GitSnapshot>((resolve) => { finish = resolve; }));
+    const lean = store.refreshExplorer();
+    const mutation = store.stage("file.ts");
+    finish(snapshot);
+    await lean;
+    await expect(mutation).resolves.toBe(true);
+    expect(invoke.mock.calls).toEqual([
+      ["git_status", { workspace: "/one", includeLineStats: false }],
+      ["git_stage", { workspace: "/one", path: "file.ts" }],
+      ["git_status", { workspace: "/one" }],
+    ]);
+  });
+
   it("stages and AI commits locally without a remote, never pushing", async () => {
     const { store, notify } = fixture({ remotes: [], upstream: undefined });
     await store.refresh();

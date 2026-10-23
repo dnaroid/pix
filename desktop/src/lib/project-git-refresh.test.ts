@@ -4,6 +4,28 @@ import { createProjectGitRefresh } from "./project-git-refresh";
 afterEach(() => vi.useRealTimers());
 
 describe("Project Explorer local Git refresh", () => {
+  it("slows unfocused/hidden windows and refreshes immediately on refocus", async () => {
+    vi.useFakeTimers();
+    let foreground = false;
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    const controller = createProjectGitRefresh(refresh, 5_000, () => foreground);
+    try {
+      await controller.request();
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(refresh).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(refresh).toHaveBeenCalledTimes(2);
+      foreground = true;
+      await controller.request(); // ProjectExplorer's window focus callback.
+      expect(refresh).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(refresh).toHaveBeenCalledTimes(4);
+      controller.dispose();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(refresh).toHaveBeenCalledTimes(4);
+    } finally { controller.dispose(); }
+  });
+
   it("polls after completion and stops on disposal", async () => {
     vi.useFakeTimers();
     const refresh = vi.fn().mockResolvedValue(undefined);

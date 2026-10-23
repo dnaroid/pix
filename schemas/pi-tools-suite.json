@@ -1312,7 +1312,7 @@
         },
         "projectKey": {
           "type": "string",
-          "description": "Optional explicit key for this project's projects/<key>/tasks.jsonc, plans/, and TODO.md state. Normally derived from the current Git origin."
+          "description": "Optional explicit key for this project's projects/<key>/tasks.sqlite, plans/, and workspace.jsonc state. Normally derived from the current Git origin."
         }
       },
       "description": "Private Git-backed registry for reusable skills/agents and project-scoped tasks/plans state."

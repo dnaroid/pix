@@ -104,7 +104,7 @@ The Activity Bar provides:
 - **Source Control** — initialize Git, stage/unstage, diff, review, commit,
   publish/push and safe repository tools;
 - **Registry** — initialize `.pi`, configure private Git-backed resources and
-  synchronize project tasks/plans/TODO;
+  synchronize project tasks, plans and workspace state;
 - **Package Scripts** — package-manager scripts and interactive terminals;
 - **Search indexes** — inspect local stores and edit shared global semantic-search configuration;
 - **Settings** — Desktop-specific models, voice, editor and Git preferences.

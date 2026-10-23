@@ -1,4 +1,4 @@
-import { PROJECT_AGENTS_DIR, PROJECT_DIR, PROJECT_PLANS_DIR, PROJECT_SKILLS_DIR, PROJECT_TASKS_FILE, PROJECT_TASK_ATTACHMENTS_DIR, PROJECT_TODO_FILE, PROJECT_WORKSPACE_FILE, ProjectArtifact, ProjectScope, REGISTRY_AGENTS_DIR, REGISTRY_PROJECTS_DIR, REGISTRY_SKILLS_DIR, RegistryRuntime, ResourceScope, ResourceType, SAFE_BRANCH, SAFE_NAME, canonicalPlanFileName, canonicalRegistryEntryName } from "./model.js";
+import { PROJECT_AGENTS_DIR, PROJECT_DIR, PROJECT_PLANS_DIR, PROJECT_SKILLS_DIR, PROJECT_TASKS_FILE, PROJECT_TASK_ATTACHMENTS_DIR, PROJECT_WORKSPACE_FILE, ProjectArtifact, ProjectScope, REGISTRY_AGENTS_DIR, REGISTRY_PROJECTS_DIR, REGISTRY_SKILLS_DIR, RegistryRuntime, ResourceScope, ResourceType, SAFE_BRANCH, SAFE_NAME, canonicalPlanFileName, canonicalRegistryEntryName } from "./model.js";
 import { RegistryContext } from "./context.js";
 import { basename, join } from "node:path";
 import { createHash } from "node:crypto";
@@ -26,7 +26,6 @@ export function matchesScope(type: ResourceType, scope: ResourceScope): boolean 
 export function projectScope(value: string | undefined): ProjectScope | undefined {
 	if (value === "tasks") return "tasks";
 	if (value === "plans") return "plans";
-	if (value === "todo") return "todo";
 	if (value === "workspace") return "workspace";
 	if (value === "project") return "project";
 	return undefined;
@@ -86,7 +85,6 @@ export function projectArtifactLocalPath(cwd: string, artifact: ProjectArtifact)
 	switch (artifact) {
 		case "tasks": return join(cwd, PROJECT_DIR, PROJECT_TASKS_FILE);
 		case "plans": return join(cwd, PROJECT_DIR, PROJECT_PLANS_DIR);
-		case "todo": return join(cwd, PROJECT_DIR, PROJECT_TODO_FILE);
 		case "workspace": return join(cwd, PROJECT_DIR, PROJECT_WORKSPACE_FILE);
 	}
 }
@@ -100,7 +98,6 @@ export function projectArtifactRelativePath(projectKey: string, artifact: Projec
 	switch (artifact) {
 		case "tasks": return `${REGISTRY_PROJECTS_DIR}/${projectKey}/${PROJECT_TASKS_FILE}`;
 		case "plans": return `${REGISTRY_PROJECTS_DIR}/${projectKey}/${PROJECT_PLANS_DIR}`;
-		case "todo": return `${REGISTRY_PROJECTS_DIR}/${projectKey}/${PROJECT_TODO_FILE}`;
 		case "workspace": return `${REGISTRY_PROJECTS_DIR}/${projectKey}/${PROJECT_WORKSPACE_FILE}`;
 	}
 }
@@ -121,7 +118,6 @@ export function projectArtifactDisplayName(artifact: ProjectArtifact): string {
 	switch (artifact) {
 		case "tasks": return PROJECT_TASKS_FILE;
 		case "plans": return `${PROJECT_PLANS_DIR}/`;
-		case "todo": return PROJECT_TODO_FILE;
 		case "workspace": return PROJECT_WORKSPACE_FILE;
 	}
 }

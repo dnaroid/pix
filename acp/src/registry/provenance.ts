@@ -39,7 +39,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export async function readProvenance(project: ProjectContext): Promise<Provenance> {
-	return (await readDocument(project)).provenance;
+	const provenance = (await readDocument(project)).provenance;
+	// Retired project state is ignored even in pre-existing provenance.
+	delete (provenance.projectResources as Record<string, unknown>).todo;
+	return provenance;
 }
 
 /** Caller holds the Registry operation lock. Publish complete JSONC before removing legacy state. */
@@ -58,6 +61,10 @@ export async function writeProvenance(ctx: RegistryContext, provenance: Provenan
 		const after: Readonly<Record<string, unknown>> = provenance[field];
 		if (parse(source)[field] === undefined) set([field], {});
 		for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+			if (field === "projectResources" && key === "todo") {
+				set([field, key], undefined);
+				continue;
+			}
 			if (JSON.stringify(before[key]) !== JSON.stringify(after[key])) {
 				set([field, key], after[key]);
 			}

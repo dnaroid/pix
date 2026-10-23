@@ -495,10 +495,11 @@ test("background project sync silently saves Local-only skills/agents under the 
 	assert.equal(snapshot.error, undefined);
 	assert.ok(snapshot.items.filter((entry) => entry.type === "project").every((entry) => entry.status === "up-to-date"));
 	const files = git(root, ["--git-dir", remote, "ls-tree", "-r", "--name-only", "main"]);
-	for (const file of ["tasks.sqlite", "workspace.jsonc", "TODO.md", "plans/plan.md"]) {
+	for (const file of ["tasks.sqlite", "workspace.jsonc", "plans/plan.md"]) {
 		assert.ok(files.includes(`projects/background-project/${file}`), `registry tracks ${file}`);
 	}
 	assert.ok(files.includes("projects/background-project/skills/draft/SKILL.md"));
+	assert.ok(!files.includes("TODO.md"), "TODO is not published");
 	assert.ok(files.includes("projects/background-project/agents/draft.md"));
 	assert.equal(files.split("\n").some((file) => file.startsWith("skills/draft") || file.startsWith("agents/draft")), false);
 	assert.equal(item(snapshot, "skill:draft").publicationScope, "project");
@@ -508,18 +509,18 @@ test("background project sync silently saves Local-only skills/agents under the 
 
 	const other = path.join(root, "other");
 	fs.mkdirSync(path.join(other, ".pi"), { recursive: true });
-	fs.writeFileSync(path.join(other, ".pi", "TODO.md"), "Unrelated local TODO\n");
+	fs.writeFileSync(path.join(other, ".pi", "workspace.jsonc"), '{"unrelated":true}\n');
 	const second = harness(other);
 	await saveRegistryConfig(remote, "main");
 	second.setInput(async () => "background-project");
 	await act(other, { action: "project-key" }, second.ctx);
 	second.notices.length = 0;
 	second.confirmations.length = 0;
-	const refused = await act(other, { action: "sync-project", scope: "todo" }, second.ctx);
+	const refused = await act(other, { action: "sync-project", scope: "workspace" }, second.ctx);
 	assert.match(refused.error ?? "", /untracked remote state/);
 	assert.deepEqual(second.notices, []);
 	assert.equal(second.confirmations.length, 0);
-	assert.equal(git(root, ["--git-dir", remote, "show", "main:projects/background-project/TODO.md"]), "Task list");
+	assert.equal(git(root, ["--git-dir", remote, "show", "main:projects/background-project/workspace.jsonc"]), '{"version":1}');
 });
 
 test("project auto-sync publishes canonical files only and does not react to service-file churn", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
@@ -949,11 +950,11 @@ test("switching to Git origin never silently overwrites previously published fal
 	isolate(root);
 	const project = path.join(root, "project");
 	fs.mkdirSync(path.join(project, ".pi"), { recursive: true });
-	fs.writeFileSync(path.join(project, ".pi", "TODO.md"), "Local TODO\n");
+	fs.writeFileSync(path.join(project, ".pi", "workspace.jsonc"), '{"local":true}\n');
 	const { remote } = createRegistry(root);
 	await saveRegistryConfig(remote, "main");
 	const h = harness(project);
-	const published = await act(project, { action: "push-project", scope: "todo" }, h.ctx);
+	const published = await act(project, { action: "push-project", scope: "workspace" }, h.ctx);
 	assert.equal(published.error, undefined);
 	const previousKey = published.projectKey!;
 	const before = git(root, ["--git-dir", remote, "rev-parse", "main"]);
@@ -961,11 +962,11 @@ test("switching to Git origin never silently overwrites previously published fal
 	git(project, ["remote", "add", "origin", "https://github.com/example/new-name.git"]);
 	const refreshed = await act(project, { action: "refresh" }, h.ctx);
 	assert.equal(refreshed.projectKey, "github.com__example__new-name");
-	assert.equal(item(refreshed, "project:todo").status, "registry-changed");
-	const blocked = await act(project, { action: "sync-project", scope: "todo" }, h.ctx);
+	assert.equal(item(refreshed, "project:workspace").status, "registry-changed");
+	const blocked = await act(project, { action: "sync-project", scope: "workspace" }, h.ctx);
 	assert.match(blocked.error ?? "", /tracked under another registry\/branch\/project key/);
 	assert.equal(git(root, ["--git-dir", remote, "rev-parse", "main"]), before);
-	assert.equal(git(root, ["--git-dir", remote, "show", `main:projects/${previousKey}/TODO.md`]), "Local TODO");
+	assert.equal(git(root, ["--git-dir", remote, "show", `main:projects/${previousKey}/workspace.jsonc`]), '{"local":true}');
 });
 
 test("interactive remote setup prompts for remote and branch and cancelling saves nothing", async () => {
@@ -1368,7 +1369,7 @@ test("syncs an agent's same-named companion directory across its full lifecycle"
 	assert.equal(fs.existsSync(remoteDir), false);
 });
 
-test("pushes, reports, and pulls project-scoped tasks, plans, TODO, and workspace state without mixing them with reusable resources", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
+test("syncs canonical project state while ignoring local and legacy remote TODO files", { timeout: GIT_INTEGRATION_TIMEOUT_MS }, async () => {
 	const root = tempRoot();
 	isolate(root);
 	const project = path.join(root, "project");
@@ -1392,7 +1393,7 @@ test("pushes, reports, and pulls project-scoped tasks, plans, TODO, and workspac
 	assert.deepEqual(sqliteTaskIds(path.join(seed, "projects", "project-alpha", "tasks.sqlite")), ["local-v1"]);
 	assert.equal(fs.readFileSync(ignoredLegacy, "utf8"), "ignored legacy task data (not imported)\n");
 	assert.match(fs.readFileSync(path.join(seed, "projects", "project-alpha", "plans", "roadmap.md"), "utf8"), /local plan v1/);
-	assert.match(fs.readFileSync(path.join(seed, "projects", "project-alpha", "TODO.md"), "utf8"), /local todo v1/);
+	assert.equal(fs.existsSync(path.join(seed, "projects", "project-alpha", "TODO.md")), false);
 	assert.match(fs.readFileSync(path.join(seed, "projects", "project-alpha", "workspace.jsonc"), "utf8"), /local-v1/);
 	assert.equal(fs.existsSync(path.join(seed, "skills", "demo", "SKILL.md")), true);
 
@@ -1405,7 +1406,8 @@ test("pushes, reports, and pulls project-scoped tasks, plans, TODO, and workspac
 	git(seed, ["push", "origin", "main"]);
 
 	const updateStatus = await act(project, { action: "refresh" }, h.ctx);
-	for (const artifact of ["tasks", "plans", "todo", "workspace"]) {
+	assert.equal(updateStatus.items.some((entry) => entry.id === "project:todo"), false);
+	for (const artifact of ["tasks", "plans", "workspace"]) {
 		assert.equal(item(updateStatus, `project:${artifact}`).status, "update-available", `${artifact} is outdated`);
 	}
 
@@ -1413,7 +1415,7 @@ test("pushes, reports, and pulls project-scoped tasks, plans, TODO, and workspac
 	assert.deepEqual(sqliteTaskIds(path.join(project, ".pi", "tasks.sqlite")), ["remote-v2"]);
 	assert.equal(fs.readFileSync(ignoredLegacy, "utf8"), "ignored legacy task data (not imported)\n");
 	assert.match(fs.readFileSync(path.join(project, ".pi", "plans", "roadmap.md"), "utf8"), /remote plan v2/);
-	assert.match(fs.readFileSync(path.join(project, ".pi", "TODO.md"), "utf8"), /remote todo v2/);
+	assert.match(fs.readFileSync(path.join(project, ".pi", "TODO.md"), "utf8"), /local todo v1/);
 	assert.match(fs.readFileSync(path.join(project, ".pi", "workspace.jsonc"), "utf8"), /remote-v2/);
 
 	const localWorkspace = path.join(project, ".pi", "workspace.jsonc");

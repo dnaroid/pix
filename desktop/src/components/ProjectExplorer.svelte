@@ -135,10 +135,13 @@
   const gitRefresh = createProjectGitRefresh(async () => {
     if (workspace && onGitStatusRefresh) await onGitStatusRefresh();
   });
+  // A spread sidebar props object invalidates every prop getter when loading
+  // changes. Derived values isolate lifecycle inputs from those unrelated writes.
+  const refreshTarget = $derived(JSON.stringify([workspace, refreshKey]));
+  const effectWorkspace = $derived(workspace);
+  const effectGitSnapshot = $derived(gitSnapshot);
   $effect(() => {
-    // Read only lifecycle inputs, not the snapshot updated by the request.
-    workspace;
-    refreshKey;
+    refreshTarget;
     untrack(() => void gitRefresh.request());
   });
   const searchActive = $derived(searchQuery.trim().length > 0);
@@ -180,15 +183,19 @@
     // OS menus snapshot eligibility before popup, rather than changing while open.
     if (nativeMenus) return;
     // A fresh snapshot may change tracked/ignored eligibility while the DOM menu is open.
-    gitSnapshot;
-    void ignoreEligibility.request(workspace, menuState.entry?.path ?? "");
+    effectGitSnapshot;
+    const requestWorkspace = effectWorkspace;
+    const path = menuState.entry?.path ?? "";
+    untrack(() => void ignoreEligibility.request(requestWorkspace, path));
     return ignoreEligibility.invalidate;
   });
   $effect(() => {
     if (nativeMenus) return;
     // Branch switches arrive through snapshots and change the link's ref.
-    gitSnapshot;
-    void remoteLinks.request(workspace, menuState.entry?.path ?? null);
+    effectGitSnapshot;
+    const requestWorkspace = effectWorkspace;
+    const path = menuState.entry?.path ?? null;
+    untrack(() => void remoteLinks.request(requestWorkspace, path));
     return remoteLinks.invalidate;
   });
 
@@ -285,7 +292,7 @@
 
   $effect(() => {
     const query = searchQuery.trim();
-    const requestWorkspace = workspace;
+    const requestWorkspace = effectWorkspace;
     const generation = ++searchGeneration;
     searchError = null;
     if (!query || !requestWorkspace) {
@@ -407,9 +414,10 @@
       items.push(
         { label: "Duplicate", disabled: !canDuplicate(entry) },
         { label: "Rename…", disabled: !canMutate(entry) },
-        { label: "Copy Relative Path" },
-        { label: "Copy Absolute Path" },
       );
+    }
+    items.push({ label: entry.path ? "Copy Relative Path" : "Copy Project Name" }, { label: "Copy Absolute Path" });
+    if (entry.path) {
       if (canIgnoreEntry) items.push({ label: "Add to .gitignore", disabled: !canIgnore(entry) });
       items.push({ label: "Delete", disabled: !canMutate(entry) });
     }
@@ -430,6 +438,7 @@
       "Duplicate": () => duplicateEntry(entry),
       "Rename…": () => nameEditor.open("rename", entry),
       "Copy Relative Path": () => copyPath(entry),
+      "Copy Project Name": () => copyPath(entry),
       "Copy Absolute Path": () => copyPath(entry, true),
       "Add to .gitignore": () => ignoreEntry(entry),
       "Delete": () => deleteEntry(entry),
@@ -536,10 +545,10 @@
   }
 
   async function copyPath(entry: ProjectTreeEntry, absolute = false): Promise<void> {
-    if (!entry.path) return;
     const requestWorkspace = workspace;
     const generation = operationGeneration;
-    const path = absolute ? projectTreeAbsolutePath(requestWorkspace, entry.path) : entry.path;
+    let path = entry.path || entry.name;
+    if (absolute) path = entry.path ? projectTreeAbsolutePath(requestWorkspace, entry.path) : requestWorkspace;
     menuController.close(true);
     try {
       await writeText(path);
@@ -1039,12 +1048,14 @@
           <Pencil class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Rename…</span>
           <span class="ml-auto font-mono text-xs text-muted-foreground">F2</span>
         </button>
-        <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" onclick={() => void copyPath(menuEntry)}>
-          <ClipboardCopy class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Copy Relative Path</span>
-        </button>
-        <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" onclick={() => void copyPath(menuEntry, true)}>
-          <ClipboardCopy class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Copy Absolute Path</span>
-        </button>
+      {/if}
+      <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" onclick={() => void copyPath(menuEntry)}>
+        <ClipboardCopy class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>{menuEntry.path ? "Copy Relative Path" : "Copy Project Name"}</span>
+      </button>
+      <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" onclick={() => void copyPath(menuEntry, true)}>
+        <ClipboardCopy class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Copy Absolute Path</span>
+      </button>
+      {#if menuEntry.path}
         {#if canIgnoreEntry}
           <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" disabled={!canIgnore(menuEntry)} onclick={() => void ignoreEntry(menuEntry)}>
             <FileText class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Add to .gitignore</span>

@@ -137,18 +137,19 @@ Decision: [0027 — Cause-specific sidebar quick actions](../docs/decisions/0027
 - Current-HEAD CI status reuses the sparse remote lane while Git is closed, with no job-detail queries or separate background timer. The visible Git panel keeps its own cadence; its store skips sidebar requests while active/in-flight. Unavailable setup states do not busy-poll. Job caches retain only runs in the current snapshot; late results for removed runs are discarded.
 - Package-terminal state is read from the existing in-memory backend registry; no subprocess is started for those checks.
 - Package-terminal **exit** events always invalidate the fast snapshot. Output events invalidate only until that runtime id is already known as running; ordinary terminal/log output does not turn a noisy process into a sub-second Git/config polling loop.
-- Existing full Git refreshes triggered by Pix mutations invalidate the fast indicator snapshot through the shared ~180 ms event-refresh debounce. A direct fast refresh cancels a pending debounce timer. External local Git changes are discovered by the next fast poll; external remote-only branch advances are discovered by the sparse remote probe.
+- Git owner snapshots invalidate the fast indicator snapshot through the shared ~180 ms event-refresh debounce only when indicator-relevant state changes: availability/error, branch/HEAD/upstream, detached state, ahead/behind counts, dirty or conflicted state. Identical snapshots and changes only to file details or line counts do not cause another native poll. A direct fast refresh cancels a pending debounce timer. External local Git changes are discovered by the next fast poll; external remote-only branch advances are discovered by the sparse remote probe.
 - Pushed Registry refresh/action snapshots likewise invalidate the fast poll so a completed sync clears/recomputes the local Registry dot immediately; the pushed snapshot is only an invalidation signal for this local check, not the source of local dirtiness.
 - The fast Registry poll also returns the specific dirty project artifacts among
-  `tasks`, `plans`, and `todo`. WorkspaceSidebar consumes each new fast-poll
+  `tasks`, `plans`, and `workspace`. WorkspaceSidebar consumes each new fast-poll
   `checkedAtMs` at most once and feeds its dirty artifact list into the same
   Desktop background sync coordinator used by direct saves. Each dirty artifact
   carries a content stamp (`projectStamps`); Desktop reloads the matching local
   renderer state only when that stamp differs from the last observed one (or the
   artifact newly became dirty), while every poll still re-observes sync cheaply:
-  `tasks` reloads the task document, while `plans` and `todo` reload the
-  project-document snapshot used by Registry plan selection. A new background
-  push is scheduled only while the coordinator is idle, so pending/syncing/error
+  `tasks` reloads the task document, while `plans` reloads the plan-document
+  snapshot used by Registry plan selection. TODO remains readable/editable as a
+  legacy project document but is not a Registry artifact or dirty-sync input.
+  A new background push is scheduled only while the coordinator is idle, so pending/syncing/error
   phases do not create duplicate pushes or prevent the local UI from reflecting
   filesystem changes. A later poll can still detect a second external change to
   the same artifact without requiring an intermediate clean artifact set,

@@ -278,7 +278,7 @@ describe("automatic project sync recovery", () => {
       status: "local-changes", statusLabel: "LOCAL CHANGES", icon: "!", local: true, remote: true, actions: ["push", "pull"] };
     fixture.publish({ ...fixture.snapshot, items: [item,
       { ...item, id: "skill:draft", type: "skill", artifact: undefined, name: "draft", status: "local-only" },
-      { ...item, id: "project:todo", artifact: "todo", status: "diverged" }] });
+      { ...item, id: "project:workspace", artifact: "workspace", status: "diverged" }] });
     await vi.advanceTimersByTimeAsync(899);
     expect(registryAction).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);

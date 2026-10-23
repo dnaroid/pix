@@ -8,9 +8,24 @@ import sidebarViewModelSource from "../app/desktop-sidebar-view-model.svelte.ts?
 import navigationViewModelSource from "../app/desktop-navigation-view-model-services.ts?raw";
 
 describe("WorkspaceSidebar project sizing", () => {
+  it("uses lean reads only for Explorer, leaving explicit Git retries full", () => {
+    expect(sidebarViewModelSource).toContain("onGitExplorerStatusRefresh: options.git.refreshExplorer");
+    expect(sidebarViewModelSource).toContain("onGitStatusRefresh: options.git.refresh,");
+    expect(sidebarSource).toContain("onGitStatusRefresh={onGitExplorerStatusRefresh ?? onGitStatusRefresh}");
+  });
+
+  it("drives Git invalidation from stable derived values, not snapshot identity", () => {
+    expect(sidebarSource).toContain("$derived(sidebarGitSignature(gitSnapshot, gitError))");
+    const effect = sidebarSource.slice(sidebarSource.indexOf("// Equal snapshots"), sidebarSource.indexOf("// Registry session-state"));
+    expect(effect).toContain("gitIndicatorSignature;");
+    expect(effect).toContain("const nextRemoteTarget = gitRemoteTarget;");
+    expect(effect).not.toContain("gitSnapshot");
+    expect(effect).not.toContain("gitError;");
+  });
+
   it("owns visible-panel polling and preserves interactive Task management", () => {
-    expect(sidebarSource).toContain('activeTab === "tasks" && !layoutController.collapsed && !editorOpen && workspace');
-    expect(sidebarSource).toContain("return onObserveTasks?.()");
+    expect(sidebarSource).toContain('$derived(activeTab === "tasks" && !layoutController.collapsed && !editorOpen && Boolean(workspace))');
+    expect(sidebarSource).toContain("return untrack(() => onObserveTasks?.())");
     expect(sidebarViewModelSource).toContain("onObserveTasks: options.projectTasks.observe");
     expect(sidebarViewModelSource).toContain("taskAttachmentCounts: options.projectTasks.attachmentCounts");
     expect(sidebarSource).not.toContain('"read_project_task_attachment_counts"');
@@ -22,7 +37,7 @@ describe("WorkspaceSidebar project sizing", () => {
     expect(tasksPanelSource).toContain('data-task-drop-placeholder');
     expect(sidebarSource).toContain('isStatusCollapsed={tasksView.isStatusCollapsed}');
     expect(sidebarSource).toContain('onToggleStatusCollapsed={tasksView.toggleStatusCollapsed}');
-    expect(sidebarSource).toContain('tasksView.selectWorkspace(workspace)');
+    expect(sidebarSource).toContain('untrack(() => tasksView.selectWorkspace(target))');
   });
   it("keeps the authoritative unfiltered task counter only in the sidebar header", () => {
     expect(sidebarSource).toContain('{tasks.length} {tasks.length === 1 ? "task" : "tasks"}</span>');

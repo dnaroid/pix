@@ -4,6 +4,7 @@ import { isTypeaheadKey, linearFocusIndex, typeaheadFocusIndex } from "../lib/ke
 import {
   projectTreeRowsWithRoot,
   projectTreeParentIndex,
+  reconcileProjectTreeEntries,
   type ProjectTreeEntry,
 } from "../lib/project-tree";
 
@@ -97,9 +98,9 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
     );
   }
 
-  function loadDirectory(path: string, requestGeneration = generation, force = false): Promise<void> {
+  function loadDirectory(path: string, requestGeneration = generation, force = false, background = false): Promise<void> {
     if (!force && directoryLoads.has(path)) return directoryLoads.get(path)!;
-    const request = performDirectoryLoad(path, requestGeneration);
+    const request = performDirectoryLoad(path, requestGeneration, background);
     directoryLoads.set(path, request);
     void request.finally(() => {
       if (directoryLoads.get(path) === request) directoryLoads.delete(path);
@@ -107,33 +108,48 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
     return request;
   }
 
-  async function performDirectoryLoad(path: string, requestGeneration: number): Promise<void> {
+  async function performDirectoryLoad(path: string, requestGeneration: number, background: boolean): Promise<void> {
     if (!options.workspace() || disposed) return;
+    const requestWorkspace = options.workspace();
     const requestVersion = (directoryRequestVersions.get(path) ?? 0) + 1;
     directoryRequestVersions.set(path, requestVersion);
-    if (!state.loadingDirectories.includes(path)) {
+    function isCurrentRequest(): boolean {
+      return !disposed && requestWorkspace === options.workspace() && requestGeneration === generation
+        && directoryRequestVersions.get(path) === requestVersion;
+    }
+    if ((!background || !state.entriesByDirectory[path]) && !state.loadingDirectories.includes(path)) {
       state.loadingDirectories = [...state.loadingDirectories, path];
     }
-    const nextErrors = { ...state.errorByDirectory };
-    delete nextErrors[path];
-    state.errorByDirectory = nextErrors;
+    if (state.errorByDirectory[path] && !background) {
+      const nextErrors = { ...state.errorByDirectory };
+      delete nextErrors[path];
+      state.errorByDirectory = nextErrors;
+    }
     reportHealth();
     try {
       const entries = await options.onListDirectory(path);
-      if (requestGeneration !== generation || directoryRequestVersions.get(path) !== requestVersion) return;
-      state.entriesByDirectory = { ...state.entriesByDirectory, [path]: entries };
+      if (!isCurrentRequest()) return;
+      const stableEntries = reconcileProjectTreeEntries(state.entriesByDirectory[path], entries);
+      if (stableEntries !== state.entriesByDirectory[path]) {
+        state.entriesByDirectory = { ...state.entriesByDirectory, [path]: stableEntries };
+      }
+      if (state.errorByDirectory[path]) {
+        const nextErrors = { ...state.errorByDirectory };
+        delete nextErrors[path];
+        state.errorByDirectory = nextErrors;
+      }
       pruneMissingExpandedChildren(path, entries);
       loadExpandedChildren(entries, requestGeneration);
       reportHealth();
     } catch (error) {
-      if (requestGeneration !== generation || directoryRequestVersions.get(path) !== requestVersion) return;
+      if (!isCurrentRequest()) return;
       state.errorByDirectory = {
         ...state.errorByDirectory,
         [path]: error instanceof Error ? error.message : String(error),
       };
       reportHealth();
     } finally {
-      if (requestGeneration === generation && directoryRequestVersions.get(path) === requestVersion) {
+      if (isCurrentRequest() && state.loadingDirectories.includes(path)) {
         state.loadingDirectories = state.loadingDirectories.filter((candidate) => candidate !== path);
       }
     }
@@ -145,7 +161,7 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
 
   async function refreshVisibleDirectories(): Promise<void> {
     const requestGeneration = generation;
-    await Promise.all(["", ...visibleExpandedDirectories()].map((path) => loadDirectory(path, requestGeneration)));
+    await Promise.all(["", ...visibleExpandedDirectories()].map((path) => loadDirectory(path, requestGeneration, false, true)));
   }
 
   function reportHealth(): void {

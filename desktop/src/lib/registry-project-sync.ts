@@ -22,5 +22,5 @@ export function registryProjectSyncPresentation(
     description: "Changes sync automatically in the background",
     needsReview,
   };
-  return { title: "Project synced", description: "Tasks, plans, TODO and workspace are up to date", needsReview };
+  return { title: "Project synced", description: "Tasks, plans and workspace are up to date", needsReview };
 }
