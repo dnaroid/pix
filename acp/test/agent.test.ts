@@ -3904,7 +3904,7 @@ test("Pix Desktop registry actions call the direct service without a Pi runtime 
 		await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, ...ELICITATION_CAPS });
 		for (const request of [
 			{ action: "refresh" }, { action: "update", type: "skill", name: "pdf" },
-			{ action: "pull-project", scope: "todo" }, { action: "tags", type: "skill", name: "pdf" },
+			{ action: "pull-project", scope: "plans" }, { action: "tags", type: "skill", name: "pdf" },
 		]) assert.deepEqual(await cx.request(PIX_REGISTRY_ACTION_METHOD, { cwd: "/tmp/registry-gui", ...request }), { snapshot });
 		assert.deepEqual(await cx.request(PIX_REGISTRY_ACTION_METHOD, { cwd: "/tmp/registry-gui", action: "project-key" }), { snapshot: { ...snapshot, projectKey: "manual-key" } });
 	}, (app) => {
