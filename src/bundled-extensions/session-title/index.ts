@@ -1,4 +1,4 @@
-import { SessionManager, type ExtensionAPI, type ExtensionContext, type SessionStartEvent } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, SessionStartEvent } from "@earendil-works/pi-coding-agent";
 import { resolve } from "node:path";
 import type { ImageContent } from "../../input-editor.js";
 import { loadSessionTitleConfig, type SessionTitleConfig } from "./config.js";
@@ -323,6 +323,8 @@ export default function sessionTitle(pi: ExtensionAPI) {
 		if (!parentSessionFile) return fallbackTitle;
 
 		try {
+			// Normal startup needs only extension types, not the entire SDK module graph.
+			const { SessionManager } = await import("@earendil-works/pi-coding-agent");
 			const directParentName = SessionManager.open(parentSessionFile).getSessionName()?.trim();
 			if (directParentName) return directParentName;
 
@@ -346,11 +348,12 @@ export default function sessionTitle(pi: ExtensionAPI) {
 		const parentSessionFile = event.previousSessionFile ?? ctx.sessionManager.getHeader()?.parentSession;
 		const cwd = ctx.cwd;
 		const sessionDir = ctx.sessionManager.getSessionDir();
-		forkTitleState = {
+		const state: ForkTitleState = {
 			sessionId: currentSessionId,
 			parentTitle: inheritedSessionName,
 			inheritedSessionName,
 		};
+		forkTitleState = state;
 
 		void resolveParentSessionTitle({
 			parentSessionFile,
@@ -359,7 +362,7 @@ export default function sessionTitle(pi: ExtensionAPI) {
 			fallbackTitle: inheritedSessionName,
 		}).then((parentTitle) => {
 			if (sessionId !== currentSessionId) return;
-			if (forkTitleState?.sessionId !== currentSessionId) return;
+			if (forkTitleState !== state) return;
 			forkTitleState = {
 				sessionId: currentSessionId,
 				parentTitle,

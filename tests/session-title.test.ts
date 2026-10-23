@@ -257,16 +257,16 @@ describe("session-title extension", () => {
 		});
 	});
 
-	it("does not touch a stale ctx after async fork startup work", async () => {
+	it("does not touch a stale ctx after async fork startup work", { timeout: 10_000 }, async () => {
 		await withSessionTitleDisabled(async () => {
 			const originalOpen = SessionManager.open;
 			const originalList = SessionManager.list;
+			const lookupStarted = deferred<void>();
 			let stale = false;
 
-			SessionManager.open = (() => {
-				throw new Error("missing parent");
-			}) as typeof SessionManager.open;
+			SessionManager.open = (() => SessionManager.inMemory()) as typeof SessionManager.open;
 			SessionManager.list = (async () => {
+				lookupStarted.resolve();
 				await Promise.resolve();
 				stale = true;
 				return [];
@@ -283,7 +283,46 @@ describe("session-title extension", () => {
 
 				sessionTitle(handlers.api);
 				await handlers.session_start?.({ type: "session_start", reason: "fork", previousSessionFile: "/tmp/parent.jsonl" }, handlers.ctx);
+				await lookupStarted.promise;
 				await Promise.resolve();
+			} finally {
+				SessionManager.open = originalOpen;
+				SessionManager.list = originalList;
+			}
+		});
+	});
+
+	it("resolves fork parent titles lazily and ignores a lookup retired by shutdown", { timeout: 10_000 }, async () => {
+		await withSessionTitleDisabled(async () => {
+			const originalOpen = SessionManager.open;
+			const originalList = SessionManager.list;
+			try {
+				for (const retire of [false, true]) {
+					const lookupStarted = deferred<void>();
+					const lookup = deferred<Awaited<ReturnType<typeof SessionManager.list>>>();
+					SessionManager.open = (() => SessionManager.inMemory()) as typeof SessionManager.open;
+					SessionManager.list = (() => {
+						lookupStarted.resolve();
+						return lookup.promise;
+					}) as typeof SessionManager.list;
+					const { handlers, setSessionNameCalls } = createExtensionHarness({
+						branch: [], sessionName: undefined, sessionId: "fork-title",
+					});
+					sessionTitle(handlers.api);
+					await handlers.session_start?.({ reason: "fork", previousSessionFile: "/tmp/parent.jsonl" }, handlers.ctx);
+					await lookupStarted.promise;
+					if (retire) {
+						await handlers.session_shutdown?.({}, handlers.ctx);
+						// Same id, new extension lifecycle: the old lookup must not overwrite it.
+						await handlers.session_start?.({ reason: "fork" }, handlers.ctx);
+					}
+					lookup.resolve([{ path: "/tmp/parent.jsonl", name: "Resolved parent" }] as Awaited<ReturnType<typeof SessionManager.list>>);
+					await new Promise<void>((resolve) => setImmediate(resolve));
+					await handlers.input?.({ text: "Investigate crash", source: "user" }, handlers.ctx);
+					const expectedInput = retire ? "Investigate crash" : buildForkTitleInput("Resolved parent", "Investigate crash");
+					assert.deepEqual(setSessionNameCalls, [fallbackSessionTitleFromInput(expectedInput, 80)]);
+					await handlers.session_shutdown?.({}, handlers.ctx);
+				}
 			} finally {
 				SessionManager.open = originalOpen;
 				SessionManager.list = originalList;
@@ -349,6 +388,12 @@ function titleConfig() {
 		notify: false,
 		debug: false,
 	};
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((settle) => { resolve = settle; });
+	return { promise, resolve };
 }
 
 function fakeContext(branch: unknown[]): ExtensionContext {

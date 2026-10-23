@@ -6,7 +6,6 @@ pub fn desktop_play_notification_sound(app: tauri::AppHandle) -> Result<(), Stri
     {
         use objc2_app_kit::{NSBeep, NSSound};
         use objc2_foundation::NSString;
-        use tauri::Manager;
 
         return app
             .run_on_main_thread(|| {

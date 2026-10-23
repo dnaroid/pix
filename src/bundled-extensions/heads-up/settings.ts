@@ -1,7 +1,6 @@
 import { homedir } from "node:os";
 import { open } from "node:fs/promises";
 import { join } from "node:path";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { parse, type ParseError } from "jsonc-parser";
 import { DEFAULT_HEADS_UP_MODEL, normalizeHeadsUpConfig, type HeadsUpConfig } from "./config.js";
 
@@ -45,6 +44,8 @@ export async function loadHeadsUpSettings(cwd: string, trusted: boolean): Promis
 		return { enabled: raw.enabled === true && !offline(), model, config: normalizeHeadsUpConfig(raw) };
 	}
 
+	// The Desktop profile above has no SDK dependency; TUI resolves its agent dir on demand.
+	const { getAgentDir } = await import("@earendil-works/pi-coding-agent");
 	const global = await readConfig(join(getAgentDir(), "heads-up.jsonc"));
 	const project = trusted ? await readConfig(join(cwd, ".pi", "heads-up.jsonc")) : {};
 	const raw = { ...global, ...project };

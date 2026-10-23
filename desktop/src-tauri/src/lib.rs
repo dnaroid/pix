@@ -12,7 +12,7 @@ use std::{
     process::{Child, Command, Stdio},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        mpsc, Arc, Condvar, Mutex, RwLock,
+        Arc, Condvar, Mutex, RwLock,
     },
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -7501,6 +7501,7 @@ fn write_project_tasks_to(workspace: &Path, document: &ProjectTaskDocument) -> R
     write_project_tasks_checked(workspace, document, None)
 }
 
+#[cfg(test)]
 fn write_project_tasks_checked(
     workspace: &Path,
     document: &ProjectTaskDocument,

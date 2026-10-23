@@ -1,9 +1,10 @@
-import { modelUsageDescriptor, queryModelUsageStatus } from "../../app/model/model-usage-status.js";
 import type { SessionModel } from "../../app/types.js";
 import type { QuotaCheck } from "../../app/session/quota-wait.js";
 
 /** Always queries the provider: cached status-bar samples cannot authorize a resume. */
 export async function checkQuota(model: SessionModel | undefined, thinkingLevel?: string): Promise<QuotaCheck> {
+	// Provider/auth machinery is only needed for a quota check, not extension startup.
+	const { modelUsageDescriptor, queryModelUsageStatus } = await import("../../app/model/model-usage-status.js");
 	const descriptor = modelUsageDescriptor(model, thinkingLevel);
 	if (!descriptor) return { kind: "unknown" };
 	try {

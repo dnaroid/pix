@@ -1,4 +1,4 @@
-import { getAgentDir, type
+import type {
 	ExtensionAPI,
 	ExtensionCommandContext,
 	ExtensionContext,
@@ -94,6 +94,7 @@ export default function workspaceUndoBridge(pi: ExtensionAPI): void {
 			if (!request) return;
 
 			try {
+				const { getAgentDir } = await import("@earendil-works/pi-coding-agent");
 				const branch = ctx.sessionManager.getBranch() as SessionBranchEntry[];
 				const mutations = workspaceMutationsAfterEntry(
 					branch,

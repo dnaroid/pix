@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(unix)]
+use std::sync::mpsc;
 
 #[test]
 fn delayed_destroy_cleanup_targets_only_captured_resources_after_label_reuse() {
