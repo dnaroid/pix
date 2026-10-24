@@ -11,7 +11,7 @@
   pass does not prove other operating-system matrix legs. This local policy does
   not change automatic GitHub Actions triggers.
 - For CI failures, flaky tests, cross-platform portability, workflow changes,
-  or CI regressions, read `.agents/skills/ci-reliability/SKILL.md` before diagnosis.
+  or CI regressions, read `.pi/skills/ci-reliability/SKILL.md` before diagnosis.
   Treat `specs/ci-release.md` and current CI scripts as the executable contract.
 
 - Ordinary Pi/TUI/ACP/Desktop Code and Knowledge search uses the native backend.

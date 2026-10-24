@@ -54,7 +54,7 @@ This avoids reusing native addons built for a different Node ABI.
 ## Verification before pushing
 
 For CI failures, flaky tests and cross-platform CI changes, load the project's
-auto-discovered `ci-reliability` skill in `.agents/skills/ci-reliability/SKILL.md`
+auto-discovered `ci-reliability` skill in `.pi/skills/ci-reliability/SKILL.md`
 before modifying tests or workflows.
 
 `npm run check` is the quick **root-only** check, not the complete CI gate.
