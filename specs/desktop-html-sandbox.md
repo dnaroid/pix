@@ -144,10 +144,10 @@ finished; the turn ends and the selection arrives as a new user prompt. When the
 agent needs the user's answer before it can continue, it calls the blocking
 `question` tool instead. The same choice is never offered both ways.
 
-Use a closed `pix-actions` fenced block with a button label in the info string.
-Its body must contain 1–8 GFM task items (a single item is a one-click
-confirmation), with no other content; checked items
-are recommended defaults. For example:
+Use a closed `pix-actions` fenced block with a button label on the opening
+line. The label must not appear as a standalone title in the body. Its body
+must contain only 1–8 GFM task items (a single item is a one-click
+confirmation); checked items are recommended defaults. For example:
 
 ~~~~markdown
 Choose what I should do next:
@@ -158,7 +158,9 @@ Choose what I should do next:
 ```
 ~~~~
 
-Desktop renders a valid block as checkboxes and a submit button. Only a block
+Desktop renders a valid block as checkboxes and a submit button. A standalone
+title or other non-checklist body content makes the block invalid, so it stays
+ordinary escaped Markdown/code. Only a block
 in the latest assistant message is interactive, and only when no prompt is
 running and no later user message exists; older choices are read-only. An
 incomplete or malformed block remains ordinary escaped Markdown/code.

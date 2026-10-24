@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import choiceActionsExtension, { CHOICE_ACTIONS_WIDGET_KEY, finalAssistantText } from "../src/bundled-extensions/choice-actions/index.js";
-import { CHOICE_ACTIONS_CAPABILITY_MARKER, lastChoiceActions } from "../src/bundled-extensions/choice-actions/contract.js";
+import { CHOICE_ACTIONS_CAPABILITY, CHOICE_ACTIONS_CAPABILITY_MARKER, lastChoiceActions } from "../src/bundled-extensions/choice-actions/contract.js";
 import { renderMarkdownTextLines } from "../src/markdown-format.js";
 
 type Handler = (event: any, ctx: any) => any;
@@ -42,6 +42,19 @@ const reply = (text: string) => ({ messages: [{ role: "user", content: "go" }, {
 const block = "Done.\n```pix-actions Next\n- [x] Add tests\n- [ ] Update docs\n```";
 
 describe("pix-actions contract", () => {
+	it("advertises a valid single-action example with the button label on the opening line", () => {
+		assert.deepEqual(lastChoiceActions(CHOICE_ACTIONS_CAPABILITY), {
+			submitLabel: "Simplify",
+			items: [{ label: "Remove duplicate instructions", checked: true }],
+		});
+		assert.ok(CHOICE_ACTIONS_CAPABILITY.includes("MUST be on the opening line, never inside the body"));
+	});
+
+	it("rejects a standalone button label in the body instead of treating it as an action", () => {
+		assert.equal(lastChoiceActions("```pix-actions\nУпростить\n- [x] Убрать дублирующую маршрутизацию к скиллам из AGENTS.md\n```"), undefined);
+		assert.equal(lastChoiceActions("```pix-actions Упростить\n- [x] Убрать дублирующую маршрутизацию к скиллам из AGENTS.md\n```")?.submitLabel, "Упростить");
+	});
+
 	it("finds the last valid closed block and ignores malformed or open ones", () => {
 		assert.deepEqual(lastChoiceActions(block)?.items.map((item) => item.label), ["Add tests", "Update docs"]);
 		assert.equal(lastChoiceActions("```pix-actions\n- [x] A\nplain\n```"), undefined);
