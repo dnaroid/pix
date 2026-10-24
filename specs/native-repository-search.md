@@ -13,6 +13,8 @@ with no external-backend dependency, fallback, command, install/update, panel, o
 lexical retrieval needs no credentials. Explicit global provider configuration itself
 authorizes semantic retrieval for every project and source. Credentials use
 `OPENROUTER_API_KEY`, then the shared Pi auth store. Existing legacy configuration is not migrated or modified.
+Repository semantic/commit embeddings use this credential path; do not read
+unrelated legacy configuration or migrate providers as part of a search task.
 Persistence/process rationale: [0066](../docs/decisions/0066-native-repository-semantic-search.md),
 building on [0065](../docs/decisions/0065-native-repository-search.md). Global authorization:
 [0068](../docs/decisions/0068-global-semantic-configuration.md). Source ownership and

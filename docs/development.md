@@ -7,6 +7,11 @@ self-contained [GitHub Release](installation.md).
 
 ## Requirements
 
+Pix Desktop is supported on macOS only (see [installation](installation.md)).
+Existing Windows/Linux Desktop packaging is not a supported product and does
+not create a current Desktop delivery-validation requirement. TUI platform
+support is unchanged.
+
 - Node.js `>=22.19.0 <27`;
 - npm selected by the current shell;
 - Git;
@@ -81,6 +86,8 @@ OS matrix legs or release smoke. It does not install dependencies or act as a Gi
 The CI workflow runs the preflight first, **then** the unchanged full gate;
 the smoke result is never a substitute for the complete platform matrix. This
 local verification policy does not change automatic GitHub Actions triggers.
+Report the actual verification scope and any blocked or incomplete checks;
+do not present a local pass as proof of other OS matrix legs.
 Preflight verifies test contracts on every OS, AST CLI availability and LSP
 ownership on Linux,
 native SQLite, detached broker and PTY exit handling on Windows, and

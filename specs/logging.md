@@ -28,6 +28,12 @@ JSON-RPC and is not a diagnostics channel.
 
 ## Privacy, limits, and coverage
 
+When changing TUI, ACP, Desktop or pi-tools-suite operations, send meaningful
+handled errors and recoverable warnings to the existing diagnostic logger,
+even when the UI also displays them. Choose appropriate levels, avoid duplicate
+or noisy events and sensitive payloads, and never let logging change operation
+behavior.
+
 Chat/request payload fields are not intentionally logged. Structured fields
 with sensitive/payload names are redacted, and URL/token/key-like strings are
 best-effort redacted. Records, strings, nesting, and queues are bounded;

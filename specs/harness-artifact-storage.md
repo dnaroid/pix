@@ -46,8 +46,9 @@ Explicit `PI_TOOLS_SUITE_EVAL_OUTPUT_DIR` and `DELIVERY_REVIEW_OUTPUT` overrides
 remain supported; relative overrides resolve against cwd.
 
 New prompts, role profiles, examples and harness defaults must preserve the
-policy. `AGENTS.md` and the suite README carry authoring guidance. A custom
-`promptOverride` still replaces the base prompt verbatim: its author must include
+policy. `AGENTS.md` routes authors here; the suite README also carries authoring
+guidance. A custom `promptOverride` still replaces the base prompt verbatim:
+its author must include
 the policy rather than relying on the generic prompt being appended.
 
 Decision: [0015 — Canonical disposable harness output](../docs/decisions/0015-harness-artifact-storage.md).
@@ -56,6 +57,8 @@ Decision: [0015 — Canonical disposable harness output](../docs/decisions/0015-
 
 - Child session transcripts and parent state live under `.pi/subagents/`;
   disposable subagent/QA evidence stays under `.pi/artifacts/subagents/`.
+  Protected owned-launch records also live under `.pi/subagents/`, not in
+  disposable evidence storage.
 - Installed UI-QA helper executables are infrastructure, not disposable evidence.
   The macOS development helper lives under the OS user's
   `~/Library/Application Support/Pix/ui-qa/helpers/`, outside project Registry
@@ -81,6 +84,8 @@ Decision: [0015 — Canonical disposable harness output](../docs/decisions/0015-
   preserved until retired (decision 0072); Manual Clean preserves `owned/`.
   This is not guaranteed
   in standalone Pi or uninitialized projects. Export evidence needing retention.
+  Manual Clean removes disposable scratch output immediately, without waiting
+  for the background TTL; the protected-state exceptions above still apply.
 - Runtime mirrors are generated from authoritative suite sources; do not fix
   an installed/generated prompt copy independently of its source.
 
