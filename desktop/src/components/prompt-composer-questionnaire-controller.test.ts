@@ -40,7 +40,8 @@ function key(overrides: Partial<KeyboardEvent> = {}): KeyboardEvent {
 
 describe("questionnaire keyboard", () => {
   it("captures Enter before focused buttons activate", () => {
-    expect(composerSource).toContain("onkeydowncapture={questionnaireController.handleKeydown}");
+    expect(composerSource).toContain("onkeydowncapture={handleQuestionnaireKeydown}");
+    expect(composerSource).toContain("questionnaireController.handleKeydown(event);");
     const { mode, controller } = setup();
     const event = key();
     controller.handleKeydown(event);

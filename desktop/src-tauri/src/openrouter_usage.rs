@@ -36,7 +36,10 @@ pub(crate) struct OpenRouterUsage {
 }
 
 fn number(value: &Value, key: &str) -> Option<f64> {
-    value.get(key).and_then(Value::as_f64).filter(|n| n.is_finite())
+    value
+        .get(key)
+        .and_then(Value::as_f64)
+        .filter(|n| n.is_finite())
 }
 
 fn text(value: &Value, key: &str) -> Option<String> {
@@ -98,7 +101,10 @@ fn fetch_data(
         return Ok(None);
     }
     if !status.is_success() {
-        return Err(format!("OpenRouter usage request failed ({})", status.as_u16()));
+        return Err(format!(
+            "OpenRouter usage request failed ({})",
+            status.as_u16()
+        ));
     }
     let body: Value = response
         .json()

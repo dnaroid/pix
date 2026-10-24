@@ -52,18 +52,13 @@ driver from a project name or load unrelated guides.
 Write one JSONC flow under
 `$PI_SUBAGENT_AGENT_DIR/ui-qa/flows/` declaring exactly one target:
 `target.url`/`target.baseUrl` for browser, `target.command.argv` for TUI, or
-`target.application` for desktop, or `target.android` for an Android target.
-Android uses runner-owned ADB screenshots, coordinates and keys. Omitted
-`deviceType` retains the emulator-only default. Physical targets require explicit
-`deviceType: "physical"`, transport `serial` and hardware `deviceSerial`.
-Never discover or substitute targets. Prefer screenshot-first; optional stock
-XML can temporarily disrupt accessibility services. Physical targets prohibit
-no-idle helpers, helper-cleanup assertions and restart.
-Its `appLifecycle` action can background, resume or restart the selected target
-package when the QA task explicitly authorizes it (physical: background/resume only); load its detail guide for
-guards and limits. No flow-level grant field exists. Never use raw ADB. Optional XML is
-secondary; temporary helper execution needs user approval. Android evidence
-lives outside disposable `ui-qa`; host tests are not live acceptance.
+`target.application` for desktop, or `target.android` for an Android target
+(emulator by default; physical devices opt in explicitly). Android uses
+runner-owned ADB screenshots, coordinates and keys — never raw ADB, never
+discovered or substituted targets; target selection, XML, helper, lifecycle and
+physical-device limits live in the Android guide. Its `appLifecycle` action
+needs explicit QA-task authorization. Android evidence lives outside
+disposable `ui-qa`; host tests are not live acceptance.
 Desktop `target.application` is an object identity/launch contract,
 never a bare application-id string; load its base guide for accepted forms.
 The selected guide defines other fields/actions. Never bypass the unified

@@ -3159,7 +3159,8 @@ fn git_status_with_options_from(
     thread::scope(|scope| {
         let root = root.as_path();
         let staged = include_line_stats.then(|| scope.spawn(move || git_diff_numstat(root, true)));
-        let unstaged = include_line_stats.then(|| scope.spawn(move || git_diff_numstat(root, false)));
+        let unstaged =
+            include_line_stats.then(|| scope.spawn(move || git_diff_numstat(root, false)));
         let remotes = include_repository_details.then(|| scope.spawn(move || git_remotes(root)));
         let status = git_output(
             root,
@@ -10671,7 +10672,8 @@ mod tests {
         assert_eq!(deleted.unstaged_additions, Some(0));
         assert_eq!(deleted.unstaged_deletions, Some(3));
 
-        let lean = git_status_with_line_stats_from(&workspace, false).expect("read Explorer status");
+        let lean =
+            git_status_with_line_stats_from(&workspace, false).expect("read Explorer status");
         assert_eq!(lean.branch, before.branch);
         assert_eq!(lean.head, before.head);
         assert_eq!(lean.remotes, before.remotes);
