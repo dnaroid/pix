@@ -399,7 +399,7 @@
             tabindex="0"
             onscroll={rememberScroll}
           >
-            <div class="mx-auto w-full max-w-[840px] px-8 py-6 text-sm leading-6">
+            <div class="preview-markdown-content mx-auto w-[calc(100%-4rem)] max-w-[776px] py-6 text-sm leading-6">
               <MarkdownText
                 text={file.content}
                 fitTables
@@ -476,6 +476,11 @@
 </section>
 
 <style>
+  /* Bound WebKit's selection-gap paint to the text column, not its gutters. */
+  .preview-markdown-content {
+    contain: paint;
+  }
+
   .preview-code {
     display: block;
     min-width: 100%;

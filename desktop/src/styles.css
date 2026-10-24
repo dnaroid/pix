@@ -435,17 +435,20 @@ html, body, #app {
   background: var(--selection);
 }
 
-/* Layout boxes must not paint native selection gaps into transcript margins.
+/* Layout boxes must not paint native selection gaps into document margins.
  * Opt actual text surfaces back in, including all nested code/link tokens. */
 .transcript-pane::selection,
-.transcript-pane *::selection {
+.transcript-pane *::selection,
+.preview-text-surface::selection,
+.preview-text-surface *::selection {
   background: transparent;
   color: var(--selection-foreground);
 }
 .transcript-pane :is(.markdown-text, .tool-result, .diff-content)::selection,
 .transcript-pane :is(.markdown-text, .tool-result, .diff-content) *::selection,
-:is(.preview-text-surface, .preview-editor)::selection,
-.preview-text-surface *::selection {
+.preview-text-surface :is(.markdown-text, .preview-code)::selection,
+.preview-text-surface :is(.markdown-text, .preview-code) *::selection,
+.preview-editor::selection {
   background: var(--selection);
   color: var(--selection-foreground);
 }
