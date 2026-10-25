@@ -239,6 +239,14 @@ export function createDesktopSidebarViewModel(options: {
     onValidateProjectFile: options.preview.validateProjectFile,
     onOpenProjectFile: (path, range) => void options.preview.openProjectFile(path, "replace", range),
     onOpenFilesFile: (path) => void options.preview.openProjectFile(path, "replace", undefined, true),
+    onBeforeFilesMutation: async () => {
+      if (options.preview.dirty) throw new Error("Save or discard the Preview draft before changing files.");
+      const release = await options.projectDocuments.prepareFileMutation();
+      if (options.preview.dirty) { release(); throw new Error("Save or discard the Preview draft before changing files."); }
+      // Closing clean Preview also invalidates pending reads and stale save targets.
+      options.preview.close();
+      return release;
+    },
     onOpenUserConfig: (kind) => void options.preview.openUserConfig(kind, "replace"),
     onOpenExternalEditor: (path) => void options.projectWorkspace.openInEditor(path),
     onProjectSwitcherOpen,

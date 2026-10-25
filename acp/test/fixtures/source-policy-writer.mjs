@@ -7,12 +7,12 @@ const [moduleUrl, root, source, value, phase] = process.argv.slice(2);
 const proceed = new Promise(resolve => process.once("message", resolve));
 const rename = fs.promises.rename;
 fs.promises.rename = async (from, to) => {
-  if (to === join(root, ".pi/search-sources.json") && phase === "before") {
+  if (to === join(root, ".pi/workspace.jsonc") && phase === "before") {
     process.send({ event: "barrier" });
     await proceed;
   }
   const result = await rename(from, to);
-  if (to === join(root, ".pi/search-sources.json") && phase === "after") {
+  if (to === join(root, ".pi/workspace.jsonc") && phase === "after") {
     process.send({ event: "barrier" });
     await proceed;
   }

@@ -54,19 +54,63 @@ test("missing policy defaults only Settings/Code without creating storage; proje
 
 test("malformed, symlinked, hardlinked, oversized policies fail closed, not back to enabled defaults", async () => {
   const root = await fixture(); await mkdir(join(root, ".pi"));
-  const file = join(root, ".pi/search-sources.json"), target = join(root, "target.json");
-  for (const text of ["invalid", "{}", JSON.stringify({ version: 2, enabled: SOURCE_DEFAULTS }), " ".repeat(9000)]) {
+  const file = join(root, ".pi/workspace.jsonc"), target = join(root, "target.json");
+  for (const text of ["invalid", ' {"search":{"sources":{"code":true,"code":false}}}', "[]", '{"search":{"sources":{"code":"yes"}}}', '{"search":{"sources":{"settings":false}}}', '{"search":{"sources":{"unknown":true}}}', " ".repeat(65537)]) {
     await writeFile(file, text);
     const policy = await readSourcePolicy(root);
     expect(policy.error).toBeTruthy(); expect(Object.values(policy.enabled).some(Boolean)).toBe(false);
   }
-  await rm(file); await writeFile(target, JSON.stringify({ version: 1, enabled: SOURCE_DEFAULTS }));
+  await rm(file); await writeFile(target, '{"search":{"sources":{"tasks":false}}}');
   await symlink(target, file);
   expect((await readSourcePolicy(root)).error).toBeTruthy();
   await expect(writeSourcePolicy(root, "tasks", true)).rejects.toThrow();
   await rm(file); await link(target, file);
   expect((await readSourcePolicy(root)).error).toBeTruthy();
   expect(await readFile(target, "utf8")).toContain('"tasks":false');
+});
+
+test("workspace JSONC preserves comments, unknown fields and large sibling state across source saves", async () => {
+  const root = await fixture(); await mkdir(join(root, ".pi"));
+  const file = join(root, ".pi/workspace.jsonc");
+  const content = `{\n  // Keep project identity\n  "color": "#123456",\n  "custom": "${"x".repeat(10000)}",\n  "search": { "sources": { "sessions": true, }, "future": 42, },\n}\n`;
+  await writeFile(file, content);
+  expect((await readSourcePolicy(root)).enabled).toEqual({ ...SOURCE_DEFAULTS, sessions: true });
+  await writeSourcePolicy(root, "tasks", true);
+  const saved = await readFile(file, "utf8");
+  expect(saved).toContain("// Keep project identity");
+  expect(saved).toContain('"color": "#123456"');
+  expect(saved).toContain('"future": 42');
+  expect(saved).toContain('"custom": "' + "x".repeat(10000) + '"');
+  expect((await readSourcePolicy(root)).enabled).toEqual({ ...SOURCE_DEFAULTS, sessions: true, tasks: true });
+  await writeSourcePolicy(root, "tasks", true);
+  expect(await readFile(file, "utf8")).toBe(saved);
+});
+
+test("standalone source files and locks are never read or migrated", async () => {
+  const root = await fixture(); await mkdir(join(root, ".pi"));
+  const legacy = join(root, ".pi/search-sources.json");
+  await writeFile(legacy, "INVALID ignored legacy data");
+  await writeFile(legacy + ".lock", "ignored lock");
+  expect((await readSourcePolicy(root)).enabled).toEqual(SOURCE_DEFAULTS);
+  expect(existsSync(join(root, ".pi/workspace.jsonc"))).toBe(false);
+  await writeSourcePolicy(root, "tasks", true);
+  expect((await readSourcePolicy(root)).enabled.tasks).toBe(true);
+  expect(await readFile(legacy, "utf8")).toBe("INVALID ignored legacy data");
+  expect(await readFile(legacy + ".lock", "utf8")).toBe("ignored lock");
+});
+
+test("unrelated workspace edits neither change policy revisions nor cancel active work", async () => {
+  const root = await fixture(); await writeSourcePolicy(root, "tasks", true);
+  const before = await readSourcePolicy(root), file = join(root, ".pi/workspace.jsonc");
+  await withSourcePolicy(root, signal(), async owned => {
+    const content = await readFile(file, "utf8");
+    await writeFile(file, content.replace("{", '{"projectExplorer":{"expandedDirectories":["src"]},'));
+    // Exercise the real stat watcher too, not only completion/checkpoint fences.
+    await new Promise(resolve => setTimeout(resolve, 700));
+    expect(owned.aborted).toBe(false);
+    await requireSourceEnabled(root, "tasks", owned);
+  });
+  expect((await readSourcePolicy(root)).revision).toBe(before.revision);
 });
 
 test("disabled history sources skip all dispatch and manual indexing before source scans/providers", async () => {
@@ -103,10 +147,8 @@ test("policy changes reject stale completion immediately, without waiting for th
   })).rejects.toThrow("selection changed");
 });
 
-test("global Settings disable/re-enable fences another project's work and ignores its legacy flag", async () => {
+test("global Settings disable/re-enable fences another project's work", async () => {
   const a = await fixture(), b = await fixture();
-  await mkdir(join(a, ".pi"));
-  await writeFile(join(a, ".pi/search-sources.json"), JSON.stringify({ version: 1, enabled: { ...SOURCE_DEFAULTS, settings: false } }));
   expect((await readSourcePolicy(a)).enabled.settings).toBe(true);
   const before = await readSourcePolicy(a);
   let sends = 0;

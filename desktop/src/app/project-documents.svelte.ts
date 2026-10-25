@@ -14,6 +14,7 @@ type ProjectDocumentsStoreOptions = {
   openProjectFile: (path: string) => void | Promise<void>;
   showEmptyFile: (file: ProjectFilePreview) => void;
   previewId: () => number | undefined;
+  currentFile?: () => ProjectFilePreview | undefined;
   afterSave: (file: ProjectFilePreview, workspace: string, previewId: number | undefined) => void;
   afterDelete?: (path: string, workspace: string) => void;
   clearError: () => void;
@@ -26,6 +27,7 @@ export function createProjectDocumentsStore(options: ProjectDocumentsStoreOption
   let workspaceGeneration = 0;
   const writes = new Map<string, Promise<ProjectFilePreview>>();
   let removing = $state<string | null>(null);
+  let fileMutationReservations = 0;
 
   function reset(): void {
     generation += 1;
@@ -64,16 +66,23 @@ export function createProjectDocumentsStore(options: ProjectDocumentsStoreOption
   async function save(path: string, content: string): Promise<boolean> {
     const workspace = options.workspace();
     if (!workspace || !isWorkspaceProjectFilePath(path) || removing === path) return false;
+    if (fileMutationReservations > 0) {
+      options.reportError(new Error("A file operation is in progress. Try saving again when it finishes."));
+      return false;
+    }
     const requestGeneration = workspaceGeneration;
     const previewId = options.previewId();
+    const loadedFile = options.currentFile?.();
+    const expectedContent = loadedFile?.path === path ? loadedFile.content : undefined;
     const isCurrent = () => requestGeneration === workspaceGeneration && options.workspace() === workspace;
     const key = `${workspace}\0${path}`;
     const command = isEditableProjectMarkdown(path) ? "write_project_markdown" : "write_project_file";
     options.clearError();
     try {
-      const previous = writes.get(key) ?? Promise.resolve();
-      const pending = previous.catch(() => {}).then(() => invoke<ProjectFilePreview>(command, {
+      const previous = writes.get(key) ?? Promise.resolve(undefined);
+      const pending = previous.catch(() => undefined).then((saved) => invoke<ProjectFilePreview>(command, {
         workspace, path, content,
+        ...(expectedContent !== undefined ? { expectedContent: saved?.content ?? expectedContent } : {}),
       })).finally(() => {
         if (writes.get(key) === pending) writes.delete(key);
       });
@@ -117,6 +126,12 @@ export function createProjectDocumentsStore(options: ProjectDocumentsStoreOption
   }
 
   return {
+    async prepareFileMutation(): Promise<() => void> {
+      fileMutationReservations++;
+      await Promise.allSettled([...writes.values()]);
+      let released = false;
+      return () => { if (!released) { released = true; fileMutationReservations--; } };
+    },
     get snapshot() { return snapshot; },
     get removing() { return removing; },
     reset,

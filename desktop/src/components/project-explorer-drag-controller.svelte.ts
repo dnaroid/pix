@@ -8,7 +8,10 @@ import {
 
 const DRAG_THRESHOLD = 4;
 
-export function createProjectExplorerDragController() {
+export function createProjectExplorerDragController(options?: {
+  entries: (entry: ProjectTreeEntry) => ProjectTreeEntry[];
+  move: (entries: ProjectTreeEntry[], destination: string) => void;
+}) {
   let draggedEntry = $state<ProjectTreeEntry | null>(null);
   let dragging = $state(false);
   let clientX = $state(0);
@@ -21,6 +24,9 @@ export function createProjectExplorerDragController() {
   let suppressEntryClick = false;
   let previousUserSelect: string | null = null;
   let previousCursor: string | null = null;
+  let entries = $state<ProjectTreeEntry[]>([]);
+  let destination = $state<string | null>(null);
+  let suppressTimer: ReturnType<typeof setTimeout> | undefined;
 
   function start(event: PointerEvent, entry: ProjectTreeEntry): void {
     if (event.button !== 0) return;
@@ -47,9 +53,11 @@ export function createProjectExplorerDragController() {
     if (!started) {
       if (Math.hypot(event.clientX - startX, event.clientY - startY) < DRAG_THRESHOLD) return;
       setDocumentDragState(true);
+      entries = options?.entries(draggedEntry) ?? [draggedEntry];
     }
     event.preventDefault();
     setDropTarget(dropTargetAt(event.clientX, event.clientY));
+    destination = treeDestinationAt(event.clientX, event.clientY);
   }
 
   function finish(event: PointerEvent): void {
@@ -58,13 +66,17 @@ export function createProjectExplorerDragController() {
     const entry = draggedEntry;
     if (started && entry) {
       event.preventDefault();
+      const destination = treeDestinationAt(event.clientX, event.clientY);
       const target = dropTargetAt(event.clientX, event.clientY);
-      target?.dispatchEvent(new CustomEvent(PROJECT_TREE_DROP_EVENT, {
-        detail: projectTreeDragPayload(entry),
+      if (destination !== null) options?.move(entries, destination);
+      else for (const item of entries) target?.dispatchEvent(new CustomEvent(PROJECT_TREE_DROP_EVENT, {
+        detail: projectTreeDragPayload(item),
       }));
       suppressEntryClick = true;
-      window.setTimeout(() => {
+      clearTimeout(suppressTimer);
+      suppressTimer = setTimeout(() => {
         suppressEntryClick = false;
+        suppressTimer = undefined;
       }, 0);
     }
     clear();
@@ -78,6 +90,18 @@ export function createProjectExplorerDragController() {
   function dropTargetAt(x: number, y: number): HTMLElement | null {
     return (document.elementFromPoint(x, y) as HTMLElement | null)
       ?.closest<HTMLElement>(PROJECT_TREE_DROP_TARGET_SELECTOR) ?? null;
+  }
+
+  function treeDestinationAt(x: number, y: number): string | null {
+    const hit = document.elementFromPoint(x, y);
+    const row = hit?.closest<HTMLElement>("[data-project-move-row]")
+      ?? hit?.closest<HTMLElement>("[data-project-tree-path]");
+    const target = row ?? hit?.closest<HTMLElement>("[data-project-move-target]");
+    const path = target?.dataset.projectMoveTarget;
+    if (path === undefined || !options || !entries.length) return null;
+    if (entries.some((entry) => path === entry.path || path.startsWith(`${entry.path}/`))) return null;
+    if (entries.every((entry) => (entry.path.includes("/") ? entry.path.slice(0, entry.path.lastIndexOf("/")) : "") === path)) return null;
+    return path;
   }
 
   function setDropTarget(target: HTMLElement | null): void {
@@ -103,6 +127,8 @@ export function createProjectExplorerDragController() {
     pointerId = null;
     source = null;
     draggedEntry = null;
+    entries = [];
+    destination = null;
     setDocumentDragState(false);
   }
 
@@ -136,10 +162,13 @@ export function createProjectExplorerDragController() {
     get clientX() { return clientX; },
     get clientY() { return clientY; },
     get suppressEntryClick() { return suppressEntryClick; },
+    get destination() { return destination; },
+    get count() { return entries.length; },
     start,
     move,
     finish,
     cancel,
     clear,
+    dispose() { clear(); clearTimeout(suppressTimer); suppressEntryClick = false; },
   };
 }

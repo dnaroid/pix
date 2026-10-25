@@ -8,8 +8,7 @@ import { promisify } from "node:util";
 import { indexSessionChunks, listIndexedSessions, searchSessionChunks } from "../src/search/session-chunks.js";
 async function setSearchSources(root:string, enabled:{sessions:boolean}) {
   await mkdir(join(root,".pi"),{recursive:true});
-  await writeFile(join(root,".pi/search-sources.json"),JSON.stringify({version:1,
-    enabled:{settings:false,code:false,knowledge:false,tasks:false,commits:false,...enabled}}));
+  await writeFile(join(root,".pi/workspace.jsonc"),JSON.stringify({ search: { sources: {code:false,knowledge:false,tasks:false,commits:false,...enabled} } }));
 }
 
 const run = promisify(execFile);

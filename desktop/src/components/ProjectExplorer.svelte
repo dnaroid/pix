@@ -32,6 +32,9 @@
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import Search from "@lucide/svelte/icons/search";
   import Trash2 from "@lucide/svelte/icons/trash-2";
+  import Scissors from "@lucide/svelte/icons/scissors";
+  import Undo2 from "@lucide/svelte/icons/undo-2";
+  import Redo2 from "@lucide/svelte/icons/redo-2";
   import X from "@lucide/svelte/icons/x";
   import { onDestroy, onMount, tick, untrack } from "svelte";
   import type { MenuNavigationItem } from "../lib/keyboard-navigation";
@@ -55,6 +58,7 @@
   import { createProjectExplorerMenuController } from "./project-explorer-menu-controller.svelte";
   import { createProjectExplorerTreeController } from "./project-explorer-tree-controller.svelte";
   import { createProjectExplorerOperations, type ProjectOperation, type ProjectOperationClaim } from "./project-explorer-operations.svelte";
+  import { createProjectExplorerFileActions, parentDirectory } from "./project-explorer-file-actions";
 
   let {
     workspace,
@@ -66,6 +70,7 @@
     onOpenFile,
     onOpenExternal,
     onHealthChange,
+    onBeforeMutation,
   }: {
     workspace: string;
     externalEditorLabel: string;
@@ -76,6 +81,7 @@
     onOpenFile: (path: string, range?: ProjectFileLineRange) => void;
     onOpenExternal: (path: string) => void;
     onHealthChange?: (error: string | null) => void;
+    onBeforeMutation?: () => Promise<() => void>;
   } = $props();
 
   let treeRoot = $state<HTMLDivElement | null>(null);
@@ -94,7 +100,16 @@
   let searchGeneration = 0;
   let expansionSaveTail: Promise<void> = Promise.resolve();
   let observedOperationWorkspace: string | undefined;
-  const dragController = createProjectExplorerDragController();
+  const dragController = createProjectExplorerDragController({
+    entries: (entry) => {
+      if (!treeState.selectedPaths.includes(entry.path)) treeController.selectEntry(entry.path);
+      return treeController.selectedEntries(entry);
+    },
+    move: (entries, destination) => {
+      const paths = entries.filter((entry) => parentDirectory(entry.path) !== destination).map((entry) => entry.path);
+      if (paths.length) void runMutation({ type: "move", paths, destination }, "Move");
+    },
+  });
   const treeController = createProjectExplorerTreeController({
     workspace: () => workspace,
     refreshKey: () => refreshKey,
@@ -109,18 +124,29 @@
   });
   const treeState = treeController.state;
   const diagnostics = createDiagnosticLogger(() => ({ workspace }));
+  const { history, runMutation, replayHistory, canReplay, invokeName } = createProjectExplorerFileActions({
+    workspace: () => workspace,
+    generation: () => operationGeneration,
+    operations,
+    tree: treeController,
+    prepare: async () => onBeforeMutation ? onBeforeMutation() : () => {},
+    closeMenu: () => menuController.close(),
+    report: (error, context) => diagnostics.report(error, context),
+    setError: (message) => { operationError = message; },
+    finish: finishOperation,
+  });
   const nameEditor = createProjectExplorerNameEditor({
     workspace: () => workspace,
     operations,
     tree: treeController,
     prepare: () => { menuController.close(); clearSearch(); },
-    invoke: (command, args) => invoke<ProjectTreeEntry>(command, args),
+    invoke: invokeName,
     onOpenFile: (path) => onOpenFile(path),
     onError: (error) => {
       diagnostics.report(error, "project-explorer:name-operation-failed");
       operationError = errorMessage(error);
     },
-    onSuccess: clearOperationError,
+    onSuccess: () => {}, // The history adapter preserves any recovery warning.
     onFinish: () => { void gitRefresh.request(); },
   });
   const nameState = nameEditor.state;
@@ -203,12 +229,13 @@
     nameEditor.dispose();
     operationGeneration += 1;
     operations.invalidate();
+    history.invalidate();
     clipboardReader.invalidate();
     ignoreEligibility.invalidate();
     remoteLinks.invalidate();
     gitRefresh.dispose();
     treeController.dispose();
-    dragController.clear();
+    dragController.dispose();
     menuController.dispose();
   });
 
@@ -222,6 +249,7 @@
     observedOperationWorkspace = currentWorkspace;
     operationGeneration += 1;
     operations.invalidate();
+    history.invalidate();
     operationError = null;
     searchGeneration += 1;
     searchQuery = "";
@@ -353,14 +381,12 @@
       event.stopPropagation();
       return;
     }
+    treeController.selectEntry(entry.path, event);
+    if (event.metaKey || event.ctrlKey || event.shiftKey) return;
     if (entry.kind === "directory") treeController.toggleDirectory(entry.path);
     else treeController.openFile(entry.path);
   }
 
-  function parentDirectory(path: string): string {
-    const separator = path.lastIndexOf("/");
-    return separator < 0 ? "" : path.slice(0, separator);
-  }
 
   function destinationDirectory(entry: ProjectTreeEntry): string {
     return entry.kind === "directory" ? entry.path : parentDirectory(entry.path);
@@ -409,7 +435,9 @@
       items.push({ label: "New File…", disabled: !canCreateIn(entry) }, { label: "New Folder…", disabled: !canCreateIn(entry) });
     }
     if (entry.path) items.push({ label: "Copy" });
+    if (entry.path) items.push({ label: "Cut", disabled: !canMutate(entry) });
     items.push({ label: "Paste", disabled: !canPasteInto(entry) });
+    items.push({ label: "Undo", disabled: !canReplay("undo") }, { label: "Redo", disabled: !canReplay("redo") });
     if (entry.path) {
       items.push(
         { label: "Duplicate", disabled: !canDuplicate(entry) },
@@ -434,7 +462,10 @@
       "New File…": () => nameEditor.open("new-file", entry),
       "New Folder…": () => nameEditor.open("new-directory", entry),
       "Copy": () => copyEntry(entry),
+      "Cut": () => copyEntry(entry, true),
       "Paste": () => pasteEntry(entry),
+      "Undo": () => replayHistory("undo"),
+      "Redo": () => replayHistory("redo"),
       "Duplicate": () => duplicateEntry(entry),
       "Rename…": () => nameEditor.open("rename", entry),
       "Copy Relative Path": () => copyPath(entry),
@@ -452,6 +483,7 @@
   }
 
   function openEntryContextMenu(event: MouseEvent, entry: ProjectTreeEntry): void {
+    if (!treeState.selectedPaths.includes(entry.path)) treeController.selectEntry(entry.path);
     treeState.focusedPath = entry.path;
     menuController.openContextMenu(event, entry);
     if (!nativeMenus) void refreshEntryClipboard(entry);
@@ -470,6 +502,17 @@
   }
 
   function handleEntryKeydown(event: KeyboardEvent, index: number, entry: ProjectTreeEntry): void {
+    const primary = isMacOS ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+    if (primary && !event.altKey && event.key.toLowerCase() === "z") {
+      event.preventDefault();
+      event.stopPropagation();
+      void replayHistory(event.shiftKey ? "redo" : "undo");
+      return;
+    }
+    if (primaryShortcut(event, "a")) { event.preventDefault(); treeController.selectAll(); return; }
+    if (primaryShortcut(event, "x")) { event.preventDefault(); void copyEntry(entry, true); return; }
+    if (event.key === " " && primary && !event.altKey) { event.preventDefault(); treeController.selectEntry(entry.path, { metaKey: true }); return; }
+    if (event.key === "Escape") { treeState.selectedPaths = []; return; }
     if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
       event.preventDefault();
       openEntryContextMenu(new MouseEvent("contextmenu"), entry);
@@ -524,20 +567,21 @@
     return error instanceof Error ? error.message : String(error);
   }
 
-  async function copyEntry(entry: ProjectTreeEntry): Promise<void> {
+  async function copyEntry(entry: ProjectTreeEntry, cut = false): Promise<void> {
     if (!entry.path) return;
     menuController.close(true);
     clipboardReader.invalidate();
     const requestWorkspace = workspace;
     const operation = operations.begin(`Copy reference: ${entry.name}`, []);
     if (!operation) return;
-    const text = encodeProjectEntryClipboard(requestWorkspace, entry);
+    const text = encodeProjectEntryClipboard(requestWorkspace, entry, treeController.selectedEntries(entry), cut ? "move" : "copy");
     try {
       await writeText(text);
       if (!operations.isCurrent(operation) || workspace !== requestWorkspace) return;
       entryClipboard = decodeProjectEntryClipboard(text);
       clearOperationError();
     } catch (error) {
+      diagnostics.report(error, "project-explorer:clipboard-failed");
       if (operations.isCurrent(operation) && workspace === requestWorkspace) operationError = errorMessage(error);
     } finally {
       finishOperation(operation);
@@ -598,90 +642,49 @@
     const requestWorkspace = workspace;
     const destination = destinationDirectory(entry);
     const generation = operationGeneration;
-    let operation: ProjectOperation | null = null;
     try {
       // Read again at activation: another app/instance may have replaced the clipboard.
       const copied = decodeProjectEntryClipboard(await readText());
       if (generation !== operationGeneration || workspace !== requestWorkspace) return;
       entryClipboard = copied;
       if (!canPasteProjectEntry(copied, requestWorkspace, destination) || !copied) return;
-      const claims: ProjectOperationClaim[] = [{ path: destination, kind: "tree" }];
-      if (copied.workspace === requestWorkspace) claims.push({ path: copied.path, kind: "tree" });
-      operation = operations.begin(`Paste: ${copied.path}`, claims);
-      if (!operation) return;
-      const created = await invoke<ProjectTreeEntry>("copy_project_entry", {
-        workspace: requestWorkspace,
-        sourceWorkspace: copied.workspace,
-        path: copied.path,
-        destination: destination || null,
-      });
-      if (!operations.isCurrent(operation) || workspace !== requestWorkspace) return;
-      treeController.ensureDirectoryExpanded(destination);
-      await treeController.refreshDirectory(destination);
-      if (!operations.isCurrent(operation) || workspace !== requestWorkspace) return;
-      await treeController.focusPath(created.path);
-      if (operations.isCurrent(operation) && workspace === requestWorkspace) clearOperationError();
+      const paths = (copied.entries ?? [copied]).map((item) => item.path)
+        .filter((path) => copied.operation !== "move" || parentDirectory(path) !== destination);
+      if (!paths.length) return;
+      const result = await runMutation(copied.operation === "move"
+        ? { type: "move", paths, destination }
+        : { type: "copy", paths, destination, sourceWorkspace: copied.workspace }, "Paste");
+      if (result && copied.operation === "move" && generation === operationGeneration) {
+        // Consume only our local cut hint; never clobber a newer system clipboard.
+        entryClipboard = null;
+      }
     } catch (error) {
+      diagnostics.report(error, "project-explorer:paste-failed");
       if (generation === operationGeneration && workspace === requestWorkspace) operationError = errorMessage(error);
-    } finally {
-      if (operation) finishOperation(operation);
     }
   }
 
   async function duplicateEntry(entry: ProjectTreeEntry): Promise<void> {
     if (!entry.path) return;
-    menuController.close();
-    const requestWorkspace = workspace;
-    const destination = parentDirectory(entry.path);
-    const operation = operations.begin(`Duplicate: ${entry.name}`, copyClaims(entry.path, destination));
-    if (!operation) return;
-    try {
-      const created = await invoke<ProjectTreeEntry>("copy_project_entry", {
-        workspace: requestWorkspace,
-        path: entry.path,
-        destination: destination || null,
-      });
-      if (!operations.isCurrent(operation) || workspace !== requestWorkspace) return;
-      await treeController.refreshDirectory(destination);
-      if (!operations.isCurrent(operation) || workspace !== requestWorkspace) return;
-      await treeController.focusPath(created.path);
-      if (operations.isCurrent(operation) && workspace === requestWorkspace) clearOperationError();
-    } catch (error) {
-      if (operations.isCurrent(operation) && workspace === requestWorkspace) operationError = errorMessage(error);
-    } finally {
-      finishOperation(operation);
-    }
+    await runMutation({ type: "copy", paths: treeController.selectedEntries(entry).map((item) => item.path), destination: parentDirectory(entry.path) }, "Duplicate");
   }
 
   async function deleteEntry(entry: ProjectTreeEntry): Promise<void> {
     if (!entry.path || !canMutate(entry)) return;
     menuController.close();
-    const kind = entry.kind === "directory" ? "folder" : "file";
+    const entries = treeController.selectedEntries(entry);
+    const label = entries.length > 1 ? `${entries.length} selected entries` : `“${entry.name}”`;
     const requestWorkspace = workspace;
-    if (!await confirmDesktopDeletion(`Delete ${kind} “${entry.name}”?\n\nThis cannot be undone.`, {
-      title: `Delete ${kind}?`, okLabel: "Delete",
+    const generation = operationGeneration;
+    if (!await confirmDesktopDeletion(`Delete ${label}?\n\nYou can restore this operation with Undo while this Files panel remains open. Recovery data is retained in .pi/file-history.`, {
+      title: "Delete entries?", okLabel: "Delete",
     })) return;
-    if (workspace !== requestWorkspace || !canMutate(entry)) return;
-    const parent = parentDirectory(entry.path);
+    if (workspace !== requestWorkspace || generation !== operationGeneration || !canMutate(entry)) return;
     const fallback = treeController.focusFallbackAfterRemoval(entry.path);
-    const operation = operations.begin(`Delete: ${entry.name}`, [{ path: entry.path, kind: "tree" }]);
-    if (!operation) return;
-    try {
-      await invoke("delete_project_entry", { workspace: requestWorkspace, path: entry.path });
-      if (!operations.isCurrent(operation) || workspace !== requestWorkspace) return;
-      const restoreFocus = treeState.focusedPath === entry.path || treeState.focusedPath?.startsWith(`${entry.path}/`);
-      treeController.removePath(entry.path);
-      await treeController.refreshDirectory(parent);
-      if (!operations.isCurrent(operation) || workspace !== requestWorkspace) return;
-      const focusTarget = fallback ?? treeController.rows[0]?.entry.path;
-      if (restoreFocus && treeState.focusedPath === null && focusTarget !== undefined && focusTarget !== null) await treeController.focusPath(focusTarget);
-      if (operations.isCurrent(operation) && workspace === requestWorkspace) clearOperationError();
-    } catch (error) {
-      if (operations.isCurrent(operation) && workspace === requestWorkspace) operationError = errorMessage(error);
-    } finally {
-      finishOperation(operation);
-    }
+    const result = await runMutation({ type: "delete", paths: entries.map((item) => item.path) }, "Delete");
+    if (result && treeState.focusedPath === null && fallback !== null) await treeController.focusPath(fallback);
   }
+
 
   function runMenuOpen(entry: ProjectTreeEntry): void {
     menuController.close();
@@ -722,7 +725,15 @@
   }
 
   function handleWindowKeydown(event: KeyboardEvent): void {
+    if (event.key === "Escape" && dragController.dragging) { event.preventDefault(); dragController.clear(); return; }
+    const target = event.target instanceof Element ? event.target : null;
     const primary = isMacOS ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+    if (!event.defaultPrevented && primary && !event.altKey && event.key.toLowerCase() === "z"
+      && target?.closest("[data-project-explorer]") && !target.closest("input, textarea, [contenteditable='true']")) {
+      event.preventDefault();
+      void replayHistory(event.shiftKey ? "redo" : "undo");
+      return;
+    }
     if (
       primary
       && event.shiftKey
@@ -776,8 +787,13 @@
   {/if}
 {/snippet}
 
-<section class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" aria-label="Project files">
+<section class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" aria-label="Project files" data-project-explorer>
   <div class="border-b border-sidebar-border px-2 py-1.5">
+    <div class="mb-1 flex h-6 items-center gap-1 text-xs text-muted-foreground">
+      <span class="min-w-0 flex-1 truncate">{treeState.selectedPaths.length ? `${treeState.selectedPaths.length} selected` : "Files"}</span>
+      <button class="grid h-6 w-6 place-items-center rounded-sm hover:bg-accent disabled:opacity-40 focus-visible:outline-1 focus-visible:outline-ring" type="button" disabled={!canReplay("undo")} aria-label="Undo file operation" title="Undo file operation (⌘Z)" onclick={() => void replayHistory("undo")}><Undo2 class="h-3.5 w-3.5" /></button>
+      <button class="grid h-6 w-6 place-items-center rounded-sm hover:bg-accent disabled:opacity-40 focus-visible:outline-1 focus-visible:outline-ring" type="button" disabled={!canReplay("redo")} aria-label="Redo file operation" title="Redo file operation (⇧⌘Z)" onclick={() => void replayHistory("redo")}><Redo2 class="h-3.5 w-3.5" /></button>
+    </div>
     <div class="flex h-7 min-w-0 items-center gap-1.5 rounded-md border border-input bg-panel-strong px-2 focus-within:border-ring">
       {#if searchLoading}
         <RotateCw class="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" aria-hidden="true" />
@@ -852,9 +868,11 @@
     bind:this={treeRoot}
     class="min-h-0 flex-1 overflow-auto py-1"
     role="tree"
+    aria-multiselectable="true"
     aria-label="Project files"
     tabindex="-1"
     oncontextmenu={openRootContextMenu}
+    data-project-move-target=""
   >
       {#each rows as row, index (row.entry.path)}
         {@const entry = row.entry}
@@ -869,15 +887,18 @@
         <div
           class={[
             "group flex h-7 w-full min-w-max items-center pr-1 hover:bg-panel-hover",
-            treeState.selectedPath === entry.path ? "bg-panel-selected" : "",
+            treeState.selectedPaths.includes(entry.path) ? "bg-panel-selected" : "",
+            dragController.dragging && dragController.destination === entry.path ? "ring-1 ring-inset ring-ring bg-panel-hover" : "",
           ]}
           style:padding-left={`${4 + row.depth * 14}px`}
           role="presentation"
+          data-project-move-row
+          data-project-move-target={entry.kind === "directory" ? entry.path : undefined}
         >
           <button
             class={[
               "flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-sm text-left text-xs text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
-              hiddenEntry && !emphasis && treeState.selectedPath !== entry.path
+              hiddenEntry && !emphasis && !treeState.selectedPaths.includes(entry.path)
                 ? "opacity-55 transition-opacity hover:opacity-100 focus-visible:opacity-100"
                 : "",
             ]}
@@ -887,10 +908,11 @@
             aria-label={gitDecoration ? `${entry.name} · ${gitDecoration.label}` : entry.name}
             aria-level={row.depth + 1}
             aria-expanded={entry.kind === "directory" ? expanded : undefined}
-            aria-selected={treeState.selectedPath === entry.path}
+            aria-selected={treeState.selectedPaths.includes(entry.path)}
             aria-keyshortcuts={entry.path ? "Shift+Enter F2 Delete" : "Shift+Enter"}
             tabindex={!nameState.edit && tabbablePath === entry.path ? 0 : -1}
             data-project-tree-path={entry.path}
+            data-project-move-target={entry.kind === "directory" ? entry.path : undefined}
             data-project-entry-emphasis={emphasis}
             data-project-git-status={gitDecoration?.code}
             onfocus={() => treeState.focusedPath = entry.path}
@@ -1035,11 +1057,17 @@
           <CopyIcon class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Copy</span>
           <span class="ml-auto font-mono text-xs text-muted-foreground">{isMacOS ? "⌘C" : "Ctrl+C"}</span>
         </button>
+        <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" disabled={!canMutate(menuEntry)} onclick={() => void copyEntry(menuEntry, true)}>
+          <Scissors class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Cut</span>
+          <span class="ml-auto font-mono text-xs text-muted-foreground">⌘X</span>
+        </button>
       {/if}
       <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" disabled={!pasteEnabled} onclick={() => void pasteEntry(menuEntry)}>
         <ClipboardPaste class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Paste</span>
         <span class="ml-auto font-mono text-xs text-muted-foreground">{isMacOS ? "⌘V" : "Ctrl+V"}</span>
       </button>
+      <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" disabled={!canReplay("undo")} onclick={() => void replayHistory("undo")}><Undo2 class="h-3.5 w-3.5" aria-hidden="true" /><span>Undo</span><span class="ml-auto font-mono text-xs text-muted-foreground">⌘Z</span></button>
+      <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" disabled={!canReplay("redo")} onclick={() => void replayHistory("redo")}><Redo2 class="h-3.5 w-3.5" aria-hidden="true" /><span>Redo</span><span class="ml-auto font-mono text-xs text-muted-foreground">⇧⌘Z</span></button>
       {#if menuEntry.path}
         <button class="project-file-menu-item" type="button" role="menuitem" tabindex="-1" disabled={!canDuplicate(menuEntry)} onclick={() => void duplicateEntry(menuEntry)}>
           <CopyIcon class="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Duplicate</span>
@@ -1082,6 +1110,7 @@
         <File class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
       {/if}
       <span class="block truncate">{dragController.entry.kind === "directory" ? `${dragController.entry.path}/` : dragController.entry.path}</span>
+      {#if dragController.count > 1}<span class="shrink-0 text-muted-foreground">+{dragController.count - 1}</span>{/if}
     </div>
   {/if}
 </section>

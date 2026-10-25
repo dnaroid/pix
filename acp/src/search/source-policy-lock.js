@@ -6,27 +6,22 @@ import { beginWrite, openDatabase, safeDirectory } from "./source-work.js";
 export class SourcePolicyLockError extends Error {}
 
 // Protocol twin: acp/src/search/source-policy-lock.js (import extensions only).
-// The permanent directory also fences older writers, whose O_EXCL file open
-// must fail. Never delete/recreate it or its SQLite file while processes run:
+// Shared by Desktop workspace CAS, source selection, and Registry workspace pull.
+// Never delete/recreate this directory or its SQLite file while processes run:
 // different inodes would let two writers each believe they own the same lock.
 export async function withSourcePolicyWriteLock(root, run) {
-  const parent = join(resolve(root), ".pi"), directory = join(parent, "search-sources.json.lock");
+  const parent = join(resolve(root), ".pi"), directory = join(parent, "workspace.jsonc.lock");
   await safeDirectory(parent);
   try { await mkdir(directory, { mode: 0o700 }); }
   catch (error) { if (error.code !== "EEXIST") throw error; }
   const info = await lstat(directory);
-  if (info.isFile() && !info.isSymbolicLink()) {
-    // An old empty marker has no owner identity. Age, even with a watchdog,
-    // cannot distinguish a dead writer from a suspended live one.
-    throw new SourcePolicyLockError("Legacy search source lock: close all older Pix/Pi processes, then remove only the file .pi/search-sources.json.lock and retry. Do not remove a lock directory.");
-  }
-  if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("Unsafe search source lock directory");
+  if (!info.isDirectory() || info.isSymbolicLink()) throw new SourcePolicyLockError("Workspace configuration lock unavailable; check .pi/workspace.jsonc.lock and retry");
   const db = await openDatabase(join(directory, "writer.sqlite"));
   let locked = false;
   try {
     try { await beginWrite(db, new AbortController().signal); }
     catch (error) {
-      if (/locked|busy/i.test(error.message)) throw new SourcePolicyLockError("Search source policy busy; retry after the other writer finishes");
+      if (/locked|busy/i.test(error.message)) throw new SourcePolicyLockError("Workspace configuration busy; retry after the other writer finishes");
       throw error;
     }
     locked = true;

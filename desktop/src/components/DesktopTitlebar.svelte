@@ -1,5 +1,6 @@
 <script lang="ts">
   import { iconButtonClass } from "../lib/icon-button";
+  import { titlebarRegionDrag } from "../lib/titlebar-drag";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import Search from "@lucide/svelte/icons/search";
   import Clock from "@lucide/svelte/icons/clock";
@@ -45,16 +46,17 @@
 </script>
 
 <header
+  use:titlebarRegionDrag
   class="flex min-w-0 select-none items-stretch border-b border-border bg-window-titlebar text-chrome-foreground"
   data-tauri-drag-region
 >
-  <div class={["shrink-0", isMacOS ? "w-[76px]" : "w-3"]} data-tauri-drag-region></div>
+  <div use:titlebarRegionDrag class={["shrink-0", isMacOS ? "w-[76px]" : "w-3"]} data-tauri-drag-region></div>
 
   {#if projectSwitcher?.workspace}
     <ProjectSwitcher {...projectSwitcher} variant="titlebar" />
   {/if}
 
-  <div class="relative flex min-w-0 flex-1" data-tauri-drag-region>
+  <div use:titlebarRegionDrag class="relative flex min-w-0 flex-1" data-tauri-drag-region>
     <WorkbenchTabs {...workbench} />
 
     {#if selector}

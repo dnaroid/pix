@@ -197,6 +197,7 @@
     onValidateProjectFile,
     onOpenProjectFile,
     onOpenFilesFile,
+    onBeforeFilesMutation,
     onOpenUserConfig,
     onOpenExternalEditor,
     onProjectSwitcherOpen,
@@ -311,6 +312,7 @@
     onValidateProjectFile: (path: string) => Promise<boolean | "directory">;
     onOpenProjectFile: (path: string, range?: ProjectFileLineRange) => void;
     onOpenFilesFile?: (path: string) => void;
+    onBeforeFilesMutation?: () => Promise<() => void>;
     onOpenUserConfig: (kind: SettingsConfigKind) => void;
     onOpenExternalEditor: (path?: string) => void;
     onProjectSwitcherOpen: () => void;
@@ -1141,6 +1143,7 @@
                 refreshKey={projectTreeRefreshKey}
                 onListDirectory={onListProjectDirectory}
                 onOpenFile={onOpenFilesFile ?? onOpenProjectFile}
+                onBeforeMutation={onBeforeFilesMutation}
                 onOpenExternal={(path) => onOpenExternalEditor(path)}
                 onHealthChange={(error) => projectPanelError = error}
               />

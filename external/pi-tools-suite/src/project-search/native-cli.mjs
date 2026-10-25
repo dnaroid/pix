@@ -56,7 +56,7 @@ try {
         : await writeSourcePolicy(process.argv[2], request.source, request.enabled);
     } catch (error) {
       result = failed(error instanceof SourcePolicyLockError ? error.message
-        : "Search source selection could not be saved. Check .pi/search-sources.json and retry.");
+        : "Search source selection could not be saved. Check .pi/workspace.jsonc and retry.");
     }
     clearTimeout(timer);
     process.stdout.write(JSON.stringify(result));

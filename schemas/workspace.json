@@ -5,6 +5,39 @@
       "type": "string",
       "description": "JSON Schema URL for editor validation and autocomplete."
     },
+    "search": {
+      "type": "object",
+      "properties": {
+        "sources": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "boolean"
+            },
+            "knowledge": {
+              "type": "boolean"
+            },
+            "sessions": {
+              "type": "boolean"
+            },
+            "tasks": {
+              "type": "boolean"
+            },
+            "commits": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "description": "Project search/index sources. Code defaults on; other project sources default off. Settings is global."
+        },
+        "revision": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Search-only generation nonce managed by source selection writers."
+        }
+      },
+      "additionalProperties": true
+    },
     "color": {
       "type": "string",
       "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",

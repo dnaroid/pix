@@ -15,8 +15,8 @@ async function fixture() {
   await mkdir(artifacts, { recursive: true });
   const root = await mkdtemp(join(artifacts, "run-")); roots.push(root);
   await mkdir(join(root, ".pi"));
-  const file = join(root, ".pi/search-sources.json"), lock = file + ".lock";
-  const original = JSON.stringify({ version: 1, enabled: DEFAULT_SEARCH_SOURCES });
+  const file = join(root, ".pi/workspace.jsonc"), lock = file + ".lock";
+  const original = JSON.stringify({});
   await writeFile(file, original);
   return { root, file, lock, original };
 }
@@ -36,14 +36,14 @@ function failedPolicy(response: any) {
 }
 
 for (const executable of ["node", "bun"]) {
-  test(`${executable} CLI returns policy-shaped success and preserves legacy-lock diagnostics`, async () => {
+  test(`${executable} CLI saves workspace flags across fresh processes and rejects invalid lock storage`, async () => {
     const f = await fixture();
     await writeFile(f.lock, "");
     const blocked = run(f.root, executable, { operation: "set-source-policy", source: "tasks", enabled: true });
     failedPolicy(blocked);
-    expect(blocked.error).toMatch(/Legacy.*close/);
+    expect(blocked.error).toMatch(/lock unavailable/i);
     expect(await readFile(f.file, "utf8")).toBe(f.original);
-    await rm(f.lock); // Fixture-only offline legacy recovery, not production cleanup.
+    await rm(f.lock); // Remove fixture-only invalid storage before retrying.
     const saved = run(f.root, executable, { operation: "set-source-policy", source: "tasks", enabled: true });
     expect(saved.enabled.tasks).toBe(true);
     expect(saved.error).toBeUndefined();

@@ -142,15 +142,18 @@ export function registryCatalogSection(item: RegistryItem): RegistryCatalogSecti
   return undefined;
 }
 
-/** Session availability is independent of a Registry-managed project copy. */
+/** Merge all session skills, including those with no Registry-managed copy. */
 export function registryItemsWithContext(
   items: readonly RegistryItem[],
   commands: readonly AvailableCommand[],
 ): RegistryItem[] {
-  const skills = new Set(commands
-    .filter((command) => command._meta?.["pix.commandSource"] === "skill")
-    .map((command) => command.name.replace(/^\/+/, "").replace(/^skill:/, "")));
-  return items.map((item) => {
+  const skills = new Map<string, AvailableCommand>();
+  for (const command of commands) {
+    if (command._meta?.["pix.commandSource"] !== "skill") continue;
+    const name = command.name.replace(/^\/+/, "").replace(/^skill:/, "");
+    if (name && !skills.has(name)) skills.set(name, command);
+  }
+  const catalog: RegistryItem[] = items.map((item) => {
     const inContext = item.type === "skill" && skills.has(item.name);
     return {
       ...item,
@@ -160,6 +163,24 @@ export function registryItemsWithContext(
       ) : item.actions,
     };
   });
+  const catalogSkills = new Set(items.filter((item) => item.type === "skill").map((item) => item.name));
+  for (const [name, command] of skills) {
+    if (catalogSkills.has(name)) continue;
+    catalog.push({
+      id: `skill:${name}`,
+      type: "skill",
+      name,
+      description: command.description,
+      status: "not-installed",
+      statusLabel: "IN CONTEXT",
+      icon: "✓",
+      local: false,
+      remote: false,
+      inContext: true,
+      actions: [],
+    });
+  }
+  return catalog;
 }
 
 /** Shared status→color mapping for both project-sync rows and catalog cards. */

@@ -5,6 +5,19 @@ const entry = { name: "docs", path: "src/docs", kind: "directory" as const };
 const text = encodeProjectEntryClipboard("/projects/source", entry);
 
 describe("Project Explorer shared clipboard", () => {
+  it("round-trips batch copy/cut and validates every path and move workspace", () => {
+    const entries = [entry, { name: "a", path: "a", kind: "file" as const }];
+    const cut = decodeProjectEntryClipboard(encodeProjectEntryClipboard("/source", entry, entries, "move"));
+    expect(cut?.entries).toEqual(entries.map(({ path, kind }) => ({ path, kind })));
+    expect(cut?.operation).toBe("move");
+    expect(canPasteProjectEntry(cut, "/other", "")).toBe(false);
+    expect(canPasteProjectEntry(cut, "/source", "src/docs/child")).toBe(false);
+    expect(canPasteProjectEntry(cut, "/source", "target")).toBe(true);
+    const batch = JSON.parse(encodeProjectEntryClipboard("/source", entry, entries));
+    batch.entries[1].path = "../escape";
+    expect(decodeProjectEntryClipboard(JSON.stringify(batch))).toBeNull();
+    expect(decodeProjectEntryClipboard(encodeProjectEntryClipboard("/source", entry, [entry], "move"))?.operation).toBe("move");
+  });
   it("round-trips a versioned file/folder reference between independent readers", async () => {
     const value = decodeProjectEntryClipboard(text);
     expect(value).toEqual({ workspace: "/projects/source", path: "src/docs", kind: "directory" });

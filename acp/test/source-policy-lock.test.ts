@@ -18,8 +18,8 @@ async function fixture(t: TestContext) {
   await mkdir(base, { recursive: true });
   const root = await mkdtemp(join(base, "run-"));
   await mkdir(join(root, ".pi"));
-  const file = join(root, ".pi/search-sources.json"), lock = file + ".lock";
-  const original = JSON.stringify({ version: 1, enabled: DEFAULT_SEARCH_SOURCES });
+  const file = join(root, ".pi/workspace.jsonc"), lock = file + ".lock";
+  const original = JSON.stringify({});
   await writeFile(file, original);
   const children: Array<{ process: ChildProcess; finished: Promise<void> }> = [];
   t.after(async () => {
@@ -134,11 +134,11 @@ test("the permanent lock directory prevents an older O_EXCL writer from entering
   assert.equal((await readSourcePolicy(f.root)).enabled.tasks, true);
 });
 
-test("an ownerless legacy lock is preserved, with explicit offline-recovery guidance", async t => {
+test("a regular file at the workspace lock path is rejected without replacement", async t => {
   const f = await fixture(t);
   await writeFile(f.lock, "");
   await utimes(f.lock, new Date(0), new Date(0));
-  await assert.rejects(writeSourcePolicy(f.root, "tasks", true), /legacy.*lock.*close/i);
+  await assert.rejects(writeSourcePolicy(f.root, "tasks", true), /lock unavailable/i);
   assert.equal(await readFile(f.lock, "utf8"), "");
   assert.equal(await readFile(f.file, "utf8"), f.original);
   assert.equal((await readSourcePolicy(f.root)).error, undefined);

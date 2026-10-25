@@ -91,7 +91,7 @@ async function fixture(t: TestContext) {
 
 test("missing project policy excludes Tasks/Sessions from background, manual and query paths", async t => {
   const f = await fixture(t); await f.put(task("a"));
-  await rm(join(f.cwd, ".pi/search-sources.json"));
+  await rm(join(f.cwd, ".pi/workspace.jsonc"));
   let discovery = 0;
   const s = f.make({ discover: async () => { discovery++; return []; } });
   await s.sync({ cwd: f.cwd, settings: [] }); await f.idle(s);
@@ -126,10 +126,10 @@ test("source toggle aborts a noncooperative background batch without publishing 
 
 test("invalid source policy reports a diagnostic while all source paths fail closed", async t => {
   const f = await fixture(t); let discoveries = 0;
-  await writeFile(join(f.cwd, ".pi/search-sources.json"), "{");
+  await writeFile(join(f.cwd, ".pi/workspace.jsonc"), "{");
   const s = f.make({ discover: async () => { discoveries++; return []; } });
   const status = await s.config({ cwd: f.cwd, includeSourceStatus: true });
-  assert.match(status.error ?? "", /search-sources\.json/);
+  assert.match(status.error ?? "", /workspace\.jsonc/);
   assert.deepEqual((await s.query({ cwd: f.cwd, query: "a", types: ["settings", "sessions"], settings: [], limit: 5 })).results, []);
   assert.equal(discoveries, 0); assert.equal(f.calls.length, 0);
 });

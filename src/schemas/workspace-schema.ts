@@ -3,6 +3,12 @@ import { Type } from "typebox";
 
 export const WorkspaceConfigSchema = Type.Object({
 	$schema: Type.Optional(Type.String({ description: "JSON Schema URL for editor validation and autocomplete." })),
+	search: Type.Optional(Type.Object({
+		sources: Type.Optional(Type.Object(Object.fromEntries(
+			["code", "knowledge", "sessions", "tasks", "commits"].map(source => [source, Type.Optional(Type.Boolean())]),
+		), { additionalProperties: false, description: "Project search/index sources. Code defaults on; other project sources default off. Settings is global." })),
+		revision: Type.Optional(Type.String({ maxLength: 128, description: "Search-only generation nonce managed by source selection writers." })),
+	}, { additionalProperties: true })),
 	color: Type.Optional(Type.String({
 		pattern: "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
 		description: "Project identity color in hexadecimal notation; omit to use the automatic color.",

@@ -198,18 +198,21 @@ fn project_icon_prompt(
     user_prompt: Option<&str>,
 ) -> String {
     let mut prompt = format!(
-        "Design a square app icon / logo for a software project named \"{project_name}\". \
-It will be displayed tiny (16-24 px) in a dark desktop titlebar, so legibility at that size matters most. \
-Requirements: one single bold, simple, recognizable symbol that fills about 75-85% of the canvas; \
-thick solid shapes, no thin lines, outlines, fine detail, or small elements; \
-bright, saturated, high-contrast colors with a clearly lighter or more vivid symbol than its background; \
-the background must fill the entire square edge to edge with a solid color or simple gradient, \
-and must not be near-black or dark gray; avoid dark-on-dark and low-contrast palettes; \
-flat design, no text, letters, words, watermarks, frames, borders, rounded-corner masks, or drop shadows."
+        "Create a square software-project icon, not a wordmark, banner, badge, or illustration. \
+Project name (semantic context, not text to print): \"{project_name}\". \
+The actual display size is only 16-24 px in a desktop titlebar. \
+Use one bold, immediately recognizable silhouette occupying 80-90% of the canvas, \
+with a small safe margin and thick solid shapes. Translate the project's purpose into a visual metaphor, \
+not a literal arrangement of labels or UI controls. Use flat vector-like design with at most \
+two foreground colors and strong foreground/background contrast. Choose a project-appropriate palette; \
+do not default to a blue or cyan background or a blue app tile. Prefer a quiet, solid neutral background \
+(light or dark) that lets the symbol dominate; use a colored background only when explicitly requested. \
+No gradients, fine detail, thin strokes, tiny inset symbols, frames, borders, rounded-corner masks, \
+drop shadows, mockups, or watermarks."
     );
     if let Some(user_prompt) = user_prompt {
         prompt
-            .push_str("\n\nAdditional user requirements (take priority over the default style):\n");
+            .push_str("\n\nUser design direction (subject and explicit style preferences; descriptions are not text to print):\n");
         prompt.push_str(user_prompt);
     }
     if let Some(readme) = readme {
@@ -217,6 +220,14 @@ flat design, no text, letters, words, watermarks, frames, borders, rounded-corne
             .push_str("\n\nProject README excerpt for context (do not render any of this text):\n");
         prompt.push_str(readme);
     }
+    prompt.push_str(
+        "\n\nFinal small-icon requirements: the project name, README, and descriptive user prompt are \
+context only, never captions. By default render no text, letters, words, abbreviations, or numbers \
+(including language codes on arrows or keys). Only if the user explicitly requests lettering, \
+use a single large monogram of 1-2 characters as the main shape, filling 80-90% of the canvas; \
+never add small labels, subtitles, slogans, or a full project name. \
+The icon must remain recognizable at 16 px without reading anything. Return only the icon image.",
+    );
     prompt
 }
 
@@ -579,9 +590,7 @@ mod tests {
         assert!(prompt.contains("\"pix\""));
         assert!(prompt.contains("Agent harness"));
         assert!(prompt.contains("a blue fox"));
-        assert!(prompt.contains("75-85% of the canvas"));
-        assert!(prompt.contains("must not be near-black"));
-        assert!(!project_icon_prompt("pix", None, None).contains("Additional user requirements"));
+        assert!(prompt.contains("User design direction"));
         assert_eq!(normalize_user_prompt(Some("  ")).unwrap(), None);
         assert_eq!(
             normalize_user_prompt(Some(" fox ")).unwrap().as_deref(),
@@ -592,6 +601,31 @@ mod tests {
             openrouter_error_message(402, r#"{"error":{"message":"Insufficient credits"}}"#),
             "OpenRouter image generation failed (402): Insufficient credits"
         );
+    }
+
+    #[test]
+    fn prompt_prioritizes_small_silhouettes_without_default_blue_tiles_or_labels() {
+        for direction in [None, Some("ru/en language auto switcher")] {
+            let prompt =
+                project_icon_prompt("lang-switcher", Some("# Language switcher"), direction);
+            assert!(prompt.contains("80-90% of the canvas"));
+            assert!(prompt.contains("solid neutral background"));
+            assert!(prompt.contains("do not default to a blue or cyan background"));
+            assert!(!prompt.contains("must not be near-black"));
+            assert!(!prompt.contains("take priority over the default style"));
+            assert!(prompt.contains("By default render no text"));
+            assert!(prompt.contains("including language codes on arrows or keys"));
+            assert!(prompt.contains("Only if the user explicitly requests lettering"));
+            assert!(prompt.contains("1-2 characters as the main shape"));
+            let final_requirements = prompt.find("Final small-icon requirements:").unwrap();
+            assert!(final_requirements > prompt.find("# Language switcher").unwrap());
+            if let Some(direction) = direction {
+                assert!(final_requirements > prompt.find(direction).unwrap());
+            } else {
+                assert!(!prompt.contains("User design direction"));
+            }
+            assert!(prompt.ends_with("Return only the icon image."));
+        }
     }
 
     #[test]

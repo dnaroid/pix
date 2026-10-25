@@ -15,7 +15,7 @@
     type WorkbenchTab,
     type WorkbenchTabId,
   } from "../lib/workbench-tabs";
-  import { titlebarDrag } from "../lib/titlebar-drag";
+  import { titlebarDrag, titlebarRegionDrag } from "../lib/titlebar-drag";
   import SessionTabStatusIcon from "./SessionTabStatusIcon.svelte";
   import { agentIcon } from "../lib/agent-icons";
 
@@ -244,7 +244,7 @@
     ><Plus class="h-4 w-4" aria-hidden="true" /></button>
   </div>
 
-  <div class="min-w-3 flex-1 self-stretch" data-tauri-drag-region></div>
+  <div use:titlebarRegionDrag class="min-w-3 flex-1 self-stretch" data-tauri-drag-region></div>
 </nav>
 
 {#if moving}

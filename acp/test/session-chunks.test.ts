@@ -17,7 +17,7 @@ async function fixture(t:{after(fn:()=>Promise<unknown>):void}) {
   const base=resolve(".pi/artifacts/session-chunks-tests");await mkdir(base,{recursive:true});
   const root=await mkdtemp(join(base,"case-"));t.after(()=>rm(root,{recursive:true,force:true}));
   await mkdir(join(root,".pi"),{recursive:true});
-  await writeFile(join(root,".pi/search-sources.json"),JSON.stringify({version:1,enabled:{settings:false,sessions:true,tasks:false,commits:false,code:false,knowledge:false}}));
+  await writeFile(join(root,".pi/workspace.jsonc"),JSON.stringify({ search: { sources: {sessions:true,tasks:false,commits:false,code:false,knowledge:false} } }));
   const candidate={id:"native-id",path:join(root,"session.jsonl")};
   const rows=[{type:"session",id:candidate.id,cwd:root},message("a",null,"user","Use rows"),
     message("b","a","assistant","I propose a circle"),message("c","b","user","yes"),

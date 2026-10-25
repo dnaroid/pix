@@ -48,8 +48,8 @@ async function fixture(t) {
   });
   await mkdir(join(root, ".pi/search"), { recursive: true });
   await mkdir(join(home, ".config/pi"), { recursive: true });
-  const policy = join(root, ".pi/search-sources.json");
-  await writeFile(policy, JSON.stringify({ version: 1, enabled: Object.fromEntries(sources.map(s => [s, true])) }));
+  const policy = join(root, ".pi/workspace.jsonc");
+  await writeFile(policy, JSON.stringify({ search: { sources: Object.fromEntries(sources.filter(s => s !== "settings").map(s => [s, true])) } }));
   await writeFile(join(root, ".gitignore"), "home/\n.pi/\n");
   const config = join(home, ".config/pi/pi-tools-suite.jsonc");
   await writeFile(config, "{}");
@@ -319,7 +319,7 @@ test("commits compare HEAD without scanning log history; detached HEAD works", a
 
 test("disabled, malformed, and aborted probes never return a fresh signature", async t => {
   const f = await fixture(t);
-  await writeFile(f.policy, JSON.stringify({ version: 1, enabled: Object.fromEntries(sources.map(s => [s, false])) }));
+  await writeFile(f.policy, JSON.stringify({ search: { sources: Object.fromEntries(sources.filter(s => s !== "settings").map(s => [s, false])) } }));
   await writeSourcePolicy(f.root, "settings", false);
   const disabled = await f.check();
   for (const value of Object.values(disabled)) { assert.ok(value.error); assert.equal(value.source, undefined); }

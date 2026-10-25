@@ -4,6 +4,7 @@ import menuControllerSource from "./project-explorer-menu-controller.svelte.ts?r
 import treeControllerSource from "./project-explorer-tree-controller.svelte.ts?raw";
 import nameEditorSource from "./project-explorer-name-editor.svelte.ts?raw";
 import nameInputSource from "./ProjectExplorerNameInput.svelte?raw";
+import fileActionsSource from "./project-explorer-file-actions.ts?raw";
 
 describe("ProjectExplorer keyboard tree", () => {
   it("wires both HTML browser menu surfaces to the guarded backend action", () => {
@@ -95,11 +96,12 @@ describe("ProjectExplorer keyboard tree", () => {
   });
 
   it("does not paint restored focus as a second hovered row after deletion", () => {
-    expect(explorerSource).toContain("if (restoreFocus && treeState.focusedPath === null && focusTarget !== undefined && focusTarget !== null) await treeController.focusPath(focusTarget)");
+    expect(explorerSource).toContain("if (result && treeState.focusedPath === null && fallback !== null) await treeController.focusPath(fallback)");
     expect(explorerSource).toContain("onfocus={() => treeState.focusedPath = entry.path}");
     expect(explorerSource).toContain("hover:bg-panel-hover");
     expect(explorerSource).not.toContain("focus-within:bg-panel-hover");
-    expect(explorerSource).toContain('treeState.selectedPath === entry.path ? "bg-panel-selected" : ""');
+    expect(explorerSource).toContain('treeState.selectedPaths.includes(entry.path) ? "bg-panel-selected" : ""');
+    expect(explorerSource).toContain('role="presentation"\n          data-project-move-row\n          data-project-move-target={entry.kind === "directory" ? entry.path : undefined}');
     expect(explorerSource).toContain("focus-visible:outline-ring");
   });
 
@@ -152,17 +154,19 @@ describe("ProjectExplorer keyboard tree", () => {
   it("routes filesystem mutations through workspace-scoped Tauri commands", () => {
     expect(nameEditorSource).toContain('options.invoke("create_project_entry"');
     expect(nameEditorSource).toContain('options.invoke("rename_project_entry"');
-    expect(explorerSource).toContain('invoke<ProjectTreeEntry>("copy_project_entry"');
-    expect(explorerSource).toContain('invoke("delete_project_entry"');
+    expect(fileActionsSource).toContain('history.execute(request)');
+    expect(explorerSource).toContain('type: "copy", paths:');
+    expect(explorerSource).toContain('type: "delete", paths:');
     expect(explorerSource).toContain("await confirmDesktopDeletion");
     expect(explorerSource).toContain("operationGeneration");
-    expect(explorerSource).toContain("finishOperation(operation)");
+    expect(fileActionsSource).toContain("options.finish(operation)");
   });
 
   it("uses scoped reservations rather than globally disabling file actions during I/O", () => {
     expect(explorerSource).not.toContain("operationBusy");
     expect(explorerSource).toContain("createProjectExplorerOperations()");
-    expect(explorerSource).toContain('operations.begin(`Delete: ${entry.name}`, [{ path: entry.path, kind: "tree" }])');
+    expect(fileActionsSource).toContain('projectFileRequestClaims(request, options.workspace())');
+    expect(fileActionsSource).toContain('operations.begin(label, claims)');
     expect(explorerSource).toContain('disabled={!canMutate(menuEntry)}');
     expect(explorerSource).toContain('role="status"');
     const submit = nameEditorSource.slice(nameEditorSource.indexOf("async function submit"));
@@ -187,7 +191,7 @@ describe("ProjectExplorer keyboard tree", () => {
   });
 
   it("uses shared clipboard references and rechecks at paste activation", () => {
-    expect(explorerSource).toContain("encodeProjectEntryClipboard(requestWorkspace, entry)");
+    expect(explorerSource).toContain("encodeProjectEntryClipboard(requestWorkspace, entry, treeController.selectedEntries(entry)");
     expect(explorerSource).toContain("decodeProjectEntryClipboard(await readText())");
     expect(explorerSource).toContain("sourceWorkspace: copied.workspace");
     expect(explorerSource).toContain("refreshEntryClipboard(entry)");
@@ -203,7 +207,7 @@ describe("ProjectExplorer keyboard tree", () => {
 
   it("emphasizes Pix entries without muting them or overriding Git name colors", () => {
     expect(explorerSource).toContain("const emphasis = projectEntryEmphasis(entry)");
-    expect(explorerSource).toContain("hiddenEntry && !emphasis && treeState.selectedPath !== entry.path");
+    expect(explorerSource).toContain("hiddenEntry && !emphasis && !treeState.selectedPaths.includes(entry.path)");
     expect(explorerSource).toContain('data-project-entry-emphasis={emphasis}');
     expect(explorerSource).toContain('<FolderCog class="h-3.5 w-3.5 shrink-0 text-primary"');
     expect(explorerSource).toContain('<FileCog class="h-3.5 w-3.5 shrink-0 text-primary"');

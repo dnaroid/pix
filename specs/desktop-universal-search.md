@@ -27,14 +27,15 @@ the selected sources (up to 60 seconds) and returns one combined response. See
 - The five non-Settings source selections in the Search indexes panel are project-local and control both indexing
   and search. Universal Search exposes only enabled-source filters and excludes
   disabled sources from retrieval; disabling a source cancels owned work and
-  suppresses stale results. Selection is shared through `.pi/search-sources.json`;
-  caches are retained and reused if a source is re-enabled. Missing policy enables
-  Code only among these five sources; the on-disk map still requires all six booleans,
-  including the ignored legacy Settings boolean. Settings has a separate global enabled
-  flag, default true. An unreadable global Settings preference fails closed for the
-  complete aggregate policy (all sources unavailable until repaired); malformed or unsafe
-  project policy also fails closed. Embedding
-  configuration remains global and does not override project selection. Initial
+  suppresses stale results. Selection is stored in `.pi/workspace.jsonc` under
+  `search.sources`; caches are retained and reused if a source is re-enabled. The
+  optional map accepts boolean `code`, `knowledge`, `sessions`, `tasks`, and
+  `commits` flags. Missing workspace/search/map/flags defaults Code on and all
+  other project sources off. Settings remains a separate global selection, default
+  enabled. Malformed/unsafe workspace config or an invalid source map fails closed
+  for all six sources. Embedding configuration remains global and does not override
+  project selection. The former `.pi/search-sources.json` and its lock are not read,
+  imported or migrated. Initial
   selection inspection is bounded to five seconds; timeout or invalid policy fails
   closed with a visible notice. Policy refresh runs every three seconds after the
   previous read settles, and source results are discarded when cancelled,

@@ -27,6 +27,31 @@ function fixture() {
 describe("project file writes", () => {
   beforeEach(() => { tauri.invoke.mockReset(); });
 
+  it("waits for pending writes and blocks new saves until every file-mutation reservation is released", async () => {
+    const { store } = fixture();
+    const started = deferred<void>();
+    const write = deferred<ProjectFilePreview>();
+    tauri.invoke.mockImplementation((command: string) => {
+      if (command === "write_project_file") { started.resolve(); return write.promise; }
+      return Promise.resolve({ plans: [] });
+    });
+    const saving = store.save("file.txt", "content");
+    await started.promise;
+    let ready = false;
+    const preparation = store.prepareFileMutation().then((release) => { ready = true; return release; });
+    expect(await store.save("other.txt", "blocked")).toBe(false);
+    expect(ready).toBe(false);
+    write.resolve({ path: "file.txt", content: "content" });
+    await saving;
+    const releaseOne = await preparation;
+    const releaseTwo = await store.prepareFileMutation();
+    releaseOne(); releaseOne();
+    expect(await store.save("other.txt", "blocked")).toBe(false);
+    releaseTwo();
+    tauri.invoke.mockResolvedValue({ path: "other.txt", content: "okay" });
+    expect(await store.save("other.txt", "okay")).toBe(true);
+  });
+
   it("serializes writes to the same file and captures the originating preview", async () => {
     const entered = deferred<void>();
     const release = deferred<ProjectFilePreview>();
@@ -75,6 +100,27 @@ describe("project file writes", () => {
       path: "src/main.ts",
       content: "export const ready = true;\n",
     });
+  });
+
+  it("passes the loaded workspace snapshot and chains the canonical result for queued saves", async () => {
+    const path = ".pi/workspace.jsonc", expected: string[] = [];
+    const first = deferred<ProjectFilePreview>(), entered = deferred<void>();
+    let count = 0;
+    tauri.invoke.mockImplementation((command: string, args: { expectedContent: string; content: string }) => {
+      if (command !== "write_project_file") return Promise.resolve({});
+      expected.push(args.expectedContent);
+      if (++count === 1) { entered.resolve(); return first.promise; }
+      return Promise.resolve({ path, content: args.content });
+    });
+    const store = createProjectDocumentsStore({
+      workspace: () => "/project", openProjectFile: vi.fn(), showEmptyFile: vi.fn(), previewId: () => 1,
+      currentFile: () => ({ path, content: "loaded" }), afterSave: vi.fn(), clearError: vi.fn(), reportError: vi.fn(),
+    });
+    const a = store.save(path, "draft-one"), b = store.save(path, "draft-two");
+    await entered.promise;
+    first.resolve({ path, content: "canonical-with-nonce" });
+    expect(await Promise.all([a, b])).toEqual([true, true]);
+    expect(expected).toEqual(["loaded", "canonical-with-nonce"]);
   });
 
   it("keeps TODO and plan writes on their specialized project-document command", async () => {

@@ -153,6 +153,12 @@ establish compatibility requirements.
   primary Copy/Paste shortcuts operate on the Project Explorer entry clipboard
   while tree focus is active. These shortcuts do not replace normal text-editing
   shortcuts outside the tree.
+- Tree selection supports Cmd/Ctrl-click toggling, Shift-click and Shift+Arrow
+  visible-range extension, and Cmd/Ctrl+A for all visible entries. The workspace
+  root is excluded; selected descendants of selected directories are deduplicated
+  before group operations. Dragging selected entries onto a folder or root moves
+  them together; Escape cancels the drag. Existing drag-to-composer attachment
+  behavior remains available for group paths.
 - New File/New Folder and Rename edit the name inline in the tree, without a
   dialog. Creation expands the destination (including the workspace root) and
   inserts a temporary input as its first child; rename replaces the targeted
@@ -177,6 +183,15 @@ establish compatibility requirements.
   Paste rereads the clipboard before issuing the mutation. Late menu reads and
   operation completions cannot affect a replaced workspace or disposed panel.
   See [decision 0026](../docs/decisions/0026-cross-instance-file-clipboard.md).
+- Copy, cut, paste and duplicate operate on the selected entry group when one is
+  selected, otherwise on the focused/context entry. Cut is limited to the same
+  workspace; copy may cross workspaces. Group moves, copy, duplicate and delete
+  are preflighted as a batch. Conflicts, vanished parents, symbolic links and
+  replacements of existing directories are refused; safe-save replacement
+  of a regular file is accepted by moving its current contents intact. Cross-
+  volume rename does not fall back to copy-and-delete. A late batch failure may
+  leave a successful prefix, which is retained as one undoable operation and
+  reported as a warning.
 - File mutations are workspace-relative backend operations. They reject paths
   that escape the active project and do not follow symbolic links. Copying a
   project entry creates a non-conflicting destination name rather than silently
@@ -194,9 +209,14 @@ establish compatibility requirements.
   deletion moves focus to a logical surviving row and clears stale
   selected/expanded state beneath the removed path from both memory and the
   sparse persisted preference.
-- Delete is destructive and requires confirmation before the filesystem mutation.
-- Pending file I/O does not globally disable Files commands. Deletion/rename
-  reserve the affected subtrees; creation keeps its parent directory alive and
+- Delete requires confirmation and retains the removed data in recovery storage
+  for Undo rather than permanently deleting it.
+- Pending file I/O does not globally disable Files commands. Mutations use scoped
+  reservations; independent forward requests may proceed concurrently. Undo/redo
+  replay is disabled/refused until mutations are idle, not queued. Pending document writes finish before a
+  mutation and new writes are reserved; a dirty Preview blocks mutation, while a
+  clean Preview closes to invalidate stale paths.
+  Deletion/rename reserve the affected subtrees; creation keeps its parent directory alive and
   reserves the new path, allowing independent sibling mutations. Copy/paste and
   duplicate conservatively reserve the destination subtree because the backend
   chooses the output name (including partially visible copies). Copying into the
@@ -214,6 +234,15 @@ establish compatibility requirements.
   or a different focused tree row; created files open only when that completion
   still owns focus. Name-mutation failures also reach the diagnostic logger.
   See [decision 0028](../docs/decisions/0028-scoped-file-operation-reservations.md).
+- Create, copy, delete, rename and move support Undo/Redo. A group request is one
+  history token; partial undo can be retried. Controls are available in the
+  toolbar/context menu and via Cmd+Z/Cmd+Shift+Z while Files is focused (not while
+  editing a name, searching, or editing Preview text). History is runtime-only
+  for the mounted panel and current workspace, with a 100-operation limit.
+  Durable recovery data and intent journals live under `.pi/file-history`; they
+  are never automatically purged, are excluded from manual and TTL Clean and
+  Files tree/search, and nested `.gitignore` files contain `*`. Journals are for
+  manual recovery only and are never replayed as executable work after restart.
 - File/folder context menus expose **Add to .gitignore** only after a local Git
   check confirms an exact workspace-root repository and a target not already
   matching ignore rules, including tracked files and folders with tracked

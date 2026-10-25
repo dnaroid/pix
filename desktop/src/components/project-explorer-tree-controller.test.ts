@@ -39,6 +39,32 @@ afterEach(() => vi.unstubAllGlobals());
 describe("Project Explorer external directory changes", () => {
   const directory = (path: string): ProjectTreeEntry => ({ path, name: path.split("/").at(-1)!, kind: "directory" });
 
+  it("toggles selections, extends visible ranges, preserves focus, and remaps/prunes selected subtrees", async () => {
+    const f = fixture(async () => [directory("b"), directory("c")]);
+    const tree = f.controller;
+    tree.state.entriesByDirectory = { "": [directory("a"), directory("b"), directory("c")], a: [directory("a/child")] };
+    tree.state.expandedDirectories = ["a"];
+    tree.state.focusedPath = "c";
+    tree.selectEntry("a");
+    tree.selectEntry("c", { metaKey: true });
+    expect(tree.state.selectedPaths).toEqual(["a", "c"]);
+    expect(tree.state.focusedPath).toBe("c");
+    tree.selectEntry("a", { shiftKey: true });
+    expect(tree.state.selectedPaths).toEqual(["a", "a/child", "b", "c"]);
+    expect(tree.selectedEntries(directory("a"))).toEqual([directory("a"), directory("b"), directory("c")]);
+    tree.selectEntry("b", { metaKey: true });
+    expect(tree.state.selectedPaths).not.toContain("b");
+    tree.remapPath("a", "renamed");
+    expect(tree.state.selectedPaths).toContain("renamed/child");
+    tree.removePath("renamed");
+    expect(tree.state.selectedPaths).toEqual(["c"]);
+    tree.selectAll();
+    expect(tree.state.selectedPaths).not.toContain("");
+    await tree.refreshDirectory("");
+    expect(tree.state.selectedPaths).toEqual(["b", "c"]);
+    tree.dispose();
+  });
+
   it("reloads a cached directory on expansion so externally created folders appear immediately", async () => {
     let entries: ProjectTreeEntry[] = [];
     const list = vi.fn(async () => entries);

@@ -1,5 +1,6 @@
 import { tick, untrack } from "svelte";
 import { isWorkspaceProjectFilePath } from "../lib/project-files";
+import { projectSelectionRange, projectSelectionRoots } from "../lib/project-tree-selection";
 import { isTypeaheadKey, linearFocusIndex, typeaheadFocusIndex } from "../lib/keyboard-navigation";
 import {
   projectTreeRowsWithRoot,
@@ -29,6 +30,8 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
     loadingDirectories: [] as string[],
     errorByDirectory: {} as Record<string, string>,
     selectedPath: null as string | null,
+    selectedPaths: [] as string[],
+    selectionAnchor: null as string | null,
     focusedPath: null as string | null,
   });
   let generation = 0;
@@ -65,6 +68,8 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
         state.expandedDirectories = [];
         restoreRevision = ++expansionRevision;
         state.selectedPath = null;
+        state.selectedPaths = [];
+        state.selectionAnchor = null;
         state.focusedPath = null;
         directoryRequestVersions.clear();
       }
@@ -139,6 +144,11 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
         state.errorByDirectory = nextErrors;
       }
       pruneMissingExpandedChildren(path, entries);
+      const available = new Set(entries.map((entry) => entry.path));
+      state.selectedPaths = state.selectedPaths.filter((candidate) => {
+        const child = immediateChildPath(candidate, path);
+        return child === null || available.has(child);
+      });
       loadExpandedChildren(entries, requestGeneration);
       reportHealth();
     } catch (error) {
@@ -201,6 +211,31 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
     revealVersion++;
     state.selectedPath = path;
     options.onOpenFile(path);
+  }
+
+  function selectEntry(path: string, modifiers: { shiftKey?: boolean; metaKey?: boolean; ctrlKey?: boolean } = {}): void {
+    if (!path) {
+      state.selectedPaths = [];
+      state.selectionAnchor = null;
+      return;
+    }
+    const additive = modifiers.metaKey || modifiers.ctrlKey;
+    if (modifiers.shiftKey) {
+      state.selectionAnchor ??= state.focusedPath || path;
+      const range = projectSelectionRange(rows().map((row) => row.entry.path), state.selectionAnchor, path);
+      state.selectedPaths = additive ? [...new Set([...state.selectedPaths, ...range])] : range;
+    } else {
+      state.selectionAnchor = path;
+      state.selectedPaths = additive
+        ? state.selectedPaths.includes(path) ? state.selectedPaths.filter((candidate) => candidate !== path) : [...state.selectedPaths, path]
+        : [path];
+    }
+  }
+
+  function selectedEntries(entry: ProjectTreeEntry): ProjectTreeEntry[] {
+    if (!state.selectedPaths.includes(entry.path)) return entry.path ? [entry] : [];
+    const entries = Object.values(state.entriesByDirectory).flat();
+    return projectSelectionRoots(entries.filter((candidate) => state.selectedPaths.includes(candidate.path)));
   }
 
   function ensureDirectoryExpanded(path: string): void {
@@ -272,6 +307,7 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
     }
     if (!isCurrent()) return;
     state.selectedPath = path;
+    selectEntry(path);
     await focusPath(path);
   }
 
@@ -302,6 +338,8 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
     expansionRevision += 1;
     schedulePersistExpandedDirectories();
     if (state.selectedPath) state.selectedPath = remap(state.selectedPath);
+    state.selectedPaths = state.selectedPaths.map(remap);
+    if (state.selectionAnchor) state.selectionAnchor = remap(state.selectionAnchor);
     if (state.focusedPath) state.focusedPath = remap(state.focusedPath);
   }
 
@@ -337,6 +375,8 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
     expansionRevision += 1;
     schedulePersistExpandedDirectories();
     if (state.selectedPath && sameOrDescendantPath(state.selectedPath, path)) state.selectedPath = null;
+    state.selectedPaths = state.selectedPaths.filter((candidate) => !sameOrDescendantPath(candidate, path));
+    if (state.selectionAnchor && sameOrDescendantPath(state.selectionAnchor, path)) state.selectionAnchor = null;
     if (state.focusedPath && sameOrDescendantPath(state.focusedPath, path)) state.focusedPath = null;
   }
 
@@ -345,6 +385,7 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
     const linearIndex = linearFocusIndex(index, event.key, visibleRows.length, "vertical", false);
     if (linearIndex !== null && ["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) {
       event.preventDefault();
+      if (event.shiftKey) selectEntry(visibleRows[linearIndex]!.entry.path, event);
       void focusRow(linearIndex);
       return;
     }
@@ -380,6 +421,8 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
 
     if ((event.key === "Enter" || event.key === " ") && !event.altKey && !event.ctrlKey && !event.metaKey) {
       event.preventDefault();
+      selectEntry(entry.path, event);
+      if (event.key === " ") return;
       if (entry.kind === "directory") toggleDirectory(entry.path);
       else openFile(entry.path);
       return;
@@ -509,6 +552,9 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
       return visibleRows[0]?.entry.path ?? null;
     },
     toggleDirectory,
+    selectEntry,
+    selectedEntries,
+    selectAll: () => { state.selectedPaths = rows().map((row) => row.entry.path).filter(Boolean); },
     isDirectoryExpanded,
     ensureDirectoryExpanded,
     openFile,

@@ -65,16 +65,19 @@ saved-name vectors and require a second Continue to populate them.
   to source-local caches. Tasks and public session messages also synchronize in the background.
 - Required `query` is a nonempty string of at most 2,048 characters.
   Project-local source selection is shared with Desktop through
-  `.pi/search-sources.json` (version 1, full boolean `enabled` map). A missing
-  file enables **Code only** among the five project sources; malformed or unsafe policy fails
-  closed. The tool's available-source description, prompt guidance and parameter
+  `.pi/workspace.jsonc` under `search.sources`. The optional map accepts boolean
+  `code`, `knowledge`, `sessions`, `tasks`, and `commits` flags. Missing
+  workspace/search/map/flags enables **Code only** among the five project sources;
+  malformed/unsafe workspace config or an invalid source map fails closed for all six
+  sources. The tool's available-source description, prompt guidance and parameter
   schema track the enabled sources dynamically. `sources` optionally selects
   unique enabled values from `sessions`, `tasks`, `commits`, `code`, and
   `knowledge` (all enabled tool sources by default, initially Code only).
   Settings is a Desktop-only source, never a tool parameter choice. Explicit
   requests for disabled sources are skipped without dispatch. Disabling a source cancels/rejects stale work and
   retains its caches for reuse if re-enabled. Global embedding configuration
-  remains unchanged and cannot override project selection.
+  remains unchanged and cannot override project selection. Legacy
+  `.pi/search-sources.json` and its lock are not read, imported or migrated.
   `limit` is 1–20 (default 10). `indexMode` is `hybrid` (default),
   `semantic`, or `lexical`. Code and Knowledge always use the native backend.
   `hybrid`/`semantic` additionally permit querying maintained task/session-name/session-message

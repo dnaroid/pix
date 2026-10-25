@@ -33,6 +33,12 @@ without blocking desktop interactions.
   into the native title bar and reserves the existing traffic-light inset;
   conversation tabs remain in the 36 px header and empty title-bar space remains
   draggable.
+  A single click on empty titlebar space, including an inactive window's
+  activating click, must not move the window. Empty regions and tab controls
+  start native dragging only after at least 4 px of screen-coordinate pointer
+  movement with the primary button still held. Pointer release/cancellation,
+  loss of window focus and teardown cancel pending gestures. Empty regions
+  retain native double-click-to-zoom behavior.
   Hovering the square shows the full project name; it does not expose the full
   workspace path in that titlebar tooltip.
   The square is non-interactive chrome and keeps the normal arrow cursor rather
@@ -143,7 +149,13 @@ without blocking desktop interactions.
   with an optional free-text prompt (max 1000 characters). Generation calls
   OpenRouter chat completions with image modalities using `OPENROUTER_API_KEY` or
   the Pi auth `openrouter` key; the project name, user prompt, and the first
-  1000 README characters are sent. The model defaults to
+  1000 README characters are sent as descriptive context, not labels to render.
+  The prompt puts final small-icon requirements after that context: a single
+  bold silhouette occupying 80–90% of the canvas must remain recognizable at
+  16–24 px, with a quiet solid neutral background by default (no default blue/
+  cyan tile or gradients). It preserves explicit subject and style preferences.
+  Text is omitted unless explicitly requested; then use only 1–2 large monogram
+  characters as the main shape, never small labels. The model defaults to
   `google/gemini-2.5-flash-image` and can be overridden by
   `desktop.projectIcon.model` in project or global `pix-desktop.jsonc`. Picked or
   generated images are previews only; nothing is written until Save. Saving an

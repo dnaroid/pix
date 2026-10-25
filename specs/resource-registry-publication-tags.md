@@ -43,6 +43,12 @@ status: active
   implies project ownership: tags, uninstall and diff still require a local
   project copy. Switching sessions, reload or loss of readiness recomputes the
   marks; without a ready session the ordinary Registry catalog is unchanged.
+- Session-only skills with neither a project copy nor a Registry publication
+  carry an **External** badge beside their name, with the tooltip
+  **Available to the active session; not managed by Registry.** They retain
+  **In context** as their availability status, but have no Registry actions or
+  publication icon. Project copies and Registry publications do not carry this
+  badge.
 - Registry is Desktop-only. ACP handles filesystem/Git operations directly,
   without loading tools-suite, starting a Pi runtime, or creating a session.
   There is no `/registry` command or TUI Registry UI.

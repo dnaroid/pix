@@ -45,7 +45,7 @@ test("all six shell index adapters fail safely without a configured provider", a
   await mkdir(join(root, ".pi"));
   await mkdir(join(root, ".config/pi"), { recursive: true });
   await writeFile(join(root, ".config/pi/pi-tools-suite.jsonc"), "{}");
-  await writeFile(join(root, ".pi/search-sources.json"), JSON.stringify({ version: 1, enabled: Object.fromEntries(sources.map(source => [source, true])) }));
+  await writeFile(join(root, ".pi/workspace.jsonc"), JSON.stringify({ search: { sources: Object.fromEntries(sources.filter(source => source !== "settings").map(source => [source, true])) } }));
   for (const source of [...sources, "all"]) {
     const result = await promisify(execFile)(process.execPath, ["--import", "tsx", "scripts/search-index.ts", "index", source, "--project", root], {
       env: { ...process.env, HOME: root, OPENROUTER_API_KEY: "", PI_CODING_AGENT_DIR: join(root, "agent") }, timeout: 30000,

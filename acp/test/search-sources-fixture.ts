@@ -13,6 +13,5 @@ export async function isolateSearchHome(root: string): Promise<() => void> {
 /** Explicit selection for tests of previously all-source behavior. Defaults have separate tests. */
 export async function enableSearchSources(root: string): Promise<void> {
   await mkdir(join(root, ".pi"), { recursive: true });
-  await writeFile(join(root, ".pi/search-sources.json"), JSON.stringify({ version: 1,
-    enabled: { settings: true, code: true, knowledge: true, tasks: true, sessions: true, commits: true } }));
+  await writeFile(join(root, ".pi/workspace.jsonc"), JSON.stringify({ search: { sources: { code: true, knowledge: true, tasks: true, sessions: true, commits: true } } }));
 }

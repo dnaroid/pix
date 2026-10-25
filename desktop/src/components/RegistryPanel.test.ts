@@ -122,7 +122,7 @@ describe("RegistryCatalog", () => {
   });
 
   it("keeps Installed usable without a shared registry or project-sync initialization", () => {
-    expect(catalogSource).toContain('!snapshot.configured && catalogSection === "available"');
+    expect(catalogSource).toContain('!snapshot?.configured && catalogSection === "available"');
     expect(catalogSource).toContain("Shared registry is not connected");
   });
 
@@ -239,7 +239,7 @@ describe("RegistryPanel publication scope toggle", () => {
   });
 
   it("blocks moving a publication to project scope until a project key exists", () => {
-    expect(catalogSource).toContain("projectKey={snapshot.projectKey}");
+    expect(catalogSource).toContain("projectKey={snapshot?.projectKey}");
     expect(actionsSource).toContain("!projectKey");
     expect(actionsSource).toContain("disabled={busy || blocked(action)}");
     expect(actionsSource).toContain('set one with "Set project key" in the Project sync section');

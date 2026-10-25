@@ -67,6 +67,7 @@ export function createDesktopProjectServices(options: DesktopProjectServicesOpti
     openProjectFile: preview.openProjectFile,
     showEmptyFile: (file) => preview.show({ kind: "file", file }, "replace"),
     previewId: () => preview.active?.id,
+    currentFile: () => preview.active?.kind === "file" ? preview.active.file : undefined,
     afterSave: (file, _workspace, previewId) => {
       if (preview.active?.id === previewId) preview.replaceCurrentFile(file);
       if (isCanonicalProjectPlanPath(file.path)) registry.scheduleProjectSync("plans");

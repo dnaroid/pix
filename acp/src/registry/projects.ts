@@ -9,6 +9,7 @@ import { hashProjectArtifactLocal, hashProjectArtifactRemote, replaceLocalTaskBu
 import { promises as fs } from "node:fs";
 import { replaceLocalPlans, replaceResource } from "./resource-files.js";
 import { localTasksExist } from "./task-database.js";
+import { replaceLocalWorkspace } from "./workspace-file.js";
 
 export async function pushProjectState(executor: RegistryExecutor, ctx: RegistryContext, scope: ProjectScope, silent = false): Promise<void> {
 	const runtime = loadRuntimeConfig(ctx.cwd);
@@ -171,12 +172,13 @@ export async function pullProjectState(executor: RegistryExecutor, ctx: Registry
 	for (const artifact of targets) {
 		const localPath = projectArtifactLocalPath(ctx.cwd, artifact);
 		const remotePath = projectArtifactRegistryPath(runtime.cacheDir, projectKey, artifact);
+		let installedWorkspaceHash: string | undefined;
 		if (artifact === "tasks") await replaceLocalTaskBundle(ctx.cwd, runtime, projectKey,
 			observedLocalHashes.get(artifact), metadata.get(artifact)?.remoteHash);
 		else if (artifact === "plans") await replaceLocalPlans(remotePath, localPath);
-		else await replaceResource(remotePath, localPath);
+		else installedWorkspaceHash = await replaceLocalWorkspace(ctx.cwd, remotePath, observedLocalHashes.get(artifact));
 		const item = metadata.get(artifact)!;
-		const localHash = await hashProjectArtifactLocal(ctx.cwd, artifact);
+		const localHash = installedWorkspaceHash ?? await hashProjectArtifactLocal(ctx.cwd, artifact);
 		await recordProjectProvenance(ctx, runtime, projectKey, artifact, item.remoteRevision, localHash);
 	}
 	notify(ctx, `Pulled ${targets.join(" + ")} for ${projectKey}. Reloading project state…`);

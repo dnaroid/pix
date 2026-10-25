@@ -70,6 +70,59 @@ describe("registry session state", () => {
     expect(cleared.actions).toEqual(skill.actions);
     expect(registryCatalogSection(cleared)).toBe("available");
   });
+  it("includes every session skill, not only the intersection with Registry", () => {
+    const pdf: RegistryItem = {
+      id: "skill:pdf", type: "skill", name: "pdf", description: "Registry PDF",
+      status: "not-installed", statusLabel: "NOT INSTALLED", icon: "·",
+      local: false, remote: true, actions: ["install", "toggle-scope", "remove"],
+    };
+    const command = (name: string) => ({
+      name, description: `Session ${name}`, _meta: { "pix.commandSource": "skill" },
+    });
+    const commands = [command("skill:pdf"), command("/skill:context7"), command("simplify"), command("skill:context7")];
+    const items = registryItemsWithContext([pdf], commands);
+    expect(items.map((item) => item.name)).toEqual(["pdf", "context7", "simplify"]);
+    expect(registryCatalogItems(items, "installed")).toHaveLength(3);
+    expect(registryCatalogItems(items, "available")).toEqual([]);
+    expect(items[0]).toMatchObject({ description: "Registry PDF", remote: true, actions: ["toggle-scope", "remove"] });
+    for (const item of items.slice(1)) {
+      expect(item).toMatchObject({ local: false, remote: false, inContext: true, actions: [] });
+      expect(registryFriendlyStatusLabel(item)).toBe("In context");
+      expect(registryDiffAvailable(item)).toBe(false);
+    }
+    expect(items[1]?.description).toBe("Session /skill:context7");
+    expect(pdf).not.toHaveProperty("inContext");
+    expect(registryItemsWithContext([pdf], [])).toEqual([{ ...pdf, inContext: false }]);
+    expect(registryItemsWithContext([pdf], [command("skill:other-session")]).map((item) => item.name))
+      .toEqual(["pdf", "other-session"]);
+  });
+
+  it("adds session-only skills without a Registry snapshot and ignores other command sources", () => {
+    const items = registryItemsWithContext([], [
+      { name: "skill:pdf", description: "PDF", _meta: { "pix.commandSource": "skill" } },
+      { name: "skill:", description: "Empty", _meta: { "pix.commandSource": "skill" } },
+      { name: "skill:extension", description: "Extension", _meta: { "pix.commandSource": "extension" } },
+      { name: "skill:prompt", description: "Prompt", _meta: { "pix.commandSource": "prompt" } },
+      { name: "ordinary", description: "Ordinary" },
+    ]);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ id: "skill:pdf", name: "pdf", inContext: true });
+    expect(registryHasAttention({ version: 1, configured: false, branch: "main", checkedAt: "now", items })).toBe(false);
+  });
+
+  it("keeps same-named agents separate from session skills without duplicating project skills", () => {
+    const base: RegistryItem = {
+      id: "agent:demo", type: "agent", name: "demo", status: "local-only",
+      statusLabel: "LOCAL", icon: "·", local: true, remote: false, actions: ["push", "uninstall"],
+    };
+    const commands = [{ name: "skill:demo", description: "Demo", _meta: { "pix.commandSource": "skill" } }];
+    const items = registryItemsWithContext([base, { ...base, id: "skill:demo", type: "skill" }], commands);
+    expect(items).toHaveLength(2);
+    expect(items[0]?.inContext).toBe(false);
+    expect(items[1]).toMatchObject({ inContext: true, local: true, actions: ["push", "uninstall"] });
+    expect(registryItemsWithContext([base], commands).map((item) => item.id)).toEqual(["agent:demo", "skill:demo"]);
+  });
+
   it("parses a structured resource snapshot", () => {
     const snapshot = registrySnapshotFromSessionState({
       sessionId: "session-1",

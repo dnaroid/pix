@@ -59,6 +59,11 @@ mod preview_file;
 mod preview_file_action;
 mod project_browser;
 mod project_directory_link;
+mod project_file_history;
+mod workspace_config_lock;
+mod workspace_search_revision;
+#[cfg(test)]
+mod workspace_config_lock_tests;
 mod project_icon;
 mod project_tasks_sqlite;
 mod qa_profile;
@@ -118,8 +123,10 @@ const PROJECT_PI_AUTO_CLEAN_TTL: Duration = Duration::from_secs(3 * 24 * 60 * 60
 const PROJECT_PI_CANONICAL_DIRECTORIES: &[&str] = &[
     "agents",
     "artifacts",
+    "file-history",
     "plans",
     "search",
+    "workspace.jsonc.lock",
     "skills",
     "subagents",
     "task-attachments",
@@ -1334,8 +1341,9 @@ async fn write_project_file(
     workspace: String,
     path: String,
     content: String,
+    expected_content: Option<String>,
 ) -> Result<ProjectFilePreview, String> {
-    run_blocking(move || write_project_file_from(Path::new(&workspace), Path::new(&path), &content))
+    run_blocking(move || write_project_file_with_expected_from(Path::new(&workspace), Path::new(&path), &content, expected_content.as_deref()))
         .await
 }
 
@@ -1440,6 +1448,32 @@ async fn copy_project_entry(
 #[tauri::command]
 async fn delete_project_entry(workspace: String, path: String) -> Result<(), String> {
     run_blocking(move || delete_project_entry_from(Path::new(&workspace), Path::new(&path))).await
+}
+
+#[tauri::command]
+async fn mutate_project_entries(
+    workspace: String,
+    request: project_file_history::Request,
+) -> Result<project_file_history::Receipt, String> {
+    run_blocking(move || project_file_history::execute(Path::new(&workspace), request)).await
+}
+
+#[tauri::command]
+async fn replay_project_entries(
+    workspace: String,
+    token: String,
+    undo: bool,
+) -> Result<project_file_history::Receipt, String> {
+    run_blocking(move || project_file_history::replay(Path::new(&workspace), &token, undo)).await
+}
+
+#[tauri::command]
+async fn forget_project_file_history(tokens: Vec<String>) -> Result<(), String> {
+    run_blocking(move || {
+        project_file_history::forget(tokens);
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -2140,9 +2174,34 @@ fn write_project_markdown_from(
     })
 }
 
+#[cfg(test)]
 fn write_project_workspace_config_from(
     workspace: &Path,
     content: &str,
+) -> Result<ProjectFilePreview, String> {
+    if content.len() as u64 > MAX_WORKSPACE_CONFIG_BYTES {
+        return Err(".pi/workspace.jsonc is too large (maximum 64 KB)".to_owned());
+    }
+    let root = canonical_workspace(workspace)?;
+    let project_dir = workspace_config_directory(&root)?;
+    let ownership = workspace_config_lock::WorkspaceConfigLock::acquire(&project_dir)?;
+    write_project_workspace_config_owned(&root, content, &ownership)
+}
+
+fn workspace_config_directory(root: &Path) -> Result<PathBuf, String> {
+    let directory = root.join(".pi");
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    let metadata = fs::symlink_metadata(&directory).map_err(|error| error.to_string())?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err(".pi must be a project-owned directory".to_owned());
+    }
+    canonical_project_directory(root, &directory)
+}
+
+fn write_project_workspace_config_owned(
+    workspace: &Path,
+    content: &str,
+    _ownership: &workspace_config_lock::WorkspaceConfigLock,
 ) -> Result<ProjectFilePreview, String> {
     if content.len() as u64 > MAX_WORKSPACE_CONFIG_BYTES {
         return Err(".pi/workspace.jsonc is too large (maximum 64 KB)".to_owned());
@@ -2176,6 +2235,13 @@ fn write_project_workspace_config_from(
         }
     }
 
+    let previous = if target.exists() {
+        Some(read_text_file_from(&target, ".pi/workspace.jsonc".to_owned(), MAX_WORKSPACE_CONFIG_BYTES)?.content)
+    } else { None };
+    let content = workspace_search_revision::for_write(previous.as_deref(), content);
+    if content.len() as u64 > MAX_WORKSPACE_CONFIG_BYTES {
+        return Err(".pi/workspace.jsonc is too large (maximum 64 KB)".to_owned());
+    }
     let sequence = WORKSPACE_CONFIG_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let temporary = project_dir.join(format!(
         ".workspace.jsonc.{}.{}.tmp",
@@ -2214,6 +2280,12 @@ fn write_project_workspace_config_if_unchanged_from(
     expected_content: Option<&str>,
     content: &str,
 ) -> Result<ConditionalWorkspaceConfigWrite, String> {
+    if content.len() as u64 > MAX_WORKSPACE_CONFIG_BYTES {
+        return Err(".pi/workspace.jsonc is too large (maximum 64 KB)".to_owned());
+    }
+    let root = canonical_workspace(workspace)?;
+    let project_dir = workspace_config_directory(&root)?;
+    let ownership = workspace_config_lock::WorkspaceConfigLock::acquire(&project_dir)?;
     let config_path = Path::new(".pi/workspace.jsonc");
     let current = if project_file_exists_from(workspace, config_path) {
         Some(read_project_file_from(
@@ -2232,7 +2304,7 @@ fn write_project_workspace_config_if_unchanged_from(
     }
     Ok(ConditionalWorkspaceConfigWrite {
         written: true,
-        document: Some(write_project_workspace_config_from(workspace, content)?),
+        document: Some(write_project_workspace_config_owned(workspace, content, &ownership)?),
     })
 }
 
@@ -2250,10 +2322,20 @@ fn read_project_file_from(
     read_text_file_from(&file_path, display_path, max_bytes)
 }
 
+#[cfg(test)]
 fn write_project_file_from(
     workspace: &Path,
     relative_path: &Path,
     content: &str,
+) -> Result<ProjectFilePreview, String> {
+    write_project_file_with_expected_from(workspace, relative_path, content, None)
+}
+
+fn write_project_file_with_expected_from(
+    workspace: &Path,
+    relative_path: &Path,
+    content: &str,
+    expected_content: Option<&str>,
 ) -> Result<ProjectFilePreview, String> {
     if content.len() as u64 > MAX_PROJECT_FILE_PREVIEW_BYTES {
         return Err("project file is too large to save (maximum 2 MB)".to_owned());
@@ -2295,6 +2377,15 @@ fn write_project_file_from(
         display_path.clone(),
         MAX_PROJECT_FILE_PREVIEW_BYTES,
     )?;
+
+    if fs::canonicalize(root.join(".pi/workspace.jsonc")).ok().as_ref() == Some(&target) {
+        let expected = expected_content.ok_or("Workspace configuration requires its loaded content; reopen the file before saving.")?;
+        let result = write_project_workspace_config_if_unchanged_from(workspace, Some(expected), content)?;
+        if !result.written {
+            return Err("Workspace configuration changed while editing. Reopen it and reapply your changes.".to_owned());
+        }
+        return result.document.ok_or_else(|| "Workspace configuration save returned no document".to_owned());
+    }
 
     let directory = target
         .parent()
@@ -2340,6 +2431,9 @@ fn list_project_directory_from(
             entry.map_err(|error| format!("failed to read project directory entry: {error}"))?;
         let name = entry.file_name().to_string_lossy().into_owned();
         if name == ".git" || name == ".DS_Store" {
+            continue;
+        }
+        if directory == root.join(".pi") && name.eq_ignore_ascii_case("file-history") {
             continue;
         }
         let file_type = entry
@@ -2427,6 +2521,9 @@ fn search_project_directory_from(
         }
         let name = entry.file_name().to_string_lossy().into_owned();
         if name == ".git" || name == ".DS_Store" {
+            continue;
+        }
+        if directory == root.join(".pi") && name.eq_ignore_ascii_case("file-history") {
             continue;
         }
         let file_type = entry
@@ -7889,6 +7986,11 @@ fn project_pi_cleanup_targets(project_directory: &Path) -> Result<Vec<PathBuf>, 
             if current == project_directory {
                 let name = entry.file_name();
                 let name = name.to_string_lossy();
+                // Recovery slots contain user data, including temp-looking names.
+                // Never recurse into this durable subtree during Manual/TTL Clean.
+                if name.eq_ignore_ascii_case("file-history") || name.eq_ignore_ascii_case("workspace.jsonc.lock") {
+                    continue;
+                }
                 if metadata.is_dir() && !metadata.file_type().is_symlink() {
                     if project_pi_directory_is_ephemeral(&name) {
                         let children = fs::read_dir(&path).map_err(|error| {
@@ -8060,6 +8162,9 @@ fn project_pi_is_cleanup_candidate(
     artifacts_directory: &Path,
     now: SystemTime,
 ) -> bool {
+    if path.starts_with(project_directory.join("workspace.jsonc.lock")) {
+        return false;
+    }
     let generated_log = current_directory == artifacts_directory
         && path.extension().is_some_and(|extension| extension == "log")
         && project_pi_file_is_stale(metadata, now);
@@ -8981,6 +9086,9 @@ pub fn run() {
             rename_project_entry,
             copy_project_entry,
             delete_project_entry,
+            mutate_project_entries,
+            replay_project_entries,
+            forget_project_file_history,
             open_in_external_editor,
             reveal_project_entry,
             git_status,

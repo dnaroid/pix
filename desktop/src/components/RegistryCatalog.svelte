@@ -222,15 +222,15 @@
 </div>
 
 <div class="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden p-1.5">
-  {#if loading && !snapshot}
+  {#if loading && !snapshot && catalogItems.length === 0}
     <div class="flex items-center justify-center gap-2 py-8 text-xs text-muted-foreground"><RefreshCw class="h-4 w-4 animate-spin" aria-hidden="true" />Checking registry…</div>
-  {:else if !snapshot}
+  {:else if !snapshot && catalogItems.length === 0}
     <div class={emptyStateClass}>Registry data is not loaded yet. Refresh to check this workspace.</div>
   {:else}
-    {#if snapshot.error}
+    {#if snapshot?.error}
       <div class="mb-2 flex items-start gap-2 rounded-md border border-tool-error/30 bg-tool-error/5 px-2.5 py-2 text-xs leading-4 text-tool-error"><X class="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" /><span>{snapshot.error}</span></div>
     {/if}
-    {#if !snapshot.configured && catalogSection === "available"}
+    {#if !snapshot?.configured && catalogSection === "available"}
       <div class="px-3 py-6 text-center">
         <Database class="mx-auto mb-2 h-5 w-5 text-muted-foreground" aria-hidden="true" />
         <p class="text-xs font-medium text-foreground">Shared registry is not connected</p>
@@ -250,6 +250,9 @@
               </span>
             {/each}
             <strong class="min-w-0 truncate text-xs font-medium text-foreground" title={item.name}>{item.name}</strong>
+            {#if item.inContext && !item.local && !item.remote}
+              <span class="shrink-0 rounded-full bg-muted/40 px-1.5 py-px text-xs text-muted-foreground" title="Available to the active session; not managed by Registry.">External</span>
+            {/if}
           </div>
           <p class="flex min-h-3.5 min-w-0 items-center gap-1.5 text-xs leading-3.5 text-muted-foreground/80" data-registry-row="description">
             {#if item.description}<span class="min-w-0 flex-1 truncate" title={item.description}>{item.description}</span>{/if}
@@ -279,14 +282,16 @@
               {#if item.inContext && item.local}
                 <span class="shrink-0 text-xs font-medium text-tool-success" title="Available to the active session">In context</span>
               {/if}
-              {#each [publicationIcon(item)] as PublicationIcon}
-                <span class="grid h-3.5 w-3.5 shrink-0 place-items-center text-muted-foreground" title={publicationTitle(item)} aria-label={publicationLabel(item)} role="img">
-                  <PublicationIcon class="h-3.5 w-3.5" aria-hidden="true" />
-                </span>
-              {/each}
+              {#if item.local || item.remote}
+                {#each [publicationIcon(item)] as PublicationIcon}
+                  <span class="grid h-3.5 w-3.5 shrink-0 place-items-center text-muted-foreground" title={publicationTitle(item)} aria-label={publicationLabel(item)} role="img">
+                    <PublicationIcon class="h-3.5 w-3.5" aria-hidden="true" />
+                  </span>
+                {/each}
+              {/if}
             </div>
             {#if registryDiffAvailable(item) || item.actions.length > 0}
-              <RegistryItemActions {item} {remoteDisabled} {actionId} projectKey={snapshot.projectKey}
+              <RegistryItemActions {item} {remoteDisabled} {actionId} projectKey={snapshot?.projectKey}
                 diffBusy={diffLoadingFor(item)} onAction={(action) => runItemAction(item, action)}
                 onDiff={() => onDiff(item)} />
             {/if}
