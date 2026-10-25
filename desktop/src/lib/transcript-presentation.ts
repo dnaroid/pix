@@ -195,22 +195,18 @@ export function toolEntryAction(tool: ToolItem): string {
 }
 
 /**
- * Collapsed comma-list labels for an activity group: every distinct name in
- * first-seen order (deduplicated). SKILL.md reads label as `skill <name>`.
+ * One label per activity entry in transcript/start order, including repeats.
+ * SKILL.md reads label as `skill <name>`. Never inspect raw payloads here.
  */
 export function activityGroupPresentationLabels(
   entries: readonly ActivityEntry[],
 ): string[] {
-  const labels = new Set<string>();
-  for (const entry of entries) {
+  return entries.map((entry) => {
     if (entry.type === "tool") {
-      const name = entry.skillName ? `skill ${entry.skillName}` : toolPresentationName(entry);
-      labels.add(name);
-    } else {
-      labels.add("thinking");
+      return entry.skillName ? `skill ${entry.skillName}` : toolPresentationName(entry);
     }
-  }
-  return [...labels];
+    return "thinking";
+  });
 }
 export function formatTranscriptDuration(durationMs: number): string {
   const milliseconds = Math.max(0, durationMs);

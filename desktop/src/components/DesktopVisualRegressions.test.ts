@@ -42,6 +42,7 @@ import workbenchTerminalPaneSource from "./WorkbenchTerminalPane.svelte?raw";
 import tauriLibSource from "../../src-tauri/src/lib.rs?raw";
 import toolResultSource from "./ToolResult.svelte?raw";
 import transcriptActivityGroupSource from "./TranscriptActivityGroup.svelte?raw";
+import activityIconTrailSource from "./ActivityIconTrail.svelte?raw";
 import transcriptSource from "./TranscriptPane.svelte?raw";
 
 describe("desktop visual regressions", () => {
@@ -59,7 +60,9 @@ describe("desktop visual regressions", () => {
     expect(user).toContain("<MarkdownText");
     expect(user).toContain('aria-label="Message actions"');
     expect(transcriptSource).toContain('if (next?.type === "message" && next.role === "user") return "mb-5";');
-    expect(transcriptActivityGroupSource).toContain('data-activity-name={label} class="font-normal text-muted-foreground/45"');
+    expect(activityIconTrailSource).toContain('data-activity-name={label} class="flex shrink-0 items-center" title={label}');
+    expect(activityIconTrailSource).toContain('{#each visibleEntries as entry, index (entry.id)}');
+    expect(activityIconTrailSource).toContain('overflow-x-auto text-muted-foreground/45');
     expect(transcriptSource).not.toContain('"border-t border-border pt-3"');
   });
   it("keeps compact context and quota controls from painting over one another", () => {
@@ -227,18 +230,20 @@ describe("desktop visual regressions", () => {
     expect(transcriptActivityGroupSource.slice(summaryStart, summaryEnd)).not.toContain("ToolStatusIcon");
   });
 
-  it("renders a one-line collapsed header: chevron, neutral comma list, elapsed time", () => {
+  it("renders a one-line collapsed header: chevron, neutral icon trail, elapsed time", () => {
     const summaryStart = transcriptActivityGroupSource.indexOf('<summary bind:this={groupSummary}');
     const summaryEnd = transcriptActivityGroupSource.indexOf("</summary>", summaryStart);
     expect(summaryStart).toBeGreaterThanOrEqual(0);
     const header = transcriptActivityGroupSource.slice(summaryStart, summaryEnd);
-    // One grid row — chevron | truncating comma list | duration — with no second row.
+    // One grid row — chevron | scrollable icon trail | duration — with no second row.
     expect(header).toContain("grid-cols-[14px_minmax(0,1fr)_auto]");
     expect(header).not.toContain("row-span-2");
     expect(header).not.toContain("row-start-2");
-    // The disclosure chevron is the header's only icon; names and time share the single line.
+    // The disclosure chevron stays separate from the operation icons.
     expect(header).toContain('class="h-3.5 w-3.5 shrink-0 transition-transform');
-    expect(header).toContain('class="min-h-4 min-w-0 truncate text-xs"');
+    expect(header).toContain('<ActivityIconTrail entries={item.entries} />');
+    expect(activityIconTrailSource).toContain('<Icon class="h-3.5 w-3.5" aria-hidden="true" />');
+    expect(activityIconTrailSource).toContain('<span class="sr-only">{accessibleLabel}');
     expect(header).toContain('data-activity-duration class="shrink-0 text-xs text-muted-foreground/45"');
     expect(header).not.toContain("ToolStatusIcon");
     expect(header).not.toContain("Brain");
@@ -248,8 +253,8 @@ describe("desktop visual regressions", () => {
     expect(transcriptActivityGroupSource).not.toContain("data-activity-more");
     expect(transcriptActivityGroupSource).not.toContain("data-activity-settled");
     // All collapsed names share a neutral tone; expanded rows keep their tool tones.
-    expect(transcriptActivityGroupSource).toContain("activityGroupPresentationLabels");
-    expect(header).toContain('data-activity-name={label} class="font-normal text-muted-foreground/45"');
+    expect(activityIconTrailSource).toContain("activityGroupPresentationLabels");
+    expect(activityIconTrailSource).toContain('data-activity-name={label} class="flex shrink-0 items-center" title={label}');
     expect(header).not.toContain("data-tool-tone");
     expect(header).not.toContain("tool-name");
     expect(header).not.toContain("text-primary");

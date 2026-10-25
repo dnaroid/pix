@@ -181,7 +181,7 @@ describe("mixed transcript activity regressions", () => {
     }
   });
 
-  it("labels the collapsed comma list with distinct first-seen names regardless of liveness", () => {
+  it("labels every collapsed icon in entry order, preserving repeats regardless of liveness", () => {
     const thought = {
       type: "message",
       id: "thought:labels",
@@ -195,7 +195,7 @@ describe("mixed transcript activity regressions", () => {
     const liveGrep = { ...tool("grep-live"), name: "grep", status: "in_progress" } as const;
     const settledBash = { ...tool("bash-done"), name: "bash", status: "completed" } as const;
     expect(activityGroupPresentationLabels([thought, settledRead, liveGrep, settledBash, settledRead])).toEqual([
-      "thinking", "read", "grep", "bash",
+      "thinking", "read", "grep", "bash", "read",
     ]);
     expect(activityGroupPresentationLabels([settledRead])).toEqual(["read"]);
     const skillRead: ToolItem = {

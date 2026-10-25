@@ -134,6 +134,13 @@ try {
   const outer = page.locator("details[data-transcript-entry-id]");
   const outerSummary = outer.locator(":scope > summary");
   assert.equal(await outer.count(), 1);
+  assert((await outerSummary.locator("[data-activity-name]").count()) < 100, "long trails bound simultaneous SVG mounts");
+  const trail = outerSummary.locator(".activity-icon-trail");
+  assert.equal(await trail.evaluate(node => node.scrollWidth > node.clientWidth), true, "long trails overflow only their own lane");
+  assert.equal(await trail.evaluate(node => { node.scrollLeft = node.scrollWidth; return node.scrollLeft > 0; }), true,
+    "the final icons remain reachable by horizontal scrolling");
+  await page.waitForFunction(() => document.querySelector('[data-activity-icon-id="tool:399"]') !== null);
+  await trail.evaluate(node => { node.scrollLeft = 0; });
   assert.equal(await page.locator("[data-activity-entry-id]").count(), 0, "collapsed groups must not mount child rows");
   assert.equal(await page.locator(".tool-result").count(), 0);
   assert.deepEqual(await page.evaluate(() => window.activitySmoke.requests), []);
@@ -182,9 +189,11 @@ try {
 
   const inactiveTimerCount = await page.evaluate(() => window.activitySmoke.timerCount);
   await page.evaluate(() => window.activitySmoke.startLive());
-  // The collapsed chat header is one line: chevron, comma list, elapsed time.
+  // The collapsed chat header is one line: chevron, ordered icons, elapsed time.
   const headerThinkingName = page.locator('[data-activity-name="thinking"]');
-  assert.equal(await outerSummary.locator(":scope > svg").count(), 1, "the chevron is the header's only icon");
+  assert.equal(await outerSummary.locator(":scope > svg").count(), 1, "one disclosure chevron stays separate from the trail");
+  assert.equal(await headerThinkingName.locator("svg").count(), 1, "thinking has an operation icon");
+  assert.equal(await headerThinkingName.getAttribute("title"), "thinking");
   assert.equal((await outerSummary.textContent()).trim().startsWith("thinking"), true,
     "the collapsed header names the live thought once");
   const nameBox = await headerThinkingName.boundingBox();
@@ -197,8 +206,9 @@ try {
   const childThinking = page.locator("[data-activity-thought-label]");
   await page.waitForFunction(() => document.querySelector("[data-activity-thought-label]") !== null);
   assert.equal(await childThinking.count(), 1);
-  assert.equal(await childThinking.evaluate((node) => getComputedStyle(node).color), neutralColor,
-    "thinking stays neutral in the header and child rows");
+  const childThinkingColor = await childThinking.evaluate((node) => getComputedStyle(node).color);
+  assert.equal(childThinkingColor.replace(/ \/ [\d.]+\)$/u, ")"), neutralColor.replace(/ \/ [\d.]+\)$/u, ")"),
+    "thinking keeps the same neutral hue, with stronger opacity on expanded child text");
   await outerSummary.click();
   assert.equal(await page.locator("[data-activity-duration]").textContent(), "<0.1s");
   assert.equal(await page.evaluate(() => window.activitySmoke.timerCount), inactiveTimerCount + 1, "one pane clock serves live groups");
@@ -218,9 +228,13 @@ try {
   assert.notEqual(skillToneColor, neutralColor, "expanded tool rows keep their native tone");
   await page.evaluate(() => window.activitySmoke.update({ sessionUpdate: "tool_call", toolCallId: "parallel-grep",
     name: "grep", title: "Grep", status: "in_progress", rawInput: { pattern: "TODO" } }));
-  const grepListName = page.locator('[data-activity-name="grep"]');
-  assert.equal(await grepListName.count(), 1, "repeated names stay deduplicated in the comma list");
-  assert.match(await outerSummary.textContent(), /thinking, skill demo, grep/, "the list stays one comma-separated line");
+  const grepListName = page.locator('[data-activity-name="grep"]').first();
+  await page.evaluate(() => window.activitySmoke.update({ sessionUpdate: "tool_call", toolCallId: "repeat-grep",
+    name: "grep", title: "Grep", status: "completed" }));
+  assert.equal(await page.locator('[data-activity-name="grep"]').count(), 2, "repeated calls retain separate icons");
+  assert.deepEqual(await outerSummary.locator("[data-activity-name]").evaluateAll(nodes => nodes.map(node => node.dataset.activityName)),
+    ["thinking", "skill demo", "grep", "grep"], "icons preserve call order");
+  assert.match((await outerSummary.textContent()).replace(/\s+/gu, " "), /thinking, skill demo, grep, grep/, "screen readers retain every call name");
   await outerSummary.click();
   const grepToneColor = await page.locator('[data-activity-entry-id="tool:parallel-grep"] .tool-name').evaluate((node) => getComputedStyle(node).color);
   await outerSummary.click();
@@ -256,7 +270,7 @@ try {
   // Failure stays on the child row: the header gains no icon, text, or tone change.
   await page.evaluate(() => window.activitySmoke.update({ sessionUpdate: "tool_call_update", toolCallId: "parallel-grep", status: "failed" }));
   assert.equal(await outerSummary.locator(":scope > svg").count(), 1, "the header gains no failure icon");
-  assert.match(await outerSummary.textContent(), /thinking, skill demo, grep/, "the header text is unchanged by a failed child");
+  assert.match((await outerSummary.textContent()).replace(/\s+/gu, " "), /thinking, skill demo, grep, grep/, "the header text is unchanged by a failed child");
   assert.equal(await grepListName.evaluate((node) => getComputedStyle(node).color), neutralColor, "the failed tool's list tone is unchanged");
   await outerSummary.click();
   await page.waitForFunction(() => {
@@ -278,10 +292,13 @@ try {
     await window.activitySmoke.setSynthetic("stress", 10000);
     return { entries: 10000, updateMs: Number((performance.now() - start).toFixed(2)),
       mountedActivityRows: document.querySelectorAll("[data-activity-entry-id]").length,
+      mountedActivityIcons: document.querySelectorAll("[data-activity-name] svg").length,
+      mountedShellElements: [...document.querySelectorAll("#app *")].filter(node => !node.closest(".activity-icon-trail")).length,
       mountedElements: document.querySelectorAll("#app *").length };
   });
   assert.equal(stress.mountedActivityRows, 0);
-  assert(stress.mountedElements < 80, "collapsed DOM size must not grow with tool count");
+  assert(stress.mountedActivityIcons > 0 && stress.mountedActivityIcons < 100, "long histories mount only the visible icons and overscan");
+  assert(stress.mountedShellElements < 80, "only the lightweight icon trail grows, not result bodies or child rows");
   assert.equal(await page.evaluate(() => window.activitySmoke.requests.length), 2);
 
   await page.evaluate(() => window.activitySmoke.setInterleaved());
@@ -292,31 +309,25 @@ try {
       .filter(node => getComputedStyle(node).borderTopStyle === "solid"
         && parseFloat(getComputedStyle(node).borderTopWidth) > 0)
       .map(node => node.dataset.transcriptEntryId));
-    assert.deepEqual(borders, ["commentary", "answer"], "only prose immediately after activity gets a divider");
+    assert.deepEqual(borders, [], "activity does not add separators above assistant prose");
     const answer = page.locator('[data-transcript-entry-id="answer"]');
     const style = await answer.evaluate(node => {
       const css = getComputedStyle(node);
-      return { width: css.borderTopWidth, color: css.borderTopColor, padding: css.paddingTop,
-        semanticColor: getComputedStyle(document.documentElement).getPropertyValue("--border").trim() };
+      return { width: css.borderTopWidth };
     });
-    assert.equal(style.width, "1px");
-    assert.equal(style.padding, "12px");
-    assert.equal(style.color, await page.evaluate(color => {
-      const node = document.createElement("div"); node.style.color = color;
-      document.body.append(node); const resolved = getComputedStyle(node).color; node.remove(); return resolved;
-    }, style.semanticColor), "divider uses the current theme border");
+    assert.equal(style.width, "0px");
     const before = await answer.boundingBox();
     const precedingGroup = page.locator('[data-transcript-entry-id="activity-group:read-third"]');
     await precedingGroup.locator(":scope > summary").click();
-    assert.equal(await answer.evaluate(node => getComputedStyle(node).borderTopWidth), "1px",
-      "expanding activity preserves its following divider");
+    assert.equal(await answer.evaluate(node => getComputedStyle(node).borderTopWidth), "0px",
+      "expanding activity does not introduce a separator");
     assert.equal((await answer.boundingBox()).width, before.width);
     await precedingGroup.locator(":scope > summary").click();
   }
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ status: "passed", scenarios: ["lazy DOM", "per-tool hydration", "duplicate toggles",
-    "click/keyboard gutter collapse and preserved disclosure", "late result after collapse", "session replacement", "one-line header: chevron, neutral comma list, elapsed time, no status icons, failure stays on child rows", "duration freeze and timer teardown",
-    "keyboard disclosure", "large collapsed history", "interleaved prose dividers in both themes"], stress }, null, 2));
+    "click/keyboard gutter collapse and preserved disclosure", "late result after collapse", "session replacement", "one-line header: chevron, ordered neutral icons including repeats, elapsed time, no status icons, failure stays on child rows", "duration freeze and timer teardown",
+    "keyboard disclosure", "large collapsed history", "interleaved prose without dividers in both themes"], stress }, null, 2));
 } finally {
   await browser?.close();
   await server.close();
