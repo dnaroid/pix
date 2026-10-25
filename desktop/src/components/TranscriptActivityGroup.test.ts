@@ -54,13 +54,26 @@ describe("activity icon trail", () => {
       "project_tasks", "todo", "session", "subagents", "question", "compress", "web_search", "web_fetch", "skill", "thinking"];
     for (const name of ["repo_audit", "repo_knowledge", "repo_context", "repo_inspect", "repo_ast",
       "repo_search", "repo_structure", "repo_architecture", "repo_deps", "repo_ask", "repo_explain",
-      "bash", "edit", "write", "read_file", "grep", "glob", "task", "agent", "brainstorm", "lookup",
+      "read_file", "task", "agent", "brainstorm", "lookup",
       "project", "projects", "get_plan", "update_plan", "multi_tool_use"]) {
       expect(activityIcon(name), name).toBe(activityIcon("unknown"));
     }
     expect(activityIcon("multi_tool_use.parallel")).toBe(activityIcon("parallel"));
     expect(new Set(names.map(activityIcon)).size).toBe(names.length);
     for (const name of names) expect(activityIcon(name)).not.toBe(activityIcon("unknown"));
+  });
+
+  it("maps the current Claude tool profile, including namespaced and lowercase labels", () => {
+    for (const name of ["Read", "Edit", "Write", "Bash", "Grep", "Glob"]) {
+      expect(activityIcon(name), name).not.toBe(activityIcon("unknown"));
+      expect(activityIcon(`functions.${name}`)).toBe(activityIcon(name));
+      expect(activityIcon(name.toLowerCase())).toBe(activityIcon(name));
+    }
+    expect(activityIcon("Edit")).toBe(activityIcon("apply_patch"));
+    expect(activityIcon("Bash")).toBe(activityIcon("shell"));
+    expect(activityIcon("Grep")).toBe(activityIcon("project_search"));
+    expect(activityIcon("Write")).not.toBe(activityIcon("Edit"));
+    expect(activityIcon("Glob")).not.toBe(activityIcon("Grep"));
   });
 
   it("bounds mounts for long trails while keeping their complete accessible sequence", () => {

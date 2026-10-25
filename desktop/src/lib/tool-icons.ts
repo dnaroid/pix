@@ -1,6 +1,8 @@
 import Brain from "@lucide/svelte/icons/brain";
 import FileText from "@lucide/svelte/icons/file-text";
 import FilePen from "@lucide/svelte/icons/file-pen";
+import FilePlus from "@lucide/svelte/icons/file-plus";
+import FolderSearch from "@lucide/svelte/icons/folder-search";
 import Terminal from "@lucide/svelte/icons/terminal";
 import Search from "@lucide/svelte/icons/search";
 import ScanSearch from "@lucide/svelte/icons/scan-search";
@@ -23,10 +25,12 @@ import Wrench from "@lucide/svelte/icons/wrench";
 const iconGroups: readonly (readonly [readonly string[], typeof Brain])[] = [
   [["thinking"], Brain],
   [["read"], FileText],
-  [["apply_patch"], FilePen],
+  [["apply_patch", "edit"], FilePen],
+  [["write"], FilePlus],
   [["ast_apply"], Replace],
-  [["shell"], Terminal],
-  [["project_search"], Search],
+  [["shell", "bash"], Terminal],
+  [["project_search", "grep"], Search],
+  [["glob"], FolderSearch],
   [["ast_grep"], ScanSearch],
   [["codemode"], CodeXml],
   [["web_search"], Globe],
