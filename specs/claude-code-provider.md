@@ -230,6 +230,19 @@ This does not change the user's Claude Code settings outside Pix requests.
 
 ### Timeout diagnostics
 
+Pi's SDK provider timeout can be raised globally with the existing
+`~/.pi/agent/settings.json` setting `retry.provider.timeoutMs` (for example,
+`1800000` for 30 minutes). This setting applies across models; an explicit
+side-request `timeoutMs` takes precedence. The SDK uses it as a fallback when
+no per-call timeout is supplied, while HTTP idle timeout remains a separate
+setting. Without either timeout override, the SDK falls back to
+`httpIdleTimeoutMs` (default 300000), which the Claude adapter treats as its
+total timeout. The local Claude provider still caps its total request budget at
+its own configured total timeout (`PI_CLAUDE_CODE_PROVIDER_TOTAL_TIMEOUT_MS`,
+or its default), so raising the SDK timeout alone does not raise that cap.
+Reload the session or restart the host for settings to take effect in new
+requests; already-running requests are unchanged.
+
 Content-free request metrics and the doctor's last-request report record the
 original finite caller `timeoutMs` (when supplied), configured total limit and
 its environment/default source, shared request budget, effective launch total,
