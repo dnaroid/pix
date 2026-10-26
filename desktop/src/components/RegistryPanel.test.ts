@@ -68,7 +68,8 @@ describe("RegistryProjectStatus quiet-by-default sync row", () => {
 
   it("keeps project-sync initialization separate from remote registry configuration", () => {
     expect(projectStatusSource).toContain("projectInitialized === false");
-    expect(projectStatusSource).toContain("Project sync is not initialized");
+    expect(projectStatusSource).toContain("Project storage is created on demand");
+    expect(projectStatusSource).toContain("full setup is optional");
     expect(projectStatusSource).toContain("onclick={onInitializeProject}");
     expect(projectStatusSource).toContain('actionId === "initialize-project"');
   });

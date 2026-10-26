@@ -166,6 +166,42 @@ sanitized summaries. Top-level
 deterministic `environment` remains Playwright-only; DevTools blocks it rather
 than approximating locale/timezone/reduced-motion semantics.
 
+For explicitly authorized synthetic diagnostics, a macOS-only
+`target.application: { fixture: "texteditBlank" }` exception launches the fixed system
+TextEdit bundle through `NSWorkspace.OpenConfiguration` with new-instance/no-substitution
+and per-process no-restore/untitled-window flags. It cannot
+combine with selectors or launch overrides and never weakens generic executable
+validation. It refuses already-running TextEdit and retains only the completion
+`NSRunningApplication`, using `isEqual` identity rather than PID/group ownership.
+One blank focused untitled document is required before input. Exactly one
+`texteditSmoke` action is required; `texteditBlankLifecycle` instead requires zero.
+Only bounded `snapshotAccessibility` may accompany the smoke; snapshots stay inside
+the retained-handle supervisor. Screenshot/video and generic companions are rejected
+before launch, with no PID-based fallback. The helper posts seven fixed paired global HID key
+events for `ghbdtn ` and checks live focused-app PID, AX identity, and exact text after
+each key; U.S./ABC layout and secure-input/modifier guards fail closed without repair.
+This is synthetic delivery, not physical-origin or product-counter acceptance. Generic
+`pressKey` is unchanged. Launch/window correlation failure blocks input. Preflight/
+launch and focus/post races remain; a new document may autosave. No persistent defaults,
+HOME/environment edits, user container cleanup, or TCC reset is permitted. Existing
+helper-signature/reapproval rules apply. Focused regression coverage lives in
+`external/pi-tools-suite/test/async-subagents/textedit-fixture.test.ts`; static tests
+do not establish runtime delivery. Foundation-only lifecycle tests live alongside
+`textedit-native-policy.test.ts`; they are not AppKit/AX runtime proof.
+**Manual TextEdit closing only:** no terminate/forceTerminate, PID/group signals,
+UI close, reaper, or handle reconstruction is permitted in any fixture outcome.
+Smoke status is separate from cleanup: `manualRequired` for a retained handle without
+observed exit, `unknown` for absent completion/lost supervisor, `confirmed` only for
+retained `isTerminated` plus no equal running instance, and `notNeeded` before any LS
+request. After a sent launch, unknown results conservatively require manual inspection,
+even if launch may not have occurred. Never infer completion from helper exit or retry
+before manual resolution. EOF/timeouts/signals permanently revoke input; late callbacks
+cannot restore it. Native launch has a 15-second budget and a 3-second late drain;
+the parent releases only its own helper with a 5-second ceiling inside the runner's
+10-second hard grace. Only the directly spawned helper may be killed at that ceiling.
+Diagnostics do not repair launch or prove delivery/cleanup; see the
+[macOS guide](../external/pi-tools-suite/src/async-subagents/agents/ui-qa/guides/desktop-macos.md).
+
 POSIX desktop launch contracts are correlated and cleaned up by their owned
 detached process group, not only by the launcher PID. This lets package-manager
 wrappers hand off to the real GUI descendant without making that descendant

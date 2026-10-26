@@ -102,6 +102,23 @@ describe("project file writes", () => {
     });
   });
 
+  it("reports denied lazy plan creation and lets the unchanged draft retry", async () => {
+    const reportError = vi.fn(), afterSave = vi.fn();
+    const store = createProjectDocumentsStore({
+      workspace: () => "/project", openProjectFile: vi.fn(), showEmptyFile: vi.fn(),
+      previewId: () => 1, afterSave, clearError: vi.fn(), reportError,
+    });
+    const path = ".pi/plans/first.md", content = "# Unsaved plan\n";
+    const error = new Error("failed to update .gitignore for .pi/: Permission denied");
+    tauri.invoke.mockRejectedValueOnce(error);
+    expect(await store.save(path, content)).toBe(false);
+    expect(reportError).toHaveBeenCalledWith(error);
+    expect(afterSave).not.toHaveBeenCalled();
+    tauri.invoke.mockResolvedValueOnce({ path, content }).mockResolvedValue({ plans: [] });
+    expect(await store.save(path, content)).toBe(true);
+    expect(afterSave).toHaveBeenCalledWith({ path, content }, "/project", 1);
+  });
+
   it("passes the loaded workspace snapshot and chains the canonical result for queued saves", async () => {
     const path = ".pi/workspace.jsonc", expected: string[] = [];
     const first = deferred<ProjectFilePreview>(), entered = deferred<void>();

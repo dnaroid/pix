@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { macosHelperSources } from "./helper-sources.mjs";
 
 const IDENTIFIER = "org.pix.ui-qa.macos-accessibility";
 const BINARY_NAME = "macos-accessibility";
@@ -150,7 +151,10 @@ export async function prepareMacosHelper({ projectRoot, source, deadline, run, s
 	const binary = path.join(helpers, BINARY_NAME);
 	const stamp = `${binary}.sha256`;
 	const lock = `${binary}.lock`;
-	const digest = createHash("sha256").update(fs.readFileSync(source)).digest("hex");
+	const sources = macosHelperSources(source);
+	const hash = createHash("sha256");
+	for (const file of sources) hash.update(fs.readFileSync(file));
+	const digest = hash.digest("hex");
 	if (signingIdentity !== undefined && (typeof signingIdentity !== "string" || signingIdentity.length > 160 || /[\x00-\x1f\x7f]/.test(signingIdentity))) {
 		throw new Error("PI_UI_QA_MACOS_CODESIGN_IDENTITY must be a valid keychain signing identity name or SHA-1 hash");
 	}
@@ -178,7 +182,7 @@ export async function prepareMacosHelper({ projectRoot, source, deadline, run, s
 				} catch { fs.rmSync(temporary, { force: true }); }
 			}
 			if (!migrated) {
-				await checkedRun(run, "xcrun", ["swiftc", "-O", source, "-o", temporary], {
+				await checkedRun(run, "xcrun", ["swiftc", "-O", ...sources, "-o", temporary], {
 					cwd: projectRoot, timeoutMs: Math.max(1, Math.min(60_000, deadline - Date.now())),
 				});
 				const compiled = fs.lstatSync(temporary);

@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { prepareMacosHelper } from "../drivers/macos/helper-cache.mjs";
 import { bundledMacosHelper } from "../drivers/macos/release-helper.mjs";
+import { textEditFixtureContract, runTextEditFixture, validateTextEditFixtureSteps } from "./textedit-fixture.mjs";
 
 const MACOS_DRIVER_SOURCE = fileURLToPath(new URL("../drivers/macos/macos-accessibility.swift", import.meta.url));
 const WINDOWS_DRIVER_SOURCE = fileURLToPath(new URL("../drivers/windows/windows-uia.ps1", import.meta.url));
@@ -16,6 +17,7 @@ const SHELL_EXECUTABLES = new Set([
 	"pwsh", "pwsh.exe", "osascript", "wscript", "wscript.exe", "cscript", "cscript.exe",
 ]);
 const ACTION_FIELDS = {
+	texteditSmoke: new Set(["action", "timeoutMs"]),
 	waitForWindow: new Set(["action", "timeoutMs"]),
 	activateWindow: new Set(["action", "timeoutMs"]),
 	snapshotAccessibility: new Set(["action", "name", "depth", "limit", "timeoutMs"]),
@@ -228,7 +230,9 @@ export async function runDesktopBackend(context) {
 	const flow = context.flow;
 	const application = validateApplication(flow.target.application, context.projectRoot);
 	const steps = validateSteps(flow.steps, probe);
+	validateTextEditFixtureSteps(steps, application.fixture);
 	const helper = await ensureDesktopHelper(context);
+	if (application.fixture) return runTextEditFixture({ context, helper, steps, artifacts: emptyArtifacts() });
 	const assertions = [];
 	const observations = [];
 	const artifacts = emptyArtifacts();
@@ -418,8 +422,10 @@ async function executeStep(options) {
 	}
 }
 
-function validateApplication(value, projectRoot) {
+export function validateApplication(value, projectRoot) {
 	if (!isObject(value)) throw new Error("target.application must be an object");
+	const fixture = textEditFixtureContract(value);
+	if (fixture) return { fixture };
 	const allowed = new Set(["pid", "name", "bundleId", "launch"]);
 	assertKnownFields(value, allowed, "target.application");
 	const selectors = [];
@@ -516,6 +522,7 @@ export function validateDesktopStepCapabilities(step, supportedCapabilities) {
 		throw new Error("desktop flow requires windowScreenshot, but the selected desktop driver does not currently provide it");
 	}
 	const required = {
+		texteditSmoke: "keyboardInput",
 		activate: "semanticActivation",
 		setValue: "valueInput",
 		inputText: "keyboardInput",

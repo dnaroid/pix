@@ -13,6 +13,10 @@ use std::{
     time::Duration,
 };
 
+#[cfg(target_os = "macos")]
+#[path = "project_tasks_initialization.rs"]
+mod initialization;
+
 fn sql_error(error: rusqlite::Error) -> String {
     format!("project task database: {error}")
 }
@@ -137,7 +141,14 @@ fn open(directory: &Path, initialize: bool) -> Result<Connection, String> {
 }
 
 pub(super) fn initialize(directory: &Path) -> Result<(), String> {
-    open(directory, true).map(|_| ())
+    #[cfg(target_os = "macos")]
+    {
+        initialization::initialize(directory)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        open(directory, true).map(|_| ())
+    }
 }
 
 pub(super) fn inspect(directory: &Path) -> Result<bool, String> {

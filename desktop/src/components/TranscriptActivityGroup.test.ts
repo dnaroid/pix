@@ -80,10 +80,10 @@ describe("activity icon trail", () => {
     const html = header(Array.from({ length: 10_000 }, (_, index) => tool(String(index), "read")));
     expect(html.match(/data-activity-name=/g)!.length).toBeLessThan(100);
     expect(html.match(/read/g)!.length).toBeGreaterThanOrEqual(10_000);
-    expect(html).toContain("199994px");
-    expect(activityIconWindow(10_000, 0, 400)).toEqual({ start: 0, end: 24 });
-    expect(activityIconWindow(10_000, 199_594, 400)).toEqual({ start: 9975, end: 10_000 });
+    expect(html).toContain("159998px");
+    expect(activityIconWindow(10_000, 0, 400)).toEqual({ start: 0, end: 29 });
+    expect(activityIconWindow(10_000, 159_598, 400)).toEqual({ start: 9970, end: 10_000 });
     expect(activityIconWindow(3, 199_594, 400)).toEqual({ start: 0, end: 3 });
-    expect(activityIconWindow(10_000, 199_594, 1000)).toEqual({ start: 9946, end: 10_000 });
+    expect(activityIconWindow(10_000, 159_598, 1000)).toEqual({ start: 9933, end: 10_000 });
   });
 });

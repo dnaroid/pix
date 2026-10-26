@@ -1,5 +1,5 @@
-/** 14px icon + 6px gap, matching the compact trail's geometry. */
-export const ACTIVITY_ICON_PITCH = 20;
+/** 14px icon + 2px gap, matching the compact trail's geometry. */
+export const ACTIVITY_ICON_PITCH = 16;
 const OVERSCAN = 4;
 
 /** Bound SVG mounts without dropping calls from the horizontally scrollable trail. */

@@ -3,6 +3,7 @@ import { spawn, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { macosHelperSources } from "../../src/async-subagents/agents/ui-qa/drivers/macos/helper-sources.mjs";
 
 const RUN_E2E = process.platform === "darwin" && /^(1|true|yes)$/i.test(process.env.UI_QA_DESKTOP_E2E ?? "");
 const e2eTest = RUN_E2E ? test : test.skip;
@@ -17,7 +18,7 @@ e2eTest("wait-window discovers a late GUI descendant in the launched process gro
 		const fixture = path.join(project, "accessibility-fixture");
 		const helper = path.join(project, "macos-accessibility");
 		for (const [source, executable] of [[fixtureSource, fixture], [helperSource, helper]]) {
-			const compile = spawnSync("xcrun", ["swiftc", "-O", source, "-o", executable], { encoding: "utf8", timeout: 120_000 });
+			const compile = spawnSync("xcrun", ["swiftc", "-O", ...macosHelperSources(source), "-o", executable], { encoding: "utf8", timeout: 120_000 });
 			expect(compile.status, compile.stderr).toBe(0);
 		}
 		const doctor = spawnSync(helper, ["doctor"], { encoding: "utf8", timeout: 10_000 });

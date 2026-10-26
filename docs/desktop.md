@@ -119,9 +119,13 @@ panels:
 - Source Control shows **Initialize Git** when the selected workspace has no Git
   repository. Pix refuses to create a nested repository when the workspace is
   already inside another Git root.
-- Registry shows **Initialize project Registry** when `.pi` is absent. It
-  initializes the project-owned SQLite task/plans/attachment scaffold without
-  importing, reading or removing old JSONC task files.
+- Registry offers **Initialize project Registry** as an optional full scaffold
+  setup (SQLite tasks, plans and attachments); saving a task, plan, attachment
+  or project setting creates only the required `.pi` storage on demand. Merely
+  opening/reading a workspace does not create `.pi`. Creating a new `.pi`
+  appends `/.pi/` to the root `.gitignore` while preserving existing rules and
+  newline style; existing `.pi` directories are not retroactively ignored.
+  Initialization does not import, read or remove old JSONC task files.
 - Search indexes reports local/semantic store state without initializing or
   repairing indexes.
 

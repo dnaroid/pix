@@ -142,8 +142,8 @@
         <FolderPlus class="h-4 w-4" aria-hidden="true" />
       </span>
       <span class="min-w-0 flex-1">
-        <span class="block truncate text-xs font-semibold text-foreground">Project sync is not initialized</span>
-        <span class="block truncate text-xs text-muted-foreground">Tasks, plans and attachments need the project scaffold</span>
+        <span class="block truncate text-xs font-semibold text-foreground">Project storage is created on demand</span>
+        <span class="block truncate text-xs text-muted-foreground">Save a task or plan to start; full setup is optional</span>
       </span>
       <button
         class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border bg-panel-strong px-2 text-xs font-medium text-foreground hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"

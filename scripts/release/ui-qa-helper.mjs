@@ -1,6 +1,7 @@
 import { chmod, lstat, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { root, run } from "./common.mjs";
+import { macosHelperSources } from "../../external/pi-tools-suite/src/async-subagents/agents/ui-qa/drivers/macos/helper-sources.mjs";
 
 export const MACOS_HELPER_IDENTIFIER = "org.pix.ui-qa.macos-accessibility";
 export const MACOS_HELPER_NAME = "macos-accessibility";
@@ -39,7 +40,7 @@ export async function compileMacosHelper(payload, target, { source = MACOS_HELPE
   }
   await mkdir(join(payload, "helpers"), { recursive: true });
   const binary = macosHelperPath(payload);
-  run("xcrun", ["swiftc", "-O", "-target", triple, source, "-o", binary]);
+  run("xcrun", ["swiftc", "-O", "-target", triple, ...macosHelperSources(source), "-o", binary]);
   await chmod(binary, 0o755);
   return binary;
 }

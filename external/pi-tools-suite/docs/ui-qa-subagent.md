@@ -268,6 +268,23 @@ The base/detail guides are `android.md`/`android-adb.md`, loaded through
   NSWorkspace registration while waiting for a late GUI descendant; a sleeping
   poll can retain an empty application list even after the AX window appears.
 
+- For explicitly authorized synthetic key diagnostics only, macOS supports
+  `target.application: { "fixture": "texteditBlank" }` plus exactly one
+  `texteditSmoke` action. This fixed external-system-app exception does not relax
+  generic launch validation. The fixed system bundle is opened through LaunchServices;
+  a native supervisor retains the completion `NSRunningApplication` and compares
+  instances with `isEqual`, never treating PID/group IDs as ownership. It refuses
+  existing TextEdit and requires one blank focused untitled document. The separate
+  `texteditBlankLifecycle` fixture requires zero smoke actions. Only bounded
+  `snapshotAccessibility` may accompany the fixed seven-pair `ghbdtn ` smoke;
+  screenshots/video and generic companions fail closed, without PID fallback.
+  TextEdit is **never automatically closed or terminated**. Cleanup is separately
+  `manualRequired`, `unknown`, `confirmed` (retained observed exit only), or `notNeeded`.
+  A sent launch with missing/crashed supervisor still requires manual inspection.
+  Only the directly spawned helper may be killed at its release cap. This establishes
+  neither physical origin nor product counters; the [macOS guide](../src/async-subagents/agents/ui-qa/guides/desktop-macos.md)
+  describes remaining focus/autosave races, manual closing, and fail-closed handling.
+
 ## Unified capability-first runner contract
 
 - One private JSONC flow under the owning agent's `ui-qa/flows/` declares

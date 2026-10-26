@@ -27,8 +27,18 @@ session-local todos.
   `tasks.d/`, and old attachment markers are not authoritative and cannot
   supply tasks. Legacy `tasks.jsonc`/`tasks.d/` are non-canonical and are
   removed by Desktop `.pi` cleanup.
-- New Registry initialization creates `.pi/tasks.sqlite`, `.pi/plans/` and
-  `.pi/task-attachments/`, all project-owned regular entries.
+- Opening/reading a workspace with no `.pi` is side-effect free and returns an
+  empty task view. The first task save lazily creates only `.pi/tasks.sqlite`;
+  attachments can be staged before that first task, and the save then records
+  their SQLite associations. Plan and settings saves likewise create only
+  their required storage. Creating a new `.pi` first appends `/.pi/` to the
+  root `.gitignore` unless a literal `.pi`, `.pi/`, `/.pi` or `/.pi/` rule
+  already exists; existing rules/newline convention are preserved and Git
+  files are not thereby untracked. Existing `.pi` directories are not
+  retroactively ignored. Permission failures surface as failed saves, not
+  success. Optional full Registry initialization creates the complete
+  `.pi/tasks.sqlite`, `.pi/plans/` and `.pi/task-attachments/` scaffold; its
+  initialized marker still requires all three valid entries.
 
 ## Tasks sidebar behavior
 

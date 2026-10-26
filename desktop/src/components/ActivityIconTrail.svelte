@@ -13,7 +13,7 @@
   const accessibleLabel = $derived(labels.join(", "));
   const window = $derived(activityIconWindow(entries.length, scrollLeft, viewportWidth));
   const visibleEntries = $derived(entries.slice(window.start, window.end));
-  const totalWidth = $derived(Math.max(0, entries.length * ACTIVITY_ICON_PITCH - 6));
+  const totalWidth = $derived(Math.max(0, entries.length * ACTIVITY_ICON_PITCH - 2));
 
   onMount(() => {
     const observer = new ResizeObserver(() => { viewportWidth = viewport.clientWidth; });
@@ -30,7 +30,7 @@
 >
   <span class="sr-only">{accessibleLabel}</span>
   <span class="relative block h-4" style:width={`${totalWidth}px`} aria-hidden="true">
-    <span class="absolute inset-y-0 left-0 flex items-center gap-1.5" style:transform={`translateX(${window.start * ACTIVITY_ICON_PITCH}px)`}>
+    <span class="absolute inset-y-0 left-0 flex items-center gap-0.5" style:transform={`translateX(${window.start * ACTIVITY_ICON_PITCH}px)`}>
       {#each visibleEntries as entry, index (entry.id)}
         {@const label = labels[window.start + index] ?? "tool"}
         {@const Icon = activityIcon(label)}

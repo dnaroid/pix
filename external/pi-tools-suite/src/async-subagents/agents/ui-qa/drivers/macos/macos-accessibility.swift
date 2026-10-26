@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import Carbon
 import AVFoundation
 import CoreMedia
 import Darwin
@@ -519,6 +520,148 @@ func sendText(_ text: String) throws {
     }
 }
 
+// Deliberately fixed diagnostic route. No generic external launch/input escape.
+// Keeping the check and all pairs in one helper invocation retains AX identity.
+enum TextEditSmoke {
+    static let bundleID = "com.apple.TextEdit"
+
+    static func runningApps() -> [NSRunningApplication] {
+        NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+            .filter { !$0.isTerminated }
+    }
+
+    static func preflight() throws {
+        try requireAccessibility()
+        guard runningApps().isEmpty else {
+            throw Failure("texteditBlank refuses an already-running TextEdit")
+        }
+    }
+
+    static func validateInstance(_ app: NSRunningApplication) throws {
+        let apps = runningApps()
+        let metadataMatches = app.bundleIdentifier == bundleID &&
+            app.bundleURL?.path == "/System/Applications/TextEdit.app" &&
+            app.executableURL?.path == "/System/Applications/TextEdit.app/Contents/MacOS/TextEdit"
+        guard TextEditAdmission.instance(app, live: apps, terminated: app.isTerminated, metadataMatches: metadataMatches) else {
+            throw Failure("texteditBlank lost retained instance identity")
+        }
+    }
+
+    static func foregroundPID() throws -> pid_t {
+        guard let raw = copyAttribute(AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute),
+              CFGetTypeID(raw) == AXUIElementGetTypeID() else {
+            throw Failure("texteditBlank cannot determine the live focused application")
+        }
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(unsafeBitCast(raw, to: AXUIElement.self), &pid) == .success else {
+            throw Failure("texteditBlank cannot determine the live focused PID")
+        }
+        return pid
+    }
+
+    static func field(_ app: NSRunningApplication, sameAs original: AXUIElement? = nil) throws -> AXUIElement {
+        try validateInstance(app)
+        guard try foregroundPID() == app.processIdentifier else {
+            throw Failure("texteditBlank lost exclusive foreground ownership")
+        }
+        let root = axApplication(app)
+        guard let windows = copyAttribute(root, kAXWindowsAttribute) as? [AXUIElement],
+              windows.count == 1,
+              scalarAttribute(windows[0], kAXModalAttribute) == "false",
+              let children = copyAttribute(windows[0], kAXChildrenAttribute) as? [AXUIElement],
+              !children.contains(where: { role($0) == kAXSheetRole }) else {
+            throw Failure("texteditBlank requires one untitled document window")
+        }
+        var document: CFTypeRef?
+        let documentStatus = AXUIElementCopyAttributeValue(windows[0], kAXDocumentAttribute as CFString, &document)
+        guard document == nil, [.success, .noValue, .attributeUnsupported].contains(documentStatus) else {
+            throw Failure("texteditBlank document identity is not absent or is unreadable")
+        }
+        let focused = try focusedElement(app)
+        guard role(focused) == kAXTextAreaRole,
+              scalarAttribute(focused, kAXEnabledAttribute) == "true",
+              scalarAttribute(focused, kAXFocusedAttribute) == "true",
+              let containingWindow = copyAttribute(focused, kAXWindowAttribute),
+              CFEqual(containingWindow, windows[0]) else {
+            throw Failure("texteditBlank requires the same enabled focused text area")
+        }
+        if let original, !CFEqual(focused, original) {
+            throw Failure("texteditBlank focused text area changed")
+        }
+        try validateInstance(app)
+        return focused
+    }
+
+    static func prepare(_ app: NSRunningApplication) throws -> AXUIElement {
+        try validateInstance(app)
+        try activate(app)
+        let element = try field(app)
+        guard stringAttribute(element, kAXValueAttribute) == "" else {
+            throw Failure("texteditBlank refuses a nonempty or unreadable document")
+        }
+        try validateInstance(app)
+        return element
+    }
+
+    static func run(_ app: NSRunningApplication, check: () throws -> Void, expecting: (String, String) -> Void) throws -> [String: Any] {
+        try check()
+        let original = try field(app)
+        guard stringAttribute(original, kAXValueAttribute) == "" else {
+            throw Failure("texteditSmoke must start with an empty document")
+        }
+        // Do not switch layouts or change security state on the user's behalf.
+        let source = TISCopyCurrentKeyboardInputSource().takeRetainedValue()
+        guard let rawID = TISGetInputSourceProperty(source, kTISPropertyInputSourceID) else {
+            throw Failure("texteditSmoke cannot determine the keyboard layout")
+        }
+        let sourceID = Unmanaged<CFString>.fromOpaque(rawID).takeUnretainedValue() as String
+        guard ["com.apple.keylayout.US", "com.apple.keylayout.ABC"].contains(sourceID) else {
+            throw Failure("texteditSmoke requires U.S. or ABC layout; observed \(sourceID)")
+        }
+        let pairs: [(CGKeyCode, String)] = [(5, "g"), (4, "h"), (11, "b"), (2, "d"), (17, "t"), (45, "n"), (49, " ")]
+        var expected = ""
+        for (code, character) in pairs {
+            try check()
+            _ = try field(app, sameAs: original)
+            guard !IsSecureEventInputEnabled(),
+                  CGEventSource.flagsState(.combinedSessionState).intersection([.maskCommand, .maskShift, .maskControl, .maskAlternate, .maskAlphaShift, .maskSecondaryFn]).isEmpty,
+                  stringAttribute(original, kAXValueAttribute) == expected else {
+                throw Failure("texteditSmoke security/modifier/value guard failed; no retry")
+            }
+            guard let down = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: true),
+                  let up = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: false) else {
+                throw Failure("texteditSmoke could not create paired key events")
+            }
+            down.flags = []
+            up.flags = []
+            try check()
+            let currentSource = TISCopyCurrentKeyboardInputSource().takeRetainedValue()
+            guard let currentID = TISGetInputSourceProperty(currentSource, kTISPropertyInputSourceID),
+                  (Unmanaged<CFString>.fromOpaque(currentID).takeUnretainedValue() as String) == sourceID else {
+                throw Failure("texteditSmoke layout changed; no retry")
+            }
+            _ = try field(app, sameAs: original)
+            try check()
+            expecting(expected, expected + character)
+            // Global HID delivery is necessary to exercise a system event tap.
+            // A focus race after the guard remains possible; this is not physical input.
+            down.post(tap: .cghidEventTap)
+            up.post(tap: .cghidEventTap)
+            expected += character
+            let deadline = Date().addingTimeInterval(0.7)
+            while true {
+                try check()
+                _ = try field(app, sameAs: original)
+                let actual = stringAttribute(original, kAXValueAttribute)
+                if actual == expected { expecting(expected, expected); break }
+                if Date() >= deadline { throw Failure("texteditSmoke exact text mismatch; no repair or retry") }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+            }
+        }
+        return ["text": expected, "pairs": pairs.count, "syntheticOnly": true]
+    }
+}
+
 func keyCode(_ name: String) throws -> CGKeyCode {
     let codes: [String: CGKeyCode] = [
         "return": 36, "enter": 36, "tab": 48, "space": 49, "delete": 51,
@@ -957,6 +1100,13 @@ func run(_ arguments: Arguments) throws {
             // wait-window starts (notably a wrapper's later --pgid descendant).
             RunLoop.current.run(until: min(Date().addingTimeInterval(0.2), deadline))
         }
+        if let rawPID = arguments.value("pid"), let pid = Int32(rawPID), pid > 0 {
+            let exists = kill(pid, 0)
+            let alive = exists == 0 ? "true" : (errno == ESRCH ? "false" : "unknown")
+            let app = NSRunningApplication(processIdentifier: pid)
+            lastFailure += "; pid=\(pid) alive=\(alive) pgid=\(getpgid(pid))" +
+                " registered=\(app != nil) finishedLaunching=\(app?.isFinishedLaunching == true)"
+        }
         throw Failure("window did not appear within \(timeout)s; last lookup: \(lastFailure)")
 
     case "focus":
@@ -1062,6 +1212,10 @@ func run(_ arguments: Arguments) throws {
         try sendText(text)
         print("typed characters=\(text.count) focused_role=\(focusedRole)")
 
+    case "textedit-supervisor":
+        guard CommandLine.arguments.count == 2 else { throw Failure("supervisor accepts only private stdio commands") }
+        try TextEditSupervisor().run()
+
     case "key":
         try requireAccessibility()
         let app = try findApplication(arguments)
@@ -1101,12 +1255,14 @@ extension Optional {
     }
 }
 
-do {
-    try run(Arguments(Array(CommandLine.arguments.dropFirst())))
-} catch let error as Failure {
-    FileHandle.standardError.write(Data("error: \(error.description)\n".utf8))
-    exit(2)
-} catch {
-    FileHandle.standardError.write(Data("error: \(error)\n".utf8))
-    exit(2)
+@main
+enum MacosAccessibilityMain {
+    static func main() {
+        do {
+            try run(Arguments(Array(CommandLine.arguments.dropFirst())))
+        } catch {
+            FileHandle.standardError.write(Data("error: \(error)\n".utf8))
+            exit(2)
+        }
+    }
 }

@@ -152,15 +152,24 @@ JSONC/task overlay import or fallback.
     failures, including authoritative snapshot errors, become an `error` state
     and retain the dirty artifacts. A later
     local edit or foreground Registry action can retry that retained state.
-14. Pix Desktop checks local `.pi` initialization independently from remote
-    Registry configuration and ACP session readiness. When `.pi` is absent, the
-    Registry panel offers **Initialize project Registry**. The local action
-    creates `.pi/tasks.sqlite` with schema v1 and WAL plus
-    `.pi/plans/` and `.pi/task-attachments/`, then reloads project tasks and
-    documents. Remote Registry setup remains a separate action.
-15. Legacy TODO and plan document saves never create a missing `.pi` directory.
-    Those project-document writes require the explicit local initialization
-    action; plans, but not TODO, participate in Registry project-state sync.
+14. Opening or reading a workspace with no `.pi` directory is side-effect free:
+    task/document reads return empty state and do not create `.pi` or modify
+    `.gitignore`. The first Desktop write creates only the required storage:
+    task creation initializes `.pi/tasks.sqlite`; plans create their needed
+    `.pi/plans/` directories; settings write their configuration file; and
+    attachment blobs may be saved before the first task row. These lazy writes
+    do not constitute full Registry initialization. The optional **Initialize
+    project Registry** action creates the complete scaffold: schema-v1
+    `.pi/tasks.sqlite` with WAL, `.pi/plans/` and `.pi/task-attachments/`, then
+    reloads project tasks and documents. Remote Registry setup is separate.
+15. When a new `.pi` directory is created, Desktop appends `/.pi/` to the
+    workspace root `.gitignore` before creating it, unless an existing literal
+    `.pi`, `.pi/`, `/.pi` or `/.pi/` rule already covers it. Existing ignore
+    rules and their LF/CRLF convention are preserved; this does not untrack
+    files already tracked by Git. An already-existing `.pi` is not retroactively
+    added to `.gitignore`. Permission or other write failures are reported and
+    do not claim that the requested save succeeded. Plans, but not TODO,
+    participate in Registry project-state sync.
 16. `.pi/workspace.jsonc` is a project artifact with the same project-key,
     provenance, status, conflict confirmation, and push/pull semantics as tasks
     and plans; its remote path is `projects/<key>/workspace.jsonc`.
@@ -181,8 +190,10 @@ JSONC/task overlay import or fallback.
     fallback remains available if `origin` is removed. Existing publications
     under a previous key are not silently moved or overwritten: provenance
     mismatch continues to require review. Missing `.pi` is not created by
-    catalog refresh and does not generate a project-key warning; project-state
-    initialization remains explicit. Reusable skills/agents remain usable
+    catalog refresh and does not generate a project-key warning; reads remain
+    side-effect free, while Desktop writes lazily create only their required
+    `.pi` storage. Full project-state scaffold initialization remains optional.
+    Reusable skills/agents remain usable
     without Git. Interactive remote setup gives generic Git URL guidance when
     no remote is configured, rather than presenting an example repository as
     a usable value.
@@ -262,11 +273,13 @@ JSONC/task overlay import or fallback.
 - The sidebar's cheap Registry task check hashes the same normalized task bundle
   as Registry provenance, including referenced attachment bytes, so a completed
   background push can converge back to a clean local indicator.
-- Desktop project-state initialization is explicit and idempotent. Its marker is
-  the complete scaffold: a regular `.pi/tasks.sqlite` plus project-owned regular
-  `.pi/plans/` and `.pi/task-attachments/` directories. A bare `.pi` directory
-  or unrelated `.pi/pix.jsonc` is not initialized state. Existing task content
-  is never overwritten, and `.pi` plus scaffold subdirectories must be regular
+- Desktop full project-state scaffold initialization is optional and idempotent;
+  ordinary Desktop writes lazily create only the storage they require. The
+  initialized marker always requires the complete scaffold: a regular
+  `.pi/tasks.sqlite` plus project-owned regular `.pi/plans/` and
+  `.pi/task-attachments/` directories. A bare `.pi` directory or unrelated
+  `.pi/pix.jsonc` is not initialized state. Existing task content is never
+  overwritten, and `.pi` plus scaffold subdirectories must be regular
   project-owned directories rather than symbolic links escaping the workspace.
 - Initialization inspects an already-existing `tasks.sqlite` before accepting a
   concurrent publication race: it must be a regular file canonically inside `.pi`,
@@ -345,17 +358,24 @@ JSONC/task overlay import or fallback.
   After it completes, Registry storage state is refreshed only if that project
   is still the active workspace. Manual Clean remains immediate and ignores the
   TTL.
-- Desktop TODO and plan saves never bootstrap a missing `.pi`; explicit
-  initialization is the only Desktop project-document path that creates it.
-  The Desktop saved-task adapter requires a valid existing SQLite database;
-  user `/task add` can create one explicitly without bootstrapping Registry.
-  Task attachments require an existing task id and immutable blob store.
+- Desktop TODO and plan saves may lazily bootstrap a missing `.pi`, creating
+  only their required document directories; task and settings saves likewise
+  create only their required storage. A new `.pi` is ignored via a root
+  `/.pi/` `.gitignore` entry before creation, without changing Git's treatment
+  of already tracked files. Reads do not create storage. The optional full
+  initialization action is distinct from these lazy writes. Attachments may be
+  staged before the first task row; the eventual task save links them in
+  SQLite.
 - Markdown saves write and flush a temporary file through no-follow directory
   handles, then atomically replace the destination entry. A destination symlink
   installed before or during the save is replaced rather than followed.
-- Concurrent Desktop initializers use create-or-inspect directories and SQLite
-  transactions. A competing initializer preserves the existing database and
-  never replaces task rows.
+- Concurrent Desktop full-scaffold initializers use create-or-inspect
+  directories and SQLite transactions. On macOS, a first SQLite database is
+  initialized in a private staging directory, explicitly checkpointed with
+  `PRAGMA wal_checkpoint(TRUNCATE)` (requiring `busy == 0`), closed and flushed,
+  then published with exclusive `renamex_np(..., RENAME_EXCL)`. A competing
+  initializer cannot expose a version-zero database or replace an existing
+  database/task rows; the published database is inspected before success.
 
 ## Related files
 
@@ -391,10 +411,12 @@ JSONC/task overlay import or fallback.
 - Desktop Rust task persistence tests cover reference-based local attachment
   pruning after successful task-document writes, idempotent `.pi` skeleton
   initialization without overwriting an existing task document, concurrent
-  initialization with atomic task-skeleton publication, rejection of bare
-  `.pi`/`.pi/pix.jsonc` initialization bypasses and nonregular scaffold races,
+  initialization with atomic task-skeleton publication, distinction between
+  lazy writes and complete-scaffold initialized state, rejection of bare
+  `.pi`/`.pi/pix.jsonc` initialized-marker bypasses and nonregular scaffold races,
   Unix symlink/nonregular scaffold rejection, symlink-safe Markdown replacement,
-  and document saves that require explicit initialization.
+  and lazy document saves without full scaffold initialization. macOS first-db
+  publication tests cover staging, checkpointing and exclusive publication.
 - Desktop coordinator tests cover debounce, scope coalescing, busy deferral,
   changes during an in-flight push, retained error state, and foreground-lock
   independence.

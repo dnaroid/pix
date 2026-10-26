@@ -63,6 +63,26 @@ describe("project task store save hook", () => {
     expect(tauri.invoke).toHaveBeenCalledTimes(callCount);
   });
 
+  it("reports denied first-task creation, restores the empty state and allows retry", async () => {
+    const reportError = vi.fn(), afterSave = vi.fn();
+    const store = createProjectTasksStore({ workspace: () => "/project", reportError, afterSave });
+    tauri.invoke.mockResolvedValueOnce(panel({ version: 1, tasks: [] }));
+    await store.load("/project");
+    const error = new Error("failed to update .gitignore for .pi/: Permission denied");
+    tauri.invoke.mockRejectedValueOnce(error);
+    expect(await store.save(DOCUMENT)).toBe(false);
+    expect(store.document.tasks).toEqual([]);
+    expect(store.saving).toBe(false);
+    expect(store.saveError).toContain("Permission denied");
+    expect(reportError).toHaveBeenCalledWith(error);
+    expect(afterSave).not.toHaveBeenCalled();
+    tauri.invoke.mockResolvedValueOnce(undefined);
+    expect(await store.save(DOCUMENT)).toBe(true);
+    expect(store.document.tasks).toEqual(DOCUMENT.tasks);
+    expect(store.saveError).toBeNull();
+    expect(afterSave).toHaveBeenCalledOnce();
+  });
+
   it("passes editor attachments as task-scoped SQLite links and never embeds file paths in the description", async () => {
     const reportError = vi.fn();
     const store = createProjectTasksStore({ workspace: () => "/project", reportError });

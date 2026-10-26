@@ -66,6 +66,10 @@ mod workspace_search_revision;
 mod workspace_config_lock_tests;
 mod project_icon;
 mod project_tasks_sqlite;
+mod project_storage;
+use project_storage::ensure_directory as ensure_project_pi_directory;
+#[cfg(test)]
+mod project_lazy_initialization_tests;
 mod qa_profile;
 #[cfg(feature = "bundled-runtime")]
 mod release_smoke;
@@ -2161,7 +2165,7 @@ fn write_project_markdown_from(
     }
 
     let root = canonical_workspace(workspace)?;
-    let project_dir = require_initialized_project_pi(&root)?;
+    let project_dir = ensure_project_pi_directory(&root)?;
     let plan_relative = (normalized != ".pi/TODO.md")
         .then(|| Path::new(&normalized).strip_prefix(Path::new(".pi/plans")))
         .transpose()
@@ -2189,13 +2193,7 @@ fn write_project_workspace_config_from(
 }
 
 fn workspace_config_directory(root: &Path) -> Result<PathBuf, String> {
-    let directory = root.join(".pi");
-    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
-    let metadata = fs::symlink_metadata(&directory).map_err(|error| error.to_string())?;
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
-        return Err(".pi must be a project-owned directory".to_owned());
-    }
-    canonical_project_directory(root, &directory)
+    ensure_project_pi_directory(root)
 }
 
 fn write_project_workspace_config_owned(
@@ -7290,9 +7288,10 @@ async fn read_project_task_attachment_counts(
     workspace: String,
 ) -> Result<HashMap<String, i64>, String> {
     run_blocking(move || {
-        let root = canonical_workspace(Path::new(&workspace))?;
-        let directory = canonical_project_directory(&root, &root.join(".pi"))?;
-        project_tasks_sqlite::attachment_counts(&directory)
+        match project_tasks_directory(Path::new(&workspace))? {
+            Some(directory) => project_tasks_sqlite::attachment_counts(&directory),
+            None => Ok(HashMap::new()),
+        }
     })
     .await
 }
@@ -7302,9 +7301,10 @@ async fn read_project_task_attachment_names(
     workspace: String,
 ) -> Result<HashMap<String, Vec<String>>, String> {
     run_blocking(move || {
-        let root = canonical_workspace(Path::new(&workspace))?;
-        let directory = canonical_project_directory(&root, &root.join(".pi"))?;
-        project_tasks_sqlite::attachment_names(&directory)
+        match project_tasks_directory(Path::new(&workspace))? {
+            Some(directory) => project_tasks_sqlite::attachment_names(&directory),
+            None => Ok(HashMap::new()),
+        }
     })
     .await
 }
@@ -7517,13 +7517,10 @@ fn persist_immutable_task_attachment(
     result
 }
 
-/// Agent-created SQLite databases are valid task storage even if the separate
-/// Registry plans scaffold has never been initialized by Desktop.
+/// Attachments can be saved while composing the first task, before its row exists.
 fn task_blob_directory(root: &Path) -> Result<PathBuf, String> {
-    let project_directory = canonical_project_directory(root, &root.join(".pi"))?;
-    if !project_tasks_sqlite::inspect(&project_directory)? {
-        return Err("Initialize task storage before attaching files".to_owned());
-    }
+    let project_directory = ensure_project_pi_directory(root)?;
+    project_tasks_sqlite::inspect(&project_directory)?;
     ensure_project_pi_subdirectory(&project_directory, "task-attachments")?;
     canonical_project_directory(root, &project_directory.join("task-attachments"))
 }
@@ -7649,9 +7646,8 @@ fn write_project_tasks_checked_with_attachments(
 ) -> Result<(), String> {
     validate_task_document(document)?;
     let root = canonical_workspace(workspace)?;
-    let project_directory = canonical_project_directory(&root, &root.join(".pi"))?;
-    if !project_tasks_sqlite::inspect(&project_directory)? {
-        return Err("Project tasks SQLite database is not initialized".to_owned());
+    if let Some(directory) = project_tasks_directory(&root)? {
+        project_tasks_sqlite::inspect(&directory)?;
     }
     let current = read_project_tasks_from(&root, MAX_TASK_DOCUMENT_BYTES)?;
     let expected = expected.unwrap_or(&current);
@@ -7695,6 +7691,17 @@ fn write_project_tasks_checked_with_attachments(
         );
     }
     let id = changed[0];
+    // Only a validated create may initialize missing storage. Updates/deletes
+    // still fail if their database disappeared; reads never create it.
+    let project_directory = if !before.contains_key(id) && after.contains_key(id) {
+        let directory = ensure_project_pi_directory(&root)?;
+        if !project_tasks_sqlite::exists(&directory)? {
+            initialize_project_tasks_file(&directory)?;
+        }
+        directory
+    } else {
+        canonical_project_directory(&root, &root.join(".pi"))?
+    };
     project_tasks_sqlite::mutate_with_attachments(
         &project_directory,
         id,
@@ -8242,13 +8249,6 @@ fn initialized_project_pi(root: &Path) -> Result<Option<PathBuf>, String> {
     Ok(Some(project_directory))
 }
 
-fn require_initialized_project_pi(root: &Path) -> Result<PathBuf, String> {
-    initialized_project_pi(root)?.ok_or_else(|| {
-        "project state is not initialized; initialize project Registry before saving project state"
-            .to_owned()
-    })
-}
-
 fn ensure_project_pi_subdirectory(project_directory: &Path, name: &str) -> Result<(), String> {
     let directory = project_directory.join(name);
     match fs::create_dir(&directory) {
@@ -8279,24 +8279,7 @@ fn initialize_project_tasks_file(project_directory: &Path) -> Result<(), String>
 
 fn initialize_project_pi_from(workspace: &Path) -> Result<(), String> {
     let root = canonical_workspace(workspace)?;
-    let project_directory = root.join(".pi");
-    match fs::create_dir(&project_directory) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-        Err(error) => {
-            return Err(format!(
-                "failed to create {}: {error}",
-                project_directory.display()
-            ))
-        }
-    }
-    let metadata = fs::symlink_metadata(&project_directory)
-        .map_err(|error| format!("failed to inspect {}: {error}", project_directory.display()))?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err(".pi must be a project-owned directory".to_owned());
-    }
-    let project_directory = canonical_project_directory(&root, &project_directory)?;
-
+    let project_directory = ensure_project_pi_directory(&root)?;
     ensure_project_pi_subdirectory(&project_directory, "plans")?;
     ensure_project_pi_subdirectory(&project_directory, "task-attachments")?;
     initialize_project_tasks_file(&project_directory)?;
@@ -8428,7 +8411,7 @@ fn write_project_markdown_atomically(
     let mut directory = open_project_markdown_directory(project_directory)?;
     let target = if let Some(plan_relative) = plan_relative {
         directory =
-            open_project_markdown_subdirectory(&directory, std::ffi::OsStr::new("plans"), false)?;
+            open_project_markdown_subdirectory(&directory, std::ffi::OsStr::new("plans"), true)?;
         let components = plan_relative.components().collect::<Vec<_>>();
         let (file_name, parents) = components
             .split_last()
@@ -11599,7 +11582,7 @@ mod tests {
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }
 
-    fn sample_task_document() -> ProjectTaskDocument {
+    pub(super) fn sample_task_document() -> ProjectTaskDocument {
         ProjectTaskDocument {
             schema: Some(PROJECT_TASKS_SCHEMA_URL.to_owned()),
             version: 1,
@@ -12522,25 +12505,16 @@ mod tests {
     }
 
     #[test]
-    fn project_markdown_save_requires_explicit_project_initialization() {
+    fn project_markdown_save_lazily_creates_only_document_storage() {
         let workspace = temporary_workspace("project-documents-initialize");
 
         for path in [Path::new(".pi/TODO.md"), Path::new(".pi/plans/release.md")] {
-            let error = write_project_markdown_from(&workspace, path, "# Draft\n")
-                .err()
-                .expect("saving before initialization must fail");
-            assert!(error.contains("initialize project Registry"));
-            assert!(
-                !workspace.join(".pi").exists(),
-                "a direct project-document save must not create .pi"
-            );
+            write_project_markdown_from(&workspace, path, "# Draft\n")
+                .expect("save without manual initialization");
+            assert_eq!(fs::read_to_string(workspace.join(path)).unwrap(), "# Draft\n");
         }
-
-        initialize_project_pi_from(&workspace).expect("initialize project state");
-        write_project_markdown_from(&workspace, Path::new(".pi/TODO.md"), "# Draft\n")
-            .expect("save TODO after initialization");
-        write_project_markdown_from(&workspace, Path::new(".pi/plans/release.md"), "# Plan\n")
-            .expect("save plan after initialization");
+        assert!(!workspace.join(".pi/tasks.sqlite").exists());
+        assert!(!workspace.join(".pi/task-attachments").exists());
 
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }
@@ -12553,16 +12527,12 @@ mod tests {
 
         assert!(!project_pi_initialized_from(&workspace).expect("inspect bare project state"));
         for path in [Path::new(".pi/TODO.md"), Path::new(".pi/plans/release.md")] {
-            assert!(write_project_markdown_from(&workspace, path, "# Draft\n")
-                .err()
-                .expect("document save must require the explicit scaffold")
-                .contains("initialize project Registry"));
+            write_project_markdown_from(&workspace, path, "# Draft\n")
+                .expect("save into partial scaffold");
         }
-        assert!(write_project_tasks_to(&workspace, &sample_task_document())
-            .expect_err("task save must require an SQLite database")
-            .contains("not initialized"));
-        assert!(!workspace.join(".pi/TODO.md").exists());
-        assert!(!workspace.join(".pi/plans").exists());
+        write_project_tasks_to(&workspace, &sample_task_document()).expect("create task storage");
+        assert_eq!(fs::read_to_string(workspace.join(".pi/pix.jsonc")).unwrap(), "{}\n");
+        assert!(!project_pi_initialized_from(&workspace).unwrap());
 
         initialize_project_pi_from(&workspace).expect("initialize explicit scaffold");
         assert!(project_pi_initialized_from(&workspace).expect("inspect initialized project state"));
