@@ -667,7 +667,13 @@ func keyCode(_ name: String) throws -> CGKeyCode {
         "return": 36, "enter": 36, "tab": 48, "space": 49, "delete": 51,
         "escape": 53, "esc": 53, "home": 115, "end": 119, "pageup": 116,
         "pagedown": 121, "left": 123, "right": 124, "down": 125, "up": 126,
-        "a": 0, "c": 8, "v": 9, "x": 7, "z": 6,
+        "a": 0, "b": 11, "c": 8, "d": 2, "e": 14, "f": 3,
+        "g": 5, "h": 4, "i": 34, "j": 38, "k": 40, "l": 37,
+        "m": 46, "n": 45, "o": 31, "p": 35, "q": 12, "r": 15,
+        "s": 1, "t": 17, "u": 32, "v": 9, "w": 13, "x": 7,
+        "y": 16, "z": 6,
+        "period": 47, ".": 47, "comma": 43, ",": 43,
+        "semicolon": 41, ";": 41,
     ]
     guard let code = codes[name.lowercased()] else {
         throw Failure("unsupported key: \(name)")

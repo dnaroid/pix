@@ -1,5 +1,6 @@
 import Brain from "@lucide/svelte/icons/brain";
 import FileText from "@lucide/svelte/icons/file-text";
+import Image from "@lucide/svelte/icons/image";
 import FilePen from "@lucide/svelte/icons/file-pen";
 import FilePlus from "@lucide/svelte/icons/file-plus";
 import FolderSearch from "@lucide/svelte/icons/folder-search";
@@ -48,7 +49,8 @@ const iconGroups: readonly (readonly [readonly string[], typeof Brain])[] = [
 const iconsByName = new Map(iconGroups.flatMap(([names, icon]) => names.map((name) => [name, icon] as const)));
 
 /** Labels contain only lightweight metadata, never tool inputs/results. */
-export function activityIcon(label: string): typeof Brain {
+export function activityIcon(label: string, imageRead = false): typeof Brain {
+  if (imageRead) return Image;
   const name = label.startsWith("skill ") ? "skill" : label.split(/[.:/]/u).at(-1)?.toLowerCase();
   return iconsByName.get(name ?? "") ?? Wrench;
 }

@@ -59,7 +59,7 @@ describe("activity icon trail", () => {
       expect(activityIcon(name), name).toBe(activityIcon("unknown"));
     }
     expect(activityIcon("multi_tool_use.parallel")).toBe(activityIcon("parallel"));
-    expect(new Set(names.map(activityIcon)).size).toBe(names.length);
+    expect(new Set(names.map((name) => activityIcon(name))).size).toBe(names.length);
     for (const name of names) expect(activityIcon(name)).not.toBe(activityIcon("unknown"));
   });
 
@@ -85,5 +85,13 @@ describe("activity icon trail", () => {
     expect(activityIconWindow(10_000, 159_598, 400)).toEqual({ start: 9970, end: 10_000 });
     expect(activityIconWindow(3, 199_594, 400)).toEqual({ start: 0, end: 3 });
     expect(activityIconWindow(10_000, 159_598, 1000)).toEqual({ start: 9933, end: 10_000 });
+  });
+
+  it("shows an image for image reads while preserving the read tooltip and avoiding payload access", () => {
+    const html = header([{ ...tool("image", "Read"), imageRead: true,
+      get rawInput() { throw new Error("No payload access"); } }]);
+    expect(html).toContain("lucide-image");
+    expect(html).toContain('title="read"');
+    expect(html).not.toContain("lucide-file-text");
   });
 });

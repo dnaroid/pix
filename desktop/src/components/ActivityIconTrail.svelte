@@ -33,7 +33,7 @@
     <span class="absolute inset-y-0 left-0 flex items-center gap-0.5" style:transform={`translateX(${window.start * ACTIVITY_ICON_PITCH}px)`}>
       {#each visibleEntries as entry, index (entry.id)}
         {@const label = labels[window.start + index] ?? "tool"}
-        {@const Icon = activityIcon(label)}
+        {@const Icon = activityIcon(label, entry.type === "tool" && entry.imageRead)}
         <span data-activity-name={label} class="flex shrink-0 items-center" title={label} data-activity-icon-id={entry.id}>
           <Icon class="h-3.5 w-3.5" aria-hidden="true" />
         </span>

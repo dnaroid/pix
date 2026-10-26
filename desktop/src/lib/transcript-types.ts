@@ -30,6 +30,8 @@ export interface ToolItem {
   readonly rawInput?: unknown;
   /** Cached name for SKILL.md reads; collapsed headers never inspect rawInput. */
   readonly skillName?: string;
+  /** Cached image-read classification; no payload parsing in collapsed trails. */
+  readonly imageRead?: boolean;
   /** Fixed safe action inferred once from tool arguments at ingestion. */
   readonly activityAction?: InferredToolAction;
   readonly rawOutput?: unknown;

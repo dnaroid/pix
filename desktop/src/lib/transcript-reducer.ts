@@ -10,6 +10,7 @@ import {
 import type { MessageRole, ToolItem, TranscriptItem, TranscriptState } from "./transcript-types";
 import { skillReadName } from "./tool-presentation";
 import { inferToolAction } from "./tool-activity";
+import { imageRead } from "./tool-image-read";
 
 interface ReducerIndexes {
   readonly messages: Map<string, number>;
@@ -251,6 +252,9 @@ function upsertTool(
       ...existing,
       ...patch,
       skillName,
+      imageRead: patch.rawInput !== undefined || patch.name !== undefined || patch.title !== undefined
+        || patch.kind !== undefined || "path" in patch || patch.attachments !== undefined
+        ? imageRead({ ...existing, ...patch }) : existing.imageRead,
       activityAction: patch.rawInput !== undefined || patch.name !== undefined || patch.title !== undefined || patch.kind !== undefined
         ? inferToolAction({ ...existing, ...patch }) : existing.activityAction,
       ...(existing.startedAtMs !== undefined && patch.startedAtMs !== undefined
@@ -269,6 +273,8 @@ function upsertTool(
     ...(patch.name ? { name: patch.name } : {}),
     title: patch.title ?? "Tool call",
     kind: patch.kind ?? "other",
+    imageRead: imageRead({ name: patch.name, title: patch.title ?? "Tool call", kind: patch.kind ?? "other",
+      rawInput: patch.rawInput, path: patch.path, attachments: patch.attachments ?? [] }),
     status: patch.status ?? "pending",
     ...(patch.rawInput !== undefined ? { rawInput: patch.rawInput } : {}),
     ...(skillName ? { skillName } : {}),

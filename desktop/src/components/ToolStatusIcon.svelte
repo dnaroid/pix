@@ -1,6 +1,7 @@
 <script lang="ts">
   import Circle from "@lucide/svelte/icons/circle";
   import CircleCheck from "@lucide/svelte/icons/circle-check";
+  import Image from "@lucide/svelte/icons/image";
   import CircleX from "@lucide/svelte/icons/circle-x";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
@@ -11,11 +12,13 @@
     status,
     attention,
     lifecycleOnly = false,
+    imageRead = false,
     class: className = "h-3 w-3",
   }: {
     status: ToolCallStatus;
     attention?: ToolAttention;
     lifecycleOnly?: boolean;
+    imageRead?: boolean;
     class?: string;
   } = $props();
 </script>
@@ -36,7 +39,11 @@
     aria-hidden="true"
   />
 {:else if status === "completed"}
-  <CircleCheck class={`${className} text-tool-success`} aria-hidden="true" />
+  {#if imageRead}
+    <Image class={`${className} text-tool-success`} aria-hidden="true" />
+  {:else}
+    <CircleCheck class={`${className} text-tool-success`} aria-hidden="true" />
+  {/if}
 {:else}
   <Circle class={`${className} text-muted-foreground`} aria-hidden="true" />
 {/if}
