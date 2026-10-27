@@ -10,7 +10,69 @@ import {
 import { windowLayoutKey } from "../lib/window-layout-storage";
 import { createProjectWorkspaceStore, restoreProjectWorkspace } from "./project-workspace.svelte";
 
-beforeEach(() => tauri.invoke.mockReset());
+beforeEach(() => { tauri.invoke.mockReset(); });
+
+describe("project shortcut actions", () => {
+  it.each([true, false])("keeps late identity reads only for the active removed project (active=%s)", async (active) => {
+    vi.stubGlobal("localStorage", { setItem: vi.fn() });
+    try {
+      let resolveRead!: (preview: { content: string }) => void;
+      tauri.invoke.mockImplementation(() => new Promise((resolve) => { resolveRead = resolve; }));
+      const store = createProjectWorkspaceStore({ workspace: () => active ? "/removed" : "", reportError: vi.fn() });
+      store.remember("/removed");
+      if (!active) store.refreshColors(["/removed"]);
+      store.forget("/removed");
+      resolveRead({ content: '{"color":"#abc"}' });
+      // Flush the invoke catch and the awaiting color read deterministically.
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(store.recentProjects).toEqual([]);
+      expect(store.projectColors.get("/removed")).toBe(active ? "#abc" : undefined);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it("persists removal without closing the workspace or deleting files", () => {
+    const setItem = vi.fn();
+    vi.stubGlobal("localStorage", { setItem });
+    try {
+      const store = createProjectWorkspaceStore({ workspace: () => "/active", reportError: vi.fn() });
+      store.remember("/other");
+      store.remember("/removed");
+      tauri.invoke.mockClear();
+      store.forget("/removed");
+      expect(store.recentProjects).toEqual(["/other"]);
+      expect(setItem).toHaveBeenLastCalledWith(RECENT_PROJECTS_STORAGE_KEY, '["/other"]');
+      expect(tauri.invoke).not.toHaveBeenCalled();
+      store.forget("/other");
+      expect(store.recentProjects).toEqual([]);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it("reports storage failure while keeping the removal in memory", () => {
+    const error = new Error("storage unavailable");
+    const reportError = vi.fn();
+    vi.stubGlobal("localStorage", { setItem: () => { throw error; } });
+    try {
+      const store = createProjectWorkspaceStore({ workspace: () => "", reportError });
+      store.remember("/removed");
+      store.forget("/removed");
+      expect(store.recentProjects).toEqual([]);
+      expect(reportError).toHaveBeenCalledWith(error);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it("opens the selected project root in Finder and reports launch failures", async () => {
+    const reportError = vi.fn();
+    const store = createProjectWorkspaceStore({ workspace: () => "/active", reportError });
+    tauri.invoke.mockResolvedValue(undefined);
+    await store.openInFinder("/other project");
+    expect(tauri.invoke).toHaveBeenCalledWith("reveal_project_entry", { workspace: "/other project", path: null });
+    const error = new Error("missing directory");
+    tauri.invoke.mockRejectedValueOnce(error);
+    await store.openInFinder("/missing");
+    expect(reportError).toHaveBeenCalledWith(error);
+  });
+});
 
 describe("project workspace startup restore", () => {
   it("keeps an explicitly restored empty window empty instead of opening another window's last project", () => {

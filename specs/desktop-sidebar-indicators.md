@@ -83,7 +83,8 @@ Decision: [0027 — Cause-specific sidebar quick actions](../docs/decisions/0027
   summary/navigation group; script error groups remain available. Run/Stop are
   shown as Play/Square icons beside each command name, while the full Run/Stop
   action name remains in its accessible label and title. This menu adds no
-  status text, icon coloring or badge, and does not change Activity Bar icons.
+  status text, icon coloring or badge. The Launch Commands Activity Bar trigger
+  uses a Play icon and retains the shared indicator-tone rules.
   Its search filters saved commands by command name using fuzzy matching;
   script error groups remain unfiltered. The query clears when the menu closes,
   and the search input receives focus when the menu opens. Arrow keys navigate

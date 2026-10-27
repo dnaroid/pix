@@ -97,6 +97,25 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
     else pruneProjectColors();
   }
 
+  function forget(path: string): void {
+    recentProjects = recentProjects.filter((project) => project !== path);
+    try {
+      localStorage.setItem(RECENT_PROJECTS_STORAGE_KEY, JSON.stringify(recentProjects));
+    } catch (error) {
+      options.reportError(error);
+    }
+    // Preserve the current project's identity even if its shortcut is removed.
+    pruneProjectColors();
+  }
+
+  async function openInFinder(path: string): Promise<void> {
+    try {
+      await invoke("reveal_project_entry", { workspace: path, path: null });
+    } catch (error) {
+      options.reportError(error);
+    }
+  }
+
   function restore(): {
     workspace: string;
     activeSessionIds: Map<string, string>;
@@ -111,6 +130,7 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
 
   function pruneProjectColors(): Set<string> {
     const activePaths = new Set(recentProjects);
+    if (options.workspace()) activePaths.add(options.workspace());
     projectColors = new Map([...projectColors].filter(([path]) => activePaths.has(path)));
     projectIcons = new Map([...projectIcons].filter(([path]) => activePaths.has(path)));
     return activePaths;
@@ -129,7 +149,7 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
       workspace: projectPath,
       path: WORKSPACE_CONFIG_PATH,
     }).catch(() => undefined);
-    if (generation !== colorLoadGeneration || !recentProjects.includes(projectPath)) return;
+    if (generation !== colorLoadGeneration || (!recentProjects.includes(projectPath) && options.workspace() !== projectPath)) return;
     const color = projectColorFromWorkspaceConfig(preview?.content);
     const next = new Map(projectColors);
     if (color) next.set(projectPath, color);
@@ -147,7 +167,7 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
       ? await invoke<ProjectIconImage>("read_project_icon", { workspace: projectPath, path: iconPath })
         .catch(() => undefined)
       : undefined;
-    if (generation !== colorLoadGeneration || !recentProjects.includes(projectPath)) return;
+    if (generation !== colorLoadGeneration || (!recentProjects.includes(projectPath) && options.workspace() !== projectPath)) return;
     setProjectIcon(projectPath, image ? projectIconDataUrl(image) : undefined);
   }
 
@@ -297,6 +317,8 @@ export function createProjectWorkspaceStore(options: ProjectWorkspaceStoreOption
     get externalEditor() { return externalEditor; },
     get gitCiFixModelRef() { return gitCiFixModelRef; },
     remember,
+    forget,
+    openInFinder,
     restore,
     refreshColors,
     saveColor,

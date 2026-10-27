@@ -140,7 +140,12 @@ this structured auth result is classified as `auth_required`, not an opaque
 command failure. Other nonzero exits, malformed output and process failures
 remain preflight errors; a nonzero exit never enables the provider. Auth status
 payloads/identity fields are not copied into the login notice. The unavailable
-notice is emitted once for consecutive startup bindings of the same session.
+notice is emitted only when the session is using this provider:
+`session_start` checks `ctx.model.provider`, and `model_select` checks the
+selected `event.model.provider`. Starts for other providers or with no model are
+quiet and do not consume notice deduplication. When this provider is selected,
+the notice is emitted once across consecutive session bindings with the same
+session ID, including notifications from either event.
 
 ### Experimental historical thinking pruning
 

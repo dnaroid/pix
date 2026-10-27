@@ -1,5 +1,5 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { VERSION } from "@earendil-works/pi-coding-agent";
 import { inspectClaudeInstallation } from "../src/auth.ts";
 import { loadClaudeAccountRotationConfig } from "../src/account-rotation.ts";
@@ -341,7 +341,10 @@ function formatRateLimitNotice(notice: RateLimitNotice): string {
 
 function registerUnavailableNotice(pi: ExtensionAPI, reason: string): void {
   let notifiedSessionId: string | undefined;
-  pi.on("session_start", (_event, ctx) => {
+  const notify = (ctx: ExtensionContext, provider: string | undefined): void => {
+    // This optional adapter is loaded in every session, not only Claude ones.
+    // Do not consume the notice until this session actually selects it.
+    if (provider !== PROVIDER) return;
     // RPC can bind extensions twice for the same session.
     const sessionId = ctx.sessionManager.getSessionId();
     if (notifiedSessionId === sessionId) return;
@@ -350,5 +353,7 @@ function registerUnavailableNotice(pi: ExtensionAPI, reason: string): void {
       `${NOTICE_PREFIX} Claude Code provider is unavailable: ${reason}. Run /pi-claude-code-provider-doctor, then /reload after correcting the problem.`,
       "error",
     );
-  });
+  };
+  pi.on("session_start", (_event, ctx) => notify(ctx, ctx.model?.provider));
+  pi.on("model_select", (event, ctx) => notify(ctx, event.model.provider));
 }

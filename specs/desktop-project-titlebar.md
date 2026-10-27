@@ -57,6 +57,18 @@ without blocking desktop interactions.
 - The active project is identified in the menu. Selecting another recent project
   switches the current workspace and moves it to the top of the persisted recent
   list.
+- Right-clicking a recent-project row, or invoking its Context Menu key / Shift+F10,
+  opens a keyboard-accessible project action menu with `Open in Finder` and
+  `Remove from recent projects`. Finder opens the project root. Removal deletes
+  only the stored recent-project shortcut: it does not close the workspace or
+  delete project files, sessions, or workspace data. The action menu supports
+  keyboard navigation, Escape dismissal with focus restoration, and dismissal
+  when focus or interaction moves outside it.
+- Removing an inactive project prunes its cached identity data, and pending
+  identity reads for that removed project cannot repopulate the cache. Removing
+  the active project preserves its identity cache and allows its pending reads
+  to complete. Normal startup/reopen remembering can add a project back to
+  recents.
 - The switcher can open the native directory chooser for the current window or a
   new window. Current-window navigation is disabled while conflicting prompt,
   workspace, or task work is active; new-window actions remain available.
@@ -191,7 +203,8 @@ without blocking desktop interactions.
   project's override. Project switching and rendering never await color IO.
 - Each color refresh owns a generation. A completion may mutate visible color
   state only if that generation is still current and the project still belongs
-  to the recent-project list; stale completions are discarded.
+  to the recent-project list or remains the active workspace; stale completions
+  are discarded.
 
 ## Non-goals
 
@@ -211,8 +224,8 @@ without blocking desktop interactions.
   pre-save read cannot repaint the saved value afterward.
 - A stale workspace-config save cannot overwrite a newer Pix-owned config write;
   the compare-and-swap result is rebased and retried.
-- Removing a project from the recent list removes its cached override from
-  visible state.
+- Removing an inactive project from the recent list removes its cached override
+  from visible state; the active workspace retains its identity.
 - The renderer uses the existing asynchronous `read_project_file` Tauri command;
   filesystem work stays on its blocking worker path and remains confined to the
   canonical workspace.
@@ -245,6 +258,7 @@ without blocking desktop interactions.
 - `desktop/src/components/workspace-sidebar-layout-controller.svelte.ts`
 - `desktop/src/components/workspace-sidebar-project-settings-controller.svelte.ts`
 - `desktop/src/components/ProjectSwitcher.svelte`
+- `desktop/src/components/ProjectSwitcherContextMenu.svelte`
 - `desktop/src/components/ProjectSettingsDialog.svelte`
 - `desktop/src/components/ProjectFolderIcon.svelte`
 - `desktop/src/components/RuntimeStatusBarItems.svelte`
@@ -269,8 +283,9 @@ without blocking desktop interactions.
 - `desktop/src/lib/project-colors.test.ts` covers JSONC override parsing and
   fallback behavior.
 - `desktop/src/components/ProjectSwitcher.test.ts` covers current/new-window
-  actions, the visible chevron affordance, and verifies that the UI component
-  does not own filesystem IPC.
+  actions, project-row Finder/removal actions and keyboard dismissal, the visible
+  chevron affordance, and verifies that the UI component does not own filesystem
+  IPC.
 - `desktop/src/components/ProjectSettingsDialog.test.ts` covers the settings
   entry point, automatic/custom controls, native color picker, and presentation/
   persistence separation.

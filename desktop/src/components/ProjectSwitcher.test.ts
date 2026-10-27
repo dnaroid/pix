@@ -1,7 +1,18 @@
 import { describe, expect, it } from "vitest";
 import switcherSource from "./ProjectSwitcher.svelte?raw";
+import contextSource from "./ProjectSwitcherContextMenu.svelte?raw";
 
 describe("ProjectSwitcher project opening actions", () => {
+  it("exposes project-specific removal and Finder actions with keyboard dismissal", () => {
+    expect(switcherSource).toContain("data-project-path={project}");
+    expect(switcherSource).toContain("onRemove={onRemoveProject} onOpenInFinder={onOpenProjectInFinder}");
+    expect(contextSource).toContain("Remove from recent projects");
+    expect(contextSource).toContain("Open in Finder");
+    expect(contextSource).toContain('event.key === "ContextMenu"');
+    expect(contextSource).toContain('event.key === "Escape"');
+    expect(contextSource).toContain("target !== request");
+    expect(contextSource).toContain("onDestroy(() => close())");
+  });
   it("filters projects through a focused search field without intercepting text editing", () => {
     expect(switcherSource).toContain('aria-label="Search projects"');
     expect(switcherSource).toContain("searchRecentProjects(recentProjects, searchQuery)");

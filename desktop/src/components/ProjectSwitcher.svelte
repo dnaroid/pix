@@ -1,5 +1,6 @@
 <script lang="ts">
   import { compactEmptyStateClass } from "../lib/status-text";
+  import ProjectSwitcherContextMenu from "./ProjectSwitcherContextMenu.svelte";
   import Check from "@lucide/svelte/icons/check";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import ExternalLink from "@lucide/svelte/icons/external-link";
@@ -33,6 +34,8 @@
     onMinimumWidthChange,
     onSelectProject,
     onOpenProjectInNewWindow,
+    onRemoveProject,
+    onOpenProjectInFinder,
     onChooseWorkspace,
     onChooseWorkspaceInNewWindow,
     onOpenProjectSettings,
@@ -48,6 +51,8 @@
     onMinimumWidthChange?: (width: number) => void;
     onSelectProject: (path: string) => void;
     onOpenProjectInNewWindow: (path: string) => void;
+    onRemoveProject?: (path: string) => void;
+    onOpenProjectInFinder?: (path: string) => void;
     onChooseWorkspace: () => void;
     onChooseWorkspaceInNewWindow: () => void;
     /** Opens the current project's name/color/logo settings. */
@@ -363,10 +368,11 @@
         </label>
       </div>
 
+      <ProjectSwitcherContextMenu onRemove={onRemoveProject} onOpenInFinder={onOpenProjectInFinder}>
       <div class="max-h-[358px] min-h-0 overflow-y-auto px-1.5 pb-1.5">
         {#each filteredProjects as project (project)}
           {@const selected = project === workspace}
-          <div class={["group grid h-11 grid-cols-[minmax(0,1fr)_28px] rounded-md", selected && "bg-panel-selected"]}>
+          <div data-project-path={project} class={["group grid h-11 grid-cols-[minmax(0,1fr)_28px] rounded-md", selected && "bg-panel-selected"]}>
             <button
               class="grid min-w-0 grid-cols-[22px_minmax(0,1fr)_14px] items-center gap-1.5 rounded-md px-1.5 py-1.5 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:hover:bg-transparent"
               data-project-option
@@ -406,6 +412,7 @@
         {/each}
       </div>
 
+      </ProjectSwitcherContextMenu>
       <div class="border-t border-sidebar-border p-1.5">
         <button
           class="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-xs hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:hover:bg-transparent"

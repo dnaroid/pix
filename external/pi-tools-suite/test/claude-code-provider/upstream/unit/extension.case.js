@@ -545,7 +545,7 @@ test("absent optional Claude CLI is quiet at startup but the doctor still explai
     }
 });
 
-test("logged-out Claude exit 1 reports actionable startup feedback once per session", async () => {
+test("logged-out Claude only notifies selected Claude sessions, once across startup and model selection", async () => {
     const { directory, executable } = await createFakeClaude("ok", {
         authStatus: { loggedIn: false, authMethod: "none", apiProvider: "firstParty", email: "private@example.test" },
         authExitCode: 1,
@@ -559,14 +559,32 @@ test("logged-out Claude exit 1 reports actionable startup feedback once per sess
         assert.equal(pi.tools.size, 0);
         const notices = [];
         const ctx = sessionContext(tmpdir(), { notify(message, level) { notices.push({ message, level }); } });
+        const start = async (context) => {
+            for (const handler of pi.handlers.get("session_start") ?? []) await handler({}, context);
+        };
+        const select = async (provider, context) => {
+            for (const handler of pi.handlers.get("model_select") ?? []) await handler({ model: { provider } }, context);
+        };
+        await start(ctx);
+        ctx.model = { provider: "openai" };
+        await start(ctx);
+        await start(ctx);
+        await select("anthropic", ctx);
+        assert.deepEqual(notices, []);
+        // The event is authoritative even if the context still has the old model.
+        await select("pi-claude-code-provider", ctx);
+        ctx.model = { provider: "pi-claude-code-provider" };
         for (const handler of pi.handlers.get("session_start") ?? []) await handler({}, ctx);
         for (const handler of pi.handlers.get("session_start") ?? []) await handler({}, ctx);
+        await select("openai", ctx);
+        await select("pi-claude-code-provider", ctx);
         assert.equal(notices.length, 1);
         assert.equal(notices[0].level, "error");
         assert.match(notices[0].message, /unavailable.*first-party claude.ai subscription/);
         assert.match(notices[0].message, /claude auth login.*\/reload/);
         assert.equal(notices[0].message.includes("private@example.test"), false);
         const nextCtx = sessionContext(tmpdir(), ctx.ui);
+        nextCtx.model = { provider: "pi-claude-code-provider" };
         for (const handler of pi.handlers.get("session_start") ?? []) await handler({}, nextCtx);
         assert.equal(notices.length, 2);
     } finally {
@@ -588,7 +606,12 @@ test("explicit missing Claude path retains the doctor and reports one session er
         const notices = [];
         const sessionStart = pi.handlers.get("session_start") ?? [];
         assert.equal(sessionStart.length, 1);
-        sessionStart[0]({}, sessionContext(tmpdir(), { notify(message, level) { notices.push({ message, level }); } }));
+        const ctx = sessionContext(tmpdir(), { notify(message, level) { notices.push({ message, level }); } });
+        ctx.model = { provider: "openai" };
+        sessionStart[0]({}, ctx);
+        assert.deepEqual(notices, []);
+        ctx.model = { provider: "pi-claude-code-provider" };
+        sessionStart[0]({}, ctx);
         assert.equal(notices.length, 1);
         assert.equal(notices[0].level, "error");
         assert.match(notices[0].message, /^\[pi-claude-code-provider\]/);

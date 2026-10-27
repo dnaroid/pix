@@ -7,7 +7,7 @@
   import SearchCheck from "@lucide/svelte/icons/search-check";
   import CodeXml from "@lucide/svelte/icons/code-xml";
   import Settings from "@lucide/svelte/icons/settings";
-  import SquareTerminal from "@lucide/svelte/icons/square-terminal";
+  import Play from "@lucide/svelte/icons/play";
   import ScrollText from "@lucide/svelte/icons/scroll-text";
   import { linearFocusIndex } from "../lib/keyboard-navigation";
   import type {
@@ -165,7 +165,7 @@
     oncontextmenu={(event) => onIndicatorContext(event, "scripts")}
     aria-haspopup={indicators.scripts || scriptsHaveActions ? "menu" : undefined}
     onclick={() => onSelect("scripts")}
-  ><SquareTerminal class={["h-5 w-5", sidebarIconTone(indicators.scripts)]} aria-hidden="true" /></button>
+  ><Play class={["h-5 w-5", sidebarIconTone(indicators.scripts)]} aria-hidden="true" /></button>
   <button
     class={["relative grid h-10 w-full place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", selected("search") ? "border-l-primary bg-background text-foreground" : "border-l-transparent text-muted-foreground"]}
     type="button"

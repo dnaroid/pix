@@ -205,6 +205,8 @@
     onProjectSwitcherOpen,
     onSelectProject,
     onOpenProjectInNewWindow,
+    onRemoveProject,
+    onOpenProjectInFinder,
     onChooseWorkspace,
     onChooseWorkspaceInNewWindow,
     onSaveProjectSettings,
@@ -320,6 +322,8 @@
     onProjectSwitcherOpen: () => void;
     onSelectProject: (path: string) => void;
     onOpenProjectInNewWindow: (path: string) => void;
+    onRemoveProject?: (path: string) => void;
+    onOpenProjectInFinder?: (path: string) => void;
     onChooseWorkspace: () => void;
     onChooseWorkspaceInNewWindow: () => void;
     onSaveProjectSettings: (draft: ProjectSettingsDraft) => Promise<string | undefined>;
@@ -1145,6 +1149,8 @@
             onMinimumWidthChange={layoutController.setProjectSwitcherMinimumWidth}
             {onSelectProject}
             {onOpenProjectInNewWindow}
+            {onRemoveProject}
+            {onOpenProjectInFinder}
             {onChooseWorkspace}
             {onChooseWorkspaceInNewWindow}
             onOpenProjectSettings={openProjectSettings}
