@@ -60,13 +60,13 @@ mod preview_file_action;
 mod project_browser;
 mod project_directory_link;
 mod project_file_history;
+mod project_icon;
+mod project_storage;
+mod project_tasks_sqlite;
 mod workspace_config_lock;
-mod workspace_search_revision;
 #[cfg(test)]
 mod workspace_config_lock_tests;
-mod project_icon;
-mod project_tasks_sqlite;
-mod project_storage;
+mod workspace_search_revision;
 use project_storage::ensure_directory as ensure_project_pi_directory;
 #[cfg(test)]
 mod project_lazy_initialization_tests;
@@ -1347,8 +1347,15 @@ async fn write_project_file(
     content: String,
     expected_content: Option<String>,
 ) -> Result<ProjectFilePreview, String> {
-    run_blocking(move || write_project_file_with_expected_from(Path::new(&workspace), Path::new(&path), &content, expected_content.as_deref()))
-        .await
+    run_blocking(move || {
+        write_project_file_with_expected_from(
+            Path::new(&workspace),
+            Path::new(&path),
+            &content,
+            expected_content.as_deref(),
+        )
+    })
+    .await
 }
 
 #[tauri::command]
@@ -2234,8 +2241,17 @@ fn write_project_workspace_config_owned(
     }
 
     let previous = if target.exists() {
-        Some(read_text_file_from(&target, ".pi/workspace.jsonc".to_owned(), MAX_WORKSPACE_CONFIG_BYTES)?.content)
-    } else { None };
+        Some(
+            read_text_file_from(
+                &target,
+                ".pi/workspace.jsonc".to_owned(),
+                MAX_WORKSPACE_CONFIG_BYTES,
+            )?
+            .content,
+        )
+    } else {
+        None
+    };
     let content = workspace_search_revision::for_write(previous.as_deref(), content);
     if content.len() as u64 > MAX_WORKSPACE_CONFIG_BYTES {
         return Err(".pi/workspace.jsonc is too large (maximum 64 KB)".to_owned());
@@ -2302,7 +2318,9 @@ fn write_project_workspace_config_if_unchanged_from(
     }
     Ok(ConditionalWorkspaceConfigWrite {
         written: true,
-        document: Some(write_project_workspace_config_owned(workspace, content, &ownership)?),
+        document: Some(write_project_workspace_config_owned(
+            workspace, content, &ownership,
+        )?),
     })
 }
 
@@ -2376,13 +2394,22 @@ fn write_project_file_with_expected_from(
         MAX_PROJECT_FILE_PREVIEW_BYTES,
     )?;
 
-    if fs::canonicalize(root.join(".pi/workspace.jsonc")).ok().as_ref() == Some(&target) {
-        let expected = expected_content.ok_or("Workspace configuration requires its loaded content; reopen the file before saving.")?;
-        let result = write_project_workspace_config_if_unchanged_from(workspace, Some(expected), content)?;
+    if fs::canonicalize(root.join(".pi/workspace.jsonc"))
+        .ok()
+        .as_ref()
+        == Some(&target)
+    {
+        let expected = expected_content.ok_or(
+            "Workspace configuration requires its loaded content; reopen the file before saving.",
+        )?;
+        let result =
+            write_project_workspace_config_if_unchanged_from(workspace, Some(expected), content)?;
         if !result.written {
             return Err("Workspace configuration changed while editing. Reopen it and reapply your changes.".to_owned());
         }
-        return result.document.ok_or_else(|| "Workspace configuration save returned no document".to_owned());
+        return result
+            .document
+            .ok_or_else(|| "Workspace configuration save returned no document".to_owned());
     }
 
     let directory = target
@@ -7287,12 +7314,12 @@ async fn read_project_task_attachments(
 async fn read_project_task_attachment_counts(
     workspace: String,
 ) -> Result<HashMap<String, i64>, String> {
-    run_blocking(move || {
-        match project_tasks_directory(Path::new(&workspace))? {
+    run_blocking(
+        move || match project_tasks_directory(Path::new(&workspace))? {
             Some(directory) => project_tasks_sqlite::attachment_counts(&directory),
             None => Ok(HashMap::new()),
-        }
-    })
+        },
+    )
     .await
 }
 
@@ -7300,12 +7327,12 @@ async fn read_project_task_attachment_counts(
 async fn read_project_task_attachment_names(
     workspace: String,
 ) -> Result<HashMap<String, Vec<String>>, String> {
-    run_blocking(move || {
-        match project_tasks_directory(Path::new(&workspace))? {
+    run_blocking(
+        move || match project_tasks_directory(Path::new(&workspace))? {
             Some(directory) => project_tasks_sqlite::attachment_names(&directory),
             None => Ok(HashMap::new()),
-        }
-    })
+        },
+    )
     .await
 }
 
@@ -7995,7 +8022,9 @@ fn project_pi_cleanup_targets(project_directory: &Path) -> Result<Vec<PathBuf>, 
                 let name = name.to_string_lossy();
                 // Recovery slots contain user data, including temp-looking names.
                 // Never recurse into this durable subtree during Manual/TTL Clean.
-                if name.eq_ignore_ascii_case("file-history") || name.eq_ignore_ascii_case("workspace.jsonc.lock") {
+                if name.eq_ignore_ascii_case("file-history")
+                    || name.eq_ignore_ascii_case("workspace.jsonc.lock")
+                {
                     continue;
                 }
                 if metadata.is_dir() && !metadata.file_type().is_symlink() {
@@ -12511,7 +12540,10 @@ mod tests {
         for path in [Path::new(".pi/TODO.md"), Path::new(".pi/plans/release.md")] {
             write_project_markdown_from(&workspace, path, "# Draft\n")
                 .expect("save without manual initialization");
-            assert_eq!(fs::read_to_string(workspace.join(path)).unwrap(), "# Draft\n");
+            assert_eq!(
+                fs::read_to_string(workspace.join(path)).unwrap(),
+                "# Draft\n"
+            );
         }
         assert!(!workspace.join(".pi/tasks.sqlite").exists());
         assert!(!workspace.join(".pi/task-attachments").exists());
@@ -12531,7 +12563,10 @@ mod tests {
                 .expect("save into partial scaffold");
         }
         write_project_tasks_to(&workspace, &sample_task_document()).expect("create task storage");
-        assert_eq!(fs::read_to_string(workspace.join(".pi/pix.jsonc")).unwrap(), "{}\n");
+        assert_eq!(
+            fs::read_to_string(workspace.join(".pi/pix.jsonc")).unwrap(),
+            "{}\n"
+        );
         assert!(!project_pi_initialized_from(&workspace).unwrap());
 
         initialize_project_pi_from(&workspace).expect("initialize explicit scaffold");
