@@ -36,6 +36,7 @@
     activeTab,
     collapsed,
     logsEnabled = false,
+    scriptsHaveActions = false,
     onSelect,
     onIndicatorContext,
   }: {
@@ -43,6 +44,7 @@
     activeTab: SidebarTab;
     collapsed: boolean;
     logsEnabled?: boolean;
+    scriptsHaveActions?: boolean;
     onSelect: (tab: SidebarTab) => void;
     onIndicatorContext: (event: MouseEvent, tab: SidebarTab) => void;
   } = $props();
@@ -161,7 +163,7 @@
     aria-pressed={activeTab === "scripts" && !collapsed}
     onkeydown={(event) => handleKeydown(event, "scripts")}
     oncontextmenu={(event) => onIndicatorContext(event, "scripts")}
-    aria-haspopup={indicators.scripts ? "menu" : undefined}
+    aria-haspopup={indicators.scripts || scriptsHaveActions ? "menu" : undefined}
     onclick={() => onSelect("scripts")}
   ><SquareTerminal class={["h-5 w-5", sidebarIconTone(indicators.scripts)]} aria-hidden="true" /></button>
   <button

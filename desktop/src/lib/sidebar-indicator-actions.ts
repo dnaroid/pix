@@ -1,6 +1,6 @@
 import type { SidebarIndicatorReason, SidebarIndicatorReasonId } from "./sidebar-indicator-types";
 
-export type SidebarIndicatorActionId =
+export type SidebarIndicatorReasonActionId =
   | "project.retry" | "tasks.reload" | "tasks.show" | "tasks.running"
   | "git.refresh" | "git.ci" | "git.fix-ci" | "git.conflicts" | "git.branch"
   | "git.fetch" | "git.changes" | "git.push" | "git.incoming" | "git.commit-push"
@@ -9,6 +9,8 @@ export type SidebarIndicatorActionId =
   | "search.inspect"
   | "settings.inspect";
 
+export type SidebarIndicatorActionId = SidebarIndicatorReasonActionId | `scripts.command.${string}`;
+
 export interface SidebarIndicatorAction {
   readonly id: SidebarIndicatorActionId;
   readonly label: string;
@@ -16,12 +18,12 @@ export interface SidebarIndicatorAction {
 }
 
 export interface SidebarIndicatorActionGroup {
-  readonly id: SidebarIndicatorReasonId;
+  readonly id: SidebarIndicatorReasonId | "scripts.commands";
   readonly reason: string;
   readonly actions: readonly SidebarIndicatorAction[];
 }
 
-const ACTIONS: Record<SidebarIndicatorActionId, string> = {
+const ACTIONS: Record<SidebarIndicatorReasonActionId, string> = {
   "project.retry": "Reload project files",
   "tasks.reload": "Retry loading tasks",
   "tasks.show": "Show planned tasks",
@@ -46,7 +48,7 @@ const ACTIONS: Record<SidebarIndicatorActionId, string> = {
   "search.inspect": "Inspect search indexes",
 };
 
-const REASON_ACTIONS: Record<SidebarIndicatorReasonId, readonly SidebarIndicatorActionId[]> = {
+const REASON_ACTIONS: Record<SidebarIndicatorReasonId, readonly SidebarIndicatorReasonActionId[]> = {
   "project.error": ["project.retry"],
   "tasks.error": ["tasks.reload"],
   "tasks.running": ["tasks.running"],

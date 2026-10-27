@@ -7,19 +7,17 @@
   import Search from "@lucide/svelte/icons/search";
   import { onMount } from "svelte";
   import { filterPackageScripts } from "../lib/package-scripts";
-  import { createPackageScriptsController } from "./package-scripts-controller.svelte";
+  import type { createPackageScriptsController } from "./package-scripts-controller.svelte";
   import SavedLaunchCommands from "./SavedLaunchCommands.svelte";
   import TerminalSessionsPane, { type TerminalSurfaceHandle } from "./TerminalSessionsPane.svelte";
 
-  let { workspace, afterWorkspaceSave }: { workspace: string; afterWorkspaceSave: (workspace: string) => void } = $props();
+  let { workspace, controller, terminalView = $bindable(null) }: {
+    workspace: string;
+    controller: ReturnType<typeof createPackageScriptsController>;
+    terminalView: TerminalSurfaceHandle | null;
+  } = $props();
 
   let query = $state("");
-  let terminalView = $state<TerminalSurfaceHandle | null>(null);
-  const controller = createPackageScriptsController({
-    workspace: () => workspace,
-    terminalView: () => terminalView,
-    afterWorkspaceSave: (savedWorkspace) => afterWorkspaceSave(savedWorkspace),
-  });
   const snapshot = $derived(controller.snapshot);
   const terminals = $derived(controller.terminals);
   const activeTerminalId = $derived(controller.activeTerminalId);
@@ -42,13 +40,9 @@
   }
 
   const visibleScripts = $derived(filterPackageScripts(snapshot?.scripts ?? [], query));
-  const launchScript = controller.launchScript;
-
-  onMount(controller.start);
-
-  export function refresh(): void {
-    controller.refresh();
-  }
+  onMount(() => {
+    if (!controller.startingScript && !controller.terminalActionId) controller.refresh();
+  });
 </script>
 
 <section class={[
@@ -119,7 +113,7 @@
                   type="button"
                   title={running ? `${script.name} is running · show terminal` : `Run ${script.name}\n${script.command}`}
                   disabled={!running && (startingScript !== null || terminalActionId !== null)}
-                  onclick={() => void launchScript(script)}
+                  onclick={() => void controller.launchScript(script)}
                 >
                   <span class="grid h-5 w-5 shrink-0 place-items-center rounded-md text-muted-foreground group-hover:text-primary">
                     {#if running || startingScript === script.name}

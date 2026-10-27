@@ -11,6 +11,8 @@ interface Options {
   reasons: () => SidebarIndicatorReasonMap;
   enabled: () => Partial<Record<SidebarIndicatorActionId, boolean>>;
   gitRemotes?: () => readonly string[];
+  extraGroups?: (tab: SidebarIndicatorTab) => readonly SidebarIndicatorActionGroup[];
+  runExtra?: (id: SidebarIndicatorActionId) => boolean;
   beforeOpen: () => void;
   reveal: (tab: SidebarIndicatorTab) => void;
   handlers: Partial<Record<SidebarIndicatorActionId, () => void>>;
@@ -21,7 +23,7 @@ export function createWorkspaceSidebarIndicatorActions(options: Options) {
   let popupWorkspace = "";
   let popupCommands = "";
   function groupsFor(tab: SidebarIndicatorTab): readonly SidebarIndicatorActionGroup[] {
-    return sidebarIndicatorActionGroups(options.reasons()[tab], options.enabled(), options.gitRemotes?.());
+    return [...(options.extraGroups?.(tab) ?? []), ...sidebarIndicatorActionGroups(options.reasons()[tab], options.enabled(), options.gitRemotes?.())];
   }
   const menu = createSidebarIndicatorMenuController({ items: (tab) => groupsFor(tab).flatMap((group) => group.actions) });
 
@@ -38,7 +40,7 @@ export function createWorkspaceSidebarIndicatorActions(options: Options) {
   }
 
   function commandSignature(groups: readonly SidebarIndicatorActionGroup[]): string {
-    return JSON.stringify(groups.map((group) => [group.id, group.actions.map((action) => [action.id, action.disabled])]));
+    return JSON.stringify(groups.map((group) => [group.id, group.actions.map((action) => [action.id, action.label, action.disabled])]));
   }
 
   function reconcile(): void {
@@ -51,6 +53,7 @@ export function createWorkspaceSidebarIndicatorActions(options: Options) {
     const action = groups().flatMap((group) => group.actions).find((action) => action.id === id);
     if (!tab || !action || action.disabled) return;
     menu.close(true);
+    if (options.runExtra?.(id)) return;
     const handler = options.handlers[id];
     if (handler) handler();
     else options.reveal(tab);

@@ -9,8 +9,11 @@ import * as projectColors from "../lib/project-colors";
 import * as launchCommands from "../lib/project-launch-commands";
 import * as packageScripts from "../lib/package-scripts";
 import type { createPackageScriptsController } from "./package-scripts-controller.svelte";
+import { launchCommandMenu } from "../lib/launch-command-menu";
 
 function fixture() {
+  const listeners = new Map<string, (event: { payload: unknown }) => void>();
+  const unlisten = vi.fn();
   const invoke = vi.fn(async (command: string, _args?: unknown): Promise<unknown> => {
     if (command === "package_scripts") return { exists: false, scripts: [] };
     if (command === "package_terminal_list") return [];
@@ -26,7 +29,10 @@ function fixture() {
     svelte: { tick: async () => client.flush() },
     "@tauri-apps/api/core": { invoke },
     "@tauri-apps/api/window": { getCurrentWindow: () => ({ label: "main" }) },
-    "@tauri-apps/api/event": { listen: async () => () => {} },
+    "@tauri-apps/api/event": { listen: async (event: string, handler: (event: { payload: unknown }) => void) => {
+      listeners.set(event, handler);
+      return unlisten;
+    } },
     "../lib/terminal-input": terminalInput,
     "../lib/project-colors": projectColors,
     "../lib/project-launch-commands": launchCommands,
@@ -48,7 +54,7 @@ function fixture() {
     client.set(props, { workspace, revision: client.get(props).revision + 1 });
     client.flush();
   };
-  return { controller, invoke, update, stop: () => { disposeController(); stop(); } };
+  return { controller, invoke, update, listeners, unlisten, stop: () => { disposeController(); stop(); } };
 }
 
 async function settle() {
@@ -56,6 +62,39 @@ async function settle() {
   for (let i = 0; i < 10; i++) await Promise.resolve();
   client.flush();
 }
+
+it("keeps Run/Stop current and buffers output without a mounted terminal, then releases its owner", async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  let busy = true;
+  f.invoke.mockImplementation(async (command: string) => {
+    if (command === "package_scripts") return { exists: false, scripts: [] };
+    if (command === "package_terminal_list") return [{ id: "pty", kind: "shell", launchCommandId: "dev", script: "shell", command: "sh", status: "running", outputBase64: "", startedAtMs: 1 }];
+    if (command === "project_file_exists") return true;
+    if (command === "read_project_file") return { content: '{"launchCommands":[{"id":"dev","name":"Dev","command":"npm run dev"}]}' };
+    if (command === "package_terminal_activity") return [{ id: "pty", busy }];
+    return undefined;
+  });
+  try {
+    await settle();
+    expect(launchCommandMenu(f.controller).groups[0]?.actions[0]?.label).toBe("Stop Dev");
+    f.listeners.get(packageScripts.PACKAGE_TERMINAL_OUTPUT_EVENT)?.({ payload: { terminalId: "pty", dataBase64: btoa("ready\n") } });
+    expect(f.controller.activeTerminal?.output).toBe("ready\n");
+    busy = false;
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(launchCommandMenu(f.controller).groups[0]?.actions[0]?.label).toBe("Run Dev");
+    busy = true;
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(launchCommandMenu(f.controller).groups[0]?.actions[0]?.label).toBe("Stop Dev");
+    f.listeners.get(packageScripts.PACKAGE_TERMINAL_EXIT_EVENT)?.({ payload: { terminalId: "pty", status: "exited", exitCode: 0 } });
+    expect(launchCommandMenu(f.controller).groups[0]?.actions[0]?.label).toBe("Run Dev");
+  } finally {
+    f.stop();
+    expect(f.unlisten).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
+    vi.useRealTimers();
+  }
+});
 
 it("does not reload or cancel an in-flight launch on unrelated sidebar polling updates", async () => {
   const f = fixture();

@@ -72,6 +72,15 @@ Decision: [0027 — Cause-specific sidebar quick actions](../docs/decisions/0027
   not switch or expand sidebar panels. Only explicit inspection/navigation actions
   open a view. Project-file retry also checks the root while the explorer is absent;
   stale workspace, superseded or disposed results cannot update project health.
+- The Launch Commands Activity Bar icon opens a context menu of saved launch
+  commands and package scripts, whether or not the sidebar panel is visible.
+  Idle commands offer **Run**; busy commands replace that entry with **Stop**,
+  limited to script terminals and terminals tied to a saved launch command;
+  unrelated manual interactive shells (including busy `vim`/`ssh` shells) and
+  idle reusable shells are not offered as stop targets. These actions use
+  the existing workspace/eligibility/focus guards and are disabled while loading,
+  starting or stopping. The action label conveys running state; this menu adds no
+  status text, icon coloring or badge, and does not change Activity Bar icon policy.
 - Stable reason/command IDs are independent of tooltip wording. Each cause is
   labelled in the menu; repeated reports of the same cause share one command group.
 - Search-index reasons offer **Inspect search indexes**; navigation never starts

@@ -71,6 +71,9 @@
   import GitPanel from "./GitPanel.svelte";
   import ProjectExplorer from "./ProjectExplorer.svelte";
   import PackageScriptsPanel from "./PackageScriptsPanel.svelte";
+  import { createPackageScriptsController } from "./package-scripts-controller.svelte";
+  import type { TerminalSurfaceHandle } from "./TerminalSessionsPane.svelte";
+  import { hasLaunchCommandMenu, launchCommandMenu } from "../lib/launch-command-menu";
   import ProjectSettingsDialog from "./ProjectSettingsDialog.svelte";
   import type { ProjectIconImage, ProjectSettingsDraft } from "../lib/project-icon";
   import ProjectSwitcher from "./ProjectSwitcher.svelte";
@@ -108,7 +111,6 @@
   };
 
   type SidebarTab = SidebarIndicatorTab;
-  type PackageScriptsPanelHandle = { refresh: () => void };
   type SettingsPanelHandle = { openSection: (id: string) => Promise<void>; openField: (section: string, fieldId: string) => Promise<void> };
   const SIDEBAR_LABELS: Record<SidebarTab, string> = {
     tasks: "Work",
@@ -352,7 +354,20 @@
   const ACTIVE_TAB_KEY = windowLayoutKey("workspaceSidebarTab");
 
   let sidebarElement = $state<HTMLElement | null>(null);
-  let packageScriptsPanel = $state<PackageScriptsPanelHandle | null>(null);
+  let launchTerminalView = $state<TerminalSurfaceHandle | null>(null);
+  const launchController = createPackageScriptsController({
+    workspace: () => workspace,
+    terminalView: () => launchTerminalView,
+    afterWorkspaceSave: (savedWorkspace) => onWorkspaceSettingsSave(savedWorkspace),
+  });
+  onMount(launchController.start);
+  const launchMenu = $derived(launchCommandMenu(launchController));
+  $effect(() => {
+    const error = launchController.error;
+    if (error) {
+      untrack(() => createDiagnosticLogger(() => ({ workspace })).report(error, "frontend:launch-commands"));
+    }
+  });
   let usagePanel = $state<UsagePanelHandle | null>(null);
   const usageRefresh = $derived(usagePanel?.refreshState() ?? { busy: false, disabled: true });
   let settingsPanel = $state<SettingsPanelHandle | null>(null);
@@ -499,6 +514,8 @@
     reasons: () => indicatorReasons,
     enabled: () => indicatorActionEnabled,
     gitRemotes: () => gitSnapshot?.remotes ?? [],
+    extraGroups: (tab) => tab === "scripts" ? launchMenu.groups : [],
+    runExtra: (id) => launchMenu.run(id),
     beforeOpen: () => statusMenuController.close(),
     reveal: revealIndicatorTab,
     handlers: {
@@ -947,6 +964,7 @@
     collapsed={layoutController.collapsed}
     onSelect={selectTab}
     onIndicatorContext={indicatorActions.open}
+    scriptsHaveActions={hasLaunchCommandMenu(launchController)}
   />
   <SidebarIndicatorMenu controller={indicatorMenuController} groups={indicatorMenuGroups} onAction={indicatorActions.run} />
 
@@ -1008,7 +1026,7 @@
             type="button"
             title="Refresh launch commands"
             aria-label="Refresh launch commands"
-            onclick={() => packageScriptsPanel?.refresh()}
+            onclick={() => launchController.refresh()}
             disabled={!workspace}
           ><RefreshCw class="h-3.5 w-3.5" aria-hidden="true" /></button>
         {/if}
@@ -1207,7 +1225,7 @@
         </div>
       {:else if activeTab === "scripts"}
         <div id="workspace-scripts-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Launch Commands">
-          <PackageScriptsPanel bind:this={packageScriptsPanel} {workspace} afterWorkspaceSave={onWorkspaceSettingsSave} />
+          <PackageScriptsPanel {workspace} controller={launchController} bind:terminalView={launchTerminalView} />
         </div>
       {:else if activeTab === "search"}
         <div id="workspace-search-index-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Search indexes">
