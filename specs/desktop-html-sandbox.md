@@ -196,7 +196,8 @@ submissions are not evicted.
 In user-message history, an exact generated quick-choice reply is displayed as
 a static checkbox receipt: all source options are shown, checked only if they
 were actually selected in the reply. These rows have no interactive controls or
-submit button. This is presentation-only; stored/sent user text, copy/edit and
+submit button. Receipt text supports native selection and copy, including after
+the choice has been answered. This is presentation-only; stored/sent user text, copy/edit and
 agent input retain the original numbered-list payload. Receipts are reconstructed
 from the preceding assistant's parsed block and the exact reply, independently
 of the window-local selection cache, including after restart. If the source is

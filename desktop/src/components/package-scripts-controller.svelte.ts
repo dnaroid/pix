@@ -6,6 +6,7 @@ import { createTerminalInputWriter } from "../lib/terminal-input";
 import type { ProjectFilePreview } from "../lib/project-files";
 import { WORKSPACE_CONFIG_PATH } from "../lib/project-colors";
 import { launchCommandsFromWorkspaceConfig, workspaceConfigWithLaunchCommands, type LaunchCommand } from "../lib/project-launch-commands";
+import { commandHistoryFromWorkspaceConfig, mergeCommandHistory, persistCommandRun } from "../lib/project-command-history";
 import {
   appendTerminalOutput,
   decodeBase64Bytes,
@@ -77,6 +78,16 @@ export function createPackageScriptsController(options: PackageScriptsController
   let workspaceLoad: Promise<void> | undefined;
   let launchSaveTail: Promise<unknown> = Promise.resolve();
   let launchWorkspace = "";
+  let recentRuns = $state<Record<string, Record<string, number>>>({});
+  async function recordRun(workspace: string, key: string): Promise<void> {
+    const history = recentRuns[workspace] ?? {};
+    const time = Object.values(history).reduce((latest, value) => Math.max(latest, value + 1), Date.now());
+    recentRuns = { ...recentRuns, [workspace]: { ...history, [key]: time } };
+    const saved = await persistCommandRun(workspace, key, time, invoke);
+    if (disposed || !saved) return;
+    recentRuns = { ...recentRuns, [workspace]: mergeCommandHistory(recentRuns[workspace] ?? {}, saved) };
+    if (options.workspace() === workspace) options.afterWorkspaceSave?.(workspace);
+  }
   const inputWriter = createTerminalInputWriter(async (terminalId, data) => {
     const terminal = terminals.find((candidate) => candidate.id === terminalId);
     if (disposed || !terminal || terminal.status !== "running") throw new Error("Terminal is no longer running");
@@ -165,6 +176,9 @@ export function createPackageScriptsController(options: PackageScriptsController
         const settings = exists ? await invoke<ProjectFilePreview>("read_project_file", { workspace: requestWorkspace, path: WORKSPACE_CONFIG_PATH }) : undefined;
         if (disposed || generation !== loadGeneration || options.workspace() !== requestWorkspace) return;
         if (savedGeneration === launchGeneration) launchCommands = launchCommandsFromWorkspaceConfig(settings?.content);
+        recentRuns = { ...recentRuns, [requestWorkspace]: mergeCommandHistory(
+          commandHistoryFromWorkspaceConfig(settings?.content), recentRuns[requestWorkspace] ?? {},
+        ) };
       } catch (caught) {
         if (disposed || generation !== loadGeneration || options.workspace() !== requestWorkspace) return;
         error = errorMessage(caught);
@@ -335,7 +349,8 @@ export function createPackageScriptsController(options: PackageScriptsController
       await tick();
       if (!isCurrent()) return;
       if (activeTerminalId === target.id) options.terminalView()?.focus();
-      await writeTerminal(target.id, `${CLEAR_LINE}${command.command}\r`);
+      await inputWriter.write(target.id, `${CLEAR_LINE}${command.command}\r`);
+      if (isCurrent()) await recordRun(workspace, `launch:${id}`);
     } catch (caught) {
       if (isCurrent()) error = errorMessage(caught);
     } finally {
@@ -437,10 +452,12 @@ export function createPackageScriptsController(options: PackageScriptsController
       return;
     }
     terminals = [...terminals, terminalSnapshotView(started)];
+    const savingHistory = recordRun(workspace, `package:${script.name}`);
     terminalDecoders.set(started.id, new TextDecoder());
     activeTerminalId = started.id;
     await tick();
     if (isCurrent() && activeTerminalId === started.id) options.terminalView()?.focus();
+    await savingHistory;
   }
 
   // Shell terminals.
@@ -487,7 +504,8 @@ export function createPackageScriptsController(options: PackageScriptsController
     options.terminalView()?.focus();
     if (initialCommand?.trim()) {
       markBusy(started.id, FRESH_SHELL_GRACE_MS);
-      await writeTerminal(started.id, `${initialCommand}\r`);
+      await inputWriter.write(started.id, `${initialCommand}\r`);
+      if (isCurrent() && launchCommandId) await recordRun(workspace, `launch:${launchCommandId}`);
     }
   }
 
@@ -747,6 +765,7 @@ export function createPackageScriptsController(options: PackageScriptsController
     runScript,
     launchScript,
     get launchCommands() { return launchCommands; },
+    get recentCommandRuns() { return recentRuns[options.workspace()] ?? {}; },
     saveLaunchCommand,
     deleteLaunchCommand,
     runLaunchCommand,

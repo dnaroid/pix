@@ -14,6 +14,7 @@ test("workspace schema models current settings and allows forward-compatible fie
     { projectExplorer: { expandedDirectories: ["src", ".pi"], future: true } },
     { usagePanel: { collapsedSections: ["activity", "future"] }, future: true },
     { usagePanel: { providerOrder: ["zhipu", "openai", "future"] } },
+    { recentCommandRuns: { "launch:dev": 1793220000000, "package:test": 1793220000001 } },
   ]) assert.equal(Value.Check(WorkspaceConfigSchema, config), true);
 });
 
@@ -25,6 +26,11 @@ test("workspace schema rejects invalid known fields", () => {
     { color: "blue" }, { color: "#12345" }, { icon: "../icon.png" },
     { launchCommands: [{ id: "dev", name: " ", command: "echo ok" }] },
     { launchCommands: [{ name: "Dev", command: "echo ok" }] },
+    { recentCommandRuns: [] },
+    { recentCommandRuns: { "launch:dev": "yesterday" } },
+    { recentCommandRuns: { "package:test": -1 } },
+    { recentCommandRuns: { "package:test": 1.5 } },
+    { recentCommandRuns: { "unknown:test": 123 } },
     { projectExplorer: { expandedDirectories: [1] } },
     { projectExplorer: { expandedDirectories: ["src", "src"] } },
     { projectExplorer: { expandedDirectories: Array.from({ length: 257 }, (_, i) => `dir-${i}`) } },

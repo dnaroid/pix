@@ -13,6 +13,39 @@ function fixture() {
 }
 
 describe("Launch Commands activity menu", () => {
+  it("orders recent runs first, leaving never-run commands in source order", () => {
+    const controller = { ...fixture(),
+      launchCommands: ["a", "b", "c", "d"].map((id) => ({ id, name: id, command: id })),
+      recentCommandRuns: { "launch:c": 1, "launch:b": 2 },
+    };
+    expect(launchCommandMenu(controller).groups[0]!.actions.map((action) => action.commandName))
+      .toEqual(["b", "c", "a", "d"]);
+  });
+
+  it("keeps running commands in their original positions and preserves package names", () => {
+    const controller = fixture();
+    const base = {
+      ...controller,
+      launchCommands: [...controller.launchCommands, { id: "build", name: "Build", command: "build" }],
+      snapshot: { exists: true, packagePath: "/project/package.json", packageManager: "npm" as const,
+        scripts: [{ name: "dev", command: "vite" }, { name: "test", command: "vitest" }] },
+    };
+    const before = launchCommandMenu(base).groups[0]!.actions.map((action) => action.commandName);
+    const menu = launchCommandMenu({ ...base,
+      launchRuntimes: { dev: { terminalId: "saved", state: "running" } },
+      scriptRuntimes: { dev: { terminalId: "package", state: "running" } },
+      terminals: [
+        { id: "package", kind: "script" as const, script: "dev" },
+        { id: "saved", kind: "shell" as const, script: "shell", launchCommandId: "dev" },
+      ].map((terminal) => ({ ...terminal, command: "sh", status: "running" as const, output: "", outputBase64: "", startedAtMs: 1 })),
+      isTerminalBusy: () => true,
+    });
+    expect(menu.groups[0]!.actions.map((action) => action.commandName)).toEqual(before);
+    expect(menu.groups[0]!.actions.map((action) => action.icon)).toEqual(["stop", "play", "stop", "play"]);
+    expect(menu.run("scripts.command.stop:package")).toBe(true);
+    expect(controller.stopProcess).toHaveBeenCalledWith("package");
+  });
+
   it("offers start without any running terminals or health reasons", () => {
     const controller = fixture();
     const menu = launchCommandMenu(controller);

@@ -54,7 +54,7 @@
           {#if action.icon === "play"}
             <Play class="mr-2 h-3 w-3 shrink-0 fill-current" aria-hidden="true" />
           {:else if action.icon === "stop"}
-            <Square class="mr-2 h-3 w-3 shrink-0 fill-current" aria-hidden="true" />
+            <Square class="mr-2 h-3 w-3 shrink-0 fill-current text-tool-error" aria-hidden="true" />
           {/if}
           {action.commandName ?? action.label}
         </button>

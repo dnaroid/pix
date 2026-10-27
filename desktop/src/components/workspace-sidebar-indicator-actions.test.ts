@@ -34,6 +34,24 @@ function fixture(reasons: SidebarIndicatorReasonMap = {}) {
 
 afterEach(() => vi.unstubAllGlobals());
 
+it("freezes ordering until the next menu opening", () => {
+  const f = fixture();
+  const actions = [
+    { id: "scripts.command.launch:a" as const, label: "Run A" },
+    { id: "scripts.command.launch:b" as const, label: "Run B" },
+  ];
+  f.setGroups([{ id: "scripts.commands", reason: "Launch commands", actions }]);
+  f.actions.open(f.event, "scripts");
+  f.setGroups([{ id: "scripts.commands", reason: "Launch commands", actions: [...actions].reverse() }]);
+  f.actions.reconcile();
+  expect(f.actions.menu.state.tab).toBe("scripts");
+  expect(f.actions.groups()[0]!.actions).toEqual(actions);
+  f.actions.menu.close();
+  f.actions.open(f.event, "scripts");
+  expect(f.actions.groups()[0]!.actions).toEqual([...actions].reverse());
+  f.actions.menu.dispose();
+});
+
 it("fuzzy-filters command names without closing the menu or hiding errors", () => {
   const f = fixture({ scripts: [{ id: "scripts.error", tone: "error", reason: "Load failed" }] });
   f.setGroups([{ id: "scripts.commands", reason: "Launch commands", actions: [

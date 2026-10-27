@@ -22,6 +22,10 @@ export const WorkspaceConfigSchema = Type.Object({
 		name: Type.String({ pattern: "\\S", description: "Display name." }),
 		command: Type.String({ pattern: "\\S", description: "Shell command to run in the project." }),
 	}))),
+	recentCommandRuns: Type.Optional(Type.Record(Type.String({ pattern: "^(launch|package):.+$" }), Type.Integer({
+		minimum: 0,
+		maximum: Number.MAX_SAFE_INTEGER,
+	}), { additionalProperties: false, description: "Last successful launch time (Unix milliseconds), keyed by launch:<command-id> or package:<script-name>. Updated automatically; not a run counter." })),
 	projectExplorer: Type.Optional(Type.Object({
 		expandedDirectories: Type.Optional(Type.Array(Type.String({ minLength: 1 }), {
 			maxItems: 256,

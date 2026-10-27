@@ -24,9 +24,17 @@ interface Options {
 export function createWorkspaceSidebarIndicatorActions(options: Options) {
   let popupWorkspace = "";
   let popupCommands = "";
+  let popupOrder: SidebarIndicatorActionId[] = [];
   function groupsFor(tab: SidebarIndicatorTab): readonly SidebarIndicatorActionGroup[] {
     const reasons = options.reasons()[tab]?.filter((reason) => reason.id !== "scripts.running");
-    return [...(options.extraGroups?.(tab) ?? []), ...sidebarIndicatorActionGroups(reasons, options.enabled(), options.gitRemotes?.())];
+    const extras = (options.extraGroups?.(tab) ?? []).map((group) => ({ ...group,
+      actions: [...group.actions].sort((a, b) => {
+        const left = popupOrder.indexOf(a.id);
+        const right = popupOrder.indexOf(b.id);
+        return (left < 0 ? Infinity : left) - (right < 0 ? Infinity : right);
+      }),
+    }));
+    return [...extras, ...sidebarIndicatorActionGroups(reasons, options.enabled(), options.gitRemotes?.())];
   }
   function filteredGroups(tab: SidebarIndicatorTab, query: string): readonly SidebarIndicatorActionGroup[] {
     const groups = groupsFor(tab);
@@ -47,6 +55,8 @@ export function createWorkspaceSidebarIndicatorActions(options: Options) {
   function open(event: MouseEvent, tab: SidebarIndicatorTab): void {
     options.beforeOpen();
     popupWorkspace = options.workspace();
+    popupOrder = [];
+    popupOrder = groupsFor(tab).flatMap((group) => group.actions.map((action) => action.id));
     popupCommands = commandSignature(groupsFor(tab));
     menu.open(event, tab);
   }

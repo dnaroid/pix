@@ -82,8 +82,28 @@ Decision: [0027 — Cause-specific sidebar quick actions](../docs/decisions/0027
   starting or stopping. The menu has no heading or running-terminal
   summary/navigation group; script error groups remain available. Run/Stop are
   shown as Play/Square icons beside each command name, while the full Run/Stop
-  action name remains in its accessible label and title. This menu adds no
-  status text, icon coloring or badge. The Launch Commands Activity Bar trigger
+  action name remains in its accessible label and title. Busy commands retain
+  their original saved-command/package-script positions; unmatched busy runtimes
+  are appended. Package entries retain their package display suffix for stable
+  fuzzy ranking. Only the Stop Square icon uses the semantic error text color;
+  the command name remains unchanged. This menu adds no status text or badge.
+  Commands are ordered by most recent successful launch first; commands never
+  launched retain their original order. A runtime Stop action inherits its
+  command's rank, and stopping does not record a launch. The order is a snapshot
+  for each menu opening; fuzzy relevance still applies within the visible menu.
+  Per-workspace successful-launch history is stored in `.pi/workspace.jsonc`
+  under `recentCommandRuns`, alongside the unchanged `launchCommands` array.
+  Keys are `launch:<id>` and `package:<name>`; values are Unix-millisecond
+  timestamps, monotonically advanced against local history (not run counters).
+  History is restored on workspace load and retained across controller changes.
+  Successful package starts and saved-command shell writes record a run;
+  revealing an already-running command does not. Compare-and-swap writes
+  preserve JSONC/unrelated edits and merge concurrent timestamps with bounded
+  retries. Save failure is logged best-effort and does not fail a successful
+  PTY start; accepted launches save to their original workspace after a switch.
+  Stale/failed starts and failed shell writes are not recorded. Ranking and
+  per-opening menu snapshots are unchanged.
+  The Launch Commands Activity Bar trigger
   uses a Play icon and retains the shared indicator-tone rules.
   Its search filters saved commands by command name using fuzzy matching;
   script error groups remain unfiltered. The query clears when the menu closes,
