@@ -34,6 +34,8 @@ describe("Desktop visual prompt", () => {
 		const hint = input.systemPromptOptions.sections.desktop_visual_guidance;
 		expect(hint).toBe(DESKTOP_VISUAL_GUIDANCE);
 		expect(hint).toContain(`${PROJECT_ARTIFACTS_DIR}/`);
+		expect(hint).toContain(`${PROJECT_ARTIFACTS_DIR}/ is temporary storage and may be cleaned up at any time`);
+		expect(hint).toContain("save durable deliverables elsewhere and export evidence that must be retained");
 		expect(hint).toContain("SVG files over pseudo/ASCII art");
 		expect(hint).toContain("clickable Markdown file link");
 		expect(hint).toContain("explicit user-requested format or output location");

@@ -9,8 +9,11 @@ status: active
 
 Harness instructions direct disposable task output (test logs, scratch reports,
 mockups and captures) to unique task/run locations under the current project's
-`.pi/artifacts/`. They forbid project-root `artifacts/` and `.artifacts/` for
-agent scratch output. Shell/Bash aliases share the same log-path guidance.
+`.pi/artifacts/`. Prompts explicitly describe this as temporary storage that
+may be cleaned up at any time, direct durable deliverables elsewhere, and
+require exporting evidence that must be retained. They forbid project-root
+`artifacts/` and `.artifacts/` for agent scratch output. Shell/Bash aliases
+share the same log-path guidance.
 Code-generated prompts and eval defaults use `PROJECT_ARTIFACTS_DIR` from
 `external/pi-tools-suite/src/artifact-paths.ts`, not separate path literals.
 The relative path is constant; absolute workspace paths are not cached.
@@ -19,7 +22,10 @@ Desktop sessions (`PIX_CONFIG_PROFILE=desktop`, trimmed and case-insensitive)
 also receive concise English system-prompt guidance to prefer SVG files over
 pseudo/ASCII art for visual explanations (diagrams, layouts and mockups), save
 them under the current project's `.pi/artifacts/`, and return a clickable
-Markdown file link. Explicit user-requested formats or locations take precedence.
+Markdown file link. This prompt also states that `.pi/artifacts/` is temporary
+and may be cleaned at any time, instructing durable deliverables to be saved
+elsewhere and retained evidence to be exported. Explicit user-requested formats
+or locations take precedence.
 This host guidance is independent of model-specific discipline and optional
 suite tools; it is not injected into TUI, standalone Pi or other ACP hosts.
 The hook preserves existing structured sections and earlier opaque prompt

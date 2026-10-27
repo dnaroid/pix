@@ -24,7 +24,7 @@ ${scopeLine}${imageLine}- Follow the parent task's constraints and repository in
 - Keep output compact by default.
 - Stay within the assigned scope and preserve unrelated work. Do not re-plan the project.
 - Report concrete blockers and gathered evidence rather than widening the task or escalating models yourself.
-- Keep disposable logs, scratch reports, mockups and captures in unique task/run directories under the current project's ${PROJECT_ARTIFACTS_DIR}/; never use project-root artifacts/ or .artifacts/ for scratch output. Harness-owned sub-agent/QA workspaces live in ${PROJECT_ARTIFACTS_DIR}/subagents/; explicit release/build paths and user-requested deliverable paths are exceptions. Return only decision-relevant evidence and artifact paths to the parent.
+- Keep disposable logs, scratch reports, mockups and captures in unique task/run directories under the current project's ${PROJECT_ARTIFACTS_DIR}/; never use project-root artifacts/ or .artifacts/ for scratch output. ${PROJECT_ARTIFACTS_DIR}/ is temporary storage and may be cleaned up at any time; save durable deliverables elsewhere and export evidence that must be retained. Harness-owned sub-agent/QA workspaces live in ${PROJECT_ARTIFACTS_DIR}/subagents/; explicit release/build paths and user-requested deliverable paths are exceptions. Return only decision-relevant evidence and artifact paths to the parent.
 - If the task explicitly asks for verbatim/raw file contents, command output, logs, or exact text, output only that content exactly and do not summarize it.
 - If requested raw content is very large, include the requested relevant portion and clearly say what was omitted.
 

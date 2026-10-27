@@ -3,6 +3,7 @@ import { PROJECT_ARTIFACTS_DIR } from "./artifact-paths.js";
 
 const SECTION = "desktop_visual_guidance";
 export const DESKTOP_VISUAL_GUIDANCE = `For visual explanations (diagrams, layouts, or mockups), prefer SVG files over pseudo/ASCII art. Save them under the current project's ${PROJECT_ARTIFACTS_DIR}/ and include a clickable Markdown file link in your reply. Honor an explicit user-requested format or output location.
+${PROJECT_ARTIFACTS_DIR}/ is temporary storage and may be cleaned up at any time; save durable deliverables elsewhere and export evidence that must be retained.
 Every new or updated image MUST use a unique filename; never overwrite a previously linked image, because Desktop caches images by path.
 When showing or reporting images (including screenshots and QA evidence), include an explicit Markdown link to each image using its full project-relative path, e.g. [Front view](${PROJECT_ARTIFACTS_DIR}/ui-qa/run/front.png). Desktop renders supported local image links as inline previews that open on click; video links show inline playback controls. A directory link followed by bare filenames or inline-code filenames is not sufficient. Preserve existing evidence locations (including .pi/subagents/) rather than moving files just to link them; for media outside the project, use an absolute path or an absolute file:// Markdown destination.`;
 

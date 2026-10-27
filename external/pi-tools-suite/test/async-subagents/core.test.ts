@@ -319,6 +319,7 @@ describe.serial("core utils and prompt generation", () => {
 		expect(prompt).toContain("- Relevant files/areas: async-subagents/core");
 		expect(prompt).toContain("Output format:");
 		expect(prompt).toContain("unique task/run directories under the current project's .pi/artifacts/");
+		expect(prompt).toContain(".pi/artifacts/ is temporary storage and may be cleaned up at any time");
 		expect(prompt).toContain("never use project-root artifacts/ or .artifacts/ for scratch output");
 		expect(prompt).toContain("Harness-owned sub-agent/QA workspaces live in .pi/artifacts/subagents/");
 		expect(prompt).toContain("user-requested deliverable paths are exceptions");
