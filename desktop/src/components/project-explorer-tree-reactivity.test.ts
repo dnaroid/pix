@@ -7,6 +7,7 @@ import source from "./project-explorer-tree-controller.svelte.ts?raw";
 import * as projectFiles from "../lib/project-files";
 import * as keyboardNavigation from "../lib/keyboard-navigation";
 import * as projectTree from "../lib/project-tree";
+import * as projectTreeSelection from "../lib/project-tree-selection";
 import type { createProjectExplorerTreeController } from "./project-explorer-tree-controller.svelte";
 import type { ProjectTreeEntry } from "../lib/project-tree";
 
@@ -23,6 +24,7 @@ function fixture() {
     "../lib/project-files": projectFiles,
     "../lib/keyboard-navigation": keyboardNavigation,
     "../lib/project-tree": projectTree,
+    "../lib/project-tree-selection": projectTreeSelection,
   };
   new Function("require", "exports", commonjs)((name: string) => {
     if (!(name in dependencies)) throw new Error(`Unexpected dependency: ${name}`);

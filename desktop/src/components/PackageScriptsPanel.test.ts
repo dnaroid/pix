@@ -31,17 +31,17 @@ describe("PackageScriptsPanel saved launch commands", () => {
   });
 
   it("moves launch refresh into the shared sidebar header and uses launch-command naming", () => {
-    expect(source).toContain("export function refresh(): void");
+    expect(source).toContain("controller: ReturnType<typeof createPackageScriptsController>");
     expect(source).not.toContain('title="Refresh package scripts"');
     expect(sidebarSource).toContain('scripts: "Launch Commands"');
     expect(sidebarSource).toContain('title="Refresh launch commands"');
-    expect(sidebarSource).toContain("packageScriptsPanel?.refresh()");
-    expect(sidebarSource).toContain("bind:this={packageScriptsPanel}");
+    expect(sidebarSource).toContain("const launchController = createPackageScriptsController({");
+    expect(sidebarSource).toContain("onclick={() => launchController.refresh()}");
+    expect(sidebarSource).toContain("controller={launchController}");
   });
 
   it("wires successful workspace settings saves to registry workspace sync", () => {
-    expect(source).toContain("afterWorkspaceSave: (savedWorkspace) => afterWorkspaceSave(savedWorkspace)");
-    expect(sidebarSource).toContain("afterWorkspaceSave={onWorkspaceSettingsSave}");
+    expect(sidebarSource).toContain("afterWorkspaceSave: (savedWorkspace) => onWorkspaceSettingsSave(savedWorkspace)");
     expect(sidebarViewModelSource).toContain('options.registry.scheduleProjectSync("workspace")');
     expect(sidebarViewModelSource).toContain("if (workspace === options.workspace())");
   });
