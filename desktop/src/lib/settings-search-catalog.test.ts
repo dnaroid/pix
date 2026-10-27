@@ -5,6 +5,17 @@ import searchPreferencesSource from "../components/settings/SettingsSearchPrefer
 import { SETTINGS_SEARCH_CATALOG, settingsFieldId } from "./settings-search-catalog";
 
 describe("authored settings search catalogue", () => {
+  it("makes Claude quota warnings searchable in the Claude settings section", () => {
+    const entry = SETTINGS_SEARCH_CATALOG.find(entry => entry.id === "claude-quota-warnings");
+    expect(entry?.section).toBe("pi-tools-suite-claude");
+    expect(entry?.label).toBe("Claude quota warnings");
+    expect(entry?.synonyms).toContain("rate limit");
+    expect(entry?.synonyms).toContain("quota");
+    expect(entry?.description).toContain("Off by default");
+    expect(entry?.description).toContain("actual limit errors remain visible");
+    expect(entry?.description).toContain("Reload or restart sessions");
+  });
+
   it("makes tray mode searchable and discloses its global restart requirement", () => {
     const entry = SETTINGS_SEARCH_CATALOG.find(entry => entry.id === "show-menu-bar-icon");
     expect(entry?.section).toBe("desktop-general");

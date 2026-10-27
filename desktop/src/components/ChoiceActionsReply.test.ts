@@ -19,6 +19,17 @@ describe("quick-choice reply presentation", () => {
     expect(source).toContain("rounded-sm border opacity-60");
   });
 
+  it("paints native selection for assistant option labels and static reply text", () => {
+    const selectionRule = styles.slice(styles.indexOf(".transcript-pane :is(.markdown-text, .tool-result, .diff-content)::selection,"));
+    const paintedRule = selectionRule.slice(0, selectionRule.indexOf("}") + 1);
+    expect(paintedRule).toContain(".transcript-pane [data-choice-actions] .select-text::selection,");
+    expect(paintedRule).toContain(".transcript-pane [data-choice-actions] .select-text *::selection,");
+    expect(paintedRule).toContain(".transcript-pane [data-choice-actions-reply]::selection,");
+    expect(paintedRule).toContain(".transcript-pane [data-choice-actions-reply] *::selection,");
+    expect(paintedRule).toContain("background: var(--selection);");
+    expect(paintedRule).toContain("color: var(--selection-foreground);");
+  });
+
   it("uses the same checkbox visuals with no interactive controls", () => {
     expect(source).toContain("cursor-default");
     expect(source).toContain("opacity-60");

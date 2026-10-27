@@ -61,6 +61,7 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
   tools("general", "Comment strictness", "Strictness for generated-comment warnings.", "comments"),
   tools("general", "Secret session hygiene", "Redact detected secret material from session history.", "redaction"),
   tools("general", "Secret redaction notifications", "Show a warning when secret material is redacted.", "alerts"),
+  tools("claude", "Claude quota warnings", "Show warnings when approaching Claude usage limits. Off by default; quota usage and actual limit errors remain visible. Reload or restart sessions to apply.", "Claude", "rate limit", "quota", "usage limits", "warnings"),
   tools("claude", "Automatic Claude account rotation", "Switch to an eligible Claude Code OAuth profile only after a confirmed subscription quota rejection.", "Claude", "OAuth", "quota"),
   tools("claude", "Pause before switching (seconds)", "Wait after a confirmed Claude quota rejection before attempting another profile.", "rotation delay", "cooldown"),
   tools("claude", "Claude OAuth profiles", "Ordered, independently authenticated Claude Code account profiles.", "accounts", "subscriptions"),

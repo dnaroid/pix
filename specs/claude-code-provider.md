@@ -76,7 +76,8 @@ Example (each directory must first be authenticated with Claude Code CLI):
 ```
 
 In Desktop Settings → Tools Suite → Claude Accounts, the **Claude quota
-warnings** switch controls whether the provider displays notices for Claude's
+warnings** switch is discoverable through settings search, including quota and
+rate-limit terms, and controls whether the provider displays notices for Claude's
 `allowed_warning` rate-limit events. Its user-only setting is
 `claudeCodeProvider.showRateLimitWarnings` in
 `~/.config/pi/pi-tools-suite.jsonc`; it defaults to `false`. The provider reads

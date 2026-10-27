@@ -446,6 +446,10 @@ html, body, #app {
 }
 .transcript-pane :is(.markdown-text, .tool-result, .diff-content)::selection,
 .transcript-pane :is(.markdown-text, .tool-result, .diff-content) *::selection,
+.transcript-pane [data-choice-actions] .select-text::selection,
+.transcript-pane [data-choice-actions] .select-text *::selection,
+.transcript-pane [data-choice-actions-reply]::selection,
+.transcript-pane [data-choice-actions-reply] *::selection,
 .preview-text-surface :is(.markdown-text, .preview-code)::selection,
 .preview-text-surface :is(.markdown-text, .preview-code) *::selection,
 .preview-editor::selection {
