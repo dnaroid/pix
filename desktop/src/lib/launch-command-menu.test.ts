@@ -16,7 +16,7 @@ describe("Launch Commands activity menu", () => {
   it("offers start without any running terminals or health reasons", () => {
     const controller = fixture();
     const menu = launchCommandMenu(controller);
-    expect(menu.groups[0]?.actions).toEqual([{ id: "scripts.command.launch:dev", label: "Run Dev", disabled: false }]);
+    expect(menu.groups[0]?.actions).toEqual([{ id: "scripts.command.launch:dev", label: "Run Dev", commandName: "Dev", icon: "play", disabled: false }]);
     expect(menu.run("scripts.command.launch:dev")).toBe(true);
     expect(controller.runLaunchCommand).toHaveBeenCalledWith("dev");
     expect(menu.run("scripts.inspect")).toBe(false);
@@ -31,6 +31,7 @@ describe("Launch Commands activity menu", () => {
       isTerminalBusy: (terminal) => terminal.id === "busy",
     });
     expect(menu.groups[0]?.actions.map((action) => action.label)).toEqual(["Stop Dev"]);
+    expect(menu.groups[0]?.actions[0]).toMatchObject({ commandName: "Dev", icon: "stop" });
     expect(menu.run("scripts.command.stop:busy")).toBe(true);
     expect(controller.stopProcess).toHaveBeenCalledWith("busy");
     expect(menu.run("scripts.command.stop:idle")).toBe(false);

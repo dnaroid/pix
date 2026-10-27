@@ -94,7 +94,7 @@
               />
             </label>
           </div>
-          <div class="max-h-44 space-y-0.5 overflow-y-auto border-t border-sidebar-border/70 p-1">
+          <div class={["space-y-0.5 border-t border-sidebar-border/70 p-1", terminalCollapsed ? "" : "max-h-44 overflow-y-auto"]}>
             {#each visibleScripts as script (script.name)}
               {@const runtime = scriptRuntimes[script.name]}
               {@const running = runtime?.state === "running"}

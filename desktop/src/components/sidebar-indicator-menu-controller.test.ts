@@ -5,13 +5,14 @@ import { createSidebarIndicatorMenuController } from "./sidebar-indicator-menu-c
 class Element {
   isConnected = true;
   focus = vi.fn(() => { dom.activeElement = this; });
+  click = vi.fn();
   getBoundingClientRect = () => ({ right: 50, top: 20, width: 256, height: 120 });
   querySelectorAll = () => elements;
   contains = (element: unknown) => elements.includes(element as Element);
 }
 let elements: [Element, Element, Element];
 const dom = { activeElement: null as Element | null };
-function fixture() {
+function fixture(bounds?: () => { top: number; bottom: number }) {
   elements = [new Element(), new Element(), new Element()];
   const trigger = new Element();
   vi.stubGlobal("HTMLElement", Element);
@@ -20,7 +21,7 @@ function fixture() {
   vi.stubGlobal("document", dom);
   vi.stubGlobal("window", { innerWidth: 600, innerHeight: 400 });
   const items = [{ label: "Disabled", disabled: true }, { label: "AI review" }, { label: "Inspect error" }];
-  const controller = createSidebarIndicatorMenuController({ items: () => items });
+  const controller = createSidebarIndicatorMenuController({ bounds, items: () => items });
   const menu = new Element();
   controller.state.element = menu as unknown as HTMLDivElement;
   const event = { clientX: 599, clientY: 399, currentTarget: trigger, preventDefault: vi.fn(), stopPropagation: vi.fn() } as unknown as MouseEvent;
@@ -30,6 +31,36 @@ function fixture() {
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("sidebar indicator menu lifecycle", () => {
+  it.each(["git", "scripts", "tasks"] as const)("keeps %s menus between the header and status bar", async (tab) => {
+    const f = fixture(() => ({ top: 50, bottom: 370 }));
+    f.controller.open(f.event, tab);
+    await vi.waitFor(() => expect(elements[1].focus).toHaveBeenCalled());
+    expect(f.controller.state.maxHeight).toBe(304);
+    expect(f.controller.state.position?.top).toBe(242);
+    f.controller.dispose();
+  });
+  it("focuses the scripts filter, preserves editing keys, and activates the first enabled result", async () => {
+    const f = fixture();
+    const input = new Element();
+    f.controller.state.filterInput = input as unknown as HTMLInputElement;
+    f.controller.open(f.event, "scripts");
+    await vi.waitFor(() => expect(input.focus).toHaveBeenCalled());
+    f.key("End", input);
+    expect(elements[2].focus).not.toHaveBeenCalled();
+    f.key("ArrowDown", input);
+    expect(elements[1].focus).toHaveBeenCalled();
+    f.key("ArrowUp", elements[1]);
+    expect(input.focus).toHaveBeenCalledTimes(2);
+    f.key("Enter", input);
+    expect(elements[1].click).toHaveBeenCalledOnce();
+    expect(elements[0].click).not.toHaveBeenCalled();
+    f.key("d", elements[1]);
+    expect(f.controller.state.filter).toBe("d");
+    f.key("Escape", input);
+    expect(f.controller.state.filter).toBe("");
+    expect(f.trigger.focus).toHaveBeenCalled();
+  });
+
   it("focuses the first enabled item and clamps the popup to the viewport", async () => {
     const f = fixture();
     f.controller.open(f.event, "git");

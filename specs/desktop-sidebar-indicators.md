@@ -79,8 +79,16 @@ Decision: [0027 — Cause-specific sidebar quick actions](../docs/decisions/0027
   unrelated manual interactive shells (including busy `vim`/`ssh` shells) and
   idle reusable shells are not offered as stop targets. These actions use
   the existing workspace/eligibility/focus guards and are disabled while loading,
-  starting or stopping. The action label conveys running state; this menu adds no
-  status text, icon coloring or badge, and does not change Activity Bar icon policy.
+  starting or stopping. The menu has no heading or running-terminal
+  summary/navigation group; script error groups remain available. Run/Stop are
+  shown as Play/Square icons beside each command name, while the full Run/Stop
+  action name remains in its accessible label and title. This menu adds no
+  status text, icon coloring or badge, and does not change Activity Bar icons.
+  Its search filters saved commands by command name using fuzzy matching;
+  script error groups remain unfiltered. The query clears when the menu closes,
+  and the search input receives focus when the menu opens. Arrow keys navigate
+  visible enabled actions; Enter invokes the first visible enabled action from
+  the search input, and Escape restores focus to the Activity Bar trigger.
 - Stable reason/command IDs are independent of tooltip wording. Each cause is
   labelled in the menu; repeated reports of the same cause share one command group.
 - Search-index reasons offer **Inspect search indexes**; navigation never starts
@@ -125,6 +133,10 @@ Decision: [0027 — Cause-specific sidebar quick actions](../docs/decisions/0027
   ArrowUp/Down, Home/End and printable typeahead skip disabled items; Enter/Space
   activate the focused command. Escape restores icon focus, Tab dismisses and
   continues focus traversal, and outside pointer input dismisses the menu.
+  All Activity Bar context menus use the live sidebar bounds when opening: their
+  maximum height fits between the header and status bar with an 8px inset, and
+  their vertical position is clamped within those bounds. Oversized menus scroll;
+  there is no fixed menu height. Existing resize dismissal remains in effect.
 
 ## Signals by activity view
 

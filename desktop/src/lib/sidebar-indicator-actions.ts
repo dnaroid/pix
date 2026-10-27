@@ -14,6 +14,8 @@ export type SidebarIndicatorActionId = SidebarIndicatorReasonActionId | `scripts
 export interface SidebarIndicatorAction {
   readonly id: SidebarIndicatorActionId;
   readonly label: string;
+  readonly commandName?: string;
+  readonly icon?: "play" | "stop";
   readonly disabled?: boolean;
 }
 

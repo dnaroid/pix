@@ -510,6 +510,7 @@
       && registrySnapshot?.configured !== false && !registrySnapshot?.projectIssue,
   });
   const indicatorActions = createWorkspaceSidebarIndicatorActions({
+    bounds: () => sidebarElement?.getBoundingClientRect(),
     workspace: () => workspace,
     reasons: () => indicatorReasons,
     enabled: () => indicatorActionEnabled,

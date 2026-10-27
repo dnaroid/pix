@@ -5,8 +5,10 @@ import {
 } from "../lib/sidebar-indicator-actions";
 import type { SidebarIndicatorReasonMap, SidebarIndicatorTab } from "../lib/sidebar-indicator-types";
 import { createSidebarIndicatorMenuController } from "./sidebar-indicator-menu-controller.svelte";
+import { fuzzySearch } from "../lib/fuzzy";
 
 interface Options {
+  bounds?: () => { top: number; bottom: number } | undefined;
   workspace: () => string;
   reasons: () => SidebarIndicatorReasonMap;
   enabled: () => Partial<Record<SidebarIndicatorActionId, boolean>>;
@@ -23,13 +25,23 @@ export function createWorkspaceSidebarIndicatorActions(options: Options) {
   let popupWorkspace = "";
   let popupCommands = "";
   function groupsFor(tab: SidebarIndicatorTab): readonly SidebarIndicatorActionGroup[] {
-    return [...(options.extraGroups?.(tab) ?? []), ...sidebarIndicatorActionGroups(options.reasons()[tab], options.enabled(), options.gitRemotes?.())];
+    const reasons = options.reasons()[tab]?.filter((reason) => reason.id !== "scripts.running");
+    return [...(options.extraGroups?.(tab) ?? []), ...sidebarIndicatorActionGroups(reasons, options.enabled(), options.gitRemotes?.())];
   }
-  const menu = createSidebarIndicatorMenuController({ items: (tab) => groupsFor(tab).flatMap((group) => group.actions) });
+  function filteredGroups(tab: SidebarIndicatorTab, query: string): readonly SidebarIndicatorActionGroup[] {
+    const groups = groupsFor(tab);
+    if (tab !== "scripts" || !query.trim()) return groups;
+    return groups.map((group) => group.id !== "scripts.commands" ? group : {
+      ...group,
+      actions: fuzzySearch(group.actions.map((action) => ({ value: action, label: action.commandName ?? action.label })), query)
+        .map((match) => match.value),
+    });
+  }
+  const menu = createSidebarIndicatorMenuController({ bounds: options.bounds, items: (tab, query) => filteredGroups(tab, query).flatMap((group) => group.actions) });
 
   function groups(): readonly SidebarIndicatorActionGroup[] {
     const tab = menu.state.tab;
-    return tab && popupWorkspace === options.workspace() ? groupsFor(tab) : [];
+    return tab && popupWorkspace === options.workspace() ? filteredGroups(tab, menu.state.filter) : [];
   }
 
   function open(event: MouseEvent, tab: SidebarIndicatorTab): void {
@@ -45,7 +57,7 @@ export function createWorkspaceSidebarIndicatorActions(options: Options) {
 
   function reconcile(): void {
     // Removing/disabling a focused DOM item would otherwise strand keyboard focus.
-    if (menu.state.tab && commandSignature(groups()) !== popupCommands) menu.close(true);
+    if (menu.state.tab && (popupWorkspace !== options.workspace() || commandSignature(groupsFor(menu.state.tab)) !== popupCommands)) menu.close(true);
   }
 
   function run(id: SidebarIndicatorActionId): void {

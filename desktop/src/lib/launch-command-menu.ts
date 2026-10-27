@@ -25,24 +25,24 @@ export function launchCommandMenu(controller: Controller): {
   const actions: SidebarIndicatorAction[] = [];
   const handlers = new Map<SidebarIndicatorActionId, () => void>();
   const disabled = controller.loading || controller.startingScript !== null || controller.terminalActionId !== null;
-  const add = (id: SidebarIndicatorActionId, label: string, run: () => void) => {
-    actions.push({ id, label, disabled });
+  const add = (id: SidebarIndicatorActionId, commandName: string, icon: "play" | "stop", run: () => void) => {
+    actions.push({ id, label: `${icon === "play" ? "Run" : "Stop"} ${commandName}`, commandName, icon, disabled });
     handlers.set(id, run);
   };
   const launches = controller.launchRuntimes;
   const scripts = controller.scriptRuntimes;
   for (const command of controller.launchCommands) {
     if (launches[command.id]?.state === "running") continue;
-    add(`scripts.command.launch:${command.id}`, `Run ${command.name}`, () => { void controller.runLaunchCommand(command.id); });
+    add(`scripts.command.launch:${command.id}`, command.name, "play", () => { void controller.runLaunchCommand(command.id); });
   }
   for (const script of controller.snapshot?.scripts ?? []) {
     if (scripts[script.name]?.state === "running") continue;
-    add(`scripts.command.package:${script.name}`, `Run ${script.name} (package)`, () => { void controller.launchScript(script); });
+    add(`scripts.command.package:${script.name}`, `${script.name} (package)`, "play", () => { void controller.launchScript(script); });
   }
   for (const terminal of controller.terminals) {
     if (!isCommandTerminal(terminal) || !controller.isTerminalBusy(terminal)) continue;
     const name = controller.launchCommands.find((command) => command.id === terminal.launchCommandId)?.name ?? terminal.script;
-    add(`scripts.command.stop:${terminal.id}`, `Stop ${name}`, () => { void controller.stopProcess(terminal.id); });
+    add(`scripts.command.stop:${terminal.id}`, name, "stop", () => { void controller.stopProcess(terminal.id); });
   }
   return {
     groups: actions.length ? [{ id: "scripts.commands", reason: "Launch commands", actions }] : [],
