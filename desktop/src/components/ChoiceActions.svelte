@@ -68,6 +68,7 @@
         ]}>{#if isSelected}<Check class="size-3 text-primary" strokeWidth={2.4} />{/if}</span>
         <span class={[
           "min-w-0 flex-1 whitespace-pre-wrap [overflow-wrap:anywhere] text-foreground",
+          !enabled && "select-text",
           !enabled && !isSelected && "opacity-60",
         ]}>
           <span class="text-muted-foreground tabular-nums">{index + 1}.</span> {item.label}

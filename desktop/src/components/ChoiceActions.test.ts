@@ -31,6 +31,12 @@ describe("ChoiceActions quick-choice block", () => {
     expect(choiceSource).toContain("if (!enabled) return;");
   });
 
+  it("opts inactive option labels into native selection without enabling the checkbox", () => {
+    expect(choiceSource).toMatch(/<span class=\{\[\s*"min-w-0 flex-1[^\n]+\n\s*!enabled && "select-text"/);
+    expect(choiceSource).toContain("aria-disabled={!enabled || undefined}");
+    expect(choiceSource).toContain("if (!enabled) return;");
+  });
+
   it("sends the formatted selection and surfaces submission errors", () => {
     expect(choiceSource).toContain("await onSubmit(choiceActionsPrompt(actions.submitLabel, actions.items, state.selected));");
     expect(choiceSource).toContain("state.submitted = true;");

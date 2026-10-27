@@ -163,6 +163,8 @@ title or other non-checklist body content makes the block invalid, so it stays
 ordinary escaped Markdown/code. Only a block
 in the latest assistant message is interactive, and only when no prompt is
 running and no later user message exists; older choices are read-only. An
+inactive assistant checklist still allows native text selection and copy of
+option labels, without toggling or submitting the choice. An
 incomplete or malformed block remains ordinary escaped Markdown/code.
 Submitting sends the selected steps as a normal user message, formatted as
 `<button label>:\n1. item\n3. item` (numbering follows original checklist
