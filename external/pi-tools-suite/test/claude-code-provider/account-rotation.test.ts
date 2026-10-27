@@ -60,6 +60,17 @@ async function eventsOf(stream: ReturnType<ReturnType<typeof createRotatingClaud
 }
 
 describe("Claude subscription account rotation", () => {
+  test("quota warnings are opt-in and require a boolean", () => {
+    expect(parseClaudeAccountRotationConfig(undefined).showRateLimitWarnings === true).toBe(false);
+    expect(parseClaudeAccountRotationConfig({}).showRateLimitWarnings === true).toBe(false);
+    for (const value of [false, true]) {
+      expect(parseClaudeAccountRotationConfig({ showRateLimitWarnings: value }).showRateLimitWarnings).toBe(value);
+      expect(parseClaudeAccountRotationConfig({ accounts, showRateLimitWarnings: value }).showRateLimitWarnings).toBe(value);
+    }
+    for (const value of ["true", 1, null]) {
+      expect(() => parseClaudeAccountRotationConfig({ showRateLimitWarnings: value })).toThrow(/showRateLimitWarnings/);
+    }
+  });
   test("parses only distinct named absolute or home-relative OAuth directories", () => {
     const value = parseClaudeAccountRotationConfig({ autoRotate: true, accounts: [
       { name: "Personal", configDir: "~/.claude-a" },

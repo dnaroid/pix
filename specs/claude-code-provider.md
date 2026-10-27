@@ -75,6 +75,16 @@ Example (each directory must first be authenticated with Claude Code CLI):
 }
 ```
 
+In Desktop Settings → Tools Suite → Claude Accounts, the **Claude quota
+warnings** switch controls whether the provider displays notices for Claude's
+`allowed_warning` rate-limit events. Its user-only setting is
+`claudeCodeProvider.showRateLimitWarnings` in
+`~/.config/pi/pi-tools-suite.jsonc`; it defaults to `false`. The provider reads
+this preference during initialization, so reload/restart sessions to apply a
+change. Disabling these notices suppresses only the `allowed_warning` UI
+notifications: structured quota telemetry, rejected-quota notifications/errors
+and account-rotation warnings are unchanged.
+
 When disabled or absent, Claude Code retains its original single-profile login
 behavior. With rotation enabled, startup checks the first configured profile,
 not the implicit default `~/.claude`. Per-request model subprocesses receive

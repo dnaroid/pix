@@ -237,6 +237,9 @@
     <p class="mt-0.5 text-xs leading-4 text-muted-foreground">Manage separate Claude Code OAuth profiles. On an explicit subscription limit rejection, retry the next eligible profile at most once, without repeating output or tool calls.</p>
   </div>
   <div class="border-y border-sidebar-border/70 bg-panel">
+    <SettingsFieldRow label="Claude quota warnings" description="Show warnings when approaching Claude usage limits. Off by default; quota usage and actual limit errors remain visible. Reload or restart sessions after changing this setting." explicit={has(["claudeCodeProvider", "showRateLimitWarnings"])} defaultLabel={defaultLabel(["claudeCodeProvider", "showRateLimitWarnings"])} onReset={() => reset(["claudeCodeProvider", "showRateLimitWarnings"])}>
+      <SettingsSwitch value={bool(["claudeCodeProvider", "showRateLimitWarnings"])} onChange={(value) => set(["claudeCodeProvider", "showRateLimitWarnings"], value)} />
+    </SettingsFieldRow>
     <SettingsFieldRow label="Automatic Claude account rotation" description="Opt-in. Switch only on an explicit five-hour or seven-day subscription rejection; do not rotate for network, auth or other errors. Profiles cool down until their quota reset." explicit={has(["claudeCodeProvider", "autoRotate"])} defaultLabel={defaultLabel(["claudeCodeProvider", "autoRotate"])} onReset={() => reset(["claudeCodeProvider", "autoRotate"])}>
       <SettingsSwitch value={bool(["claudeCodeProvider", "autoRotate"])} disabled={claudeAccountRows(json(["claudeCodeProvider", "accounts"])).length < 2 && !bool(["claudeCodeProvider", "autoRotate"])} onChange={(value) => set(["claudeCodeProvider", "autoRotate"], value)} />
       {#if claudeAccountRows(json(["claudeCodeProvider", "accounts"])).length < 2}

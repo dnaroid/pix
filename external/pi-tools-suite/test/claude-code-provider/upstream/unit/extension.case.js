@@ -51,7 +51,15 @@ function fakePi(initialTools = []) {
 
 // Sessions are registered process-wide, so one test leaving a session open would
 // silently change how the next test's requests resolve.
-test.beforeEach(() => {
+let originalHome;
+let testHome;
+test.beforeEach(async () => {
+    originalHome = process.env.HOME;
+    testHome = await mkdtemp(join(tmpdir(), "claude-warning-settings-"));
+    process.env.HOME = testHome;
+    await mkdir(join(testHome, ".config", "pi"), { recursive: true });
+    // Existing display/dedup tests explicitly opt in; production defaults off.
+    await writeFile(join(testHome, ".config", "pi", "pi-tools-suite.jsonc"), JSON.stringify({ claudeCodeProvider: { showRateLimitWarnings: true } }));
     assert.deepEqual([...sessionRegistry().keys()], []);
     // The Pi-AI registry is process-wide too, and an instance that never starts a
     // session keeps its registration, which is correct but not a clean slate.
@@ -59,6 +67,11 @@ test.beforeEach(() => {
 });
 
 let sessionCounter = 0;
+test.afterEach(async () => {
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+    await rm(testHome, { recursive: true, force: true });
+});
 
 // Pi identifies the session a request belongs to, so every started session needs
 // its own id; the provider keys its per-session state on it.
@@ -286,7 +299,9 @@ test("publishes unconstrained per-window consumption as quota telemetry without 
     }
 });
 
-test("publishes owned structured quota before a rejected stream and independently of warning dedup", async () => {
+for (const showRateLimitWarnings of [undefined, false, true]) {
+test(`publishes owned quota and rejection with showRateLimitWarnings=${showRateLimitWarnings}`, async () => {
+    await writeFile(join(testHome, ".config", "pi", "pi-tools-suite.jsonc"), JSON.stringify({ claudeCodeProvider: { showRateLimitWarnings } }));
     const warning = { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.99, resetsAt: 1_800_000_000 };
     const { directory, executable } = await createFakeClaude("Rate limit reached", { resultError: true, rateLimitInfo: [warning, warning,
         { status: "rejected", rateLimitType: "five_hour", resetsAt: 1_800_000_000 }] });
@@ -314,7 +329,8 @@ test("publishes owned structured quota before a rejected stream and independentl
         assert.equal(result.stopReason, "error");
         assert.equal(events.length, 3, "UI text dedup must not suppress telemetry");
         assert.equal(widgets.length, 3);
-        assert.equal(notices.filter(({ message }) => message.includes("rate limit warning")).length, 1);
+        assert.equal(notices.filter(({ message }) => message.includes("rate limit warning")).length, showRateLimitWarnings === true ? 1 : 0);
+        assert.equal(notices.filter(({ message }) => message.includes("Claude rate limited")).length, 1);
         for (let i = 0; i < events.length; i++) {
             assert.equal(events[i].name, "pix:claude-code:rate-limit");
             assert.equal(events[i].data.version, 1);
@@ -346,6 +362,8 @@ test("publishes owned structured quota before a rejected stream and independentl
         await rm(directory, { recursive: true, force: true });
     }
 });
+
+}
 
 test("does not report a disabled overage as a rate limit", async () => {
     // The steady state on a subscription without usage credits: the plan window

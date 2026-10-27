@@ -38,7 +38,9 @@ export default async function piClaudeCodeProvider(pi: ExtensionAPI): Promise<vo
   registerDoctorCommand(pi, runtimeCleanup);
 
   let installation: ClaudeInstallation;
+  let showRateLimitWarnings = false;
   try {
+    showRateLimitWarnings = loadClaudeAccountRotationConfig().showRateLimitWarnings === true;
     installation = await inspectConfiguredClaudeInstallation();
   } catch (error) {
     // The suite enables this optional adapter by default, including on clean
@@ -134,8 +136,8 @@ export default async function piClaudeCodeProvider(pi: ExtensionAPI): Promise<vo
     };
     const rateLimitNotify: RateLimitNoticeSink = (notice, modelRef) => {
       if (activeRateLimitNotify !== rateLimitNotify) return;
-      // Publish structured quota telemetry even when the visible warning is
-      // deduplicated. Only subscription windows describe the quota popup.
+      // Publish quota telemetry even when warnings are disabled or deduplicated.
+      // Only subscription windows describe the quota popup.
       const route = modelRef;
       if (route && (notice.rateLimitType === "five_hour" || notice.rateLimitType === "seven_day")
           && notice.resetsAt !== undefined
@@ -144,7 +146,7 @@ export default async function piClaudeCodeProvider(pi: ExtensionAPI): Promise<vo
           rateLimitType: notice.rateLimitType, ...(notice.utilization === undefined ? {} : { utilization: notice.utilization }),
           resetsAt: notice.resetsAt, observedAt: Date.now() });
       }
-      notifyRateLimit(notice);
+      if (notice.status === "rejected" || showRateLimitWarnings) notifyRateLimit(notice);
     };
     activeRateLimitNotify = rateLimitNotify;
     // Unconstrained consumption arrives on every request; it updates the quota

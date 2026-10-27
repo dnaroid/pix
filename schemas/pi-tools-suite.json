@@ -1320,6 +1320,11 @@
     "claudeCodeProvider": {
       "type": "object",
       "properties": {
+        "showRateLimitWarnings": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show Claude Code approaching-quota warnings. Disabled by default; quota usage and actual rejection errors remain visible. Reload or restart sessions after changing this setting."
+        },
         "autoRotate": {
           "type": "boolean",
           "default": false,

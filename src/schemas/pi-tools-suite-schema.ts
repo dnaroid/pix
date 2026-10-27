@@ -300,6 +300,7 @@ const SearchConfig = Type.Object({
 }, { description: "Global search configuration in ~/.config/pi/pi-tools-suite.jsonc." });
 
 const ClaudeCodeProviderConfig = Type.Object({
+	showRateLimitWarnings: Type.Optional(Type.Boolean({ default: false, description: "Show Claude Code approaching-quota warnings. Disabled by default; quota usage and actual rejection errors remain visible. Reload or restart sessions after changing this setting." })),
 	autoRotate: Type.Optional(Type.Boolean({ default: false, description: "Automatically use another Claude Code OAuth profile after a structured subscription rate-limit rejection. Each profile is tried at most once per request; disabled by default." })),
 	selectedAccount: Type.Optional(Type.String({ minLength: 1, maxLength: 64, description: "Preferred OAuth profile name from accounts. Manual selection applies to the next Claude Code model request, even when automatic rotation is off. If the profile is removed, falls back to the default." })),
 	rotationDelaySeconds: Type.Optional(Type.Integer({ default: 60, minimum: 0, maximum: 300, description: "Non-blocking pause (seconds) before trying another OAuth profile after an explicit subscription quota rejection. Defaults to 60; 0 skips the pause. Cancel stops waiting; the pause counts toward the request timeout." })),

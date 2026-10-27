@@ -11,6 +11,7 @@ export interface ClaudeAccount {
 
 export interface ClaudeAccountRotationConfig {
   enabled: boolean;
+  showRateLimitWarnings?: boolean;
   accounts: ClaudeAccount[];
   /** Explicit preferred profile; unlike rotation, works with autoRotate off. */
   selectedAccount?: string;
@@ -60,6 +61,10 @@ export function parseClaudeAccountRotationConfig(raw: unknown, home = homedir())
   if (raw === undefined) return { enabled: false, accounts: [] };
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("claudeCodeProvider must be an object");
   const input = raw as Record<string, unknown>;
+  if (input.showRateLimitWarnings !== undefined && typeof input.showRateLimitWarnings !== "boolean") {
+    throw new Error("claudeCodeProvider.showRateLimitWarnings must be a boolean");
+  }
+  const warningPreference = input.showRateLimitWarnings === undefined ? {} : { showRateLimitWarnings: input.showRateLimitWarnings };
   const enabled = input.autoRotate === true;
   if (input.autoRotate !== undefined && typeof input.autoRotate !== "boolean") {
     throw new Error("claudeCodeProvider.autoRotate must be a boolean");
@@ -75,7 +80,7 @@ export function parseClaudeAccountRotationConfig(raw: unknown, home = homedir())
   }
   if (input.accounts === undefined) {
     if (enabled) throw new Error("claudeCodeProvider.accounts needs at least two OAuth profiles");
-    return { enabled, accounts: [], rotationDelaySeconds };
+    return { enabled, accounts: [], rotationDelaySeconds, ...warningPreference };
   }
   if (!Array.isArray(input.accounts) || input.accounts.length > MAX_ACCOUNTS) {
     throw new Error(`claudeCodeProvider.accounts must be an array of at most ${MAX_ACCOUNTS} profiles`);
@@ -103,7 +108,7 @@ export function parseClaudeAccountRotationConfig(raw: unknown, home = homedir())
   const preferred = typeof selectedAccount === "string"
     ? accounts.find((account) => account.name === selectedAccount.trim())?.name
     : undefined;
-  return { enabled, accounts, rotationDelaySeconds, ...(preferred ? { selectedAccount: preferred } : {}) };
+  return { enabled, accounts, rotationDelaySeconds, ...warningPreference, ...(preferred ? { selectedAccount: preferred } : {}) };
 }
 
 /** Process-wide quota state. A request visits each profile at most once; no recursive retries. */
