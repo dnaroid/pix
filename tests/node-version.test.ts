@@ -46,7 +46,9 @@ describe("Node version configuration", () => {
 			assert.equal(readJson(`${prefix}package.json`).engines.node, supportedRange, prefix || "root");
 			assert.equal(readJson(`${prefix}package-lock.json`).packages[""].engines.node, supportedRange, `${prefix}lockfile`);
 		}
-		assert.ok(readText("README.md").includes(`**Node.js \`${supportedRange}\`**`));
+		for (const path of ["README.md", "wiki/development/guide.md"]) {
+			assert.ok(readText(path).includes(`Node.js \`${supportedRange}\``), path);
+		}
 	});
 
 	it("uses the selected PATH runtime without a mise configuration or script wrappers", () => {

@@ -11121,7 +11121,10 @@ mod tests {
             Some(&initial.content),
         )
         .expect("save a draft based on the current document");
-        assert_eq!(updated.content, "# Game rules\n\nThree action points per turn.\n");
+        assert_eq!(
+            updated.content,
+            "# Game rules\n\nThree action points per turn.\n"
+        );
         assert_eq!(
             fs::read_to_string(&document).expect("read saved document"),
             updated.content
@@ -11135,12 +11138,9 @@ mod tests {
         let document = workspace.join("notes.md");
         fs::write(&document, "# Existing notes\n").expect("write existing document");
 
-        let saved = write_project_file_from(
-            &workspace,
-            Path::new("notes.md"),
-            "# Replacement notes\n",
-        )
-        .expect("preserve writes without expected content");
+        let saved =
+            write_project_file_from(&workspace, Path::new("notes.md"), "# Replacement notes\n")
+                .expect("preserve writes without expected content");
 
         assert_eq!(saved.content, "# Replacement notes\n");
         assert_eq!(

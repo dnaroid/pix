@@ -83,7 +83,10 @@ pub(crate) async fn write_project_entry_clipboard(
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn prepare_copy(workspace: &Path, paths: Vec<String>) -> Result<(String, Vec<String>), String> {
+pub(crate) fn prepare_copy(
+    workspace: &Path,
+    paths: Vec<String>,
+) -> Result<(String, Vec<String>), String> {
     use std::path::Component;
     if paths.is_empty() || paths.len() > 1000 {
         return Err("Select between 1 and 1000 clipboard entries.".into());
