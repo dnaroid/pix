@@ -362,7 +362,7 @@ describe("desktop visual regressions", () => {
     expect(composerSource).not.toContain("composer-working");
     expect(composerSource).not.toContain("border-pulse");
     // Ordinary input focus stays native: the text-entry surface itself is
-    // ring-free per DESIGN.md, while keyboard focus remains visible on the
+    // ring-free per wiki/desktop/design.md, while keyboard focus remains visible on the
     // composer's interactive controls.
     expect(composerSource).not.toContain("focus-within:");
     expect(composerSource).toContain("focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring");

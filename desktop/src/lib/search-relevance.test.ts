@@ -94,11 +94,11 @@ describe("local search relevance", () => {
     const hits: SearchHit[] = [
       { kind: "settings", id: "settings:auto-by-default", fieldId: auto.id, section: auto.section, title: auto.label, snippet: auto.description, score: 0.9 },
       { kind: "commits", id: "commits:" + "a".repeat(40), hash: "a".repeat(40), title: "Add auto thinking", snippet: "Developer", score: 0.9, semantic: true, commit: { hash: "a".repeat(40), shortHash: "aaaaaaa", subject: "Add auto thinking", author: "Developer", date: "2026-01-01" } },
-      { kind: "knowledge", id: "knowledge:specs/desktop-autocomplete.md:3-5", path: "specs/desktop-autocomplete.md", startLine: 3, endLine: 5, title: "specs/desktop-autocomplete.md", snippet: "Lines 3–5", score: 0.8, content: "Inline prompt completion architecture and request handling" },
+      { kind: "knowledge", id: "knowledge:wiki/desktop/conversations/desktop-autocomplete.md:3-5", path: "wiki/desktop/conversations/desktop-autocomplete.md", startLine: 3, endLine: 5, title: "wiki/desktop/conversations/desktop-autocomplete.md", snippet: "Lines 3–5", score: 0.8, content: "Inline prompt completion architecture and request handling" },
       { kind: "settings", id: "settings:autocomplete-model", fieldId: autocomplete.id, section: autocomplete.section, title: autocomplete.label, snippet: autocomplete.description, score: 0.3 },
     ];
     const ranked = rankSearchHits(hits, "как работает авто-пополнение?", [auto, autocomplete], true);
-    expect(ranked.slice(0, 2).map(hit => hit.id).sort()).toEqual(["knowledge:specs/desktop-autocomplete.md:3-5", "settings:autocomplete-model"].sort());
+    expect(ranked.slice(0, 2).map(hit => hit.id).sort()).toEqual(["knowledge:wiki/desktop/conversations/desktop-autocomplete.md:3-5", "settings:autocomplete-model"].sort());
     expect(ranked.findIndex(hit => hit.id === "settings:auto-by-default")).toBeGreaterThan(1);
     expect(ranked.findIndex(hit => hit.kind === "commits")).toBeGreaterThan(1);
   });

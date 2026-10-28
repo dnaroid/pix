@@ -5,6 +5,7 @@ import type { SearchIndexViewState } from "./search-index-controller";
 
 export type SidebarIndicatorTab =
   | "project"
+  | "wiki"
   | "tasks"
   | "git"
   | "registry"

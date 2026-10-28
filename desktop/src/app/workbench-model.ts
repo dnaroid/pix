@@ -90,7 +90,7 @@ export function buildSessionWorkbenchTabs(options: {
 }
 
 type PreviewLike =
-  | { kind: "file"; file: { path: string } }
+  | { kind: "file"; file: { path: string; virtualWikiDirectory?: string } }
   | { kind: "attachment"; attachment: { name: string; path?: string } };
 
 type GitDiffLike = {
@@ -125,15 +125,17 @@ export function buildDesktopWorkbenchTabs(options: {
   const auxiliary: WorkbenchAuxiliaryPlacement[] = [];
   if (options.preview) {
     const previewTitle = options.preview.kind === "file"
-      ? options.preview.file.path
+      ? options.preview.file.virtualWikiDirectory ?? options.preview.file.path
       : options.preview.attachment.name;
     const previewTab: WorkbenchPreviewTab = {
       id: "preview",
-      label: workbenchTabLabel(previewTitle),
-      title: previewTitle,
+      label: options.preview.kind === "file" && options.preview.file.virtualWikiDirectory
+        ? `${workbenchTabLabel(previewTitle)} · Contents` : workbenchTabLabel(previewTitle),
+      title: options.preview.kind === "file" && options.preview.file.virtualWikiDirectory
+        ? `${previewTitle}/ · Contents` : previewTitle,
       panelId: "workbench-panel-preview",
       kind: "preview",
-      filePath: options.preview.kind === "file" ? options.preview.file.path : options.preview.attachment.path,
+      filePath: options.preview.kind === "file" ? previewTitle : options.preview.attachment.path,
       closable: true,
       dirty: options.previewDirty,
     };

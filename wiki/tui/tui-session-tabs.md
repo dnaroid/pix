@@ -1,0 +1,187 @@
+---
+kind: spec
+status: active
+---
+
+# TUI session tabs and UI-only draft conversations
+
+## Purpose
+
+Pix TUI uses the same lazy conversation lifecycle as Pix Desktop: opening a
+new tab is a UI operation, while creating a Pi session is deferred until the
+user actually sends work to the agent.
+
+## Behavior
+
+- `New Tab` opens or reactivates one **UI-only draft tab**. The draft has a
+  normal tab identity for focus/input ownership, but it has no persisted
+  session path and owns no Pi runtime.
+- Opening the draft must not call the new-session runtime factory, create a Pi
+  session file, or add anything to the persisted TUI tab snapshot.
+- When Pix starts without an explicit session and without a restorable real
+  tab, startup enters the same UI-only draft state without creating a Pi
+  runtime.
+- An untouched draft renders the saved-session selector as the draft tab's own
+  conversation surface, with the title **Open a conversation**. It is not a
+  global under-tabs popup layered over the previous real tab. The selector uses
+  the normal TUI search, Up/Down navigation, Enter activation, and Escape
+  dismissal behavior.
+- The first row is **New session** and is selected by default. Enter on this row
+  only dismisses the selector and returns terminal input to the composer; it
+  does not create a Pi runtime or persisted session. The real session is still
+  deferred until the first normal prompt submit.
+- Saved-session discovery follows that synthetic row and excludes every saved
+  session already represented by a real open TUI tab.
+- Typing, pasting, adding attachments, path insertion, or voice input marks the
+  draft as edited and dismisses the selector, but does not create a Pi session.
+- The status line exposes the normal model + thinking selector while the active
+  tab is still a UI-only draft. Pix may load the locally available model
+  catalogue for that UI, but selecting a model/thinking level must not allocate
+  an `AgentSession`, create a session file, or otherwise materialize the draft.
+  The staged draft selection remains attached to that draft while the user
+  switches between tabs.
+- The same draft status line keeps the workspace/project name and current Git
+  branch visible and queries provider quota for the staged model/thinking pair
+  through the shared model-usage controller. Draft quota refresh, including a
+  click-forced refresh, remains sessionless; context/DCP usage stays absent until
+  the draft is materialized because there is no runtime context yet.
+- A normal first prompt submission materializes the draft in place: Pix creates
+  the new runtime using any staged draft model/thinking selection, activates/
+  binds it, converts the same tab id from draft to real-session ownership, and
+  only then submits the prompt. If the user did not stage a selection, the
+  normal configured default/fallback model resolution remains unchanged.
+- Resource slash commands that require a Pi session materialize the draft
+  before execution. Purely local slash commands and shell input do not create a
+  Pi session merely because the draft exists.
+- `/default-model` and `/default-thinking` are purely local, sessionless
+  commands: they persist defaults for future sessions without allocating an
+  `AgentSession` or materializing a UI-only draft. `/default-thinking` uses the
+  configured default model and only falls back to the active session model when
+  a runtime exists.
+- Choosing a saved conversation from the draft selector loads that persisted
+  session directly into the same draft tab. Pix does not create or tear down a
+  throwaway new session.
+- Closing a draft tab is a UI-only close. Closing the last real persisted tab
+  in normal session mode leaves a draft tab rather than eagerly starting
+  another Pi session.
+- Closing an active draft while another real tab exists closes the draft-owned
+  session selector synchronously before restoring the real tab. The selector
+  must not survive as a resume popup on the restored tab.
+- Returning from a draft restores the cached real-tab conversation immediately
+  when available. If a required history refresh is cancelled or fails, Pix
+  falls back to that cached snapshot instead of leaving the restored tab with
+  an empty conversation surface.
+- Persisted conversation **rendering** may stay tail-lazy, but that tail is not
+  a valid provider-context root. When older session entries exist,
+  `buildSessionContext()` / `buildContextEntries()` reconstruct the complete
+  active branch with the SDK's compaction semantics while the UI-facing history
+  reader remains lazy. A user message that happens to be the first user entry in
+  the loaded tail must never be reparented into a synthetic model-context root;
+  after an error/restart the agent therefore retains the pre-error objective and
+  work even when those entries are older than the initial display tail.
+- The sole UI-only draft tab is the minimum conversation surface and cannot be
+  closed. Its close glyph/target is omitted, and close commands against it are
+  ignored until another real tab exists.
+- `--no-session` keeps its existing in-memory session lifecycle and does not opt
+  into the persisted-session draft-tab behavior.
+
+## Persistence and parity
+
+- Only real tabs with persisted `sessionPath` values are serialized to the TUI
+  tabs snapshot.
+- Saving a workspace that currently contains only a UI-only draft writes an
+  empty real-tab snapshot so an older persisted tab set cannot reappear on the
+  next launch.
+- Desktop/TUI ACP tab metadata therefore continues to contain only real Pi
+  sessions. A TUI draft never appears in Desktop `session/list` results or
+  restored-tab metadata.
+- Restored real tabs remain ordered and selected by the existing snapshot
+  rules; the draft is a transient TUI surface layered on top of that
+  real-session membership model.
+- On startup, once the persisted tab snapshot has been read, Pix publishes the
+  saved tab strip immediately instead of waiting for the active Pi runtime to
+  finish loading. The selected saved tab acts as startup chrome while its
+  runtime/session history continues initializing.
+- Building the sessionless draft model catalogue is not part of the restored
+  real-session startup critical path. Pix loads that catalogue lazily only
+  after a UI-only draft tab becomes active, and the draft is rendered before
+  that background discovery starts. This keeps extension-backed draft model
+  selection available without delaying saved tab visibility.
+
+## Concurrency and ownership invariants
+
+- Draft creation, materialization, saved-session replacement, switching, and
+  closing run through the serialized tab lifecycle mutation queue.
+- Draft activation is atomic with respect to rendering: the draft is marked as
+  the pending/active tab before old-runtime UI cleanup starts, and the old
+  visible runtime is detached before cleanup callbacks that may render. A
+  synchronous render during teardown therefore cannot reactivate the previous
+  real tab while the draft selector is opening.
+- First-prompt materialization marks the draft pending before awaiting runtime
+  creation so repeated submits cannot create duplicate sessions.
+- Async materialization and saved-session loads may mutate visible state only
+  while the captured lifecycle generation and draft tab id still own the
+  operation. Stale runtimes are disposed instead of being adopted by a newer
+  tab, and a failed draft-to-real-tab switch restores the real tab's prior
+  activity indicator.
+- Input and command scopes include the active tab id, so late selector/session
+  list or command continuations from a displaced draft cannot modify the newly
+  active tab.
+- Switching away from a real tab to a draft detaches the visible runtime
+  subscription/UI while retaining the real runtime under its owning background
+  tab. Switching back restores that runtime or lazily reloads it by session
+  path.
+- Late runtime-scoped UI signals from the displaced real tab, including
+  async-subagent live-state updates, are ignored while the draft owns the
+  conversation surface. A draft must never render a subagent panel belonging
+  to the detached real session.
+
+## Related files
+
+- `src/app/session/tabs-controller.ts`
+- `src/app/session/session-lifecycle-controller.ts`
+- `src/app/session/lazy-session-manager.ts`
+- `src/app/runtime.ts`
+- `src/app/screen/status-controller.ts`
+- `src/app/rendering/status-line-renderer.ts`
+- `src/app/input/input-action-controller.ts`
+- `src/app/popup/popup-menu-controller.ts`
+- `src/app/popup/menu-items-controller.ts`
+- `src/app/popup/popup-action-controller.ts`
+- `src/app/commands/command-navigation-actions.ts`
+- `src/app/commands/command-host.ts`
+- `src/app/app.ts`
+- `tests/tabs-controller.test.ts`
+- `tests/lazy-session-manager.test.ts`
+- `tests/input-action-controller.test.ts`
+- `tests/menu-items-controller.test.ts`
+- `tests/command-navigation-actions.test.ts`
+- `tests/popup-menu-controller.test.ts`
+- `tests/popup-action-controller.test.ts`
+- `wiki/desktop/conversations/desktop-session-parity.md`
+
+## Verification
+
+- Tab-controller tests cover UI-only New Tab, startup without a runtime, direct
+  saved-session replacement, lazy first-prompt materialization, and failed
+  materialization and draft-to-real switch rollback.
+- Input-action tests cover materializing the draft only when a normal first
+  prompt is actually submitted.
+- Menu/popup tests cover excluding already-open sessions, omitting the **new**
+  row, the **Open a conversation** selector label, direct replacement of the
+  draft tab, and applying a draft model choice without materializing a runtime.
+- Status/model-usage tests cover rendering/click-targeting draft model and
+  thinking values, retaining workspace/branch chrome, and loading/refreshing
+  staged-model quota before a runtime session exists.
+- Command-navigation tests cover synchronizing the draft selector query while a
+  shared saved-session load is already in progress.
+- `npm run test:inner`
+- `npx tsc --noEmit`
+
+## Implementation
+
+- `src/app/session/tabs-controller.ts`
+
+## Tests
+
+- `tests/tabs-controller.test.ts`

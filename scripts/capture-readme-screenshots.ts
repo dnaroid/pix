@@ -8,7 +8,7 @@ import { MockModel } from "../tests/helpers/mock-model.js";
 
 const exec = promisify(execFile);
 const projectRoot = resolve(import.meta.dirname, "..");
-const outputDir = join(projectRoot, "assets", "screenshots");
+const outputDir = join(projectRoot, "wiki", "assets", "screenshots");
 const socketName = `pix-readme-${process.pid}`;
 const sessionName = "pix-readme";
 const rows = 26;

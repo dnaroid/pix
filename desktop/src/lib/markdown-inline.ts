@@ -121,7 +121,7 @@ export function renderInline(
           ? renderInline(link.label, depth + 1, false, context)
           : escapeHtml(link.label);
         const homePath = normalizeHomeFileDestination(link.destination);
-        const projectPath = homePath ? undefined : normalizeProjectFileDestination(link.destination);
+        const projectPath = homePath ? undefined : normalizeProjectFileDestination(link.destination, context.documentPath);
         const localPath = normalizeLocalFileDestination(link.destination);
         const projectKind = projectPath ? mediaKindForPath(projectPath) : undefined;
         const localKind = localPath ? mediaKindForPath(localPath) : undefined;

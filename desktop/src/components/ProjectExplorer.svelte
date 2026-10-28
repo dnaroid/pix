@@ -4,7 +4,8 @@
   import ProjectExplorerNameInput from "./ProjectExplorerNameInput.svelte";
   import { createProjectExplorerNameEditor } from "./project-explorer-name-editor.svelte";
   import { invoke, isTauri } from "@tauri-apps/api/core";
-  import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
+  import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+  import { readSystemProjectClipboard, writeSystemProjectClipboard } from "../lib/system-project-clipboard";
   import { confirmDesktopDeletion } from "../lib/confirm-deletion";
   import {
     canPasteProjectEntry,
@@ -55,6 +56,8 @@
   import type { ProjectFileLineRange, ProjectFilePreview } from "../lib/project-files";
   import { projectTreeAbsolutePath, projectTreeRootEntry, type ProjectSearchMatch, type ProjectTreeEntry } from "../lib/project-tree";
   import { createProjectExplorerDragController } from "./project-explorer-drag-controller.svelte";
+  import { installProjectExplorerNativeDrop } from "./project-explorer-native-drop";
+  import { startProjectFileDrag } from "../lib/desktop-file-drop";
   import { createProjectExplorerMenuController } from "./project-explorer-menu-controller.svelte";
   import { createProjectExplorerTreeController } from "./project-explorer-tree-controller.svelte";
   import { createProjectExplorerOperations, type ProjectOperation, type ProjectOperationClaim } from "./project-explorer-operations.svelte";
@@ -85,6 +88,8 @@
   } = $props();
 
   let treeRoot = $state<HTMLDivElement | null>(null);
+  let filePanel: HTMLElement;
+  let nativeDropDestination = $state<string | null>(null);
   const operations = createProjectExplorerOperations();
   let operationError = $state<string | null>(null);
   let canIgnoreEntry = $state(false);
@@ -95,7 +100,7 @@
   let searchLoading = $state(false);
   let searchError = $state<string | null>(null);
   let entryClipboard = $state<ProjectEntryClipboard | null>(null);
-  const clipboardReader = createProjectEntryClipboardReader(readText);
+  const clipboardReader = createProjectEntryClipboardReader(readSystemProjectClipboard, (error) => diagnostics.report(error, "project-explorer:clipboard-failed"));
   let operationGeneration = 0;
   let searchGeneration = 0;
   let expansionSaveTail: Promise<void> = Promise.resolve();
@@ -109,6 +114,20 @@
       const paths = entries.filter((entry) => parentDirectory(entry.path) !== destination).map((entry) => entry.path);
       if (paths.length) void runMutation({ type: "move", paths, destination }, "Move");
     },
+    native: isTauri() ? async (entries, signal) => {
+      const requestWorkspace = workspace;
+      const generation = operationGeneration;
+      try {
+        await startProjectFileDrag(requestWorkspace, entries.map((entry) => entry.path), signal);
+        if (workspace === requestWorkspace && generation === operationGeneration) {
+          await treeController.refreshVisibleDirectories();
+          void gitRefresh.request();
+        }
+      } catch (error) {
+        diagnostics.report(error, "project-explorer:drag-failed");
+        if (workspace === requestWorkspace && generation === operationGeneration) operationError = errorMessage(error);
+      }
+    } : undefined,
   });
   const treeController = createProjectExplorerTreeController({
     workspace: () => workspace,
@@ -155,6 +174,14 @@
     await treeController.revealPath(path);
   }
   onMount(() => createProjectFilesRefresh(() => treeController.refreshVisibleDirectories()).dispose);
+  onMount(() => installProjectExplorerNativeDrop(filePanel, {
+    workspace: () => workspace,
+    generation: () => operationGeneration,
+    hover: (destination) => { nativeDropDestination = destination; },
+    mutate: runMutation,
+    report: (error) => diagnostics.report(error, "project-explorer:drop-failed"),
+    error: (message) => { operationError = message; },
+  }));
   const rootEntries = $derived(treeController.rootEntries);
   const rows = $derived(treeController.rows);
   const gitDecorations = $derived(projectGitDecorations(gitSnapshot?.changes));
@@ -251,6 +278,7 @@
     operations.invalidate();
     history.invalidate();
     operationError = null;
+    nativeDropDestination = null;
     searchGeneration += 1;
     searchQuery = "";
     searchResults = [];
@@ -576,7 +604,7 @@
     if (!operation) return;
     const text = encodeProjectEntryClipboard(requestWorkspace, entry, treeController.selectedEntries(entry), cut ? "move" : "copy");
     try {
-      await writeText(text);
+      await writeSystemProjectClipboard(text);
       if (!operations.isCurrent(operation) || workspace !== requestWorkspace) return;
       entryClipboard = decodeProjectEntryClipboard(text);
       clearOperationError();
@@ -644,7 +672,7 @@
     const generation = operationGeneration;
     try {
       // Read again at activation: another app/instance may have replaced the clipboard.
-      const copied = decodeProjectEntryClipboard(await readText());
+      const copied = decodeProjectEntryClipboard(await readSystemProjectClipboard());
       if (generation !== operationGeneration || workspace !== requestWorkspace) return;
       entryClipboard = copied;
       if (!canPasteProjectEntry(copied, requestWorkspace, destination) || !copied) return;
@@ -787,7 +815,7 @@
   {/if}
 {/snippet}
 
-<section class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" aria-label="Project files" data-project-explorer>
+<section bind:this={filePanel} class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" aria-label="Project files" data-project-explorer data-project-workspace={workspace}>
   <div class="border-b border-sidebar-border px-2 py-1.5">
     <div class="mb-1 flex h-6 items-center gap-1 text-xs text-muted-foreground">
       <span class="min-w-0 flex-1 truncate">{treeState.selectedPaths.length ? `${treeState.selectedPaths.length} selected` : "Files"}</span>
@@ -866,7 +894,7 @@
   {:else}
   <div
     bind:this={treeRoot}
-    class="min-h-0 flex-1 overflow-auto py-1"
+    class={["min-h-0 flex-1 overflow-auto py-1", nativeDropDestination === "" ? "ring-1 ring-inset ring-ring" : ""]}
     role="tree"
     aria-multiselectable="true"
     aria-label="Project files"
@@ -888,7 +916,7 @@
           class={[
             "group flex h-7 w-full min-w-max items-center pr-1 hover:bg-panel-hover",
             treeState.selectedPaths.includes(entry.path) ? "bg-panel-selected" : "",
-            dragController.dragging && dragController.destination === entry.path ? "ring-1 ring-inset ring-ring bg-panel-hover" : "",
+            (dragController.dragging && dragController.destination === entry.path) || nativeDropDestination === entry.path ? "ring-1 ring-inset ring-ring bg-panel-hover" : "",
           ]}
           style:padding-left={`${4 + row.depth * 14}px`}
           role="presentation"

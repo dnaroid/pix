@@ -111,7 +111,7 @@ describe("WorkspaceSidebar project sizing", () => {
   it("keeps the rail's right divider visible through all selected button backgrounds", () => {
     // The 30px rail includes its 1px border; a 30px child would paint over it.
     expect(activityBarSource).toContain("border-r border-sidebar-border");
-    expect(activityBarSource.match(/h-10 w-full/g)).toHaveLength(10);
+    expect(activityBarSource.match(/h-10 w-full/g)).toHaveLength(11);
     expect(activityBarSource).not.toContain("h-10 w-[30px]");
   });
 

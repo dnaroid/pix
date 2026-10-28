@@ -20,7 +20,10 @@ export type PreviewTarget =
       kind: "file";
       file: ProjectFilePreview;
       lineRange?: ProjectFileLineRange;
+      /** Knowledge result location, revealed in rendered Markdown rather than source. */
+      searchRange?: ProjectFileLineRange;
       userConfigKind?: SettingsConfigKind;
+      markdownLinkBase?: "document";
     }
   | { kind: "attachment"; attachment: Attachment; autoplay?: boolean };
 
@@ -40,6 +43,10 @@ export function createPreviewState(options: PreviewStoreOptions) {
   let filePreviewGeneration = 0;
 
   function show(target: PreviewTarget, navigation: PreviewNavigation): void {
+    if (dirty) {
+      options.setErrorMessage("Save or discard the current Preview draft before opening another document.");
+      return;
+    }
     filePreviewGeneration += 1;
     const opening = currentPreview(history) === undefined;
     if (opening) {
@@ -78,6 +85,7 @@ export function createPreviewState(options: PreviewStoreOptions) {
   }
 
   function move(offset: -1 | 1): void {
+    if (dirty) return;
     consumeAutoplay();
     filePreviewGeneration += 1;
     history = movePreviewHistory(history, offset);

@@ -15,7 +15,7 @@ describe("Desktop design contract: disclosure chevrons", () => {
     for (const [filename, source] of Object.entries(components)) {
       for (const summary of source.matchAll(/<summary\b[^>]*>([\s\S]*?)<\/summary>/gu)) {
         const body = summary[1] ?? "";
-        const message = `${filename}: disclosures must include a visible state-rotating ChevronRight/ChevronDown (DESIGN.md §12.3)`;
+        const message = `${filename}: disclosures must include a visible state-rotating ChevronRight/ChevronDown (wiki/desktop/design.md §12.3)`;
         expect(body, message).toMatch(/<Chevron(?:Right|Down|Left|Up)\b/u);
         expect(body, message).toMatch(/rotate-(?:0|90|180|270)/u);
         count++;

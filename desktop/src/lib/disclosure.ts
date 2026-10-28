@@ -1,5 +1,5 @@
 /*
- * Shared attached-pane disclosure geometry (DESIGN.md §12.3): a 32 px muted
+ * Shared attached-pane disclosure geometry (wiki/desktop/design.md §12.3): a 32 px muted
  * header row on the panel surface. Each <summary> still renders its own
  * state-rotating Lucide chevron next to the label.
  */

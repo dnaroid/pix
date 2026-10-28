@@ -12,6 +12,7 @@ export type ProjectFileRequest =
   | { type: "create"; parent: string; name: string; kind: "file" | "directory" }
   | { type: "rename"; path: string; name: string }
   | { type: "move"; paths: string[]; destination: string }
+  | { type: "importMove"; paths: string[]; destination: string; sourceWorkspace: string }
   | { type: "delete"; paths: string[] }
   | { type: "copy"; paths: string[]; destination: string; sourceWorkspace?: string };
 

@@ -1,6 +1,6 @@
 // Shared primitives for the owned-launch native programs (bridge,
 // supervisor, worker gate). macOS-only candidate production code for
-// durable detached-descendant containment; see owned-launch/README.md for
+// durable detached-descendant containment; see wiki/tools/agents/owned-launch.md for
 // the full protocol and claim boundaries.
 //
 // Private ABI notes (same convention as the proven feasibility fixtures):
@@ -288,7 +288,7 @@ static int OL_UNUSED ol_parse_long(const char *v, long len, long *out) {
   return 0;
 }
 
-// Strict sequential parser for the spec format documented in README.md:
+// Strict sequential parser for the spec format documented in wiki/tools/agents/owned-launch.md:
 //   scalar key=value lines first (including args_count / env_count), then
 //   arg:<i>:<len>=<len raw bytes> entries, then env:<i>:<len>= entries.
 // The parser never searches inside payload bytes; every item is consumed

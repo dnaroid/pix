@@ -1,0 +1,95 @@
+---
+kind: spec
+status: active
+---
+
+# Desktop live model switching
+
+<!-- markdownlint-disable MD013 -->
+
+## Type
+
+Change
+
+## Lifecycle
+
+Active implemented contract.
+
+## Goal
+
+Keep Desktop model and thinking selection available while the agent is running, matching the TUI's live model-switch behavior.
+
+## Behavior
+
+- Model + Thinking opens as a [nonmodal status-bar popup](desktop-model-picker-popup.md), not a blocking modal; see [decision 0049](../decisions/0049-nonmodal-model-picker.md). Its actual current model is the initial search-active row. Model rows remain outside the normal Tab sequence. Enter on a model row or thinking chip confirms like Apply; footer controls retain their own native Enter activation. Visibility-manage Enter toggles visibility instead.
+- Desktop keeps the combined model/thinking picker enabled while the active session is processing a prompt. When first-prompt model routing is enabled, the live picker also exposes `Auto`; selecting it opens or reuses the UI-only New Conversation draft and stages routing there instead of mutating the active live session.
+- `Auto` stays at the top of the normal combined picker independent of current-model sorting and fuzzy search. Visibility-management mode remains concrete-model-only.
+- On opening, the staged selection and keyboard-active row are the actual current session/draft model, not the pinned `Auto` row (unless Auto is current). An empty search preserves the staged model. Selection uses the row background and `current` label, without a selection checkmark; visibility-management checkboxes remain.
+- In selection mode, Left/Right cycle the staged model's supported thinking levels from search, model rows, or other picker controls; Up/Down in search navigate models. Thinking-radio arrows also move radio focus and apply only one step. Auto has no manual thinking adjustment.
+- Apply/Enter confirms even an unchanged selection without a redundant config request. Successful confirmation closes the picker and restores input focus to the composer. Escape/Cancel restore trigger focus; outside dismissal does not redirect focus. Failed apply keeps the picker open with its error.
+- The picker exposes `Set default`. For a concrete staged selection it persists that model and staged thinking as the Desktop future-session default; for `Auto` it enables routing and persists `modelRouting.default: true`. The picker marks the saved default and does not have to apply the staged selection to save it.
+- The same picker is visible on a UI-only New Conversation draft before its first prompt. In that state the selection is staged locally from the sessionless draft config catalogue; it does not require an active session runtime and does not send `session/set_config_option`. The catalogue loads workspace and bundled extensions without creating an `AgentSession`, so extension-registered providers such as pi-tools-suite's Antigravity models are selectable before materialization.
+- Each draft catalogue request reloads extension discovery, so newly added workspace providers do not require an ACP backend restart. Changes to an already-loaded extension module follow Pi's normal module-cache lifecycle.
+- When pi-tools-suite is already installed in the Pi agent directory, Desktop uses that discovered copy instead of also loading the packaged copy. Without an installed copy, Desktop loads the packaged suite explicitly.
+- The draft status bar follows that staged model/thinking selection for provider quota display. Applying a different staged model or thinking level starts a sessionless best-effort quota refresh through `pix/session/draft_config`; it does not materialize the draft or send a live-session config mutation.
+- An unresolved Auto draft renders only `Auto` in the status bar; it does not render `off`, `auto`, or another placeholder thinking label before the router chooses a tier.
+- The Claude Code adapter's `pi-claude-code-provider` models use the Anthropic provider glyph and model color in the picker and status bar, while retaining their distinct provider identity for routing and quota.
+- The picker remembers thinking independently per model. The current model begins from the actual session/draft thinking; switching to another model restores that model's staged value from the current picker interaction or its persisted user-level `thinkingByModel` preference, then clamps it to the model's supported thinking levels.
+- Applying model/thinking successfully updates the Desktop-only user `~/.config/pi/pix-desktop.jsonc` `thinkingByModel` map. Cancelling the picker does not persist staged-only changes, and project `<project>/.pi/pix-desktop.jsonc` cannot override this user preference. TUI `pix.jsonc` is not read. See `model-thinking-preferences.md`.
+- Applying a new model during an active run sends the normal ACP `session/set_config_option` request immediately; Desktop does not wait for the prompt to finish before issuing it.
+- The ACP adapter applies `model` through Pi's normal `setModel` RPC and `thought_level` through `setThinkingLevel`; there is no ACP idle-only guard around these options.
+- Server-initiated thinking changes are propagated back to the client. When pi emits an agent-session `thinking_level_changed` event (todo-thinking overrides from the tools-suite todo extension, builtin `/thinking`, `/model provider/id:level`, or any other runtime thinking change), the ACP adapter re-pushes `session/update` with `sessionUpdate: "config_option_update"` and the freshly built `configOptions`. The push is generation-guarded: bursts coalesce to the latest state, and a replaced or closed session never notifies. Desktop applies the pushed options to the active session state (and the per-session runtime map), so the StatusBar thought-level indicator follows live changes exactly like pi's TUI footer. A pi-side thinking change that keeps the same level emits no event and therefore no push.
+- This matches TUI behavior: TUI calls `session.setModel()` while `session.isStreaming` is true. The current in-flight model request is not interrupted; the changed session model is used by subsequent model work according to Pi runtime semantics.
+- Model-specific resource reload is not forced in the middle of an active run. TUI explicitly skips `session.reload()` while streaming, and Desktop continues to use the existing ACP/Pi model-change path rather than introducing a separate reload or cancellation flow.
+- Existing guards still prevent live-session model changes when the Desktop session runtime is unavailable, another config change is in progress, or a conflicting Desktop operation is running. The runtime-availability guard is intentionally replaced by draft-config availability while the UI-only draft is active.
+
+## Implementation
+
+- `desktop/src/app/model-config.svelte.ts`
+- `desktop/src/app/model-config-actions.ts`
+- `desktop/src/app/model-draft-config.svelte.ts`
+- `desktop/src/app/model-picker-state.svelte.ts`
+- `desktop/src/app/session-runtime-config.svelte.ts`
+- `desktop/src/components/StatusBar.svelte`
+- `desktop/src/components/ModelProviderIcon.svelte`
+- `desktop/src/components/ModelThinkingPicker.svelte`
+- `desktop/src/lib/acp-client.ts`
+- `desktop/src/lib/acp-pix-extensions.ts`
+- `desktop/src/lib/model-thinking.ts`
+- `desktop/src/lib/model-display.ts`
+- `desktop/src/lib/model-thinking-preferences.ts`
+- `desktop/src/lib/model-picker-navigation.ts`
+- `desktop/src/lib/model-picker-popover.ts`
+- `src/config.ts`
+- `schemas/pix-desktop.json`
+- `acp/src/acp/config-options.ts`
+- `acp/src/acp/draft-model-runtime.ts`
+- `acp/src/acp/pix-acp-agent.ts`
+- `src/app/commands/command-model-actions.ts`
+
+## Tests
+
+- `desktop/src/components/ModelThinkingPicker.test.ts`
+- `desktop/src/components/DesktopModelThinkingPreferences.test.ts`
+- `desktop/src/app/model-draft-config.test.ts`
+- `desktop/src/app/model-picker-state.test.ts`
+- `desktop/src/app/session-metadata.test.ts`
+- `desktop/src/lib/model-thinking-preferences.test.ts`
+- `desktop/src/lib/model-display.test.ts`
+- `desktop/src/lib/model-picker-navigation.test.ts`
+- `desktop/src/lib/model-picker-popover.test.ts`
+- `tests/command-model-actions.test.ts`
+- `acp/test/config-options.test.ts`
+- `acp/test/agent.test.ts`
+
+## Verification
+
+- Desktop source-level regression coverage verifies that `promptRunning` does not disable or reject the combined model/thinking selector.
+- Desktop draft coverage verifies that the selector can stage model/thinking before `session/new` and that the staged values are forwarded only on lazy first-prompt materialization.
+- Desktop preference coverage verifies cross-picker per-model restoration and JSONC persistence through the user-config compare-and-swap path.
+- TUI unit coverage verifies that a model change still calls `setModel` while streaming and skips only the reload step.
+- ACP config-option tests cover model/thinking option validation and routing through the shared Pi RPC surface.
+- ACP agent tests cover the `thinking_level_changed` → `config_option_update` push: notification content and session id, burst coalescing through the generation guard, and skipping the push when pi state discovery fails.
+- Desktop metadata-store coverage applies a pushed `config_option_update` to the active session state and the per-session runtime map (background sessions update only the runtime map).
+- Desktop model-display tests cover the Claude Code provider's Anthropic glyph and color mapping.
+- `desktop/src/lib/model-picker-navigation.test.ts` covers current/Auto initialization, search, and supported-effort arrow cycling. `desktop/src/lib/model-picker-popover.test.ts` covers popup placement, dismissal, focus and listener cleanup; `desktop/src/app/model-picker-state.test.ts` covers repeat activation and late opening completion. `desktop/src/components/ModelThinkingPicker.test.ts` guards keyboard/confirmation wiring and stale Apply completion.

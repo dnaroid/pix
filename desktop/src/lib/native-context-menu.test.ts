@@ -63,6 +63,32 @@ describe("native desktop context menu commands", () => {
     await Promise.resolve();
     expect(writeText).toHaveBeenCalledExactlyOnceWith("/sessions/мой session.jsonl");
   });
+  it("renames the captured session and rechecks availability, activity and attachment", async () => {
+    const open = vi.fn();
+    const canRename = vi.fn(() => true);
+    const target = context({ kind: "session", sessionId: "target" });
+    const commands = nativeContextMenuItems(target, false, reportError, () => true, undefined, undefined, { canRename, open });
+    const rename = commands.find((item) => "id" in item && item.id === "desktop.session.rename");
+    expect(rename).toMatchObject({ text: "Rename Session…", enabled: true });
+    target.sessionId = "another";
+    if (rename && "action" in rename) rename.action?.("ignored");
+    expect(open).toHaveBeenCalledExactlyOnceWith("target");
+    canRename.mockReturnValue(false);
+    if (rename && "action" in rename) rename.action?.("ignored");
+    expect(open).toHaveBeenCalledOnce();
+    for (const [active, connected] of [[false, true], [true, false]]) {
+      canRename.mockReturnValue(true);
+      const commands = nativeContextMenuItems(context({ kind: "session", sessionId: "target", element: { isConnected: connected } as HTMLElement }),
+        false, reportError, () => active!, undefined, undefined, { canRename, open });
+      const command = commands.find((item) => "id" in item && item.id === "desktop.session.rename");
+      if (command && "action" in command) command.action?.("ignored");
+    }
+    await Promise.resolve();
+    expect(open).toHaveBeenCalledOnce();
+    canRename.mockReturnValue(false);
+    expect(nativeContextMenuItems(context({ kind: "session", sessionId: "draft" }), false, reportError, () => true,
+      undefined, undefined, { canRename, open })[0]).toMatchObject({ enabled: false });
+  });
   it("does not copy missing session paths or run stale or detached tab callbacks", async () => {
     expect(items({ kind: "session", sessionId: "id-without-file" })[0]).toMatchObject({ enabled: false });
     for (const commands of [

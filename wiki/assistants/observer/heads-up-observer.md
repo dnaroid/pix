@@ -1,0 +1,501 @@
+---
+kind: spec
+status: active
+---
+
+# Heads up observer (experimental, opt-in)
+
+Rationale and alternatives: [0034 — Bounded, opt-in Heads up observer](../../decisions/0034-heads-up-observer.md).
+
+## Behavior
+
+Pix offers an optional passive observer of a coding conversation. It looks for
+up to three independent concrete, consequential, probably unnoticed contradictions or tradeoffs in
+the current task. It is not a code reviewer or an enforcement mechanism: it
+cannot inspect files independently and must not claim facts absent from its
+input. The normal result is no notice.
+
+The implementation uses one provider-neutral registry inference, not a child
+agent, forked agent session, subprocess harness or tool loop. The request has
+no tools, tool choice `none`, low reasoning, zero retries and no implicit model
+fallback. The initial model reference is `openai-codex/gpt-6-luna`, a candidate
+for evaluation rather than a measured quality winner. Missing credentials or
+model availability is reported as a controlled status, never replaced silently
+with the parent model. Ordinary work in the parent is never awaited or resumed
+by an observer result.
+
+It is off by default. `/heads-up on` enables the current runtime/session;
+`/heads-up off` cancels work. `/heads-up check` explicitly checks an enabled
+observer, and `/heads-up status` shows phase, model and recorded counters.
+`/heads-up model provider/model-id` chooses its model without changing the main
+agent. Commands are registered extension commands; ACP executes them out of
+band without taking over the active parent run.
+
+TUI configuration is read from the agent directory's `heads-up.jsonc`, followed
+by a trusted working directory's `.pi/heads-up.jsonc`. Desktop instead reads the
+`headsUp` object in `~/.config/pi/pix-desktop.jsonc`, followed by the same object
+in a trusted working directory's `.pi/pix-desktop.jsonc`. Desktop never inherits
+standalone `heads-up.jsonc` or TUI `pix.jsonc`; no automatic migration is made.
+Invalid JSONC and oversized files are ignored. Standalone files are bounded at
+16 KiB; a complete Desktop profile may be up to 1 MiB. Comments and trailing
+commas are accepted. `enabled: true` explicitly opts new/reloaded runtimes in;
+`model` is a provider/model reference and numeric settings are clamped.
+
+Desktop Settings → Observer edits these saved defaults using the existing
+conflict-checked JSONC save flow, preserving unrelated keys and comments. It
+offers a model picker, default-enable switch, completed-turn cadence, minimum
+interval, and an advanced group for per-check/hour input limits, checks per
+hour, output tokens, timeout and notice lifetime. Timing fields display seconds
+and persist milliseconds. Fields have labelled controls and reset-to-default
+actions; settings search can reveal advanced fields. A trusted project override
+can supersede user defaults. Saved changes apply to new or reloaded runtimes,
+not silently to active sessions. Runtime toggles/commands never write config.
+Desktop explicit on/off commands persist a versioned `pix-desktop-observer-enabled`
+custom session entry (not a conversation message or model input). The last valid
+boolean choice in that session overrides the configured enable default on reload
+or app restart; unrelated sessions and profile defaults are unchanged. Branch
+navigation does not rewind the session preference. Forks inherit only metadata
+copied in their source branch; a fork without that entry uses defaults. Invalid
+entries are ignored. A failed save must not publish a successful toggle. Drafts
+without a conversation are not durable sessions. Restoring a choice never starts
+inference by itself. TUI on/off remains runtime-local and ignores this Desktop
+metadata. Deduplication, limits and check history reset on runtime recreation;
+usage entries are durable. There is no cross-session knowledge profile.
+
+## Context and cadence
+
+Automatic checks need at least six new completed agent turns and sixty seconds
+since the last check (or initial runtime creation). `turn_end` accumulates cadence
+and evidence, but does not launch inference. A successful final `agent_settled`
+opens the automatic opportunity, after repairs, retries and queued continuations.
+The outcome comes from the final `agent_before_settle`; abort/error settlement
+does not launch a check. Pending automatic work waits while the parent runs.
+No inference promise is returned to the parent hook. A manual check can run
+immediately, even during the parent run, bypassing cadence but not enablement,
+concurrency, availability or budgets. Todo boundaries are not observer triggers.
+
+A newly accepted delegated completion is another coalesced automatic opportunity:
+it does not require six more primary turns or wake the parent. A single timer
+waits for the same minimum interval and physical request lock. An idle parent
+needs no synthetic settlement; a running parent must settle successfully first.
+Arrivals during a request remain pending for a later check. All
+availability, input and rolling-hour limits still apply; a refused opportunity
+does not poll until a budget becomes available. Invalidation cancels the timer.
+
+An open stack does not suppress discovery. Successful settlement after new completed turns, or a delegated
+completion while idle, can queue a review without another six-turn threshold.
+Changed bounded evidence (user/tool/delegated records or cited assistant
+text), or a retained stack suspended by a new parent run, permits automatic review;
+ordinary assistant progress alone does not create an opportunity.
+The same request/input/hour/output limits apply. One request both reviews all active
+cards and discovers new independent findings, returning the complete supported set
+of at most three, not a delta. Existing IDs, titles and consequences are untrusted
+`activeNotices` within the payload budget. Descriptors may be explicitly clipped
+to reserve evidence space at small limits; identities are not silently dropped.
+Supported unresolved cards retain ID, creation time and expiry; omitted cards are
+removed and `none` clears the set. A successful unrelated check does not imply
+resolution. Retained cards keep their relative order before new discoveries;
+the prompt prioritizes supported active cards over filling slots. Exact normalized
+issue-identity duplicates are merged (including a new candidate matching an active card),
+and previously closed topics remain subject to bounded deduplication. Semantic
+independence/deduplication still relies on the model, not a deterministic classifier.
+Invalid/error/unavailable/budget-refused assessments preserve retained identities under
+the original per-card TTLs, but never restore unconfirmed cards to visibility.
+No extra request is made per card and no periodic
+polling is added. Manual Check now reviews and discovers even without new evidence.
+
+New-discovery-only automatic opportunities use a runtime-local adaptive interval:
+each explicit `irrelevant` or `incorrect` verdict raises the multiplier from 1 to 2
+to 4 (capped); `useful` resets it to 1. Already-known, dismiss, expiry, silence,
+ordinary work and successful/empty assessments do not change it. The completed-turn
+threshold is unchanged; delegated opportunities still bypass only that threshold.
+Any retained card, including a hidden one awaiting review, keeps the base interval
+for the combined review/discovery request. Manual checks bypass adaptation as well
+as normal cadence. Removing/expiring the last card reschedules a queued opportunity
+under the discovery interval; feedback never creates an opportunity by itself.
+Existing budgets, availability, physical request ownership and no-polling rules
+remain intact. Status explains negative-feedback slowing and the unchanged review/
+manual paths; eligibility is not a promised launch time.
+
+### Strict visible freshness
+
+Starting a parent run or completing a meaningful user/tool/delegated evidence
+event immediately hides the entire previous stack, without a projection rebuild
+or inference. User/tool `message_end` invalidation occurs even before persistence;
+ordinary assistant progress does not trigger it. Projection comparisons additionally
+detect changed or removed cited evidence at turn/check boundaries. Hidden cards
+remain private review candidates, not claims that a problem still exists or has
+been resolved. Their original identities and expiry times are retained.
+
+Only a successful assessment against current evidence with the parent settled
+can restore supported cards. Manual checks may start while the parent runs, but
+cannot publish claims while it is running; changed evidence or a new run across
+the request invalidates its result. A bounded fresh opportunity waits for settlement.
+Missing/clipped evidence is not confirmation that a retained problem persists.
+Errors, malformed responses, unavailable context/model and budget refusals leave
+unconfirmed cards hidden. They do not schedule retries or polling. The existing
+interval, hourly and input/output limits still apply. This is evidence freshness,
+not a guarantee of model correctness or independently inspected repository state.
+
+Default limits are twelve checks per rolling hour, a 16,000-character serialized
+observation payload, 192,000 payload characters per rolling hour, 900 output
+tokens and a twenty-second request timeout. The fixed system instructions are
+additional to the payload character budget. Reservations are made before the
+request and are not refunded on errors; toggling or changing models does not
+reset limits. These are initial experiment defaults, not measured optimal
+values. Full token usage is reported separately from payload character limits.
+
+Immediately before a real check, Pix reads its existing in-memory, active,
+compaction-aware session projection. Context edits and branch changes are
+respected instead of resurrecting raw history. It retains the first surviving
+user request, recent user instructions and a bounded set of recent work records;
+user requirements are separately tagged from assistant claims. Only bounded
+text and bounded tool arguments/results are included, with real source-entry
+IDs. Thinking, image bytes and full logs are excluded. Omission/clipping is
+explicit. No full-history scan occurs per render or per streamed token.
+Selected records are serialized in projection order. Apart from pinned user
+instructions, work records form a contiguous recent suffix: a record that does
+not fit ends selection, rather than allowing an older small failure to replace
+a larger fresh retest. Shell and codemode results use the same bounded text path;
+nested codemode evidence is its returned aggregate text, not independently
+invented child tool records. Prefix clipping still applies to long individual
+records; omitted text is never proof that no correction/retest exists.
+
+### Delegated work (first increment)
+
+The suite publishes a runtime-only versioned `async-subagents:delegated-evidence`
+bridge independently of its generic completion messages, wait delivery and
+parent follow-up arbitration. Capture starts synchronously at spawn execution,
+before routing/authentication awaits, with a unique launch ID, captured parent
+session/branch anchor and child ID. The final retry/fallback completion binds the
+actual run directory and reads the child result from the session-native store:
+live final text, a parent-authored completion message, the last non-error assistant
+message in the child session JSONL, or an owned-launch result. A compact structured
+summary is the fallback; the retired per-agent `result.json` sidecar is not read.
+Only the final visible report is used, never hidden thinking, full logs or
+shared-working-tree diffs. The bridge clips reports at 6,000 characters and marks
+them as clipped; unreadable, empty, foreign or mismatched results produce no
+evidence. No replay or adoption of previously launched workers occurs.
+Prelaunch exits (routing/model errors, aborts or setup errors) retire unbound
+captures; cancelled/failed launches retire their captures without invented reports.
+Returning from a successful spawn does not retire background children.
+
+The enabled parent observer must have observed that launch in its current
+lifecycle. Evidence additionally requires the anchor in the active projection
+when input is assembled. It holds at most 64 pending launches and 64 completed
+reports; duplicate completions are ignored. Disable, new user request, stop/error,
+model change, branch/session replacement, compaction and shutdown retire captured
+ownership. Enabling again does not adopt an earlier child. This conservative rule
+can omit a still-running child's late report after a task boundary.
+
+Records have a `delegated:` launch ID and are explicitly **child-reported, not
+verified mutation/test evidence**. Process status and “done/tests pass” do not
+prove correctness. A concrete reported design change can contradict a user
+requirement; any notice must attribute it to the report rather than claim an
+independent inspection. Generic custom completion notices alone are ignored.
+Reports use the same redaction, 3,000-character record bound and total input budget;
+clipping is explicit and missing text is not proof of failure. Read retained
+corrections/retests in order, rather than extracting old risk fragments. Verified
+per-child changed-file or test-command/outcome provenance is not implemented:
+current compact child artifacts do not provide it. Children never run an observer.
+
+Verification contradictions must match actor, assigned scope, run/check and time.
+A research-only child's “I did not run it” is not evidence against a later parent
+run. Consult retained parent tool results and corrections; delegated reports are
+appended after projected parent records, not a global chronological event stream.
+Missing or clipped run evidence means unknown, not failed/not run; default to
+silence without a concrete supported conflict. Conversely, an explicit failure
+for the same run/check is not overridden by an unsupported parent success claim.
+Diagnostics (LSP, lint, type errors) inside one tool result or script can be
+stale: a later step of the same output, or a later result showing the file
+exists, the check passes or the agent verified it, supersedes them. Superseded
+diagnostics are not grounds for a notice.
+
+Common credential patterns, private-key blocks and control sequences are
+filtered. This is best-effort redaction, not proof that arbitrary project text
+contains no secrets or personal data. Enabling an observer sends the selected
+conversation excerpts to its configured model provider. Input data is not
+trusted instruction text; unknown evidence IDs, extra fields, malformed or
+truncated replies and tool calls are rejected. Valid evidence IDs establish
+provenance, not the correctness of a model inference.
+
+## Presentation and feedback
+
+At most three notices are active, with only one short card visible above the
+composer. Multiple cards show a position counter and previous/next navigation.
+Navigation is local and free: TUI uses `/heads-up prev` and `/heads-up next`;
+Desktop uses accessible buttons. Selection remains stable by ID through updates;
+removing/expiring the selected card selects its next surviving neighbor (or the
+last survivor). TUI uses a keyed widget;
+Desktop consumes the structured `heads-up` session-state channel. Desktop
+validates bounded payloads, rejects stale revisions of the current instance, and
+rejects snapshots from the 32 most recently retired instances per session.
+Snapshot version 1 adds optional `notices` and `awaitingReview`; older singleton snapshots remain
+readable. New arrays contain at most three unique validated cards; `notice` is
+the selected member or null for an empty array. `awaitingReview: true` requires an
+enabled observer and an empty visible stack (`notice: null`); no retained claim
+text is published. TUI shows a neutral “Awaiting fresh review” widget; Desktop
+removes the card and exposes the wait reason in Observer status. Desktop selection is runtime/session
+scoped, survives same-owner updates, and resets on replacement. Each card expires
+independently even when hidden. Feedback and discussion target the displayed ID;
+Desktop rejects callbacks captured from a replaced instance. This
+bounded in-memory retirement history is not an arbitrary-history replay guard:
+an instance evicted from it is no longer rejected solely by its instance ID.
+Feedback actions include `known` (already understood), `irrelevant` (not useful to
+this task), `incorrect` (disputed accuracy), `useful` and `dismiss` (no accuracy or
+relevance verdict). Each removes only its target ID so a stale action cannot clear
+a newer card. TUI exposes these `/heads-up` commands; Desktop has labelled buttons.
+Shown is recorded separately from explicit feedback. Nothing is inferred from silence.
+
+Each notice may carry the paired bounded `topic` (issue kind, 80 characters) and
+`subject` (affected symbol/path, 160 characters). The prompt requests both; legacy
+four-field responses remain accepted and use normalized title/consequence identity.
+Malformed pairs/unknown fields reject the whole reply. A retained ID cannot change
+its existing topic/subject; a legacy reply omitting the pair inherits it. A legacy
+card without a pair may gain one during review, preserving its ID, TTL and shown
+count; the pair is immutable thereafter. Same-key
+paraphrases merge while preserving active ID/order/TTL. Subject punctuation/case
+is preserved; distinct subjects may have independent issues of the same kind.
+Model-provided identity is a hint, not a semantic correctness guarantee.
+
+Task memory contains at most 32 structured records: shown/verdict, issue identity,
+title/consequence and supporting IDs. Internal bounded evidence-text fingerprints
+(case/whitespace-normalized, independent of citation IDs/order) suppress the same
+issue on the same evidence, including after dismissal or expiry. Changed evidence
+can make it eligible again, but the prompt requires materially new circumstances,
+not extra irrelevant citations or mere rewording. Known is not permission to violate
+a requirement. The model must still establish relevance; deterministic identity/
+fingerprint matching is not a semantic classifier. New non-extension user input
+is a conservative task boundary and clears this memory, as does lifecycle context
+clearing (branch/switch/fork/compaction). Off/on and model changes retain it within
+the task. Runtime recreation resets it; no persistence or cross-session profile exists.
+
+Up to 16 recent structured records share at most a quarter of the serialized input
+budget with legacy textual history. Evidence keeps priority; active descriptors
+can omit optional topic/subject when space is tight, explicitly marked clipped,
+without dropping active IDs. Feedback is untrusted data, not repository evidence.
+Counters for shown/useful/known/irrelevant/incorrect/dismiss and the discovery
+multiplier are runtime-local, survive task boundaries, and reset on runtime
+recreation. Status shows them locally; no external analytics, transcript feedback
+logging or automatic judgments of user expertise are added. Optional snapshot
+details and notice identity fields preserve readability of older snapshots.
+Shown counts accepted new cards, not navigation impressions or retained-card reviews.
+
+`/heads-up explain` expands existing evidence in TUI. Desktop has an evidence
+expander and feedback actions; expansion never makes another model request.
+Desktop management lives in a persistent statusbar Observer item, not in the
+composer actions menu. The trigger contains only a 16px telescope: grey when off/unready,
+primary when enabled (including waiting and error states), except a static amber
+telescope while budget-limited. Limited status takes precedence over an existing finding
+in the trigger/popup; the finding card remains separate. The limit label is
+«Достигнут лимит проверок»; accessible label and popup include the earliest known reservation
+expiry (or explicitly unknown), not a promised check time or full reset. Input
+budget exhaustion is distinguished in the detail. A runtime update clearing the
+limit restores primary; wall-clock expiry alone does not claim recovery. The same telescope
+pulses only during a real checking phase, respecting reduced motion; no spinner,
+visible status label or notice badge is shown. Accessible label and popup
+distinguish off, waiting, checking, finding, unavailable/error and limited states. A draft
+or unready runtime still allows opening settings, but not session controls.
+Cards expire after five minutes by default, including while the main agent is
+idle; the existing evidence/feedback card stays above the composer.
+
+The statusbar popup contains the standard SettingsSwitch for the current session,
+explicit Check now and an Observer settings deep link. It shows dynamic state and
+wait/error reasons in plain language, with last check time and its outcome visible
+by default. A no-finding outcome means nothing new to flag, not a guarantee that
+the work is correct. A keyboard-reachable Technical details disclosure holds
+duration, raw runtime reason, new completed turns, actual rolling/total checks,
+used input characters, recorded input/cache/output tokens, feedback counts and
+discovery slowdown. Details start collapsed on each opening; toggling them is
+presentation-only and never requests inference. Waiting copy explains remaining
+agent replies and interval gates without promising a timed check.
+It toggles on button activation (click, Enter or Space), never pointer hover or
+mere focus. Pointer departure leaves it open; repeat activation, outside click,
+Escape or focus leaving the trigger/popup dismisses it. Opening does not steal
+focus. The popup lower edge touches the trigger's top, matching Plan
+without a visual gap or intervening dead pointer region.
+The trigger has no browser-native tooltip. See [status-bar click popups](../../decisions/0048-status-bar-click-popups.md).
+Configured model, cadence, interval and budget ceilings stay in Settings, not the
+popup. Earliest reservation expiry is shown only while limited. Never-run,
+no finding, finding, suppressed duplicate, malformed reply, error, timeout and
+cancellation are distinct results. Older snapshots without optional `details`
+remain readable; missing details are unavailable, not claimed successful checks.
+Eligibility time is not a promised launch time: automatic work still requires
+a successful final settlement or a pending evidence opportunity while idle, and the
+remaining gates must pass. The earliest reservation expiry is not a full reset.
+
+Opening the popup may issue `/heads-up snapshot`, a quiet out-of-band state
+refresh with no inference, context assembly, transcript notification, or parent
+run. Without a snapshot it is sent only for a registered extension command.
+Opening cannot enable the feature or alter the composer. Counter refreshes can
+clear a fully expired limit without starting a check. Its display clock only
+runs while the popup is open. Pending button requests, session switches,
+disconnects and retired runtime instances are ownership-guarded. The popup
+closes on owner replacement/unready transitions; a first snapshot completing
+initial loading does not close it. Escape restores trigger focus; outside
+click dismisses; popup controls are keyboard reachable. Closed UI does not
+intercept Escape. Popup geometry stays inside narrow viewports. Settings deep
+links wait for asynchronously loaded sections and focus the Observer heading.
+
+`/heads-up discuss` in Pix TUI, or Desktop's Insert question action, only fills
+an empty composer with no attachments and no blocking dialogue. It never sends
+the draft, overwrites user text or starts a parent turn. The draft contains only
+the note title and consequence (no wrapper, evidence records or internal IDs);
+attachment mentions and effort-shortcut words are neutralized.
+No number-key interception, automatic modal dialogue, generated learning page
+or auto-fix exists in this experiment.
+
+## Lifecycle, accounting and failure cases
+
+Each controller owns one runtime/session. New genuine user input, stop/error,
+disable, model changes, compaction, branching or shutdown invalidates pending
+results. Before publishing a finding or applying an existing-card review, the
+observer refreshes the projection and compares bounded evidence with that used
+for inference. New/edited/removed evidence discards the completion and coalesces
+a fresh assessment under the same interval/budgets; unrelated success does not
+automatically declare an old failure resolved. Any finding/review, including manual,
+waits for a fresh assessment if the parent has resumed. An evidence-event revision
+also rejects changes observed before their message is persisted. Ordinary uncited assistant
+progress does not invalidate a result. Generation remains a lifecycle/request
+guard and revision remains UI snapshot ordering, not evidence freshness.
+Dismissed/expired cards cannot be resurrected by a late assessment: any membership
+change discards that assessment atomically rather than overwriting survivors or
+resurrecting a closed card. Navigation alone does not invalidate inference. Session replacement
+cannot publish a late result to the new session. Teardown clears timers and abort
+listeners. Previously displayed assertions are hidden immediately on invalidating
+evidence or parent start; reassessment waits for settlement and can remain
+limited/unavailable until the retained cards expire.
+
+Timeout actively aborts inference. If a provider ignores cancellation, the UI
+stops waiting but the physical in-flight lock remains until the request settles;
+no queue of overlapping requests is created. A permanently non-settling provider
+therefore requires runtime recreation before checking again.
+
+Finalized replies with valid usage are recorded as `appendUsage("heads-up", ...)`
+on the captured originating session manager, including stale/aborted replies
+that still supply usage. Provider errors without usage cannot be reconstructed.
+An absent accounting capability refuses work; an accounting failure blocks
+subsequent checks. Spend is never attributed to whichever tab happens to be
+active. There is no external feature analytics or transcript logging; structured
+runtime status is local UI state, not a new external telemetry service.
+
+`PI_OFFLINE` is a hard stop. Print/JSON, standalone RPC without the Desktop
+bridge, UI-less draft runtimes and suite subagent runtimes do not activate the
+observer. This feature does not inherit into ordinary async-subagent workers.
+
+## Implementation
+
+- `src/bundled-extensions/heads-up/index.ts`
+- `src/bundled-extensions/heads-up/desktop-preference.ts`
+- `src/bundled-extensions/heads-up/controller.ts`
+- `src/bundled-extensions/heads-up/notices.ts`
+- `src/bundled-extensions/heads-up/feedback.ts`
+- `src/bundled-extensions/heads-up/config.ts`
+- `src/bundled-extensions/heads-up/context.ts`
+- `src/bundled-extensions/heads-up/delegated.ts`
+- `external/pi-tools-suite/src/async-subagents/delegated-evidence.ts`
+- `external/pi-tools-suite/src/async-subagents/tools/spawn.ts`
+- `external/pi-tools-suite/src/async-subagents/tools/subagents.ts`
+- `src/bundled-extensions/heads-up/inference.ts`
+- `src/bundled-extensions/heads-up/parser.ts`
+- `src/bundled-extensions/heads-up/presentation.ts`
+- `src/bundled-extensions/heads-up/settings.ts`
+- `src/bundled-extensions/heads-up/usage.ts`
+- `src/bundled-extensions/heads-up/contract.ts`
+- `src/app/runtime.ts`
+- `desktop/src/app/heads-up.svelte.ts`
+- `desktop/src/app/desktop-workbench-prop-builders.ts`
+- `desktop/src/components/HeadsUpCard.svelte`
+- `desktop/src/lib/heads-up.ts`
+- `desktop/src/lib/observer-status.ts`
+- `desktop/src/components/ObserverStatus.svelte`
+- `desktop/src/components/StatusBar.svelte`
+- `desktop/src/app/desktop-status-bar-view-model.svelte.ts`
+- `desktop/src/app/desktop-shell-view-model-services.ts`
+- `desktop/src/App.svelte`
+- `desktop/src/components/SettingsPanel.svelte`
+- `desktop/src/components/WorkspaceSidebar.svelte`
+- `desktop/src/components/settings/SettingsObserver.svelte`
+- `desktop/src/components/settings/DesktopSettingsEditor.svelte`
+- `desktop/src/components/settings/SettingsNumberInput.svelte`
+- `desktop/src/components/settings/SettingsSwitch.svelte`
+- `desktop/src/lib/settings.ts`
+- `desktop/src/lib/settings-viewport.ts`
+- `desktop/src/lib/settings-navigation.ts`
+- `desktop/src/lib/default-desktop-config.ts`
+- `src/schemas/pix-desktop-schema.ts`
+- `acp/src/acp/pix-acp-agent.ts`
+- `desktop/src-tauri/src/backend_runtime.rs`
+- `scripts/heads-up-eval/cases.ts`
+- `scripts/heads-up-eval/scoring.ts`
+- `scripts/heads-up-eval/runner.ts`
+- `scripts/heads-up-eval/options.ts`
+- `scripts/heads-up-eval/run.ts`
+
+## Tests
+
+- `tests/heads-up-controller.test.ts`
+- `tests/heads-up-notices.test.ts`
+- `tests/heads-up-feedback.test.ts`
+- `tests/heads-up-context.test.ts`
+- `tests/heads-up-extension.test.ts`
+- `tests/heads-up-delegated.test.ts`
+- `external/pi-tools-suite/test/async-subagents/completion-delivery.test.ts`
+- `tests/bundled-question-extension.test.ts`
+- `desktop/src/app/heads-up.svelte.test.ts`
+- `desktop/src/app/heads-up-reactivity.test.ts`
+- `desktop/src/app/desktop-workbench-prop-builders.test.ts`
+- `desktop/src/lib/heads-up.test.ts`
+- `desktop/src/components/HeadsUpCard.test.ts`
+- `desktop/src/components/ObserverStatus.test.ts`
+- `acp/test/agent.test.ts`
+- `acp/test/config.test.ts`
+- `tests/heads-up-eval.test.ts`
+- `tests/heads-up-status.test.ts`
+- `tests/heads-up-settings.test.ts`
+- `desktop/src/app/observer-status-integration.test.ts`
+- `desktop/src/lib/observer-status.test.ts`
+- `desktop/src/components/settings/SettingsObserver.test.ts`
+- `desktop/src/lib/settings-viewport.test.ts`
+- `desktop/scripts/observer-smoke.mjs`
+- `desktop/scripts/fixtures/ObserverSmoke.svelte`
+
+## Verification
+
+Deterministic tests use fake clocks/providers, real in-memory session projection,
+out-of-band ACP command fixtures and server-rendered UI. They establish runtime
+behavior, not real-model precision, usefulness, latency or pricing. Live model
+quality needs a separate opt-in evaluation on representative coding sessions.
+
+`npm --prefix desktop run test:observer` exercises real Svelte components, browser
+events, model selection and the settings save contract using synthetic IPC/state.
+It checks read-only popup opening, explicit controls, cancellation, tab/runtime
+replacement, Escape/Tab focus, cold settings navigation, seconds conversion,
+comment/parent-model preservation and narrow popup bounds. Evidence is written
+under `.pi/artifacts/observer-ui-*`. This is not a native Tauri/window-system
+test and never contacts a model or writes a real user profile.
+
+Known verification gap: browser QA reproduced the popup closing after Check now
+when the focused button becomes disabled and focus leaves the popup. The smoke
+currently reopens the popup to continue its assertions; that workaround is not a
+product fix or proof that the popup stays open during checking. The failed run
+did not establish the disabled Checking button, enabled Off control or draft
+preservation after cancellation. Those interactions still need a product fix
+and a fresh real-UI verification; native Tauri QA has not been performed.
+
+The [Heads up evaluator](evaluation.md) supplies a synthetic development
+corpus and an opt-in, sequential live-model runner. `npm run eval:heads-up` only
+validates/lists fixtures; `--live` authorizes real inference using the production
+context builder, prompt and parser. The CLI has a whole-matrix request ceiling,
+no retries/fallback or judge model, and never reads real conversation histories.
+It reports false positives, missed warnings, source/consequence-anchor matches,
+invalid replies, incomplete runs, latency and recorded usage separately. Lexical
+scoring is a proxy; every emitted notice still requires human semantic review.
+The prompt requires current requirement → observed state → concrete consequence,
+with the correct direction, and distinguishes proposals, applied changes, rejected
+mutations, later fixes and explicit approvals. The corpus covers these pairs,
+opposite API directions and multiple independent/duplicate findings. Order-independent
+one-to-one rubric matching and narrow known-inversion checks reject covered errors;
+they do not establish general semantic accuracy. Historical live scores predate
+the current prompt/schema/corpus and are not a current quality measurement.
+See that guide for commands, limits, interpretation and artifact retention.

@@ -5,7 +5,7 @@ import { isClosingFence, parseFence, type MarkdownFence } from "./markdown-fence
  * provider bytes stay untouched. Literal examples inside fenced code or block
  * quotes remain visible, and an incomplete marker fails open.
  */
-export function stripDcpControlMetadata(text: string): string {
+export function stripDcpControlMetadata(text: string, preserveLines = false): string {
   if (!text.includes("<dcp-message-ids>")) return text;
 
   const lines = text.split("\n");
@@ -18,6 +18,7 @@ export function stripDcpControlMetadata(text: string): string {
     if (candidate) {
       candidate.push(line);
       if (/<\/dcp-message-ids>\s*$/i.test(line)) {
+        if (preserveLines) kept.push(...candidate.map(() => ""));
         candidate = undefined;
         touched = true;
       }
@@ -35,8 +36,10 @@ export function stripDcpControlMetadata(text: string): string {
     }
 
     if (!inFence && !quoteLine && /^\s*<dcp-message-ids>/i.test(line)) {
-      if (/<\/dcp-message-ids>\s*$/i.test(line)) touched = true;
-      else candidate = [line];
+      if (/<\/dcp-message-ids>\s*$/i.test(line)) {
+        touched = true;
+        if (preserveLines) kept.push("");
+      } else candidate = [line];
       continue;
     }
 
@@ -44,5 +47,7 @@ export function stripDcpControlMetadata(text: string): string {
   }
 
   if (candidate) kept.push(...candidate);
-  return touched ? kept.join("\n").trimEnd() : text;
+  if (!touched) return text;
+  const result = kept.join("\n");
+  return preserveLines ? result : result.trimEnd();
 }

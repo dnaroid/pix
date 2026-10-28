@@ -1,5 +1,233 @@
 use super::*;
 
+fn finder_copy(paths: &[PathBuf], destination: &str) -> Request {
+    Request::Copy {
+        paths: paths
+            .iter()
+            .map(|path| path.strip_prefix("/").unwrap().to_str().unwrap().to_owned())
+            .collect(),
+        destination: destination.into(),
+        source_workspace: Some("/".into()),
+    }
+}
+
+fn finder_move(paths: &[PathBuf], destination: &str) -> Request {
+    Request::ImportMove {
+        paths: paths
+            .iter()
+            .map(|path| path.strip_prefix("/").unwrap().to_str().unwrap().to_owned())
+            .collect(),
+        destination: destination.into(),
+        source_workspace: "/".into(),
+    }
+}
+
+#[test]
+fn finder_moves_are_reversible_across_parents_and_keep_receipts_workspace_relative() {
+    let source = Workspace::new();
+    let target = Workspace::new();
+    fs::create_dir_all(source.0.join("папка/sub")).unwrap();
+    source.write("a #%.txt", "one");
+    source.write("папка/sub/file", "two");
+    let receipt = execute(
+        &target.0,
+        finder_move(
+            &[
+                source.0.join("a #%.txt"),
+                source.0.join("папка"),
+                source.0.join("папка/sub/file"),
+            ],
+            "",
+        ),
+    )
+    .unwrap();
+    assert_eq!(receipt.changes.len(), 2);
+    assert!(receipt.changes.iter().all(|change| change.before.is_none()));
+    assert!(!source.exists("a #%.txt"));
+    assert!(!source.exists("папка"));
+    assert_eq!(target.read("папка/sub/file"), "two");
+    let undo = replay(&target.0, &receipt.token, true).unwrap();
+    assert!(undo.complete);
+    assert!(undo.entries.is_empty());
+    assert!(undo.changes.iter().all(|change| change.after.is_none()));
+    assert_eq!(source.read("a #%.txt"), "one");
+    assert_eq!(source.read("папка/sub/file"), "two");
+    assert!(!target.exists("папка"));
+    replay(&target.0, &receipt.token, false).unwrap();
+    assert_eq!(target.read("a #%.txt"), "one");
+    assert!(!source.exists("a #%.txt"));
+}
+
+#[test]
+fn finder_move_refuses_collisions_and_never_overwrites_original_on_undo() {
+    let source = Workspace::new();
+    let target = Workspace::new();
+    source.write("file", "source");
+    target.write("file", "target");
+    assert!(execute(&target.0, finder_move(&[source.0.join("file")], "")).is_err());
+    assert_eq!(source.read("file"), "source");
+    assert_eq!(target.read("file"), "target");
+    fs::remove_file(target.0.join("file")).unwrap();
+    let receipt = execute(&target.0, finder_move(&[source.0.join("file")], "")).unwrap();
+    source.write("file", "replacement");
+    assert!(replay(&target.0, &receipt.token, true).is_err());
+    assert_eq!(source.read("file"), "replacement");
+    assert_eq!(target.read("file"), "source");
+}
+
+#[test]
+fn finder_move_rejects_links_recursion_and_foreign_metadata() {
+    use std::os::unix::fs::symlink;
+    let source = Workspace::new();
+    let target = Workspace::new();
+    fs::create_dir_all(source.0.join("folder/sub")).unwrap();
+    fs::create_dir_all(source.0.join(".git")).unwrap();
+    source.write(".git/config", "protected");
+    source.write("file", "source");
+    symlink(source.0.join("folder"), source.0.join("link")).unwrap();
+    for path in [
+        source.0.join("link"),
+        source.0.join(".git/config"),
+        source.0.join(".git"),
+        target.0.clone(),
+    ] {
+        assert!(execute(&target.0, finder_move(&[path], "")).is_err());
+    }
+    assert!(execute(
+        &source.0,
+        finder_move(&[source.0.join("folder")], "folder/sub")
+    )
+    .is_err());
+    fs::create_dir(target.0.join("target")).unwrap();
+    let receipt = execute(&target.0, finder_move(&[source.0.join("file")], "target")).unwrap();
+    symlink(&target.0, source.0.join("linked-parent")).unwrap();
+    // Undo refuses to follow a replaced original parent through a symlink.
+    let source2 = Workspace::new();
+    fs::create_dir(source2.0.join("parent")).unwrap();
+    source2.write("parent/other", "other");
+    let second = execute(
+        &target.0,
+        finder_move(&[source2.0.join("parent/other")], "target"),
+    )
+    .unwrap();
+    fs::remove_dir(source2.0.join("parent")).unwrap();
+    symlink(&source.0, source2.0.join("parent")).unwrap();
+    assert!(replay(&target.0, &second.token, true).is_err());
+    assert_eq!(target.read("target/other"), "other");
+    replay(&target.0, &receipt.token, true).unwrap();
+    assert_eq!(source.read("file"), "source");
+}
+
+#[test]
+fn finder_move_partial_success_remains_undoable_and_local_paths_are_remapped() {
+    let source = Workspace::new();
+    let target = Workspace::new();
+    source.write("a", "one");
+    target.write("local", "two");
+    fs::create_dir(target.0.join("dest")).unwrap();
+    let request = finder_move(&[source.0.join("a"), target.0.join("local")], "dest");
+    let receipt = execute_with(&target.0, request, |index| {
+        if index == 1 {
+            target.write("dest/local", "racing file");
+        }
+    })
+    .unwrap();
+    assert_eq!(receipt.changes.len(), 1);
+    assert!(receipt.warning.is_some());
+    replay(&target.0, &receipt.token, true).unwrap();
+    assert_eq!(source.read("a"), "one");
+    fs::remove_file(target.0.join("dest/local")).unwrap();
+    let local = execute(&target.0, finder_move(&[target.0.join("local")], "dest")).unwrap();
+    assert_eq!(local.changes[0].before.as_deref(), Some("local"));
+    let undo = replay(&target.0, &local.token, true).unwrap();
+    assert_eq!(undo.changes[0].after.as_deref(), Some("local"));
+    assert_eq!(target.read("local"), "two");
+}
+
+#[test]
+fn finder_batch_copies_files_and_folders_from_different_parents_with_undo() {
+    let source = Workspace::new();
+    let target = Workspace::new();
+    fs::create_dir_all(source.0.join("папка/sub")).unwrap();
+    fs::create_dir(source.0.join("other")).unwrap();
+    fs::create_dir(target.0.join("target")).unwrap();
+    source.write("a #%.txt", "one");
+    source.write("other/a #%.txt", "two");
+    source.write("папка/sub/file", "nested");
+    target.write("target/a #%.txt", "existing");
+    let paths = [
+        source.0.join("a #%.txt"),
+        source.0.join("other/a #%.txt"),
+        source.0.join("папка"),
+        source.0.join("папка/sub/file"),
+    ];
+    let receipt = execute(&target.0, finder_copy(&paths, "target")).unwrap();
+    assert_eq!(receipt.changes.len(), 3); // A selected descendant is copied with its parent.
+    assert_eq!(target.read("target/a #%.txt"), "existing");
+    assert_eq!(target.read(&receipt.entries[0].path), "one");
+    assert_eq!(target.read(&receipt.entries[1].path), "two");
+    assert_eq!(target.read("target/папка/sub/file"), "nested");
+    assert_eq!(source.read("a #%.txt"), "one");
+    replay(&target.0, &receipt.token, true).unwrap();
+    assert!(!target.exists("target/папка"));
+    assert_eq!(target.read("target/a #%.txt"), "existing");
+    source.write("a #%.txt", "changed source");
+    replay(&target.0, &receipt.token, false).unwrap();
+    assert_eq!(target.read(&receipt.entries[0].path), "one");
+}
+
+#[test]
+fn finder_copy_rejects_recursion_protected_destinations_and_missing_sources() {
+    let source = Workspace::new();
+    let target = Workspace::new();
+    fs::create_dir_all(source.0.join("folder/sub")).unwrap();
+    assert!(execute(
+        &source.0,
+        finder_copy(&[source.0.join("folder")], "folder/sub")
+    )
+    .is_err());
+    // Staging lives under .pi/file-history, so copying .pi itself would recurse
+    // even when the requested destination is the workspace root.
+    assert!(execute(&source.0, finder_copy(&[source.0.join(".pi")], "")).is_err());
+    assert!(execute(&target.0, finder_copy(&[source.0.join("missing")], "")).is_err());
+    source.write("file", "source");
+    fs::create_dir(target.0.join(".git")).unwrap();
+    assert!(execute(&target.0, finder_copy(&[source.0.join("file")], ".git")).is_err());
+    assert!(execute(
+        &target.0,
+        finder_copy(&[source.0.join("file")], "../escape")
+    )
+    .is_err());
+}
+
+#[test]
+fn finder_copy_rejects_symlinks_and_keeps_a_late_successful_prefix_undoable() {
+    use std::os::unix::fs::symlink;
+    let source = Workspace::new();
+    let target = Workspace::new();
+    source.write("file", "source");
+    symlink(source.0.join("file"), source.0.join("link")).unwrap();
+    assert!(execute(
+        &target.0,
+        finder_copy(&[source.0.join("file"), source.0.join("link")], "")
+    )
+    .is_err());
+    assert!(!target.exists("file"));
+    fs::create_dir(source.0.join("folder")).unwrap();
+    symlink(source.0.join("file"), source.0.join("folder/link")).unwrap();
+    let receipt = execute(
+        &target.0,
+        finder_copy(&[source.0.join("file"), source.0.join("folder")], ""),
+    )
+    .unwrap();
+    assert!(receipt.warning.is_some());
+    assert_eq!(receipt.changes.len(), 1);
+    assert!(!target.exists("folder"));
+    replay(&target.0, &receipt.token, true).unwrap();
+    assert!(!target.exists("file"));
+    assert_eq!(source.read("file"), "source");
+}
+
 struct Workspace(PathBuf);
 impl Workspace {
     fn new() -> Self {

@@ -22,7 +22,7 @@ task names the application but not a project, prefer its documented disposable
 QA project; do not open the user's working projects or conversations by default.
 This changes project data only, not the real application/surface under test.
 
-For Pix QA in the Pix source checkout, read `docs/qa-sandbox.md` for the default
+For Pix QA in the Pix source checkout, read `wiki/development/testing/qa-sandbox.md` for the default
 project setup. Never run project-specific helpers in an unrelated repository.
 Additional synthetic starting data may be prepared inside the owned workspace;
 exercise behavior under test through the UI. If the requested app/surface itself

@@ -27,6 +27,8 @@
     fitTables = false,
     remoteImages = false,
     headingAnchors = false,
+    documentPath,
+    sourceLineRanges = false,
     enableHtmlSandbox = false,
     onHtmlSandboxSubmit,
     choiceActionsActive = false,
@@ -46,6 +48,8 @@
     fitTables?: boolean;
     remoteImages?: boolean;
     headingAnchors?: boolean;
+    documentPath?: string;
+    sourceLineRanges?: boolean;
     enableHtmlSandbox?: boolean;
     onHtmlSandboxSubmit?: (payload: unknown) => Promise<"sent" | "queued">;
     choiceActionsActive?: boolean;
@@ -109,7 +113,7 @@
       {/key}
     {/if}
   {:else}
-    {@const html = renderMarkdown(segment.text, { remoteImages, headingAnchors })}
+    {@const html = renderMarkdown(segment.text, { remoteImages, headingAnchors, documentPath, sourceLineRanges })}
     <div
       class={["markdown-text", compact && "compact", dense && "dense", fitTables && "fit-tables"]}
       use:linkClicks

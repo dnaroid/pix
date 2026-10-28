@@ -8,6 +8,13 @@ import {
 } from "./markdown";
 
 describe("renderMarkdown", () => {
+  it("renders Wiki parent links and images relative to their document without permitting workspace escape", () => {
+    const html = renderMarkdown("[Home](../index.md)\n\n![Map](../images/map%20one.png)\n\n[Outside](../../../secret.md)", { documentPath: "wiki/rules/combat.md" });
+    expect(html).toContain('data-project-file-candidate="wiki/index.md"');
+    expect(html).toContain('data-project-file="wiki/images/map one.png"');
+    expect(html).not.toContain('data-project-file-candidate="secret.md"');
+    expect(renderMarkdown("[Home](../index.md)")).not.toContain("data-project-file-candidate");
+  });
   it("embeds project, absolute, file URI and home GLB links, but not remote links or code", () => {
     for (const path of ["models/chair.glb", "/tmp/chair.GLB", "file:///tmp/chair.glb", "~/models/chair.glb"]) {
       const html = renderMarkdown(`[Chair](${path})`);

@@ -68,8 +68,8 @@ Maintained differences:
 `DESIGN.md`, `SECURITY.md` and `CHANGELOG.md` are retained upstream reference
 documents, **not** current Pix contracts. Upstream command/install instructions
 and the old image cap in them are historical. Current contracts:
-`specs/claude-code-provider.md`, `specs/claude-image-count.md`,
-`specs/claude-image-read-recovery.md` at the Pix root.
+`wiki/providers/claude-code-provider.md`, `wiki/providers/claude-image-count.md`,
+`wiki/providers/claude-image-read-recovery.md` at the Pix root.
 
 ## Updating upstream
 

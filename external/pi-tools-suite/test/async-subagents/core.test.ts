@@ -489,7 +489,7 @@ Research only this project.
 		expect(instructions).toContain("actual user-facing surface requested by the task");
 		expect(instructions).toContain("An explicitly named project, path, URL");
 		expect(instructions).toContain("Never silently redirect that check to a sandbox");
-		expect(instructions).toContain("docs/qa-sandbox.md");
+		expect(instructions).toContain("wiki/development/testing/qa-sandbox.md");
 		// The bundled role is a thin common contract plus a deterministic
 		// guide-routing workflow plus the escalation contract; backend specifics
 		// load via `guide` at runtime.

@@ -5,7 +5,7 @@ import { PROJECT_TREE_DROP_EVENT, PROJECT_TREE_DROP_TARGET_SELECTOR, type Projec
 const folder: ProjectTreeEntry = { path: "folder", name: "folder", kind: "directory" };
 const file: ProjectTreeEntry = { path: "other", name: "other", kind: "file" };
 
-function fixture() {
+function fixture(native?: (entries: ProjectTreeEntry[]) => Promise<void>) {
   vi.useFakeTimers();
   const root = { dataset: {} as Record<string, string>, style: { userSelect: "text", cursor: "default" } };
   const row = { dataset: { projectMoveTarget: "target" } as Record<string, string> };
@@ -23,12 +23,37 @@ function fixture() {
   const event = (x = 0, pointerId = 1) => ({ button: 0, pointerId, clientX: x, clientY: 0, currentTarget: source, preventDefault: vi.fn() } as unknown as PointerEvent);
   const move = vi.fn();
   const entries = vi.fn(() => [folder, file]);
-  const controller = createProjectExplorerDragController({ entries, move });
+  const controller = createProjectExplorerDragController({ entries, move, native });
   return { controller, move, entries, event, root, source, row, composer, hit: (value: typeof hit) => { hit = value; if (value === "file") delete row.dataset.projectMoveTarget; } };
 }
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("Files group drag", () => {
+  it("hands the selected group to AppKit once past the threshold and suppresses click until completion", async () => {
+    let done!: () => void;
+    const native = vi.fn(() => new Promise<void>((resolve) => { done = resolve; }));
+    const f = fixture(native);
+    f.controller.start(f.event(), folder); f.controller.move(f.event(2));
+    expect(native).not.toHaveBeenCalled();
+    f.controller.move(f.event(8)); f.controller.move(f.event(10)); f.controller.finish(f.event(10));
+    expect(native).toHaveBeenCalledExactlyOnceWith([folder, file], expect.any(AbortSignal));
+    expect(f.move).not.toHaveBeenCalled();
+    expect(f.controller.suppressEntryClick).toBe(true);
+    expect(f.source.releasePointerCapture).toHaveBeenCalledWith(1);
+    expect(f.root.style).toEqual({ userSelect: "text", cursor: "default" });
+    done(); await Promise.resolve();
+    vi.runAllTimers();
+    expect(f.controller.suppressEntryClick).toBe(false);
+    f.controller.dispose();
+  });
+  it("does not schedule suppression timers after a native drag completes on a disposed panel", async () => {
+    let done!: () => void;
+    const f = fixture(() => new Promise<void>((resolve) => { done = resolve; }));
+    f.controller.start(f.event(), folder); f.controller.move(f.event(8));
+    f.controller.dispose(); done(); await Promise.resolve();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(f.controller.suppressEntryClick).toBe(false);
+  });
   it("resolves nested row indentation and right gutters to that row, never root", () => {
     const f = fixture();
     f.entries.mockReturnValue([{ ...file, path: "nested/file" }]);

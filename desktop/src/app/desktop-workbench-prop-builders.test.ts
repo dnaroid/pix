@@ -288,6 +288,10 @@ describe("workbench Git diff props", () => {
 
     expect(buildWorkbenchEditorProps(options).preview?.editable).toBe(true);
     expect(buildWorkbenchEditorProps(options).preview?.workspace).toBe("/workspace");
+    const searchRange = { startLine: 12, endLine: 18 };
+    options.preview.active.searchRange = searchRange;
+    expect(buildWorkbenchEditorProps(options).preview?.searchRange).toEqual(searchRange);
+    delete options.preview.active.searchRange;
     options.preview.active = { ...options.preview.active, file: { path: "~/.config/pi/pix.jsonc", content: "{}" } };
     expect(buildWorkbenchEditorProps(options).preview?.editable).toBe(false);
     options.preview.active = {
@@ -308,6 +312,14 @@ describe("workbench Git diff props", () => {
     const local = buildWorkbenchEditorProps(options).preview;
     expect(local?.editable).toBe(false);
     expect(local?.externalEditorLabel).toBeUndefined();
+    options.preview.active = { ...options.preview.active, file: {
+      path: "wiki/index.md", content: "# Contents", virtualWikiDirectory: "wiki",
+    } };
+    const contents = buildWorkbenchEditorProps(options).preview;
+    expect(contents?.editable).toBe(false);
+    expect(contents?.externalEditorLabel).toBeUndefined();
+    expect(contents?.onOpenExternalEditor).toBeUndefined();
+    expect(contents?.onSaveProjectFile).toBeUndefined();
   });
 
   it("renders the dedicated terminal workbench surface only while its tab is open", () => {

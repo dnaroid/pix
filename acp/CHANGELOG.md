@@ -5,14 +5,14 @@ Notable changes to `pix-acp`. The format follows
 [Semantic Versioning](https://semver.org/). The adapter is versioned
 independently of the repo-wide `pi-ui-extend` package; the
 `@earendil-works/pi-coding-agent` dependency stays exactly pinned per the
-constraints in [`README.md`](README.md).
+constraints in [`README.md`](../wiki/architecture/acp.md).
 
 ## 0.1.0 — 2026-09-02
 
 First functionally complete milestone: prompt pipeline, event translation,
 extension UI bridge, session management, config options, and slash-command
 interception all work end-to-end (verified live against pi 0.84.4; see
-[`README.md`](README.md)).
+[`README.md`](../wiki/architecture/acp.md)).
 
 ### Added
 

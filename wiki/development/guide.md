@@ -1,0 +1,318 @@
+# Development
+
+<!-- markdownlint-disable MD013 -->
+
+Use this guide for source development. End users should normally install a
+self-contained [GitHub Release](../getting-started/installation.md).
+
+## Requirements
+
+Pix Desktop is supported on macOS only (see [installation](../getting-started/installation.md)).
+Existing Windows/Linux Desktop packaging is not a supported product and does
+not create a current Desktop delivery-validation requirement. TUI platform
+support is unchanged.
+
+- Node.js `>=22.19.0 <27`;
+- npm selected by the current shell;
+- Git;
+- Rust + platform Tauri prerequisites for native Desktop builds.
+
+Pix intentionally does not pin Node with mise/nvm/Volta repository files.
+Development, CI and release scripts use the `node` / `npm` on `PATH`.
+
+## Clone and install
+
+```bash
+git clone https://github.com/dnaroid/pix.git
+cd pix
+
+command -v node
+node --version
+command -v npm
+npm --version
+
+npm ci
+```
+
+ACP, Desktop and pi-tools-suite have their own dependency trees when their
+commands are used:
+
+```bash
+npm ci --prefix acp
+npm ci --prefix desktop
+npm ci --prefix external/pi-tools-suite
+```
+
+After changing Node major versions, delete all native dependency trees before
+reinstalling:
+
+```bash
+rm -rf node_modules acp/node_modules desktop/node_modules external/pi-tools-suite/node_modules
+npm ci
+npm ci --prefix acp
+npm ci --prefix desktop
+npm ci --prefix external/pi-tools-suite
+```
+
+This avoids reusing native addons built for a different Node ABI.
+
+## Verification before pushing
+
+For CI failures, flaky tests and cross-platform CI changes, load the project's
+auto-discovered `ci-reliability` skill in `.pi/skills/ci-reliability/SKILL.md`
+before modifying tests or workflows.
+
+`npm run check` is the quick **root-only** check, not the complete CI gate.
+For ordinary implementation, review and bug-fix tasks, run focused regression
+tests and relevant typechecks/builds for the changed code. Do not routinely run
+the full gate, or reproduce it by running all its stages separately.
+
+Run the full local CI only when preparing a release or when the user explicitly
+asks to push everything ("запушить всё"). A focused preflight does not by itself
+authorize a full run. For those release/push-everything tasks, run:
+
+```bash
+npm run check:ci:preflight -- --list  # inspect platform-specific smoke tests
+npm run check:ci:preflight            # quick lifecycle/portability regressions
+npm run check:ci -- --list  # inspect the native-host plan without running tests
+npm run check:ci
+```
+
+The same entrypoint runs in `check.yml`: root checks, ACP checks (including
+stdio smoke), and the tools-suite tests on all three supported TUI platforms;
+Desktop frontend checks/tests and Rust fmt/check/backend-runtime tests on macOS;
+browser mock-page E2E on Linux. A successful native gate does not prove the other
+OS matrix legs or release smoke. It does not install dependencies or act as a Git hook.
+The CI workflow runs the preflight first, **then** the unchanged full gate;
+the smoke result is never a substitute for the complete platform matrix. This
+local verification policy does not change automatic GitHub Actions triggers.
+Report the actual verification scope and any blocked or incomplete checks;
+do not present a local pass as proof of other OS matrix legs.
+Preflight verifies test contracts on every OS, AST CLI availability and LSP
+ownership on Linux,
+native SQLite, detached broker and PTY exit handling on Windows, and
+Claude Code process-group cleanup on macOS. Both stages retain individual logs
+and summaries under `.pi/artifacts`, which CI uploads even on failure.
+On Windows, the shared gate launches the npm-installed Bun command through
+`cmd.exe` because npm exposes `bun.cmd`, which Node's direct `spawn("bun")`
+cannot resolve. This is covered by `tests/ci-gate.test.ts`.
+
+Install the root and ACP dependencies first (`npm ci --ignore-scripts`,
+`npm ci --prefix acp --ignore-scripts`), plus Desktop dependencies on macOS
+(`npm ci --prefix desktop --ignore-scripts`). Use Bun **1.4.2**, the version
+pinned across the GitHub CI matrix: earlier Bun builds such as 1.3.14 cannot
+resolve the `node:sqlite` import in the suite's native-storage tests. Bun must
+be on PATH, along with
+Rust/Tauri prerequisites on macOS. Linux browser E2E requires
+`npx playwright install --with-deps chromium` beforehand. These checks do not
+enable paid/live-model evals; leave their opt-in environment flags unset.
+
+The gate stops on the first failure and preserves its exit code. All checks
+clear inherited `PIX_CONFIG_PROFILE`, `PIX_BRAINSTORM_HOST_URL` and
+`PIX_BRAINSTORM_HOST_TOKEN` so Desktop-launched agents use CI defaults and cannot
+reach the live council host; tests can still explicitly choose a profile or
+supply their own fake host. Tools-suite
+tests receive an isolated HOME/config directory, without changing your shell's
+environment. The gate prepends the checkout's `node_modules/.bin` to each
+check's `PATH`, so nested npm scripts retain access to root development binaries.
+Full per-step output and a machine-readable result (including
+steps not run) are written to a unique `.pi/artifacts/check-ci-*/` directory.
+CI uploads the logs and summary even on failure. Scratch evidence is disposable;
+export it if you need durable retention.
+
+### Keeping tests deterministic
+
+`npm run check` and the CI preflight run
+`node scripts/ci-test-contracts.mjs --check`. This analyzes checked-in test
+sources for new wall-clock success assertions, path-suffix comparisons that
+assume POSIX separators, and direct recursive cleanup in SQLite fixture hooks.
+The existing 17 occurrences are recorded in
+`scripts/ci-test-contract-baseline.json` and remain visible; introducing a
+new expression or another copy fails. Review and fix a new occurrence instead
+of auto-updating the baseline. Use
+`node scripts/ci-test-contracts.mjs --report` to inspect the remaining debt,
+and `--baseline` only when explicitly reviewing changes to that allowlist.
+This checker is an early warning, not a substitute for runtime ownership tests.
+
+For clean-SHA verification without disturbing another working session, create
+a separate checkout with `git worktree add --detach <scratch-path> <sha>`,
+install its locked dependencies, and run the pinned native gate there.
+Keep the scratch worktree under `.pi/artifacts/` (and remove it with
+`git worktree remove` after verification). Never stash or reset someone else's
+unfinished source changes merely to obtain a clean CI run.
+
+To review recurring failures across downloaded GitHub Actions artifacts:
+
+```bash
+gh run download <run-id> -D .pi/artifacts/ci-history/<run-id>
+npm run ci:history -- .pi/artifacts/ci-history
+```
+
+The report separates preflight and full-gate runs, then groups failed test
+names, error-code signatures, and observed Bun suite durations by OS.
+It does not infer GitHub job status from a
+successful gate summary: check the GitHub run separately for cancelled jobs
+or post-job timeouts. It also cannot prove flakiness from a single failure;
+repeat a focused lifecycle regression on its native OS with Bun 1.4.2 rather
+than repeatedly running the entire CI matrix.
+
+## TUI development
+
+```bash
+npm run dev -- --cwd /path/to/project
+npm run check
+npm run test:tools-suite
+npm run build:tools-suite
+npm run build:pix
+```
+
+The bundled pi-tools-suite runtime is built from source by
+`npm run build:tools-suite`. `node scripts/sync-pi-tools-suite.mjs` rebuilds it
+before mirroring source and runtime outputs to the live extension; pass
+`--check` to inspect drift without building or writing.
+
+The tools-suite's default Bun command uses `--isolate` to keep per-file module
+mocks from leaking into unrelated tests. For the complete suite use the
+CI-pinned Bun 1.4.2; for multi-file focused Bun runs,
+also pass `--isolate`; restoring mocks alone cannot repair cached fake schemas.
+
+## Desktop development
+
+```bash
+npm run dev:desktop
+npm run check:desktop
+npm --prefix desktop test
+```
+
+`npm run watch:all` watches Pix, ACP, the bundled suite and Desktop. It keeps
+the last working Desktop process alive while a replacement compiles and only
+offers a user-triggered `Restart` after any nonempty queued build succeeds,
+including Pix-, ACP-, and bundled suite-only changes. Runtime-only changes reuse
+the last successful Desktop artifact by copying it to a distinct executable
+path; they do not rebuild web assets or Rust. A failed build or artifact copy
+leaves the previously published app target unchanged. Build, copy, and publication
+failures retain the requested work for retry. The watcher does not restart Desktop
+automatically. After updating `scripts/watch-all.mjs`, stop and start an already
+running `watch:all` supervisor once so it loads the new watcher script.
+On macOS it prunes superseded
+temporary `.app` copies after builds/restarts and safely reclaims abandoned
+watcher temp roots at the next startup. Roots containing a running app or owned
+by another watcher are retained; do not delete them while Desktop is active.
+
+To run the watcher from any directory without keeping an editor open, install
+the development launcher once from the repository root:
+
+```bash
+mkdir -p "$HOME/.local/bin"
+ln -s "$PWD/scripts/pix-watch" "$HOME/.local/bin/pix-watch"
+```
+
+Ensure `$HOME/.local/bin` is on `PATH`, then run `pix-watch` in a terminal.
+It runs `npm run watch:all` in the linked checkout using npm from `PATH`.
+Keep that terminal open; stop with `Ctrl+C`. This is not a background service.
+If you move the checkout, recreate the symlink.
+
+### Native QA without restarting your working Desktop
+
+Prepare/check the native automation helper independently of the watcher:
+
+```bash
+npm run qa:desktop -- doctor
+```
+
+Development installs the signature-checked helper at the permanent OS-account
+path `~/Library/Application Support/Pix/ui-qa/helpers/macos-accessibility`.
+This is user-global, not a system-wide/root install: all checkouts share it, and
+Registry Clean, `.pi/subagents` cleanup and temporary QA HOME do not remove or
+relocate it. A matching private old project helper is copied and verified without
+re-signing; the legacy copy is left for ordinary cleanup, not used by new runs.
+Source changes are built privately and published under the shared build lock.
+Installed releases still use their signed payload helper, not this dev install.
+
+To explicitly request permissions:
+
+```bash
+npm run qa:desktop -- doctor --prompt
+```
+
+This requests Accessibility and Screen Recording for the helper whose full path
+is printed; it does not launch/restart Desktop, start a watcher, grant permission
+or reset TCC. Approve that helper in **System Settings > Privacy & Security**,
+under **Accessibility** and **Screen Recording**. Pix Desktop's own permission
+does not imply permission for the helper. If no dialog appears, add/enable the
+exact printed executable manually. Rerun plain `doctor` after approval in a new
+process: exit 0 means both grants are present, 2 means at least one is missing,
+and 1 means setup/diagnosis failed. `--prompt` may return 2 before approval.
+
+Permanent storage prevents cleanup from deleting the helper, but does not
+guarantee permanent macOS grants. Moving the executable or changing its signing
+identity may require approval again. Ad-hoc source rebuilds change the
+code-hash-based identity; `PI_UI_QA_MACOS_CODESIGN_IDENTITY` can select an existing
+keychain signing certificate for a stable certificate-based requirement.
+Do not silently create certificates or change OS privacy settings from `ui-qa`.
+
+With the existing `watch:all` running, prepare an isolated test copy:
+
+```bash
+npm run qa:desktop -- prepare
+```
+
+By default, `prepare` seeds the fresh owned workspace with the synthetic
+`fixtures/qa/pix-project` template and returns `workspace`, `projectSeed` and
+`manifestPath`. Use `--empty-workspace` for an onboarding/empty-project check.
+An explicit project/path/URL or real-data requirement takes precedence; do not
+substitute this template for it. Use its returned manifest path with
+`npm run qa:desktop -- launch --manifest <manifestPath>` for a manual launch.
+The `ui-qa` subagent instead gives the unified runner a direct project-script
+launch target; `.pi/skills/pix-desktop-qa/SKILL.md` contains that workflow.
+The test copy has its own HOME, agent sessions, application state, ephemeral
+WebView and disposable project; your working app stays on its current build.
+
+Preparation waits for the successful watcher artifact and never starts another
+watcher. Use `--state <desktop-watch-state.json>` to disambiguate watchers and
+`--timeout-ms <100..900000>` for a bounded wait. For authorized model-based tests,
+`--seed-config --seed-api-keys` explicitly copies allowlisted settings and literal
+API keys only; it does not copy OAuth tokens, sessions or an entire home. Do not
+export the private profile with screenshots. UI-only tests need no credentials.
+See `wiki/development/testing/desktop-qa-isolated-launch.md` for identity, cleanup and failure rules.
+
+For TUI/manual QA without an explicit data project, `npm run qa:sandbox` creates
+a unique `.pi/artifacts/pix-qa-sandbox-*/workspace` and prints its path. It only
+creates project data: it does not launch Pix, install dependencies or configure
+providers. The sample's `npm test` runs with Node without installation. Use the
+real requested Pix UI in that workspace; explicit project/path/URL or real-data
+requirements always win. See [Pix QA Sandbox](testing/qa-sandbox.md) for contents,
+fixtures and coverage limits.
+
+## Release builds
+
+Release construction and native verification are intentionally separate from
+development builds. See [Release and update verification](release/guide.md).
+
+Native release targets must be built on the corresponding native OS/CPU because
+the packaged runtime contains native modules.
+
+## README screenshots
+
+Regenerate screenshots without live accounts/model traffic:
+
+```bash
+node --import tsx scripts/capture-readme-screenshots.ts
+```
+
+The capture harness uses the real renderer, an isolated temporary home and the
+local test `MockModel`.
+
+## Project layout
+
+```text
+src/                         Pix TUI renderer and SDK bridge
+desktop/                     Pix Desktop Tauri/Svelte application
+acp/                         ACP adapter embedding Pi for Desktop/editors
+external/pi-tools-suite/     bundled tools/extensions
+schemas/                     published JSON schemas
+skills/                      packaged agent skills
+docs/                        user/developer/release documentation
+tests/                       TUI unit/integration/PTY tests
+scripts/                     build, release, sync and capture tooling
+```

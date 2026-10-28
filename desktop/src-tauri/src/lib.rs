@@ -59,6 +59,12 @@ mod preview_file;
 mod preview_file_action;
 mod project_browser;
 mod project_directory_link;
+mod project_entry_clipboard;
+mod project_entry_drag;
+#[cfg(target_os = "macos")]
+mod project_entry_drag_destination;
+#[cfg(target_os = "macos")]
+mod project_entry_drag_source;
 mod project_file_history;
 mod project_icon;
 mod project_storage;
@@ -2431,6 +2437,21 @@ fn write_project_file_with_expected_from(
         file.sync_all()
             .map_err(|error| format!("failed to flush {display_path}: {error}"))?;
         drop(file);
+        // Detect edits made since Preview loaded this document. Recheck at
+        // commit time to include changes made while preparing the temporary
+        // file; this is optimistic detection, not a lock on external writers.
+        if let Some(expected) = expected_content {
+            let current = read_text_file_from(
+                &target,
+                display_path.clone(),
+                MAX_PROJECT_FILE_PREVIEW_BYTES,
+            )?;
+            if current.content != expected {
+                return Err(format!(
+                    "File changed while editing. Reopen {display_path} and reapply your changes."
+                ));
+            }
+        }
         replace_project_file(&temporary, &target, sequence, &display_path)?;
         sync_directory(directory)?;
         Ok(())
@@ -9097,6 +9118,12 @@ pub fn run() {
             create_project_entry,
             rename_project_entry,
             copy_project_entry,
+            project_entry_clipboard::read_project_entry_clipboard,
+            project_entry_clipboard::write_project_entry_clipboard,
+            project_entry_drag::read_project_entry_drag,
+            project_entry_drag::capture_project_entry_drag,
+            project_entry_drag::start_project_entry_drag,
+            project_entry_drag::cancel_project_entry_drag,
             delete_project_entry,
             mutate_project_entries,
             replay_project_entries,
@@ -11032,6 +11059,94 @@ mod tests {
         assert!(read_project_file_from(&workspace, Path::new("../secret.txt"), 1024).is_err());
         assert!(read_project_file_from(&workspace, Path::new("large.txt"), 4).is_err());
         assert!(read_project_file_from(&workspace, Path::new("binary.bin"), 1024).is_err());
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn project_file_expected_content_rejects_stale_save() {
+        let workspace = temporary_workspace("project-file-stale-save");
+        let wiki = workspace.join("wiki");
+        fs::create_dir(&wiki).expect("create wiki");
+        let document = wiki.join("index.md");
+        let original = "# Game rules\n\nOriginal rules.\n";
+        let external = "# Game rules\n\nUpdated by another editor.\n";
+        fs::write(&document, original).expect("write original document");
+        fs::write(&document, external).expect("simulate an external edit");
+
+        let error = write_project_file_with_expected_from(
+            &workspace,
+            Path::new("wiki/index.md"),
+            "# Game rules\n\nStale draft.\n",
+            Some(original),
+        )
+        .err()
+        .expect("stale content must not overwrite the current document");
+
+        assert!(error.contains("changed while editing"));
+        assert!(error.contains("wiki/index.md"));
+        assert_eq!(
+            fs::read_to_string(&document).expect("read current document"),
+            external
+        );
+        assert!(fs::read_dir(&wiki).expect("list wiki").all(|entry| {
+            !entry
+                .expect("read wiki entry")
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".pix-edit.")
+        }));
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn project_file_expected_content_accepts_matching_content() {
+        let workspace = temporary_workspace("project-file-matching-save");
+        fs::create_dir(workspace.join("wiki")).expect("create wiki");
+        let document = workspace.join("wiki/index.md");
+        fs::write(&document, "").expect("create empty wiki index");
+
+        let initial = write_project_file_with_expected_from(
+            &workspace,
+            Path::new("wiki/index.md"),
+            "# Game rules\n",
+            Some(""),
+        )
+        .expect("initialize an unchanged empty document");
+        assert_eq!(initial.path, "wiki/index.md");
+
+        let updated = write_project_file_with_expected_from(
+            &workspace,
+            Path::new("wiki/index.md"),
+            "# Game rules\n\nThree action points per turn.\n",
+            Some(&initial.content),
+        )
+        .expect("save a draft based on the current document");
+        assert_eq!(updated.content, "# Game rules\n\nThree action points per turn.\n");
+        assert_eq!(
+            fs::read_to_string(&document).expect("read saved document"),
+            updated.content
+        );
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
+    }
+
+    #[test]
+    fn project_file_expected_content_remains_optional() {
+        let workspace = temporary_workspace("project-file-unconditional-save");
+        let document = workspace.join("notes.md");
+        fs::write(&document, "# Existing notes\n").expect("write existing document");
+
+        let saved = write_project_file_from(
+            &workspace,
+            Path::new("notes.md"),
+            "# Replacement notes\n",
+        )
+        .expect("preserve writes without expected content");
+
+        assert_eq!(saved.content, "# Replacement notes\n");
+        assert_eq!(
+            fs::read_to_string(&document).expect("read replacement document"),
+            saved.content
+        );
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }
 

@@ -1,0 +1,159 @@
+---
+kind: spec
+status: active
+---
+
+# Desktop native process lifecycle
+
+## Behavior
+
+This contract applies to supported macOS Desktop. Retained Windows/Linux native
+code is not a supported product or a compatibility requirement.
+
+The native host reserves an ACP slot for an existing window before resolving or
+spawning the backend. Repeated starts for the same window return the same live
+generation; starts for different windows do not serialize on runtime resolution
+or spawn. Destroying a window synchronously cancels its reservation and removes
+the label from the registry; even a start already queued on the blocking pool
+must not leave a child behind. Application exit rejects subsequent starts and
+stops all owned children. Generation-checked stop cannot terminate a replacement.
+
+ACP stdin is written by a worker, not an async command thread. `acp_send`
+accepts a batch of 1..=256 newline-free JSON objects as one queue item. The
+command boundary admits at most 16 queued batches / 8 MiB; a single oversized
+batch is permitted exclusively. Saturated command admission returns an explicit
+busy/retry error immediately; rejected writes are not accepted. Accepted batches
+retain FIFO order, are written through a buffered writer, flushed once, and
+settle their acknowledgements asynchronously. An invalid entry rejects only its
+batch, with nothing written; an OS write failure rejects and drains all pending
+writes. The webview keeps one batch in flight per run and coalesces later sends
+into an ordered outbox (bounded to 4096 lines), so send order is strict.
+Output producers backpressure on bounded queues rather than dropping lines.
+Shutdown closes stdin and uses bounded grace before force-stop.
+Output is emitted in bounded batches. ACP diagnostics remain separate from
+protocol stdout.
+
+On an unexpected ACP exit, the native exit event includes a separate 64 KiB
+stderr tail captured before event batching. The supervisor waits at most 250 ms
+for the stderr reader to finish, off the UI thread; a broken inherited pipe may
+leave a partial tail but cannot indefinitely delay exit notification. Before
+emitting `acp://exit`, the supervisor also waits at most 1 s for the stdout and
+stderr forwarders to emit their final batches, so final JSON-RPC responses
+arrive before exit rejects pending requests. The
+Desktop error strip shows the exit status and a bounded diagnostic reason
+(preferring a fatal line over stack frames), or explicitly states that stderr
+is unavailable. Each connection attempt resets its frontend diagnostic buffer.
+
+Unexpected exits and initialization failures save a bounded, uniquely named
+receipt at `<workspace>/.pi/artifacts/acp-crash-<uuid>/stderr.log` via the native
+blocking pool. Receipts contain the timestamp, failure summary and stderr tail;
+common credential forms and terminal controls are stripped before saving/display.
+Redaction is best-effort: logs can still contain private project data and should
+be reviewed before sharing. The native writer caps receipts at 512 KiB, refuses
+symlinked `.pi`/`artifacts` directories and creates files with mode 0600 on macOS.
+The error strip reports the saved path or a saving failure without hiding the
+original error. Requested stops do not create crash receipts; no workspace means
+no project-local receipt. A reconnect/dispose invalidates pending log-save UI
+updates, while an already submitted log may still finish saving for the original
+project. These scratch receipts follow the normal artifact cleanup policy; they
+are not a permanent crash archive.
+
+The backend starts in its own process group on macOS. Cleanup signals
+the process group before reaping an exited leader to prevent process-group ID
+reuse, including natural exits. A force-stop
+targets backend descendants;
+normal stop first closes stdin for graceful nested-process disposal. Spawn and
+stdio failure paths reap the child. A spawned PTY child is owned by a startup
+guard until its supervisor takes ownership; all setup and registry rejection
+paths kill and reap it. Native terminal startup reserves the same window lifetime
+and serializes registry publication with window destruction; it rejects missing
+or destroyed owners. Window destruction captures the exact terminal
+operation IDs (including completed history) while cancelling the old lifetime;
+delayed stop and pruning touch only those captured IDs, not resources published
+by a replacement window using the same label. Workspace cleanup and application
+exit still stop resources in their existing scopes.
+
+LSP onboarding package-manager commands are a separate transient class rather
+than a long-lived per-window runtime. `install_lsp_server` runs its fixed,
+user-approved command on Tauri's blocking pool and waits for that child to exit
+before returning bounded output; it does not publish an ACP/PTY process
+slot. Workspace/session invalidation therefore suppresses stale registration/UI
+continuations but does not cancel a package-manager command that is already
+running. See [desktop-lsp-onboarding.md](../operations/desktop-lsp-onboarding.md).
+
+Source Control CI queries are another transient class, but unlike installer
+commands they are explicitly cancellable. `gh`/`glab` commands run on the
+blocking pool with stdin disabled, fixed argument vectors, bounded output,
+isolated process ownership and a hard deadline. Each request is registered to
+its owning WebView. Frontend workspace/HEAD invalidation requests cancellation;
+native window destruction and application exit also synchronously remove and
+cancel the matching registrations so a lost JS teardown cannot strand a child.
+After the CLI leader exits, descendant cleanup happens before pipe readers are
+joined, preventing inherited output handles from keeping the command alive.
+
+The Activity Bar's remote-Git freshness probe is a smaller transient class.
+`workspace_git_remote_update_probe` runs `git ls-remote` on the blocking pool
+only for the configured upstream ref, with stdin/prompts disabled. Each Git
+subprocess, including the preceding local configuration/ref queries, has 64 KiB
+bounds on each output stream and its own 5-second hard deadline; this is not a
+5-second deadline for the entire multi-command probe. It uses the shared native
+owned-child process-group isolation
+but is not registered as a long-lived per-window process: frontend
+workspace/generation guards discard stale completions, while the native
+deadlines bound each orphaned subprocess. When the Git leader exits, descendants
+are terminated before the leader is reaped and pipe readers are joined, so an
+`ssh` or credential helper cannot keep the request alive. The probe never
+fetches objects or mutates Git refs, the index, or the working tree.
+
+## Constraints and failure cases
+
+- A worker currently inside an OS pipe write cannot be interrupted by queue
+  closure alone; forced process termination closes the pipe after grace.
+- An individual ACP line may exceed the byte budget; the queue admits that
+  line alone rather than corrupting the protocol.
+- Forced cleanup uses SIGKILL on the isolated process group.
+- Per-window slots are removed on destruction; cancelled reservations are not
+  retained as tombstones for arbitrary labels.
+
+## Implementation
+
+- `desktop/src-tauri/src/lib.rs::start_process`
+- `desktop/src-tauri/src/lib.rs::stop_process_slot`
+- `desktop/src-tauri/src/lib.rs::spawn_package_terminal`
+- `desktop/src-tauri/src/lib.rs::capture_destroyed_window`
+- `desktop/src-tauri/src/lsp_install.rs::install_lsp_server`
+- `desktop/src-tauri/src/git_ci.rs` (`GitCiProcessState`, bounded CLI runner)
+- `desktop/src-tauri/src/lib.rs::workspace_git_remote_update_probe`
+- `desktop/src-tauri/src/lib.rs::sidebar_git_remote_ls_remote_output`
+- `desktop/src-tauri/src/acp_queue.rs::Queue`
+- `desktop/src-tauri/src/acp_diagnostics.rs` (stderr capture and crash receipts)
+- `desktop/src/app/connection.svelte.ts` (failure reporting and stale-save guards)
+- `desktop/src/lib/acp-crash-diagnostics.ts` (bounded/redacted summaries)
+- `desktop/src-tauri/src/native_process.rs::force_stop`
+- `desktop/src-tauri/src/native_process/windows.rs` (suspended spawn, job ownership)
+
+## Tests
+
+- `desktop/src-tauri/src/acp_queue.rs` (oversized payload, saturated queue, shutdown)
+- `desktop/src-tauri/src/acp_diagnostics.rs` (bounded capture, unique receipts, symlink refusal)
+- `desktop/src/app/connection.test.ts` (late stderr, stale save success/failure, requested stops)
+- `desktop/src/lib/acp-crash-diagnostics.test.ts` (summary, redaction and bounds)
+- `desktop/src-tauri/src/native_lifecycle_tests.rs` (command-level admission,
+  invalid JSON isolation, writer failure acknowledgement drain, startup/stop
+  publication cancellation, same-label replacement resource isolation,
+  natural exit with inherited pipe and PTY startup guards)
+- `desktop/src-tauri/src/lib.rs` (destroyed reservation, isolated force-stop,
+  bounded/read-only remote-Git update probe)
+- `desktop/src-tauri/src/native_process/windows.rs` (Windows job descendants
+  after natural leader exit, injected suspended startup failure)
+
+## Verification
+
+`cargo test --manifest-path desktop/src-tauri/Cargo.toml --lib` and
+`cargo check --manifest-path desktop/src-tauri/Cargo.toml` must succeed.
+Optional retained-code check (not a Desktop delivery gate): on a non-Windows
+host with the GNU Windows Rust target installed,
+`cargo check --manifest-path desktop/src-tauri/native-job-crosscheck/Cargo.toml
+--target x86_64-pc-windows-gnu --tests` typechecks the platform module and
+its Windows-only tests without requiring a full Tauri cross-toolchain; this
+does not execute the tests on Windows.

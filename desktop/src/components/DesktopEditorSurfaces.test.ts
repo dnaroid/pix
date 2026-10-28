@@ -60,6 +60,16 @@ describe("desktop editor work surfaces", () => {
     expect(previewSource.match(/preview-text-surface/g)?.length).toBe(2);
   });
 
+  it("fits images and videos to the entire Preview viewport rather than their intrinsic width", () => {
+    expect(previewSource).toContain("flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] place-items-center");
+    const image = previewSource.match(/<img\b[^>]*>/)?.[0];
+    const video = previewSource.match(/<video\b[^>]*>/)?.[0];
+    for (const media of [image, video]) {
+      expect(media).toContain('class="size-full min-h-0 min-w-0 object-contain"');
+      expect(media).not.toMatch(/max-w-|max-h-/);
+    }
+  });
+
   it("keeps keyboard copy explicit inside the Preview textarea", () => {
     expect(previewSource).toContain("function handleEditorCopy(event: ClipboardEvent)");
     expect(previewSource).toContain('event.clipboardData.setData("text/plain"');

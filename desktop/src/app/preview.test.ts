@@ -35,6 +35,128 @@ function fixture(revealProjectEntry?: (path: string) => Promise<void>) {
 }
 
 describe("Preview async ownership", () => {
+  it("preserves a Wiki draft when another file or late read tries to replace it", async () => {
+    const { preview, options } = fixture();
+    preview.show({ kind: "file", file: { path: "wiki/index.md", content: "# Home" }, markdownLinkBase: "document" }, "replace");
+    const next = deferred<{ kind: "file"; file: { path: string; content: string } }>();
+    tauri.invoke.mockImplementation((command: string) => command === "project_directory_exists" ? false : next.promise);
+    const opening = preview.openProjectFile("wiki/rules.md", "push", undefined, false, "document");
+    preview.setDirty(true);
+    next.resolve({ kind: "file", file: { path: "wiki/rules.md", content: "# Rules" } });
+    await opening;
+    expect(preview.active).toMatchObject({ file: { path: "wiki/index.md" }, markdownLinkBase: "document" });
+    expect(preview.dirty).toBe(true);
+    expect(options.setErrorMessage).toHaveBeenCalledWith(expect.stringContaining("Save or discard"));
+    preview.show({ kind: "attachment", attachment: image }, "replace");
+    expect(preview.active?.kind).toBe("file");
+  });
+
+  it("retains document-relative Wiki navigation in Preview history", async () => {
+    const { preview } = fixture();
+    tauri.invoke.mockImplementation(async (command: string, { path }: { path: string }) => command === "project_directory_exists"
+      ? false : { kind: "text", file: { path, content: `# ${path}` } });
+    await preview.openProjectFile("wiki/index.md", "push", undefined, false, "document");
+    await preview.openProjectFile("wiki/rules.md", "push", undefined, false, "document");
+    preview.move(-1);
+    expect(preview.active).toMatchObject({ file: { path: "wiki/index.md" }, markdownLinkBase: "document" });
+  });
+
+  it("opens virtual Wiki contents and child pages with normal back/forward history", async () => {
+    const reveal = vi.fn(async () => {});
+    const { preview } = fixture(reveal);
+    tauri.invoke.mockImplementation(async (command: string, { path }: { path: string }) => {
+      if (command === "project_directory_exists") return path === "wiki";
+      if (command === "project_file_exists") return path === "wiki/combat.md";
+      if (command === "list_project_directory") return [{ kind: "file", name: "combat.md", path: "wiki/combat.md" }];
+      if (command === "read_preview_file") return { kind: "text", file: { path, content: "# Combat" } };
+      throw new Error(`Unexpected command: ${command}`);
+    });
+    await preview.openProjectFile("wiki", "push", undefined, false, "document");
+    expect(preview.active).toMatchObject({ kind: "file", markdownLinkBase: "document", file: {
+      virtualWikiDirectory: "wiki", content: expect.stringContaining("[combat](./combat.md)"),
+    } });
+    await preview.openProjectFile("wiki/combat.md", "push", undefined, false, "document");
+    expect(preview.active).toMatchObject({ file: { path: "wiki/combat.md" } });
+    preview.move(-1);
+    expect(preview.active).toMatchObject({ file: { virtualWikiDirectory: "wiki" } });
+    preview.move(1);
+    expect(preview.active).toMatchObject({ file: { path: "wiki/combat.md" } });
+    expect(reveal).not.toHaveBeenCalled();
+    expect(tauri.invoke.mock.calls.every(([command]) => !/write|create/u.test(command))).toBe(true);
+  });
+
+  it("opens an image-only Wiki listing and follows its image through media Preview", async () => {
+    const { preview } = fixture();
+    tauri.invoke.mockImplementation(async (command: string, { path }: { path: string }) => {
+      if (command === "project_directory_exists") return path === "wiki/screenshots";
+      if (command === "project_file_exists") return false;
+      if (command === "list_project_directory") return [{ kind: "file", name: "overview.png", path: "wiki/screenshots/overview.png" }];
+      if (command === "resolve_project_media") return { name: "overview.png", path: "/one/wiki/screenshots/overview.png" };
+      throw new Error(`Unexpected command: ${command}`);
+    });
+    await preview.openProjectFile("wiki/screenshots", "push", undefined, false, "document");
+    expect(preview.active).toMatchObject({ file: {
+      content: expect.stringContaining("[overview.png](./overview.png)"),
+      virtualWikiDirectory: "wiki/screenshots",
+    } });
+    await preview.openProjectFile("wiki/screenshots/overview.png", "push", undefined, false, "document");
+    expect(preview.active).toMatchObject({ kind: "attachment", attachment: { kind: "image", name: "overview.png" } });
+    preview.move(-1);
+    expect(preview.active).toMatchObject({ file: { virtualWikiDirectory: "wiki/screenshots" } });
+  });
+
+  it("opens a real index from a Wiki directory link instead of revealing Files", async () => {
+    const reveal = vi.fn(async () => {});
+    const { preview } = fixture(reveal);
+    tauri.invoke.mockImplementation(async (command: string, { path }: { path: string }) => {
+      if (command === "project_directory_exists") return true;
+      if (command === "project_file_exists") return path === "wiki/rules/index.md";
+      return { kind: "text", file: { path, content: "# Rules" } };
+    });
+    await preview.openProjectFile("wiki/rules", "push", undefined, false, "document");
+    expect(preview.active).toMatchObject({ file: { path: "wiki/rules/index.md" }, markdownLinkBase: "document" });
+    expect(reveal).not.toHaveBeenCalled();
+  });
+
+  it.each(["close", "workspace", "new-file", "history"])("discards late Wiki listings after %s", async (action) => {
+    const { preview, setWorkspace } = fixture();
+    preview.show({ kind: "file", file: { path: "one.md", content: "one" } }, "push");
+    preview.show({ kind: "file", file: { path: "two.md", content: "two" } }, "push");
+    const listing = deferred<unknown[]>();
+    const enteredListing = deferred<void>();
+    tauri.invoke.mockImplementation(async (command: string, { path }: { path: string }) => {
+      if (command === "project_directory_exists") return path === "wiki";
+      if (command === "project_file_exists") return false;
+      if (command === "list_project_directory") { enteredListing.resolve(); return listing.promise; }
+      return { kind: "text", file: { path, content: "# New" } };
+    });
+    const opening = preview.openProjectFile("wiki", "push", undefined, false, "document");
+    await enteredListing.promise;
+    if (action === "close") preview.close();
+    if (action === "workspace") { setWorkspace("/two"); preview.resetForWorkspaceChange(); }
+    if (action === "new-file") await preview.openProjectFile("new.md", "push");
+    if (action === "history") preview.move(-1);
+    const expected = preview.active;
+    listing.resolve([]);
+    await opening;
+    expect(preview.active).toBe(expected);
+    expect(preview.active?.kind === "file" && preview.active.file.virtualWikiDirectory).toBeFalsy();
+  });
+
+  it("reports a current failed Wiki listing and preserves the previous Preview", async () => {
+    const { preview, options } = fixture();
+    preview.show({ kind: "attachment", attachment: image }, "replace");
+    const previous = preview.active;
+    const error = new Error("Wiki listing failed");
+    tauri.invoke.mockImplementation(async (command: string) => {
+      if (command === "project_directory_exists") return true;
+      if (command === "project_file_exists") return false;
+      throw error;
+    });
+    await preview.openProjectFile("wiki", "push", undefined, false, "document");
+    expect(options.reportError).toHaveBeenCalledExactlyOnceWith(error);
+    expect(preview.active).toBe(previous);
+  });
   it.each(["file", "directory", null] as const)("preserves local target kind %s for Markdown icons", async (kind) => {
     const { preview } = fixture();
     tauri.invoke.mockResolvedValue(kind);
@@ -185,6 +307,22 @@ describe("Preview async ownership", () => {
     await preview.openProjectFile(file.path, "push", { startLine: 1, endLine: 1 });
     expect(reveal).not.toHaveBeenCalled();
     expect(preview.active).toMatchObject({ kind: "file", file, lineRange: { startLine: 1, endLine: 1 } });
+  });
+
+  it("retains Wiki search locations in rendered-document history separately from source links", async () => {
+    const { preview } = fixture();
+    const range = { startLine: 24, endLine: 29 };
+    tauri.invoke.mockImplementation(async (command: string, args: any) => command === "project_directory_exists"
+      ? false : { kind: "text", file: { path: args.path, content: "# Wiki" } });
+    await preview.openProjectFile("wiki/first.md", "push", undefined, true, "document", range);
+    expect(preview.active).toMatchObject({ kind: "file", searchRange: range, markdownLinkBase: "document" });
+    expect(preview.active).not.toHaveProperty("lineRange");
+    await preview.openProjectFile("wiki/second.md", "push", undefined, true, "document", { startLine: 2, endLine: 3 });
+    preview.move(-1);
+    expect(preview.active).toMatchObject({ file: { path: "wiki/first.md" }, searchRange: range });
+    await preview.openProjectFile("wiki/source.md", "push", range, false, "document");
+    expect(preview.active).toMatchObject({ lineRange: range });
+    expect(preview.active).not.toHaveProperty("searchRange");
   });
 
   it("does not let an older attachment replace a newer project file", async () => {

@@ -70,6 +70,7 @@
   import type { AcpClient, RuntimeStatus } from "../lib/acp-client";
   import GitPanel from "./GitPanel.svelte";
   import ProjectExplorer from "./ProjectExplorer.svelte";
+  import ProjectWikiPanel from "./ProjectWikiPanel.svelte";
   import PackageScriptsPanel from "./PackageScriptsPanel.svelte";
   import { createPackageScriptsController } from "./package-scripts-controller.svelte";
   import type { TerminalSurfaceHandle } from "./TerminalSessionsPane.svelte";
@@ -115,6 +116,7 @@
   const SIDEBAR_LABELS: Record<SidebarTab, string> = {
     tasks: "Work",
     project: "Project",
+    wiki: "Wiki",
     git: "Source Control",
     registry: "Registry",
     scripts: "Launch Commands",
@@ -198,6 +200,7 @@
     onListProjectDirectory,
     onValidateProjectFile,
     onOpenProjectFile,
+    onOpenWikiFile,
     onOpenFilesFile,
     onBeforeFilesMutation,
     onOpenUserConfig,
@@ -315,6 +318,7 @@
     onListProjectDirectory: (path: string) => Promise<ProjectTreeEntry[]>;
     onValidateProjectFile: (path: string) => Promise<boolean | "directory">;
     onOpenProjectFile: (path: string, range?: ProjectFileLineRange) => void;
+    onOpenWikiFile?: (path: string, searchRange?: ProjectFileLineRange) => void;
     onOpenFilesFile?: (path: string) => void;
     onBeforeFilesMutation?: () => Promise<() => void>;
     onOpenUserConfig: (kind: SettingsConfigKind) => void;
@@ -667,7 +671,7 @@
   function isSidebarTab(value: string | null): value is SidebarTab {
     // Restore selection before the async preference resolves; the preference
     // gates mounting and demotes to Tasks if the loaded value is disabled.
-    return value === "project" || value === "tasks" || value === "git" || value === "registry" || value === "scripts" || value === "search" || value === "usage" || value === "lsp" || value === "settings" || value === "logs";
+    return value === "project" || value === "wiki" || value === "tasks" || value === "git" || value === "registry" || value === "scripts" || value === "search" || value === "usage" || value === "lsp" || value === "settings" || value === "logs";
   }
 
   function setActiveTab(tab: SidebarTab): void {
@@ -1175,6 +1179,17 @@
             {/if}
           </div>
         </section>
+      {:else if activeTab === "wiki"}
+        <div id="workspace-wiki-panel" class="flex min-h-0 min-w-0 flex-col overflow-hidden" aria-label="Project wiki">
+          <ProjectWikiPanel
+            {workspace}
+            activePath={activeProjectDocumentPath}
+            onOpenFile={onOpenWikiFile ?? onOpenProjectFile}
+            onOpenFiles={onOpenProjectFile}
+            onBeforeMutation={onBeforeFilesMutation}
+            onOpenExternal={onOpenExternalEditor}
+          />
+        </div>
       {:else if activeTab === "git"}
         <div id="workspace-git-panel" class="grid min-h-0 min-w-0 overflow-hidden" aria-label="Source Control">
           <GitPanel

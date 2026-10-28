@@ -4,10 +4,11 @@ import elicitationSource from "./ElicitationDialog.svelte?raw";
 import modelSource from "./ModelThinkingPicker.svelte?raw";
 import settingsSource from "./ProjectSettingsDialog.svelte?raw";
 import searchSource from "./UniversalSearch.svelte?raw";
+import renameSource from "./SessionRenameDialog.svelte?raw";
 
 describe("desktop modal dialog lifecycle", () => {
   it("uses native modal dialogs with shared focus lifecycle", () => {
-    for (const source of [commandSource, elicitationSource, settingsSource, searchSource]) {
+    for (const source of [commandSource, elicitationSource, settingsSource, searchSource, renameSource]) {
       expect(source).toContain("<dialog");
       expect(source).toContain("activateModalDialog");
     }
@@ -18,6 +19,10 @@ describe("desktop modal dialog lifecycle", () => {
     expect(elicitationSource).toContain('type="submit"');
     expect(settingsSource).toContain("<form");
     expect(settingsSource).toContain('type="submit"');
+    expect(renameSource).toContain("<form");
+    expect(renameSource).toContain('type="submit"');
+    expect(renameSource).toContain("input?.select()");
+    expect(renameSource).toContain("oncancel");
   });
 
   it("renders single-line prompts separately from multiline editors", () => {

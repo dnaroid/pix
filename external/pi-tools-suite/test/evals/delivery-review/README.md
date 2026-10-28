@@ -16,4 +16,4 @@ bun test test/evals/delivery-review/assertions.test.ts
 ```
 
 There is no current delivery-review live command. Current delegation selection
-evals are documented in [docs/evals.md](../../../docs/evals.md).
+evals are documented in [docs/evals.md](../../../../../wiki/development/testing/evals.md).

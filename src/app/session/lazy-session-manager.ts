@@ -169,7 +169,7 @@ class LazySessionManager implements SessionManagerFacade {
 	// it can omit old ancestors and contain abandoned side-branch entries.
 	// Lineage-sensitive callers must use readFullBranchEntries(); retry proofs
 	// must follow parentId, never compare positions in this cache. See
-	// specs/dcp-statistics.md#lazy-tail-retry-invariant and its regression tests.
+	// wiki/context/dcp-statistics.md#lazy-tail-retry-invariant and its regression tests.
 	getBranch(fromId?: string): SessionEntry[] {
 		if (this.hydrated) return this.hydrated.getBranch(fromId);
 		if (fromId === undefined) return [...this.entries];

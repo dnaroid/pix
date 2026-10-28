@@ -7,6 +7,7 @@ interface PreviewScrollControllerOptions {
   readonly previewId: () => number;
   readonly scrollPosition: () => PreviewScrollPosition;
   readonly lineRange: () => ProjectFileLineRange | undefined;
+  readonly searchRange?: () => ProjectFileLineRange | undefined;
   readonly file: () => ProjectFilePreview | undefined;
   readonly highlighted: () => HighlightedCode | undefined;
   readonly element: () => HTMLDivElement | undefined;
@@ -18,6 +19,15 @@ interface PreviewScrollControllerOptions {
 
 type AnimationFrameScheduler = (callback: FrameRequestCallback) => number;
 type AnimationFrameCanceller = (handle: number) => void;
+
+/** Source annotations keep semantic/Markdown matches navigable without flattening the DOM. */
+export function renderedRangeElements(root: HTMLElement, range: ProjectFileLineRange): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>("[data-source-start-line]")).filter(element => {
+    const start = Number(element.dataset.sourceStartLine);
+    const end = Number(element.dataset.sourceEndLine);
+    return start <= range.endLine && end >= range.startLine;
+  });
+}
 
 /**
  * Run work one paint after scroll restoration. `restoreScroll` also uses an
@@ -101,11 +111,12 @@ export function createPreviewScrollController(options: PreviewScrollControllerOp
 
   $effect(() => {
     const requestedPreviewId = options.previewId();
-    const range = options.lineRange();
+    const searchRange = options.searchRange?.();
+    const range = options.lineRange() ?? searchRange;
     const scroll = options.element();
     const scrollPosition = options.scrollPosition();
     const reveal = Boolean(range && scrollPosition.left === 0 && scrollPosition.top === 0);
-    if (!scroll || !options.file() || !options.highlighted()) return;
+    if (!scroll || !options.file() || (!options.highlighted() && !searchRange)) return;
 
     let cancelled = false;
     let cancelReveal = () => {};
@@ -116,18 +127,20 @@ export function createPreviewScrollController(options: PreviewScrollControllerOp
       if (cancelled || options.previewId() !== requestedPreviewId) return;
       cancelReveal = scheduleAfterScrollRestore(() => {
         if (cancelled || options.previewId() !== requestedPreviewId) return;
+        for (const element of scroll.querySelectorAll(".preview-range-highlight")) {
+          element.classList.remove("preview-range-highlight");
+        }
+        if (!range) return;
         const lines = Array.from(scroll.querySelectorAll<HTMLElement>(".preview-code .sh__line"));
-        for (const line of lines) line.classList.remove("preview-range-highlight");
-        if (!range || lines.length === 0) return;
-
         const startIndex = Math.max(0, Math.min(lines.length - 1, range.startLine - 1));
         const endIndex = Math.max(startIndex, Math.min(lines.length - 1, range.endLine - 1));
-        for (let index = startIndex; index <= endIndex; index += 1) {
-          lines[index]?.classList.add("preview-range-highlight");
-        }
+        const targets = options.highlighted()
+          ? lines.slice(startIndex, endIndex + 1)
+          : renderedRangeElements(scroll, range);
+        for (const element of targets) element.classList.add("preview-range-highlight");
 
         if (!reveal) return;
-        const first = lines[startIndex];
+        const first = targets[0];
         if (!first) return;
         const scrollRect = scroll.getBoundingClientRect();
         const firstRect = first.getBoundingClientRect();

@@ -12,9 +12,15 @@ type TableAlignment = "center" | "left" | "right" | undefined;
 export function renderBlocks(lines: readonly string[], depth: number, context: MarkdownRenderContext): string {
   const output: string[] = [];
   let index = 0;
+  function append(html: string, start: number, end: number): void {
+    output.push(context.sourceLineRanges && depth === 0
+      ? html.replace(/^<\w+/u, `$& data-source-start-line="${start + 1}" data-source-end-line="${end}"`)
+      : html);
+  }
 
   while (index < lines.length) {
     const line = lines[index] ?? "";
+    const start = index;
     if (!line.trim()) {
       index += 1;
       continue;
@@ -22,7 +28,7 @@ export function renderBlocks(lines: readonly string[], depth: number, context: M
 
     const math = displayMathBlockAt(lines, index);
     if (math) {
-      output.push(renderDisplayMath(math));
+      append(renderDisplayMath(math), start, index + math.lineCount);
       index += math.lineCount;
       continue;
     }
@@ -39,22 +45,23 @@ export function renderBlocks(lines: readonly string[], depth: number, context: M
       const source = body.join("\n");
       if (fence.language.toLowerCase() === "mermaid") {
         const escapedSource = escapeHtml(source);
-        output.push(
+        append(
           `<figure class="mermaid-diagram" data-mermaid-source="${escapeAttribute(source)}">`
           + '<div class="mermaid-canvas" role="img" aria-label="Mermaid diagram" aria-busy="true"></div>'
           + `<pre class="mermaid-fallback" data-code-source="${escapeAttribute(source)}"><code>${escapedSource}</code></pre>`
           + "</figure>",
+          start, index,
         );
         continue;
       }
       const highlighted = highlightCode(source, fence.language);
-      output.push(`<pre data-code-source="${escapeAttribute(source)}"><code class="highlighted-code" data-language="${highlighted.language}">${highlighted.html}</code></pre>`);
+      append(`<pre data-code-source="${escapeAttribute(source)}"><code class="highlighted-code" data-language="${highlighted.language}">${highlighted.html}</code></pre>`, start, index);
       continue;
     }
 
     const table = parseTable(lines, index, context);
     if (table) {
-      output.push(table.html);
+      append(table.html, start, index + table.lineCount);
       index += table.lineCount;
       continue;
     }
@@ -64,13 +71,13 @@ export function renderBlocks(lines: readonly string[], depth: number, context: M
       const level = heading[1]?.length ?? 1;
       const source = heading[2] ?? "";
       const id = context.headingAnchors ? ` id="${escapeAttribute(nextHeadingSlug(source, context))}"` : "";
-      output.push(`<h${level}${id}>${renderInline(source, 0, true, context)}</h${level}>`);
+      append(`<h${level}${id}>${renderInline(source, 0, true, context)}</h${level}>`, start, index + 1);
       index += 1;
       continue;
     }
 
     if (/^ {0,3}(?:-{3,}|_{3,}|\*{3,})\s*$/.test(line)) {
-      output.push("<hr>");
+      append("<hr>", start, index + 1);
       index += 1;
       continue;
     }
@@ -86,13 +93,13 @@ export function renderBlocks(lines: readonly string[], depth: number, context: M
       const quote = depth < MAX_BLOCK_DEPTH
         ? renderBlocks(quoteLines, depth + 1, context)
         : `<p>${renderInline(quoteLines.join("\n"), 0, true, context)}</p>`;
-      output.push(`<blockquote>${quote}</blockquote>`);
+      append(`<blockquote>${quote}</blockquote>`, start, index);
       continue;
     }
 
     const list = parseList(lines, index, context);
     if (list) {
-      output.push(list.html);
+      append(list.html, start, index + list.lineCount);
       index += list.lineCount;
       continue;
     }
@@ -103,7 +110,7 @@ export function renderBlocks(lines: readonly string[], depth: number, context: M
       paragraph.push(lines[index] ?? "");
       index += 1;
     }
-    output.push(`<p>${renderInline(paragraph.join("\n"), 0, true, context)}</p>`);
+    append(`<p>${renderInline(paragraph.join("\n"), 0, true, context)}</p>`, start, index);
   }
 
   return output.join("");

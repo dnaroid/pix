@@ -41,8 +41,10 @@ tauri-plugin-window-state = "2"
 core-foundation = "0.10"
 core-graphics = "0.25"
 mac-notification-sys = "0.6.15"
+# Match Tauri's locked Wry so native drag validates its actual Objective-C type.
+wry = { version = "=0.55.1", default-features = false }
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSPasteboard", "NSScreen", "NSWindow", "NSWorkspace", "NSSound"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSPasteboard", "NSPasteboardItem", "NSDragging", "NSDraggingItem", "NSDraggingSession", "NSEvent", "NSGraphicsContext", "NSImage", "NSResponder", "NSView", "NSScreen", "NSWindow", "NSWorkspace", "NSSound"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSGeometry", "NSDictionary", "NSString", "NSURL", "NSUserNotification"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

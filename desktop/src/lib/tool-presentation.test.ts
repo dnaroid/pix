@@ -71,10 +71,10 @@ describe("toolPresentation", () => {
     });
     expect(toolPresentation({
       name: "repo_audit", kind: "other", title: "Repo Audit",
-      rawInput: { noSemantic: true, paths: ["desktop/src/lib/tool-presentation.ts", "desktop/src/lib/tool-presentation.test.ts", "specs/desktop-tool-rows.md", "desktop/src/lib/transcript.ts"] },
+      rawInput: { noSemantic: true, paths: ["desktop/src/lib/tool-presentation.ts", "desktop/src/lib/tool-presentation.test.ts", "wiki/desktop/rendering/desktop-tool-rows.md", "desktop/src/lib/transcript.ts"] },
     })).toEqual({
       name: "repo_audit",
-      args: "paths: [desktop/src/lib/tool-presentation.ts, desktop/src/lib/tool-presentation.test.ts, specs/desktop-tool-rows.md, desktop/src/lib/transcript.ts] · noSemantic: true",
+      args: "paths: [desktop/src/lib/tool-presentation.ts, desktop/src/lib/tool-presentation.test.ts, wiki/desktop/rendering/desktop-tool-rows.md, desktop/src/lib/transcript.ts] · noSemantic: true",
       tone: "inspect",
     });
   });

@@ -3,6 +3,7 @@ import type { ProjectFileLineRange } from "./project-files";
 import type { MarkdownRenderContext } from "./markdown-context";
 import { escapeAttribute } from "./markdown-escape";
 import { previewMediaKindForPath, type PreviewMediaKind } from "./media";
+import { resolveWikiLink } from "./project-wiki";
 
 type MarkdownMediaKind = PreviewMediaKind;
 
@@ -33,7 +34,7 @@ export function linkForDestination(
   const homePath = normalizeHomeFileDestination(destination);
   if (homePath) return homeFileLink(homePath, label);
 
-  const projectReference = normalizeProjectFileReference(destination);
+  const projectReference = normalizeProjectFileReference(destination, context.documentPath);
   if (projectReference) return projectFileLink(projectReference.path, label, projectReference.range);
 
   const localPath = normalizeLocalFileDestination(destination);
@@ -190,13 +191,14 @@ export function normalizeLocalFileDestination(destination: string): string | und
 }
 
 /** Normalize a Markdown destination that can safely be resolved inside the active workspace. */
-export function normalizeProjectFileDestination(destination: string): string | undefined {
-  return normalizeProjectFileReference(destination)?.path;
+export function normalizeProjectFileDestination(destination: string, documentPath?: string): string | undefined {
+  return normalizeProjectFileReference(destination, documentPath)?.path;
 }
 
 /** Normalize a confined project path and an optional GitHub-style source-line fragment. */
 export function normalizeProjectFileReference(
   destination: string,
+  documentPath?: string,
 ): { path: string; range?: ProjectFileLineRange } | undefined {
   if (!destination || /[\u0000-\u001f\u007f]/.test(destination)) return undefined;
   let value = destination.trim();
@@ -208,6 +210,12 @@ export function normalizeProjectFileReference(
   if (fragmentStart >= 0) pathEnd = Math.min(pathEnd, fragmentStart);
   const pathValue = value.slice(0, pathEnd);
   const fragment = fragmentStart >= 0 ? value.slice(fragmentStart + 1) : undefined;
+  if (documentPath) {
+    const path = resolveWikiLink(documentPath, value);
+    if (!path) return undefined;
+    const range = fragment ? projectFileLineRange(fragment) : undefined;
+    return { path, ...(range ? { range } : {}) };
+  }
   try {
     value = decodeURIComponent(pathValue);
   } catch {

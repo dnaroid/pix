@@ -207,7 +207,8 @@ export function createDesktopSidebarViewModel(options: {
       onSaveIdentity: options.git.saveIdentity,
     },
     projectDocuments: options.projectDocuments.snapshot,
-    activeProjectDocumentPath: options.preview.active?.kind === "file" ? options.preview.active.file.path : null,
+    activeProjectDocumentPath: options.preview.active?.kind === "file"
+      ? options.preview.active.file.virtualWikiDirectory ?? options.preview.active.file.path : null,
     planActionsDisabled: options.projectActions.actionId !== null || options.projectDocuments.removing !== null,
     planRunDisabled: !(options.planRunReady?.() ?? true) || !options.canUseSession() || options.sessionMutationRunning(),
     recentProjects: options.projectWorkspace.recentProjects,
@@ -240,6 +241,7 @@ export function createDesktopSidebarViewModel(options: {
     onListProjectDirectory: options.projectWorkspace.listDirectory,
     onValidateProjectFile: options.preview.validateProjectFile,
     onOpenProjectFile: (path, range) => void options.preview.openProjectFile(path, "replace", range),
+    onOpenWikiFile: (path, searchRange) => void options.preview.openProjectFile(path, "push", undefined, true, "document", searchRange),
     onOpenFilesFile: (path) => void options.preview.openProjectFile(path, "replace", undefined, true),
     onBeforeFilesMutation: async () => {
       if (options.preview.dirty) throw new Error("Save or discard the Preview draft before changing files.");

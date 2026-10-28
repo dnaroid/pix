@@ -152,6 +152,18 @@ describe("session workbench model", () => {
     }
   });
 
+  it("labels virtual contents and uses the real directory for reverse navigation", () => {
+    const tabs = buildDesktopWorkbenchTabs({
+      sessionTabs: [], preview: { kind: "file", file: {
+        path: "wiki/rules/index.md", virtualWikiDirectory: "wiki/rules",
+      } }, previewDirty: false, previewAnchorId: null, previewOpenedOrder: 1,
+      gitReviewLoading: false, gitResolveRunning: false, gitAnchorId: null, gitOpenedOrder: 0,
+    });
+    expect(tabs[0]).toMatchObject({
+      kind: "preview", label: "rules · Contents", title: "wiki/rules/ · Contents", filePath: "wiki/rules",
+    });
+  });
+
   it("inserts a dedicated LSP installer beside the owning conversation and locks close while busy", () => {
     const [session] = build([{ sessionId: "session-1", cwd: "/tmp/project", title: "Session" }]);
     const tabs = buildDesktopWorkbenchTabs({

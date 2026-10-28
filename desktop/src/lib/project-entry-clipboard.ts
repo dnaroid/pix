@@ -1,4 +1,4 @@
-import type { ProjectTreeEntry } from "./project-tree";
+import { projectTreeAbsolutePath, type ProjectTreeEntry } from "./project-tree";
 
 const FORMAT = "pix-project-entry";
 export interface ProjectEntryClipboard {
@@ -45,12 +45,13 @@ export function canPasteProjectEntry(copied: ProjectEntryClipboard | null, works
   if (copied.operation === "move" && copied.workspace !== workspace) return false;
   if (copied.entries) return copied.entries.every((entry) => canPasteProjectEntry({ workspace: copied.workspace, ...entry }, workspace, destination));
   // This is only a menu hint. The backend checks canonical paths, including aliases.
-  return copied.kind !== "directory" || copied.workspace !== workspace
-    || (destination !== copied.path && !destination.startsWith(`${copied.path}/`));
+  const source = projectTreeAbsolutePath(copied.workspace, copied.path);
+  const target = projectTreeAbsolutePath(workspace, destination).replace(/\/$/u, "");
+  return copied.kind !== "directory" || (target !== source && !target.startsWith(`${source}/`));
 }
 
 /** Action-triggered reads only; replacement and teardown invalidate late results. */
-export function createProjectEntryClipboardReader(read: () => Promise<string | null>) {
+export function createProjectEntryClipboardReader(read: () => Promise<string | null>, report: (error: unknown) => void = () => {}) {
   let generation = 0;
   return {
     invalidate() { generation += 1; },
@@ -59,7 +60,8 @@ export function createProjectEntryClipboardReader(read: () => Promise<string | n
       try {
         const value = decodeProjectEntryClipboard(await read());
         if (request === generation) publish(value);
-      } catch {
+      } catch (error) {
+        report(error);
         if (request === generation) publish(null);
       }
     },

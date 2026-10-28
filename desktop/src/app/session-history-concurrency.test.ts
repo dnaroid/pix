@@ -2,7 +2,7 @@ import type { SessionUpdate } from "@agentclientprotocol/sdk";
 import { describe, expect, it, vi } from "vitest";
 import type { AcpClient } from "../lib/acp-client";
 import type { LazySessionHistory } from "../lib/acp-client-types";
-import { appendLocalUserMessage, emptyTranscript, type ToolItem } from "../lib/transcript";
+import { applySessionUpdates, appendLocalUserMessage, emptyTranscript, groupTranscriptItems, type ToolItem } from "../lib/transcript";
 import { createActiveSessionState } from "./active-session-state.svelte";
 import { createSessionHistory } from "./session-history.svelte";
 
@@ -35,6 +35,40 @@ function harness() {
 }
 
 describe("lazy history request ownership", () => {
+  it.each([false, true])("merges a recovered question with history without duplicate render keys (answered=%s)", async (answered) => {
+    const h = harness();
+    h.state.setTranscript(emptyTranscript);
+    const response = deferred<LazySessionHistory>();
+    h.sessionHistory.mockReturnValueOnce(response.promise);
+    const pending = h.history.hydrate(h.client, "session-1", "/project", h.history.begin());
+    const question: SessionUpdate = {
+      sessionUpdate: "tool_call", toolCallId: "question-1", name: "question", title: "Question",
+      status: "in_progress", rawInput: { questions: [{ id: "scope", prompt: "Which scope?" }] },
+    };
+    const live: SessionUpdate[] = [question];
+    if (answered) live.push({
+      sessionUpdate: "tool_call_update", toolCallId: "question-1", status: "completed",
+      rawOutput: { canceled: false, answers: [{ id: "scope", label: "Small" }] },
+    });
+    h.state.setTranscriptFor("session-1", applySessionUpdates(emptyTranscript, live));
+    response.resolve({ updates: [question], deferredToolCallIds: [] });
+    await pending;
+
+    expect(h.state.transcript.items).toHaveLength(1);
+    expect(h.state.transcript.items[0]).toMatchObject({ status: answered ? "completed" : "in_progress" });
+    const display = groupTranscriptItems(h.state.transcript.items);
+    expect(new Set(display.map((item) => item.id)).size).toBe(display.length);
+    for (const item of display) {
+      if (item.type === "activity-group") {
+        expect(new Set(item.entries.map((entry) => entry.id)).size).toBe(item.entries.length);
+      }
+    }
+    expect(display.filter((item) => item.type === "message").map((item) => item.text)).toEqual(
+      answered ? ["Which scope?", "Small"] : ["Which scope?"],
+    );
+    expect(h.reportError).not.toHaveBeenCalled();
+  });
+
   it.each(["switch", "forget", "reset", "replacement"])(
     "retains submit-owned background hydration only while its session is valid: %s", async (action) => {
       const h = harness();

@@ -1,6 +1,8 @@
 export interface ProjectFilePreview {
   path: string;
   content: string;
+  /** Generated Wiki contents: path is only a Markdown link base, never a disk file. */
+  virtualWikiDirectory?: string;
 }
 
 export interface ProjectFileLineRange {

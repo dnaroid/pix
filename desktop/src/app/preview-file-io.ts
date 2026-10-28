@@ -11,6 +11,7 @@ import type { PreviewStoreOptions } from "./preview-options";
 import type { PreviewNavigation, PreviewState } from "./preview-state.svelte";
 import { previewMediaKindForPath } from "../lib/media";
 import type { FileLinkValidation } from "../lib/file-link-kind";
+import { resolvePreviewWikiDirectory } from "./preview-wiki-directory";
 
 type PreviewRead = { kind: "text"; file: ProjectFilePreview } | { kind: "external" };
 
@@ -94,6 +95,8 @@ export function createPreviewFileIo(options: PreviewStoreOptions, state: Preview
     navigation: PreviewNavigation = "replace",
     lineRange?: ProjectFileLineRange,
     autoplay = false,
+    markdownLinkBase?: "document",
+    searchRange?: ProjectFileLineRange,
   ): Promise<void> {
     const workspace = options.workspace();
     if (!workspace) {
@@ -103,16 +106,26 @@ export function createPreviewFileIo(options: PreviewStoreOptions, state: Preview
 
     const generation = state.beginFileLoad();
     const isCurrent = () => state.fileLoadIsCurrent(generation) && options.workspace() === workspace;
-    const mediaKind = previewMediaKindForPath(path);
     try {
-      if (options.revealProjectEntry) {
+      if (options.revealProjectEntry || markdownLinkBase === "document") {
         const directory = await invoke<boolean>("project_directory_exists", { workspace, path });
         if (!isCurrent()) return;
         if (directory) {
-          await options.revealProjectEntry(path);
-          return;
+          const wiki = markdownLinkBase === "document"
+            ? await resolvePreviewWikiDirectory(workspace, path, isCurrent) : undefined;
+          if (!isCurrent()) return;
+          if (wiki?.kind === "contents") {
+            state.show({ kind: "file", file: wiki.file, markdownLinkBase: "document" }, navigation);
+            return;
+          }
+          if (wiki?.kind === "index") path = wiki.path;
+          else {
+            await options.revealProjectEntry?.(path);
+            return;
+          }
         }
       }
+      const mediaKind = previewMediaKindForPath(path);
       if (mediaKind) {
         const attachment = await resolveProjectMedia(path);
         if (!attachment || !isCurrent()) return;
@@ -125,7 +138,12 @@ export function createPreviewFileIo(options: PreviewStoreOptions, state: Preview
         await openLargeFile(path, workspace, isCurrent);
         return;
       }
-      state.show({ kind: "file", file: result.file, ...(lineRange ? { lineRange } : {}) }, navigation);
+      state.show({
+        kind: "file", file: result.file,
+        ...(lineRange ? { lineRange } : {}),
+        ...(markdownLinkBase ? { markdownLinkBase } : {}),
+        ...(searchRange ? { searchRange } : {}),
+      }, navigation);
     } catch (error) {
       if (isCurrent()) options.reportError(error);
     }

@@ -6,6 +6,8 @@
   import { invoke, isTauri } from "@tauri-apps/api/core";
   import { createWindowRunActivitySync, hasRestartBlockingRun } from "./app/window-run-activity";
   import { installDesktopContextMenu } from "./lib/desktop-context-menu";
+  import { createSessionRename } from "./app/session-rename.svelte";
+  import SessionRenameDialog from "./components/SessionRenameDialog.svelte";
   import type { DesktopShortcutPlatform } from "./lib/desktop-commands";
   import type { Attachment } from "./lib/attachments";
   import DesktopTitlebar from "./components/DesktopTitlebar.svelte";
@@ -914,8 +916,23 @@
   const overlaysViewModel = viewModels.overlays;
   const statusBarViewModel = viewModels.statusBar;
 
+  const sessionRename = createSessionRename({
+    client: () => client,
+    workspace: () => workspace,
+    sessions: () => sessionCatalog.sessions,
+    isOpen: (id) => tabSessions.some((session) => session.sessionId === id),
+    isBusy: (id) => promptRuntime.runningSessionIds.has(id),
+    ensureRuntime: sessionServices.runtime.ensure,
+    runtimeReady: sessionServices.runtime.isReady,
+    refreshSessions: sessionCatalog.refresh,
+    reportError,
+  });
+  $effect(() => sessionRename.reconcile());
+  onDestroy(sessionRename.cancel);
+
   onMount(() => installDesktopContextMenu({
     reportError, workspace: () => workspace,
+    sessionActions: sessionRename,
     revealProjectEntry: async (path) => { await workspaceSidebar?.revealProjectEntry(path); },
   }));
   onMount(desktopLifecycle.start);
@@ -1002,6 +1019,10 @@
 {/if}
 <DesktopBootstrapDialog onCredentialsChanged={reconnect} />
 <DeleteConfirmationHost />
+{#if sessionRename.request}
+  <SessionRenameDialog title={sessionRename.request.title} saving={sessionRename.saving}
+    onconfirm={(name) => void sessionRename.submit(name)} oncancel={sessionRename.cancel} {reportError} />
+{/if}
 <ModelSetupDialog client={client ?? undefined} onApplied={reconnect} catalog={modelThinkingConfigState(displayedConfigOptions).models} />
 <DesktopUpdateBanner {updater} />
 <ToastViewport />

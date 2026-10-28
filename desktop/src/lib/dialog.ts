@@ -1,5 +1,5 @@
 /*
- * Shared modal geometry and footer actions (DESIGN.md §10, §13). Keyboard
+ * Shared modal geometry and footer actions (wiki/desktop/design.md §10, §13). Keyboard
  * focus comes from the global :focus-visible ring in styles.css, which is
  * unlayered and therefore wins over any per-button outline utility.
  */

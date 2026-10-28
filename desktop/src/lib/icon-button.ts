@@ -1,5 +1,5 @@
 /*
- * Shared quiet icon-action geometry (DESIGN.md §8.2, §10): 24 px (sm) or
+ * Shared quiet icon-action geometry (wiki/desktop/design.md §8.2, §10): 24 px (sm) or
  * 28 px (md) square, muted until hover, hover surface matching the host
  * region. Keyboard focus uses the global restrained :focus-visible ring.
  * Class literals stay static so Tailwind's scanner sees every token.

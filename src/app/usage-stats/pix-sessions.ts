@@ -9,7 +9,7 @@ type PixState = { sessionId: string; file: string; cwd?: string };
 
 /**
  * Pix/Pi session JSONL of every project, using the shared `usageFromEntry`
- * accounting of `specs/session-usage.md`. The project comes from each
+ * accounting of `wiki/usage/session-usage.md`. The project comes from each
  * session header `cwd`. Forked session files copy ancestor entries with
  * their ids and timestamps, so records are keyed by `(entry id, timestamp)`
  * and counted once.

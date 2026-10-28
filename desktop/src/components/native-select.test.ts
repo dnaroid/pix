@@ -14,7 +14,7 @@ describe("Desktop design contract: Pix dropdowns", () => {
     for (const [filename, source] of Object.entries(components)) {
       const relative = filename.replace(/^(?:\.\.\/components\/|\.\/)/u, "");
       const count = [...source.matchAll(/<select\b/gu)].length;
-      expect(count, `${filename}: use a Pix popup/listbox (DESIGN.md §11), not a native select`).toBeLessThanOrEqual(legacySelects[relative] ?? 0);
+      expect(count, `${filename}: use a Pix popup/listbox (wiki/desktop/design.md §11), not a native select`).toBeLessThanOrEqual(legacySelects[relative] ?? 0);
     }
   });
 

@@ -17,6 +17,21 @@ export const WorkspaceConfigSchema = Type.Object({
 		pattern: "^\\.pi/project-icon\\.(?:png|jpg|webp|gif|svg)$",
 		description: "Project-relative path to the canonical project logo; omit to use initials.",
 	})),
+
+	wiki: Type.Optional(Type.Object({
+		path: Type.Optional(Type.String({
+			minLength: 1,
+			pattern: "\\S",
+			default: "wiki",
+			description: "Project-relative Wiki folder. Parent traversal, absolute paths, Git metadata and disposable harness storage are not allowed. Defaults to wiki/.",
+		})),
+		index: Type.Optional(Type.String({
+			minLength: 1,
+			pattern: "\\.[mM][dD]$|\\.[mM][aA][rR][kK][dD][oO][wW][nN]$",
+			default: "index.md",
+			description: "Markdown home page relative to the Wiki folder. Nested paths are supported; parent traversal and absolute paths are not allowed. Defaults to index.md.",
+		})),
+	}, { additionalProperties: true, description: "Project Wiki documents and assets. Omitted settings use wiki/index.md." })),
 	launchCommands: Type.Optional(Type.Array(Type.Object({
 		id: Type.String({ pattern: "\\S", description: "Stable launch command identifier." }),
 		name: Type.String({ pattern: "\\S", description: "Display name." }),
@@ -45,6 +60,6 @@ export const WorkspaceConfigSchema = Type.Object({
 	$id: "https://unpkg.com/pi-ui-extend/schemas/workspace.json",
 	$schema: "https://json-schema.org/draft-07/schema#",
 	title: "Pix Project Workspace",
-	description: "Project identity, launch commands and Desktop view state in .pi/workspace.jsonc. Unknown fields are preserved.",
+	description: "Project identity, Wiki, launch commands and Desktop view state in .pi/workspace.jsonc. Unknown fields are preserved.",
 	additionalProperties: true,
 });

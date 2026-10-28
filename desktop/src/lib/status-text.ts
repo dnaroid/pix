@@ -1,5 +1,5 @@
 /*
- * Shared quiet status text (DESIGN.md §10): neutral mono count pills and
+ * Shared quiet status text (wiki/desktop/design.md §10): neutral mono count pills and
  * centered empty-state messages. Pane variant for panels/dialogs, compact
  * variant for popup listboxes.
  */

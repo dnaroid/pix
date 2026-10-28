@@ -1,7 +1,7 @@
 <script lang="ts">
   import { compactEmptyStateClass } from "../lib/status-text";
   /*
-   * Shared Pix dropdown (DESIGN.md §11): styled trigger + popup listbox with
+   * Shared Pix dropdown (wiki/desktop/design.md §11): styled trigger + popup listbox with
    * keyboard navigation, dismissal, focus restoration and viewport-aware
    * positioning. Use it for every Desktop field/filter/toolbar choice instead
    * of a native select element.

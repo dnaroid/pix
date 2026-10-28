@@ -14,7 +14,7 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function harness() {
+function harness(focusPathForEntry?: (entry: ProjectTreeEntry) => string) {
   let workspace = "/project";
   const operations = createProjectExplorerOperations();
   const tree = {
@@ -33,7 +33,7 @@ function harness() {
   const onSuccess = vi.fn();
   const onFinish = vi.fn();
   const editor = createProjectExplorerNameEditor({
-    workspace: () => workspace, operations, tree, invoke, prepare: vi.fn(), onError, onOpenFile, onSuccess, onFinish,
+    workspace: () => workspace, operations, tree, invoke, prepare: vi.fn(), focusPathForEntry, onError, onOpenFile, onSuccess, onFinish,
   });
   return { editor, tree, invoke, operations, onError, onOpenFile, onSuccess, onFinish,
     switchWorkspace: (value: string) => { workspace = value; operations.invalidate(); editor.invalidate(); } };
@@ -69,6 +69,18 @@ describe("Project Explorer inline names", () => {
     expect(h.invoke).toHaveBeenCalledWith("create_project_entry", { workspace: "/project", parent: null, name: "src", kind: "directory" });
     expect(h.tree.focusPath).toHaveBeenCalledWith("src");
     expect(h.tree.openFile).not.toHaveBeenCalled();
+  });
+
+  it("opens a newly created hidden page while focusing its visible folder", async () => {
+    const h = harness(() => "src");
+    const index: ProjectTreeEntry = { path: "src/index.md", name: "index.md", kind: "file" };
+    h.editor.open("new-file", folder);
+    h.editor.state.edit!.value = "index.md";
+    h.invoke.mockResolvedValueOnce(index);
+    await h.editor.submit(h.editor.state.edit!);
+    expect(h.tree.focusPath).toHaveBeenCalledExactlyOnceWith("src");
+    expect(h.tree.state.focusedPath).toBe("src");
+    expect(h.tree.openFile).toHaveBeenCalledExactlyOnceWith("src/index.md");
   });
 
   it.each([

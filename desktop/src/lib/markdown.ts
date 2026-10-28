@@ -22,5 +22,5 @@ export {
 export function renderMarkdown(text: string, options: MarkdownRenderOptions = {}): string {
   if (!text) return "";
   const context = createMarkdownRenderContext(options);
-  return renderBlocks(stripDcpControlMetadata(text).replace(/\r\n?/g, "\n").split("\n"), 0, context);
+  return renderBlocks(stripDcpControlMetadata(text, options.sourceLineRanges).replace(/\r\n?/g, "\n").split("\n"), 0, context);
 }

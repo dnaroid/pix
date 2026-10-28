@@ -1,0 +1,115 @@
+---
+kind: spec
+status: active
+---
+
+# Desktop agent pause and continuation
+
+<!-- markdownlint-disable MD013 -->
+
+## Type
+
+Change
+
+## Lifecycle
+
+Active implemented contract.
+
+## Goal
+
+Give Pix Desktop the same turn-boundary pause/continue workflow as the TUI and expose continuation when an agent run stops at another resumable boundary such as the configured turn/request limit.
+
+## Scope
+
+- Show a pause control next to Desktop's stop control in the activity/status row above the message input while an agent run is active.
+- Pause only after the current agent turn has completed; do not abort an in-flight tool batch.
+- A second Pause click withdraws a still-pending request without restarting the run.
+- Show a continue control when the session is paused or an idle transcript is otherwise resumable.
+- Continue the same Pi agent transcript without inserting an artificial user message.
+- Keep the control state scoped to the owning Desktop session.
+
+## Behavior
+
+- While a normal Desktop prompt or continuation is running, the activity/status row above the composer shows Pause and Stop controls together at its right edge. Message actions (menu, voice, and Send/Queue) stay inside the input; run controls do not. File attachments are available through the message menu, not a separate input-row button. The row remains available even before live activity metadata arrives, with a neutral `Working` fallback.
+- Pause changes the session to `pause-requested` immediately. The button stays enabled and pressed, with the label/tooltip `Cancel pending pause`; clicking it again withdraws the request while the boundary decision is still pending. Successful withdrawal restores `running` on the same busy owner, without aborting tools, creating a user message, continuing/restarting the agent, or draining the deferred queue. Rapid clicks serialize their control requests; stale responses cannot overwrite newer state notifications or a replacement run/runtime. Once the boundary has committed, withdrawal cannot undo it: settlement proceeds normally and only Continue can resume a paused run.
+- A requested Pause (from the button or a scheduled `/wait` pause) does not commit while the session still owns live async sub-agents, including finished sub-agents whose completion has not been delivered yet. The agent keeps running and the request stays `pause-requested` until a later turn boundary with no live sub-agents. This applies to `finishTurn`, post-run bookkeeping and before-settle completion delivery. Hosts read this through the `Symbol.for("pix.subagents.session-live")` getter that async-subagents publishes on the owning session manager. If the run ends naturally on a non-resumable boundary while sub-agents are still live, the request clears as before.
+- A successful turn-boundary pause changes the session to `paused`; the active conversation shows a short non-interactive `Agent paused` toast centered over the chat viewport, and once the prompt request settles the activity/status row replaces Pause with Continue in the same slot and retains Stop immediately to its right. This layout also applies to `continuable`. Stop at either idle resumable boundary clears the pause/continuation state without continuing the agent or dispatching queued messages. Without live activity, it shows static `Agent paused` or `Ready to continue` text for the respective resumable state. A native `Pix — Paused` notification is also eligible through the normal Desktop notification policy when the owning window is in the background. Both are transition-driven: opening or switching to a session that is already paused does not replay an old pause notification.
+- While a session is in `paused` or `continuable`, its conversation-tab status icon is a static Pause glyph rather than the normal running spinner, including the short settlement interval where the prompt runtime may still be marked running. After restart, the icon updates when loading discovers a resumable transcript boundary; this does not require persisting the in-memory pause label or eagerly loading every tab.
+- When a run becomes idle with a non-assistant transcript tail or queued Pi message, Desktop reports `continuable`. This covers turn/request-limit stops that leave Pi at a resumable boundary.
+- A normal completed assistant response is `idle` and does not show Continue.
+- Run controls remain hidden in embedded editors and questionnaire mode; questionnaire activity can still show `Waiting for input`. Status announcements contain only status text, not the adjacent action buttons. Long status text truncates without shrinking the controls.
+- Explicit Stop/cancel clears the continuation affordance; cancellation is not treated as pause.
+- Stop sends cancellation immediately and cuts off live answer/thinking output on the same click, including chunks waiting for a Desktop animation frame and late ACP `message_update` events (including authoritative block endings). Tool settlement and diagnostic/system notices remain deliverable. The busy owner stays held until the actual request settles; this is not a turn-boundary Pause. Cancellation interrupts transcript-entry metadata waits and prevents a prompt still waiting for its initial snapshot from starting afterward. Output is accepted again when a new run begins; session/runtime teardown clears the cancellation guard.
+- A stopped run does not automatically start the next Desktop queued message, including after late queue-state pushes. Pending items remain available for explicit sending; a new explicit prompt or continuation clears that run's Stop guard. The cancelled run settles with stop reason `cancelled`.
+- If an explicit queued **Send now** cannot be accepted after removing its item from the queue, Desktop returns the original payload to that session's manual queue (or restores it in the active composer if requeue fails). An interrupted ACP run may reject steering; automatic dispatch remains held during the replacement attempt.
+- Desktop's deferred/auto queue does not consume another message while the session is `pause-requested`, `paused`, `continuable`, or `resuming`; advancing past those boundaries requires Continue or a new explicit user prompt.
+- Continue invokes `Agent.continue()` through the Pix RPC shim and then uses Pi's normal post-run retry, compaction, queue-draining, and settlement bookkeeping. A requested Pause remains pending through a scheduled retry rather than losing its failed response. If a newer run takes ownership before continuation, the stale continuation fails closed; a failed continuation does not leave ACP stuck in `resuming`.
+- While continuation is active, Desktop treats the session as running, so Stop can cancel it and Pause can be requested again after the resumed run starts.
+- `resuming` denotes continuation startup only and disables Pause. An extension-originated run that has emitted `agent_start` (including automatic continuation after question recovery) publishes `running`: Desktop adopts its busy owner while leaving Pause enabled. `running` is not a settlement signal and does not allow the deferred/auto queue to advance.
+- Extension-originated runs (including timed continuations and todo nudges) are also owned as active ACP runs and signal Desktop's running indicator. If an extension starts again while the prior settlement is awaiting RPC snapshots or notifications, the existing busy owner spans that restart: the stale settlement cannot publish an idle/paused state or resolve the owning request. Stop reasons and cancellation from the previous SDK run do not leak into the restarted run.
+- Desktop settlement is guarded by run ownership too: a late prompt/Continue completion cannot clear a newer run's busy flag, finalize its transcript activity, or flush its queue. Owner generations are not reused after session cleanup or runtime reset.
+- An explicit **Send now** on a queued message holds automatic dispatch for that session while it interrupts and replaces the current run. The hold remains through settlement and transcript scrolling, and is released even when interruption or prompting fails. If the selected message was removed from the queue but cannot be accepted for prompting (including a stale session/client or failed scroll/prompt), Desktop returns its payload to that original session's manual queue; if that requeue fails, the active composer is restored where possible. Automatic queue draining does not race this explicit send.
+- Loading, importing, or switching a live session recomputes whether its current transcript is resumable. A previously paused boundary may therefore rehydrate as the equivalent `continuable` state rather than preserving the in-memory `paused` label.
+
+The pending Pause button is visibly distinguished from the neutral unrequested
+button by a primary-tinted background, primary icon and inset outline. This
+selected treatment remains visible without hovering and uses semantic theme
+colors in both light and dark mode.
+
+## Protocol bridge
+
+- Desktop uses the private `pix/session/agent_control` ACP request with `state`, `pause`, `cancel-pause`, and `continue` actions. `cancel-pause` is a no-op outside a live pending pause; Pi rejects withdrawal after its irreversible boundary decision and does not resume the agent.
+- A successful `continue` response includes the final ACP `stopReason` from the resumed run after it settles, alongside the resulting agent-control state. Desktop uses that settled reason for the same completion/error classification as a normal prompt; `state` and `pause` responses do not need a stop reason.
+- ACP publishes session-scoped state changes over the existing private `pix/session-state` notification on the `agent-control` channel.
+- ACP and Desktop both recognize the pause-ready `running` state. See [0026 — Pause-ready adopted continuations](../../decisions/0026-pause-ready-adopted-continuations.md).
+- The default ACP Pi entry is a thin Pix RPC shim around the pinned Pi RPC runtime. It intercepts private control messages before they can enter the transcript and implements the turn-boundary pause algorithm by wrapping `Agent.finishTurn` and using `Agent.continue()`. Existing explicit `continue` decisions remain authoritative, so a pause request stays pending until the next boundary that can be resumed through `Agent.continue()`.
+- Explicit `PIX_ACP_PI_ENTRY` overrides remain supported, but a replacement entry must implement the Pix control shim for Desktop pause/continue to work.
+
+## Related files
+
+- `src/app/session/agent-pause-controller.ts`
+- `src/bundled-extensions/question/recovery.ts` (third private SDK continuation mirror)
+- `acp/src/pi/pix-rpc-entry.js`
+- `acp/src/pi/pi-rpc-client.ts`
+- `acp/src/acp/desktop-commands.ts`
+- `acp/src/acp/pix-acp-agent.ts`
+- `desktop/src/lib/agent-control.ts`
+- `desktop/src/lib/agent-control.test.ts`
+- `desktop/src/lib/acp-client.ts`
+- `desktop/src/lib/acp-pix-extensions.ts`
+- `desktop/src/app/prompt-agent-control.svelte.ts`
+- `desktop/src/app/prompt-run-lifecycle.svelte.ts`
+- `desktop/src/app/prompt-run-lifecycle.test.ts`
+- `desktop/src/app/prompt-runtime.svelte.ts`
+- `desktop/src/app/desktop-workbench-prop-builders.ts`
+- `desktop/src/components/TranscriptPane.svelte`
+- `desktop/src/components/PromptComposerControls.svelte`
+- `desktop/src/components/PromptComposerActivityRow.svelte`
+- `desktop/src/components/PromptComposerActivityRow.test.ts`
+
+## Tests
+
+- `acp/test/agent.test.ts`
+- `acp/test/desktop-commands.test.ts`
+- `acp/test/pix-rpc-entry.test.ts`
+- `acp/test/pi-rpc-pause.test.ts`
+- `desktop/src/app/prompt-agent-control.test.ts`
+- `desktop/src/components/PromptComposerActivityRow.test.ts`
+- `desktop/src/lib/agent-control.test.ts`
+- `desktop/src/app/prompt-run-lifecycle.test.ts`
+
+## Verification
+
+- ACP tests cover pause-requested to paused state and generic resumable-stop to continuation flow, including the settled continuation stop reason.
+- `acp/test/agent.test.ts` deterministically gates settlement snapshots and checks extension restarts during both prompt-owned and adopted runs, including retained ownership, queueing and Pause availability.
+- Recovered-question/adopted-run regressions cover `running` state parsing, enabled Pause/Stop rendering, actual pause dispatch, duplicate start notifications, failed pause recovery, and terminal settlement without losing the busy owner.
+- Desktop tests cover the private ACP control request, session-state parsing, same-session pause transition detection, and source-level wiring/placement of the centered pause toast.
+- Activity-row render tests cover running controls without metadata, clickable/pressed pending Pause, Pause disablement while resuming, paused/continuable Continue, idle row removal, and questionnaire suppression. Source checks cover placement above the message form and callback separation from message actions.
+- Pending-pause cancellation tests cover prompt-owned and adopted runs, unchanged ownership/queue blocking, rapid repeated clicks, boundary commitment, failed cancellation, and stale replies after state pushes or session/runtime replacement.
+- `desktop/src/app/prompt-run-lifecycle.test.ts` covers stale completion and queued settlement callbacks, including cleanup/reset followed by a new run with the same session ID.
+- ACP typecheck/tests/stdio smoke and Desktop Svelte/TypeScript checks pass.
+
+## Risks / compatibility
+
+- The turn-boundary implementation intentionally relies on private `AgentSession` bookkeeping because the Pi RPC API does not expose pause/continue. The adapters mirror Pi 1.2's `_startRun` **post-run** lifecycle without inserting a new prompt, including retry-cancellation/failure cleanup (`_finishCancelledRetry`, `_failedResponse`), `_runSystemPromptOptions`, pending custom-message flushing, and `agent_before_settle`. They must be reviewed again on every Pi SDK bump; preparation/compaction before a new prompt is not part of continuation. The Pi RPC runtime's preflight response uses `handled`/`started` dispositions rather than boolean acknowledgements. Cancellation during resumed turns is regression-tested but still depends on these private implementation details.
+- Provider `max_tokens` responses that end on an assistant message are not considered resumable by `Agent.continue()` and therefore do not show Continue; the resumable limit case is the agent-loop turn/request boundary that leaves a user/tool-result tail or queued message.

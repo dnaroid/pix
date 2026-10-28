@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AcpClient } from "../lib/acp-client";
-import { appendLocalUserMessage } from "../lib/transcript";
+import { applySessionUpdates, appendLocalUserMessage } from "../lib/transcript";
 import { createActiveSessionState } from "./active-session-state.svelte";
 import { createSessionHistory } from "./session-history.svelte";
 
@@ -191,5 +191,33 @@ describe("desktop lazy session history", () => {
 
     await expect(history.loadOlder()).resolves.toBe(false);
     expect(sessionHistory).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a live question answer when an older page repeats its tool call", async () => {
+    const question = {
+      sessionUpdate: "tool_call" as const, toolCallId: "question-1", name: "question", title: "Question",
+      status: "in_progress" as const,
+    };
+    const sessionHistory = vi.fn()
+      .mockResolvedValueOnce({ updates: [question], deferredToolCallIds: [], cursor: "older" })
+      .mockResolvedValueOnce({ updates: [question], deferredToolCallIds: [] });
+    const client = { sessionHistory } as unknown as AcpClient;
+    const state = createActiveSessionState();
+    state.setSessionId("session-1");
+    state.initializeSessionTranscript("session-1");
+    const history = createSessionHistory({
+      client: () => client, state, workspace: () => "/project", ensureRuntime: vi.fn(),
+      runtimeReady: () => true, scheduleScrollToLatest: vi.fn(), recoverUnavailableSession: vi.fn(), reportError: vi.fn(),
+    });
+    await history.hydrate(client, "session-1", "/project", history.begin());
+    state.setTranscriptFor("session-1", applySessionUpdates(state.transcript, [{
+      sessionUpdate: "tool_call_update", toolCallId: "question-1", status: "completed",
+      rawOutput: { canceled: false, answers: [{ id: "scope", label: "Small" }] },
+    }]));
+    await expect(history.loadOlder()).resolves.toBe(true);
+    expect(state.transcript.items).toHaveLength(1);
+    expect(state.transcript.items[0]).toMatchObject({
+      status: "completed", rawOutput: { canceled: false, answers: [{ id: "scope", label: "Small" }] },
+    });
   });
 });

@@ -11,6 +11,7 @@ const DRAG_THRESHOLD = 4;
 export function createProjectExplorerDragController(options?: {
   entries: (entry: ProjectTreeEntry) => ProjectTreeEntry[];
   move: (entries: ProjectTreeEntry[], destination: string) => void;
+  native?: (entries: ProjectTreeEntry[], signal: AbortSignal) => Promise<void>;
 }) {
   let draggedEntry = $state<ProjectTreeEntry | null>(null);
   let dragging = $state(false);
@@ -27,9 +28,12 @@ export function createProjectExplorerDragController(options?: {
   let entries = $state<ProjectTreeEntry[]>([]);
   let destination = $state<string | null>(null);
   let suppressTimer: ReturnType<typeof setTimeout> | undefined;
+  let nativeActive = false;
+  let nativeGeneration = 0;
+  let nativeAbort: AbortController | undefined;
 
   function start(event: PointerEvent, entry: ProjectTreeEntry): void {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || nativeActive) return;
     clear();
     pointerId = event.pointerId;
     source = event.currentTarget as HTMLButtonElement;
@@ -54,6 +58,30 @@ export function createProjectExplorerDragController(options?: {
       if (Math.hypot(event.clientX - startX, event.clientY - startY) < DRAG_THRESHOLD) return;
       setDocumentDragState(true);
       entries = options?.entries(draggedEntry) ?? [draggedEntry];
+      if (options?.native) {
+        event.preventDefault();
+        const selected = [...entries];
+        const generation = ++nativeGeneration;
+        const abort = new AbortController();
+        nativeAbort = abort;
+        nativeActive = true;
+        clear();
+        suppressEntryClick = true;
+        clearTimeout(suppressTimer);
+        // The adapter reports errors; retain click suppression through the OS
+        // session and ignore late completion after panel teardown.
+        const finishNative = () => {
+          if (generation !== nativeGeneration) return;
+          nativeActive = false;
+          nativeAbort = undefined;
+          suppressTimer = setTimeout(() => {
+            suppressEntryClick = false;
+            suppressTimer = undefined;
+          }, 0);
+        };
+        void options.native(selected, abort.signal).then(finishNative, finishNative);
+        return;
+      }
     }
     event.preventDefault();
     setDropTarget(dropTargetAt(event.clientX, event.clientY));
@@ -61,6 +89,7 @@ export function createProjectExplorerDragController(options?: {
   }
 
   function finish(event: PointerEvent): void {
+    if (nativeActive) { nativeAbort?.abort(); return; }
     if (event.pointerId !== pointerId) return;
     const started = document.documentElement.dataset.pixProjectPathDragging === "true";
     const entry = draggedEntry;
@@ -83,6 +112,7 @@ export function createProjectExplorerDragController(options?: {
   }
 
   function cancel(event: PointerEvent): void {
+    if (nativeActive) { nativeAbort?.abort(); return; }
     if (event.pointerId !== pointerId) return;
     clear();
   }
@@ -168,7 +198,7 @@ export function createProjectExplorerDragController(options?: {
     move,
     finish,
     cancel,
-    clear,
-    dispose() { clear(); clearTimeout(suppressTimer); suppressEntryClick = false; },
+    clear() { nativeAbort?.abort(); clear(); },
+    dispose() { nativeAbort?.abort(); nativeAbort = undefined; nativeGeneration++; nativeActive = false; clear(); clearTimeout(suppressTimer); suppressEntryClick = false; },
   };
 }

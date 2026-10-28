@@ -314,6 +314,10 @@ export function buildWorkbenchEditorProps(
 > {
   const activePreview = options.preview.active;
   const userConfigKind = activePreview?.kind === "file" ? activePreview.userConfigKind : undefined;
+  const virtualContents = activePreview?.kind === "file" && Boolean(activePreview.file.virtualWikiDirectory);
+  const saveProjectFile = userConfigKind
+    ? (path: string, content: string) => options.preview.saveUserConfig(userConfigKind, path, content)
+    : options.projectDocuments.save;
   const gitDiffPreview = options.git.diffPreview;
   const lspInstaller = options.lspOnboarding.installer;
 
@@ -324,29 +328,32 @@ export function buildWorkbenchEditorProps(
       active: options.activeWorkbenchTabId() === "preview",
       scrollPosition: activePreview.scrollPosition,
       file: activePreview.kind === "file" ? activePreview.file : undefined,
+      markdownLinkBase: activePreview.kind === "file" ? activePreview.markdownLinkBase : undefined,
       lineRange: activePreview.kind === "file" ? activePreview.lineRange : undefined,
+      searchRange: activePreview.kind === "file" ? activePreview.searchRange : undefined,
       attachment: activePreview.kind === "attachment" ? activePreview.attachment : undefined,
       autoplay: activePreview.kind === "attachment" && activePreview.autoplay === true,
       onAutoplayConsumed: () => options.preview.consumeAutoplay(activePreview.id),
       canGoBack: options.preview.canGoBack,
       canGoForward: options.preview.canGoForward,
       editable: activePreview.kind === "file"
+        && !virtualContents
         && (userConfigKind !== undefined || isWorkspaceProjectFilePath(activePreview.file.path)),
-      externalEditorLabel: activePreview.kind === "file" && isWorkspaceProjectFilePath(activePreview.file.path)
+      externalEditorLabel: activePreview.kind === "file" && !virtualContents && isWorkspaceProjectFilePath(activePreview.file.path)
         ? options.externalEditorLabel()
         : undefined,
       onBack: () => options.preview.move(-1),
       onForward: () => options.preview.move(1),
-      onOpenProjectFile: (path, range) => options.preview.openProjectFile(path, "push", range),
+      onOpenProjectFile: (path, range) => activePreview.kind === "file" && activePreview.markdownLinkBase === "document"
+        ? options.preview.openProjectFile(path, "push", range, false, "document")
+        : options.preview.openProjectFile(path, "push", range),
       onValidateProjectFile: options.preview.validateProjectFile,
       onValidateLocalFile: options.preview.validateLocalFile,
       onResolveProjectMedia: options.preview.resolveProjectMedia,
       onOpenLocalFile: (path) => options.preview.openLocalFile(path, "push"),
       onResolveLocalMedia: options.preview.resolveLocalMedia,
-      onSaveProjectFile: userConfigKind
-        ? (path, content) => options.preview.saveUserConfig(userConfigKind, path, content)
-        : options.projectDocuments.save,
-      onOpenExternalEditor: activePreview.kind === "file" && isWorkspaceProjectFilePath(activePreview.file.path)
+      onSaveProjectFile: virtualContents ? undefined : saveProjectFile,
+      onOpenExternalEditor: activePreview.kind === "file" && !virtualContents && isWorkspaceProjectFilePath(activePreview.file.path)
         ? (path) => void options.projectWorkspace.openInEditor(path)
         : undefined,
       onScrollPositionChange: options.preview.rememberScroll,

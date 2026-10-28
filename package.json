@@ -33,9 +33,8 @@
     "./schemas/registry.json": "./schemas/registry.json"
   },
   "files": [
-    "assets/screenshots",
     "bin",
-    "docs",
+    "wiki",
     "dist",
     "scripts/pix-memory-profiler.mjs",
     "scripts/profile-pix-memory.mjs",
@@ -55,6 +54,7 @@
     "!**/*.pyc"
   ],
   "scripts": {
+    "check:wiki": "node --import tsx scripts/check-wiki.ts",
     "search:index": "node --import tsx scripts/search-index.ts",
     "predev": "npm run link:pix --silent",
     "dev": "tsx src/main.ts",

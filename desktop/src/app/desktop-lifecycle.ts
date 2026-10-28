@@ -1,4 +1,4 @@
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { installDesktopFileDrop } from "../lib/desktop-file-drop";
 
 const RUNTIME_STATUS_REFRESH_MS = 5 * 60_000;
 
@@ -28,7 +28,6 @@ type DesktopLifecycleOptions = {
 export function createDesktopLifecycle(options: DesktopLifecycleOptions) {
   function start(): () => void {
     let disposed = false;
-    let unlistenDragDrop: (() => void) | undefined;
     const runtimeStatusTimer = window.setInterval(() => {
       const sessionId = options.activeSessionId();
       if (sessionId && options.activeSessionRuntimeReady()) {
@@ -43,28 +42,17 @@ export function createDesktopLifecycle(options: DesktopLifecycleOptions) {
       options.loadWorkspaceData(workspace);
     }
 
-    void getCurrentWindow().onDragDropEvent(({ payload }) => {
-      if (payload.type === "enter" || payload.type === "over") {
-        options.setDragActive(options.canAcceptDroppedAttachments());
-        return;
-      }
-      if (payload.type === "leave") {
-        options.setDragActive(false);
-        return;
-      }
-      if (payload.type !== "drop") return;
-
-      options.setDragActive(false);
-      const questionId = options.activeCustomQuestionId();
-      if (questionId) {
-        void options.addQuestionImagePaths(questionId, payload.paths);
-      } else if (options.canInsertPromptAttachments()) {
-        void options.insertPromptPaths(payload.paths);
-      }
-    }).then((unlisten) => {
-      if (disposed) unlisten();
-      else unlistenDragDrop = unlisten;
-    }).catch(options.reportError);
+    const disposeFileDrop = installDesktopFileDrop({
+      workspace: options.workspace,
+      sessionId: options.activeSessionId,
+      canAcceptAttachments: options.canAcceptDroppedAttachments,
+      setDragActive: options.setDragActive,
+      questionId: options.activeCustomQuestionId,
+      addQuestionPaths: options.addQuestionImagePaths,
+      canInsertPromptPaths: options.canInsertPromptAttachments,
+      insertPromptPaths: options.insertPromptPaths,
+      reportError: options.reportError,
+    });
 
     void options.connect().then(() => {
       if (disposed) void options.disposeConnection();
@@ -73,7 +61,7 @@ export function createDesktopLifecycle(options: DesktopLifecycleOptions) {
     return () => {
       disposed = true;
       window.clearInterval(runtimeStatusTimer);
-      unlistenDragDrop?.();
+      disposeFileDrop();
       options.disposeSessionUpdates();
       options.disposeTranscriptScroll();
       options.cancelAllPendingElicitations();

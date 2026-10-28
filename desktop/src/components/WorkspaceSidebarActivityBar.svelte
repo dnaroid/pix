@@ -1,5 +1,6 @@
 <script lang="ts">
   import Blocks from "@lucide/svelte/icons/blocks";
+  import BookOpen from "@lucide/svelte/icons/book-open";
   import ChartColumn from "@lucide/svelte/icons/chart-column";
   import Folder from "@lucide/svelte/icons/folder";
   import GitBranch from "@lucide/svelte/icons/git-branch";
@@ -20,6 +21,7 @@
 
   const SIDEBAR_TABS: readonly SidebarTab[] = [
     "project",
+    "wiki",
     "tasks",
     "git",
     "registry",
@@ -104,6 +106,18 @@
   >
     <Folder class={["h-5 w-5", sidebarIconTone(indicators.project)]} aria-hidden="true" />
   </button>
+  <button
+    class={["relative grid h-10 w-full place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground", selected("wiki") ? "border-l-primary bg-background text-foreground" : "border-l-transparent text-muted-foreground"]}
+    type="button"
+    data-sidebar-tab
+    tabindex={activeTab === "wiki" ? 0 : -1}
+    title={selected("wiki") ? "Hide Wiki" : "Wiki"}
+    aria-label="Project wiki"
+    aria-controls="workspace-wiki-panel"
+    aria-pressed={selected("wiki")}
+    onkeydown={(event) => handleKeydown(event, "wiki")}
+    onclick={() => onSelect("wiki")}
+  ><BookOpen class="h-5 w-5" aria-hidden="true" /></button>
   <button
     class={["relative grid h-10 w-full place-items-center border-l-2 hover:bg-chrome-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring", selected("tasks") ? "border-l-primary bg-background text-foreground" : "border-l-transparent text-muted-foreground"]}
     type="button"

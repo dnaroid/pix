@@ -34,15 +34,27 @@ pub(crate) fn build(
     // Temporary QA uses incognito; explicit persistent QA uses its own UUID store.
     // Neither may fall back to the working app's default WKWebView store.
     let builder = crate::qa_profile::configure_webview(manager, builder);
+    // Let WebKit negotiate native file drops with DOM destinations. Wry's
+    // interception forces Copy and omits the modifier state needed for Cmd-Move.
+    #[cfg(target_os = "macos")]
+    let builder = builder.disable_drag_drop_handler();
     let window = builder
         .visible(false)
         .on_navigation(allow_workbench_navigation)
         .on_page_load(move |window, payload| {
+            #[cfg(target_os = "macos")]
+            if matches!(payload.event(), PageLoadEvent::Started)
+                && matches!(payload.url().scheme(), "tauri" | "http")
+            {
+                crate::project_entry_drag_destination::reset(window.label());
+            }
             if claim_initial_reveal(payload.event(), visible, &revealed) {
                 reveal(window.clone());
             }
         })
         .build()?;
+    #[cfg(target_os = "macos")]
+    crate::project_entry_drag_destination::install(&window)?;
     Ok(window)
 }
 

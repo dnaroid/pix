@@ -30,6 +30,12 @@ pub(crate) enum Request {
         paths: Vec<String>,
         destination: String,
     },
+    ImportMove {
+        paths: Vec<String>,
+        destination: String,
+        #[serde(rename = "sourceWorkspace")]
+        source_workspace: String,
+    },
     Copy {
         paths: Vec<String>,
         destination: String,
@@ -85,6 +91,9 @@ struct Step {
 struct Record {
     workspace: PathBuf,
     root_identity: Identity,
+    // Runtime-only capability: journals are never loaded as executable history.
+    source_workspace: Option<PathBuf>,
+    source_root_identity: Option<Identity>,
     steps: Vec<Step>,
 }
 
@@ -289,6 +298,28 @@ fn join(parent: &str, name: &str) -> String {
     }
 }
 
+fn workspace_relative_source(root: &Path, source: &Path) -> Option<String> {
+    source.strip_prefix(root).ok()?.to_str().map(str::to_owned)
+}
+
+fn validate_import_source(source: &Path, root: &Path, storage: &Path) -> Result<(), String> {
+    let parts: Vec<_> = source
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy().to_ascii_lowercase())
+        .collect();
+    if root.starts_with(source)
+        || storage.starts_with(source)
+        || parts.iter().any(|part| part == ".git")
+        || parts.last().is_some_and(|part| part == ".pi")
+        || parts
+            .windows(2)
+            .any(|pair| pair[0] == ".pi" && pair[1] == "file-history")
+    {
+        return Err("Cannot move a workspace, its ancestors or protected project metadata.".into());
+    }
+    Ok(())
+}
+
 fn roots(paths: Vec<String>) -> Result<Vec<String>, String> {
     if paths.is_empty() || paths.len() > 1000 {
         return Err("Select between 1 and 1000 entries.".into());
@@ -326,6 +357,7 @@ fn execute_with(
     let mut copy_source = root.clone();
     let mut create_kind = None;
     let mut copy = false;
+    let mut import_move = false;
     let pairs: Vec<(Option<String>, Option<String>)> = match request {
         Request::Create { parent, name, kind } => {
             crate::validate_project_entry_name(&name)?;
@@ -349,6 +381,29 @@ fn execute_with(
                 })
                 .collect()
         }
+        Request::ImportMove {
+            paths,
+            destination,
+            source_workspace,
+        } => {
+            import_move = true;
+            copy_source = crate::canonical_workspace(Path::new(&source_workspace))?;
+            let destination_path = directory(&root, &destination)?;
+            let mut pairs = Vec::new();
+            for path in roots(paths)? {
+                let source = resolve(&copy_source, &path, false)?;
+                validate_import_source(&source, &root, &storage)?;
+                if destination_path.starts_with(&source) {
+                    return Err("Cannot move a folder into itself.".into());
+                }
+                let target = join(&destination, path.rsplit('/').next().unwrap());
+                if source == root.join(&target) {
+                    continue;
+                }
+                pairs.push((Some(path), Some(target)));
+            }
+            pairs
+        }
         Request::Delete { paths } => roots(paths)?
             .into_iter()
             .map(|path| (Some(path), None))
@@ -368,8 +423,10 @@ fn execute_with(
             for path in roots(paths)? {
                 let source = resolve(&copy_source, &path, false)?;
                 let meta = fs::symlink_metadata(&source).map_err(|e| e.to_string())?;
-                if meta.is_dir() && destination_path.starts_with(&source) {
-                    return Err("Cannot copy a folder into itself.".into());
+                if meta.is_dir()
+                    && (destination_path.starts_with(&source) || storage.starts_with(&source))
+                {
+                    return Err("Cannot copy a folder into itself or its recovery storage.".into());
                 }
                 let name = path.rsplit('/').next().unwrap();
                 let mut target = join(&destination, name);
@@ -403,7 +460,7 @@ fn execute_with(
                 return Err(format!("{path} already exists or is targeted twice."));
             }
             if let Some(source) = before {
-                if !copy && path.starts_with(&format!("{source}/")) {
+                if !copy && !import_move && path.starts_with(&format!("{source}/")) {
                     return Err("Cannot move a folder into itself.".into());
                 }
             }
@@ -415,6 +472,12 @@ fn execute_with(
     let mut record = Record {
         workspace: root.clone(),
         root_identity,
+        source_workspace: import_move.then(|| copy_source.clone()),
+        source_root_identity: if import_move {
+            Some(identity(&copy_source)?)
+        } else {
+            None
+        },
         steps: Vec::new(),
     };
     let mut warning = None;
@@ -485,7 +548,11 @@ fn execute_with(
         let step = record.steps.last_mut().unwrap();
         step.done = true;
         changes.push(Change {
-            before: step.before.clone(),
+            before: if import_move {
+                workspace_relative_source(&root, source.as_ref().unwrap())
+            } else {
+                step.before.clone()
+            },
             after: after.clone(),
         });
         let finish = (|| -> Result<(), String> {
@@ -544,6 +611,11 @@ fn replay_with(
     if record.workspace != root || record.root_identity != identity(&root)? {
         return Err("The workspace was replaced; history cannot be replayed.".into());
     }
+    if let Some(source_root) = &record.source_workspace {
+        if record.source_root_identity.as_ref() != Some(&identity(source_root)?) {
+            return Err("The source workspace was replaced; history cannot be replayed.".into());
+        }
+    }
     let mut indices: Vec<_> = (0..record.steps.len())
         .filter(|i| record.steps[*i].done == undo)
         .collect();
@@ -552,7 +624,13 @@ fn replay_with(
     }
     // Preflight the entire remaining batch. Races are still guarded by RENAME_EXCL.
     for index in &indices {
-        check_step(&root, &folder, &record.steps[*index], undo)?;
+        check_step(
+            &root,
+            record.source_workspace.as_deref(),
+            &folder,
+            &record.steps[*index],
+            undo,
+        )?;
     }
     let mut changes = Vec::new();
     let mut entries = Vec::new();
@@ -560,7 +638,13 @@ fn replay_with(
     for index in indices {
         before_step(index);
         let step = &record.steps[index];
-        let (source, target) = match check_step(&root, &folder, step, undo) {
+        let (source, target) = match check_step(
+            &root,
+            record.source_workspace.as_deref(),
+            &folder,
+            step,
+            undo,
+        ) {
             Ok(paths) => paths,
             Err(error) => {
                 warning = Some(error);
@@ -572,16 +656,12 @@ fn replay_with(
             break;
         }
         changes.push(Change {
-            before: if undo {
-                step.after.clone()
-            } else {
-                step.before.clone()
-            },
-            after: if undo {
-                step.before.clone()
-            } else {
-                step.after.clone()
-            },
+            before: (if undo { &step.after } else { &step.before })
+                .as_ref()
+                .and_then(|_| workspace_relative_source(&root, &source)),
+            after: (if undo { &step.before } else { &step.after })
+                .as_ref()
+                .and_then(|_| workspace_relative_source(&root, &target)),
         });
         record.steps[index].done = !undo;
         let finish = (|| -> Result<(), String> {
@@ -610,6 +690,7 @@ fn replay_with(
 
 fn check_step(
     root: &Path,
+    source_root: Option<&Path>,
     folder: &Path,
     step: &Step,
     undo: bool,
@@ -618,11 +699,23 @@ fn check_step(
     if step.slot.contains('/') || !step.slot.starts_with("data-") {
         return Err("Invalid recovery slot.".into());
     }
-    let location = |path: &Option<String>, missing| -> Result<PathBuf, String> {
+    let location = |path: &Option<String>, missing, external| -> Result<PathBuf, String> {
         match path {
             Some(path) => {
                 editable(path)?;
-                resolve(root, path, missing)
+                let location = resolve(
+                    if external {
+                        source_root.unwrap_or(root)
+                    } else {
+                        root
+                    },
+                    path,
+                    missing,
+                )?;
+                if external && source_root.is_some() {
+                    validate_import_source(&location, root, &root.join(STORAGE))?;
+                }
+                Ok(location)
             }
             None => resolve(
                 root,
@@ -637,9 +730,15 @@ fn check_step(
         }
     };
     let (source, target) = if undo {
-        (location(&step.after, false)?, location(&step.before, true)?)
+        (
+            location(&step.after, false, false)?,
+            location(&step.before, true, true)?,
+        )
     } else {
-        (location(&step.before, false)?, location(&step.after, true)?)
+        (
+            location(&step.before, false, true)?,
+            location(&step.after, true, false)?,
+        )
     };
     let actual = identity(&source)?;
     let expected = step.identity.as_ref().ok_or(

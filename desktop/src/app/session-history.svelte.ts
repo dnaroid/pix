@@ -1,5 +1,6 @@
 import type { AcpClient } from "../lib/acp-client";
 import type { LazySessionHistory } from "../lib/acp-client-types";
+import { mergeTranscriptHistory } from "../lib/transcript-history";
 import {
   applyDeferredToolResult,
   applySessionUpdates,
@@ -124,10 +125,8 @@ export function createSessionHistory(options: SessionHistoryOptions) {
       if (history.cursor) olderCursorBySessionId.set(sessionId, history.cursor);
       else olderCursorBySessionId.delete(sessionId);
 
-      const currentItems = options.state.transcriptFor(sessionId)?.items ?? [];
-      const nextTranscript = currentItems.length === 0
-        ? loadedTranscript
-        : { items: [...loadedTranscript.items, ...currentItems] };
+      const currentTranscript = options.state.transcriptFor(sessionId) ?? emptyTranscript;
+      const nextTranscript = mergeTranscriptHistory(loadedTranscript, currentTranscript);
       options.state.setTranscriptFor(sessionId, nextTranscript);
       incompleteHydrationSessionIds.delete(sessionId);
       if (options.state.sessionId === sessionId) options.scheduleScrollToLatest();
@@ -228,7 +227,7 @@ export function createSessionHistory(options: SessionHistoryOptions) {
         }
 
         const currentTranscript = options.state.transcript;
-        const nextTranscript = { items: [...olderTranscript.items, ...currentTranscript.items] };
+        const nextTranscript = mergeTranscriptHistory(olderTranscript, currentTranscript);
         options.state.setTranscript(nextTranscript);
         options.state.setSessionTranscript(sessionId, nextTranscript);
         return true;

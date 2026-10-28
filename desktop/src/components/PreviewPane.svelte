@@ -30,12 +30,18 @@
   import { createPreviewFileSearchController } from "./preview-file-search-controller.svelte";
   import { createPreviewMarkdownController } from "./preview-markdown-controller.svelte";
   import { createPreviewScrollController } from "./preview-scroll-controller.svelte";
+  import { createDiagnosticLogger } from "../lib/diagnostic-logging";
+  import { openExternalHref } from "../lib/external-links";
+  import { resolveWikiLink } from "../lib/project-wiki";
+  import { normalizeProjectFileReference } from "../lib/markdown-links";
 
   let {
     attachment,
     file,
     workspace = "",
+    markdownLinkBase,
     lineRange,
+    searchRange,
     previewId,
     active = true,
     autoplay = false,
@@ -62,7 +68,9 @@
     attachment?: Attachment;
     file?: ProjectFilePreview;
     workspace?: string;
+    markdownLinkBase?: "document";
     lineRange?: ProjectFileLineRange;
+    searchRange?: ProjectFileLineRange;
     previewId: number;
     active?: boolean;
     autoplay?: boolean;
@@ -93,19 +101,25 @@
   let wrapLines = $state(false);
   let audioError = $state(false);
   let previewImageElement = $state<HTMLImageElement | undefined>();
+  let VisualEditor = $state<typeof import("./WikiMarkdownEditor.svelte").default>();
+  let visualEditor = $state<{ readMarkdown: () => string; focus: () => void } | null>(null);
+  let visualHost = $state<HTMLDivElement | undefined>();
+  let editorMode = $state<"visual" | "source">("visual");
+  let visualLoadError = $state<string | null>(null);
+  const diagnostics = createDiagnosticLogger(() => ({ workspace }));
 
   async function copyMedia(isCurrent: () => boolean): Promise<void> {
     if (attachment) await copyPreviewMedia(attachment, previewImageElement, isCurrent);
   }
 
-  const copyFilePath = $derived(previewCopyFilePath(file?.path ?? attachment?.path, workspace));
+  const copyFilePath = $derived(file?.virtualWikiDirectory ? undefined : previewCopyFilePath(file?.path ?? attachment?.path, workspace));
   async function copyFile(isCurrent: () => boolean): Promise<void> {
     if (copyFilePath) await copyPreviewFile(copyFilePath, isCurrent);
   }
 
   $effect(() => { source; audioError = false; });
 
-  const title = $derived(file?.path ?? attachment?.name ?? "Preview");
+  const title = $derived(file?.virtualWikiDirectory ? `${file.virtualWikiDirectory}/ · Contents` : file?.path ?? attachment?.name ?? "Preview");
   const source = $derived(
     attachment?.dataUrl ?? (attachment?.path ? convertFileSrc(attachment.path) : ""),
   );
@@ -119,7 +133,7 @@
   const editorController = createPreviewEditorController({
     previewId: () => previewId,
     file: () => file,
-    editable: () => editable,
+    editable: () => editable && !file?.virtualWikiDirectory,
     onSaveProjectFile: () => onSaveProjectFile,
     onDirtyChange: () => onDirtyChange,
   });
@@ -128,14 +142,31 @@
   const saving = $derived(editorState.saving);
   const canEdit = $derived(editorController.canEdit);
   const dirty = $derived(editorController.dirty);
+  const visualEditing = $derived(editing && markdown && editorMode === "visual");
+
+  $effect(() => {
+    if (!visualEditing || VisualEditor) return;
+    const sourceId = previewId;
+    let current = true;
+    void import("./WikiMarkdownEditor.svelte").then((module) => {
+      if (current && previewId === sourceId) {
+        visualLoadError = null;
+        VisualEditor = module.default;
+      }
+    }).catch((error) => {
+      diagnostics.report(error, "wiki:editor-load-failed");
+      if (current && previewId === sourceId) visualLoadError = "The visual editor could not load. You can edit the Markdown source.";
+    });
+    return () => { current = false; };
+  });
 
   const searchController = createPreviewFileSearchController({
     active: () => active,
     previewId: () => previewId,
     enabled: () => Boolean(file),
-    editing: () => editing,
+    editing: () => editing && !visualEditing,
     fileText: () => editing ? editorState.draft : (file?.content ?? ""),
-    contentElement: () => contentScrollElement,
+    contentElement: () => visualEditing ? visualHost?.querySelector<HTMLElement>(".ProseMirror") ?? undefined : contentScrollElement,
     editorElement: () => editorElement,
     inputElement: () => searchInputElement,
   });
@@ -146,6 +177,7 @@
     previewId: () => previewId,
     scrollPosition: () => scrollPosition,
     lineRange: () => lineRange,
+    searchRange: () => searchRange,
     file: () => file,
     highlighted: () => highlighted,
     element: () => contentScrollElement,
@@ -162,6 +194,7 @@
     onOpenProjectFile: () => onOpenProjectFile,
     onOpenLocalFile: () => onOpenLocalFile,
     rememberScroll: scrollController.remember,
+    preferDocumentRelative: () => markdownLinkBase === "document",
   });
 
   const restoreScroll = scrollController.restoreScroll;
@@ -172,7 +205,34 @@
   const openProjectFromMarkdown = markdownController.openProject;
   const validateProjectFromMarkdown = markdownController.validateProject;
   const openLocalFromMarkdown = markdownController.openLocal;
-  const saveEdit = editorController.save;
+  async function saveEdit(): Promise<void> {
+    if (visualEditing && visualEditor) editorState.draft = visualEditor.readMarkdown();
+    await editorController.save();
+  }
+  function beginEdit(): void {
+    editorMode = renderAsMarkdown ? "visual" : "source";
+    visualLoadError = null;
+    editorController.begin();
+  }
+  function switchEditorMode(mode: "visual" | "source"): void {
+    if (visualEditing && visualEditor) editorState.draft = visualEditor.readMarkdown();
+    editorMode = mode;
+  }
+  async function resolveEditorImage(source: string): Promise<string | undefined> {
+    if (/^https?:\/\//iu.test(source)) return source;
+    const path = file && resolveWikiLink(file.path, source);
+    if (!path) return undefined;
+    const media = await onResolveProjectMedia?.(path);
+    return media?.dataUrl ?? (media?.path ? convertFileSrc(media.path) : undefined);
+  }
+  async function openEditorLink(href: string): Promise<void> {
+    if (/^(?:https?:\/\/|mailto:)/iu.test(href)) { await openExternalHref(href); return; }
+    if (!file) return;
+    const reference = normalizeProjectFileReference(href, markdownLinkBase === "document" ? file.path : undefined);
+    if (!reference) return;
+    if (markdownLinkBase === "document") await onOpenProjectFile?.(reference.path, reference.range);
+    else await openProjectFromMarkdown(reference.path, reference.range);
+  }
   const handleEditorKeydown = editorController.handleKeydown;
   function handleEditorCopy(event: ClipboardEvent): void {
     const editor = event.currentTarget;
@@ -260,7 +320,7 @@
           onCopy={copyMedia}
         />
       {/if}
-      {#if file || attachment}
+      {#if (file && !file.virtualWikiDirectory) || attachment}
         <PreviewCopyButton
           text={copyFilePath ?? ""}
           {previewId}
@@ -309,7 +369,7 @@
           <button
             class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             type="button"
-            onclick={editorController.begin}
+            onclick={beginEdit}
           ><Pencil class="h-3.5 w-3.5" aria-hidden="true" />Edit</button>
         {/if}
       {/if}
@@ -378,6 +438,34 @@
     {/if}
     {#if file}
       {#if editing}
+        {#if markdown}
+          <div class="flex shrink-0 items-center gap-1 border-b border-border bg-chrome px-3 py-1 text-xs" role="group" aria-label="Markdown edit mode">
+            <button type="button" class={["rounded-sm px-2 py-1 hover:bg-panel-hover", editorMode === "visual" ? "bg-panel-selected text-foreground" : "text-muted-foreground"]} aria-pressed={editorMode === "visual"} onclick={() => switchEditorMode("visual")}>Visual</button>
+            <button type="button" class={["rounded-sm px-2 py-1 hover:bg-panel-hover", editorMode === "source" ? "bg-panel-selected text-foreground" : "text-muted-foreground"]} aria-pressed={editorMode === "source"} onclick={() => switchEditorMode("source")}>Source</button>
+            <span class="ml-auto text-muted-foreground">Markdown · ⌘S to save</span>
+          </div>
+        {/if}
+        {#if visualEditing}
+          <div bind:this={visualHost} class="min-h-0 min-w-0 flex-1 overflow-hidden">
+            {#if visualLoadError}
+              <p class="p-4 text-sm text-tool-error" role="alert">{visualLoadError}</p>
+            {:else if VisualEditor}
+              {#key previewId}
+                <VisualEditor
+                  bind:this={visualEditor}
+                  value={editorState.draft}
+                  documentPath={file.path}
+                  {workspace}
+                  onChange={(value) => { editorState.draft = value; }}
+                  onSave={() => void saveEdit()}
+                  onResolveImage={resolveEditorImage}
+                  onOpenLink={openEditorLink}
+                  onSourceRequested={() => switchEditorMode("source")}
+                />
+              {/key}
+            {:else}<p class="p-4 text-sm text-muted-foreground" role="status">Loading visual editor…</p>{/if}
+          </div>
+        {:else}
         <textarea
           bind:this={editorElement}
           class="preview-editor min-h-0 min-w-0 flex-1 resize-none bg-background p-5 font-mono text-sm leading-6 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
@@ -387,6 +475,7 @@
           onkeydown={handleEditorKeydown}
           oncopy={handleEditorCopy}
         ></textarea>
+        {/if}
       {:else if renderAsMarkdown}
         {#key previewId}
           <!-- svelte-ignore a11y_no_noninteractive_tabindex Scrollable preview needs keyboard focus. -->
@@ -402,13 +491,15 @@
             <div class="preview-markdown-content mx-auto w-[calc(100%-4rem)] max-w-[776px] py-6 text-sm leading-6">
               <MarkdownText
                 text={file.content}
+                documentPath={markdownLinkBase === "document" ? file.path : undefined}
                 fitTables
                 remoteImages
                 headingAnchors
-                onValidateProjectFile={validateProjectFromMarkdown}
+                sourceLineRanges={Boolean(searchRange)}
+                onValidateProjectFile={markdownLinkBase === "document" ? onValidateProjectFile : validateProjectFromMarkdown}
                 {onValidateLocalFile}
-                onOpenProjectFile={openProjectFromMarkdown}
-                onResolveProjectMedia={(path) => onResolveProjectMedia?.(projectLinkPath(path)) ?? Promise.resolve(undefined)}
+                onOpenProjectFile={markdownLinkBase === "document" ? onOpenProjectFile : openProjectFromMarkdown}
+                onResolveProjectMedia={(path) => onResolveProjectMedia?.(markdownLinkBase === "document" ? path : projectLinkPath(path)) ?? Promise.resolve(undefined)}
                 onOpenLocalFile={openLocalFromMarkdown}
                 {onResolveLocalMedia}
               />
@@ -436,11 +527,11 @@
         </div>
       {/if}
     {:else if attachment}
-      <div class="grid min-h-0 min-w-0 flex-1 place-items-center overflow-hidden bg-background p-3">
+      <div class="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)] place-items-center overflow-hidden bg-background p-3">
         {#if isGlbPath(attachment.path ?? attachment.name)}
           <div class="glb-preview" use:glbViewer={source}></div>
         {:else if attachment.kind === "image"}
-          <img bind:this={previewImageElement} class="max-h-full max-w-full object-contain" src={source} alt={attachment.name} data-image-path={attachment.path} />
+          <img bind:this={previewImageElement} class="size-full min-h-0 min-w-0 object-contain" src={source} alt={attachment.name} data-image-path={attachment.path} />
         {:else if previewMediaKindForPath(attachment.path ?? attachment.name) === "audio"}
           {#key previewId}
             <div class="flex w-full max-w-lg flex-col gap-3 text-sm text-muted-foreground">
@@ -463,7 +554,7 @@
         {#key previewId}
         <!-- svelte-ignore a11y_media_has_caption User-selected videos do not necessarily include a captions track. -->
           <video
-            class="max-h-full max-w-full"
+            class="size-full min-h-0 min-w-0 object-contain"
             data-context-file-path={attachment.path ?? ""}
             src={source}
             controls
@@ -476,6 +567,12 @@
 </section>
 
 <style>
+  .preview-markdown-content :global(.preview-range-highlight) {
+    background: color-mix(in srgb, var(--tool-warning) 18%, transparent);
+    outline: 1px solid color-mix(in srgb, var(--tool-warning) 45%, transparent);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
   /* Bound WebKit's selection-gap paint to the text column, not its gutters. */
   .preview-markdown-content {
     contain: paint;

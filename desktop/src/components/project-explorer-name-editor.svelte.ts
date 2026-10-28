@@ -29,6 +29,7 @@ export function createProjectExplorerNameEditor(options: {
     "ensureDirectoryExpanded" | "focusPath" | "remapPath" | "refreshDirectory" | "openFile">
     & { state: { selectedPath: string | null; focusedPath: string | null } };
   prepare: () => void;
+  focusPathForEntry?: (entry: ProjectTreeEntry) => string;
   invoke: (command: string, args: Record<string, unknown>) => Promise<ProjectTreeEntry>;
   onOpenFile: (path: string) => void;
   onError: (error: unknown) => void;
@@ -107,13 +108,14 @@ export function createProjectExplorerNameEditor(options: {
       await options.tree.refreshDirectory(edit.parent);
       if (!current()) return;
       const restoreFocus = mayFocus() && options.tree.state.focusedPath === focusedBefore;
-      if (restoreFocus) await options.tree.focusPath(result.path);
+      const focusPath = options.focusPathForEntry?.(result) ?? result.path;
+      if (restoreFocus) await options.tree.focusPath(focusPath);
       if (!current()) return;
       if (edit.mode === "rename") {
         if (selectedBefore && (selectedBefore === edit.entry.path || selectedBefore.startsWith(`${edit.entry.path}/`))
           && options.tree.state.selectedPath) options.onOpenFile(options.tree.state.selectedPath);
       } else if (result.kind === "file" && restoreFocus && mayFocus()
-        && options.tree.state.focusedPath === result.path) options.tree.openFile(result.path);
+        && options.tree.state.focusedPath === focusPath) options.tree.openFile(result.path);
       options.onSuccess();
     } catch (error) {
       if (current()) options.onError(error);

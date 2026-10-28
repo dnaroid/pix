@@ -1,9 +1,10 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { contextElement, desktopContextTarget, focusContextTarget, nativeSpellingContextTarget, type DesktopContextTarget } from "./desktop-context-target";
 import type { GitRemoteEntryLink } from "./project-git-remote-link";
-import { createNativeContextMenuFactory, type ContextMenuPosition, type NativeContextMenu } from "./native-context-menu";
+import { createNativeContextMenuFactory, type ContextMenuPosition, type NativeContextMenu, type SessionContextActions } from "./native-context-menu";
 
 interface ContextMenuOptions {
+  sessionActions?: SessionContextActions;
   workspace?: () => string;
   revealProjectEntry?: (path: string) => Promise<void>;
   reportError: (error: unknown) => void;
@@ -11,14 +12,14 @@ interface ContextMenuOptions {
 }
 
 /** Installed once per App mount, including secondary project windows. */
-export function installDesktopContextMenu({ reportError, createMenu, workspace, revealProjectEntry }: ContextMenuOptions): () => void {
+export function installDesktopContextMenu({ reportError, createMenu, workspace, revealProjectEntry, sessionActions }: ContextMenuOptions): () => void {
   // A plain Vite browser preview is still a browser, not a privileged desktop host.
   if (!createMenu && !isTauri()) return () => {};
   const resolveRemoteLink = workspace ? (path: string): Promise<GitRemoteEntryLink | null> => {
     const current = workspace();
     return current ? invoke<GitRemoteEntryLink | null>("git_remote_entry_link", { workspace: current, path }) : Promise.resolve(null);
   } : undefined;
-  const create = createMenu ?? createNativeContextMenuFactory(reportError, revealProjectEntry, resolveRemoteLink);
+  const create = createMenu ?? createNativeContextMenuFactory(reportError, revealProjectEntry, resolveRemoteLink, sessionActions);
   let generation = 0;
   let disposed = false;
   let active: { menu: NativeContextMenu; valid: boolean } | null = null;

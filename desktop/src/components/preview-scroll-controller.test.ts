@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { scheduleAfterScrollRestore } from "./preview-scroll-controller.svelte";
+import { renderedRangeElements, scheduleAfterScrollRestore } from "./preview-scroll-controller.svelte";
 
 function animationFrames() {
   let nextHandle = 1;
@@ -23,6 +23,15 @@ function animationFrames() {
 }
 
 describe("preview line-range reveal scheduling", () => {
+  it("selects only rendered blocks intersecting the returned source fragment", () => {
+    const blocks = [[1, 1], [3, 7], [9, 15], [17, 18]].map(([start, end]) => ({
+      dataset: { sourceStartLine: String(start), sourceEndLine: String(end) },
+    } as unknown as HTMLElement));
+    const root = { querySelectorAll: () => blocks } as unknown as HTMLElement;
+    expect(renderedRangeElements(root, { startLine: 7, endLine: 9 })).toEqual(blocks.slice(1, 3));
+    expect(renderedRangeElements(root, { startLine: 8, endLine: 8 })).toEqual([]);
+    expect(renderedRangeElements(root, { startLine: 30, endLine: 31 })).toEqual([]);
+  });
   it("waits for the pending saved-position restore before revealing a requested line", () => {
     const frames = animationFrames();
     let scrollTop = 480;

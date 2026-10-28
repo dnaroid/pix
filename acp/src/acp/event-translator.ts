@@ -1,6 +1,6 @@
 /**
  * Translation of pi `JsonAgentSessionEvent`s into ACP `session/update`
- * notifications (roadmap step 2 of acp/README.md).
+ * notifications (roadmap step 2 of wiki/architecture/acp.md).
  *
  * Mapping (pi → ACP):
  * - `message_update` + `text_delta`     → `agent_message_chunk` (text)

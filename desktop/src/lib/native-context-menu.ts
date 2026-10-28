@@ -13,6 +13,11 @@ export interface NativeContextMenu {
   close(): Promise<void>;
 }
 
+export interface SessionContextActions {
+  canRename(sessionId: string): boolean;
+  open(sessionId: string): void;
+}
+
 type EditCommand = "Undo" | "Redo" | "Cut" | "Copy" | "Paste" | "SelectAll";
 type ContextMenuItem = MenuItemOptions | PredefinedMenuItemOptions;
 const EDIT_LABELS: Record<EditCommand, string> = {
@@ -42,6 +47,7 @@ export function nativeContextMenuItems(
   isActive: () => boolean,
   revealProjectEntry?: (path: string) => Promise<void>,
   remoteLink?: GitRemoteEntryLink | null,
+  sessionActions?: SessionContextActions,
 ): ContextMenuItem[] {
   const items: ContextMenuItem[] = [];
   const run = (action: () => Promise<unknown>) => () => {
@@ -87,6 +93,13 @@ export function nativeContextMenuItems(
   }
 
   if (context.kind === "session") {
+    const sessionId = context.sessionId;
+    if (sessionActions && sessionId) items.push({
+      id: "desktop.session.rename",
+      text: "Rename Session…",
+      enabled: sessionActions.canRename(sessionId),
+      action: run(async () => { if (sessionActions.canRename(sessionId)) sessionActions.open(sessionId); }),
+    });
     const sessionFile = context.sessionFile;
     items.push({
       id: "desktop.session.copy-path",
@@ -193,6 +206,7 @@ export function createNativeContextMenuFactory(
   reportError: (error: unknown) => void,
   revealProjectEntry?: (path: string) => Promise<void>,
   resolveRemoteLink?: (path: string) => Promise<GitRemoteEntryLink | null>,
+  sessionActions?: SessionContextActions,
 ): (context: DesktopContextTarget, isActive: () => boolean) => Promise<NativeContextMenu> {
   // Tauri's callback registry is app-wide, not per WebView. Each mounted owner
   // needs a namespace so secondary windows cannot overwrite each other's actions.
@@ -209,7 +223,7 @@ export function createNativeContextMenuFactory(
       const revealPath = context.fileLinkRevealPath;
       const remoteLink = revealPath && resolveRemoteLink
         ? await resolveRemoteLink(revealPath).catch(() => null) : null;
-      const items = nativeContextMenuItems(context, linux, reportError, isActive, revealProjectEntry, remoteLink)
+      const items = nativeContextMenuItems(context, linux, reportError, isActive, revealProjectEntry, remoteLink, sessionActions)
         .map((item) => "id" in item ? { ...item, id: `${namespace}:${item.id}` } : item);
       const menu = await Menu.new({ items });
       return {

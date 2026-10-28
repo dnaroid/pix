@@ -495,7 +495,7 @@ function indexBranchParents(entries: readonly unknown[], requireFullChain: boole
  *
  * This proves permission to re-read, NOT a publishable merged snapshot. Never
  * return the tail/union as history or hydrate synchronously to validate it.
- * Contract + counterexample: specs/dcp-statistics.md#lazy-tail-retry-invariant.
+ * Contract + counterexample: wiki/context/dcp-statistics.md#lazy-tail-retry-invariant.
  */
 function readSnapshotFollowsCurrentBranch(
   entries: readonly unknown[],
