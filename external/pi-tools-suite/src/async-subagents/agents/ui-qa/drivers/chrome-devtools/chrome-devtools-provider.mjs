@@ -132,10 +132,10 @@ export function chromeDevtoolsStartArgs({ sessionId, evidenceDir, allowedOrigins
 	];
 	for (const origin of allowedOrigins) args.push(`--allowedUrlPattern=${origin}/*`);
 	if (devtools.browserUrl) args.push(`--browserUrl=${devtools.browserUrl}`);
-	else {
+	else if (devtools.headless !== undefined) {
 		args.push("--isolated=true");
 		args.push(`--headless=${devtools.headless !== false}`);
-	}
+	} else args.push("--autoConnect=true");
 	return args;
 }
 
@@ -155,6 +155,7 @@ export async function runChromeDevtoolsProvider(context, config) {
 	// A 128-bit random hex id gives this run an isolated daemon namespace without
 	// colliding with the user's default or other QA sessions.
 	const sessionId = randomBytes(16).toString("hex");
+	const attachedExistingChrome = Boolean(config.devtools.browserUrl) || config.devtools.headless === undefined;
 	const environment = chromeDevtoolsEnvironment();
 	const assertions = [];
 	const observations = [];
@@ -185,8 +186,8 @@ export async function runChromeDevtoolsProvider(context, config) {
 				timeoutMs: 5_000,
 			}).catch(() => {});
 			return blocked(
-				"Chrome DevTools CLI could not start its isolated UI-QA daemon/browser with the required safety policy",
-				`verify Chrome 149+ is installed and that chrome-devtools-mcp can start with allowedUrlPattern; ${safeCliFailure(start)}`,
+				"Chrome DevTools CLI could not connect/start its UI-QA daemon/browser with the required safety policy",
+				`enable remote debugging in Chrome at chrome://inspect/#remote-debugging for autoConnect (no port guessing), or verify the explicit browserUrl/headless option; verify Chrome 149+ and allowedUrlPattern support; ${safeCliFailure(start)}`,
 			);
 		}
 		daemonStarted = true;
@@ -194,7 +195,7 @@ export async function runChromeDevtoolsProvider(context, config) {
 			action: "browserProvider",
 			provider: CHROME_DEVTOOLS_DRIVER,
 			isolatedDaemon: true,
-			attachedExistingChrome: Boolean(config.devtools.browserUrl),
+			attachedExistingChrome,
 			reuseExistingBrowserSession: Boolean(config.devtools.reuseExistingBrowserSession),
 			javascriptEvaluation: false,
 			networkHeadersRedacted: true,
@@ -203,7 +204,7 @@ export async function runChromeDevtoolsProvider(context, config) {
 
 		const page = await invokeCliJson(executable, sessionId, "new_page", [
 			config.baseUrl,
-			...(config.devtools.browserUrl && !config.devtools.reuseExistingBrowserSession
+			...(attachedExistingChrome && !config.devtools.reuseExistingBrowserSession
 				? ["--isolatedContext", sessionId]
 				: []),
 			"--timeout", String(Math.min(30_000, boundedRemaining(context, 30_000))),
@@ -892,4 +893,3 @@ function safeReason(error) {
 function isObject(value) {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
-

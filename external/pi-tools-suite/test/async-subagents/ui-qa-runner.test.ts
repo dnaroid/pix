@@ -360,13 +360,26 @@ describe("capability-first UI QA runner", () => {
 		expect(args).toContain("--categoryExtensions=false");
 		expect(args).toContain("--categoryPwa=false");
 		expect(args).toContain("--experimentalVision=false");
-		expect(args).toContain("--isolated=true");
-		expect(args).toContain("--headless=true");
+		expect(args).toContain("--autoConnect=true");
+		expect(args.some((arg) => /^--(browserUrl|headless|isolated)=/.test(arg))).toBe(false);
 		expect(args).toContain("--workspace=/tmp/ui qa evidence");
 		expect(args).toContain("--allowedUrlPattern=https://example.test/*");
 		expect(args).toContain("--allowedUrlPattern=http://127.0.0.1:4312/*");
 		expect(args.join(" ")).not.toContain("Cookie");
 		expect(args.join(" ")).not.toContain("Authorization");
+	});
+
+	test("preserves explicit DevTools endpoints and isolated launch options without autoConnect", () => {
+		const options = { sessionId: "deadbeef", evidenceDir: "/tmp/ui qa evidence", allowedOrigins: ["https://example.test"] };
+		const attached = chromeDevtoolsStartArgs({ ...options, devtools: { browserUrl: "http://127.0.0.1:4312" } });
+		expect(attached).toContain("--browserUrl=http://127.0.0.1:4312");
+		expect(attached).not.toContain("--autoConnect=true");
+		for (const headless of [true, false]) {
+			const launched = chromeDevtoolsStartArgs({ ...options, devtools: { headless } });
+			expect(launched).toContain("--isolated=true");
+			expect(launched).toContain(`--headless=${headless}`);
+			expect(launched).not.toContain("--autoConnect=true");
+		}
 	});
 
 	test("rejects non-loopback Chrome DevTools attach endpoints", async () => {
@@ -479,6 +492,13 @@ else { console.error("unsupported fake command: " + command); process.exit(1); }
 		expect(stop).toContain(sessionId);
 		expect(start).toContain("--javascriptEvaluation=false");
 		expect(start).toContain("--redactNetworkHeaders=true");
+		expect(start).toContain("--autoConnect=true");
+		const newPage = calls.find((entry) => entry[0] === "new_page");
+		expect(newPage).toContain("--isolatedContext");
+		expect(newPage).toContain(sessionId);
+		expect(result.observations).toContainEqual(expect.objectContaining({ action: "browserProvider", attachedExistingChrome: true, reuseExistingBrowserSession: false }));
+		expect(calls.filter((entry) => entry[0] === "close_page")).toHaveLength(1);
+		expect(calls.find((entry) => entry[0] === "close_page")).toContain("7");
 	});
 
 	test("preserves the browser backend's bounded in-memory upload flow size", () => {

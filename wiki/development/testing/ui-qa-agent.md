@@ -141,13 +141,15 @@ the browser adapter normalizes that to `BLOCKED`, and the unified runner merges
 those capabilities into `blockedHandoff`.
 
 The Chrome DevTools provider requires `chrome-devtools-mcp >= 1.9.0`, creates a
-random per-run daemon session, and stops only that session. It starts an
-isolated Chrome/profile by default; an existing Chrome may be attached only by
-an exact credential-free local loopback `browserUrl`. Even then, a task-owned
-isolated page/context is the default, while `reuseExistingBrowserSession: true`
-is reserved for a parent/user request that explicitly requires the existing
-authenticated session. The runner closes only its own page and never closes or
-stops externally owned Chrome/tabs.
+random per-run daemon session, and stops only that session. By default it uses
+`--autoConnect=true` to discover Chrome's remote-debugging endpoint; it does
+not guess or scan ports, and Chrome remote debugging must already be enabled.
+An explicit exact credential-free local loopback `browserUrl` overrides this
+default. An explicit `headless` boolean opts into launching an isolated browser
+instead. All modes create a task-owned isolated page/context unless
+`reuseExistingBrowserSession: true` is explicitly authorized by the parent/user
+alongside `browserUrl`. The runner closes only its own page and stops only its
+own daemon; it does not stop external Chrome or close unrelated tabs.
 
 DevTools execution disables JavaScript evaluation, extensions/PWA/experimental
 categories, usage statistics, and CrUX lookup; enables network-header

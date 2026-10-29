@@ -7,8 +7,12 @@ Load this topic only when the browser router or `selection.guide` selected
 ## Runner-owned security boundary
 
 The provider requires a compatible `chrome-devtools-mcp` CLI. The runner owns a
-random per-run daemon session and stops only that session. It starts an isolated
-Chrome/profile by default and applies fail-closed defaults: JavaScript
+random per-run daemon session and stops only that session. By default it uses
+`--autoConnect=true` to discover the local Chrome debugging endpoint; never
+guess/scan ports or supply a conventional port such as 9222. Chrome must have
+remote debugging enabled at `chrome://inspect/#remote-debugging`; relay a
+`BLOCKED` handoff if connection is unavailable, rather than silently launching
+another browser. It applies fail-closed defaults: JavaScript
 evaluation and optional extension/PWA/experimental categories are disabled,
 usage statistics and CrUX lookup are disabled, network headers are redacted,
 writes are restricted to the run evidence directory, page-id routing is
@@ -26,9 +30,12 @@ profiles, environment, or JavaScript.
 
 Optional `target.devtools` fields:
 
-- `headless`: boolean for runner-owned isolated Chrome, default `true`;
+- `headless`: explicit boolean opt-in to runner-owned isolated Chrome instead
+  of autoConnect (both `true` and `false` select a new browser); omit for normal
+  autoConnect discovery, do not set it just to fill defaults;
 - `browserUrl`: exact credential-free loopback HTTP endpoint for an already
-  debug-enabled Chrome; remote/non-loopback endpoints are rejected;
+  debug-enabled Chrome, only when an endpoint is explicitly supplied for the
+  task; overrides autoConnect/headless. Remote/non-loopback endpoints are rejected;
 - `reuseExistingBrowserSession`: boolean, valid only with `browserUrl`, and only
   when the parent/user explicitly requires the existing authenticated session.
 
