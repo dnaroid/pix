@@ -192,7 +192,7 @@ describe("ProjectExplorer keyboard tree", () => {
 
   it("uses shared clipboard references and rechecks at paste activation", () => {
     expect(explorerSource).toContain("encodeProjectEntryClipboard(requestWorkspace, entry, treeController.selectedEntries(entry)");
-    expect(explorerSource).toContain("decodeProjectEntryClipboard(await readText())");
+    expect(explorerSource).toContain("decodeProjectEntryClipboard(await readSystemProjectClipboard())");
     expect(explorerSource).toContain("sourceWorkspace: copied.workspace");
     expect(explorerSource).toContain("refreshEntryClipboard(entry)");
     expect(explorerSource).toContain("clipboardReader.invalidate()");
