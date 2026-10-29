@@ -10,7 +10,7 @@ type Revision = (cwd: string) => Promise<string>;
 type InFlight = {
   readonly controller: AbortController;
   readonly listeners: Set<Listener>;
-  readonly promise: Promise<void>;
+  readonly promise: Promise<boolean>;
 };
 
 /** Avoid repeated full JSONL scans on every Desktop session/list request. */
@@ -25,13 +25,13 @@ export class NativeSessionCatalog {
     private readonly revision: Revision = sessionDirectoryRevision,
   ) {}
 
-  /** Schedule a scan; callers can return their persisted map immediately. */
-  refresh(cwd: string, onChanged: Listener): void {
-    if (this.disposed) return;
+  /** Schedule/coalesce discovery; true means reconciled, false means failed or aborted. */
+  refresh(cwd: string, onChanged: Listener): Promise<boolean> {
+    if (this.disposed) return Promise.resolve(false);
     const current = this.inFlight.get(cwd);
     if (current) {
       current.listeners.add(onChanged);
-      return;
+      return current.promise;
     }
     const controller = new AbortController();
     const listeners = new Set([onChanged]);
@@ -39,7 +39,7 @@ export class NativeSessionCatalog {
       try {
         const revision = await this.revision(cwd);
         controller.signal.throwIfAborted();
-        if (this.completedRevisions.get(cwd) === revision) return;
+        if (this.completedRevisions.get(cwd) === revision) return true;
         await this.scan(cwd, controller.signal);
         controller.signal.throwIfAborted();
         // Session files can grow while their JSONL bodies are being scanned.
@@ -52,14 +52,17 @@ export class NativeSessionCatalog {
         if (!this.disposed) {
           for (const listener of [...listeners]) listener();
         }
+        return true;
       } catch (error) {
         if (!controller.signal.aborted && !this.disposed) this.onFailure(error);
+        return false;
       } finally {
         if (this.inFlight.get(cwd)?.controller === controller) this.inFlight.delete(cwd);
         listeners.clear();
       }
     })();
     this.inFlight.set(cwd, { controller, listeners, promise });
+    return promise;
   }
 
   async dispose(): Promise<void> {

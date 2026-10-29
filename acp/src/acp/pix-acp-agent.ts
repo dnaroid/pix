@@ -2169,10 +2169,15 @@ export class PixAcpAgent {
 		if (params.cwd && this.clientName === "pix-desktop") {
 			// SessionManager.list() reads every JSONL body. Return the persisted map
 			// immediately and notify Desktop once the slow native reconciliation settles.
-			this.nativeSessionCatalog.refresh(params.cwd, () => {
+			const discovery = this.nativeSessionCatalog.refresh(params.cwd, () => {
 				if (this.disposed) return;
 				void client.notify(PIX_SESSION_CATALOG_CHANGED_METHOD, { cwd: params.cwd! }).catch(() => {});
 			});
+			// Only a missing saved Desktop tab needs the slow, authoritative list.
+			// Failed discovery must not turn a partial map into a destructive snapshot.
+			if (params._meta?.["pix.waitForDiscovery"] === true && !await discovery) {
+				throw new RequestError(ERROR_SERVER, "native session discovery did not complete; saved tabs were retained");
+			}
 		} else {
 			// Other ACP clients retain the synchronous, fully reconciled list contract.
 			try {

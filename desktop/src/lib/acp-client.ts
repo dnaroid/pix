@@ -128,8 +128,11 @@ export class AcpClient {
     });
   }
 
-  listSessions(cwd: string): Promise<ListSessionsResponse> {
-    return this.request("session/list", { cwd });
+  listSessions(cwd: string, options?: { waitForDiscovery?: boolean }): Promise<ListSessionsResponse> {
+    return this.request("session/list", {
+      cwd,
+      ...(options?.waitForDiscovery ? { _meta: { "pix.waitForDiscovery": true } } : {}),
+    });
   }
 
   async newSession(cwd: string, draftConfig?: DraftSessionConfig): Promise<NewSessionResponse> {

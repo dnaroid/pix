@@ -38,6 +38,23 @@ export function createSessionCatalog(options: SessionCatalogOptions) {
     );
   }
 
+  async function listForRestore(
+    requestClient: AcpClient,
+    requestWorkspace: string,
+    requestGeneration: number,
+  ): Promise<ListSessionsResponse | null> {
+    let response = await requestClient.listSessions(requestWorkspace);
+    if (!responseIsCurrent(requestClient, requestWorkspace, requestGeneration)) return null;
+    const savedTabs = options.tabs.sessionTabsForProject(requestWorkspace) ?? [];
+    const available = new Set(response.sessions.map((session) => session.sessionId));
+    if (savedTabs.some((id) => !available.has(id))) {
+      // A fast map snapshot can precede native discovery. Never persist its
+      // omissions as closed tabs before reconciliation succeeds.
+      response = await requestClient.listSessions(requestWorkspace, { waitForDiscovery: true });
+    }
+    return responseIsCurrent(requestClient, requestWorkspace, requestGeneration) ? response : null;
+  }
+
   function flushNativeRefresh(): void {
     const pending = pendingNativeRefresh;
     if (!pending || initialListings > 0 || refreshRequest) return;
@@ -54,8 +71,8 @@ export function createSessionCatalog(options: SessionCatalogOptions) {
     const requestGeneration = ++generation;
     initialListings += 1;
     try {
-      const response = await requestClient.listSessions(requestWorkspace);
-      if (!responseIsCurrent(requestClient, requestWorkspace, requestGeneration)) return null;
+      const response = await listForRestore(requestClient, requestWorkspace, requestGeneration);
+      if (!response) return null;
       applyResponse(response);
       return response;
     } catch (error) {
@@ -85,9 +102,9 @@ export function createSessionCatalog(options: SessionCatalogOptions) {
     const existing = refreshRequest;
     if (existing && existing.client === requestClient && existing.workspace === requestWorkspace) return existing.promise;
     const requestGeneration = ++generation;
-    const promise = requestClient.listSessions(requestWorkspace)
+    const promise = listForRestore(requestClient, requestWorkspace, requestGeneration)
       .then((response) => {
-        if (!responseIsCurrent(requestClient, requestWorkspace, requestGeneration)) return;
+        if (!response) return;
         applyResponse(response);
       })
       .catch((error) => {

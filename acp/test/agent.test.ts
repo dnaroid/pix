@@ -1627,6 +1627,63 @@ test("Pix Desktop session/list returns its persisted map without awaiting a slow
   });
 });
 
+test("Desktop can await coalesced discovery before pruning missing saved tabs", async (t) => {
+  const root = resolve(".pi/artifacts/session-list-restore");
+  await mkdir(root, { recursive: true });
+  const cwd = mkdtempSync(join(root, "test-"));
+  const path = join(cwd, "saved.jsonl");
+  await writeFile(path, '{"type":"session"}\n');
+  let started!: () => void;
+  const scanning = new Promise<void>(resolve => { started = resolve; });
+  let release!: () => void;
+  const waiting = new Promise<void>(resolve => { release = resolve; });
+  let scans = 0;
+  const harness = createTestAdapter({
+    listPiSessions: async () => {
+      scans++;
+      started();
+      await waiting;
+      return [nativeSession("restored", { cwd, path })];
+    },
+    nativeSessionRevision: async () => "stable",
+    loadTuiTabs: async () => ({ sessionPaths: [] }),
+  });
+  t.after(async () => {
+    release();
+    await harness.adapter.dispose();
+    await rm(cwd, { recursive: true, force: true });
+  });
+  await connectAs(harness.adapter, "pix-desktop", async cx => {
+    await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, clientInfo: { name: "pix-desktop", version: "test" } });
+    const initial = await cx.request("session/list", { cwd }) as { sessions: unknown[] };
+    assert.deepEqual(initial.sessions, []);
+    await scanning;
+    let settled = false;
+    const restore = cx.request("session/list", { cwd, _meta: { "pix.waitForDiscovery": true } })
+      .then(response => { settled = true; return response as { sessions: Array<{ sessionId: string }> }; });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(settled, false);
+    release();
+    assert.deepEqual((await restore).sessions.map(s => s.sessionId), ["restored"]);
+    assert.equal(scans, 1);
+  });
+});
+
+test("Desktop discovery failure rejects authoritative lists rather than pruning saved tabs", async () => {
+  const harness = createTestAdapter({
+    listPiSessions: async () => { throw new Error("scan failed"); },
+    nativeSessionRevision: async () => "stable",
+  });
+  try {
+    await connectAs(harness.adapter, "pix-desktop", async cx => {
+      await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, clientInfo: { name: "pix-desktop", version: "test" } });
+      await assert.rejects(cx.request("session/list", { cwd: "/project", _meta: { "pix.waitForDiscovery": true } }), /native session discovery did not complete/);
+    });
+  } finally {
+    await harness.adapter.dispose();
+  }
+});
+
 test("session/new failure to start pi returns a protocol error and registers nothing", async () => {
 	const { adapter } = createTestAdapter({
 		createPiClient: () => {

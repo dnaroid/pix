@@ -26,13 +26,15 @@ test("native session catalog coalesces slow scans, skips unchanged revisions and
   }, (error) => errors.push(error), async () => version);
   try {
     const notifications: string[] = [];
-    catalog.refresh("/first", () => { notifications.push("a"); notified.resolve(); });
+    const first = catalog.refresh("/first", () => { notifications.push("a"); notified.resolve(); });
     await start.promise;
-    catalog.refresh("/first", () => notifications.push("b"));
+    const second = catalog.refresh("/first", () => notifications.push("b"));
+    assert.equal(first, second, "restore callers await the same reconciliation");
     assert.equal(scans, 1, "duplicate callers share the active full scan");
     assert.equal(notifications.length, 0);
     release.resolve();
     await notified.promise;
+    assert.equal(await first, true);
     assert.equal(notifications.join(","), "a,b");
     await nextTurn();
 
@@ -60,7 +62,7 @@ test("failure does not poison the last successful revision, and disposal cancels
   const catalog = new NativeSessionCatalog(async () => {
     if (++calls === 1) throw new Error("snapshot temporarily unavailable");
   }, (error) => errors.push(error), async () => "stable");
-  catalog.refresh("/one", () => assert.fail("failed scan must not notify"));
+  assert.equal(await catalog.refresh("/one", () => assert.fail("failed scan must not notify")), false);
   await nextTurn();
   assert.equal(errors.length, 1);
   catalog.refresh("/one", () => changed.resolve());
@@ -79,10 +81,11 @@ test("failure does not poison the last successful revision, and disposal cancels
     });
     signal.throwIfAborted();
   }, () => assert.fail("aborting a scan must not report failure"), async () => "one");
-  pending.refresh("/two", () => notifications++);
+  const discovery = pending.refresh("/two", () => notifications++);
   await blocked.promise;
   await pending.dispose();
   await aborted.promise;
+  assert.equal(await discovery, false);
   pending.refresh("/two", () => notifications++);
   assert.equal(notifications, 0);
 });

@@ -268,6 +268,19 @@ describe("ACP JSON-RPC client", () => {
     await client.dispose();
   });
 
+  it("can request an authoritative session catalog for restoring saved tabs", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+    const listing = client.listSessions("/workspace", { waitForDiscovery: true });
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    expect(requestAt(transport, 1)).toMatchObject({
+      method: "session/list", params: { cwd: "/workspace", _meta: { "pix.waitForDiscovery": true } },
+    });
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 1).id, result: { sessions: [] } });
+    await expect(listing).resolves.toEqual({ sessions: [] });
+    await client.dispose();
+  });
+
   it("requests read-only LSP snapshots through ACP", async () => {
     const transport = new FakeTransport();
     const client = await startedClient(transport);

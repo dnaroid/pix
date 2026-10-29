@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildTabSessions, parseSessionTabIds } from "../lib/session-tabs";
+import { buildTabSessions, parseSessionTabIds, startupSessionId } from "../lib/session-tabs";
+import type { AcpClient } from "../lib/acp-client";
+import { createSessionCatalog } from "./session-catalog.svelte";
 import { windowLayoutKey } from "../lib/window-layout-storage";
 import { createSessionTabsState } from "./session-tabs-state.svelte";
 import { restoreProjectWorkspace } from "./project-workspace.svelte";
@@ -22,6 +24,27 @@ describe("session tabs state persistence", () => {
   });
 
   afterEach(() => vi.unstubAllGlobals());
+
+  it("restores the ordered snapshot and active tab after an incomplete startup list", async () => {
+    values.set(windowLayoutKey("sessionTabs"), JSON.stringify({ "/project": ["second", "active"] }));
+    values.set(windowLayoutKey("activeSessions"), JSON.stringify({ "/project": "active" }));
+    const saved = restoreProjectWorkspace("http://localhost/?workspace=%2Fproject", localStorage);
+    const tabs = createSessionTabsState();
+    tabs.setSessionTabIds(saved.sessionTabIds);
+    tabs.setActiveSessionIds(saved.activeSessionIds);
+    const sessions = ["active", "second"].map(sessionId => ({ sessionId, cwd: "/project" }));
+    const client = { listSessions: vi.fn()
+      .mockResolvedValueOnce({ sessions: [] })
+      .mockResolvedValueOnce({ sessions }) } as unknown as AcpClient;
+    const catalog = createSessionCatalog({ client: () => client, workspace: () => "/project", tabs, reportError: vi.fn() });
+    const response = await catalog.listNow();
+    expect(response).not.toBeNull();
+    expect(tabs.restoredIds).toEqual(["second", "active"]);
+    expect(startupSessionId(response!, tabs.activeForProject("/project"), tabs.sessionTabsForProject("/project")))
+      .toBe("active");
+    expect(parseSessionTabIds(values.get(windowLayoutKey("sessionTabs")) ?? null).get("/project"))
+      .toEqual(["second", "active"]);
+  });
 
   it.each([false, true])("keeps restored Desktop tabs across refresh and navigation (selected: %s)", (selected) => {
     const tabs = createSessionTabsState();

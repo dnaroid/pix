@@ -30,13 +30,22 @@ Show the same project sessions in Pix Desktop that Pix TUI discovers while keepi
 
 ## Behavior
 
-- Pix Desktop's project-scoped `session/list` returns the persisted ACP session
-  map immediately instead of synchronously parsing every native JSONL transcript
-  (large projects can contain hundreds of megabytes of saved conversations).
-  Native TUI/Desktop discovery reconciles in the background. A successful
+- Pix Desktop's ordinary project-scoped `session/list` returns the persisted
+  ACP session map immediately instead of synchronously parsing every native
+  JSONL transcript (large projects can contain hundreds of megabytes of saved
+  conversations). Native TUI/Desktop discovery reconciles in the background. A successful
   changed-directory scan emits `pix/session/catalog_changed` with the owning
   project cwd; Desktop then reloads the list and includes the new sessions.
   The first response may temporarily precede discovery, but never blocks on it.
+  Desktop restoration first requests this fast list. If it omits any session ID
+  in that workspace's saved Desktop tab snapshot, Desktop retries with
+  `_meta['pix.waitForDiscovery']=true`; ACP waits for the coalesced native
+  discovery before returning the authoritative list. Confirmed absence can then
+  prune stale saved tabs. If discovery fails or is aborted, the list request
+  fails and restoration leaves the saved snapshot untouched while reporting the
+  error. When every saved tab is present in the fast response, restoration does
+  not wait for discovery. Stale workspace/client/generation responses are
+  ignored.
   Other ACP clients retain synchronous, fully reconciled `session/list`.
 - Native background scans are single-flight per cwd and compare file names,
   sizes, mtimes and inode numbers before rereading unchanged JSONL bodies.

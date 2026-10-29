@@ -19,20 +19,76 @@ function fixture(listSessions: () => Promise<ListSessionsResponse>) {
   const client = { listSessions: vi.fn(listSessions) } as unknown as AcpClient;
   let selectedClient: AcpClient | null = client;
   const mergeRestored = vi.fn();
+  let savedTabs: string[] | null = null;
   const reportError = vi.fn();
   const catalog = createSessionCatalog({
     client: () => selectedClient, workspace: () => workspace,
-    tabs: { mergeRestored } as unknown as ReturnType<typeof createSessionTabsState>,
+    tabs: { mergeRestored, sessionTabsForProject: () => savedTabs } as unknown as ReturnType<typeof createSessionTabsState>,
     reportError,
   });
   return {
     catalog, client, mergeRestored, reportError,
     setWorkspace: (next: string) => { workspace = next; },
     setClient: (next: AcpClient | null) => { selectedClient = next; },
+    setSavedTabs: (ids: string[]) => { savedTabs = ids; },
   };
 }
 
 describe("native session catalog updates", () => {
+  it("reconciles missing saved tabs before applying a partial startup catalog", async () => {
+    const discovery = deferred<ListSessionsResponse>();
+    const f = fixture(vi.fn()
+      .mockResolvedValueOnce(result("cached"))
+      .mockImplementationOnce(() => discovery.promise));
+    f.setSavedTabs(["restored"]);
+    const listing = f.catalog.listNow();
+    await vi.waitFor(() => expect(f.client.listSessions).toHaveBeenCalledTimes(2));
+    expect(f.client.listSessions).toHaveBeenLastCalledWith("/workspace", { waitForDiscovery: true });
+    expect(f.mergeRestored).not.toHaveBeenCalled();
+    discovery.resolve(result("restored"));
+    expect((await listing)?.sessions.map(s => s.sessionId)).toEqual(["restored"]);
+    expect(f.mergeRestored).toHaveBeenCalledTimes(1);
+    expect(f.mergeRestored).toHaveBeenCalledWith("/workspace", null, ["restored"]);
+  });
+
+  it.each(["listNow", "refresh"] as const)("keeps the saved snapshot untouched when %s reconciliation fails", async method => {
+    const failure = new Error("discovery failed");
+    const f = fixture(vi.fn().mockResolvedValueOnce(result("cached")).mockRejectedValueOnce(failure));
+    f.setSavedTabs(["restored"]);
+    await f.catalog[method]();
+    expect(f.mergeRestored).not.toHaveBeenCalled();
+    expect(f.reportError).toHaveBeenCalledWith(failure);
+  });
+
+  it("keeps startup fast when every saved tab is already in the map", async () => {
+    const f = fixture(async () => result("saved"));
+    f.setSavedTabs(["saved"]);
+    await f.catalog.listNow();
+    expect(f.client.listSessions).toHaveBeenCalledExactlyOnceWith("/workspace");
+    expect(f.mergeRestored).toHaveBeenCalledWith("/workspace", null, ["saved"]);
+  });
+
+  it("allows pruning only after authoritative discovery confirms a saved tab is gone", async () => {
+    const f = fixture(vi.fn().mockResolvedValue({ sessions: [] }));
+    f.setSavedTabs(["deleted"]);
+    await f.catalog.listNow();
+    expect(f.client.listSessions).toHaveBeenCalledTimes(2);
+    expect(f.mergeRestored).toHaveBeenCalledExactlyOnceWith("/workspace", null, []);
+  });
+
+  it("ignores reconciliation completing after a workspace switch", async () => {
+    const discovery = deferred<ListSessionsResponse>();
+    const f = fixture(vi.fn().mockResolvedValueOnce(result("cached")).mockReturnValueOnce(discovery.promise));
+    f.setSavedTabs(["restored"]);
+    const listing = f.catalog.listNow();
+    await vi.waitFor(() => expect(f.client.listSessions).toHaveBeenCalledTimes(2));
+    f.setWorkspace("/other");
+    f.catalog.invalidate();
+    discovery.resolve(result("restored"));
+    expect(await listing).toBeNull();
+    expect(f.mergeRestored).not.toHaveBeenCalled();
+  });
+
   it("delays a native discovery notification until the first list settles", async () => {
     const initial = deferred<ListSessionsResponse>();
     const f = fixture(vi.fn()
