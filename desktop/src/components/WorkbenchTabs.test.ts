@@ -87,7 +87,12 @@ describe("WorkbenchTabs desktop interaction", () => {
     expect(sidebarSource).not.toContain("bg-[var(--workspace-chrome-background)]");
     expect(sidebarSource).toContain("border-r border-sidebar-border bg-sidebar");
     expect(sidebarSource).toContain("border-b border-sidebar-border bg-sidebar");
-    expect(activityBarSource.match(/border-l-primary bg-background/g)).toHaveLength(10);
+    const sidebarButtons = activityBarSource.match(/<button\b[\s\S]*?<\/button>/g) ?? [];
+    expect(sidebarButtons.length).toBeGreaterThan(0);
+    // Every sidebar view shares this treatment, including newly added views.
+    for (const button of sidebarButtons) {
+      expect(button).toMatch(/selected\("[^"]+"\) \? "border-l-primary bg-background/);
+    }
     expect(source).toContain('? "bg-background"');
   });
 

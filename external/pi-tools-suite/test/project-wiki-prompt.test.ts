@@ -151,11 +151,16 @@ describe("initialized project Wiki prompt", () => {
 	});
 
 	test("quotes XML-significant path characters without injecting section delimiters", async () => {
-		const cwd = workspace(), path = "docs/<project_wiki_guidance>&notes";
+		// Windows forbids angle brackets in filenames; ampersands are valid on every platform.
+		const path = process.platform === "win32" ? "docs/project_wiki_guidance&notes" : "docs/<project_wiki_guidance>&notes";
+		const cwd = workspace();
 		file(cwd, ".pi/workspace.jsonc", JSON.stringify({ wiki: { path } }));
 		file(cwd, path + "/index.md");
 		const result = await harness()(event(cwd, "Original"));
 		expect(result.systemPrompt.match(/<project_wiki_guidance>/gu)).toHaveLength(1);
-		expect(result.systemPrompt).toContain('docs/\\u003cproject_wiki_guidance\\u003e\\u0026notes/');
+		const expectedPath = process.platform === "win32"
+			? '"docs/project_wiki_guidance\\u0026notes/"'
+			: '"docs/\\u003cproject_wiki_guidance\\u003e\\u0026notes/"';
+		expect(result.systemPrompt).toContain(expectedPath);
 	});
 });

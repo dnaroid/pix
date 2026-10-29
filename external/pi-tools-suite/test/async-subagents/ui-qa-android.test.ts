@@ -42,7 +42,13 @@ server.listen(5037, '127.0.0.1', () => console.log('ready'));
 	});
 });
 afterAll(() => server?.kill("SIGTERM"));
-afterEach(() => { for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true }); });
+afterEach(() => {
+	for (const dir of dirs.splice(0)) {
+		// The synchronous runner has exited, but Windows can briefly retain file handles.
+		// Retry transient locks without hiding persistent cleanup failures.
+		fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+	}
+});
 
 const XML = '<hierarchy rotation="0"><node package="your.app" text="Schedules" content-desc="" class="android.widget.Button" enabled="true" checked="false" bounds="[0,0][80,40]"/><node package="other.app" text="Secret"/></hierarchy>';
 

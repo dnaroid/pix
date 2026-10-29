@@ -90,7 +90,8 @@ describe("persistent Registry plan navigation", () => {
     expect(sidebarSource).toContain("const plansView = createRegistryPlansView()");
     expect(sidebarSource).toContain("onChoose={onOpenProjectDocument}");
     expect(sidebarSource).toContain("activePath={activeProjectDocumentPath}");
-    expect(viewModelSource).toContain('options.preview.active?.kind === "file" ? options.preview.active.file.path : null');
+    // Virtual Wiki directories select their navigation entry; ordinary plans use the file path.
+    expect(viewModelSource.replace(/\s+/g, " ")).toContain('options.preview.active?.kind === "file" ? options.preview.active.file.virtualWikiDirectory ?? options.preview.active.file.path : null');
     expect(sidebarSource).not.toContain("planSelector");
     expect(sidebarSource).toContain("void openPlansSegment()");
     expect(sidebarSource).not.toContain("focusSearch");
