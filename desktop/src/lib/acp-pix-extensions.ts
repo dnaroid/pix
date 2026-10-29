@@ -40,6 +40,16 @@ import type {
   UserMessageActionResult,
 } from "./acp-client-types";
 
+export const SELECTION_ASSIST_DELTA_METHOD = "pix/selection/assist_delta";
+export type SelectionAssistDelta = { readonly text: string } | { readonly reset: true };
+export interface SelectionAssistRequest {
+  readonly requestId?: string;
+  readonly cwd: string;
+  readonly action: "explain" | "translate";
+  readonly text: string;
+  readonly context?: string;
+  readonly path?: string;
+}
 export interface ModelSetupRoles { readonly main: string; readonly fast: string; readonly strong: string }
 export interface ModelSetupStatus {
   readonly configured: boolean;
@@ -371,6 +381,22 @@ export class AcpPixExtensions {
       throw new Error("pix/prompt/enhance returned an invalid response");
     }
     return response.prompt;
+  }
+
+  async fileMentions(cwd: string, query: string, signal?: AbortSignal): Promise<import("../../../src/file-mentions").FileMentionMatch[]> {
+    const response = await this.request<unknown>("pix/files/complete", { cwd, query }, null, signal);
+    if (!isRecord(response) || !Array.isArray(response.matches) || response.matches.some((item: unknown) => !isRecord(item) || typeof item.path !== "string" || typeof item.directory !== "boolean")) {
+      throw new Error("pix/files/complete returned an invalid response");
+    }
+    return response.matches as import("../../../src/file-mentions").FileMentionMatch[];
+  }
+
+  async selectionAssist(request: SelectionAssistRequest, signal?: AbortSignal): Promise<string> {
+    const response = await this.request<unknown>("pix/selection/assist", { ...request }, 90_000, signal);
+    if (!isRecord(response) || typeof response.text !== "string" || response.text.trim().length === 0) {
+      throw new Error("pix/selection/assist returned an invalid response");
+    }
+    return response.text;
   }
 
   async gitAssist(cwd: string, kind: "review" | "commit-message", diff: string): Promise<string> {

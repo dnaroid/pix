@@ -16,6 +16,7 @@
   import SessionActivityStatusHud from "./SessionActivityStatusHud.svelte";
   import SessionPlanStatus from "./SessionPlanStatus.svelte";
   import NotificationCenter from "./NotificationCenter.svelte";
+  import BackgroundJobsStatus from "./BackgroundJobsStatus.svelte";
   import type { PlanProgress } from "../lib/project-documents";
 
   type ConfigValue = { value: string; name: string; group?: string };
@@ -27,6 +28,7 @@
     promptRunning,
     quotaWaitIndicator = null,
     observer = null,
+    backgroundJobs = null,
     canConfigure,
     modelThinkingOpen,
     runtimeStatus,
@@ -74,6 +76,7 @@
       onRequestSnapshot: () => void;
       onOpenSettings: () => void;
     } | null;
+    backgroundJobs?: import("svelte").ComponentProps<typeof BackgroundJobsStatus> | null;
     canConfigure: boolean;
     modelThinkingOpen: boolean;
     runtimeStatus?: RuntimeStatus;
@@ -223,6 +226,9 @@
   {#key observer?.sessionId}
   {#if observer}
     <ObserverStatus {...observer} />
+  {/if}
+  {#if backgroundJobs}
+    <BackgroundJobsStatus {...backgroundJobs} />
   {/if}
   {#if sessionPlan}
     <SessionPlanStatus plan={sessionPlan} onOpen={onOpenPlan} onRefresh={onRefreshPlans} onResume={onResumePlan} resumeDisabled={planRunDisabled} />

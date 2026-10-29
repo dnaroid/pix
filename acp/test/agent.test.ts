@@ -1292,6 +1292,25 @@ test("Desktop publishes provisional and generated session titles from pi state",
 	);
 });
 
+test("pix/files/complete indexes draft workspace paths without creating or prompting a session", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "pix-acp-mentions-"));
+	const harness = createTestAdapter();
+	try {
+		await mkdir(join(cwd, "src"));
+		await writeFile(join(cwd, "src", "mention.ts"), "file contents must not be returned");
+		await writeFile(join(cwd, ".gitignore"), "secret.ts\n");
+		await writeFile(join(cwd, "secret.ts"), "sensitive contents");
+		await connect(harness.adapter, async (cx) => {
+			const response = await cx.request("pix/files/complete", { cwd, query: "" });
+			assert.deepEqual(response, { matches: [
+				{ path: ".gitignore", directory: false }, { path: "src/", directory: true }, { path: "src/mention.ts", directory: false },
+			] });
+			assert.equal(harness.adapter.sessionCount, 0);
+			assert.deepEqual(harness.clients, []);
+		});
+	} finally { await harness.adapter.dispose(); await rm(cwd, { recursive: true, force: true }); }
+});
+
 test("pix/autocomplete routes the active session without mutating its prompt", async () => {
 	let autocompleteInput: AutocompleteCompleterInput | undefined;
 	const harness = createTestAdapter({
@@ -1830,7 +1849,7 @@ test("Pix Desktop pause stops at the turn boundary and exposes a paused continua
 		},
 	);
 
-	assert.deepEqual(states.map((state) => state.state), ["pause-requested", "paused"]);
+	assert.deepEqual(states.map((state) => state.state), ["running", "pause-requested", "paused"]);
 });
 
 test("wait commands preserve paused state and do not replace an active run", async () => {
@@ -1896,6 +1915,29 @@ test("heads-up commands stay out-of-band while parent is idle, paused or running
 		await pending;
 	});
 	assert.ok(options[0]?.args?.includes("/test/heads-up.js"));
+});
+
+test("background-jobs controls run out-of-band while the parent run is active", async () => {
+	const pi = new FakePiClient();
+	pi.commands.push({ name: "background-jobs", source: "extension", sourceInfo: {}, description: "Background shell jobs" });
+	const { adapter } = createTestAdapter({ createPiClient: () => pi });
+	await connect(adapter, async (cx) => {
+		const session = await cx.buildSession("/tmp/background-jobs-control").start();
+		const runtime = adapter.getSession(session.sessionId)!;
+		await waitFor(() => runtime.runtimeExtensionCommands.has("background-jobs"));
+		const pending = session.prompt("work");
+		await waitFor(() => pi.promptCalls.some((call) => call.message === "work"));
+		pi.emit({ type: "agent_start" });
+		const run = runtime.activeRun;
+		assert.ok(run);
+		pi.promptHandledWithoutRun = true;
+		await session.prompt("/background-jobs kill bg_1");
+		assert.equal(runtime.activeRun, run);
+		assert.ok(pi.promptCalls.some((call) => call.message === "/background-jobs kill bg_1"));
+		pi.promptHandledWithoutRun = false;
+		pi.emit({ type: "agent_settled" });
+		await pending;
+	});
 });
 
 test("BTW controls and progress do not enter the parent run, queue or transcript; teardown resets memory", async () => {
@@ -3014,10 +3056,8 @@ for (const origin of ["prompt", "extension"] as const) {
 			await new Promise<void>((resolve) => setImmediate(resolve));
 			assert.equal(adapter.getSession(session.sessionId)!.activeRun, owner);
 			assert.equal(promptSettled, false, "old settlement must not resolve a still-running prompt");
-			if (origin === "extension") {
-				assert.equal(adapter.getSession(session.sessionId)!.agentControlState, "running",
-					"an adopted run must not publish an idle indicator while streaming");
-			}
+			assert.equal(adapter.getSession(session.sessionId)!.agentControlState, "running",
+				"a restarted run must not publish an idle indicator while streaming");
 			assert.equal(owner!.stopReason, undefined, "previous run's error must not leak into the restart");
 			await assert.rejects(session.prompt("overlap"), /already in progress/);
 			const queued = await cx.request(PIX_QUEUE_MESSAGE_METHOD, {
@@ -3106,6 +3146,53 @@ test("session/prompt rejects for unknown sessions and refuses concurrent prompts
 		assert.equal((await first).stopReason, "end_turn");
 	});
 });
+
+for (const origin of ["preflight", "prompt", "extension"] as const) {
+	test(`${origin} busy run republishes control state on rejected sends and state queries`, async () => {
+		const { adapter, clients } = createTestAdapter();
+		const notifications: Array<{ sessionId: string; channel: string; data: { state?: string } }> = [];
+		await connect(adapter, async (cx) => {
+			const session = await cx.buildSession("/tmp/busy-state-recovery").start();
+			const pi = clients[0]!;
+			const pending = origin === "extension" ? undefined : session.prompt("work");
+			if (pending) await waitFor(() => pi.promptCalls.length === 1);
+			if (origin !== "preflight") pi.emit({ type: "agent_start" });
+			const owner = adapter.getSession(session.sessionId)!.activeRun;
+			const states = () => notifications.filter((item) => item.sessionId === session.sessionId
+				&& item.channel === "agent-control");
+			for (const action of ["reject", "reject", "query"] as const) {
+				const before = states().length;
+				if (action === "reject") {
+					await assert.rejects(session.prompt("overlap"), /already in progress/);
+				} else {
+					const result = await cx.request(PIX_AGENT_CONTROL_METHOD, {
+						sessionId: session.sessionId, action: "state",
+					}) as DesktopAgentControlResponse;
+					assert.equal(result.state, "running");
+				}
+				await waitFor(() => states().length > before);
+				const published = states();
+				assert.equal(published[published.length - 1]!.data.state, "running");
+				assert.equal(adapter.getSession(session.sessionId)!.activeRun, owner);
+			}
+			// Recovery during preflight must survive the subsequent SDK start too.
+			if (origin === "preflight") pi.emit({ type: "agent_start" });
+			assert.equal(adapter.getSession(session.sessionId)!.agentControlState, "running");
+			await cx.notify("session/cancel", { sessionId: session.sessionId });
+			await waitFor(() => pi.aborts === 1);
+			pi.emit({ type: "agent_settled", aborted: true });
+			if (pending) assert.equal((await pending).stopReason, "cancelled");
+			await waitFor(() => adapter.getSession(session.sessionId)?.activeRun === undefined);
+		}, (app) => {
+			const custom = app as unknown as {
+				onNotification(method: string, parser: (params: unknown) => typeof notifications[number],
+					handler: (ctx: { params: typeof notifications[number] }) => void): void;
+			};
+			custom.onNotification(PIX_SESSION_STATE_METHOD, (params) => params as typeof notifications[number],
+				(ctx) => { notifications.push(ctx.params); });
+		});
+	});
+}
 
 test("session/prompt rejects unsupported content", async () => {
 	const { adapter } = createTestAdapter();

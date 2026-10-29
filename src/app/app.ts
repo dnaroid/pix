@@ -384,6 +384,9 @@ export class PiUiExtendApp {
 			get userMessageJumpLoading() { return app.menuItems.isUserMessageJumpLoading(); },
 		});
 		this.popupMenus = new AppPopupMenuController({
+			fileMentionEditor: () => this.inputEditor,
+			fileMentionCwd: () => this.runtime?.cwd ?? this.options.cwd,
+			fileMentionContext: () => this.tabsController.activeInputTabId() ?? "",
 			get entries() { return app.entries; },
 			get session() { return app.runtime?.session; },
 			currentThinkingLevel: () => this.runtime?.session.thinkingLevel ?? this.draftModelState()?.thinkingLevel,
@@ -954,7 +957,8 @@ export class PiUiExtendApp {
 			toggleModelVisibilityMode: () => this.popupMenus.toggleModelVisibilityMode(),
 			setActiveModelDefault: () => this.popupActions.setSelectedModelDefault(),
 			autocompleteModel: () => this.popupMenus.autocompleteModel(),
-			acceptAutocompleteSuggestion: () => this.autocompleteController.acceptSuggestion(),
+			acceptAutocompleteSuggestion: () => this.popupMenus.syncActivePopupMenu() === "file-mention"
+				? this.popupMenus.acceptFileMention() : this.autocompleteController.acceptSuggestion(),
 			autocompleteSlashCommand: () => this.popupMenus.autocompleteSlashCommand(),
 			toggleVoiceRecording: () => {
 				void this.voiceController.toggleRecording();
@@ -980,7 +984,7 @@ export class PiUiExtendApp {
 			stopModelUsagePolling: () => this.modelUsageController.stopPolling(),
 			stopMemoryWatchdog: () => this.memoryWatchdog.stop(),
 			stopVoiceInput: () => this.voiceController.dispose(),
-			stopAutocomplete: () => this.autocompleteController.dispose(),
+			stopAutocomplete: () => { this.autocompleteController.dispose(); this.popupMenus.disposeFileMentions(); },
 			stopShellCommand: () => this.shellController.dispose(),
 			unsubscribeSession: () => {
 				this.sessionLifecycle.unsubscribeSession();

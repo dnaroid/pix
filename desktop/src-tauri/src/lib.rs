@@ -58,6 +58,7 @@ mod plan_progress;
 mod preview_file;
 mod preview_file_action;
 mod project_browser;
+mod wiki_html_export;
 mod project_directory_link;
 mod project_entry_clipboard;
 mod project_entry_drag;
@@ -9106,6 +9107,7 @@ pub fn run() {
             open_local_file,
             preview_file_action::preview_file_action,
             project_browser::open_project_html_in_browser,
+            wiki_html_export::export_project_wiki_html,
             preview_file::read_preview_file,
             preview_file::open_preview_file_in_editor,
             read_project_file,

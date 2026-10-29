@@ -5,7 +5,11 @@
   import type { SessionConfigOption } from "@agentclientprotocol/sdk";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ExternalLink from "@lucide/svelte/icons/external-link";
+  import FilePlus from "@lucide/svelte/icons/file-plus";
   import Folder from "@lucide/svelte/icons/folder";
+  import FolderOpen from "@lucide/svelte/icons/folder-open";
+  import FolderPlus from "@lucide/svelte/icons/folder-plus";
+  import Globe from "@lucide/svelte/icons/globe";
   import GripVertical from "@lucide/svelte/icons/grip-vertical";
   import ListTodo from "@lucide/svelte/icons/list-todo";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
@@ -554,6 +558,8 @@
     if (activeTab !== tab || layoutController.collapsed) selectTab(tab);
   }
 
+  let wikiPanel = $state<{ create: (kind: "new-file" | "new-directory") => void; exportHtml: () => void; showInFiles: () => void; refresh: () => void } | null>(null);
+  let wikiReady = $state(false);
   const activeTabTitle = $derived(SIDEBAR_LABELS[activeTab]);
   const draggedTask = $derived(taskDragController.taskId ? tasks.find((task) => task.id === taskDragController.taskId) : undefined);
   function openRegistryProjectArtifact(artifact: RegistryProjectArtifact): void {
@@ -1038,6 +1044,14 @@
             onclick={() => launchController.refresh()}
             disabled={!workspace}
           ><RefreshCw class="h-3.5 w-3.5" aria-hidden="true" /></button>
+        {:else if activeTab === "wiki"}
+          <div class="ml-auto flex shrink-0 items-center gap-0.5">
+          <button class={iconButtonClass("sm", "chrome")} type="button" title="New page" aria-label="New page" disabled={!wikiReady} onclick={() => wikiPanel?.create("new-file")}><FilePlus class="h-3.5 w-3.5" aria-hidden="true" /></button>
+          <button class={iconButtonClass("sm", "chrome")} type="button" title="New section" aria-label="New section" disabled={!wikiReady} onclick={() => wikiPanel?.create("new-directory")}><FolderPlus class="h-3.5 w-3.5" aria-hidden="true" /></button>
+          <button class={iconButtonClass("sm", "chrome")} type="button" title="Show Wiki folder in Files" aria-label="Show Wiki folder in Files" disabled={!wikiReady} onclick={() => wikiPanel?.showInFiles()}><FolderOpen class="h-3.5 w-3.5" aria-hidden="true" /></button>
+          <button class={iconButtonClass("sm", "chrome")} type="button" title="Open as HTML in browser" aria-label="Open as HTML in browser" disabled={!wikiReady} onclick={() => wikiPanel?.exportHtml()}><Globe class="h-3.5 w-3.5" aria-hidden="true" /></button>
+          <button class={iconButtonClass("sm", "chrome")} type="button" title="Refresh Wiki" aria-label="Refresh Wiki" disabled={!wikiReady} onclick={() => wikiPanel?.refresh()}><RefreshCw class="h-3.5 w-3.5" aria-hidden="true" /></button>
+          </div>
         {/if}
         <button
           class={iconButtonClass("sm", "chrome")}
@@ -1182,6 +1196,8 @@
       {:else if activeTab === "wiki"}
         <div id="workspace-wiki-panel" class="flex min-h-0 min-w-0 flex-col overflow-hidden" aria-label="Project wiki">
           <ProjectWikiPanel
+            bind:this={wikiPanel}
+            bind:ready={wikiReady}
             {workspace}
             activePath={activeProjectDocumentPath}
             onOpenFile={onOpenWikiFile ?? onOpenProjectFile}

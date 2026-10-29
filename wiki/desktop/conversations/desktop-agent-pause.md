@@ -45,9 +45,9 @@ Give Pix Desktop the same turn-boundary pause/continue workflow as the TUI and e
 - Desktop's deferred/auto queue does not consume another message while the session is `pause-requested`, `paused`, `continuable`, or `resuming`; advancing past those boundaries requires Continue or a new explicit user prompt.
 - Continue invokes `Agent.continue()` through the Pix RPC shim and then uses Pi's normal post-run retry, compaction, queue-draining, and settlement bookkeeping. A requested Pause remains pending through a scheduled retry rather than losing its failed response. If a newer run takes ownership before continuation, the stale continuation fails closed; a failed continuation does not leave ACP stuck in `resuming`.
 - While continuation is active, Desktop treats the session as running, so Stop can cancel it and Pause can be requested again after the resumed run starts.
-- `resuming` denotes continuation startup only and disables Pause. An extension-originated run that has emitted `agent_start` (including automatic continuation after question recovery) publishes `running`: Desktop adopts its busy owner while leaving Pause enabled. `running` is not a settlement signal and does not allow the deferred/auto queue to advance.
+- `resuming` denotes continuation startup only and disables Pause. Every `agent_start`, whether Desktop- or extension-originated, publishes `running` unless a pause is pending. Failed Pause also restores `running` while the run remains active. Desktop adopts unsolicited busy ownership while leaving Pause enabled for `running`. `running` is not a settlement signal and does not allow the deferred/auto queue to advance.
 - Extension-originated runs (including timed continuations and todo nudges) are also owned as active ACP runs and signal Desktop's running indicator. If an extension starts again while the prior settlement is awaiting RPC snapshots or notifications, the existing busy owner spans that restart: the stale settlement cannot publish an idle/paused state or resolve the owning request. Stop reasons and cancellation from the previous SDK run do not leak into the restarted run.
-- Desktop settlement is guarded by run ownership too: a late prompt/Continue completion cannot clear a newer run's busy flag, finalize its transcript activity, or flush its queue. Owner generations are not reused after session cleanup or runtime reset.
+- Desktop settlement is guarded by run ownership too: a busy ACP state push (`running`, `resuming`, or `pause-requested`) that arrives before an older prompt/Continue response or transcript-metadata lookup finishes transfers ownership to an adopted run generation when the local request settles. The stale response cannot hide Stop, finalize the adopted activity, report the older run's completion, or drain its queue. Continue applies the same precedence: newer state notifications outrank stale Continue responses and recovery queries; if the recovery state query fails, Desktop retains its known busy state rather than assuming idle. Owner generations are not reused after session cleanup or runtime reset.
 - An explicit **Send now** on a queued message holds automatic dispatch for that session while it interrupts and replaces the current run. The hold remains through settlement and transcript scrolling, and is released even when interruption or prompting fails. If the selected message was removed from the queue but cannot be accepted for prompting (including a stale session/client or failed scroll/prompt), Desktop returns its payload to that original session's manual queue; if that requeue fails, the active composer is restored where possible. Automatic queue draining does not race this explicit send.
 - Loading, importing, or switching a live session recomputes whether its current transcript is resumable. A previously paused boundary may therefore rehydrate as the equivalent `continuable` state rather than preserving the in-memory `paused` label.
 
@@ -61,6 +61,7 @@ colors in both light and dark mode.
 - Desktop uses the private `pix/session/agent_control` ACP request with `state`, `pause`, `cancel-pause`, and `continue` actions. `cancel-pause` is a no-op outside a live pending pause; Pi rejects withdrawal after its irreversible boundary decision and does not resume the agent.
 - A successful `continue` response includes the final ACP `stopReason` from the resumed run after it settles, alongside the resulting agent-control state. Desktop uses that settled reason for the same completion/error classification as a normal prompt; `state` and `pause` responses do not need a stop reason.
 - ACP publishes session-scoped state changes over the existing private `pix/session-state` notification on the `agent-control` channel.
+- ACP republishes active-run state during refresh, using `running` for an otherwise-idle active run except while that run is settling. Busy prompt rejection and load/resume refresh also republish state before returning or propagating the error, allowing Desktop to recover lost run ownership from protocol state rather than error text or polling.
 - ACP and Desktop both recognize the pause-ready `running` state. See [0026 — Pause-ready adopted continuations](../../decisions/0026-pause-ready-adopted-continuations.md).
 - The default ACP Pi entry is a thin Pix RPC shim around the pinned Pi RPC runtime. It intercepts private control messages before they can enter the transcript and implements the turn-boundary pause algorithm by wrapping `Agent.finishTurn` and using `Agent.continue()`. Existing explicit `continue` decisions remain authoritative, so a pause request stays pending until the next boundary that can be resumed through `Agent.continue()`.
 - Explicit `PIX_ACP_PI_ENTRY` overrides remain supported, but a replacement entry must implement the Pix control shim for Desktop pause/continue to work.
@@ -81,6 +82,7 @@ colors in both light and dark mode.
 - `desktop/src/app/prompt-run-lifecycle.svelte.ts`
 - `desktop/src/app/prompt-run-lifecycle.test.ts`
 - `desktop/src/app/prompt-runtime.svelte.ts`
+- `desktop/src/app/prompt-runtime-busy.test.ts`
 - `desktop/src/app/desktop-workbench-prop-builders.ts`
 - `desktop/src/components/TranscriptPane.svelte`
 - `desktop/src/components/PromptComposerControls.svelte`
@@ -94,6 +96,7 @@ colors in both light and dark mode.
 - `acp/test/pix-rpc-entry.test.ts`
 - `acp/test/pi-rpc-pause.test.ts`
 - `desktop/src/app/prompt-agent-control.test.ts`
+- `desktop/src/app/prompt-runtime-busy.test.ts`
 - `desktop/src/components/PromptComposerActivityRow.test.ts`
 - `desktop/src/lib/agent-control.test.ts`
 - `desktop/src/app/prompt-run-lifecycle.test.ts`
@@ -107,6 +110,7 @@ colors in both light and dark mode.
 - Activity-row render tests cover running controls without metadata, clickable/pressed pending Pause, Pause disablement while resuming, paused/continuable Continue, idle row removal, and questionnaire suppression. Source checks cover placement above the message form and callback separation from message actions.
 - Pending-pause cancellation tests cover prompt-owned and adopted runs, unchanged ownership/queue blocking, rapid repeated clicks, boundary commitment, failed cancellation, and stale replies after state pushes or session/runtime replacement.
 - `desktop/src/app/prompt-run-lifecycle.test.ts` covers stale completion and queued settlement callbacks, including cleanup/reset followed by a new run with the same session ID.
+- `desktop/src/app/prompt-runtime-busy.test.ts` covers busy pushes before old prompt/Continue responses or transcript metadata, rejected overlapping sends, stale/failed Continue recovery, retained Stop and queue blocking, and cleanup/reset. ACP tests cover repeated state republication for preflight, prompt-owned, and adopted busy runs without replacing their owner.
 - ACP typecheck/tests/stdio smoke and Desktop Svelte/TypeScript checks pass.
 
 ## Risks / compatibility

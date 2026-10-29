@@ -1,4 +1,5 @@
 import type { AgentSessionRuntime } from "@earendil-works/pi-coding-agent";
+import { fileMentionQuery } from "../../file-mentions.js";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { AutocompleteConfig } from "../../config.js";
 import type { InputEditor } from "../../input-editor.js";
@@ -146,6 +147,7 @@ export class AppAutocompleteController {
 		if (cursor !== text.length) return undefined;
 		if (text.trim().length < AUTOCOMPLETE_MIN_TEXT_LENGTH) return undefined;
 		if (text.startsWith("/") || text.startsWith("!")) return undefined;
+		if (fileMentionQuery(text, cursor)) return undefined;
 		return { text, cursor };
 	}
 

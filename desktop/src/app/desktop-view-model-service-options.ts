@@ -25,6 +25,7 @@ import type { createTranscriptScrollController } from "./transcript-scroll.svelt
 import type { LspOnboardingStore } from "./lsp-onboarding.svelte";
 import type { QuotaWaitStore } from "./quota-wait.svelte";
 import type { HeadsUpStore } from "./heads-up.svelte";
+import type { BackgroundJobsStore } from "./background-jobs.svelte";
 
 type ErrorState = ReturnType<typeof createErrorState>;
 type SessionOrchestration = ReturnType<typeof createDesktopSessionOrchestration>;
@@ -70,6 +71,7 @@ export type DesktopViewModelServicesOptions = {
   lspOnboarding: LspOnboardingStore;
   quotaWait: QuotaWaitStore;
   headsUp: HeadsUpStore;
+  backgroundJobs?: BackgroundJobsStore;
   openObserverSettings: () => void;
   openProjectSettings: () => void;
   openClaudeLoginTerminal?: (command: string) => Promise<void>;

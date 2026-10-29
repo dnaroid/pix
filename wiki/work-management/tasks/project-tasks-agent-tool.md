@@ -55,6 +55,9 @@ status: active
   - `update` with id and at least one of status/priority/title/description;
   - `run` with id, **only when the user asks to execute that saved task**,
     in Pix Desktop only.
+- Desktop-only `models` lists the selectable model catalog and supported
+  thinking levels. `run` may include `modelRef` in `provider/model[:thinking]`
+  form; it must match that catalog and a supported thinking level.
 - Tool schema **does not expose delete, bulk modification, reorder, arbitrary
   SQL, project-root override, attachment write, raw file write or storage
   reset**. Unsupported fields are errors. Type, id, links, sessionId and
@@ -71,11 +74,22 @@ status: active
 
 ### Agent-initiated Desktop launch
 
+`project_tasks {"op":"models"}` returns
+`{op:"models",models:[{modelRef,name,thinkingLevels}]}` from the source
+runtime's ACP options, filtered by Desktop's `visibleModels` preference. An
+undefined preference exposes all available models; `[]` exposes none. The
+`pix:auto` entry is excluded. Unlike the interactive picker, a hidden current
+model is not added automatically. This operation is Desktop-only; the storage
+engine and non-Desktop/headless hosts reject it.
+
 `project_tasks {"op":"run","id":"<task-id>"}` delegates to the existing
 Desktop **Tasks Run** action. It creates a separate normal ACP session, not a
 subagent, and uses the saved task's model/thinking, attachments and linked-plan
-behavior. A linked task only opens its existing session without another prompt.
-No prompt/model overrides or cross-project cwd are accepted.
+behavior. An optional `modelRef` overrides the saved task assignment only for a
+new session; it is not persisted and does not change the source session. A linked
+task only opens its existing session without another prompt and ignores the
+override. No prompt override or cross-project cwd is accepted. Create/update
+still cannot set `modelRef`.
 
 - The receipt is `{op:"run", id, sessionId, outcome:"started"|"opened"}`.
   `started` means prompt dispatch, **not task completion**; the caller does not

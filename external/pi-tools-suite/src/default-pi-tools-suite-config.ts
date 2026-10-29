@@ -43,6 +43,13 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
     "sessionHygiene": true,
     "notify": true
   },
+  // Background shell jobs (Bash/shell run_in_background). notifyOnExit "context"
+  // adds an exit notice at the next turn boundary while the agent is running;
+  // idle sessions only get a UI notification. Use "ui-only" or "off" to opt out.
+  "backgroundShell": {
+    "notifyOnExit": "context",
+    "maxJobsPerSession": 8
+  },
   // Private Git repository used as the reusable resource registry. Create the
   // repo first, then set remote with /registry configure <git-url>.
   "resourceRegistry": {

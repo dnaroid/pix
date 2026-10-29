@@ -24,7 +24,7 @@ serde_json = { version = "1", features = ["raw_value"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 sha2 = "0.10"
 portable-pty = "0.9"
-pulldown-cmark = { version = "0.13", default-features = false }
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "rustls"] }
 tauri = { version = "2", features = ["protocol-asset", "image-png", "tray-icon"] }
 tokio = { version = "1", features = ["sync", "signal", "macros"] }

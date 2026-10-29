@@ -16,7 +16,7 @@ import {
 import type { ExtensionTerminalInputResult } from "../extensions/extension-ui-controller.js";
 import type { MouseEvent, ActivePopupMenu } from "../types.js";
 
-type DirectPopupMenu = Exclude<ActivePopupMenu, "slash">;
+type DirectPopupMenu = Exclude<ActivePopupMenu, "slash" | "file-mention">;
 type ConsumeSequenceResult = "consumed" | "pending" | "none";
 type ParsedModifiedKey = Parameters<typeof terminalKeyIsEscape>[0];
 

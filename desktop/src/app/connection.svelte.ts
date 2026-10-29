@@ -11,12 +11,12 @@ import type { AcpExit, ForkReadyNotification } from "../lib/acp-client-types";
 import { TauriAcpTransport } from "../lib/tauri-transport";
 import { emitUsageStatsChanged } from "../lib/usage-stats-events";
 import type { DesktopDiagnosticEvent } from "../lib/diagnostic-logging";
-import type { TaskRunRequest, TaskRunResult } from "../../../acp/src/acp/task-run-contract";
+import type { TaskRunRequest, TaskRunResponse } from "../../../acp/src/acp/task-run-contract";
 
 export type ConnectionStatus = "starting" | "ready" | "error" | "stopped";
 
 type ConnectionStoreOptions = {
-  onTaskRun?: (request: TaskRunRequest, signal: AbortSignal) => Promise<TaskRunResult>;
+  onTaskRun?: (request: TaskRunRequest, signal: AbortSignal) => Promise<TaskRunResponse>;
   workspace: () => string;
   onSessionUpdate: (notification: SessionNotification) => void;
   onSessionCatalogChanged?: (cwd: string) => void;

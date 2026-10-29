@@ -40,6 +40,7 @@ export the full Pi parent prompt, `coding-discipline`, DCP or other
 - `src/coding-discipline` — injects a deduplicated silent-mode and quality-discipline block at the very top of the main-session per-turn system prompt for GLM main-session models only (`isGlmModel`) immediately before the LLM request; text-only GLM models get the `lookup` bridge while vision-capable `zai/glm-5.3-flash` inspects images directly; non-GLM models are left untouched; disabled for async sub-agents
 - `src/credential-firewall` — opt-in secret firewall for high-confidence outbound/session credential redaction; disabled by default
 - `src/ast-grep` — `ast_grep` / `ast_apply`
+- `src/background-shell` — background shell jobs: `run_in_background` on `Bash`/`bash`/`shell`, `shell_output`/`shell_kill`/`shell_jobs` (Claude aliases `BashOutput`/`KillShell`), `/background-jobs`, per-session process-group lifecycle, orphan detection, exit notices and the Desktop/TUI job indicator; see [the background shell contract](background-shell.md)
 - `src/brainstorm` — `/brainstorm [--mode auto|brainstorm|audit] <topic>` and the model-only `brainstorm` tool: five-round brainstorming or evidence-based audit with reviewed parent synthesis. Preserves the protocol under `.pi/brainstorms/`, without starting implementation. Desktop uses persistent native participant sessions; TUI/legacy runs require async-subagents and the research role. See [the council contract](../assistants/brainstorm.md).
 - `src/async-subagents` — `subagents` tool and sub-agent slash commands, including oh-my-openagent-style `/ultrawork` (`/ulw`) and `/hyperplan` orchestration prompts; roles are Markdown files under `src/async-subagents/agents/*.md` plus project `.pi/agents/*.md`; parent implementation is default, with handoffs only for explicit user delegation, an implementation capability gap, or sufficiently large prescribed mechanical work whose deterministic checks and expected net savings justify overhead; includes a cross-vendor `oracle` profile for bounded second opinions and complex architectural review; defaults to a 3-hour per-agent execution timeout when none is specified (explicit timeouts override it), with project-wide concurrency queueing, optional per-agent retry/backoff, and `result.json` structured metadata/chaining fields next to raw `result.md`; stores project-local run files and a registry under `.pi/subagents/` so result/status collection can recover after compaction or reload while the main session remains alive; clean Pi TUI sessions additionally get a live native widget for queued/running/retrying agents, while Pix keeps its renderer-owned presentation
 - `src/lsp` — shared LSP diagnostics hook/library that enriches mutating tool results with diagnostics and shuts down language servers on session shutdown
@@ -1270,6 +1271,7 @@ pi-tools-suite/
     question/
     todo/
     model-tools/
+    background-shell/
     usage/
     web-search/
     truncation-metadata-normalizer/

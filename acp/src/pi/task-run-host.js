@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { TASK_RUN_RESPONSE_PREFIX, parseTaskRunResult } from "../acp/task-run-contract.js";
+import { TASK_RUN_RESPONSE_PREFIX, parseTaskRunResponse } from "../acp/task-run-contract.js";
 
 const HOST = Symbol.for("pix.project-tasks.run");
 const bridges = new WeakMap();
@@ -9,7 +9,12 @@ const installed = new WeakSet();
 export function createTaskRunBridge(session, emit, timeoutMs = 120_000) {
   const pending = new Map();
   let closed = false;
-  const launch = ({ taskId, sessionId }, signal) => {
+  /**
+   * @param {{ taskId?: string, sessionId: string, op?: "run" | "models", modelRef?: string }} request
+   * @param {AbortSignal} [signal]
+   */
+  const launch = (request, signal) => {
+    const { taskId, sessionId, op, modelRef } = request;
     signal?.throwIfAborted();
     if (closed || session.sessionManager.getSessionId() !== sessionId) throw new Error("Task launch runtime was replaced");
     return new Promise((resolve, reject) => {
@@ -26,11 +31,16 @@ export function createTaskRunBridge(session, emit, timeoutMs = 120_000) {
         try { emit({ type: "pix_task_run_cancel", requestId }); } catch { /* Retiring transport. */ }
         finish(undefined, new Error("Task launch cancelled; inspect the task sessionId before retrying"));
       };
-      pending.set(requestId, finish);
+      pending.set(requestId, (value, error) => {
+        if (error) return finish(undefined, error);
+        try { finish(parseTaskRunResponse(value, op === "models")); }
+        catch (error) { finish(undefined, error); }
+      });
       signal?.addEventListener("abort", abort, { once: true });
       timer = setTimeout(abort, timeoutMs);
       timer.unref?.();
-      try { emit({ type: "pix_task_run_request", requestId, taskId }); }
+      try { emit({ type: "pix_task_run_request", requestId,
+        ...(op === "models" ? { op } : { taskId, ...(modelRef !== undefined ? { modelRef } : {}) }) }); }
       catch (error) { finish(undefined, error); }
     });
   };
@@ -40,10 +50,7 @@ export function createTaskRunBridge(session, emit, timeoutMs = 120_000) {
       const finish = pending.get(envelope.requestId);
       if (!finish) return; // cancelled or an old runtime's late reply
       if (typeof envelope.error === "string") finish(undefined, new Error(envelope.error));
-      else {
-        try { finish(parseTaskRunResult(envelope.result)); }
-        catch (error) { finish(undefined, error); }
-      }
+      else finish(envelope.result);
     },
     dispose() {
       closed = true;
@@ -79,7 +86,7 @@ export function installTaskRunHost(Session) {
 
 export function handleTaskRunResponse(session, text, options) {
   if (!text.startsWith(TASK_RUN_RESPONSE_PREFIX)) return false;
-  if (text.length > 16_384) throw new Error("Task launch response is too large");
+  if (text.length > 2 * 1024 * 1024) throw new Error("Task launch response is too large");
   const envelope = JSON.parse(text.slice(TASK_RUN_RESPONSE_PREFIX.length));
   if (!envelope || typeof envelope.requestId !== "string") throw new Error("Invalid task launch response");
   bridges.get(session)?.respond(envelope);

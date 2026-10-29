@@ -1,4 +1,5 @@
 import type { AcpClient } from "../lib/acp-client";
+import { invoke } from "@tauri-apps/api/core";
 import type { Attachment } from "../lib/attachments";
 import { appendLocalUserMessage } from "../lib/transcript";
 import type { ActiveSessionState } from "./active-session-state.svelte";
@@ -8,7 +9,11 @@ import type { DesktopSessionServices } from "./desktop-session-services";
 import type { DesktopSessionTransitionServices } from "./desktop-session-transition-services";
 import { DRAFT_SESSION_TAB_ID } from "./draft-session.svelte";
 import { createProjectActions } from "./project-actions.svelte";
-import type { TaskRunRequest, TaskRunResult } from "../../../acp/src/acp/task-run-contract";
+import type { TaskRunRequest, TaskRunResponse, TaskModelsResult } from "../../../acp/src/acp/task-run-contract";
+import { AUTO_MODEL_REF, modelThinkingConfigState } from "../lib/model-thinking";
+import { visibleModelRefsFromPixConfig } from "../lib/model-visibility";
+import type { SettingsConfigDocument } from "../lib/settings";
+import { parseDesktopModelRef } from "./desktop-helpers";
 
 type DesktopProjectActionServicesOptions = {
   client: () => AcpClient | null;
@@ -108,16 +113,43 @@ export function createDesktopProjectActionServices(options: DesktopProjectAction
     reportError: options.reportError,
   });
 
-  async function runTaskFromAgent(request: TaskRunRequest, signal: AbortSignal): Promise<TaskRunResult> {
+  async function taskModels(sourceSessionId: string): Promise<TaskModelsResult> {
+    const document = await invoke<SettingsConfigDocument>("read_user_config", { kind: "desktop" });
+    const visible = visibleModelRefsFromPixConfig(document.content);
+    const catalog = modelThinkingConfigState(options.sessions.runtime.getConfigOptions(sourceSessionId) ?? []).models;
+    return { models: catalog.filter(model => model.ref !== AUTO_MODEL_REF && (!visible || visible.includes(model.ref)))
+      .map(model => ({ modelRef: model.ref, name: model.name, thinkingLevels: [...model.thinkingLevels] })) };
+  }
+
+  async function runTaskFromAgent(request: TaskRunRequest, signal: AbortSignal): Promise<TaskRunResponse> {
     const client = options.client();
     const current = () => client && client === options.client() && options.workspace() === request.cwd && !signal.aborted;
-    if (!current() || !options.canUseSession() || options.workspaceOpening?.() || actions.actionId
+    if (!current() || options.workspaceOpening?.()) throw new Error("Task launch workspace is unavailable or busy");
+    if (request.op === "models") {
+      const result = await taskModels(request.sourceSessionId);
+      if (!current()) throw new Error("Task model listing workspace changed");
+      return result;
+    }
+    if (!options.canUseSession() || actions.actionId
       || options.project.tasks.saving || options.project.tasks.loading) throw new Error("Task launch workspace is unavailable or busy");
     // Agent writes can precede the sidebar's next poll. Launch only the saved row.
     await options.project.tasks.load(request.cwd);
     if (!current() || options.project.tasks.loadFailed) throw new Error("Task launch workspace changed or tasks could not be loaded");
-    const task = options.project.tasks.document.tasks.find((candidate) => candidate.id === request.taskId);
+    let task = options.project.tasks.document.tasks.find((candidate) => candidate.id === request.taskId);
     if (!task) throw new Error(`Unknown project task id: ${request.taskId}`);
+    if (request.modelRef !== undefined && !task.sessionId) {
+      const parsed = parseDesktopModelRef(request.modelRef);
+      const catalog = await taskModels(request.sourceSessionId);
+      if (!current()) throw new Error("Task launch workspace changed");
+      // The native config read yields: a poll may remove or link the saved row.
+      task = options.project.tasks.document.tasks.find((candidate) => candidate.id === request.taskId);
+      if (!task) throw new Error(`Unknown project task id: ${request.taskId}`);
+      const selected = catalog.models.find(model => model.modelRef === parsed?.modelRef);
+      if (!task.sessionId && (!selected || (parsed?.thinking && !selected.thinkingLevels.includes(parsed.thinking)))) {
+        throw new Error("Choose a favorite model and supported thinking level from project_tasks op models");
+      }
+    }
+    if (request.modelRef !== undefined) return actions.runTaskFromAgent(task, signal, request.modelRef);
     return actions.runTaskFromAgent(task, signal);
   }
 

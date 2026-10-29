@@ -1,4 +1,6 @@
 import { resolve } from "node:path";
+import { AppFileMentionsController } from "../input/file-mentions-controller.js";
+import type { InputEditor } from "../../input-editor.js";
 import { fuzzySearch, type FuzzySearchItem } from "../../fuzzy.js";
 import { PopupMenu, type PopupMenuItem } from "../../ui.js";
 import { sanitizeText } from "../rendering/render-text.js";
@@ -71,9 +73,12 @@ type PopupMenuRendererPort = {
 	): RenderedLine[];
 };
 
-export type DirectPopupMenu = Exclude<ActivePopupMenu, "slash">;
+export type DirectPopupMenu = Exclude<ActivePopupMenu, "slash" | "file-mention">;
 
 export type AppPopupMenuControllerHost = {
+	fileMentionEditor?(): InputEditor;
+	fileMentionCwd?(): string;
+	fileMentionContext?(): string;
 	readonly entries: readonly Entry[];
 	readonly session: AgentSession | undefined;
 	currentThinkingLevel?(): ThinkingLevel | undefined;
@@ -138,7 +143,14 @@ export class AppPopupMenuController {
 	private activeUserMessageEntryId: string | undefined;
 	private activeQueuedMessageEntryId: string | undefined;
 
-	constructor(private readonly host: AppPopupMenuControllerHost, private readonly renderer: PopupMenuRendererPort) {}
+	private readonly fileMentions: AppFileMentionsController | undefined;
+	constructor(private readonly host: AppPopupMenuControllerHost, private readonly renderer: PopupMenuRendererPort) {
+		if (host.fileMentionEditor && host.fileMentionCwd) this.fileMentions = new AppFileMentionsController(
+			() => host.fileMentionEditor!(), () => host.fileMentionCwd!(), () => host.fileMentionContext?.() ?? "", () => host.render());
+	}
+
+	disposeFileMentions(): void { this.fileMentions?.dispose(); }
+	acceptFileMention(): boolean { return this.fileMentions?.accept() ?? false; }
 
 	get directMenu(): DirectPopupMenu | undefined {
 		return this.directPopupMenu;
@@ -239,6 +251,8 @@ export class AppPopupMenuController {
 
 	getActivePopupMenu(active: ActivePopupMenu): PopupMenu<unknown> {
 		switch (active) {
+			case "file-mention":
+				return this.fileMentions!.menu;
 			case "sdk-menu":
 				return this.sdkMenu;
 			case "queue-message":
@@ -456,6 +470,7 @@ export class AppPopupMenuController {
 	}
 
 	closeMenusForTabSwitch(): void {
+		this.fileMentions?.dismiss();
 		if (this.directPopupMenu === "sdk-menu") {
 			this.closeSdkMenu(undefined, { render: false, restoreStatus: false });
 		}
@@ -484,6 +499,7 @@ export class AppPopupMenuController {
 
 	cancelActivePopupMenu(): void {
 		const active = this.syncActivePopupMenu();
+		if (active === "file-mention") { this.fileMentions?.dismiss(); this.host.render(); return; }
 		if (this.directPopupMenu === "sdk-menu") {
 			this.closeSdkMenu(undefined);
 			return;
@@ -610,6 +626,7 @@ export class AppPopupMenuController {
 	}
 
 	syncActivePopupMenu(): ActivePopupMenu | undefined {
+		const mentionOpen = this.fileMentions?.sync(!this.directPopupMenu && this.host.isRunning());
 		if (this.syncQueueMessageMenu()) return "queue-message";
 		if (this.syncUserMessageMenu()) return "user-message";
 		if (this.syncUserMessageJumpMenu()) return "user-message-jump";
@@ -617,10 +634,14 @@ export class AppPopupMenuController {
 		if (this.syncSdkMenu()) return "sdk-menu";
 		if (this.syncModelMenu()) return "model";
 		if (this.syncSlashCommandMenu()) return "slash";
+		if (mentionOpen) return "file-mention";
 		return undefined;
 	}
 
 	renderActivePopupMenu(width: number): RenderedLine[] {
+		if (this.syncActivePopupMenu() === "file-mention" && this.fileMentions) {
+			return this.renderer.renderSdkMenu(width, this.fileMentions.menu, { options: { title: "Project files and folders" } }, "");
+		}
 		if (this.syncQueueMessageMenu()) return this.renderer.renderQueueMessageMenu(width, this.queueMessageMenu);
 		if (this.syncUserMessageMenu()) return this.renderer.renderUserMessageMenu(width, this.userMessageMenu);
 		if (this.syncUserMessageJumpMenu()) return this.renderer.renderUserMessageJumpMenu(width, this.userMessageJumpMenu, this.directPopupMenuQuery);

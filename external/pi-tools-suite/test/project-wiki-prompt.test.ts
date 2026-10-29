@@ -54,10 +54,13 @@ describe("initialized project Wiki prompt", () => {
 		file(cwd, "wiki/index.md");
 		await harness()(input);
 		const hint = input.systemPromptOptions.sections.project_wiki_guidance;
+		expect(hint).toContain("The Wiki is this project's knowledge base.");
+		expect(hint).not.toContain("project_search");
+		expect(hint).not.toContain("Start with its index");
+		expect(hint).toContain("Save and maintain durable project knowledge, documentation and specifications");
 		expect(hint).toContain('documentation and specifications in "wiki/"');
 		expect(hint).toContain('"wiki/index.md"');
-		expect(hint).toContain("durable project documentation");
-		expect(hint).toContain("index links current");
+		expect(hint).toContain("keep documentation and index links current");
 		expect(hint).toContain("explicit user-requested locations and required fixed-path files");
 		expect(input.systemPromptOptions.sections.existing).toBe("Keep this section");
 	});

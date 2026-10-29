@@ -23,6 +23,8 @@ const fixture = compile(`
   import PreviewPane from "/src/components/PreviewPane.svelte";
   import { resolvePreviewWikiDirectory } from "/src/app/preview-wiki-directory";
   const workspace = "/wiki-panel-browser-smoke";
+  let panel = $state<any>(null);
+  let ready = $state(false);
   let file = $state<any>(undefined);
   let previewId = $state(0);
   async function openFile(path: string) {
@@ -57,8 +59,8 @@ const fixture = compile(`
   <header class="flex h-10 shrink-0 items-center border-b border-border bg-chrome px-4 text-sm font-medium">Pix · Game Wiki</header>
   <div class="flex min-h-0 flex-1">
     <aside class="flex w-[296px] shrink-0 flex-col border-r border-border bg-panel" aria-label="Wiki sidebar">
-      <div class="flex h-9 shrink-0 items-center border-b border-border px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Wiki</div>
-      <ProjectWikiPanel {workspace} activePath={file?.virtualWikiDirectory ?? file?.path ?? null} onOpenFile={openFile}
+      <div class="flex h-9 shrink-0 items-center gap-1 border-b border-border px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Wiki<button type="button" title="New wiki page" aria-label="New wiki page" disabled={!ready} onclick={() => panel?.create("new-file")}>New</button><button type="button" title="New wiki section" aria-label="New wiki section" disabled={!ready} onclick={() => panel?.create("new-directory")}>New</button><button type="button" title="Refresh Wiki" aria-label="Refresh Wiki" disabled={!ready} onclick={() => panel?.refresh()}>Ref</button></div>
+      <ProjectWikiPanel bind:this={panel} bind:ready {workspace} activePath={file?.virtualWikiDirectory ?? file?.path ?? null} onOpenFile={openFile}
         onOpenFiles={(path) => window.__wikiPanelEvents.files.push(path)}
         onOpenExternal={(path) => window.__wikiPanelEvents.external.push(path)}
         onBeforeMutation={async () => { window.__wikiPanelEvents.prepared++; return () => window.__wikiPanelEvents.released++; }} />

@@ -28,6 +28,42 @@ test("task bridge correlates responses and keeps concurrent launch receipts sepa
   assert.equal(events.length, 2);
 });
 
+test("task bridge forwards model overrides and validates model-list replies separately from receipts", async () => {
+  const { events, bridge } = fixture();
+  const launched = bridge.launch({ sessionId: "owner", taskId: "a", modelRef: "provider/favorite:high" });
+  assert.equal(events[0].modelRef, "provider/favorite:high");
+  const listed = bridge.launch({ sessionId: "owner", op: "models" });
+  assert.equal(events[1].op, "models");
+  assert.equal(events[1].taskId, undefined);
+  const catalog = { models: [{ modelRef: "provider/favorite", name: "Favorite", thinkingLevels: ["off", "high"] }] };
+  bridge.respond({ requestId: events[1].requestId, result: catalog });
+  bridge.respond({ requestId: events[0].requestId, result: receipt });
+  assert.deepEqual(await listed, catalog);
+  assert.deepEqual(await launched, receipt);
+  const invalid = bridge.launch({ sessionId: "owner", op: "models" });
+  const rejected = assert.rejects(invalid, /Invalid task model catalog/);
+  bridge.respond({ requestId: events[2].requestId, result: receipt });
+  await rejected;
+  bridge.dispose();
+});
+
+test("ACP model queries preserve the source owner and reject invalid model operations", async () => {
+  const responses: unknown[] = [];
+  const catalog = { models: [] };
+  const session = { acpSessionId: "source", cwd: "/workspace",
+    client: { request: async (_method: string, request: TaskRunRequest) => {
+      assert.deepEqual(request, { requestId: "m", op: "models", cwd: "/workspace", sourceSessionId: "source" });
+      return catalog;
+    } }, pi: { respondToTaskRun: async (...args: unknown[]) => { responses.push(args); } } };
+  await forwardTaskRun(session, { requestId: "m", op: "models" }, () => true, logger);
+  assert.deepEqual(responses, [["m", { result: catalog }]]);
+  const owner = { requestId: "m", cwd: "/workspace", sourceSessionId: "source" };
+  for (const bad of [{ op: "models", taskId: "a" }, { op: "models", modelRef: "p/m" },
+    { op: "invalid" }, { taskId: "a", modelRef: 42 }, { taskId: "a", modelRef: " " }]) {
+    assert.throws(() => parseTaskRunRequest({ ...owner, ...bad }), /Invalid|accepts no/);
+  }
+});
+
 test("cancellation and teardown retire pending listeners, ignore late replies, and reject stale owners", async () => {
   const { events, bridge } = fixture();
   assert.throws(() => bridge.launch({ sessionId: "stale", taskId: "a" }), /replaced/);
@@ -101,6 +137,14 @@ test("runtime rebind and dispose revoke the global capability; control replies n
     }), true);
     assert.deepEqual(await next, receipt);
     assert.equal(handled, true);
+    const models = { models: Array.from({ length: 300 }, (_, index) => ({
+      modelRef: `provider/model-${index}`, name: `Model ${index}`, thinkingLevels: ["off", "high"],
+    })) };
+    const listing = (globalThis as any)[key]({ sessionId: "owner", op: "models" });
+    const catalogEnvelope = TASK_RUN_RESPONSE_PREFIX + JSON.stringify({ requestId: events[events.length - 1].requestId, result: models });
+    assert.ok(catalogEnvelope.length > 16_384);
+    assert.equal(handleTaskRunResponse(session, catalogEnvelope), true);
+    assert.deepEqual(await listing, models);
     assert.equal(handleTaskRunResponse(session, "ordinary prompt"), false);
     session.dispose();
     assert.equal((globalThis as any)[key], undefined);

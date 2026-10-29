@@ -2,6 +2,20 @@ import { describe, expect, it } from "vitest";
 import { highlightCode, languageForFilePath, languageForReadTool } from "./syntax-highlight";
 
 describe("syntax highlighting", () => {
+  it("highlights mjs files, reads and Markdown fences as JavaScript", () => {
+    const code = 'export const message = "hello"; // module';
+    for (const hint of ["mjs", "MJS"]) {
+      expect(highlightCode(code, hint)).toEqual(highlightCode(code, "javascript"));
+      expect(highlightCode(code, hint).html).toContain("sh__token--keyword");
+    }
+    expect(languageForFilePath("/workspace/script.mjs")).toBe("javascript");
+    expect(languageForFilePath("C:\\workspace\\SCRIPT.MJS?raw=1#source")).toBe("javascript");
+    expect(languageForReadTool("read", "Read script.mjs", "/workspace/script.mjs")).toBe("javascript");
+    expect(languageForReadTool("read", "read script.mjs:25+50")).toBe("javascript");
+    expect(languageForReadTool("read", "Ls src", "/workspace/script.mjs")).toBeUndefined();
+    expect(highlightCode("x".repeat(33_000), "mjs").language).toBe("plaintext");
+  });
+
   it("recognizes GDScript reads including range-bearing legacy titles", () => {
     expect(languageForFilePath("presentation/recon/mission_result.gd")).toBe("gdscript");
     expect(languageForReadTool("read", "read presentation/recon/mission_result.gd:25+50")).toBe("gdscript");

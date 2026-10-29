@@ -105,6 +105,15 @@ workspace-containment checks.
   Escape cancels. Creating an index opens it for editing and focuses its folder
   even though the new file is hidden from the tree. Files remain available through **Show Wiki folder in Files**,
   where the existing rename, move, clipboard and recovery commands apply.
+- **Open as HTML in browser** (globe button) exports every Markdown page to one
+  self-contained `index.html` in the system temp folder
+  (`pix-wiki-export-<hash>/`) and opens it in the default browser from
+  `file://`, with no server. The page follows the system light/dark theme,
+  has a sidebar tree, in-page routing (`#/path`) and global full-text search
+  (`/` or Cmd/Ctrl+K). Raw HTML in Markdown is escaped, unsafe link schemes
+  are dropped and images load from the Wiki folder. Symlinks and hidden
+  entries are skipped; macOS only. Implemented in
+  `desktop/src-tauri/src/wiki_html_export.rs`.
 - A page opens in the existing Preview workbench tab. Sidebar page navigation
   and document links use its history. Assets use the existing image/media/file
   Preview routing. Wiki is not a new session or an additional nested tab strip.
@@ -167,10 +176,12 @@ An empty folder or settings alone do not initialize the Wiki. Configuration and
 index paths must resolve inside the project; invalid settings or a missing index
 omit the hint. The hook creates no files and reads no Wiki document contents.
 
-The hint directs durable project documentation and specifications to the actual
-Wiki folder, names its index, and asks agents to follow the structure and keep
-index links current. Explicit user destinations and required fixed-path files
-take precedence; disposable task output retains its existing artifact policy.
+The hint identifies the Wiki as the project's knowledge base and directs agents
+to save and maintain durable project knowledge, documentation and
+specifications in the actual Wiki folder. It names the index, asks agents to
+follow the existing Wiki structure and keep documentation and index links
+current. Explicit user destinations and required fixed-path files take
+precedence; disposable task output retains its existing artifact policy.
 Settings and index existence are checked asynchronously before every agent run,
 including within an existing session. The hook updates/removes its own section
 without duplicating guidance or retaining another project's path. Earlier opaque

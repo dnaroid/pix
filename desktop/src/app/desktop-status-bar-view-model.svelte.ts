@@ -5,6 +5,7 @@ import type { createSessionCoordinator } from "./session-coordinator";
 import type { createSessionRuntimeStore } from "./session-runtime.svelte";
 import type { QuotaWaitStore } from "./quota-wait.svelte";
 import type { HeadsUpStore } from "./heads-up.svelte";
+import type { BackgroundJobsStore } from "./background-jobs.svelte";
 import { shouldShowStatusBarSkeletons, type StatusBarConnectionStatus } from "./status-bar-skeleton";
 import {
   quotaWaitStatusLabel,
@@ -51,6 +52,8 @@ export function createDesktopStatusBarViewModel(options: {
   sessionCoordinator: ReturnType<typeof createSessionCoordinator>;
   quotaWait: QuotaWaitStore;
   headsUp: HeadsUpStore;
+  backgroundJobs?: BackgroundJobsStore;
+  openBackgroundJobLog?: (path: string) => void;
   openObserverSettings: () => void;
   openSubagentSession?: (runDir: string, agentId: string) => void;
   subagentPathNavigation?: ProjectPathNavigation;
@@ -113,6 +116,9 @@ export function createDesktopStatusBarViewModel(options: {
     const waitState = options.quotaWait.indicator(sessionId);
     const nowMs = options.quotaWait.nowMs;
     const observerSnapshot = draft ? undefined : options.headsUp.state(sessionId);
+    const backgroundJobsSnapshot = draft || viewer ? undefined : options.backgroundJobs?.state(sessionId);
+    const backgroundJobsOwnerCurrent = () => options.activeSessionId() === sessionId && !options.draftSessionTabActive()
+      && options.activeSessionRuntimeReady() && options.status() === "ready";
     const observerOwnerCurrent = () => options.activeSessionId() === sessionId
       && !options.draftSessionTabActive() && options.activeSessionRuntimeReady() && options.status() === "ready"
       && (!observerSnapshot || options.headsUp.state(sessionId)?.instanceId === observerSnapshot.instanceId);
@@ -141,6 +147,19 @@ export function createDesktopStatusBarViewModel(options: {
         onRequestSnapshot: () => { if (sessionId && observerOwnerCurrent()) void options.headsUp.requestSnapshot(sessionId); },
         onOpenSettings: options.openObserverSettings,
       },
+      backgroundJobs: sessionId && backgroundJobsSnapshot && options.backgroundJobs
+        && (backgroundJobsSnapshot.jobs.length > 0 || backgroundJobsSnapshot.orphans.length > 0) ? (() => {
+          const store = options.backgroundJobs!;
+          return {
+            snapshot: backgroundJobsSnapshot,
+            disabled: !(runtimeReady && connectionStatus === "ready"),
+            isPending: (command: string) => store.isPending(sessionId, command),
+            onKill: (jobId: string) => { if (backgroundJobsOwnerCurrent()) void store.kill(sessionId, jobId); },
+            onKillAll: () => { if (backgroundJobsOwnerCurrent()) void store.killAll(sessionId); },
+            onKillOrphans: () => { if (backgroundJobsOwnerCurrent()) void store.killOrphans(sessionId); },
+            onOpenLog: (path: string) => options.openBackgroundJobLog?.(path),
+          };
+        })() : null,
       canConfigure: !viewer && !cachedDisplay && !draftDisplay.length && options.canUseSession()
         && !historyLoading
         && (draft ? options.draftConfigAvailable() : runtimeReady),

@@ -111,6 +111,7 @@ const MARKDOWN_FENCE_LANGUAGES: Record<string, SyntaxHighlightLanguage> = {
 	json: "json",
 	markdown: "markdown",
 	md: "markdown",
+	mjs: "javascript",
 	jsonc: "json",
 	jsx: "javascript",
 	python: "python",

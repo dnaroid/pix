@@ -1,5 +1,6 @@
 import { normalizeExternalHref } from "./markdown-links";
 import { isWorkspaceProjectFilePath } from "./project-files";
+import { selectionAssistTarget, type SelectionAssistTarget } from "./selection-assist-target";
 import { workbenchTabMoveCommand } from "./workbench-tab-move";
 
 export type DesktopContextKind = "editable" | "readonly" | "password" | "selection" | "link" | "terminal" | "image" | "file" | "session" | "workbench";
@@ -22,6 +23,8 @@ export interface DesktopContextTarget {
   moveTab?: () => void;
   projectRevealPath?: string;
   sourceReference?: string;
+  /** Explain Code / Translate target captured when the menu opens. */
+  assist?: SelectionAssistTarget;
   hasSelection: boolean;
   readOnly: boolean;
 }
@@ -171,8 +174,9 @@ export function desktopContextTarget(target: EventTarget | null, workspace = "")
     let kind: DesktopContextKind = fileSurface ? "file" : "readonly";
     if (linkUrl || fileLinkPath) kind = "link";
     if (hasSelection) kind = "selection";
+    const assist = hasSelection ? selectionAssistTarget(element.ownerDocument.getSelection()) ?? undefined : undefined;
     return {
-      kind, element, editor: null, linkUrl, fileLinkPath, fileLinkRevealPath, sourceReference,
+      kind, element, editor: null, ...(assist ? { assist } : {}), linkUrl, fileLinkPath, fileLinkRevealPath, sourceReference,
       filePath, projectRevealPath: revealPath, moveTab, hasSelection, readOnly: true,
     };
   }

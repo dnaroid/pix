@@ -8,20 +8,27 @@
   import ProjectWikiSearch from "./ProjectWikiSearch.svelte";
   import type { ProjectFileLineRange } from "../lib/project-files";
 
-  let { workspace, activePath = null, onOpenFile, onOpenFiles, onOpenExternal, onBeforeMutation }: {
+  let { workspace, activePath = null, onOpenFile, onOpenFiles, onOpenExternal, onBeforeMutation, ready = $bindable(false) }: {
     workspace: string;
     activePath?: string | null;
     onOpenFile: (path: string, searchRange?: ProjectFileLineRange) => void;
     onOpenFiles: (path: string) => void;
     onOpenExternal: (path: string) => void;
     onBeforeMutation?: () => Promise<() => void>;
+    ready?: boolean;
   } = $props();
   const controller = createProjectWikiController({
     prepare: () => onBeforeMutation?.() ?? Promise.resolve(() => {}),
     report: (error, target) => createDiagnosticLogger(() => ({ workspace: target })).report(error, "wiki:load-failed"),
   });
   const wikiState = controller.state;
-  let wikiTree = $state<{ cancelNavigation: () => void } | null>(null);
+  type WikiTreeHandle = { cancelNavigation: () => void; create: (kind: "new-file" | "new-directory") => void; exportHtml: () => Promise<void>; showInFiles: () => void; refresh: () => void };
+  let wikiTree = $state<WikiTreeHandle | null>(null);
+  $effect(() => { ready = wikiTree !== null; });
+  export function create(kind: "new-file" | "new-directory"): void { wikiTree?.create(kind); }
+  export function exportHtml(): void { void wikiTree?.exportHtml(); }
+  export function showInFiles(): void { wikiTree?.showInFiles(); }
+  export function refresh(): void { wikiTree?.refresh(); }
   $effect(() => { const target = workspace; untrack(() => { void controller.selectWorkspace(target); }); });
   onDestroy(controller.dispose);
 

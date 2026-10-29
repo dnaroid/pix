@@ -18,7 +18,9 @@ const MAX_HIGHLIGHT_CHARS = 32 * 1024;
 export function highlightCode(code: string, languageHint?: string): HighlightedCode {
   let language: CodeLanguage = "plaintext";
   if (code.length <= MAX_HIGHLIGHT_CHARS && languageHint) {
-    language = /^(gd|gdscript)$/i.test(languageHint) ? "gdscript" : lang(languageHint) ?? "plaintext";
+    if (/^(gd|gdscript)$/i.test(languageHint)) language = "gdscript";
+    else if (/^mjs$/i.test(languageHint)) language = "javascript";
+    else language = lang(languageHint) ?? "plaintext";
   }
   let html: string;
   if (language === "plaintext") {
@@ -44,6 +46,7 @@ export function languageForFilePath(filePath: string): CodeLanguage | undefined 
   if (extensionStart < 0) return undefined;
 
   const extension = fileName.slice(extensionStart + 1).toLowerCase();
+  if (extension === "mjs") return "javascript";
   if (extension === "gd") return "gdscript";
   if (extension === "svelte") return "html";
   return lang(extension);

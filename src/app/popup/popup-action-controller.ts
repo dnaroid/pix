@@ -51,6 +51,7 @@ export class AppPopupActionController {
 	async submitActivePopupMenu(): Promise<boolean> {
 		const active = this.popupMenus.syncActivePopupMenu();
 		if (!active) return false;
+		if (active === "file-mention") return this.popupMenus.acceptFileMention();
 
 		if (active === "queue-message") return await this.submitSelectedQueueMessageAction();
 		if (active === "user-message") return await this.submitSelectedUserMessageAction();

@@ -9,7 +9,7 @@ import type {
 import type { UsageStatsChangedNotification } from "../../../acp/src/acp/usage-stats-contract";
 import type { AgentControlState } from "./agent-control";
 import type { SessionStateNotification } from "./session-state";
-import type { TaskRunRequest, TaskRunResult } from "../../../acp/src/acp/task-run-contract";
+import type { TaskRunRequest, TaskRunResponse } from "../../../acp/src/acp/task-run-contract";
 
 export interface AcpExit {
   readonly generation: number;
@@ -34,7 +34,7 @@ export interface AcpTransport {
 }
 
 export interface AcpClientHandlers {
-  readonly onTaskRun?: (request: TaskRunRequest, signal: AbortSignal) => Promise<TaskRunResult>;
+  readonly onTaskRun?: (request: TaskRunRequest, signal: AbortSignal) => Promise<TaskRunResponse>;
 	readonly onSessionUpdate: (notification: SessionNotification) => void;
 	readonly onSessionCatalogChanged?: (cwd: string) => void;
   /** A newer usage snapshot for `source` is available; `cwd` only for project-scoped sources. */

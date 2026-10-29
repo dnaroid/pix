@@ -15,6 +15,8 @@ type PromptRunLifecycleOptions = Pick<
 > & {
   flushAutoQueue: (sessionId: string) => void | Promise<void>;
   canCancelIdle?: (sessionId: string) => boolean;
+  /** Transfer a server run that outlives the Desktop request to its own owner. */
+  onRequestSettled?: (sessionId: string) => void;
 };
 
 export type PromptRunCompletion = {
@@ -152,6 +154,9 @@ export function createPromptRunLifecycle(options: PromptRunLifecycleOptions) {
         cancelSnapshotWaits.delete(runGeneration);
         if (promptRunsBySessionId.get(sessionId) !== tracked) return;
         promptRunsBySessionId.delete(sessionId);
+        if (generation(sessionId) === runGeneration && requestClient === options.client()) {
+          options.onRequestSettled?.(sessionId);
+        }
         finishRunAndFlush(sessionId, runGeneration, stopReason);
         if (stopReason !== undefined) onCompletion?.({
           stopReason,

@@ -16,7 +16,7 @@ import type {
   SetSessionConfigOptionResponse,
 } from "@agentclientprotocol/sdk";
 import type { BtwCommand, BtwState } from "../../../acp/src/btw/contract";
-import { TASK_RUN_METHOD, TASK_RUN_CANCEL_METHOD, parseTaskRunRequest, parseTaskRunResult } from "../../../acp/src/acp/task-run-contract";
+import { TASK_RUN_METHOD, TASK_RUN_CANCEL_METHOD, parseTaskRunRequest, parseTaskRunResponse } from "../../../acp/src/acp/task-run-contract";
 import {
   PIX_SESSION_STATE_METHOD,
   parseSessionStateNotification,
@@ -25,7 +25,7 @@ import type { RegistryActionRequest, RegistryDiff, RegistryResourceType, Registr
 import type { AgentControlAction } from "./agent-control";
 import { isRecord, parseQueueState, parseQueuedUserMessage } from "./acp-response-parsers";
 import { AcpIncomingRequestError, AcpJsonRpcConnection } from "./acp-json-rpc";
-import { AcpPixExtensions, type ModelSetupRoles, type ModelSetupSearch } from "./acp-pix-extensions";
+import { AcpPixExtensions, type ModelSetupRoles, type ModelSetupSearch, type SelectionAssistRequest, type SelectionAssistDelta, SELECTION_ASSIST_DELTA_METHOD } from "./acp-pix-extensions";
 import { SEARCH_CONFIG_METHOD, SEARCH_QUERY_METHOD, SEARCH_SYNC_METHOD, SEARCH_COMMITS_METHOD, SEARCH_INTENT_METHOD, SEARCH_TASKS_METHOD, type SearchIntentRequest, type SearchIntentResponse, type SearchConfigRequest, type SearchSyncRequest, type SearchStatus, type SearchQueryRequest, type SearchQueryResponse, type SemanticTasksRequest, type SemanticTasksResponse } from "../../../acp/src/search/contract";
 import { SEARCH_RAG_METHOD, SEARCH_RAG_DELTA_METHOD, type RagRequest, type RagResponse, type RagProgress } from "../../../acp/src/search/rag-contract";
 import { TASK_TYPE_CLASSIFY_METHOD, isClassifiedTaskType, type TaskTypeClassifyRequest, type TaskTypeClassifyResponse } from "../../../acp/src/tasks/type-classification-contract";
@@ -100,6 +100,7 @@ export class AcpClient {
   private readonly rpc: AcpJsonRpcConnection;
   private readonly pix: AcpPixExtensions;
   private readonly ragUpdates = new Map<string, (update: RagProgress) => void>();
+  private readonly selectionUpdates = new Map<string, (delta: SelectionAssistDelta) => void>();
 
   constructor(
     transport: AcpTransport,
@@ -277,6 +278,17 @@ export class AcpClient {
     return this.pix.enhancePrompt(sessionId, draft);
   }
 
+  async selectionAssist(request: SelectionAssistRequest, signal?: AbortSignal, onDelta?: (delta: SelectionAssistDelta) => void): Promise<string> {
+    if (!onDelta) return this.pix.selectionAssist(request, signal);
+    const requestId = crypto.randomUUID();
+    this.selectionUpdates.set(requestId, onDelta);
+    try {
+      return await this.pix.selectionAssist({ ...request, requestId }, signal);
+    } finally {
+      this.selectionUpdates.delete(requestId);
+    }
+  }
+
   gitAssist(cwd: string, kind: "review" | "commit-message", diff: string): Promise<string> {
     return this.pix.gitAssist(cwd, kind, diff);
   }
@@ -369,6 +381,10 @@ export class AcpClient {
 
   autocomplete(sessionId: string, draft: string, signal?: AbortSignal): Promise<string> {
     return this.pix.autocomplete(sessionId, draft, signal);
+  }
+
+  fileMentions(cwd: string, query: string, signal?: AbortSignal) {
+    return this.pix.fileMentions(cwd, query, signal);
   }
 
   modelSetupStatus() {
@@ -509,6 +525,13 @@ export class AcpClient {
       this.taskRuns.get(params.requestId)?.abort();
       return;
     }
+    if (method === SELECTION_ASSIST_DELTA_METHOD && isRecord(params)) {
+      const listener = typeof params.requestId === "string" ? this.selectionUpdates.get(params.requestId) : undefined;
+      if (!listener) return;
+      if (params.reset === true) listener({ reset: true });
+      else if (typeof params.text === "string" && params.text.length <= 4000) listener({ text: params.text });
+      return;
+    }
     if (method === SEARCH_RAG_DELTA_METHOD && isRecord(params)) {
       const listener = typeof params.requestId === "string" ? this.ragUpdates.get(params.requestId) : undefined;
       if (!listener) return;
@@ -552,7 +575,7 @@ export class AcpClient {
       if (this.taskRuns.has(request.requestId)) throw new Error("Duplicate task launch request");
       const controller = new AbortController();
       this.taskRuns.set(request.requestId, controller);
-      try { return parseTaskRunResult(await this.handlers.onTaskRun(request, controller.signal)); }
+      try { return parseTaskRunResponse(await this.handlers.onTaskRun(request, controller.signal), request.op === "models"); }
       finally { this.taskRuns.delete(request.requestId); }
     }
     if (method !== "elicitation/create" || !isRecord(params)) {

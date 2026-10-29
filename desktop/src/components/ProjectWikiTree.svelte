@@ -2,13 +2,9 @@
   import { invoke } from "@tauri-apps/api/core";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import File from "@lucide/svelte/icons/file";
-  import FilePlus from "@lucide/svelte/icons/file-plus";
   import FileText from "@lucide/svelte/icons/file-text";
   import Folder from "@lucide/svelte/icons/folder";
-  import FolderOpen from "@lucide/svelte/icons/folder-open";
-  import FolderPlus from "@lucide/svelte/icons/folder-plus";
   import ImageIcon from "@lucide/svelte/icons/image";
-  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import { onDestroy, onMount, untrack } from "svelte";
   import { createDiagnosticLogger } from "../lib/diagnostic-logging";
   import { iconButtonClass } from "../lib/icon-button";
@@ -36,6 +32,7 @@
   let root = $state<HTMLDivElement | null>(null);
   let error = $state<string | null>(null);
   let disposed = false;
+  let exporting = $state(false);
   const diagnostics = createDiagnosticLogger(() => ({ workspace }));
   const operations = createProjectExplorerOperations();
   const projectPath = (path: string) => path ? `${config.path}/${path}` : config.path;
@@ -130,10 +127,23 @@
     });
   });
 
-  function create(kind: "new-file" | "new-directory"): void {
+  export function create(kind: "new-file" | "new-directory"): void {
     const selected = rows.find((row) => row.entry.path === treeState.focusedPath)?.entry ?? rows[0]?.entry;
     if (selected) nameEditor.open(kind, selected);
   }
+  export async function exportHtml(): Promise<void> {
+    if (exporting) return;
+    exporting = true;
+    error = null;
+    try {
+      await invoke("export_project_wiki_html", { workspace, path: config.path, index: config.index });
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : String(cause);
+      diagnostics.report(cause, "wiki:html-export-failed");
+    } finally { exporting = false; }
+  }
+  export function showInFiles(): void { onOpenFiles(config.path); }
+  export function refresh(): void { void tree.refreshVisibleDirectories(); onRefreshConfig(); }
   export function cancelNavigation(): void { navigation.cancel(); }
   function activate(entry: ProjectTreeEntry): void {
     error = null;
@@ -171,13 +181,6 @@
 </script>
 
 <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-  <div class="flex h-9 shrink-0 items-center gap-0.5 border-b border-border px-2">
-    <span class="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground" title={config.path}>{config.path}/</span>
-    <button type="button" class={iconButtonClass("sm", "panel")} title="New page" aria-label="New wiki page" disabled={operations.active.length > 0} onclick={() => create("new-file")}><FilePlus class="h-3.5 w-3.5" aria-hidden="true" /></button>
-    <button type="button" class={iconButtonClass("sm", "panel")} title="New section" aria-label="New wiki section" disabled={operations.active.length > 0} onclick={() => create("new-directory")}><FolderPlus class="h-3.5 w-3.5" aria-hidden="true" /></button>
-    <button type="button" class={iconButtonClass("sm", "panel")} title="Show Wiki folder in Files" aria-label="Show Wiki folder in Files" onclick={() => onOpenFiles(config.path)}><FolderOpen class="h-3.5 w-3.5" aria-hidden="true" /></button>
-    <button type="button" class={iconButtonClass("sm", "panel")} title="Refresh Wiki" aria-label="Refresh Wiki" onclick={() => { void tree.refreshVisibleDirectories(); onRefreshConfig(); }}><RefreshCw class="h-3.5 w-3.5" aria-hidden="true" /></button>
-  </div>
   <div bind:this={root} class="min-h-0 min-w-0 flex-1 overflow-auto py-1" role="tree" aria-label="Wiki contents" data-wiki-tree>
     {#each rows as row, index (row.entry.path)}
       {@const entry = row.entry}

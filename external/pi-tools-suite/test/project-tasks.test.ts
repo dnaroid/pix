@@ -40,7 +40,7 @@ async function rows(root: string): Promise<unknown> {
 }
 
 describe("project_tasks SQLite-only storage", () => {
-  test("run is id-only, delegates to Desktop without mutating SQLite, and fails closed in other hosts", async () => {
+  test("run and models delegate to Desktop without mutating SQLite and fail closed in other hosts", async () => {
     const root = await fixture([task()]);
     const before = await rows(root);
     const key = Symbol.for("pix.project-tasks.run");
@@ -57,23 +57,35 @@ describe("project_tasks SQLite-only storage", () => {
       const result = await tool.execute("r", { op: "run", id: "A" }, controller.signal, undefined, ctx);
       expect(result.details).toEqual({ op: "run", id: "A", sessionId: "child", outcome: "started" });
       expect(calls).toEqual([[{ taskId: "A", sessionId: "owner" }, controller.signal]]);
+      const chosen = await tool.execute("r", { op: "run", id: "A", modelRef: "provider/favorite:high" }, undefined, undefined, ctx);
+      expect(chosen.isError).not.toBe(true);
+      expect(calls[1]).toEqual([{ taskId: "A", sessionId: "owner", modelRef: "provider/favorite:high" }, undefined]);
       controller.abort();
       expect((await tool.execute("r", { op: "run", id: "A" }, controller.signal, undefined, ctx)).isError).toBe(true);
-      expect(calls).toHaveLength(1);
+      expect(calls).toHaveLength(2);
       const previousAgentDir = process.env.PI_SUBAGENT_AGENT_DIR;
       try {
         process.env.PI_SUBAGENT_AGENT_DIR = "/subagent";
         const denied = await tool.execute("r", { op: "run", id: "A" }, undefined, undefined, ctx);
         expect(denied.isError).toBe(true);
-        expect(calls).toHaveLength(1);
+        expect(calls).toHaveLength(2);
       } finally {
         if (previousAgentDir === undefined) delete process.env.PI_SUBAGENT_AGENT_DIR;
         else process.env.PI_SUBAGENT_AGENT_DIR = previousAgentDir;
       }
-      for (const bad of [{ op: "run" }, { op: "run", id: "A", status: "in-progress" }, { op: "run", id: "A", title: "override" }]) {
+      const models = { models: [{ modelRef: "provider/favorite", name: "Favorite", thinkingLevels: ["off", "high"] }] };
+      (globalThis as any)[key] = async (request: unknown) => { expect(request).toEqual({ op: "models", sessionId: "owner" }); return models; };
+      expect((await tool.execute("m", { op: "models" }, undefined, undefined, ctx)).details).toEqual({ op: "models", ...models });
+      for (const bad of [{ op: "run" }, { op: "run", id: "A", status: "in-progress" }, { op: "run", id: "A", title: "override" },
+        { op: "run", id: "A", modelRef: " " }, { op: "run", id: "A", modelRef: 42 },
+        { op: "models", id: "A" }, { op: "models", modelRef: "provider/favorite" },
+        { op: "update", id: "A", modelRef: "provider/favorite" }, { op: "create", type: "idea", title: "Task", modelRef: "provider/favorite" }]) {
         expect(() => parseProjectTasksParams(bad)).toThrow();
       }
       await expect(runProjectTasks(root, { op: "run", id: "A" })).rejects.toThrow("host");
+      await expect(runProjectTasks(root, { op: "models" })).rejects.toThrow("host");
+      delete (globalThis as any)[key];
+      expect((await tool.execute("m", { op: "models" }, undefined, undefined, ctx)).isError).toBe(true);
       expect(await rows(root)).toEqual(before);
     } finally {
       if (previous) (globalThis as any)[key] = previous; else delete (globalThis as any)[key];

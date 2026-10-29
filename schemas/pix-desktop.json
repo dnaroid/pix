@@ -265,6 +265,28 @@
       },
       "description": "Desktop inline autocomplete configuration."
     },
+    "selectionAssist": {
+      "type": "object",
+      "properties": {
+        "modelRef": {
+          "type": "string",
+          "description": "Model used to explain selected preview code and translate selected chat text. Empty or omitted reuses the autocomplete model chain."
+        },
+        "fallbackModels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Ordered selection-assistant fallbacks tried after modelRef."
+        },
+        "language": {
+          "type": "string",
+          "default": "ru",
+          "description": "Language for code explanations and the translation target, e.g. 'ru' or 'en'."
+        }
+      },
+      "description": "Desktop selection assistant: Explain Code in Preview and Translate in chat."
+    },
     "sessionTitle": {
       "type": "object",
       "properties": {

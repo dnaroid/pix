@@ -34,6 +34,7 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
   desktop("models", "Routing tiers", "Semantic task classes available to the router.", "task tiers"),
   desktop("models", "Visible models", "Choose which models appear in the Desktop model picker.", "model visibility"),
   desktop("assistant", "Feature models", "Models for search answers, prompt enhancement, autocomplete, session titles and the search/task classifier, managed by the model setup wizard.", "RAG", "prompt enhancer", "autocomplete", "автодополнение", "авто-пополнение", "автозавершение", "session title", "classifier", "wizard"),
+  desktop("assistant", "Explain & translate language", "Language for Explain Code answers in Preview and the target of Translate in chat.", "explain code", "translate", "перевод", "объяснить", "language", "язык"),
   desktop("assistant", "RAG thinking effort", "Reasoning effort used by the RAG answer model.", "RAG", "reasoning"),
   desktop("assistant", "Search settings", "Include the authored settings catalogue in search for all projects. Disabling retains the shared cache.", "global settings search", "поиск настроек"),
   desktop("assistant", "Typing debounce", "Milliseconds to wait after typing before requesting a completion.", "delay"),

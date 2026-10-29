@@ -5,7 +5,7 @@ import type { ActivePopupMenu, AppOptions, Entry, ModelMenuValue, PixMenuItem, P
 import type { ToastNotifier } from "../../ui.js";
 import type { ReloadAgentCatalog } from "./reload-context-inventory.js";
 
-export type DirectPopupMenu = Exclude<ActivePopupMenu, "slash">;
+export type DirectPopupMenu = Exclude<ActivePopupMenu, "slash" | "file-mention">;
 
 export type CommandControllerHost = {
 	readonly options: AppOptions;

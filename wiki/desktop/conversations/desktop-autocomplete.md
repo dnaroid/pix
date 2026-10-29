@@ -52,6 +52,8 @@ Give Pix Desktop the same best-effort LLM prompt autocomplete behavior as the TU
 
 ## Related files
 
+File/folder `@` mentions are a separate feature: see [file mentions](desktop-file-mentions.md).
+
 - `acp/src/acp/autocomplete.ts`
 - `acp/src/acp/pix-config-paths.ts`
 - `schemas/pix-desktop.json`

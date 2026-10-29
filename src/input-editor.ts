@@ -6,6 +6,7 @@
  * `[File: foo.ts]`). The actual data is stored separately and collected on submit.
  */
 
+import { fileMentionTokens } from "./file-mentions.js";
 export { imageMimeTypeForPath, isImagePath, looksLikeFilePath, quoteFilePathForInput, readClipboardImage, type ClipboardImage } from "./input-editor-files.js";
 
 // ── Types ───────────────────────────────────────────────────────────
@@ -541,13 +542,14 @@ export class InputEditor {
 		const renderedText = canRenderSuggestion ? `${this._text}${suggestionSuffix}` : this._text;
 		const logicalLines = renderedText.split("\n");
 		const tagPatterns = this.getTagPatterns();
+		const mentions = fileMentionTokens(this._text);
 		const suggestionStart = canRenderSuggestion ? this._text.length : undefined;
 		let lineOffset = 0;
 
 		for (let i = 0; i < logicalLines.length; i++) {
 			const line = logicalLines[i]!;
 			const prefix = i === 0 && allVisual.length === 0 ? firstPrefix : continuationPrefix;
-			this.pushVisualLines(allVisual, line, prefix, continuationPrefix, width, i === 0 && allVisual.length === 0, tagPatterns, lineOffset, suggestionStart, renderedText.length);
+			this.pushVisualLines(allVisual, line, prefix, continuationPrefix, width, i === 0 && allVisual.length === 0, tagPatterns, lineOffset, suggestionStart, renderedText.length, mentions);
 			lineOffset += line.length + (i < logicalLines.length - 1 ? 1 : 0);
 		}
 
@@ -937,6 +939,7 @@ export class InputEditor {
 		lineOffset: number,
 		suggestionStart: number | undefined,
 		suggestionEnd: number,
+		mentions: readonly { start: number; end: number }[],
 	): void {
 		let currentPrefix = firstPrefix;
 		let remaining = logicalLine;
@@ -958,6 +961,11 @@ export class InputEditor {
 				start: s.start + currentPrefix.length,
 				end: s.end + currentPrefix.length,
 			}));
+			for (const mention of mentions) {
+				const start = Math.max(mention.start, chunkGlobalStart);
+				const end = Math.min(mention.end, chunkGlobalEnd);
+				if (start < end) spans.push({ start: start - chunkGlobalStart + currentPrefix.length, end: end - chunkGlobalStart + currentPrefix.length });
+			}
 			const suggestionSpans = suggestionStart === undefined ? undefined : suggestionSpansForChunk(
 				chunkGlobalStart,
 				chunkGlobalEnd,

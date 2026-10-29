@@ -298,7 +298,7 @@
 {:else if section === "assistant"}
   <div class="px-2.5 py-2.5">
     <h2 class="text-sm font-semibold text-foreground">Assistant features</h2>
-    <p class="mt-0.5 text-xs leading-4 text-muted-foreground">Models and limits used by knowledge review, prompt enhancement, autocomplete, and automatic session titles.</p>
+    <p class="mt-0.5 text-xs leading-4 text-muted-foreground">Models and limits used by knowledge review, prompt enhancement, autocomplete, explain/translate, and automatic session titles.</p>
   </div>
   <div class="border-y border-sidebar-border/70 bg-panel">
     <SettingsFieldRow
@@ -309,9 +309,19 @@
         { label: "Search answers (RAG)", ref: text(["search", "ragModelRef"]), emptyLabel: "Default Desktop model" },
         { label: "Prompt enhancer", ref: text(["promptEnhancer", "modelRef"]), fallbacks: list(["promptEnhancer", "fallbackModels"]) },
         { label: "Autocomplete", ref: text(["autocomplete", "modelRef"]), fallbacks: list(["autocomplete", "fallbackModels"]), emptyLabel: "Disabled" },
+        { label: "Explain & translate", ref: text(["selectionAssist", "modelRef"]), fallbacks: list(["selectionAssist", "fallbackModels"]), emptyLabel: "Autocomplete model" },
         { label: "Session titles", ref: text(["sessionTitle", "modelRef"]), fallbacks: list(["sessionTitle", "fallbackModels"]) },
         { label: "Search & task classifier", ref: text(["search", "intentModelRef"]), emptyLabel: "Built-in default" },
       ]} />
+    </SettingsFieldRow>
+    <SettingsFieldRow
+      label="Explain & translate language"
+      description="Language for Explain Code answers in Preview and the target of Translate in chat, for example ru or en."
+      explicit={has(["selectionAssist", "language"])}
+      defaultLabel={defaultLabel(["selectionAssist", "language"])}
+      onReset={() => reset(["selectionAssist", "language"])}
+    >
+      <SettingsTextInput value={text(["selectionAssist", "language"])} placeholder="ru" onChange={(value) => set(["selectionAssist", "language"], value)} />
     </SettingsFieldRow>
     <SettingsFieldRow
       label="RAG thinking effort"

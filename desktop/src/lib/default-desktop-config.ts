@@ -40,6 +40,7 @@ export const DEFAULT_DESKTOP_CONFIG_JSONC = String.raw`{
     "maxPromptTokens": 1200,
     "includeRecentMessages": 0
   },
+  "selectionAssist": { "modelRef": "zai/glm-5-turbo", "fallbackModels": [], "language": "ru" },
   "sessionTitle": { "modelRef": "openai-codex/gpt-6-luna", "fallbackModels": ["zai/glm-5-turbo"] },
   "dictation": {
     "apiKey": "",

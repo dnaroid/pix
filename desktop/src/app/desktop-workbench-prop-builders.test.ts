@@ -58,6 +58,17 @@ function conversationOptions(sessionId: string | null, quotaWait = createQuotaWa
 }
 
 describe("workbench composer props", () => {
+  it("forwards workspace identity and local completion separately from LLM autocomplete", () => {
+    const options = conversationOptions(null);
+    options.autocomplete.fileMentionContextKey = "/workspace/one";
+    options.autocomplete.fileMentions = vi.fn();
+    let props = buildWorkbenchConversationProps(options).composer;
+    expect(props.fileMentionContextKey).toBe("/workspace/one");
+    expect(props.onFileMentions).toBe(options.autocomplete.fileMentions);
+    options.autocomplete.fileMentionContextKey = "/workspace/two";
+    props = buildWorkbenchConversationProps(options).composer;
+    expect(props.fileMentionContextKey).toBe("/workspace/two");
+  });
   it("forwards the explicit Claude login terminal and diagnostic actions", () => {
     const options = conversationOptions("session-1");
     options.openClaudeLoginTerminal = vi.fn();

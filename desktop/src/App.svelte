@@ -6,6 +6,8 @@
   import { invoke, isTauri } from "@tauri-apps/api/core";
   import { createWindowRunActivitySync, hasRestartBlockingRun } from "./app/window-run-activity";
   import { installDesktopContextMenu } from "./lib/desktop-context-menu";
+  import { createSelectionAssistStore } from "./app/selection-assist.svelte";
+  import SelectionAssistPopover from "./components/SelectionAssistPopover.svelte";
   import { createSessionRename } from "./app/session-rename.svelte";
   import SessionRenameDialog from "./components/SessionRenameDialog.svelte";
   import type { DesktopShortcutPlatform } from "./lib/desktop-commands";
@@ -65,6 +67,7 @@
   import { createLspOnboardingStore } from "./app/lsp-onboarding.svelte";
   import { createQuotaWaitStore } from "./app/quota-wait.svelte";
   import { createHeadsUpStore } from "./app/heads-up.svelte";
+  import { createBackgroundJobsStore } from "./app/background-jobs.svelte";
   import { createBtwStore } from "./app/btw.svelte";
   import { btwDiscussionDraft, canInsertBtwDraft } from "./app/btw-draft";
   import BtwDock from "./components/BtwDock.svelte";
@@ -186,6 +189,12 @@
     client: () => client,
     runtimeReady: (sessionId) => sessionServices.runtime.isReady(sessionId),
     commandAvailable: (sessionId) => sessionServices.metadata.slashCommandsBySession.get(sessionId)?.some((command) => command.name === "heads-up") ?? false,
+    reportError,
+  });
+
+  const backgroundJobs = createBackgroundJobsStore({
+    client: () => client,
+    runtimeReady: (sessionId) => sessionServices.runtime.isReady(sessionId),
     reportError,
   });
 
@@ -833,6 +842,7 @@
     quotaWait,
     headsUp,
     btw,
+    backgroundJobs,
     reportError,
   });
   const sessionCoordinator = sessionOrchestration.coordinator;
@@ -906,6 +916,7 @@
     lspOnboarding,
     quotaWait,
     headsUp,
+    backgroundJobs,
     openObserverSettings: () => void workspaceSidebar?.openSettingsSection("desktop-observer"),
     openProjectSettings: () => workspaceSidebar?.openProjectSettings(),
     openClaudeLoginTerminal: openInteractiveTerminal,
@@ -930,8 +941,12 @@
   $effect(() => sessionRename.reconcile());
   onDestroy(sessionRename.cancel);
 
+  const selectionAssist = createSelectionAssistStore({ client: () => client, workspace: () => workspace, report: diagnosticLogger.report });
+  $effect(() => { void workspace; return () => selectionAssist.close(); });
+  onDestroy(selectionAssist.close);
   onMount(() => installDesktopContextMenu({
     reportError, workspace: () => workspace,
+    selectionAssist: (target) => void selectionAssist.run(target),
     sessionActions: sessionRename,
     revealProjectEntry: async (path) => { await workspaceSidebar?.revealProjectEntry(path); },
   }));
@@ -940,6 +955,7 @@
   onMount(() => toasts.setReporter(diagnosticLogger.report));
   onMount(() => startThemePreference((error) => diagnosticLogger.report(error, "frontend:theme-preference")));
   onDestroy(headsUp.reset);
+  onDestroy(backgroundJobs.reset);
   onDestroy(btw.reset);
   onMount(desktopNotifications.start);
   onMount(trayAttention.start);
@@ -1009,6 +1025,8 @@
 </div>
 
 <DesktopOverlays {...overlaysViewModel.props} />
+<!-- Outside the app shell so its clipping/stacking never cuts the popover. -->
+<SelectionAssistPopover store={selectionAssist} />
 {#if searchOpen}
   <UniversalSearch {workspace} {client} memory={searchMemory} onSelect={searchNavigation.open}
     onClose={closeSearch}

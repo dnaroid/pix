@@ -5,6 +5,8 @@ type AutocompleteStoreOptions = {
   activeSessionId: () => string | null;
   settingsReady: () => boolean;
   promptReady: () => boolean;
+  workspace?: () => string;
+  reportError?: (error: unknown) => void;
 };
 
 export function createAutocompleteStore(options: AutocompleteStoreOptions) {
@@ -53,5 +55,15 @@ export function createAutocompleteStore(options: AutocompleteStoreOptions) {
     get debounceMs() { return debounceMs; },
     refresh,
     complete,
+    get fileMentionContextKey() { return options.workspace?.() ?? ""; },
+    fileMentions(query: string, signal: AbortSignal) {
+      const client = options.client();
+      const workspace = options.workspace?.();
+      if (!client || !workspace) return Promise.resolve([]);
+      return client.fileMentions(workspace, query, signal).catch((error: unknown) => {
+        if (!signal.aborted) options.reportError?.(error);
+        throw error;
+      });
+    },
   };
 }

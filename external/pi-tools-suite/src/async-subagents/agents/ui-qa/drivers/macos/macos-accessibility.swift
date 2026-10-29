@@ -504,20 +504,65 @@ func sendText(_ text: String) throws {
     guard let source = CGEventSource(stateID: .combinedSessionState) else {
         throw Failure("could not create keyboard event source")
     }
-    let utf16 = Array(text.utf16)
-    for start in stride(from: 0, to: utf16.count, by: 32) {
-        let chunk = Array(utf16[start ..< min(start + 32, utf16.count)])
-        guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
-              let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false)
+    // WebKit text inputs may ignore an event's Unicode string and translate its
+    // virtual key through the active layout instead, so a fixed key 0 typed
+    // "aaaa…"/"фффф…". Send the layout's real key (+Shift) for each grapheme and
+    // keep the Unicode string only for characters the layout cannot produce.
+    let keyMap = currentLayoutKeyMap()
+    for character in text {
+        let chunk = Array(String(character).utf16)
+        let mapped = keyMap[character]
+        let code = mapped?.code ?? 0
+        guard let down = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: true),
+              let up = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: false)
         else { throw Failure("could not create keyboard event") }
-        chunk.withUnsafeBufferPointer { buffer in
-            down.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: buffer.baseAddress)
-            up.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: buffer.baseAddress)
+        let flags: CGEventFlags = mapped?.shift == true ? .maskShift : []
+        down.flags = flags
+        up.flags = flags
+        if mapped == nil {
+            chunk.withUnsafeBufferPointer { buffer in
+                down.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: buffer.baseAddress)
+                up.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: buffer.baseAddress)
+            }
         }
         down.post(tap: .cghidEventTap)
+        usleep(4_000)
         up.post(tap: .cghidEventTap)
-        usleep(10_000)
+        usleep(16_000)
     }
+}
+
+// Maps each character the active layout produces (unmodified or with Shift)
+// to its first virtual key. Empty when the layout has no Unicode key data.
+func currentLayoutKeyMap() -> [Character: (code: CGKeyCode, shift: Bool)] {
+    var map: [Character: (code: CGKeyCode, shift: Bool)] = [:]
+    let source = TISCopyCurrentKeyboardLayoutInputSource().takeRetainedValue()
+    guard let raw = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else { return map }
+    let data = Unmanaged<CFData>.fromOpaque(raw).takeUnretainedValue() as Data
+    data.withUnsafeBytes { bytes in
+        guard let layout = bytes.baseAddress?.assumingMemoryBound(to: UCKeyboardLayout.self) else { return }
+        for shift in [false, true] {
+            let modifiers: UInt32 = shift ? UInt32(shiftKey >> 8) & 0xFF : 0
+            for code in 0 ..< 128 {
+                var deadKeys: UInt32 = 0
+                var length = 0
+                var chars = [UniChar](repeating: 0, count: 4)
+                let status = UCKeyTranslate(
+                    layout, UInt16(code), UInt16(kUCKeyActionDown), modifiers,
+                    UInt32(LMGetKbdType()), OptionBits(kUCKeyTranslateNoDeadKeysBit),
+                    &deadKeys, chars.count, &length, &chars
+                )
+                guard status == noErr, length > 0 else { continue }
+                let produced = String(utf16CodeUnits: chars, count: length)
+                guard produced.count == 1, let character = produced.first,
+                      !character.isNewline, map[character] == nil,
+                      character.unicodeScalars.allSatisfy({ $0.value >= 0x20 && $0.value != 0x7F })
+                else { continue }
+                map[character] = (CGKeyCode(code), shift)
+            }
+        }
+    }
+    return map
 }
 
 // Deliberately fixed diagnostic route. No generic external launch/input escape.

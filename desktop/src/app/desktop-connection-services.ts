@@ -8,7 +8,7 @@ import type { ForkReadyNotification } from "../lib/acp-client-types";
 import type { SessionStateNotification } from "../lib/session-state";
 import { createConnectionStore } from "./connection.svelte";
 import type { DesktopDiagnosticEvent } from "../lib/diagnostic-logging";
-import type { TaskRunRequest, TaskRunResult } from "../../../acp/src/acp/task-run-contract";
+import type { TaskRunRequest, TaskRunResponse } from "../../../acp/src/acp/task-run-contract";
 
 type SessionCoordinatorBridge = {
   handleUpdate: (notification: SessionNotification) => void;
@@ -30,7 +30,7 @@ type WorkspaceSessionStartupBridge = {
 };
 
 type DesktopConnectionServicesOptions = {
-  onTaskRun?: (request: TaskRunRequest, signal: AbortSignal) => Promise<TaskRunResult>;
+  onTaskRun?: (request: TaskRunRequest, signal: AbortSignal) => Promise<TaskRunResponse>;
   workspace: () => string;
   onSessionCatalogChanged?: (cwd: string) => void;
   sessionCoordinator: () => SessionCoordinatorBridge;

@@ -267,6 +267,8 @@ export function buildWorkbenchConversationProps(
       autocompleteDebounceMs: options.autocomplete.debounceMs,
       questionMode,
       onAutocomplete: options.autocomplete.complete,
+      onFileMentions: options.autocomplete.fileMentions,
+      fileMentionContextKey: options.autocomplete.fileMentionContextKey,
       onDraftChange: options.draft.promote,
       onOpenHistory: () => options.openHistoryPicker(""),
       onEnhance: () => options.conversationActions.enhancePromptDraft(options.promptText()),

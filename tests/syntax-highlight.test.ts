@@ -9,6 +9,10 @@ const colors = THEMES.dark.colors;
 describe("syntax highlighting", () => {
 	it("detects languages from file names, extensions, and markdown fences", () => {
 		assert.equal(syntaxHighlightLanguageForPath("src/app.ts"), "typescript");
+		assert.equal(syntaxHighlightLanguageForPath("src/app.mjs"), "javascript");
+		assert.equal(syntaxHighlightLanguageForPath("src/APP.MJS"), "javascript");
+		assert.equal(syntaxHighlightLanguageForMarkdownFence("mjs"), "javascript");
+		assert.equal(syntaxHighlightLanguageForMarkdownFence("MJS"), "javascript");
 		assert.equal(syntaxHighlightLanguageForPath("types/app.d.ts"), "typescript");
 		assert.equal(syntaxHighlightLanguageForPath("Dockerfile"), "shell");
 		assert.equal(syntaxHighlightLanguageForPath("README.unknown"), undefined);

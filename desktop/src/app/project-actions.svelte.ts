@@ -127,7 +127,7 @@ export function createProjectActions(options: ProjectActionsOptions) {
     }
   }
 
-  async function runTask(task: ProjectTask, launch?: { signal: AbortSignal; started: (result: TaskRunResult) => void }): Promise<void> {
+  async function runTask(task: ProjectTask, launch?: { signal: AbortSignal; modelRef?: string; started: (result: TaskRunResult) => void }): Promise<void> {
     launch?.signal.throwIfAborted();
     // A caller may still hold the pre-launch row after its session was saved.
     task = options.taskDocument().tasks.find((candidate) => candidate.id === task.id) ?? task;
@@ -186,8 +186,9 @@ export function createProjectActions(options: ProjectActionsOptions) {
       await Promise.all(taskPrompt.attachments.map((attachment) => options.prepareTranscriptAttachment(attachment)));
       const payload = buildPromptPayload(taskPrompt.text, taskPrompt.attachments, options.imagePromptSupported());
       if (!current()) return;
-      const chosenModel = task.modelRef ? parseDesktopModelRef(task.modelRef) : undefined;
-      if (task.modelRef && !chosenModel) throw new Error("Assigned task model must use provider/model[:thinking] format.");
+      const modelRef = launch?.modelRef ?? task.modelRef;
+      const chosenModel = modelRef ? parseDesktopModelRef(modelRef) : undefined;
+      if (modelRef && !chosenModel) throw new Error("Assigned task model must use provider/model[:thinking] format.");
       const response = chosenModel
         ? await requestClient.newSession(requestWorkspace, {
             modelRef: chosenModel.modelRef,
@@ -261,10 +262,10 @@ export function createProjectActions(options: ProjectActionsOptions) {
   }
 
   /** Resolve on prompt dispatch, never on the child agent's eventual completion. */
-  function runTaskFromAgent(task: ProjectTask, signal: AbortSignal): Promise<TaskRunResult> {
+  function runTaskFromAgent(task: ProjectTask, signal: AbortSignal, modelRef?: string): Promise<TaskRunResult> {
     return new Promise((resolve, reject) => {
       let started = false;
-      void runTask(task, { signal, started: (result) => { started = true; resolve(result); } }).then(() => {
+      void runTask(task, { signal, modelRef, started: (result) => { started = true; resolve(result); } }).then(() => {
         if (!started) reject(new Error("Task launch did not start; inspect the task sessionId and Desktop diagnostics before retrying"));
       }, reject);
     });

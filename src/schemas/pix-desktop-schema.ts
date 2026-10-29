@@ -74,6 +74,15 @@ const AutocompleteConfig = Type.Object(
 	{ description: "Desktop inline autocomplete configuration." },
 );
 
+const SelectionAssistConfig = Type.Object(
+	{
+		modelRef: Type.Optional(Type.String({ description: "Model used to explain selected preview code and translate selected chat text. Empty or omitted reuses the autocomplete model chain." })),
+		fallbackModels: Type.Optional(Type.Array(Type.String(), { description: "Ordered selection-assistant fallbacks tried after modelRef." })),
+		language: Type.Optional(Type.String({ default: "ru", description: "Language for code explanations and the translation target, e.g. 'ru' or 'en'." })),
+	},
+	{ description: "Desktop selection assistant: Explain Code in Preview and Translate in chat." },
+);
+
 const SessionTitleConfig = Type.Object(
 	{
 		modelRef: Type.Optional(Type.String({ description: "Model used to generate compact session titles." })),
@@ -177,6 +186,7 @@ export const PixDesktopConfigSchema = Type.Object(
 		})),
 		promptEnhancer: Type.Optional(PromptEnhancerConfig),
 		autocomplete: Type.Optional(AutocompleteConfig),
+		selectionAssist: Type.Optional(SelectionAssistConfig),
 		sessionTitle: Type.Optional(SessionTitleConfig),
 		search: Type.Optional(Type.Object(
 			{

@@ -37,6 +37,7 @@ import { parseRagRequest } from "../search/rag-request.js";
 import { DesktopRagService } from "../search/rag-service.js";
 import { collectRagEvidence } from "../search/rag-evidence.js";
 import { NativeSessionCatalog } from "./native-session-catalog.js";
+import { FileMentionIndex, parseFileMentionsRequest } from "./file-mentions.js";
 import { SessionRefreshScheduler } from "./session-refresh-scheduler.js";
 import { PIX_SESSION_CATALOG_CHANGED_METHOD } from "./session-catalog-contract.js";
 import { PIX_USAGE_STATS_CHANGED_METHOD, PIX_USAGE_STATS_METHOD, type UsageStatsChangedNotification } from "./usage-stats-contract.js";
@@ -48,7 +49,7 @@ import { copyFile, mkdir, readFile, realpath, rename, rm, stat, writeFile } from
 import { basename, dirname, join, parse, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setText as copyTextToClipboard } from "@mariozechner/clipboard";
-import { TASK_RUN_METHOD, TASK_RUN_CANCEL_METHOD, type TaskRunRequest, type TaskRunResult } from "./task-run-contract.js";
+import { TASK_RUN_METHOD, TASK_RUN_CANCEL_METHOD, type TaskRunRequest, type TaskRunResponse } from "./task-run-contract.js";
 import { forwardTaskRun } from "./task-run-bridge.js";
 import {
 	PROTOCOL_VERSION,
@@ -141,6 +142,8 @@ import {
 	PIX_BRANCH_USER_MESSAGES_METHOD,
 	PIX_CLAUDE_QUOTA_REFRESH_METHOD,
 	PIX_GIT_ASSIST_METHOD,
+	PIX_SELECTION_ASSIST_METHOD,
+	PIX_SELECTION_ASSIST_DELTA_METHOD,
 	PIX_DEFER_MESSAGE_METHOD,
 	PIX_DCP_STATS_METHOD,
 	PIX_DRAFT_CONFIG_METHOD,
@@ -178,6 +181,7 @@ import {
 	parseDesktopAgentControlRequest,
 	parseDesktopSessionRequest,
 	parseDesktopGitAssistantRequest,
+	parseDesktopSelectionAssistRequest,
 	parseDesktopImportSessionRequest,
 	parseDesktopQueueActionRequest,
 	parseDesktopQueueSubmitRequest,
@@ -207,6 +211,8 @@ import {
 	type DesktopClaudeQuotaRefreshResponse,
 	type DesktopGitAssistantRequest,
 	type DesktopGitAssistantResponse,
+	type DesktopSelectionAssistRequest,
+	type DesktopSelectionAssistResponse,
 	type DesktopImportSessionRequest,
 	type DesktopQueueActionRequest,
 	type DesktopQueueActionResponse,
@@ -259,6 +265,7 @@ import {
 import { EventTranslator } from "./event-translator.js";
 import { SessionUpdateCoalescer } from "./session-update-coalescer.js";
 import { createGitAssistant, type GitAssistant } from "./git-assistant.js";
+import { createSelectionAssistant, type SelectionAssistant } from "./selection-assist.js";
 import {
 	isThinkingLevel,
 	loadPixIgnoreContextFiles,
@@ -354,7 +361,7 @@ type ClientCaller = {
 	notify(method: typeof PIX_QUEUE_CONSUMED_METHOD, params: DesktopQueueConsumedNotification): Promise<void>;
 	notify(method: typeof PIX_FORK_READY_METHOD, params: DesktopForkReadyNotification): Promise<void>;
 	request(method: "elicitation/create", params: CreateElicitationRequest): Promise<CreateElicitationResponse>;
-  request(method: typeof TASK_RUN_METHOD, params: TaskRunRequest): Promise<TaskRunResult>;
+  request(method: typeof TASK_RUN_METHOD, params: TaskRunRequest): Promise<TaskRunResponse>;
   notify(method: typeof TASK_RUN_CANCEL_METHOD, params: { requestId: string }): Promise<void>;
 };
 
@@ -529,6 +536,8 @@ export interface PixAcpAgentOptions {
 	readonly enhancePrompt?: PromptEnhancer;
 	/** One-shot Git review/commit-message backend (overridable for hermetic tests). */
 	readonly gitAssistant?: GitAssistant;
+	/** Selection explain/translate backend (overridable for hermetic tests). */
+	readonly selectionAssistant?: SelectionAssistant;
 	/** Direct workspace Registry backend (overridable for transport tests). */
 	readonly registryService?: Pick<DesktopRegistryService, "action" | "diff">;
 	/** Shared model-usage query (overridable for deterministic concurrency tests). */
@@ -625,6 +634,7 @@ export class PixAcpAgent {
 	/** Lazy local model catalogue for viewer display (context window, names). */
 	private viewerModelRuntime: Promise<ModelRuntime | undefined> | undefined;
 	private readonly gitAssistant: GitAssistant;
+	private readonly selectionAssistant: SelectionAssistant;
 	private readonly queryModelUsage: (state: PiSessionState, options?: { freshOnly?: boolean }) => Promise<ModelUsageRefreshResult>;
 	private readonly claudeCodeLoginNudge: () => Promise<boolean>;
 	private readonly parseAnthropicUsageHeaders: (record: PiAnthropicUsageRecord) => Promise<DesktopModelUsageStatus | undefined>;
@@ -636,6 +646,7 @@ export class PixAcpAgent {
 	private readonly copyText: (text: string) => Promise<void>;
 	private readonly registryService: Pick<DesktopRegistryService, "action" | "diff">;
 	private disposed = false;
+	private readonly fileMentionIndex = new FileMentionIndex();
 	private readonly retiringForkQueues = new Set<Promise<void>>();
 	private readonly retiringForkQueuePaths = new Map<string, Promise<void>>();
 	/** Advertised by the client during `initialize`; gates dialog bridging. */
@@ -726,6 +737,7 @@ export class PixAcpAgent {
 		});
 		this.enhancePrompt = options.enhancePrompt ?? createPromptEnhancer();
 		this.gitAssistant = options.gitAssistant ?? createGitAssistant();
+		this.selectionAssistant = options.selectionAssistant ?? createSelectionAssistant();
 		this.queryModelUsage = options.queryModelUsage ?? ((state, queryOptions) => queryPixModelUsage(state, options.agentDir, queryOptions?.freshOnly));
 		this.claudeCodeLoginNudge = options.claudeCodeLoginNudge ?? launchClaudeCodeLoginNudge;
 		this.parseAnthropicUsageHeaders = options.parseAnthropicUsageHeaders ?? parsePixAnthropicUsageHeaders;
@@ -886,6 +898,9 @@ export class PixAcpAgent {
 			)
 			.onRequest("pix/setup/models/apply", parseSetupRequest, (ctx) => this.withRequestLogging("pix/setup/models/apply", ctx.params, ctx.signal, () => ({ written: writeRoles(ctx.params.roles, undefined, ctx.params.overrides, ctx.params.search) })),
 			)
+			.onRequest("pix/files/complete", parseFileMentionsRequest, (ctx) => this.withRequestLogging("pix/files/complete", ctx.params, ctx.signal, () => {
+				return this.fileMentionIndex.query(ctx.params.cwd, ctx.params.query, ctx.signal).then((matches) => ({ matches }));
+			}))
 			.onRequest("pix/autocomplete", parseAutocompleteRequest, (ctx) => this.withRequestLogging("pix/autocomplete", ctx.params, ctx.signal, () => this.autocomplete(ctx.params, ctx.signal)),
 			)
 			.onRequest("pix/autocomplete/config", parseAutocompleteSettingsRequest, (ctx) => this.withRequestLogging("pix/autocomplete/config", ctx.params, ctx.signal, () => this.autocompleteConfig(ctx.params)),
@@ -893,6 +908,12 @@ export class PixAcpAgent {
 			.onRequest(PIX_ENHANCE_PROMPT_METHOD, parseDesktopEnhancePromptRequest, (ctx) => this.withRequestLogging(PIX_ENHANCE_PROMPT_METHOD, ctx.params, ctx.signal, () => this.desktopEnhancePrompt(ctx.params, ctx.signal)),
 			)
 			.onRequest(BTW_METHOD, parseDesktopBtwRequest, (ctx) => this.withRequestLogging(BTW_METHOD, ctx.params, ctx.signal, () => this.desktopBtw(ctx.params)))
+			.onRequest(PIX_SELECTION_ASSIST_METHOD, parseDesktopSelectionAssistRequest, (ctx) => this.withRequestLogging(PIX_SELECTION_ASSIST_METHOD, ctx.params, ctx.signal, () => this.desktopSelectionAssist(ctx.params, ctx.signal, ctx.params.requestId
+				? async (delta) => {
+					ctx.signal.throwIfAborted();
+					await ctx.client.notify(PIX_SELECTION_ASSIST_DELTA_METHOD, { requestId: ctx.params.requestId, ...delta });
+				}
+				: undefined)))
 			.onRequest(PIX_GIT_ASSIST_METHOD, parseDesktopGitAssistantRequest, (ctx) => this.withRequestLogging(PIX_GIT_ASSIST_METHOD, ctx.params, ctx.signal, () => this.desktopGitAssist(ctx.params, ctx.signal)),
 			)
 			.onRequest(PIX_FORK_MESSAGES_METHOD, parseDesktopSessionRequest, (ctx) => this.withRequestLogging(PIX_FORK_MESSAGES_METHOD, ctx.params, ctx.signal, () => this.forkMessages(ctx.params)),
@@ -956,6 +977,7 @@ export class PixAcpAgent {
 	 * orphaned child processes cannot keep the adapter process alive.
 	 */
 	async dispose(): Promise<void> {
+		this.fileMentionIndex.dispose();
 		this.backgroundSearchSessions.dispose();
 		this.disposed = true;
 		await this.nativeSessionCatalog.dispose();
@@ -1022,6 +1044,22 @@ export class PixAcpAgent {
 		}
 		const prompt = await this.enhancePrompt({ cwd: session.cwd, draft: params.draft, signal });
 		return { prompt };
+	}
+
+	private async desktopSelectionAssist(
+		params: DesktopSelectionAssistRequest,
+		signal: AbortSignal,
+		onDelta?: (delta: { readonly text: string } | { readonly reset: true }) => Promise<void>,
+	): Promise<DesktopSelectionAssistResponse> {
+		try {
+			const { requestId: _requestId, ...request } = params;
+			const text = await this.selectionAssistant({ ...request, signal, ...(onDelta ? { onDelta } : {}) });
+			return { text };
+		} catch (error) {
+			if (error instanceof RequestError) throw error;
+			const detail = error instanceof Error ? error.message : String(error);
+			throw new RequestError(ERROR_SERVER, `Selection assistant failed: ${detail || "unknown error"}`);
+		}
 	}
 
 	private async desktopGitAssist(
@@ -2985,7 +3023,7 @@ export class PixAcpAgent {
 	/** Only known bundled control commands may bypass the parent run lifecycle. */
 	private runtimeExtensionCommandMatches(session: AgentSessionState, text: string): boolean {
 		const name = /^\/(\S+)/.exec(text.trim())?.[1]?.toLowerCase();
-		return (name === "wait" || name === "quota-wait" || name === "heads-up") && session.runtimeExtensionCommands.has(name);
+		return (name === "wait" || name === "quota-wait" || name === "heads-up" || name === "background-jobs") && session.runtimeExtensionCommands.has(name);
 	}
 
 	/**
@@ -3063,13 +3101,12 @@ export class PixAcpAgent {
 				// invalidate that completion and discard its reason/cancellation.
 				if (run.settlement) {
 					run.cancelled = false;
-					void this.setAgentControlState(session, run.extensionInitiated ? "running" : "idle");
 				}
 				run.settlement = undefined;
 				run.stopReason = undefined;
 				run.started = true;
-				if (!run.extensionInitiated && session.agentControlState === "resuming") {
-					void this.setAgentControlState(session, "idle");
+				if (session.agentControlState !== "pause-requested") {
+					void this.setAgentControlState(session, "running");
 				}
 				return;
 			case "agent_end":
@@ -3106,12 +3143,10 @@ export class PixAcpAgent {
 		if (!session) throw new RequestError(ERROR_SERVER, `unknown session ${params.sessionId}`);
 
 		if (params.action === "state") {
-			if (!session.activeRun) {
-				await this.refreshAgentControlState(
-					session,
-					session.agentControlState === "paused" ? "paused" : undefined,
-				);
-			}
+			await this.refreshAgentControlState(
+				session,
+				session.agentControlState === "paused" ? "paused" : undefined,
+			);
 			return { sessionId: session.acpSessionId, state: session.agentControlState };
 		}
 
@@ -3127,7 +3162,7 @@ export class PixAcpAgent {
 				await session.pi.pause();
 			} catch (error) {
 				if (this.sessions.get(session.acpSessionId) === session && session.activeRun) {
-					await this.setAgentControlState(session, session.activeRun.extensionInitiated ? "running" : "idle");
+					await this.setAgentControlState(session, "running");
 				}
 				throw new RequestError(ERROR_SERVER, `pi pause failed: ${stringifyUnknown(error)}`);
 			}
@@ -3561,8 +3596,8 @@ export class PixAcpAgent {
 		return this.claudeLoginNudgeInFlight;
 	}
 
-	private async setAgentControlState(session: AgentSessionState, state: DesktopAgentControlState): Promise<void> {
-		if (this.sessions.get(session.acpSessionId) !== session || session.agentControlState === state) return;
+	private async setAgentControlState(session: AgentSessionState, state: DesktopAgentControlState, forcePublish = false): Promise<void> {
+		if (this.sessions.get(session.acpSessionId) !== session || (!forcePublish && session.agentControlState === state)) return;
 		session.agentControlState = state;
 		await session.client.notify(PIX_SESSION_STATE_METHOD, {
 			sessionId: session.acpSessionId,
@@ -3577,7 +3612,15 @@ export class PixAcpAgent {
 		session: AgentSessionState,
 		preferred?: "paused" | "continuable",
 	): Promise<DesktopAgentControlState> {
-		if (this.sessions.get(session.acpSessionId) !== session || session.activeRun) return session.agentControlState;
+		if (this.sessions.get(session.acpSessionId) !== session) return session.agentControlState;
+		if (session.activeRun) {
+			// A loaded tab or rejected overlapping send may have lost its local
+			// busy owner. Republish even an unchanged state so Stop can recover.
+			const next = session.agentControlState === "idle" && !session.activeRun.settlement
+				? "running" : session.agentControlState;
+			await this.setAgentControlState(session, next, true);
+			return session.agentControlState;
+		}
 		const next = await this.deriveAgentControlState(session, preferred);
 		if (this.sessions.get(session.acpSessionId) !== session || session.activeRun) return session.agentControlState;
 		await this.setAgentControlState(session, next);
@@ -3641,6 +3684,7 @@ export class PixAcpAgent {
 		}
 
 		if (session.activeRun || session.builtinRunning) {
+			if (session.activeRun) await this.refreshAgentControlState(session);
 			throw new RequestError(ERROR_SERVER, "a prompt is already in progress for this session");
 		}
 

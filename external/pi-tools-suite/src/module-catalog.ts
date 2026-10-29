@@ -25,6 +25,8 @@ export const PI_TOOLS_SUITE_MODULE_CATALOG: readonly PiToolsSuiteModuleCatalogEn
 	{ name: "opencode-import", defaultEnabled: true, description: "Imports supported OpenCode provider credentials into Pi without overwriting existing entries by default." },
 	{ name: "question", defaultEnabled: true, description: "Registers the native clean-Pi questionnaire tool; Pix skips its runtime UI because Pix owns question rendering.", cleanPiOnly: true },
 	{ name: "todo", defaultEnabled: true, description: "Adds session todo planning with hierarchy, blockers, persistence, import/export, and plan commands." },
+	// Before model-tools: Bash/bash/shell run_in_background delegates to this module's manager.
+	{ name: "background-shell", defaultEnabled: true, description: "Runs agent shell commands in the background with shell_output/shell_kill/shell_jobs, per-session cleanup and orphan detection." },
 	{ name: "model-tools", defaultEnabled: true, description: "Registers model-specific aliases and gated variants for common file, shell, search, and patch tools." },
 	{ name: "codemode", defaultEnabled: true, description: "Enables SDK QuickJS scripts alongside direct tools. Changes apply after extension reload or session restart." },
 	{ name: "usage", defaultEnabled: true, description: "Adds read-only quota and usage reporting for supported model providers." },

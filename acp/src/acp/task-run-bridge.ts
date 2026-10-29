@@ -1,18 +1,18 @@
-import { TASK_RUN_METHOD, parseTaskRunRequest, parseTaskRunResult, type TaskRunRequest, type TaskRunResult } from "./task-run-contract.js";
+import { TASK_RUN_METHOD, parseTaskRunRequest, parseTaskRunResponse, type TaskRunRequest, type TaskRunResponse } from "./task-run-contract.js";
 import type { Logger } from "../logging.js";
 
-type LaunchResponse = { result?: TaskRunResult; error?: string };
+type LaunchResponse = { result?: TaskRunResponse; error?: string };
 type LaunchSession = {
   acpSessionId: string;
   cwd: string;
-  client: { request(method: typeof TASK_RUN_METHOD, params: TaskRunRequest): Promise<TaskRunResult> };
+  client: { request(method: typeof TASK_RUN_METHOD, params: TaskRunRequest): Promise<TaskRunResponse> };
   pi: { respondToTaskRun?: (requestId: string, response: LaunchResponse) => Promise<void> };
 };
 
 /** The physical runtime owns replies; never deliver an old receipt to its replacement. */
 export async function forwardTaskRun(
   session: LaunchSession,
-  event: { requestId: string; taskId: string },
+  event: { requestId: string; op?: "run" | "models"; taskId?: string; modelRef?: string },
   current: () => boolean,
   logger: Logger,
 ): Promise<void> {
@@ -20,7 +20,7 @@ export async function forwardTaskRun(
   let response: LaunchResponse;
   try {
     const request = parseTaskRunRequest({ ...event, cwd: session.cwd, sourceSessionId: session.acpSessionId });
-    response = { result: parseTaskRunResult(await session.client.request(TASK_RUN_METHOD, request)) };
+    response = { result: parseTaskRunResponse(await session.client.request(TASK_RUN_METHOD, request), request.op === "models") };
   } catch (error) {
     logger.warn("task launch failed", { module: "project-tasks" });
     const detail = error instanceof Error ? error.message : "Desktop task launch unavailable";

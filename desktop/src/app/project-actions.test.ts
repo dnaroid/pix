@@ -59,6 +59,28 @@ function reviewHarness() {
 }
 
 describe("SQLite project task launch", () => {
+  it.each([
+    ["provider/favorite", { modelRef: "provider/favorite" }],
+    ["provider/favorite:high", { modelRef: "provider/favorite", thinkingLevel: "high" }],
+    ["provider/favorite:off", { modelRef: "provider/favorite", thinkingLevel: "off" }],
+  ])("uses agent override %s for a new session without persisting it or changing a linked session", async (modelRef, config) => {
+    const { options, client, runPrompt } = reviewHarness();
+    const task = { id: "a", title: "Do work", type: "feature" as const, status: "todo" as const,
+      modelRef: "provider/saved:low", priority: "medium" as const,
+      createdAt: "2026-10-10T00:00:00Z", updatedAt: "2026-10-10T00:00:00Z" };
+    let document: ProjectTaskDocument = { version: 1, tasks: [task] };
+    options.taskDocument = () => document;
+    options.taskAttachments = async () => [];
+    options.saveProjectTasks = async (next) => { document = next; return true; };
+    const actions = createProjectActions(options);
+    const signal = new AbortController().signal;
+    await expect(actions.runTaskFromAgent(task, signal, modelRef)).resolves.toEqual({ sessionId: "session-1", outcome: "started" });
+    expect(client.newSession).toHaveBeenCalledExactlyOnceWith("/project", config);
+    expect(document.tasks[0]?.modelRef).toBe("provider/saved:low");
+    await expect(actions.runTaskFromAgent(task, signal, "provider/other:off")).resolves.toEqual({ sessionId: "session-1", outcome: "opened" });
+    expect(client.newSession).toHaveBeenCalledOnce();
+    expect(runPrompt).toHaveBeenCalledOnce();
+  });
   it.each(["save", "scroll"])("finishes prompt dispatch if cancellation arrives during %s after linking begins", async (phase) => {
     const { options, runPrompt, client } = reviewHarness();
     const task = { id: "a", title: "Do work", type: "feature" as const, status: "todo" as const,

@@ -30,6 +30,17 @@ export function createPromptAgentControl(options: PromptAgentControlOptions) {
     return agentControlStates.get(sessionId) ?? "idle";
   }
 
+  function serverIsRunning(state: AgentControlState): boolean {
+    return state === "running" || state === "resuming" || state === "pause-requested";
+  }
+
+  /** A busy push may precede the old prompt/Continue response. Its completion
+   * must not erase the newer server run or flush queued work into it. */
+  function adoptServerRun(sessionId: string): void {
+    if (!serverIsRunning(agentState(sessionId))) return;
+    extensionRunGenerations.set(sessionId, options.runs.beginRun(sessionId));
+  }
+
   function setAgentState(sessionId: string, state: AgentControlState): void {
     const previous = agentControlStates.get(sessionId);
     const next = new Map(agentControlStates);
@@ -58,7 +69,7 @@ export function createPromptAgentControl(options: PromptAgentControlOptions) {
       setAgentState(sessionId, state);
       return;
     }
-    if ((state === "resuming" || state === "running") && !options.runs.isRunning(sessionId)) {
+    if (serverIsRunning(state) && !options.runs.isRunning(sessionId)) {
       extensionRunGenerations.set(sessionId, options.runs.beginRun(sessionId));
     } else if (extensionRunGenerations.has(sessionId) && !options.runs.isRunning(sessionId)) {
       finishExtensionRun(sessionId);
@@ -134,23 +145,30 @@ export function createPromptAgentControl(options: PromptAgentControlOptions) {
     options.runs.clearEndedAt(sessionId);
     setAgentState(sessionId, "resuming");
     const runGeneration = options.runs.beginRun(sessionId);
+    const revision = stateRevisions.get(sessionId);
+    const isCurrent = () => requestClient === options.client() && options.runtimeReady(sessionId)
+      && options.runs.generation(sessionId) === runGeneration;
     let stopReason: Awaited<ReturnType<typeof requestClient.agentControl>>["stopReason"];
     localControlRequests.add(sessionId);
     try {
       const next = await requestClient.agentControl(sessionId, "continue");
       stopReason = next.stopReason;
-      if (requestClient === options.client() && options.runtimeReady(sessionId)) setAgentState(sessionId, next.state);
+      if (isCurrent() && stateRevisions.get(sessionId) === revision) setAgentState(sessionId, next.state);
     } catch (error) {
-      if (requestClient !== options.client()) return;
-      if (options.runtimeReady(sessionId)) {
-        const next = await requestClient.agentControl(sessionId, "state").catch(() => undefined);
-        setAgentState(sessionId, next?.state ?? "idle");
+      if (!isCurrent()) return;
+      const queryRevision = stateRevisions.get(sessionId);
+      const next = await requestClient.agentControl(sessionId, "state").catch(() => undefined);
+      if (isCurrent() && stateRevisions.get(sessionId) === queryRevision) {
+        if (next) setAgentState(sessionId, next.state);
+        else if (queryRevision === revision) setAgentState(sessionId, "idle");
       }
+      if (!isCurrent()) return;
       options.onPromptError?.(sessionId, error);
       if (sessionId === options.activeSessionId()) options.reportError(error);
     } finally {
       localControlRequests.delete(sessionId);
-      if (requestClient === options.client()) {
+      if (isCurrent()) {
+        adoptServerRun(sessionId);
         options.runs.finishRunAndFlush(sessionId, runGeneration, stopReason);
       }
     }
@@ -179,6 +197,7 @@ export function createPromptAgentControl(options: PromptAgentControlOptions) {
     get agentControlStates() { return agentControlStates; },
     agentState,
     setAgentState,
+    adoptServerRun,
     handleAgentControlStatePush,
     pauseActiveAgent,
     continueActiveAgent,

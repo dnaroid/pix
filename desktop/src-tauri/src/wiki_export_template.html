@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>__PIX_WIKI_TITLE__ — Wiki</title>
+<style>
+:root{color-scheme:light dark;--bg:#fff;--panel:#f6f7f9;--fg:#1c1f24;--muted:#6a727d;--border:#dde1e6;--accent:#2563eb;--code:#eef0f3;--mark:#fde68a;--hover:#e9ecf0;--sel:#dfe7fb}
+@media (prefers-color-scheme:dark){:root{--bg:#16181c;--panel:#1d2025;--fg:#e6e8eb;--muted:#9099a5;--border:#2e333a;--accent:#7aa7ff;--code:#252a31;--mark:#6b5a12;--hover:#272b32;--sel:#26324d}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{display:grid;grid-template-columns:320px minmax(0,1fr);background:var(--bg);color:var(--fg);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
+aside{display:flex;flex-direction:column;min-height:0;background:var(--panel);border-right:1px solid var(--border)}
+aside header{padding:12px;border-bottom:1px solid var(--border)}
+aside h1{font-size:13px;margin:0 0 8px;color:var(--muted);font-weight:600;letter-spacing:.02em;text-transform:uppercase}
+#q{width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font:inherit;font-size:13px}
+#q:focus{outline:2px solid var(--accent);outline-offset:-1px}
+nav{flex:1;overflow:auto;padding:6px 0 16px;font-size:13px}
+nav details>div{padding-left:12px}
+nav summary{cursor:pointer;padding:3px 12px;color:var(--muted);list-style-position:inside}
+nav summary:hover,nav a:hover{background:var(--hover)}
+nav a{display:block;padding:3px 12px;color:var(--fg);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+nav a.active{background:var(--sel);font-weight:600}
+nav .res{white-space:normal;border-bottom:1px solid var(--border);padding:7px 12px}
+nav .res b{display:block}nav .res small{display:block;color:var(--muted)}
+nav .res span{display:block;color:var(--muted);font-size:12px;margin-top:2px}
+nav p{padding:8px 12px;color:var(--muted)}
+mark{background:var(--mark);color:inherit;border-radius:2px}
+main{overflow:auto;min-width:0}
+article{max-width:820px;margin:0 auto;padding:32px 28px 80px;overflow-wrap:anywhere}
+article h1,article h2,article h3,article h4{line-height:1.3;margin:1.6em 0 .6em}
+article h1{margin-top:0;font-size:2em}
+article h2{padding-bottom:.25em;border-bottom:1px solid var(--border)}
+article a{color:var(--accent)}
+article img,article video{max-width:100%;height:auto;border-radius:6px}
+article code,article pre{font:.9em ui-monospace,SFMono-Regular,Menlo,monospace}
+article code{background:var(--code);padding:.1em .3em;border-radius:4px}
+article pre{background:var(--code);padding:12px 14px;border-radius:8px;overflow:auto}
+article pre code{background:none;padding:0}
+article blockquote{margin:1em 0;padding:0 1em;border-left:3px solid var(--border);color:var(--muted)}
+article table{border-collapse:collapse;display:block;overflow:auto}
+article th,article td{border:1px solid var(--border);padding:5px 10px}
+article th{background:var(--panel)}
+article hr{border:0;border-top:1px solid var(--border)}
+@media (max-width:760px){body{grid-template-columns:1fr;grid-template-rows:auto 1fr}aside{max-height:42vh;border-right:0;border-bottom:1px solid var(--border)}}
+@media print{aside{display:none}body{display:block}}
+</style>
+</head>
+<body>
+<aside>
+<header><h1 id="proj"></h1><input id="q" type="search" placeholder="Search Wiki… ( / )" aria-label="Search Wiki" autocomplete="off"></header>
+<nav id="nav" aria-label="Wiki contents"></nav>
+</aside>
+<main id="main"><article id="doc"></article></main>
+<script>
+"use strict";
+const DATA = __PIX_WIKI_DATA__;
+const pages = DATA.pages;
+const byPath = new Map(pages.map((p) => [p.path, p]));
+for (const p of pages) p.lc = (p.title + " " + p.path + " " + p.text).toLowerCase();
+const $ = (id) => document.getElementById(id);
+const nav = $("nav"), doc = $("doc"), q = $("q");
+$("proj").textContent = DATA.title;
+
+function route() {
+  const hash = location.hash;
+  if (hash.startsWith("#/")) { try { return decodeURIComponent(hash.slice(2)); } catch (_) {} }
+  return DATA.index;
+}
+const href = (path) => "#/" + path.split("/").map(encodeURIComponent).join("/");
+function isIndex(p) { const n = p.path.split("/").pop().toLowerCase(); return p.path === DATA.index || n === "index.md"; }
+
+function buildTree() {
+  const root = { dirs: new Map(), files: [] };
+  for (const p of pages) {
+    const parts = p.path.split("/");
+    let node = root;
+    for (const part of parts.slice(0, -1)) {
+      if (!node.dirs.has(part)) node.dirs.set(part, { dirs: new Map(), files: [] });
+      node = node.dirs.get(part);
+    }
+    node.files.push(p);
+  }
+  return root;
+}
+function renderNode(node, into) {
+  const files = node.files.slice().sort((a, b) => (isIndex(b) - isIndex(a)) || a.path.localeCompare(b.path, undefined, { numeric: true }));
+  for (const [name, child] of [...node.dirs].sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true }))) {
+    const d = document.createElement("details");
+    const s = document.createElement("summary");
+    s.textContent = name;
+    const box = document.createElement("div");
+    d.append(s, box);
+    renderNode(child, box);
+    into.append(d);
+  }
+  for (const p of files) {
+    const a = document.createElement("a");
+    a.href = href(p.path); a.textContent = p.title; a.title = p.path; a.dataset.path = p.path;
+    into.append(a);
+  }
+}
+const tree = document.createElement("div");
+renderNode(buildTree(), tree);
+
+function showTree() { nav.replaceChildren(tree); markActive(); }
+function markActive() {
+  const path = current && current.path;
+  for (const a of tree.querySelectorAll("a")) {
+    const on = a.dataset.path === path;
+    a.classList.toggle("active", on);
+    if (on) for (let el = a.parentElement; el && el !== tree; el = el.parentElement) if (el.tagName === "DETAILS") el.open = true;
+  }
+}
+
+let current = null;
+function show() {
+  const page = byPath.get(route()) || byPath.get(DATA.index) || pages[0];
+  if (!page) { doc.textContent = "This Wiki is empty."; return; }
+  current = page;
+  doc.innerHTML = page.html;
+  for (const a of doc.querySelectorAll("a[href]")) {
+    const h = a.getAttribute("href");
+    if (/^(https?:|mailto:)/i.test(h)) { a.target = "_blank"; a.rel = "noopener noreferrer"; }
+    else if (h === "#") a.removeAttribute("href");
+  }
+  document.title = page.title + " — " + DATA.title;
+  $("main").scrollTop = 0;
+  markActive();
+}
+addEventListener("hashchange", show);
+
+function snippet(text, lc, tokens) {
+  let at = -1;
+  for (const t of tokens) { const i = lc.indexOf(t); if (i >= 0 && (at < 0 || i < at)) at = i; }
+  if (at < 0) return null;
+  const start = Math.max(0, at - 50);
+  return { start, text: text.slice(start, at + 130) };
+}
+function highlight(el, text, tokens) {
+  const lower = text.toLowerCase();
+  const marks = [];
+  for (const t of tokens) { let i = lower.indexOf(t); while (i >= 0 && marks.length < 40) { marks.push([i, i + t.length]); i = lower.indexOf(t, i + t.length); } }
+  marks.sort((a, b) => a[0] - b[0]);
+  let pos = 0;
+  for (const [s, e] of marks) {
+    if (s < pos) continue;
+    el.append(text.slice(pos, s));
+    const m = document.createElement("mark"); m.textContent = text.slice(s, e); el.append(m);
+    pos = e;
+  }
+  el.append(text.slice(pos));
+}
+function search(query) {
+  const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!tokens.length) { showTree(); return; }
+  const hits = [];
+  for (const p of pages) {
+    if (!tokens.every((t) => p.lc.includes(t))) continue;
+    const title = p.title.toLowerCase();
+    let score = 0;
+    for (const t of tokens) { if (title.includes(t)) score += 10; if (p.path.toLowerCase().includes(t)) score += 3; score += Math.min(p.lc.split(t).length - 1, 5); }
+    hits.push({ p, score });
+  }
+  hits.sort((a, b) => b.score - a.score);
+  const list = document.createDocumentFragment();
+  if (!hits.length) { const e = document.createElement("p"); e.textContent = "No results."; list.append(e); }
+  for (const { p } of hits.slice(0, 50)) {
+    const a = document.createElement("a");
+    a.className = "res"; a.href = href(p.path);
+    const b = document.createElement("b"); highlight(b, p.title, tokens);
+    const small = document.createElement("small"); small.textContent = p.path;
+    a.append(b, small);
+    const sn = snippet(p.text, p.text.toLowerCase(), tokens);
+    if (sn) { const s = document.createElement("span"); highlight(s, (sn.start ? "… " : "") + sn.text, tokens); a.append(s); }
+    list.append(a);
+  }
+  nav.replaceChildren(list);
+}
+let timer = 0;
+q.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(() => search(q.value), 80); });
+q.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { q.value = ""; search(""); q.blur(); }
+  else if (e.key === "Enter") { const a = nav.querySelector("a.res"); if (a) location.hash = a.getAttribute("href"); }
+});
+addEventListener("keydown", (e) => {
+  const typing = /^(input|textarea|select)$/i.test(document.activeElement && document.activeElement.tagName);
+  if ((e.key === "k" && (e.metaKey || e.ctrlKey)) || (e.key === "/" && !typing && !e.metaKey && !e.ctrlKey)) { e.preventDefault(); q.focus(); q.select(); }
+});
+
+showTree();
+show();
+</script>
+</body>
+</html>

@@ -9,8 +9,9 @@ import {
 } from "./schema.js";
 
 export interface ProjectTasksParams {
-  op: "list" | "get" | "update" | "create" | "delete" | "run";
+  op: "list" | "get" | "update" | "create" | "delete" | "run" | "models";
   id?: string;
+  modelRef?: string;
   title?: string;
   description?: string;
   type?: ProjectTask["type"];
@@ -21,9 +22,11 @@ export interface ProjectTasksParams {
 export function parseProjectTasksParams(value: unknown, allowDelete = false): ProjectTasksParams {
   const label = "Invalid project_tasks request";
   const input = object(value, label);
-  enumValue(input.op, allowDelete ? ["list", "get", "update", "create", "delete", "run"] : ["list", "get", "update", "create", "run"], `${label}.op`);
+  enumValue(input.op, allowDelete ? ["list", "get", "update", "create", "delete", "run", "models"] : ["list", "get", "update", "create", "run", "models"], `${label}.op`);
   const fields = input.op === "list" ? ["status", "priority", "type"]
-    : (input.op === "get" || input.op === "delete" || input.op === "run") ? ["id"]
+    : input.op === "models" ? []
+    : input.op === "run" ? ["id", "modelRef"]
+    : (input.op === "get" || input.op === "delete") ? ["id"]
     : input.op === "update" ? ["id", "status", "priority", "title", "description"]
     : ["type", "status", "priority", "title", "description"];
   onlyKeys(input, ["op", ...fields], label);
@@ -33,6 +36,10 @@ export function parseProjectTasksParams(value: unknown, allowDelete = false): Pr
   if (input.priority !== undefined) enumValue(input.priority, TASK_PRIORITIES, `${label}.priority`);
   if (input.title !== undefined) string(input.title, 0, 200, `${label}.title`);
   if (input.description !== undefined) string(input.description, 0, 10_000, `${label}.description`);
+  if (input.modelRef !== undefined) {
+    string(input.modelRef, 1, 512, `${label}.modelRef`);
+    if (!(input.modelRef as string).trim()) throw new Error(`${label}: modelRef must not be blank`);
+  }
   if (input.op === "update" && !["status", "priority", "title", "description"].some(key => input[key] !== undefined)) {
     throw new Error(`${label}: update requires status, priority, title or description`);
   }
@@ -53,7 +60,7 @@ export interface ProjectTasksResponse {
 export async function runProjectTasks(cwd: string, input: unknown, signal?: AbortSignal, services?: ProjectTasksServices): Promise<ProjectTasksResponse> {
   // Delete is supported by the engine for explicit user commands, not the agent tool.
   const params = parseProjectTasksParams(input, true);
-  if (params.op === "run") throw new Error("Task launch must use the Pix Desktop host, not the storage engine");
+  if (params.op === "run" || params.op === "models") throw new Error("Task launch/model listing must use the Pix Desktop host, not the storage engine");
   signal?.throwIfAborted();
   const root = await realpath(cwd);
   const rootInfo = await lstat(root);

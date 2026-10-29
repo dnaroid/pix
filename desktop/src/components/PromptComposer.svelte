@@ -30,6 +30,9 @@
   import PromptSlashCommandMenu from "./PromptSlashCommandMenu.svelte";
   import { createPromptComposerQuestionnaireController } from "./prompt-composer-questionnaire-controller.svelte";
   import { createPromptComposerSlashController } from "./prompt-composer-slash-controller.svelte";
+  import { createPromptComposerMentionsController } from "./prompt-composer-mentions-controller.svelte";
+  import PromptComposerMentions from "./PromptComposerMentions.svelte";
+  import { fileMentionTokens, type FileMentionMatch } from "../../../src/file-mentions";
   import { createPromptComposerTextareaController } from "./prompt-composer-textarea-controller.svelte";
   import { createPromptComposerVoiceController } from "./prompt-composer-voice-controller.svelte";
 
@@ -55,6 +58,8 @@
     autocompleteDebounceMs,
     questionMode,
     onAutocomplete,
+    onFileMentions,
+    fileMentionContextKey = "",
     onDraftChange = () => {},
     onOpenHistory,
     onOpenBtw,
@@ -95,6 +100,8 @@
     autocompleteDebounceMs: number;
     questionMode?: QuestionComposerMode;
     onAutocomplete: (draft: string, signal: AbortSignal) => Promise<string>;
+    onFileMentions?: (query: string, signal: AbortSignal) => Promise<FileMentionMatch[]>;
+    fileMentionContextKey?: string;
     onDraftChange?: () => void;
     onOpenHistory?: () => void | Promise<void>;
     onOpenBtw?: () => void | Promise<void>;
@@ -148,6 +155,18 @@
     autocompleteEnabled: () => autocompleteEnabled,
     ready: () => ready,
     requestAutocomplete: (draft, signal) => onAutocomplete(draft, signal),
+    pathCompletionActive: () => mentionsController.open,
+  });
+  const mentionsController = createPromptComposerMentionsController({
+    text: () => promptText,
+    selectionStart: () => textareaController.selectionStart,
+    selectionEnd: () => textareaController.selectionEnd,
+    context: () => `${fileMentionContextKey}\0${conversationContextKey ?? ""}`,
+    enabled: () => !!onFileMentions && ready && hasConversationTarget && !editorMode && !questionMode && !textareaController.composing,
+    request: (query, signal) => onFileMentions?.(query, signal) ?? Promise.resolve([]),
+    replace: (text, cursor) => textareaController.replacePromptText(text, cursor),
+    dismissAutocomplete: () => textareaController.dismiss(),
+    closeMenu: () => { composerMenuOpen = false; },
   });
   const voiceController = createPromptComposerVoiceController({
     contextKey: () => conversationContextKey,
@@ -210,6 +229,7 @@
   }
 
   const editorMode = $derived(variant === "editor" && !questionMode);
+  const mentionTokens = $derived(!editorMode && !questionMode ? fileMentionTokens(promptText).filter((token) => token.end < promptText.length || !mentionsController.open) : []);
   const textareaValue = $derived(composerText());
   const conversationContextKey = $derived(activeSessionId ?? (draftSession ? "pix:desktop-draft-session" : undefined));
   const hasConversationTarget = $derived(!!conversationContextKey);
@@ -262,6 +282,7 @@
   );
   const promptAssistiveStatus = $derived.by(() => {
     if (promptEnhancing) return "Improving prompt…";
+    if (mentionsController.open) return `${mentionsController.matches.length} project paths. Use arrow keys, Tab or Enter to insert, Escape to close.`;
     if (slashController.open) {
       return `${slashController.matches.length} slash commands available. Use arrow keys to navigate, then Tab or Enter to choose.`;
     }
@@ -328,7 +349,16 @@
       if (!target?.closest("[data-composer-menu]")) composerMenuOpen = false;
     };
     document.addEventListener("pointerdown", closeComposerMenuOutside);
-    return () => document.removeEventListener("pointerdown", closeComposerMenuOutside);
+    const closeMentionsOutside = (event: PointerEvent) => {
+      const target = event.target;
+      if (mentionsController.open && !composerForm?.contains(target as Node)
+        && !(target instanceof Element && target.closest("[data-file-mention-popup]"))) mentionsController.dismiss();
+    };
+    document.addEventListener("pointerdown", closeMentionsOutside);
+    return () => {
+      document.removeEventListener("pointerdown", closeComposerMenuOutside);
+      document.removeEventListener("pointerdown", closeMentionsOutside);
+    };
   });
 
   $effect(() => {
@@ -426,6 +456,7 @@
       return;
     }
     composerMenuOpen = true;
+    mentionsController.dismiss();
     slashController.dismissCurrent();
     textareaController.dismiss();
     void tick().then(() => {
@@ -521,6 +552,7 @@
   }
 
   function handleKeydown(event: KeyboardEvent): void {
+    if (mentionsController.handleKeydown(event)) return;
     if (slashController.handleKeydown(event)) return;
     if (
       !editorMode
@@ -680,6 +712,8 @@
   {#key headsUp.notice.id}<HeadsUpCard {...headsUp} />{/key}
 {/if}
 
+<div class="relative" data-file-mention-anchor>
+<PromptComposerMentions controller={mentionsController} />
 <form
   class={[
     "overflow-hidden rounded-md border bg-panel-strong",
@@ -767,13 +801,23 @@
             aria-describedby="prompt-autocomplete-status"
             role={!editorMode && !questionMode ? "combobox" : undefined}
             aria-autocomplete={!editorMode && !questionMode ? "list" : undefined}
-            aria-expanded={!editorMode && !questionMode ? slashController.open : undefined}
-            aria-controls={!editorMode && !questionMode && slashController.open ? slashListboxId : undefined}
-            aria-activedescendant={!editorMode && !questionMode && slashController.open ? `prompt-slash-command-${slashController.selectedIndex}` : undefined}
+            aria-expanded={!editorMode && !questionMode ? slashController.open || mentionsController.open : undefined}
+            aria-controls={mentionsController.open ? "prompt-file-mention-listbox" : !editorMode && !questionMode && slashController.open ? slashListboxId : undefined}
+            aria-activedescendant={mentionsController.open && mentionsController.matches.length ? `prompt-file-mention-${mentionsController.selectedIndex}` : !editorMode && !questionMode && slashController.open ? `prompt-slash-command-${slashController.selectedIndex}` : undefined}
             placeholder={composerPlaceholder()}
             disabled={questionMode ? !questionnaireController.currentQuestion : editorMode ? !ready : !hasConversationTarget || !ready}
             rows="1"
           ></textarea>
+          {#if mentionTokens.length}
+            <div class="flex flex-wrap gap-1 py-1" aria-label="Path mentions">
+              {#each mentionTokens as token (token.start)}
+                <button type="button" class="max-w-full truncate rounded-sm border border-border bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground hover:text-foreground"
+                  title={`Remove @${token.path}`} aria-label={`Remove mention ${token.path}`}
+                  onclick={() => { mentionsController.dismiss(); void textareaController.replacePromptText(promptText.slice(0, token.start) + promptText.slice(token.end), token.start); }}
+                >@{token.path} ×</button>
+              {/each}
+            </div>
+          {/if}
         </div>
         {#if !editorMode && !questionMode}
           <div class="grid w-23 shrink-0 grid-cols-3 items-center gap-1">
@@ -838,5 +882,6 @@
     {promptAssistiveStatus}
   </p>
 </form>
+</div>
 </div>
 </div>

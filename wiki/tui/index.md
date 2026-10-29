@@ -15,6 +15,7 @@ Terminal workspaces, input, session tabs and commands. Memory diagnostics and co
 - [External TUI memory/freeze profiler](tui-external-memory-profiler.md) — active
 - [TUI Git assistant slash commands](tui-git-slash-commands.md) — active
 - [TUI input paste classification](tui-input-paste.md) — active
+- [TUI file and folder mentions](tui-file-mentions.md) — active
 - [TUI combined model and thinking selector](tui-model-thinking-selector.md) — active
 - [TUI session tabs and UI-only draft conversations](tui-session-tabs.md) — active
 - [TUI streaming-thinking memory growth](tui-streaming-thinking-memory.md) — active

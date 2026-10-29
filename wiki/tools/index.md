@@ -10,6 +10,7 @@ The suite guide describes installed tools and configuration. API contracts, exec
 
 ## Pages
 
+- [Background shell jobs](background-shell.md) — active
 - [Headless Tool API](headless-tool-api.md)
 - [Native Pi TUI presentation for pi-tools-suite](native-pi-tools-suite-ui.md)
 - [Fault-tolerant pi-tools-suite module loading](pi-tools-suite-module-loading.md) — active

@@ -8,6 +8,7 @@ import { planOwners } from "../lib/project-task-plans";
 import { projectTaskDisplayLabel } from "../lib/project-tasks";
 import type { SubagentSessionNavigation } from "./desktop-subagent-navigation";
 import { createSessionStepNavigation } from "./session-step-navigation";
+import { workspaceRelativePath } from "../lib/background-jobs";
 
 export function createDesktopShellViewModelServices(
   options: DesktopViewModelServicesOptions,
@@ -92,6 +93,12 @@ export function createDesktopShellViewModelServices(
     sessionCoordinator: options.orchestration.coordinator,
     quotaWait: options.quotaWait,
     headsUp: options.headsUp,
+    backgroundJobs: options.backgroundJobs,
+    openBackgroundJobLog: (path) => {
+      const relative = workspaceRelativePath(options.workspace(), path);
+      if (relative) void options.project.preview.openProjectFile(relative, "push");
+      else void options.project.preview.openLocalFile(path, "push");
+    },
     openObserverSettings: options.openObserverSettings,
     subagentViewerState: subagentNavigation?.viewerState,
     openSubagentSession: subagentNavigation

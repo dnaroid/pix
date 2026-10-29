@@ -70,6 +70,8 @@ export function createDesktopSessionServices(options: DesktopSessionServicesOpti
   });
   const autocomplete = createAutocompleteStore({
     client: options.client,
+    workspace: options.workspace,
+    reportError: options.reportError,
     activeSessionId: () => options.state.sessionId,
     settingsReady: () => options.statusReady()
       && options.state.runtimeReady

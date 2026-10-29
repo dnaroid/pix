@@ -6,6 +6,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import type { DesktopContextTarget } from "./desktop-context-target";
 import { copyContextImage, openContextImage } from "./image-context-actions";
 import { gitRemoteLinkLabel, type GitRemoteEntryLink } from "./project-git-remote-link";
+import type { SelectionAssistTarget } from "./selection-assist-target";
 
 export interface ContextMenuPosition { x: number; y: number }
 export interface NativeContextMenu {
@@ -48,6 +49,7 @@ export function nativeContextMenuItems(
   revealProjectEntry?: (path: string) => Promise<void>,
   remoteLink?: GitRemoteEntryLink | null,
   sessionActions?: SessionContextActions,
+  selectionAssist?: (target: SelectionAssistTarget) => void,
 ): ContextMenuItem[] {
   const items: ContextMenuItem[] = [];
   const run = (action: () => Promise<unknown>) => () => {
@@ -147,6 +149,16 @@ export function nativeContextMenuItems(
     edit("Copy");
   }
 
+  const assist = context.assist;
+  if (assist && selectionAssist) {
+    if (items.length) separator();
+    items.push({
+      id: `desktop.selection.${assist.action}`,
+      text: assist.action === "explain" ? "Explain Code" : "Translate",
+      action: run(async () => selectionAssist(assist)),
+    });
+  }
+
   const sourceReference = context.sourceReference;
   if (sourceReference) {
     if (items.length) separator();
@@ -207,6 +219,7 @@ export function createNativeContextMenuFactory(
   revealProjectEntry?: (path: string) => Promise<void>,
   resolveRemoteLink?: (path: string) => Promise<GitRemoteEntryLink | null>,
   sessionActions?: SessionContextActions,
+  selectionAssist?: (target: SelectionAssistTarget) => void,
 ): (context: DesktopContextTarget, isActive: () => boolean) => Promise<NativeContextMenu> {
   // Tauri's callback registry is app-wide, not per WebView. Each mounted owner
   // needs a namespace so secondary windows cannot overwrite each other's actions.
@@ -223,7 +236,7 @@ export function createNativeContextMenuFactory(
       const revealPath = context.fileLinkRevealPath;
       const remoteLink = revealPath && resolveRemoteLink
         ? await resolveRemoteLink(revealPath).catch(() => null) : null;
-      const items = nativeContextMenuItems(context, linux, reportError, isActive, revealProjectEntry, remoteLink, sessionActions)
+      const items = nativeContextMenuItems(context, linux, reportError, isActive, revealProjectEntry, remoteLink, sessionActions, selectionAssist)
         .map((item) => "id" in item ? { ...item, id: `${namespace}:${item.id}` } : item);
       const menu = await Menu.new({ items });
       return {

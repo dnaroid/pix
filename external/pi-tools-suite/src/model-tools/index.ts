@@ -17,6 +17,7 @@ import { Type, type TSchema } from "typebox";
 import { claudeAliasToolDescriptions, codexAliasToolDescriptions } from "../tool-descriptions";
 import { applyPatch } from "./apply-patch";
 import { registerShellWorkdir } from "./shell-workdir";
+import { backgroundShellTools, isBackgroundShellAvailable, startBackgroundJob } from "../background-shell/service.js";
 import {
   detectModelProfile,
   prepareApplyPatchArgs,
@@ -35,7 +36,10 @@ const CLAUDE_ALIAS_TOOLS = Object.values(CLAUDE_ALIAS_TOOL_DESCRIPTIONS).map((to
 const CODEX_ALIAS_TOOLS = ["read", ...Object.values(CODEX_ALIAS_TOOL_DESCRIPTIONS).map((tool) => tool.name)];
 const BUILTIN_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"] as const;
 const LEGACY_MANAGED_TOOLS = ["LS", "shell_command"];
-const MANAGED_TOOLS = new Set([...CLAUDE_ALIAS_TOOLS, ...CODEX_ALIAS_TOOLS, ...BUILTIN_TOOLS, ...LEGACY_MANAGED_TOOLS]);
+/** Background job readers: Claude-style aliases for the Claude profile, native names otherwise. */
+const CLAUDE_BACKGROUND_TOOLS = ["BashOutput", "KillShell"];
+const NATIVE_BACKGROUND_TOOLS = ["shell_output", "shell_kill"];
+const MANAGED_TOOLS = new Set([...CLAUDE_ALIAS_TOOLS, ...CODEX_ALIAS_TOOLS, ...BUILTIN_TOOLS, ...LEGACY_MANAGED_TOOLS, ...CLAUDE_BACKGROUND_TOOLS, ...NATIVE_BACKGROUND_TOOLS]);
 const MAX_BUILTIN_DEFINITIONS = 64;
 
 function isStaleExtensionContextError(error: unknown): boolean {
@@ -54,7 +58,15 @@ type ShellAliasInput = {
   timeout?: number;
   timeout_ms?: number;
   run_in_background?: boolean;
+  max_runtime?: number;
 };
+
+const RUN_IN_BACKGROUND_DESCRIPTION = "Start the command as a background job and return immediately with a job id; read output with shell_output/BashOutput and stop it with shell_kill/KillShell. Use for dev servers, watchers and long test runs.";
+const MAX_RUNTIME_DESCRIPTION = "Background only: optional wall-clock limit in seconds after which the job is stopped";
+
+function requireBackgroundShell(): void {
+  if (!isBackgroundShellAvailable()) throw new Error("run_in_background requires the background-shell module (disabled or unsupported on this platform)");
+}
 
 type BashToolDefinition = ReturnType<typeof createBashToolDefinition>;
 type AnyToolDefinition = ToolDefinition<any, any, any>;
@@ -227,6 +239,7 @@ type BuiltinAliasOptions<Input> = {
   toArgs: (params: Input) => unknown;
   renderShell?: "self";
   validate?: (params: Input) => void;
+  background?: (params: Input, ctx: ExtensionToolContext) => Promise<unknown> | undefined;
 };
 
 function registerBuiltinAlias<Input>(runtime: ModelToolsRuntime, pi: ExtensionAPI, options: BuiltinAliasOptions<Input>): void {
@@ -253,6 +266,8 @@ function registerBuiltinAlias<Input>(runtime: ModelToolsRuntime, pi: ExtensionAP
       async execute(id, params, signal, onUpdate, ctx) {
         const input = params as Input;
         options.validate?.(input);
+        const background = options.background?.(input, ctx);
+        if (background) return background as any;
         return createBuiltinDefinition(runtime, options.builtinName, ctx.cwd).execute(
           id,
           options.toArgs(input),
@@ -312,11 +327,14 @@ function registerClaudeAliases(runtime: ModelToolsRuntime, pi: ExtensionAPI, rep
       command: Type.String({ description: "Command to execute" }),
       description: Type.Optional(Type.String({ description: "Short command description" })),
       timeout: Type.Optional(Type.Number({ description: "Timeout in seconds" })),
-      run_in_background: Type.Optional(Type.Boolean({ description: "Unsupported by this adapter; omit it." })),
+      run_in_background: Type.Optional(Type.Boolean({ description: RUN_IN_BACKGROUND_DESCRIPTION })),
+      max_runtime: Type.Optional(Type.Number({ description: MAX_RUNTIME_DESCRIPTION })),
     }),
     toArgs: toBashRenderArgs,
-    validate: (params: { run_in_background?: boolean }) => {
-      if (params.run_in_background) throw new Error("Bash.run_in_background is not supported by this adapter");
+    background: (params: ShellAliasInput, ctx) => {
+      if (!params.run_in_background) return undefined;
+      requireBackgroundShell();
+      return startBackgroundJob(ctx, { command: toShellCommand(params), description: params.description, maxRuntimeSeconds: params.max_runtime });
     },
   });
 
@@ -361,7 +379,11 @@ async function runShellAlias(
 ) {
   const command = toShellCommand(input);
   if (!command) throw new Error("Missing shell command");
+  if (input.run_in_background) requireBackgroundShell();
   const workdir = await resolveWorkdir(ctx, input.cwd ?? input.workdir);
+  if (input.run_in_background) {
+    return startBackgroundJob(ctx, { command, cwd: workdir, description: input.description, maxRuntimeSeconds: input.max_runtime });
+  }
   const tool = runtime.dependencies.createBashToolDefinition(
     ctx.cwd,
     workdir ? { spawnHook: (spawnContext: BashSpawnContext) => ({ ...spawnContext, cwd: workdir }) } : undefined,
@@ -377,6 +399,8 @@ function registerCodexAliases(runtime: ModelToolsRuntime, pi: ExtensionAPI, repo
     cwd: Type.Optional(Type.String({ description: "Working directory" })),
     timeout_ms: Type.Optional(Type.Number({ description: "Timeout in milliseconds" })),
     timeout: Type.Optional(Type.Number({ description: "Timeout in seconds" })),
+    run_in_background: Type.Optional(Type.Boolean({ description: RUN_IN_BACKGROUND_DESCRIPTION })),
+    max_runtime: Type.Optional(Type.Number({ description: MAX_RUNTIME_DESCRIPTION })),
   });
 
   pi.registerTool(
@@ -386,7 +410,7 @@ function registerCodexAliases(runtime: ModelToolsRuntime, pi: ExtensionAPI, repo
       renderCall: (args, theme, context) => renderShellAliasCall(runtime, args, theme, context),
       renderResult: (result, options, theme, context) => renderShellAliasResult(runtime, result, options, theme, context),
       async execute(id, params, signal, onUpdate, ctx) {
-        return runShellAlias(runtime, resolveWorkdir, id, params, signal, onUpdate, ctx);
+        return runShellAlias(runtime, resolveWorkdir, id, params, signal, onUpdate, ctx) as any;
       },
     }),
   );
@@ -407,10 +431,63 @@ function registerCodexAliases(runtime: ModelToolsRuntime, pi: ExtensionAPI, repo
   );
 }
 
+function registerBackgroundAliases(runtime: ModelToolsRuntime, pi: ExtensionAPI): void {
+  const tools = backgroundShellTools();
+  if (!tools) return;
+  // Builtin bash gains run_in_background; foreground calls keep the SDK implementation.
+  const base = runtime.dependencies.createBashToolDefinition(process.cwd()) as AnyToolDefinition;
+  const baseParameters = (base.parameters ?? Type.Object({ command: Type.String(), timeout: Type.Optional(Type.Number()) })) as any;
+  pi.registerTool({
+    ...base,
+    name: "bash",
+    label: base.label ?? "bash",
+    description: `${base.description ?? "Execute a bash command."} Set run_in_background for dev servers, watchers and long runs.`,
+    parameters: Type.Object({
+      ...(baseParameters.properties ?? {}),
+      run_in_background: Type.Optional(Type.Boolean({ description: RUN_IN_BACKGROUND_DESCRIPTION })),
+      max_runtime: Type.Optional(Type.Number({ description: MAX_RUNTIME_DESCRIPTION })),
+    }),
+    async execute(id, params: any, signal, onUpdate, ctx) {
+      if (params?.run_in_background) {
+        requireBackgroundShell();
+        return startBackgroundJob(ctx, { command: String(params.command ?? ""), maxRuntimeSeconds: params.max_runtime }) as any;
+      }
+      const { run_in_background: _bg, max_runtime: _max, ...rest } = params ?? {};
+      return runtime.dependencies.createBashToolDefinition(ctx.cwd).execute(id, rest, signal, onUpdate, ctx);
+    },
+  } as AnyToolDefinition);
+  pi.registerTool(defineTool({
+    name: "BashOutput",
+    label: "BashOutput",
+    description: "Read new output from a background Bash job (run_in_background). Returns only output produced since the last read, plus status and log path.",
+    parameters: Type.Object({
+      bash_id: Type.String({ description: "Background job id returned by Bash" }),
+      filter: Type.Optional(Type.String({ description: "Optional regular expression; only matching lines are returned" })),
+    }),
+    async execute(id, params, signal, onUpdate, ctx) {
+      return tools.output.execute(id, { job_id: params.bash_id, ...(params.filter ? { filter: params.filter } : {}) }, signal, onUpdate, ctx);
+    },
+  }));
+  pi.registerTool(defineTool({
+    name: "KillShell",
+    label: "KillShell",
+    description: "Stop a background Bash job and its whole process group (SIGTERM, then SIGKILL).",
+    parameters: Type.Object({ shell_id: Type.String({ description: "Background job id returned by Bash" }) }),
+    async execute(id, params, signal, onUpdate, ctx) {
+      return tools.kill.execute(id, { job_id: params.shell_id }, signal, onUpdate, ctx);
+    },
+  }));
+}
+
 function toolsForProfile(profile: ModelProfile): string[] | undefined {
   if (profile === "claude") return CLAUDE_ALIAS_TOOLS;
   if (profile === "codex") return CODEX_ALIAS_TOOLS;
   return undefined;
+}
+
+function backgroundToolsForProfile(profile: ModelProfile): string[] {
+  if (!backgroundShellTools()) return [];
+  return profile === "claude" ? CLAUDE_BACKGROUND_TOOLS : NATIVE_BACKGROUND_TOOLS;
 }
 
 function sameTools(left: string[], right: string[]): boolean {
@@ -426,7 +503,7 @@ function applyToolProfile(pi: ExtensionAPI, model: unknown, baseTools: string[])
 		const selectedTargetTools = preserveSelection
 			? selectSuitableToolsForModel(model, active.filter((tool) => MANAGED_TOOLS.has(tool)))
 			: targetTools;
-		const next = selectedTargetTools ? [...preserved, ...selectedTargetTools] : [...preserved, ...baseTools];
+		const next = [...preserved, ...(selectedTargetTools ?? baseTools), ...backgroundToolsForProfile(detectModelProfile(model))];
 		const nextTools = [...new Set(next)];
 		if (!sameTools(active, nextTools)) pi.setActiveTools(nextTools);
 	} catch (error) {
@@ -445,6 +522,7 @@ export default function modelTools(pi: ExtensionAPI, dependencies: Partial<Model
   const repoDiscovery = true;
   registerClaudeAliases(runtime, pi, repoDiscovery);
   registerCodexAliases(runtime, pi, repoDiscovery, resolveWorkdir);
+  registerBackgroundAliases(runtime, pi);
 
   let baseTools: string[] = [];
 
