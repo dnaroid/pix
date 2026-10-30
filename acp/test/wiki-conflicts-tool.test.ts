@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import wikiConflictsExtension, { parseWikiConflictsParams, WIKI_CONFLICTS_TOOL } from "../src/extensions/wiki-conflicts.js";
+import wikiConflictsExtension, { createWikiConflictsExtension, parseWikiConflictsParams, WIKI_CONFLICTS_TOOL } from "../src/extensions/wiki-conflicts.js";
 import type { KnowledgeCheckResult } from "../src/knowledge/contract.js";
 import { knowledgeFindingId } from "../src/knowledge/decisions.js";
 import { recordKnowledgeCheck, recordKnowledgeDecision } from "../src/knowledge/stamp.js";
@@ -68,9 +68,17 @@ test("scans saved reports, merges decisions and filters by status, kind and path
 });
 
 test("validates tool parameters with an open default", () => {
-  assert.deepEqual(parseWikiConflictsParams({}), { filter: { status: "open" }, limit: 30 });
+  assert.deepEqual(parseWikiConflictsParams({}), { action: "list", filter: { status: "open" }, limit: 30 });
   assert.deepEqual(parseWikiConflictsParams({ status: "all", kind: "internal", path: "./wiki/a", limit: 5 }),
-    { filter: { kind: "internal", branch: "wiki/a" }, limit: 5 });
+    { action: "list", filter: { kind: "internal", branch: "wiki/a" }, limit: 5 });
+  assert.deepEqual(parseWikiConflictsParams({ ids: ["ABCDEF0123"] }), { action: "list", filter: {}, ids: ["abcdef0123"], limit: 30 });
+  assert.throws(() => parseWikiConflictsParams({ ids: ["abc"] }), /prefix/u);
+  assert.deepEqual(parseWikiConflictsParams({ action: "decide", id: "abcdef01", verdict: "side-a", note: " fixed " }),
+    { action: "decide", id: "abcdef01", verdict: "side-a", note: "fixed" });
+  assert.throws(() => parseWikiConflictsParams({ action: "decide", id: "abcdef01", verdict: "false-positive" }), /note/u);
+  assert.throws(() => parseWikiConflictsParams({ action: "decide", id: "abcdef01", verdict: "nope" }), /verdict/u);
+  assert.throws(() => parseWikiConflictsParams({ action: "recheck", path: "wiki/a.md", limit: 3 }), /not supported/u);
+  assert.throws(() => parseWikiConflictsParams({ action: "recheck" }), /path/u);
   assert.throws(() => parseWikiConflictsParams({ status: "done" }), /status/u);
   assert.throws(() => parseWikiConflictsParams({ limit: 0 }), /limit/u);
 });
@@ -105,4 +113,68 @@ test("the tool is inactive by default and activated only for runs in a project w
   const listed = await tool.execute("2", { status: "all" }, undefined, undefined, { cwd: ready });
   assert.equal(listed.isError, undefined);
   assert.deepEqual(JSON.parse(listed.content[0].text).summary.total, 0);
+});
+
+function toolOf(extension: (pi: never) => void) {
+  let tool: any;
+  extension({ registerTool: (definition: unknown) => { tool = definition; }, on: () => undefined } as never);
+  return (params: unknown, cwd: string) => tool.execute("t", params, undefined, undefined, { cwd })
+    .then((out: any) => ({ out, json: out.isError ? undefined : JSON.parse(out.content[0].text) }));
+}
+
+test("lists by id with canonical sides and quoteChanged, and records decisions through the tool", async (t) => {
+  const root = await project(t);
+  await writeFile(join(root, "wiki", "policy.md"), await recordKnowledgeCheck(body, result(), checkedAt));
+  await writeFile(join(root, "wiki", "rules.md"), "# Rules\nSource   claim.\n");
+  const id = await knowledgeFindingId("conflict", draft, existing);
+  const call = toolOf(wikiConflictsExtension);
+
+  const listed = (await call({ ids: [id.slice(0, 10)] }, root)).json;
+  assert.equal(listed.matched, 1);
+  const [found] = listed.findings;
+  assert.deepEqual([found.a.path, found.b.path], ["wiki/policy.md", "wiki/rules.md"]);
+  assert.equal(found.quoteChanged, undefined);
+  const uncertainty = (await call({ kind: "uncertainty" }, root)).json.findings[0];
+  // wiki/other.md does not exist, so its side (canonical "a") is reported as changed.
+  assert.equal(uncertainty.a.path, "wiki/other.md");
+  assert.deepEqual(uncertainty.quoteChanged, ["a"]);
+
+  const before = await readFile(join(root, "wiki", "policy.md"), "utf8");
+  const decided = (await call({ action: "decide", id: id.slice(0, 12), verdict: "side-b", note: "Fixed policy." }, root)).json;
+  assert.deepEqual(decided.written, ["wiki/policy.md"]);
+  assert.equal(decided.finding.status, "fix-pending");
+  const after = await readFile(join(root, "wiki", "policy.md"), "utf8");
+  assert.notEqual(after, before);
+  assert.ok(after.endsWith(body) || after.includes(body));
+
+  const cleared = (await call({ action: "decide", id, verdict: "clear" }, root)).json;
+  assert.equal(cleared.finding.status, "open");
+  assert.match((await call({ action: "decide", id: "0000000000", verdict: "deferred" }, root)).out.content[0].text, /No saved/u);
+});
+
+test("recheck saves a new report and refuses to overwrite a page edited during the check", async (t) => {
+  const root = await project(t);
+  const page = join(root, "wiki", "policy.md");
+  await writeFile(page, body);
+  const clean = toolOf(createWikiConflictsExtension({ check: async () => async (request) => {
+    assert.equal(request.path, "wiki/policy.md");
+    return result();
+  } }));
+  const checked = (await clean({ action: "recheck", path: "wiki/policy.md" }, root)).json;
+  assert.equal(checked.saved, true);
+  assert.equal(checked.conflicts, 1);
+  assert.equal(checked.findings.length, 2);
+  assert.match(await readFile(page, "utf8"), /pix:wiki-report/u);
+
+  await writeFile(page, body);
+  const racing = toolOf(createWikiConflictsExtension({ check: async () => async () => {
+    await writeFile(page, "# Policy\nEdited.\n");
+    return result();
+  } }));
+  const raced = (await racing({ action: "recheck", path: "wiki/policy.md" }, root)).json;
+  assert.equal(raced.saved, false);
+  assert.equal(await readFile(page, "utf8"), "# Policy\nEdited.\n");
+
+  const outside = await clean({ action: "recheck", path: "README.md" }, root);
+  assert.equal(outside.out.isError, true);
 });

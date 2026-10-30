@@ -1,7 +1,10 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { KnowledgeCitation } from "../knowledge/contract.js";
-import { wikiFindingStatus, type WikiFinding, type WikiFindingFilter, type WikiFindingStatus } from "../knowledge/findings.js";
-import { initializedProjectWiki, scanWikiFindings } from "../knowledge/wiki-findings-scan.js";
+import { initializedProjectWiki } from "../knowledge/wiki-findings-scan.js";
+import {
+  ACTIONS, DECIDE_VERDICTS, DEFAULT_LIMIT, KINDS, MAX_IDS, MAX_LIMIT, MIN_ID_PREFIX, STATUSES,
+  decideWikiConflict, defaultWikiPageCheck, listWikiConflicts, parseWikiConflictsParams, recheckWikiPage,
+  type WikiPageCheck,
+} from "./wiki-conflicts-actions.js";
 
 /**
  * Agent tool over saved Wiki contradiction reports. It is active only for runs
@@ -9,118 +12,77 @@ import { initializedProjectWiki, scanWikiFindings } from "../knowledge/wiki-find
  */
 
 export const WIKI_CONFLICTS_TOOL = "wiki_conflicts";
-const DEFAULT_LIMIT = 30;
-const MAX_LIMIT = 200;
-const MAX_QUOTE_CHARS = 600;
-const STATUSES = ["open", "fix-pending", "decided", "stale", "all"] as const;
-const KINDS = ["conflict", "uncertainty", "internal"] as const;
+export { compactWikiFinding, parseWikiConflictsParams } from "./wiki-conflicts-actions.js";
 
-export interface WikiConflictsParams {
-  readonly status?: (typeof STATUSES)[number];
-  readonly kind?: (typeof KINDS)[number];
-  readonly path?: string;
-  readonly limit?: number;
-}
-
-export function parseWikiConflictsParams(value: unknown): { filter: WikiFindingFilter; limit: number } {
-  const params = (value ?? {}) as Record<string, unknown>;
-  if (typeof params !== "object" || Array.isArray(params)) throw new Error("wiki_conflicts expects an object.");
-  const status = params.status ?? "open";
-  if (!STATUSES.includes(status as never)) throw new Error(`status must be one of ${STATUSES.join(", ")}.`);
-  if (params.kind !== undefined && !KINDS.includes(params.kind as never)) throw new Error(`kind must be one of ${KINDS.join(", ")}.`);
-  if (params.path !== undefined && typeof params.path !== "string") throw new Error("path must be a project-relative string.");
-  const branch = typeof params.path === "string" ? params.path.trim().replaceAll("\\", "/").replace(/^\.\//u, "") : "";
-  const limit = params.limit === undefined ? DEFAULT_LIMIT : Number(params.limit);
-  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) throw new Error(`limit must be an integer 1..${MAX_LIMIT}.`);
-  return {
-    filter: {
-      ...(status !== "all" ? { status: status as WikiFindingStatus } : {}),
-      ...(params.kind !== undefined ? { kind: params.kind as NonNullable<WikiFindingFilter["kind"]> } : {}),
-      ...(branch ? { branch } : {}),
-    },
-    limit,
-  };
-}
-
-function side(citation: KnowledgeCitation) {
-  const quote = citation.quote.length > MAX_QUOTE_CHARS ? `${citation.quote.slice(0, MAX_QUOTE_CHARS)}…` : citation.quote;
-  return { path: citation.path, lines: `${citation.startLine}-${citation.endLine}`, quote };
-}
-
-export function compactWikiFinding(finding: WikiFinding) {
-  return {
-    id: finding.id,
-    kind: finding.kind,
-    status: wikiFindingStatus(finding),
-    ...(finding.internal ? { internal: true } : {}),
-    a: side(finding.draft),
-    b: side(finding.existing),
-    explanation: finding.explanation,
-    checkedAt: finding.checkedAt,
-    reportPaths: finding.reportPaths,
-    ...(finding.decision ? { decision: {
-      verdict: finding.decision.verdict, at: finding.decision.at,
-      ...(finding.decision.note ? { note: finding.decision.note } : {}),
-      ...(finding.decision.taskId ? { taskId: finding.decision.taskId } : {}),
-    } } : {}),
-    ...(finding.reopened ? { reopened: true } : {}),
-  };
+export interface WikiConflictsExtensionOptions {
+  /** Test seam for `recheck`; defaults to the Desktop knowledge-check service. */
+  readonly check?: () => Promise<WikiPageCheck>;
 }
 
 async function wikiReady(cwd: string): Promise<boolean> {
   try { return !!await initializedProjectWiki(cwd); } catch { return false; }
 }
 
-export default function wikiConflictsExtension(pi: ExtensionAPI): void {
-  pi.registerTool({
-    name: WIKI_CONFLICTS_TOOL,
-    label: "Wiki conflicts",
-    description: "Read-only list of contradictions and uncertainties found by Pix Wiki consistency checks, from reports saved in project Wiki pages. Returns findings with both quoted sides (a = reporting page, b = compared source; path, lines, quote), explanation, status (open, fix-pending = fix verdict awaiting recheck, decided = false positive/deferred, stale = no longer in a current report) and any user decision, plus totals. Does not run a new check or modify files.",
-    promptSnippet: "Use wiki_conflicts to see known contradictions in the project Wiki before editing or reconciling documentation.",
-    promptGuidelines: [
-      "wiki_conflicts reflects only saved check reports; a fix is confirmed only after the page is rechecked in Pix. Never edit the `<!-- pix:wiki-report ... -->` or `<!-- pix:wiki-check ... -->` metadata lines in Wiki pages.",
-    ],
-    defaultActive: false,
-    parameters: {
-      type: "object",
-      properties: {
-        status: { type: "string", enum: [...STATUSES], description: "Default open (includes fix-pending). all returns every status." },
-        kind: { type: "string", enum: [...KINDS], description: "conflict, uncertainty, or internal (both sides on one page)." },
-        path: { type: "string", maxLength: 1024, description: "Project-relative Wiki folder or page prefix; matches either side." },
-        limit: { type: "integer", minimum: 1, maximum: MAX_LIMIT, description: `Maximum findings returned (default ${DEFAULT_LIMIT}).` },
+export function createWikiConflictsExtension(options: WikiConflictsExtensionOptions = {}) {
+  return function wikiConflictsExtension(pi: ExtensionAPI): void {
+    pi.registerTool({
+      name: WIKI_CONFLICTS_TOOL,
+      label: "Wiki conflicts",
+      description: "Contradictions and uncertainties found by Pix Wiki consistency checks, from reports saved in project Wiki pages. "
+        + "action=list (default): findings with canonical sides a/b (path, lines, quote), quoteChanged (sides whose quote no longer occurs in the current page), "
+        + "explanation, status (open, fix-pending = fix verdict awaiting recheck, decided = false positive/deferred, stale = no longer in a current report), decision and totals; "
+        + "filter by status/kind/path or ids (full id or hex prefix). "
+        + "action=decide: record a verdict for one finding id in every report containing it: side-a / side-b (that side is correct; the other was fixed), "
+        + "different-scope, false-positive (note required), deferred, or clear to remove the decision. "
+        + "action=recheck: run the configured Wiki consistency check (paid model call) on one Wiki page and save its report; refuses to overwrite a page edited during the check.",
+      promptSnippet: "Use wiki_conflicts to see, decide and recheck known contradictions in the project Wiki.",
+      promptGuidelines: [
+        "wiki_conflicts: never edit the `<!-- pix:wiki-report ... -->` or `<!-- pix:wiki-check ... -->` metadata lines in Wiki pages.",
+        "wiki_conflicts decide: record side-a/side-b/different-scope only after the fix is actually written; false-positive and deferred only on the user's explicit decision.",
+        "wiki_conflicts recheck: costs a model call per page; use it once after finishing a page's fixes, not after every edit. A fix is confirmed only when the recheck no longer reports the finding.",
+      ],
+      defaultActive: false,
+      parameters: {
+        type: "object",
+        properties: {
+          action: { type: "string", enum: [...ACTIONS], description: "list (default), decide or recheck." },
+          status: { type: "string", enum: [...STATUSES], description: "list: default open (includes fix-pending); with ids default all. all returns every status." },
+          kind: { type: "string", enum: [...KINDS], description: "list: conflict, uncertainty, or internal (both sides on one page)." },
+          path: { type: "string", maxLength: 1024, description: "list: Wiki folder or page prefix matching either side. recheck: the Wiki page to check." },
+          ids: { type: "array", items: { type: "string" }, minItems: 1, maxItems: MAX_IDS, description: `list: finding ids or hex prefixes (≥${MIN_ID_PREFIX} chars).` },
+          limit: { type: "integer", minimum: 1, maximum: MAX_LIMIT, description: `list: maximum findings returned (default ${DEFAULT_LIMIT}).` },
+          id: { type: "string", maxLength: 64, description: `decide: finding id or unique hex prefix (≥${MIN_ID_PREFIX} chars).` },
+          verdict: { type: "string", enum: [...DECIDE_VERDICTS], description: "decide: side-a/side-b refer to sides a/b from list." },
+          note: { type: "string", maxLength: 1000, description: "decide: rationale; required for false-positive." },
+        },
+        additionalProperties: false,
       },
-      additionalProperties: false,
-    },
-    async execute(_id, params, signal, _update, ctx) {
-      try {
-        const { filter, limit } = parseWikiConflictsParams(params);
-        const wiki = await initializedProjectWiki(ctx.cwd);
-        if (!wiki) throw new Error("The project Wiki is not initialized.");
-        const scan = await scanWikiFindings(wiki, filter, signal);
-        const response = {
-          wiki: wiki.path,
-          summary: scan.summary,
-          matched: scan.findings.length,
-          findings: scan.findings.slice(0, limit).map(compactWikiFinding),
-          ...(scan.findings.length > limit ? { limited: true } : {}),
-          ...(scan.truncated ? { truncated: true } : {}),
-          scannedPages: scan.scannedPages,
-          ...(scan.skippedPages ? { skippedPages: scan.skippedPages } : {}),
-        };
-        return { content: [{ type: "text" as const, text: JSON.stringify(response) }], details: response };
-      } catch (error) {
-        const message = signal?.aborted ? "wiki_conflicts cancelled." : error instanceof Error ? error.message : "wiki_conflicts failed.";
-        return { content: [{ type: "text" as const, text: message }], isError: true, details: { error: message } };
-      }
-    },
-  });
+      async execute(_id, params, signal, _update, ctx) {
+        try {
+          const request = parseWikiConflictsParams(params);
+          const wiki = await initializedProjectWiki(ctx.cwd);
+          if (!wiki) throw new Error("The project Wiki is not initialized.");
+          const owned = signal ?? new AbortController().signal;
+          const response = request.action === "decide" ? await decideWikiConflict(wiki, request, owned)
+            : request.action === "recheck" ? await recheckWikiPage(wiki, request, await (options.check ?? defaultWikiPageCheck)(), owned)
+              : await listWikiConflicts(wiki, request, owned);
+          return { content: [{ type: "text" as const, text: JSON.stringify(response) }], details: response };
+        } catch (error) {
+          const message = signal?.aborted ? "wiki_conflicts cancelled." : error instanceof Error ? error.message : "wiki_conflicts failed.";
+          return { content: [{ type: "text" as const, text: message }], isError: true, details: { error: message } };
+        }
+      },
+    });
 
-  // Re-evaluated every run: the Wiki can be initialized or removed while a session is open.
-  pi.on("before_agent_start", async (event) => {
-    const ready = await wikiReady(event.systemPromptOptions.cwd);
-    const active = pi.getActiveTools();
-    const has = active.includes(WIKI_CONFLICTS_TOOL);
-    if (ready && !has) pi.setActiveTools([...active, WIKI_CONFLICTS_TOOL]);
-    else if (!ready && has) pi.setActiveTools(active.filter(name => name !== WIKI_CONFLICTS_TOOL));
-  });
+    // Re-evaluated every run: the Wiki can be initialized or removed while a session is open.
+    pi.on("before_agent_start", async (event) => {
+      const ready = await wikiReady(event.systemPromptOptions.cwd);
+      const active = pi.getActiveTools();
+      const has = active.includes(WIKI_CONFLICTS_TOOL);
+      if (ready && !has) pi.setActiveTools([...active, WIKI_CONFLICTS_TOOL]);
+      else if (!ready && has) pi.setActiveTools(active.filter(name => name !== WIKI_CONFLICTS_TOOL));
+    });
+  };
 }
+
+export default createWikiConflictsExtension();

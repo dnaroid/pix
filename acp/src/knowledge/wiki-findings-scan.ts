@@ -14,7 +14,7 @@ import { KNOWLEDGE_REPORT_PREFIX, MAX_KNOWLEDGE_REPORT_BYTES, MAX_KNOWLEDGE_STAM
  */
 
 export const MAX_WIKI_SCAN_FILES = 5_000;
-const MAX_PAGE_BYTES = MAX_KNOWLEDGE_DOCUMENT_CHARS * 4 + MAX_KNOWLEDGE_REPORT_BYTES + MAX_KNOWLEDGE_STAMP_BYTES;
+export const MAX_WIKI_PAGE_BYTES = MAX_KNOWLEDGE_DOCUMENT_CHARS * 4 + MAX_KNOWLEDGE_REPORT_BYTES + MAX_KNOWLEDGE_STAMP_BYTES;
 const CONFIG_PATH = ".pi/workspace.jsonc";
 
 export interface InitializedProjectWiki {
@@ -131,7 +131,7 @@ async function wikiPages(root: string, wikiPath: string, signal?: AbortSignal): 
 async function pageFindings(root: string, path: string): Promise<readonly WikiPageFinding[] | undefined> {
   const file = join(root, path);
   const info = await lstat(file);
-  if (!info.isFile() || info.size > MAX_PAGE_BYTES) return undefined;
+  if (!info.isFile() || info.size > MAX_WIKI_PAGE_BYTES) return undefined;
   const content = await readFile(file, "utf8");
   if (!content.includes(KNOWLEDGE_REPORT_PREFIX)) return [];
   const report = await readKnowledgeReport(content);

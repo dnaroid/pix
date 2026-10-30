@@ -974,10 +974,35 @@ ACP RPC sessions load `acp/dist/extensions/wiki-conflicts.js` (source
 is registered inactive and activated per run in `before_agent_start` only when
 the project Wiki is initialized (`.pi/workspace.jsonc` config, default
 `wiki/index.md`, with an existing index file); otherwise it is removed from the
-active tools. It is read-only: it scans saved `pix:wiki-report` lines in Wiki
-Markdown pages (at most 5,000 pages, symlinks and dot entries skipped) through
-the same projection as the Conflicts tab (`acp/src/knowledge/findings.ts`),
-never runs a check or writes. Parameters: `status` (`open` default, includes
-fix-pending; `fix-pending`, `decided`, `stale`, `all`), `kind` (`conflict`,
-`uncertainty`, `internal`), `path` prefix, `limit` 1–200 (default 30). It
-returns totals, both quoted sides, explanation, status and any decision.
+active tools. It scans saved `pix:wiki-report` lines in Wiki Markdown pages
+(at most 5,000 pages, symlinks and dot entries skipped) through the same
+projection as the Conflicts tab (`acp/src/knowledge/findings.ts`). Actions
+(`acp/src/extensions/wiki-conflicts-actions.ts`):
+
+- `list` (default): `status` (`open` default, includes fix-pending;
+  `fix-pending`, `decided`, `stale`, `all`), `kind` (`conflict`,
+  `uncertainty`, `internal`), `path` prefix, `ids` (full id or hex prefix of at
+  least 8 characters, up to 50; status defaults to all), `limit` 1–200
+  (default 30). Returns totals, sides `a`/`b` in canonical order (the same
+  order as verdicts `side-a`/`side-b`), explanation, status, decision and
+  `quoteChanged` — sides whose quote (whitespace-normalized, metadata
+  stripped) no longer occurs in the current page or whose page is unreadable.
+- `decide`: `id` (unique prefix allowed), `verdict` (`side-a`, `side-b`,
+  `different-scope`, `false-positive` with required `note`, `deferred`, or
+  `clear` to remove the decision), optional `note`. It writes the verdict to
+  every report containing the finding through the shared
+  `acp/src/knowledge/finding-decision.ts` (also used by the Conflicts tab); a
+  linked task is kept while the finding stays deferred. Guidance: fix
+  verdicts only after the fix is written; false-positive/deferred only on the
+  user's explicit decision.
+- `recheck`: `path` of one page inside the Wiki folder. Runs the same
+  `KnowledgeCheckService` as Desktop's explicit check (configured judge model —
+  a paid call — and native search; the ACP host passes the bundled suite via
+  `PIX_WIKI_CHECK_TOOLS_SUITE_EXTENSION`), records the result with
+  `recordKnowledgeCheck` and returns counts and the page's findings. If the page
+  changed during the check, the report is not saved (`saved: false`).
+
+Writes (`acp/src/knowledge/wiki-page-files.ts`) are compare-and-swap: the page
+is re-read before and after writing a same-directory temporary file, which is
+then renamed over the page; symlinks, hidden/parent segments and oversized
+files are rejected.

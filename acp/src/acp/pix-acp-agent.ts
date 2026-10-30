@@ -4484,6 +4484,9 @@ function piClientOptions(
 			PIX_ACP_SESSION_STATE_BRIDGE: "1",
 			...(workspaceUndoExtensionPath ? { PIX_ACP_WORKSPACE_UNDO_BRIDGE: "1" } : {}),
 			...(questionExtensionPath ? { PIX_QUESTION_RPC_BRIDGE: "1" } : {}),
+			// wiki_conflicts recheck runs the knowledge check with the same bundled suite.
+			...(wikiConflictsExtensionPath && toolsSuiteExtensionPath
+				? { PIX_WIKI_CHECK_TOOLS_SUITE_EXTENSION: toolsSuiteExtensionPath } : {}),
 		},
 		...(args.length > 0 ? { args } : {}),
 	};
