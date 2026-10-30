@@ -49,3 +49,5 @@ mutation semantics or supported Desktop platforms are introduced.
 
 Custom embedded controls, dynamic live commands, or native accessibility/focus
 regressions require a different command surface.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"20c5a6e8ea317041627f2d8db1fe118422e3645004fb583cd041b3222ae00a32","checkedAt":"2026-10-30T23:56:09.373Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":45,"reportLanguage":"ru"} -->

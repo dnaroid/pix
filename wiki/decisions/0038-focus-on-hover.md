@@ -53,3 +53,5 @@ tooltips, resizing and teardown behavior still need runtime verification.
 
 Native QA shows missing focus/hover/tooltips, drag interference, focus oscillation,
 or the user requests opt-in/no-focus behavior again.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"211bf05366b09d7e5cb807cd6ae8118f95522073c752bfd10b59b7f22b8472b0","checkedAt":"2026-10-30T23:55:02.247Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":42,"reportLanguage":"ru"} -->

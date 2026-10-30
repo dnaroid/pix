@@ -66,3 +66,5 @@ branch, with no new synchronous disk read. Regression coverage includes lazy
 resume, preserved summaries, true native overcapacity and large current tasks.
 Revisit when the SDK exposes provenance, changes invalidation/estimation, or
 large-session profiling calls for cooperative projection work.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"3d5cc977320e099bc52f1d06fb2852e1066eedc73bd330811a48e611aae395ce","checkedAt":"2026-10-30T23:55:19.263Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":58,"reportLanguage":"ru"} -->
