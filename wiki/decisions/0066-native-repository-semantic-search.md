@@ -61,3 +61,5 @@ separate permission for live provider evaluation. No structural/knowledge-review
 Measured coverage/latency requires background indexing; cache caps are routinely reached;
 provider compatibility expands; or a reviewed common vector-writer lifecycle permits safe
 consolidation without paid-vector loss.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"275566799d48fa0b435cf2b0fcbd5b4f846ff0903c72c6655b7f1bd9bdf1e5df","checkedAt":"2026-10-30T23:51:14.089Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":44,"reportLanguage":"ru"} -->

@@ -41,3 +41,5 @@ running processes need to restart to drop the loaded extension.
 
 The user explicitly requests this feature again and a supported, verifiable
 runtime rebinding mechanism is available.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"729c017953d604d857ddf2c6b61af567fc7ca73dfc9f6c2e67d2569ab39c73d5","checkedAt":"2026-10-30T23:41:09.934Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":49,"reportLanguage":"ru"} -->

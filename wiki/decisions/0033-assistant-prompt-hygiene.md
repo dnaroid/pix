@@ -65,3 +65,5 @@ Existing loaded extension processes need reload/restart after synchronization.
 SDK prompt reconstruction or section semantics change; another extension replaces
 the prompt after the suite; evidence shows the single policy authority is missed;
 or deterministic and live routing evaluations reveal regressions.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"866c6715970bf196ae29ce78216c11290e07beddb8596cb616f6f5e642569cfa","checkedAt":"2026-10-30T23:49:34.500Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":64,"reportLanguage":"ru"} -->

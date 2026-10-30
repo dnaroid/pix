@@ -43,3 +43,5 @@ native UI QA is necessary to establish actual paint timing.
 
 Native launch capture still exposes white frames, load completion precedes CSS
 painting, or failed navigation needs a separate visible error surface.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"812e615a2575d370f0667737411d6c92d1ef6f620d738b13177969866d5baede","checkedAt":"2026-10-30T23:43:39.821Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":49,"reportLanguage":"ru"} -->

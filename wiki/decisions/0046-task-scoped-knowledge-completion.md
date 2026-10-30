@@ -63,3 +63,5 @@ commands do not introduce new atomic cross-agent snapshot guarantees here.
 
 Models still conflate verdicts, shared-dependency races cannot be resolved with
 re-review, or task-local machine-readable receipts become necessary.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"4c7b45a4ee56edef6b4ce2d66863d96c2e23af17e0e51a7bb90a65dd521fa6a4","checkedAt":"2026-10-30T23:47:53.047Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":64,"reportLanguage":"ru"} -->

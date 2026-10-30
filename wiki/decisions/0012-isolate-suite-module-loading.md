@@ -54,3 +54,5 @@ approval for unfinished work, and non-registration side effects still need owner
 SDK registration APIs change, a module requires self-introspection during factory
 initialization, or a failure demonstrates resource leaks/hangs requiring module
 cleanup contracts or stronger runtime isolation.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"9380567d2a571acf6aa53f8972faecc2f0554f056d5a74d32d3ab2f1f8fc3f95","checkedAt":"2026-10-30T23:50:26.878Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":65,"reportLanguage":"ru"} -->

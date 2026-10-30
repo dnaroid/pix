@@ -64,3 +64,5 @@ extend retention. Closing a panel neither cancels nor resets an idle timer.
 Revisit if measured restart cost warrants a different timeout or configuration,
 if future long-lived operations need explicit activity guards, or if a server's
 workspace semantics cannot be represented by configured root markers.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"81f997a82c9876533ad5c3e4e0b61bda95b42169fae7e1093285c18276146fed","checkedAt":"2026-10-30T23:47:35.007Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":58,"reportLanguage":"ru"} -->

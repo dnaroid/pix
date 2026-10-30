@@ -48,3 +48,5 @@ still requires macOS acceptance evidence beyond mocked frontend tests.
 
 Desktop platform support changes, users require draft export or remote-video
 caching, or native pasteboard compatibility tests expose application failures.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"3094e9cead0f9facb4ea766dbc9e76eb8b6d8dbcc2734ea056c1e9d8ccd0d73a","checkedAt":"2026-10-30T23:46:45.466Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":53,"reportLanguage":"ru"} -->

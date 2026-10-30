@@ -51,3 +51,5 @@ deterministic lifecycle tests are required. Other modal dialogs are unchanged.
 
 Native keyboard or narrow-window testing reveals clipped controls, unwanted
 focus restoration, or interaction conflicts with other status popups.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"22e6ed1ae779f12e744abb5291377c516b00f7d39cfdd5ea054409b411fa58ec","checkedAt":"2026-10-30T23:44:14.803Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":11,"candidateSources":49,"reportLanguage":"ru"} -->

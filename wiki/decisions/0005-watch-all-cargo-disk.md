@@ -66,3 +66,5 @@ leave obsolete dependency artifacts; other target directories are not reclaimed.
 
 Target continues growing across same-profile web rebuilds, native rebuild times
 become unacceptable, or watch-mode source-level debugging becomes a requirement.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"e89c26a7c840710eed92a762edeeb4523e989d6e3950becf32602ccf8a61a864","checkedAt":"2026-10-30T23:49:49.233Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":64,"reportLanguage":"ru"} -->

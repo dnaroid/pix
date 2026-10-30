@@ -54,3 +54,5 @@ than introducing another themed modal component.
 Activity reporting loses runs or IPC latency is observably significant; product
 adds unsaved-document/composer shutdown warnings; or native UI verification shows
 platform dialog/exit behavior differs from the contract.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"caa8b79d3368c7aafb2e77fd15dda0b66c8d2b8a95537fa30a39dce1b5ed297c","checkedAt":"2026-10-30T23:41:32.375Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":56,"reportLanguage":"ru"} -->

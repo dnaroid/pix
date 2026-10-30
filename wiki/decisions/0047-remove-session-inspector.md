@@ -52,3 +52,5 @@ tabs, activity transport, and Plan clearing remain unchanged.
 The status-bar activity popups no longer provide the required live Plan or
 Subagents information and a distinct replacement surface is explicitly
 requested.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"0eebe70381aec280e7b77752568674e45bd58a15b6474b56ee4df4f18cd3b3aa","checkedAt":"2026-10-30T23:52:45.521Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":39,"reportLanguage":"ru"} -->

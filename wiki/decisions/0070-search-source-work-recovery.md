@@ -94,3 +94,5 @@ legacy import/migration code and migration tests have been removed. Only the six
 source-local stores are supported; schema-1 Settings caches fail without mutation.
 The source/provider ownership and uncertain-billing recovery decision remains
 unchanged. See the governing specifications for the final storage contract.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"2d7269a238ae4e51b6ef50fc54530b6d259404ae0868764a45af0400c42b8dc7","checkedAt":"2026-10-30T23:42:47.818Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":63,"reportLanguage":"ru"} -->

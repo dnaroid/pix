@@ -50,3 +50,5 @@ must not be interpreted as execution or success guarantees.
 
 Verified common invocations need additional safe prefixes, script naming proves
 misleading, or explicit streaming events are used to identify response writing.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"4734bd937708c9f008e29b3e0659f116b6b956971cbac6dabf2e07f378fecfb6","checkedAt":"2026-10-30T23:48:34.751Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":67,"reportLanguage":"ru"} -->

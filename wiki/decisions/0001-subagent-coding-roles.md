@@ -75,3 +75,5 @@ attempts, review findings, rework, total cost and latency. Reconsider if Luna
 repeatedly needs costly repairs, Sol's total accepted-work cost is better, or
 GLM demonstrates reliable semantic work under the same scope/check discipline.
 Do not change policy from token price or isolated timeout counts alone.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"daa84cb80c6e7a6cfcf56a219675b1ceccab17bce5f49561de027772480289af","checkedAt":"2026-10-30T23:43:56.850Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":64,"reportLanguage":"ru"} -->

@@ -42,3 +42,5 @@ installed native tracking view.
 ## Revisit when
 
 A reliable no-activation hover solution is demonstrated and explicitly requested.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"33850537aa62c1a69d16439063ce555b7aaeca92eeb292be5f3f8667b8321d75","checkedAt":"2026-10-30T23:54:25.746Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":36,"reportLanguage":"ru"} -->

@@ -44,3 +44,5 @@ guards. Outside-project files remain reachable through OS actions, not this tree
 ## Revisit when
 
 Explorer supports multiple roots, external files, or separate editor tabs.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"ebd5cd5e97f26cdb4dc1ec43658a837a37d156be5fa5eb2b9191be1cdb171228","checkedAt":"2026-10-30T23:47:19.137Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":52,"reportLanguage":"ru"} -->

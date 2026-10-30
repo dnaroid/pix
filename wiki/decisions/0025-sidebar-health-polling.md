@@ -33,3 +33,5 @@ Closed panels gained explicit signals with existing sparse scheduling. Checks re
 ## Revisit when
 
 The sidebar health contract or Git CI recovery/cadence needs change.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"a0f7fbe3b03cb52cfc98a3db7df7494a4a54711d3a731615c0e676a4feaa7eb5","checkedAt":"2026-10-30T23:42:28.664Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":52,"reportLanguage":"ru"} -->

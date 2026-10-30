@@ -49,3 +49,5 @@ it. No SDK API or persisted session format changes are required.
 
 The private protocol gains explicit run-lifecycle metadata, or upstream provides
 a supported pause/continuation lifecycle that replaces these states.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"6a35d6fb0ad9cb9f223a8b9f73ca1fa53db376ac3f90219e402dff1956ad1841","checkedAt":"2026-10-30T23:51:40.144Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":46,"reportLanguage":"ru"} -->

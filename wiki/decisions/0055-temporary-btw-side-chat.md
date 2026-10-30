@@ -64,3 +64,5 @@ lifecycle tests.
 
 Evidence: `acp/test/btw.test.ts`, `acp/test/pi-rpc-btw.test.ts`,
 `desktop/src/app/btw.test.ts`, `desktop/scripts/btw-smoke.mjs`.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"f7e8b702b49ef645ff2ad351c196e4ca76ae7b9d0bbadf5a288ca9ac8fa4c8de","checkedAt":"2026-10-30T23:54:08.148Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":60,"reportLanguage":"ru"} -->

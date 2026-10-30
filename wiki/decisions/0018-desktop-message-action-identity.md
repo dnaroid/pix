@@ -32,3 +32,5 @@ An optimistic row has no actionable entry until binding completes; an older unke
 - The prompt protocol supplies the submitted entry ID directly.
 - Extensions can prepend unrelated user entries before the submitted prompt.
 - Legacy unkeyed history must remain actionable without reload.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"423089362d97f192f2a9074c4235ec70014f9ae4c80799a8d2dd47dcc020681e","checkedAt":"2026-10-30T23:53:48.002Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":62,"reportLanguage":"ru"} -->

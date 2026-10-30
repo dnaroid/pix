@@ -42,3 +42,5 @@ across arbitrary transcript edits. The map is released with the controller.
 
 Users need restart persistence, or transcript changes while hidden require
 entry-based rather than numeric-offset restoration.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"1bb07a8a4c0973bdfee145c9948861de8edeb345dfbf9bf8ff4d8234ab8903c5","checkedAt":"2026-10-30T23:45:36.181Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":50,"reportLanguage":"ru"} -->
