@@ -57,3 +57,5 @@ The shared contract and Desktop behavior are documented in the
 See [Development](guide.md) for the source checkout and build/test
 commands. Renderer/SDK behavior changes should be tested against the public
 extension contract rather than only against one visual path.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"de8f046f6b235a9754ee7f23aa94e834b65b614fca3b2e7d2d3e1a74ac5e28e8","checkedAt":"2026-10-30T23:20:05.881Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":56,"reportLanguage":"ru"} -->

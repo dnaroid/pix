@@ -198,3 +198,5 @@ a separate explicitly requested scenario.
 - Run `node --import tsx --test tests/watch-all*.test.ts`,
   `npm --prefix desktop run check`, and a production Desktop web/native smoke
   build using the private frontend override.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"937e0979fa8d3576157441845fd37d244b5b8302cb0ce058269a17033b693b8b","checkedAt":"2026-10-30T23:21:02.142Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":59,"reportLanguage":"ru"} -->

@@ -1332,7 +1332,7 @@ session mutation/startup from the viewer.
 
 ## Tests
 
-- `external/pi-tools-suite/test/async-subagents/dcp.test.ts`: command-free child DCP, lifecycle activation, disabled configuration and actual in-memory compression without journal/session writes or raw-history mutation.
+- `external/pi-tools-suite/test/async-subagents/dcp.test.ts`: command-free child DCP, lifecycle activation, disabled configuration and actual compression under an in-memory (`SessionManager.inMemory()`) host without journal/session writes or raw-history mutation. Real async children are persisted and journal normally.
 
 - `external/pi-tools-suite/test/async-subagents/work-tools.test.ts`: optional
   policy, CLI removals, project replacements, read-only lifecycle/call guard,

@@ -46,3 +46,5 @@ and [handoff](../decisions/0021-transparent-workspace-handoff.md) decisions.
 Root, ACP and Desktop typechecks plus targeted bundled extension, session
 lifecycle and state bridge/coordinator regressions. These checks do not claim
 interactive UI QA.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"699ebb46da5e96aa53c0e19ded97b3c36cdfd80f85c36c9ff5d40d4a456bc0d8","checkedAt":"2026-10-30T23:18:23.849Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":66,"reportLanguage":"ru"} -->

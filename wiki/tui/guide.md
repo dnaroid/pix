@@ -1,3 +1,4 @@
+<!-- pix:wiki-report {"version":1,"checkedAt":"2026-10-30T23:24:12.098Z","result":{"path":"wiki/tui/guide.md","documentHash":"a40644e791067ebefd5e1464dffdc6c8be09553c1beb7768b6eebeb48874e3fd","modelRef":"zai/glm-5.3-flash","reportLanguage":"ru","checkedSources":12,"conflicts":[],"uncertainties":[],"reviewedSources":[],"notices":["Состав Wiki изменился или не удалось проверить его во время поиска; повторите проверку.","Документ, настройки или содержимое Wiki изменились во время проверки. Повторите её."],"coverage":{"scope":"retrieved-passages","checkedPassages":12,"candidateSources":62,"excerptedSources":11,"limits":["query-sampling","candidate-limit","source-limit","context-limit","passage-limit"]},"status":"incomplete"}} -->
 # Using Pix TUI
 
 <!-- markdownlint-disable MD013 -->
@@ -167,3 +168,5 @@ them. Use the message action **Undo changes** to rewind that branch and restore
 recorded workspace changes.
 
 Workspace undo is a safety net, not a replacement for version control.
+
+<!-- pix:wiki-check {"version":1,"status":"attempted","runId":"be10804d-802a-4a0d-81f8-ba18fd60f930","contentHash":"a40644e791067ebefd5e1464dffdc6c8be09553c1beb7768b6eebeb48874e3fd","checkedAt":"2026-10-30T23:24:12.101Z","maxDocumentChars":128000} -->

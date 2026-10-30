@@ -15,3 +15,5 @@ Source setup, extension development and asset watching. Use focused checks for o
 - [Extension authors](extensions.md)
 - [Development](guide.md)
 - [watch:all Desktop web asset embedding](watch-all-desktop-assets.md) — active
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"77478c2b053f0349ce5ea81ad2c42bc4a254878c9e51996b9bb39ef4388eca97","checkedAt":"2026-10-30T23:21:15.551Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":51,"reportLanguage":"ru"} -->

@@ -70,3 +70,5 @@ After `/reload` and other resource-reload flows, report loaded context file path
 - `acp/test/context-inventory.test.ts`
 - `external/pi-tools-suite/test/context-inventory.test.ts`
 - `acp/test/agent.test.ts`
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"7d71a16e9ee9dbbe0f0a1d2e760efe1e7ec2a347c637814e2b021d7cd034bc16","checkedAt":"2026-10-30T23:17:08.832Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":71,"reportLanguage":"ru"} -->

@@ -25,3 +25,5 @@ Only explicitly historical/removed behavior is placed here. Superseded ADRs rema
 - [0065 — Shared local repository search with a separate disposable file index](../decisions/0065-native-repository-search.md) — consult its replacement metadata; partial supersession does not invalidate retained choices.
 
 The [Desktop guide](../desktop/guide.md) and [Desktop contracts](../desktop/index.md) replace the MVP feature inventory. The [workspace removal decision](../decisions/0023-remove-workspace-tool.md) explains the removed workspace tool.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"1804f1cd9f1ba1e9a705e557f4231429b822565b4e1f7ddbd16f33835ebb1934","checkedAt":"2026-10-30T23:18:45.852Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":53,"reportLanguage":"ru"} -->

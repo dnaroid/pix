@@ -179,3 +179,5 @@ current product non-goals.
   than exposing a general shell plugin to the webview.
 - Unknown: final production sidecar packaging format and signing/notarization
   workflow.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"7f18b5714631ef3be209d180ace1d9ef6673cb880d2f9fb6adf1fe7a312a8849","checkedAt":"2026-10-30T23:18:05.727Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":73,"reportLanguage":"ru"} -->

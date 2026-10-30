@@ -179,3 +179,5 @@ verification runs the suite typecheck/tests/smoke gate and host checks.
 Evidence is recorded by
 `external/pi-tools-suite/test/session-recovery.test.ts` and the implementation
 in `external/pi-tools-suite/src/session-recovery/index.ts`.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"579b58f661f19e066891644f506c96e2169ca418c178067c05825bdc4a5977e6","checkedAt":"2026-10-30T23:17:43.805Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":51,"reportLanguage":"ru"} -->
