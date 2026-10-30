@@ -210,6 +210,8 @@ export function createDesktopSidebarViewModel(options: {
     },
     projectDocuments: options.projectDocuments.snapshot,
     knowledgeJobs: options.projectDocuments.knowledgeJobs,
+    wikiAutoCheck: options.projectDocuments.wikiAutoCheck,
+    onSetWikiAutoCheck: options.projectDocuments.setWikiAutoCheck,
     onCancelKnowledgeCheck: options.projectDocuments.cancelKnowledgeCheck,
     onDismissKnowledgeCheck: options.projectDocuments.dismissKnowledgeCheck,
     onOpenKnowledgeCitation: (citation, language) => options.preview.openKnowledgeCitation(citation, "push", language),

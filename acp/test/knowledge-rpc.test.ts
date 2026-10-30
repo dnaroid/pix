@@ -37,7 +37,7 @@ test("Desktop Wiki check RPC validates requests, preserves errors and never star
     await cx.request("initialize", { protocolVersion: PROTOCOL_VERSION, clientInfo: { name: "pix-desktop", version: "test" } });
     assert.deepEqual(await cx.request(KNOWLEDGE_CHECK_METHOD, request), response);
     for (const invalid of [{ ...request, cwd: "relative" }, { ...request, path: "../outside.md" },
-      { ...request, content: "x".repeat(48_001) }]) await assert.rejects(cx.request(KNOWLEDGE_CHECK_METHOD, invalid));
+      { ...request, content: "x".repeat(128_001) }]) await assert.rejects(cx.request(KNOWLEDGE_CHECK_METHOD, invalid));
     assert.deepEqual(received, [request]);
     fail = true;
     await assert.rejects(cx.request(KNOWLEDGE_CHECK_METHOD, request), /Comparison provider is unavailable/);

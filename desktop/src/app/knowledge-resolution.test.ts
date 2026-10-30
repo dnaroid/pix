@@ -3,8 +3,8 @@ import type { AcpClient } from "../lib/acp-client";
 import type { KnowledgeResolutionRequest } from "../lib/knowledge-resolution";
 import { createKnowledgeResolution } from "./knowledge-resolution.svelte";
 
-const { buildPrompt } = vi.hoisted(() => ({ buildPrompt: vi.fn() }));
-vi.mock("../lib/knowledge-resolution", () => ({ knowledgeResolutionPrompt: buildPrompt }));
+const { buildPrompt, buildBatchPrompt } = vi.hoisted(() => ({ buildPrompt: vi.fn(), buildBatchPrompt: vi.fn() }));
+vi.mock("../lib/knowledge-resolution", () => ({ knowledgeResolutionPrompt: buildPrompt, knowledgeBatchResolutionPrompt: buildBatchPrompt }));
 
 const prompt = "Разбери проверенный отчёт и сохрани более новые правки пользователя.";
 const input = (workspace = "/one"): KnowledgeResolutionRequest => ({
@@ -47,7 +47,10 @@ function fixture() {
   };
 }
 
-beforeEach(() => { buildPrompt.mockReset(); buildPrompt.mockResolvedValue(prompt); });
+beforeEach(() => {
+  buildPrompt.mockReset(); buildPrompt.mockResolvedValue(prompt);
+  buildBatchPrompt.mockReset(); buildBatchPrompt.mockReturnValue(prompt);
+});
 
 describe("Wiki report to new resolution session", () => {
   it("is idle until explicitly started and hands the complete prompt to a distinct ready session", async () => {
@@ -274,5 +277,39 @@ describe("Wiki report to new resolution session", () => {
     expect(f.refresh).not.toHaveBeenCalled();
     expect(f.reportError).not.toHaveBeenCalled();
     expect(f.client.closeSession).not.toHaveBeenCalled();
+  });
+});
+
+describe("Wiki basket to new resolution session", () => {
+  const batch = (workspace = "/one") => ({ workspace, language: "ru" as const, items: [] });
+
+  it("sends the batch prompt to a new session and reports success", async () => {
+    const f = fixture(), request = batch();
+    await expect(f.resolution.startBatch(request)).resolves.toBe(true);
+    expect(buildBatchPrompt).toHaveBeenCalledExactlyOnceWith(request);
+    expect(buildPrompt).not.toHaveBeenCalled();
+    expect(f.activate).toHaveBeenCalledExactlyOnceWith("resolution-session", "/one", prompt);
+    expect(f.started).toHaveBeenCalledExactlyOnceWith("resolution-session");
+  });
+
+  it("reports false without a session when blocked, and closes the session on failure", async () => {
+    const blocked = fixture();
+    blocked.setRunning(true);
+    await expect(blocked.resolution.startBatch(batch())).resolves.toBe(false);
+    expect(blocked.client.newSession).not.toHaveBeenCalled();
+
+    const failing = fixture();
+    failing.runtime.isReady.mockReturnValue(false);
+    await expect(failing.resolution.startBatch(batch())).resolves.toBe(false);
+    expect(failing.client.closeSession).toHaveBeenCalledExactlyOnceWith("resolution-session");
+    expect(failing.reportError).toHaveBeenCalledOnce();
+    expect(String(failing.reportError.mock.calls[0]![0])).toContain("Не удалось подготовить");
+  });
+
+  it("reports false when the workspace changes while the prompt is built", async () => {
+    const f = fixture();
+    buildBatchPrompt.mockImplementationOnce(() => { f.changeWorkspace("/two"); return prompt; });
+    await expect(f.resolution.startBatch(batch())).resolves.toBe(false);
+    expect(f.client.newSession).not.toHaveBeenCalled();
   });
 });

@@ -93,3 +93,5 @@ Keep Desktop model and thinking selection available while the agent is running, 
 - Desktop metadata-store coverage applies a pushed `config_option_update` to the active session state and the per-session runtime map (background sessions update only the runtime map).
 - Desktop model-display tests cover the Claude Code provider's Anthropic glyph and color mapping.
 - `desktop/src/lib/model-picker-navigation.test.ts` covers current/Auto initialization, search, and supported-effort arrow cycling. `desktop/src/lib/model-picker-popover.test.ts` covers popup placement, dismissal, focus and listener cleanup; `desktop/src/app/model-picker-state.test.ts` covers repeat activation and late opening completion. `desktop/src/components/ModelThinkingPicker.test.ts` guards keyboard/confirmation wiring and stale Apply completion.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"4c441c704378fbf6575e10c6e507c1bda8752524fe209fc7690cd1eec3caacdc","checkedAt":"2026-10-30T23:06:57.860Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":57,"reportLanguage":"ru"} -->

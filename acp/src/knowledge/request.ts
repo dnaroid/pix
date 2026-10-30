@@ -16,7 +16,8 @@ export function parseKnowledgeCheckRequest(value: unknown): KnowledgeCheckReques
     || stripKnowledgeCheckStamp(request.content).length > MAX_KNOWLEDGE_DOCUMENT_CHARS
     || request.content.includes("\0")) return invalid();
   if (request.expectedContent !== undefined && (typeof request.expectedContent !== "string"
-    || request.expectedContent.length > 512 * 1024 || request.expectedContent.includes("\0"))) return invalid();
+    || request.expectedContent.length > MAX_KNOWLEDGE_DOCUMENT_CHARS + MAX_KNOWLEDGE_STAMP_BYTES + MAX_KNOWLEDGE_REPORT_BYTES
+    || request.expectedContent.includes("\0"))) return invalid();
   return { cwd: request.cwd, path: request.path, content: request.content,
     ...(typeof request.expectedContent === "string" ? { expectedContent: request.expectedContent } : {}) };
 }

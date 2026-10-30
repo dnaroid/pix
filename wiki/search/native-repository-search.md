@@ -22,8 +22,9 @@ uncertain-work recovery: [0070](../decisions/0070-search-source-work-recovery.md
 
 Desktop [Wiki contradiction checks](../desktop/workbench/desktop-project-wiki.md#contradiction-checks)
 reuse this engine in hybrid mode, scoped to Knowledge and the selected project's
-configured Wiki. Their separate sessionless answer-model comparison uses verified
-source passages after retrieval. The Wiki spec defines the save/report flow,
+configured Wiki. Their separate sessionless contradiction judge uses verified
+source passages after retrieval and independent `knowledgeCheck.modelRef` /
+`knowledgeCheck.thinking` settings, not Search RAG preferences. The Wiki spec defines the save/report flow,
 completion rules and budgets; ordinary native retrieval keeps its existing
 source/provider configuration and performs no answer generation.
 

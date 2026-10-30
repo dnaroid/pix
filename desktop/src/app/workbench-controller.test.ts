@@ -18,7 +18,7 @@ describe("workbench close navigation", () => {
       activeTabId: () => activeId, activeConversationTabId: () => null,
       setActiveTabId, handleSessionTabClick: vi.fn(), closeSessionTab: vi.fn(),
       previewPane: () => pane, closePreview, closeGitDiff: vi.fn(), closeLspInstall: vi.fn(),
-      closeTerminal: vi.fn(), retargetPreviewAnchor: vi.fn(), retargetGitAnchor: vi.fn(),
+      closeTerminal: vi.fn(), closeWikiConflicts: vi.fn(), retargetPreviewAnchor: vi.fn(), retargetGitAnchor: vi.fn(),
     });
     const pending = controller.close("preview", null);
     expect(pane.requestClose).toHaveBeenCalledOnce();
@@ -49,7 +49,7 @@ describe("workbench close navigation", () => {
         return accepted;
       },
       previewPane: () => null, closePreview: vi.fn(), closeGitDiff: vi.fn(),
-      closeLspInstall: vi.fn(), closeTerminal: vi.fn(),
+      closeLspInstall: vi.fn(), closeTerminal: vi.fn(), closeWikiConflicts: vi.fn(),
       retargetPreviewAnchor: vi.fn(), retargetGitAnchor: vi.fn(),
     });
     const pending = controller.close(closingId, nextId);
@@ -83,14 +83,32 @@ describe("workbench close navigation", () => {
         return true;
       },
       previewPane: () => null, closePreview: vi.fn(), closeGitDiff: vi.fn(),
-      closeLspInstall: vi.fn(), closeTerminal: vi.fn(),
+      closeLspInstall: vi.fn(), closeTerminal: vi.fn(), closeWikiConflicts: vi.fn(),
       retargetPreviewAnchor: vi.fn(), retargetGitAnchor: vi.fn(),
     });
     await expect(controller.close(closingId, previewId)).resolves.toBe(true);
     expect(activeId).toBe(previewId);
   });
 
-  it.each(["preview", "git-diff", "terminal"] as const)("preserves a visible %s surface when the underlying conversation changes", (kind) => {
+  it("closes the Wiki Conflicts tab through its own owner, not the terminal", async () => {
+    const tab = { id: "wiki-conflicts", kind: "wiki-conflicts", openCount: 3, label: "Wiki Conflicts",
+      title: "Wiki Conflicts", panelId: "workbench-panel-wiki-conflicts", closable: true } as const;
+    const fallback = workbenchSessionTabId("next");
+    let activeId: WorkbenchTabId | null = "wiki-conflicts";
+    const closeTerminal = vi.fn(), closeWikiConflicts = vi.fn();
+    const controller = createWorkbenchController({
+      tabs: () => [tab], activeTabId: () => activeId, activeConversationTabId: () => fallback,
+      setActiveTabId: (id) => { activeId = id; }, handleSessionTabClick: vi.fn(), closeSessionTab: vi.fn(),
+      previewPane: () => null, closePreview: vi.fn(), closeGitDiff: vi.fn(), closeLspInstall: vi.fn(),
+      closeTerminal, closeWikiConflicts, retargetPreviewAnchor: vi.fn(), retargetGitAnchor: vi.fn(),
+    });
+    await expect(controller.close("wiki-conflicts", fallback)).resolves.toBe(true);
+    expect(closeWikiConflicts).toHaveBeenCalledOnce();
+    expect(closeTerminal).not.toHaveBeenCalled();
+    expect(activeId).toBe(fallback);
+  });
+
+  it.each(["preview", "git-diff", "terminal", "wiki-conflicts"] as const)("preserves a visible %s surface when the underlying conversation changes", (kind) => {
     expect(shouldActivateConversationTab({ kind } as never)).toBe(false);
     expect(shouldActivateConversationTab({ kind: "session" } as never)).toBe(true);
     expect(shouldActivateConversationTab(undefined)).toBe(true);

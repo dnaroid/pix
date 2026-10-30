@@ -99,8 +99,15 @@ intent and task type classification), plus `search.embedding` /
 from disk afterwards. Setup uses sessionless ACP requests and does not create
 a chat session.
 
+**Features → Assistant** includes **Contradiction judge** (shared Suite setting)
+and **Contradiction judge (Desktop override)**, with independent reasoning.
+Neither slot defaults to a session or Search model. An empty Desktop override
+inherits Suite; its model and reasoning can each be reset in the wizard. These
+choices appear in **In use** and replace-everywhere. See the
+[judge configuration contract](../configuration/guide.md#wiki-contradiction-judge).
+
 Settings show models read-only with **Edit in wizard…**: Default & router
-models, Feature models, Git models, Observer model, Sub-agent models, Lookup
+models, Feature models, Contradiction judge, Git models, Observer model, Sub-agent models, Lookup
 models and Summarizer models. Wizard-managed routing tiers (simple, standard,
 complex, expert) show model/thinking read-only; custom tiers stay editable, as
 do non-model settings such as Auto by default, routing fallback tier, visible

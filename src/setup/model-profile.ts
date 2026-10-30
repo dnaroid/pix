@@ -73,7 +73,9 @@ export interface ModelSlot {
 	readonly group: string;
 	/** Role whose model this slot takes unless overridden. */
 	readonly role: keyof ModelRoles;
-	readonly file: "pix" | "suite";
+	readonly file: "pix" | "suite" | "desktop";
+	readonly emptyLabel?: string;
+	readonly thinkingDefaultLabel?: string;
 	/** No role default: written only when the user picks a value (empty clears it). */
 	readonly optional?: boolean;
 	/** Offer only vision-capable models. */
@@ -106,7 +108,7 @@ const pixSlot = (id: string, label: string, group: string, role: keyof ModelRole
 const suiteSlot = (id: string, label: string, group: string, role: keyof ModelRoles, path: SlotDef["path"]): SlotDef =>
 	({ id, label, group, role, file: "suite", path });
 
-const optSlot = (file: "pix" | "suite", id: string, label: string, group: string, path: SlotDef["path"], extra: { list?: boolean; vision?: boolean; parent?: string; openrouter?: boolean } = {}): SlotDef =>
+const optSlot = (file: ModelSlot["file"], id: string, label: string, group: string, path: SlotDef["path"], extra: { list?: boolean; vision?: boolean; parent?: string; openrouter?: boolean; emptyLabel?: string; thinkingDefaultLabel?: string } = {}): SlotDef =>
 	({ id, label, group, role: "main", file, path, optional: true, ...extra });
 const listPath = (key: string, p: Path) => (cfg: Cfg): Path | undefined =>
 	(key === "" || (cfg[key] === undefined || (cfg[key] && typeof cfg[key] === "object"))) ? p : undefined;
@@ -144,6 +146,7 @@ const AGENT_ROLES: ReadonlyArray<readonly [string, keyof ModelRoles]> = [
 	["implement-core", "main"], ["mechanical", "main"],
 ];
 const SUITE_SLOTS: readonly SlotDef[] = [
+	optSlot("suite", "knowledge-judge", "Contradiction judge", "Assistant", fixed("knowledgeCheck", "modelRef"), { emptyLabel: "No judge selected", thinkingDefaultLabel: "Low (default)" }),
 	suiteSlot("frontier-primary", "Frontier model (primary)", "Frontier", "strong", fixed("frontierModels", 0, "model")),
 	// Extra frontier entries have no role default: only models the user lists stay frontier.
 	optSlot("suite", "frontier-extra", "More frontier models", "Frontier", fixed("frontierModels"), { list: true, parent: "frontier-primary" }),
@@ -154,9 +157,14 @@ const SUITE_SLOTS: readonly SlotDef[] = [
 	optSlot("suite", "lookup-fallback", "Lookup fallback", "Vision", fixed("lookupFallbackModels"), { list: true, vision: true, parent: "lookup" }),
 ];
 
+const DESKTOP_SLOTS: readonly SlotDef[] = [
+	optSlot("desktop", "knowledge-judge-desktop", "Contradiction judge (Desktop override)", "Assistant", fixed("knowledgeCheck", "modelRef"), { parent: "knowledge-judge", emptyLabel: "Use Tools Suite setting", thinkingDefaultLabel: "Use Tools Suite setting" }),
+];
+
 const THINKING_LEVELS: readonly string[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 /** field: sibling `thinking` key next to modelRef; suffix: `provider/model:level`. */
 const THINKING_KIND: Readonly<Record<string, "field" | "suffix">> = {
+	"knowledge-judge": "field", "knowledge-judge-desktop": "field",
 	default: "field", "tier-simple": "field", "tier-standard": "field", "tier-complex": "field", "tier-expert": "field",
 	"git-review": "suffix", "git-commit": "suffix",
 	...Object.fromEntries(AGENT_ROLES.map(([agent]) => [`agent-${agent}`, "suffix" as const])),
@@ -169,9 +177,14 @@ const thinkingOf = (overrides: SlotOverrides, id: string): string | undefined =>
 const at = (cfg: Cfg, path: Path): unknown => path.reduce<any>((o, k) => (o == null ? undefined : o[k]), cfg);
 
 /** Optional slot: skip when untouched; an empty pick clears. Lists are de-duplicated and never repeat the primary. */
-function applyOptional(out: string, cfg: Cfg, slot: SlotDef, value: string | readonly string[] | undefined, primary?: string): string {
+function applyOptional(out: string, cfg: Cfg, slot: SlotDef, value: string | readonly string[] | undefined, primary?: string, thinking?: SlotOverrides[string]): string {
 	const path = slot.path(cfg);
-	if (!path || value === undefined) return out;
+	if (!path) return out;
+	if (THINKING_KIND[slot.id] === "field" && typeof thinking === "string"
+		&& (thinking === "" || THINKING_LEVELS.includes(thinking))) {
+		out = set(out, [...path.slice(0, -1), "thinking"], thinking || undefined);
+	}
+	if (value === undefined) return out;
 	if (slot.list) {
 		const raw = typeof value === "string" ? [value] : value;
 		const list = [...new Set(raw.map((v) => v.trim()).filter((v) => v && v !== primary))];
@@ -183,7 +196,7 @@ function applyOptional(out: string, cfg: Cfg, slot: SlotDef, value: string | rea
 	return set(out, path, single);
 }
 
-export const MODEL_SLOTS: readonly ModelSlot[] = [...PIX_SLOTS, ...SUITE_SLOTS].map(({ id, label, group, role, file, optional, vision, parent, list, openrouter }) => ({ ...(openrouter ? { openrouter } : {}), id, label, group, role, file, ...(THINKING_KIND[id] ? { thinking: true } : {}), ...(optional ? { optional } : {}), ...(vision ? { vision } : {}), ...(parent ? { parent } : {}), ...(list ? { list } : {}) }));
+export const MODEL_SLOTS: readonly ModelSlot[] = [...PIX_SLOTS, ...SUITE_SLOTS, ...DESKTOP_SLOTS].map(({ id, label, group, role, file, optional, vision, parent, list, openrouter, emptyLabel, thinkingDefaultLabel }) => ({ ...(openrouter ? { openrouter } : {}), id, label, group, role, file, ...(THINKING_KIND[id] ? { thinking: true } : {}), ...(optional ? { optional } : {}), ...(vision ? { vision } : {}), ...(parent ? { parent } : {}), ...(list ? { list } : {}), ...(emptyLabel ? { emptyLabel } : {}), ...(thinkingDefaultLabel ? { thinkingDefaultLabel } : {}) }));
 
 const slotValue = (slot: ModelSlot, roles: ModelRoles, overrides: SlotOverrides): string =>
 	(typeof overrides[slot.id] === "string" ? (overrides[slot.id] as string).trim() : "") || roles[slot.role];
@@ -213,6 +226,14 @@ export function applyModelRolesToPixConfig(source: string, roles: ModelRoles, ov
 	return out;
 }
 
+/** Desktop-only overrides must never be written to pix.jsonc. */
+export function applyModelRolesToDesktopConfig(source: string, roles: ModelRoles, overrides: SlotOverrides = {}): string {
+	let out = applyModelRolesToPixConfig(source, roles, overrides);
+	const cfg = (parseJsonc(out) ?? {}) as Cfg;
+	for (const slot of DESKTOP_SLOTS) out = applyOptional(out, cfg, slot, overrides[slot.id], undefined, overrides[`${slot.id}:thinking`]);
+	return out;
+}
+
 const modelOf = (e: unknown): string | undefined => typeof e === "string" ? e : (e as { model?: string } | null)?.model;
 
 /** Primary first; keeps existing entries' flags/aliases. Untouched extras stay as they are. */
@@ -232,7 +253,7 @@ export function applyModelRolesToSuiteConfig(source: string, roles: ModelRoles, 
 	for (const [agent] of AGENT_ROLES) { const level = thinkingOf(overrides, `agent-${agent}`); out = set(out, ["builtinAgentModels", agent], v(`agent-${agent}`) + (level ? `:${level}` : "")); }
 	out = set(out, ["dcp", "compress", "autoCompress", "summarizerModel"], [v("summarizer")]);
 	out = set(out, ["dcp", "compress", "autoCompress", "summarizerFallbackModels"], v("summarizer-fallback") === v("summarizer") ? [] : [v("summarizer-fallback")]);
-	for (const slot of SUITE_SLOTS) if (slot.optional && slot.id !== "frontier-extra") out = applyOptional(out, suiteCfg, slot, overrides[slot.id], primaryOf(slot, SUITE_SLOTS, roles, overrides));
+	for (const slot of SUITE_SLOTS) if (slot.optional && slot.id !== "frontier-extra") out = applyOptional(out, suiteCfg, slot, overrides[slot.id], primaryOf(slot, SUITE_SLOTS, roles, overrides), overrides[`${slot.id}:thinking`]);
 	return out;
 }
 
@@ -256,4 +277,3 @@ export function applySearchToSuiteConfig(source: string, search: SearchSetup): s
 	if (search.reranker !== undefined) out = set(out, ["search", "rerankerModel"], search.reranker.trim() || undefined);
 	return out;
 }
-

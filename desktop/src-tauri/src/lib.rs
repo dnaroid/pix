@@ -58,8 +58,6 @@ mod plan_progress;
 mod preview_file;
 mod preview_file_action;
 mod project_browser;
-mod wiki_consistency;
-mod wiki_html_export;
 mod project_directory_link;
 mod project_entry_clipboard;
 mod project_entry_drag;
@@ -71,6 +69,10 @@ mod project_file_history;
 mod project_icon;
 mod project_storage;
 mod project_tasks_sqlite;
+mod wiki_check_inventory;
+mod wiki_consistency;
+mod wiki_file_dates;
+mod wiki_html_export;
 mod workspace_config_lock;
 #[cfg(test)]
 mod workspace_config_lock_tests;
@@ -1345,6 +1347,79 @@ async fn read_project_file(workspace: String, path: String) -> Result<ProjectFil
             Path::new(&workspace),
             Path::new(&path),
             MAX_PROJECT_FILE_PREVIEW_BYTES,
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+async fn list_wiki_check_directory(
+    workspace: String,
+    wiki_path: String,
+    path: String,
+    cursor: Option<String>,
+) -> Result<wiki_check_inventory::WikiCheckDirectoryPage, String> {
+    run_blocking(move || {
+        wiki_check_inventory::list_directory(
+            Path::new(&workspace),
+            Path::new(&wiki_path),
+            Path::new(&path),
+            cursor.as_deref(),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+async fn list_wiki_status_directory(
+    workspace: String,
+    wiki_path: String,
+    path: String,
+    cursor: Option<String>,
+) -> Result<wiki_check_inventory::WikiCheckDirectoryPage, String> {
+    run_blocking(move || {
+        wiki_check_inventory::list_status_directory(
+            Path::new(&workspace),
+            Path::new(&wiki_path),
+            Path::new(&path),
+            cursor.as_deref(),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+async fn release_wiki_check_inventory(workspace: String, cursor: String) -> Result<(), String> {
+    run_blocking(move || wiki_check_inventory::release(Path::new(&workspace), &cursor)).await
+}
+
+#[tauri::command]
+async fn read_wiki_check_document(
+    workspace: String,
+    wiki_path: String,
+    path: String,
+) -> Result<wiki_check_inventory::WikiCheckDocument, String> {
+    run_blocking(move || {
+        wiki_check_inventory::read_document(
+            Path::new(&workspace),
+            Path::new(&wiki_path),
+            Path::new(&path),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+async fn read_wiki_status_document(
+    workspace: String,
+    wiki_path: String,
+    path: String,
+) -> Result<wiki_check_inventory::WikiCheckDocument, String> {
+    run_blocking(move || {
+        wiki_check_inventory::read_status_document(
+            Path::new(&workspace),
+            Path::new(&wiki_path),
+            Path::new(&path),
         )
     })
     .await
@@ -9126,6 +9201,11 @@ pub fn run() {
             preview_file::read_preview_file,
             preview_file::open_preview_file_in_editor,
             read_project_file,
+            list_wiki_check_directory,
+            list_wiki_status_directory,
+            release_wiki_check_inventory,
+            read_wiki_check_document,
+            read_wiki_status_document,
             write_project_file,
             write_project_workspace_config_if_unchanged,
             project_file_exists,
@@ -9173,6 +9253,7 @@ pub fn run() {
             git_operations::git_discard_file,
             git_ignore::git_can_ignore,
             git_ignore::git_ignore_entry,
+            wiki_file_dates::wiki_file_dates,
             git_remote_link::git_remote_entry_link,
             git_switch_branch,
             git_create_branch,

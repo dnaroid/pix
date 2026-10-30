@@ -4,7 +4,7 @@ import { lstat, open, opendir, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { parse, type ParseError } from "jsonc-parser";
 import type { CheckDocument, CheckEvidence } from "./comparison.js";
-import type { KnowledgeCheckCoverage, KnowledgeReportLanguage } from "./contract.js";
+import { MAX_KNOWLEDGE_CHUNK_CHARS, type KnowledgeCheckCoverage, type KnowledgeReportLanguage } from "./contract.js";
 import { KnowledgeReportError, reportMessage, sourceInvalid, sourceUnavailable, type KnowledgeReportMessage } from "./report-language.js";
 import { knowledgeEvidenceText, MAX_KNOWLEDGE_STAMP_BYTES, MAX_KNOWLEDGE_REPORT_BYTES, stripKnowledgeCheckStamp } from "./stamp.js";
 
@@ -28,11 +28,14 @@ export interface KnowledgeSnapshot {
   notices: string[];
   complete: boolean;
   coverage?: KnowledgeCheckCoverage;
+  /** Internal aggregation identity; never model-generated source paths. */
+  candidatePaths?: readonly string[];
+  excerptedPaths?: readonly string[];
   current: (signal: AbortSignal) => Promise<boolean>;
 }
 
 const MAX_FILE_BYTES = 512 * 1024;
-const MAX_DRAFT_CHARS = 48_000;
+const MAX_DRAFT_CHARS = MAX_KNOWLEDGE_CHUNK_CHARS;
 const MAX_QUERIES = 8;
 const MAX_SOURCES = 12;
 const MAX_PASSAGE_CHARS = 6_000;
@@ -317,6 +320,7 @@ export async function collectKnowledgeEvidence(input: KnowledgeCheckInput, searc
   const evidence: CheckEvidence[] = [];
   const prepared: { hit: KnowledgeSearchHit; source: PassageSource; budget: number }[] = [];
   let remaining = MAX_CONTEXT_CHARS, excerptedSources = 0;
+  const excerptedPaths: string[] = [];
   for (const hit of [...candidates.values()].slice(0, MAX_SOURCES)) {
     signal.throwIfAborted();
     try {
@@ -343,7 +347,7 @@ export async function collectKnowledgeEvidence(input: KnowledgeCheckInput, searc
     if (budget < source.preferred) limits.add("context-limit");
     const selected = passage(source, budget);
     if (!selected.text.trim()) continue;
-    if (selected.text.length < source.text.length) { limits.add("passage-limit"); excerptedSources++; }
+    if (selected.text.length < source.text.length) { limits.add("passage-limit"); excerptedSources++; excerptedPaths.push(hit.path); }
     evidence.push({ id: `source-${evidence.length + 1}`, path: hit.path, ...selected });
   }
   if (!evidence.length) incomplete(message("noExternalSources"));
@@ -368,6 +372,6 @@ export async function collectKnowledgeEvidence(input: KnowledgeCheckInput, searc
     } catch { owned.throwIfAborted(); return false; }
   }
   return { document: { path, text: draftContent }, evidence, documentHash: sha(draftContent), wikiPath,
-    notices: [...notices], complete, current, coverage: { scope: "retrieved-passages", checkedPassages: evidence.length,
+    notices: [...notices], complete, current, candidatePaths: [...candidates.keys()], excerptedPaths, coverage: { scope: "retrieved-passages", checkedPassages: evidence.length,
       candidateSources: candidates.size, excerptedSources, limits: [...limits] } };
 }

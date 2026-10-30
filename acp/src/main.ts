@@ -5,7 +5,9 @@
  * All diagnostics go to stderr via the logger.
  */
 
+import { existsSync } from "node:fs";
 import { Readable, Writable } from "node:stream";
+import { fileURLToPath } from "node:url";
 import { ndJsonStream } from "@agentclientprotocol/sdk";
 import { PixAcpAgent } from "./acp/pix-acp-agent.js";
 import { adapterConfigFromEnv } from "./config.js";
@@ -14,10 +16,20 @@ import { installPixProcessLogging } from "../../dist/app/logger.js";
 import { PiRpcClient } from "./pi/pi-rpc-client.js";
 import { stringifyUnknown } from "./stringify-unknown.js";
 
+/** Compiled beside main.js in dist; the .ts source when run through tsx. */
+function wikiConflictsExtensionPath(): string | undefined {
+	for (const name of ["wiki-conflicts.js", "wiki-conflicts.ts"]) {
+		const path = fileURLToPath(new URL(`./extensions/${name}`, import.meta.url));
+		if (existsSync(path)) return path;
+	}
+	return undefined;
+}
+
 async function main(): Promise<void> {
 	installPixProcessLogging({ module: "acp-process" }, acpFileLogger);
 	const config = adapterConfigFromEnv();
 	const logger = createLogger(config.logLevel);
+	const wikiConflicts = wikiConflictsExtensionPath();
 
 	const adapter = new PixAcpAgent({
 		createPiClient: (options) => new PiRpcClient(options),
@@ -31,6 +43,7 @@ async function main(): Promise<void> {
 		...(config.quotaWaitExtensionPath ? { quotaWaitExtensionPath: config.quotaWaitExtensionPath } : {}),
 		...(config.headsUpExtensionPath ? { headsUpExtensionPath: config.headsUpExtensionPath } : {}),
 		...(config.htmlSandboxExtensionPath ? { htmlSandboxExtensionPath: config.htmlSandboxExtensionPath } : {}),
+		...(wikiConflicts ? { wikiConflictsExtensionPath: wikiConflicts } : {}),
 	});
 
 	const stream = ndJsonStream(

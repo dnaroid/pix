@@ -11,6 +11,28 @@ const coverage = (extra: Partial<KnowledgeCheckCoverage> = {}): KnowledgeCheckCo
 });
 
 describe("Wiki consistency report language", () => {
+  it("describes full and partial document-part coverage without inflating completed comparisons", () => {
+    const complete = result({ reportLanguage: "ru", chunkCoverage: {
+      totalChunks: 2, checkedChunks: 2, totalComparisons: 3, checkedComparisons: 3,
+    } });
+    expect(knowledgeCheckReportText(complete).chunkReview).toBe("Части документа: проверено 2 из 2. Сопоставления: завершено 3 из 3, включая сравнение частей между собой.");
+    const partial = { ...complete, status: "incomplete" as const, chunkCoverage: {
+      totalChunks: 3, checkedChunks: 2, totalComparisons: 6, checkedComparisons: 2,
+    } };
+    expect(knowledgeCheckReportText(partial).chunkReview).toContain("проверено 2 из 3");
+    expect(knowledgeCheckReportText(partial).chunkReview).toContain("завершено 2 из 6");
+    expect(knowledgeCheckReportText({ ...partial, reportLanguage: "en" }).chunkReview).toContain("2 of 6 completed");
+    expect(knowledgeCheckReportText(result()).chunkReview).toBe("");
+  });
+
+  it("distinguishes retained report passages from all reviewed passages", () => {
+    const value = result({ reportLanguage: "ru", coverage: coverage({ checkedPassages: 24, retainedPassages: 12 }) });
+    expect(knowledgeCheckReportText(value).retainedEvidence).toBe("В отчёте сохранено 12 из 24 проверенных фрагментов.");
+    expect(knowledgeCheckReportText({ ...value, reportLanguage: "en" }).retainedEvidence).toBe("This report retains 12 of the 24 reviewed passages.");
+    expect(knowledgeCheckReportText(result({ coverage: coverage({ retainedPassages: 1 }) })).retainedEvidence).toBe("");
+    expect(knowledgeCheckReportText(result()).retainedEvidence).toBe("");
+  });
+
   it("keeps legacy results and initial progress in English", () => {
     const text = knowledgeCheckReportText(result({ coverage: coverage() }));
     expect(text.summary).toBe("No contradictions found in the reviewed passages");

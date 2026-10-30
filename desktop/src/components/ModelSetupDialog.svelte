@@ -9,6 +9,7 @@
   import SettingsSwitch from "./settings/SettingsSwitch.svelte";
   import SettingsModelSelect from "./settings/SettingsModelSelect.svelte";
   import { modelSetupRequest, notifyUserConfigWritten } from "../lib/model-setup-request.svelte";
+  import { modelSetupOverrides } from "../lib/model-setup-overrides";
   import { modelUsage, promoteFrontier, replaceModel, upgradeCandidate, type SetupDraft, type UsageSlot } from "../lib/model-setup-replace";
 
   const DISMISSED_KEY = "pix.desktop.model-setup.v1.dismissed";
@@ -45,7 +46,9 @@
   });
   const options = $derived(allModels.map(toOption));
   const visionOptions = $derived(allModels.filter((m) => m.vision).map(toOption));
-  const slotOptions = (slot: { vision?: boolean; openrouter?: boolean }) => (slot.vision ? visionOptions : options).filter((o) => !slot.openrouter || o.value.startsWith("openrouter/"));
+  const slotOptions = (slot: { id?: string; vision?: boolean; openrouter?: boolean }) => (slot.vision ? visionOptions : options)
+    .filter((o) => (!slot.openrouter || o.value.startsWith("openrouter/"))
+      && (!slot.id?.startsWith("knowledge-judge") || (o.value.length <= 256 && /^[^\s/:]+\/[^\s:]+$/u.test(o.value))));
   let searchOn = $state(false);
   let searchProvider = $state<"openrouter" | "ollama">("openrouter");
   let searchModel = $state("");
@@ -59,6 +62,8 @@
   let slotLists = $state<Record<string, string[]>>({});
   let slotThinking = $state<Record<string, string>>({});
   const THINKING_OPTIONS = ["", "off", "minimal", "low", "medium", "high", "xhigh", "max"].map((v) => ({ value: v, label: v === "" ? "Default" : v }));
+  const thinkingOptions = (slot: ModelSetupSlot) => THINKING_OPTIONS.map(option =>
+    option.value === "" && slot.thinkingDefaultLabel ? { ...option, label: slot.thinkingDefaultLabel } : option);
   const labelOf = (ref: string) => allModels.find((m) => m.ref === ref)?.label ?? ref.slice(ref.indexOf("/") + 1);
   const ordered = (slots: readonly ModelSetupSlot[]): ModelSetupSlot[] => {
     const top = slots.filter((s) => !s.parent);
@@ -88,7 +93,7 @@
     ["Routing & desktop", ["Routing", "Desktop"]],
     ["Agents", ["Frontier", "Sub-agents", "Context", "Vision"]],
   ];
-  const shortLabel = (label: string) => label.replace(/^Routing tier: /, "").replace(/^Sub-agent: /, "").replace(/^Frontier model \((\w+)\)$/, (_, w: string) => w[0]!.toUpperCase() + w.slice(1));
+  const shortLabel = (label: string) => label.replace(/^Routing tier: /, "").replace(/^Sub-agent: /, "").replace(/^Contradiction judge \(Desktop override\)$/, "Desktop override").replace(/^Frontier model \((\w+)\)$/, (_, w: string) => w[0]!.toUpperCase() + w.slice(1));
   const pages = $derived.by(() => {
     const known = new Set(PAGES.flatMap(([, g]) => g));
     const out = PAGES.map(([title, names]) => ({ title, groups: groups.filter(([g]) => names.includes(g)) })).filter((p) => p.groups.length > 0);
@@ -155,7 +160,8 @@
       if (next.configured || next.models.length === 0) return;
       status = next;
       roles = next.suggested ?? { main: "", fast: "", strong: "" };
-      slotPicks = {};
+      // A first-run default model may be absent even when an explicit judge is already set.
+      slotPicks = Object.fromEntries(Object.entries(next.currentSlots).filter(([id]) => next.slots.some(slot => slot.id === id && slot.optional && !slot.list)));
       slotLists = {};
       slotThinking = { ...next.currentThinking };
       showSlots = false;
@@ -204,7 +210,7 @@
     saving = true;
     error = null;
     try {
-      await client.applyModelSetup(roles, { ...slotPicks, ...slotLists, ...Object.fromEntries(Object.entries(slotThinking).filter(([, v]) => v).map(([id, v]) => [`${id}:thinking`, v])) }, searchOn ? {
+      await client.applyModelSetup(roles, modelSetupOverrides(status?.slots ?? [], slotPicks, slotLists, slotThinking), searchOn ? {
         provider: searchProvider, model: searchModel.trim(), vectorSize: Number(searchVector),
         ...(searchKnowledge.trim() ? { knowledgeModel: searchKnowledge.trim() } : {}),
         reranker: searchReranker.trim(),
@@ -323,12 +329,12 @@
                     value={slotValue(slot)}
                     options={slotOptions(slot)}
                     popup
-                    emptyLabel={slot.optional ? "None" : undefined}
+                    emptyLabel={slot.optional ? slot.emptyLabel ?? "None" : undefined}
                     ariaLabel={slot.label}
                     onChange={(value) => { slotPicks = { ...slotPicks, [slot.id]: value }; }}
                   />
                   {#if slot.thinking}
-                    <TaskFieldSelect value={slotThinking[slot.id] ?? ""} ariaLabel={`${slot.label} thinking`} size="sm" options={THINKING_OPTIONS} onChange={(v) => { slotThinking = { ...slotThinking, [slot.id]: v }; }} />
+                    <TaskFieldSelect value={slotThinking[slot.id] ?? ""} ariaLabel={`${slot.label} thinking`} size="sm" options={thinkingOptions(slot)} onChange={(v) => { slotThinking = { ...slotThinking, [slot.id]: v }; }} />
                   {:else}
                     <span class="px-1 text-xs text-muted-foreground/60">—</span>
                   {/if}

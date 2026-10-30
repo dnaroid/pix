@@ -1,6 +1,7 @@
 import { render } from "svelte/server";
 import { describe, expect, it, vi } from "vitest";
 import type { KnowledgeCheckResult, KnowledgeConflict } from "../../../acp/src/knowledge/contract";
+import { WIKI_CONFLICTS_NAVIGATION_CONTEXT } from "../app/workbench-wiki-conflicts.svelte";
 import WikiConsistencyReport from "./WikiConsistencyReport.svelte";
 
 const conflict: KnowledgeConflict = {
@@ -27,6 +28,34 @@ function buttons(body: string): string[] { return body.match(/<button\b[^>]*>[\s
 function citationButtons(body: string): string[] { return buttons(body).filter(button => button.includes('aria-label="Открыть фрагмент источника:')); }
 
 describe("Wiki consistency report rendering", () => {
+  it.each([false, true])("keeps summary and wrapping actions on separate rows (compact: %s)", compact => {
+    const body = html({ compact, onResolve: vi.fn(), onRetry: vi.fn(), canSaveAnyway: true });
+    expect(body).toContain('class="flex min-w-0 flex-col items-start gap-1 px-3 py-2"');
+    const toggle = buttons(body).find(button => button.includes('aria-label="Свернуть отчёт"'));
+    expect(toggle).toContain("flex w-full min-w-0");
+    expect(toggle).toContain("min-w-0 whitespace-normal break-words");
+    expect(toggle).not.toContain("flex-1");
+    expect(body).toContain('class="flex w-full min-w-0 flex-wrap items-center gap-1"');
+    for (const label of ["Разрулить в новой сессии", "Проверить снова", "Всё равно сохранить", "Закрыть"]) {
+      const action = buttons(body).find(button => button.includes(label));
+      expect(action, label).toContain("min-w-0 max-w-full whitespace-normal break-words");
+    }
+  });
+
+  it("shows chunk completion and keeps original document line links in merged findings", () => {
+    const body = html({ canOpenSources: true, onOpenCitation: vi.fn(), result: report({
+      chunkCoverage: { totalChunks: 2, checkedChunks: 2, totalComparisons: 3, checkedComparisons: 3 },
+      coverage: { scope: "retrieved-passages", checkedPassages: 24, retainedPassages: 2,
+        candidateSources: 30, excerptedSources: 0, limits: [] },
+      conflicts: [{ ...conflict, draft: { ...conflict.draft, startLine: 920, endLine: 920 } }],
+    }) });
+    expect(body).toContain("Части документа: проверено 2 из 2");
+    expect(body).toContain("Сопоставления: завершено 3 из 3");
+    expect(body).toContain("В отчёте сохранено 2 из 24 проверенных фрагментов");
+    expect(citationButtons(body).some(button => button.includes("wiki/combat.md:L920"))).toBe(true);
+    expect(body).not.toContain("chunk-1");
+  });
+
   it("renders distinct findings, diagnostics and all reviewed evidence with path and line links", () => {
     const onOpenCitation = vi.fn();
     const onResolve = vi.fn();
@@ -135,5 +164,18 @@ describe("Wiki consistency report rendering", () => {
     expect(summaries.every(summary => summary.includes("<svg") && summary.includes("group-open:rotate-90"))).toBe(true);
     expect(body).not.toContain("lg:grid-cols-2");
     expect(body).not.toContain("max-h-");
+  });
+
+  it("offers Wiki Conflicts only inside the Desktop shell and only for reports with findings", () => {
+    const navigation = { open: vi.fn(), openCount: 1 };
+    const context = new Map([[WIKI_CONFLICTS_NAVIGATION_CONTEXT, navigation]]);
+    const withFindings = render(WikiConsistencyReport, { props: { result: report(), onCancel: () => {}, onSaveAnyway: () => {} }, context }).body;
+    expect(withFindings).toContain("data-open-wiki-conflicts");
+    expect(withFindings).toContain("Открыть в Wiki Conflicts");
+    const clear = render(WikiConsistencyReport, {
+      props: { result: report({ status: "clear", conflicts: [], uncertainties: [] }), onCancel: () => {}, onSaveAnyway: () => {} }, context,
+    }).body;
+    expect(clear).not.toContain("data-open-wiki-conflicts");
+    expect(html()).not.toContain("data-open-wiki-conflicts");
   });
 });

@@ -142,6 +142,17 @@ export function knowledgeCheckReportText(result?: KnowledgeCheckResult, checking
     `${russian ? "Неопределённости" : "Uncertainties"}: ${result.uncertainties?.length ?? 0}`,
     result.notices.length ? `${russian ? "Замечания" : "Notices"}: ${result.notices.length}` : "",
   ].filter(Boolean).join(" · ") : "";
+  const chunks = result?.chunkCoverage;
+  const chunkReview = chunks ? russian
+    ? `Части документа: проверено ${chunks.checkedChunks} из ${chunks.totalChunks}. Сопоставления: завершено ${chunks.checkedComparisons} из ${chunks.totalComparisons}, включая сравнение частей между собой.`
+    : `Document parts: ${chunks.checkedChunks} of ${chunks.totalChunks} reviewed. Comparisons: ${chunks.checkedComparisons} of ${chunks.totalComparisons} completed, including comparisons between parts.`
+    : "";
+  const retained = coverage?.retainedPassages;
+  const retainedEvidence = retained !== undefined && retained < coverage!.checkedPassages ? russian
+    ? `В отчёте сохранено ${retained} из ${coverage!.checkedPassages} проверенных фрагментов.`
+    : `This report retains ${retained} of the ${coverage!.checkedPassages} reviewed passages.`
+    : "";
   return { ...copy, draftLabel: stale ? copy.checkedDraftLabel : copy.draftLabel,
-    summary: queued ? copy.queued : checking ? copy.checking : copy.status[result?.status ?? "incomplete"], reviewed, selection, counts };
+    summary: queued ? copy.queued : checking ? copy.checking : copy.status[result?.status ?? "incomplete"], reviewed, selection, counts,
+    chunkReview, retainedEvidence };
 }

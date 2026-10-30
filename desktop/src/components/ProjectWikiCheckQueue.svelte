@@ -22,6 +22,7 @@
   let expanded = $state(false);
   let selectedId = $state<number | undefined>();
   let header = $state<HTMLButtonElement>();
+  export function open(): void { expanded = true; header?.focus(); }
   const projectJobs = $derived(jobs.filter((job) => job.workspace === workspace));
   const displayed = $derived([...projectJobs].reverse());
   const pending = $derived(projectJobs.filter((job) => job.state === "queued" || job.state === "running").length);
@@ -78,7 +79,7 @@
             >
               <ChevronRight class={["h-3 w-3 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none", selected ? "rotate-90" : "rotate-0"]} aria-hidden="true" />
               <span class="min-w-0 flex-1 truncate">{job.path}</span>
-              <span class={["shrink-0", job.result?.status === "clear" && !job.error ? "text-tool-success" : job.state === "failed" || job.result?.status === "conflicts" ? "text-tool-warning" : "text-muted-foreground"]}>{label(job)}</span>
+              <span class={["shrink-0", job.result?.status === "conflicts" ? "text-tool-error" : job.result?.status === "clear" && !job.error ? "text-tool-success" : job.state === "failed" || job.result?.status === "incomplete" ? "text-tool-warning" : "text-muted-foreground"]}>{label(job)}</span>
             </button>
             {#if active}
               <button type="button" class={actionClass} onclick={() => onCancel?.(job.id)}>{ru ? "Отменить" : "Cancel"}</button>

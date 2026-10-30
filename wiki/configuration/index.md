@@ -16,3 +16,5 @@ User/project configuration, model visibility, routing, thinking and fallback rul
 - [Model selector fallback arrays](model-selector-fallbacks.md)
 - [Model-specific thinking preferences](model-thinking-preferences.md)
 - [Model visibility whitelist](model-visibility-whitelist.md)
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"575cf983871e341d5e339f2e864e0b9c5a300b9b424ef6236456cd75972a743a","checkedAt":"2026-10-30T23:05:27.819Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":40,"reportLanguage":"ru"} -->

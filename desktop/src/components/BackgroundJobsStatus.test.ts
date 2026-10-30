@@ -39,6 +39,23 @@ describe("status bar background jobs indicator", () => {
     expect(html).toContain("text-tool-warning");
   });
 
+  it.each(["starting", "running", "exited", "killed", "failed"] as const)("defaults %s jobs to the appropriate disclosure state", (status) => {
+    const job = { ...snapshot.jobs[0]!, status };
+    const html = render(BackgroundJobsStatus, { props: { snapshot: { ...snapshot, jobs: [job] }, ...handlers } }).body;
+    const details = html.match(/<details\b[^>]*data-background-job="bg_live"[^>]*>/)?.[0];
+    expect(details).toBeDefined();
+    expect(/\sopen(?:[\s=>])/.test(details!)).toBe(status === "starting" || status === "running");
+    const summary = html.match(/<summary\b[\s\S]*?<\/summary>/)?.[0];
+    expect(summary).toContain("lucide-chevron-right");
+    expect(summary).toContain("group-open/job:rotate-90");
+    expect(summary).toContain("motion-reduce:transition-none");
+    expect(summary).toContain("dev server");
+    expect(summary).toContain(`data-background-job-status="${status}"`);
+    expect(summary).not.toContain("data-background-job-open-log");
+    expect(html).toContain("data-background-job-tail");
+    expect(html).toContain("data-background-job-open-log");
+  });
+
   it("renders in the right status section before the plan chip", () => {
     expect(statusBarSource.indexOf("<BackgroundJobsStatus")).toBeGreaterThan(statusBarSource.indexOf("data-status-right"));
     expect(statusBarSource.indexOf("<BackgroundJobsStatus")).toBeLessThan(statusBarSource.indexOf("<SessionPlanStatus"));

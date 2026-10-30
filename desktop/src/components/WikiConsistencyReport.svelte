@@ -1,5 +1,7 @@
 <script lang="ts">
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import { getContext } from "svelte";
+  import { WIKI_CONFLICTS_NAVIGATION_CONTEXT, type WikiConflictsNavigation } from "../app/workbench-wiki-conflicts.svelte";
   import type { KnowledgeCheckResult, KnowledgeCitation, KnowledgeReportLanguage } from "../../../acp/src/knowledge/contract";
   import type { ProjectFileLineRange } from "../lib/project-files";
   import { knowledgeCheckReportText } from "./wiki-consistency-report-text";
@@ -42,12 +44,14 @@
   let expanded = $state(true);
   let sourcesExpanded = $state(false);
   const reportId = $props.id();
+  // Absent outside the Desktop shell (isolated renders); the action is then hidden.
+  const conflictsNavigation = getContext<WikiConflictsNavigation | undefined>(WIKI_CONFLICTS_NAVIGATION_CONTEXT);
   let observedResult: KnowledgeCheckResult | undefined;
   const text = $derived(knowledgeCheckReportText(result, checking, queued, stale));
   const reportOpen = $derived(expanded && !!result && !checking);
   const uncertainties = $derived(result?.uncertainties ?? []);
   const sources = $derived(result?.reviewedSources ?? []);
-  const actionClass = "rounded-sm px-2 py-1 text-xs font-medium hover:bg-panel-hover disabled:opacity-40";
+  const actionClass = "min-w-0 max-w-full whitespace-normal break-words rounded-sm px-2 py-1 text-xs font-medium hover:bg-panel-hover disabled:opacity-40";
   const disclosureClass = "flex min-w-0 cursor-pointer list-none items-start gap-1.5 py-2 text-left [&::-webkit-details-marker]:hidden";
 
   $effect(() => {
@@ -59,10 +63,10 @@
 </script>
 
 <section class="min-h-0 shrink-0 border-b border-border bg-panel text-xs" aria-label={text.sectionLabel} aria-busy={checking} data-wiki-consistency-report>
-  <div class="flex flex-wrap items-start gap-1 px-3 py-2">
+  <div class="flex min-w-0 flex-col items-start gap-1 px-3 py-2">
     <button
       type="button"
-      class="flex min-w-0 flex-1 items-start gap-1.5 rounded-sm py-1 pr-2 text-left hover:bg-panel-hover"
+      class="flex w-full min-w-0 items-start gap-1.5 rounded-sm py-1 pr-2 text-left hover:bg-panel-hover"
       aria-expanded={reportOpen}
       aria-controls={`${reportId}-body`}
       aria-label={reportOpen ? text.collapseReport : text.expandReport}
@@ -70,17 +74,20 @@
       onclick={() => expanded = !expanded}
     >
       <ChevronRight class={["mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none", reportOpen ? "rotate-90" : ""]} aria-hidden="true" />
-      <span class="min-w-0">
-        <span class={["block font-medium", !checking && !stale && result?.status === "clear" ? "text-tool-success" : "text-tool-warning"]} role="status" aria-live="polite">{stale && !checking ? text.staleSummary : text.summary}</span>
+      <span class="min-w-0 whitespace-normal break-words">
+        <span class={["block font-medium", !checking && !stale && result?.status === "conflicts" ? "text-tool-error" : !checking && !stale && result?.status === "clear" ? "text-tool-success" : "text-tool-warning"]} role="status" aria-live="polite">{stale && !checking ? text.staleSummary : text.summary}</span>
         {#if result && !checking}<span class="mt-1 block text-muted-foreground">{text.counts}</span>{/if}
       </span>
     </button>
-    <div class="flex flex-wrap items-center gap-1">
+    <div class="flex w-full min-w-0 flex-wrap items-center gap-1">
       {#if checking}
         <button class={actionClass} type="button" onclick={onCancel}>{text.cancelCheck}</button>
       {:else}
         {#if result && result.status !== "clear" && /^[0-9a-f]{64}$/u.test(result.documentHash) && onResolve}
           <button class={[actionClass, "border border-border text-foreground"]} type="button" disabled={resolving || stale} title={stale ? text.resolveStale : undefined} aria-busy={resolving} onclick={() => void onResolve?.()}>{resolving ? text.resolving : text.resolveInSession}</button>
+        {/if}
+        {#if conflictsNavigation && result && (result.conflicts.length || result.uncertainties?.length)}
+          <button class={actionClass} type="button" data-open-wiki-conflicts onclick={() => conflictsNavigation.open({ path: result.path })}>{result.reportLanguage === "ru" ? "Открыть в Wiki Conflicts" : "Open in Wiki Conflicts"}</button>
         {/if}
         {#if onRetry}<button class={actionClass} type="button" disabled={resolving} onclick={onRetry}>{text.checkAgain}</button>{/if}
         {#if canSaveAnyway}
@@ -99,6 +106,7 @@
         {#if checkedAt}<p class="mt-1 text-muted-foreground">{text.savedReportLabel}: <time datetime={checkedAt}>{checkedAt}</time></p>{/if}
         <p class="mt-1 break-all text-muted-foreground">{text.documentLabel}: <span class="font-mono">{result.path}</span></p>
         <p class="mt-1 text-muted-foreground">{text.reviewed}</p>
+        {#if text.chunkReview}<p class="mt-1 text-muted-foreground">{text.chunkReview}</p>{/if}
         {#if text.selection}<p class="mt-1 text-muted-foreground">{text.scopeLabel}: {text.selection}.</p>{/if}
         <p class="mt-1 break-words text-muted-foreground">{text.judgeLabel}: {result.modelRef || text.modelUnavailable}</p>
       </section>
@@ -144,6 +152,7 @@
           <span>{text.sourcesLabel}{result.reviewedSources ? ` · ${sources.length}` : ""}</span>
         </button>
         <div id={`${reportId}-sources`} hidden={!sourcesExpanded}>
+          {#if text.retainedEvidence}<p class="pb-2 text-muted-foreground">{text.retainedEvidence}</p>{/if}
           {#if result.reviewedSources === undefined}
             <p class="pb-2 text-muted-foreground">{text.sourcesUnavailable}</p>
           {:else if !sources.length}

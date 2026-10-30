@@ -3,6 +3,8 @@ kind: spec
 status: active
 ---
 
+<!-- pix:wiki-report {"version":1,"checkedAt":"2026-10-30T23:14:02.022Z","result":{"path":"wiki/context/dcp-protected-continuity.md","documentHash":"388112e19a79431444ac06d39d8e89c9bea9aada1e753e6af79ae3607b9e3c70","modelRef":"zai/glm-5.3-flash","reportLanguage":"ru","checkedSources":12,"conflicts":[],"uncertainties":[],"reviewedSources":[],"notices":["Документ, настройки или содержимое Wiki изменились во время проверки. Повторите её."],"coverage":{"scope":"retrieved-passages","checkedPassages":12,"candidateSources":54,"excerptedSources":10,"limits":["query-sampling","candidate-limit","source-limit","context-limit","passage-limit"]},"status":"incomplete"}} -->
+
 # DCP protected continuity
 
 ## Behavior
@@ -153,3 +155,5 @@ uses the same deterministic repack preview as runtime code, so a saved session
 can be compared without modifying its JSONL. Full DCP marathon/lifecycle tests
 continue to verify restart, exact membership, provider evidence, cancellation,
 and bounded long-session behavior.
+
+<!-- pix:wiki-check {"version":1,"status":"attempted","runId":"be10804d-802a-4a0d-81f8-ba18fd60f930","contentHash":"388112e19a79431444ac06d39d8e89c9bea9aada1e753e6af79ae3607b9e3c70","checkedAt":"2026-10-30T23:14:02.025Z","maxDocumentChars":128000} -->

@@ -119,7 +119,8 @@
   // Quick-choice blocks accept input only in the final assistant reply of a
   // settled turn; any later user message makes them read-only history.
   const choiceActionsMessageId = $derived(promptRunning ? undefined : latestAssistantMessageId(displayItems));
-  // Sign-in recovery may resume only from the final notice of a settled turn.
+  // Historical errors remain readable, but sign-in recovery belongs only to
+  // the final notice of a settled turn, never to an older failed attempt.
   const claudeLoginContinueItemId = $derived(promptRunning ? undefined : displayItems.at(-1)?.id);
   let activityNowMs = $state(Date.now());
   const hasActiveActivity = $derived(displayItems.some((item) => item.type === "activity-group" && item.active));
@@ -335,7 +336,7 @@
                   <div class="font-semibold text-foreground">{notice.title}</div>
                   <AttachmentGrid attachments={item.attachments} onOpen={onOpenAttachment} onPrepare={onPrepareAttachment} />
                   <p class="mt-1 whitespace-pre-wrap break-words font-mono text-muted-foreground">{item.text}</p>
-                  {#if onOpenClaudeLoginTerminal && onClaudeLoginError && isClaudeLoginError(item.messageId, item.text)}
+                  {#if item.id === claudeLoginContinueItemId && onOpenClaudeLoginTerminal && onClaudeLoginError && isClaudeLoginError(item.messageId, item.text)}
                     {#key activeSessionId}
                       <ClaudeLoginAction
                         onOpenTerminal={onOpenClaudeLoginTerminal}

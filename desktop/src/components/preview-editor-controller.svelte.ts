@@ -360,7 +360,7 @@ export function createPreviewEditorController(options: PreviewEditorControllerOp
     let owner: PendingWrite | undefined;
     try {
       const content = recordedResult
-        ? await recordKnowledgeCheck(snapshot.content, recordedResult)
+        ? await recordKnowledgeCheck(snapshot.content, recordedResult, new Date(), snapshot.loadedContent)
         : /\.(md|markdown)$/iu.test(snapshot.path)
           ? snapshot.loadedContent.includes(KNOWLEDGE_REPORT_PREFIX)
             ? await preserveKnowledgeReport(snapshot.content, snapshot.loadedContent)

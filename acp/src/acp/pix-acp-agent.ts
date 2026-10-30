@@ -510,6 +510,8 @@ export interface PixAcpAgentOptions {
 	readonly headsUpExtensionPath?: string;
 	/** Desktop-only extension: advertises inline HTML UI and serves a help tool. */
 	readonly htmlSandboxExtensionPath?: string;
+	/** acp-owned `wiki_conflicts` tool; active only in projects with an initialized Wiki. */
+	readonly wikiConflictsExtensionPath?: string;
 	/** Agent resource directory override for hermetic draft-catalog tests. */
 	readonly agentDir?: string;
 	readonly logger: Logger;
@@ -2459,6 +2461,7 @@ export class PixAcpAgent {
 			ignoreContextFiles,
 			this.options.headsUpExtensionPath,
 			this.clientName === "pix-desktop" ? this.options.htmlSandboxExtensionPath : undefined,
+			this.options.wikiConflictsExtensionPath,
 		);
 		const pi = this.options.createPiClient({
 			...startup,
@@ -4461,6 +4464,7 @@ function piClientOptions(
 	ignoreContextFiles = false,
 	headsUpExtensionPath?: string,
 	htmlSandboxExtensionPath?: string,
+	wikiConflictsExtensionPath?: string,
 ): PiRpcClientOptions {
 	const args = [
 		...(questionExtensionPath ? ["--extension", questionExtensionPath] : []),
@@ -4470,6 +4474,7 @@ function piClientOptions(
 		...(quotaWaitExtensionPath ? ["--extension", quotaWaitExtensionPath] : []),
 		...(headsUpExtensionPath ? ["--extension", headsUpExtensionPath] : []),
 		...(htmlSandboxExtensionPath ? ["--extension", htmlSandboxExtensionPath] : []),
+		...(wikiConflictsExtensionPath ? ["--extension", wikiConflictsExtensionPath] : []),
 		...(ignoreContextFiles ? ["--no-context-files"] : []),
 	];
 	const base = {

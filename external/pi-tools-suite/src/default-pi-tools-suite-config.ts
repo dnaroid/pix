@@ -3,8 +3,9 @@ import { codeDefaults, knowledgeDefaults } from "./project-search/source-extensi
 // Default user config written when pi-tools-suite.jsonc is missing.
 export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   "$schema": "https://unpkg.com/pi-ui-extend/schemas/pi-tools-suite.json",
-  // Wiki contradiction reports: en or ru. Desktop can override this language.
-  "knowledgeCheck": { "reportLanguage": "en" },
+  // Select a Wiki contradiction judge explicitly (provider/model). Desktop can override each field.
+  // The judge is independent of Search and session models; report language: en or ru.
+  "knowledgeCheck": { "modelRef": "", "thinking": "low", "reportLanguage": "en" },
   // Complete extension lists. Empty arrays disable the corresponding category.
   "search": {
     // Optional OpenRouter reranking across Code/Knowledge/Sessions/Tasks/Commits.

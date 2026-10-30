@@ -1,8 +1,9 @@
 import { createDesktopDraftModelRuntime, desktopToolsSuiteExtensionPath, type DesktopDraftModelRuntimeHandle } from "../acp/draft-model-runtime.js";
 import { parseModelRef } from "../acp/pix-settings.js";
-import { loadRagPreferences, type RagModelPreferences } from "../search/rag-service.js";
+import { loadKnowledgeModelPreferences, type KnowledgeModelPreferences } from "./model-preferences.js";
 import { bounded } from "../search/bounded.js";
-import { compareKnowledge } from "./comparison.js";
+import { compareKnowledge, type CheckCompletion } from "./comparison.js";
+import { checkKnowledgeChunks, splitKnowledgeDocument } from "./chunks.js";
 import { collectKnowledgeEvidence, type KnowledgeSearch, type KnowledgeSnapshot } from "./evidence.js";
 import { createNativeKnowledgeSearch } from "./native-search.js";
 import { parseKnowledgeCheckRequest } from "./request.js";
@@ -10,6 +11,7 @@ import { MAX_KNOWLEDGE_REVIEWED_CHARS, MAX_KNOWLEDGE_REVIEWED_PASSAGES,
   type KnowledgeCheckRequest, type KnowledgeCheckResult, type KnowledgeCitation, type KnowledgeReportLanguage } from "./contract.js";
 import { loadKnowledgeReportLanguage } from "./preferences.js";
 import { KnowledgeReportError, reportMessage } from "./report-language.js";
+import { stripKnowledgeCheckStamp } from "./stamp.js";
 
 export const KNOWLEDGE_CHECK_DEADLINE_MS = 120_000;
 
@@ -35,7 +37,7 @@ export interface KnowledgeCheckOptions {
   readonly search?: KnowledgeSearch;
   readonly collect?: (request: KnowledgeCheckRequest, search: KnowledgeSearch, signal: AbortSignal, reportLanguage: KnowledgeReportLanguage) => Promise<KnowledgeSnapshot>;
   readonly loadReportLanguage?: () => Promise<KnowledgeReportLanguage>;
-  readonly loadPreferences?: (cwd: string) => Promise<RagModelPreferences>;
+  readonly loadPreferences?: (cwd: string) => Promise<KnowledgeModelPreferences>;
   readonly createRuntime?: (cwd: string) => Promise<DesktopDraftModelRuntimeHandle>;
   readonly timeoutMs?: number;
   readonly warn?: (message: string) => void;
@@ -50,13 +52,21 @@ export class KnowledgeCheckService {
 
   async check(input: KnowledgeCheckRequest, signal: AbortSignal): Promise<KnowledgeCheckResult> {
     const request = parseKnowledgeCheckRequest(input);
+    const body = stripKnowledgeCheckStamp(request.content);
+    const chunks = splitKnowledgeDocument({ path: request.path, text: body });
+    const comparisons = chunks.length * (chunks.length + 1) / 2;
     let handle: DesktopDraftModelRuntimeHandle | undefined;
     let reportLanguage: KnowledgeReportLanguage = "en";
     try {
-      return await bounded(signal, this.options.timeoutMs ?? KNOWLEDGE_CHECK_DEADLINE_MS, async owned => {
+      return await bounded(signal, this.options.timeoutMs ?? KNOWLEDGE_CHECK_DEADLINE_MS * comparisons, async owned => {
         reportLanguage = await (this.options.loadReportLanguage ?? loadKnowledgeReportLanguage)();
         owned.throwIfAborted();
-        const snapshot = await (this.options.collect ?? collectKnowledgeEvidence)(request, this.search, owned, reportLanguage);
+        const preferences = await (this.options.loadPreferences ?? loadKnowledgeModelPreferences)(request.cwd);
+        owned.throwIfAborted();
+        const parsed = parseModelRef(preferences.modelRef);
+        if (!parsed) throw new Error(reportMessage(reportLanguage, "selectModel"));
+        const collect = (part: KnowledgeCheckRequest) => (this.options.collect ?? collectKnowledgeEvidence)(part, this.search, owned, reportLanguage);
+        const snapshot = await collect(chunks.length > 1 ? { ...request, content: chunks[0]!.text } : request);
         owned.throwIfAborted();
         const retrievalNotices = [...snapshot.notices];
         if (!snapshot.evidence.length) retrievalNotices.push(reportMessage(reportLanguage, "noWikiEvidence"));
@@ -66,10 +76,6 @@ export class KnowledgeCheckService {
           coverage: snapshot.coverage ?? { scope: "retrieved-passages" as const,
             checkedPassages: snapshot.evidence.length, candidateSources: checkedSources, excerptedSources: 0, limits: [] },
         };
-        const preferences = await (this.options.loadPreferences ?? loadRagPreferences)(request.cwd);
-        owned.throwIfAborted();
-        const parsed = parseModelRef(preferences.modelRef);
-        if (!parsed) throw new Error(reportMessage(reportLanguage, "selectModel"));
         const acquired = await (this.options.createRuntime ?? (cwd => {
           const extension = desktopToolsSuiteExtensionPath(this.options);
           return createDesktopDraftModelRuntime({ cwd,
@@ -89,7 +95,7 @@ export class KnowledgeCheckService {
         if (!model) throw new Error(reportMessage(reportLanguage, "modelUnavailable"));
         const selectedModel = model;
         const maxTokens = Math.min(model.maxTokens > 0 ? model.maxTokens : 8192, 8192);
-        const comparison = await compareKnowledge(snapshot.document, snapshot.evidence, async (prompt, checkSignal) => {
+        const completePrompt: CheckCompletion = async (prompt, checkSignal) => {
           const message = await runtime.completeSimple(selectedModel, {
             systemPrompt: prompt.system,
             messages: [{ role: "user", content: prompt.user, timestamp: Date.now() }],
@@ -104,7 +110,11 @@ export class KnowledgeCheckService {
           }
           if (message.stopReason === "length") throw new Error(reportMessage(reportLanguage, "modelOutputLimit"));
           return message.content.flatMap(part => part.type === "text" ? [part.text] : []).join("");
-        }, owned, reportLanguage);
+        };
+        if (chunks.length > 1) return checkKnowledgeChunks({ request, body, chunks, firstSnapshot: snapshot,
+          collect, complete: completePrompt, signal: owned, reportLanguage, modelRef: preferences.modelRef,
+          ...(this.options.warn ? { warn: this.options.warn } : {}) });
+        const comparison = await compareKnowledge(snapshot.document, snapshot.evidence, completePrompt, owned, reportLanguage);
         owned.throwIfAborted();
         if (!await snapshot.current(owned)) {
           this.options.warn?.("Wiki contradiction check invalidated by changed source content");

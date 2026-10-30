@@ -6,6 +6,7 @@
     type BackgroundJobsSnapshot,
   } from "../lib/background-jobs";
   import SquareTerminal from "@lucide/svelte/icons/square-terminal";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import StatusBarPopover from "./StatusBarPopover.svelte";
 
   let { snapshot, disabled = false, isPending = () => false, onKill, onKillAll, onKillOrphans, onOpenLog }: {
@@ -44,7 +45,7 @@
         aria-hidden="true"
       />
       {#if live.length > 1}
-        <span class="pointer-events-none absolute -top-0.5 right-0 min-w-3 rounded-full bg-chrome px-0.5 font-mono text-[9px] leading-3 tabular-nums" aria-hidden="true" data-background-jobs-count>{live.length}</span>
+        <span class="pointer-events-none absolute -top-0.5 right-0 min-w-3 rounded-full bg-chrome px-0.5 font-mono text-xs leading-3 tabular-nums" aria-hidden="true" data-background-jobs-count>{live.length}</span>
       {/if}
     </button>
   {/snippet}
@@ -61,29 +62,32 @@
       {/if}
       {#each jobs as job (job.id)}
         {@const tail = backgroundJobTailLines(job.tail)}
-        <div class="flex min-w-0 flex-col gap-1 border-t border-border pt-1.5 first-of-type:border-t-0 first-of-type:pt-0" data-background-job={job.id}>
-          <div class="flex min-w-0 items-center gap-2">
+        <details class="group/job min-w-0 border-t border-border pt-1.5 first-of-type:border-t-0 first-of-type:pt-0" open={isLiveBackgroundJob(job)} data-background-job={job.id}>
+          <summary class="flex min-w-0 list-none items-center gap-2 rounded-sm hover:bg-panel-hover focus-visible:outline-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+            <ChevronRight class="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform group-open/job:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
             <span class="min-w-0 flex-1 truncate font-mono text-xs text-foreground" title={job.command}>{job.description ?? job.command}</span>
             <span class={["shrink-0 text-xs", isLiveBackgroundJob(job) ? "text-tool-success" : job.status === "exited" && job.exitCode === 0 ? "text-muted-foreground" : "text-tool-error"]} data-background-job-status={job.status}>{backgroundJobStatusLabel(job)}</span>
-          </div>
-          {#if tail}
-            <pre class="max-h-24 overflow-auto rounded-sm bg-muted/40 px-1.5 py-1 font-mono text-[11px] leading-4 whitespace-pre-wrap break-all text-muted-foreground" data-background-job-tail>{tail}</pre>
-          {/if}
-          <div class="flex items-center gap-1.5">
-            {#if isLiveBackgroundJob(job)}
-              <button class={buttonClass} type="button" aria-label={`Stop background job ${job.id}`} data-background-job-kill
-                disabled={disabled || isPending(`/background-jobs kill ${job.id}`)} onclick={() => onKill(job.id)}>Kill</button>
+          </summary>
+          <div class="mt-1 flex min-w-0 flex-col gap-1">
+            {#if tail}
+              <pre class="max-h-24 overflow-auto rounded-sm bg-muted/40 px-1.5 py-1 font-mono text-xs leading-4 whitespace-pre-wrap break-all text-muted-foreground" data-background-job-tail>{tail}</pre>
             {/if}
-            <button class={buttonClass} type="button" data-background-job-open-log onclick={() => onOpenLog(job.logPath)}>Open log</button>
-            <span class="ml-auto font-mono text-[11px] text-muted-foreground/70">{job.id}</span>
+            <div class="flex items-center gap-1.5">
+              {#if isLiveBackgroundJob(job)}
+                <button class={buttonClass} type="button" aria-label={`Stop background job ${job.id}`} data-background-job-kill
+                  disabled={disabled || isPending(`/background-jobs kill ${job.id}`)} onclick={() => onKill(job.id)}>Kill</button>
+              {/if}
+              <button class={buttonClass} type="button" data-background-job-open-log onclick={() => onOpenLog(job.logPath)}>Open log</button>
+              <span class="ml-auto font-mono text-xs text-muted-foreground/70">{job.id}</span>
+            </div>
           </div>
-        </div>
+        </details>
       {/each}
       {#if snapshot.orphans.length}
         <div class="flex flex-col gap-1 border-t border-border pt-1.5" data-background-orphans>
           <span class="text-xs font-medium text-tool-warning">Left running by a previous Pix process</span>
           {#each snapshot.orphans as orphan (orphan.jobId)}
-            <span class="truncate font-mono text-[11px] text-muted-foreground" title={orphan.command}>pid {orphan.pid}: {orphan.command}</span>
+            <span class="truncate font-mono text-xs text-muted-foreground" title={orphan.command}>pid {orphan.pid}: {orphan.command}</span>
           {/each}
           <div class="flex items-center gap-1.5">
             <button class={buttonClass} type="button" disabled={disabled || isPending("/background-jobs kill-orphans")} onclick={onKillOrphans}>Stop orphans</button>

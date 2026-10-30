@@ -12,6 +12,7 @@
   import { EXTERNAL_EDITOR_OPTIONS } from "../../lib/desktop-config";
   import type { ModelThinkingModel } from "../../lib/model-thinking";
   import SettingsFieldRow from "./SettingsFieldRow.svelte";
+  import SettingsKnowledgeJudge from "./SettingsKnowledgeJudge.svelte";
   import SettingsModelSummary from "./SettingsModelSummary.svelte";
   import SettingsModelRoutingTiers, { type ModelRoutingTierDraft } from "./SettingsModelRoutingTiers.svelte";
   import SettingsModelVisibility from "./SettingsModelVisibility.svelte";
@@ -328,6 +329,7 @@
     >
       <SettingsTextInput value={text(["selectionAssist", "language"])} placeholder="ru" onChange={(value) => set(["selectionAssist", "language"], value)} />
     </SettingsFieldRow>
+    <SettingsKnowledgeJudge {source} {models} desktop />
     <SettingsFieldRow
       label="Contradiction report language"
       description="Language for Wiki contradiction reports. Inherit the Tools Suite setting or choose an override. Source quotations remain unchanged."

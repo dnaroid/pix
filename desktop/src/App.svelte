@@ -2,7 +2,8 @@
   import { projectFolderHue } from "./lib/recent-projects";
   import { modelThinkingConfigState } from "./lib/model-thinking";
   import { createComposerMessageEdit } from "./app/composer-message-edit.svelte";
-  import { onDestroy, onMount, tick, untrack } from "svelte";
+  import { onDestroy, onMount, setContext, tick, untrack } from "svelte";
+  import { WIKI_CONSISTENCY_CONTEXT } from "./app/wiki-consistency-owner.svelte";
   import { invoke, isTauri } from "@tauri-apps/api/core";
   import { createWindowRunActivitySync, hasRestartBlockingRun } from "./app/window-run-activity";
   import { installDesktopContextMenu } from "./lib/desktop-context-menu";
@@ -73,6 +74,11 @@
   import BtwDock from "./components/BtwDock.svelte";
   import { startThemePreference } from "./lib/theme-preference";
   import { createWorkbenchTerminalState } from "./app/workbench-terminal.svelte";
+  import {
+    createWorkbenchWikiConflictsState,
+    WIKI_CONFLICTS_NAVIGATION_CONTEXT,
+    type WikiConflictsNavigation,
+  } from "./app/workbench-wiki-conflicts.svelte";
 
   const isMacOS = /Macintosh|Mac OS X/.test(navigator.userAgent);
   const desktopShortcutPlatform: DesktopShortcutPlatform = isMacOS ? "mac" : "other";
@@ -97,6 +103,14 @@
     setActiveWorkbenchTabId: (id) => activeWorkbenchTabId = id,
     nextWorkbenchAuxOrder: () => ++workbenchAuxSequence,
   });
+  const workbenchWikiConflicts = createWorkbenchWikiConflictsState({
+    activeWorkbenchTabId: () => activeWorkbenchTabId,
+    setActiveWorkbenchTabId: (id) => activeWorkbenchTabId = id,
+    nextWorkbenchAuxOrder: () => ++workbenchAuxSequence,
+    // Read lazily after project services exist.
+    snapshot: () => projectServices.wikiConsistency.wikiPath() ? projectServices.wikiConsistency.findings() : null,
+    revealList: () => workspaceSidebar?.openWikiConflicts(),
+  });
   let previewPane = $state<{ requestClose: () => Promise<boolean> } | null>(null);
   let workbenchTerminalPane = $state<{ openTerminal: (command: string) => Promise<void> } | null>(null);
   let transcriptPane = $state<HTMLDivElement | null>(null);
@@ -111,6 +125,8 @@
     openSettingsSection: (id: string) => Promise<void>;
     openSettingsField: (section: string, fieldId: string) => Promise<void>;
     openGitPanel: (isCurrent?: () => boolean) => void;
+    openWikiChecks: () => Promise<void>;
+    openWikiConflicts: () => Promise<void>;
     closeProjectSwitcher: () => void;
     openProjectSettings: () => void;
   } | null>(null);
@@ -355,6 +371,9 @@
 
   const projectServices = createDesktopProjectServices({
     revealProjectEntry: async (path) => { await workspaceSidebar?.revealProjectEntry(path); },
+    openKnowledgeChecks: () => workspaceSidebar?.openWikiChecks(),
+    openWikiConflicts: (input) => workbenchWikiConflicts.show(input),
+    knowledgeBackgroundReady: () => status === "ready" && Boolean(client),
     client: () => client,
     workspace: () => workspace,
     operationRunning: () => operationRunning,
@@ -369,6 +388,7 @@
     clearError: errors.clear,
     reportError,
   });
+  setContext(WIKI_CONSISTENCY_CONTEXT, projectServices.wikiConsistency);
   const projectTasks = projectServices.tasks;
   const tasksSaving = $derived(projectTasks.saving);
 
@@ -384,6 +404,7 @@
     startup: () => workspaceSessionStartup,
     resetWorkbench: () => {
       workbenchTerminal.reset();
+      workbenchWikiConflicts.reset();
       activeWorkbenchTabId = null;
       rootEffects.resetWorkbenchTracking();
       workbenchAuxSequence = 0;
@@ -672,6 +693,7 @@
     setActiveTabId: (id) => activeWorkbenchTabId = id,
     previewPane: () => previewPane,
     closeTerminal: workbenchTerminal.close,
+    closeWikiConflicts: workbenchWikiConflicts.close,
     nextLocalMessageId: () => `local:${++localMessageId}`,
     scrollToLatest,
     reportError,
@@ -755,6 +777,15 @@
     tabAttention: sessionTabAttention,
     lspOnboarding,
     workbenchTerminal,
+    workbenchWikiConflicts,
+  });
+  setContext<WikiConflictsNavigation>(WIKI_CONFLICTS_NAVIGATION_CONTEXT, {
+    open: (input) => workbenchWikiConflicts.show(input),
+    reveal: () => workbenchWikiConflicts.reveal(),
+    get openCount() { return presentationState.wikiConflictsOpenCount; },
+    inbox: workbenchWikiConflicts.inbox,
+    get sidebarView() { return workbenchWikiConflicts.sidebarView; },
+    set sidebarView(value) { workbenchWikiConflicts.sidebarView = value; },
   });
   const sessionMutationRunning = $derived(presentationState.sessionMutationRunning);
   const canUseSession = $derived(presentationState.canUseSession);
@@ -914,11 +945,13 @@
     transcriptAttachments,
     orchestration: sessionOrchestration,
     lspOnboarding,
+    workbenchWikiConflicts,
     quotaWait,
     headsUp,
     backgroundJobs,
     openObserverSettings: () => void workspaceSidebar?.openSettingsSection("desktop-observer"),
     openProjectSettings: () => workspaceSidebar?.openProjectSettings(),
+    openTasksPanel: (taskId) => workspaceSidebar?.openTasksPanel(taskId),
     openClaudeLoginTerminal: openInteractiveTerminal,
   });
   const titlebarViewModel = viewModels.titlebar;

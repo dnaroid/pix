@@ -85,3 +85,5 @@ behavior or replace real UI startup verification.
 From the repository root, run `node --import tsx --test
 tests/pi-tools-suite-runtime.test.ts` for compiled-runtime and release-staging
 regressions.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"cd341ab03d5fc8c0cb0ec0095de99bf572e60bdfeddf8fe6a5f747aeb62e323e","checkedAt":"2026-10-30T23:09:14.526Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":67,"reportLanguage":"ru"} -->

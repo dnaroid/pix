@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { KnowledgeCheckService } from "../src/knowledge/service.js";
 import { parseKnowledgeCheckRequest } from "../src/knowledge/request.js";
-import { isKnowledgeCheckResult, type KnowledgeCheckCoverage } from "../src/knowledge/contract.js";
+import { isKnowledgeCheckResult, MAX_KNOWLEDGE_DOCUMENT_CHARS, type KnowledgeCheckCoverage } from "../src/knowledge/contract.js";
 import type { KnowledgeSnapshot, KnowledgeSearch } from "../src/knowledge/evidence.js";
 import { KnowledgeReportError } from "../src/knowledge/report-language.js";
 
@@ -47,7 +47,7 @@ describe("Wiki request and response contracts", () => {
     assert.deepEqual(parseKnowledgeCheckRequest(request), request);
     for (const value of [null, {}, { ...request, cwd: "relative" }, { ...request, path: "../private.md" },
       { ...request, path: "/private.md" }, { ...request, path: "wiki/../private.md" }, { ...request, path: "wiki/secrets.json" },
-      { ...request, content: "x".repeat(48_001) }, { ...request, expectedContent: 3 }]) {
+      { ...request, content: "x".repeat(MAX_KNOWLEDGE_DOCUMENT_CHARS + 1) }, { ...request, expectedContent: 3 }]) {
       assert.throws(() => parseKnowledgeCheckRequest(value));
     }
   });
@@ -102,6 +102,44 @@ describe("Wiki request and response contracts", () => {
 });
 
 describe("retrieval plus actual model invocation", () => {
+  it("fails before retrieval or runtime creation when the dedicated judge is not configured", async () => {
+    let collected = 0, created = 0;
+    const checker = service(clean, {
+      loadReportLanguage: async () => "ru",
+      loadPreferences: async () => { throw new KnowledgeReportError("selectModel"); },
+      collect: async () => { collected++; return snapshot(); },
+      createRuntime: async () => { created++; return runtime(clean); },
+    });
+    await assert.rejects(checker.check(request, signal()), /knowledgeCheck\.modelRef/u);
+    assert.equal(collected, 0);
+    assert.equal(created, 0);
+  });
+  it("uses the judge model and reasoning captured at the start of the check", async () => {
+    let loads = 0;
+    const handle = runtime(clean, () => {}, (_context, options) => {
+      assert.equal((options as { reasoning: string }).reasoning, "high");
+    });
+    handle.modelRuntime.getModel = (provider, modelId) => {
+      assert.equal(provider, "judge"); assert.equal(modelId, "selected");
+      return { provider, id: modelId, maxTokens: 8192, reasoning: true } as ReturnType<ModelRuntime["getModel"]>;
+    };
+    const result = await service(clean, {
+      loadPreferences: async () => { loads++; return { modelRef: "judge/selected", thinking: "high" }; },
+      collect: async () => { assert.equal(loads, 1); return snapshot(); },
+      createRuntime: async () => handle,
+    }).check(request, signal());
+    assert.equal(result.modelRef, "judge/selected");
+    assert.equal(loads, 1);
+  });
+  it("does not send an explicit reasoning level when the judge is configured off", async () => {
+    const result = await service(clean, {
+      loadPreferences: async () => ({ modelRef: "test/model", thinking: "off" }),
+      createRuntime: async () => runtime(clean, () => {}, (_context, options) => {
+        assert.equal(Object.hasOwn(options as object, "reasoning"), false);
+      }),
+    }).check(request, signal());
+    assert.equal(result.status, "clear");
+  });
   it("calls the selected model and verifies both original quotations before returning a conflict", async () => {
     let disposed = 0, calls = 0;
     const checker = service(conflict, { createRuntime: async () => runtime(conflict, () => { disposed++; }, (context, options) => {

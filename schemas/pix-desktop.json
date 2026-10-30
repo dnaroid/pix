@@ -8,6 +8,56 @@
     "knowledgeCheck": {
       "type": "object",
       "properties": {
+        "modelRef": {
+          "type": "string",
+          "default": "",
+          "maxLength": 256,
+          "pattern": "^(?:[^\\s/:]+/[^\\s:]+)?$",
+          "description": "User-global Wiki contradiction judge, in provider/model format without a thinking suffix. Empty or omitted inherits Tools Suite knowledgeCheck.modelRef. Never uses the Search or session model; a judge must be configured explicitly."
+        },
+        "thinking": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": ""
+            },
+            {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "off"
+                },
+                {
+                  "type": "string",
+                  "const": "minimal"
+                },
+                {
+                  "type": "string",
+                  "const": "low"
+                },
+                {
+                  "type": "string",
+                  "const": "medium"
+                },
+                {
+                  "type": "string",
+                  "const": "high"
+                },
+                {
+                  "type": "string",
+                  "const": "xhigh"
+                },
+                {
+                  "type": "string",
+                  "const": "max"
+                }
+              ],
+              "description": "Model thinking budget level."
+            }
+          ],
+          "default": "",
+          "description": "Wiki contradiction judge reasoning override. Empty or omitted inherits Tools Suite knowledgeCheck.thinking (low when unset). Independent of Search RAG thinking."
+        },
         "reportLanguage": {
           "anyOf": [
             {
@@ -27,7 +77,7 @@
           "description": "User-global language override for Wiki contradiction reports. Empty or omitted inherits the Tools Suite setting (English by default); source quotations are preserved."
         }
       },
-      "description": "Wiki contradiction report preferences, read from the user-global configuration."
+      "description": "Wiki contradiction judge and report preferences, read from the user-global configuration."
     },
     "ignoreContextFiles": {
       "type": "boolean",

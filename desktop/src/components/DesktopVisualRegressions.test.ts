@@ -174,7 +174,7 @@ describe("desktop visual regressions", () => {
     expect(styles).toContain("cursor: default;");
     expect(styles).toContain(".select-text,");
     expect(styles).toContain("cursor: text;");
-    expect(previewSource).toContain('<strong class="select-text min-w-0 flex-1 truncate text-xs font-medium" title={title}>{title}</strong>');
+    expect(previewSource).toMatch(/<strong class=\{\["select-text min-w-0 flex-1 truncate text-xs font-medium",[^>]*\]\} title=\{title\}>\{title\}<\/strong>/u);
   });
 
   it("highlights transcript text without painting layout margins", async () => {

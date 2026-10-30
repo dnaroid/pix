@@ -19,6 +19,14 @@ export const WorkspaceConfigSchema = Type.Object({
 	})),
 
 	wiki: Type.Optional(Type.Object({
+		autoCheck: Type.Optional(Type.Boolean({
+			default: false,
+			description: "Check non-green Wiki pages in the background while this project is open, then watch new and changed documents. Notifications are shown only for conflicts.",
+		})),
+		autoCheckRunId: Type.Optional(Type.String({
+			pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+			description: "Background Wiki pass identity managed by Desktop. Restores progress after restart without repeatedly checking the same non-green version; a new enabled pass receives a new identity.",
+		})),
 		path: Type.Optional(Type.String({
 			minLength: 1,
 			pattern: "\\S",

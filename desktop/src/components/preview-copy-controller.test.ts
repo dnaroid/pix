@@ -3,8 +3,10 @@ import { createPreviewCopyController } from "./preview-copy-controller";
 import previewSource from "./PreviewPane.svelte?raw";
 
 describe("Preview content copy", () => {
-  it("uses the current draft while editing and source text otherwise", () => {
-    expect(previewSource).toContain('<PreviewCopyButton text={editing ? editorState.draft : file.content} {previewId} />');
+  it("uses the current draft while editing and the displayed source text otherwise", () => {
+    // Markdown copies omit the hidden Wiki report block, like the rendered preview.
+    expect(previewSource).toContain('<PreviewCopyButton text={editing ? editorState.draft : previewContent} {previewId} />');
+    expect(previewSource).toContain("stripKnowledgeCheckStamp(file.content) : file.content");
   });
 
   it("copies exact text including empty content", async () => {

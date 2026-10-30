@@ -17,8 +17,8 @@ export const DEFAULT_DESKTOP_CONFIG_JSONC = String.raw`{
     ]
   },
   "search": { "ragModelRef": "", "ragThinking": "medium" },
-  // Empty inherits the Tools Suite report language; en and ru override it.
-  "knowledgeCheck": { "reportLanguage": "" },
+  // Empty fields inherit the Tools Suite judge settings, never the Search model.
+  "knowledgeCheck": { "modelRef": "", "thinking": "", "reportLanguage": "" },
   "ignoreContextFiles": false,
   "headsUp": {
     "enabled": false,

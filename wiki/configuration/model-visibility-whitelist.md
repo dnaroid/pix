@@ -70,3 +70,5 @@ Give Pix TUI and Desktop user-controlled model-picker whitelists while keeping t
 - TUI menu tests cover full-catalog behavior under an explicit session scope and normal-vs-management whitelist filtering.
 - TUI popup/input tests cover the visibility mode and `Shift+Tab` routing.
 - Desktop unit tests cover JSONC whitelist parsing/updating; `svelte-check` covers the picker integration.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"f17e118a0ce7051bda5f9528c4377ce95ee97fe73d801f065c879eace4123ece","checkedAt":"2026-10-30T23:04:25.028Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":62,"reportLanguage":"ru"} -->

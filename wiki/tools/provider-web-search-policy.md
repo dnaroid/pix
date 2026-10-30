@@ -43,3 +43,5 @@ The provider never exposes/registers the banned tool; a legacy registration is
 removed from the active tool list after startup, on model selection and before
 each turn, and direct calls are blocked. The separate suite search remains
 active, and child inventories exclude provider search.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"0229a733643fb1f3bc551eff83076757e672e5a00cf277f89b7197672f3cb4ba","checkedAt":"2026-10-30T23:13:22.820Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":53,"reportLanguage":"ru"} -->

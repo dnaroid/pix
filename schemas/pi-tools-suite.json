@@ -8,6 +8,51 @@
     "knowledgeCheck": {
       "type": "object",
       "properties": {
+        "modelRef": {
+          "type": "string",
+          "default": "",
+          "maxLength": 256,
+          "pattern": "^(?:[^\\s/:]+/[^\\s:]+)?$",
+          "description": "User-global Wiki contradiction judge, in provider/model format without a thinking suffix. Desktop knowledgeCheck.modelRef can override it. Empty means no judge is selected; Search and session models are never used as fallbacks."
+        },
+        "thinking": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": ""
+            },
+            {
+              "type": "string",
+              "const": "off"
+            },
+            {
+              "type": "string",
+              "const": "minimal"
+            },
+            {
+              "type": "string",
+              "const": "low"
+            },
+            {
+              "type": "string",
+              "const": "medium"
+            },
+            {
+              "type": "string",
+              "const": "high"
+            },
+            {
+              "type": "string",
+              "const": "xhigh"
+            },
+            {
+              "type": "string",
+              "const": "max"
+            }
+          ],
+          "default": "low",
+          "description": "Reasoning budget for the Wiki contradiction judge; low when empty or omitted. Desktop knowledgeCheck.thinking can override it independently of the model."
+        },
         "reportLanguage": {
           "anyOf": [
             {
@@ -23,7 +68,7 @@
           "description": "User-global language for Wiki contradiction reports. Desktop can override it; source quotations are preserved."
         }
       },
-      "description": "Wiki contradiction report preferences, read from the user-global configuration."
+      "description": "Wiki contradiction judge and report preferences, read from the user-global configuration."
     },
     "enabled": {
       "type": "boolean",

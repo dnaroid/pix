@@ -1,6 +1,6 @@
 import type { SessionTabStatusKind } from "./session-tab-status";
 
-export type WorkbenchTabId = `session:${string}` | "preview" | "git-diff" | "lsp-install" | "terminal";
+export type WorkbenchTabId = `session:${string}` | "preview" | "git-diff" | "lsp-install" | "terminal" | "wiki-conflicts";
 
 interface WorkbenchTabBase {
   readonly id: WorkbenchTabId;
@@ -44,15 +44,25 @@ export interface WorkbenchTerminalTab extends WorkbenchTabBase {
   readonly kind: "terminal";
 }
 
+/** Project-wide viewer of saved Wiki contradiction reports; one instance per window. */
+export interface WorkbenchWikiConflictsTab extends WorkbenchTabBase {
+  readonly kind: "wiki-conflicts";
+  /** Non-stale findings currently shown as open; zero when unknown. */
+  readonly openCount: number;
+}
+
 export type WorkbenchTab =
   | WorkbenchSessionTab
   | WorkbenchPreviewTab
   | WorkbenchDiffTab
   | WorkbenchLspInstallTab
-  | WorkbenchTerminalTab;
+  | WorkbenchTerminalTab
+  | WorkbenchWikiConflictsTab;
+
+export type WorkbenchTabKind = WorkbenchTab["kind"];
 
 export interface WorkbenchAuxiliaryPlacement {
-  readonly tab: WorkbenchPreviewTab | WorkbenchDiffTab | WorkbenchLspInstallTab | WorkbenchTerminalTab;
+  readonly tab: WorkbenchPreviewTab | WorkbenchDiffTab | WorkbenchLspInstallTab | WorkbenchTerminalTab | WorkbenchWikiConflictsTab;
   readonly insertAfterId?: WorkbenchTabId | null;
   readonly openedOrder: number;
 }

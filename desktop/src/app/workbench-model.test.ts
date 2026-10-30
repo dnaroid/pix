@@ -243,4 +243,28 @@ describe("session workbench model", () => {
       closable: true,
     });
   });
+
+  it("places one Wiki Conflicts tab beside its opener with a bounded open count", () => {
+    const [session] = build([{ sessionId: "session-1", cwd: "/tmp/project", title: "Session" }]);
+    const base = {
+      sessionTabs: session ? [session] : [],
+      previewDirty: false, previewAnchorId: null, previewOpenedOrder: 0,
+      gitDiff: null, gitReviewLoading: false, gitResolveRunning: false, gitAnchorId: null, gitOpenedOrder: 0,
+      lspInstall: null,
+      terminal: { insertAfterId: workbenchSessionTabId("session-1"), openedOrder: 1 },
+    };
+    const tabs = buildDesktopWorkbenchTabs({
+      ...base,
+      wikiConflicts: { openCount: 7.9, insertAfterId: workbenchSessionTabId("session-1"), openedOrder: 2 },
+    });
+    expect(tabs.map((tab) => tab.id)).toEqual([workbenchSessionTabId("session-1"), "wiki-conflicts", "terminal"]);
+    expect(tabs[1]).toMatchObject({
+      kind: "wiki-conflicts", label: "Wiki Conflicts", title: "Wiki Conflicts · 7 open",
+      panelId: "workbench-panel-wiki-conflicts", closable: true, openCount: 7,
+    });
+    const empty = buildDesktopWorkbenchTabs({ ...base, wikiConflicts: { openCount: -2, insertAfterId: null, openedOrder: 0 } });
+    expect(empty.at(-1)).toMatchObject({ id: "wiki-conflicts", title: "Wiki Conflicts", openCount: 0 });
+    expect(buildDesktopWorkbenchTabs(base).some((tab) => tab.id === "wiki-conflicts")).toBe(false);
+  });
 });
+

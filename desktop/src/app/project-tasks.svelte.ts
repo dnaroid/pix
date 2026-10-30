@@ -13,6 +13,8 @@ import {
 } from "../lib/project-tasks";
 
 export type ProjectTaskDraft = {
+  /** Preassigned id (from `newId`) so the caller can link the task before it reloads. */
+  id?: string;
   title: string;
   description?: string;
   type: ProjectTaskType;
@@ -181,7 +183,7 @@ export function createProjectTasksStore(options: ProjectTasksStoreOptions) {
     const description = draft.description?.trim();
     const timestamp = new Date().toISOString();
     const task: ProjectTask = {
-      id: newId(),
+      id: draft.id ?? newId(),
       title,
       ...(description ? { description } : {}),
       type: draft.type,

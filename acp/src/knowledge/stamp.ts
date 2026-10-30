@@ -1,4 +1,8 @@
-import { isKnowledgeCheckResult, type KnowledgeCheckResult, type KnowledgeReportLanguage } from "./contract.js";
+import { MAX_KNOWLEDGE_DOCUMENT_CHARS, isKnowledgeCheckResult, type KnowledgeCheckResult, type KnowledgeReportLanguage } from "./contract.js";
+import {
+  carryKnowledgeDecisions, isKnowledgeDecisionList, isKnowledgeFindingDecision, knowledgeResultFindingIds,
+  type KnowledgeFindingDecision,
+} from "./decisions.js";
 
 export const KNOWLEDGE_STAMP_PREFIX = "<!-- pix:wiki-check ";
 export const MAX_KNOWLEDGE_STAMP_BYTES = 4096;
@@ -26,9 +30,32 @@ export interface SavedKnowledgeReport {
   readonly checkedAt: string;
   /** A stale report remains available as evidence, never as a verdict on the edited body. */
   readonly current: boolean;
+  /** User verdicts on individual findings; absent when none were recorded. */
+  readonly decisions?: readonly KnowledgeFindingDecision[];
 }
 
-interface ReportEnvelope { readonly version: 1; readonly checkedAt: string; readonly result: KnowledgeCheckResult; }
+/** A completed automatic attempt is a checkpoint, never a successful check. */
+export interface KnowledgeAutoCheckAttempt {
+  readonly version: 1;
+  readonly status: "attempted";
+  readonly runId: string;
+  readonly contentHash: string;
+  readonly checkedAt: string;
+  /** Absent on legacy checkpoints written with the original 48,000-character cap. */
+  readonly maxDocumentChars?: number;
+  readonly current: boolean;
+}
+
+const AUTO_ATTEMPT_KEYS = ["version", "status", "runId", "contentHash", "checkedAt", "maxDocumentChars"];
+const AUTO_RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+
+interface ReportEnvelope {
+  readonly version: 1;
+  readonly checkedAt: string;
+  readonly result: KnowledgeCheckResult;
+  /** Optional and non-empty when present; older readers reject reports carrying it. */
+  readonly decisions?: readonly KnowledgeFindingDecision[];
+}
 interface MetadataRange { readonly start: number; readonly end: number; }
 interface ReportPrefix {
   readonly ranges: readonly MetadataRange[];
@@ -173,7 +200,10 @@ async function contentHash(content: string): Promise<string> {
 function validReport(value: unknown): value is ReportEnvelope {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const envelope = value as Record<string, unknown>;
-  return Object.keys(envelope).length === 3 && Object.keys(envelope).every(key => ["version", "checkedAt", "result"].includes(key))
+  const keys = Object.keys(envelope);
+  return keys.length === ("decisions" in envelope ? 4 : 3)
+    && keys.every(key => ["version", "checkedAt", "result", "decisions"].includes(key))
+    && (!("decisions" in envelope) || isKnowledgeDecisionList(envelope.decisions))
     && envelope.version === 1 && canonicalDate(envelope.checkedAt) && isKnowledgeCheckResult(envelope.result)
     && envelope.result.status !== "clear" && /^[0-9a-f]{64}$/u.test(envelope.result.documentHash);
 }
@@ -190,7 +220,8 @@ export async function readKnowledgeReport(content: string): Promise<SavedKnowled
     const envelope: unknown = JSON.parse(json);
     if (!validReport(envelope)) return undefined;
     return { result: envelope.result, checkedAt: envelope.checkedAt,
-      current: envelope.result.documentHash === await contentHash(parsed.body) };
+      current: envelope.result.documentHash === await contentHash(parsed.body),
+      ...(envelope.decisions ? { decisions: envelope.decisions } : {}) };
   } catch { return undefined; }
 }
 
@@ -207,6 +238,46 @@ export async function readKnowledgeCheckStamp(content: string): Promise<Knowledg
     if (validStamp(stamp) && stamp.contentHash === await contentHash(body)) return stamp;
   } catch { /* Invalid metadata or unavailable hashing never becomes a successful saved check. */ }
   return undefined;
+}
+
+/** Resume the same automatic pass without repeating red/yellow/failed versions. */
+export async function readKnowledgeAutoCheckAttempt(content: string): Promise<KnowledgeAutoCheckAttempt | undefined> {
+  const parsed = metadata(content);
+  const { suffix, count } = parsed.footer;
+  const opener = "\n" + KNOWLEDGE_STAMP_PREFIX, closer = " -->\n";
+  if (parsed.overflow || count !== 1 || !suffix.startsWith(opener) || !suffix.endsWith(closer)) return undefined;
+  const json = suffix.slice(opener.length, -closer.length);
+  if (/[<>\r\n]/u.test(json)) return undefined;
+  try {
+    const value: unknown = JSON.parse(json);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    const attempt = value as Record<string, unknown>;
+    if ((Object.keys(attempt).length !== AUTO_ATTEMPT_KEYS.length && Object.keys(attempt).length !== AUTO_ATTEMPT_KEYS.length - 1)
+      || Object.keys(attempt).some(key => !AUTO_ATTEMPT_KEYS.includes(key))
+      || attempt.version !== 1 || attempt.status !== "attempted"
+      || typeof attempt.runId !== "string" || !AUTO_RUN_ID.test(attempt.runId)
+      || typeof attempt.contentHash !== "string" || !/^[0-9a-f]{64}$/u.test(attempt.contentHash)
+      || !canonicalDate(attempt.checkedAt)
+      || ("maxDocumentChars" in attempt && (typeof attempt.maxDocumentChars !== "number"
+        || !Number.isSafeInteger(attempt.maxDocumentChars) || attempt.maxDocumentChars < 1
+        || attempt.maxDocumentChars > 1_000_000))) return undefined;
+    return { version: 1, status: "attempted", runId: attempt.runId, contentHash: attempt.contentHash,
+      ...(typeof attempt.maxDocumentChars === "number" ? { maxDocumentChars: attempt.maxDocumentChars } : {}),
+      checkedAt: attempt.checkedAt, current: attempt.contentHash === await contentHash(parsed.body) };
+  } catch { return undefined; }
+}
+
+/** Retain the original report bytes, including stale evidence, when only recording an attempt. */
+export async function recordKnowledgeAutoCheckAttempt(content: string, runId: string, hash: string,
+  checkedAt: Date | string = new Date()): Promise<string> {
+  const parsed = metadata(content);
+  const date = checkedAt instanceof Date ? checkedAt.toISOString() : checkedAt;
+  if (parsed.overflow) throw new Error("The existing Wiki check exceeds its metadata limit.");
+  if (!AUTO_RUN_ID.test(runId) || !canonicalDate(date) || !/^[0-9a-f]{64}$/u.test(hash)
+    || hash !== await contentHash(parsed.body)) throw new Error("The automatic Wiki check does not match the current document.");
+  const attempt = { version: 1, status: "attempted", runId, contentHash: hash, checkedAt: date,
+    maxDocumentChars: MAX_KNOWLEDGE_DOCUMENT_CHARS };
+  return parsed.footer.body + "\n" + KNOWLEDGE_STAMP_PREFIX + JSON.stringify(attempt) + " -->\n";
 }
 
 /** Append/replace app metadata only for a clear result that still matches the exact body. */
@@ -239,12 +310,22 @@ function attachReport(body: string, envelope: ReportEnvelope): string {
   return body.slice(0, at) + block + body.slice(at);
 }
 
-/** Persist one complete report or one success stamp; neither metadata form participates in the body hash. */
-export async function recordKnowledgeCheck(content: string, result: KnowledgeCheckResult, checkedAt: Date | string = new Date()): Promise<string> {
+function withDecisions(envelope: ReportEnvelope, decisions: readonly KnowledgeFindingDecision[] | undefined): ReportEnvelope {
+  return decisions?.length ? { ...envelope, decisions } : { version: 1, checkedAt: envelope.checkedAt, result: envelope.result };
+}
+
+/**
+ * Persist one complete report or one success stamp; neither metadata form participates in the body hash.
+ * Decisions of the report in `previous` (default: `content`) carry over for findings the new report still contains.
+ */
+export async function recordKnowledgeCheck(content: string, result: KnowledgeCheckResult, checkedAt: Date | string = new Date(),
+  previous: string = content): Promise<string> {
   if (result.status === "clear") return stampKnowledgeCheck(content, result, checkedAt);
   const { body, overflow } = metadata(content);
   if (overflow) throw new Error("The existing Wiki check exceeds its metadata limit.");
-  const envelope = { version: 1 as const, checkedAt: checkedAt instanceof Date ? checkedAt.toISOString() : checkedAt, result };
+  const decisions = await carryKnowledgeDecisions((await readKnowledgeReport(previous))?.decisions, result);
+  const envelope = withDecisions({ version: 1, checkedAt: checkedAt instanceof Date ? checkedAt.toISOString() : checkedAt, result },
+    decisions);
   if (!validReport(envelope) || result.documentHash !== await contentHash(body)) {
     throw new Error("The Wiki report does not match the current document or has invalid metadata.");
   }
@@ -256,5 +337,30 @@ export async function preserveKnowledgeReport(content: string, previousContent: 
   const next = metadata(content), previous = metadata(previousContent);
   if (next.overflow || previous.overflow) throw new Error("The existing Wiki check exceeds its metadata limit.");
   const report = await readKnowledgeReport(previousContent);
-  return report ? attachReport(next.body, { version: 1, checkedAt: report.checkedAt, result: report.result }) : next.body;
+  return report
+    ? attachReport(next.body, withDecisions({ version: 1, checkedAt: report.checkedAt, result: report.result }, report.decisions))
+    : next.body;
+}
+
+/**
+ * Sets (or with `null` clears) the decision for one finding of the saved report.
+ * Body bytes and trailing app metadata are preserved exactly; stale reports accept decisions too.
+ */
+export async function recordKnowledgeDecision(content: string, findingId: string,
+  decision: Omit<KnowledgeFindingDecision, "findingId"> | null): Promise<string> {
+  const parsed = metadata(content);
+  if (parsed.overflow) throw new Error("The existing Wiki check exceeds its metadata limit.");
+  const report = await readKnowledgeReport(content);
+  if (!report) throw new Error("The page has no valid saved Wiki report.");
+  if (!(await knowledgeResultFindingIds(report.result)).has(findingId)) {
+    throw new Error("The saved Wiki report no longer contains this finding.");
+  }
+  const others = (report.decisions ?? []).filter(item => item.findingId !== findingId);
+  const next = decision ? { findingId, verdict: decision.verdict, ...(decision.note !== undefined ? { note: decision.note } : {}),
+    ...(decision.taskId !== undefined ? { taskId: decision.taskId } : {}), at: decision.at } : undefined;
+  if (next && !isKnowledgeFindingDecision(next)) throw new Error("The Wiki finding decision is invalid.");
+  const decisions = next ? [...others, next] : others;
+  const envelope = withDecisions({ version: 1, checkedAt: report.checkedAt, result: report.result }, decisions);
+  if (!validReport(envelope)) throw new Error("The Wiki report decisions exceed their limit.");
+  return attachReport(parsed.body, envelope) + parsed.footer.suffix;
 }

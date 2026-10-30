@@ -153,16 +153,17 @@ describe("project Wiki consistency routing", () => {
     const path = "docs/knowledge/retries.md";
     const config = deferred<ReturnType<typeof wikiConfig>>();
     const backend = deferred<KnowledgeCheckResult>();
+    const backendStarted = deferred<boolean>();
     mocks.readWorkspaceConfig.mockReturnValue(config.promise);
     const { store, checkKnowledge, changeWorkspace } = fixture(path);
-    checkKnowledge.mockReturnValue(backend.promise);
+    checkKnowledge.mockImplementation(() => { backendStarted.resolve(true); return backend.promise; });
     const controller = new AbortController();
     const pending = store.checkKnowledge(path, "Draft", controller.signal);
     const rejected = expect(pending).rejects.toThrow(invalidation === "cancellation" ? "Cancelled by editor" : /project changed/i);
 
     if (boundary === "backend") {
       config.resolve(wikiConfig("docs/knowledge"));
-      await Promise.resolve();
+      await backendStarted.promise;
       expect(checkKnowledge).toHaveBeenCalledTimes(1);
     }
 

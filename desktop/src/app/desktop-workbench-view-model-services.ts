@@ -1,7 +1,16 @@
+import type { WikiFileDates } from "../lib/wiki-file-dates";
+import { invoke } from "@tauri-apps/api/core";
 import { externalEditorLabel } from "../lib/desktop-config";
+import { createDiagnosticLogger } from "../lib/diagnostic-logging";
+import type { ProjectFilePreview } from "../lib/project-files";
 import type { DesktopViewModelServicesOptions } from "./desktop-view-model-service-options";
 import { createDesktopWorkbenchViewModel } from "./desktop-workbench-view-model.svelte";
 import type { SubagentSessionNavigation } from "./desktop-subagent-navigation";
+import { toasts } from "./toasts.svelte";
+import { wikiConflictsText, wikiVerdictLabel } from "../components/wiki-conflicts-text";
+
+/** Undo window for a Wiki finding decision. */
+const WIKI_DECISION_UNDO_MS = 8_000;
 
 export function createDesktopWorkbenchViewModelServices(
   options: DesktopViewModelServicesOptions,
@@ -85,6 +94,64 @@ export function createDesktopWorkbenchViewModelServices(
       gitAssist: options.workbenchGit.gitAssist,
       knowledgeResolution: options.workbenchGit.knowledgeResolution,
       lspOnboarding: options.lspOnboarding,
+      wikiConflicts: options.workbenchWikiConflicts ? {
+        state: options.workbenchWikiConflicts,
+        recheck: options.project.wikiConflictsRecheck,
+        read: async (workspace, path, signal) => {
+          signal.throwIfAborted();
+          const file = await invoke<ProjectFilePreview>("read_project_file", { workspace, path });
+          signal.throwIfAborted();
+          return file.content;
+        },
+        reportError: (error) => createDiagnosticLogger(() => ({ workspace: options.workspace() }))
+          .report(error, "wiki:conflicts-compare-read-failed"),
+        dates: async (workspace, request, signal) => {
+          try {
+            signal.throwIfAborted();
+            const dates = await invoke<WikiFileDates>("wiki_file_dates", {
+              workspace, path: request.path, startLine: request.lines?.startLine, endLine: request.lines?.endLine,
+            });
+            return signal.aborted ? null : dates;
+          } catch (error) {
+            if (!signal.aborted) createDiagnosticLogger(() => ({ workspace: options.workspace() }))
+              .report(error, "wiki:conflicts-file-dates-failed");
+            return null;
+          }
+        },
+        decisionWriter: options.project.documents.knowledgeDecisionWriter,
+        refresh: () => options.project.wikiConsistency.refresh(),
+        reportDecisionError: (error) => {
+          createDiagnosticLogger(() => ({ workspace: options.workspace() })).report(error, "wiki:finding-decision-failed");
+          options.errors.report(error);
+        },
+        editWriter: options.project.documents.wikiEditWriter,
+        reportEditError: (error) => {
+          createDiagnosticLogger(() => ({ workspace: options.workspace() })).report(error, "wiki:side-edit-failed");
+          options.errors.report(error);
+        },
+        tasks: {
+          prepare: async (workspace) => {
+            const tasks = options.project.tasks;
+            if (options.workspace() !== workspace || tasks.saving) return false;
+            await tasks.load(workspace);
+            return options.workspace() === workspace && !tasks.loading && !tasks.loadFailed && !tasks.saving;
+          },
+          newId: () => options.project.tasks.newId(),
+          create: (draft) => options.project.tasks.create(draft),
+          open: (taskId) => options.openTasksPanel?.(taskId),
+        },
+        offerDecisionUndo: (offer) => {
+          const text = wikiConflictsText(offer.finding.reportLanguage);
+          toasts.info({
+            message: offer.decision ? text.decisionSaved(wikiVerdictLabel(text, offer.finding, offer.decision.verdict))
+              : text.decisionCleared,
+            source: text.heading,
+            key: offer.key,
+            durationMs: WIKI_DECISION_UNDO_MS,
+            actions: [{ label: text.undo, run: async () => { await offer.undo(); } }],
+          });
+        },
+      } : undefined,
     },
   });
 }

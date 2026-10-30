@@ -95,8 +95,13 @@ all layers.
   has jobs or orphans. It pulses in the success tone while jobs run, turns to the
   warning tone when orphans exist, and shows a small count badge for more than one
   live job. The accessible name and tooltip read `N background jobs[, M orphaned]`.
-  Its popover shows a bounded output tail per job,
-  Kill for live jobs, Open log (Desktop preview), Stop all and Stop orphans.
+  Its popover shows each job as a native expandable details row: the summary
+  keeps its command/description and status visible beside a Lucide chevron that
+  rotates when expanded. Starting and running jobs default open; exited, killed
+  and failed jobs default closed. Expanding a row reveals the bounded output tail,
+  job actions and id. Native details/summary keyboard toggling is preserved.
+  The popover also provides Kill for live jobs, Open log (Desktop preview),
+  Stop all and Stop orphans.
   Controls send `/background-jobs …` to the ready runtime. Each command is
   deduplicated while pending, and errors from stale requests are dropped.
 
@@ -111,3 +116,5 @@ all layers.
   `src/components/BackgroundJobsStatus.test.ts`.
 - ACP: `agent.test.ts` covers `background-jobs controls run out-of-band while
   the parent run is active`.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"d8d02c1f8c994ddb65d6785f18044205985e550d794db1516fa08c77255c7381","checkedAt":"2026-10-30T23:09:51.401Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":63,"reportLanguage":"ru"} -->

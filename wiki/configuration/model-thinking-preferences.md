@@ -80,3 +80,5 @@ Remember the user's last applied thinking level independently for each model in 
 - `npm --prefix desktop test`
 - `npm --prefix desktop run check`
 - `npm --prefix desktop run build:web`
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"5399c3cbf23a85339f84c9120e698062a80c1e7d6f3eee39acf430915bd73d91","checkedAt":"2026-10-30T23:04:38.926Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":63,"reportLanguage":"ru"} -->

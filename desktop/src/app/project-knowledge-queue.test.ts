@@ -23,12 +23,25 @@ function fixture() {
   let workspace = "/project";
   const check = vi.fn(async (job: ProjectKnowledgeJob, _signal: AbortSignal) => result(job.path, job.content));
   const record = vi.fn(async (_job: ProjectKnowledgeJob, _result: KnowledgeCheckResult, _current: () => boolean) => true);
-  const reportError = vi.fn(), onComplete = vi.fn();
-  const queue = createProjectKnowledgeQueue({ workspace: () => workspace, check, record, reportError, onComplete });
-  return { queue, check, record, reportError, onComplete, changeWorkspace: () => { workspace = "/other-project"; } };
+  const reportError = vi.fn(), reportBackgroundError = vi.fn(), onComplete = vi.fn();
+  const recordFailure = vi.fn(async (_job: ProjectKnowledgeJob, _current: () => boolean) => true);
+  const queue = createProjectKnowledgeQueue({ workspace: () => workspace, check, record, recordFailure, reportError, reportBackgroundError, onComplete });
+  return { queue, check, record, recordFailure, reportError, reportBackgroundError, onComplete, changeWorkspace: () => { workspace = "/other-project"; } };
 }
 
 describe("project-owned manual Wiki queue", () => {
+  it("accepts a 54k saved page and binds the result to its full document hash", async () => {
+    const item = fixture(), content = "Wiki body\n".repeat(5_400);
+    expect(content).toHaveLength(54_000);
+    const id = item.queue.enqueue(input("wiki/long.md", content));
+    expect(id).toBeDefined();
+    await vi.waitFor(() => expect(item.queue.jobs.find(job => job.id === id)?.state).toBe("completed"));
+    expect(item.check.mock.calls[0]?.[0]).toMatchObject({ content, expectedContent: content });
+    expect(item.queue.jobs.find(job => job.id === id)?.result?.documentHash).toBe((await result("wiki/long.md", content)).documentHash);
+    expect(item.record.mock.calls[0]?.[0]).toMatchObject({ content, expectedContent: content });
+    expect(item.reportError).not.toHaveBeenCalled();
+  });
+
   it("runs immutable snapshots FIFO and retains completed reports", async () => {
     const item = fixture();
     const first = deferred<KnowledgeCheckResult>();
@@ -196,4 +209,119 @@ describe("project-owned manual Wiki queue", () => {
     expect(item.check).not.toHaveBeenCalled();
     expect(item.reportError).toHaveBeenCalledTimes(1);
   });
+});
+
+
+const background = (path: string, content = "Saved body"): ManualKnowledgeCheckInput => ({
+  ...input(path, content), origin: "background", autoCheckRunId: "test-pass",
+});
+
+describe("automatic Wiki work shares the manual queue", () => {
+  it("runs waiting manual requests first without preempting the running automatic check", async () => {
+    const item = fixture(), first = deferred<KnowledgeCheckResult>();
+    item.check.mockReturnValueOnce(first.promise);
+    item.queue.enqueue(background("wiki/running.md"));
+    await vi.waitFor(() => expect(item.check).toHaveBeenCalledTimes(1));
+    item.queue.enqueue(background("wiki/background.md"));
+    item.queue.enqueue(input("wiki/manual.md"));
+    first.resolve(await result("wiki/running.md", "Saved body"));
+    await vi.waitFor(() => expect(item.queue.jobs.every(job => job.state === "completed")).toBe(true));
+    expect(item.check.mock.calls.map(([job]) => job.path)).toEqual(["wiki/running.md", "wiki/manual.md", "wiki/background.md"]);
+    expect(item.check.mock.calls[0]?.[1].aborted).toBe(false);
+  });
+
+  it("promotes an identical waiting automatic snapshot instead of creating a second task", async () => {
+    const item = fixture(), first = deferred<KnowledgeCheckResult>();
+    item.check.mockReturnValueOnce(first.promise);
+    item.queue.enqueue(input("wiki/running.md"));
+    await vi.waitFor(() => expect(item.check).toHaveBeenCalledTimes(1));
+    item.queue.enqueue(background("wiki/earlier.md"));
+    const promoted = item.queue.enqueue(background("wiki/promoted.md"));
+    expect(item.queue.enqueue(input("wiki/promoted.md"))).toBe(promoted);
+    expect(item.queue.jobs).toHaveLength(3);
+    first.resolve(await result("wiki/running.md", "Saved body"));
+    await vi.waitFor(() => expect(item.queue.jobs.every(job => job.state === "completed")).toBe(true));
+    expect(item.check.mock.calls.map(([job]) => job.path)).toEqual(["wiki/running.md", "wiki/promoted.md", "wiki/earlier.md"]);
+    expect(item.record.mock.calls[1]?.[0].autoCheckRunId).toBe("test-pass");
+  });
+
+  it("disabling automatic work cancels only its waiting tasks", async () => {
+    const item = fixture(), first = deferred<KnowledgeCheckResult>();
+    item.check.mockReturnValueOnce(first.promise);
+    const running = item.queue.enqueue(background("wiki/running.md"))!;
+    await vi.waitFor(() => expect(item.check).toHaveBeenCalledTimes(1));
+    const cancelled = item.queue.enqueue(background("wiki/waiting.md"))!;
+    const manual = item.queue.enqueue(input("wiki/manual.md"))!;
+    item.queue.cancelQueuedBackground();
+    expect(item.queue.jobs.find(job => job.id === cancelled)?.state).toBe("cancelled");
+    expect(item.queue.jobs.find(job => job.id === running)?.state).toBe("running");
+    expect(item.check.mock.calls[0]?.[1].aborted).toBe(false);
+    first.resolve(await result("wiki/running.md", "Saved body"));
+    await vi.waitFor(() => expect(item.queue.jobs.find(job => job.id === manual)?.state).toBe("completed"));
+    expect(item.check.mock.calls.map(([job]) => job.path)).toEqual(["wiki/running.md", "wiki/manual.md"]);
+  });
+
+  it("reserves capacity for manual requests and treats automatic backpressure quietly", () => {
+    const item = fixture();
+    for (let index = 0; index < MAX_ACTIVE_KNOWLEDGE_JOBS - 1; index++) {
+      expect(item.queue.enqueue(background(`wiki/background-${index}.md`))).toBeDefined();
+    }
+    expect(item.queue.enqueue(background("wiki/later.md"))).toBeUndefined();
+    expect(item.queue.enqueue(input("wiki/manual.md"))).toBeDefined();
+    expect(item.reportError).not.toHaveBeenCalled();
+    expect(item.reportBackgroundError).not.toHaveBeenCalled();
+    item.queue.reset();
+  });
+
+  it("logs automatic failures quietly and durably records the attempted version", async () => {
+    const item = fixture(), error = new Error("Judge unavailable");
+    item.check.mockRejectedValueOnce(error);
+    item.queue.enqueue(background("wiki/page.md"));
+    await vi.waitFor(() => expect(item.queue.jobs[0]?.state).toBe("failed"));
+    expect(item.reportBackgroundError).toHaveBeenCalledExactlyOnceWith(error);
+    expect(item.reportError).not.toHaveBeenCalled();
+    expect(item.recordFailure).toHaveBeenCalledTimes(1);
+    expect(item.recordFailure.mock.calls[0]?.[0]).toMatchObject({ path: "wiki/page.md", autoCheckRunId: "test-pass", expectedContent: "Saved body" });
+    expect(item.queue.jobs[0]?.recorded).toBe(true);
+    expect(item.onComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains the physical slot during failure recording and fences cancellation", async () => {
+    const item = fixture(), recording = deferred<boolean>();
+    item.check.mockRejectedValueOnce(new Error("Judge unavailable"));
+    item.recordFailure.mockReturnValueOnce(recording.promise);
+    const cancelled = item.queue.enqueue(background("wiki/page.md"))!;
+    await vi.waitFor(() => expect(item.recordFailure).toHaveBeenCalledTimes(1));
+    const next = item.queue.enqueue(input("wiki/next.md"))!;
+    item.queue.cancel(cancelled);
+    expect(item.recordFailure.mock.calls[0]?.[1]()).toBe(false);
+    const later = item.queue.enqueue(input("wiki/later.md"))!;
+    const calls = item.check.mock.calls.length;
+    await Promise.resolve();
+    expect(item.check).toHaveBeenCalledTimes(calls);
+    recording.resolve(true);
+    await vi.waitFor(() => expect(item.queue.jobs.find(job => job.id === later)?.state).toBe("completed"));
+    expect(item.onComplete.mock.calls.some(([job]) => job.id === cancelled)).toBe(false);
+    expect(item.queue.jobs.find(job => job.id === next)?.state).toBe("completed");
+  });
+
+  it("rejects automatic draft-only work without using the manual error channel", () => {
+    const item = fixture();
+    expect(item.queue.enqueue({ ...background("wiki/page.md"), persistStamp: false })).toBeUndefined();
+    expect(item.reportBackgroundError).toHaveBeenCalledTimes(1);
+    expect(item.reportError).not.toHaveBeenCalled();
+    expect(item.queue.jobs).toEqual([]);
+  });
+});
+
+
+it.each([true, false])("allows the owner to checkpoint a failed manual saved request only when persistStamp=%s", async persistStamp => {
+  const item = fixture(), failure = new Error("Judge unavailable");
+  item.check.mockRejectedValueOnce(failure);
+  item.queue.enqueue(input("wiki/manual.md", "Saved body", persistStamp));
+  await vi.waitFor(() => expect(item.queue.jobs[0]?.state).toBe("failed"));
+  expect(item.recordFailure).toHaveBeenCalledTimes(persistStamp ? 1 : 0);
+  expect(item.reportError).toHaveBeenCalledExactlyOnceWith(failure);
+  expect(item.reportBackgroundError).not.toHaveBeenCalled();
+  expect(item.queue.jobs[0]?.recorded).toBe(persistStamp ? true : undefined);
 });

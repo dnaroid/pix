@@ -2,7 +2,9 @@ import type { KnowledgeConflict, KnowledgeCitation, KnowledgeUncertainty } from 
 export type { KnowledgeConflict, KnowledgeCitation, KnowledgeUncertainty } from "./comparison.js";
 
 export const KNOWLEDGE_CHECK_METHOD = "pix/knowledge/check";
-export const MAX_KNOWLEDGE_DOCUMENT_CHARS = 48_000;
+export const MAX_KNOWLEDGE_DOCUMENT_CHARS = 128_000;
+export const MAX_KNOWLEDGE_CHUNK_CHARS = 48_000;
+export const MAX_KNOWLEDGE_CHUNKS = Math.ceil(MAX_KNOWLEDGE_DOCUMENT_CHARS / MAX_KNOWLEDGE_CHUNK_CHARS);
 export const MAX_KNOWLEDGE_REVIEWED_PASSAGES = 12;
 export const MAX_KNOWLEDGE_REVIEWED_CHARS = 48_000;
 export type KnowledgeReportLanguage = "en" | "ru";
@@ -24,6 +26,15 @@ export interface KnowledgeCheckCoverage {
   readonly candidateSources: number;
   readonly excerptedSources: number;
   readonly limits: readonly KnowledgeCoverageLimit[];
+  /** Present when the saved source list samples the passages actually compared. */
+  readonly retainedPassages?: number;
+}
+
+export interface KnowledgeChunkCoverage {
+  readonly totalChunks: number;
+  readonly checkedChunks: number;
+  readonly totalComparisons: number;
+  readonly checkedComparisons: number;
 }
 
 export interface KnowledgeCheckResult {
@@ -35,6 +46,8 @@ export interface KnowledgeCheckResult {
   readonly reportLanguage?: KnowledgeReportLanguage;
   readonly checkedSources: number;
   readonly coverage?: KnowledgeCheckCoverage;
+  /** Large documents include independent Wiki checks and every cross-chunk pair. */
+  readonly chunkCoverage?: KnowledgeChunkCoverage;
   readonly conflicts: readonly KnowledgeConflict[];
   /** Grounded competing claims whose deciding condition is missing; older results omit this field. */
   readonly uncertainties?: readonly KnowledgeUncertainty[];
@@ -52,6 +65,9 @@ export function isKnowledgeCheckResult(value: unknown): value is KnowledgeCheckR
     || value.notices.some(item => typeof item !== "string") || !Array.isArray(value.conflicts)
     || value.conflicts.length > 20) return false;
   if (value.coverage !== undefined && !coverage(value.coverage)) return false;
+  if (value.chunkCoverage !== undefined && (!chunkCoverage(value.chunkCoverage)
+    || (value.status === "clear" && (value.chunkCoverage.checkedChunks !== value.chunkCoverage.totalChunks
+      || value.chunkCoverage.checkedComparisons !== value.chunkCoverage.totalComparisons)))) return false;
   if (value.reportLanguage !== undefined && value.reportLanguage !== "en" && value.reportLanguage !== "ru") return false;
   if (value.uncertainties !== undefined && (!Array.isArray(value.uncertainties)
     || value.uncertainties.length > 10 || !value.uncertainties.every(item => finding(item, 1_000)))) return false;
@@ -59,6 +75,8 @@ export function isKnowledgeCheckResult(value: unknown): value is KnowledgeCheckR
     || value.reviewedSources.length > MAX_KNOWLEDGE_REVIEWED_PASSAGES
     || !value.reviewedSources.every(item => citation(item, MAX_KNOWLEDGE_REVIEWED_CHARS))
     || value.reviewedSources.reduce((total: number, item: KnowledgeCitation) => total + item.quote.length, 0) > MAX_KNOWLEDGE_REVIEWED_CHARS)) return false;
+  if (record(value.coverage) && value.coverage.retainedPassages !== undefined
+    && (!Array.isArray(value.reviewedSources) || value.reviewedSources.length !== value.coverage.retainedPassages)) return false;
   if (value.status === "clear" && (value.conflicts.length !== 0
     || (Array.isArray(value.uncertainties) && value.uncertainties.length !== 0))) return false;
   if (value.status === "conflicts" && value.conflicts.length === 0) return false;
@@ -71,7 +89,19 @@ function coverage(value: unknown): boolean {
       .every(count => Number.isSafeInteger(count) && (count as number) >= 0)
     && Array.isArray(value.limits) && value.limits.length <= KNOWLEDGE_COVERAGE_LIMITS.length
     && new Set(value.limits).size === value.limits.length
+    && (value.retainedPassages === undefined || (Number.isSafeInteger(value.retainedPassages)
+      && (value.retainedPassages as number) >= 0 && (value.retainedPassages as number) <= (value.checkedPassages as number)))
     && value.limits.every(limit => KNOWLEDGE_COVERAGE_LIMITS.includes(limit));
+}
+
+function chunkCoverage(value: unknown): value is KnowledgeChunkCoverage {
+  return record(value) && [value.totalChunks, value.checkedChunks, value.totalComparisons, value.checkedComparisons]
+    .every(count => Number.isSafeInteger(count) && (count as number) >= 0)
+    && (value.totalChunks as number) >= 1 && (value.totalChunks as number) <= MAX_KNOWLEDGE_CHUNKS
+    && (value.checkedChunks as number) <= (value.totalChunks as number)
+    && value.totalComparisons === (value.totalChunks as number) * ((value.totalChunks as number) + 1) / 2
+    && (value.checkedComparisons as number) <= (value.totalComparisons as number)
+    && (value.checkedComparisons as number) >= (value.checkedChunks as number);
 }
 
 function record(value: unknown): value is Record<string, unknown> {

@@ -31,6 +31,7 @@
   import SettingsModelSummary from "./SettingsModelSummary.svelte";
   import SettingsClaudeAccounts from "./SettingsClaudeAccounts.svelte";
   import SettingsFieldRow from "./SettingsFieldRow.svelte";
+  import SettingsKnowledgeJudge from "./SettingsKnowledgeJudge.svelte";
   import SettingsFrontierModels from "./SettingsFrontierModels.svelte";
   import SettingsJsonValue from "./SettingsJsonValue.svelte";
   import SettingsModuleVisibility from "./SettingsModuleVisibility.svelte";
@@ -192,6 +193,7 @@
     <SettingsFieldRow label="Tools Suite" description="Enable or disable the complete pi-tools-suite extension." explicit={has(["enabled"])} defaultLabel={defaultLabel(["enabled"])} onReset={() => reset(["enabled"])}>
       <SettingsSwitch value={bool(["enabled"])} onChange={(value) => set(["enabled"], value)} />
     </SettingsFieldRow>
+    <SettingsKnowledgeJudge {source} {models} />
     <SettingsFieldRow
       label="Contradiction report language"
       description="Language for Wiki contradiction reports. Desktop can override this setting; source quotations remain unchanged."

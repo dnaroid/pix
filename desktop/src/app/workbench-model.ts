@@ -15,6 +15,7 @@ import {
   type WorkbenchTab,
   type WorkbenchTabId,
   type WorkbenchTerminalTab,
+  type WorkbenchWikiConflictsTab,
 } from "../lib/workbench-tabs";
 import { sessionIsFork } from "../lib/session-tabs";
 import { subagentSessionLink } from "../lib/session-subagent-link";
@@ -121,6 +122,11 @@ export function buildDesktopWorkbenchTabs(options: {
     insertAfterId: WorkbenchTabId | null;
     openedOrder: number;
   } | null;
+  wikiConflicts?: {
+    openCount: number;
+    insertAfterId: WorkbenchTabId | null;
+    openedOrder: number;
+  } | null;
 }): WorkbenchTab[] {
   const auxiliary: WorkbenchAuxiliaryPlacement[] = [];
   if (options.preview) {
@@ -192,6 +198,23 @@ export function buildDesktopWorkbenchTabs(options: {
       tab: terminalTab,
       insertAfterId: options.terminal.insertAfterId,
       openedOrder: options.terminal.openedOrder || 4,
+    });
+  }
+  if (options.wikiConflicts) {
+    const openCount = Math.max(0, Math.floor(options.wikiConflicts.openCount));
+    const wikiConflictsTab: WorkbenchWikiConflictsTab = {
+      id: "wiki-conflicts",
+      label: "Wiki Conflicts",
+      title: openCount ? `Wiki Conflicts · ${openCount} open` : "Wiki Conflicts",
+      panelId: "workbench-panel-wiki-conflicts",
+      kind: "wiki-conflicts",
+      closable: true,
+      openCount,
+    };
+    auxiliary.push({
+      tab: wikiConflictsTab,
+      insertAfterId: options.wikiConflicts.insertAfterId,
+      openedOrder: options.wikiConflicts.openedOrder || 5,
     });
   }
   return buildWorkbenchTabs([...options.sessionTabs], auxiliary);

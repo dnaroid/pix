@@ -1,7 +1,7 @@
 import type { KnowledgeReportLanguage } from "./contract.js";
 import { findingInvalid, uncertaintyInvalid, reportLanguageInstruction, reportMessage, type KnowledgeReportMessage } from "./report-language.js";
 
-export interface CheckDocument { path: string; text: string; }
+export interface CheckDocument { path: string; text: string; startLine?: number; context?: string; }
 export interface CheckEvidence { id: string; path: string; text: string; startLine: number; context?: string; }
 export interface KnowledgeCitation { path: string; quote: string; startLine: number; endLine: number; }
 export interface KnowledgeConflict { draft: KnowledgeCitation; existing: KnowledgeCitation; explanation: string; }
@@ -27,7 +27,7 @@ Report uncertainty only when a specific missing condition, scope, version, timef
 For each pair choose exactly one outcome: an established conflict, a material uncertainty, or neither. Never place the same pair in both conflicts and uncertainties. A conflict's explanation must establish overlapping applicability and incompatibility; if it says the environment, deployment, version or another decisive condition is unknown, put that pair only in uncertainties. A context-dependent phrase such as "this deployment" does not establish that it is the draft's named production deployment. Before returning, move any pair whose incompatibility depends on an unresolved condition out of conflicts and into uncertainties.
 Return exactly one JSON object with keys conflicts and uncertainties, without commentary:
 {"conflicts":[{"sourceId":"a supplied source id, or draft for an internal contradiction","draftQuote":"verbatim continuous quotation from draft.text","existingQuote":"verbatim continuous quotation from that source's text field","explanation":"why the two claims cannot both hold in the same context"}],"uncertainties":[{"sourceId":"a supplied source id, or draft for an internal uncertainty","draftQuote":"verbatim continuous quotation of the competing claim from draft.text","existingQuote":"verbatim continuous quotation of the competing claim from that source's text field","explanation":"the specific missing information needed to decide whether these two claims are compatible"}]}
-Each quotation must occur exactly once in its supplied text field and contain enough context to establish the conflicting claim. A source's optional context field is for interpretation only, not quotation grounding. For an internal contradiction use sourceId draft and two distinct, non-overlapping quotations from the draft. Never invent paths, ids, line numbers, quotes or facts.
+Each quotation must occur exactly once in its supplied text field and contain enough context to establish the conflicting claim. Optional context fields on the draft and sources are for interpretation only, not quotation grounding. For an internal contradiction use sourceId draft and two distinct, non-overlapping quotations from the draft. Never invent paths, ids, line numbers, quotes or facts.
 Uncertainties require the same exact quotation evidence as conflicts; return structured objects, never free-form uncertainty strings. Their explanation must identify the missing deciding condition, not merely repeat the quotations or source identifiers.
 Use an empty conflicts array when no grounded contradiction was found among the supplied passages. Use an empty uncertainties array when no material uncertainty about a specific competing pair remains in this bounded comparison. Never add a generic caveat about exhaustive coverage to uncertainties. Return at most 20 conflicts, quotations at most 4000 characters, conflict explanations at most 2000 characters, and at most 10 uncertainty objects with explanations of at most 1000 characters each.`;
 
@@ -85,8 +85,8 @@ function groundedFinding(
     invalid("findingSource");
     return undefined;
   }
-  const draft = locate(document, finding.draftQuote, 1);
-  const firstLine = finding.sourceId === "draft" ? 1 : sources.get(finding.sourceId)!.startLine;
+  const draft = locate(document, finding.draftQuote, document.startLine ?? 1);
+  const firstLine = finding.sourceId === "draft" ? document.startLine ?? 1 : sources.get(finding.sourceId)!.startLine;
   const existing = locate(source, finding.existingQuote, firstLine);
   if (!draft || !existing) {
     invalid("findingQuote");
@@ -109,6 +109,9 @@ export async function compareKnowledge(
 ): Promise<ComparisonResult> {
   const message = (key: KnowledgeReportMessage) => reportMessage(reportLanguage, key);
   signal.throwIfAborted();
+  if (document.startLine !== undefined && (!Number.isSafeInteger(document.startLine) || document.startLine < 1)) {
+    return incomplete(message("comparisonSourcesInvalid"));
+  }
   const sources = new Map<string, CheckEvidence>();
   for (const source of evidence) {
     if (!source.id || source.id === "draft" || sources.has(source.id)
@@ -121,7 +124,8 @@ export async function compareKnowledge(
   const response = await complete({
     system: SYSTEM_PROMPT + "\n" + reportLanguageInstruction(reportLanguage),
     user: JSON.stringify({
-      draft: { path: document.path, text: normalized(document.text) },
+      draft: { path: document.path, text: normalized(document.text),
+        ...(document.context ? { context: normalized(document.context) } : {}) },
       sources: evidence.map(source => ({ ...source, text: normalized(source.text) })),
     }),
   }, signal);

@@ -27,3 +27,5 @@ suite setting `pruneHistoricalThinking` (default `false`;
 
 `external/pi-tools-suite/test/historical-thinking-prune.test.ts`: pruning,
 current tool loop kept, steer boundary, prefix stability, no-op cases.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"864ddc617b554fb8c37f9703ebfabfb2594f2c454492ce96446e1573fc2d29ac","checkedAt":"2026-10-30T23:14:53.135Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":51,"reportLanguage":"ru"} -->

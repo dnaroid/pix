@@ -8,6 +8,9 @@ export interface ManualKnowledgeCheckInput {
   readonly expectedContent: string;
   /** Persist a success footer or a non-clear report block for the captured saved version. */
   readonly persistStamp: boolean;
+  readonly origin?: "manual" | "background";
+  /** Durable automatic-pass identity; ordinary manual requests omit it. */
+  readonly autoCheckRunId?: string;
 }
 
 export interface ProjectKnowledgeJob extends ManualKnowledgeCheckInput {
@@ -29,6 +32,8 @@ interface QueueOptions {
   readonly check: (job: ProjectKnowledgeJob, signal: AbortSignal) => Promise<KnowledgeCheckResult | undefined>;
   readonly record: (job: ProjectKnowledgeJob, result: KnowledgeCheckResult, isCurrent: () => boolean) => Promise<boolean>;
   readonly reportError: (error: unknown) => void;
+  readonly reportBackgroundError?: (error: unknown) => void;
+  readonly recordFailure?: (job: ProjectKnowledgeJob, isCurrent: () => boolean) => Promise<boolean>;
   readonly onComplete?: (job: ProjectKnowledgeJob) => void;
 }
 
@@ -48,7 +53,7 @@ async function matchesSnapshot(result: KnowledgeCheckResult, content: string): P
   return result.documentHash === hash;
 }
 
-/** Project-owned manual checks outlive Preview; no editor lifecycle owns their abort signal. */
+/** Project-owned checks outlive Preview; manual work takes priority over waiting background work. */
 export function createProjectKnowledgeQueue(options: QueueOptions) {
   let jobs = $state<readonly ProjectKnowledgeJob[]>([]);
   const pending = new Map<number, QueuedRun>();
@@ -79,10 +84,15 @@ export function createProjectKnowledgeQueue(options: QueueOptions) {
       && jobs.some(job => job.id === run.snapshot.id && job.state === "running");
   }
 
+  function report(job: Pick<ProjectKnowledgeJob, "origin">, error: unknown): void {
+    if (job.origin === "background" && options.reportBackgroundError) options.reportBackgroundError(error);
+    else options.reportError(error);
+  }
+
   function notify(job: ProjectKnowledgeJob | undefined): void {
     if (!job || options.workspace() !== job.workspace) return;
     try { options.onComplete?.(job); }
-    catch (error) { options.reportError(error); }
+    catch (error) { report(job, error); }
   }
 
   async function execute(run: QueuedRun): Promise<void> {
@@ -109,7 +119,7 @@ export function createProjectKnowledgeQueue(options: QueueOptions) {
           if (!isCurrent(run)) return;
           recorded = false;
           error = message(cause);
-          options.reportError(cause);
+          report(run.snapshot, cause);
         }
       }
       if (!isCurrent(run)) return;
@@ -118,8 +128,14 @@ export function createProjectKnowledgeQueue(options: QueueOptions) {
       notify(completed);
     } catch (error) {
       if (!isCurrent(run)) return;
-      options.reportError(error);
-      const failed = update(run.snapshot.id, { state: "failed", error: message(error), finishedAt: Date.now() });
+      report(run.snapshot, error);
+      let recorded: boolean | undefined;
+      if (run.snapshot.persistStamp && options.recordFailure) {
+        try { recorded = await options.recordFailure(run.snapshot, () => isCurrent(run)); }
+        catch (cause) { if (isCurrent(run)) report(run.snapshot, cause); }
+      }
+      if (!isCurrent(run)) return;
+      const failed = update(run.snapshot.id, { state: "failed", error: message(error), recorded, finishedAt: Date.now() });
       prune();
       notify(failed);
     } finally {
@@ -136,8 +152,8 @@ export function createProjectKnowledgeQueue(options: QueueOptions) {
 
   function pump(): void {
     if (running) return;
-    for (const job of jobs) {
-      if (job.state !== "queued") continue;
+    const waiting = jobs.filter(job => job.state === "queued");
+    for (const job of [...waiting.filter(job => job.origin !== "background"), ...waiting.filter(job => job.origin === "background")]) {
       const run = pending.get(job.id);
       if (!run || run.generation !== generation || options.workspace() !== job.workspace) {
         update(job.id, { state: "cancelled", finishedAt: Date.now() });
@@ -158,23 +174,37 @@ export function createProjectKnowledgeQueue(options: QueueOptions) {
     if (!workspace || !isWorkspaceProjectFilePath(input.path) || !/\.(md|markdown)$/iu.test(input.path)) return undefined;
     if (content.length > MAX_KNOWLEDGE_DOCUMENT_CHARS
       || input.expectedContent.length > MAX_KNOWLEDGE_DOCUMENT_CHARS + MAX_KNOWLEDGE_STAMP_BYTES + MAX_KNOWLEDGE_REPORT_BYTES) {
-      options.reportError(new Error("This document is too large for a queued Wiki check."));
+      report(input, new Error("This document is too large for a queued Wiki check."));
       return undefined;
     }
     if (input.persistStamp && stripKnowledgeCheckStamp(input.expectedContent) !== content) {
-      options.reportError(new Error("A saved-page check must match the loaded document. Check the edited draft without saving its marker."));
+      report(input, new Error("A saved-page check must match the loaded document. Check the edited draft without saving its marker."));
+      return undefined;
+    }
+    if (input.origin === "background" && (!input.persistStamp || !input.autoCheckRunId
+      || input.autoCheckRunId.length > 128 || /[\u0000-\u001f\u007f]/u.test(input.autoCheckRunId))) {
+      report(input, new Error("An automatic Wiki check requires a saved snapshot and a bounded pass identity."));
       return undefined;
     }
     const duplicate = jobs.find(job => active(job) && job.workspace === workspace && job.path === input.path
       && job.content === content && job.expectedContent === input.expectedContent && job.persistStamp === input.persistStamp);
-    if (duplicate) return duplicate.id;
-    if (jobs.filter(active).length >= MAX_ACTIVE_KNOWLEDGE_JOBS) {
-      options.reportError(new Error("The Wiki check queue is full. Wait for a check to finish or cancel a queued check."));
+    if (duplicate) {
+      // Preserve one physical task and its automatic-pass stamp, but honor a later
+      // explicit manual request when choosing the next waiting task.
+      if (input.origin !== "background" && duplicate.origin === "background") update(duplicate.id, { origin: "manual" });
+      return duplicate.id;
+    }
+    const activeCount = jobs.filter(active).length;
+    if (input.origin === "background" && activeCount >= MAX_ACTIVE_KNOWLEDGE_JOBS - 1) return undefined;
+    if (activeCount >= MAX_ACTIVE_KNOWLEDGE_JOBS) {
+      report(input, new Error("The Wiki check queue is full. Wait for a check to finish or cancel a queued check."));
       return undefined;
     }
     const snapshot: ProjectKnowledgeJob = {
       id: ++sequence, workspace, path: input.path, content,
       expectedContent: input.expectedContent, persistStamp: input.persistStamp,
+      ...(input.origin ? { origin: input.origin } : {}),
+      ...(input.autoCheckRunId ? { autoCheckRunId: input.autoCheckRunId } : {}),
       state: "queued", createdAt: Date.now(),
     };
     pending.set(snapshot.id, { snapshot, controller: new AbortController(), generation });
@@ -208,6 +238,9 @@ export function createProjectKnowledgeQueue(options: QueueOptions) {
     get jobs() { return jobs; },
     enqueue,
     cancel,
+    cancelQueuedBackground(): void {
+      for (const job of jobs) if (job.state === "queued" && job.origin === "background") cancel(job.id);
+    },
     dismiss(id: number): void {
       jobs = jobs.filter(job => job.id !== id || active(job));
     },

@@ -36,6 +36,7 @@ type DesktopWorkbenchGitServicesOptions = {
   setActiveTabId: (id: WorkbenchTabId | null) => void;
   previewPane: () => { requestClose: () => Promise<boolean> } | null;
   closeTerminal: () => void;
+  closeWikiConflicts: () => void;
   nextLocalMessageId: () => string;
   scrollToLatest: () => Promise<void>;
   reportError: (error: unknown) => void;
@@ -55,6 +56,7 @@ export function createDesktopWorkbenchGitServices(options: DesktopWorkbenchGitSe
     closeGitDiff: options.project.git.closeDiff,
     closeLspInstall: options.lspOnboarding.closeInstaller,
     closeTerminal: options.closeTerminal,
+    closeWikiConflicts: options.closeWikiConflicts,
     retargetPreviewAnchor: options.project.preview.retargetAnchor,
     retargetGitAnchor: options.project.git.retargetAnchor,
   });

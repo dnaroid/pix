@@ -1,5 +1,11 @@
 import type { AcpClient } from "../lib/acp-client";
-import { knowledgeResolutionPrompt, type KnowledgeResolutionRequest } from "../lib/knowledge-resolution";
+import type { KnowledgeReportLanguage } from "../../../acp/src/knowledge/contract";
+import {
+  knowledgeBatchResolutionPrompt,
+  knowledgeResolutionPrompt,
+  type KnowledgeBatchResolutionRequest,
+  type KnowledgeResolutionRequest,
+} from "../lib/knowledge-resolution";
 import type { createSessionRuntimeStore } from "./session-runtime.svelte";
 import type { createPromptRuntime } from "./prompt-runtime.svelte";
 
@@ -27,11 +33,22 @@ export function createKnowledgeResolution(options: KnowledgeResolutionOptions) {
   const environmentCurrent = (request: LaunchOwner) => request.client === options.client()
     && request.workspace === options.workspace() && request.generation === options.generation();
 
+  /** Single-report or single-finding resolution. */
   async function start(input: KnowledgeResolutionRequest): Promise<void> {
+    await launch(input.workspace, input.result.reportLanguage, () => knowledgeResolutionPrompt(input));
+  }
+
+  /** One session for a basket of saved findings; resolves true once the prompt is sent. */
+  function startBatch(input: KnowledgeBatchResolutionRequest): Promise<boolean> {
+    return launch(input.workspace, input.language, async () => knowledgeBatchResolutionPrompt(input));
+  }
+
+  async function launch(workspace: string, language: KnowledgeReportLanguage | undefined,
+    buildPrompt: () => Promise<string>): Promise<boolean> {
     const client = options.client();
-    if (!client || !options.ready() || options.operationRunning() || input.workspace !== options.workspace()
-      || (starting && owner && environmentCurrent(owner))) return;
-    const request = { client, workspace: input.workspace, generation: options.generation() };
+    if (!client || !options.ready() || options.operationRunning() || workspace !== options.workspace()
+      || (starting && owner && environmentCurrent(owner))) return false;
+    const request = { client, workspace, generation: options.generation() };
     owner = request;
     starting = true;
     let createdSessionId: string | undefined;
@@ -44,14 +61,14 @@ export function createKnowledgeResolution(options: KnowledgeResolutionOptions) {
       createdSessionId = undefined;
     };
     try {
-      const prompt = await knowledgeResolutionPrompt(input);
-      if (!current()) return;
+      const prompt = await buildPrompt();
+      if (!current()) return false;
       const created = await client.newSession(request.workspace);
       createdSessionId = created.sessionId;
-      if (!current()) { await closeCreated(); return; }
+      if (!current()) { await closeCreated(); return false; }
       await options.runtime.ensure(client, created.sessionId, request.workspace);
-      if (!current()) { await closeCreated(); return; }
-      if (!options.runtime.isReady(created.sessionId)) throw new Error(input.result.reportLanguage === "ru"
+      if (!current()) { await closeCreated(); return false; }
+      if (!options.runtime.isReady(created.sessionId)) throw new Error(language === "ru"
         ? "Не удалось подготовить новую сессию для разбора противоречий."
         : "Could not prepare a new session to resolve the Wiki findings.");
       const messageId = options.activate(created.sessionId, request.workspace, prompt);
@@ -62,13 +79,15 @@ export function createKnowledgeResolution(options: KnowledgeResolutionOptions) {
       }).catch(error => { if (environmentCurrent(request)) options.reportError(error); });
       options.onStarted(created.sessionId);
       void Promise.resolve(options.refreshSessions()).catch(error => { if (environmentCurrent(request)) options.reportError(error); });
+      return true;
     } catch (error) {
       if (!launched) await closeCreated();
       if (environmentCurrent(request)) options.reportError(error);
+      return false;
     } finally {
       if (owner === request) { owner = undefined; starting = false; }
     }
   }
 
-  return { start, get starting() { return starting && Boolean(owner && environmentCurrent(owner)); } };
+  return { start, startBatch, get starting() { return starting && Boolean(owner && environmentCurrent(owner)); } };
 }

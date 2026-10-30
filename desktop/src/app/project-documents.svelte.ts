@@ -4,8 +4,13 @@ import { isWorkspaceProjectFilePath, type ProjectFilePreview, type ProjectFileSa
 import { getProjectWikiConfig } from "../lib/project-wiki";
 import { readWorkspaceConfig } from "./workspace-config-persistence";
 import type { KnowledgeCheckRequest, KnowledgeCheckResult } from "../../../acp/src/knowledge/contract";
-import { recordKnowledgeCheck } from "../../../acp/src/knowledge/stamp";
+import { readKnowledgeCheckStamp, recordKnowledgeAutoCheckAttempt, recordKnowledgeCheck } from "../../../acp/src/knowledge/stamp";
 import { createProjectKnowledgeQueue, type ProjectKnowledgeJob } from "./project-knowledge-queue.svelte";
+import { createKnowledgeJudgeGate } from "./knowledge-judge-gate";
+import { createWikiAutoCheckScheduler } from "./wiki-auto-check.svelte";
+import { createWikiAutoCheckSettingsOwner } from "./wiki-auto-check-settings.svelte";
+import { getWikiAutoCheckSettings } from "../lib/wiki-auto-check-config";
+import { listWikiCheckDirectory, readWikiCheckDocument, releaseWikiCheckInventory } from "../lib/wiki-check-inventory";
 import {
   EMPTY_PROJECT_DOCUMENTS,
   PROJECT_TODO_PATH,
@@ -26,6 +31,8 @@ type ProjectDocumentsStoreOptions = {
   reportError: (error: unknown) => void;
   checkKnowledge?: (request: KnowledgeCheckRequest, signal: AbortSignal) => Promise<KnowledgeCheckResult>;
   onKnowledgeJobComplete?: (job: ProjectKnowledgeJob) => void;
+  knowledgeBackgroundReady?: () => boolean;
+  reportBackgroundKnowledgeError?: (error: unknown, workspace?: string) => void;
 };
 
 export function createProjectDocumentsStore(options: ProjectDocumentsStoreOptions) {
@@ -36,25 +43,79 @@ export function createProjectDocumentsStore(options: ProjectDocumentsStoreOption
   const writes = new Map<string, Promise<ProjectFilePreview | undefined>>();
   let removing = $state<string | null>(null);
   let fileMutationReservations = 0;
+  const judge = createKnowledgeJudgeGate();
+  let automatic!: ReturnType<typeof createWikiAutoCheckScheduler>;
+  const reportBackground = (error: unknown, workspace = options.workspace()) =>
+    (options.reportBackgroundKnowledgeError ?? options.reportError)(error, workspace);
+  const autoSettings = createWikiAutoCheckSettingsOwner({
+    workspace: options.workspace,
+    generation: () => workspaceGeneration,
+    pause: () => automatic?.reset(),
+    resume: () => { if (options.knowledgeBackgroundReady) automatic?.start(); },
+    reportError: reportBackground,
+  });
   const knowledgeQueue = createProjectKnowledgeQueue({
     workspace: options.workspace,
-    check: (job, signal) => checkKnowledgeSnapshot(job.workspace, job.path, job.content, signal, job.expectedContent),
+    check: (job, signal) => checkKnowledgeSnapshot(job.workspace, job.path, job.content, signal, job.expectedContent, job.origin === "background"),
     record: async (job, result, isCurrent) => {
-      const content = await recordKnowledgeCheck(job.content, result);
+      let content = await recordKnowledgeCheck(job.content, result, new Date(), job.expectedContent);
+      const runId = await currentAutoPass(job, isCurrent);
+      if (runId && result.status !== "clear") {
+        content = await recordKnowledgeAutoCheckAttempt(content, runId, result.documentHash);
+      }
       if (!isCurrent()) return false;
       if (content === job.expectedContent) return true;
-      return save(job.path, content, {
-        expectedContent: job.expectedContent,
-        isCurrent: () => isCurrent() && options.workspace() === job.workspace,
-      });
+      return saveKnowledgeMetadata(job.path, content, job.expectedContent,
+        () => isCurrent() && options.workspace() === job.workspace, job.origin === "background");
+    },
+    recordFailure: async (job, isCurrent) => {
+      const runId = await currentAutoPass(job, isCurrent);
+      if (!runId || !isCurrent()) return false;
+      // A failed explicit recheck does not invalidate a still-current historical success.
+      if (await readKnowledgeCheckStamp(job.expectedContent)) return isCurrent();
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(job.content));
+      const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+      const content = await recordKnowledgeAutoCheckAttempt(job.expectedContent, runId, hash);
+      return saveKnowledgeMetadata(job.path, content, job.expectedContent, isCurrent, true);
     },
     reportError: options.reportError,
-    onComplete: options.onKnowledgeJobComplete,
+    reportBackgroundError: reportBackground,
+    onComplete: job => { automatic?.jobCompleted(job); options.onKnowledgeJobComplete?.(job); },
   });
+  automatic = createWikiAutoCheckScheduler({
+    workspace: options.workspace,
+    readConfig: autoSettings.read,
+    listDirectory: listWikiCheckDirectory,
+    releaseInventory: releaseWikiCheckInventory,
+    readFile: readWikiCheckDocument,
+    jobs: () => knowledgeQueue.jobs,
+    enqueue: knowledgeQueue.enqueue,
+    cancel: knowledgeQueue.cancel,
+    cancelQueuedBackground: knowledgeQueue.cancelQueuedBackground,
+    ready: options.knowledgeBackgroundReady,
+    reportError: reportBackground,
+    recordSkipped: async (input, isCurrent) => {
+      // Oversized pages never reach the model; avoid delaying discovery just to
+      // persist their optional checkpoint while another check owns the corpus.
+      const content = await recordKnowledgeAutoCheckAttempt(input.content, input.runId, input.contentHash);
+      return saveKnowledgeMetadata(input.path, content, input.content, isCurrent, true, true);
+    },
+  });
+
+  async function currentAutoPass(job: ProjectKnowledgeJob, isCurrent: () => boolean): Promise<string | undefined> {
+    if ((!options.knowledgeBackgroundReady && !job.autoCheckRunId) || !isCurrent()) return undefined;
+    const config = await readWorkspaceConfig(job.workspace);
+    if (!isCurrent() || options.workspace() !== job.workspace) return undefined;
+    if (!job.path.startsWith(getProjectWikiConfig(config?.content).path + "/")) return undefined;
+    const setting = getWikiAutoCheckSettings(config?.content);
+    return setting.enabled && setting.runId ? setting.runId : job.autoCheckRunId;
+  }
 
   function reset(): void {
     generation += 1;
     workspaceGeneration += 1;
+    autoSettings.reset();
+    automatic.reset();
     knowledgeQueue.reset();
     snapshot = EMPTY_PROJECT_DOCUMENTS;
     wikiPath = "wiki";
@@ -63,6 +124,7 @@ export function createProjectDocumentsStore(options: ProjectDocumentsStoreOption
 
   async function load(projectPath: string): Promise<void> {
     const requestGeneration = ++generation;
+    if (options.knowledgeBackgroundReady && options.workspace() === projectPath) automatic.start();
     try {
       const next = await invoke<ProjectDocumentsSnapshot>("list_project_documents", {
         workspace: projectPath,
@@ -102,7 +164,7 @@ export function createProjectDocumentsStore(options: ProjectDocumentsStoreOption
   }
 
   async function checkKnowledgeSnapshot(workspace: string, path: string, content: string, signal: AbortSignal,
-    expectedContent?: string): Promise<KnowledgeCheckResult | undefined> {
+    expectedContent?: string, background = false): Promise<KnowledgeCheckResult | undefined> {
     if (!workspace) throw new Error("Choose a project before checking Wiki documents.");
     signal.throwIfAborted();
     const owner = workspaceGeneration;
@@ -112,19 +174,76 @@ export function createProjectDocumentsStore(options: ProjectDocumentsStoreOption
     wikiPath = getProjectWikiConfig(config?.content).path;
     if (!path.startsWith(`${wikiPath}/`)) return undefined;
     if (!options.checkKnowledge) throw new Error("Wiki contradiction checking is unavailable. Connect the project backend and retry.");
-    const result = await options.checkKnowledge({ cwd: workspace, path, content,
-      ...(expectedContent !== undefined ? { expectedContent } : {}),
-    }, signal);
+    const result = await judge.run(() => {
+      signal.throwIfAborted();
+      if (owner !== workspaceGeneration || options.workspace() !== workspace) throw new Error("Project changed during Wiki check.");
+      return options.checkKnowledge!({ cwd: workspace, path, content,
+        ...(expectedContent !== undefined ? { expectedContent } : {}),
+      }, signal);
+    }, signal, background);
     signal.throwIfAborted();
     if (owner !== workspaceGeneration || options.workspace() !== workspace) throw new Error("Project changed during Wiki check.");
     return result;
   }
 
-  async function save(path: string, content: string, guard?: ProjectFileSaveGuard): Promise<boolean> {
+  async function saveKnowledgeMetadata(path: string, content: string, expectedContent: string,
+    isCurrent: () => boolean, background: boolean, onlyIfIdle = false): Promise<boolean> {
+    if (!isCurrent()) return false;
+    // The evidence snapshot detects raw file changes too. App-owned report
+    // writes must not invalidate another model comparison still in progress.
+    const operation = async () => {
+      if (!isCurrent()) return false;
+      if (background) {
+        const workspace = options.workspace();
+        const config = await readWorkspaceConfig(workspace);
+        if (!isCurrent()) return false;
+        const root = getProjectWikiConfig(config?.content).path;
+        if (!path.startsWith(root + "/")) return false;
+        const current = await readWikiCheckDocument(workspace, root, path, new AbortController().signal);
+        if (!isCurrent() || current.content !== expectedContent) return false;
+      }
+      return save(path, content, { expectedContent, isCurrent }, background);
+    };
+    const signal = new AbortController().signal;
+    return onlyIfIdle ? judge.tryRunIfIdle(operation, signal) ?? false : judge.run(operation, signal, background);
+  }
+
+  /**
+   * Writes a user verdict into a page's report block. It waits for the judge slot
+   * like other report writes so an in-flight comparison is not invalidated, and
+   * the native compare-and-swap rejects any concurrent change of the raw file.
+   */
+  function knowledgeDecisionWriter() {
+    // Captured once per decision operation, so a project switch (even A→B→A) fences every later write.
+    const workspace = options.workspace(), owner = workspaceGeneration;
+    const isCurrent = () => owner === workspaceGeneration && options.workspace() === workspace;
+    return {
+      isCurrent,
+      write: (path: string, content: string, expectedContent: string): Promise<boolean> => isCurrent()
+        ? saveKnowledgeMetadata(path, content, expectedContent, isCurrent, false) : Promise.resolve(false),
+    };
+  }
+
+  /**
+   * Compare-and-swap writer for inline Wiki edits from the comparison tab. Like a
+   * Preview save, it does not wait for the judge: changing the page invalidates an
+   * in-flight check of it. Fenced to the project generation current at creation.
+   */
+  function wikiEditWriter() {
+    const workspace = options.workspace(), owner = workspaceGeneration;
+    const isCurrent = () => owner === workspaceGeneration && options.workspace() === workspace;
+    return {
+      isCurrent,
+      write: (path: string, content: string, expectedContent: string): Promise<boolean> => isCurrent()
+        ? save(path, content, { expectedContent, isCurrent }) : Promise.resolve(false),
+    };
+  }
+
+  async function save(path: string, content: string, guard?: ProjectFileSaveGuard, quiet = false): Promise<boolean> {
     const workspace = options.workspace();
     if (!workspace || !isWorkspaceProjectFilePath(path) || removing === path || (guard && !guard.isCurrent())) return false;
     if (fileMutationReservations > 0) {
-      options.reportError(new Error("A file operation is in progress. Try saving again when it finishes."));
+      (quiet ? reportBackground : options.reportError)(new Error("A file operation is in progress. Try saving again when it finishes."));
       return false;
     }
     const requestGeneration = workspaceGeneration;
@@ -134,7 +253,7 @@ export function createProjectDocumentsStore(options: ProjectDocumentsStoreOption
     const isCurrent = () => requestGeneration === workspaceGeneration && options.workspace() === workspace;
     const key = `${workspace}\0${path}`;
     const command = isEditableProjectMarkdown(path) ? "write_project_markdown" : "write_project_file";
-    options.clearError();
+    if (!quiet) options.clearError();
     try {
       const previous = writes.get(key) ?? Promise.resolve(undefined);
       let writeStarted = false;
@@ -159,7 +278,7 @@ export function createProjectDocumentsStore(options: ProjectDocumentsStoreOption
       void load(workspace);
       return true;
     } catch (error) {
-      if (isCurrent() && (!guard || guard.isCurrent())) options.reportError(error);
+      if (isCurrent() && (!guard || guard.isCurrent())) (quiet ? reportBackground : options.reportError)(error);
       return false;
     }
   }
@@ -203,15 +322,21 @@ export function createProjectDocumentsStore(options: ProjectDocumentsStoreOption
     get wikiPath() { return wikiPath; },
     get removing() { return removing; },
     get knowledgeJobs() { return knowledgeQueue.jobs; },
+    get wikiAutoCheck() { return { ...automatic.view, enabled: autoSettings.enabled ?? automatic.view.enabled, saving: autoSettings.saving,
+      error: autoSettings.error ?? automatic.view.error }; },
+    setWikiAutoCheck: autoSettings.setEnabled,
     enqueueKnowledgeCheck: knowledgeQueue.enqueue,
     cancelKnowledgeCheck: knowledgeQueue.cancel,
     dismissKnowledgeCheck: knowledgeQueue.dismiss,
     getKnowledgeJob: knowledgeQueue.find,
     reset,
+    dispose(): void { reset(); automatic.dispose(); },
     load,
     refresh,
     open,
     save,
+    knowledgeDecisionWriter,
+    wikiEditWriter,
     checkKnowledge,
     removePlan,
   };

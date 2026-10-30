@@ -1,12 +1,15 @@
 <script lang="ts">
   import BookOpen from "@lucide/svelte/icons/book-open";
-  import { onDestroy, untrack } from "svelte";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import { getContext, onDestroy, untrack } from "svelte";
+  import { WIKI_CONFLICTS_NAVIGATION_CONTEXT, type WikiConflictsNavigation } from "../app/workbench-wiki-conflicts.svelte";
   import { createDiagnosticLogger } from "../lib/diagnostic-logging";
   import { emptyStateClass } from "../lib/status-text";
   import { createProjectWikiController } from "./project-wiki-controller.svelte";
   import ProjectWikiTree from "./ProjectWikiTree.svelte";
   import ProjectWikiSearch from "./ProjectWikiSearch.svelte";
   import ProjectWikiCheckQueue from "./ProjectWikiCheckQueue.svelte";
+  import WikiConflictsList from "./WikiConflictsList.svelte";
   import type { KnowledgeCitation, KnowledgeReportLanguage } from "../../../acp/src/knowledge/contract";
   import type { ProjectKnowledgeJob } from "../app/project-knowledge-queue.svelte";
   import type { ProjectFileLineRange } from "../lib/project-files";
@@ -32,13 +35,28 @@
     report: (error, target) => createDiagnosticLogger(() => ({ workspace: target })).report(error, "wiki:load-failed"),
   });
   const wikiState = controller.state;
+  const conflictsNavigation = getContext<WikiConflictsNavigation | undefined>(WIKI_CONFLICTS_NAVIGATION_CONTEXT);
+  const openConflictCount = $derived(conflictsNavigation?.openCount ?? 0);
+  const conflictsView = $derived(conflictsNavigation?.sidebarView === "conflicts");
+  function showPages(): void { if (conflictsNavigation) conflictsNavigation.sidebarView = "pages"; }
+  function showConflicts(): void {
+    if (!conflictsNavigation) return;
+    conflictsNavigation.sidebarView = "conflicts";
+    conflictsNavigation.reveal();
+  }
+  const viewTabClass = (selected: boolean) => [
+    "inline-flex min-h-7 items-center gap-1.5 border-b-2 px-2 text-xs",
+    selected ? "border-primary font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
+  ];
   type WikiTreeHandle = { cancelNavigation: () => void; create: (kind: "new-file" | "new-directory") => void; exportHtml: () => Promise<void>; showInFiles: () => void; refresh: () => void };
   let wikiTree = $state<WikiTreeHandle | null>(null);
+  let checkQueue = $state<{ open: () => void } | null>(null);
   $effect(() => { ready = wikiTree !== null; });
   export function create(kind: "new-file" | "new-directory"): void { wikiTree?.create(kind); }
   export function exportHtml(): void { void wikiTree?.exportHtml(); }
   export function showInFiles(): void { wikiTree?.showInFiles(); }
   export function refresh(): void { wikiTree?.refresh(); }
+  export function openChecks(): void { checkQueue?.open(); }
   $effect(() => { const target = workspace; untrack(() => { void controller.selectWorkspace(target); }); });
   onDestroy(controller.dispose);
 
@@ -85,15 +103,33 @@
       </div>
     {:else}
       {#key `${workspace}\0${config.path}\0${config.index}`}
-        <ProjectWikiSearch {workspace} path={config.path} {activePath} onOpenFile={openFile}>
-          {#if !wikiState.indexExists}
-            <div class="flex min-h-9 shrink-0 items-center gap-2 border-b border-border px-3">
-              <span class="min-w-0 flex-1 text-xs text-muted-foreground">Automatic contents</span>
-              <button type="button" class="rounded-sm px-2 py-1 text-xs hover:bg-panel-hover disabled:opacity-40" disabled={wikiState.creating || wikiState.loading} onclick={() => void initialize()}>{wikiState.creating ? "Creating…" : "Create index"}</button>
-            </div>
-          {/if}
-          <ProjectWikiTree bind:this={wikiTree} {workspace} {config} {activePath} onOpenFile={openFile} onOpenFiles={openFiles} {onOpenExternal} {onBeforeMutation} onRefreshConfig={() => void controller.refresh()} />
-        </ProjectWikiSearch>
+        {#if conflictsNavigation}
+          <div class="flex shrink-0 items-end gap-1 border-b border-border px-2" role="tablist" aria-label="Wiki view" data-wiki-view-tabs>
+            <button type="button" role="tab" class={viewTabClass(!conflictsView)} aria-selected={!conflictsView} onclick={showPages}>Pages</button>
+            <button type="button" role="tab" class={viewTabClass(conflictsView)} aria-selected={conflictsView} data-wiki-conflicts-badge
+              aria-label={`Conflicts: ${openConflictCount} open`} onclick={showConflicts}>
+              Conflicts
+              {#if openConflictCount > 0}
+                <span class="rounded-sm bg-tool-error/15 px-1.5 font-medium tabular-nums text-tool-error">{openConflictCount}</span>
+              {/if}
+            </button>
+          </div>
+        {/if}
+        <!-- The tree stays mounted while Conflicts is shown so header actions and expansion survive. -->
+        <div class={conflictsView ? "hidden" : "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"}>
+          <ProjectWikiSearch {workspace} path={config.path} {activePath} onOpenFile={openFile}>
+            {#if !wikiState.indexExists}
+              <div class="flex min-h-9 shrink-0 items-center gap-2 border-b border-border px-3">
+                <span class="min-w-0 flex-1 text-xs text-muted-foreground">Automatic contents</span>
+                <button type="button" class="rounded-sm px-2 py-1 text-xs hover:bg-panel-hover disabled:opacity-40" disabled={wikiState.creating || wikiState.loading} onclick={() => void initialize()}>{wikiState.creating ? "Creating…" : "Create index"}</button>
+              </div>
+            {/if}
+            <ProjectWikiTree bind:this={wikiTree} {workspace} {config} {activePath} onOpenFile={openFile} onOpenFiles={openFiles} {onOpenExternal} {onBeforeMutation} onRefreshConfig={() => void controller.refresh()} />
+          </ProjectWikiSearch>
+        </div>
+        {#if conflictsNavigation && conflictsView}
+          <WikiConflictsList inbox={conflictsNavigation.inbox} onReveal={() => conflictsNavigation.reveal()} />
+        {/if}
       {/key}
     {/if}
   {:else if !wikiState.error}
@@ -102,7 +138,7 @@
 {/if}
 
 {#if workspace}
-  <ProjectWikiCheckQueue {workspace} jobs={knowledgeJobs} onCancel={onCancelKnowledgeCheck} onDismiss={onDismissKnowledgeCheck} onOpenFile={openFile}
+  <ProjectWikiCheckQueue bind:this={checkQueue} {workspace} jobs={knowledgeJobs} onCancel={onCancelKnowledgeCheck} onDismiss={onDismissKnowledgeCheck} onOpenFile={openFile}
     canOpenSources={knowledgeSourcesEnabled} onOpenCitation={onOpenKnowledgeCitation ? openCitation : undefined}
     onResolve={onResolveKnowledgeJob} resolving={knowledgeResolving} />
 {/if}

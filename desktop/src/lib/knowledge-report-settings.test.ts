@@ -59,3 +59,41 @@ describe("Wiki report-language settings", () => {
     expect(reset).toContain("// Preserve the selected model and unrelated report preferences.");
   });
 });
+
+describe("independent contradiction judge settings", () => {
+  it("validates model references and every explicit reasoning budget in both profiles", () => {
+    for (const schema of [suiteSchema, desktopSchema]) {
+      for (const thinking of ["", "off", "minimal", "low", "medium", "high", "xhigh", "max"]) {
+        expect(settingsSourceIssues(JSON.stringify({ knowledgeCheck: { modelRef: "provider/vendor/model", thinking } }), schema)).toEqual([]);
+      }
+      for (const modelRef of ["not-a-ref", "/model", "provider/", "provider/model:high", "provider/with space", 123, null]) {
+        expect(settingsSourceIssues(JSON.stringify({ knowledgeCheck: { modelRef } }), schema)).not.toEqual([]);
+      }
+      for (const thinking of ["ultra", 123, null]) {
+        expect(settingsSourceIssues(JSON.stringify({ knowledgeCheck: { thinking } }), schema)).not.toEqual([]);
+      }
+    }
+  });
+  it("defaults to an unselected Suite judge and field-wise inheritance in Desktop", () => {
+    for (const [kind, schema, source] of [
+      ["pi-tools-suite", suiteSchema, DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC],
+      ["desktop", desktopSchema, DEFAULT_DESKTOP_CONFIG_JSONC],
+    ] as const) {
+      expect(settingsDefaultValue(kind, schema, ["knowledgeCheck", "modelRef"]).value).toBe("");
+      expect(settingsDefaultValue(kind, schema, ["knowledgeCheck", "thinking"]).value).toBe(kind === "desktop" ? "" : "low");
+      expect(settingsValue(parseSettingsSource(source).value, ["knowledgeCheck", "modelRef"])).toBe("");
+      expect(settingsValue(parseSettingsSource(source).value, ["knowledgeCheck", "thinking"])).toBe(kind === "desktop" ? "" : "low");
+    }
+  });
+  it("changes and resets judge fields without touching RAG, session settings or report language", () => {
+    const original = '{ // keep this\n"search":{"ragModelRef":"search/model","ragThinking":"medium"},"defaultModel":{"modelRef":"session/model"},"knowledgeCheck":{"reportLanguage":"ru"}}';
+    let source = updateSettingsSource(original, ["knowledgeCheck", "modelRef"], "judge/model");
+    source = updateSettingsSource(source, ["knowledgeCheck", "thinking"], "high");
+    expect(settingsSourceIssues(source, desktopSchema)).toEqual([]);
+    expect(parseSettingsSource(source).value.knowledgeCheck).toEqual({ modelRef: "judge/model", thinking: "high", reportLanguage: "ru" });
+    source = removeSettingsValue(source, ["knowledgeCheck", "modelRef"]);
+    source = removeSettingsValue(source, ["knowledgeCheck", "thinking"]);
+    expect(parseSettingsSource(source).value).toEqual(parseSettingsSource(original).value);
+    expect(source).toContain("// keep this");
+  });
+});
