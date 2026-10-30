@@ -850,3 +850,5 @@ Before considering a UI task complete, ask:
 12. Are important contextual commands reachable without hover alone?
 13. Do resizable/secondary panes preserve the primary workspace and useful spatial memory?
 14. Does each large region clearly read as attached workbench geometry or intentional floating UI?
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"29e6e245496ff4b24e99159c3addba434a9ea8bedea1d709d31401b209939103","checkedAt":"2026-10-30T23:29:27.895Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":61,"reportLanguage":"ru"} -->

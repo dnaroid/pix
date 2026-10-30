@@ -91,3 +91,5 @@ Not to be confused with the suite-side usage fetcher
 `external/pi-tools-suite/src/usage/lib/openai.ts`, which intentionally does
 **not** refresh: on expiry it returns an error asking the user to refresh
 via the OpenCode flow. `[confirmed by code]`
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"32131f545611125148e20ea006ea5b32e00f824b0a498630e05beea2a598d2fe","checkedAt":"2026-10-30T23:26:51.689Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":60,"reportLanguage":"ru"} -->

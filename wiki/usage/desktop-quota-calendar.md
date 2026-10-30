@@ -205,3 +205,5 @@ request or control is implemented.
 
 Focused Desktop Vitest, including a DST-observing timezone run for date helpers;
 Desktop check and build:web. Native visual QA is not asserted by unit/source tests.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"a6b491c4c7e60232ea653e507a7df6eebb5ecad5a7d5559dbcd79dd1f2b4fe5e","checkedAt":"2026-10-30T23:31:17.056Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":53,"reportLanguage":"ru"} -->

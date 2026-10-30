@@ -68,3 +68,5 @@ Durable replay, multi-page artifact acknowledgement, outer-script delivery
 acceptance, or cancellation after boundary commitment becomes a requirement.
 Regression coverage lives in
 `external/pi-tools-suite/test/async-subagents/completion-delivery.test.ts`.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"d5dd4f4b85aa8cfe3b0606ca434e45b56b71da739f77a307db4845d9bb82819a","checkedAt":"2026-10-30T23:33:46.669Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":65,"reportLanguage":"ru"} -->

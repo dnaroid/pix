@@ -63,3 +63,5 @@ These always-on regressions use fake Claude CLI protocol output and the real
 local provider/process/image-store code without credentials, network calls,
 quota consumption or actual Pi tools. Also run the imported upstream unit tests
 and suite source typecheck against the installed SDK.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"b82e55b7d7f2c2b169a720da0a425b9834c309dddabfd98679ec8fc567fe3c47","checkedAt":"2026-10-30T23:26:32.640Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":62,"reportLanguage":"ru"} -->

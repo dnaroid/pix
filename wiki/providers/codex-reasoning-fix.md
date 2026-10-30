@@ -172,3 +172,5 @@ Retained local diagnostic logs: `external/pi-tools-suite/.pi/artifacts/codex-foc
 `/tmp/codex-suite-clean-host.eBMZCY`, `/tmp/codex-suite-smoke.MSBHzF`, and
 `/tmp/codex-suite-sync.5UW5nm`. These temporary/host-local paths are **not
 permanent durable proof**; rerun the commands against the target revision.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"77c1394e6f0c68d4cd15f64cebb34428494b1e2597c77c8e31560b156ab2b7d0","checkedAt":"2026-10-30T23:27:37.055Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":63,"reportLanguage":"ru"} -->

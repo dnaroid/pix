@@ -161,3 +161,5 @@ Build the TUI, ACP and Desktop; run deterministic state-machine, extension,
 queue and session ownership tests. Verify both real interfaces show a centered
 countdown and preserve waiting when hidden, with actionable blocked reports if
 the environment cannot run either application.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"42638be0320816674ae62937cb68d600dcb33a54cc6f43f4e5885dd171a34281","checkedAt":"2026-10-30T23:28:13.472Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":60,"reportLanguage":"ru"} -->

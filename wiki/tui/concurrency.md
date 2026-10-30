@@ -82,3 +82,5 @@ the state that started it, without blocking normal terminal interaction.
 - Confirmed by the pre-change audit: shared editor/runtime state was read after asynchronous boundaries in the related files.
 - Confirmed by regression tests: audit probes reproduced cross-tab submit, deferred paste, undo leakage, and render amplification before the fixes.
 - Unknown: acceptable upstream design for asynchronous SDK session hydration.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"73bb42e0b06135ea166708bff92b286cbf8c4646c591d09caebe35faf7239035","checkedAt":"2026-10-30T23:25:56.352Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":60,"reportLanguage":"ru"} -->

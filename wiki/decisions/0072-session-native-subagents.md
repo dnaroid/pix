@@ -1,3 +1,4 @@
+<!-- pix:wiki-report {"version":1,"checkedAt":"2026-10-30T23:33:31.783Z","result":{"path":"wiki/decisions/0072-session-native-subagents.md","documentHash":"5d24329dc151d5bd281e10f4d34ac59c0fcfefda405257c348b5b6186573f903","modelRef":"zai/glm-5.3-flash","reportLanguage":"ru","checkedSources":12,"conflicts":[],"uncertainties":[],"reviewedSources":[],"notices":["Native reranking unavailable or its context changed; original ranking retained.","Не удалось подтвердить полноту или актуальность результатов поиска.","Состав Wiki изменился или не удалось проверить его во время поиска; повторите проверку.","Документ, настройки или содержимое Wiki изменились во время проверки. Повторите её."],"coverage":{"scope":"retrieved-passages","checkedPassages":12,"candidateSources":56,"excerptedSources":11,"limits":["query-sampling","candidate-limit","source-limit","context-limit","passage-limit"]},"status":"incomplete"}} -->
 # 0072 — Session-native sub-agents without run directories
 
 - Status: accepted
@@ -184,3 +185,5 @@ read the run tree directly.
 - The Pi SDK adds first-class child-session support or recursive listing.
 - Pix needs to resume or list children independently of their parent session.
 - Owned-launch recovery cannot locate records keyed by launch id after a crash.
+
+<!-- pix:wiki-check {"version":1,"status":"attempted","runId":"be10804d-802a-4a0d-81f8-ba18fd60f930","contentHash":"5d24329dc151d5bd281e10f4d34ac59c0fcfefda405257c348b5b6186573f903","checkedAt":"2026-10-30T23:33:31.785Z","maxDocumentChars":128000} -->

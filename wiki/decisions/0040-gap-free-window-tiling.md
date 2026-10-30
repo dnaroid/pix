@@ -55,3 +55,5 @@ row or column; overflow windows still stay unchanged after display capacity runs
 
 Users request different dominant-window proportions, layout preferences, or a
 different policy for distributing windows across displays.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"156fa4fe4964fa571bc7130f8cb7be195172ac575e3733a7fd786094e02ff877","checkedAt":"2026-10-30T23:34:35.311Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":48,"reportLanguage":"ru"} -->

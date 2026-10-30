@@ -90,3 +90,5 @@ Make choosing the model and reasoning effort one staged TUI interaction, includi
 ## Tests
 
 - `tests/popup-menu-controller.test.ts`
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"9b9d90993d3a0f72d4b7d77fb738be6e49a1debaf1e130c42542ef7e98221523","checkedAt":"2026-10-30T23:25:36.039Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":49,"reportLanguage":"ru"} -->

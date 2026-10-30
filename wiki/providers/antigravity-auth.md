@@ -165,3 +165,5 @@ capacity limits. `[confirmed by code: src/antigravity-auth/index.ts]`
 3. Add a unit test for `refreshNextFailoverCredential` exhausting all accounts and rethrowing the last error, and for the empty-accounts case. `[addresses failover coverage]`
 4. Add a test that a Google refresh-token revocation error propagates as a provider failure notification without an infinite loop (the `sendSessionMessage:false` guard exists for this). `[addresses revoke behavior]`
 5. Verify opencode-import `auth-exists-use-force` vs `already-imported` vs `imported:true` branches with fixtures. `[addresses import coverage]`
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"c2e04d4f6f7f75d703d1fdd66c88f4d1d55e4a1e445ebb7779bf7997a311567d","checkedAt":"2026-10-30T23:26:17.171Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":51,"reportLanguage":"ru"} -->
