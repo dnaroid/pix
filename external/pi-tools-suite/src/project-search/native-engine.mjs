@@ -110,7 +110,7 @@ export async function searchNative(root, request, dependencies = {}) {
 }
 async function searchEnabledNative(root, request, dependencies) {
   try { validateRequest(request); }
-  catch { return { hits: [], notices: ["Invalid native search request"], status: { backend: "native", complete: false, stale: true } }; }
+  catch { return { hits: [], notices: ["Invalid native search request"], limitNotices: [], status: { backend: "native", complete: false, completeForSelection: false, stale: true } }; }
   const reranker = await repositoryRerankerSettings();
   const reranking = !!reranker && request.mode !== "lexical" && !request.skipRerank;
   const sourceStates = new Map();
@@ -124,7 +124,9 @@ async function searchEnabledNative(root, request, dependencies) {
     const ranked = await rerankNativeHits(request.query, response.hits, reranker, dependencies, checkCurrent);
     response.hits = ranked.hits;
     response.notices.push(...ranked.notices);
-    if (ranked.notices.some(notice => notice.includes("candidate limit"))) response.status.complete = false;
+    response.limitNotices.push(...ranked.limitNotices);
+    response.status.completeForSelection = response.status.completeForSelection === true && ranked.completeForSelection === true;
+    if (ranked.limitNotices.length) response.status.complete = false;
   }
   const seen = new Set();
   response.hits = response.hits.filter(hit => {
@@ -140,7 +142,9 @@ async function searchEnabledNative(root, request, dependencies) {
   }
   if (Buffer.byteLength(JSON.stringify(response)) > 480 * 1024) {
     response.status.complete = false;
-    response.notices.push("Native output limit reached; results are partial.");
+    const notice = "Native output limit reached; results are partial.";
+    response.notices.push(notice);
+    response.limitNotices.push(notice);
     while (response.hits.length && Buffer.byteLength(JSON.stringify(response)) > 480 * 1024) response.hits.pop();
   }
   return response;
@@ -160,7 +164,9 @@ async function retrieveSources(root, request, dependencies) {
     indexed: semantic.reduce((n, status) => n + (status.indexed ?? 0), 0), total: semantic.reduce((n, status) => n + (status.total ?? 0), 0) } : undefined;
   return { hits: hits.filter(hit => { if (request.dedupeFile && seen.has(hit.path)) return false; seen.add(hit.path); return true; }).slice(0, request.limit ?? 10),
     notices: [...new Set(results.flatMap(result => result.notices))],
+    limitNotices: [...new Set(results.flatMap(result => result.limitNotices))],
     status: { ...results[0].status, ...(combinedSemantic ? { semantic: combinedSemantic } : {}), complete: results.every(result => result.status.complete), stale: results.some(result => result.status.stale),
+      completeForSelection: results.every(result => result.status.completeForSelection === true),
       scannedFiles: results.reduce((n, result) => n + (result.status.scannedFiles ?? 0), 0), updatedFiles: results.reduce((n, result) => n + (result.status.updatedFiles ?? 0), 0) } };
 }
 async function searchSource(root, request, dependencies = {}) {
@@ -168,37 +174,43 @@ async function searchSource(root, request, dependencies = {}) {
   let work;
   let success = false;
   const started = Date.now();
-  const notices = [];
+  const notices = [], limitNotices = [];
   try {
     validateRequest(request);
     request = { ...request, mode: request.mode ?? "hybrid", limit: request.limit ?? 10 };
     root = await canonicalRoot(root);
     const policy = await readSourcePolicy(root);
-    if (policy.error) return { hits: [], notices: [policy.error], status: { backend: "native", complete: false, stale: true } };
+    if (policy.error) return { hits: [], notices: [policy.error], limitNotices, status: { backend: "native", complete: false, completeForSelection: false, stale: true } };
     if (!policy.enabled[request.sources[0]]) return { hits: [], notices: [`${request.sources[0]}: disabled for this project`],
-      status: { backend: "native", complete: true } };
+      limitNotices, status: { backend: "native", complete: true, completeForSelection: true, stale: false } };
     store = await openStore(root, request.sources[0]);
     if (request.mode !== "lexical") work = await claimWork(store.db, dependencies.signal ?? new AbortController().signal);
     const { scan, published, generation } = await refreshSnapshot(store, dependencies.signal);
     notices.push(...scan.notices);
-    let complete = !!published;
+    let complete = !!published, completeForSelection = !!published;
     if (scan.complete && !published) {
       notices.push("A newer native snapshot won the generation race; retry for verified freshness.");
     }
     const candidateRequest = request.mode === "lexical" ? request : { ...request, dedupeFile: false, limit: 100 };
     let result = queryStore(store, candidateRequest);
     const stale = !published || result.meta.generation !== generation;
-    if (published && stale) { complete = false; notices.push("Native snapshot changed before query; freshness is unverified."); }
-    if (result.capped) { complete = false; notices.push("Native query candidate limit reached; results are partial."); }
+    if (published && stale) { complete = completeForSelection = false; notices.push("Native snapshot changed before query; freshness is unverified."); }
+    if (result.capped) {
+      complete = false;
+      const notice = "Native query candidate limit reached; results are partial.";
+      notices.push(notice); limitNotices.push(notice);
+    }
     let semantic;
     if (request.mode !== "lexical" && !stale) {
       semantic = await searchSemantic(store, request, result.meta.generation, { ...dependencies, work,
         signal: AbortSignal.any([dependencies.signal ?? new AbortController().signal, AbortSignal.timeout(Math.max(1, 35000 - (Date.now() - started)))]) });
       notices.push(...semantic.notices);
       if (semantic.status.enabled || request.mode === "semantic") complete &&= semantic.status.complete;
+      if (semantic.status.enabled || request.mode === "semantic" || semantic.status.state !== "disabled")
+        completeForSelection &&= semantic.status.complete === true && semantic.status.state === "ready";
       if (store.db.prepare("SELECT generation FROM pix_native_meta WHERE singleton=1").get().generation !== result.meta.generation) {
         result = queryStore(store, candidateRequest);
-        complete = false;
+        complete = completeForSelection = false;
         notices.push("Native snapshot changed during semantic retrieval; current local matches returned.");
       }
     }
@@ -207,7 +219,7 @@ async function searchSource(root, request, dependencies = {}) {
     const hits = usableSemantic
       ? fuseRepositoryHits(request.mode === "semantic" ? [] : result.hits, semantic.hits, request)
       : result.hits.filter((hit, index, all) => !request.dedupeFile || all.findIndex(other => other.path === hit.path) === index).slice(0, request.limit);
-    const response = { hits, notices, status: { backend: "native", complete,
+    const response = { hits, notices, limitNotices, status: { backend: "native", complete, completeForSelection,
       stale,
       semanticEnabled,
       mode: usableSemantic ? request.mode : "lexical", ...(semantic ? { semantic: semantic.status } : {}),
@@ -219,7 +231,7 @@ async function searchSource(root, request, dependencies = {}) {
     return response;
   } catch (error) {
     if (error instanceof SourceExtensionConfigurationError) notices.push(error.message);
-    return { hits: [], notices: [...notices, "Native search unavailable (invalid request, unsafe storage or scan/query failure); results are incomplete."],
-      status: { backend: "native", complete: false, stale: true } };
+    return { hits: [], notices: [...notices, "Native search unavailable (invalid request, unsafe storage or scan/query failure); results are incomplete."], limitNotices,
+      status: { backend: "native", complete: false, completeForSelection: false, stale: true } };
   } finally { if (work) await work.release(success).catch(() => {}); store?.close(); }
 }

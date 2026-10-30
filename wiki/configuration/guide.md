@@ -265,6 +265,36 @@ stopping/cancelling work without affecting existing conversations.
 
 See [Pix Desktop](../desktop/guide.md).
 
+### Wiki contradiction report language
+
+`knowledgeCheck.reportLanguage` selects `en` (English) or `ru` (Russian) for
+Wiki contradiction reports. Set the shared preference in
+`~/.config/pi/pi-tools-suite.jsonc`, or override it in
+`~/.config/pi/pix-desktop.jsonc`:
+
+```jsonc
+{
+  "knowledgeCheck": { "reportLanguage": "ru" }
+}
+```
+
+The controls are **Settings → Tools Suite → General → Contradiction report
+language** and **Settings → Desktop → Assistant → Contradiction report
+language**. Desktop's **Use Tools Suite setting** saves an empty string; an
+omitted/empty Desktop value also inherits the suite preference. An explicit
+Desktop `en` or `ru` takes priority. When neither file supplies a supported
+value, reports use English. This preference is user-global; project files do
+not override it. It is read at the start of each new check, so existing results
+keep their original language until checked again.
+
+The setting covers model explanations, uncertainty prose, report labels and
+checker-owned diagnostics. Quotations stay verbatim in their original language;
+file paths, source IDs and JSON keys also remain unchanged. Unknown native or
+provider diagnostic messages retain their original text. It does not change
+the judge model or reasoning effort.
+
+See [Wiki contradiction checks](../desktop/workbench/desktop-project-wiki.md#contradiction-checks).
+
 ### Desktop Observer defaults
 
 **Settings → Desktop → Observer** edits the `headsUp` object in the Desktop

@@ -5,6 +5,26 @@
       "type": "string",
       "description": "JSON Schema URL used by editors for validation and autocomplete."
     },
+    "knowledgeCheck": {
+      "type": "object",
+      "properties": {
+        "reportLanguage": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "en"
+            },
+            {
+              "type": "string",
+              "const": "ru"
+            }
+          ],
+          "default": "en",
+          "description": "User-global language for Wiki contradiction reports. Desktop can override it; source quotations are preserved."
+        }
+      },
+      "description": "Wiki contradiction report preferences, read from the user-global configuration."
+    },
     "enabled": {
       "type": "boolean",
       "description": "Enable or disable the entire pi-tools-suite extension."

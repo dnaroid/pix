@@ -6,11 +6,21 @@
   import { createProjectWikiController } from "./project-wiki-controller.svelte";
   import ProjectWikiTree from "./ProjectWikiTree.svelte";
   import ProjectWikiSearch from "./ProjectWikiSearch.svelte";
+  import ProjectWikiCheckQueue from "./ProjectWikiCheckQueue.svelte";
+  import type { KnowledgeCitation, KnowledgeReportLanguage } from "../../../acp/src/knowledge/contract";
+  import type { ProjectKnowledgeJob } from "../app/project-knowledge-queue.svelte";
   import type { ProjectFileLineRange } from "../lib/project-files";
 
-  let { workspace, activePath = null, onOpenFile, onOpenFiles, onOpenExternal, onBeforeMutation, ready = $bindable(false) }: {
+  let { workspace, activePath = null, knowledgeJobs = [], onCancelKnowledgeCheck, onDismissKnowledgeCheck, onOpenKnowledgeCitation, onResolveKnowledgeJob, knowledgeSourcesEnabled = true, knowledgeResolving = false, onOpenFile, onOpenFiles, onOpenExternal, onBeforeMutation, ready = $bindable(false) }: {
     workspace: string;
     activePath?: string | null;
+    knowledgeJobs?: readonly ProjectKnowledgeJob[];
+    onCancelKnowledgeCheck?: (id: number) => void;
+    onDismissKnowledgeCheck?: (id: number) => void;
+    onOpenKnowledgeCitation?: (citation: KnowledgeCitation, language?: KnowledgeReportLanguage) => void | Promise<void>;
+    onResolveKnowledgeJob?: (job: ProjectKnowledgeJob) => void | Promise<void>;
+    knowledgeSourcesEnabled?: boolean;
+    knowledgeResolving?: boolean;
     onOpenFile: (path: string, searchRange?: ProjectFileLineRange) => void;
     onOpenFiles: (path: string) => void;
     onOpenExternal: (path: string) => void;
@@ -35,6 +45,10 @@
   function openFile(path: string, searchRange?: ProjectFileLineRange): void {
     wikiTree?.cancelNavigation();
     onOpenFile(path, searchRange);
+  }
+  function openCitation(citation: KnowledgeCitation, language?: KnowledgeReportLanguage): void | Promise<void> {
+    wikiTree?.cancelNavigation();
+    return onOpenKnowledgeCitation?.(citation, language);
   }
   function openFiles(path: string): void {
     wikiTree?.cancelNavigation();
@@ -85,4 +99,10 @@
   {:else if !wikiState.error}
     <div class={emptyStateClass}>Wiki is unavailable.</div>
   {/if}
+{/if}
+
+{#if workspace}
+  <ProjectWikiCheckQueue {workspace} jobs={knowledgeJobs} onCancel={onCancelKnowledgeCheck} onDismiss={onDismissKnowledgeCheck} onOpenFile={openFile}
+    canOpenSources={knowledgeSourcesEnabled} onOpenCitation={onOpenKnowledgeCitation ? openCitation : undefined}
+    onResolve={onResolveKnowledgeJob} resolving={knowledgeResolving} />
 {/if}

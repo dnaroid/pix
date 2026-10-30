@@ -5,6 +5,16 @@ import searchPreferencesSource from "../components/settings/SettingsSearchPrefer
 import { SETTINGS_SEARCH_CATALOG, settingsFieldId } from "./settings-search-catalog";
 
 describe("authored settings search catalogue", () => {
+  it("routes report-language searches to both the suite default and Desktop override", () => {
+    const entries = SETTINGS_SEARCH_CATALOG.filter(entry => entry.id === "contradiction-report-language");
+    expect(entries.map(entry => entry.section).sort()).toEqual(["desktop-assistant", "pi-tools-suite-general"]);
+    for (const entry of entries) {
+      expect(entry.synonyms).toContain("knowledgeCheck.reportLanguage");
+      expect(entry.synonyms).toContain("противоречия");
+      expect(entry.synonyms).toContain("язык");
+    }
+  });
+
   it("makes Claude quota warnings searchable in the Claude settings section", () => {
     const entry = SETTINGS_SEARCH_CATALOG.find(entry => entry.id === "claude-quota-warnings");
     expect(entry?.section).toBe("pi-tools-suite-claude");

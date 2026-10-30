@@ -83,6 +83,7 @@ export function createDesktopWorkbenchViewModelServices(
       projectWorkspace: options.project.workspace,
       git: options.project.git,
       gitAssist: options.workbenchGit.gitAssist,
+      knowledgeResolution: options.workbenchGit.knowledgeResolution,
       lspOnboarding: options.lspOnboarding,
     },
   });

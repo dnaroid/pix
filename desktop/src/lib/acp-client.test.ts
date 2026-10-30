@@ -49,6 +49,50 @@ async function startedClient(transport: FakeTransport, overrides: Record<string,
 }
 
 describe("ACP JSON-RPC client", () => {
+  it("checks a Wiki draft without a chat session and validates the response", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+    const params = { cwd: "/workspace", path: "wiki/rules.md", content: "New rule", expectedContent: "Old rule" };
+    const result = { status: "clear", path: params.path, documentHash: "hash", modelRef: "provider/model",
+      checkedSources: 2, conflicts: [], notices: [] };
+    const operation = client.checkKnowledge(params);
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    expect(requestAt(transport, 1)).toMatchObject({ method: "pix/knowledge/check", params });
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 1).id, result });
+    await expect(operation).resolves.toEqual(result);
+    await client.dispose();
+  });
+
+  it.each([
+    { status: "clear", path: "wiki/other.md", documentHash: "hash", modelRef: "m", checkedSources: 0, conflicts: [], notices: [] },
+    { status: "clear", path: "wiki/rules.md", documentHash: "hash", modelRef: "m", checkedSources: 0, conflicts: [{ explanation: "bad" }], notices: [] },
+    { status: "clear", path: "wiki/rules.md", documentHash: "hash", modelRef: "m", checkedSources: -1, conflicts: [], notices: [] },
+  ])("rejects malformed or unrelated Wiki check results", async (result) => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+    const operation = client.checkKnowledge({ cwd: "/workspace", path: "wiki/rules.md", content: "Draft" });
+    const rejection = expect(operation).rejects.toThrow(/Invalid/);
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    transport.message({ jsonrpc: "2.0", id: requestAt(transport, 1).id, result });
+    await rejection;
+    await client.dispose();
+  });
+
+  it("cancels Wiki checks and ignores their late responses", async () => {
+    const transport = new FakeTransport();
+    const client = await startedClient(transport);
+    const controller = new AbortController();
+    const operation = client.checkKnowledge({ cwd: "/workspace", path: "wiki/rules.md", content: "Draft" }, controller.signal);
+    const rejection = expect(operation).rejects.toMatchObject({ name: "AbortError" });
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    const id = requestAt(transport, 1).id;
+    controller.abort();
+    await rejection;
+    expect(requestAt(transport, 2)).toMatchObject({ method: "$/cancel_request", params: { requestId: id } });
+    transport.message({ jsonrpc: "2.0", id, result: { status: "clear" } });
+    await client.dispose();
+  });
+
   it("routes validated agent task requests and acknowledges launch without another user prompt", async () => {
     const transport = new FakeTransport();
     const onTaskRun = vi.fn(async () => ({ sessionId: "child", outcome: "started" }));

@@ -43,6 +43,11 @@
 
   export type ToolsSuiteSettingsSection = "general" | "subagents" | "automation" | "dcp" | "context" | "claude" | "integrations";
 
+  const REPORT_LANGUAGE_OPTIONS = [
+    { value: "en", label: "English (en)" },
+    { value: "ru", label: "Русский (ru)" },
+  ];
+
   const THINKING_STRICTNESS = [
     { value: "conservative", label: "Conservative" },
     { value: "balanced", label: "Balanced" },
@@ -186,6 +191,20 @@
   <div class="border-y border-sidebar-border/70 bg-panel">
     <SettingsFieldRow label="Tools Suite" description="Enable or disable the complete pi-tools-suite extension." explicit={has(["enabled"])} defaultLabel={defaultLabel(["enabled"])} onReset={() => reset(["enabled"])}>
       <SettingsSwitch value={bool(["enabled"])} onChange={(value) => set(["enabled"], value)} />
+    </SettingsFieldRow>
+    <SettingsFieldRow
+      label="Contradiction report language"
+      description="Language for Wiki contradiction reports. Desktop can override this setting; source quotations remain unchanged."
+      explicit={has(["knowledgeCheck", "reportLanguage"])}
+      defaultLabel={defaultLabel(["knowledgeCheck", "reportLanguage"])}
+      onReset={() => reset(["knowledgeCheck", "reportLanguage"])}
+    >
+      <SettingsSelect
+        value={text(["knowledgeCheck", "reportLanguage"])}
+        options={REPORT_LANGUAGE_OPTIONS}
+        ariaLabel="Contradiction report language"
+        onChange={(value) => set(["knowledgeCheck", "reportLanguage"], value)}
+      />
     </SettingsFieldRow>
     <SettingsFieldRow label="Modules" description="Choose which built-in pi-tools-suite modules are enabled for this user profile. Existing list/map config is reflected here and remains editable in Advanced JSONC." explicit={has(["enabledModules"]) || has(["disabledModules"]) || has(["modules"]) || has(["enabledExtensions"]) || has(["disabledExtensions"]) || has(["extensions"])} defaultLabel="Defaults applied when omitted" onReset={() => resetMany([["enabledModules"], ["disabledModules"], ["modules"], ["enabledExtensions"], ["disabledExtensions"], ["extensions"]])}>
       <SettingsModuleVisibility modules={moduleStates} unknownNames={unknownModuleNames} onChange={updateModule} />

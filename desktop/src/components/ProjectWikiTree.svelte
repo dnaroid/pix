@@ -62,7 +62,7 @@
     root: () => root,
     onListDirectory: async (path) => {
       const directory = config.path;
-      const entries = await invoke<ProjectTreeEntry[]>("list_project_directory", { workspace, path: projectPath(path) });
+      const entries = await invoke<ProjectTreeEntry[]>("list_project_directory", { workspace, path: projectPath(path), includeWikiChecks: true });
       return entries.map((entry) => relativeEntry(entry, directory))
       .filter((entry) => entry.kind !== "file" || wikiIndexOwner(entry.path, config) === null)
       .sort((left, right) => {
@@ -185,17 +185,19 @@
     {#each rows as row, index (row.entry.path)}
       {@const entry = row.entry}
       {@const expanded = entry.kind === "directory" && tree.isDirectoryExpanded(entry.path)}
+      {@const checked = entry.kind === "file" && /\.(?:md|markdown)$/iu.test(entry.path) && entry.wikiChecked === true}
+      {@const checkedDescription = checked ? "This saved version passed the last consistency check" : ""}
       <div
         role="treeitem"
         class={["flex h-7 w-full min-w-0 items-center gap-1.5 pr-2 text-left text-xs hover:bg-panel-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring", treeState.selectedPath === entry.path ? "bg-panel-selected text-foreground" : "text-muted-foreground"]}
         style:padding-left={`${4 + row.depth * 14}px`}
-        aria-label={label(entry)}
+        aria-label={checked ? `${label(entry)}. ${checkedDescription}` : label(entry)}
         aria-level={row.depth + 1}
         aria-expanded={entry.kind === "directory" ? expanded : undefined}
         aria-selected={treeState.selectedPath === entry.path}
         tabindex={!nameState.edit && tree.tabbablePath === entry.path ? 0 : -1}
         data-project-tree-path={entry.path}
-        title={projectPath(entry.path)}
+        title={checked ? `${projectPath(entry.path)}\n${checkedDescription}` : projectPath(entry.path)}
         onfocus={() => treeState.focusedPath = entry.path}
         onclick={() => activate(entry)}
         onkeydown={(event) => handleKeydown(event, index, entry)}
@@ -210,11 +212,11 @@
           <Folder class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
         {:else}
           <span class="w-6 shrink-0" aria-hidden="true"></span>
-          {#if /\.(?:md|markdown)$/iu.test(entry.path)}<FileText class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          {#if /\.(?:md|markdown)$/iu.test(entry.path)}<FileText class={["h-3.5 w-3.5 shrink-0", checked ? "text-tool-success" : ""]} aria-hidden="true" />
           {:else if /\.(?:png|jpe?g|gif|webp|svg|avif)$/iu.test(entry.path)}<ImageIcon class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           {:else}<File class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />{/if}
         {/if}
-        <span class="min-w-0 flex-1 truncate">{label(entry)}</span>
+        <span class={["min-w-0 flex-1 truncate", checked ? "text-tool-success" : ""]}>{label(entry)}</span>
       </div>
       {#if nameState.edit && nameState.edit.parent === entry.path && expanded}
         {#key nameState.edit}

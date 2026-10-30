@@ -13,6 +13,7 @@ import type { createConversationBranchActions } from "./conversation-branch-acti
 import type { createConversationSessionActions } from "./conversation-session-actions";
 import type { createErrorState } from "./error-state.svelte";
 import type { createGitAssist } from "./git-assist";
+import type { createKnowledgeResolution } from "./knowledge-resolution.svelte";
 import type { createGitWorkspaceStore } from "./git-workspace.svelte";
 import type { LspOnboardingStore } from "./lsp-onboarding.svelte";
 import type { createPreviewStore } from "./preview.svelte";
@@ -110,6 +111,7 @@ export type WorkbenchEditorBuilderOptions = {
   projectWorkspace: ReturnType<typeof createProjectWorkspaceStore>;
   git: ReturnType<typeof createGitWorkspaceStore>;
   gitAssist: ReturnType<typeof createGitAssist>;
+  knowledgeResolution?: ReturnType<typeof createKnowledgeResolution>;
   lspOnboarding: LspOnboardingStore;
 };
 
@@ -315,6 +317,8 @@ export function buildWorkbenchEditorProps(
   "preview" | "previewVisible" | "gitDiff" | "gitDiffVisible" | "lspInstall" | "lspInstallVisible" | "terminal" | "terminalVisible"
 > {
   const activePreview = options.preview.active;
+  const previewWorkspace = options.workspace();
+  const documentGeneration = options.projectDocuments.generation;
   const userConfigKind = activePreview?.kind === "file" ? activePreview.userConfigKind : undefined;
   const virtualContents = activePreview?.kind === "file" && Boolean(activePreview.file.virtualWikiDirectory);
   const saveProjectFile = userConfigKind
@@ -325,7 +329,7 @@ export function buildWorkbenchEditorProps(
 
   return {
     preview: activePreview ? {
-      workspace: options.workspace(),
+      workspace: previewWorkspace,
       previewId: activePreview.id,
       active: options.activeWorkbenchTabId() === "preview",
       scrollPosition: activePreview.scrollPosition,
@@ -333,6 +337,8 @@ export function buildWorkbenchEditorProps(
       markdownLinkBase: activePreview.kind === "file" ? activePreview.markdownLinkBase : undefined,
       lineRange: activePreview.kind === "file" ? activePreview.lineRange : undefined,
       searchRange: activePreview.kind === "file" ? activePreview.searchRange : undefined,
+      evidenceCitation: activePreview.kind === "file" ? activePreview.evidenceCitation : undefined,
+      evidenceLanguage: activePreview.kind === "file" ? activePreview.evidenceLanguage : undefined,
       attachment: activePreview.kind === "attachment" ? activePreview.attachment : undefined,
       autoplay: activePreview.kind === "attachment" && activePreview.autoplay === true,
       onAutoplayConsumed: () => options.preview.consumeAutoplay(activePreview.id),
@@ -355,6 +361,22 @@ export function buildWorkbenchEditorProps(
       onOpenLocalFile: (path) => options.preview.openLocalFile(path, "push"),
       onResolveLocalMedia: options.preview.resolveLocalMedia,
       onSaveProjectFile: virtualContents ? undefined : saveProjectFile,
+      onCheckKnowledge: userConfigKind || virtualContents ? undefined : options.projectDocuments.checkKnowledge,
+      onOpenKnowledgeCitation: (citation, language) => options.preview.openKnowledgeCitation(citation, "push", language),
+      onResolveKnowledge: !userConfigKind && !virtualContents && options.knowledgeResolution
+        && options.statusReady() && options.clientAvailable() && !options.operationRunning()
+        ? (result, content) => {
+          if (options.workspace() === previewWorkspace && options.projectDocuments.generation === documentGeneration) {
+            return options.knowledgeResolution!.start({ workspace: previewWorkspace, result, content });
+          }
+        }
+        : undefined,
+      knowledgeResolving: options.knowledgeResolution?.starting ?? false,
+      knowledgeJobs: userConfigKind || virtualContents ? [] : options.projectDocuments.knowledgeJobs,
+      onEnqueueKnowledgeCheck: userConfigKind || virtualContents ? undefined : options.projectDocuments.enqueueKnowledgeCheck,
+      onCancelKnowledgeCheck: userConfigKind || virtualContents ? undefined : options.projectDocuments.cancelKnowledgeCheck,
+      knowledgeCheckEnabled: activePreview.kind === "file" && !userConfigKind && !virtualContents
+        && Boolean(options.projectDocuments.wikiPath && activePreview.file.path.startsWith(`${options.projectDocuments.wikiPath}/`)),
       onOpenExternalEditor: activePreview.kind === "file" && !virtualContents && isWorkspaceProjectFilePath(activePreview.file.path)
         ? (path) => void options.projectWorkspace.openInEditor(path)
         : undefined,

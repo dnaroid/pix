@@ -20,6 +20,13 @@ building on [0065](../decisions/0065-native-repository-search.md). Global author
 [0068](../decisions/0068-global-semantic-configuration.md). Source ownership and
 uncertain-work recovery: [0070](../decisions/0070-search-source-work-recovery.md).
 
+Desktop [Wiki contradiction checks](../desktop/workbench/desktop-project-wiki.md#contradiction-checks)
+reuse this engine in hybrid mode, scoped to Knowledge and the selected project's
+configured Wiki. Their separate sessionless answer-model comparison uses verified
+source passages after retrieval. The Wiki spec defines the save/report flow,
+completion rules and budgets; ordinary native retrieval keeps its existing
+source/provider configuration and performs no answer generation.
+
 ## Canonical behavior
 
 - The shared engine lives in the default-enabled bundled tools-suite module and works
@@ -28,6 +35,12 @@ uncertain-work recovery: [0070](../decisions/0070-search-source-work-recovery.md
   kind, id, title, snippet, score, project-relative path, inclusive 1-based start/end lines,
   and optional bounded content. Desktop retains normal navigation, ranking and RAG evidence
   revalidation. The agent retains its federated source/result caps.
+  The optional `status.completeForSelection` distinguishes successful snapshot
+  and configured retrieval-stage completion from ordinary candidate/output caps;
+  existing `status.complete` retains its conservative meaning. `limitNotices`
+  identifies benign selection-limit messages while retaining them in `notices`
+  for existing clients. Stale scans, generation changes, incomplete semantics and
+  configured-reranker failures cannot produce a true selection-completion flag.
   Release payloads include the engine source and its `ignore` parser as a locked root
   production dependency: the standalone CLI must not rely on the checkout's suite-local
   node_modules or a dependency nested inside the SDK.

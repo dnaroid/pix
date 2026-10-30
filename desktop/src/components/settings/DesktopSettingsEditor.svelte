@@ -31,6 +31,11 @@
     { value: "dark", label: "Dark" },
   ];
   const WIZARD_TIERS = ["simple", "standard", "complex", "expert"];
+  const REPORT_LANGUAGE_OPTIONS = [
+    { value: "", label: "Use Tools Suite setting" },
+    { value: "en", label: "English (en)" },
+    { value: "ru", label: "Русский (ru)" },
+  ];
   const LANGUAGE_OPTIONS = [
     ["en", "English"],
     ["ru", "Russian"],
@@ -322,6 +327,20 @@
       onReset={() => reset(["selectionAssist", "language"])}
     >
       <SettingsTextInput value={text(["selectionAssist", "language"])} placeholder="ru" onChange={(value) => set(["selectionAssist", "language"], value)} />
+    </SettingsFieldRow>
+    <SettingsFieldRow
+      label="Contradiction report language"
+      description="Language for Wiki contradiction reports. Inherit the Tools Suite setting or choose an override. Source quotations remain unchanged."
+      explicit={has(["knowledgeCheck", "reportLanguage"])}
+      defaultLabel="Tools Suite setting (English when unset)"
+      onReset={() => reset(["knowledgeCheck", "reportLanguage"])}
+    >
+      <SettingsSelect
+        value={text(["knowledgeCheck", "reportLanguage"])}
+        options={REPORT_LANGUAGE_OPTIONS}
+        ariaLabel="Contradiction report language"
+        onChange={(value) => set(["knowledgeCheck", "reportLanguage"], value)}
+      />
     </SettingsFieldRow>
     <SettingsFieldRow
       label="RAG thinking effort"

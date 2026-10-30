@@ -201,6 +201,28 @@ fn media_html(url: &str, label: &str) -> String {
     }
 }
 
+fn is_wiki_metadata_comment(raw: &str) -> bool {
+    let line = raw.strip_suffix("\r\n").or_else(|| raw.strip_suffix('\n')).unwrap_or(raw);
+    let Some(payload) = line.strip_prefix("<!-- pix:wiki-report ")
+        .or_else(|| line.strip_prefix("<!-- pix:wiki-check "))
+        .and_then(|value| value.strip_suffix(" -->")) else {
+        return false;
+    };
+    // App JSON escapes angle brackets. A second comment or surrounding HTML
+    // must never be mistaken for part of one reserved metadata comment.
+    !payload.contains(['<', '>', '\r', '\n'])
+}
+
+fn without_wiki_metadata(raw: CowStr<'_>) -> Option<CowStr<'_>> {
+    if !raw.split_inclusive('\n').any(is_wiki_metadata_comment) {
+        return Some(raw);
+    }
+    let visible: String = raw.split_inclusive('\n')
+        .filter(|line| !is_wiki_metadata_comment(line))
+        .collect();
+    (!visible.is_empty()).then(|| CowStr::from(visible))
+}
+
 fn render_page(rel: &str, source: &str, root: &Path, pages: &HashSet<String>) -> Page {
     let dir = rel.rsplit_once('/').map_or("", |(dir, _)| dir);
     let options = Options::ENABLE_TABLES
@@ -226,7 +248,10 @@ fn render_page(rel: &str, source: &str, root: &Path, pages: &HashSet<String>) ->
             continue;
         }
         let event = match event {
-            Event::Html(raw) | Event::InlineHtml(raw) => Event::Text(raw),
+            Event::Html(raw) | Event::InlineHtml(raw) => {
+                let Some(visible) = without_wiki_metadata(raw) else { continue; };
+                Event::Text(visible)
+            }
             Event::Start(Tag::Link { link_type, dest_url, title, id }) => {
                 let url = rewrite_url(&dest_url, dir, root, pages, false);
                 let local = rewrite_url(&dest_url, dir, root, pages, true);
@@ -403,6 +428,56 @@ mod tests {
         assert!(!html.contains("<script>alert"));
         assert!(!html.contains("Home </script>"));
         assert!(html.contains("\\u003cscript"));
+    }
+
+    #[test]
+    fn omits_saved_wiki_reports_and_stamps_from_html_search_and_titles() {
+        let report = format!("<!-- pix:wiki-report {{\"notice\":\"archivedreport {}\"}} -->\n", "x".repeat(12_000));
+        let stamp = "<!-- pix:wiki-check {\"modelRef\":\"archivedstamp\"} -->\n";
+        let source = format!("---\ntitle: Rules\n---\n\n{report}# Current rules\nCurrent body.\n\n{stamp}");
+        let page = render_page("rules.md", &source, Path::new("/w"), &HashSet::new());
+        assert_eq!(page.title, "Current rules");
+        assert!(page.html.contains("Current body.") && page.text.contains("Current body."));
+        for hidden in ["pix:wiki-report", "pix:wiki-check", "archivedreport", "archivedstamp"] {
+            assert!(!page.html.contains(hidden));
+            assert!(!page.text.contains(hidden));
+            assert!(!page.title.contains(hidden));
+        }
+        let inline = render_page("title.md", "# Visible <!-- pix:wiki-report {\"notice\":\"hidden\"} -->\n", Path::new("/w"), &HashSet::new());
+        assert_eq!(inline.title, "Visible");
+        assert!(!inline.html.contains("hidden") && !inline.text.contains("hidden"));
+        let exported = build_html("Wiki", Path::new("/w"), "rules.md", &[("rules.md".to_owned(), source)]).unwrap();
+        assert!(!exported.contains("archivedreport") && !exported.contains("archivedstamp"));
+    }
+
+    #[test]
+    fn strips_only_complete_reserved_comment_lines_from_combined_html_events() {
+        let mixed = "<div>before</div>\n<!-- pix:wiki-report {\"notice\":\"hidden\"} -->\n<section>after</section>\n";
+        assert_eq!(without_wiki_metadata(CowStr::from(mixed)).as_deref(), Some("<div>before</div>\n<section>after</section>\n"));
+        for ordinary in [
+            "<!-- pix:wiki-report {} --><!-- ordinary retained -->",
+            "<!-- pix:wiki-check {} --> <b>retained</b>",
+            "<!-- pix:wiki-report {\n\"example\":true} -->\n",
+            "<!-- ordinary retained -->\n",
+            "<!-- pix:wiki-reporter retained -->\n",
+        ] {
+            assert_eq!(without_wiki_metadata(CowStr::from(ordinary)).as_deref(), Some(ordinary));
+        }
+        let page = render_page("mixed.md", mixed, Path::new("/w"), &HashSet::new());
+        assert!(page.html.contains("&lt;div&gt;before&lt;/div&gt;"));
+        assert!(page.html.contains("&lt;section&gt;after&lt;/section&gt;"));
+        assert!(!page.html.contains("<div>before") && !page.html.contains("hidden"));
+    }
+
+    #[test]
+    fn preserves_reserved_comment_examples_in_fenced_and_inline_code() {
+        let source = "# Examples\n\n```html\n<!-- pix:wiki-report {\"example\":\"reportexample\"} -->\n<!-- pix:wiki-check {\"example\":\"stampexample\"} -->\n```\n\n`<!-- pix:wiki-report inlineexample -->`\n";
+        let page = render_page("examples.md", source, Path::new("/w"), &HashSet::new());
+        for visible in ["reportexample", "stampexample", "inlineexample"] {
+            assert!(page.html.contains(visible) && page.text.contains(visible));
+        }
+        assert!(page.html.contains("&lt;!-- pix:wiki-report"));
+        assert!(!page.html.contains("<!-- pix:wiki-report"));
     }
 
     #[test]

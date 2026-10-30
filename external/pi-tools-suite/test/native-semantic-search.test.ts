@@ -64,6 +64,7 @@ describe("native semantic repository retrieval", () => {
     const hybrid = await searchNative(root, request({ query: "needle" }), provider);
     expect(hybrid.hits.map((hit: any) => hit.path).sort()).toEqual(["boundary.test.ts", "boundary.ts", "docs.md", "literal.ts"]);
     expect(hybrid.status.semantic).toMatchObject({ state: "ready", indexed: 6, total: 6 });
+    expect(hybrid.status.completeForSelection).toBe(true);
     calls = 0;
     const semantic = await searchNative(root, request({ query: "needle", mode: "semantic" }), provider);
     expect(semantic.hits.map((hit: any) => hit.path).sort()).toEqual(["boundary.test.ts", "boundary.ts", "docs.md"]);
@@ -83,6 +84,21 @@ describe("native semantic repository retrieval", () => {
     const documents = provider.calls.flatMap(call => call.inputs).filter(input => !input.endsWith(request().query));
     expect(documents).toHaveLength(128);
   });
+  test("candidate caps remain distinct from incomplete configured semantic retrieval", async () => {
+    const root = await fixture(), provider = fakeProvider();
+    for (let i = 0; i < 205; i++) await put(root, `code/item${i}.ts`, "renewCredentials");
+    const query = request({ query: "renewCredentials", sources: ["code"], limit: 12 });
+    const first = await searchNative(root, query, provider);
+    expect(first.status.semantic).toMatchObject({ enabled: true, complete: false, state: "partial" });
+    expect(first.status).toMatchObject({ complete: false, completeForSelection: false, stale: false });
+    expect(first.limitNotices).toContain("Native query candidate limit reached; results are partial.");
+
+    const ready = await searchNative(root, query, provider);
+    expect(ready.status.semantic).toMatchObject({ enabled: true, complete: true, state: "ready" });
+    expect(ready.status).toMatchObject({ complete: false, completeForSelection: true, stale: false });
+    expect(ready.limitNotices).toEqual(first.limitNotices);
+  });
+
   test("suite-owned provider configuration needs no IDX directory and never silently falls back", async () => {
     const root = await fixture(), provider = fakeProvider();
     await put(root, "../.config/pi/pi-tools-suite.jsonc", JSON.stringify({ enabled: true, search: { embedding: config } }));
@@ -217,6 +233,7 @@ describe("native semantic repository retrieval", () => {
     finish();
     const stale = await pending;
     expect(stale.status.semantic.state).toBe("unavailable");
+    expect(stale.status.completeForSelection).toBe(false);
     expect(stale.hits).toEqual([]);
     const db = new Database(join(root, ".pi/search/code.sqlite"), { readonly: true });
     try { expect((db.query("SELECT COUNT(*) AS n FROM vectors").get() as any).n).toBe(0); }
@@ -238,6 +255,7 @@ describe("native semantic repository retrieval", () => {
     const result = await pending;
     expect(aborted).toBe(true);
     expect(result.status.semantic.state).toBe("unavailable");
+    expect(result.status.completeForSelection).toBe(false);
     expect(result.hits).toEqual([]);
   });
 
@@ -249,6 +267,7 @@ describe("native semantic repository retrieval", () => {
       expect(result.hits[0].path).toBe("auth.ts");
       expect(result.status.mode).toBe("lexical");
       expect(result.status.semantic.state).toBe("unavailable");
+      expect(result.status.completeForSelection).toBe(false);
       expect(result.notices.join(" ")).not.toContain("secret-fixture");
     }
   });

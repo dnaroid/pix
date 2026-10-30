@@ -56,7 +56,82 @@ export async function readSafeFile(root, name, maxBytes = SCAN_LIMITS.fileBytes)
   } finally { await handle.close(); }
 }
 
+/** Match Desktop's bounded app-owned metadata positions, preserving raw source line numbers.
+ * Report JSON is evidence about an earlier snapshot, never searchable document content. */
+function blankWikiMetadata(text) {
+  const reportPrefix = "<!-- pix:wiki-report ", stampPrefix = "<!-- pix:wiki-check ";
+  const reportLimit = 384 * 1024, stampLimit = 4096;
+  let body = text, footerBytes = 0;
+  while (body) {
+    const end = body.endsWith("\r\n") ? body.length - 2 : body.endsWith("\n") ? body.length - 1 : body.length;
+    const separator = body.lastIndexOf("\n", end - 1);
+    if (separator < 0) break;
+    const line = body.slice(separator + 1, end);
+    if (!line.startsWith(stampPrefix) || line.includes("\r")) break;
+    footerBytes += Buffer.byteLength(body.slice(separator));
+    if (footerBytes > stampLimit) break;
+    body = body.slice(0, separator);
+  }
+  const reportRanges = [];
+  let bytes = 0, overflow = false;
+  function group(start, firstComment) {
+    let cursor = firstComment, end = start;
+    while (body.startsWith(reportPrefix, cursor)) {
+      const newline = body.indexOf("\n", cursor);
+      const nextEnd = newline < 0 ? body.length : newline + 1;
+      if (nextEnd - end > reportLimit || (bytes += Buffer.byteLength(body.slice(end, nextEnd))) > reportLimit) {
+        overflow = true;
+        return nextEnd;
+      }
+      end = nextEnd;
+      cursor = end;
+      if (body.startsWith("\n" + reportPrefix, cursor)) cursor++;
+    }
+    if (end > start) reportRanges.push({ start, end });
+    return end;
+  }
+  function lineAt(start) {
+    const newline = body.indexOf("\n", start);
+    const end = newline < 0 ? body.length : newline;
+    const textEnd = end > start && body[end - 1] === "\r" ? end - 1 : end;
+    return { text: body.slice(start, textEnd), textEnd, end: newline < 0 ? body.length : newline + 1 };
+  }
+  function frontmatter(start) {
+    const opening = lineAt(start);
+    if ((opening.text !== "---" && opening.text !== "+++") || opening.end === body.length) return undefined;
+    let cursor = opening.end;
+    while (cursor < body.length) {
+      const line = lineAt(cursor);
+      if (line.text === opening.text || (opening.text === "---" && line.text === "...")) return line;
+      if (line.end === body.length) break;
+      cursor = line.end;
+    }
+    return undefined;
+  }
+  let start = body.startsWith("\uFEFF") ? 1 : 0;
+  if (body.startsWith(reportPrefix, start)) start = group(start, start);
+  if (!overflow) {
+    const header = frontmatter(body[start] === "\uFEFF" ? start + 1 : start);
+    if (header) {
+      if (body.startsWith("\n" + reportPrefix, header.end)) group(header.end, header.end + 1);
+      else if (body.startsWith(reportPrefix, header.end)) {
+        group(body.slice(header.textEnd, header.end) === "\n" ? header.textEnd : header.end, header.end);
+      }
+    }
+  }
+  // An oversized reserved header stays source text and hits the ordinary chunk bound.
+  const ranges = overflow ? [] : reportRanges;
+  if (body.length < text.length) ranges.push({ start: body.length, end: text.length });
+  let cursor = 0, output = "";
+  for (const range of ranges) {
+    output += text.slice(cursor, range.start) + text.slice(range.start, range.end).replace(/[^\r\n]/gu, "");
+    cursor = range.end;
+  }
+  return output + text.slice(cursor);
+}
+
 function chunksFor(name, kind, text) {
+  if (kind === "knowledge" && /\.(md|markdown)$/iu.test(name)) text = blankWikiMetadata(text);
   const lines = text.split("\n");
   // The last empty split item is not an additional physical source line.
   if (lines.length > 1 && lines.at(-1) === "") lines.pop();

@@ -64,13 +64,53 @@ export function createDesktopProjectServices(options: DesktopProjectServicesOpti
 
   const documents = createProjectDocumentsStore({
     workspace: options.workspace,
+    checkKnowledge: (request, signal) => {
+      const client = options.client();
+      if (!client) throw new Error("Connect the project backend before checking Wiki contradictions.");
+      return client.checkKnowledge(request, signal);
+    },
     openProjectFile: preview.openProjectFile,
     showEmptyFile: (file) => preview.show({ kind: "file", file }, "replace"),
     previewId: () => preview.active?.id,
     currentFile: () => preview.active?.kind === "file" ? preview.active.file : undefined,
     afterSave: (file, _workspace, previewId) => {
-      if (preview.active?.id === previewId) preview.replaceCurrentFile(file);
+      const active = preview.active;
+      if (active && active.id === previewId && active.kind === "file"
+        && active.file.path === file.path) preview.replaceCurrentFile(file);
       if (isCanonicalProjectPlanPath(file.path)) registry.scheduleProjectSync("plans");
+    },
+    onKnowledgeJobComplete: (job) => {
+      if (options.workspace() !== job.workspace) return;
+      const russian = job.result?.reportLanguage === "ru";
+      const failed = job.state === "failed";
+      const clear = job.result?.status === "clear";
+      const message = failed
+        ? russian ? "Проверка Wiki не завершилась" : "Wiki check failed"
+        : job.error
+          ? russian ? "Отчёт Wiki готов; отметка не сохранена" : "Wiki report ready; check mark was not saved"
+          : clear
+            ? russian ? "Проверка Wiki завершена: противоречий не найдено" : "Wiki check complete: no contradictions found"
+            : job.result?.status === "conflicts"
+              ? russian ? "В Wiki найдены возможные противоречия" : "Potential Wiki contradictions found"
+              : russian ? "Проверка Wiki завершена не полностью" : "Wiki check is incomplete";
+      const input = {
+        message,
+        detail: job.path,
+        source: "Wiki",
+        key: `wiki-check:${job.workspace}:${job.id}`,
+        log: false,
+        actions: [{
+          label: russian ? "Открыть страницу" : "Open page",
+          run: async () => {
+            if (options.workspace() === job.workspace) {
+              await preview.openProjectFile(job.path, "push", undefined, false, "document");
+            }
+          },
+        }],
+      };
+      if (failed) toasts.error(input);
+      else if (clear && !job.error) toasts.success(input);
+      else toasts.warning(input);
     },
     afterDelete: (path) => {
       preview.invalidateFileLoads();

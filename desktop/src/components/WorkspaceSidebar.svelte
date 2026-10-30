@@ -75,6 +75,8 @@
   import GitPanel from "./GitPanel.svelte";
   import ProjectExplorer from "./ProjectExplorer.svelte";
   import ProjectWikiPanel from "./ProjectWikiPanel.svelte";
+  import type { KnowledgeCitation, KnowledgeReportLanguage } from "../../../acp/src/knowledge/contract";
+  import type { ProjectKnowledgeJob } from "../app/project-knowledge-queue.svelte";
   import PackageScriptsPanel from "./PackageScriptsPanel.svelte";
   import { createPackageScriptsController } from "./package-scripts-controller.svelte";
   import type { TerminalSurfaceHandle } from "./TerminalSessionsPane.svelte";
@@ -171,6 +173,13 @@
     gitCi,
     gitWorkflow,
     projectDocuments,
+    knowledgeJobs = [],
+    onCancelKnowledgeCheck,
+    onDismissKnowledgeCheck,
+    onOpenKnowledgeCitation,
+    onResolveKnowledgeJob,
+    knowledgeSourcesEnabled = true,
+    knowledgeResolving = false,
     activeProjectDocumentPath = null,
     planActionsDisabled = false,
     planRunDisabled = false,
@@ -284,6 +293,13 @@
     gitCi: GitCiPanelState;
     gitWorkflow: GitPanelWorkflow;
     projectDocuments: ProjectDocumentsSnapshot;
+    knowledgeJobs?: readonly ProjectKnowledgeJob[];
+    onCancelKnowledgeCheck?: (id: number) => void;
+    onDismissKnowledgeCheck?: (id: number) => void;
+    onOpenKnowledgeCitation?: (citation: KnowledgeCitation, language?: KnowledgeReportLanguage) => void | Promise<void>;
+    onResolveKnowledgeJob?: (job: ProjectKnowledgeJob) => void | Promise<void>;
+    knowledgeSourcesEnabled?: boolean;
+    knowledgeResolving?: boolean;
     activeProjectDocumentPath?: string | null;
     planActionsDisabled?: boolean;
     planRunDisabled?: boolean;
@@ -1200,6 +1216,13 @@
             bind:ready={wikiReady}
             {workspace}
             activePath={activeProjectDocumentPath}
+            {knowledgeJobs}
+            {onCancelKnowledgeCheck}
+            {onDismissKnowledgeCheck}
+            {onOpenKnowledgeCitation}
+            {onResolveKnowledgeJob}
+            {knowledgeSourcesEnabled}
+            {knowledgeResolving}
             onOpenFile={onOpenWikiFile ?? onOpenProjectFile}
             onOpenFiles={onOpenProjectFile}
             onBeforeMutation={onBeforeFilesMutation}

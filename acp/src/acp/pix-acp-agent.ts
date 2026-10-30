@@ -35,6 +35,9 @@ import { DesktopTaskTypeClassifier, parseTaskTypeClassifyRequest } from "../task
 import { SEARCH_RAG_METHOD, SEARCH_RAG_DELTA_METHOD } from "../search/rag-contract.js";
 import { parseRagRequest } from "../search/rag-request.js";
 import { DesktopRagService } from "../search/rag-service.js";
+import { KnowledgeCheckService } from "../knowledge/service.js";
+import { KNOWLEDGE_CHECK_METHOD } from "../knowledge/contract.js";
+import { parseKnowledgeCheckRequest } from "../knowledge/request.js";
 import { collectRagEvidence } from "../search/rag-evidence.js";
 import { NativeSessionCatalog } from "./native-session-catalog.js";
 import { FileMentionIndex, parseFileMentionsRequest } from "./file-mentions.js";
@@ -528,6 +531,7 @@ export interface PixAcpAgentOptions {
 	/** Stateless Quick Add type classifier; never reads the task document. */
 	readonly taskTypeClassifier?: Pick<DesktopTaskTypeClassifier, "classify">;
 	readonly ragService?: Pick<DesktopRagService, "generate">;
+	readonly knowledgeCheckService?: Pick<KnowledgeCheckService, "check">;
 	/** Reader for the TUI's project tab snapshot (overridable for tests). */
 	readonly loadTuiTabs?: (cwd: string) => Promise<TuiTabSnapshot>;
 	/** Private prompt-completion backend (overridable for hermetic tests). */
@@ -625,6 +629,7 @@ export class PixAcpAgent {
 	private readonly searchIntentService: Pick<DesktopSearchIntentService, "classify">;
 	private readonly taskTypeClassifier: Pick<DesktopTaskTypeClassifier, "classify">;
 	private readonly ragService: Pick<DesktopRagService, "generate">;
+	private readonly knowledgeCheckService: Pick<KnowledgeCheckService, "check">;
 	private readonly usageStatsHost: UsageStatsHost;
 	private readonly providerUsageCache: ProviderUsageCacheHost;
 	private readonly listPiSessions: (cwd?: string, signal?: AbortSignal) => Promise<readonly PiSessionInfo[]>;
@@ -661,6 +666,11 @@ export class PixAcpAgent {
 		});
 		this.searchIntentService = options.searchIntentService ?? new DesktopSearchIntentService();
 		this.taskTypeClassifier = options.taskTypeClassifier ?? new DesktopTaskTypeClassifier();
+		this.knowledgeCheckService = options.knowledgeCheckService ?? new KnowledgeCheckService({
+			...(options.toolsSuiteExtensionPath ? { bundledExtensionPath: options.toolsSuiteExtensionPath } : {}),
+			...(options.agentDir ? { agentDir: options.agentDir } : {}),
+			warn: message => options.logger.warn(message),
+		});
 		this.ragService = options.ragService ?? new DesktopRagService({
 			collect: (request, signal) => collectRagEvidence(request, signal, async id => {
 				const record = await this.sessionMap.get(id);
@@ -790,6 +800,15 @@ export class PixAcpAgent {
 					if (ctx.signal.aborted) throw error;
 					reportRequestFailure(this.options.logger, TASK_TYPE_CLASSIFY_METHOD, error, ctx.signal);
 					return { type: "feature" as const, fallback: true };
+				}
+			}))
+			.onRequest(KNOWLEDGE_CHECK_METHOD, parseKnowledgeCheckRequest, async (ctx) => this.withRequestLogging(KNOWLEDGE_CHECK_METHOD, ctx.params, ctx.signal, async () => {
+				if (this.clientName !== "pix-desktop") throw new RequestError(ERROR_SERVER, "Desktop Wiki check unavailable");
+				try { return await this.knowledgeCheckService.check(ctx.params, ctx.signal); }
+				catch (error) {
+					if (ctx.signal.aborted) throw error;
+					reportRequestFailure(this.options.logger, KNOWLEDGE_CHECK_METHOD, error, ctx.signal);
+					throw new RequestError(ERROR_SERVER, error instanceof Error ? error.message : "Wiki contradiction check failed");
 				}
 			}))
 			.onRequest(SEARCH_RAG_METHOD, parseRagRequest, async (ctx) => this.withRequestLogging(SEARCH_RAG_METHOD, ctx.params, ctx.signal, async () => {

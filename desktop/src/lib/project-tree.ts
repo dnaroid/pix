@@ -4,6 +4,8 @@ export interface ProjectTreeEntry {
   readonly name: string;
   readonly path: string;
   readonly kind: ProjectTreeEntryKind;
+  /** True only when the saved Markdown body matches its last clear check stamp. */
+  readonly wikiChecked?: boolean;
 }
 
 export interface ProjectTreeRow {
@@ -19,12 +21,13 @@ export function reconcileProjectTreeEntries(
   if (!previous) return next;
   if (previous.length === next.length && next.every((entry, index) => {
     const old = previous[index]!;
-    return old.path === entry.path && old.name === entry.name && old.kind === entry.kind;
+    return old.path === entry.path && old.name === entry.name && old.kind === entry.kind
+      && old.wikiChecked === entry.wikiChecked;
   })) return previous;
   const byPath = new Map(previous.map((entry) => [entry.path, entry]));
   const entries = next.map((entry) => {
     const old = byPath.get(entry.path);
-    return old?.name === entry.name && old.kind === entry.kind ? old : entry;
+    return old?.name === entry.name && old.kind === entry.kind && old.wikiChecked === entry.wikiChecked ? old : entry;
   });
   return entries;
 }

@@ -12,6 +12,7 @@ import type { DesktopSessionServices } from "./desktop-session-services";
 import type { DesktopSessionTransitionServices } from "./desktop-session-transition-services";
 import type { LspOnboardingStore } from "./lsp-onboarding.svelte";
 import { createGitAssist } from "./git-assist";
+import { createKnowledgeResolution } from "./knowledge-resolution.svelte";
 import { createWorkbenchController } from "./workbench-controller";
 
 type SessionCoordinatorRef = {
@@ -58,6 +59,24 @@ export function createDesktopWorkbenchGitServices(options: DesktopWorkbenchGitSe
     retargetGitAnchor: options.project.git.retargetAnchor,
   });
 
+  const activateResolutionSession = (sessionId: string, workspace: string, prompt: string): string => {
+    options.state.saveActiveTranscript();
+    options.sessions.catalog.ensureProvisional(sessionId, workspace);
+    options.sessions.tabs.show(sessionId);
+    options.state.setSessionId(sessionId);
+    options.sessions.tabs.rememberActive(workspace, sessionId);
+    options.state.initializeActiveConversation(
+      sessionId,
+      options.sessions.runtime.getConfigOptions(sessionId) ?? [],
+      true,
+      false,
+    );
+    const transcriptMessageId = options.nextLocalMessageId();
+    const next = appendLocalUserMessage(options.state.transcript, prompt, transcriptMessageId, []);
+    options.state.setActiveTranscriptForSession(sessionId, next);
+    return transcriptMessageId;
+  };
+
   const gitAssist = createGitAssist({
     client: options.client,
     workspace: options.workspace,
@@ -75,23 +94,7 @@ export function createDesktopWorkbenchGitServices(options: DesktopWorkbenchGitSe
       return options.workspace() === workspace ? options.project.workspace.gitCiFixModelRef : undefined;
     },
     forgetRuntime: (sessionId) => options.sessionCoordinator().forgetRuntime(sessionId),
-    activateResolutionSession: (sessionId, workspace, prompt) => {
-      options.state.saveActiveTranscript();
-      options.sessions.catalog.ensureProvisional(sessionId, workspace);
-      options.sessions.tabs.show(sessionId);
-      options.state.setSessionId(sessionId);
-      options.sessions.tabs.rememberActive(workspace, sessionId);
-      options.state.initializeActiveConversation(
-        sessionId,
-        options.sessions.runtime.getConfigOptions(sessionId) ?? [],
-        true,
-        false,
-      );
-      const transcriptMessageId = options.nextLocalMessageId();
-      const next = appendLocalUserMessage(options.state.transcript, prompt, transcriptMessageId, []);
-      options.state.setActiveTranscriptForSession(sessionId, next);
-      return transcriptMessageId;
-    },
+    activateResolutionSession,
     onResolutionRunStarted: (sessionId) => {
       options.project.git.closeDiff();
       options.setActiveTabId(workbenchSessionTabId(sessionId));
@@ -102,7 +105,25 @@ export function createDesktopWorkbenchGitServices(options: DesktopWorkbenchGitSe
     reportError: options.reportError,
   });
 
-  return { workbench, gitAssist };
+  const knowledgeResolution = createKnowledgeResolution({
+    client: options.client,
+    workspace: options.workspace,
+    generation: () => options.project.documents.generation,
+    ready: options.statusReady,
+    operationRunning: options.operationRunning,
+    runtime: options.sessions.runtime,
+    prompts: options.prompt.runtime,
+    forgetRuntime: (sessionId) => options.sessionCoordinator().forgetRuntime(sessionId),
+    activate: activateResolutionSession,
+    onStarted: (sessionId) => {
+      options.setActiveTabId(workbenchSessionTabId(sessionId));
+      void options.scrollToLatest();
+    },
+    refreshSessions: options.sessions.catalog.refresh,
+    reportError: options.reportError,
+  });
+
+  return { workbench, gitAssist, knowledgeResolution };
 }
 
 export type DesktopWorkbenchGitServices = ReturnType<typeof createDesktopWorkbenchGitServices>;

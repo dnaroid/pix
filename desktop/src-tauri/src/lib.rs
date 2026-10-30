@@ -58,6 +58,7 @@ mod plan_progress;
 mod preview_file;
 mod preview_file_action;
 mod project_browser;
+mod wiki_consistency;
 mod wiki_html_export;
 mod project_directory_link;
 mod project_entry_clipboard;
@@ -604,6 +605,8 @@ struct ProjectTreeEntry {
     name: String,
     path: String,
     kind: ProjectTreeEntryKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    wiki_checked: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -1402,9 +1405,15 @@ async fn project_file_exists(workspace: String, path: String) -> Result<bool, St
 async fn list_project_directory(
     workspace: String,
     path: Option<String>,
+    include_wiki_checks: Option<bool>,
 ) -> Result<Vec<ProjectTreeEntry>, String> {
     run_blocking(move || {
-        list_project_directory_from(Path::new(&workspace), path.as_deref().map(Path::new))
+        let mut entries =
+            list_project_directory_from(Path::new(&workspace), path.as_deref().map(Path::new))?;
+        if include_wiki_checks.unwrap_or(false) {
+            wiki_consistency::annotate_project_entries(Path::new(&workspace), &mut entries);
+        }
+        Ok(entries)
     })
     .await
 }
@@ -2504,7 +2513,12 @@ fn list_project_directory_from(
             .map_err(|_| "project tree entry resolves outside the workspace".to_owned())?
             .to_string_lossy()
             .replace('\\', "/");
-        entries.push(ProjectTreeEntry { name, path, kind });
+        entries.push(ProjectTreeEntry {
+            name,
+            path,
+            kind,
+            wiki_checked: None,
+        });
         if entries.len() > 2_000 {
             return Err(format!(
                 "{} contains too many entries to display (maximum 2000)",
@@ -2728,6 +2742,7 @@ fn project_tree_entry_from_path(root: &Path, path: &Path) -> Result<ProjectTreeE
         name,
         path: relative,
         kind,
+        wiki_checked: None,
     })
 }
 

@@ -7,6 +7,7 @@ type DesktopLifecycleOptions = {
   activeSessionRuntimeReady: () => boolean;
   refreshRuntimeStatus: (sessionId: string, force?: boolean) => void | Promise<void>;
   disposeGitCi: () => void;
+  disposeProjectDocuments?: () => void;
   restoreProjects: () => void;
   refreshProjectColors: () => void;
   workspace: () => string;
@@ -66,6 +67,7 @@ export function createDesktopLifecycle(options: DesktopLifecycleOptions) {
       options.disposeTranscriptScroll();
       options.cancelAllPendingElicitations();
       options.disposeGitCi();
+      options.disposeProjectDocuments?.();
       void options.disposeConnection();
     };
   }

@@ -5,6 +5,30 @@
       "type": "string",
       "description": "JSON Schema URL used by editors for validation and autocomplete."
     },
+    "knowledgeCheck": {
+      "type": "object",
+      "properties": {
+        "reportLanguage": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": ""
+            },
+            {
+              "type": "string",
+              "const": "en"
+            },
+            {
+              "type": "string",
+              "const": "ru"
+            }
+          ],
+          "default": "",
+          "description": "User-global language override for Wiki contradiction reports. Empty or omitted inherits the Tools Suite setting (English by default); source quotations are preserved."
+        }
+      },
+      "description": "Wiki contradiction report preferences, read from the user-global configuration."
+    },
     "ignoreContextFiles": {
       "type": "boolean",
       "description": "Disable AGENTS.md / CLAUDE.md discovery for Desktop sessions. A project .pi/pix-desktop.jsonc value overrides the user default."

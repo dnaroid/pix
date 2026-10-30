@@ -5,6 +5,7 @@
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
   import Check from "@lucide/svelte/icons/check";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ChevronUp from "@lucide/svelte/icons/chevron-up";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import FileCode from "@lucide/svelte/icons/file-code";
@@ -22,14 +23,20 @@
   import { glbViewer } from "./glb-viewer-action";
   import "../styles/glb-viewer.css";
   import type { PreviewScrollPosition } from "../lib/preview-history";
-  import type { ProjectFileLineRange, ProjectFilePreview } from "../lib/project-files";
+  import type { ProjectFileLineRange, ProjectFilePreview, ProjectFileSaveGuard } from "../lib/project-files";
   import { highlightCode, languageForFilePath } from "../lib/syntax-highlight";
   import MarkdownText from "./MarkdownText.svelte";
   import PreviewCopyButton from "./PreviewCopyButton.svelte";
+  import WikiConsistencyReport from "./WikiConsistencyReport.svelte";
+  import type { KnowledgeCheckResult, KnowledgeCitation, KnowledgeReportLanguage } from "../../../acp/src/knowledge/contract";
+  import { knowledgeEvidenceText } from "../lib/knowledge-citation";
+  import type { ManualKnowledgeCheckInput, ProjectKnowledgeJob } from "../app/project-knowledge-queue.svelte";
+  import { stripKnowledgeCheckStamp } from "../../../acp/src/knowledge/stamp";
   import { createPreviewEditorController } from "./preview-editor-controller.svelte";
   import { createPreviewFileSearchController } from "./preview-file-search-controller.svelte";
   import { createPreviewMarkdownController } from "./preview-markdown-controller.svelte";
   import { createPreviewScrollController } from "./preview-scroll-controller.svelte";
+  import { createPreviewEvidenceController } from "./preview-evidence-controller.svelte";
   import { createDiagnosticLogger } from "../lib/diagnostic-logging";
   import { openExternalHref } from "../lib/external-links";
   import { resolveWikiLink } from "../lib/project-wiki";
@@ -42,6 +49,8 @@
     markdownLinkBase,
     lineRange,
     searchRange,
+    evidenceCitation,
+    evidenceLanguage,
     previewId,
     active = true,
     autoplay = false,
@@ -56,10 +65,18 @@
     onValidateProjectFile,
     onValidateLocalFile,
     onOpenProjectFile,
+    onOpenKnowledgeCitation,
     onResolveProjectMedia,
     onOpenLocalFile,
     onResolveLocalMedia,
     onSaveProjectFile,
+    onCheckKnowledge,
+    knowledgeJobs = [],
+    onEnqueueKnowledgeCheck,
+    onCancelKnowledgeCheck,
+    knowledgeCheckEnabled = true,
+    onResolveKnowledge,
+    knowledgeResolving = false,
     onOpenExternalEditor,
     onScrollPositionChange,
     onDirtyChange,
@@ -71,6 +88,8 @@
     markdownLinkBase?: "document";
     lineRange?: ProjectFileLineRange;
     searchRange?: ProjectFileLineRange;
+    evidenceCitation?: KnowledgeCitation;
+    evidenceLanguage?: KnowledgeReportLanguage;
     previewId: number;
     active?: boolean;
     autoplay?: boolean;
@@ -85,10 +104,18 @@
     onValidateProjectFile?: (path: string) => Promise<boolean | "directory">;
     onValidateLocalFile?: (path: string) => Promise<boolean | "directory">;
     onOpenProjectFile?: (path: string, range?: ProjectFileLineRange) => void | Promise<void>;
+    onOpenKnowledgeCitation?: (citation: KnowledgeCitation, language?: KnowledgeReportLanguage) => void | Promise<void>;
     onResolveProjectMedia?: (path: string) => Promise<Attachment | undefined>;
     onOpenLocalFile?: (path: string) => void | Promise<void>;
     onResolveLocalMedia?: (path: string) => Promise<Attachment | undefined>;
-    onSaveProjectFile?: (path: string, content: string) => Promise<boolean>;
+    onSaveProjectFile?: (path: string, content: string, guard?: ProjectFileSaveGuard) => Promise<boolean>;
+    onCheckKnowledge?: (path: string, content: string, signal: AbortSignal) => Promise<KnowledgeCheckResult | undefined>;
+    knowledgeJobs?: readonly ProjectKnowledgeJob[];
+    onEnqueueKnowledgeCheck?: (input: ManualKnowledgeCheckInput) => number | undefined;
+    onCancelKnowledgeCheck?: (id: number) => void;
+    knowledgeCheckEnabled?: boolean;
+    onResolveKnowledge?: (result: KnowledgeCheckResult, snapshot: string) => void | Promise<void>;
+    knowledgeResolving?: boolean;
     onOpenExternalEditor?: (path: string) => void;
     onScrollPositionChange?: (id: number, position: PreviewScrollPosition) => void;
     onDirtyChange?: (dirty: boolean) => void;
@@ -126,23 +153,42 @@
   const language = $derived(file ? languageForFilePath(file.path) : undefined);
   const markdown = $derived(language === "markdown");
   const renderAsMarkdown = $derived(language === "markdown" && !lineRange);
+  const previewContent = $derived(file ? markdown && !file.virtualWikiDirectory ? stripKnowledgeCheckStamp(file.content) : file.content : "");
+  const canCheckKnowledge = $derived(markdown && !file?.virtualWikiDirectory && knowledgeCheckEnabled && Boolean(onEnqueueKnowledgeCheck || onCheckKnowledge));
   const highlighted = $derived(
-    file && !renderAsMarkdown ? highlightCode(file.content, language) : undefined,
+    file && !renderAsMarkdown ? highlightCode(previewContent, language) : undefined,
   );
 
   const editorController = createPreviewEditorController({
     previewId: () => previewId,
     file: () => file,
     editable: () => editable && !file?.virtualWikiDirectory,
+    workspace: () => workspace,
     onSaveProjectFile: () => onSaveProjectFile,
+    onCheckKnowledge: () => onCheckKnowledge,
+    knowledgeJobs: () => knowledgeJobs,
+    onEnqueueKnowledgeCheck: () => onEnqueueKnowledgeCheck,
+    onCancelKnowledgeCheck: () => onCancelKnowledgeCheck,
+    onKnowledgeCheckError: (error) => diagnostics.report(error, "wiki:consistency-check-failed"),
     onDirtyChange: () => onDirtyChange,
   });
   const editorState = editorController.state;
   const editing = $derived(editorState.editing);
   const saving = $derived(editorState.saving);
+  const checking = $derived(editorController.checking);
+  const queued = $derived(editorController.queued);
+  const knowledgeResult = $derived(editorController.knowledgeResult);
+  const knowledgeReportStale = $derived(editorController.knowledgeReportStale);
+  const knowledgeReportCheckedAt = $derived(editorController.knowledgeReportCheckedAt);
+  const knowledgeRecordingError = $derived(editorController.knowledgeRecordingError);
   const canEdit = $derived(editorController.canEdit);
   const dirty = $derived(editorController.dirty);
+  const savedKnowledgeStamp = $derived(knowledgeCheckEnabled && markdown && !file?.virtualWikiDirectory ? editorController.savedKnowledgeStamp : undefined);
+  const knowledgeRussian = $derived((knowledgeResult?.reportLanguage ?? savedKnowledgeStamp?.reportLanguage ?? evidenceLanguage) === "ru");
+  const savedCheckTitle = $derived(savedKnowledgeStamp
+    ? `${savedKnowledgeStamp.reportLanguage === "ru" ? "В проверенных фрагментах противоречий не найдено" : "No contradictions found in the reviewed passages"} · ${savedKnowledgeStamp.checkedAt} · ${savedKnowledgeStamp.modelRef}` : "");
   const visualEditing = $derived(editing && markdown && editorMode === "visual");
+  onDestroy(editorController.dispose);
 
   $effect(() => {
     if (!visualEditing || VisualEditor) return;
@@ -165,7 +211,7 @@
     previewId: () => previewId,
     enabled: () => Boolean(file),
     editing: () => editing && !visualEditing,
-    fileText: () => editing ? editorState.draft : (file?.content ?? ""),
+    fileText: () => editing ? editorState.draft : previewContent,
     contentElement: () => visualEditing ? visualHost?.querySelector<HTMLElement>(".ProseMirror") ?? undefined : contentScrollElement,
     editorElement: () => editorElement,
     inputElement: () => searchInputElement,
@@ -187,6 +233,20 @@
     onScrollPositionChange: () => onScrollPositionChange,
   });
 
+  const evidenceController = createPreviewEvidenceController({
+    previewId: () => previewId,
+    workspace: () => workspace,
+    active: () => active,
+    citation: () => evidenceCitation,
+    file: () => file,
+    content: () => previewContent,
+    element: () => contentScrollElement,
+    editing: () => editing,
+    scrollPosition: () => scrollPosition,
+    onError: (error) => diagnostics.report(error, "wiki:evidence-highlight-failed"),
+  });
+  onDestroy(evidenceController.dispose);
+
   const markdownController = createPreviewMarkdownController({
     previewId: () => previewId,
     file: () => file,
@@ -206,8 +266,24 @@
   const validateProjectFromMarkdown = markdownController.validateProject;
   const openLocalFromMarkdown = markdownController.openLocal;
   async function saveEdit(): Promise<void> {
-    if (visualEditing && visualEditor) editorState.draft = visualEditor.readMarkdown();
+    if (visualEditing && visualEditor) editorController.updateDraft(visualEditor.readMarkdown());
     await editorController.save();
+  }
+  async function checkEdit(): Promise<void> {
+    if (visualEditing && visualEditor) editorController.updateDraft(visualEditor.readMarkdown());
+    await editorController.check();
+  }
+  async function saveEditAnyway(): Promise<void> {
+    if (visualEditing && visualEditor) editorController.updateDraft(visualEditor.readMarkdown());
+    await editorController.saveAnyway();
+  }
+  async function resolveKnowledge(): Promise<void> {
+    const result = knowledgeResult;
+    if (!result || knowledgeReportStale || !/^[0-9a-f]{64}$/u.test(result.documentHash)) return;
+    const snapshot = editing
+      ? visualEditing && visualEditor ? visualEditor.readMarkdown() : editorState.draft
+      : previewContent;
+    await onResolveKnowledge?.(result, snapshot);
   }
   function beginEdit(): void {
     editorMode = renderAsMarkdown ? "visual" : "source";
@@ -215,7 +291,7 @@
     editorController.begin();
   }
   function switchEditorMode(mode: "visual" | "source"): void {
-    if (visualEditing && visualEditor) editorState.draft = visualEditor.readMarkdown();
+    if (visualEditing && visualEditor) editorController.updateDraft(visualEditor.readMarkdown());
     editorMode = mode;
   }
   async function resolveEditorImage(source: string): Promise<string | undefined> {
@@ -293,14 +369,19 @@
       {#if file}
         <FileCode class="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
       {/if}
-      <strong class="select-text min-w-0 flex-1 truncate text-xs font-medium" title={title}>{title}</strong>
+      <strong class={["select-text min-w-0 flex-1 truncate text-xs font-medium", savedKnowledgeStamp ? "text-tool-success" : ""]} title={title}>{title}</strong>
+      {#if savedKnowledgeStamp}
+        <span class="inline-flex shrink-0 items-center gap-1 rounded border border-tool-success/30 bg-tool-success/10 px-1.5 py-0.5 text-xs text-tool-success" title={savedCheckTitle} aria-label={savedCheckTitle}>
+          <Check class="h-3.5 w-3.5" aria-hidden="true" />{savedKnowledgeStamp.reportLanguage === "ru" ? "Проверено" : "Checked"}
+        </span>
+      {/if}
       {#if file && lineRange}
         <span class="shrink-0 rounded border border-tool-warning/30 bg-tool-warning/10 px-1.5 py-0.5 font-mono text-xs text-tool-warning">
           L{lineRange.startLine}{lineRange.endLine === lineRange.startLine ? "" : `–${lineRange.endLine}`}
         </span>
       {/if}
       {#if file}
-        <PreviewCopyButton text={editing ? editorState.draft : file.content} {previewId} />
+        <PreviewCopyButton text={editing ? editorState.draft : previewContent} {previewId} />
         <button
           class={searchState.open
             ? "grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent text-accent-foreground transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
@@ -351,6 +432,15 @@
           <WrapText class="h-4 w-4" aria-hidden="true" />
         </button>
       {/if}
+      {#if canCheckKnowledge}
+        <button
+          class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring disabled:opacity-40"
+          type="button"
+          disabled={saving || checking}
+          title={knowledgeRussian ? "Проверить документ на противоречия с Wiki проекта" : "Check this document for contradictions with the project Wiki"}
+          onclick={() => void checkEdit()}
+        >{queued ? knowledgeRussian ? "В очереди…" : "Queued…" : checking ? knowledgeRussian ? "Проверяем…" : "Checking…" : knowledgeRussian ? "Проверить противоречия" : "Check consistency"}</button>
+      {/if}
       {#if canEdit}
         {#if editing}
           <button
@@ -362,9 +452,9 @@
           <button
             class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-40"
             type="button"
-            disabled={saving || !dirty}
+            disabled={saving || checking || !dirty}
             onclick={() => void saveEdit()}
-          ><Check class="h-3.5 w-3.5" aria-hidden="true" />{saving ? "Saving…" : "Save"}</button>
+          ><Check class="h-3.5 w-3.5" aria-hidden="true" />{checking ? "Checking…" : saving ? "Saving…" : "Save"}</button>
         {:else}
           <button
             class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
@@ -385,6 +475,43 @@
         </button>
       {/if}
     </header>
+    {#if checking || knowledgeResult}
+      <WikiConsistencyReport
+        {checking}
+        {queued}
+        result={knowledgeResult}
+        stale={knowledgeReportStale}
+        checkedAt={knowledgeReportCheckedAt}
+        canSaveAnyway={editorController.canSaveAnyway}
+        canOpenSources={!dirty}
+        onRetry={() => void checkEdit()}
+        onCancel={editorController.cancelCheck}
+        onSaveAnyway={() => void saveEditAnyway()}
+        onOpenSource={onOpenProjectFile}
+        onOpenCitation={onOpenKnowledgeCitation}
+        onResolve={onResolveKnowledge ? resolveKnowledge : undefined}
+        resolving={knowledgeResolving}
+      />
+    {/if}
+    {#if knowledgeRecordingError}
+      <p class="shrink-0 border-b border-border px-3 py-2 text-xs text-tool-warning" role="status">{knowledgeRecordingError}</p>
+    {/if}
+    {#if evidenceCitation && evidenceController.status !== "idle"}
+      <div class="shrink-0 border-b border-border bg-panel px-3 py-2 text-xs" data-preview-evidence>
+        <p class={evidenceController.status === "exact" ? "text-muted-foreground" : "text-tool-warning"} role="status">
+          {knowledgeEvidenceText(evidenceController.status, evidenceLanguage)}
+        </p>
+        {#if evidenceController.status !== "exact"}
+          <details class="group mt-1">
+            <summary class="flex cursor-pointer list-none items-center gap-1.5 py-1 text-muted-foreground [&::-webkit-details-marker]:hidden">
+              <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
+              {evidenceLanguage === "ru" ? "Цитата из отчёта" : "Quotation from the report"}
+            </summary>
+            <pre class="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words border-l-2 border-border pl-3 font-mono text-xs text-foreground">{evidenceCitation.quote}</pre>
+          </details>
+        {/if}
+      </div>
+    {/if}
     {#if file && searchState.open}
       <div
         class="absolute top-11 right-3 z-30 flex h-8 max-w-[min(520px,calc(100%-24px))] items-center gap-1 rounded-md border border-border bg-popover px-1.5 text-popover-foreground shadow-md"
@@ -456,7 +583,7 @@
                   value={editorState.draft}
                   documentPath={file.path}
                   {workspace}
-                  onChange={(value) => { editorState.draft = value; }}
+                  onChange={editorController.updateDraft}
                   onSave={() => void saveEdit()}
                   onResolveImage={resolveEditorImage}
                   onOpenLink={openEditorLink}
@@ -469,7 +596,8 @@
         <textarea
           bind:this={editorElement}
           class="preview-editor min-h-0 min-w-0 flex-1 resize-none bg-background p-5 font-mono text-sm leading-6 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-          bind:value={editorState.draft}
+          value={editorState.draft}
+          oninput={(event) => editorController.updateDraft(event.currentTarget.value)}
           aria-label={`Edit ${file.path}`}
           spellcheck="false"
           onkeydown={handleEditorKeydown}
@@ -490,12 +618,12 @@
           >
             <div class="preview-markdown-content mx-auto w-[calc(100%-4rem)] max-w-[776px] py-6 text-sm leading-6">
               <MarkdownText
-                text={file.content}
+                text={previewContent}
                 documentPath={markdownLinkBase === "document" ? file.path : undefined}
                 fitTables
                 remoteImages
                 headingAnchors
-                sourceLineRanges={Boolean(searchRange)}
+                sourceLineRanges={Boolean(searchRange || evidenceCitation)}
                 onValidateProjectFile={markdownLinkBase === "document" ? onValidateProjectFile : validateProjectFromMarkdown}
                 {onValidateLocalFile}
                 onOpenProjectFile={markdownLinkBase === "document" ? onOpenProjectFile : openProjectFromMarkdown}
@@ -572,6 +700,17 @@
     outline: 1px solid color-mix(in srgb, var(--tool-warning) 45%, transparent);
     outline-offset: 3px;
     border-radius: 2px;
+  }
+  .preview-markdown-content :global(.preview-evidence-section) {
+    background: color-mix(in srgb, var(--tool-warning) 14%, transparent);
+    outline: 1px dashed color-mix(in srgb, var(--tool-warning) 65%, transparent);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+  :global(::highlight(pix-preview-evidence)) {
+    background: color-mix(in srgb, var(--tool-warning) 42%, transparent);
+    text-decoration: underline;
+    text-decoration-color: var(--tool-warning);
   }
   /* Bound WebKit's selection-gap paint to the text column, not its gutters. */
   .preview-markdown-content {

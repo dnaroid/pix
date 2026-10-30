@@ -173,6 +173,12 @@ const DesktopAppConfig = Type.Object(
 export const PixDesktopConfigSchema = Type.Object(
 	{
 		$schema: Type.Optional(Type.String({ description: "JSON Schema URL used by editors for validation and autocomplete." })),
+		knowledgeCheck: Type.Optional(Type.Object({
+			reportLanguage: Type.Optional(Type.Union([Type.Literal(""), Type.Literal("en"), Type.Literal("ru")], {
+				default: "",
+				description: "User-global language override for Wiki contradiction reports. Empty or omitted inherits the Tools Suite setting (English by default); source quotations are preserved.",
+			})),
+		}, { description: "Wiki contradiction report preferences, read from the user-global configuration." })),
 		ignoreContextFiles: Type.Optional(Type.Boolean({
 			description: "Disable AGENTS.md / CLAUDE.md discovery for Desktop sessions. A project .pi/pix-desktop.jsonc value overrides the user default.",
 		})),

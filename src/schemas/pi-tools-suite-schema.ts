@@ -317,6 +317,12 @@ const ClaudeCodeProviderConfig = Type.Object({
 export const PiToolsSuiteConfigSchema = Type.Object(
 	{
 		$schema: Type.Optional(Type.String({ description: "JSON Schema URL used by editors for validation and autocomplete." })),
+		knowledgeCheck: Type.Optional(Type.Object({
+			reportLanguage: Type.Optional(Type.Union([Type.Literal("en"), Type.Literal("ru")], {
+				default: "en",
+				description: "User-global language for Wiki contradiction reports. Desktop can override it; source quotations are preserved.",
+			})),
+		}, { description: "Wiki contradiction report preferences, read from the user-global configuration." })),
 		enabled: Type.Optional(Type.Boolean({ description: "Enable or disable the entire pi-tools-suite extension." })),
 		disabledModules: Type.Optional(Type.Array(Type.String(), { description: "List of disabled module names (e.g. ['lsp', 'prompt-commands'])." })),
 		enabledModules: Type.Optional(Type.Array(Type.String(), { description: "List of module names to explicitly enable, including modules that are disabled by default." })),
