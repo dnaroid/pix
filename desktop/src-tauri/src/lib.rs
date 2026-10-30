@@ -9228,6 +9228,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn forced_stop_terminates_backend_descendant() {
+        use std::io::{BufRead, BufReader};
         let mut command = Command::new("/bin/sh");
         command
             .arg("-c")

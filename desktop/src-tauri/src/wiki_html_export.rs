@@ -89,7 +89,10 @@ fn normalize(base_dir: &str, target: &str) -> Option<String> {
     let mut parts: Vec<&str> = if target.starts_with('/') {
         Vec::new()
     } else {
-        base_dir.split('/').filter(|part| !part.is_empty()).collect()
+        base_dir
+            .split('/')
+            .filter(|part| !part.is_empty())
+            .collect()
     };
     for part in target.split('/') {
         match part {
@@ -160,7 +163,11 @@ fn rewrite_url(
     {
         let scheme = url[..index].to_ascii_lowercase();
         let allowed = scheme == "http" || scheme == "https" || (!image && scheme == "mailto");
-        return if allowed { url.to_owned() } else { BLOCKED.to_owned() };
+        return if allowed {
+            url.to_owned()
+        } else {
+            BLOCKED.to_owned()
+        };
     }
     if url.starts_with("//") || url.starts_with('#') {
         return BLOCKED.to_owned();
@@ -227,22 +234,42 @@ fn render_page(rel: &str, source: &str, root: &Path, pages: &HashSet<String>) ->
         }
         let event = match event {
             Event::Html(raw) | Event::InlineHtml(raw) => Event::Text(raw),
-            Event::Start(Tag::Link { link_type, dest_url, title, id }) => {
+            Event::Start(Tag::Link {
+                link_type,
+                dest_url,
+                title,
+                id,
+            }) => {
                 let url = rewrite_url(&dest_url, dir, root, pages, false);
                 let local = rewrite_url(&dest_url, dir, root, pages, true);
                 if media_kind(&local).is_some() {
                     media = Some((local, String::new()));
                     continue;
                 }
-                Event::Start(Tag::Link { link_type, dest_url: CowStr::from(url), title, id })
+                Event::Start(Tag::Link {
+                    link_type,
+                    dest_url: CowStr::from(url),
+                    title,
+                    id,
+                })
             }
-            Event::Start(Tag::Image { link_type, dest_url, title, id }) => {
+            Event::Start(Tag::Image {
+                link_type,
+                dest_url,
+                title,
+                id,
+            }) => {
                 let url = rewrite_url(&dest_url, dir, root, pages, true);
                 if media_kind(&url) == Some(true) {
                     media = Some((url, String::new()));
                     continue;
                 }
-                Event::Start(Tag::Image { link_type, dest_url: CowStr::from(url), title, id })
+                Event::Start(Tag::Image {
+                    link_type,
+                    dest_url: CowStr::from(url),
+                    title,
+                    id,
+                })
             }
             other => other,
         };
@@ -250,7 +277,10 @@ fn render_page(rel: &str, source: &str, root: &Path, pages: &HashSet<String>) ->
     }
     for event in &events {
         match event {
-            Event::Start(Tag::Heading { level: HeadingLevel::H1, .. }) => in_title = title.is_empty(),
+            Event::Start(Tag::Heading {
+                level: HeadingLevel::H1,
+                ..
+            }) => in_title = title.is_empty(),
             Event::End(TagEnd::Heading(HeadingLevel::H1)) => {
                 in_title = false;
                 text.push(' ');
@@ -269,7 +299,10 @@ fn render_page(rel: &str, source: &str, root: &Path, pages: &HashSet<String>) ->
     html::push_html(&mut body, events.into_iter());
     if title.trim().is_empty() {
         let name = rel.rsplit('/').next().unwrap_or(rel);
-        title = name.rsplit_once('.').map_or(name, |(stem, _)| stem).to_owned();
+        title = name
+            .rsplit_once('.')
+            .map_or(name, |(stem, _)| stem)
+            .to_owned();
     }
     Page {
         path: rel.to_owned(),
@@ -287,7 +320,12 @@ fn escape_html(value: &str) -> String {
         .replace('"', "&quot;")
 }
 
-fn build_html(project: &str, root: &Path, index: &str, sources: &[(String, String)]) -> Result<String, String> {
+fn build_html(
+    project: &str,
+    root: &Path,
+    index: &str,
+    sources: &[(String, String)],
+) -> Result<String, String> {
     let known: HashSet<String> = sources.iter().map(|(path, _)| path.clone()).collect();
     let pages = sources
         .iter()
@@ -318,11 +356,15 @@ fn export(workspace: &Path, path: &Path, index: &str) -> Result<PathBuf, String>
     if sources.is_empty() {
         return Err("Wiki has no Markdown pages to export".to_owned());
     }
-    let project = workspace
-        .file_name()
-        .map_or_else(|| "Wiki".to_owned(), |name| name.to_string_lossy().into_owned());
+    let project = workspace.file_name().map_or_else(
+        || "Wiki".to_owned(),
+        |name| name.to_string_lossy().into_owned(),
+    );
     let page = build_html(&project, &directory, index, &sources)?;
-    let digest = format!("{:x}", Sha256::digest(workspace.to_string_lossy().as_bytes()));
+    let digest = format!(
+        "{:x}",
+        Sha256::digest(workspace.to_string_lossy().as_bytes())
+    );
     let output = std::env::temp_dir().join(format!("pix-wiki-export-{}", &digest[..16]));
     fs::create_dir_all(&output)
         .map_err(|error| format!("failed to create export folder: {error}"))?;
@@ -380,15 +422,28 @@ mod tests {
         assert_eq!(link("javascript:alert(1)"), "#");
         assert_eq!(link("//evil.example/x"), "#");
         assert_eq!(link("https://example.com/a:b"), "https://example.com/a:b");
-        assert_eq!(rewrite_url("p ic.png", "a", root, &pages, true), "file:///w/a/p%20ic.png");
-        assert_eq!(rewrite_url("data:image/png;base64,AA", "a", root, &pages, true), "#");
+        assert_eq!(
+            rewrite_url("p ic.png", "a", root, &pages, true),
+            "file:///w/a/p%20ic.png"
+        );
+        assert_eq!(
+            rewrite_url("data:image/png;base64,AA", "a", root, &pages, true),
+            "#"
+        );
     }
 
     #[test]
     fn renders_local_media_links_inline() {
         let pages = HashSet::new();
-        let page = render_page("a/p.md", "[x.png](i/x.png)\n\n![v](m.mp4)\n\n[d](d.md)", Path::new("/w"), &pages);
-        assert!(page.html.contains("<img src=\"file:///w/a/i/x.png\" alt=\"x.png\""));
+        let page = render_page(
+            "a/p.md",
+            "[x.png](i/x.png)\n\n![v](m.mp4)\n\n[d](d.md)",
+            Path::new("/w"),
+            &pages,
+        );
+        assert!(page
+            .html
+            .contains("<img src=\"file:///w/a/i/x.png\" alt=\"x.png\""));
         assert!(page.html.contains("<video controls"));
         assert!(!page.html.contains("<a href=\"file"));
     }
