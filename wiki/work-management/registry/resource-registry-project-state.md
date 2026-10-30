@@ -272,7 +272,10 @@ JSONC/task overlay import or fallback.
   not force-push through provenance conflicts.
 - The sidebar's cheap Registry task check hashes the same normalized task bundle
   as Registry provenance, including referenced attachment bytes, so a completed
-  background push can converge back to a clean local indicator.
+  background push can converge back to a clean local indicator. Each poll first
+  compares a metadata-only stamp (`tasks.sqlite`, its WAL, and the size/mtime of
+  every `.pi/task-attachments/` blob) and rehashes the bundle only when that
+  stamp changes; a WAL checkpoint may cause one extra rehash, never a missed edit.
 - Desktop full project-state scaffold initialization is optional and idempotent;
   ordinary Desktop writes lazily create only the storage they require. The
   initialized marker always requires the complete scaffold: a regular

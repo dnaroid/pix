@@ -58,7 +58,6 @@ mod plan_progress;
 mod preview_file;
 mod preview_file_action;
 mod project_browser;
-mod wiki_html_export;
 mod project_directory_link;
 mod project_entry_clipboard;
 mod project_entry_drag;
@@ -67,9 +66,11 @@ mod project_entry_drag_destination;
 #[cfg(target_os = "macos")]
 mod project_entry_drag_source;
 mod project_file_history;
+mod project_file_search;
 mod project_icon;
 mod project_storage;
 mod project_tasks_sqlite;
+mod wiki_html_export;
 mod workspace_config_lock;
 #[cfg(test)]
 mod workspace_config_lock_tests;
@@ -93,9 +94,6 @@ const MAX_ATTACHMENT_COUNT: usize = 10;
 const MAX_ATTACHMENT_BYTES: u64 = 25 * 1024 * 1024;
 const MAX_ATTACHMENT_CACHE_BYTES: u64 = 250 * 1024 * 1024;
 const MAX_PROJECT_FILE_PREVIEW_BYTES: u64 = 2 * 1024 * 1024;
-const MAX_PROJECT_SEARCH_FILE_BYTES: u64 = 2 * 1024 * 1024;
-const MAX_PROJECT_SEARCH_FILES: usize = 20_000;
-const MAX_PROJECT_SEARCH_RESULTS: usize = 500;
 const MAX_PROJECT_MARKDOWN_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_WORKSPACE_CONFIG_BYTES: u64 = 64 * 1024;
 const MAX_TASK_DOCUMENT_BYTES: u64 = 1024 * 1024;
@@ -604,17 +602,6 @@ struct ProjectTreeEntry {
     name: String,
     path: String,
     kind: ProjectTreeEntryKind,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ProjectSearchMatch {
-    path: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    line: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    column: Option<usize>,
-    preview: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -1407,14 +1394,6 @@ async fn list_project_directory(
         list_project_directory_from(Path::new(&workspace), path.as_deref().map(Path::new))
     })
     .await
-}
-
-#[tauri::command]
-async fn search_project_files(
-    workspace: String,
-    query: String,
-) -> Result<Vec<ProjectSearchMatch>, String> {
-    run_blocking(move || search_project_files_from(Path::new(&workspace), &query)).await
 }
 
 #[tauri::command]
@@ -2521,152 +2500,6 @@ fn list_project_directory_from(
             .then_with(|| left.name.cmp(&right.name))
     });
     Ok(entries)
-}
-
-fn search_project_files_from(
-    workspace: &Path,
-    query: &str,
-) -> Result<Vec<ProjectSearchMatch>, String> {
-    let query = query.trim();
-    if query.is_empty() {
-        return Ok(Vec::new());
-    }
-    let root = canonical_workspace(workspace)?;
-    let folded_query = ascii_fold(query);
-    let mut results = Vec::new();
-    let mut files_scanned = 0usize;
-    search_project_directory_from(
-        &root,
-        &root,
-        &folded_query,
-        &mut files_scanned,
-        &mut results,
-    )?;
-    Ok(results)
-}
-
-fn search_project_directory_from(
-    root: &Path,
-    directory: &Path,
-    folded_query: &str,
-    files_scanned: &mut usize,
-    results: &mut Vec<ProjectSearchMatch>,
-) -> Result<(), String> {
-    if results.len() >= MAX_PROJECT_SEARCH_RESULTS || *files_scanned >= MAX_PROJECT_SEARCH_FILES {
-        return Ok(());
-    }
-    let mut entries = fs::read_dir(directory)
-        .map_err(|error| format!("failed to read {}: {error}", directory.display()))?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| format!("failed to inspect {}: {error}", directory.display()))?;
-    entries.sort_by_key(|entry| entry.file_name());
-
-    for entry in entries {
-        if results.len() >= MAX_PROJECT_SEARCH_RESULTS || *files_scanned >= MAX_PROJECT_SEARCH_FILES
-        {
-            break;
-        }
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if name == ".git" || name == ".DS_Store" {
-            continue;
-        }
-        if directory == root.join(".pi") && name.eq_ignore_ascii_case("file-history") {
-            continue;
-        }
-        let file_type = entry
-            .file_type()
-            .map_err(|error| format!("failed to inspect {}: {error}", entry.path().display()))?;
-        if file_type.is_symlink() {
-            continue;
-        }
-        if file_type.is_dir() {
-            if matches!(
-                name.as_str(),
-                "node_modules" | "target" | "dist" | "build" | "coverage" | ".next" | ".svelte-kit"
-            ) {
-                continue;
-            }
-            search_project_directory_from(
-                root,
-                &entry.path(),
-                folded_query,
-                files_scanned,
-                results,
-            )?;
-            continue;
-        }
-        if !file_type.is_file() {
-            continue;
-        }
-        *files_scanned += 1;
-        let relative = entry
-            .path()
-            .strip_prefix(root)
-            .map_err(|_| "project search path resolves outside the workspace".to_owned())?
-            .to_string_lossy()
-            .replace('\\', "/");
-        if ascii_fold(&relative).contains(folded_query) {
-            results.push(ProjectSearchMatch {
-                path: relative.clone(),
-                line: None,
-                column: None,
-                preview: "File path match".to_owned(),
-            });
-            if results.len() >= MAX_PROJECT_SEARCH_RESULTS {
-                break;
-            }
-        }
-
-        let metadata = entry
-            .metadata()
-            .map_err(|error| format!("failed to inspect {}: {error}", entry.path().display()))?;
-        if metadata.len() > MAX_PROJECT_SEARCH_FILE_BYTES {
-            continue;
-        }
-        let bytes = match fs::read(entry.path()) {
-            Ok(bytes) => bytes,
-            Err(_) => continue,
-        };
-        let content = match String::from_utf8(bytes) {
-            Ok(content) => content,
-            Err(_) => continue,
-        };
-        for (line_index, line) in content.lines().enumerate() {
-            let folded_line = ascii_fold(line);
-            let mut offset = 0usize;
-            while offset <= folded_line.len() {
-                let Some(found) = folded_line[offset..].find(folded_query) else {
-                    break;
-                };
-                let byte_index = offset + found;
-                let column = line[..byte_index].chars().count() + 1;
-                results.push(ProjectSearchMatch {
-                    path: relative.clone(),
-                    line: Some(line_index + 1),
-                    column: Some(column),
-                    preview: line.trim().chars().take(240).collect(),
-                });
-                if results.len() >= MAX_PROJECT_SEARCH_RESULTS {
-                    return Ok(());
-                }
-                offset = byte_index + folded_query.len().max(1);
-            }
-        }
-    }
-    Ok(())
-}
-
-fn ascii_fold(value: &str) -> String {
-    value
-        .chars()
-        .map(|character| {
-            if character.is_ascii_uppercase() {
-                character.to_ascii_lowercase()
-            } else {
-                character
-            }
-        })
-        .collect()
 }
 
 fn validate_project_entry_name(name: &str) -> Result<(), String> {
@@ -5187,11 +5020,50 @@ fn sidebar_registry_untracked_artifact_stamp(
     Ok(format!("{fingerprint:016x}"))
 }
 
+/// Cheap change stamp for the tracked task bundle, polled every few seconds.
+/// It reads only file metadata: the SQLite/WAL stamps cover every logical
+/// edit and the attachment blob stamps cover the bytes the bundle hash reads.
+/// A checkpoint may cause one extra rehash, never a missed edit. The second
+/// value estimates the bytes a full bundle hash would read for the budget.
 fn sidebar_registry_task_bundle_fingerprint(root: &Path) -> Result<(u64, u64), String> {
-    let snapshot = project_tasks_sqlite::snapshot(&root.join(".pi"))?;
+    let project = root.join(".pi");
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    snapshot.hash(&mut hasher);
-    Ok((hasher.finish(), snapshot.len() as u64))
+    let mut bytes = 0u64;
+    for suffix in ["tasks.sqlite", "tasks.sqlite-wal"] {
+        let stamp = sidebar_path_stamp(&project.join(suffix))?;
+        bytes = bytes.saturating_add(stamp.as_ref().map_or(0, |stamp| stamp.len));
+        stamp.hash(&mut hasher);
+    }
+    let attachments = project.join("task-attachments");
+    match fs::read_dir(&attachments) {
+        Ok(entries) => {
+            let mut blobs = Vec::new();
+            for entry in entries {
+                let entry = entry.map_err(|error| {
+                    format!("failed to read {}: {error}", attachments.display())
+                })?;
+                let metadata = entry.metadata().map_err(|error| {
+                    format!("failed to inspect {}: {error}", entry.path().display())
+                })?;
+                blobs.push((
+                    entry.file_name().to_string_lossy().into_owned(),
+                    metadata.len(),
+                    sidebar_modified_ns(&metadata),
+                ));
+                if blobs.len() > MAX_SIDEBAR_REGISTRY_ENTRIES {
+                    return Err("task attachments are too many to inspect cheaply".to_owned());
+                }
+            }
+            blobs.sort_unstable();
+            for blob in &blobs {
+                bytes = bytes.saturating_add(blob.1);
+            }
+            blobs.hash(&mut hasher);
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("failed to read {}: {error}", attachments.display())),
+    }
+    Ok((hasher.finish(), bytes))
 }
 
 fn sidebar_registry_hash_task_bundle(root: &Path) -> Result<String, String> {
@@ -9004,6 +8876,7 @@ pub fn run() {
         .manage(WorkspaceConfigState::default())
         .manage(SidebarIndicatorState::default())
         .manage(native_project_search::SearchState::default())
+        .manage(project_file_search::ProjectFileSearchState::default())
         .manage(git_ci::GitCiProcessState::default())
         .manage(window_restore::WindowRestoreState::default())
         .manage(desktop_tray_attention::State::default())
@@ -9116,7 +8989,8 @@ pub fn run() {
             project_file_exists,
             project_directory_link::project_directory_exists,
             list_project_directory,
-            search_project_files,
+            project_file_search::search_project_files,
+            project_file_search::cancel_search_project_files,
             create_project_entry,
             rename_project_entry,
             copy_project_entry,
@@ -9258,6 +9132,9 @@ pub fn run() {
             handle
                 .state::<git_ci::GitCiProcessState>()
                 .cancel_window(label);
+            handle
+                .state::<project_file_search::ProjectFileSearchState>()
+                .destroyed(label);
             // Record destruction on the event thread, before any queued
             // spawn_blocking task can resume and publish a child.
             let (slot, terminal_ids) = capture_destroyed_window(
@@ -9319,6 +9196,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::project_file_search::search_project_files_from;
 
     #[cfg(target_os = "macos")]
     #[test]
@@ -10631,6 +10509,36 @@ mod tests {
 
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
         fs::remove_dir_all(home).expect("remove temporary home");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sidebar_task_bundle_fingerprint_uses_metadata_without_reading_attachments() {
+        use std::os::unix::fs::PermissionsExt;
+        let workspace = temporary_workspace("sidebar-task-bundle-fingerprint");
+        initialize_project_pi_from(&workspace).expect("initialize SQLite");
+        write_project_tasks_to(&workspace, &sample_task_document()).expect("write task");
+        let attachments = workspace.join(".pi/task-attachments");
+        let blob = attachments.join(format!("{:x}", Sha256::digest(b"image-v1")));
+        fs::write(&blob, b"image-v1").expect("write task attachment");
+        let (before, bytes) =
+            sidebar_registry_task_bundle_fingerprint(&workspace).expect("fingerprint bundle");
+        assert!(bytes >= 8);
+
+        // An unreadable blob proves the poll only stats attachments.
+        fs::set_permissions(&blob, fs::Permissions::from_mode(0o000)).expect("lock blob");
+        let unreadable = sidebar_registry_task_bundle_fingerprint(&workspace);
+        fs::set_permissions(&blob, fs::Permissions::from_mode(0o600)).expect("unlock blob");
+        assert_eq!(
+            unreadable.expect("fingerprint without reading blob").0,
+            before
+        );
+
+        fs::write(attachments.join("second"), b"another").expect("add attachment");
+        let (after, _) =
+            sidebar_registry_task_bundle_fingerprint(&workspace).expect("fingerprint bundle");
+        assert_ne!(after, before);
+        fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }
 
     #[test]

@@ -62,6 +62,28 @@ describe("Project Explorer external directory changes", () => {
     expect(tree.state.selectedPaths).not.toContain("");
     await tree.refreshDirectory("");
     expect(tree.state.selectedPaths).toEqual(["b", "c"]);
+    expect(tree.isSelected("b")).toBe(true);
+    expect(tree.isSelected("a")).toBe(false);
+    tree.selectEntry("b", { metaKey: true });
+    expect(tree.isSelected("b")).toBe(false);
+    tree.dispose();
+  });
+
+  it("answers per-row selection and loading lookups from the current arrays", () => {
+    const f = fixture();
+    const tree = f.controller;
+    const entries = Array.from({ length: 5_000 }, (_, index) => directory(`dir-${index}`));
+    tree.state.entriesByDirectory = { "": entries };
+    tree.selectAll();
+    expect(tree.state.selectedPaths).toHaveLength(5_000);
+    expect(entries.every((entry) => tree.isSelected(entry.path))).toBe(true);
+    tree.state.loadingDirectories = ["dir-7"];
+    expect(tree.isDirectoryLoading("dir-7")).toBe(true);
+    expect(tree.isDirectoryLoading("dir-8")).toBe(false);
+    tree.state.expandedDirectories = ["dir-3"];
+    expect(tree.isDirectoryExpanded("dir-3")).toBe(true);
+    tree.state.selectedPaths = [];
+    expect(tree.isSelected("dir-0")).toBe(false);
     tree.dispose();
   });
 

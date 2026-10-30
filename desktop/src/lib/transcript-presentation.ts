@@ -10,6 +10,13 @@ import type {
   TranscriptItem,
 } from "./transcript-types";
 
+// Transcript items are immutable snapshots and streaming replaces only the
+// changed ones. Reusing derived objects for unchanged items keeps every
+// settled group's identity, so its row skips recomputation on each frame.
+const displayMessages = new WeakMap<MessageItem, MessageItem>();
+const questionMessagesByTool = new WeakMap<ToolItem, MessageItem[]>();
+const activityGroupsByFirstEntry = new WeakMap<ActivityEntry, ActivityGroupItem>();
+
 export function groupTranscriptItems(items: readonly TranscriptItem[]): TranscriptDisplayItem[] {
   const grouped: TranscriptDisplayItem[] = [];
   let entries: [ActivityEntry, ...ActivityEntry[]] | undefined;
@@ -17,25 +24,55 @@ export function groupTranscriptItems(items: readonly TranscriptItem[]): Transcri
   for (const item of items) {
     if (item.type === "message" && item.role !== "thought") {
       if (entries) {
-        grouped.push(buildActivityGroup(entries));
+        grouped.push(activityGroup(entries));
         entries = undefined;
       }
-      grouped.push(messageForDisplay(item));
+      grouped.push(cachedMessageForDisplay(item));
       continue;
     }
 
     const entry = item as ActivityEntry;
     if (entries) entries.push(entry);
     else entries = [entry];
-    const questionMessages = item.type === "tool" ? questionTranscriptMessages(item) : [];
+    const questionMessages = item.type === "tool" ? cachedQuestionMessages(item) : [];
     if (questionMessages.length > 0) {
-      grouped.push(buildActivityGroup(entries), ...questionMessages);
+      grouped.push(activityGroup(entries), ...questionMessages);
       entries = undefined;
     }
   }
 
-  if (entries) grouped.push(buildActivityGroup(entries));
+  if (entries) grouped.push(activityGroup(entries));
   return grouped;
+}
+
+function cachedMessageForDisplay(item: MessageItem): MessageItem {
+  let display = displayMessages.get(item);
+  if (!display) {
+    display = messageForDisplay(item);
+    displayMessages.set(item, display);
+  }
+  return display;
+}
+
+function cachedQuestionMessages(tool: ToolItem): MessageItem[] {
+  let messages = questionMessagesByTool.get(tool);
+  if (!messages) {
+    messages = questionTranscriptMessages(tool);
+    questionMessagesByTool.set(tool, messages);
+  }
+  return messages;
+}
+
+function activityGroup(entries: readonly [ActivityEntry, ...ActivityEntry[]]): ActivityGroupItem {
+  const previous = activityGroupsByFirstEntry.get(entries[0]);
+  if (
+    previous
+    && previous.entries.length === entries.length
+    && previous.entries.every((entry, index) => entry === entries[index])
+  ) return previous;
+  const group = buildActivityGroup(entries);
+  activityGroupsByFirstEntry.set(entries[0], group);
+  return group;
 }
 
 function messageForDisplay(item: MessageItem): MessageItem {

@@ -100,7 +100,7 @@ describe("ProjectExplorer keyboard tree", () => {
     expect(explorerSource).toContain("onfocus={() => treeState.focusedPath = entry.path}");
     expect(explorerSource).toContain("hover:bg-panel-hover");
     expect(explorerSource).not.toContain("focus-within:bg-panel-hover");
-    expect(explorerSource).toContain('treeState.selectedPaths.includes(entry.path) ? "bg-panel-selected" : ""');
+    expect(explorerSource).toContain('treeController.isSelected(entry.path) ? "bg-panel-selected" : ""');
     expect(explorerSource).toContain('role="presentation"\n          data-project-move-row\n          data-project-move-target={entry.kind === "directory" ? entry.path : undefined}');
     expect(explorerSource).toContain("focus-visible:outline-ring");
   });
@@ -207,7 +207,7 @@ describe("ProjectExplorer keyboard tree", () => {
 
   it("emphasizes Pix entries without muting them or overriding Git name colors", () => {
     expect(explorerSource).toContain("const emphasis = projectEntryEmphasis(entry)");
-    expect(explorerSource).toContain("hiddenEntry && !emphasis && !treeState.selectedPaths.includes(entry.path)");
+    expect(explorerSource).toContain("hiddenEntry && !emphasis && !treeController.isSelected(entry.path)");
     expect(explorerSource).toContain('data-project-entry-emphasis={emphasis}');
     expect(explorerSource).toContain('<FolderCog class="h-3.5 w-3.5 shrink-0 text-primary"');
     expect(explorerSource).toContain('<FileCog class="h-3.5 w-3.5 shrink-0 text-primary"');

@@ -1,7 +1,7 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import type { Attachment } from "../lib/attachments";
 import { imageDimensions, imagePreviewStyle, type ImageDimensions } from "../lib/image-preview-layout";
-import { renderMermaidDiagram } from "../lib/mermaid";
+import { cachedMermaidDiagram, mermaidThemeKey, renderMermaidDiagram } from "../lib/mermaid";
 import { MarkdownImageRetention } from "./markdown-image-retention";
 import { mountGlbViewer } from "./glb-viewer-action";
 import { isGlbPath } from "../lib/glb";
@@ -56,6 +56,7 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
     const retainedImages = new MarkdownImageRetention();
     const retainedModels = new MarkdownImageRetention("model");
     const retainedAudio = new MarkdownImageRetention("audio");
+    const retainedVideos = new MarkdownImageRetention("video");
     const modelViewers = new Map<HTMLElement, () => void>();
     const audioPlayers = new Map<HTMLElement, () => void>();
     let mediaObserver: IntersectionObserver | undefined;
@@ -71,6 +72,7 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
         retainedImages.restore(node);
         retainedModels.restore(node);
         retainedAudio.restore(node);
+        retainedVideos.restore(node);
         for (const [preview, dispose] of modelViewers) {
           if (!node.contains(preview)) { dispose(); modelViewers.delete(preview); }
         }
@@ -185,8 +187,8 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
       const render = (preview: HTMLElement) => {
         if (preview.dataset.mediaState === "loading" || preview.dataset.mediaState === "ready") return;
         const kind = preview.dataset.projectMedia ?? preview.dataset.localMedia;
-        if ((kind === "image" || kind === "audio") && preview.dataset.mediaState === "error") return;
-        void renderMediaPreview(preview, scheduledGeneration);
+        if (kind !== "model" && preview.dataset.mediaState === "error") return;
+        void renderMediaPreview(preview);
       };
       if (typeof IntersectionObserver === "undefined") {
         for (const preview of previews) render(preview);
@@ -202,16 +204,15 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
       for (const preview of previews) mediaObserver.observe(preview);
     }
 
-    async function renderMediaPreview(preview: HTMLElement, scheduledGeneration: number): Promise<void> {
+    async function renderMediaPreview(preview: HTMLElement): Promise<void> {
       const projectPath = preview.dataset.projectFile;
       const localPath = preview.dataset.localFile;
       const path = projectPath ?? localPath;
       const scope = projectPath ? "project" : "local";
       const kind = projectPath ? preview.dataset.projectMedia : preview.dataset.localMedia;
-      // Retained media may span render generations. Containment is their
-      // lifecycle guard; videos still use the existing generation guard.
-      const isCurrent = () => !destroyed && node.contains(preview)
-        && (kind === "image" || kind === "model" || kind === "audio" || scheduledGeneration === generation);
+      // Retained media span render generations; containment is their
+      // lifecycle guard, so a streamed reply never restarts a playing video.
+      const isCurrent = () => !destroyed && node.contains(preview);
       const resolver = projectPath ? options.onResolveProjectMedia() : options.onResolveLocalMedia();
       const frame = preview.querySelector<HTMLElement>(".markdown-media-frame");
       if (!path || !resolver || (kind !== "image" && kind !== "video" && kind !== "model" && kind !== "audio") || !frame) return;
@@ -327,7 +328,21 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
     function observeDiagrams(scheduledGeneration: number): void {
       if (scheduledGeneration !== generation) return;
       diagramObserver?.disconnect();
-      const diagrams = Array.from(node.querySelectorAll<HTMLElement>(".mermaid-diagram"));
+      let diagrams = Array.from(node.querySelectorAll<HTMLElement>(".mermaid-diagram"));
+      if (diagrams.length) {
+        // Apply settled renders before paint so streamed HTML never flashes
+        // a known diagram back to its source or re-renders it.
+        const themeKey = mermaidThemeKey(node);
+        diagrams = diagrams.filter((diagram) => {
+          const source = diagram.dataset.mermaidSource;
+          const canvas = diagram.querySelector<HTMLElement>(".mermaid-canvas");
+          if (source === undefined || !canvas) return true;
+          const svg = cachedMermaidDiagram(source, themeKey);
+          if (svg === null) return true;
+          showMermaidResult(svg, canvas, diagram);
+          return false;
+        });
+      }
       const render = (diagram: HTMLElement) => {
         if (diagram.dataset.mermaidState === "loading") return;
         void renderDiagram(diagram, scheduledGeneration);
@@ -357,14 +372,7 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
         const svg = await renderMermaidDiagram(source, node);
         if (scheduledGeneration !== generation || !node.contains(diagram)) return;
 
-        if (svg) {
-          canvas.innerHTML = svg;
-          canvas.setAttribute("role", "img");
-          canvas.setAttribute("aria-label", "Mermaid diagram");
-          diagram.dataset.mermaidState = "rendered";
-        } else {
-          showMermaidError(canvas, diagram);
-        }
+        showMermaidResult(svg, canvas, diagram);
       } catch (error: unknown) {
         if (scheduledGeneration !== generation || !node.contains(diagram)) return;
         console.warn("Failed to render Mermaid diagram", error);
@@ -394,6 +402,7 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
         retainedImages.clear();
         retainedModels.clear();
         retainedAudio.clear();
+        retainedVideos.clear();
         for (const dispose of modelViewers.values()) dispose();
         modelViewers.clear();
         for (const dispose of audioPlayers.values()) dispose();
@@ -418,6 +427,18 @@ function invalidateFileLink(candidate: HTMLElement): void {
   candidate.dataset.fileValidationState = "invalid";
   delete candidate.dataset.projectFileCandidate;
   delete candidate.dataset.localFileCandidate;
+}
+
+function showMermaidResult(svg: string | undefined, canvas: HTMLElement, diagram: HTMLElement) {
+  canvas.setAttribute("aria-busy", "false");
+  if (!svg) {
+    showMermaidError(canvas, diagram);
+    return;
+  }
+  canvas.innerHTML = svg;
+  canvas.setAttribute("role", "img");
+  canvas.setAttribute("aria-label", "Mermaid diagram");
+  diagram.dataset.mermaidState = "rendered";
 }
 
 function showMermaidError(canvas: HTMLElement, diagram: HTMLElement) {

@@ -83,3 +83,14 @@ describe("quick-choice visual replies", () => {
     expect(replies.get("u2")?.items.map((item) => item.checked)).toEqual([true, false, false]);
   });
 });
+
+describe("quick-choice presentation while streaming", () => {
+  it("parses an unchanged assistant message once and re-parses a replaced snapshot", () => {
+    const user = message("u", "user", "Далее:\n2. Второй");
+    const first = choiceActionsPresentation([source, user]);
+    const again = choiceActionsPresentation([source, user]);
+    expect(again.answeredBlocks.get("a")).toEqual(first.answeredBlocks.get("a"));
+    const edited = { ...source, text: block.replace("Далее", "Другое") };
+    expect(choiceActionsPresentation([edited, user]).answeredBlocks.size).toBe(0);
+  });
+});

@@ -306,3 +306,26 @@ describe("mixed transcript activity regressions", () => {
     expect(activityGroupHeading(group(state).entries)).toEqual({ action: "Failed", active: false, moreCount: 0, failed: true });
   });
 });
+
+describe("streamed transcript grouping identity", () => {
+  it("reuses settled groups and messages until their entries change", () => {
+    const first = tool("one");
+    const second = tool("two");
+    const reply = { type: "message" as const, id: "a", role: "assistant" as const, text: "Done", attachments: [] };
+    const before = groupTranscriptItems([first, second, reply]);
+    const streamed = { ...reply, text: "Done, more" };
+    const after = groupTranscriptItems([first, second, streamed]);
+    expect(after[0]).toBe(before[0]);
+    expect(after[1]).toBe(streamed);
+
+    const third = tool("three");
+    const extended = groupTranscriptItems([first, second, third]);
+    expect(extended[0]).not.toBe(before[0]);
+    expect((extended[0] as ActivityGroupItem).entries).toEqual([first, second, third]);
+
+    const updatedSecond = { ...second, status: "failed" as const };
+    const replaced = groupTranscriptItems([first, updatedSecond, reply]);
+    expect(replaced[0]).not.toBe(before[0]);
+    expect((replaced[0] as ActivityGroupItem).entries[1]).toBe(updatedSecond);
+  });
+});

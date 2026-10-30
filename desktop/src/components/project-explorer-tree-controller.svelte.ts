@@ -34,6 +34,11 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
     selectionAnchor: null as string | null,
     focusedPath: null as string | null,
   });
+  // Rows look these up once each per render; Set lookups keep a large
+  // expanded tree linear instead of scanning the arrays for every row.
+  const selectedPathSet = $derived(new Set(state.selectedPaths));
+  const expandedDirectorySet = $derived(new Set(state.expandedDirectories));
+  const loadingDirectorySet = $derived(new Set(state.loadingDirectories));
   let generation = 0;
   let observedWorkspace: string | undefined;
   let observedRefreshKey: number | undefined;
@@ -98,7 +103,7 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
     return projectTreeRowsWithRoot(
       options.workspace(),
       state.entriesByDirectory,
-      new Set(state.expandedDirectories),
+      expandedDirectorySet,
       state.rootExpanded,
     );
   }
@@ -233,9 +238,9 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
   }
 
   function selectedEntries(entry: ProjectTreeEntry): ProjectTreeEntry[] {
-    if (!state.selectedPaths.includes(entry.path)) return entry.path ? [entry] : [];
+    if (!selectedPathSet.has(entry.path)) return entry.path ? [entry] : [];
     const entries = Object.values(state.entriesByDirectory).flat();
-    return projectSelectionRoots(entries.filter((candidate) => state.selectedPaths.includes(candidate.path)));
+    return projectSelectionRoots(entries.filter((candidate) => selectedPathSet.has(candidate.path)));
   }
 
   function ensureDirectoryExpanded(path: string): void {
@@ -458,7 +463,15 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
   }
 
   function isDirectoryExpanded(path: string): boolean {
-    return path === "" ? state.rootExpanded : state.expandedDirectories.includes(path);
+    return path === "" ? state.rootExpanded : expandedDirectorySet.has(path);
+  }
+
+  function isSelected(path: string): boolean {
+    return selectedPathSet.has(path);
+  }
+
+  function isDirectoryLoading(path: string): boolean {
+    return loadingDirectorySet.has(path);
   }
 
   async function restoreExpandedDirectories(
@@ -508,7 +521,7 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
 
   function visibleExpandedDirectories(): string[] {
     return rows()
-      .filter((row) => row.entry.kind === "directory" && state.expandedDirectories.includes(row.entry.path))
+      .filter((row) => row.entry.kind === "directory" && expandedDirectorySet.has(row.entry.path))
       .map((row) => row.entry.path);
   }
 
@@ -530,7 +543,7 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
     for (const entry of entries) {
       if (
         entry.kind === "directory"
-        && state.expandedDirectories.includes(entry.path)
+        && expandedDirectorySet.has(entry.path)
         && !state.entriesByDirectory[entry.path]
       ) {
         void loadDirectory(entry.path, requestGeneration);
@@ -542,7 +555,7 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
     state,
     get rows() { return rows(); },
     get rootEntries() { return state.entriesByDirectory[""] ?? []; },
-    get rootLoading() { return state.loadingDirectories.includes(""); },
+    get rootLoading() { return loadingDirectorySet.has(""); },
     get rootError() { return state.errorByDirectory[""]; },
     get tabbablePath() {
       const visibleRows = rows();
@@ -556,6 +569,8 @@ export function createProjectExplorerTreeController(options: ProjectExplorerTree
     selectedEntries,
     selectAll: () => { state.selectedPaths = rows().map((row) => row.entry.path).filter(Boolean); },
     isDirectoryExpanded,
+    isSelected,
+    isDirectoryLoading,
     ensureDirectoryExpanded,
     openFile,
     refreshDirectory,
