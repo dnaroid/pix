@@ -219,12 +219,15 @@ arbitrary pixel sizes.
 
 Preview source code is a sustained reading surface: it uses 13 px Geist Mono
 with a 1.7 line height, medium-weight keywords, italic comments and a quiet
-12 px line-number gutter on the `code` surface that brightens for the hovered
-line. Syntax colors come from the `--sh-*` role tokens in
-`desktop/src/styles.css` (a warm palette around the terracotta primary in light
-mode and a cool night palette around the blue primary in dark mode); each role
-keeps roughly 4.5:1 or better contrast on `code`. Sugar High reports numbers as
-`class`, so types and numeric literals share one hue.
+12 px line-number gutter that brightens for the hovered line, on the shared
+`code` background (`--source-surface` aliases it; the theme changes text roles,
+not the surface). Syntax colors come from the `--sh-*` role tokens in
+`desktop/src/styles.css`: a crisp IDE light palette, and a warm Darcula-style
+night palette (orange keywords, yellow functions, green strings, purple
+properties, blue numbers, grey comments); each role keeps about 4.5:1 or better
+contrast on `code`. Pix refines Sugar High tokens: names followed by `(` use
+`--sh-function` and numeric literals `--sh-number`; types keep `--sh-class`.
+Inline Explain notes and the module summary use the `--annotation-*` tokens.
 
 Global element defaults (`font: inherit`, `white-space`, `cursor`) MUST live in
 `@layer base`. Unlayered element rules silently beat every Tailwind utility, so
