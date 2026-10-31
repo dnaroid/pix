@@ -79,7 +79,16 @@ The permanent key must stay outside UI/browser runtime code.
   presence check, not validation of the key against Deepgram. Config reads run
   on the blocking pool, with latest-request-wins application on the main thread;
   they refresh on listener activation, Pix window activation and Settings saves.
-  External file edits take effect on the next Pix window activation.
+  External file edits take effect on the next Pix window activation. Window
+  activation skips the config read when no composer owns the shortcut, and a
+  repeated activation failure (such as missing Accessibility permission) is
+  logged once until it changes or succeeds.
+- The HID tap runs on the main run loop and sees every key press system-wide,
+  so it is installed only while a Pix window has keyboard focus. When the last
+  Pix window loses focus (another app becomes active), the tap and its run-loop
+  source are removed immediately; regaining focus reinstalls it. A Pix
+  main-thread stall therefore cannot delay typing in other apps. Before the
+  first focus event after launch, the native key-window check decides.
 - With no configured key, no eligible composer, or missing Accessibility
   permission, no event tap is installed for that window and macOS dictation
   remains available. Only configured voice input can trigger the permission

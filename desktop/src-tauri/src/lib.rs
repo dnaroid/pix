@@ -40,9 +40,11 @@ mod desktop_tray_attention;
 mod desktop_tray_icon;
 mod dictation_shortcut;
 mod git_ci;
+mod git_history_search;
 mod git_identity;
 mod git_ignore;
 mod git_operations;
+mod git_process;
 mod git_remote_link;
 mod log_clear;
 mod log_reader;
@@ -3921,7 +3923,7 @@ fn git_push_from(workspace: &Path) -> Result<(), String> {
         ],
     )?;
     if upstream.status.success() {
-        return git_output(&root, &["push"]).map(|_| ());
+        return git_process::git_network_output(&root, &["push"], "push").map(|_| ());
     }
     let remote = if snapshot.remotes.iter().any(|remote| remote == "origin") {
         "origin".to_owned()
@@ -3932,7 +3934,8 @@ fn git_push_from(workspace: &Path) -> Result<(), String> {
     } else {
         return Err("This branch has no upstream; configure one before pushing".to_owned());
     };
-    git_output(&root, &["push", "-u", &remote, &snapshot.branch]).map(|_| ())
+    git_process::git_network_output(&root, &["push", "-u", &remote, &snapshot.branch], "push")
+        .map(|_| ())
 }
 
 fn git_switch_branch_from(workspace: &Path, branch: &str, create: bool) -> Result<(), String> {
@@ -5571,80 +5574,23 @@ fn sidebar_git_remote_ls_remote_output(
 }
 
 fn sidebar_git_bounded_output(root: &Path, args: &[&str]) -> Result<std::process::Output, String> {
-    let mut command = git_command(root, args);
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    native_process::isolate(&mut command);
-
-    let mut child = native_process::spawn(&mut command)
-        .map_err(|error| format!("failed to start Git remote update probe: {error}"))?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "Git remote update probe stdout pipe is unavailable".to_owned())?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| "Git remote update probe stderr pipe is unavailable".to_owned())?;
-    let stdout_thread = thread::spawn(move || {
-        read_bounded_process_stream(stdout, MAX_SIDEBAR_GIT_REMOTE_OUTPUT_BYTES)
-    });
-    let stderr_thread = thread::spawn(move || {
-        read_bounded_process_stream(stderr, MAX_SIDEBAR_GIT_REMOTE_OUTPUT_BYTES)
-    });
-    let deadline = Instant::now() + SIDEBAR_GIT_REMOTE_TIMEOUT;
-    let status = loop {
-        match native_process::exited_before_reap(&child) {
-            Ok(true) => {
-                // Remote transports can spawn ssh/credential helpers that inherit
-                // stdout/stderr. Kill descendants before reaping the leader so a
-                // helper cannot retain a pipe after `git` itself exits.
-                let _ = native_process::force_stop(&mut child);
-                break child
-                    .wait()
-                    .map_err(|error| format!("failed to reap Git remote update probe: {error}"))?;
-            }
-            Ok(false) => {}
-            Err(error) => {
-                let _ = native_process::force_stop(&mut child);
-                let _ = child.wait();
-                let _ = stdout_thread.join();
-                let _ = stderr_thread.join();
-                return Err(format!(
-                    "failed while observing Git remote update probe: {error}"
-                ));
-            }
-        }
-        #[cfg(not(unix))]
-        if let Some(status) = child
-            .try_wait()
-            .map_err(|error| format!("failed to observe Git remote update probe: {error}"))?
-        {
-            let _ = native_process::force_stop(&mut child);
-            break status;
-        }
-        if Instant::now() >= deadline {
-            let _ = native_process::force_stop(&mut child);
-            let _ = child.wait();
-            let _ = stdout_thread.join();
-            let _ = stderr_thread.join();
-            return Err("Git remote update probe timed out".to_owned());
-        }
-        thread::sleep(POLL_INTERVAL);
-    };
-    let (stdout, stdout_truncated) = stdout_thread
-        .join()
-        .map_err(|_| "Git remote update probe stdout reader panicked".to_owned())?;
-    let (stderr, stderr_truncated) = stderr_thread
-        .join()
-        .map_err(|_| "Git remote update probe stderr reader panicked".to_owned())?;
-    if stdout_truncated || stderr_truncated {
+    // Remote transports can spawn ssh/credential helpers that inherit
+    // stdout/stderr; the supervisor kills the whole group before reaping.
+    let output = git_process::bounded_output(
+        &mut git_command(root, args),
+        SIDEBAR_GIT_REMOTE_TIMEOUT,
+        MAX_SIDEBAR_GIT_REMOTE_OUTPUT_BYTES,
+        MAX_SIDEBAR_GIT_REMOTE_OUTPUT_BYTES,
+        None,
+    )
+    .map_err(|error| match error {
+        git_process::SupervisedError::TimedOut => "Git remote update probe timed out".to_owned(),
+        error => format!("Git remote update probe failed: {error}"),
+    })?;
+    if output.truncated {
         return Err("Git remote update probe output exceeded its safety limit".to_owned());
     }
-    Ok(std::process::Output {
-        status,
-        stdout,
-        stderr,
-    })
+    Ok(output.output)
 }
 
 fn sidebar_git_status_output(root: &Path) -> Result<std::process::Output, String> {
@@ -9005,6 +8951,7 @@ pub fn run() {
         .manage(SidebarIndicatorState::default())
         .manage(native_project_search::SearchState::default())
         .manage(git_ci::GitCiProcessState::default())
+        .manage(git_history_search::GitHistorySearchState::default())
         .manage(window_restore::WindowRestoreState::default())
         .manage(desktop_tray_attention::State::default())
         .setup(move |app| {
@@ -9148,7 +9095,8 @@ pub fn run() {
             git_operations::git_pull,
             git_operations::git_update,
             git_operations::git_history,
-            git_operations::git_search_history,
+            git_history_search::git_search_history,
+            git_history_search::git_search_history_cancel,
             git_operations::git_commit_diff,
             git_identity::git_identity,
             git_identity::git_save_identity,
@@ -9209,19 +9157,13 @@ pub fn run() {
         .build(context)
         .expect("failed to build Pix Desktop");
     app.run(move |handle, event| {
-        if matches!(
-            &event,
-            tauri::RunEvent::WindowEvent {
-                event: tauri::WindowEvent::Focused(true),
-                ..
-            }
-        ) {
-            let handle = handle.clone();
-            tauri::async_runtime::spawn(async move {
-                if let Err(error) = dictation_shortcut::refresh(&handle).await {
-                    logging::error(module_path!(), format!("dictation shortcut: {error}"));
-                }
-            });
+        if let tauri::RunEvent::WindowEvent {
+            label,
+            event: tauri::WindowEvent::Focused(focused),
+            ..
+        } = &event
+        {
+            dictation_shortcut::window_focus_changed(handle, label, *focused);
         }
         if let tauri::RunEvent::WindowEvent {
             label,
@@ -9350,6 +9292,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn forced_stop_terminates_backend_descendant() {
+        use std::io::{BufRead, BufReader};
         let mut command = Command::new("/bin/sh");
         command
             .arg("-c")

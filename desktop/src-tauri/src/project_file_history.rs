@@ -7,11 +7,18 @@ use serde::{Deserialize, Serialize};
 use std::{
     fs,
     path::{Component, Path, PathBuf},
-    sync::{LazyLock, Mutex},
+    sync::{Arc, LazyLock, Mutex, PoisonError},
 };
 
-static MUTATIONS: LazyLock<Mutex<std::collections::HashMap<String, Record>>> =
+#[path = "project_file_history_lock.rs"]
+mod lock;
+
+/// Runtime history tokens. The map lock is only held to look up, insert or
+/// remove an entry; filesystem work is serialized per workspace by
+/// `WORKSPACES` (in process) and the storage `flock` (across processes).
+static MUTATIONS: LazyLock<Mutex<std::collections::HashMap<String, Arc<Entry>>>> =
     LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+static WORKSPACES: LazyLock<lock::WorkspaceLocks> = LazyLock::new(Default::default);
 const STORAGE: &str = ".pi/file-history";
 
 #[derive(Deserialize)]
@@ -95,6 +102,18 @@ struct Record {
     source_workspace: Option<PathBuf>,
     source_root_identity: Option<Identity>,
     steps: Vec<Step>,
+}
+
+/// A replayable record plus the workspaces it touches, readable without
+/// locking the record so callers can take workspace locks first.
+struct Entry {
+    workspace: PathBuf,
+    source_workspace: Option<PathBuf>,
+    record: Mutex<Record>,
+}
+
+fn mutations() -> std::sync::MutexGuard<'static, std::collections::HashMap<String, Arc<Entry>>> {
+    MUTATIONS.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 #[derive(Serialize)]
@@ -349,8 +368,18 @@ fn execute_with(
     request: Request,
     mut before_step: impl FnMut(usize),
 ) -> Result<Receipt, String> {
-    let mut records = MUTATIONS.lock().map_err(|_| "File history lock failed")?;
     let root = crate::canonical_workspace(workspace)?;
+    let source_root = match &request {
+        Request::ImportMove {
+            source_workspace, ..
+        } => Some(crate::canonical_workspace(Path::new(source_workspace))?),
+        Request::Copy {
+            source_workspace: Some(source_workspace),
+            ..
+        } => Some(crate::canonical_workspace(Path::new(source_workspace))?),
+        _ => None,
+    };
+    let _workspaces = WORKSPACES.acquire(std::iter::once(root.clone()).chain(source_root.clone()));
     let storage = ensure_storage(&root)?;
     let _disk_lock = lock_storage(&storage)?;
     let root_identity = identity(&root)?;
@@ -386,8 +415,9 @@ fn execute_with(
             destination,
             source_workspace,
         } => {
+            let _ = source_workspace;
             import_move = true;
-            copy_source = crate::canonical_workspace(Path::new(&source_workspace))?;
+            copy_source = source_root.clone().expect("import source was resolved");
             let destination_path = directory(&root, &destination)?;
             let mut pairs = Vec::new();
             for path in roots(paths)? {
@@ -413,10 +443,9 @@ fn execute_with(
             destination,
             source_workspace,
         } => {
+            let _ = source_workspace;
             copy = true;
-            copy_source = crate::canonical_workspace(
-                source_workspace.as_deref().map(Path::new).unwrap_or(&root),
-            )?;
+            copy_source = source_root.clone().unwrap_or_else(|| root.clone());
             let destination_path = directory(&root, &destination)?;
             let mut reserved = std::collections::HashSet::new();
             let mut pairs = Vec::new();
@@ -523,8 +552,13 @@ fn execute_with(
         } // Write intent before moving user data.
         let result = if copy {
             let staged = folder.join(format!("stage-{index}"));
-            copy_project_path(source.as_ref().unwrap(), &staged)
-                .and_then(|_| rename_exclusive(&staged, &target))
+            let copied = copy_project_path(source.as_ref().unwrap(), &staged)
+                .and_then(|_| rename_exclusive(&staged, &target));
+            if copied.is_err() {
+                // The stage is Pix's own duplicate; the source is untouched.
+                remove_stage(&staged, &root);
+            }
+            copied
         } else if before.is_none() {
             match create_kind.as_ref().unwrap() {
                 ProjectTreeEntryKind::Directory => {
@@ -572,11 +606,19 @@ fn execute_with(
         }
     }
     if changes.is_empty() {
+        remove_unused_token_folder(&folder, &root);
         return Err(warning.unwrap_or_else(|| "No files changed.".into()));
     }
     // Runtime tokens are capabilities. Journals are retained for manual recovery,
     // never deserialized into executable filesystem instructions after restart.
-    records.insert(token.clone(), record);
+    mutations().insert(
+        token.clone(),
+        Arc::new(Entry {
+            workspace: root.clone(),
+            source_workspace: record.source_workspace.clone(),
+            record: Mutex::new(record),
+        }),
+    );
     Ok(Receipt {
         token,
         entries,
@@ -596,7 +638,6 @@ fn replay_with(
     undo: bool,
     mut before_step: impl FnMut(usize),
 ) -> Result<Receipt, String> {
-    let mut records = MUTATIONS.lock().map_err(|_| "File history lock failed")?;
     if uuid::Uuid::parse_str(token)
         .map(|id| id.to_string() != token)
         .unwrap_or(true)
@@ -604,10 +645,21 @@ fn replay_with(
         return Err("Invalid history token.".into());
     }
     let root = crate::canonical_workspace(workspace)?;
+    let entry = mutations().get(token).cloned().ok_or("File history belongs to a closed panel or earlier app session; recovery data is retained on disk.")?;
+    // Workspace locks before the record lock, matching `execute_with`.
+    let _workspaces = WORKSPACES.acquire(
+        [root.clone(), entry.workspace.clone()]
+            .into_iter()
+            .chain(entry.source_workspace.clone()),
+    );
+    let mut record = entry
+        .record
+        .lock()
+        .map_err(|_| "File history record is unavailable.")?;
+    let record = &mut *record;
     let storage = resolve(&root, STORAGE, false)?;
     let _disk_lock = lock_storage(&storage)?;
     let folder = resolve(&root, &format!("{STORAGE}/{token}"), false)?;
-    let record = records.get_mut(token).ok_or("File history belongs to a closed panel or earlier app session; recovery data is retained on disk.")?;
     if record.workspace != root || record.root_identity != identity(&root)? {
         return Err("The workspace was replaced; history cannot be replayed.".into());
     }
@@ -760,11 +812,56 @@ fn check_step(
     Ok((source, target))
 }
 
+/// In-flight undo/redo keeps its own reference and finishes; later calls fail.
 pub(crate) fn forget(tokens: Vec<String>) {
-    if let Ok(mut records) = MUTATIONS.lock() {
-        for token in tokens {
-            records.remove(&token);
+    let mut records = mutations();
+    for token in tokens {
+        records.remove(&token);
+    }
+}
+
+fn remove_stage(staged: &Path, root: &Path) {
+    let result = match fs::symlink_metadata(staged) {
+        Ok(meta) if meta.is_dir() => fs::remove_dir_all(staged),
+        Ok(_) => fs::remove_file(staged),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(error) => Err(error),
+    };
+    if let Err(error) = result {
+        crate::logging::record(
+            "warn",
+            "files",
+            "file-history:stage-cleanup-failed",
+            serde_json::json!({ "error": error.to_string() }),
+            root.to_str(),
+        );
+    }
+}
+
+/// A batch that changed nothing leaves only Pix's own intent journal behind.
+/// Remove exactly those files; any other content keeps the folder for recovery.
+fn remove_unused_token_folder(folder: &Path, root: &Path) {
+    let result = (|| -> std::io::Result<()> {
+        for entry in fs::read_dir(folder)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            let journal =
+                name == "journal.json" || (name.starts_with("journal-") && name.ends_with(".tmp"));
+            if journal && entry.file_type()?.is_file() {
+                fs::remove_file(entry.path())?;
+            }
         }
+        fs::remove_dir(folder)
+    })();
+    if let Err(error) = result {
+        crate::logging::record(
+            "warn",
+            "files",
+            "file-history:empty-batch-cleanup-failed",
+            serde_json::json!({ "error": error.to_string() }),
+            root.to_str(),
+        );
     }
 }
 

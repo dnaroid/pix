@@ -27,7 +27,7 @@ export interface SearchSources {
   /** Saved plan paths; plans are searched as part of the Tasks source. */
   plans?: (workspace: string) => Promise<readonly string[]>;
   taskSemantic?: (workspace: string, query: string, signal: AbortSignal) => Promise<SemanticTasksResponse>;
-  commits?: (workspace: string, query: string) => Promise<GitHistoryEntry[]>;
+  commits?: (workspace: string, query: string, signal: AbortSignal) => Promise<GitHistoryEntry[]>;
   commitHybrid?: (workspace: string, query: string, signal: AbortSignal) => Promise<CommitSearchResponse>;
 }
 export interface UnifiedSearchResult {
@@ -194,7 +194,7 @@ export async function queryUniversalSearch(
       if (!types.includes("commits") || !workspace || patchOnly) return;
       try {
         if (!sources.commits) throw new Error("Commit source unavailable");
-        const commits = await sources.commits(workspace, query);
+        const commits = await sources.commits(workspace, query, signal);
         if (!signal.aborted) groups.set("commits", searchRecentCommits(commits, query));
       } catch (error) {
         if (!signal.aborted) result.notices.push(`Commits search failed: ${searchErrorDetail(error)}`);
