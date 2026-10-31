@@ -313,3 +313,28 @@ describe("Wiki basket to new resolution session", () => {
     expect(f.client.newSession).not.toHaveBeenCalled();
   });
 });
+
+describe("documentation migration to new session", () => {
+  const config = { path: "docs/wiki", index: "index.md", indexPath: "docs/wiki/index.md" };
+
+  it("sends the configured Wiki migration prompt to a fresh session", async () => {
+    const f = fixture();
+    expect(await f.resolution.startWikiMigration("/one", config)).toBe(true);
+    const [sessionId, workspace, sent] = f.activate.mock.calls[0]!;
+    expect([sessionId, workspace]).toEqual(["resolution-session", "/one"]);
+    expect(sent).toContain("`docs/wiki/index.md`");
+    expect(sent).toContain("git mv");
+    expect(f.prompts.runPromptRequest).toHaveBeenCalledExactlyOnceWith(f.client, "resolution-session",
+      [{ type: "text", text: sent }], [], "message-1");
+    expect(f.started).toHaveBeenCalledExactlyOnceWith("resolution-session");
+  });
+
+  it("closes the session and reports a migration-specific error when the runtime is not ready", async () => {
+    const f = fixture();
+    f.runtime.isReady.mockReturnValue(false);
+    expect(await f.resolution.startWikiMigration("/one", config)).toBe(false);
+    expect(f.client.closeSession).toHaveBeenCalledExactlyOnceWith("resolution-session");
+    expect(String(f.reportError.mock.calls[0]![0])).toContain("migrate documentation");
+    expect(f.prompts.runPromptRequest).not.toHaveBeenCalled();
+  });
+});

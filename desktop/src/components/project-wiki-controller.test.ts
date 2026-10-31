@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ProjectFilePreview } from "../lib/project-files";
-import { createProjectWikiController } from "./project-wiki-controller.svelte";
+import { createProjectWikiController, STARTER_WIKI_INDEX } from "./project-wiki-controller.svelte";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -21,6 +21,14 @@ function fixture(source?: string) {
       if (args.kind === "directory") directories.add(created);
       else files.set(created, "");
       return { path: created, name: args.name, kind: args.kind };
+    }
+    if (command === "list_project_directory") {
+      const children = [...directories, ...files.keys()].filter((entry) => entry.slice(0, entry.lastIndexOf("/")) === path);
+      return children.map((entry) => ({ path: entry, name: entry.slice(entry.lastIndexOf("/") + 1), kind: directories.has(entry) ? "directory" : "file" }));
+    }
+    if (command === "read_project_file") {
+      if (!files.has(path)) throw new Error("Missing file");
+      return { path, content: files.get(path) };
     }
     if (command === "write_project_file") {
       if (files.get(path) !== args.expectedContent) throw new Error("Changed while editing");
@@ -49,6 +57,36 @@ describe("project Wiki lifecycle", () => {
     expect(await f.controller.initialize()).toBe("wiki/index.md");
     expect(f.files.get("wiki/index.md")).toContain("# Project wiki");
     expect(f.release).toHaveBeenCalledOnce();
+    expect(f.controller.state.starter).toBe(true);
+    f.controller.dispose();
+  });
+
+  it("offers migration only while the Wiki holds nothing but the untouched starter index", async () => {
+    const f = fixture('{"wiki":{"path":"docs/game","index":"overview/home.md"}}');
+    for (const directory of ["docs", "docs/game", "docs/game/overview"]) f.directories.add(directory);
+    f.files.set("docs/game/overview/home.md", `<!-- pix:wiki-report {} -->\r\n${STARTER_WIKI_INDEX.replaceAll("\n", "\r\n")}`);
+    f.files.set("docs/game/.DS_Store", "");
+    await f.controller.selectWorkspace("/game");
+    expect(f.controller.state.starter).toBe(true);
+
+    f.files.set("docs/game/overview/rules.md", "# Rules\n");
+    await f.controller.refresh();
+    expect(f.controller.state.starter).toBe(false);
+
+    f.files.delete("docs/game/overview/rules.md");
+    f.files.set("docs/game/overview/home.md", "# Game\n\nAuthored.\n");
+    await f.controller.refresh();
+    expect(f.controller.state.starter).toBe(false);
+    f.controller.dispose();
+  });
+
+  it("does not offer migration when initialization adds an index beside existing pages", async () => {
+    const f = fixture();
+    f.directories.add("wiki");
+    f.files.set("wiki/notes.md", "# Notes\n");
+    await f.controller.selectWorkspace("/game");
+    expect(await f.controller.initialize()).toBe("wiki/index.md");
+    expect(f.controller.state.starter).toBe(false);
     f.controller.dispose();
   });
 

@@ -1,7 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
+import { stripKnowledgeCheckStamp } from "../../../acp/src/knowledge/stamp";
 import { readWorkspaceConfig } from "../app/workspace-config-persistence";
 import type { ProjectFilePreview } from "../lib/project-files";
+import type { ProjectTreeEntry } from "../lib/project-tree";
 import { getProjectWikiConfig, type ProjectWikiConfig } from "../lib/project-wiki";
+
+/** Placeholder written by "Create Wiki"; a Wiki holding only this page is still empty. */
+export const STARTER_WIKI_INDEX = "# Project wiki\n\nDescribe the project, its requirements and rules here.\n\n## Contents\n\nCreate pages and sections in the Wiki sidebar, then link them from this index.\n";
 
 type Send = <T>(command: string, args: Record<string, unknown>) => Promise<T>;
 interface Options {
@@ -22,6 +27,8 @@ export function createProjectWikiController(options: Options) {
     exists: false,
     indexExists: false,
     configExists: false,
+    /** Nothing but the untouched starter index: offer to migrate existing docs. */
+    starter: false,
     error: null as string | null,
   });
   let workspace = "";
@@ -46,16 +53,32 @@ export function createProjectWikiController(options: Options) {
         send<boolean>("project_file_exists", { workspace: target, path: config.indexPath }),
       ]);
       if (!current()) return;
+      const starter = exists && indexExists && await onlyStarterIndex(target, config);
+      if (!current()) return;
       state.config = config;
       state.configExists = document !== undefined;
       state.exists = exists;
       state.indexExists = indexExists;
+      state.starter = starter;
       state.error = null;
     } catch (error) {
       if (current()) { state.config = null; report(error, target); }
     } finally {
       if (current()) state.loading = false;
     }
+  }
+
+  /** Walks only the index path: any other visible entry means the Wiki has content. */
+  async function onlyStarterIndex(target: string, config: ProjectWikiConfig): Promise<boolean> {
+    let directory = config.path;
+    for (const name of config.index.split("/")) {
+      const entries = await send<ProjectTreeEntry[]>("list_project_directory", { workspace: target, path: directory });
+      const visible = entries.filter((entry) => !entry.name.startsWith("."));
+      if (visible.length !== 1 || visible[0]!.name !== name) return false;
+      directory = `${directory}/${name}`;
+    }
+    const index = await send<ProjectFilePreview>("read_project_file", { workspace: target, path: config.indexPath });
+    return stripKnowledgeCheckStamp(index.content).replaceAll("\r\n", "\n").trim() === STARTER_WIKI_INDEX.trim();
   }
 
   function refresh(): Promise<void> {
@@ -76,6 +99,7 @@ export function createProjectWikiController(options: Options) {
     state.exists = false;
     state.indexExists = false;
     state.configExists = false;
+    state.starter = false;
     state.creating = false;
     state.loading = false;
     state.error = null;
@@ -117,10 +141,12 @@ export function createProjectWikiController(options: Options) {
         if (!current()) return;
         await send("write_project_file", {
           workspace: target, path: config.indexPath, expectedContent: "",
-          content: "# Project wiki\n\nDescribe the project, its requirements and rules here.\n\n## Contents\n\nCreate pages and sections in the Wiki sidebar, then link them from this index.\n",
+          content: STARTER_WIKI_INDEX,
         });
         if (!current()) return;
       }
+      state.starter = await onlyStarterIndex(target, config);
+      if (!current()) return;
       state.exists = true;
       state.indexExists = true;
       return config.indexPath;
