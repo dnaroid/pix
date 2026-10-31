@@ -308,3 +308,54 @@ fn forwarder_drain_waits_for_every_forwarder_but_is_bounded() {
     Forwarders { done: rx, count: 2 }.drain(Duration::from_millis(50));
     assert!(started.elapsed() < Duration::from_secs(2));
 }
+
+fn running_process(generation: u64, stdin: bool) -> (RunningProcess, ExitSignal) {
+    let (stop_tx, _stop_rx) = mpsc::channel();
+    let exited: ExitSignal = Arc::new((Mutex::new(false), Condvar::new()));
+    let process = RunningProcess {
+        generation,
+        stdin_tx: stdin.then(|| Arc::new(acp_queue::Queue::new(16, 1))),
+        stop_tx,
+        exited: exited.clone(),
+    };
+    (process, exited)
+}
+
+#[test]
+fn start_reuses_only_a_live_process() {
+    let slot = ProcessSlot::default();
+    assert_eq!(reusable_generation(&slot, Duration::ZERO).unwrap(), None);
+    let (process, _exited) = running_process(3, true);
+    *slot.running.lock().unwrap() = Some(process);
+    assert_eq!(reusable_generation(&slot, Duration::ZERO).unwrap(), Some(3));
+}
+
+#[test]
+fn start_waits_for_a_stopping_process_instead_of_returning_its_generation() {
+    let slot = Arc::new(ProcessSlot::default());
+    let (process, exited) = running_process(4, false);
+    *slot.running.lock().unwrap() = Some(process);
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let starter_slot = slot.clone();
+    let starter = thread::spawn(move || {
+        entered_tx.send(()).unwrap();
+        reusable_generation(&starter_slot, Duration::from_secs(30))
+    });
+    entered_rx.recv().unwrap();
+    // Supervisor order: clear the generation, then signal exit.
+    *slot.running.lock().unwrap() = None;
+    let (lock, wake) = &*exited;
+    *lock.lock().unwrap() = true;
+    wake.notify_all();
+    assert_eq!(starter.join().unwrap().unwrap(), None);
+}
+
+#[test]
+fn start_reports_a_retryable_error_when_the_stopping_process_does_not_exit() {
+    let slot = ProcessSlot::default();
+    let (process, _exited) = running_process(5, false);
+    *slot.running.lock().unwrap() = Some(process);
+    let error = reusable_generation(&slot, Duration::from_millis(10)).unwrap_err();
+    assert!(error.contains("still stopping"), "{error}");
+    assert_eq!(slot.running.lock().unwrap().as_ref().unwrap().generation, 5);
+}

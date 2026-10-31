@@ -13,7 +13,10 @@ code is not a supported product or a compatibility requirement.
 The native host reserves an ACP slot for an existing window before resolving or
 spawning the backend. Repeated starts for the same window return the same live
 generation; starts for different windows do not serialize on runtime resolution
-or spawn. Destroying a window synchronously cancels its reservation and removes
+or spawn. A start never returns a generation whose stdin a stop already closed:
+it waits (bounded by the stop timeout plus forwarder drain) for that process to
+exit and then spawns a fresh generation, or fails with a retryable
+"still stopping" error. Destroying a window synchronously cancels its reservation and removes
 the label from the registry; even a start already queued on the blocking pool
 must not leave a child behind. Application exit rejects subsequent starts and
 stops all owned children. Generation-checked stop cannot terminate a replacement.
@@ -71,7 +74,18 @@ or destroyed owners. Window destruction captures the exact terminal
 operation IDs (including completed history) while cancelling the old lifetime;
 delayed stop and pruning touch only those captured IDs, not resources published
 by a replacement window using the same label. Workspace cleanup and application
-exit still stop resources in their existing scopes.
+exit still stop resources in their existing scopes. Application exit stops every
+ACP slot and package terminal concurrently on a worker thread under one overall
+6-second deadline (logging a warning for stragglers), so quit latency does not
+grow with the number of windows.
+
+Package terminal output is read by a dedicated PTY reader and coalesced into one
+`package-terminal://output` event per ~16 ms or 64 KiB. The terminal supervisor
+waits at most 1 s after the child is reaped for the reader's EOF and final
+batch before it clears the running state and emits `package-terminal://exit`,
+so trailing output (e.g. a crash trace) precedes exit and is not lost to an
+immediate forget. A background descendant holding the PTY open only delays exit
+by that bound. Retained replay history is a 512 KiB byte ring.
 
 LSP onboarding package-manager commands are a separate transient class rather
 than a long-lived per-window runtime. `install_lsp_server` runs its fixed,
@@ -88,6 +102,13 @@ isolated process ownership and a hard deadline. Each request is registered to
 its owning WebView. Frontend workspace/HEAD invalidation requests cancellation;
 native window destruction and application exit also synchronously remove and
 cancel the matching registrations so a lost JS teardown cannot strand a child.
+Native Code/Knowledge search and indexing requests follow the same ownership
+model: each cancellation token records its owning WebView; window destruction
+cancels that window's tokens, application exit cancels all of them and makes
+later registrations start cancelled, and a request registered after its window
+closed does not spawn the search child. The request is written to the child's
+stdin on a separate thread, so cancellation and the deadline apply while a large
+rerank payload is still being written.
 After the CLI leader exits, descendant cleanup happens before pipe readers are
 joined, preventing inherited output handles from keeping the command alive.
 

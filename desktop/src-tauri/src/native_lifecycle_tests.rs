@@ -19,7 +19,7 @@ fn delayed_destroy_cleanup_targets_only_captured_resources_after_label_reuse() {
         exit_code: None,
         signal: None,
         stop_requested: false,
-        output: Vec::new(),
+        output: package_terminal_output::OutputHistory::new(16),
         running: None,
     };
     terminals
