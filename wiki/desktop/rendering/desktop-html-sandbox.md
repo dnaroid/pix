@@ -426,4 +426,4 @@ user message bubbles and restored composer drafts.
 - `acp/test/config.test.ts`
 - `acp/test/agent.test.ts`
 
-<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"14a40a8f5272d24c0efe61c84fa89db3165b5bea511bdc4ef414e248abe5e814","checkedAt":"2026-10-31T00:43:33.603Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":62,"reportLanguage":"ru"} -->
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"0bac3d56141be91c8b0a0443ca8786261a742fb8b4119f2a9384231948f07fb7","checkedAt":"2026-10-31T14:58:59.241Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":65,"reportLanguage":"ru"} -->
