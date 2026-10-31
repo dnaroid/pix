@@ -21,6 +21,15 @@ enabled, and exact target/allowed origins become the network allowlist.
 If the CLI/runtime is missing or too old, relay the runner's `BLOCKED` handoff;
 do not install or upgrade it from this child.
 
+CLI JSON responses are validated fail-closed: exit-zero MCP tool-error envelopes
+(including text-content error arrays), empty/invalid/unsupported output, and
+missing or malformed page records from `new_page`/`list_pages` fail the run.
+Raw CLI error details are withheld from diagnostics for privacy. A ready daemon
+does not establish that Chrome connected: `attachExistingChromeRequested` means
+attachment was requested, while `daemonReady` reports daemon startup only.
+Neither observation proves a browser connection, and the original CLI error may
+not be recoverable from the redacted failure.
+
 For `chrome-devtools-mcp` 1.9.0 compatibility, attach modes (`autoConnect` and
 `browserUrl`) omit `--categoryPwa` entirely: that CLI rejects the option even
 when set to `false`. PWA remains disabled by default. Explicit isolated launches

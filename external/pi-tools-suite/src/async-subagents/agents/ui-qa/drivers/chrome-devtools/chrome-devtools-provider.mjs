@@ -2,6 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { decodeCliResponse } from "./cli-response.mjs";
 
 const MINIMUM_CLI_VERSION = [1, 9, 0];
 const MAX_OUTPUT_BYTES = 1024 * 1024;
@@ -197,7 +198,8 @@ export async function runChromeDevtoolsProvider(context, config) {
 			action: "browserProvider",
 			provider: CHROME_DEVTOOLS_DRIVER,
 			isolatedDaemon: true,
-			attachedExistingChrome,
+			attachExistingChromeRequested: attachedExistingChrome,
+			daemonReady: true,
 			reuseExistingBrowserSession: Boolean(config.devtools.reuseExistingBrowserSession),
 			javascriptEvaluation: false,
 			networkHeadersRedacted: true,
@@ -695,21 +697,7 @@ async function invokeCliJson(executable, sessionId, command, args, context, envi
 		timeoutMs,
 	});
 	if (execution.code !== 0) throw new Error(`chrome-devtools ${command} failed: ${safeCliFailure(execution)}`);
-	const text = execution.stdout.trim();
-	if (!text) return {};
-	try {
-		const parsed = JSON.parse(text.split(/\r?\n/).filter(Boolean).pop());
-		if (Array.isArray(parsed)) {
-			const firstText = parsed.find((entry) => entry?.type === "text" && typeof entry.text === "string");
-			if (firstText) {
-				try { return JSON.parse(firstText.text); } catch { return { message: firstText.text }; }
-			}
-			return {};
-		}
-		return isObject(parsed) ? parsed : {};
-	} catch {
-		throw new Error(`chrome-devtools ${command} returned invalid JSON`);
-	}
+	return decodeCliResponse(execution.stdout, command);
 }
 
 function runCliProcess(executable, args, options) {

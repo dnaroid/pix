@@ -1,11 +1,24 @@
 # 0037 — Status-bar hover details
 
-- Status: superseded for popup activation/retention/dismissal; content and chrome choices remain accepted
+- Status: superseded for popup activation/retention/dismissal; remaining choices apply only where not replaced by the current governing specs
 - Recorded: 2026-10-05
 - Decided: 2026-10-05
 - Owner / approval evidence: user explicitly requested Desktop Context and Usage details on hover rather than click (conversation-only evidence).
 - Governing specs: [Desktop runtime status](../usage/desktop-runtime-status.md), [Session usage](../usage/session-usage.md), [Observer](../assistants/observer/heads-up-observer.md), [Council](../assistants/brainstorm.md)
 - Replaces / replaced by: [0048 — Status-bar click popups](0048-status-bar-click-popups.md) supersedes hover/focus opening and pointer-departure dismissal. The historical rationale below is retained.
+
+Current chrome clarification (source-verified, not a new approval record): the
+one-pixel separators and Radar/Binoculars icons described below are historical,
+not current requirements. The current
+[runtime status spec](../usage/desktop-runtime-status.md) governs the replacement
+layout: spacing without short inter-group vertical separators. In
+[`StatusBar.svelte`](../../desktop/src/components/StatusBar.svelte), the right
+group contains Observer, background jobs, Plan, the session activity HUD and
+notifications, with conditional controls omitted when absent. Observer uses the
+shared [`ObserverIcon.svelte`](../../desktop/src/components/ObserverIcon.svelte)
+eye-in-triangle glyph, not Radar or Binoculars. Status-bar top borders, internal
+popup dividers and context-ring sector separators are unaffected. The earlier
+chrome rationale is preserved below; it does not override these current specs.
 
 ## Context
 
@@ -119,4 +132,4 @@ Revisit the duration or pointer corridor if real Desktop use still shows difficu
 reaching actions. Fake-timer tests verify cancellation/lifecycle, not native cursor
 geometry; no native UI verification is claimed.
 
-<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"f3460155eef24712027dfbebf84b26572a2efdd4c506089e96210c4e65e1b159","checkedAt":"2026-10-30T23:44:56.699Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":39,"reportLanguage":"ru"} -->
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"bfd9ad45319d56d2fac33674bf554aec9b26b4b5415c735a8913e761debbf852","checkedAt":"2026-10-31T13:59:39.587Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":50,"reportLanguage":"ru"} -->

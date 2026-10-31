@@ -47,7 +47,7 @@
   }
 </script>
 
-<section class="min-h-0 shrink-0 border-t border-border" aria-label={russian ? "Проверки Wiki" : "Wiki checks"} data-wiki-check-queue>
+<section class="mt-auto min-h-0 shrink-0 border-t border-border" aria-label={russian ? "Проверки Wiki" : "Wiki checks"} data-wiki-check-queue>
   <button
     bind:this={header}
     type="button"

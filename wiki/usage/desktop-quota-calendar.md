@@ -17,7 +17,14 @@ The provider-agnostic **Limits** section shows account quota windows (`hourly`,
 then `weekly`), including weekly-only snapshots. Headers retain the window name
 and percentage explicitly labelled “remaining”.
 
-The weekly timeline runs **start left, reset right**. One continuous track
+The following weekly timeline is inside the open Usage popup, not its compact
+status-bar trigger. The trigger retains seven equal slices of the reported
+window; it does not use local-midnight boundaries. Its labels describe aggregate
+quota only. See [runtime status](desktop-runtime-status.md). The popup timeline
+instead uses the actual local calendar-day boundaries described below; these are
+two distinct surfaces, not competing geometries for one track.
+
+The popup weekly timeline runs **start left, reset right**. One continuous track
 shows `clamp(remainingPercent, 0, 100)` remaining quota filled from the right
 edge, with hairline dividers marking the boundaries between local calendar days.
 The first and last days may be partial; widths are proportional to time, so
@@ -212,4 +219,4 @@ request or control is implemented.
 Focused Desktop Vitest, including a DST-observing timezone run for date helpers;
 Desktop check and build:web. Native visual QA is not asserted by unit/source tests.
 
-<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"a6b491c4c7e60232ea653e507a7df6eebb5ecad5a7d5559dbcd79dd1f2b4fe5e","checkedAt":"2026-10-30T23:31:17.056Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":53,"reportLanguage":"ru"} -->
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"0670de3ae0ce0e99fe7617655d9fa69d74e81e30b15669861aaca0b75edfb428","checkedAt":"2026-10-31T14:03:14.163Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":54,"reportLanguage":"ru"} -->

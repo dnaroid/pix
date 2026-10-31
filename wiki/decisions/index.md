@@ -45,7 +45,7 @@ Why consequential choices were made. Status and replacement metadata govern each
 - [0034 — Bounded, opt-in Heads up observer](0034-heads-up-observer.md) — accepted for an opt-in experiment, not general rollout
 - [0035 — Background queued forks](0035-background-queued-forks.md) — accepted
 - [0036 — Inactive-only native hover forwarding](0036-inactive-window-hover.md) — superseded
-- [0037 — Status-bar hover details](0037-status-bar-hover-details.md) — superseded for popup activation/retention/dismissal; content and chrome choices remain accepted
+- [0037 — Status-bar hover details](0037-status-bar-hover-details.md) — superseded for popup activation/retention/dismissal; remaining choices apply only where not replaced by the current governing specs
 - [0038 — Focus on hover](0038-focus-on-hover.md) — superseded
 - [0039 — Compact quota reset calendar](0039-quota-reset-calendar.md) — accepted
 - [0040 — Gap-free window tiling](0040-gap-free-window-tiling.md) — accepted
@@ -83,4 +83,4 @@ Why consequential choices were made. Status and replacement metadata govern each
 - [Decision log](README.md)
 - [NNNN — Decision title](TEMPLATE.md) — template, not a decision
 
-<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"c73d3e2cb8ceace6629da3018ab6490f8802206253d6740016f2dcc0a2ecfb4b","checkedAt":"2026-10-31T01:33:05.958Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":72,"reportLanguage":"ru"} -->
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"5eb9a3a5012bfaf94dae4fee88682ad2521a44d2d14524af5ef09cc97d703c62","checkedAt":"2026-10-31T14:00:24.250Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":72,"reportLanguage":"ru"} -->

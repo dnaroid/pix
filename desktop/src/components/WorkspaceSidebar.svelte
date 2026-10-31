@@ -1101,7 +1101,10 @@
       </div>
 
       {#if activeTab === "wiki"}
-        <WikiAutoCheckControl part="notice" state={wikiAutoCheck} />
+        <!-- Keep the auto grid row occupied even when the notice renders nothing. -->
+        <div class="min-w-0" data-wiki-auto-check-notice-slot>
+          <WikiAutoCheckControl part="notice" state={wikiAutoCheck} />
+        </div>
       {/if}
 
       {#if activeTab === "tasks"}

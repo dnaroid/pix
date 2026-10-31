@@ -500,7 +500,7 @@ else { console.error("unsupported fake command: " + command); process.exit(1); }
 		const newPage = calls.find((entry) => entry[0] === "new_page");
 		expect(newPage).toContain("--isolatedContext");
 		expect(newPage).toContain(sessionId);
-		expect(result.observations).toContainEqual(expect.objectContaining({ action: "browserProvider", attachedExistingChrome: true, reuseExistingBrowserSession: false }));
+		expect(result.observations).toContainEqual(expect.objectContaining({ action: "browserProvider", attachExistingChromeRequested: true, daemonReady: true, reuseExistingBrowserSession: false }));
 		expect(calls.filter((entry) => entry[0] === "close_page")).toHaveLength(1);
 		expect(calls.find((entry) => entry[0] === "close_page")).toContain("7");
 	});

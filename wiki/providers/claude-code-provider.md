@@ -131,8 +131,16 @@ provider error that identifies the exhaustion and (when known) the earliest
 reset; do not recursively requeue or spin. The existing quota-wait extension
 may handle the final exhausted error after the turn as before. Automatic
 switches emit a session-scoped warning that names the two profile labels (never
-credential material). Quota telemetry from Claude Code remains scoped to the
-active Pi model/session and is **not** a combined balance across accounts.
+credential material). Structured quota telemetry carries the originating Pi
+session/model for provenance validation, but accepted samples are shared across
+Claude Code routes and sessions within one Pix process, not owned by that
+session/model. This is **not** a combined balance across accounts: the current
+cache assumes one Claude Code login per process and samples carry no account
+identity. With account rotation, one account's consumption can therefore appear
+on another account's session until polling or a subsequent event corrects it.
+Per-account telemetry isolation would require account identifiers and a cache
+keyed by them; it is not implemented. See the
+[runtime quota contract](../usage/desktop-runtime-status.md).
 
 Claude Code is optional. When `claude` is absent from PATH and no nonblank
 `PI_CLAUDE_CODE_PROVIDER_PATH` is configured, initialization quietly leaves the
@@ -378,4 +386,4 @@ forced cleanup and a child whose close is observed before rejection. Both must
 publish only an error and finish private cleanup; the fixture must not race a
 short natural-exit timer against Windows process-tree termination.
 
-<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"c8ec58d441bc8d9c541468fef6c850929a309f103a80ec02f00d94471d7ee41f","checkedAt":"2026-10-30T23:27:21.394Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":61,"reportLanguage":"ru"} -->
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"cfb2e6108ef52c90bb910c4e93e49035f1906812085cb8ccfc1ed9d5284358f5","checkedAt":"2026-10-31T13:57:41.370Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":69,"reportLanguage":"ru"} -->
