@@ -99,7 +99,11 @@ actual JavaScript exceptions and unhandled rejections still reach the logger.
   `notification:delivery`, `sidebar:git-remote-probe` or
   `project-explorer:files-refresh` prefixed to the diagnostic. Recurring poll or
   retry failures use `createFailureStreakReporter` to log once per failure streak
-  (the first failure after a success), not on every attempt.
+  (the first failure after a success), not on every attempt. Subsystem
+  failures call `warn(label, error)` directly; as a safety net,
+  `report(error, event)` with an event outside the native allow-list is sent as
+  `frontend:warning` with that event name as the label instead of being
+  rejected and silently dropped.
 - **Desktop native Git mutations** record fetch, pull, update, stash save/apply,
   and discard-file results at info (success) or warn (failure), scoped to the
   workspace. Git arguments, individual file paths, ref names, and command

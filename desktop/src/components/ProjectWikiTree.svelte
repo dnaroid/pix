@@ -47,7 +47,7 @@
   const consistency = shared ?? createWikiConsistencyTreeState({
     workspace: () => workspace,
     wikiPath: () => config.path,
-    reportError: (cause) => diagnostics.report(cause, "wiki:consistency-status-failed"),
+    reportError: (cause) => diagnostics.warn("wiki:consistency-status-failed", cause),
   });
   const operations = createProjectExplorerOperations();
   const projectPath = (path: string) => path ? `${config.path}/${path}` : config.path;
@@ -60,7 +60,7 @@
       const branch = projectPath(entry.path);
       return wikiTreeConflictMenuActions(branch, wikiBranchReportLanguage(consistency.findings().findings, branch), (input) => conflictsNavigation.open(input));
     },
-    reportError: (cause) => diagnostics.report(cause, "wiki:tree-menu-failed"),
+    reportError: (cause) => diagnostics.warn("wiki:tree-menu-failed", cause),
   }) : null;
   function openConflictMenu(event: MouseEvent, entry: ProjectTreeEntry): void {
     if (!conflictMenu) return;
@@ -81,7 +81,7 @@
     onMissingIndex: (path) => onOpenFile(projectPath(path)),
     onError: (cause) => {
       error = cause instanceof Error ? cause.message : String(cause);
-      diagnostics.report(cause, "wiki:index-open-failed");
+      diagnostics.warn("wiki:index-open-failed", cause);
     },
   });
   function openFile(path: string): void {
@@ -111,7 +111,7 @@
     onOpenFile: openFile,
     onOpenExternal: (path) => onOpenExternal(projectPath(path)),
     onHealthChange: (message) => {
-      if (message && message !== error) diagnostics.report(new Error(message), "wiki:list-failed");
+      if (message && message !== error) diagnostics.warn("wiki:list-failed", new Error(message));
       error = message;
     },
     onLoadExpandedDirectories: async () => [],
@@ -146,7 +146,7 @@
     onOpenFile: openFile,
     onError: (cause) => {
       error = cause instanceof Error ? cause.message : String(cause);
-      diagnostics.report(cause, "wiki:create-failed");
+      diagnostics.warn("wiki:create-failed", cause);
     },
     onSuccess: () => {},
     onFinish: () => {},
@@ -182,7 +182,7 @@
       await invoke("export_project_wiki_html", { workspace, path: config.path, index: config.index });
     } catch (cause) {
       error = cause instanceof Error ? cause.message : String(cause);
-      diagnostics.report(cause, "wiki:html-export-failed");
+      diagnostics.warn("wiki:html-export-failed", cause);
     } finally { exporting = false; }
   }
   export function showInFiles(): void { onOpenFiles(config.path); }

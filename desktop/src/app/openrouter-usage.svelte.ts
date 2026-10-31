@@ -45,7 +45,7 @@ function readCache(): Snapshot | null {
     cache = parsed && typeof parsed.updatedAt === "number" && parsed.usage && typeof parsed.usage === "object"
       ? { usage: parsed.usage, updatedAt: parsed.updatedAt } : null;
   } catch (error) {
-    diagnostics.report(error, "frontend:openrouter-usage-cache");
+    diagnostics.warn("frontend:openrouter-usage-cache", error);
     cache = null;
   }
   return cache;
@@ -57,7 +57,7 @@ function writeCache(next: Snapshot | null): void {
     if (next) storage()?.setItem(STORAGE_KEY, JSON.stringify(next));
     else storage()?.removeItem(STORAGE_KEY);
   } catch (error) {
-    diagnostics.report(error, "frontend:openrouter-usage-cache");
+    diagnostics.warn("frontend:openrouter-usage-cache", error);
   }
 }
 

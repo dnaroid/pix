@@ -56,7 +56,8 @@ it("logs a failed save for the original workspace without rejecting the successf
   expect(await persistCommandRun("/original", "package:test", 100)).toBeUndefined();
   await Promise.resolve();
   expect(send).toHaveBeenCalledWith("log_desktop_diagnostic", expect.objectContaining({
-    workspace: "/original", event: "frontend:command-history-save", diagnostic: expect.stringContaining("disk unavailable"),
+    workspace: "/original", event: "frontend:warning",
+    diagnostic: expect.stringMatching(/^frontend:command-history-save: .*disk unavailable/),
   }));
 });
 

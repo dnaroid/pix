@@ -60,7 +60,7 @@ export async function persistCommandRun(workspace: string, key: string, time: nu
     throw new Error(".pi/workspace.jsonc changed repeatedly; command history was not saved.");
   } catch (error) {
     // History is best-effort: never turn a successfully started PTY into a failed launch.
-    createDiagnosticLogger(() => ({ workspace }), send).report(error, "frontend:command-history-save");
+    createDiagnosticLogger(() => ({ workspace }), send).warn("frontend:command-history-save", error);
     return undefined;
   }
 }

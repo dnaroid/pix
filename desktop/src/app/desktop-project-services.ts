@@ -80,13 +80,13 @@ export function createDesktopProjectServices(options: DesktopProjectServicesOpti
     openPage: path => preview.openProjectFile(path, "push", undefined, false, "document"),
     openChecks: options.openKnowledgeChecks,
     openConflicts: options.openWikiConflicts,
-    reportError: error => backgroundDiagnostics.report(error, "wiki:notification-failed"),
+    reportError: error => backgroundDiagnostics.warn("wiki:notification-failed", error),
   });
   documents = createProjectDocumentsStore({
     workspace: options.workspace,
     knowledgeBackgroundReady: options.knowledgeBackgroundReady ?? (() => Boolean(options.client())),
     reportBackgroundKnowledgeError: (error, workspace = options.workspace()) =>
-      createDiagnosticLogger(() => ({ workspace })).report(error, "wiki:background-check"),
+      createDiagnosticLogger(() => ({ workspace })).warn("wiki:background-check", error),
     checkKnowledge: (request, signal) => {
       const client = options.client();
       if (!client) throw new Error("Connect the project backend before checking Wiki contradictions.");
@@ -119,7 +119,7 @@ export function createDesktopProjectServices(options: DesktopProjectServicesOpti
   const wikiConsistency = createWikiConsistencyOwner({
     workspace: options.workspace,
     wikiPath: () => documents.wikiPath,
-    reportError: error => backgroundDiagnostics.report(error, "wiki:consistency-status-failed"),
+    reportError: error => backgroundDiagnostics.warn("wiki:consistency-status-failed", error),
   });
   const wikiConflictsRecheck = createWikiConflictsRecheck({
     workspace: options.workspace,
@@ -128,7 +128,7 @@ export function createDesktopProjectServices(options: DesktopProjectServicesOpti
     read: (workspace, wikiPath, path, signal) => readWikiCheckDocument(workspace, wikiPath, path, signal),
     enqueue: input => documents.enqueueKnowledgeCheck(input),
     reportError: error => {
-      backgroundDiagnostics.report(error, "wiki:conflicts-recheck-failed");
+      backgroundDiagnostics.warn("wiki:conflicts-recheck-failed", error);
       options.reportError(error);
     },
   });

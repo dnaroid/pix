@@ -58,7 +58,7 @@
         for (const notice of state.result.notices) {
           if (reported.has(notice) || state.result.pendingSources?.some(source => notice === pendingSearchNotice(source))) continue;
           reported.add(notice);
-          diagnostics.report(notice, "wiki:search-notice");
+          diagnostics.warn("wiki:search-notice", notice);
         }
       },
     );

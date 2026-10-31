@@ -104,7 +104,7 @@ export function createDesktopWorkbenchViewModelServices(
           return file.content;
         },
         reportError: (error) => createDiagnosticLogger(() => ({ workspace: options.workspace() }))
-          .report(error, "wiki:conflicts-compare-read-failed"),
+          .warn("wiki:conflicts-compare-read-failed", error),
         dates: async (workspace, request, signal) => {
           try {
             signal.throwIfAborted();
@@ -114,19 +114,19 @@ export function createDesktopWorkbenchViewModelServices(
             return signal.aborted ? null : dates;
           } catch (error) {
             if (!signal.aborted) createDiagnosticLogger(() => ({ workspace: options.workspace() }))
-              .report(error, "wiki:conflicts-file-dates-failed");
+              .warn("wiki:conflicts-file-dates-failed", error);
             return null;
           }
         },
         decisionWriter: options.project.documents.knowledgeDecisionWriter,
         refresh: () => options.project.wikiConsistency.refresh(),
         reportDecisionError: (error) => {
-          createDiagnosticLogger(() => ({ workspace: options.workspace() })).report(error, "wiki:finding-decision-failed");
+          createDiagnosticLogger(() => ({ workspace: options.workspace() })).warn("wiki:finding-decision-failed", error);
           options.errors.report(error);
         },
         editWriter: options.project.documents.wikiEditWriter,
         reportEditError: (error) => {
-          createDiagnosticLogger(() => ({ workspace: options.workspace() })).report(error, "wiki:side-edit-failed");
+          createDiagnosticLogger(() => ({ workspace: options.workspace() })).warn("wiki:side-edit-failed", error);
           options.errors.report(error);
         },
         tasks: {
