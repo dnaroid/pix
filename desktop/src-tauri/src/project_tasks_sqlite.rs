@@ -13,7 +13,7 @@ use std::{
     time::Duration,
 };
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 #[path = "project_tasks_initialization.rs"]
 mod initialization;
 
@@ -141,11 +141,11 @@ fn open(directory: &Path, initialize: bool) -> Result<Connection, String> {
 }
 
 pub(super) fn initialize(directory: &Path) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
         initialization::initialize(directory)
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
         open(directory, true).map(|_| ())
     }

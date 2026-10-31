@@ -1,6 +1,26 @@
 //! Publish a complete SQLite database, never an observable version-zero file.
-//! Desktop is macOS-only; RENAME_EXCL also avoids transient hard-link aliases.
+//! An exclusive rename (macOS RENAME_EXCL, Linux RENAME_NOREPLACE) never
+//! overwrites another initializer and avoids transient hard-link aliases.
 use std::{ffi::CString, fs, os::unix::ffi::OsStrExt, path::Path};
+
+/// Returns false with errno set when the rename failed.
+fn rename_exclusive(from: &CString, to: &CString) -> bool {
+    // SAFETY: the C strings are valid for the syscall. Exclusive rename never
+    // overwrites another initializer's database (or any other existing object).
+    #[cfg(target_os = "macos")]
+    let status = unsafe { libc::renamex_np(from.as_ptr(), to.as_ptr(), libc::RENAME_EXCL) };
+    #[cfg(target_os = "linux")]
+    let status = unsafe {
+        libc::renameat2(
+            libc::AT_FDCWD,
+            from.as_ptr(),
+            libc::AT_FDCWD,
+            to.as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    };
+    status == 0
+}
 
 pub(super) fn initialize(directory: &Path) -> Result<(), String> {
     if super::exists(directory)? {
@@ -31,9 +51,7 @@ pub(super) fn initialize(directory: &Path) -> Result<(), String> {
             CString::new(source.as_os_str().as_bytes()).map_err(|error| error.to_string())?;
         let to = CString::new(directory.join("tasks.sqlite").as_os_str().as_bytes())
             .map_err(|error| error.to_string())?;
-        // SAFETY: the C strings are valid for the syscall. Exclusive rename never
-        // overwrites another initializer's database (or any other existing object).
-        if unsafe { libc::renamex_np(from.as_ptr(), to.as_ptr(), libc::RENAME_EXCL) } != 0 {
+        if !rename_exclusive(&from, &to) {
             let error = std::io::Error::last_os_error();
             if error.kind() != std::io::ErrorKind::AlreadyExists {
                 return Err(format!("failed to publish project task database: {error}"));
