@@ -21,6 +21,11 @@ enabled, and exact target/allowed origins become the network allowlist.
 If the CLI/runtime is missing or too old, relay the runner's `BLOCKED` handoff;
 do not install or upgrade it from this child.
 
+For `chrome-devtools-mcp` 1.9.0 compatibility, attach modes (`autoConnect` and
+`browserUrl`) omit `--categoryPwa` entirely: that CLI rejects the option even
+when set to `false`. PWA remains disabled by default. Explicit isolated launches
+retain `--categoryPwa=false`.
+
 ## Target options
 
 Use `target.browserDriver: "chrome-devtools"` when explicit routing is needed.

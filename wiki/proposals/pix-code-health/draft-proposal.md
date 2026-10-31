@@ -22,7 +22,7 @@
 - [LSP manager](../../../external/pi-tools-suite/src/lsp/shared-manager.ts) уже решает LSP leases/trust/lifecycle, но sharedDiagnosticsForFile возвращает строку; универсального versioned Findings Store или общего analyzer-broker API нет. Его reuse ограничен существующими LSP responsibilities (P1-F3/K4).
 - AST-grep интеграция запускает внешний executable; его присутствие не гарантировано. TypeScript devDependency не равна доступному runtime compiler. Нельзя обещать «без новых зависимостей» и одновременно незаметно установить анализатор (P1-F3).
 - Существующий comment-checker timestamp module-scoped. Это не подходящая модель session-owned dedup; исправление этого отдельного кода не входит в задачу (P2-F1).
-- [Artifact contract](../../operations/harness-artifact-storage.md): disposable reports — уникальные .pi/artifacts/; harness-owned output — свои .pi/subagents/ и council storage. Durable baselines/suppressions не scratch. Initialized Desktop TTL 72h/manual cleanup immediate, поэтому сохраняемые evidence нужно экспортировать.
+- [Artifact contract](../../operations/harness-artifact-storage.md): новые disposable reports и QA/browser evidence — уникальные `.pi/artifacts/` (subagent/QA — `.pi/artifacts/subagents/`); protected child transcripts, parent lifecycle state and unretired owned-launch records remain under `.pi/subagents/`. New disposable evidence must not be placed there or overwrite/move already-linked evidence. Council protocol uses its own storage. Durable baselines/suppressions are not scratch. Initialized Desktop TTL is 72h/manual cleanup immediate, so evidence that must be retained needs export.
 
 Точные исходники SDK: node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/{types.d.ts,runner.js} и core/agent-session.js. Локальное исполнение project config не sandbox и не гарантия отсутствия сети; LSP trust не даёт разрешения на любые lint/Git/test команды.
 
@@ -182,4 +182,4 @@ Existing heads-up-controller/codemode-sdk/LSP lifecycle test SOURCES suggest pat
 9. Ownership/storage между сессиями и условие, при котором разрешён shared broker/UI; Observer integration требует собственного контрактного обсуждения.
 
 До этих согласий код не менять, зависимости не устанавливать, ADR не создавать и реализацию не запускать.
-<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"d65291920952a70b30829afa12d0135d952f9c6749a6f3f48fa0097c6a0ae5f9","checkedAt":"2026-10-31T01:09:04.615Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":55,"reportLanguage":"ru"} -->
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"c502100d1601e1758793123a6f253fc3a5f1220635ca138aee2bd926a0bdb4cb","checkedAt":"2026-10-31T12:59:52.394Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":55,"reportLanguage":"ru"} -->

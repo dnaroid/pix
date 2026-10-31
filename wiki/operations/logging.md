@@ -1,4 +1,3 @@
-<!-- pix:wiki-report {"version":1,"checkedAt":"2026-10-31T01:51:02.631Z","result":{"path":"wiki/operations/logging.md","documentHash":"98d27ef82507b51ad10ab0ded432d1f811eef7e4bfba25c9d4958f85f6f649b9","modelRef":"zai/glm-5.3-flash","reportLanguage":"ru","checkedSources":0,"conflicts":[],"uncertainties":[],"reviewedSources":[],"notices":["Не удалось выполнить поиск связанных документов.","Истекло время поиска связанных документов.","Нет доступных актуальных фрагментов связанных источников; согласованность между документами не установлена.","Связанные фрагменты Wiki недоступны; проверены только противоречия внутри этого черновика."],"coverage":{"scope":"retrieved-passages","checkedPassages":0,"candidateSources":0,"excerptedSources":0,"limits":["query-sampling"]},"status":"incomplete"}} -->
 # Unified diagnostic logging
 
 Pix's TUI/backend, ACP adapter, and Desktop write independent, best-effort diagnostic records to the shared `~/.config/pi/logs/` directory. There is no logging daemon: cleanup and writes are performed by running applications, so no process runs solely to maintain logs. The legacy `~/.config/pi/pix.log` is neither written by this system nor migrated or removed.
@@ -248,4 +247,4 @@ while all applications are closed. Since expiration is based on segment
 creation rather than each record's timestamp, records near the end of a
 segment can expire up to one hour early.
 
-<!-- pix:wiki-check {"version":1,"status":"attempted","runId":"f061c4de-d66a-4d75-9c7e-aef1d8e78d55","contentHash":"98d27ef82507b51ad10ab0ded432d1f811eef7e4bfba25c9d4958f85f6f649b9","checkedAt":"2026-10-31T01:51:02.635Z","maxDocumentChars":128000} -->
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"98d27ef82507b51ad10ab0ded432d1f811eef7e4bfba25c9d4958f85f6f649b9","checkedAt":"2026-10-31T11:01:59.585Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":67,"reportLanguage":"ru"} -->

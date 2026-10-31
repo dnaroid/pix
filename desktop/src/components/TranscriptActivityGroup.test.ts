@@ -51,7 +51,7 @@ describe("activity icon trail", () => {
     expect(activityIcon("skill simplify")).toBe(activityIcon("skill"));
     expect(activityIcon("unknown_a")).toBe(activityIcon("unknown_b"));
     const names = ["read", "shell", "ast_grep", "ast_apply", "apply_patch", "codemode", "project_search",
-      "project_tasks", "todo", "session", "subagents", "question", "compress", "web_search", "web_fetch", "skill", "thinking"];
+      "project_tasks", "todo", "session", "subagents", "question", "compress", "web_search", "web_fetch", "wiki_conflicts", "skill", "thinking"];
     for (const name of ["repo_audit", "repo_knowledge", "repo_context", "repo_inspect", "repo_ast",
       "repo_search", "repo_structure", "repo_architecture", "repo_deps", "repo_ask", "repo_explain",
       "read_file", "task", "agent", "brainstorm", "lookup",
@@ -61,6 +61,13 @@ describe("activity icon trail", () => {
     expect(activityIcon("multi_tool_use.parallel")).toBe(activityIcon("parallel"));
     expect(new Set(names.map((name) => activityIcon(name))).size).toBe(names.length);
     for (const name of names) expect(activityIcon(name)).not.toBe(activityIcon("unknown"));
+  });
+
+  it("renders a dedicated book alert icon for wiki conflicts, including namespaced labels", () => {
+    expect(activityIcon("functions.wiki_conflicts")).toBe(activityIcon("wiki_conflicts"));
+    const html = header([tool("wiki", "wiki_conflicts")]);
+    expect(html).toContain("lucide-book-alert");
+    expect(html).not.toContain("lucide-wrench");
   });
 
   it("maps the current Claude tool profile, including namespaced and lowercase labels", () => {

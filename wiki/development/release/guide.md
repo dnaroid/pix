@@ -149,7 +149,9 @@ and additionally exercise ACP and the native application for Desktop.
 
 The `Release` workflow uses native Ubuntu 22.04 x64, macOS 15 ARM64 and Windows
 2022 x64 runners. `Actions → Release → Run workflow` builds and tests all packages
-without publishing anything. The seven user-facing installers/archives are
+without publishing anything. The current delivery set is three portable TUI
+archives and one macOS ARM64 Desktop DMG (four user-facing packages), plus the
+macOS updater bundle. These five public build assets are
 available as three Actions artifacts. On a version-tag push, the final job waits
 for the full native matrix, validates the complete set, adds `SHA256SUMS`, uploads
 everything to a temporary draft, and only after the complete upload succeeds
@@ -193,10 +195,13 @@ Keep keys out of the repository and out of release files. Official references:
 
 Tauri updater signing is independent from those OS identities. Configure
 `TAURI_SIGNING_PRIVATE_KEY` with the private minisign-compatible key whose public
-half is embedded in `tauri.release.conf.json`. The release matrix emits `.sig`
-files for Windows NSIS/Linux AppImage and signed `.app.tar.gz` updater bundles for
-both macOS architectures. `latest.json` maps the four Tauri targets to those
-files. OS code-signing warnings may still occur when Developer ID/Authenticode
+half is embedded in `tauri.release.conf.json`. The current release matrix emits
+one macOS ARM64 `-updater.tar.gz` and its internal `.sig` sidecar.
+`latest.json` maps only `darwin-aarch64` to that bundle and embeds the signature;
+the `.sig` is not a public download. With `latest.json` and `SHA256SUMS`, the
+public release has seven files. Windows/Linux jobs deliver TUI only; retained
+Desktop packaging branches are not additional supported updater targets.
+OS code-signing warnings may still occur when Developer ID/Authenticode
 credentials are absent even though the updater signature itself is valid.
 
 ## Local release check
@@ -316,4 +321,4 @@ behavior applies only to npm installs.
 
 Update checks respect `PI_OFFLINE=1`, `PI_SKIP_VERSION_CHECK=1`, and `PIX_SKIP_VERSION_CHECK=1`.
 
-<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"076c0889d06e42dbbd79410f66aa46bdcbf98a16499468e146574345b80f7d2d","checkedAt":"2026-10-31T02:03:46.285Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":47,"reportLanguage":"ru"} -->
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"8df795755d1cdedef71209ecdc55978b7b4ceaa1c2d0ded85c98c85f19b7710f","checkedAt":"2026-10-31T12:35:20.032Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":46,"reportLanguage":"ru"} -->

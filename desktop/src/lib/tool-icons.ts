@@ -11,6 +11,7 @@ import Replace from "@lucide/svelte/icons/replace";
 import CodeXml from "@lucide/svelte/icons/code-xml";
 import Globe from "@lucide/svelte/icons/globe";
 import BookOpen from "@lucide/svelte/icons/book-open";
+import BookAlert from "@lucide/svelte/icons/book-alert";
 import GraduationCap from "@lucide/svelte/icons/graduation-cap";
 import ListChecks from "@lucide/svelte/icons/list-checks";
 import ListTodo from "@lucide/svelte/icons/list-todo";
@@ -36,6 +37,7 @@ const iconGroups: readonly (readonly [readonly string[], typeof Brain])[] = [
   [["codemode"], CodeXml],
   [["web_search"], Globe],
   [["web_fetch"], BookOpen],
+  [["wiki_conflicts"], BookAlert],
   [["skill"], GraduationCap],
   [["todo"], ListChecks],
   [["project_tasks"], ListTodo],

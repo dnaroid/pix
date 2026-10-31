@@ -124,7 +124,6 @@ export function chromeDevtoolsStartArgs({ sessionId, evidenceDir, allowedOrigins
 		"--pageIdRouting=true",
 		"--javascriptEvaluation=false",
 		"--categoryExtensions=false",
-		"--categoryPwa=false",
 		"--categoryExperimentalThirdParty=false",
 		"--categoryExperimentalWebmcp=false",
 		"--experimentalVision=false",
@@ -133,6 +132,9 @@ export function chromeDevtoolsStartArgs({ sessionId, evidenceDir, allowedOrigins
 	for (const origin of allowedOrigins) args.push(`--allowedUrlPattern=${origin}/*`);
 	if (devtools.browserUrl) args.push(`--browserUrl=${devtools.browserUrl}`);
 	else if (devtools.headless !== undefined) {
+		// Attach modes must omit categoryPwa: CLI 1.9 rejects its presence even
+		// when false. PWA is off by default; keep an explicit disable for launches.
+		args.push("--categoryPwa=false");
 		args.push("--isolated=true");
 		args.push(`--headless=${devtools.headless !== false}`);
 	} else args.push("--autoConnect=true");

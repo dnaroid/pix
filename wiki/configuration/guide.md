@@ -148,8 +148,10 @@ as the New Conversation draft picker. Selecting `Auto` from an existing
 conversation does not re-route that conversation; Pix opens or reuses a New
 Conversation draft and enables Auto there.
 
-Desktop exposes the same fields in Settings → Models, including editable tier
-rows. The router provider needs valid credentials independently of the target
+Desktop exposes routing in Settings → Models. Wizard-managed tiers (`simple`,
+`standard`, `complex`, `expert`) show model/thinking read-only with **Edit in
+wizard…**; custom tiers remain editable there. The router provider needs valid
+credentials independently of the target
 tier providers.
 
 ## Desktop configuration
@@ -205,7 +207,7 @@ query** is sent to OpenRouter for this decision; project files, history,
 indexed snippets and workspace paths are not uploaded by the classifier.
 Provider charges may apply. If the key or Jev is unavailable, Auto falls back
 to regular Search. This is separate from the `modelRouting` Auto model picker and
-from semantic settings/session-title/task consent preferences.
+from global semantic provider configuration.
 
 ### Desktop Universal Search: task embeddings
 
@@ -214,39 +216,37 @@ task titles, descriptions, parent/related tasks, file and artifact paths,
 attachment names, status, priority, linked session and assigned model.
 Neither a saved OpenRouter key nor a repository-search index is required for those matches.
 
-Under Desktop Settings → Search, `search.tasksSemanticEnabled` is a separate,
-**off-by-default** opt-in. When enabled, an explicit Tasks search can send
-project-task **titles and descriptions** (up to 2,000 characters per task), saved
-plan paths/titles and plan Markdown (chunked, up to 64 chunks of 2,000 characters
-per plan), and the query
-to OpenRouter for semantic embeddings, which may incur charges. Plan content is
-uploaded when this setting is enabled. Other task fields and attachment contents
-are excluded from task embedding inputs. The first search indexes up to 64 new task texts; later
-searches continue the index. The durable cache is kept under
-`.pi/search/index.sqlite`, not in the authoritative task database. Task status,
-priority, links and model changes do not trigger re-embedding when the title
-and description remain unchanged. Disabling stops future uploads but does not
-delete previously paid local vectors. RAG source/model calls have their own
-separate disclosure and consent.
+Desktop and agent/TUI `project_search` share the explicit global
+`search.embedding` configuration in `~/.config/pi/pi-tools-suite.jsonc`.
+It authorizes eligible uploads across enabled sources/projects; there is no
+independent task/session consent flag. Configure it in **Tools Suite → Search**
+or with the user command `/search-semantic configure <embedding JSON>`.
+Keys or existing caches alone do not authorize uploads.
 
-The agent/TUI `project_search` also honors these same user-global opt-ins:
-it can **create missing task-title/description and explicitly saved session-name
-vectors on demand** inside `.pi/search/index.sqlite`, the same cache Desktop
-uses. An opted-in agent search sends those selected texts (bounded task input
-to 2,000 characters) and the query to the pinned OpenRouter model, which may
-incur costs; it never embeds conversation transcript bodies, task attachments,
-task links, session identifiers or files independently. Batches are reused
-across Desktop and agents under SQLite writer transactions. Changing a task's
-status or model alone never triggers a new task vector, and deleting the last
-task cleans the corresponding index only on an explicit opted-in Tasks search.
-Selecting Commits with `hybrid` or `semantic` similarly fills missing current
-`HEAD` commit vectors using the configured repository embedding provider and
-`OPENROUTER_API_KEY`; **commit titles, authors and messages may be transmitted**. Each
-source has an upper bound of 256 new vectors per request and a 40-second
-indexing budget; repeat searches continue when a large corpus remains. The
-full federated search waits up to 60 seconds and returns one merged answer.
-Use `indexMode: "lexical"` to prevent all embedding and index writes even when
-the consent flags or repository embedding configuration are present.
+Task semantic inputs include task titles/descriptions and bounded saved-plan
+text; attachment contents are excluded. Commit semantic inputs include commit
+metadata/messages, never full patches. Session indexing includes saved names
+and public user/assistant text, excluding thinking, tool bodies and attachments.
+Eligible session documents are indexed by background/manual work; session
+queries reuse cached document vectors and may embed the query, but never
+create missing session document embeddings. Eligibility and lifecycle limits
+are defined in [Universal Search](../search/desktop-universal-search.md).
+
+Derived caches are source-local under `.pi/search/`: `tasks.sqlite`,
+`sessions.sqlite`, `git-commits.sqlite`, `code.sqlite` and `knowledge.sqlite`.
+Settings uses the shared `~/.config/pi/search/settings.sqlite`. These are
+separate from canonical tasks and transcripts. Unchanged text reuses compatible
+paid vectors. Removing the global embedding configuration stops new semantic
+work and retains caches. `/search-semantic reset-history` explicitly resets
+recognized project Task/Session/Commit vectors, never the global Settings cache.
+
+Use `indexMode: "lexical"` to prevent embedding-provider calls. Lexical search
+may still update local indexes; it is not a no-writes mode. Agent federated
+search returns one bounded merged response within 60 seconds. Source-specific
+batch sizes, budgets and indexing behavior belong to the
+[native search](../search/native-repository-search.md#optional-semantic-retrieval)
+and [Universal Search](../search/desktop-universal-search.md) contracts.
+RAG source/model calls have their own separate disclosure and consent.
 
 RAG retrieves the selected sources from the existing search indexes, reads
 bounded original excerpts as needed and streams a Markdown answer **inside**
@@ -497,9 +497,14 @@ microphone permission.
 - **LSP:** configure/trust servers in tools-suite configuration. See
   [pi-tools-suite LSP setup](../tools/suite.md#lsp-setup).
 - **Repository search:** Code and Knowledge search is native across Pi, TUI,
-  ACP and Desktop. Optional repository embeddings use the `embedding` object in
-  project `.pi/search/semantic.json` and `OPENROUTER_API_KEY`; chunks/queries may
-  be transmitted externally. Legacy external-search data/configuration is not read, migrated,
+  ACP and Desktop. Optional repository embeddings use explicit global
+  `search.embedding` in `~/.config/pi/pi-tools-suite.jsonc`, which authorizes
+  eligible uploads across enabled sources/projects without another consent step.
+  OpenRouter credentials use `OPENROUTER_API_KEY`, then shared Pi `auth.json`
+  (`PI_CODING_AGENT_DIR`, otherwise `~/.pi/agent`); Ollama needs no key.
+  Chunks/queries may be transmitted externally; see the
+  [native search contract](../search/native-repository-search.md#optional-semantic-retrieval).
+  Legacy project and external-search data/configuration is not read, migrated,
   deleted or modified by this integration.
 
 ## Local project instructions
@@ -549,4 +554,4 @@ setting.
 > Shipped defaults contain no provider/model ids. Choose models with `pix install
 > [--models]` or Desktop's first-run dialog / Settings → **Edit in wizard…**.
 
-<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"915fab124ea1563980f9ee578940fabc142d99cf8172e1fc7d8d1f4bf60a0892","checkedAt":"2026-10-30T23:06:08.089Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":58,"reportLanguage":"ru"} -->
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"23b3e76494de266245f3c469a75ecb124b2675600296d589ba258f3a15f6f2c4","checkedAt":"2026-10-31T12:51:00.416Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":72,"reportLanguage":"ru"} -->

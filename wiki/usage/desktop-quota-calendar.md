@@ -61,6 +61,9 @@ reset remains visible in this fallback. Header-derived rate windows are excluded
 Stale windows remain visibly marked as cached.
 The complete popup is bounded by the application viewport height minus 70px,
 with internal scrolling and no extra timers or refresh-on-open requests.
+This bound includes the header; the body scrolls within it. It replaces the
+historical 640px / viewport-minus-120px scroll-area cap recorded in ADR0039,
+rather than combining with an independent cap on the body.
 
 After the integrated limits/timeline and any reset credits, directly before the spend table,
 **Token usage by model** adds a donut only when more than
@@ -88,6 +91,9 @@ For OpenAI Codex OAuth quota snapshots, Desktop also renders a separate
 **Reset credits** section when the account has available rate-limit reset
 credits. These are one-shot account credits, not the weekly quota's scheduled
 reset, so they must never be merged into or labelled as the weekly calendar.
+Their separate rows coexist with the expiry ticks on the weekly timeline in the
+same popup: ticks supplement the rows when expiry falls within the quota window,
+without replacing them or indicating a scheduled quota reset.
 By default each credit occupies one compact row with its backend title and
 relative expiry countdown (or unavailable state), without a disclosure or expanded
 cards. Credits expiring in strictly less than 24 hours use muted red for their

@@ -1,4 +1,3 @@
-<!-- pix:wiki-report {"version":1,"checkedAt":"2026-10-31T01:48:36.007Z","result":{"path":"wiki/decisions/0011-council-research-tools.md","documentHash":"90d0f5b26b3c294cbf2fb5d81c8d137849857c487a9b9f9cdc9b9047179f5b9a","modelRef":"zai/glm-5.3-flash","reportLanguage":"ru","checkedSources":12,"conflicts":[],"uncertainties":[],"reviewedSources":[],"notices":["Native reranking unavailable or its context changed; original ranking retained.","Не удалось подтвердить полноту или актуальность результатов поиска.","Native scan incomplete (I/O, concurrent edit or scan limit); previous snapshot retained.","Семантическая часть гибридного поиска завершилась не полностью.","Состав Wiki изменился или не удалось проверить его во время поиска; повторите проверку.","Документ, настройки или содержимое Wiki изменились во время проверки. Повторите её."],"coverage":{"scope":"retrieved-passages","checkedPassages":12,"candidateSources":50,"excerptedSources":9,"limits":["query-sampling","candidate-limit","source-limit","context-limit","passage-limit"]},"status":"incomplete"}} -->
 # 0011 — Read-only council research capabilities
 
 - Status: accepted
@@ -62,4 +61,4 @@ independence remain model instructions. Missing access yields coverage gaps.
 SDK CLI/tool-selection semantics change, new repo tools become mutating, privacy
 requirements need a network sandbox, or measured research costs exceed value.
 
-<!-- pix:wiki-check {"version":1,"status":"attempted","runId":"f061c4de-d66a-4d75-9c7e-aef1d8e78d55","contentHash":"90d0f5b26b3c294cbf2fb5d81c8d137849857c487a9b9f9cdc9b9047179f5b9a","checkedAt":"2026-10-31T01:48:36.009Z","maxDocumentChars":128000} -->
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"90d0f5b26b3c294cbf2fb5d81c8d137849857c487a9b9f9cdc9b9047179f5b9a","checkedAt":"2026-10-31T11:00:22.682Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":50,"reportLanguage":"ru"} -->

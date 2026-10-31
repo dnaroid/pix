@@ -51,4 +51,4 @@ existing grants remain in memory and apply again when the restriction returns.
 
 Run suite typecheck, suite tests and smoke, plus the Pix root check and suite integration test. The deterministic shell alias tests exercise grant/revoke, canonical descendant and link behavior, denied paths, missing directories, and session/runtime boundaries.
 
-<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"3c287c7dff24947ef963fa091423455b86f4b554714a491c375e3e9b60b47ae0","checkedAt":"2026-10-31T00:02:28.982Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":69,"reportLanguage":"ru"} -->
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"f4d4bad00fb84db32f02ac84f743abfad8e1757075f241dc258056cc8e93185a","checkedAt":"2026-10-31T12:18:12.294Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":69,"reportLanguage":"ru"} -->

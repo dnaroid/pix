@@ -1,3 +1,4 @@
+<!-- pix:wiki-report {"version":1,"checkedAt":"2026-10-31T12:35:54.579Z","result":{"path":"wiki/desktop/guide.md","documentHash":"b854e98214b7f209342684617a90880b17b94db9beec63907741a5bb7c4dc3db","modelRef":"zai/glm-5.3-flash","reportLanguage":"ru","checkedSources":12,"conflicts":[],"uncertainties":[],"reviewedSources":[],"notices":["Документ, настройки или содержимое Wiki изменились во время проверки. Повторите её."],"coverage":{"scope":"retrieved-passages","checkedPassages":12,"candidateSources":61,"excerptedSources":11,"limits":["query-sampling","candidate-limit","source-limit","context-limit","passage-limit"]},"status":"incomplete"}} -->
 # Pix Desktop
 
 <!-- markdownlint-disable MD013 -->
@@ -29,19 +30,21 @@ inside a window.
 
 The left Activity Bar exposes:
 
-- **Tasks** — project-local SQLite tasks (`.pi/tasks.sqlite`) with full UI
+- **Work** — Tasks and Plans sections; project-local SQLite tasks (`.pi/tasks.sqlite`) have full UI
   management, Quick Add, drag-and-drop, linked sessions and SHA-256 attachments;
   slash commands and the agent task tool supplement the UI;
 - **Project** — file explorer with keyboard navigation and external-editor
   actions;
+- **Wiki** — project knowledge pages and consistency findings;
 - **Source Control** — branch/status, diffs, stage/unstage, commit/push, code
   review and safe repository tools;
 - **Registry** — private Git-backed skills/agents/project-state synchronization;
-- **Package Scripts** — project package scripts and interactive terminals;
+- **Launch Commands** — saved launch commands, project package scripts and interactive terminals;
 - **Search indexes** — local and semantic search-store status by source;
 - **Usage** — Pix session usage across this project or all projects, with
   selectable time period and cost, token and call metrics;
 - **LSP** — language-server status and controls;
+- **Logs** — diagnostic logs, when enabled;
 - **Settings** — Desktop-specific model, voice, editor and Source Control
   preferences.
 
@@ -113,10 +116,14 @@ complex, expert) show model/thinking read-only; custom tiers stay editable, as
 do non-model settings such as Auto by default, routing fallback tier, visible
 models, RAG thinking effort, autocomplete limits, frontier flags and economy.
 
-Code and Knowledge use native local search. Optional semantic retrieval requires
-explicit project consent/configuration in `.pi/search/semantic.json`; eligible
-chunks and queries may be sent externally using `OPENROUTER_API_KEY`. Existing
-Legacy search directories/configuration are not consulted.
+Code and Knowledge use native local search. Optional semantic retrieval is
+authorized by explicit global `search.embedding` in
+`~/.config/pi/pi-tools-suite.jsonc`, constrained by enabled project sources;
+there is no separate project consent flag. OpenRouter uses `OPENROUTER_API_KEY`
+then shared Pi authentication; Ollama needs no API key. Eligible selected text
+and queries may be embedded. Legacy project `semantic.json` and standalone
+`semantic-search.json` do not authorize semantics and are not migrated. See the
+[native search contract](../search/native-repository-search.md).
 
 ## Project initialization states
 
@@ -333,4 +340,4 @@ Browser-only automation is not a substitute for testing the Tauri/WebKit
 application. On Linux, semantic native automation may also require a working
 AT-SPI accessibility bus.
 
-<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"d1bc2c3eae27d3913deef75bb29e786939c1c9840d1734534d4c767e5a690ab7","checkedAt":"2026-10-31T01:26:05.195Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":58,"reportLanguage":"ru"} -->
+<!-- pix:wiki-check {"version":1,"status":"attempted","runId":"19234a89-390d-4a92-841c-d7eb9a972182","contentHash":"b854e98214b7f209342684617a90880b17b94db9beec63907741a5bb7c4dc3db","checkedAt":"2026-10-31T12:35:54.583Z","maxDocumentChars":128000} -->

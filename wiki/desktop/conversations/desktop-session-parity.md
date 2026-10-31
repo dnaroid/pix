@@ -66,7 +66,7 @@ Show the same project sessions in Pix Desktop that Pix TUI discovers while keepi
   session. Selecting a saved session replaces the draft directly; a new real
   session is materialized only on the first prompt or action that requires a
   Pi session.
-- Desktop's embedded chooser and TUI's under-tabs chooser present only returned
+- Desktop's embedded chooser and TUI's draft-tab-surface chooser present only returned
   sessions that are not already represented by real tabs, so already-open or
   running conversations are not duplicated there.
 - Without a search query, Desktop saved-session surfaces keep the same fork ordering as TUI: roots and siblings are sorted by descending `updatedAt` and each child follows its parent. Desktop draws thin SVG ancestry lines with rounded turns and small nodes instead of textual connectors. Separate keyboard-accessible, state-rotating Lucide chevrons collapse/expand descendants without selecting a conversation. Hover/focus highlights the row and its direct parent/children. Search results remain flat ranked matches while retaining fork markers and include descendants of collapsed branches.
@@ -111,4 +111,4 @@ Show the same project sessions in Pix Desktop that Pix TUI discovers while keepi
 - Confirmed by code: ACP previously listed only `pix-acp/sessions.json` records.
 - Confirmed by local metadata: the native project session set and TUI tab snapshot contain more entries than the ACP map.
 
-<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"391c591654433357c9d25614df594d415c7ee5d000a8e446aba36d1fe30f83ef","checkedAt":"2026-10-31T01:01:43.291Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":61,"reportLanguage":"ru"} -->
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"48c10ebb443686161bb3f6f17dc7c9ae45f2bdb9984f9c09f5b4339eafa0775c","checkedAt":"2026-10-31T12:34:53.128Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":61,"reportLanguage":"ru"} -->

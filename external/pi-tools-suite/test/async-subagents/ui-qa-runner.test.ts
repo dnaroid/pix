@@ -358,7 +358,7 @@ describe("capability-first UI QA runner", () => {
 		expect(args).toContain("--pageIdRouting=true");
 		expect(args).toContain("--javascriptEvaluation=false");
 		expect(args).toContain("--categoryExtensions=false");
-		expect(args).toContain("--categoryPwa=false");
+		expect(args.some((arg) => /category-?pwa/i.test(arg))).toBe(false);
 		expect(args).toContain("--experimentalVision=false");
 		expect(args).toContain("--autoConnect=true");
 		expect(args.some((arg) => /^--(browserUrl|headless|isolated)=/.test(arg))).toBe(false);
@@ -374,11 +374,15 @@ describe("capability-first UI QA runner", () => {
 		const attached = chromeDevtoolsStartArgs({ ...options, devtools: { browserUrl: "http://127.0.0.1:4312" } });
 		expect(attached).toContain("--browserUrl=http://127.0.0.1:4312");
 		expect(attached).not.toContain("--autoConnect=true");
+		expect(attached.some((arg) => /category-?pwa/i.test(arg))).toBe(false);
+		const endpointOverridesLaunch = chromeDevtoolsStartArgs({ ...options, devtools: { browserUrl: "http://127.0.0.1:4312", headless: true } });
+		expect(endpointOverridesLaunch).toEqual(attached);
 		for (const headless of [true, false]) {
 			const launched = chromeDevtoolsStartArgs({ ...options, devtools: { headless } });
 			expect(launched).toContain("--isolated=true");
 			expect(launched).toContain(`--headless=${headless}`);
 			expect(launched).not.toContain("--autoConnect=true");
+			expect(launched).toContain("--categoryPwa=false");
 		}
 	});
 

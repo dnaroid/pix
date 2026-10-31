@@ -160,7 +160,7 @@ the current sub-agent profile merge pipeline.
   therefore self-contained. As extended by `ui-qa-agent.md`, `ui-qa` additionally
   receives launcher-owned runner/workspace paths. Its top-level
   `agents/ui-qa.md` body is a thin common contract plus deterministic guide
-  routing; backend-specific browser/TUI/Desktop/auth instructions live in
+  routing; backend-specific browser/TUI/Desktop/Android instructions and browser-auth details live in
   non-role assets under `agents/ui-qa/guides/` and are loaded through the
   allowlisted UI-QA runner. `ui-qa` is the only built-in UI-QA role name.
 
@@ -189,4 +189,4 @@ and core tests verify that a same-named project role survives a bundled disable,
 fully replaces omitted built-in fields, and is announced as a project
 replacement in the parent catalog.
 
-<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"c074ea0f1f8d3ea5993bdfc7c420ec3d2787fd78a942d0192ffb41767661b7da","checkedAt":"2026-10-31T00:20:13.726Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":59,"reportLanguage":"ru"} -->
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"caa6bef6010565f1c2539016d00b7b4751ac5dd7ee02976be61544dc97dfa054","checkedAt":"2026-10-31T13:00:00.010Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":58,"reportLanguage":"ru"} -->

@@ -1,15 +1,15 @@
 # Known documentation conflicts and lifecycle caveats
 
-The migration relocates documentation; it does not authorize a new interpretation
-of conflicting requirements. Original passages and their metadata are preserved.
-The following discrepancies need an evidence-backed follow-up, not silent merging.
+The migration relocated documentation without authorizing new product decisions.
+Subsequent evidence-backed corrections are noted below. Preserve historical
+rationale, distinguish it from current contracts, and do not hide implementation
+gaps by weakening requirements.
 
 ## Search configuration: older guides versus the native contract
 
 - [Configuration guide](../configuration/guide.md), [Desktop guide](../desktop/guide.md)
-  and [troubleshooting](../getting-started/troubleshooting.md) retain descriptions
-  of project `.pi/search/semantic.json`, per-source semantic consent and/or a
-  pinned search provider.
+  and [troubleshooting](../getting-started/troubleshooting.md) now use the global
+  suite configuration, not project `semantic.json` or independent consent flags.
 - [Native repository search](../search/native-repository-search.md) and
   [global authorization decision](../decisions/0068-global-semantic-configuration.md)
   describe the current native/global `search.embedding` contract. Global embedding
@@ -19,7 +19,8 @@ The following discrepancies need an evidence-backed follow-up, not silent mergin
 
 Use the native contract and current scripts when changing search. This migration
 did not reconfigure a provider, enable extra sources or upload documents to
-establish discoverability. The older guide passages remain visible as drift.
+establish discoverability. Session queries use cached document vectors; eligible
+background/manual indexing, not querying, creates session document embeddings.
 
 ## Desktop support and release asset matrices
 
@@ -28,15 +29,28 @@ establish discoverability. The older guide passages remain visible as drift.
   restrict Desktop support to macOS Apple Silicon.
 - The LLM installation guide also contains Windows/Linux Desktop installation
   branches. They are not permission to expand the supported Desktop scope.
-- [Release guide](../development/release/guide.md) retains older counts/matrices
-  for seven assets/four updater targets and a version-specific historical claim.
-  These must not be treated as a fresh release inventory without checking the
+- [Release guide](../development/release/guide.md) and
+  [distribution contract](../development/release/release-distribution.md) now
+  match the current scripts: three TUI archives, a macOS ARM64 DMG and updater
+  bundle (five public build assets), plus `latest.json` and `SHA256SUMS`.
+  The one `.sig` is internal. Historical measurements and retained packaging
+  branches are not fresh release inventory; check the
   [CI specification](../development/release/ci-release.md),
   [distribution contract](../development/release/release-distribution.md) and
   current release scripts.
 
-The root README keeps the unambiguous macOS-only Desktop scope. Original detailed
-texts remain intact rather than silently rewriting platform requirements.
+The root README keeps the unambiguous macOS-only Desktop scope. This correction
+does not expand platform support; older Windows/Linux installation branches
+remain lifecycle caveats, not delivery authorization.
+
+## Known implementation gap: terminal typography
+
+[Package-script terminals](../desktop/integrations/desktop-package-scripts.md)
+record the current xterm font size of 10 px. The
+[Desktop design contract](../desktop/design.md#5-typography) requires at least
+12 px, including dense technical chrome. The 10 px runtime is not a new design
+exception. Documentation now distinguishes observed behavior from the unmet
+requirement; changing the runtime and its tests remains implementation work.
 
 ## Accepted ADRs can be partly superseded
 
@@ -75,4 +89,4 @@ The complete original [contract overview](../reference/contracts.md) contains
 additional known unknowns and historical consolidation notes. Preserve those
 caveats when editing the corresponding feature contracts.
 
-<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"48c60883b11ff19fec4d79deaa323e7bb3e2eb8cd9684c8900890f9c96046604","checkedAt":"2026-10-31T00:11:26.958Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":57,"reportLanguage":"ru"} -->
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"d3c86919ef63424dda74d636cb890d7eb2ebb7737eb0567d5a8eea8a1eda8bf2","checkedAt":"2026-10-31T12:36:24.417Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":63,"reportLanguage":"ru"} -->

@@ -1028,4 +1028,4 @@ is re-read before and after writing a same-directory temporary file, which is
 then renamed over the page; symlinks, hidden/parent segments and oversized
 files are rejected.
 
-<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"1ca56dcbd5eb69ec7c9a7089d1521b0de11d7f40ceaee054f61fb8f0fd023fa2","checkedAt":"2026-10-31T02:07:11.576Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":22,"candidateSources":103,"reportLanguage":"ru"} -->
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"84b4101b0523b321712271f67849178ab3cad54d56d72b1248e155d0d428d249","checkedAt":"2026-10-31T11:32:28.730Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":23,"candidateSources":104,"reportLanguage":"ru"} -->
