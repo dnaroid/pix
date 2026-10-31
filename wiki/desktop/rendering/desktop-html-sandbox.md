@@ -144,6 +144,11 @@ finished; the checklist is the last content of the final message, with no tool
 calls or further work after it, and the selection arrives as a new user prompt. When the
 agent needs the user's answer before it can continue, it calls the blocking
 `question` tool instead. The same choice is never offered both ways.
+Ending a turn with a closed `pix-actions` checklist counts as waiting on the
+user: the todo extension (`external/pi-tools-suite/src/todo/`) does not send its
+unfinished-todo auto-nudge after such a reply, just as it waits on a pending
+`question`/`ask_user` call. Otherwise the nudge would push the agent past the
+checklist it just offered.
 
 Use a closed `pix-actions` fenced block with a button label on the opening
 line. The label must not appear as a standalone title in the body. Its body
