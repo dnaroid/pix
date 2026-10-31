@@ -57,7 +57,10 @@ status: active
   cannot recreate it after teardown begins. Attention updates validate native owner identity,
   prune destroyed/replaced windows and ignore shutdown; each renderer serializes
   and coalesces updates and releases focus/visibility listeners on teardown.
-  There are no polling timers.
+  There are no polling timers. A failed publish schedules a single pending
+  retry (2 s, doubling to 60 s, reset on success) so the badge converges without
+  another attention event; the retry is cancelled on teardown, and the failure is
+  logged as `frontend:warning` once per failure streak.
 
 ## Implementation and verification
 

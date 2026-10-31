@@ -7,6 +7,7 @@ import {
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { AgentControlState } from "./agent-control";
+import { createFailureStreakReporter } from "./diagnostic-logging";
 
 type NotificationPreferences = {
   notificationsEnabled: boolean;
@@ -28,7 +29,16 @@ type DesktopNotificationServiceOptions = {
   isActiveSession?: (sessionId: string | null) => boolean;
   playPixSound?: () => void | Promise<void>;
   api?: NativeNotificationApi;
+  /** Handled native failures; repeats are suppressed until the next success. */
+  reportWarning?: (label: string, error: unknown) => void;
+  now?: () => number;
 };
+
+/**
+ * A denial is re-checked (never re-prompted) at most this often, so granting
+ * permission later in System Settings takes effect without a restart.
+ */
+export const NOTIFICATION_PERMISSION_RECHECK_MS = 30_000;
 
 export type DesktopNotificationService = ReturnType<typeof createDesktopNotificationService>;
 
@@ -76,7 +86,13 @@ export function createDesktopNotificationService(options: DesktopNotificationSer
   const api = options.api ?? NATIVE_NOTIFICATION_API;
   const isForeground = options.isForeground ?? desktopWindowForeground;
   const enabled = options.enabled ?? (() => true);
-  let permissionGranted: boolean | undefined;
+  const now = options.now ?? Date.now;
+  const permissionFailures = createFailureStreakReporter((error) => options.reportWarning?.("notification:permission", error));
+  const deliveryFailures = createFailureStreakReporter((error) => options.reportWarning?.("notification:delivery", error));
+  // Only a grant is cached: macOS lets the user grant later in System Settings.
+  let permissionGranted = false;
+  let permissionPrompted = false;
+  let permissionDeniedAt: number | undefined;
   let permissionRequest: Promise<boolean> | null = null;
   let activationHandler: ((sessionId: string) => void | Promise<void>) | null = null;
   let activationSubscription: Promise<void> | null = null;
@@ -106,18 +122,26 @@ export function createDesktopNotificationService(options: DesktopNotificationSer
   }
 
   async function ensurePermission(): Promise<boolean> {
-    if (permissionGranted !== undefined) return permissionGranted;
+    if (permissionGranted) return true;
     if (permissionRequest) return permissionRequest;
+    if (permissionDeniedAt !== undefined && now() - permissionDeniedAt < NOTIFICATION_PERMISSION_RECHECK_MS) return false;
     permissionRequest = (async () => {
       try {
-        if (await api.isPermissionGranted()) return true;
+        const granted = await api.isPermissionGranted();
+        permissionFailures.success();
+        if (granted) return true;
+        // Prompt at most once per run; later checks only observe Settings.
+        if (permissionPrompted) return false;
+        permissionPrompted = true;
         return (await api.requestPermission()) === "granted";
-      } catch {
+      } catch (error) {
+        permissionFailures.failure(error);
         return false;
       }
     })().then((granted) => {
-      permissionGranted = granted;
       permissionRequest = null;
+      permissionGranted = granted;
+      permissionDeniedAt = granted ? undefined : now();
       return granted;
     });
     return permissionRequest;
@@ -168,8 +192,10 @@ export function createDesktopNotificationService(options: DesktopNotificationSer
         if (disposed || !latest.notificationsEnabled || latest.soundOnlyEnabled || isForeground()) return;
       }
       await api.sendNotification({ title, body: compactBody(body), sessionId });
-    } catch {
+      deliveryFailures.success();
+    } catch (error) {
       // Native notifications are best effort and must never fail the agent flow.
+      deliveryFailures.failure(error);
     }
   }
 

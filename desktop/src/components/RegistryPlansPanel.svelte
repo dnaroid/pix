@@ -7,6 +7,7 @@
   import type { PlanProgress } from "../lib/project-documents";
   import { onMount } from "svelte";
   import { createProjectFilesRefresh } from "../lib/project-files-refresh";
+  import { createDiagnosticLogger } from "../lib/diagnostic-logging";
 
   let { plans, activePath, view, onChoose, planProgress = {}, onRefresh = async () => {}, actionsDisabled = false, runDisabled = false, onRun = () => {}, onDelete = () => {}, owners = {}, runs = {}, onOpenRun, onResume }: {
     plans: readonly string[];
@@ -26,7 +27,9 @@
     onResume?: (path: string) => void;
   } = $props();
 
-  onMount(() => createProjectFilesRefresh(() => onRefresh(), undefined, 3_000).dispose);
+  const diagnostics = createDiagnosticLogger(() => ({ workspace: view.workspace }));
+  onMount(() => createProjectFilesRefresh(() => onRefresh(), undefined, 3_000,
+    (error) => diagnostics.warn("registry:plans-refresh", error)).dispose);
 
   function focusPlan(event: KeyboardEvent): void {
     const root = (event.currentTarget as HTMLElement).closest("nav")!;

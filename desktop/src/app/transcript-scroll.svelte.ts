@@ -6,6 +6,8 @@ type TranscriptScrollOptions = {
   activeSessionId: () => string | null;
   pane: () => HTMLDivElement | null;
   content: () => HTMLDivElement | null;
+  /** Open session tabs; saved positions for closed tabs are dropped on activation. */
+  openSessionIds?: () => Iterable<string>;
 };
 
 type ScrollMetrics = Pick<HTMLDivElement, "clientHeight" | "scrollHeight" | "scrollTop">;
@@ -106,6 +108,7 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
       });
     }
     activatedSessionId = sessionId;
+    pruneClosedSessionPositions(sessionId);
     scrollRevision += 1;
     if (frame) cancelAnimationFrame(frame);
     frame = 0;
@@ -114,6 +117,17 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
     savedScrollTop = position?.scrollTop ?? 0;
     restorePending = true;
     scheduleScrollToLatest();
+  }
+
+  // Every activation runs after tab close/workspace switches settle, so the map
+  // stays bounded by open tabs instead of every session visited this run.
+  function pruneClosedSessionPositions(incoming: string | null): void {
+    if (!options.openSessionIds) return;
+    const open = new Set<string | null>(options.openSessionIds());
+    open.add(incoming);
+    for (const id of sessionPositions.keys()) {
+      if (!open.has(id)) sessionPositions.delete(id);
+    }
   }
 
   function jumpToLatest(): void {
@@ -264,6 +278,7 @@ export function createTranscriptScrollController(options: TranscriptScrollOption
   }
 
   return {
+    get savedSessionCount() { return sessionPositions.size; },
     get followsLatest() { return followsLatest; },
     get restoring() { return restorePending; },
     activateSession,

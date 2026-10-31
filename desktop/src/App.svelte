@@ -143,6 +143,7 @@
     activeSessionId: () => activeSessionId,
     pane: () => transcriptPane,
     content: () => transcriptContent,
+    openSessionIds: () => tabSessions.map((session) => session.sessionId),
   });
   const transcriptFollowsLatest = $derived(transcriptScroll.followsLatest);
   const scheduleScrollToLatest = transcriptScroll.scheduleScrollToLatest;
@@ -256,6 +257,7 @@
   const sessions = $derived(sessionCatalog.sessions);
   const sessionTabAttention = createSessionTabAttentionStore();
   const trayAttention = createDesktopTrayAttention({
+    reportWarning: diagnosticLogger.warn,
     isSessionVisible: (sessionId) => desktopWindowForeground()
       && (sessionId === null || activeWorkbenchTabId === workbenchSessionTabId(sessionId)),
   });
@@ -277,6 +279,7 @@
     },
     isActiveSession: (sessionId) => sessionId !== null
       && activeWorkbenchTabId === workbenchSessionTabId(sessionId),
+    reportWarning: diagnosticLogger.warn,
     playPixSound: async () => {
       if (!isTauri()) return;
       try {
@@ -284,7 +287,7 @@
       } catch (error) {
         if (!pixSoundErrorReported) {
           pixSoundErrorReported = true;
-          diagnosticLogger.report(error, "notification:sound-failed");
+          diagnosticLogger.warn("notification:sound", error);
         }
       }
     },
@@ -842,6 +845,7 @@
     connection,
     promptServices,
     disposeTranscriptScroll: transcriptScroll.dispose,
+    resetAfterDisconnect: () => sessionCoordinator.resetAfterDisconnect(),
     cancelAllPendingElicitations,
     reportError,
   });

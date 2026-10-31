@@ -15,6 +15,13 @@ import {
   type SessionSubagentSnapshot,
 } from "../lib/session-subagents";
 
+/**
+ * Tombstones drop late session/update events from runtimes whose close may
+ * still be in flight (or failed). They survive workspace resets and are only
+ * cleared on disconnect, so cap them FIFO to keep long sessions bounded.
+ */
+export const MAX_FORGOTTEN_SESSION_IDS = 1024;
+
 type SessionActivityStoreOptions = {
   onChange?: (sessionId: string) => void;
 };
@@ -95,7 +102,14 @@ export function createSessionActivityStore(options: SessionActivityStoreOptions 
   }
 
   function markForgotten(sessionId: string): void {
+    // Re-insert so the most recently retired runtime is evicted last.
+    forgottenSessionIds.delete(sessionId);
     forgottenSessionIds.add(sessionId);
+    while (forgottenSessionIds.size > MAX_FORGOTTEN_SESSION_IDS) {
+      const oldest = forgottenSessionIds.values().next().value;
+      if (oldest === undefined) break;
+      forgottenSessionIds.delete(oldest);
+    }
     owners.delete(sessionId);
     // Abandoned new/fork requests may forget without the tab-close clear path.
     // Snapshots and their ordering timestamps belong to the attachment too.
@@ -131,17 +145,25 @@ export function createSessionActivityStore(options: SessionActivityStoreOptions 
     }
   }
 
+  // Workspace reset: retired runtimes on the same connection can still emit
+  // late updates (for example after a failed closeSession), so keep tombstones.
   function reset(): void {
     todos = new Map();
     subagents = new Map();
     summaries = new Map();
     owners.clear();
-    forgottenSessionIds.clear();
     pending.clear();
+  }
+
+  /** The connection that could deliver late updates is gone; drop tombstones. */
+  function resetAfterDisconnect(): void {
+    reset();
+    forgottenSessionIds.clear();
   }
 
   return {
     get ownedSessionCount() { return owners.size; },
+    get forgottenSessionCount() { return forgottenSessionIds.size; },
     get pendingRequestCount() { return pending.size; },
     get todos() { return todos; },
     get subagents() { return subagents; },
@@ -155,5 +177,6 @@ export function createSessionActivityStore(options: SessionActivityStoreOptions 
     isForgotten: (sessionId: string) => forgottenSessionIds.has(sessionId),
     clear,
     reset,
+    resetAfterDisconnect,
   };
 }

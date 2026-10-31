@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createDesktopAgentNotificationCoordinator,
   createDesktopNotificationService,
+  NOTIFICATION_PERMISSION_RECHECK_MS,
 } from "./desktop-notifications";
 
 function notificationHarness(foreground = false) {
@@ -72,6 +73,61 @@ describe("desktop native notifications", () => {
       body: "Research",
       sessionId: "session-1",
     });
+  });
+
+  it("re-checks a denial after the throttle without prompting again", async () => {
+    let granted = false;
+    let clock = 0;
+    const api = {
+      isPermissionGranted: vi.fn(async () => granted),
+      requestPermission: vi.fn(async () => "denied" as NotificationPermission),
+      sendNotification: vi.fn(async () => undefined),
+      listenActivation: vi.fn(async (_handler: (sessionId: string | null) => void) => vi.fn()),
+      focusWindow: vi.fn(async () => undefined),
+    };
+    const service = createDesktopNotificationService({ isForeground: () => false, api, now: () => clock });
+
+    await service.completed("s", "Denied");
+    await service.completed("s", "Throttled");
+    expect(api.isPermissionGranted).toHaveBeenCalledTimes(1);
+    expect(api.requestPermission).toHaveBeenCalledTimes(1);
+
+    clock += NOTIFICATION_PERMISSION_RECHECK_MS;
+    await service.completed("s", "Still denied");
+    expect(api.isPermissionGranted).toHaveBeenCalledTimes(2);
+    expect(api.requestPermission).toHaveBeenCalledTimes(1);
+    expect(api.sendNotification).not.toHaveBeenCalled();
+
+    granted = true; // user enabled notifications in System Settings
+    clock += NOTIFICATION_PERMISSION_RECHECK_MS;
+    await service.completed("s", "Granted");
+    await service.completed("s", "Cached");
+    expect(api.isPermissionGranted).toHaveBeenCalledTimes(3);
+    expect(api.sendNotification).toHaveBeenCalledTimes(2);
+  });
+
+  it("logs permission and delivery failures once per failure streak", async () => {
+    let clock = 0;
+    const reportWarning = vi.fn();
+    const api = {
+      isPermissionGranted: vi.fn(async (): Promise<boolean> => { throw new Error("no bridge"); }),
+      requestPermission: vi.fn(async () => "granted" as NotificationPermission),
+      sendNotification: vi.fn(async (): Promise<void> => { throw new Error("send failed"); }),
+      listenActivation: vi.fn(async (_handler: (sessionId: string | null) => void) => vi.fn()),
+      focusWindow: vi.fn(async () => undefined),
+    };
+    const service = createDesktopNotificationService({ isForeground: () => false, api, now: () => clock, reportWarning });
+    await service.completed("s", "a");
+    clock += NOTIFICATION_PERMISSION_RECHECK_MS;
+    await service.completed("s", "b");
+    expect(reportWarning.mock.calls).toEqual([["notification:permission", expect.any(Error)]]);
+
+    api.isPermissionGranted.mockImplementation(async () => true);
+    clock += NOTIFICATION_PERMISSION_RECHECK_MS;
+    await service.completed("s", "c");
+    await service.completed("s", "d");
+    expect(api.sendNotification).toHaveBeenCalledTimes(2);
+    expect(reportWarning.mock.calls.map(([label]) => label)).toEqual(["notification:permission", "notification:delivery"]);
   });
 
   it("focuses the owning window and activates the exact session when clicked", async () => {

@@ -32,6 +32,7 @@ type DesktopLifecycleServicesOptions = {
   connection: ConnectionServices;
   promptServices: PromptServices;
   disposeTranscriptScroll: () => void;
+  resetAfterDisconnect: () => void;
   cancelAllPendingElicitations: () => void;
   reportError: (error: unknown) => void;
 };
@@ -75,6 +76,7 @@ export function createDesktopLifecycleServices(options: DesktopLifecycleServices
     insertPromptPaths: (paths) => options.promptComposer()?.insertPaths(paths),
     connect: options.connection.connect,
     disposeConnection: options.connection.dispose,
+    resetAfterDisconnect: options.resetAfterDisconnect,
     disposeSessionUpdates: options.promptServices.updates.dispose,
     disposeTranscriptScroll: options.disposeTranscriptScroll,
     cancelAllPendingElicitations: options.cancelAllPendingElicitations,

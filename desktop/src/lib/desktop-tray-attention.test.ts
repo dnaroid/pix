@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
-import { createDesktopTrayAttention } from "./desktop-tray-attention";
+import { createDesktopTrayAttention, TRAY_ATTENTION_RETRY_MAX_MS, TRAY_ATTENTION_RETRY_MS } from "./desktop-tray-attention";
 
 afterEach(() => {
   if (typeof window !== "undefined") clearMocks();
@@ -139,6 +139,50 @@ describe("desktop tray unseen attention", () => {
     release();
     await settle();
     expect(publish.mock.calls).toEqual([[true], [false]]);
+  });
+
+  it("retries a failed publish with backoff and logs once per failure streak", async () => {
+    vi.useFakeTimers();
+    try {
+      const publish = vi.fn(async (_attention: boolean): Promise<void> => undefined);
+      const reportWarning = vi.fn();
+      const attention = createDesktopTrayAttention({ isSessionVisible: () => false, publish, reportWarning });
+      publish.mockRejectedValueOnce(new Error("ipc down")).mockRejectedValueOnce(new Error("ipc down"));
+      attention.mark("a");
+      await settle();
+      expect(publish).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(1);
+      await vi.advanceTimersByTimeAsync(TRAY_ATTENTION_RETRY_MS);
+      expect(publish).toHaveBeenCalledTimes(2);
+      expect(reportWarning).toHaveBeenCalledOnce();
+      expect(reportWarning).toHaveBeenCalledWith("tray:publish", expect.any(Error));
+      await vi.advanceTimersByTimeAsync(TRAY_ATTENTION_RETRY_MS * 2);
+      expect(publish.mock.calls).toEqual([[true], [true], [true]]);
+      expect(vi.getTimerCount()).toBe(0);
+      publish.mockRejectedValueOnce(new Error("again"));
+      attention.clearSession("a");
+      await settle();
+      expect(reportWarning).toHaveBeenCalledTimes(2); // new streak after success
+      attention.dispose();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not retry after teardown", async () => {
+    vi.useFakeTimers();
+    try {
+      const publish = vi.fn(async (_attention: boolean): Promise<void> => { throw new Error("down"); });
+      const attention = createDesktopTrayAttention({ isSessionVisible: () => false, publish });
+      attention.mark("a");
+      attention.dispose();
+      await vi.advanceTimersByTimeAsync(TRAY_ATTENTION_RETRY_MAX_MS * 2);
+      expect(publish).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("uses the window-owned native command without notification permission or routing data", async () => {

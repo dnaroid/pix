@@ -223,7 +223,7 @@
     // The shared owner has its own periodic refresh.
     if (!shared) consistency.refresh();
     return tree.refreshVisibleDirectories();
-  }).dispose);
+  }, undefined, undefined, (error) => diagnostics.warn("wiki:tree-refresh", error)).dispose);
   onDestroy(() => { disposed = true; conflictMenu?.dispose(); if (!shared) consistency.dispose(); navigation.dispose(); nameEditor.dispose(); operations.invalidate(); tree.dispose(); });
 </script>
 

@@ -253,14 +253,17 @@ pub(crate) fn log_desktop_diagnostic(
             "frontend:uncaught",
             "frontend:unhandled-rejection",
             "media:playback-unavailable",
+            "frontend:warning",
         ]
         .contains(&event.as_str())
     {
         return Err("invalid diagnostic".into());
     }
     let media_warning = event == "media:playback-unavailable";
+    // Handled, recoverable frontend failures (tray publish, poll probes, ...).
+    let warning = media_warning || event == "frontend:warning";
     record_scoped(
-        if media_warning { "warn" } else { "error" },
+        if warning { "warn" } else { "error" },
         if media_warning {
             "frontend.media"
         } else {
@@ -484,6 +487,14 @@ mod tests {
             None,
         )
         .is_ok());
+        assert!(log_desktop_diagnostic(
+            "frontend:warning".into(),
+            "tray:publish: failed".into(),
+            None,
+            None,
+        )
+        .is_ok());
+        assert!(log_desktop_diagnostic("custom:event".into(), "x".into(), None, None).is_err());
         assert!(log_desktop_event("acp:ready".into(), None, Some("x".repeat(257))).is_err());
     }
     #[test]

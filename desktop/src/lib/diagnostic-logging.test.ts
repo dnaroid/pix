@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createDiagnosticLogger } from "./diagnostic-logging";
+import { createDiagnosticLogger, createFailureStreakReporter, DESKTOP_WARNING_EVENT } from "./diagnostic-logging";
 
 describe("frontend diagnostic logging", () => {
   it("ignores browser-only ResizeObserver loop notices, not actual JavaScript errors", async () => {
@@ -102,5 +102,23 @@ describe("frontend diagnostic logging", () => {
     const other = createDiagnosticLogger(() => ({ workspace: "" }), send);
     expect(() => other.report({ toString() { throw new Error("bad value"); } })).not.toThrow();
     expect(send).not.toHaveBeenCalled();
+  });
+  it("sends labeled warnings through the native-allowlisted warning event", async () => {
+    const send = vi.fn().mockResolvedValue(undefined);
+    const logger = createDiagnosticLogger(() => ({ workspace: "/project" }), send);
+    logger.warn("tray:publish", new Error("ipc down"));
+    await Promise.resolve();
+    expect(send).toHaveBeenCalledWith("log_desktop_diagnostic", expect.objectContaining({
+      event: DESKTOP_WARNING_EVENT,
+      diagnostic: expect.stringMatching(/^tray:publish: Error: ipc down/),
+    }));
+  });
+  it("reports only the first failure of each streak and never throws", () => {
+    const report = vi.fn(() => { throw new Error("logger broke"); });
+    const streak = createFailureStreakReporter(report);
+    expect(() => { streak.failure(1); streak.failure(2); }).not.toThrow();
+    streak.success();
+    streak.failure(3);
+    expect(report.mock.calls).toEqual([[1], [3]]);
   });
 });
