@@ -9,6 +9,8 @@
   import ChevronUp from "@lucide/svelte/icons/chevron-up";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import FileCode from "@lucide/svelte/icons/file-code";
+  import Languages from "@lucide/svelte/icons/languages";
+  import MessageSquareText from "@lucide/svelte/icons/message-square-text";
   import Pencil from "@lucide/svelte/icons/pencil";
   import Search from "@lucide/svelte/icons/search";
   import WrapText from "@lucide/svelte/icons/wrap-text";
@@ -37,6 +39,7 @@
   import { createPreviewMarkdownController } from "./preview-markdown-controller.svelte";
   import { createPreviewScrollController } from "./preview-scroll-controller.svelte";
   import { createPreviewEvidenceController } from "./preview-evidence-controller.svelte";
+  import { createPreviewTranslationController, type PreviewDocumentTranslator } from "./preview-translation-controller.svelte";
   import { createDiagnosticLogger } from "../lib/diagnostic-logging";
   import { openExternalHref } from "../lib/external-links";
   import { resolveWikiLink } from "../lib/project-wiki";
@@ -78,6 +81,8 @@
     onResolveKnowledge,
     knowledgeResolving = false,
     onOpenExternalEditor,
+    onExplainFile,
+    onTranslateDocument,
     onScrollPositionChange,
     onDirtyChange,
     onClose,
@@ -117,6 +122,10 @@
     onResolveKnowledge?: (result: KnowledgeCheckResult, snapshot: string) => void | Promise<void>;
     knowledgeResolving?: boolean;
     onOpenExternalEditor?: (path: string) => void;
+    /** Whole-file commentary, anchored below the header button. */
+    onExplainFile?: (path: string, content: string, anchor: { left: number; top: number; bottom: number }) => void;
+    /** Whole-document Markdown translation with a project cache. */
+    onTranslateDocument?: PreviewDocumentTranslator;
     onScrollPositionChange?: (id: number, position: PreviewScrollPosition) => void;
     onDirtyChange?: (dirty: boolean) => void;
     onClose: () => void;
@@ -158,6 +167,33 @@
   const highlighted = $derived(
     file && !renderAsMarkdown ? highlightCode(previewContent, language) : undefined,
   );
+
+  const translation = createPreviewTranslationController({
+    translate: () => onTranslateDocument,
+    onError: (error) => diagnostics.warn("preview:document-translation-failed", error),
+  });
+  onDestroy(translation.dispose);
+  $effect(() => { translation.setSource(`${previewId}\0${file?.path ?? ""}\0${renderAsMarkdown ? previewContent : ""}`); });
+  const translationState = translation.state;
+  const canTranslate = $derived(Boolean(file && renderAsMarkdown && !file.virtualWikiDirectory && onTranslateDocument && previewContent.trim()));
+  const showingTranslation = $derived(canTranslate && translationState.showing);
+  const renderedMarkdown = $derived(showingTranslation ? translationState.text : previewContent);
+  const translationSummary = $derived.by(() => {
+    if (translationState.status === "error") return translationState.error || "Translation failed";
+    if (translation.running) return translationState.text ? "Translating…" : "Preparing translation…";
+    if (translationState.status !== "done") return "";
+    const target = translationState.language ? ` · ${translationState.language}` : "";
+    if (translationState.chunks === 0) return `Nothing to translate${target}`;
+    if (translationState.cachedChunks === translationState.chunks) return `Translation${target} · from cache`;
+    if (translationState.cachedChunks > 0) return `Translation${target} · ${translationState.cachedChunks}/${translationState.chunks} sections from cache`;
+    return `Translation${target}`;
+  });
+  const canExplainFile = $derived(Boolean(file && highlighted && !file.virtualWikiDirectory && onExplainFile && previewContent.trim()));
+  function explainFile(event: MouseEvent): void {
+    if (!file || !onExplainFile) return;
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    onExplainFile(file.path, previewContent, { left: rect.right - 600, top: rect.top, bottom: rect.bottom });
+  }
 
   const editorController = createPreviewEditorController({
     previewId: () => previewId,
@@ -211,7 +247,7 @@
     previewId: () => previewId,
     enabled: () => Boolean(file),
     editing: () => editing && !visualEditing,
-    fileText: () => editing ? editorState.draft : previewContent,
+    fileText: () => editing ? editorState.draft : renderedMarkdown,
     contentElement: () => visualEditing ? visualHost?.querySelector<HTMLElement>(".ProseMirror") ?? undefined : contentScrollElement,
     editorElement: () => editorElement,
     inputElement: () => searchInputElement,
@@ -286,6 +322,7 @@
     await onResolveKnowledge?.(result, snapshot);
   }
   function beginEdit(): void {
+    translation.showOriginal();
     editorMode = renderAsMarkdown ? "visual" : "source";
     visualLoadError = null;
     editorController.begin();
@@ -432,6 +469,26 @@
           <WrapText class="h-4 w-4" aria-hidden="true" />
         </button>
       {/if}
+      {#if canExplainFile && !editing}
+        <button
+          class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          type="button"
+          title="Explain this whole file"
+          aria-label={`Explain ${file?.path ?? "file"}`}
+          onpointerdown={(event) => event.stopPropagation()}
+          onclick={explainFile}
+        ><MessageSquareText class="h-3.5 w-3.5" aria-hidden="true" />Explain</button>
+      {/if}
+      {#if canTranslate && !editing}
+        <button
+          class={["inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+            showingTranslation ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"]}
+          type="button"
+          aria-pressed={showingTranslation}
+          title={showingTranslation ? "Show the original document" : "Translate this document (cached in .pi/translations)"}
+          onclick={() => file && translation.toggle(file.path, previewContent)}
+        ><Languages class="h-3.5 w-3.5" aria-hidden="true" />{showingTranslation ? "Original" : "Translate"}</button>
+      {/if}
       {#if canCheckKnowledge}
         <button
           class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring disabled:opacity-40"
@@ -475,6 +532,23 @@
         </button>
       {/if}
     </header>
+    {#if showingTranslation && !editing}
+      <div class="flex min-h-8 shrink-0 items-center gap-2 border-b border-border bg-panel px-3 py-1 text-xs" data-preview-translation>
+        <Languages class={["h-3.5 w-3.5 shrink-0", translationState.status === "error" ? "text-tool-error" : "text-muted-foreground"]} aria-hidden="true" />
+        <span class={["min-w-0 flex-1 truncate", translationState.status === "error" ? "text-tool-error" : "text-muted-foreground"]} role="status" title={translationSummary}>{translationSummary}</span>
+        {#if translation.running}
+          <button type="button" class="rounded-sm px-2 py-0.5 text-muted-foreground hover:bg-panel-hover hover:text-foreground" onclick={translation.cancel}>Cancel</button>
+        {:else if file}
+          <button
+            type="button"
+            class="rounded-sm px-2 py-0.5 text-muted-foreground hover:bg-panel-hover hover:text-foreground"
+            title="Translate again, ignoring cached sections"
+            onclick={() => file && void translation.translate(file.path, previewContent, true)}
+          >{translationState.status === "error" ? "Retry" : "Retranslate"}</button>
+        {/if}
+        <button type="button" class="rounded-sm px-2 py-0.5 text-muted-foreground hover:bg-panel-hover hover:text-foreground" onclick={translation.showOriginal}>Original</button>
+      </div>
+    {/if}
     {#if checking || knowledgeResult}
       <WikiConsistencyReport
         {checking}
@@ -616,14 +690,17 @@
             tabindex="0"
             onscroll={rememberScroll}
           >
-            <div class="preview-markdown-content mx-auto w-[calc(100%-4rem)] max-w-[776px] py-6 text-sm leading-6">
+            <div class="preview-markdown-content mx-auto w-[calc(100%-4rem)] max-w-[776px] py-6 text-sm leading-6" lang={showingTranslation ? translationState.language || undefined : undefined}>
+              {#if showingTranslation && !translationState.text}
+                <p class="text-muted-foreground" role="status">{translationState.status === "error" ? "The translation is unavailable." : "Translating…"}</p>
+              {/if}
               <MarkdownText
-                text={previewContent}
+                text={renderedMarkdown}
                 documentPath={markdownLinkBase === "document" ? file.path : undefined}
                 fitTables
                 remoteImages
                 headingAnchors
-                sourceLineRanges={Boolean(searchRange || evidenceCitation)}
+                sourceLineRanges={!showingTranslation && Boolean(searchRange || evidenceCitation)}
                 onValidateProjectFile={markdownLinkBase === "document" ? onValidateProjectFile : validateProjectFromMarkdown}
                 {onValidateLocalFile}
                 onOpenProjectFile={markdownLinkBase === "document" ? onOpenProjectFile : openProjectFromMarkdown}
@@ -647,8 +724,8 @@
           onscroll={rememberScroll}
         >
           <pre class={wrapLines
-            ? "m-0 min-h-full w-full min-w-0 py-3 font-mono text-xs leading-6 text-foreground"
-            : "m-0 min-h-full min-w-full w-max py-3 font-mono text-xs leading-6 text-foreground"}><code
+            ? "preview-source m-0 min-h-full w-full min-w-0 py-4 font-mono text-foreground"
+            : "preview-source m-0 min-h-full min-w-full w-max py-4 font-mono text-foreground"}><code
               class:wrap-lines={wrapLines}
               class="preview-code"
             >{@html highlighted.html}</code></pre>
@@ -717,6 +794,20 @@
     contain: paint;
   }
 
+  /*
+   * Source reading typography: 13px Geist Mono with an airy 1.7 rhythm,
+   * contextual alternates on, no decorative ligatures, crisp glyphs on dark.
+   */
+  .preview-source {
+    font-size: 13px;
+    line-height: 1.7;
+    font-feature-settings: "calt" 1, "liga" 0;
+    font-variant-ligatures: contextual;
+    letter-spacing: -0.003em;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
   .preview-code {
     display: block;
     min-width: 100%;
@@ -727,29 +818,46 @@
 
   .preview-code :global(.sh__line) {
     display: block;
-    min-height: 1.5rem;
+    min-height: 1.7em;
     min-width: 100%;
     width: max-content;
-    padding-right: 1rem;
+    padding-right: 1.5rem;
     white-space: pre;
   }
 
+  .preview-code :global(.sh__line:hover) {
+    background: color-mix(in srgb, var(--foreground) 4%, transparent);
+  }
+
+  .preview-code :global(.sh__token--keyword) {
+    font-weight: 500;
+  }
+
+  /* Quiet gutter on the code surface itself: numbers recede until hovered. */
   .preview-code :global(.sh__line)::before {
     position: sticky;
     left: 0;
     display: inline-block;
     width: 3.5rem;
-    margin-right: 1rem;
-    border-right: 1px solid var(--code-border);
-    background: var(--panel);
-    color: var(--muted-foreground);
+    margin-right: 1.25rem;
+    border-right: 1px solid color-mix(in srgb, var(--code-border) 55%, transparent);
+    background: var(--code);
+    color: color-mix(in srgb, var(--muted-foreground) 62%, transparent);
     content: counter(preview-line);
     counter-increment: preview-line;
+    font-size: 12px;
+    font-style: normal;
+    font-weight: 400;
     font-variant-numeric: tabular-nums;
     text-align: right;
-    padding-right: 0.75rem;
+    padding-right: 0.875rem;
     text-indent: 0;
     user-select: none;
+  }
+
+  .preview-code :global(.sh__line:hover)::before {
+    background: color-mix(in srgb, var(--foreground) 4%, var(--code));
+    color: var(--foreground);
   }
 
   .preview-code :global(.sh__line.preview-range-highlight) {
@@ -757,7 +865,7 @@
   }
 
   .preview-code :global(.sh__line.preview-range-highlight)::before {
-    background: color-mix(in srgb, var(--tool-warning) 13%, var(--panel));
+    background: color-mix(in srgb, var(--tool-warning) 13%, var(--code));
     color: var(--foreground);
   }
 
@@ -765,7 +873,7 @@
     position: relative;
     min-width: 0;
     width: 100%;
-    padding-left: 4.5rem;
+    padding-left: 4.75rem;
     overflow-wrap: anywhere;
     white-space: pre-wrap;
   }

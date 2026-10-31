@@ -108,6 +108,9 @@ export type WorkbenchConversationBuilderOptions = {
 
 export type WorkbenchEditorBuilderOptions = {
   workspace: () => string;
+  /** Live ACP client for whole-document Preview translation. */
+  client?: () => AcpClient | null;
+  explainFile?: (path: string, content: string, anchor: { left: number; top: number; bottom: number }) => void;
   statusReady: () => boolean;
   clientAvailable: () => boolean;
   operationRunning: () => boolean;
@@ -422,6 +425,14 @@ export function buildWorkbenchEditorProps(
         && Boolean(options.projectDocuments.wikiPath && activePreview.file.path.startsWith(`${options.projectDocuments.wikiPath}/`)),
       onOpenExternalEditor: activePreview.kind === "file" && !virtualContents && isWorkspaceProjectFilePath(activePreview.file.path)
         ? (path) => void options.projectWorkspace.openInEditor(path)
+        : undefined,
+      onExplainFile: activePreview.kind === "file" && options.explainFile && options.clientAvailable() ? options.explainFile : undefined,
+      onTranslateDocument: activePreview.kind === "file" && options.client && options.clientAvailable() && previewWorkspace
+        ? (request, signal, onDelta) => {
+          const client = options.client?.();
+          if (!client) return Promise.reject(new Error("Pix is not connected to a workspace."));
+          return client.translateDocument({ cwd: previewWorkspace, ...request }, signal, onDelta);
+        }
         : undefined,
       onScrollPositionChange: options.preview.rememberScroll,
       onDirtyChange: options.preview.setDirty,

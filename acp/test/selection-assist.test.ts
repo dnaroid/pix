@@ -120,3 +120,27 @@ test("selection assistant cancellation does not advance the chain", async () => 
 	await assert.rejects(assist({ cwd: "/w", action: "explain", text: "x()", signal: controller.signal }), /cancelled/);
 	assert.deepEqual(seen, ["a"]);
 });
+
+test("explain-file uses a file prompt, a larger budget and a larger text limit", async () => {
+	const seen: { prompt: string; system: string; maxTokens: unknown }[] = [];
+	const runtime = {
+		getModel: (provider: string, id: string) => ({ provider, id, maxTokens: 0 }),
+		refresh: async () => {},
+		streamSimple: (_model: unknown, ctx: { systemPrompt: string; messages: { content: string }[] }, opts: Record<string, unknown>) => {
+			seen.push({ prompt: ctx.messages[0]!.content, system: ctx.systemPrompt, maxTokens: opts.maxTokens });
+			return (async function* () { yield { type: "text_delta", delta: "Overview" }; })();
+		},
+	};
+	const assist = createSelectionAssistant({
+		createModelRuntime: async () => runtime as never,
+		loadConfig: () => ({ modelRefs: ["p/m"], language: "ru" }),
+	});
+	const text = "x".repeat(50_000);
+	assert.equal(await assist({ cwd: "/w", action: "explain-file", text, path: "src/a.ts", signal: new AbortController().signal }), "Overview");
+	assert.match(seen[0]!.prompt, /^File: src\/a\.ts\n<file>\n/u);
+	assert.match(seen[0]!.system, /whole source file/u);
+	assert.equal(seen[0]!.maxTokens, 1_500);
+	assert.equal(parseDesktopSelectionAssistRequest({ cwd: "/w", action: "explain-file", text }).action, "explain-file");
+	assert.throws(() => parseDesktopSelectionAssistRequest({ cwd: "/w", action: "explain", text }));
+	assert.throws(() => parseDesktopSelectionAssistRequest({ cwd: "/w", action: "explain-file", text: "x".repeat(120_001) }));
+});

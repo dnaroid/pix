@@ -45,10 +45,24 @@ export type SelectionAssistDelta = { readonly text: string } | { readonly reset:
 export interface SelectionAssistRequest {
   readonly requestId?: string;
   readonly cwd: string;
-  readonly action: "explain" | "translate";
+  readonly action: "explain" | "explain-file" | "translate";
   readonly text: string;
   readonly context?: string;
   readonly path?: string;
+}
+export interface DocumentTranslateRequest {
+  readonly requestId?: string;
+  readonly cwd: string;
+  readonly text: string;
+  readonly path?: string;
+  /** Ignore cached chunks and translate everything again. */
+  readonly refresh?: boolean;
+}
+export interface DocumentTranslation {
+  readonly text: string;
+  readonly language: string;
+  readonly chunks: number;
+  readonly cachedChunks: number;
 }
 export interface ModelSetupRoles { readonly main: string; readonly fast: string; readonly strong: string }
 export interface ModelSetupStatus {
@@ -398,6 +412,18 @@ export class AcpPixExtensions {
       throw new Error("pix/selection/assist returned an invalid response");
     }
     return response.text;
+  }
+
+  async translateDocument(request: DocumentTranslateRequest, signal?: AbortSignal): Promise<DocumentTranslation> {
+    // Long documents translate chunk by chunk; the caller cancels, so no fixed timeout.
+    const response = await this.request<unknown>("pix/document/translate", { ...request }, null, signal);
+    if (
+      !isRecord(response) || typeof response.text !== "string" || typeof response.language !== "string"
+      || typeof response.chunks !== "number" || typeof response.cachedChunks !== "number"
+    ) {
+      throw new Error("pix/document/translate returned an invalid response");
+    }
+    return { text: response.text, language: response.language, chunks: response.chunks, cachedChunks: response.cachedChunks };
   }
 
   async gitAssist(cwd: string, kind: "review" | "commit-message", diff: string): Promise<string> {

@@ -1,6 +1,6 @@
 /** Classifies a window selection for the Explain Code / Translate assistant. */
 
-export type SelectionAssistAction = "explain" | "translate";
+export type SelectionAssistAction = "explain" | "explain-file" | "translate";
 
 export interface SelectionAssistTarget {
   readonly action: SelectionAssistAction;
@@ -14,6 +14,9 @@ export interface SelectionAssistTarget {
 }
 
 export const SELECTION_ASSIST_MAX_TEXT = 20_000;
+/** ACP accepts up to 120,000 characters for a whole-file explanation. */
+export const EXPLAIN_FILE_MAX_TEXT = 120_000;
+const TRUNCATION_NOTE = "\n\n[… file truncated for explanation …]";
 const CONTEXT_LINES = 15;
 const MAX_CONTEXT = 8_000;
 
@@ -56,4 +59,13 @@ export function selectionAssistTarget(selection: Selection | null): SelectionAss
 
   if (common.closest(".transcript-pane, .preview-markdown-content")) return { action: "translate", text, anchor };
   return null;
+}
+
+/** Whole-file explanation from the Preview header; very large files are explained from their beginning. */
+export function explainFileTarget(path: string, content: string, anchor: SelectionAssistTarget["anchor"]): SelectionAssistTarget | null {
+  if (!content.trim()) return null;
+  const text = content.length > EXPLAIN_FILE_MAX_TEXT
+    ? content.slice(0, EXPLAIN_FILE_MAX_TEXT - TRUNCATION_NOTE.length) + TRUNCATION_NOTE
+    : content;
+  return { action: "explain-file", text, path, anchor };
 }

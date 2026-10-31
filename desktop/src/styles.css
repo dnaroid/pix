@@ -184,16 +184,20 @@
   --thinking-xhigh: #cf333d;
   --thinking-max: #b91c57;
 
-  /* Sugar High syntax roles stay anchored to the active semantic theme. */
-  --sh-identifier: var(--foreground);
-  --sh-keyword: var(--primary);
-  --sh-string: var(--status);
-  --sh-class: color-mix(in srgb, var(--primary) 72%, var(--foreground));
-  --sh-property: color-mix(in srgb, var(--status) 74%, var(--foreground));
-  --sh-entity: var(--status);
-  --sh-jsxliterals: var(--primary);
-  --sh-sign: var(--muted-foreground);
-  --sh-comment: var(--muted-foreground);
+  /*
+   * Sugar High syntax roles. Light: warm "paper" palette around the terracotta
+   * primary; each role keeps about 4.5:1 or better contrast on --code. Sugar High reports
+   * numbers as `class`, so types and literals share one hue.
+   */
+  --sh-identifier: #2f2d28;
+  --sh-keyword: #b2482a;
+  --sh-string: #44701c;
+  --sh-class: #1f6c86;
+  --sh-property: #6c4aa5;
+  --sh-entity: #9a5a12;
+  --sh-jsxliterals: #2f2d28;
+  --sh-sign: #6b685f;
+  --sh-comment: #716e65;
   --sh-break: inherit;
   --sh-space: inherit;
 }
@@ -264,8 +268,21 @@
     --thinking-low: #c8b45a;
     --thinking-xhigh: #ff8a86;
     --thinking-max: #ff5f8f;
+    /* Cool night palette tuned to the blue primary and the --code surface. */
+    --sh-identifier: #c9d1e3;
+    --sh-keyword: #c3a3f7;
+    --sh-string: #a6d189;
+    --sh-class: #7dcfff;
+    --sh-property: #82aaff;
+    --sh-entity: #f0b37e;
+    --sh-jsxliterals: #c9d1e3;
+    --sh-sign: #8c98ad;
+    --sh-comment: #7a859a;
   }
 }
+
+/* Comments read as annotations, not code. */
+.sh__token--comment { font-style: italic; }
 
 * {
   box-sizing: border-box;
