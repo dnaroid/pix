@@ -1,11 +1,12 @@
 <script lang="ts">
   import "@xterm/xterm/css/xterm.css";
   import "./terminal-font.css";
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import type { FitAddon } from "@xterm/addon-fit";
   import type { ILink, Terminal } from "@xterm/xterm";
   import { refreshAfterTerminalFontLoad } from "./terminal-font";
   import { createTerminalViewLifetime, type TerminalViewLifetime } from "./terminal-view-lifetime";
+  import { createTerminalInitialWriteGate, type TerminalInitialWriteGate } from "./terminal-initial-write-gate";
 
   type TerminalTextLink = {
     startIndex: number;
@@ -45,7 +46,9 @@
 
   let container: HTMLDivElement | undefined;
   let scrollTrack: HTMLDivElement | undefined;
-  let terminal: Terminal | undefined;
+  // Reactive so option/controlled-content effects re-run once the async xterm import attaches it.
+  let terminal = $state.raw<Terminal | undefined>();
+  let initialWrite: TerminalInitialWriteGate | undefined;
   let fitAddon: FitAddon | undefined;
   let inputBuffer = "";
   let inputTimer: number | null = null;
@@ -58,7 +61,7 @@
   let scrollThumbHeight = $state(0);
 
   export function write(data: string): void {
-    if (data) terminal?.write(data);
+    if (data) initialWrite?.write(data);
   }
 
   export function clear(): void {
@@ -74,11 +77,15 @@
   }
 
   $effect(() => {
-    if (!terminal) return;
-    terminal.options.disableStdin = !running;
-    terminal.options.cursorBlink = true;
-    terminal.options.cursorInactiveStyle = "outline";
-    terminal.options.convertEol = convertEol;
+    // Read props before the early return so a run-state change is tracked even before xterm attaches.
+    const disableStdin = !running;
+    const nextConvertEol = convertEol;
+    const currentTerminal = terminal;
+    if (!currentTerminal) return;
+    currentTerminal.options.disableStdin = disableStdin;
+    currentTerminal.options.cursorBlink = true;
+    currentTerminal.options.cursorInactiveStyle = "outline";
+    currentTerminal.options.convertEol = nextConvertEol;
     scheduleTerminalChromeSync();
   });
 
@@ -143,7 +150,13 @@
     const fit = new FitAddonConstructor();
     next.loadAddon(fit);
     next.open(container);
+    // Snapshot the replay at attach time. Live chunks after this point reach write() and are also
+    // appended to the owner's output (and thus to initialContent); the gate writes them after the
+    // snapshot instead of letting the first-frame replay include them a second time.
+    const initialSnapshot = content === undefined ? untrack(() => initialContent) : "";
+    const gate = createTerminalInitialWriteGate((data) => next.write(data));
     terminal = next;
+    initialWrite = gate;
     fitAddon = fit;
 
     // xterm's DOM renderer caches glyph widths; remeasure after the font arrives.
@@ -219,9 +232,7 @@
 
     lifetime.scheduleInitial(() => {
       fitTerminal();
-      if (content === undefined && initialContent) {
-        next.write(initialContent);
-      }
+      gate.open(initialSnapshot);
       next.scrollToBottom();
       if (running && focusWhenRunning) next.focus();
       scheduleTerminalChromeSync();
@@ -240,6 +251,7 @@
       linkDisposable?.dispose();
       next.dispose();
       terminal = undefined;
+      initialWrite = undefined;
       fitAddon = undefined;
       renderedControlledContent = "";
       scrollbarVisible = false;

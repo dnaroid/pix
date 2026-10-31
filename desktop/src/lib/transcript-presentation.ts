@@ -134,6 +134,33 @@ export function activityGroupDuration(
   return item.active ? elapsedDuration(item.startedAtMs, nowMs) : item.durationMs;
 }
 
+/** Below this span, durations display tenths of a second; above it, at most whole seconds. */
+const SUB_SECOND_DURATION_LIMIT_MS = 10_000;
+const ACTIVITY_CLOCK_SUB_SECOND_INTERVAL_MS = 100;
+const ACTIVITY_CLOCK_SECOND_INTERVAL_MS = 1_000;
+
+/** The most recent recorded start among live groups, i.e. the one with the finest displayed precision. */
+export function latestActiveActivityStart(items: readonly TranscriptDisplayItem[]): number | undefined {
+  let latest: number | undefined;
+  for (const item of items) {
+    if (item.type !== "activity-group" || !item.active || item.startedAtMs === undefined) continue;
+    if (latest === undefined || item.startedAtMs > latest) latest = item.startedAtMs;
+  }
+  return latest;
+}
+
+/**
+ * Pane clock cadence matching `formatTranscriptDuration` precision: tenths while
+ * the newest live group is under 10 s, whole seconds afterwards, and no clock
+ * when no live group has a start (no live duration is displayed).
+ */
+export function activityClockIntervalMs(latestActiveStartMs: number | undefined, nowMs: number): number | undefined {
+  if (latestActiveStartMs === undefined) return undefined;
+  return nowMs - latestActiveStartMs < SUB_SECOND_DURATION_LIMIT_MS
+    ? ACTIVITY_CLOCK_SUB_SECOND_INTERVAL_MS
+    : ACTIVITY_CLOCK_SECOND_INTERVAL_MS;
+}
+
 function elapsedDuration(startedAtMs: number | undefined, endedAtMs: number | undefined): number | undefined {
   return startedAtMs === undefined || endedAtMs === undefined
     ? undefined
@@ -248,7 +275,7 @@ export function activityGroupPresentationLabels(
 export function formatTranscriptDuration(durationMs: number): string {
   const milliseconds = Math.max(0, durationMs);
   if (milliseconds < 100) return "<0.1s";
-  if (milliseconds < 10_000) return `${(milliseconds / 1000).toFixed(1)}s`;
+  if (milliseconds < SUB_SECOND_DURATION_LIMIT_MS) return `${(milliseconds / 1000).toFixed(1)}s`;
   if (milliseconds < 60_000) return `${Math.round(milliseconds / 1000)}s`;
   const totalSeconds = Math.round(milliseconds / 1000);
   const minutes = Math.floor(totalSeconds / 60);

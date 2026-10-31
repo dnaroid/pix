@@ -29,7 +29,7 @@ describe("ProjectExplorer keyboard tree", () => {
     expect(menuControllerSource).not.toContain("MENU_HEIGHT");
   });
   it("polls only visible directory listings through the mounted explorer lifecycle", () => {
-    expect(explorerSource).toContain("onMount(() => createProjectFilesRefresh(() => treeController.refreshVisibleDirectories()).dispose)");
+    expect(explorerSource).toMatch(/onMount\(\(\) => createProjectFilesRefresh\(\s*\(\) => treeController\.refreshVisibleDirectories\(\),[^;]*project-explorer:files-refresh[^;]*\)\.dispose\)/);
     expect(treeControllerSource).toContain("async function refreshVisibleDirectories(): Promise<void>");
     expect(treeControllerSource).toContain('["", ...visibleExpandedDirectories()].map((path) => loadDirectory(path, requestGeneration, false, true))');
     expect(treeControllerSource).toContain("if (!force && directoryLoads.has(path)) return directoryLoads.get(path)!");

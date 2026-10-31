@@ -61,7 +61,7 @@ export function createSessionCoordinator(options: SessionCoordinatorOptions) {
     options.state.setSessionId(null);
     options.runtime.reset();
     options.state.clearSessionTranscripts();
-    options.activity.reset();
+    options.activity.resetAfterDisconnect();
     options.registry.reset();
     options.git.setResolveRunning(false);
     options.metadata.reset();

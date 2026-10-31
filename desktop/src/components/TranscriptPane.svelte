@@ -19,8 +19,10 @@
   import { isClaudeLoginError } from "../lib/claude-login-recovery";
   import ClaudeLoginAction from "./ClaudeLoginAction.svelte";
   import {
+    activityClockIntervalMs,
     formatTranscriptDuration,
     groupTranscriptItems,
+    latestActiveActivityStart,
     type MessageItem,
     type TranscriptDisplayItem,
     type TranscriptState,
@@ -123,18 +125,22 @@
   // the final notice of a settled turn, never to an older failed attempt.
   const claudeLoginContinueItemId = $derived(promptRunning ? undefined : displayItems.at(-1)?.id);
   let activityNowMs = $state(Date.now());
-  const hasActiveActivity = $derived(displayItems.some((item) => item.type === "activity-group" && item.active));
+  const latestActiveStartMs = $derived(latestActiveActivityStart(displayItems));
+  // Only flips when the newest live group crosses the 10 s tenths/seconds display boundary.
+  const activityClockMs = $derived(activityClockIntervalMs(latestActiveStartMs, activityNowMs));
   let pauseToastVisible = $state(false);
   let pauseToastTimer: number | undefined;
   let previousAgentControl: { sessionId: string | null; state: AgentControlState } | undefined;
   const PAUSE_TOAST_DURATION_MS = 2_400;
 
-  // One pane-level clock updates every live collapsed header. Completed rows
-  // receive no clock prop, so their persisted final duration stays static.
+  // One pane-level clock updates every live collapsed header, ticking only as
+  // often as the displayed precision changes. Completed rows receive no clock
+  // prop, so their persisted final duration stays static.
   $effect(() => {
-    if (!hasActiveActivity) return;
+    const intervalMs = activityClockMs;
+    if (intervalMs === undefined) return;
     activityNowMs = Date.now();
-    const timer = window.setInterval(() => activityNowMs = Date.now(), 100);
+    const timer = window.setInterval(() => activityNowMs = Date.now(), intervalMs);
     return () => window.clearInterval(timer);
   });
 

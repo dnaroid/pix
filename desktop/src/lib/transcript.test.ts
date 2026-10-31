@@ -8,7 +8,9 @@ import {
   activityGroupHeading,
   emptyTranscript,
   finalizeTranscriptActivity,
+  activityClockIntervalMs,
   formatTranscriptDuration,
+  latestActiveActivityStart,
   groupTranscriptItems,
   hydrateTranscriptAttachment,
   markDeferredToolResults,
@@ -408,6 +410,22 @@ describe("transcript reducer", () => {
     expect(formatTranscriptDuration(3_840)).toBe("3.8s");
     expect(formatTranscriptDuration(12_600)).toBe("13s");
     expect(formatTranscriptDuration(65_000)).toBe("1m 5s");
+  });
+
+  it("ticks the live activity clock only as often as the displayed precision changes", () => {
+    expect(activityClockIntervalMs(undefined, 50_000)).toBeUndefined();
+    expect(activityClockIntervalMs(1_000, 1_000)).toBe(100);
+    expect(activityClockIntervalMs(1_000, 10_999)).toBe(100);
+    expect(activityClockIntervalMs(1_000, 11_000)).toBe(1_000);
+    // A clock sample older than a newly started group still selects tenths.
+    expect(activityClockIntervalMs(20_000, 19_500)).toBe(100);
+  });
+
+  it("selects the newest live group start for the activity clock", () => {
+    const group = (active: boolean, startedAtMs?: number) => ({ type: "activity-group", active, startedAtMs }) as never;
+    expect(latestActiveActivityStart([])).toBeUndefined();
+    expect(latestActiveActivityStart([group(true), group(false, 9_000)])).toBeUndefined();
+    expect(latestActiveActivityStart([group(true, 1_000), group(false, 9_000), group(true, 4_000)])).toBe(4_000);
   });
 });
 

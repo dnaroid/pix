@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { TODO_STATE_CHANNEL } from "../lib/session-todos";
 import { SUBAGENTS_LIVE_STATE_CHANNEL } from "../lib/session-subagents";
-import { createSessionActivityStore } from "./session-activity.svelte";
+import { createSessionActivityStore, MAX_FORGOTTEN_SESSION_IDS } from "./session-activity.svelte";
 
 function todo(sessionId: string, checkedAt: number, activityOwner: string) {
   return { sessionId, activityOwner, channel: TODO_STATE_CHANNEL, data: {
@@ -94,6 +94,22 @@ describe("session activity attachment ownership", () => {
     store.markForgotten("closed-0");
     store.reset();
     expect(store.ownedSessionCount).toBe(0);
+    // A workspace reset keeps tombstones: the same connection may still emit
+    // late updates for a runtime whose closeSession failed.
+    expect(store.isForgotten("closed-0")).toBe(true);
+    store.resetAfterDisconnect();
     expect(store.isForgotten("closed-0")).toBe(false);
+    expect(store.forgottenSessionCount).toBe(0);
+  });
+
+  it("bounds tombstones FIFO, refreshing a re-forgotten session", () => {
+    const store = createSessionActivityStore();
+    for (let i = 0; i < MAX_FORGOTTEN_SESSION_IDS; i++) store.markForgotten(`closed-${i}`);
+    store.markForgotten("closed-0"); // refreshed: now newest
+    store.markForgotten("overflow");
+    expect(store.forgottenSessionCount).toBe(MAX_FORGOTTEN_SESSION_IDS);
+    expect(store.isForgotten("closed-0")).toBe(true);
+    expect(store.isForgotten("closed-1")).toBe(false);
+    expect(store.isForgotten("overflow")).toBe(true);
   });
 });

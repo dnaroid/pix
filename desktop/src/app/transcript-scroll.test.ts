@@ -684,3 +684,29 @@ describe("transcript step reveal highlight", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 });
+
+describe("transcript scroll saved positions", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("drops saved positions for closed tabs on the next activation", () => {
+    vi.stubGlobal("requestAnimationFrame", () => 1);
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    let open = ["a", "b", "c"];
+    let active: string | null = "a";
+    const pane = { clientHeight: 300, scrollHeight: 600, scrollTop: 0 };
+    const controller = createTranscriptScrollController({
+      activeSessionId: () => active,
+      pane: () => pane as unknown as HTMLDivElement,
+      content: () => null,
+      openSessionIds: () => open,
+    });
+    for (const id of ["a", "b", "c", "a"]) controller.activateSession(active = id);
+    expect(controller.savedSessionCount).toBe(3);
+    open = ["a"]; // b and c closed; a closing next while active
+    controller.activateSession(active = null);
+    expect(controller.savedSessionCount).toBe(1);
+    open = [];
+    controller.activateSession(active = "d");
+    expect(controller.savedSessionCount).toBe(0);
+  });
+});

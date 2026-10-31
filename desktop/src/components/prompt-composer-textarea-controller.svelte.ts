@@ -124,7 +124,9 @@ export function createPromptComposerTextareaController(options: PromptComposerTe
 
   function handleInput(target: HTMLTextAreaElement): void {
     updateSelection(target);
-    resize();
+    // No synchronous resize: the input changes the bound draft, and the
+    // composer's draft effect resizes once in the next frame (before paint),
+    // avoiding a second forced layout per keystroke.
     observe(target);
   }
 

@@ -124,4 +124,20 @@ describe("Project Explorer directory polling", () => {
     expect(test.refresh).toHaveBeenCalledTimes(2);
     test.controller.dispose();
   });
+
+  it("reports one diagnostic per failure streak, not every poll", async () => {
+    vi.useFakeTimers();
+    const refresh = vi.fn<() => Promise<void>>().mockRejectedValue(new Error("Listing failed"));
+    const reportFailure = vi.fn();
+    const window = new EventTarget();
+    const document = Object.assign(new EventTarget(), { hidden: false, hasFocus: () => true });
+    const controller = createProjectFilesRefresh(refresh, { window, document }, 5_000, reportFailure);
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(refresh).toHaveBeenCalledTimes(3);
+    expect(reportFailure).toHaveBeenCalledOnce();
+    refresh.mockResolvedValueOnce(undefined);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(reportFailure).toHaveBeenCalledTimes(2);
+    controller.dispose();
+  });
 });

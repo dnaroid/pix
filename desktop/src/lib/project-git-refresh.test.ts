@@ -80,4 +80,19 @@ describe("Project Explorer local Git refresh", () => {
     expect(refresh).toHaveBeenCalledTimes(2);
     controller.dispose();
   });
+
+  it("reports the first failure of each streak only", async () => {
+    vi.useFakeTimers();
+    const refresh = vi.fn().mockRejectedValue(new Error("Not a Git repository"));
+    const reportFailure = vi.fn();
+    const controller = createProjectGitRefresh(refresh, 5_000, () => true, reportFailure);
+    await controller.request();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(refresh).toHaveBeenCalledTimes(3);
+    expect(reportFailure).toHaveBeenCalledOnce();
+    refresh.mockResolvedValueOnce(undefined);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(reportFailure).toHaveBeenCalledTimes(2);
+    controller.dispose();
+  });
 });

@@ -140,4 +140,25 @@ describe("sidebar polling lifecycle", () => {
     await vi.advanceTimersByTimeAsync(200);
     expect(calls("workspace_sidebar_indicator_poll")).toHaveLength(2);
   });
+
+  it("logs remote probe failures once per streak and again for a new workspace", async () => {
+    let remoteFails = true;
+    invoke.mockImplementation((command: string) => command === "workspace_git_remote_update_probe"
+      ? (remoteFails ? Promise.reject(new Error("offline")) : Promise.resolve({ hasUpdates: false, checkedAtMs: 1 }))
+      : Promise.resolve(poll));
+    const warn = vi.fn();
+    const value = new SidebarIndicatorService("main", vi.fn(), vi.fn(), warn);
+    services.push(value);
+    value.start("/one"); await flush();
+    await vi.advanceTimersByTimeAsync(180_000);
+    expect(calls("workspace_git_remote_update_probe").length).toBeGreaterThan(2);
+    expect(warn.mock.calls).toEqual([["sidebar:git-remote-probe", expect.any(Error)]]);
+    value.setWorkspace("/two"); await flush();
+    expect(warn).toHaveBeenCalledTimes(2);
+    remoteFails = false;
+    await vi.advanceTimersByTimeAsync(60_000);
+    remoteFails = true;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(warn).toHaveBeenCalledTimes(3);
+  });
 });

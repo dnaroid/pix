@@ -26,8 +26,29 @@ interface MarkdownContentActionOptions {
 }
 
 export function createMarkdownContentAction(options: MarkdownContentActionOptions) {
+  // Shared by every Markdown segment this factory decorates (one MarkdownText),
+  // so the same file resolves once. Cleared only when the last segment unmounts.
   const mediaCache = new Map<string, Promise<Attachment | undefined>>();
   const mediaDimensions = new Map<string, ImageDimensions>();
+  let liveSegments = 0;
+
+  /**
+   * Caches only successful resolutions. A missing/failed file is evicted once
+   * settled, so a later occurrence re-resolves after the agent writes the file.
+   */
+  function resolveMedia(
+    cacheKey: string,
+    path: string,
+    resolver: (path: string) => Promise<Attachment | undefined>,
+  ): Promise<Attachment | undefined> {
+    const cached = mediaCache.get(cacheKey);
+    if (cached) return cached;
+    const request = resolver(path);
+    mediaCache.set(cacheKey, request);
+    const evict = () => { if (mediaCache.get(cacheKey) === request) mediaCache.delete(cacheKey); };
+    request.then((attachment) => { if (!attachment?.path) evict(); }, evict);
+    return request;
+  }
 
   function decorateFileLink(candidate: HTMLElement, target: FileLinkTarget, validation: FileLinkValidation): void {
     const kind = fileLinkIconKind(target.path, validation);
@@ -50,6 +71,7 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
   }
 
   return function markdownContent(node: HTMLElement, _renderedHtml: string) {
+    liveSegments += 1;
     let generation = 0;
     let destroyed = false;
     const fileLinkValidationCache = new FileLinkValidationCache();
@@ -224,12 +246,7 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
       frame.setAttribute("aria-busy", "true");
       try {
         const cacheKey = `${scope}:${path}`;
-        let request = mediaCache.get(cacheKey);
-        if (!request) {
-          request = resolver(path);
-          mediaCache.set(cacheKey, request);
-        }
-        const attachment = await request;
+        const attachment = await resolveMedia(cacheKey, path, resolver);
         if (!isCurrent()) return;
         let matchesKind = attachment?.kind === kind;
         if (kind === "model") matchesKind = isGlbPath(attachment?.path ?? "");
@@ -395,10 +412,14 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
         scheduleRender();
       },
       destroy() {
+        if (destroyed) return;
         destroyed = true;
         generation += 1;
-        mediaCache.clear();
-        mediaDimensions.clear();
+        liveSegments -= 1;
+        if (liveSegments === 0) {
+          mediaCache.clear();
+          mediaDimensions.clear();
+        }
         retainedImages.clear();
         retainedModels.clear();
         retainedAudio.clear();

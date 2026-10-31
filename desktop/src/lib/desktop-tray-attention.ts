@@ -1,9 +1,16 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { createFailureStreakReporter } from "./diagnostic-logging";
 
 type Options = {
   isSessionVisible: (sessionId: string | null) => boolean;
   publish?: (attention: boolean) => Promise<unknown>;
+  /** Handled publish failures; repeats are suppressed until the next success. */
+  reportWarning?: (label: string, error: unknown) => void;
 };
+
+/** First retry after a failed publish; doubles per failure up to the cap. */
+export const TRAY_ATTENTION_RETRY_MS = 2_000;
+export const TRAY_ATTENTION_RETRY_MAX_MS = 60_000;
 
 /** Window-owned unseen events; the native host combines all live windows. */
 export function createDesktopTrayAttention(options: Options) {
@@ -17,6 +24,26 @@ export function createDesktopTrayAttention(options: Options) {
   let delivered: boolean | null = null;
   let flushing = false;
   let disposed = false;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let retryDelay = TRAY_ATTENTION_RETRY_MS;
+  const failures = createFailureStreakReporter((error) => options.reportWarning?.("tray:publish", error));
+
+  function clearRetry(): void {
+    if (retryTimer !== undefined) clearTimeout(retryTimer);
+    retryTimer = undefined;
+  }
+
+  // Without a retry the badge stays wrong until some unrelated event changes
+  // `desired`. One timer at a time, backing off; never after disposal.
+  function scheduleRetry(): void {
+    if (disposed || retryTimer !== undefined) return;
+    const delay = retryDelay;
+    retryDelay = Math.min(retryDelay * 2, TRAY_ATTENTION_RETRY_MAX_MS);
+    retryTimer = setTimeout(() => {
+      retryTimer = undefined;
+      if (!disposed) void flush();
+    }, delay);
+  }
 
   async function flush(): Promise<void> {
     if (flushing) return;
@@ -27,8 +54,13 @@ export function createDesktopTrayAttention(options: Options) {
         await publish(value);
         delivered = value;
       }
-    } catch {
-      // Best effort; a subsequent update retries. Never block agent work.
+      failures.success();
+      retryDelay = TRAY_ATTENTION_RETRY_MS;
+      clearRetry();
+    } catch (error) {
+      // Best effort; never block agent work.
+      failures.failure(error);
+      scheduleRetry();
     } finally {
       flushing = false;
     }
@@ -57,6 +89,7 @@ export function createDesktopTrayAttention(options: Options) {
     if (disposed) return;
     reset();
     disposed = true;
+    clearRetry();
   }
 
   return {

@@ -173,7 +173,12 @@
     searchQuery = "";
     await treeController.revealPath(path);
   }
-  onMount(() => createProjectFilesRefresh(() => treeController.refreshVisibleDirectories()).dispose);
+  onMount(() => createProjectFilesRefresh(
+    () => treeController.refreshVisibleDirectories(),
+    undefined,
+    undefined,
+    (error) => diagnostics.warn("project-explorer:files-refresh", error),
+  ).dispose);
   onMount(() => installProjectExplorerNativeDrop(filePanel, {
     workspace: () => workspace,
     generation: () => operationGeneration,
@@ -187,7 +192,7 @@
   const gitDecorations = $derived(projectGitDecorations(gitSnapshot?.changes));
   const gitRefresh = createProjectGitRefresh(async () => {
     if (workspace && onGitStatusRefresh) await onGitStatusRefresh();
-  });
+  }, undefined, undefined, (error) => diagnostics.warn("project-explorer:git-refresh", error));
   // A spread sidebar props object invalidates every prop getter when loading
   // changes. Derived values isolate lifecycle inputs from those unrelated writes.
   const refreshTarget = $derived(JSON.stringify([workspace, refreshKey]));
