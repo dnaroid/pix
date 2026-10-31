@@ -8,8 +8,16 @@ import { escapeAttribute, escapeHtml } from "./markdown-escape";
  * Notes never carry the `sh__line` class, so line numbers, range scrolling
  * and selection context keep counting real source lines only.
  */
-export function insertPreviewAnnotations(html: string, annotations: readonly FileAnnotation[]): string {
-  if (annotations.length === 0) return html;
+export interface PreviewAnnotationHeader {
+  /** `summary`: module overview; `status`: progress; `error`: failure message. */
+  readonly kind: "summary" | "status" | "error";
+  readonly label?: string;
+  readonly text: string;
+}
+
+export function insertPreviewAnnotations(html: string, annotations: readonly FileAnnotation[], header?: PreviewAnnotationHeader): string {
+  const top = header?.text.trim() ? headerRow(header) : "";
+  if (annotations.length === 0) return top ? `${top}\n${html}` : html;
   const rows = html.split("\n");
   const byLine = new Map<number, string>();
   for (const annotation of annotations) {
@@ -18,8 +26,8 @@ export function insertPreviewAnnotations(html: string, annotations: readonly Fil
     if (!text) continue;
     byLine.set(annotation.line, byLine.has(annotation.line) ? `${byLine.get(annotation.line)} ${text}` : text);
   }
-  if (byLine.size === 0) return html;
-  const output: string[] = [];
+  if (byLine.size === 0) return top ? `${top}\n${html}` : html;
+  const output: string[] = top ? [top] : [];
   rows.forEach((row, index) => {
     const note = byLine.get(index + 1);
     if (note !== undefined) output.push(annotationRow(index + 1, note));
@@ -31,6 +39,14 @@ export function insertPreviewAnnotations(html: string, annotations: readonly Fil
 function annotationRow(line: number, text: string): string {
   return `<span class="preview-annotation" data-annotation-line="${line}" role="note" aria-label="${escapeAttribute(`Note for line ${line}`)}">`
     + `<span class="preview-annotation-body">${renderInlineNote(text)}</span></span>`;
+}
+
+function headerRow(header: PreviewAnnotationHeader): string {
+  const role = header.kind === "error" ? "alert" : header.kind === "status" ? "status" : "note";
+  const label = header.label ? `<span class="preview-annotation-label">${escapeHtml(header.label)}</span>` : "";
+  const body = header.text.trim().split(/\n{2,}/u).map((paragraph) => `<span class="preview-annotation-paragraph">${renderInlineNote(paragraph)}</span>`).join("");
+  return `<span class="preview-annotation preview-annotation-${header.kind}" role="${role}">`
+    + `<span class="preview-annotation-body">${label}${body}</span></span>`;
 }
 
 /** Minimal inline Markdown for notes: `code`, **bold** and *emphasis*; everything else is escaped text. */

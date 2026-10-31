@@ -41,7 +41,7 @@
   import { createPreviewEvidenceController } from "./preview-evidence-controller.svelte";
   import { createPreviewTranslationController, type PreviewDocumentTranslator } from "./preview-translation-controller.svelte";
   import { createPreviewAnnotationController, type PreviewFileAnnotator } from "./preview-annotation-controller.svelte";
-  import { insertPreviewAnnotations } from "../lib/preview-annotations";
+  import { insertPreviewAnnotations, type PreviewAnnotationHeader } from "../lib/preview-annotations";
   import { createDiagnosticLogger } from "../lib/diagnostic-logging";
   import { openExternalHref } from "../lib/external-links";
   import { resolveWikiLink } from "../lib/project-wiki";
@@ -200,18 +200,30 @@
   const annotationState = annotations.state;
   const canAnnotate = $derived(Boolean(file && highlighted && !file.virtualWikiDirectory && onAnnotateFile && previewContent.trim()));
   const showingAnnotations = $derived(canAnnotate && annotationState.showing);
-  const sourceHtml = $derived(highlighted
-    ? showingAnnotations && annotationState.annotations.length ? insertPreviewAnnotations(highlighted.html, annotationState.annotations) : highlighted.html
-    : "");
-  const annotationSummary = $derived.by(() => {
-    if (annotationState.status === "error") return annotationState.error || "Comments are unavailable";
-    if (annotationState.status === "loading") return "Reading the file and writing comments…";
-    if (annotationState.status !== "done") return "";
-    const count = annotationState.annotations.length;
+  const annotationHeader = $derived.by((): PreviewAnnotationHeader | undefined => {
+    const russian = annotationState.language === "ru";
+    if (annotationState.status === "loading") return { kind: "status", text: "Explaining the file…" };
+    if (annotationState.status === "error") {
+      return { kind: "error", label: "Explain failed", text: `${annotationState.error || "The explanation is unavailable."} Click Explain to retry.` };
+    }
+    if (annotationState.status !== "done" || !annotationState.summary) return undefined;
     const coverage = annotationState.annotatedLines < annotationState.totalLines
-      ? ` · first ${annotationState.annotatedLines} of ${annotationState.totalLines} lines` : "";
-    return `${count} ${count === 1 ? "comment" : "comments"}${annotationState.language ? ` · ${annotationState.language}` : ""}${coverage}`;
+      ? russian
+        ? `\n\nПрокомментированы первые ${annotationState.annotatedLines} из ${annotationState.totalLines} строк.`
+        : `\n\nComments cover the first ${annotationState.annotatedLines} of ${annotationState.totalLines} lines.`
+      : "";
+    return { kind: "summary", label: russian ? "О модуле" : "About this module", text: annotationState.summary + coverage };
   });
+  const sourceHtml = $derived(highlighted
+    ? showingAnnotations ? insertPreviewAnnotations(highlighted.html, annotationState.status === "done" ? annotationState.annotations : [], annotationHeader) : highlighted.html
+    : "");
+  function handleExplainClick(event: MouseEvent): void {
+    if (!file) return;
+    if (annotations.running) { annotations.cancel(); return; }
+    // Shift+click ignores the cached explanation and asks the model again.
+    if (event.shiftKey) { void annotations.annotate(file.path, previewContent, true); return; }
+    annotations.toggle(file.path, previewContent);
+  }
 
   const editorController = createPreviewEditorController({
     previewId: () => previewId,
@@ -494,9 +506,10 @@
             showingAnnotations ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"]}
           type="button"
           aria-pressed={showingAnnotations}
-          title={showingAnnotations ? "Hide inline comments" : "Comment this file inline"}
-          onclick={() => file && annotations.toggle(file.path, previewContent)}
-        ><MessageSquareText class="h-3.5 w-3.5" aria-hidden="true" />Comments</button>
+          aria-busy={annotations.running}
+          title={annotations.running ? "Cancel the explanation" : showingAnnotations ? "Hide the explanation (Shift+click to explain again)" : "Explain this file inline (Shift+click ignores the cache)"}
+          onclick={handleExplainClick}
+        ><MessageSquareText class={["h-3.5 w-3.5", annotations.running ? "animate-pulse" : ""]} aria-hidden="true" />{annotations.running ? "Explaining…" : "Explain"}</button>
       {/if}
       {#if canTranslate && !editing}
         <button
@@ -551,22 +564,6 @@
         </button>
       {/if}
     </header>
-    {#if showingAnnotations && !editing}
-      <div class="flex min-h-8 shrink-0 items-center gap-2 border-b border-border bg-panel px-3 py-1 text-xs" data-preview-annotations>
-        <MessageSquareText class={["h-3.5 w-3.5 shrink-0", annotationState.status === "error" ? "text-tool-error" : "text-muted-foreground"]} aria-hidden="true" />
-        <span class={["min-w-0 flex-1 truncate", annotationState.status === "error" ? "text-tool-error" : "text-muted-foreground"]} role="status" title={annotationSummary}>{annotationSummary}</span>
-        {#if annotations.running}
-          <button type="button" class="rounded-sm px-2 py-0.5 text-muted-foreground hover:bg-panel-hover hover:text-foreground" onclick={annotations.cancel}>Cancel</button>
-        {:else if file}
-          <button
-            type="button"
-            class="rounded-sm px-2 py-0.5 text-muted-foreground hover:bg-panel-hover hover:text-foreground"
-            onclick={() => file && void annotations.annotate(file.path, previewContent, true)}
-          >{annotationState.status === "error" ? "Retry" : "Regenerate"}</button>
-        {/if}
-        <button type="button" class="rounded-sm px-2 py-0.5 text-muted-foreground hover:bg-panel-hover hover:text-foreground" onclick={annotations.hide}>Hide</button>
-      </div>
-    {/if}
     {#if showingTranslation && !editing}
       <div class="flex min-h-8 shrink-0 items-center gap-2 border-b border-border bg-panel px-3 py-1 text-xs" data-preview-translation>
         <Languages class={["h-3.5 w-3.5 shrink-0", translationState.status === "error" ? "text-tool-error" : "text-muted-foreground"]} aria-hidden="true" />
@@ -943,6 +940,47 @@
   }
 
   .preview-code :global(.preview-annotation-body strong) { font-weight: 600; }
+
+  /* Module summary before line 1, plus progress and failure rows in the same place. */
+  .preview-code :global(.preview-annotation-summary),
+  .preview-code :global(.preview-annotation-status),
+  .preview-code :global(.preview-annotation-error) {
+    padding-top: 0.25rem;
+    padding-bottom: 0.75rem;
+  }
+
+  .preview-code :global(.preview-annotation-summary .preview-annotation-body) {
+    border-left-width: 3px;
+    padding: 0.55rem 0.85rem;
+    font-size: 13px;
+  }
+
+  .preview-code :global(.preview-annotation-label) {
+    display: block;
+    margin-bottom: 0.2rem;
+    color: var(--annotation-accent);
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+
+  .preview-code :global(.preview-annotation-paragraph) { display: block; }
+  .preview-code :global(.preview-annotation-paragraph + .preview-annotation-paragraph) { margin-top: 0.4rem; }
+
+  .preview-code :global(.preview-annotation-status .preview-annotation-body) {
+    border-left-color: var(--source-gutter-border);
+    background: transparent;
+    color: var(--muted-foreground);
+    font-style: italic;
+  }
+
+  .preview-code :global(.preview-annotation-error .preview-annotation-body) {
+    border-left-color: var(--tool-error);
+    background: color-mix(in srgb, var(--tool-error) 9%, var(--source-surface));
+  }
+
+  .preview-code :global(.preview-annotation-error .preview-annotation-label) { color: var(--tool-error); }
 
   .preview-code :global(.sh__line.preview-range-highlight) {
     background: color-mix(in srgb, var(--tool-warning) 18%, transparent);

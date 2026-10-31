@@ -54,14 +54,20 @@ export interface FileAnnotateRequest {
   readonly cwd: string;
   readonly text: string;
   readonly path?: string;
+  /** Skip ACP's `.pi/explanations` cache and explain again. */
+  readonly refresh?: boolean;
 }
 export interface FileAnnotation { readonly line: number; readonly text: string }
 export interface FileAnnotations {
+  /** Module summary shown above the first line. */
+  readonly summary: string;
   readonly annotations: readonly FileAnnotation[];
   readonly language: string;
   /** Lines the model saw; a very large file is annotated from its beginning. */
   readonly annotatedLines: number;
   readonly totalLines: number;
+  /** Served from the project cache for this exact source. */
+  readonly cached: boolean;
 }
 export interface DocumentTranslateRequest {
   readonly requestId?: string;
@@ -430,15 +436,17 @@ export class AcpPixExtensions {
   async annotateFile(request: FileAnnotateRequest, signal?: AbortSignal): Promise<FileAnnotations> {
     const response = await this.request<unknown>("pix/file/annotate", { ...request }, null, signal);
     if (
-      !isRecord(response) || !Array.isArray(response.annotations) || typeof response.language !== "string"
+      !isRecord(response) || typeof response.summary !== "string" || !Array.isArray(response.annotations) || typeof response.language !== "string"
+      || typeof response.cached !== "boolean"
       || typeof response.annotatedLines !== "number" || typeof response.totalLines !== "number"
       || response.annotations.some((item: unknown) => !isRecord(item) || !Number.isInteger(item.line) || typeof item.text !== "string")
     ) {
       throw new Error("pix/file/annotate returned an invalid response");
     }
     return {
+      summary: response.summary,
       annotations: (response.annotations as Record<string, unknown>[]).map((item) => ({ line: item.line as number, text: item.text as string })),
-      language: response.language, annotatedLines: response.annotatedLines, totalLines: response.totalLines,
+      language: response.language, annotatedLines: response.annotatedLines, totalLines: response.totalLines, cached: response.cached,
     };
   }
 
