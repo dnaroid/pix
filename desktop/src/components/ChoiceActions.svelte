@@ -29,12 +29,15 @@
     state.selected = state.selected.includes(index) ? state.selected.filter((value) => value !== index) : [...state.selected, index];
   }
 
-  async function submit(): Promise<void> {
-    if (!enabled || !state.selected.length) return;
+  async function submit(button?: number): Promise<void> {
+    if (!enabled) return;
+    // Reply buttons send their own label; checklists send the selection.
+    if (button !== undefined) state.selected = [button];
+    if (!state.selected.length) return;
     state.submitting = true;
     state.error = "";
     try {
-      await onSubmit(choiceActionsPrompt(actions.submitLabel, actions.items, state.selected));
+      await onSubmit(button !== undefined ? actions.items[button]!.label : choiceActionsPrompt(actions.submitLabel, actions.items, state.selected));
       state.submitted = true;
     } catch (cause) {
       state.error = cause instanceof Error ? cause.message : String(cause);
@@ -44,6 +47,27 @@
   }
 </script>
 
+{#if actions.buttons}
+<div class="my-3 flex flex-wrap items-center gap-2" role="group" aria-label={actions.submitLabel} data-choice-actions data-choice-buttons>
+  {#each actions.items as item, index}
+    {@const pressed = state.submitted && state.selected.includes(index)}
+    <button
+      class={[
+        "rounded-md px-3 py-1 text-xs font-medium disabled:cursor-default",
+        index === 0 ? "bg-primary text-primary-foreground" : "border border-border/70 text-foreground",
+        enabled && (index === 0 ? "hover:opacity-90" : "hover:bg-panel-hover"),
+        !enabled && !pressed && "opacity-40",
+      ]}
+      type="button"
+      disabled={!enabled}
+      aria-pressed={state.submitted ? pressed : undefined}
+      data-choice-button={index}
+      onclick={() => submit(index)}
+    >{item.label}</button>
+  {/each}
+  {#if state.error}<p class="w-full text-xs text-destructive" role="alert">{state.error}</p>{/if}
+</div>
+{:else}
 <div class="my-3 w-full rounded-md border border-border/70" data-choice-actions>
   <div class="divide-y divide-border/70" role="group" aria-label={actions.submitLabel}>
     {#each actions.items as item, index}
@@ -83,10 +107,11 @@
         type="button"
         disabled={!enabled || !state.selected.length}
         data-choice-actions-submit
-        onclick={submit}
+        onclick={() => submit()}
       >{actions.submitLabel}</button>
       <span class="text-xs tabular-nums text-muted-foreground" aria-live="polite">{state.selected.length} / {actions.items.length}</span>
     </div>
   {/if}
   {#if state.error}<p class="px-2.5 pb-2 text-xs text-destructive" role="alert">{state.error}</p>{/if}
 </div>
+{/if}

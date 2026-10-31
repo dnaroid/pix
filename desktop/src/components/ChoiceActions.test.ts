@@ -11,7 +11,7 @@ describe("ChoiceActions quick-choice block", () => {
   it("accepts input only while active, idle and not yet submitted", () => {
     expect(choiceSource).toContain("const enabled = $derived(active && !state.submitting && !state.submitted);");
     expect(choiceSource).toContain("if (!enabled) return;");
-    expect(choiceSource).toContain("if (!enabled || !state.selected.length) return;");
+    expect(choiceSource).toContain("if (!state.selected.length) return;");
     expect(choiceSource).toContain("disabled={!enabled || !state.selected.length}");
     expect(choiceSource).toContain("{#if active && !state.submitted}");
   });
@@ -38,7 +38,7 @@ describe("ChoiceActions quick-choice block", () => {
   });
 
   it("sends the formatted selection and surfaces submission errors", () => {
-    expect(choiceSource).toContain("await onSubmit(choiceActionsPrompt(actions.submitLabel, actions.items, state.selected));");
+    expect(choiceSource).toContain("await onSubmit(button !== undefined ? actions.items[button]!.label : choiceActionsPrompt(actions.submitLabel, actions.items, state.selected));");
     expect(choiceSource).toContain("state.submitted = true;");
     expect(choiceSource).toContain('role="alert"');
   });
@@ -54,5 +54,13 @@ describe("ChoiceActions quick-choice block", () => {
     expect(transcriptSource).toContain("choiceActionsScope={activeSessionId ? JSON.stringify([activeSessionId, item.id]) : undefined}");
     expect(transcriptSource).toContain("promptRunning ? undefined : latestChoiceActionsMessageId(displayItems)");
     expect(transcriptSource).toContain("choiceActionsActive={item.id === choiceActionsMessageId}");
+  });
+
+  it("renders reply buttons that send their label once, then lock", () => {
+    expect(choiceSource).toContain("{#if actions.buttons}");
+    expect(choiceSource).toContain("onclick={() => submit(index)}");
+    expect(choiceSource).toContain("if (button !== undefined) state.selected = [button];");
+    expect(choiceSource).toContain("disabled={!enabled}");
+    expect(choiceSource).toContain("aria-pressed={state.submitted ? pressed : undefined}");
   });
 });

@@ -164,7 +164,26 @@ Choose what I should do next:
 ```
 ~~~~
 
-Desktop renders a valid block as checkboxes and a submit button. A standalone
+When the agent stops for the user to do something themselves (install a tool,
+sign in, export a file) and then reply, the body may instead contain only plain
+list items without checkboxes — 1–4 short replies of at most 40 characters:
+
+~~~~markdown
+```pix-actions
+- Готово
+- Пропустить
+```
+~~~~
+
+Such a block is a row of reply buttons: the first is the primary action, the
+rest are secondary. Clicking one sends its label verbatim as the user message,
+then the row locks like a submitted checklist. Mixing plain and checkbox items
+makes the block invalid. The opening-line label serves only as the group's
+accessible name. The same activity rules apply; reply buttons produce no
+checkbox receipt. In the Pix TUI the row renders as `[ Готово ]  [ Пропустить ]`
+and the widget sends a button on its digit (or Enter when there is a single one).
+
+Desktop renders a valid checklist as checkboxes and a submit button. A standalone
 title or other non-checklist body content makes the block invalid, so it stays
 ordinary escaped Markdown/code. Only the latest assistant message that contains
 a valid block is interactive, and only when no prompt is running and no later
@@ -407,4 +426,4 @@ user message bubbles and restored composer drafts.
 - `acp/test/config.test.ts`
 - `acp/test/agent.test.ts`
 
-<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"14a40a8f5272d24c0efe61c84fa89db3165b5bea511bdc4ef414e248abe5e814","checkedAt":"2026-10-31T00:43:33.603Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":62,"reportLanguage":"ru"} -->
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"0bac3d56141be91c8b0a0443ca8786261a742fb8b4119f2a9384231948f07fb7","checkedAt":"2026-10-31T14:58:59.241Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":65,"reportLanguage":"ru"} -->
