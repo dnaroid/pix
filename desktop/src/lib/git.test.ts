@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  createGitCommitDraftWriter,
   gitChangeCode,
   gitChangeLabel,
   gitChangeLineStats,
@@ -70,6 +71,57 @@ describe("Git source-control helpers", () => {
     saveGitCommitDraft(storage, "/projects/alpha", "");
     expect(loadGitCommitDraft(storage, "/projects/alpha")).toBe("");
     expect(loadGitCommitDraft(storage, "/projects/beta")).toBe("fix: another project");
+  });
+
+  it("debounces commit-draft writes and flushes them under the workspace they were typed in", () => {
+    const values = new Map<string, string>();
+    let writes = 0;
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { writes += 1; values.set(key, value); },
+      removeItem: (key: string) => { writes += 1; values.delete(key); },
+    };
+    const timers = new Map<number, () => void>();
+    let nextTimer = 0;
+    const writer = createGitCommitDraftWriter(storage, 300, {
+      setTimeout: (callback) => { const id = ++nextTimer; timers.set(id, callback); return id; },
+      clearTimeout: (handle) => { timers.delete(handle as number); },
+    });
+    const fireTimers = () => { for (const [id, callback] of [...timers]) { timers.delete(id); callback(); } };
+
+    writer.schedule("/projects/alpha", "f");
+    writer.schedule("/projects/alpha", "fe");
+    writer.schedule("/projects/alpha", "feat");
+    expect(writes).toBe(0);
+    expect(timers.size).toBe(1);
+    fireTimers();
+    expect(writes).toBe(1);
+    expect(loadGitCommitDraft(storage, "/projects/alpha")).toBe("feat");
+
+    // Blur/unmount flushes immediately and releases the timer; a second flush is a no-op.
+    writer.schedule("/projects/alpha", "feat: x");
+    writer.flush();
+    writer.flush();
+    expect(timers.size).toBe(0);
+    expect(writes).toBe(2);
+    expect(loadGitCommitDraft(storage, "/projects/alpha")).toBe("feat: x");
+
+    // A workspace change persists the previous workspace's pending draft under its own key.
+    writer.schedule("/projects/alpha", "feat: y");
+    writer.schedule("/projects/beta", "fix: z");
+    expect(loadGitCommitDraft(storage, "/projects/alpha")).toBe("feat: y");
+    expect(loadGitCommitDraft(storage, "/projects/beta")).toBe("");
+    writer.flush();
+    expect(loadGitCommitDraft(storage, "/projects/beta")).toBe("fix: z");
+
+    // Clearing the draft is debounced like any other edit; cancel drops a pending write.
+    writer.schedule("/projects/beta", "");
+    fireTimers();
+    expect(loadGitCommitDraft(storage, "/projects/beta")).toBe("");
+    writer.schedule("/projects/beta", "discarded");
+    writer.cancel();
+    fireTimers();
+    expect(loadGitCommitDraft(storage, "/projects/beta")).toBe("");
   });
 
   it("shows resolve only for review output that contains actionable findings", () => {

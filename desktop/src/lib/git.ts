@@ -74,6 +74,64 @@ export function saveGitCommitDraft(storage: GitCommitDraftStorage, workspace: st
   }
 }
 
+export const GIT_COMMIT_DRAFT_SAVE_DELAY_MS = 300;
+
+export interface GitCommitDraftWriterTimers {
+  readonly setTimeout: (callback: () => void, delayMs: number) => unknown;
+  readonly clearTimeout: (handle: unknown) => void;
+}
+
+/**
+ * Debounces commit-draft persistence so typing does not write storage on every
+ * keystroke. The pending write keeps the workspace it was typed in, so a flush
+ * during a workspace switch/unmount never stores the draft under the new key.
+ * Callers flush on blur, unmount and page hide; `flush` is idempotent.
+ */
+export function createGitCommitDraftWriter(
+  storage: GitCommitDraftStorage,
+  delayMs = GIT_COMMIT_DRAFT_SAVE_DELAY_MS,
+  timers: GitCommitDraftWriterTimers = {
+    setTimeout: (callback, delay) => globalThis.setTimeout(callback, delay),
+    clearTimeout: (handle) => globalThis.clearTimeout(handle as ReturnType<typeof setTimeout>),
+  },
+) {
+  let pending: { workspace: string; message: string } | undefined;
+  let timer: unknown;
+
+  function clearTimer(): void {
+    if (timer === undefined) return;
+    timers.clearTimeout(timer);
+    timer = undefined;
+  }
+
+  function flush(): void {
+    clearTimer();
+    const write = pending;
+    pending = undefined;
+    if (write) saveGitCommitDraft(storage, write.workspace, write.message);
+  }
+
+  return {
+    schedule(workspace: string, message: string): void {
+      if (pending && pending.workspace !== workspace) flush();
+      pending = { workspace, message };
+      clearTimer();
+      timer = timers.setTimeout(() => {
+        timer = undefined;
+        flush();
+      }, delayMs);
+    },
+    flush,
+    /** Drops the pending write without persisting it. */
+    cancel(): void {
+      clearTimer();
+      pending = undefined;
+    },
+  };
+}
+
+export type GitCommitDraftWriter = ReturnType<typeof createGitCommitDraftWriter>;
+
 export function stagedGitChanges(snapshot: GitSnapshot | undefined): GitFileChange[] {
   return (snapshot?.changes ?? []).filter((change) => change.staged);
 }

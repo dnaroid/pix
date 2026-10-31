@@ -182,6 +182,13 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
   changed previews are not resurrected, and teardown releases retained nodes.
   Videos and remote images are outside this retention policy.
   See [image retention decision](../../decisions/0016-streaming-image-dom-retention.md).
+- Media path resolution is cached per rendered Markdown block (shared by all its
+  segments, so one file resolves once) and released only when its last segment
+  unmounts. Only successful resolutions are cached: a missing or failed
+  resolution is evicted once it settles, so a later occurrence of the same path
+  (for example after the agent writes a file it mentioned earlier) resolves
+  again instead of reusing "Preview unavailable". An occurrence already in the
+  error state keeps it through streaming as described above.
 - `file://` media is accepted only after decoding to an absolute existing regular
   file. The backend canonicalizes it and grants scoped asset access only for a
   supported image/video/audio/GLB extension. Existing bounded UTF-8 non-media files from

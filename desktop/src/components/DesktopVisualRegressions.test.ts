@@ -723,7 +723,7 @@ describe("desktop visual regressions", () => {
     expect(terminalSource).toContain('cursorStyle: "block"');
     expect(terminalSource).toContain('cursorInactiveStyle: "outline"');
     expect(terminalSource).toContain("cursorBlink: true");
-    expect(terminalSource).toContain("terminal.options.cursorBlink = true");
+    expect(terminalSource).toContain("currentTerminal.options.cursorBlink = true");
     expect(terminalSource).toContain('selectionBackground: value("--selection", foreground)');
     expect(terminalSource).not.toContain("brightRed:");
     expect(terminalSource).not.toContain("brightGreen:");

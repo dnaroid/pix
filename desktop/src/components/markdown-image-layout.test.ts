@@ -371,4 +371,73 @@ describe("Markdown natural image reservation", () => {
     expect(resolver).toHaveBeenCalledTimes(1);
     action.destroy();
   });
+
+  it.each(["missing", "rejected"] as const)("re-resolves a %s file for a later occurrence instead of caching the failure", async (failure) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const resolver = vi.fn<() => Promise<Attachment>>()
+      .mockImplementationOnce(failure === "missing" ? async () => undefined as unknown as Attachment : async () => { throw new Error("not yet written"); })
+      .mockImplementation(async () => attachment);
+    const { root, first, action } = setup(resolver);
+    await flush();
+    intersect(first);
+    await flush();
+    expect(first.dataset.mediaState).toBe("error");
+
+    // The agent writes the file, then mentions it again in the same message.
+    const later = preview();
+    root.append(later);
+    action.update("file written");
+    await flush();
+    intersect(later);
+    await flush();
+    expect(resolver).toHaveBeenCalledTimes(2);
+    expect(later.dataset.mediaState).toBe("ready");
+    // A successful resolution stays cached for further occurrences.
+    const third = preview();
+    root.append(third);
+    action.update("mentioned again");
+    await flush();
+    intersect(third);
+    await flush();
+    expect(resolver).toHaveBeenCalledTimes(2);
+    expect(third.dataset.mediaState).toBe("ready");
+    action.destroy();
+    warn.mockRestore();
+  });
+
+  it("keeps the shared media cache while any sibling segment is still mounted", async () => {
+    const resolver = vi.fn(async () => attachment);
+    const factory = createMarkdownContentAction({
+      externalLinkIconTemplate: () => undefined,
+      onValidateProjectFile: () => undefined,
+      onValidateLocalFile: () => undefined,
+      onResolveProjectMedia: () => resolver,
+      onResolveLocalMedia: () => resolver,
+    });
+    const rootA = new Element();
+    const rootB = new Element();
+    const previewA = preview();
+    const previewB = preview();
+    rootA.append(previewA);
+    rootB.append(previewB);
+    const segmentA = factory(rootA as unknown as HTMLElement, "a");
+    const segmentB = factory(rootB as unknown as HTMLElement, "b");
+    await flush();
+    intersect(previewA);
+    intersect(previewB);
+    await flush();
+    expect(resolver).toHaveBeenCalledOnce();
+
+    segmentB.destroy();
+    segmentB.destroy();
+    const laterA = preview();
+    rootA.append(laterA);
+    segmentA.update("a grows");
+    await flush();
+    intersect(laterA);
+    await flush();
+    expect(laterA.dataset.mediaState).toBe("ready");
+    expect(resolver).toHaveBeenCalledOnce();
+    segmentA.destroy();
+  });
 });

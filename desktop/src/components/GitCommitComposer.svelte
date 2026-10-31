@@ -5,7 +5,7 @@
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Upload from "@lucide/svelte/icons/upload";
   import { onDestroy, onMount, tick } from "svelte";
-  import { loadGitCommitDraft, saveGitCommitDraft, stagedGitChanges, type GitSnapshot, type GitDiffScope } from "../lib/git";
+  import { createGitCommitDraftWriter, loadGitCommitDraft, saveGitCommitDraft, stagedGitChanges, type GitSnapshot, type GitDiffScope } from "../lib/git";
   import { gitPushBlockedReason } from "../lib/git-workflow";
   import { autosizeTextarea } from "../lib/textarea";
 
@@ -25,6 +25,9 @@
   let messageTextarea = $state<HTMLTextAreaElement>();
   let draftVersion = 0;
   let disposed = false;
+  // `{#key workspace}` remounts this composer on a workspace switch; the writer keeps
+  // each pending draft bound to the workspace it was typed in and flushes on destroy.
+  const draftWriter = createGitCommitDraftWriter(localStorage);
   const staged = $derived(stagedGitChanges(snapshot).length);
   const conflicts = $derived(snapshot.changes.some((change) => change.conflicted));
   const pushBlocked = $derived(gitPushBlockedReason(snapshot));
@@ -41,7 +44,10 @@
     message = loadGitCommitDraft(localStorage, workspace);
     void syncMessageTextareaHeight();
   });
-  onDestroy(() => { disposed = true; });
+  onDestroy(() => {
+    disposed = true;
+    draftWriter.flush();
+  });
 
   async function syncMessageTextareaHeight(): Promise<void> {
     await tick();
@@ -54,7 +60,7 @@
     message = value;
     draftVersion += 1;
     draftNotice = "";
-    saveGitCommitDraft(localStorage, workspace, value);
+    draftWriter.schedule(workspace, value);
     void syncMessageTextareaHeight();
   }
 
@@ -85,7 +91,9 @@
     submitting = true;
     try {
       if (await onCommit(submitted.trim(), push)) {
-        // Clear only the submitted draft; another mounted panel may own a newer one.
+        // Persist any pending keystrokes first, then clear only the submitted draft;
+        // a newer edit or another mounted panel may own a different one.
+        draftWriter.flush();
         if (loadGitCommitDraft(localStorage, workspace) === submitted) saveGitCommitDraft(localStorage, workspace, "");
         if (!disposed && message === submitted) {
           message = "";
@@ -97,6 +105,8 @@
     }
   }
 </script>
+
+<svelte:window onpagehide={draftWriter.flush} onbeforeunload={draftWriter.flush} />
 
 <section class="shrink-0 space-y-2 border-t border-sidebar-border bg-panel p-2" aria-label="Prepare and commit changes">
   <div class="grid grid-cols-2 gap-1.5">
@@ -121,6 +131,7 @@
     bind:this={messageTextarea}
     aria-label="Commit message" placeholder="Describe what changed…" value={message} disabled={submitting || actionId === "commit"}
     oninput={(event) => edit(event.currentTarget.value)}
+    onblur={draftWriter.flush}
     onkeydown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void commit(!event.shiftKey && !pushBlocked); } }}
   ></textarea>
   {#if draftNotice}<p class="text-xs leading-4 text-tool-warning" role="status">{draftNotice}</p>{/if}

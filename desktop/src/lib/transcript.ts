@@ -32,9 +32,11 @@ export {
 
 export { finalizeTranscriptActivity } from "./transcript-timing";
 export {
+  activityClockIntervalMs,
   activityGroupDuration,
   activityGroupHeading,
   activityGroupPresentationLabels,
   formatTranscriptDuration,
   groupTranscriptItems,
+  latestActiveActivityStart,
 } from "./transcript-presentation";
