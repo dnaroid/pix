@@ -365,13 +365,16 @@ export interface DesktopFileAnnotateRequest {
 	readonly cwd: string;
 	readonly text: string;
 	readonly path?: string;
+	readonly refresh?: boolean;
 }
 
 export interface DesktopFileAnnotateResponse {
+	readonly summary: string;
 	readonly annotations: readonly { readonly line: number; readonly text: string }[];
 	readonly language: string;
 	readonly annotatedLines: number;
 	readonly totalLines: number;
+	readonly cached: boolean;
 }
 
 export interface DesktopDocumentTranslateRequest {
@@ -769,10 +772,15 @@ export function parseDesktopFileAnnotateRequest(value: unknown): DesktopFileAnno
 		|| value.text.trim().length === 0
 		|| value.text.length > FILE_ANNOTATE_MAX_TEXT
 		|| (value.path !== undefined && (typeof value.path !== "string" || value.path.length > 4_096))
+		|| (value.refresh !== undefined && typeof value.refresh !== "boolean")
 	) {
 		throw new RequestError(ERROR_INVALID_PARAMS, "pix/file/annotate requires cwd and non-empty file text");
 	}
-	return { cwd: value.cwd, text: value.text, ...(typeof value.path === "string" && value.path ? { path: value.path } : {}) };
+	return {
+		cwd: value.cwd, text: value.text,
+		...(typeof value.path === "string" && value.path ? { path: value.path } : {}),
+		...(value.refresh === true ? { refresh: true } : {}),
+	};
 }
 
 export function parseDesktopDocumentTranslateRequest(value: unknown): DesktopDocumentTranslateRequest {

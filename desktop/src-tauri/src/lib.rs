@@ -150,8 +150,9 @@ const PROJECT_PI_CANONICAL_DIRECTORIES: &[&str] = &[
     "skills",
     "subagents",
     "task-attachments",
-    // Preview translation cache; ACP applies its own retention (30 days unused, 4,000 entries).
+    // Preview translation and Explain caches; ACP applies their retention (30 days unused, 4,000 entries).
     "translations",
+    "explanations",
 ];
 const PROJECT_PI_CANONICAL_FILES: &[&str] = &[
     "AGENTS.md",
@@ -11988,23 +11989,29 @@ mod tests {
     }
 
     #[test]
-    fn project_pi_cleanup_preserves_translation_cache() {
+    fn project_pi_cleanup_preserves_translation_and_explanation_caches() {
         let workspace = temporary_workspace("project-pi-translation-cache");
         initialize_project_pi_from(&workspace).expect("initialize project .pi");
-        let translations = workspace.join(".pi/translations");
-        fs::create_dir(&translations).expect("create translations directory");
-        let entry = translations.join(format!("{}.json", "a".repeat(64)));
-        fs::write(&entry, b"{}").expect("write translation entry");
         let old = SystemTime::now()
             .checked_sub(PROJECT_PI_AUTO_CLEAN_TTL + Duration::from_secs(60))
-            .expect("old translation timestamp");
-        fs::File::open(&entry)
-            .unwrap()
-            .set_times(fs::FileTimes::new().set_modified(old))
-            .unwrap();
+            .expect("old cache timestamp");
+        let mut entries = Vec::new();
+        for directory in ["translations", "explanations"] {
+            let cache = workspace.join(".pi").join(directory);
+            fs::create_dir(&cache).expect("create cache directory");
+            let entry = cache.join(format!("{}.json", "a".repeat(64)));
+            fs::write(&entry, b"{}").expect("write cache entry");
+            fs::File::open(&entry)
+                .unwrap()
+                .set_times(fs::FileTimes::new().set_modified(old))
+                .unwrap();
+            entries.push(entry);
+        }
         auto_clean_project_pi_from(&workspace).expect("TTL cleanup");
         clean_project_pi_from(&workspace).expect("manual cleanup");
-        assert_eq!(fs::read(&entry).unwrap(), b"{}");
+        for entry in entries {
+            assert_eq!(fs::read(&entry).unwrap(), b"{}");
+        }
         fs::remove_dir_all(workspace).expect("remove temporary workspace");
     }
 

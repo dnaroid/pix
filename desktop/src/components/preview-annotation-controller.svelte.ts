@@ -2,7 +2,7 @@ import type { FileAnnotation, FileAnnotations } from "../lib/acp-pix-extensions"
 
 export type PreviewAnnotationStatus = "idle" | "loading" | "done" | "error";
 export type PreviewFileAnnotator = (
-  request: { readonly path: string; readonly text: string },
+  request: { readonly path: string; readonly text: string; readonly refresh?: boolean },
   signal: AbortSignal,
 ) => Promise<FileAnnotations>;
 
@@ -11,7 +11,7 @@ interface PreviewAnnotationControllerOptions {
   readonly onError: (error: unknown) => void;
 }
 
-/** Session-only memory of finished annotations, so reopening a file is free. */
+/** Session memory in front of ACP's durable `.pi/explanations` cache; keyed by content, so edits miss. */
 const RESULT_CACHE_LIMIT = 24;
 
 /**
@@ -23,6 +23,7 @@ export function createPreviewAnnotationController(options: PreviewAnnotationCont
   const state = $state({
     showing: false,
     status: "idle" as PreviewAnnotationStatus,
+    summary: "",
     annotations: [] as readonly FileAnnotation[],
     error: "",
     language: "",
@@ -41,7 +42,7 @@ export function createPreviewAnnotationController(options: PreviewAnnotationCont
 
   function apply(result: FileAnnotations): void {
     Object.assign(state, {
-      status: "done", error: "", annotations: result.annotations, language: result.language,
+      status: "done", error: "", summary: result.summary, annotations: result.annotations, language: result.language,
       annotatedLines: result.annotatedLines, totalLines: result.totalLines,
     });
   }
@@ -50,7 +51,7 @@ export function createPreviewAnnotationController(options: PreviewAnnotationCont
     if (key === sourceKey) return;
     sourceKey = key;
     abort();
-    Object.assign(state, { showing: false, status: "idle", annotations: [], error: "", language: "", annotatedLines: 0, totalLines: 0 });
+    Object.assign(state, { showing: false, status: "idle", summary: "", annotations: [], error: "", language: "", annotatedLines: 0, totalLines: 0 });
   }
 
   function remember(key: string, result: FileAnnotations): void {
@@ -75,7 +76,7 @@ export function createPreviewAnnotationController(options: PreviewAnnotationCont
     const current = () => controller === own && sourceKey === owner && !disposed;
     Object.assign(state, { showing: true, status: "loading", error: "" });
     try {
-      const result = await annotator({ path, text }, own.signal);
+      const result = await annotator({ path, text, ...(refresh ? { refresh: true } : {}) }, own.signal);
       if (!current()) return;
       if (owner !== undefined) remember(owner, result);
       apply(result);

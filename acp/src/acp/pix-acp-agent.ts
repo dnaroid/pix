@@ -766,7 +766,10 @@ export class PixAcpAgent {
 		this.gitAssistant = options.gitAssistant ?? createGitAssistant();
 		const assistRunner = createAssistModelRunner();
 		this.selectionAssistant = options.selectionAssistant ?? createSelectionAssistant({ runner: assistRunner });
-		this.fileAnnotator = options.fileAnnotator ?? createFileAnnotator({ runner: assistRunner });
+		this.fileAnnotator = options.fileAnnotator ?? createFileAnnotator({
+			runner: assistRunner,
+			onCacheError: (error) => options.logger.warn(`explanation cache failed: ${stringifyUnknown(error)}`),
+		});
 		this.documentTranslator = options.documentTranslator ?? createDocumentTranslator({
 			runner: assistRunner,
 			onCacheError: (error) => options.logger.warn(`translation cache failed: ${stringifyUnknown(error)}`),

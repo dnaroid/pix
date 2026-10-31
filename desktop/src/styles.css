@@ -185,14 +185,15 @@
   --thinking-max: #b91c57;
 
   /*
-   * Source theme. Light: a crisp IDE light palette on warm white; each role
-   * keeps about 4.5:1 or better contrast on --source-surface. Pix splits
+   * Source theme. Light: a crisp IDE light palette; each role keeps about
+   * 4.5:1 or better contrast on the code background. Pix splits
    * Sugar High tokens further: called/declared names use --sh-function and
    * numeric literals --sh-number (Sugar High reports numbers as `class`).
    */
-  --source-surface: #fbfaf7;
-  --source-gutter: #9a978e;
-  --source-gutter-border: #e6e3da;
+  /* Source keeps the shared code background; only text roles are themed. */
+  --source-surface: var(--code);
+  --source-gutter: #8f8c83;
+  --source-gutter-border: color-mix(in srgb, var(--code-border) 70%, transparent);
   --sh-identifier: #1d1c19;
   --sh-keyword: #0033b3;
   --sh-string: #067d17;
@@ -200,10 +201,10 @@
   --sh-number: #1750eb;
   --sh-class: #1d1c19;
   --sh-property: #871094;
-  --sh-entity: #8a6d00;
+  --sh-entity: #7a6000;
   --sh-jsxliterals: #1d1c19;
   --sh-sign: #3f3d38;
-  --sh-comment: #737069;
+  --sh-comment: #6a675f;
   --sh-break: inherit;
   --sh-space: inherit;
   /* Inline file comments: highlighted insertions in Preview source. */
@@ -279,10 +280,8 @@
     --thinking-low: #c8b45a;
     --thinking-xhigh: #ff8a86;
     --thinking-max: #ff5f8f;
-    /* Warm Darcula-style night palette on a graphite source surface, lifted to about 4.5:1+. */
-    --source-surface: #2b2b2b;
-    --source-gutter: #606366;
-    --source-gutter-border: #3a3c3e;
+    /* Warm Darcula-style night palette on the shared code background, about 4.5:1+. */
+    --source-gutter: #5f6672;
     --sh-identifier: #a9b7c6;
     --sh-keyword: #d4834a;
     --sh-string: #7f9f6a;

@@ -17,4 +17,16 @@ describe("Preview inline annotations", () => {
   it("escapes note text and supports only tiny inline Markdown", () => {
     expect(renderInlineNote("<b>x</b> **bold** *em* `a<b>` 2*3*4")).toBe("&lt;b&gt;x&lt;/b&gt; <strong>bold</strong> <em>em</em> <code>a&lt;b&gt;</code> 2*3*4");
   });
+
+  it("puts the module summary, progress or error before line 1", () => {
+    const { html } = highlightCode("a\nb", "js");
+    const out = insertPreviewAnnotations(html, [{ line: 2, text: "Second." }], { kind: "summary", label: "О модуле", text: "Does `x`.\n\nMore <b>." });
+    const rows = out.split("\n");
+    expect(rows[0]).toBe('<span class="preview-annotation preview-annotation-summary" role="note"><span class="preview-annotation-body"><span class="preview-annotation-label">О модуле</span><span class="preview-annotation-paragraph">Does <code>x</code>.</span><span class="preview-annotation-paragraph">More &lt;b&gt;.</span></span></span>');
+    expect(rows[1]).toContain("sh__line");
+    expect(rows[2]).toContain('data-annotation-line="2"');
+    expect(insertPreviewAnnotations(html, [], { kind: "status", text: "Explaining…" }).split("\n")[0]).toContain('preview-annotation-status" role="status"');
+    expect(insertPreviewAnnotations(html, [], { kind: "error", text: "boom" }).split("\n")[0]).toContain('role="alert"');
+    expect(insertPreviewAnnotations(html, [], { kind: "summary", text: "  " })).toBe(html);
+  });
 });
