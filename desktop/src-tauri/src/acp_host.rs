@@ -114,20 +114,18 @@ fn start_process(app: AppHandle, window_label: String) -> Result<u64, String> {
         .startup
         .lock()
         .map_err(|_| "ACP process state is poisoned".to_owned())?;
-    let running_slot = slot
-        .running
-        .lock()
-        .map_err(|_| "ACP process state is poisoned".to_owned())?;
     if slot.cancelled.load(Ordering::Acquire) || state.exiting.load(Ordering::Acquire) {
         return Err("ACP window is closed".to_owned());
     }
     if app.get_webview_window(&window_label).is_none() {
         return Err("ACP window is closed".to_owned());
     }
-    if let Some(running) = &*running_slot {
-        return Ok(running.generation);
+    if let Some(generation) = reusable_generation(&slot, STOP_TIMEOUT + FORWARDER_DRAIN_TIMEOUT)? {
+        return Ok(generation);
     }
-    drop(running_slot);
+    if slot.cancelled.load(Ordering::Acquire) || state.exiting.load(Ordering::Acquire) {
+        return Err("ACP window is closed".to_owned());
+    }
 
     let resource_dir = app
         .path()
@@ -222,6 +220,45 @@ fn start_process(app: AppHandle, window_label: String) -> Result<u64, String> {
         )
     });
     Ok(generation)
+}
+
+/// Decide, under the startup lock, whether `acp_start` can reuse the current
+/// process. A live process is reused. A stopping one (a stop already closed
+/// its stdin, e.g. after `acp_stop` timed out) must never be handed out: every
+/// `acp_send` to it would fail with "stdin is closed". Wait (bounded) for its
+/// supervisor to clear it so the caller spawns a fresh generation instead.
+fn reusable_generation(slot: &ProcessSlot, timeout: Duration) -> Result<Option<u64>, String> {
+    let exited = {
+        let running = slot
+            .running
+            .lock()
+            .map_err(|_| "ACP process state is poisoned".to_owned())?;
+        match &*running {
+            None => return Ok(None),
+            Some(process) if process.stdin_tx.is_some() => return Ok(Some(process.generation)),
+            Some(process) => process.exited.clone(),
+        }
+    };
+    let (lock, wake) = &*exited;
+    let done = lock
+        .lock()
+        .map_err(|_| "ACP exit signal is poisoned".to_owned())?;
+    let (done, _) = wake
+        .wait_timeout_while(done, timeout, |done| !*done)
+        .map_err(|_| "ACP exit signal is poisoned".to_owned())?;
+    let finished = *done;
+    drop(done);
+    // The supervisor clears its generation before signalling exit. A slot
+    // that still holds it was removed from the registry (window closing).
+    let still_running = slot
+        .running
+        .lock()
+        .map_err(|_| "ACP process state is poisoned".to_owned())?
+        .is_some();
+    if !finished || still_running {
+        return Err("pix-acp is still stopping; retry starting it".to_owned());
+    }
+    Ok(None)
 }
 
 fn publish_process(

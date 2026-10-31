@@ -244,7 +244,9 @@ uncertain-work recovery: [0070](../decisions/0070-search-source-work-recovery.md
 
 - Parsing, hashing and synchronous SQLite are in an owned child process, not the UI/main
   event loop. No Desktop session is needed. Workspace/query changes abort the native child
-  and suppress late results. Owners close streams/listeners/timers and terminate processes
+  and suppress late results. In Desktop, closing the owning window or quitting the app
+  also cancels native search/indexing children (see
+  [native process lifecycle](../architecture/desktop-native-process-lifecycle.md)). Owners close streams/listeners/timers and terminate processes
   on cancellation, timeout, abnormal exit or output overflow.
 - Storage rejects redirected directories, symlink/hardlink databases or sidecars, unknown
   native schemas/versions/identities and dangerous triggers without deleting user data.

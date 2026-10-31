@@ -11,7 +11,7 @@ use std::{
     path::{Component, Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicU64, Ordering},
         Arc, Condvar, Mutex, RwLock,
     },
     thread,
@@ -22,6 +22,8 @@ use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_window_state::StateFlags;
 
 mod acp_host;
+mod attachment_approvals;
+use attachment_approvals::AttachmentPathState;
 mod acp_queue;
 use acp_host::{
     remove_process_slot_locked, reserve_process_slot, stop_process, stop_process_slot,
@@ -39,7 +41,10 @@ mod desktop_tray;
 mod desktop_tray_attention;
 mod desktop_tray_icon;
 mod dictation_shortcut;
+mod exit_teardown;
 mod git_ci;
+mod git_diff;
+use git_diff::{git_diff_from, truncate_git_diff};
 mod git_identity;
 mod git_ignore;
 mod git_operations;
@@ -54,6 +59,7 @@ mod native_process;
 mod native_project_search;
 mod native_repository_semantic_config;
 mod openrouter_usage;
+mod package_terminal_output;
 mod plan_progress;
 mod preview_file;
 mod preview_file_action;
@@ -396,7 +402,7 @@ struct PackageTerminalSession {
     exit_code: Option<u32>,
     signal: Option<String>,
     stop_requested: bool,
-    output: Vec<u8>,
+    output: package_terminal_output::OutputHistory,
     running: Option<PackageTerminalRunning>,
 }
 
@@ -990,165 +996,6 @@ enum ProjectTaskPriority {
     Medium,
     High,
     Urgent,
-}
-
-struct AttachmentPathState {
-    approved: Mutex<HashSet<PathBuf>>,
-    cache_lock: Mutex<()>,
-    registry_lock: Mutex<()>,
-    registry_loaded: AtomicBool,
-    registry_path: PathBuf,
-}
-
-impl AttachmentPathState {
-    fn new(app: &AppHandle) -> Self {
-        let cache_dir = app
-            .path()
-            .app_cache_dir()
-            .unwrap_or_else(|_| env::temp_dir());
-        Self {
-            approved: Mutex::new(HashSet::new()),
-            cache_lock: Mutex::new(()),
-            registry_lock: Mutex::new(()),
-            registry_loaded: AtomicBool::new(false),
-            registry_path: cache_dir.join("approved-attachments.json"),
-        }
-    }
-
-    fn ensure_registry_loaded(&self, app: &AppHandle) -> Result<(), String> {
-        if self.registry_loaded.load(Ordering::Acquire) {
-            return Ok(());
-        }
-        let _registry_guard = self
-            .registry_lock
-            .lock()
-            .map_err(|_| "attachment registry state is poisoned".to_owned())?;
-        if self.registry_loaded.load(Ordering::Relaxed) {
-            return Ok(());
-        }
-
-        let mut restored = HashSet::new();
-        if let Ok(raw) = fs::read_to_string(&self.registry_path) {
-            if let Ok(paths) = serde_json::from_str::<Vec<String>>(&raw) {
-                for path in paths {
-                    if let Ok(canonical) = fs::canonicalize(path) {
-                        let _ = app.asset_protocol_scope().allow_file(&canonical);
-                        restored.insert(canonical);
-                    }
-                }
-            }
-        }
-        self.approved
-            .lock()
-            .map_err(|_| "attachment path state is poisoned".to_owned())?
-            .extend(restored);
-        self.registry_loaded.store(true, Ordering::Release);
-        Ok(())
-    }
-
-    fn approve_selected_batch(
-        &self,
-        app: &AppHandle,
-        paths: &[String],
-    ) -> Result<Vec<PathBuf>, String> {
-        self.ensure_registry_loaded(app)?;
-        let canonical = paths
-            .iter()
-            .map(|path| {
-                fs::canonicalize(path).map_err(|error| format!("failed to resolve {path}: {error}"))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        {
-            let approved = self
-                .approved
-                .lock()
-                .map_err(|_| "attachment path state is poisoned".to_owned())?;
-            for (source, path) in paths.iter().zip(&canonical) {
-                if !approved.contains(path) && !app.asset_protocol_scope().is_allowed(path) {
-                    return Err(format!("{source} was not selected by the user"));
-                }
-            }
-        }
-        self.approve_paths(app, canonical.iter().cloned())?;
-        Ok(canonical)
-    }
-
-    fn approve_cached(&self, app: &AppHandle, path: &Path) -> Result<PathBuf, String> {
-        let canonical = fs::canonicalize(path)
-            .map_err(|error| format!("failed to resolve {}: {error}", path.display()))?;
-        self.approve(app, canonical.clone())?;
-        Ok(canonical)
-    }
-
-    fn approved_path(&self, app: &AppHandle, path: &Path) -> Result<PathBuf, String> {
-        self.ensure_registry_loaded(app)?;
-        let canonical = fs::canonicalize(path)
-            .map_err(|error| format!("failed to resolve {}: {error}", path.display()))?;
-        let approved = self
-            .approved
-            .lock()
-            .map_err(|_| "attachment path state is poisoned".to_owned())?;
-        if approved.contains(&canonical) {
-            Ok(canonical)
-        } else {
-            Err(format!("{} is not an approved attachment", path.display()))
-        }
-    }
-
-    fn approve(&self, app: &AppHandle, path: PathBuf) -> Result<(), String> {
-        self.approve_paths(app, std::iter::once(path))
-    }
-
-    fn approve_paths(
-        &self,
-        app: &AppHandle,
-        paths: impl IntoIterator<Item = PathBuf>,
-    ) -> Result<(), String> {
-        self.ensure_registry_loaded(app)?;
-        let paths = paths.into_iter().collect::<HashSet<_>>();
-        for path in &paths {
-            app.asset_protocol_scope()
-                .allow_file(path)
-                .map_err(|error| format!("failed to allow attachment preview: {error}"))?;
-        }
-        let _registry_guard = self
-            .registry_lock
-            .lock()
-            .map_err(|_| "attachment registry state is poisoned".to_owned())?;
-        let (new_paths, snapshot) = {
-            let approved = self
-                .approved
-                .lock()
-                .map_err(|_| "attachment path state is poisoned".to_owned())?;
-            let new_paths = paths
-                .into_iter()
-                .filter(|path| !approved.contains(path))
-                .collect::<Vec<_>>();
-            if new_paths.is_empty() {
-                return Ok(());
-            }
-            let snapshot = approved
-                .iter()
-                .chain(new_paths.iter())
-                .map(|value| value.to_string_lossy().into_owned())
-                .collect::<Vec<_>>();
-            (new_paths, snapshot)
-        };
-        if let Some(parent) = self.registry_path.parent() {
-            fs::create_dir_all(parent).map_err(|error| {
-                format!("failed to create the attachment registry directory: {error}")
-            })?;
-        }
-        let serialized = serde_json::to_vec(&snapshot)
-            .map_err(|error| format!("failed to encode the attachment registry: {error}"))?;
-        fs::write(&self.registry_path, serialized)
-            .map_err(|error| format!("failed to save the attachment registry: {error}"))?;
-        self.approved
-            .lock()
-            .map_err(|_| "attachment path state is poisoned".to_owned())?
-            .extend(new_paths);
-        Ok(())
-    }
 }
 
 #[tauri::command]
@@ -3728,133 +3575,6 @@ fn validate_git_relative_path(path: &str) -> Result<&str, String> {
     Ok(trimmed)
 }
 
-fn git_diff_from(
-    workspace: &Path,
-    path: Option<&str>,
-    scope: GitDiffScope,
-) -> Result<GitDiff, String> {
-    let root = git_repository_root(workspace)?;
-    let path = path.map(validate_git_relative_path).transpose()?;
-    let snapshot = git_status_from(&root)?;
-    let mut content = String::new();
-
-    match scope {
-        GitDiffScope::Staged => {
-            content.push_str(&git_tracked_diff(&root, path, true)?);
-        }
-        GitDiffScope::Unstaged => {
-            content.push_str(&git_tracked_diff(&root, path, false)?);
-            append_untracked_diffs(&root, &snapshot, path, &mut content)?;
-        }
-        GitDiffScope::All => {
-            let staged = git_tracked_diff(&root, path, true)?;
-            if !staged.trim().is_empty() {
-                content.push_str("# Staged changes\n\n");
-                content.push_str(&staged);
-            }
-            let unstaged = git_tracked_diff(&root, path, false)?;
-            let before_unstaged = content.len();
-            if !unstaged.trim().is_empty() {
-                if !content.is_empty() {
-                    content.push_str("\n\n");
-                }
-                content.push_str("# Working tree changes\n\n");
-                content.push_str(&unstaged);
-            }
-            let before_untracked = content.len();
-            append_untracked_diffs(&root, &snapshot, path, &mut content)?;
-            if before_untracked == content.len()
-                && before_unstaged == content.len()
-                && content.is_empty()
-            {
-                content.clear();
-            }
-        }
-    }
-
-    let (content, truncated) = truncate_git_diff(content);
-    Ok(GitDiff {
-        path: path.map(str::to_owned),
-        scope,
-        content,
-        truncated,
-    })
-}
-
-fn git_tracked_diff(root: &Path, path: Option<&str>, staged: bool) -> Result<String, String> {
-    let mut args = vec!["diff"];
-    if staged {
-        args.push("--cached");
-    }
-    args.extend(["--no-ext-diff", "--no-color", "--minimal"]);
-    if let Some(path) = path {
-        args.extend(["--", path]);
-    }
-    let output = git_output(root, &args)?;
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-}
-
-fn append_untracked_diffs(
-    root: &Path,
-    snapshot: &GitSnapshot,
-    requested_path: Option<&str>,
-    content: &mut String,
-) -> Result<(), String> {
-    let untracked = snapshot
-        .changes
-        .iter()
-        .filter(|change| change.untracked)
-        .filter(|change| requested_path.is_none_or(|path| change.path == path))
-        .take(100)
-        .collect::<Vec<_>>();
-    for change in untracked {
-        let output = git_output_raw(
-            root,
-            &[
-                "diff",
-                "--no-index",
-                "--no-ext-diff",
-                "--no-color",
-                "--",
-                "/dev/null",
-                &change.path,
-            ],
-        )?;
-        let accepted = output.status.success() || output.status.code() == Some(1);
-        if !accepted {
-            return Err(git_command_error("git diff --no-index", &output));
-        }
-        // Git runs with the workspace as cwd and receives a workspace-relative
-        // path, so its diff headers are already relative. Never post-process the
-        // whole diff: doing so can corrupt hunk contents that happen to contain
-        // the absolute workspace path.
-        let diff = String::from_utf8_lossy(&output.stdout).into_owned();
-        if !diff.trim().is_empty() {
-            if !content.is_empty() {
-                content.push_str("\n\n");
-            }
-            content.push_str(&diff);
-        }
-        if content.len() > MAX_GIT_DIFF_BYTES {
-            break;
-        }
-    }
-    Ok(())
-}
-
-fn truncate_git_diff(mut content: String) -> (String, bool) {
-    if content.len() <= MAX_GIT_DIFF_BYTES {
-        return (content, false);
-    }
-    let mut boundary = MAX_GIT_DIFF_BYTES;
-    while !content.is_char_boundary(boundary) {
-        boundary -= 1;
-    }
-    content.truncate(boundary);
-    content.push_str("\n\n[Diff truncated by Pix Desktop]\n");
-    (content, true)
-}
-
 fn git_stage_from(workspace: &Path, path: Option<&str>) -> Result<(), String> {
     let root = git_repository_root(workspace)?;
     let path = path.map(validate_git_relative_path).transpose()?;
@@ -6240,7 +5960,7 @@ fn package_terminal_snapshot(
         status: session.status,
         exit_code: session.exit_code,
         signal: session.signal.clone(),
-        output_base64: BASE64.encode(&session.output),
+        output_base64: BASE64.encode(session.output.to_vec()),
         started_at_ms: session.started_at_ms,
     }
 }
@@ -6345,7 +6065,7 @@ fn spawn_package_terminal(
     #[cfg(not(unix))]
     let process_group_leader: Option<i32> = None;
     let killer = Arc::new(Mutex::new(child.0.as_ref().unwrap().clone_killer()));
-    let mut reader = pair
+    let reader = pair
         .master
         .try_clone_reader()
         .map_err(|error| format!("failed to read package terminal: {error}"))?;
@@ -6404,7 +6124,9 @@ fn spawn_package_terminal(
                     exit_code: None,
                     signal: None,
                     stop_requested: false,
-                    output: Vec::new(),
+                    output: package_terminal_output::OutputHistory::new(
+                        MAX_PACKAGE_TERMINAL_OUTPUT_BYTES,
+                    ),
                     running: Some(PackageTerminalRunning {
                         master: master.clone(),
                         writer: writer.clone(),
@@ -6426,17 +6148,8 @@ fn spawn_package_terminal(
 
     let output_app = app.clone();
     let output_id = id.clone();
-    thread::spawn(move || {
-        let mut buffer = [0_u8; 8192];
-        loop {
-            match reader.read(&mut buffer) {
-                Ok(0) => break,
-                Ok(read) => {
-                    append_package_terminal_output(&output_app, &output_id, &buffer[..read])
-                }
-                Err(_) => break,
-            }
-        }
+    let drained = package_terminal_output::spawn_output_pump(reader, move |batch| {
+        append_package_terminal_output(&output_app, &output_id, batch)
     });
 
     let supervisor_app = app.clone();
@@ -6445,7 +6158,9 @@ fn spawn_package_terminal(
         .0
         .take()
         .expect("terminal child owned until supervisor starts");
-    thread::spawn(move || supervise_package_terminal(supervisor_app, supervisor_id, child, exited));
+    thread::spawn(move || {
+        supervise_package_terminal(supervisor_app, supervisor_id, child, exited, drained)
+    });
 
     let sessions = state
         .sessions
@@ -6740,22 +6455,7 @@ fn append_package_terminal_output(app: &AppHandle, terminal_id: &str, data: &[u8
         let Some(session) = sessions.get_mut(terminal_id) else {
             return;
         };
-        if data.len() >= MAX_PACKAGE_TERMINAL_OUTPUT_BYTES {
-            session.output.clear();
-            session
-                .output
-                .extend_from_slice(&data[data.len() - MAX_PACKAGE_TERMINAL_OUTPUT_BYTES..]);
-        } else {
-            let overflow = session
-                .output
-                .len()
-                .saturating_add(data.len())
-                .saturating_sub(MAX_PACKAGE_TERMINAL_OUTPUT_BYTES);
-            if overflow > 0 {
-                session.output.drain(..overflow.min(session.output.len()));
-            }
-            session.output.extend_from_slice(data);
-        }
+        session.output.push(data);
         session.window_label.clone()
     };
     let _ = app.emit_to(
@@ -6773,8 +6473,21 @@ fn supervise_package_terminal(
     terminal_id: String,
     mut child: Box<dyn portable_pty::Child + Send + Sync>,
     exited: ExitSignal,
+    drained: package_terminal_output::DrainSignal,
 ) {
     let result = child.wait();
+    // Deliver the PTY's final output (e.g. a crash trace) before exit, so it is
+    // neither emitted after exit nor lost to an immediate forget. A background
+    // descendant can keep the PTY open, hence the bound.
+    if !drained.wait(package_terminal_output::OUTPUT_DRAIN_TIMEOUT) {
+        logging::record(
+            "debug",
+            module_path!(),
+            "package-terminal:output-drain-timeout",
+            serde_json::json!({ "terminalId": terminal_id }),
+            None,
+        );
+    }
     let (window_label, status, exit_code, signal) = {
         let state = app.state::<PackageTerminalState>();
         let Ok(mut sessions) = state.sessions.lock() else {
@@ -6830,16 +6543,8 @@ fn signal_exit(exited: &ExitSignal) {
     }
 }
 
-fn append_terminal_error_line(output: &mut Vec<u8>, message: &str) {
-    let line = format!("\r\n[pix] {message}\r\n");
-    let overflow = output
-        .len()
-        .saturating_add(line.len())
-        .saturating_sub(MAX_PACKAGE_TERMINAL_OUTPUT_BYTES);
-    if overflow > 0 {
-        output.drain(..overflow.min(output.len()));
-    }
-    output.extend_from_slice(line.as_bytes());
+fn append_terminal_error_line(output: &mut package_terminal_output::OutputHistory, message: &str) {
+    output.push(format!("\r\n[pix] {message}\r\n").as_bytes());
 }
 
 fn write_package_terminal(
@@ -7152,39 +6857,12 @@ fn stop_package_terminals_for_workspace(
     Ok(())
 }
 
-fn stop_package_terminals_for_window(app: &AppHandle, window_label: &str) {
-    let ids = {
-        let state = app.state::<PackageTerminalState>();
-        let Ok(sessions) = state.sessions.lock() else {
-            return;
-        };
-        captured_window_ids(&sessions, window_label, |session| &session.window_label)
-    };
-    stop_captured_package_terminals(app, window_label, &ids);
-}
-
 fn stop_captured_package_terminals(app: &AppHandle, window_label: &str, ids: &[String]) {
     for id in ids {
         let _ = stop_package_terminal(app, window_label, &id, true);
     }
     if let Ok(mut sessions) = app.state::<PackageTerminalState>().sessions.lock() {
         remove_captured_ids(&mut sessions, ids);
-    }
-}
-
-fn stop_all_package_terminals(app: &AppHandle) {
-    let window_labels = {
-        let state = app.state::<PackageTerminalState>();
-        let Ok(sessions) = state.sessions.lock() else {
-            return;
-        };
-        sessions
-            .values()
-            .map(|session| session.window_label.clone())
-            .collect::<HashSet<_>>()
-    };
-    for window_label in window_labels {
-        stop_package_terminals_for_window(app, &window_label);
     }
 }
 
@@ -9258,6 +8936,9 @@ pub fn run() {
             handle
                 .state::<git_ci::GitCiProcessState>()
                 .cancel_window(label);
+            handle
+                .state::<native_project_search::SearchState>()
+                .cancel_window(label);
             // Record destruction on the event thread, before any queued
             // spawn_blocking task can resume and publish a child.
             let (slot, terminal_ids) = capture_destroyed_window(
@@ -9289,24 +8970,15 @@ pub fn run() {
                 api.prevent_exit();
                 let windows = window_restore::freeze(handle);
                 handle.state::<git_ci::GitCiProcessState>().cancel_all();
+                handle
+                    .state::<native_project_search::SearchState>()
+                    .cancel_all();
                 let handle = handle.clone();
                 thread::spawn(move || {
                     if let Err(error) = window_restore::save(&handle, windows) {
                         logging::error(module_path!(), format!("failed to save open windows: {error}"));
                     }
-                    let state = handle.state::<AcpProcessState>();
-                    let window_labels = state
-                        .slots
-                        .lock()
-                        .map(|slots| slots.keys().cloned().collect::<Vec<_>>())
-                        .unwrap_or_default();
-                    for window_label in window_labels {
-                        if let Err(error) = stop_process(&state, &window_label, None) {
-                            logging::error(module_path!(), format!("failed to stop pix-acp for window {window_label} during exit: {error}"));
-                        }
-                        stop_package_terminals_for_window(&handle, &window_label);
-                    }
-                    stop_all_package_terminals(&handle);
+                    exit_teardown::stop_all_native_processes(&handle);
                     logging::record("info", "lifecycle", "desktop:stopping", serde_json::json!({}), None);
                     logging::shutdown();
                     handle.exit(code.unwrap_or(0));
@@ -9350,6 +9022,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn forced_stop_terminates_backend_descendant() {
+        use std::io::{BufRead, BufReader};
         let mut command = Command::new("/bin/sh");
         command
             .arg("-c")

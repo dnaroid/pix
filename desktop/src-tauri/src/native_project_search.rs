@@ -13,33 +13,81 @@ use std::{
 };
 use tauri::{AppHandle, Manager, State};
 
+/// Cancellation tokens by request id. Each records its owning window so
+/// window close and app exit cancel native search/indexing children even when
+/// the webview can no longer send `native_project_search_cancel`.
 #[derive(Default)]
-pub(crate) struct SearchState(Mutex<HashMap<String, (Instant, Arc<AtomicBool>)>>);
+pub(crate) struct SearchState {
+    requests: Mutex<HashMap<String, SearchToken>>,
+    /// Set on app exit: requests registered afterwards start cancelled.
+    exiting: AtomicBool,
+}
+
+struct SearchToken {
+    created: Instant,
+    cancelled: Arc<AtomicBool>,
+    window_label: String,
+}
+
 impl SearchState {
-    fn token(&self, id: &str) -> Result<Arc<AtomicBool>, String> {
+    pub(crate) fn cancel_window(&self, window_label: &str) {
+        let Ok(mut requests) = self.requests.lock() else {
+            return;
+        };
+        requests.retain(|_, request| {
+            if request.window_label == window_label {
+                request.cancelled.store(true, Ordering::Release);
+                false
+            } else {
+                true
+            }
+        });
+    }
+
+    pub(crate) fn cancel_all(&self) {
+        self.exiting.store(true, Ordering::Release);
+        let Ok(mut requests) = self.requests.lock() else {
+            return;
+        };
+        for request in requests.values() {
+            request.cancelled.store(true, Ordering::Release);
+        }
+        requests.clear();
+    }
+
+    fn token(&self, id: &str, window_label: &str) -> Result<Arc<AtomicBool>, String> {
         if id.is_empty()
             || id.len() > 80
             || !id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-')
         {
             return Err("Invalid search request identity".into());
         }
-        let mut requests = self.0.lock().map_err(|_| "Search state unavailable")?;
+        let mut requests = self
+            .requests
+            .lock()
+            .map_err(|_| "Search state unavailable")?;
         // Active requests can outlive the tombstone TTL while indexing.
-        requests.retain(|_, (time, token)| {
-            Arc::strong_count(token) > 1 || time.elapsed() < Duration::from_secs(60)
+        requests.retain(|_, request| {
+            Arc::strong_count(&request.cancelled) > 1
+                || request.created.elapsed() < Duration::from_secs(60)
         });
         if requests.len() >= 128 && !requests.contains_key(id) {
             return Err("Too many native search requests".into());
         }
+        let exiting = self.exiting.load(Ordering::Acquire);
         // Retain a pre-start cancellation: Tauri commands may be scheduled out of order.
         Ok(requests
             .entry(id.to_owned())
-            .or_insert_with(|| (Instant::now(), Arc::new(AtomicBool::new(false))))
-            .1
+            .or_insert_with(|| SearchToken {
+                created: Instant::now(),
+                cancelled: Arc::new(AtomicBool::new(exiting)),
+                window_label: window_label.to_owned(),
+            })
+            .cancelled
             .clone())
     }
     fn finish(&self, id: &str) {
-        if let Ok(mut requests) = self.0.lock() {
+        if let Ok(mut requests) = self.requests.lock() {
             requests.remove(id);
         }
     }
@@ -55,29 +103,35 @@ pub(crate) struct SearchRequest {
 
 #[tauri::command]
 pub(crate) fn native_project_search_cancel(
+    window: tauri::WebviewWindow,
     request_id: String,
     state: State<'_, SearchState>,
 ) -> Result<(), String> {
-    state.token(&request_id)?.store(true, Ordering::Release);
+    state
+        .token(&request_id, window.label())?
+        .store(true, Ordering::Release);
     Ok(())
 }
 
 #[tauri::command]
 pub(crate) async fn native_project_search(
     app: AppHandle,
+    window: tauri::WebviewWindow,
     state: State<'_, SearchState>,
     request: SearchRequest,
 ) -> Result<serde_json::Value, String> {
-    let cancelled = state.token(&request.request_id)?;
+    let window_label = window.label().to_owned();
+    let cancelled = state.token(&request.request_id, &window_label)?;
     let index_source = native_index_source(&request.query);
     let workspace = index_source.map(|_| request.workspace.clone());
     let cancel_flag = cancelled.clone();
     let started = Instant::now();
     let id = request.request_id.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || run(&app, request, cancelled))
-        .await
-        .map_err(|_| "Native search worker failed".to_owned())
-        .and_then(|result| result);
+    let result =
+        tauri::async_runtime::spawn_blocking(move || run(&app, &window_label, request, cancelled))
+            .await
+            .map_err(|_| "Native search worker failed".to_owned())
+            .and_then(|result| result);
     state.finish(&id);
     if let Some(source) = index_source {
         let aborted = cancel_flag.load(Ordering::Acquire);
@@ -132,6 +186,7 @@ fn native_index_source(query: &serde_json::Value) -> Option<&'static str> {
 
 fn run(
     app: &AppHandle,
+    window_label: &str,
     request: SearchRequest,
     cancelled: Arc<AtomicBool>,
 ) -> Result<serde_json::Value, String> {
@@ -164,6 +219,11 @@ fn run(
         use std::os::unix::process::CommandExt;
         command.process_group(0);
     }
+    // Destroyed cancels registered tokens; a request that registered after it
+    // (commands can be scheduled late) must not start a child for a closed window.
+    if cancelled.load(Ordering::Acquire) || app.get_webview_window(window_label).is_none() {
+        return Err("Native search cancelled".into());
+    }
     let mut child =
         crate::native_process::spawn(&mut command).map_err(|_| "Native search could not start")?;
     let pid = child.id();
@@ -171,14 +231,12 @@ fn run(
     let stderr = child.stderr.take().expect("piped stderr");
     let out = thread::spawn(move || crate::read_bounded_process_stream(stdout, 2 * 1024 * 1024));
     let err = thread::spawn(move || crate::read_bounded_process_stream(stderr, 8192));
-    let wrote = child
-        .stdin
-        .take()
-        .expect("piped stdin")
-        .write_all(&input)
-        .is_ok();
+    // Up to 4 MB of rerank input: write it off-thread so cancellation and the
+    // deadline apply while the child is still reading. Killing the child below
+    // unblocks a stalled write with EPIPE.
+    let writer = spawn_input_writer(child.stdin.take().expect("piped stdin"), input);
     let deadline = request_deadline(&request.query);
-    let mut failed = !wrote;
+    let mut failed = false;
     loop {
         if cancelled.load(Ordering::Acquire) || deadline.is_some_and(|time| Instant::now() >= time)
         {
@@ -210,9 +268,10 @@ fn run(
     // Kill the process group before reaping, including any outstanding git enumerator.
     crate::force_kill_process_group(pid, &mut child);
     let status = child.wait();
+    let wrote = writer.join().unwrap_or(false);
     let output = out.join();
     let _ = err.join();
-    if failed || !status.map(|s| s.success()).unwrap_or(false) {
+    if failed || !wrote || !status.map(|s| s.success()).unwrap_or(false) {
         return Err("Native search cancelled, unavailable or timed out".into());
     }
     let (bytes, truncated) = output.map_err(|_| "Native search output unavailable")?;
@@ -220,6 +279,14 @@ fn run(
         return Err("Native search output exceeded its bound".into());
     }
     serde_json::from_slice(&bytes).map_err(|_| "Invalid native search response".into())
+}
+
+/// Writes the request and closes stdin (by dropping it) on its own thread.
+fn spawn_input_writer<W: Write + Send + 'static>(
+    mut stdin: W,
+    input: Vec<u8>,
+) -> thread::JoinHandle<bool> {
+    thread::spawn(move || stdin.write_all(&input).and_then(|()| stdin.flush()).is_ok())
 }
 
 fn request_deadline(query: &serde_json::Value) -> Option<Instant> {
@@ -239,6 +306,58 @@ fn request_input_limit(query: &serde_json::Value) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    impl SearchState {
+        fn token_for_test(&self, id: &str) -> Result<Arc<AtomicBool>, String> {
+            self.token(id, "window")
+        }
+    }
+    #[test]
+    fn window_close_cancels_only_that_windows_requests() {
+        let state = SearchState::default();
+        let one = state.token("index-1", "window-a").unwrap();
+        let two = state.token("index-2", "window-b").unwrap();
+        state.cancel_window("window-a");
+        assert!(one.load(Ordering::Acquire));
+        assert!(!two.load(Ordering::Acquire));
+        assert!(!state.requests.lock().unwrap().contains_key("index-1"));
+        assert!(state.requests.lock().unwrap().contains_key("index-2"));
+    }
+    #[test]
+    fn app_exit_cancels_running_and_late_requests() {
+        let state = SearchState::default();
+        let running = state.token("index-1", "window-a").unwrap();
+        state.cancel_all();
+        assert!(running.load(Ordering::Acquire));
+        assert!(state.requests.lock().unwrap().is_empty());
+        // A command scheduled after exit began must not start a child.
+        assert!(state
+            .token("late", "window-b")
+            .unwrap()
+            .load(Ordering::Acquire));
+    }
+    #[test]
+    fn input_write_runs_off_the_cancellation_loop_thread() {
+        struct Blocked(std::sync::mpsc::Receiver<()>);
+        impl Write for Blocked {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                let _ = self.0.recv();
+                Err(std::io::ErrorKind::BrokenPipe.into())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let (release, blocked) = std::sync::mpsc::channel();
+        // Returns while the write is still blocked, so the caller reaches its
+        // cancel/deadline loop immediately; a failed write is reported on join.
+        let writer = spawn_input_writer(Blocked(blocked), vec![0; 4 * 1024 * 1024]);
+        assert!(!writer.is_finished());
+        drop(release);
+        assert!(!writer.join().unwrap());
+        assert!(spawn_input_writer(Vec::new(), b"{}".to_vec())
+            .join()
+            .unwrap());
+    }
     #[test]
     fn only_explicit_code_and_knowledge_index_calls_are_logged() {
         assert_eq!(
@@ -261,34 +380,41 @@ mod tests {
     #[test]
     fn cancellation_before_start_and_finish_are_owned() {
         let state = SearchState::default();
-        state.token("a-1").unwrap().store(true, Ordering::Release);
-        assert!(state.token("a-1").unwrap().load(Ordering::Acquire));
+        state
+            .token_for_test("a-1")
+            .unwrap()
+            .store(true, Ordering::Release);
+        assert!(state.token_for_test("a-1").unwrap().load(Ordering::Acquire));
         state.finish("a-1");
-        assert!(!state.token("a-1").unwrap().load(Ordering::Acquire));
-        assert!(state.token("../unsafe").is_err());
+        assert!(!state.token_for_test("a-1").unwrap().load(Ordering::Acquire));
+        assert!(state.token_for_test("../unsafe").is_err());
     }
     #[test]
     fn cancellation_tombstones_are_bounded() {
         let state = SearchState::default();
         for n in 0..128 {
-            state.token(&n.to_string()).unwrap();
+            state.token_for_test(&n.to_string()).unwrap();
         }
-        assert!(state.token("overflow").is_err());
+        assert!(state.token_for_test("overflow").is_err());
         state.finish("0");
-        assert!(state.token("new").is_ok());
+        assert!(state.token_for_test("new").is_ok());
     }
     #[test]
     fn long_indexing_keeps_its_cancellation_token() {
         let state = SearchState::default();
-        let active = state.token("long-index").unwrap();
-        state.token("expired-tombstone").unwrap();
-        for (time, _) in state.0.lock().unwrap().values_mut() {
-            *time = Instant::now() - Duration::from_secs(120);
+        let active = state.token_for_test("long-index").unwrap();
+        state.token_for_test("expired-tombstone").unwrap();
+        for request in state.requests.lock().unwrap().values_mut() {
+            request.created = Instant::now() - Duration::from_secs(120);
         }
-        state.token("other").unwrap();
-        assert!(!state.0.lock().unwrap().contains_key("expired-tombstone"));
+        state.token_for_test("other").unwrap();
+        assert!(!state
+            .requests
+            .lock()
+            .unwrap()
+            .contains_key("expired-tombstone"));
         state
-            .token("long-index")
+            .token_for_test("long-index")
             .unwrap()
             .store(true, Ordering::Release);
         assert!(active.load(Ordering::Acquire));

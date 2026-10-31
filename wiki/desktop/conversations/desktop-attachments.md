@@ -77,7 +77,7 @@ Show image and video attachments in the desktop composer and transcript, while k
   by content hash. No blob deletion or garbage collection is triggered by
   a task write; an explicit reference-aware GC can be introduced separately.
 - The Tauri shell exposes bounded attachment inspection/read/cache commands and an approved-path opener command.
-- Dialog and drop selections are admitted through Tauri's dynamic asset scope, then persisted in Pix's approved attachment registry for session replay.
+- Dialog and drop selections are admitted through Tauri's dynamic asset scope, then persisted in Pix's approved attachment registry for session replay. The registry keeps the newest 2,048 approvals by insertion order, drops entries whose files no longer exist when it is loaded, and is replaced atomically (temporary file + rename). An evicted path loses its approval (and is not restored after restart) but keeps its asset-protocol grant until the app exits, because Tauri's scope cannot revoke a single path without a permanent deny.
 
 ## Invariants
 
