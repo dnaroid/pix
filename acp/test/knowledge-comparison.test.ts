@@ -252,6 +252,42 @@ describe("knowledge comparison", () => {
     assert.equal((await compare(answer([finding]), repeated)).complete, false);
     const repeatedSource = [{ ...evidence[0]!, text: evidence[0]!.text + evidence[0]!.text }];
     assert.equal((await compare(answer([finding]), document, repeatedSource)).complete, false);
+    const result = await compare(answer([finding]), repeated);
+    assert.ok(result.notices.some(notice => notice.includes("occurs more than once")));
+  });
+
+  test("grounds re-wrapped quotations in the exact original hard-wrapped slice", async () => {
+    const draft = { path: "wiki/new.md", text: "# Policy\nClient v2 retries at most\n  7 times in production.\nOther text.\n" };
+    const sources = [{ id: "source-1", path: "wiki/old.md", text: "## Client\nClient v2 retries at\r\nmost 5 times in production.\n", startLine: 4 }];
+    const result = await compare(answer([{ ...finding, draftQuote: "Client v2 retries at most 7 times in production.",
+      existingQuote: " Client v2 retries  at most 5 times\tin production. " }]), draft, sources);
+    assert.equal(result.complete, true);
+    assert.deepEqual(result.conflicts[0]!.draft, { path: draft.path,
+      quote: "Client v2 retries at most\n  7 times in production.", startLine: 2, endLine: 3 });
+    assert.deepEqual(result.conflicts[0]!.existing, { path: "wiki/old.md",
+      quote: "Client v2 retries at\nmost 5 times in production.", startLine: 5, endLine: 6 });
+  });
+
+  test("whitespace-tolerant grounding still rejects ambiguous, missing and changed-word quotations", async () => {
+    const repeated = { ...document, text: "Client v2 retries at\nmost 7 times.\nClient v2 retries at most\n7 times.\n" };
+    const ambiguous = await compare(answer([{ ...finding, draftQuote: "Client v2 retries at most 7 times." }]), repeated);
+    assert.equal(ambiguous.complete, false);
+    assert.ok(ambiguous.notices.some(notice => notice.includes("occurs more than once")));
+    for (const draftQuote of ["Client v2 retries at most 8 times.", "Clientv2 retries at most 7 times.", " \n "]) {
+      const result = await compare(answer([{ ...finding, draftQuote }]));
+      assert.equal(result.complete, false);
+      assert.equal(result.conflicts.length, 0);
+    }
+    const missing = await compare(answer([{ ...finding, draftQuote: "Client v2 retries at most 8 times." }]));
+    assert.ok(missing.notices.some(notice => notice.includes("does not occur")));
+  });
+
+  test("whitespace-tolerant internal quotations still reject overlap", async () => {
+    const draft = { path: "wiki/new.md", text: "Retries are at most\n7 times. Retries are at most 9 times.\n" };
+    const result = await compare(answer([{ ...finding, sourceId: "draft", draftQuote: "Retries are at most 7 times.",
+      existingQuote: "7 times. Retries" }]), draft);
+    assert.equal(result.complete, false);
+    assert.equal(result.conflicts.length, 0);
   });
 
   test("normalizes CRLF and computes inclusive multiline citation spans", async () => {

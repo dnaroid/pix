@@ -54,7 +54,8 @@ const MESSAGES = {
   reportSizeLimit: ["The merged report reached its saved-size limit; some details were omitted.", "Объединённый отчёт достиг ограничения размера; часть подробностей не сохранена."],
   findingFields: ["invalid fields", "некорректные поля"],
   findingSource: ["unknown source", "неизвестный источник"],
-  findingQuote: ["a quotation is missing or not uniquely located in the supplied text", "цитата отсутствует или встречается в предоставленном тексте несколько раз"],
+  findingQuote: ["a quotation does not occur in the supplied text", "цитата отсутствует в предоставленном тексте"],
+  findingQuoteAmbiguous: ["a quotation occurs more than once in the supplied text", "цитата встречается в предоставленном тексте несколько раз"],
   findingOverlap: ["internal quotations overlap", "цитаты из черновика пересекаются"],
   noWikiEvidence: ["No related Wiki passages were available; only contradictions within this draft could be checked.", "Связанные фрагменты Wiki недоступны; проверены только противоречия внутри этого черновика."],
   corpusChanged: ["The document, Wiki configuration or Wiki contents changed during the check. Run it again.", "Документ, настройки или содержимое Wiki изменились во время проверки. Повторите её."],
@@ -74,6 +75,13 @@ export function reportMessage(language: KnowledgeReportLanguage, key: KnowledgeR
 /** Retain an explicit reason without matching or rewriting arbitrary error text. */
 export class KnowledgeReportError extends Error {
   constructor(readonly reason: KnowledgeReportMessage) { super(reportMessage("en", reason)); }
+}
+
+/** Actionable notice for a semantic index that is still being built incrementally. */
+export function semanticPartial(language: KnowledgeReportLanguage, indexed: number, total: number): string {
+  return language === "ru"
+    ? `Семантический индекс Wiki построен частично (${indexed}/${total} фрагментов); каждый поиск дополняет его небольшими порциями. Запустите индексацию Knowledge в панели Search indexes и повторите проверку.`
+    : `The Wiki semantic index is partial (${indexed}/${total} chunks); each search extends it only in small batches. Run Knowledge indexing in the Search indexes panel, then check again.`;
 }
 
 export function sourceUnavailable(language: KnowledgeReportLanguage, path: string): string {

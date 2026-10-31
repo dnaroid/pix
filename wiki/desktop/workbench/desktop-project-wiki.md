@@ -529,15 +529,22 @@ make a successfully completed comparison of the selected passages incomplete.
 Passages and leading context end on complete lines; optional context never
 displaces the reserved matched range. Timeouts, failed or stale retrieval,
 unavailable/incomplete semantics, unreadable sources and genuine comparison
-uncertainty still produce notices and prevent a clear result. Sources
+uncertainty still produce notices and prevent a clear result. A partially built
+semantic index reports its latest `indexed/total` coverage once and points to
+Knowledge indexing in **Search indexes**; the check itself never starts a full
+indexing run. Sources
 are reread from validated project files; cached search snippets are not used as
 proof. The model can also compare two claims within the draft. With zero external
 evidence, internal findings remain available, but cross-document consistency
 cannot be established.
 
 Findings require known source IDs and exact, uniquely occurring quotations in
-the draft and source passage after newline normalization. Line ranges are
-computed from those texts. Metadata context alone cannot ground a quote.
+the draft and source passage after newline normalization. A quotation absent
+verbatim is retried once with whitespace runs (line breaks, indentation, repeated
+spaces) treated as equivalent, because judges often re-wrap hard-wrapped Markdown;
+it must still occur exactly once, and the citation keeps the exact original slice,
+never the model's text. Diagnostics distinguish a missing from a repeated
+quotation. Line ranges are computed from those texts. Metadata context alone cannot ground a quote.
 Malformed output, fabricated or ambiguous quotations and model uncertainties
 make the check incomplete; independently valid findings can still be shown.
 
@@ -609,10 +616,16 @@ captured report remain in the project queue. Normal Save performs a fresh check.
 retains Preview's dirty-draft protection, so links are disabled while the draft
 is dirty; quoted evidence remains visible in the report.
 
-Before returning a result, the service revalidates the Wiki corpus metadata,
-Wiki configuration and hashes of the draft's saved baseline and selected source
-files. Changed documents, including newly added or previously unselected pages,
-invalidate the result. Incomplete corpus validation also prevents a clear result.
+Before returning a result, the service revalidates the Wiki corpus, Wiki
+configuration, the raw hash of the draft's saved baseline and the evidence text
+of selected source files. The corpus fence compares every Markdown page's body
+without app-owned report/stamp metadata (cached by unchanged file metadata), and
+selected sources compare their line-preserving evidence text. Body edits,
+additions, removals and renames, including of previously unselected pages,
+invalidate the result. A report or decision written to another page (for example
+by a `wiki_conflicts` recheck from a session), a `touch` or an identical atomic
+rewrite does not. Pages unreadable as evidence fall back to file metadata.
+Incomplete corpus validation also prevents a clear result.
 Draft and project ownership guards discard stale or cancelled pre-save replies;
 manual jobs retain their own captured file identity through Preview navigation.
 Before publishing a manual report, its path and SHA-256 must match that job's

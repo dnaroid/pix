@@ -1,7 +1,7 @@
 import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, writeFile, rm, symlink, realpath } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm, rename, symlink, realpath } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { collectKnowledgeEvidence, type KnowledgeCheckInput, type KnowledgeSearch, type KnowledgeSearchHit, type KnowledgeSearchResult } from "../src/knowledge/evidence.js";
@@ -84,7 +84,10 @@ test("persisted report blocks never become queries, draft content or source evid
   assert.equal(snapshot.evidence[0]?.text.includes("IGNORED_REPORT_INSTRUCTION"), false);
   assert.equal(snapshot.evidence[0]?.text.split("\n").length, rawPolicy.split("\n").length);
   assert.equal(await snapshot.current(signal()), true);
+  // A concurrent report rewrite of a related page leaves its evidence text unchanged.
   await put(input.cwd, "wiki/policy.md", rawPolicy.replace("test/judge", "test/other-judge"));
+  assert.equal(await snapshot.current(signal()), true);
+  await put(input.cwd, "wiki/policy.md", rawPolicy.replace("Retry", "Never retry"));
   assert.equal(await snapshot.current(signal()), false);
 });
 
@@ -102,16 +105,42 @@ test("bounded report metadata overhead does not consume the source body byte lim
   assert.equal(snapshot.notices.some(notice => notice.includes("512 KiB")), false);
 });
 
-test("metadata-only edits still invalidate raw target and source snapshots", async t => {
-  for (const changed of ["wiki/draft.md", "wiki/policy.md"]) await t.test(changed, async child => {
+test("metadata-only edits invalidate only the raw target, never related or unselected pages", async t => {
+  for (const changed of ["wiki/draft.md", "wiki/policy.md", "wiki/unselected.md"]) await t.test(changed, async child => {
     const input = await project(child), rawDraft = await stamped(draft, input.path), rawPolicy = await stamped(policy, "wiki/policy.md");
+    const unselected = "Unrelated page.\n", rawUnselected = await stamped(unselected, "wiki/unselected.md");
     await put(input.cwd, input.path, rawDraft);
     await put(input.cwd, "wiki/policy.md", rawPolicy);
+    await put(input.cwd, "wiki/unselected.md", rawUnselected);
     const result = await collectKnowledgeEvidence({ ...input, content: rawDraft, expectedContent: rawDraft }, search, signal());
     assert.equal(await result.current(signal()), true);
-    await put(input.cwd, changed, await stamped(changed === input.path ? draft : policy, changed, "other/model"));
-    assert.equal(await result.current(signal()), false);
+    const body = changed === input.path ? draft : changed === "wiki/policy.md" ? policy : unselected;
+    await put(input.cwd, changed, await stamped(body, changed, "other/model"));
+    assert.equal(await result.current(signal()), changed !== input.path);
   });
+});
+
+test("an identical rewrite of an unselected page keeps the corpus fence current", async t => {
+  const input = await project(t);
+  await put(input.cwd, "wiki/unselected.md", "Original unrelated policy.");
+  const snapshot = await collectKnowledgeEvidence(input, search, signal());
+  assert.equal(snapshot.complete, true);
+  await rm(join(input.cwd, "wiki/unselected.md"));
+  await put(input.cwd, "wiki/unselected.md", "Original unrelated policy.");
+  assert.equal(await snapshot.current(signal()), true);
+  await rename(join(input.cwd, "wiki/unselected.md"), join(input.cwd, "wiki/renamed.md"));
+  assert.equal(await snapshot.current(signal()), false);
+});
+
+test("a concurrent report write to another page during retrieval keeps the comparison complete", async t => {
+  const input = await project(t);
+  await put(input.cwd, "wiki/unselected.md", "Original unrelated policy.\n");
+  const result = await collectKnowledgeEvidence(input, async () => {
+    await put(input.cwd, "wiki/unselected.md", await stamped("Original unrelated policy.\n", "wiki/unselected.md"));
+    return response([hit("wiki/policy.md")]);
+  }, signal());
+  assert.equal(result.complete, true);
+  assert.equal(await result.current(signal()), true);
 });
 
 test("hybrid retrieval is confined to the target Wiki and uses original bytes, excluding self", async t => {
@@ -451,4 +480,18 @@ test("abort before retrieval and late completion both propagate cancellation", a
   }, late.signal), { name: "AbortError" });
   const snapshot = await collectKnowledgeEvidence(input, search, signal());
   await assert.rejects(snapshot.current(early.signal), { name: "AbortError" });
+});
+
+test("a partially built semantic index reports its latest coverage once with an actionable notice", async t => {
+  const input = await project(t);
+  let indexed = 100;
+  const snapshot = await collectKnowledgeEvidence({ ...input, content: draft + "\n## Second\n\nAnother retry rule.\n" }, async () => {
+    indexed += 128;
+    return { ...response([hit("wiki/policy.md")]), status: { complete: true, stale: false, semanticEnabled: true,
+      semantic: { enabled: true, complete: false, state: "partial", indexed, total: 2000 } } };
+  }, signal(), "ru");
+  assert.equal(snapshot.complete, false);
+  const partial = snapshot.notices.filter(notice => notice.includes("Search indexes"));
+  assert.equal(partial.length, 1);
+  assert.ok(partial[0]!.includes(`${indexed}/2000`));
 });

@@ -5,7 +5,7 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { parse, type ParseError } from "jsonc-parser";
 import type { CheckDocument, CheckEvidence } from "./comparison.js";
 import { MAX_KNOWLEDGE_CHUNK_CHARS, type KnowledgeCheckCoverage, type KnowledgeReportLanguage } from "./contract.js";
-import { KnowledgeReportError, reportMessage, sourceInvalid, sourceUnavailable, type KnowledgeReportMessage } from "./report-language.js";
+import { KnowledgeReportError, reportMessage, semanticPartial, sourceInvalid, sourceUnavailable, type KnowledgeReportMessage } from "./report-language.js";
 import { knowledgeEvidenceText, MAX_KNOWLEDGE_STAMP_BYTES, MAX_KNOWLEDGE_REPORT_BYTES, stripKnowledgeCheckStamp } from "./stamp.js";
 
 export interface KnowledgeCheckInput { cwd: string; path: string; content: string; expectedContent?: string; }
@@ -14,7 +14,8 @@ export interface KnowledgeSearchResult {
   hits: KnowledgeSearchHit[];
   notices: string[];
   limitNotices?: string[];
-  status: { complete: boolean; completeForSelection?: boolean; stale: boolean; semanticEnabled?: boolean; semantic?: { enabled: boolean; complete: boolean; state: string } };
+  status: { complete: boolean; completeForSelection?: boolean; stale: boolean; semanticEnabled?: boolean;
+    semantic?: { enabled: boolean; complete: boolean; state: string; indexed?: number; total?: number } };
 }
 export type KnowledgeSearch = (cwd: string, request: {
   query: string; sources: ["knowledge"]; mode: "hybrid"; pathPrefix: string;
@@ -106,17 +107,42 @@ async function directory(root: string, name: string): Promise<{ dev: number; ino
   return { dev: info.dev, ino: info.ino };
 }
 
-/** Metadata-only corpus fence, including documents retrieval did not select. */
-async function inventory(root: string, wikiPath: string, signal: AbortSignal): Promise<{ signature: string; complete: boolean }> {
+/** Body digests keyed by unchanged file metadata, so repeated fences reread only touched pages. */
+export type KnowledgeInventoryCache = Map<string, string>;
+
+/**
+ * Corpus fence over every Markdown page, including documents retrieval did not select.
+ * Pages are compared by their body without app-owned report/stamp metadata, so a
+ * concurrent report or decision write, a `touch` or an identical atomic rewrite does
+ * not invalidate a comparison; any body edit, addition, removal or rename does.
+ */
+async function inventory(root: string, wikiPath: string, signal: AbortSignal, cache: KnowledgeInventoryCache): Promise<{ signature: string; complete: boolean }> {
   const pending = [wikiPath], rows: string[] = [];
   let entries = 0, complete = true;
+  async function body(name: string, info: { dev: bigint; ino: bigint; size: bigint; mtimeNs: bigint; ctimeNs: bigint }): Promise<string> {
+    const key = JSON.stringify([name, String(info.dev), String(info.ino), String(info.size), String(info.mtimeNs), String(info.ctimeNs)]);
+    const cached = cache.get(key);
+    if (cached) return cached;
+    let digest: string;
+    try {
+      const content = await file(root, name, signal);
+      digest = content ? "body:" + sha(stripKnowledgeCheckStamp(content.text)) : "missing";
+    } catch (error) {
+      signal.throwIfAborted();
+      // Unreadable as evidence (too large, binary, mid-replacement): fall back to its metadata.
+      if (!(error instanceof SourceValidationError)) throw error;
+      digest = "metadata:" + key;
+    }
+    cache.set(key, digest);
+    return digest;
+  }
   async function record(name: string, isDirectory: boolean): Promise<boolean> {
     signal.throwIfAborted();
     const path = join(root, name), info = await lstat(path, { bigint: true });
     if (info.isSymbolicLink() || (isDirectory ? !info.isDirectory() : !info.isFile())
       || !inside(root, path) || await realpath(path) !== path) return false;
-    rows.push(JSON.stringify([name, isDirectory, String(info.dev), String(info.ino), String(info.size),
-      String(info.mtimeNs), String(info.ctimeNs)]));
+    rows.push(JSON.stringify(isDirectory ? [name, true, String(info.dev), String(info.ino)]
+      : [name, false, await body(name, info)]));
     return true;
   }
   while (pending.length && entries < MAX_INVENTORY_ENTRIES) {
@@ -246,16 +272,21 @@ export async function collectKnowledgeEvidence(input: KnowledgeCheckInput, searc
   if (draftContent.length > MAX_DRAFT_CHARS) throw new KnowledgeReportError("documentInvalid");
   const root = await realpath(resolve(requestedCwd));
   const rootIdentity = await directory(root, ".");
-  const revisions = new Map<string, string | null>();
-  async function snapshot(name: string): Promise<{ text: string; hash: string } | undefined> {
+  // Config and the checked page keep raw identity; related pages compare their evidence text,
+  // which preserves line numbers but ignores app-owned report/stamp rewrites.
+  const revisions = new Map<string, { hash: string | null; evidence: boolean }>();
+  const cache: KnowledgeInventoryCache = new Map();
+  const identity = (content: { text: string; hash: string } | undefined, evidence: boolean) =>
+    content ? evidence ? sha(knowledgeEvidenceText(content.text)) : content.hash : null;
+  async function snapshot(name: string, evidence = false): Promise<{ text: string; hash: string } | undefined> {
     const content = await file(root, name, signal);
-    revisions.set(name, content?.hash ?? null);
+    revisions.set(name, { hash: identity(content, evidence), evidence });
     return content;
   }
   const config = await snapshot(CONFIG_PATH);
   const wikiPath = wikiPathFromConfig(config?.text);
   const wikiIdentity = await directory(root, wikiPath);
-  const corpus = await inventory(root, wikiPath, signal);
+  const corpus = await inventory(root, wikiPath, signal, cache);
   const path = projectPath(requestedPath);
   if (!path.startsWith(`${wikiPath}/`) || !/\.(md|markdown)$/iu.test(path) || !durable(path))
     throw new KnowledgeReportError("documentMarkdown");
@@ -271,6 +302,7 @@ export async function collectKnowledgeEvidence(input: KnowledgeCheckInput, searc
   const selection = queries(draftContent);
   if (selection.sampled) limits.add("query-sampling");
   const deadline = Date.now() + 45_000, batches: KnowledgeSearchHit[][] = [];
+  let partialSemantic: { indexed: number; total: number } | undefined;
   for (const query of selection.values) {
     signal.throwIfAborted();
     const remaining = deadline - Date.now();
@@ -291,6 +323,12 @@ export async function collectKnowledgeEvidence(input: KnowledgeCheckInput, searc
       const semantic = result.status.semantic;
       if (result.status.semanticEnabled !== true && semantic?.enabled !== true)
         incomplete(message("semanticUnavailable"));
+      else if (semantic?.state === "partial" && Number.isSafeInteger(semantic.indexed) && Number.isSafeInteger(semantic.total)
+        && semantic.indexed! >= 0 && semantic.indexed! < semantic.total!) {
+        // Each query extends the index; report only the latest coverage once.
+        complete = false;
+        partialSemantic = { indexed: semantic.indexed!, total: semantic.total! };
+      }
       else if (!semantic?.enabled || !semantic.complete || semantic.state !== "ready")
         incomplete(message("semanticIncomplete"));
       batches.push(result.hits);
@@ -299,6 +337,7 @@ export async function collectKnowledgeEvidence(input: KnowledgeCheckInput, searc
       incomplete(message("retrievalTimeout")); break;
     }
   }
+  if (partialSemantic) notices.add(semanticPartial(reportLanguage, partialSemantic.indexed, partialSemantic.total));
   const candidates = new Map<string, KnowledgeSearchHit>();
   for (let rank = 0; rank < 12; rank++) for (const batch of batches) {
     const hit = batch[rank];
@@ -324,7 +363,7 @@ export async function collectKnowledgeEvidence(input: KnowledgeCheckInput, searc
   for (const hit of [...candidates.values()].slice(0, MAX_SOURCES)) {
     signal.throwIfAborted();
     try {
-      const original = await snapshot(hit.path);
+      const original = await snapshot(hit.path, true);
       if (!original) { incomplete(sourceUnavailable(reportLanguage, hit.path)); continue; }
       if (!original.text.trim()) continue;
       const source = preparePassage(knowledgeEvidenceText(original.text), hit);
@@ -351,7 +390,7 @@ export async function collectKnowledgeEvidence(input: KnowledgeCheckInput, searc
     evidence.push({ id: `source-${evidence.length + 1}`, path: hit.path, ...selected });
   }
   if (!evidence.length) incomplete(message("noExternalSources"));
-  const afterRetrieval = await inventory(root, wikiPath, signal);
+  const afterRetrieval = await inventory(root, wikiPath, signal, cache);
   if (!afterRetrieval.complete || corpus.signature !== afterRetrieval.signature)
     incomplete(message("corpusChangedRetrieval"));
   async function current(owned: AbortSignal): Promise<boolean> {
@@ -361,11 +400,11 @@ export async function collectKnowledgeEvidence(input: KnowledgeCheckInput, searc
       const latestRoot = await directory(root, "."), latestWiki = await directory(root, wikiPath);
       if (latestRoot.dev !== rootIdentity.dev || latestRoot.ino !== rootIdentity.ino
         || latestWiki.dev !== wikiIdentity.dev || latestWiki.ino !== wikiIdentity.ino) return false;
-      const latestCorpus = await inventory(root, wikiPath, owned);
+      const latestCorpus = await inventory(root, wikiPath, owned, cache);
       if (!corpus.complete || !latestCorpus.complete || corpus.signature !== latestCorpus.signature) return false;
-      for (const [name, hash] of revisions) {
+      for (const [name, { hash, evidence }] of revisions) {
         owned.throwIfAborted();
-        if (((await file(root, name, owned))?.hash ?? null) !== hash) return false;
+        if (identity(await file(root, name, owned), evidence) !== hash) return false;
       }
       owned.throwIfAborted();
       return true;
