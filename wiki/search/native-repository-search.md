@@ -351,4 +351,4 @@ Semantic regressions use deterministic injected embeddings/HTTP responses, never
 requests: no-token-overlap matches, incrementality, model isolation, scope/privacy,
 bounded progression, revocation, stale publication, leases and malformed responses.
 
-<!-- pix:wiki-check {"version":1,"status":"attempted","runId":"be10804d-802a-4a0d-81f8-ba18fd60f930","contentHash":"c3e5ad3aac99dc163f77db4c074b2747dfb689a01294deccb9b7ba54a00a620f","checkedAt":"2026-10-31T00:50:12.083Z","maxDocumentChars":128000} -->
+<!-- pix:wiki-check {"version":1,"status":"attempted","runId":"f061c4de-d66a-4d75-9c7e-aef1d8e78d55","contentHash":"c3e5ad3aac99dc163f77db4c074b2747dfb689a01294deccb9b7ba54a00a620f","checkedAt":"2026-10-31T01:49:58.288Z","maxDocumentChars":128000} -->

@@ -415,3 +415,5 @@ Render Markdown in Desktop transcripts and the workspace Preview editor without 
   parser/link/table/media/streaming surface.
 - Confirmed by Rust tests: project/home/local media resolution remains confined
   to the trusted backend paths and size/UTF-8 limits.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"b5c5011bb09f7e81b9f8c4fc57878be1f154a8250dd5529d3878a9e2879fa6cc","checkedAt":"2026-10-31T02:09:38.943Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":68,"reportLanguage":"ru"} -->

@@ -90,4 +90,4 @@ Quit, forward/backward cycling (including minimized and ISO keyboard layouts),
 left/right clicks, Show all windows and attention across conversations/windows. Unit tests alone
 do not prove native menu, shortcut or Dock behavior.
 
-<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"576c726bded1489320cce66ace7ea223f87b671ff4b85fea2d19f616079bf208","checkedAt":"2026-10-31T00:35:59.353Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":59,"reportLanguage":"ru"} -->
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"281b5b855134d59d55696aeef705943d582d713bd159c4a952b3ac64a626dc55","checkedAt":"2026-10-31T01:13:49.087Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":61,"reportLanguage":"ru"} -->
