@@ -538,8 +538,12 @@ evidence, internal findings remain available, but cross-document consistency
 cannot be established.
 
 Findings require known source IDs and exact, uniquely occurring quotations in
-the draft and source passage after newline normalization. Line ranges are
-computed from those texts. Metadata context alone cannot ground a quote.
+the draft and source passage after newline normalization. A quotation absent
+verbatim is retried once with whitespace runs (line breaks, indentation, repeated
+spaces) treated as equivalent, because judges often re-wrap hard-wrapped Markdown;
+it must still occur exactly once, and the citation keeps the exact original slice,
+never the model's text. Diagnostics distinguish a missing from a repeated
+quotation. Line ranges are computed from those texts. Metadata context alone cannot ground a quote.
 Malformed output, fabricated or ambiguous quotations and model uncertainties
 make the check incomplete; independently valid findings can still be shown.
 

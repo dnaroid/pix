@@ -44,16 +44,44 @@ function nonempty(value: unknown, limit: number): value is string {
 }
 
 interface LocatedQuote { citation: KnowledgeCitation; from: number; to: number; }
+type QuoteLocation = LocatedQuote | "missing" | "ambiguous";
 
-function locate(source: CheckDocument, quote: string, firstLine: number): LocatedQuote | undefined {
+/** Collapses each whitespace run to one space and maps every kept character back to its original offset. */
+function collapsedWhitespace(text: string): { text: string; offsets: number[] } {
+  let output = "";
+  const offsets: number[] = [];
+  for (const match of text.matchAll(/\s+|[^\s]+/gu)) {
+    const value = match[0], start = match.index;
+    if (/^\s/u.test(value)) { output += " "; offsets.push(start); continue; }
+    output += value;
+    for (let index = 0; index < value.length; index++) offsets.push(start + index);
+  }
+  return { text: output, offsets };
+}
+
+/**
+ * Exact unique occurrence first. Models often re-wrap hard-wrapped Markdown lines or
+ * change indentation, so a missing quote is retried with whitespace runs treated as
+ * equivalent. The citation always keeps the exact original slice, never model text.
+ */
+function locate(source: CheckDocument, quote: string, firstLine: number): QuoteLocation {
   const text = normalized(source.text);
   quote = normalized(quote);
-  const from = text.indexOf(quote);
-  if (from < 0 || text.indexOf(quote, from + 1) >= 0) return undefined;
-  const to = from + quote.length;
+  let from = text.indexOf(quote), to = from + quote.length;
+  if (from >= 0 && text.indexOf(quote, from + 1) >= 0) return "ambiguous";
+  if (from < 0) {
+    const needle = collapsedWhitespace(quote.trim()).text;
+    if (!needle) return "missing";
+    const haystack = collapsedWhitespace(text);
+    const at = haystack.text.indexOf(needle);
+    if (at < 0) return "missing";
+    if (haystack.text.indexOf(needle, at + 1) >= 0) return "ambiguous";
+    from = haystack.offsets[at]!;
+    to = haystack.offsets[at + needle.length - 1]! + 1;
+  }
   const lineAt = (offset: number) => firstLine + (text.slice(0, offset).match(/\n/gu)?.length ?? 0);
   return {
-    citation: { path: source.path, quote, startLine: lineAt(from), endLine: lineAt(to - 1) },
+    citation: { path: source.path, quote: text.slice(from, to), startLine: lineAt(from), endLine: lineAt(to - 1) },
     from, to,
   };
 }
@@ -88,8 +116,8 @@ function groundedFinding(
   const draft = locate(document, finding.draftQuote, document.startLine ?? 1);
   const firstLine = finding.sourceId === "draft" ? document.startLine ?? 1 : sources.get(finding.sourceId)!.startLine;
   const existing = locate(source, finding.existingQuote, firstLine);
-  if (!draft || !existing) {
-    invalid("findingQuote");
+  if (typeof draft === "string" || typeof existing === "string") {
+    invalid(draft === "ambiguous" || existing === "ambiguous" ? "findingQuoteAmbiguous" : "findingQuote");
     return undefined;
   }
   if (finding.sourceId === "draft" && Math.max(draft.from, existing.from) < Math.min(draft.to, existing.to)) {
