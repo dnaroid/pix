@@ -45,6 +45,14 @@ workspace-containment checks.
   directories and a small Markdown home page, without overwriting an existing
   index. An existing root without its configured index shows **Automatic contents**
   beside the optional **Create index** action.
+- While the Wiki holds nothing but the untouched starter index (hidden entries
+  and leading check reports ignored), the panel offers **Migrate docs to Wiki**.
+  The explicit action starts a new agent session with the prompt from
+  `desktop/src/lib/wiki-migration-prompt.ts`: inventory existing docs/specs,
+  group them into sections with their own index pages, move them with `git mv`,
+  fix every reference to the old paths, verify links and leave the changes
+  uncommitted for review. The offer hides after a successful start and stays
+  hidden once the Wiki has other pages.
   Partial filesystem failures remain visible and can be retried; the UI never
   rolls back by deleting preexisting content.
 - The panel places a **Search Wiki** input above the existing tree; it replaces

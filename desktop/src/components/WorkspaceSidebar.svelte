@@ -40,6 +40,7 @@
   import type { GitCiPanelState } from "../lib/git-ci";
   import type { GitPanelWorkflow } from "../lib/git-workflow";
   import type { ProjectFileLineRange } from "../lib/project-files";
+  import type { ProjectWikiConfig } from "../lib/project-wiki";
   import type { ProjectTreeEntry } from "../lib/project-tree";
   import type { SettingsConfigKind } from "../lib/settings";
   import type { ProjectDocumentsSnapshot } from "../lib/project-documents";
@@ -182,6 +183,7 @@
     onDismissKnowledgeCheck,
     onOpenKnowledgeCitation,
     onResolveKnowledgeJob,
+    onStartWikiMigration,
     knowledgeSourcesEnabled = true,
     knowledgeResolving = false,
     activeProjectDocumentPath = null,
@@ -304,6 +306,7 @@
     onDismissKnowledgeCheck?: (id: number) => void;
     onOpenKnowledgeCitation?: (citation: KnowledgeCitation, language?: KnowledgeReportLanguage) => void | Promise<void>;
     onResolveKnowledgeJob?: (job: ProjectKnowledgeJob) => void | Promise<void>;
+    onStartWikiMigration?: (workspace: string, config: ProjectWikiConfig) => Promise<boolean>;
     knowledgeSourcesEnabled?: boolean;
     knowledgeResolving?: boolean;
     activeProjectDocumentPath?: string | null;
@@ -1244,6 +1247,7 @@
             {onDismissKnowledgeCheck}
             {onOpenKnowledgeCitation}
             {onResolveKnowledgeJob}
+            {onStartWikiMigration}
             {knowledgeSourcesEnabled}
             {knowledgeResolving}
             onOpenFile={onOpenWikiFile ?? onOpenProjectFile}

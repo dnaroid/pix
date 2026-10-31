@@ -6,6 +6,8 @@ import {
   type KnowledgeBatchResolutionRequest,
   type KnowledgeResolutionRequest,
 } from "../lib/knowledge-resolution";
+import type { ProjectWikiConfig } from "../lib/project-wiki";
+import { wikiMigrationPrompt } from "../lib/wiki-migration-prompt";
 import type { createSessionRuntimeStore } from "./session-runtime.svelte";
 import type { createPromptRuntime } from "./prompt-runtime.svelte";
 
@@ -43,8 +45,14 @@ export function createKnowledgeResolution(options: KnowledgeResolutionOptions) {
     return launch(input.workspace, input.language, async () => knowledgeBatchResolutionPrompt(input));
   }
 
+  /** Fresh session that moves existing docs/specs into an empty Wiki; resolves true once the prompt is sent. */
+  function startWikiMigration(workspace: string, config: ProjectWikiConfig): Promise<boolean> {
+    return launch(workspace, undefined, async () => wikiMigrationPrompt(config),
+      "Could not prepare a new session to migrate documentation into the Wiki.");
+  }
+
   async function launch(workspace: string, language: KnowledgeReportLanguage | undefined,
-    buildPrompt: () => Promise<string>): Promise<boolean> {
+    buildPrompt: () => Promise<string>, prepareError?: string): Promise<boolean> {
     const client = options.client();
     if (!client || !options.ready() || options.operationRunning() || workspace !== options.workspace()
       || (starting && owner && environmentCurrent(owner))) return false;
@@ -68,9 +76,9 @@ export function createKnowledgeResolution(options: KnowledgeResolutionOptions) {
       if (!current()) { await closeCreated(); return false; }
       await options.runtime.ensure(client, created.sessionId, request.workspace);
       if (!current()) { await closeCreated(); return false; }
-      if (!options.runtime.isReady(created.sessionId)) throw new Error(language === "ru"
+      if (!options.runtime.isReady(created.sessionId)) throw new Error(prepareError ?? (language === "ru"
         ? "Не удалось подготовить новую сессию для разбора противоречий."
-        : "Could not prepare a new session to resolve the Wiki findings.");
+        : "Could not prepare a new session to resolve the Wiki findings."));
       const messageId = options.activate(created.sessionId, request.workspace, prompt);
       const run = options.prompts.runPromptRequest(client, created.sessionId, [{ type: "text", text: prompt }], [], messageId);
       launched = true;
@@ -89,5 +97,5 @@ export function createKnowledgeResolution(options: KnowledgeResolutionOptions) {
     }
   }
 
-  return { start, startBatch, get starting() { return starting && Boolean(owner && environmentCurrent(owner)); } };
+  return { start, startBatch, startWikiMigration, get starting() { return starting && Boolean(owner && environmentCurrent(owner)); } };
 }

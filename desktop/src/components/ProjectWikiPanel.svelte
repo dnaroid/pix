@@ -13,8 +13,9 @@
   import type { KnowledgeCitation, KnowledgeReportLanguage } from "../../../acp/src/knowledge/contract";
   import type { ProjectKnowledgeJob } from "../app/project-knowledge-queue.svelte";
   import type { ProjectFileLineRange } from "../lib/project-files";
+  import type { ProjectWikiConfig } from "../lib/project-wiki";
 
-  let { workspace, activePath = null, knowledgeJobs = [], onCancelKnowledgeCheck, onDismissKnowledgeCheck, onOpenKnowledgeCitation, onResolveKnowledgeJob, knowledgeSourcesEnabled = true, knowledgeResolving = false, onOpenFile, onOpenFiles, onOpenExternal, onBeforeMutation, ready = $bindable(false) }: {
+  let { workspace, activePath = null, knowledgeJobs = [], onCancelKnowledgeCheck, onDismissKnowledgeCheck, onOpenKnowledgeCitation, onResolveKnowledgeJob, onStartWikiMigration, knowledgeSourcesEnabled = true, knowledgeResolving = false, onOpenFile, onOpenFiles, onOpenExternal, onBeforeMutation, ready = $bindable(false) }: {
     workspace: string;
     activePath?: string | null;
     knowledgeJobs?: readonly ProjectKnowledgeJob[];
@@ -22,6 +23,8 @@
     onDismissKnowledgeCheck?: (id: number) => void;
     onOpenKnowledgeCitation?: (citation: KnowledgeCitation, language?: KnowledgeReportLanguage) => void | Promise<void>;
     onResolveKnowledgeJob?: (job: ProjectKnowledgeJob) => void | Promise<void>;
+    /** Starts a new agent session that moves existing docs/specs into this Wiki. */
+    onStartWikiMigration?: (workspace: string, config: ProjectWikiConfig) => Promise<boolean>;
     knowledgeSourcesEnabled?: boolean;
     knowledgeResolving?: boolean;
     onOpenFile: (path: string, searchRange?: ProjectFileLineRange) => void;
@@ -73,6 +76,20 @@
     onOpenFiles(path);
   }
 
+  // A launched migration hides the offer until the agent's pages make the Wiki non-empty.
+  let migrationStartedFor = $state<string | null>(null);
+  let migrationLaunching = $state(false);
+  async function startMigration(config: ProjectWikiConfig): Promise<void> {
+    if (!onStartWikiMigration || migrationLaunching) return;
+    const target = workspace;
+    migrationLaunching = true;
+    try {
+      if (await onStartWikiMigration(target, config)) migrationStartedFor = target;
+    } catch (error) {
+      createDiagnosticLogger(() => ({ workspace: target })).warn("wiki:migration-start-failed", error);
+    } finally { migrationLaunching = false; }
+  }
+
   async function initialize(): Promise<void> {
     const path = await controller.initialize();
     if (path) openFile(path);
@@ -122,6 +139,13 @@
               <div class="flex min-h-9 shrink-0 items-center gap-2 border-b border-border px-3">
                 <span class="min-w-0 flex-1 text-xs text-muted-foreground">Automatic contents</span>
                 <button type="button" class="rounded-sm px-2 py-1 text-xs hover:bg-panel-hover disabled:opacity-40" disabled={wikiState.creating || wikiState.loading} onclick={() => void initialize()}>{wikiState.creating ? "Creating…" : "Create index"}</button>
+              </div>
+            {/if}
+            {#if wikiState.starter && onStartWikiMigration && migrationStartedFor !== workspace}
+              <div class="flex shrink-0 flex-col gap-2 border-b border-border px-3 py-2" data-wiki-migration>
+                <p class="text-xs leading-5 text-muted-foreground">Wiki is empty. Move the project's existing docs and specs here in a new session — links are updated and pages get grouped into sections.</p>
+                <button type="button" class="self-start rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-40"
+                  disabled={migrationLaunching || knowledgeResolving} onclick={() => void startMigration(config)}>{migrationLaunching ? "Starting…" : "Migrate docs to Wiki"}</button>
               </div>
             {/if}
             <ProjectWikiTree bind:this={wikiTree} {workspace} {config} {activePath} onOpenFile={openFile} onOpenFiles={openFiles} {onOpenExternal} {onBeforeMutation} onRefreshConfig={() => void controller.refresh()} />

@@ -224,6 +224,9 @@ export function createDesktopSidebarViewModel(options: {
         }
       }
       : undefined,
+    onStartWikiMigration: options.knowledgeResolution && options.gitAssistantReady() && !options.sessionMutationRunning()
+      ? (workspace, config) => options.knowledgeResolution!.startWikiMigration(workspace, config)
+      : undefined,
     activeProjectDocumentPath: options.preview.active?.kind === "file"
       ? options.preview.active.file.virtualWikiDirectory ?? options.preview.active.file.path : null,
     planActionsDisabled: options.projectActions.actionId !== null || options.projectDocuments.removing !== null,
