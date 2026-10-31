@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { choiceActionsPresentation } from "./choice-actions-replies";
+import { choiceActionsPresentation, latestChoiceActionsMessageId } from "./choice-actions-replies";
 import type { MessageItem } from "./transcript-types";
 
 function message(id: string, role: MessageItem["role"], text: string): MessageItem {
@@ -58,11 +58,14 @@ describe("quick-choice visual replies", () => {
     expect(choiceActionsReplies([message("u", "user", "Далее:\n2. Второй")]).size).toBe(0);
   });
 
-  it("matches only the immediately preceding conversational assistant and first user reply", () => {
+  it("matches only the latest checklist since the previous user message and the first reply", () => {
     const user = message("u", "user", "Далее:\n2. Второй");
     expect(choiceActionsReplies([source, message("s", "system", "notice"), user]).has("u")).toBe(true);
     expect(choiceActionsReplies([source, message("t", "thought", "thinking"), user]).has("u")).toBe(true);
-    expect(choiceActionsReplies([source, message("a2", "assistant", "Different reply"), user]).size).toBe(0);
+    // A block-less reply after the checklist (the agent kept working) keeps it answerable.
+    expect(choiceActionsReplies([source, message("a2", "assistant", "Different reply"), user]).has("u")).toBe(true);
+    const otherBlock = block.replace("Далее", "Другое");
+    expect(choiceActionsReplies([source, message("a2", "assistant", otherBlock), user]).size).toBe(0);
     expect(choiceActionsReplies([source, message("u0", "user", "Something else"), user]).size).toBe(0);
     expect(choiceActionsReplies([source, user, message("u2", "user", user.text)]).has("u2")).toBe(false);
   });
@@ -92,5 +95,16 @@ describe("quick-choice presentation while streaming", () => {
     expect(again.answeredBlocks.get("a")).toEqual(first.answeredBlocks.get("a"));
     const edited = { ...source, text: block.replace("Далее", "Другое") };
     expect(choiceActionsPresentation([edited, user]).answeredBlocks.size).toBe(0);
+  });
+
+  it("keeps the latest checklist active when the agent keeps replying after it", () => {
+    const tail = [source, message("t", "thought", "ran"), message("a2", "assistant", "Done, continuing.")];
+    expect(latestChoiceActionsMessageId(tail)).toBe("a");
+    expect(latestChoiceActionsMessageId([...tail, message("a3", "assistant", block)])).toBe("a3");
+    expect(latestChoiceActionsMessageId([...tail, message("u", "user", "next")])).toBeUndefined();
+    expect(latestChoiceActionsMessageId([source, message("u", "user", "x"), message("a2", "assistant", "plain")])).toBeUndefined();
+    expect(latestChoiceActionsMessageId([message("a2", "assistant", "plain")])).toBeUndefined();
+    const reply = message("u", "user", "Далее:\n2. Второй");
+    expect(choiceActionsPresentation([...tail, reply]).answeredBlocks.get("a")).toEqual(new Set([0]));
   });
 });

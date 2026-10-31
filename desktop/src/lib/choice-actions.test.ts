@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { choiceActionsPrompt, latestAssistantMessageId, parseChoiceActions } from "./choice-actions";
+import { choiceActionsPrompt, parseChoiceActions } from "./choice-actions";
 import { splitHtmlSandboxSegments } from "./html-sandbox";
-import type { TranscriptDisplayItem } from "./transcript-types";
-
-const msg = (id: string, role: "user" | "assistant" | "system") =>
-  ({ type: "message", id, role, text: "", attachments: [] }) as TranscriptDisplayItem;
 
 describe("pix-actions blocks", () => {
   it("parses recommended items and the button label", () => {
@@ -34,10 +30,5 @@ describe("pix-actions blocks", () => {
     const items = [{ label: "A", checked: false }, { label: "B", checked: false }, { label: "C", checked: false }];
     expect(choiceActionsPrompt("Do", items, [2, 0, 2])).toBe("Do:\n1. A\n3. C");
     expect(() => choiceActionsPrompt("Do", items, [])).toThrow();
-  });
-
-  it("activates only the final assistant reply not followed by a user message", () => {
-    expect(latestAssistantMessageId([msg("u", "user"), msg("a", "assistant"), msg("s", "system")])).toBe("a");
-    expect(latestAssistantMessageId([msg("a", "assistant"), msg("u", "user")])).toBeUndefined();
   });
 });

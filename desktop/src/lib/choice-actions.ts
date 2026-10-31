@@ -1,8 +1,6 @@
 // Model-authored quick-choice blocks: a closed ```pix-actions fence whose body
-// is a GFM task list. Rendered as checkboxes in the latest assistant message.
+// is a GFM task list. Rendered as checkboxes; the latest one of a settled turn is interactive.
 // The parser/prompt contract is shared with the Pix TUI.
-
-import type { TranscriptDisplayItem } from "./transcript-types";
 
 export {
   CHOICE_ACTIONS_LANGUAGE,
@@ -16,14 +14,3 @@ export {
   type ChoiceActionItem,
   type ChoiceActions,
 } from "../../../src/bundled-extensions/choice-actions/contract";
-
-/** The final assistant reply, unless a user message follows it. */
-export function latestAssistantMessageId(items: readonly TranscriptDisplayItem[]): string | undefined {
-  for (let index = items.length - 1; index >= 0; index -= 1) {
-    const item = items[index]!;
-    if (item.type !== "message") continue;
-    if (item.role === "user") return undefined;
-    if (item.role === "assistant") return item.id;
-  }
-  return undefined;
-}

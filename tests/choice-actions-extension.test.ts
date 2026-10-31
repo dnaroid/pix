@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import choiceActionsExtension, { CHOICE_ACTIONS_WIDGET_KEY, finalAssistantText } from "../src/bundled-extensions/choice-actions/index.js";
+import choiceActionsExtension, { CHOICE_ACTIONS_WIDGET_KEY, finalAssistantText, latestRunChoiceActions } from "../src/bundled-extensions/choice-actions/index.js";
 import { CHOICE_ACTIONS_CAPABILITY, CHOICE_ACTIONS_CAPABILITY_MARKER, lastChoiceActions } from "../src/bundled-extensions/choice-actions/contract.js";
 import { renderMarkdownTextLines } from "../src/markdown-format.js";
 
@@ -66,6 +66,14 @@ describe("pix-actions contract", () => {
 	it("reads the final assistant text only when no user message follows", () => {
 		assert.equal(finalAssistantText(reply("hi").messages), "hi");
 		assert.equal(finalAssistantText([{ role: "assistant", content: "x" }, { role: "user", content: "y" }]), undefined);
+	});
+
+	it("keeps a checklist the agent offered before it kept working", () => {
+		const kept = [{ role: "user", content: "go" }, { role: "assistant", content: block }, { role: "toolResult", content: "ok" }, { role: "assistant", content: "Continuing." }];
+		assert.equal(latestRunChoiceActions(kept)?.submitLabel, "Next");
+		assert.equal(latestRunChoiceActions([...kept, { role: "user", content: "x" }]), undefined);
+		assert.equal(latestRunChoiceActions([{ role: "assistant", content: block }, { role: "user", content: "x" }, { role: "assistant", content: "plain" }]), undefined);
+		assert.ok(CHOICE_ACTIONS_CAPABILITY.includes("no tool calls or further work after it"));
 	});
 });
 

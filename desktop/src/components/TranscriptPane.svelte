@@ -27,8 +27,7 @@
     type TranscriptDisplayItem,
     type TranscriptState,
   } from "../lib/transcript";
-  import { latestAssistantMessageId } from "../lib/choice-actions";
-  import { choiceActionsPresentation } from "../lib/choice-actions-replies";
+  import { choiceActionsPresentation, latestChoiceActionsMessageId } from "../lib/choice-actions-replies";
   import ChoiceActionsReply from "./ChoiceActionsReply.svelte";
   import AttachmentGrid from "./AttachmentGrid.svelte";
   import MarkdownText from "./MarkdownText.svelte";
@@ -118,9 +117,10 @@
   let displayItems = $derived(groupTranscriptItems(transcript.items));
   const choicePresentation = $derived(choiceActionsPresentation(displayItems));
   const choiceReplies = $derived(choicePresentation.replies);
-  // Quick-choice blocks accept input only in the final assistant reply of a
-  // settled turn; any later user message makes them read-only history.
-  const choiceActionsMessageId = $derived(promptRunning ? undefined : latestAssistantMessageId(displayItems));
+  // Quick-choice blocks accept input only in the latest checklist of a settled
+  // turn (even if the agent kept replying after it); any later user message
+  // makes them read-only history.
+  const choiceActionsMessageId = $derived(promptRunning ? undefined : latestChoiceActionsMessageId(displayItems));
   // Historical errors remain readable, but sign-in recovery belongs only to
   // the final notice of a settled turn, never to an older failed attempt.
   const claudeLoginContinueItemId = $derived(promptRunning ? undefined : displayItems.at(-1)?.id);

@@ -9,7 +9,7 @@ export const MAX_CHOICE_SUBMIT_LABEL_CHARS = 40;
 export const DEFAULT_CHOICE_SUBMIT_LABEL = "Continue";
 
 /** Prompt guidance shared by every client that renders pix-actions. */
-export const CHOICE_ACTIONS_CAPABILITY = "Choice rule: if you need the user's answer before you can continue, call the question tool and wait; if the work is done and you are only offering optional next steps, end the turn with a pix-actions checklist instead. Never use both for the same choice.\n"
+export const CHOICE_ACTIONS_CAPABILITY = "Choice rule: if you need the user's answer before you can continue, call the question tool and wait; if the work is done and you are only offering optional next steps, end the turn with a pix-actions checklist instead. Never use both for the same choice. The checklist is the last thing you do: put it at the end of your final message and stop, with no tool calls or further work after it; if work remains, finish it first or ask with the question tool.\n"
 	+ "When offering next steps you would carry out, end with a closed ```pix-actions <button label> fence containing only \"- [x] step\" (recommended) or \"- [ ] step\" lines; the user can tick several. The button label MUST be on the opening line, never inside the body: a standalone title makes the menu render as code. Keep user-performed steps outside. Example:\n"
 	+ "```pix-actions Simplify\n- [x] Remove duplicate instructions\n```";
 export const CHOICE_ACTIONS_CAPABILITY_MARKER = "Choice rule: if you need the user's answer";
