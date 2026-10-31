@@ -1746,4 +1746,49 @@ describe.serial("todo extension lifecycle", () => {
 			globalThis.clearTimeout = originalClearTimeout;
 		}
 	});
+
+	test.serial("does not auto-nudge past a pix-actions checklist that ends the turn", async () => {
+		const extension = (await import("../src/todo/index.js")).default;
+		const pi = new FakePi();
+		const snapshot = { action: "create", params: {}, tasks: [{ id: 1, subject: "Live run", status: "pending" }], nextId: 2 };
+		const ctx = {
+			hasUI: false,
+			sessionManager: { getBranch: () => [{ type: "message", message: { role: "toolResult", toolName: "todo", details: snapshot } }] },
+			isIdle: () => true,
+			hasPendingMessages: () => false,
+		};
+		const originalSetTimeout = globalThis.setTimeout;
+		const originalClearTimeout = globalThis.clearTimeout;
+		globalThis.setTimeout = ((callback: TimerHandler) => {
+			if (typeof callback === "function") callback();
+			return 1 as any;
+		}) as any;
+		globalThis.clearTimeout = (() => {}) as any;
+		try {
+			extension(pi as any);
+			await pi.emit("session_start", {}, ctx);
+			await pi.emit("agent_start", {}, ctx);
+			const offer = "Done.\n```pix-actions Next\n- [x] Export the rig\n- [ ] Live run\n```";
+			await pi.emit("agent_end", { messages: [{ role: "assistant", stopReason: "stop", content: [{ type: "text", text: offer }] }] }, ctx);
+			await pi.emit("agent_settled", {}, ctx);
+			expect(pi.sentMessages).toHaveLength(0);
+
+			// A later ordinary reply without a checklist nudges again.
+			await emitSuccessfulSettledRun(pi, ctx);
+			expect(pi.sentMessages).toHaveLength(1);
+		} finally {
+			globalThis.setTimeout = originalSetTimeout;
+			globalThis.clearTimeout = originalClearTimeout;
+		}
+	});
+
+	test("detects only a closed pix-actions fence in the final assistant reply", async () => {
+		const { endsWithChoiceActions } = await import("../src/todo/index.js");
+		const offer = (text: string) => [{ role: "assistant", content: [{ type: "text", text }] }];
+		expect(endsWithChoiceActions(offer("```pix-actions Go\n- [x] A\n```"))).toBe(true);
+		expect(endsWithChoiceActions(offer("~~~~pix-actions\n- [ ] A\n~~~~"))).toBe(true);
+		expect(endsWithChoiceActions(offer("```pix-actions Go\n- [x] A"))).toBe(false);
+		expect(endsWithChoiceActions(offer("```md\n- [x] A\n```"))).toBe(false);
+		expect(endsWithChoiceActions([...offer("```pix-actions\n- [x] A\n```"), { role: "toolResult", content: "x" }, ...offer("plain")])).toBe(false);
+	});
 });

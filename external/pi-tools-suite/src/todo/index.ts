@@ -148,6 +148,26 @@ function normalizeTodoThinkingLevelForModel(model: unknown, level: TodoThinkingL
 	return available[0] ?? "off";
 }
 
+// A closed ```pix-actions checklist ends the turn with optional next steps
+// for the user to pick. Like a pending ask_user call, it waits on the user, so
+// unfinished todos must not auto-nudge the agent past it.
+const CHOICE_ACTIONS_BLOCK = /^ {0,3}(`{3,}|~{3,})[ \t]*pix-actions(?:[ \t][^\n]*)?\n[\s\S]*?^ {0,3}\1[`~]*[ \t]*$/m;
+
+export function endsWithChoiceActions(messages: readonly unknown[] | undefined): boolean {
+	if (!Array.isArray(messages)) return false;
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const message = messages[i] as { role?: unknown; content?: unknown } | undefined;
+		if (message?.role !== "assistant") continue;
+		const text = typeof message.content === "string"
+			? message.content
+			: Array.isArray(message.content)
+				? message.content.flatMap((block: { type?: unknown; text?: unknown }) => block?.type === "text" && typeof block.text === "string" ? [block.text] : []).join("\n")
+				: "";
+		return CHOICE_ACTIONS_BLOCK.test(text);
+	}
+	return false;
+}
+
 function isAskUserToolName(toolName: string): boolean {
 	return ASK_USER_TOOL_NAMES.has(toolName);
 }
@@ -630,6 +650,12 @@ export default function (pi: ExtensionAPI) {
 			lastNudgedSignature = undefined;
 			clearNudgeTimer();
 			return;
+		}
+
+		// The reply offered a pix-actions checklist: wait for the user's pick.
+		if (completedAssistantReply && endsWithChoiceActions((event as { messages?: readonly unknown[] } | undefined)?.messages)) {
+			settledNudgeEligible = false;
+			clearNudgeTimer();
 		}
 	});
 
