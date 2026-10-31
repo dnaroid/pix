@@ -58,6 +58,13 @@ generation guards and teardown cancellation still apply; retries never start
 indexing. These recovery rules do not establish the cause of a particular native
 startup failure.
 
+Source selection is read through a native process, so the polling loop does not
+read it again on every poll (1.5 seconds while indexing). A successful selection
+is reused until a Desktop selection-change or search-configuration event, a
+source toggle in the panel, an explicit Refresh, or a 60-second expiry (which
+picks up CLI or external `.pi/workspace.jsonc` edits). Failed or invalid-policy
+reads are retried on the next poll.
+
 Count and activity errors include a bounded diagnostic reason (up to 240 characters)
 and an automatic-retry notice; a failed activity read does not discard readable counts.
 

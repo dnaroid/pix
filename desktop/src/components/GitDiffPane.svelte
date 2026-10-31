@@ -6,6 +6,14 @@
   import Wrench from "@lucide/svelte/icons/wrench";
   import { onDestroy } from "svelte";
   import { gitReviewHasFindings, type GitDiff } from "../lib/git";
+  import {
+    chunkDiffLines,
+    diffChunkIntrinsicSize,
+    diffLineTone,
+    GIT_DIFF_INITIAL_CHUNKS,
+    revealDiffChunks,
+    type DiffLineChunk,
+  } from "../lib/git-diff-chunks";
   import type { ProjectFileLineRange } from "../lib/project-files";
   import MarkdownText from "./MarkdownText.svelte";
 
@@ -43,7 +51,17 @@
 
   const title = $derived(diff.commit ? `${diff.commit.shortHash} · ${diff.commit.subject}` : diff.path ?? "All changes");
   const scopeLabel = $derived(diff.commit ? "Commit" : diff.scope === "staged" ? "Staged" : diff.scope === "unstaged" ? "Working Tree" : "All Changes");
-  const lines = $derived(diff.content.split("\n"));
+  // Split once per diff replacement. Rows are unkeyed (position-based), so a
+  // replacement patches text in place instead of hashing every line as a key.
+  const chunks = $derived(chunkDiffLines(diff.content));
+  // Raw: identity is compared below and the chunk arrays must not be proxied.
+  let revealed = $state.raw<{ source: DiffLineChunk[] | undefined; count: number }>({ source: undefined, count: 0 });
+  // Until the reveal effect for a new diff runs, show only its first batch.
+  const visibleChunks = $derived(chunks.slice(0, revealed.source === chunks ? revealed.count : GIT_DIFF_INITIAL_CHUNKS));
+  $effect(() => {
+    const source = chunks;
+    return revealDiffChunks(source.length, (count) => { revealed = { source, count }; });
+  });
   const hasReviewFindings = $derived(gitReviewHasFindings(review));
   const copyPromptDisabled = $derived(!canResolve || reviewLoading || resolveLoading || reviewStale);
   let view = $state<"review" | "diff">("diff");
@@ -74,14 +92,6 @@
     if (copyPromptResetTimer) clearTimeout(copyPromptResetTimer);
   });
 
-  function lineTone(line: string): string {
-    if (line.startsWith("+++ ") || line.startsWith("--- ")) return "text-muted-foreground";
-    if (line.startsWith("+")) return "bg-tool-success/7 text-tool-success";
-    if (line.startsWith("-")) return "bg-tool-error/7 text-tool-error";
-    if (line.startsWith("@@")) return "bg-tool-info/6 text-tool-info";
-    if (line.startsWith("diff --git") || line.startsWith("index ")) return "text-foreground font-semibold";
-    return "text-foreground/80";
-  }
 </script>
 
 <section
@@ -154,7 +164,7 @@
 
     <div class={["min-h-0 flex-1 overflow-auto bg-code", view === "review" && (review || reviewLoading) ? "hidden" : ""]}>
       {#if diff.content.trim()}
-        <pre class="min-w-max py-2 font-mono text-xs leading-4"><code>{#each lines as line, index (`${index}:${line}`)}<span class={["block min-h-4 whitespace-pre px-3", lineTone(line)]}>{line || " "}</span>{/each}</code></pre>
+        <pre class="min-w-max py-2 font-mono text-xs leading-4"><code>{#each visibleChunks as chunk}<span class="block [content-visibility:auto]" style={diffChunkIntrinsicSize(chunk)}>{#each chunk.lines as line}<span class={["block min-h-4 whitespace-pre px-3", diffLineTone(line)]}>{line || " "}</span>{/each}</span>{/each}</code></pre>
       {:else}
         <div class="grid h-full place-items-center text-xs text-muted-foreground">No diff for this selection.</div>
       {/if}

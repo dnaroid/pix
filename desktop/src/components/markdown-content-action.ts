@@ -3,7 +3,7 @@ import type { Attachment } from "../lib/attachments";
 import { imageDimensions, imagePreviewStyle, type ImageDimensions } from "../lib/image-preview-layout";
 import { renderMermaidDiagram } from "../lib/mermaid";
 import { MarkdownImageRetention } from "./markdown-image-retention";
-import { mountGlbViewer } from "./glb-viewer-action";
+import { mountViewportGlbViewer } from "./glb-viewer-action";
 import { isGlbPath } from "../lib/glb";
 import { previewMediaKindForPath } from "../lib/media";
 import { audioSource } from "./audio-source-action";
@@ -240,7 +240,7 @@ export function createMarkdownContentAction(options: MarkdownContentActionOption
         preview.dataset.contextFilePath = attachment.path;
 
         if (kind === "model") {
-          modelViewers.set(preview, mountGlbViewer(frame, convertFileSrc(attachment.path)));
+          modelViewers.set(preview, mountViewportGlbViewer(frame, convertFileSrc(attachment.path)));
           frame.removeAttribute("aria-busy");
           preview.dataset.mediaState = "ready";
           return;

@@ -5,7 +5,7 @@ import type { Attachment } from "../lib/attachments";
 vi.mock("@tauri-apps/api/core", () => ({ convertFileSrc: (path: string) => `asset:${path}`, invoke: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("../lib/mermaid", () => ({ renderMermaidDiagram: vi.fn() }));
 const glb = vi.hoisted(() => ({ mount: vi.fn(() => vi.fn()) }));
-vi.mock("./glb-viewer-action", () => ({ mountGlbViewer: glb.mount }));
+vi.mock("./glb-viewer-action", () => ({ mountViewportGlbViewer: glb.mount }));
 
 // Minimal DOM surface: deterministic hydration, dimensions and lifecycle tests.
 class Element {
