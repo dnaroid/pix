@@ -41,6 +41,14 @@ import type {
 } from "./acp-client-types";
 
 export const SELECTION_ASSIST_DELTA_METHOD = "pix/selection/assist_delta";
+export const FILE_ANNOTATE_PROGRESS_METHOD = "pix/file/annotate_progress";
+export interface FileAnnotationProgress {
+  readonly summary?: string;
+  /** Notes of the part that just finished. */
+  readonly annotations?: readonly FileAnnotation[];
+  readonly completedParts: number;
+  readonly totalParts: number;
+}
 export type SelectionAssistDelta = { readonly text: string } | { readonly reset: true };
 export interface SelectionAssistRequest {
   readonly requestId?: string;
@@ -54,8 +62,9 @@ export interface FileAnnotateRequest {
   readonly cwd: string;
   readonly text: string;
   readonly path?: string;
-  /** Skip ACP's `.pi/explanations` cache and explain again. */
+  /** Skip ACP's `.pi/explanations` caches and explain again. */
   readonly refresh?: boolean;
+  readonly requestId?: string;
 }
 export interface FileAnnotation { readonly line: number; readonly text: string }
 export interface FileAnnotations {
@@ -66,6 +75,9 @@ export interface FileAnnotations {
   /** Lines the model saw; a very large file is annotated from its beginning. */
   readonly annotatedLines: number;
   readonly totalLines: number;
+  /** Large files are explained in parallel parts; failed parts leave gaps. */
+  readonly parts: number;
+  readonly failedParts: number;
   /** Served from the project cache for this exact source. */
   readonly cached: boolean;
 }
@@ -439,6 +451,7 @@ export class AcpPixExtensions {
       !isRecord(response) || typeof response.summary !== "string" || !Array.isArray(response.annotations) || typeof response.language !== "string"
       || typeof response.cached !== "boolean"
       || typeof response.annotatedLines !== "number" || typeof response.totalLines !== "number"
+      || typeof response.parts !== "number" || typeof response.failedParts !== "number"
       || response.annotations.some((item: unknown) => !isRecord(item) || !Number.isInteger(item.line) || typeof item.text !== "string")
     ) {
       throw new Error("pix/file/annotate returned an invalid response");
@@ -446,7 +459,8 @@ export class AcpPixExtensions {
     return {
       summary: response.summary,
       annotations: (response.annotations as Record<string, unknown>[]).map((item) => ({ line: item.line as number, text: item.text as string })),
-      language: response.language, annotatedLines: response.annotatedLines, totalLines: response.totalLines, cached: response.cached,
+      language: response.language, annotatedLines: response.annotatedLines, totalLines: response.totalLines,
+      parts: response.parts, failedParts: response.failedParts, cached: response.cached,
     };
   }
 

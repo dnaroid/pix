@@ -149,6 +149,7 @@ import {
 	PIX_SELECTION_ASSIST_DELTA_METHOD,
 	PIX_DOCUMENT_TRANSLATE_METHOD,
 	PIX_FILE_ANNOTATE_METHOD,
+	PIX_FILE_ANNOTATE_PROGRESS_METHOD,
 	PIX_DEFER_MESSAGE_METHOD,
 	PIX_DCP_STATS_METHOD,
 	PIX_DRAFT_CONFIG_METHOD,
@@ -279,7 +280,7 @@ import { createGitAssistant, type GitAssistant } from "./git-assistant.js";
 import { createSelectionAssistant, type SelectionAssistant } from "./selection-assist.js";
 import { createAssistModelRunner } from "./assist-model-runner.js";
 import { createDocumentTranslator, type DocumentTranslator } from "./document-translation.js";
-import { createFileAnnotator, type FileAnnotator } from "./file-annotation.js";
+import { createFileAnnotator, type FileAnnotationProgress, type FileAnnotator } from "./file-annotation.js";
 import {
 	isThinkingLevel,
 	loadPixIgnoreContextFiles,
@@ -769,6 +770,7 @@ export class PixAcpAgent {
 		this.fileAnnotator = options.fileAnnotator ?? createFileAnnotator({
 			runner: assistRunner,
 			onCacheError: (error) => options.logger.warn(`explanation cache failed: ${stringifyUnknown(error)}`),
+			onUnusableAnswer: (excerpt) => options.logger.warn(`explain answer was unusable: ${JSON.stringify(excerpt)}`),
 		});
 		this.documentTranslator = options.documentTranslator ?? createDocumentTranslator({
 			runner: assistRunner,
@@ -959,7 +961,12 @@ export class PixAcpAgent {
 					await ctx.client.notify(PIX_SELECTION_ASSIST_DELTA_METHOD, { requestId: ctx.params.requestId, ...delta });
 				}
 				: undefined)))
-			.onRequest(PIX_FILE_ANNOTATE_METHOD, parseDesktopFileAnnotateRequest, (ctx) => this.withRequestLogging(PIX_FILE_ANNOTATE_METHOD, ctx.params, ctx.signal, () => this.desktopFileAnnotate(ctx.params, ctx.signal)))
+			.onRequest(PIX_FILE_ANNOTATE_METHOD, parseDesktopFileAnnotateRequest, (ctx) => this.withRequestLogging(PIX_FILE_ANNOTATE_METHOD, ctx.params, ctx.signal, () => this.desktopFileAnnotate(ctx.params, ctx.signal, ctx.params.requestId
+				? async (progress) => {
+					ctx.signal.throwIfAborted();
+					await ctx.client.notify(PIX_FILE_ANNOTATE_PROGRESS_METHOD, { requestId: ctx.params.requestId, ...progress });
+				}
+				: undefined)))
 			.onRequest(PIX_DOCUMENT_TRANSLATE_METHOD, parseDesktopDocumentTranslateRequest, (ctx) => this.withRequestLogging(PIX_DOCUMENT_TRANSLATE_METHOD, ctx.params, ctx.signal, () => this.desktopDocumentTranslate(ctx.params, ctx.signal, ctx.params.requestId
 				? async (delta) => {
 					ctx.signal.throwIfAborted();
@@ -1114,9 +1121,14 @@ export class PixAcpAgent {
 		}
 	}
 
-	private async desktopFileAnnotate(params: DesktopFileAnnotateRequest, signal: AbortSignal): Promise<DesktopFileAnnotateResponse> {
+	private async desktopFileAnnotate(
+		params: DesktopFileAnnotateRequest,
+		signal: AbortSignal,
+		onProgress?: (progress: FileAnnotationProgress) => Promise<void>,
+	): Promise<DesktopFileAnnotateResponse> {
 		try {
-			return await this.fileAnnotator({ ...params, signal });
+			const { requestId: _requestId, ...request } = params;
+			return await this.fileAnnotator({ ...request, signal, ...(onProgress ? { onProgress } : {}) });
 		} catch (error) {
 			if (error instanceof RequestError) throw error;
 			const detail = error instanceof Error ? error.message : String(error);

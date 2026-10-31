@@ -25,7 +25,7 @@ import type { RegistryActionRequest, RegistryDiff, RegistryResourceType, Registr
 import type { AgentControlAction } from "./agent-control";
 import { isRecord, parseQueueState, parseQueuedUserMessage } from "./acp-response-parsers";
 import { AcpIncomingRequestError, AcpJsonRpcConnection } from "./acp-json-rpc";
-import { AcpPixExtensions, type ModelSetupRoles, type ModelSetupSearch, type SelectionAssistRequest, type SelectionAssistDelta, type DocumentTranslateRequest, type DocumentTranslation, type FileAnnotateRequest, type FileAnnotations, SELECTION_ASSIST_DELTA_METHOD } from "./acp-pix-extensions";
+import { AcpPixExtensions, type ModelSetupRoles, type ModelSetupSearch, type SelectionAssistRequest, type SelectionAssistDelta, type DocumentTranslateRequest, type DocumentTranslation, type FileAnnotateRequest, type FileAnnotations, type FileAnnotationProgress, SELECTION_ASSIST_DELTA_METHOD, FILE_ANNOTATE_PROGRESS_METHOD } from "./acp-pix-extensions";
 import { SEARCH_CONFIG_METHOD, SEARCH_QUERY_METHOD, SEARCH_SYNC_METHOD, SEARCH_COMMITS_METHOD, SEARCH_INTENT_METHOD, SEARCH_TASKS_METHOD, type SearchIntentRequest, type SearchIntentResponse, type SearchConfigRequest, type SearchSyncRequest, type SearchStatus, type SearchQueryRequest, type SearchQueryResponse, type SemanticTasksRequest, type SemanticTasksResponse } from "../../../acp/src/search/contract";
 import { SEARCH_RAG_METHOD, SEARCH_RAG_DELTA_METHOD, type RagRequest, type RagResponse, type RagProgress } from "../../../acp/src/search/rag-contract";
 import { KNOWLEDGE_CHECK_METHOD, isKnowledgeCheckResult, type KnowledgeCheckRequest, type KnowledgeCheckResult } from "../../../acp/src/knowledge/contract";
@@ -101,6 +101,7 @@ export class AcpClient {
   private readonly rpc: AcpJsonRpcConnection;
   private readonly pix: AcpPixExtensions;
   private readonly ragUpdates = new Map<string, (update: RagProgress) => void>();
+  private readonly annotateUpdates = new Map<string, (progress: FileAnnotationProgress) => void>();
   private readonly selectionUpdates = new Map<string, (delta: SelectionAssistDelta) => void>();
 
   constructor(
@@ -290,8 +291,15 @@ export class AcpClient {
     }
   }
 
-  annotateFile(request: FileAnnotateRequest, signal?: AbortSignal): Promise<FileAnnotations> {
-    return this.pix.annotateFile(request, signal);
+  async annotateFile(request: FileAnnotateRequest, signal?: AbortSignal, onProgress?: (progress: FileAnnotationProgress) => void): Promise<FileAnnotations> {
+    if (!onProgress) return this.pix.annotateFile(request, signal);
+    const requestId = crypto.randomUUID();
+    this.annotateUpdates.set(requestId, onProgress);
+    try {
+      return await this.pix.annotateFile({ ...request, requestId }, signal);
+    } finally {
+      this.annotateUpdates.delete(requestId);
+    }
   }
 
   /** Progress shares the selection-assist delta channel, keyed by a per-call request id. */
@@ -548,6 +556,12 @@ export class AcpClient {
       this.taskRuns.get(params.requestId)?.abort();
       return;
     }
+    if (method === FILE_ANNOTATE_PROGRESS_METHOD && isRecord(params)) {
+      const listener = typeof params.requestId === "string" ? this.annotateUpdates.get(params.requestId) : undefined;
+      const progress = listener ? parseFileAnnotationProgress(params) : undefined;
+      if (listener && progress) listener(progress);
+      return;
+    }
     if (method === SELECTION_ASSIST_DELTA_METHOD && isRecord(params)) {
       const listener = typeof params.requestId === "string" ? this.selectionUpdates.get(params.requestId) : undefined;
       if (!listener) return;
@@ -615,4 +629,18 @@ export class AcpClient {
 
 function toError(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value));
+}
+
+/** Bounded validation of an Explain progress notification. */
+function parseFileAnnotationProgress(params: Record<string, unknown>): FileAnnotationProgress | undefined {
+  const { completedParts, totalParts, summary, annotations } = params;
+  if (!Number.isInteger(completedParts) || !Number.isInteger(totalParts)) return undefined;
+  if (summary !== undefined && (typeof summary !== "string" || summary.length > 4_000)) return undefined;
+  if (annotations !== undefined && (!Array.isArray(annotations) || annotations.length > 100
+    || annotations.some((note: unknown) => !isRecord(note) || !Number.isInteger(note.line) || typeof note.text !== "string" || note.text.length > 2_000))) return undefined;
+  return {
+    completedParts: completedParts as number, totalParts: totalParts as number,
+    ...(typeof summary === "string" ? { summary } : {}),
+    ...(Array.isArray(annotations) ? { annotations: (annotations as Record<string, unknown>[]).map((note) => ({ line: note.line as number, text: note.text as string })) } : {}),
+  };
 }

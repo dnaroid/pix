@@ -202,20 +202,34 @@
   const showingAnnotations = $derived(canAnnotate && annotationState.showing);
   const annotationHeader = $derived.by((): PreviewAnnotationHeader | undefined => {
     const russian = annotationState.language === "ru";
-    if (annotationState.status === "loading") return { kind: "status", text: "Explaining the file…" };
+    const loading = annotationState.status === "loading";
+    const partsProgress = annotationState.totalParts > 1 ? ` ${annotationState.completedParts}/${annotationState.totalParts}` : "";
     if (annotationState.status === "error") {
-      return { kind: "error", label: "Explain failed", text: `${annotationState.error || "The explanation is unavailable."} Click Explain to retry.` };
+      const reason = (annotationState.error || "The explanation is unavailable").trim().replace(/^File annotation failed:\s*/u, "");
+      return { kind: "error", label: "Explain failed", text: `${/[.!?…]$/u.test(reason) ? reason : `${reason}.`} Click Explain to retry.` };
     }
-    if (annotationState.status !== "done" || !annotationState.summary) return undefined;
-    const coverage = annotationState.annotatedLines < annotationState.totalLines
-      ? russian
-        ? `\n\nПрокомментированы первые ${annotationState.annotatedLines} из ${annotationState.totalLines} строк.`
-        : `\n\nComments cover the first ${annotationState.annotatedLines} of ${annotationState.totalLines} lines.`
-      : "";
-    return { kind: "summary", label: russian ? "О модуле" : "About this module", text: annotationState.summary + coverage };
+    if (loading && !annotationState.summary) return { kind: "status", text: `Explaining the file…${partsProgress}` };
+    if (!annotationState.summary) {
+      return !loading && annotationState.failedParts > 0
+        ? { kind: "status", text: `${annotationState.failedParts} part(s) could not be explained. Shift+click Explain to retry.` }
+        : undefined;
+    }
+    const notes: string[] = [];
+    if (loading) notes.push(`Explaining…${partsProgress}`);
+    if (!loading && annotationState.failedParts > 0) {
+      notes.push(russian
+        ? `Не удалось прокомментировать частей: ${annotationState.failedParts}. Shift+клик по Explain повторит.`
+        : `${annotationState.failedParts} part(s) could not be explained. Shift+click Explain to retry.`);
+    }
+    if (!loading && annotationState.annotatedLines < annotationState.totalLines) {
+      notes.push(russian
+        ? `Прокомментированы первые ${annotationState.annotatedLines} из ${annotationState.totalLines} строк.`
+        : `Comments cover the first ${annotationState.annotatedLines} of ${annotationState.totalLines} lines.`);
+    }
+    return { kind: "summary", label: russian ? "О модуле" : "About this module", text: [annotationState.summary, ...notes].join("\n\n") };
   });
   const sourceHtml = $derived(highlighted
-    ? showingAnnotations ? insertPreviewAnnotations(highlighted.html, annotationState.status === "done" ? annotationState.annotations : [], annotationHeader) : highlighted.html
+    ? showingAnnotations ? insertPreviewAnnotations(highlighted.html, annotationState.status === "error" ? [] : annotationState.annotations, annotationHeader) : highlighted.html
     : "");
   function handleExplainClick(event: MouseEvent): void {
     if (!file) return;
