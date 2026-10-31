@@ -6,28 +6,31 @@
 
   let { store }: { store: SelectionAssistStore } = $props();
 
-  const WIDTH = 460;
-  const MAX_HEIGHT = 380;
   const MARGIN = 12;
   const GAP = 6;
   const assist = $derived(store.state);
   const target = $derived(assist.target);
-  const title = $derived(target?.action === "explain" ? "Explain Code" : "Translation");
+  const wholeFile = $derived(target?.action === "explain-file");
+  // A whole-file commentary is a longer read than a selection note.
+  const popoverWidth = $derived(wholeFile ? 600 : 460);
+  const popoverMaxHeight = $derived(wholeFile ? 620 : 380);
+  const title = $derived(target?.action === "explain" ? "Explain Code" : wholeFile ? "Explain File" : "Translation");
+  const loadingLabel = $derived(target?.action === "translate" ? "Translating…" : wholeFile ? "Reading the file…" : "Explaining…");
   let viewportWidth = $state(window.innerWidth);
   let viewportHeight = $state(window.innerHeight);
   // Place on the side with more room and cap the height to that room so the
   // popover never leaves the window; above the selection it grows upward.
   const placement = $derived.by(() => {
     if (!target) return "";
-    const left = Math.max(MARGIN, Math.min(target.anchor.left, viewportWidth - WIDTH - MARGIN));
+    const left = Math.max(MARGIN, Math.min(target.anchor.left, viewportWidth - popoverWidth - MARGIN));
     const below = viewportHeight - target.anchor.bottom - GAP - MARGIN;
     const above = target.anchor.top - GAP - MARGIN;
-    const useBelow = below >= Math.min(MAX_HEIGHT, 200) || below >= above;
-    const room = Math.max(120, Math.min(MAX_HEIGHT, useBelow ? below : above));
+    const useBelow = below >= Math.min(popoverMaxHeight, 200) || below >= above;
+    const room = Math.max(120, Math.min(popoverMaxHeight, useBelow ? below : above));
     const vertical = useBelow
       ? `top: ${Math.min(target.anchor.bottom + GAP, viewportHeight - room - MARGIN)}px;`
       : `bottom: ${Math.min(viewportHeight - target.anchor.top + GAP, viewportHeight - room - MARGIN)}px;`;
-    return `left: ${left}px; ${vertical} max-height: ${room}px; width: min(${WIDTH}px, calc(100vw - ${MARGIN * 2}px));`;
+    return `left: ${left}px; ${vertical} max-height: ${room}px; width: min(${popoverWidth}px, calc(100vw - ${MARGIN * 2}px));`;
   });
   let root = $state<HTMLElement | null>(null);
 
@@ -55,7 +58,10 @@
     aria-label={title}
   >
     <div class="flex h-8 shrink-0 items-center gap-2 border-b border-border px-3">
-      <span class="text-xs font-semibold">{title}</span>
+      <span class="shrink-0 text-xs font-semibold">{title}</span>
+      {#if wholeFile && target?.path}
+        <span class="min-w-0 truncate font-mono text-xs text-muted-foreground" title={target.path}>{target.path.split("/").at(-1)}</span>
+      {/if}
       <span class="flex-1"></span>
       {#if assist.status === "done"}
         <button type="button" class="rounded px-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground" onclick={copy}>Copy</button>
@@ -64,7 +70,7 @@
     </div>
     <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3.5 py-2.5 text-[13px] leading-[1.55]" aria-live="polite">
       {#if assist.status === "loading"}
-        <p class="text-muted-foreground">{target.action === "explain" ? "Explaining…" : "Translating…"}</p>
+        <p class="text-muted-foreground">{loadingLabel}</p>
       {:else if assist.status === "error"}
         <p class="text-tool-error">{assist.error}</p>
       {:else if assist.status === "done" || assist.status === "streaming"}
@@ -98,4 +104,6 @@
   }
   .assist-body :global(pre code) { padding: 0; background: none; }
   .assist-body :global(strong) { font-weight: 600; }
+  .assist-body :global(h3) { margin: 0.75rem 0 0.35rem; font-size: 13px; font-weight: 600; }
+  .assist-body :global(h3:first-child) { margin-top: 0; }
 </style>

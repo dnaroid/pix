@@ -78,6 +78,10 @@ Decision: [0015 — Canonical disposable harness output](../decisions/0015-harne
 - `.pi/search/` is canonical durable project state, not scratch output. Both
   Desktop cleanup paths preserve its SQLite database and sidecars; see
   [Desktop universal search](../search/desktop-universal-search.md).
+- `.pi/translations/` is the durable Preview translation cache with its own
+  retention (30 days unused, 4,000 entries), not scratch output; both Desktop
+  cleanup paths preserve it. See
+  [Desktop selection assistant](../desktop/conversations/desktop-selection-assist.md).
 - Project logo files `.pi/project-icon.{png,jpg,webp,gif,svg}` are canonical
   project state and are preserved by `.pi` cleanup; see the
   [project identity contract](../desktop/workbench/desktop-project-titlebar.md).

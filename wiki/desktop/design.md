@@ -217,6 +217,15 @@ text; `text-base` = 14 px for longer readable content; `text-lg` = 16 px and
 16 px so spacing utilities are unaffected. Prefer those steps over one-off
 arbitrary pixel sizes.
 
+Preview source code is a sustained reading surface: it uses 13 px Geist Mono
+with a 1.7 line height, medium-weight keywords, italic comments and a quiet
+12 px line-number gutter on the `code` surface that brightens for the hovered
+line. Syntax colors come from the `--sh-*` role tokens in
+`desktop/src/styles.css` (a warm palette around the terracotta primary in light
+mode and a cool night palette around the blue primary in dark mode); each role
+keeps roughly 4.5:1 or better contrast on `code`. Sugar High reports numbers as
+`class`, so types and numeric literals share one hue.
+
 Global element defaults (`font: inherit`, `white-space`, `cursor`) MUST live in
 `@layer base`. Unlayered element rules silently beat every Tailwind utility, so
 a component's `text-xs` or `cursor-*` would otherwise be ignored. Rich document content such as Markdown may use its own heading

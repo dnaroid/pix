@@ -32,6 +32,8 @@ export const PIX_GIT_ASSIST_METHOD = "pix/git/assist";
 export const PIX_SELECTION_ASSIST_METHOD = "pix/selection/assist";
 /** Streamed selection-assistant output: { requestId, text } appends, { requestId, reset: true } clears. */
 export const PIX_SELECTION_ASSIST_DELTA_METHOD = "pix/selection/assist_delta";
+/** Whole-document Markdown translation; progress reuses `pix/selection/assist_delta` keyed by requestId. */
+export const PIX_DOCUMENT_TRANSLATE_METHOD = "pix/document/translate";
 export const PIX_BRANCH_USER_MESSAGES_METHOD = "pix/session/branch_user_messages";
 export const PIX_USER_MESSAGE_ACTION_METHOD = "pix/session/user_message_action";
 export const PIX_AGENT_CONTROL_METHOD = "pix/session/agent_control";
@@ -341,7 +343,7 @@ export interface DesktopGitAssistantResponse {
 	readonly text: string;
 }
 
-export type DesktopSelectionAssistAction = "explain" | "translate";
+export type DesktopSelectionAssistAction = "explain" | "explain-file" | "translate";
 
 export interface DesktopSelectionAssistRequest {
 	readonly cwd: string;
@@ -355,6 +357,22 @@ export interface DesktopSelectionAssistRequest {
 
 export interface DesktopSelectionAssistResponse {
 	readonly text: string;
+}
+
+export interface DesktopDocumentTranslateRequest {
+	readonly cwd: string;
+	readonly text: string;
+	readonly path?: string;
+	/** Bypass cached chunks and translate again. */
+	readonly refresh?: boolean;
+	readonly requestId?: string;
+}
+
+export interface DesktopDocumentTranslateResponse {
+	readonly text: string;
+	readonly language: string;
+	readonly chunks: number;
+	readonly cachedChunks: number;
 }
 
 export interface DesktopImportSessionRequest extends DesktopSessionRequest {
@@ -699,25 +717,52 @@ export function parseDesktopGitAssistantRequest(value: unknown): DesktopGitAssis
 	return { cwd: value.cwd, kind: value.kind, diff: value.diff };
 }
 
+/** Selected text limit; a whole-file explanation accepts a larger, client-truncated file. */
+export const SELECTION_ASSIST_MAX_TEXT = 20_000;
+export const EXPLAIN_FILE_MAX_TEXT = 120_000;
+export const DOCUMENT_TRANSLATE_MAX_TEXT = 400_000;
+
 export function parseDesktopSelectionAssistRequest(value: unknown): DesktopSelectionAssistRequest {
 	if (
 		!isRecord(value)
 		|| typeof value.cwd !== "string"
 		|| value.cwd.trim().length === 0
-		|| (value.action !== "explain" && value.action !== "translate")
+		|| (value.action !== "explain" && value.action !== "explain-file" && value.action !== "translate")
 		|| typeof value.text !== "string"
 		|| value.text.trim().length === 0
-		|| value.text.length > 20_000
+		|| value.text.length > (value.action === "explain-file" ? EXPLAIN_FILE_MAX_TEXT : SELECTION_ASSIST_MAX_TEXT)
 		|| (value.context !== undefined && (typeof value.context !== "string" || value.context.length > 40_000))
 		|| (value.path !== undefined && (typeof value.path !== "string" || value.path.length > 4_096))
 		|| (value.requestId !== undefined && (typeof value.requestId !== "string" || value.requestId.length === 0 || value.requestId.length > 128))
 	) {
-		throw new RequestError(ERROR_INVALID_PARAMS, "pix/selection/assist requires cwd, action and non-empty text up to 20000 characters");
+		throw new RequestError(ERROR_INVALID_PARAMS, "pix/selection/assist requires cwd, action and non-empty text up to 20000 characters (120000 for explain-file)");
 	}
 	return {
 		cwd: value.cwd, action: value.action, text: value.text,
 		...(typeof value.context === "string" && value.context ? { context: value.context } : {}),
 		...(typeof value.path === "string" && value.path ? { path: value.path } : {}),
+		...(typeof value.requestId === "string" ? { requestId: value.requestId } : {}),
+	};
+}
+
+export function parseDesktopDocumentTranslateRequest(value: unknown): DesktopDocumentTranslateRequest {
+	if (
+		!isRecord(value)
+		|| typeof value.cwd !== "string"
+		|| value.cwd.trim().length === 0
+		|| typeof value.text !== "string"
+		|| value.text.trim().length === 0
+		|| value.text.length > DOCUMENT_TRANSLATE_MAX_TEXT
+		|| (value.path !== undefined && (typeof value.path !== "string" || value.path.length > 4_096))
+		|| (value.refresh !== undefined && typeof value.refresh !== "boolean")
+		|| (value.requestId !== undefined && (typeof value.requestId !== "string" || value.requestId.length === 0 || value.requestId.length > 128))
+	) {
+		throw new RequestError(ERROR_INVALID_PARAMS, `pix/document/translate requires cwd and non-empty text up to ${DOCUMENT_TRANSLATE_MAX_TEXT} characters`);
+	}
+	return {
+		cwd: value.cwd, text: value.text,
+		...(typeof value.path === "string" && value.path ? { path: value.path } : {}),
+		...(value.refresh === true ? { refresh: true } : {}),
 		...(typeof value.requestId === "string" ? { requestId: value.requestId } : {}),
 	};
 }

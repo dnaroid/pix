@@ -81,6 +81,8 @@ export function createDesktopWorkbenchViewModelServices(
     },
     editor: {
       workspace: options.workspace,
+      client: options.client,
+      explainFile: options.explainFile,
       statusReady: () => options.status() === "ready",
       clientAvailable: options.clientAvailable,
       operationRunning: options.operationRunning,

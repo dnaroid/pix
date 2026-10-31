@@ -147,6 +147,7 @@ import {
 	PIX_GIT_ASSIST_METHOD,
 	PIX_SELECTION_ASSIST_METHOD,
 	PIX_SELECTION_ASSIST_DELTA_METHOD,
+	PIX_DOCUMENT_TRANSLATE_METHOD,
 	PIX_DEFER_MESSAGE_METHOD,
 	PIX_DCP_STATS_METHOD,
 	PIX_DRAFT_CONFIG_METHOD,
@@ -185,6 +186,7 @@ import {
 	parseDesktopSessionRequest,
 	parseDesktopGitAssistantRequest,
 	parseDesktopSelectionAssistRequest,
+	parseDesktopDocumentTranslateRequest,
 	parseDesktopImportSessionRequest,
 	parseDesktopQueueActionRequest,
 	parseDesktopQueueSubmitRequest,
@@ -216,6 +218,8 @@ import {
 	type DesktopGitAssistantResponse,
 	type DesktopSelectionAssistRequest,
 	type DesktopSelectionAssistResponse,
+	type DesktopDocumentTranslateRequest,
+	type DesktopDocumentTranslateResponse,
 	type DesktopImportSessionRequest,
 	type DesktopQueueActionRequest,
 	type DesktopQueueActionResponse,
@@ -269,6 +273,8 @@ import { EventTranslator } from "./event-translator.js";
 import { SessionUpdateCoalescer } from "./session-update-coalescer.js";
 import { createGitAssistant, type GitAssistant } from "./git-assistant.js";
 import { createSelectionAssistant, type SelectionAssistant } from "./selection-assist.js";
+import { createAssistModelRunner } from "./assist-model-runner.js";
+import { createDocumentTranslator, type DocumentTranslator } from "./document-translation.js";
 import {
 	isThinkingLevel,
 	loadPixIgnoreContextFiles,
@@ -544,6 +550,7 @@ export interface PixAcpAgentOptions {
 	readonly gitAssistant?: GitAssistant;
 	/** Selection explain/translate backend (overridable for hermetic tests). */
 	readonly selectionAssistant?: SelectionAssistant;
+	readonly documentTranslator?: DocumentTranslator;
 	/** Direct workspace Registry backend (overridable for transport tests). */
 	readonly registryService?: Pick<DesktopRegistryService, "action" | "diff">;
 	/** Shared model-usage query (overridable for deterministic concurrency tests). */
@@ -642,6 +649,7 @@ export class PixAcpAgent {
 	private viewerModelRuntime: Promise<ModelRuntime | undefined> | undefined;
 	private readonly gitAssistant: GitAssistant;
 	private readonly selectionAssistant: SelectionAssistant;
+	private readonly documentTranslator: DocumentTranslator;
 	private readonly queryModelUsage: (state: PiSessionState, options?: { freshOnly?: boolean }) => Promise<ModelUsageRefreshResult>;
 	private readonly claudeCodeLoginNudge: () => Promise<boolean>;
 	private readonly parseAnthropicUsageHeaders: (record: PiAnthropicUsageRecord) => Promise<DesktopModelUsageStatus | undefined>;
@@ -749,7 +757,12 @@ export class PixAcpAgent {
 		});
 		this.enhancePrompt = options.enhancePrompt ?? createPromptEnhancer();
 		this.gitAssistant = options.gitAssistant ?? createGitAssistant();
-		this.selectionAssistant = options.selectionAssistant ?? createSelectionAssistant();
+		const assistRunner = createAssistModelRunner();
+		this.selectionAssistant = options.selectionAssistant ?? createSelectionAssistant({ runner: assistRunner });
+		this.documentTranslator = options.documentTranslator ?? createDocumentTranslator({
+			runner: assistRunner,
+			onCacheError: (error) => options.logger.warn(`translation cache failed: ${stringifyUnknown(error)}`),
+		});
 		this.queryModelUsage = options.queryModelUsage ?? ((state, queryOptions) => queryPixModelUsage(state, options.agentDir, queryOptions?.freshOnly));
 		this.claudeCodeLoginNudge = options.claudeCodeLoginNudge ?? launchClaudeCodeLoginNudge;
 		this.parseAnthropicUsageHeaders = options.parseAnthropicUsageHeaders ?? parsePixAnthropicUsageHeaders;
@@ -935,6 +948,12 @@ export class PixAcpAgent {
 					await ctx.client.notify(PIX_SELECTION_ASSIST_DELTA_METHOD, { requestId: ctx.params.requestId, ...delta });
 				}
 				: undefined)))
+			.onRequest(PIX_DOCUMENT_TRANSLATE_METHOD, parseDesktopDocumentTranslateRequest, (ctx) => this.withRequestLogging(PIX_DOCUMENT_TRANSLATE_METHOD, ctx.params, ctx.signal, () => this.desktopDocumentTranslate(ctx.params, ctx.signal, ctx.params.requestId
+				? async (delta) => {
+					ctx.signal.throwIfAborted();
+					await ctx.client.notify(PIX_SELECTION_ASSIST_DELTA_METHOD, { requestId: ctx.params.requestId, ...delta });
+				}
+				: undefined)))
 			.onRequest(PIX_GIT_ASSIST_METHOD, parseDesktopGitAssistantRequest, (ctx) => this.withRequestLogging(PIX_GIT_ASSIST_METHOD, ctx.params, ctx.signal, () => this.desktopGitAssist(ctx.params, ctx.signal)),
 			)
 			.onRequest(PIX_FORK_MESSAGES_METHOD, parseDesktopSessionRequest, (ctx) => this.withRequestLogging(PIX_FORK_MESSAGES_METHOD, ctx.params, ctx.signal, () => this.forkMessages(ctx.params)),
@@ -1080,6 +1099,21 @@ export class PixAcpAgent {
 			if (error instanceof RequestError) throw error;
 			const detail = error instanceof Error ? error.message : String(error);
 			throw new RequestError(ERROR_SERVER, `Selection assistant failed: ${detail || "unknown error"}`);
+		}
+	}
+
+	private async desktopDocumentTranslate(
+		params: DesktopDocumentTranslateRequest,
+		signal: AbortSignal,
+		onDelta?: (delta: { readonly text: string } | { readonly reset: true }) => Promise<void>,
+	): Promise<DesktopDocumentTranslateResponse> {
+		try {
+			const { requestId: _requestId, ...request } = params;
+			return await this.documentTranslator({ ...request, signal, ...(onDelta ? { onDelta } : {}) });
+		} catch (error) {
+			if (error instanceof RequestError) throw error;
+			const detail = error instanceof Error ? error.message : String(error);
+			throw new RequestError(ERROR_SERVER, `Document translation failed: ${detail || "unknown error"}`);
 		}
 	}
 
