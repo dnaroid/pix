@@ -10,12 +10,10 @@
   const GAP = 6;
   const assist = $derived(store.state);
   const target = $derived(assist.target);
-  const wholeFile = $derived(target?.action === "explain-file");
-  // A whole-file commentary is a longer read than a selection note.
-  const popoverWidth = $derived(wholeFile ? 600 : 460);
-  const popoverMaxHeight = $derived(wholeFile ? 620 : 380);
-  const title = $derived(target?.action === "explain" ? "Explain Code" : wholeFile ? "Explain File" : "Translation");
-  const loadingLabel = $derived(target?.action === "translate" ? "Translating…" : wholeFile ? "Reading the file…" : "Explaining…");
+  const popoverWidth = 460;
+  const popoverMaxHeight = 380;
+  const title = $derived(target?.action === "explain" ? "Explain Code" : "Translation");
+  const loadingLabel = $derived(target?.action === "translate" ? "Translating…" : "Explaining…");
   let viewportWidth = $state(window.innerWidth);
   let viewportHeight = $state(window.innerHeight);
   // Place on the side with more room and cap the height to that room so the
@@ -58,10 +56,7 @@
     aria-label={title}
   >
     <div class="flex h-8 shrink-0 items-center gap-2 border-b border-border px-3">
-      <span class="shrink-0 text-xs font-semibold">{title}</span>
-      {#if wholeFile && target?.path}
-        <span class="min-w-0 truncate font-mono text-xs text-muted-foreground" title={target.path}>{target.path.split("/").at(-1)}</span>
-      {/if}
+      <span class="text-xs font-semibold">{title}</span>
       <span class="flex-1"></span>
       {#if assist.status === "done"}
         <button type="button" class="rounded px-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground" onclick={copy}>Copy</button>
@@ -104,6 +99,4 @@
   }
   .assist-body :global(pre code) { padding: 0; background: none; }
   .assist-body :global(strong) { font-weight: 600; }
-  .assist-body :global(h3) { margin: 0.75rem 0 0.35rem; font-size: 13px; font-weight: 600; }
-  .assist-body :global(h3:first-child) { margin-top: 0; }
 </style>

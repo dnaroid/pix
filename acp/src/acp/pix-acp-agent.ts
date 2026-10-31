@@ -148,6 +148,7 @@ import {
 	PIX_SELECTION_ASSIST_METHOD,
 	PIX_SELECTION_ASSIST_DELTA_METHOD,
 	PIX_DOCUMENT_TRANSLATE_METHOD,
+	PIX_FILE_ANNOTATE_METHOD,
 	PIX_DEFER_MESSAGE_METHOD,
 	PIX_DCP_STATS_METHOD,
 	PIX_DRAFT_CONFIG_METHOD,
@@ -187,6 +188,7 @@ import {
 	parseDesktopGitAssistantRequest,
 	parseDesktopSelectionAssistRequest,
 	parseDesktopDocumentTranslateRequest,
+	parseDesktopFileAnnotateRequest,
 	parseDesktopImportSessionRequest,
 	parseDesktopQueueActionRequest,
 	parseDesktopQueueSubmitRequest,
@@ -220,6 +222,8 @@ import {
 	type DesktopSelectionAssistResponse,
 	type DesktopDocumentTranslateRequest,
 	type DesktopDocumentTranslateResponse,
+	type DesktopFileAnnotateRequest,
+	type DesktopFileAnnotateResponse,
 	type DesktopImportSessionRequest,
 	type DesktopQueueActionRequest,
 	type DesktopQueueActionResponse,
@@ -275,6 +279,7 @@ import { createGitAssistant, type GitAssistant } from "./git-assistant.js";
 import { createSelectionAssistant, type SelectionAssistant } from "./selection-assist.js";
 import { createAssistModelRunner } from "./assist-model-runner.js";
 import { createDocumentTranslator, type DocumentTranslator } from "./document-translation.js";
+import { createFileAnnotator, type FileAnnotator } from "./file-annotation.js";
 import {
 	isThinkingLevel,
 	loadPixIgnoreContextFiles,
@@ -551,6 +556,7 @@ export interface PixAcpAgentOptions {
 	/** Selection explain/translate backend (overridable for hermetic tests). */
 	readonly selectionAssistant?: SelectionAssistant;
 	readonly documentTranslator?: DocumentTranslator;
+	readonly fileAnnotator?: FileAnnotator;
 	/** Direct workspace Registry backend (overridable for transport tests). */
 	readonly registryService?: Pick<DesktopRegistryService, "action" | "diff">;
 	/** Shared model-usage query (overridable for deterministic concurrency tests). */
@@ -650,6 +656,7 @@ export class PixAcpAgent {
 	private readonly gitAssistant: GitAssistant;
 	private readonly selectionAssistant: SelectionAssistant;
 	private readonly documentTranslator: DocumentTranslator;
+	private readonly fileAnnotator: FileAnnotator;
 	private readonly queryModelUsage: (state: PiSessionState, options?: { freshOnly?: boolean }) => Promise<ModelUsageRefreshResult>;
 	private readonly claudeCodeLoginNudge: () => Promise<boolean>;
 	private readonly parseAnthropicUsageHeaders: (record: PiAnthropicUsageRecord) => Promise<DesktopModelUsageStatus | undefined>;
@@ -759,6 +766,7 @@ export class PixAcpAgent {
 		this.gitAssistant = options.gitAssistant ?? createGitAssistant();
 		const assistRunner = createAssistModelRunner();
 		this.selectionAssistant = options.selectionAssistant ?? createSelectionAssistant({ runner: assistRunner });
+		this.fileAnnotator = options.fileAnnotator ?? createFileAnnotator({ runner: assistRunner });
 		this.documentTranslator = options.documentTranslator ?? createDocumentTranslator({
 			runner: assistRunner,
 			onCacheError: (error) => options.logger.warn(`translation cache failed: ${stringifyUnknown(error)}`),
@@ -948,6 +956,7 @@ export class PixAcpAgent {
 					await ctx.client.notify(PIX_SELECTION_ASSIST_DELTA_METHOD, { requestId: ctx.params.requestId, ...delta });
 				}
 				: undefined)))
+			.onRequest(PIX_FILE_ANNOTATE_METHOD, parseDesktopFileAnnotateRequest, (ctx) => this.withRequestLogging(PIX_FILE_ANNOTATE_METHOD, ctx.params, ctx.signal, () => this.desktopFileAnnotate(ctx.params, ctx.signal)))
 			.onRequest(PIX_DOCUMENT_TRANSLATE_METHOD, parseDesktopDocumentTranslateRequest, (ctx) => this.withRequestLogging(PIX_DOCUMENT_TRANSLATE_METHOD, ctx.params, ctx.signal, () => this.desktopDocumentTranslate(ctx.params, ctx.signal, ctx.params.requestId
 				? async (delta) => {
 					ctx.signal.throwIfAborted();
@@ -1099,6 +1108,16 @@ export class PixAcpAgent {
 			if (error instanceof RequestError) throw error;
 			const detail = error instanceof Error ? error.message : String(error);
 			throw new RequestError(ERROR_SERVER, `Selection assistant failed: ${detail || "unknown error"}`);
+		}
+	}
+
+	private async desktopFileAnnotate(params: DesktopFileAnnotateRequest, signal: AbortSignal): Promise<DesktopFileAnnotateResponse> {
+		try {
+			return await this.fileAnnotator({ ...params, signal });
+		} catch (error) {
+			if (error instanceof RequestError) throw error;
+			const detail = error instanceof Error ? error.message : String(error);
+			throw new RequestError(ERROR_SERVER, `File annotation failed: ${detail || "unknown error"}`);
 		}
 	}
 

@@ -98,4 +98,13 @@ describe("syntax highlighting", () => {
     expect(languageForReadTool("read", "Read docs/guide.markdown")).toBe("markdown");
     expect(languageForReadTool("read", "Ls docs", "/workspace/docs/readme.md")).toBeUndefined();
   });
+  it("marks called and declared names as functions and numeric literals as numbers", () => {
+    const { html } = highlightCode("function render(n) { btn.addEventListener('click', go); if (n < 10) x = 0x1F + 1; }", "js");
+    expect(html).toContain('<span class="sh__token--function" style="color:var(--sh-function)">render</span>');
+    expect(html).toContain('<span class="sh__token--function" style="color:var(--sh-function)">addEventListener</span>');
+    expect(html).not.toContain('sh__token--function" style="color:var(--sh-function)">go<');
+    for (const value of ["10", "0x1F"]) expect(html).toContain(`<span class="sh__token--number" style="color:var(--sh-number)">${value}</span>`);
+    expect(highlightCode("const a = new HeadsUpContext();", "ts").html).not.toContain("sh__token--function");
+    expect(highlightCode("let e: EvalCase;", "ts").html).toContain('<span class="sh__token--class" style="color:var(--sh-class)">EvalCase</span>');
+  });
 });

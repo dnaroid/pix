@@ -55,11 +55,28 @@ function highlightUncached(code: string, languageHint?: string): HighlightedCode
   if (language === "plaintext") {
     html = code.split("\n").map((line) => `<span class="sh__line">${escapeHtml(line)}</span>`).join("\n");
   } else if (language === "gdscript") {
-    html = highlightGDScript(code);
+    html = refineTokens(highlightGDScript(code));
   } else {
-    html = highlight(code, { lang: language });
+    html = refineTokens(highlight(code, { lang: language }));
   }
   return { html, language };
+}
+
+const NAME_BEFORE_CALL = /<span class="sh__token--(?:identifier|property)" style="color:var\(--sh-(?:identifier|property)\)">([^<]+)<\/span>(?=(?:<span class="sh__token--space"[^>]*>[^<]*<\/span>)?<span class="sh__token--sign"[^>]*>\()/gu;
+const CLASS_TOKEN = /<span class="sh__token--class" style="color:var\(--sh-class\)">([^<]+)<\/span>/gu;
+const NUMBER_LITERAL = /^(?:0[xob][\da-f_]+n?|(?:\d[\d_]*(?:\.[\d_]*)?|\.\d[\d_]*)(?:e[+-]?\d+)?[a-z]*)$/iu;
+
+/**
+ * Sugar High has no function or number roles. Names directly followed by `(`
+ * (calls and declarations) become `function`; numeric `class` tokens become
+ * `number`, so themes can color them like an IDE does.
+ */
+export function refineTokens(html: string): string {
+  return html
+    .replace(NAME_BEFORE_CALL, (_match, name: string) => `<span class="sh__token--function" style="color:var(--sh-function)">${name}</span>`)
+    .replace(CLASS_TOKEN, (match, text: string) => NUMBER_LITERAL.test(text)
+      ? `<span class="sh__token--number" style="color:var(--sh-number)">${text}</span>`
+      : match);
 }
 
 /** Resolve Sugar High's canonical language from a file path. */

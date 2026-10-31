@@ -5,17 +5,14 @@ import { parse as parseJsonc } from "jsonc-parser";
 import { createAssistModelRunner, type AssistDelta, type AssistModelRunner } from "./assist-model-runner.js";
 import { pixProjectConfigPath, pixUserConfigPath } from "./pix-config-paths.js";
 
-/** Desktop selection helpers: explain selected code or a whole file, translate selected chat text. */
-export type SelectionAssistAction = "explain" | "explain-file" | "translate";
+/** Desktop selection helpers: explain selected code, translate selected chat text. */
+export type SelectionAssistAction = "explain" | "translate";
 
 export const DEFAULT_SELECTION_ASSIST_LANGUAGE = "ru";
 const SELECTION_ASSIST_TIMEOUT_MS = 30_000;
 /** Explanations stay short so they arrive at autocomplete-like speed. */
 const EXPLAIN_MAX_TOKENS = 400;
 const TRANSLATE_MAX_TOKENS = 2_048;
-/** A whole-file walkthrough is longer than a selection note but still a quick read. */
-const EXPLAIN_FILE_MAX_TOKENS = 1_500;
-const EXPLAIN_FILE_TIMEOUT_MS = 60_000;
 
 export interface SelectionAssistInput {
 	readonly cwd: string;
@@ -49,18 +46,14 @@ export function createSelectionAssistant(options: CreateSelectionAssistantOption
 	return async ({ cwd, action, text, context, path, signal, onDelta }) => {
 		const config = (options.loadConfig ?? loadSelectionAssistConfig)(cwd);
 		if (config.modelRefs.length === 0) throw new Error("No selection assistant model is configured");
-		const systemPrompt = action === "explain"
-			? explainSystemPrompt(config.language)
-			: action === "explain-file" ? explainFileSystemPrompt(config.language) : translateSystemPrompt(config.language);
-		const prompt = action === "explain"
-			? buildExplainPrompt(text, context, path)
-			: action === "explain-file" ? buildExplainFilePrompt(text, path) : buildTranslatePrompt(text);
+		const systemPrompt = action === "explain" ? explainSystemPrompt(config.language) : translateSystemPrompt(config.language);
+		const prompt = action === "explain" ? buildExplainPrompt(text, context, path) : buildTranslatePrompt(text);
 		return run({
 			modelRefs: config.modelRefs,
 			systemPrompt,
 			prompt,
-			maxTokens: action === "explain" ? EXPLAIN_MAX_TOKENS : action === "explain-file" ? EXPLAIN_FILE_MAX_TOKENS : TRANSLATE_MAX_TOKENS,
-			timeoutMs: action === "explain-file" ? EXPLAIN_FILE_TIMEOUT_MS : SELECTION_ASSIST_TIMEOUT_MS,
+			maxTokens: action === "explain" ? EXPLAIN_MAX_TOKENS : TRANSLATE_MAX_TOKENS,
+			timeoutMs: SELECTION_ASSIST_TIMEOUT_MS,
 			signal,
 			...(onDelta ? { onDelta } : {}),
 		});
@@ -105,17 +98,6 @@ Do not rewrite or suggest changes unless something is clearly a bug.
 Answer in the language with this code/name: ${language}.`;
 }
 
-function explainFileSystemPrompt(language: string): string {
-	return `You give a developer a guided commentary on a whole source file they opened in a code viewer.
-Start with one or two sentences on the file's purpose and its role in the project.
-Then walk through its main parts in source order (exports, types, functions, classes, important constants) as short bullets: what each part does and how the parts work together.
-Finish with non-obvious details worth knowing (side effects, invariants, error handling, concurrency, edge cases) when there are any.
-Be concise and skimmable; use at most two short level-3 headings. Use Markdown; wrap identifiers in backticks. Do not restate the code.
-Do not rewrite or suggest changes unless something is clearly a bug.
-If the file was truncated, say what part you saw.
-Answer in the language with this code/name: ${language}.`;
-}
-
 function translateSystemPrompt(language: string): string {
 	return `You are a translator. Translate the user's text into the language with this code/name: ${language}.
 Preserve meaning, tone, Markdown formatting, code, identifiers, paths and URLs exactly.
@@ -131,10 +113,6 @@ function buildExplainPrompt(text: string, context: string | undefined, path: str
 		text,
 		"</selection>",
 	].join("\n");
-}
-
-function buildExplainFilePrompt(text: string, path: string | undefined): string {
-	return [...(path ? [`File: ${path}`] : []), "<file>", text, "</file>"].join("\n");
 }
 
 function buildTranslatePrompt(text: string): string {

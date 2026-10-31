@@ -108,9 +108,8 @@ export type WorkbenchConversationBuilderOptions = {
 
 export type WorkbenchEditorBuilderOptions = {
   workspace: () => string;
-  /** Live ACP client for whole-document Preview translation. */
+  /** Live ACP client for Preview translation and inline file annotations. */
   client?: () => AcpClient | null;
-  explainFile?: (path: string, content: string, anchor: { left: number; top: number; bottom: number }) => void;
   statusReady: () => boolean;
   clientAvailable: () => boolean;
   operationRunning: () => boolean;
@@ -426,7 +425,13 @@ export function buildWorkbenchEditorProps(
       onOpenExternalEditor: activePreview.kind === "file" && !virtualContents && isWorkspaceProjectFilePath(activePreview.file.path)
         ? (path) => void options.projectWorkspace.openInEditor(path)
         : undefined,
-      onExplainFile: activePreview.kind === "file" && options.explainFile && options.clientAvailable() ? options.explainFile : undefined,
+      onAnnotateFile: activePreview.kind === "file" && options.client && options.clientAvailable() && previewWorkspace
+        ? (request, signal) => {
+          const client = options.client?.();
+          if (!client) return Promise.reject(new Error("Pix is not connected to a workspace."));
+          return client.annotateFile({ cwd: previewWorkspace, ...request }, signal);
+        }
+        : undefined,
       onTranslateDocument: activePreview.kind === "file" && options.client && options.clientAvailable() && previewWorkspace
         ? (request, signal, onDelta) => {
           const client = options.client?.();

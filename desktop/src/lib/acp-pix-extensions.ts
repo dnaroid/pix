@@ -45,10 +45,23 @@ export type SelectionAssistDelta = { readonly text: string } | { readonly reset:
 export interface SelectionAssistRequest {
   readonly requestId?: string;
   readonly cwd: string;
-  readonly action: "explain" | "explain-file" | "translate";
+  readonly action: "explain" | "translate";
   readonly text: string;
   readonly context?: string;
   readonly path?: string;
+}
+export interface FileAnnotateRequest {
+  readonly cwd: string;
+  readonly text: string;
+  readonly path?: string;
+}
+export interface FileAnnotation { readonly line: number; readonly text: string }
+export interface FileAnnotations {
+  readonly annotations: readonly FileAnnotation[];
+  readonly language: string;
+  /** Lines the model saw; a very large file is annotated from its beginning. */
+  readonly annotatedLines: number;
+  readonly totalLines: number;
 }
 export interface DocumentTranslateRequest {
   readonly requestId?: string;
@@ -412,6 +425,21 @@ export class AcpPixExtensions {
       throw new Error("pix/selection/assist returned an invalid response");
     }
     return response.text;
+  }
+
+  async annotateFile(request: FileAnnotateRequest, signal?: AbortSignal): Promise<FileAnnotations> {
+    const response = await this.request<unknown>("pix/file/annotate", { ...request }, null, signal);
+    if (
+      !isRecord(response) || !Array.isArray(response.annotations) || typeof response.language !== "string"
+      || typeof response.annotatedLines !== "number" || typeof response.totalLines !== "number"
+      || response.annotations.some((item: unknown) => !isRecord(item) || !Number.isInteger(item.line) || typeof item.text !== "string")
+    ) {
+      throw new Error("pix/file/annotate returned an invalid response");
+    }
+    return {
+      annotations: (response.annotations as Record<string, unknown>[]).map((item) => ({ line: item.line as number, text: item.text as string })),
+      language: response.language, annotatedLines: response.annotatedLines, totalLines: response.totalLines,
+    };
   }
 
   async translateDocument(request: DocumentTranslateRequest, signal?: AbortSignal): Promise<DocumentTranslation> {

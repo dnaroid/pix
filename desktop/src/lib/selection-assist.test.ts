@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { nativeContextMenuItems } from "./native-context-menu";
 import type { DesktopContextTarget } from "./desktop-context-target";
-import { EXPLAIN_FILE_MAX_TEXT, explainFileTarget, type SelectionAssistTarget } from "./selection-assist-target";
+import type { SelectionAssistTarget } from "./selection-assist-target";
 import { createSelectionAssistStore } from "../app/selection-assist.svelte";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn().mockResolvedValue(undefined) }));
@@ -109,12 +109,3 @@ describe("selection assist store", () => {
   });
 });
 
-describe("whole-file explanation target", () => {
-  it("keeps small files whole, truncates large ones within the ACP limit and skips blank files", () => {
-    expect(explainFileTarget("src/a.ts", "const a = 1;\n", anchor)).toEqual({ action: "explain-file", text: "const a = 1;\n", path: "src/a.ts", anchor });
-    const large = explainFileTarget("src/big.ts", "x".repeat(EXPLAIN_FILE_MAX_TEXT + 10), anchor)!;
-    expect(large.text.length).toBe(EXPLAIN_FILE_MAX_TEXT);
-    expect(large.text).toMatch(/file truncated/u);
-    expect(explainFileTarget("src/empty.ts", "  \n", anchor)).toBeNull();
-  });
-});
