@@ -94,3 +94,5 @@ status: active
 Focused Desktop/ACP tests, Desktop check and web build, ACP typecheck. Boundary,
 source isolation, attachments, cancellation, failure and stale completion must
 be tested deterministically; static checks are not live Desktop QA evidence.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"ff6c094e91d38a267c49325a8d0ba24d16d7f750547d2e26db2d50e06d758f8e","checkedAt":"2026-10-31T00:41:07.227Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":64,"reportLanguage":"ru"} -->

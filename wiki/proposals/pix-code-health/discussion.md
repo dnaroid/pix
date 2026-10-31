@@ -1325,3 +1325,5 @@ None material. C→B platform-creep, resource competition of "background" work, 
 
 
 Round 5 reviews [the preserved draft](draft-proposal.md). Final changes: [revision notes](revision-notes.md), available after finalization.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"9dbcc8a4dc50f2474ec968b47ea47f872c1f3675cac824ace4b8388f78c6a539","checkedAt":"2026-10-31T01:07:04.418Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":29,"candidateSources":113,"reportLanguage":"ru"} -->

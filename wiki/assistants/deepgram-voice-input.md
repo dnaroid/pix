@@ -242,4 +242,4 @@ download Vosk models or load/install Vosk bindings.
 - `desktop/src-tauri/src/dictation_shortcut.rs`
 - `desktop/src-tauri/src/lib.rs`
 
-<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"45422698e292e107a361cbe954625e0cd73772ff9ebc009ccda2c383f22f26ce","checkedAt":"2026-10-30T23:19:03.943Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":61,"reportLanguage":"ru"} -->
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"314fd8f18c454a6845235bd14d61004d4e094f865a09abd7eacedc7e363f7fee","checkedAt":"2026-10-31T00:48:19.526Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":62,"reportLanguage":"ru"} -->

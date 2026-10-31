@@ -69,3 +69,5 @@ status: active
 Run focused Desktop tests, Desktop check and native Cargo check/tests. In native
 macOS Desktop verify cancel/confirm for active/background tab close, window close
 and Cmd+Q across multiple windows, as well as silent idle close.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"ce04263df32a9e7989ffbc942466e77f668ab8668205aa2366b46526207f29e5","checkedAt":"2026-10-31T00:30:39.182Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":60,"reportLanguage":"ru"} -->

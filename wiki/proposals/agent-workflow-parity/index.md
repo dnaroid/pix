@@ -18,3 +18,5 @@
 1. Фоновые shell-процессы — реализовано ([контракт](../../tools/background-shell.md)). На момент исследования это была самая изолированная задача: SDK уже давал `BashOperations`, а `run_in_background` был помечен «Unsupported».
 2. Пользовательские хуки. Это тонкий слой над уже существующими событиями `tool_call` / `tool_result` / `agent_settled`; главный риск — trust.
 3. Чекпоинты. Самая ценная, но и самая рискованная задача: она затрагивает существующий контракт [Undo changes](../../desktop/conversations/desktop-user-message-actions.md) и параллельные сессии.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"1863a8c68a279b48d2aa65aa01ef99452e1db05411a86a1cc30c0cd843e88839","checkedAt":"2026-10-31T00:45:18.302Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":45,"reportLanguage":"ru"} -->

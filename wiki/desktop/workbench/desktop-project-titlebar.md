@@ -325,3 +325,5 @@ without blocking desktop interactions.
 - Confirmed by native-window inspection (macOS): dragging empty title-bar space moves the window and dragging the transcript area does not. Dragging requires the `core:window:allow-start-dragging` capability (`core:window:default` does not include it); `core:window:allow-internal-toggle-maximize` restores native double-click-to-zoom on the title bar.
 - Confirmed by tests: the recent-project, project-color, and project-switcher unit
   tests cover the deterministic identity and override surface.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"05cc9ca996b891c3a37aa04308478b99e1c6a63b7ce0104e4be6ff0cb21d66d8","checkedAt":"2026-10-31T00:33:45.575Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":59,"reportLanguage":"ru"} -->

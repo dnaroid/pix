@@ -105,3 +105,5 @@ Render Pix Desktop chat tool rows with the same compact headers and mutation out
 - Confirmed by code: pi-tools-suite LSP and comment-checker hooks append text blocks to the final mutation result before `tool_execution_end` is emitted.
 - Confirmed by code: the TUI edit/apply-patch renderer places the diff or patch before final result text and changes completed mutation status when LSP output is present.
 - Confirmed by tests: ACP retains tool names and final text; desktop presentation matches representative TUI formats and roles.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"ee8ddca238fdc0add904436f2441913f9fafb84b31e356060ca5281e87bb47cd","checkedAt":"2026-10-31T00:42:08.843Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":64,"reportLanguage":"ru"} -->

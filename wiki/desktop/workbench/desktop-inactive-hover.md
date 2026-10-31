@@ -47,3 +47,5 @@ Confirm no hover bridge installation or module remains. In native macOS Desktop,
 after restarting the updated build, move the pointer over an inactive Pix window
 while another app is frontmost: focus and ordering must remain unchanged. Clicking
 the window should still activate it and deliver that first click.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"b543a3bb9f05ac60048ceaa4642ee3599ace521e6bd1a86d070c6892ea39f737","checkedAt":"2026-10-31T00:33:25.405Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":46,"reportLanguage":"ru"} -->

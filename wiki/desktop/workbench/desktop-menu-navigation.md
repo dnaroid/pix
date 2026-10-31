@@ -3,6 +3,8 @@ kind: spec
 status: active
 ---
 
+<!-- pix:wiki-report {"version":1,"checkedAt":"2026-10-31T00:35:32.396Z","result":{"path":"wiki/desktop/workbench/desktop-menu-navigation.md","documentHash":"2d8c2ad814e31b2c0d51e02a91b05e1473edae7f6cb06f357389139ae11d8bd0","modelRef":"zai/glm-5.3-flash","reportLanguage":"ru","checkedSources":12,"conflicts":[],"uncertainties":[],"reviewedSources":[],"notices":["Native reranking unavailable or its context changed; original ranking retained.","Не удалось подтвердить полноту или актуальность результатов поиска.","Состав Wiki изменился или не удалось проверить его во время поиска; повторите проверку.","Документ, настройки или содержимое Wiki изменились во время проверки. Повторите её."],"coverage":{"scope":"retrieved-passages","checkedPassages":12,"candidateSources":56,"excerptedSources":11,"limits":["query-sampling","candidate-limit","source-limit","context-limit","passage-limit"]},"status":"incomplete"}} -->
+
 # Desktop menu keyboard navigation
 
 <!-- markdownlint-disable MD013 -->
@@ -92,3 +94,5 @@ roles and lifecycle are defined in `wiki/desktop/workbench/desktop-context-menus
 ## Tests
 
 - `desktop/src/lib/keyboard-navigation.test.ts`
+
+<!-- pix:wiki-check {"version":1,"status":"attempted","runId":"be10804d-802a-4a0d-81f8-ba18fd60f930","contentHash":"2d8c2ad814e31b2c0d51e02a91b05e1473edae7f6cb06f357389139ae11d8bd0","checkedAt":"2026-10-31T00:35:32.399Z","maxDocumentChars":128000} -->

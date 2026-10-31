@@ -110,3 +110,5 @@ Show the same project sessions in Pix Desktop that Pix TUI discovers while keepi
 - Confirmed by code: TUI lists sessions with `SessionManager.list(cwd)` and persists tabs under `~/.pi/agent/pix/tabs`.
 - Confirmed by code: ACP previously listed only `pix-acp/sessions.json` records.
 - Confirmed by local metadata: the native project session set and TUI tab snapshot contain more entries than the ACP map.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"391c591654433357c9d25614df594d415c7ee5d000a8e446aba36d1fe30f83ef","checkedAt":"2026-10-31T01:01:43.291Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":61,"reportLanguage":"ru"} -->

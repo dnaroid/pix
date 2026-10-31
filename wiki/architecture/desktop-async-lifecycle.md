@@ -127,4 +127,4 @@ Keep Desktop connection teardown authoritative and yield between bounded portion
 - `npm --prefix desktop run check`
 - `npm --prefix desktop run build:web`
 
-<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"e555f399ab70fc1a04a4c95273961ea11ac5701e522bd653fb7bb27052296f19","checkedAt":"2026-10-31T00:08:07.247Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":63,"reportLanguage":"ru"} -->
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"ef59c88bfbfe4aa61b0f8ff261e1768e8c2e7fde0771392819a2581cac8a05ef","checkedAt":"2026-10-31T00:52:28.736Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":66,"reportLanguage":"ru"} -->

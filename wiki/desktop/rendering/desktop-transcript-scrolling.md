@@ -122,3 +122,5 @@ See [image retention decision](../../decisions/0016-streaming-image-dom-retentio
 - Confirmed by implementation: `session-history.svelte.ts` stores the cursor per session and prepends older transcript pages without replacing the loaded tail.
 - Confirmed by implementation: `TranscriptPane.svelte` loads an older page near the top and preserves a concrete transcript-entry DOM anchor after prepend.
 - Confirmed by tests: persisted history cursor paging keeps turn boundaries intact, the ACP client forwards cursors, and the Desktop session-history store prepends older pages in order.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"d98e96f010531a562a7c0126c04e90661e21a939cb91a51a874b6129838aedd2","checkedAt":"2026-10-31T00:42:56.843Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":64,"reportLanguage":"ru"} -->

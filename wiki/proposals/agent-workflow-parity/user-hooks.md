@@ -90,3 +90,5 @@ SDK ожидает обработчики `tool_call` / `tool_result` после
 1. Отдельный файл `.pi/hooks.jsonc` (как у CC — отдельно от прочих настроек) или секция в `pi-tools-suite.jsonc`? Предлагается секция.
 2. Fail-open по умолчанию для PreToolUse — приемлемо? Альтернатива — fail-closed для хуков, помеченных как политика безопасности.
 3. Нужна ли совместимость имён полей с CC один к одному или достаточно близкой?
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"68926e439e8d8a04a81026db12a0055720126541aa4b258fd58b08678866ae27","checkedAt":"2026-10-31T01:02:10.827Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":51,"reportLanguage":"ru"} -->

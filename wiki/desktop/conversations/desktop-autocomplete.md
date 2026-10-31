@@ -94,3 +94,5 @@ File/folder `@` mentions are a separate feature: see [file mentions](desktop-fil
 ## Tests
 
 - `desktop/src/lib/autocomplete.test.ts`
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"37746817dc3cb78d9acbaf0d53ccce1894fddce3cb6e85cb94315e389c762cd2","checkedAt":"2026-10-31T00:38:12.406Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":64,"reportLanguage":"ru"} -->

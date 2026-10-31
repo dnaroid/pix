@@ -84,3 +84,5 @@ Notify the user when a Pix Desktop agent needs attention. The default is native 
 - Confirmed by code: ACP `session/prompt` resolves only after `agent_settled`; Desktop auto-queue draining happens after each prompt run and can start another prompt.
 - Confirmed by the Desktop notification implementation and tests: fully settled work, user-abort suppression, and question attention determine native delivery.
 - Confirmed by Tauri documentation: the official notification plugin provides permission checks/requests and native notification delivery on Desktop platforms.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"9b8579b0d8f106e0a630f0f68ae88c99bcc9a2bb317eb185cf7ecb85a016ac1a","checkedAt":"2026-10-31T00:31:00.485Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":67,"reportLanguage":"ru"} -->

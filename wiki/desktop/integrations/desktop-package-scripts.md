@@ -90,3 +90,5 @@ Expose project-root package scripts, project-defined launch commands, and window
 
 - Confirmed by code: `PackageScriptsPanel.svelte` and `WorkbenchTerminalPane.svelte` both mount the same `TerminalSessionsPane.svelte` + `TerminalView.svelte` terminal surface, while `package-scripts-controller.svelte.ts` owns workspace loading, terminal events, streaming decoders, process mutations, active-terminal selection, and focus handoff.
 - Confirmed by code: `desktop/src/lib/package-scripts.ts` defines terminal snapshots/events, base64 decoding, bounded output, filtering, and status presentation helpers.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"e30d3451eff89da6c3f04d182bcbd08452b723fea798ca04abce87a83d8d7583","checkedAt":"2026-10-31T00:57:36.215Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":64,"reportLanguage":"ru"} -->

@@ -148,3 +148,5 @@ Present conversations, file/media Preview, Source Control Git Diff, interactive 
 - `npm --prefix desktop test`
 - `npm --prefix desktop run check`
 - `npm --prefix desktop run build:web`
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"29a9e39c17349c7a336f6a24f8b6a221b993b8f604086d6dcb79361ff3d935d3","checkedAt":"2026-10-31T01:00:06.969Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":55,"reportLanguage":"ru"} -->

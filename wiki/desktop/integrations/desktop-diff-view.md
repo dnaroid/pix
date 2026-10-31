@@ -73,3 +73,5 @@ Render file-edit results and `git diff` shell output as readable inline diffs in
 - Confirmed by code: TUI shell renderer marks `git diff` commands with `bodyStyle: "diff"`; TUI diff lines classify metadata, hunks, additions, and deletions only at column zero.
 - Confirmed by code: the ACP translator already emits structured diff content for Edit and Write tools.
 - Confirmed by tests: TUI tests cover shell diff detection and prevent indented bullets from receiving diff colors.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"7a774ca6e4d76cf46b2373b0d67e2355451fdf6ddffef19016e9f283ed60881c","checkedAt":"2026-10-31T00:56:55.632Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":55,"reportLanguage":"ru"} -->

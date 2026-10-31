@@ -187,3 +187,5 @@ Existing test sources дают patterns, не Code Health coverage; tests не �
 10. Adapter capabilities: known inputs/snapshot support/freshness/coverage/dedup и producer-limited limits.
 
 До согласования этих решений реализацию не начинать. Код/spec/tests не изменялись; dependencies не устанавливались; ADR не создавался. Council approval не approval реализации.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"af9a4d202e5d22392c47c5f40cf842bdf1a29775f10a2b44a7bdc80361ba674c","checkedAt":"2026-10-31T01:09:27.334Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":55,"reportLanguage":"ru"} -->

@@ -397,3 +397,5 @@ user message bubbles and restored composer drafts.
 - `tests/html-sandbox-extension.test.ts`
 - `acp/test/config.test.ts`
 - `acp/test/agent.test.ts`
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"14a40a8f5272d24c0efe61c84fa89db3165b5bea511bdc4ef414e248abe5e814","checkedAt":"2026-10-31T00:43:33.603Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":62,"reportLanguage":"ru"} -->

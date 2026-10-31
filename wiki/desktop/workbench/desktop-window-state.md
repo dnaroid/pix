@@ -168,3 +168,5 @@ persistent layout setting. Its resulting normal geometry is persisted here.
 - Confirmed by code: native startup applies normal geometry in logical points
   before creating each window, checking logical display intersection. The official
   window-state plugin saves on exit and restores only maximization when ready.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"787e2eb8c9bd8eb5fdbb67fb19b3a97774f8795bc40d364d35a786d91a09f582","checkedAt":"2026-10-31T00:34:25.242Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":72,"reportLanguage":"ru"} -->

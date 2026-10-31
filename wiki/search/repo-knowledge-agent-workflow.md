@@ -207,3 +207,5 @@ Historical: [0046 — Task-scoped knowledge audit completion](../decisions/0046-
   It checks declared actions plus actual records, links, and historical
   preservation; it is not full audit/subagent execution or an LLM judgment of
   rationale truth. Inspect retained output for fabricated alternatives/claims.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"f93f9d46c0e639f826c9994ec3714714fa9166d16ab20644f70a9e8da7334c81","checkedAt":"2026-10-31T00:49:11.292Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":69,"reportLanguage":"ru"} -->

@@ -27,3 +27,5 @@ Insertion is plain `@path` unless the path contains spaces, `@`, backslashes, or
 
 - [Desktop prompt autocomplete](desktop-autocomplete.md)
 - [TUI](../../tui/index.md)
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"2bb82e7f9e637051ae702492aa8101a92c859b05752d2009e26270dca153b096","checkedAt":"2026-10-31T00:39:31.488Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":69,"reportLanguage":"ru"} -->

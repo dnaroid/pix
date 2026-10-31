@@ -880,3 +880,5 @@ Useful next additions include:
 The important constraint is to keep correctness evidence objective whenever it
 can be objective, and use live models only for the decisions that genuinely
 depend on model behavior.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"605431f9a577a5364f23c6ae2cb0a1814eeb4d684d9eb3574718c5d2d19e55e2","checkedAt":"2026-10-31T00:26:51.161Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":62,"reportLanguage":"ru"} -->

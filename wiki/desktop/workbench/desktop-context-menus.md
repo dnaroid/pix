@@ -245,3 +245,5 @@ disposal, and link actions capture their URL rather than reading a later target.
   browser menu, correct clipboard content, undo after paste, image paste,
   Escape/focus return and secondary-window behavior. Windows/Linux must be
   checked on their own hosts; browser mocks do not establish OS behavior.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"1dac771e9dd049d8caf23cbd31dc62450a854e418f1c2fcc80c6fbea081130a7","checkedAt":"2026-10-31T00:36:27.333Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":56,"reportLanguage":"ru"} -->

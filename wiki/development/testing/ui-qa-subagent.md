@@ -536,3 +536,5 @@ sub-agent directory. For manual inspection only, explicit E2E runs copy the
 latest artifacts to `.pi/qa-runs/browser-qa-e2e/latest/` and print clickable
 links; this test-only published copy is not the runtime storage contract. Set
 `BROWSER_QA_KEEP_EVIDENCE=0` to skip that copy.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"25d9cfbd253e4d8c3c06a1698e104cf8c0800a950756ea20fca65c94649ef643","checkedAt":"2026-10-31T00:28:06.493Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":46,"reportLanguage":"ru"} -->

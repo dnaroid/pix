@@ -53,3 +53,5 @@ dark and light system appearance, restored windows and new-project windows:
 no white intermediate canvas in dark appearance, no repeated reveal on reload.
 All restored windows must come to the foreground with the tray icon both disabled
 and enabled.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"0afc4639b879cf886e26611d72ef59642980a23d85130ba74c2399734d833bd9","checkedAt":"2026-10-31T00:32:28.886Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":52,"reportLanguage":"ru"} -->

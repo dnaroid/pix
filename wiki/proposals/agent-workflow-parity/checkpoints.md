@@ -88,3 +88,5 @@
 1. Включать запись Bash по умолчанию или opt-in на первом этапе?
 2. Нужна ли «Restore code only» в TUI сразу или только в Desktop?
 3. Где хранить shadow-репозиторий: в `~/.pi/agent/` (переживает удаление проекта) или в `.pi/` проекта (удобнее чистить)?
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"5df13a8e50f04514dec178ac62b360d350004572f8625f0fb5d8a5453469d035","checkedAt":"2026-10-31T01:02:32.163Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":45,"reportLanguage":"ru"} -->

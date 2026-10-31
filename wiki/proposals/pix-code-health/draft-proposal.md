@@ -182,3 +182,4 @@ Existing heads-up-controller/codemode-sdk/LSP lifecycle test SOURCES suggest pat
 9. Ownership/storage между сессиями и условие, при котором разрешён shared broker/UI; Observer integration требует собственного контрактного обсуждения.
 
 До этих согласий код не менять, зависимости не устанавливать, ADR не создавать и реализацию не запускать.
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"d65291920952a70b30829afa12d0135d952f9c6749a6f3f48fa0097c6a0ae5f9","checkedAt":"2026-10-31T01:09:04.615Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":55,"reportLanguage":"ru"} -->

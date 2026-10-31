@@ -321,3 +321,5 @@ accepted | stale`. Состояние `stale` вычисляется, когда
   `ProjectWikiPanel.svelte` (бейдж), `desktop/src/lib/workbench-tabs.ts`
   (`WorkbenchTabId`, `WorkbenchTab`, `WorkbenchAuxiliaryPlacement`) и
   отрисовка полосы вкладок, раскладки окон и восстановления рабочей области.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"f9d339e04aea5f04e46fa14cbee9d6ef5b15ef448099aeba25df516f0e54cf00","checkedAt":"2026-10-31T01:10:03.721Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":56,"reportLanguage":"ru"} -->

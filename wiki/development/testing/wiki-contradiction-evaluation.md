@@ -174,3 +174,5 @@ responses, production/harness hashes and the dirty-worktree provenance.
   deterministic evaluator controls.
 - `acp/src/knowledge/comparison.ts`, `evidence.ts`, `chunks.ts`: unchanged
   production behavior under evaluation.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"407edce5ac47ed6c3cd4da7440464b0634a830328e5267553b7c3136bc8c27c2","checkedAt":"2026-10-31T00:25:44.793Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":58,"reportLanguage":"ru"} -->

@@ -68,3 +68,5 @@ Keep true modal UI limited to bounded decisions, configuration and search, with 
 - `npm --prefix desktop test`
 - `npm --prefix desktop run check`
 - `npm --prefix desktop run build:web`
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"ddb35b905526ac78d13a4d77c405eeebe132c4dcb7e6a6b1c01e932f3d89386f","checkedAt":"2026-10-31T00:34:04.872Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":62,"reportLanguage":"ru"} -->

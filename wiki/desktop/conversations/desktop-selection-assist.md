@@ -55,3 +55,5 @@ The model setup wizard provides `selection-assist` (“Explain & translate”, f
 
 - `acp/test/selection-assist.test.ts`
 - `desktop/src/lib/selection-assist.test.ts`
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"15b9c9f1443bf948539685892ac4de6629de3ab54b16070445d8dfaa3bd8a8e5","checkedAt":"2026-10-31T00:41:49.787Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":68,"reportLanguage":"ru"} -->

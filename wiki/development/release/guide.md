@@ -1,3 +1,4 @@
+<!-- pix:wiki-report {"version":1,"checkedAt":"2026-10-31T00:56:39.618Z","result":{"path":"wiki/development/release/guide.md","documentHash":"076c0889d06e42dbbd79410f66aa46bdcbf98a16499468e146574345b80f7d2d","modelRef":"zai/glm-5.3-flash","reportLanguage":"ru","checkedSources":12,"conflicts":[],"uncertainties":[],"reviewedSources":[],"notices":["Native reranking unavailable or its context changed; original ranking retained.","Не удалось подтвердить полноту или актуальность результатов поиска.","Состав Wiki изменился или не удалось проверить его во время поиска; повторите проверку.","Документ, настройки или содержимое Wiki изменились во время проверки. Повторите её."],"coverage":{"scope":"retrieved-passages","checkedPassages":12,"candidateSources":47,"excerptedSources":11,"limits":["query-sampling","candidate-limit","source-limit","context-limit","passage-limit"]},"status":"incomplete"}} -->
 # Release and update verification
 
 Use this checklist before publishing a Pix GitHub Release so installs work on macOS, Linux, and Windows and the `pi-tools-suite` extension payload is included.
@@ -315,3 +316,5 @@ behavior applies only to npm installs.
 - A `pi` executable installed under a different package-manager prefix is outside `pix update`'s scope and must be updated separately.
 
 Update checks respect `PI_OFFLINE=1`, `PI_SKIP_VERSION_CHECK=1`, and `PIX_SKIP_VERSION_CHECK=1`.
+
+<!-- pix:wiki-check {"version":1,"status":"attempted","runId":"be10804d-802a-4a0d-81f8-ba18fd60f930","contentHash":"076c0889d06e42dbbd79410f66aa46bdcbf98a16499468e146574345b80f7d2d","checkedAt":"2026-10-31T00:56:39.622Z","maxDocumentChars":128000} -->

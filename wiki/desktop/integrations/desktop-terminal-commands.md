@@ -77,3 +77,5 @@ Bring the Pix TUI's two bang-command modes to Desktop using the matching Desktop
 ## Tests
 
 - `desktop/src/lib/terminal-commands.test.ts`
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"4493c94828ce53950c29c22ea95a4b6a212ef36717bc90a5041c1a11bbcfc0b6","checkedAt":"2026-10-31T00:28:47.455Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":62,"reportLanguage":"ru"} -->

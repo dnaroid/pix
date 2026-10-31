@@ -247,4 +247,4 @@ while all applications are closed. Since expiration is based on segment
 creation rather than each record's timestamp, records near the end of a
 segment can expire up to one hour early.
 
-<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"c5d69555d048fd0e0e550990c403f96106bc5a66c3bf1da1341459f984843b93","checkedAt":"2026-10-31T00:03:01.984Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":70,"reportLanguage":"ru"} -->
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"0354aa3f2bfccb5a832d2914b175566c59dba61c064c5ec214ce9cd7bd5997db","checkedAt":"2026-10-31T01:11:03.602Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":68,"reportLanguage":"ru"} -->

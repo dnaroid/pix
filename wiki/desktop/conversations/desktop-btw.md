@@ -172,3 +172,5 @@ It compares the actual shared main and BTW pickers, including whitelist filterin
 Manage/empty-whitelist behavior, shared preference writes, per-model effort,
 popup teardown, Use main and independent request settings.
 This is not a native `.app` or live-provider quality evaluation.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"4296f9725e7eea3c9f64656a45d073569201d31163904b87c653e87a5f146cea","checkedAt":"2026-10-31T00:37:55.639Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":67,"reportLanguage":"ru"} -->

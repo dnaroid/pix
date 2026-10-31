@@ -174,3 +174,5 @@ Report:
 
 Do not claim Desktop UI verification if the agent could not actually launch or
 observe the native application.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"a83d7dcf59f541d33deb370b04bb315d338d74b149df3f2f02f752b9aa474eb7","checkedAt":"2026-10-31T00:52:44.694Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":58,"reportLanguage":"ru"} -->

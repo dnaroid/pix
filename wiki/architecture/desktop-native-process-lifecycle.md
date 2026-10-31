@@ -179,4 +179,4 @@ host with the GNU Windows Rust target installed,
 its Windows-only tests without requiring a full Tauri cross-toolchain; this
 does not execute the tests on Windows.
 
-<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"6169f9c973718a8c904ff04d4d603a014f254676e720036c819deda4f0d0bbde","checkedAt":"2026-10-31T00:07:30.529Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":67,"reportLanguage":"ru"} -->
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"a5fb367b16143f74bb91b3b84831d40bde60312c488989eced438983fe9ef5fd","checkedAt":"2026-10-31T00:52:06.803Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":64,"reportLanguage":"ru"} -->

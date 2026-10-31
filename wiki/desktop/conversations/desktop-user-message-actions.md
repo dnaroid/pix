@@ -121,3 +121,5 @@ Pix Desktop exposes five user-message actions, including Edit and resend, withou
 ## Decisions
 
 - [Identity-only Desktop message actions](../../decisions/0018-desktop-message-action-identity.md)
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"45340573f8a59041a50fae8b89d94d12cbabcf0cd8045fbeb2f126956bce2c12","checkedAt":"2026-10-31T00:40:47.046Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":65,"reportLanguage":"ru"} -->

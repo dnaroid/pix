@@ -33,3 +33,5 @@
 ## Редактура и границы
 Статус обновлён на completed five rounds; ссылки source files относительно run directory исправлены; preserved draft не изменён. Финальный текст уплотнён без смены выбранной архитектуры; reviewer-requested capability/scheduling/comparator/provenance/test boundaries сохранены.
 Не выполнено: product/spec/test edits, installs, tests, runtime pilot/benchmarks, actual capture, Git hardening investigation, ADR. Нет implementation approval; future source egress/continuation требует собственного согласия. До следующего этапа согласовать §12 и acceptance thresholds.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"796448bec8de97ef300e6c53f0c756c8a1ca1fdb9fb6bf888b793ac007833914","checkedAt":"2026-10-31T01:07:25.913Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":47,"reportLanguage":"ru"} -->

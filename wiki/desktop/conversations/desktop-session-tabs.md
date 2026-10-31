@@ -212,3 +212,5 @@ Preserve Pix conversation/session membership and lazy draft semantics after conv
 - `npm --prefix desktop test`
 - `npm --prefix desktop run check`
 - `npm --prefix desktop run build:web`
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"4e3b0448c61ebfbbbdde5091a63ec5df0ec644cb65e28b775d95023319de8696","checkedAt":"2026-10-31T01:00:27.197Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":53,"reportLanguage":"ru"} -->

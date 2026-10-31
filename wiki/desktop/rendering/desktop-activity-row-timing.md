@@ -73,3 +73,5 @@ Make collapsed Desktop activity rows compactly show the full thinking/tool flow 
 - `npm --prefix desktop test -- transcript.test.ts transcript-activity.test.ts session-history-concurrency.test.ts`
 - `npm --prefix desktop run test:transcript-activity` exercises native disclosure events, lazy mounting/hydration, late completions, session replacement, the one-line collapsed header (one chevron, icon trail including repeats, elapsed time — no aggregate status icon or action text) with failure kept on child rows, controllable live-duration updates/freezing and timer teardown, keyboard toggles, and a large collapsed transcript in Chromium with stubbed backend calls.
 - `npm --prefix desktop run check` and `npm --prefix desktop run build:web` check types and production compilation. Browser smoke is not an end-to-end native Tauri or arbitrary-size frame-budget guarantee.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"2b2ee295945d6b9efa36b0cd30f78eb4d97eeabb37c784d09da861a44a83994f","checkedAt":"2026-10-31T00:43:15.055Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":54,"reportLanguage":"ru"} -->

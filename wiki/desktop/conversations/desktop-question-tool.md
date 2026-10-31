@@ -101,3 +101,5 @@ Render the bundled `question` tool as an inline mode of the existing Pix Desktop
   bounds; ACP/Desktop validate the normalized private carrier; result/TUI state
   keeps the same selection semantics.
 - Confirmed by tests: root contract/result/TUI/renderer tests, ACP bridge tests, and Desktop question state tests.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"2463a520be1368622eb8f74091d65b7f3ee5876d22f56a154756cef519efed30","checkedAt":"2026-10-31T00:37:38.225Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":55,"reportLanguage":"ru"} -->

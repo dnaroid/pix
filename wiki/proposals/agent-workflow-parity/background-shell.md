@@ -74,3 +74,5 @@
 1. Режим уведомления по умолчанию: `context` или `ui-only`?
 2. Давать ли модели `shell_input(job_id, text)` для интерактивных процессов? Предлагается нет, это вне MVP.
 3. Нужна ли интеграция с терминалом Desktop: «открыть задание во вкладке терминала»?
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"38aa561eee5630de3580c8415d4717932482a43f5905ba0ac008cf6bbd84a0d3","checkedAt":"2026-10-31T00:44:52.274Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":62,"reportLanguage":"ru"} -->

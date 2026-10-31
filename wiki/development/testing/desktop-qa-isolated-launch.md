@@ -229,3 +229,5 @@ Run the focused Node tests and native profile/lifecycle tests. Native acceptance
 must identify the pinned source and actual QA PID, verify a real rendered UI in
 the separate QA project, retain accessibility/pixel evidence, verify owned cleanup,
 and show that the working Desktop executable/PID was not restarted or closed.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"34bea6812c75641a942a41cb65d112b3858a6110f51ee37dcc3975a0443436e5","checkedAt":"2026-10-31T00:26:09.385Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":61,"reportLanguage":"ru"} -->

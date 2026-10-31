@@ -77,3 +77,5 @@ in first-prompt model routing just as it is for non-optimistic materialization.
   abandoned or stale materialization does not leak a late-created session into
   the active workbench.
 - Desktop Svelte/TypeScript checks complete with zero errors and warnings.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"34b26f65ac830aad95a423438d3fe0b34b0357c2a23f280ea38581b47cdc4062","checkedAt":"2026-10-31T00:40:21.995Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":66,"reportLanguage":"ru"} -->
