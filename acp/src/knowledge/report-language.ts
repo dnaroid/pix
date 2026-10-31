@@ -77,6 +77,13 @@ export class KnowledgeReportError extends Error {
   constructor(readonly reason: KnowledgeReportMessage) { super(reportMessage("en", reason)); }
 }
 
+/** Actionable notice for a semantic index that is still being built incrementally. */
+export function semanticPartial(language: KnowledgeReportLanguage, indexed: number, total: number): string {
+  return language === "ru"
+    ? `Семантический индекс Wiki построен частично (${indexed}/${total} фрагментов); каждый поиск дополняет его небольшими порциями. Запустите индексацию Knowledge в панели Search indexes и повторите проверку.`
+    : `The Wiki semantic index is partial (${indexed}/${total} chunks); each search extends it only in small batches. Run Knowledge indexing in the Search indexes panel, then check again.`;
+}
+
 export function sourceUnavailable(language: KnowledgeReportLanguage, path: string): string {
   return (language === "ru" ? "Источник недоступен: " : "Source unavailable: ") + path;
 }
