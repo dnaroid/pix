@@ -1,5 +1,4 @@
 <script lang="ts">
-  import Brain from "@lucide/svelte/icons/brain";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import { untrack, type ComponentProps } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
@@ -84,7 +83,7 @@
           <details class="group/thought" data-activity-entry-id={entry.id} open={expandedEntries.has(entry.id)} ontoggle={(event) => toggleEntry(event, entry)}>
             <summary class="grid min-h-4 list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden leading-tight transition-colors select-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
               <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open/thought:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
-              <Brain class="h-3 w-3 shrink-0 text-muted-foreground/65" aria-hidden="true" />
+              <ToolStatusIcon label="thinking" status={entry.startedAtMs !== undefined && entry.endedAtMs === undefined ? "in_progress" : "completed"} class="h-3 w-3 opacity-80" />
               <span class="flex min-w-0 items-baseline gap-x-1.5 overflow-hidden text-xs">
                 <span data-activity-thought-label class="text-muted-foreground/85">thinking</span>
                 {#if entry.startedAtMs !== undefined && entry.endedAtMs !== undefined}
@@ -113,7 +112,7 @@
               <details class="group/result" open={expandedEntries.has(tool.id)} ontoggle={(event) => toggleEntry(event, tool)}>
                 <summary class="grid min-h-4 list-none grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden leading-tight transition-colors select-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
                   <ChevronRight class="h-3.5 w-3.5 shrink-0 transition-transform group-open/result:rotate-90 motion-reduce:transition-none" aria-hidden="true" />
-                  <ToolStatusIcon status={tool.status} attention={toolAttention} imageRead={tool.imageRead} class="h-3 w-3 opacity-80" />
+                  <ToolStatusIcon label={presentation.name} status={tool.status} attention={toolAttention} imageRead={tool.imageRead} class="h-3 w-3 opacity-80" />
                   <span class="flex min-w-0 items-baseline gap-x-1.5 overflow-hidden font-mono text-xs">
                     <strong class="tool-name shrink-0 font-bold" data-tool-tone={presentation.tone}>{presentation.name}</strong>
                     {#if presentation.args}<span class="min-w-0 truncate text-muted-foreground">{presentation.args}</span>{/if}
@@ -142,7 +141,7 @@
             {:else}
               <div class="grid min-h-4 grid-cols-[14px_12px_minmax(0,1fr)] items-center gap-x-1.5 overflow-hidden leading-tight">
                 <span aria-hidden="true"></span>
-                <ToolStatusIcon status={tool.status} attention={toolAttention} imageRead={tool.imageRead} class="h-3 w-3 opacity-80" />
+                <ToolStatusIcon label={presentation.name} status={tool.status} attention={toolAttention} imageRead={tool.imageRead} class="h-3 w-3 opacity-80" />
                 <span class="flex min-w-0 items-baseline gap-x-1.5 overflow-hidden font-mono text-xs">
                   <strong class="tool-name shrink-0 font-bold" data-tool-tone={presentation.tone}>{presentation.name}</strong>
                   {#if presentation.args}<span class="min-w-0 truncate text-muted-foreground">{presentation.args}</span>{/if}

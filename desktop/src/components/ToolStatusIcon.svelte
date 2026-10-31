@@ -1,49 +1,36 @@
 <script lang="ts">
-  import Circle from "@lucide/svelte/icons/circle";
-  import CircleCheck from "@lucide/svelte/icons/circle-check";
-  import Image from "@lucide/svelte/icons/image";
-  import CircleX from "@lucide/svelte/icons/circle-x";
-  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
-  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import { activityIcon } from "../lib/tool-icons";
   import type { ToolCallStatus } from "@agentclientprotocol/sdk";
   import type { ToolAttention } from "../lib/tool-output";
 
   let {
     status,
+    label,
     attention,
-    lifecycleOnly = false,
     imageRead = false,
     class: className = "h-3 w-3",
   }: {
     status: ToolCallStatus;
+    label: string;
     attention?: ToolAttention;
-    lifecycleOnly?: boolean;
     imageRead?: boolean;
     class?: string;
   } = $props();
+
+  const Icon = $derived(activityIcon(label, imageRead));
+  const statusColor = $derived.by(() => {
+    if (status === "failed") return "text-tool-error";
+    if (status === "in_progress") return "text-primary";
+    if (status === "completed") {
+      if (attention === "error") return "text-tool-error";
+      if (attention === "warning") return "text-tool-warning";
+      return "text-tool-success";
+    }
+    return "text-muted-foreground";
+  });
+  const statusLabel = $derived(status === "completed" && attention ? attention : status);
 </script>
 
-{#if lifecycleOnly && status === "in_progress"}
-  <LoaderCircle class={`${className} animate-spin text-primary motion-reduce:animate-none`} aria-hidden="true" />
-{:else if lifecycleOnly && status === "pending"}
-  <Circle class={`${className} text-muted-foreground`} aria-hidden="true" />
-{:else if lifecycleOnly}
-  <CircleCheck class={`${className} text-muted-foreground`} aria-hidden="true" />
-{:else if status === "failed"}
-  <CircleX class={`${className} text-tool-error`} aria-hidden="true" />
-{:else if status === "in_progress"}
-  <LoaderCircle class={`${className} animate-spin text-primary motion-reduce:animate-none`} aria-hidden="true" />
-{:else if status === "completed" && attention}
-  <TriangleAlert
-    class={`${className} ${attention === "error" ? "text-tool-error" : "text-tool-warning"}`}
-    aria-hidden="true"
-  />
-{:else if status === "completed"}
-  {#if imageRead}
-    <Image class={`${className} text-tool-success`} aria-hidden="true" />
-  {:else}
-    <CircleCheck class={`${className} text-tool-success`} aria-hidden="true" />
-  {/if}
-{:else}
-  <Circle class={`${className} text-muted-foreground`} aria-hidden="true" />
-{/if}
+<span class="inline-flex shrink-0" role="img" aria-label={`${label}: ${statusLabel}`} title={`${label}: ${statusLabel}`}>
+  <Icon class={`${className} ${statusColor}`} aria-hidden="true" />
+</span>
