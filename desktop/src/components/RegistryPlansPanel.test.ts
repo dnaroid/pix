@@ -57,7 +57,7 @@ describe("persistent Registry plan navigation", () => {
     expect(html).toContain("data-plan-progress-ring");
     expect(html.indexOf("13/17")).toBeGreaterThan(0);
     expect(html.indexOf("13/17")).toBeLessThan(html.indexOf('aria-label="Run plan releases/rollout.md"'));
-    expect(panelSource).toContain("createProjectFilesRefresh(() => onRefresh(), undefined, 3_000).dispose");
+    expect(panelSource).toMatch(/createProjectFilesRefresh\(\(\) => onRefresh\(\), undefined, 3_000,[^;]*registry:plans-refresh[^;]*\)\.dispose/);
     expect(sidebarSource).toContain("planProgress={projectDocuments.planProgress}");
     expect(viewModelSource).toContain("onRefreshPlans: options.projectDocuments.refresh");
   });

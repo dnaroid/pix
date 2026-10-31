@@ -6,6 +6,7 @@ import {
   type PackageTerminalExitEvent,
   type PackageTerminalOutputEvent,
 } from "./package-scripts";
+import { createFailureStreakReporter } from "./diagnostic-logging";
 import {
   mergeStableRegistryIndicatorPoll,
   runtimeOutputNeedsRefresh,
@@ -52,11 +53,16 @@ export class SidebarIndicatorService {
   private destroyed = false;
   private unlisteners: UnlistenFn[] = [];
   private publishedSignature: string | undefined;
+  // Offline/auth failures recur every probe; log the first of each streak.
+  private readonly gitRemoteFailures = createFailureStreakReporter((error) => (
+    this.reportWarning?.("sidebar:git-remote-probe", error)
+  ));
 
   constructor(
     private readonly windowLabel: string,
     private readonly onChange: (state: SidebarIndicatorServiceState) => void,
     private readonly refreshCiIndicator?: () => void,
+    private readonly reportWarning?: (label: string, error: unknown) => void,
   ) {}
 
   start(workspace: string): void {
@@ -80,6 +86,7 @@ export class SidebarIndicatorService {
     this.fastGeneration += 1;
     this.gitRemoteGeneration += 1;
     this.gitRemoteLastAttemptMs = 0;
+    this.gitRemoteFailures.success(); // a new workspace starts a new streak
     this.acknowledgedScriptFailures.clear();
     this.state = {
       unseenScriptFailureIds: [],
@@ -240,11 +247,15 @@ export class SidebarIndicatorService {
         workspace,
       });
       if (this.destroyed || workspace !== this.workspace || generation !== this.gitRemoteGeneration) return;
+      this.gitRemoteFailures.success();
       this.state = { ...this.state, gitRemote };
       this.publish();
-    } catch {
+    } catch (error) {
       // Remote freshness is best-effort. Offline/auth failures must never turn
       // a background attention hint into an error or block other sidebar state.
+      if (!this.destroyed && workspace === this.workspace && generation === this.gitRemoteGeneration) {
+        this.gitRemoteFailures.failure(error);
+      }
     } finally {
       this.gitRemoteRunning = false;
       if (this.gitRemoteQueued) {

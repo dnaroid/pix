@@ -90,7 +90,16 @@ actual JavaScript exceptions and unhandled rejections still reach the logger.
   failures/unexpected ACP exit use warn. This command accepts no arbitrary
   diagnostic payload or custom event names; it shares the frontend's bounded
   IPC queue and workspace/session snapshot behavior. Existing error reports
-  continue through `log_desktop_diagnostic`.
+  continue through `log_desktop_diagnostic`, which also only accepts a native
+  allow-list of event names: `frontend:error`, `frontend:uncaught`,
+  `frontend:unhandled-rejection`, `media:playback-unavailable` and
+  `frontend:warning`. Handled, recoverable frontend failures use
+  `logger.warn(label, error)` → `frontend:warning` (warn level), with a
+  subsystem label such as `tray:publish`, `notification:permission`,
+  `notification:delivery`, `sidebar:git-remote-probe` or
+  `project-explorer:files-refresh` prefixed to the diagnostic. Recurring poll or
+  retry failures use `createFailureStreakReporter` to log once per failure streak
+  (the first failure after a success), not on every attempt.
 - **Desktop native Git mutations** record fetch, pull, update, stash save/apply,
   and discard-file results at info (success) or warn (failure), scoped to the
   workspace. Git arguments, individual file paths, ref names, and command

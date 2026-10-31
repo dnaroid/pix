@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { createProjectFilesRefresh } from "../lib/project-files-refresh";
+  import { createDiagnosticLogger } from "../lib/diagnostic-logging";
   import { projectDocumentLabel, type PlanProgress } from "../lib/project-documents";
   import type { PlanRunStatus } from "../lib/plan-launches";
   import PlanProgressIndicator from "./PlanProgressIndicator.svelte";
@@ -23,7 +24,9 @@
   const ratio = $derived(plan.progress?.total ? Math.min(1, plan.progress.completed / plan.progress.total) : 0);
   const counts = $derived(plan.progress && plan.progress.total > 0 ? `${plan.progress.completed}/${plan.progress.total}` : undefined);
   // Keep saved checklist progress fresh only while this chip is mounted in the foreground.
-  onMount(() => onRefresh ? createProjectFilesRefresh(() => onRefresh(), undefined, 3_000).dispose : undefined);
+  const diagnostics = createDiagnosticLogger(() => ({ workspace: "" }));
+  onMount(() => onRefresh ? createProjectFilesRefresh(() => onRefresh(), undefined, 3_000,
+    (error) => diagnostics.warn("session-plan:refresh", error)).dispose : undefined);
 </script>
 
 <StatusBarPopover label="Executing plan">

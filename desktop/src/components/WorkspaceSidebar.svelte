@@ -687,6 +687,7 @@
       getCurrentWindow().label,
       (state) => indicatorServiceState = state,
       () => gitCi.onRefreshIndicator?.(),
+      (label, error) => createDiagnosticLogger(() => ({ workspace })).warn(label, error),
     );
     indicatorService.setViewedTab(layoutController.collapsed ? undefined : activeTab);
     indicatorService.start(workspace);

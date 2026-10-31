@@ -35,6 +35,23 @@ describe("legacy workspace session state", () => {
     }
   });
 
+  it("keeps dropping late updates from a closed runtime across a workspace reset", () => {
+    const activity = createSessionActivityStore();
+    const enqueue = vi.fn();
+    const coordinator = createSessionCoordinator({
+      activity, updates: { enqueue }, metadata: { handle: () => false },
+    } as never);
+    const notification = { sessionId: "close-failed", update: { sessionUpdate: "user_message_chunk", content: { type: "text", text: "late" } } } as const;
+    activity.open("close-failed");
+    activity.markForgotten("close-failed");
+    coordinator.resetActivity(); // closeWorkspaceSessions after a failed closeSession
+    coordinator.handleUpdate(notification);
+    expect(enqueue).not.toHaveBeenCalled();
+    activity.resetAfterDisconnect();
+    coordinator.handleUpdate(notification);
+    expect(enqueue).toHaveBeenCalledOnce();
+  });
+
   it("does not mutate conversation cwd", () => {
     const activity = vi.fn();
     const unhandled = vi.fn(() => false);

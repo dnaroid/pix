@@ -1,3 +1,5 @@
+import { createFailureStreakReporter } from "./diagnostic-logging";
+
 interface RefreshActivity {
   window: Pick<Window, "addEventListener" | "removeEventListener">;
   document: Pick<Document, "hidden" | "hasFocus" | "addEventListener" | "removeEventListener">;
@@ -8,7 +10,10 @@ export function createProjectFilesRefresh(
   refresh: () => Promise<void>,
   activity: RefreshActivity = { window, document },
   intervalMs = 5_000,
+  /** Logged once per failure streak; the owning view still shows listing errors. */
+  reportFailure?: (error: unknown) => void,
 ) {
+  const failures = createFailureStreakReporter((error) => reportFailure?.(error));
   let disposed = false;
   let running = false;
   let pending = false;
@@ -30,8 +35,10 @@ export function createProjectFilesRefresh(
     running = true;
     try {
       await refresh();
-    } catch {
+      failures.success();
+    } catch (error) {
       // Directory state owns listing errors; keep retrying after transient failures.
+      if (!disposed) failures.failure(error);
     } finally {
       running = false;
       if (pending && active && !disposed) {

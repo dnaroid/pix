@@ -20,6 +20,11 @@ type DesktopLifecycleOptions = {
   insertPromptPaths: (paths: readonly string[]) => void | Promise<void>;
   connect: () => Promise<void>;
   disposeConnection: () => void | Promise<void>;
+  /**
+   * connection.dispose() does not fire onDisconnect, so teardown must release
+   * runtime state (quota/credential retry timers, btw, activity) explicitly.
+   */
+  resetAfterDisconnect: () => void;
   disposeSessionUpdates: () => void;
   disposeTranscriptScroll: () => void;
   cancelAllPendingElicitations: () => void;
@@ -55,8 +60,28 @@ export function createDesktopLifecycle(options: DesktopLifecycleOptions) {
       reportError: options.reportError,
     });
 
+    function disposeConnectionAndReset(): void {
+      // Reset now, and again once in-flight connection work has settled so a
+      // completion racing teardown cannot leave timers or state behind.
+      let pending: void | Promise<void>;
+      try {
+        pending = options.disposeConnection();
+      } finally {
+        resetAfterDisconnect();
+      }
+      void Promise.resolve(pending).catch(() => {}).then(resetAfterDisconnect);
+    }
+
+    function resetAfterDisconnect(): void {
+      try {
+        options.resetAfterDisconnect();
+      } catch (error) {
+        options.reportError(error);
+      }
+    }
+
     void options.connect().then(() => {
-      if (disposed) void options.disposeConnection();
+      if (disposed) disposeConnectionAndReset();
     });
 
     return () => {
@@ -68,7 +93,7 @@ export function createDesktopLifecycle(options: DesktopLifecycleOptions) {
       options.cancelAllPendingElicitations();
       options.disposeGitCi();
       options.disposeProjectDocuments?.();
-      void options.disposeConnection();
+      disposeConnectionAndReset();
     };
   }
 
