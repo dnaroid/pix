@@ -66,6 +66,25 @@ describe("pi-tools-suite config", () => {
 		expect(config.todoThinkingOverrides).toEqual({ "zai/glm-5.3": { min: "max", max: "max" } });
 	});
 
+	test("restrictShellWorkdir defaults on and only user layers or the environment can turn it off", () => {
+		const homeDir = tempDir();
+		const cwd = tempDir();
+		expect(loadPiToolsSuiteConfig(MODULES, { cwd, homeDir, env: {}, ensureUserConfig: false }).restrictShellWorkdir).toBe(true);
+		mkdirSync(join(cwd, ".pi"), { recursive: true });
+		writeFileSync(join(cwd, ".pi", "pi-tools-suite.jsonc"), `{ "restrictShellWorkdir": false }`);
+		expect(loadPiToolsSuiteConfig(MODULES, { cwd, homeDir, env: {}, ensureUserConfig: false }).restrictShellWorkdir).toBe(true);
+		mkdirSync(join(homeDir, ".config", "pi"), { recursive: true });
+		writeFileSync(join(homeDir, ".config", "pi", "pi-tools-suite.jsonc"), `{ "restrictShellWorkdir": false }`);
+		expect(loadPiToolsSuiteConfig(MODULES, { cwd, homeDir, env: {} }).restrictShellWorkdir).toBe(false);
+		// A repository cannot re-enable or disable it; the environment overrides both files.
+		writeFileSync(join(cwd, ".pi", "pi-tools-suite.jsonc"), `{ "restrictShellWorkdir": true }`);
+		expect(loadPiToolsSuiteConfig(MODULES, { cwd, homeDir, env: {} }).restrictShellWorkdir).toBe(false);
+		expect(loadPiToolsSuiteConfig(MODULES, { cwd, homeDir, env: { PI_TOOLS_SUITE_RESTRICT_SHELL_WORKDIR: "1" } }).restrictShellWorkdir).toBe(true);
+		const piConfigDir = tempDir();
+		writeFileSync(join(piConfigDir, "pi-tools-suite.jsonc"), `{ "restrictShellWorkdir": true }`);
+		expect(loadPiToolsSuiteConfig(MODULES, { cwd, homeDir, env: { PI_CONFIG_DIR: piConfigDir } }).restrictShellWorkdir).toBe(true);
+	});
+
 	test("merges bundled-agent disable and re-enable lists across config layers", () => {
 		const homeDir = tempDir();
 		const cwd = tempDir();

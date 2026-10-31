@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -19,7 +19,13 @@ class FakePi {
 }
 
 const roots: string[] = [];
+const RESTRICT_ENV = "PI_TOOLS_SUITE_RESTRICT_SHELL_WORKDIR";
+let previousRestrict: string | undefined;
+// The real resolver reads user config per call; pin the default so a developer's config cannot leak in.
+beforeEach(() => { previousRestrict = process.env[RESTRICT_ENV]; process.env[RESTRICT_ENV] = "1"; });
 afterEach(() => {
+  if (previousRestrict === undefined) delete process.env[RESTRICT_ENV];
+  else process.env[RESTRICT_ENV] = previousRestrict;
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -170,5 +176,30 @@ describe("session shell workdir permissions", () => {
     await pending;
     expect(notices.at(-1)?.message).toContain("session changed");
     await denied(resolveWorkdir(ctx as any, extra));
+  });
+
+  test("restrictShellWorkdir false allows any existing directory without a grant", async () => {
+    const { other, context, command, notices, shell, executed } = await fixture();
+    const ctx = context({});
+    process.env[RESTRICT_ENV] = "0";
+    await shell(other, ctx);
+    expect(executed.at(-1)).toBe(other);
+    await command("list", ctx);
+    expect(notices.at(-1)?.message).toContain("unrestricted");
+    await expect(shell(path.join(other, "missing"), ctx)).rejects.toThrow();
+    process.env[RESTRICT_ENV] = "1";
+    await denied(shell(other, ctx));
+    expect(notices.length).toBe(1);
+  });
+
+  test("the restriction is evaluated per call, so a config change applies without reload", async () => {
+    const { other, context } = await fixture();
+    const pi = new FakePi();
+    let restricted = false;
+    const resolveWorkdir = registerShellWorkdir(pi as any, undefined, () => restricted);
+    const ctx = context({});
+    expect(await resolveWorkdir(ctx as any, other)).toBe(other);
+    restricted = true;
+    await denied(resolveWorkdir(ctx as any, other));
   });
 });

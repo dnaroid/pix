@@ -3,6 +3,18 @@ import { realpath, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { isPathInside } from "./path-utils";
 import { diagnosticErrorType, suiteDiagnostics } from "../lib/suite-diagnostics.js";
+import { loadPiToolsSuiteConfig } from "../config.js";
+
+/** Read per call so a user-level config change applies without reload; project config cannot disable it. */
+function defaultRestricted(cwd: string): boolean {
+  try {
+    return loadPiToolsSuiteConfig([], { cwd, ensureUserConfig: false }).restrictShellWorkdir;
+  } catch (error) {
+    // Fail closed: an unreadable config never widens the shell working-directory boundary.
+    suiteDiagnostics.report("warn", "shell", "workdir-config-failed", cwd, { errorType: diagnosticErrorType(error) });
+    return true;
+  }
+}
 
 /** Grants live only in this extension runtime, never in the session transcript or config. */
 export function registerShellWorkdir(
@@ -11,6 +23,7 @@ export function registerShellWorkdir(
     realpath,
     isDirectory: async (path) => (await stat(path)).isDirectory(),
   },
+  restricted: (cwd: string) => boolean = defaultRestricted,
 ): (ctx: ExtensionContext, workdir: string | undefined) => Promise<string | undefined> {
   const grants = new WeakMap<ExtensionContext["sessionManager"], Set<string>>();
 
@@ -43,6 +56,10 @@ export function registerShellWorkdir(
       // access to a replacement session after session_start resets the map.
       const allowed = forSession(ctx);
       if (action === "list") {
+        if (!restricted(ctx.cwd)) {
+          ctx.ui.notify("Shell working directories are unrestricted (restrictShellWorkdir: false in the user Tools Suite config).", "info");
+          return;
+        }
         ctx.ui.notify(allowed.size
           ? `Extra shell working directories (this session only; cleared on reload/exit):\n${[...allowed].sort().join("\n")}`
           : "No extra shell working directories allowed (this session only).", "info");
@@ -87,10 +104,10 @@ export function registerShellWorkdir(
     const allowed = forSession(ctx);
     const cwdRealPath = await filesystem.realpath(ctx.cwd);
     const workdirRealPath = await filesystem.realpath(resolve(ctx.cwd, workdir));
-    if (isPathInside(cwdRealPath, workdirRealPath) ||
+    if (!restricted(ctx.cwd) || isPathInside(cwdRealPath, workdirRealPath) ||
         (grants.get(ctx.sessionManager) === allowed && [...allowed].some((root) => isPathInside(root, workdirRealPath)))) {
       return workdirRealPath;
     }
-    throw new Error(`Working directory escapes workspace: ${workdir}. Use /shell-workdir allow <path> for this session.`);
+    throw new Error(`Working directory escapes workspace: ${workdir}. Use /shell-workdir allow <path> for this session, or set "restrictShellWorkdir": false in ~/.config/pi/pi-tools-suite.jsonc.`);
   };
 }

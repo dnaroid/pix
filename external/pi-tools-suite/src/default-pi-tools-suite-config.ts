@@ -93,6 +93,11 @@ export const DEFAULT_PI_TOOLS_SUITE_CONFIG_JSONC = String.raw`{
   // Experimental: omit thinking of earlier turns from model requests for every
   // provider. The session and transcript keep it. PI_TOOLS_SUITE_PRUNE_HISTORICAL_THINKING=1/0.
   "pruneHistoricalThinking": false,
+  // Shell/Bash aliases accept a workdir only inside the project or a /shell-workdir
+  // session grant. false allows any existing directory. Only this user-level file
+  // (or PI_TOOLS_SUITE_RESTRICT_SHELL_WORKDIR=1/0) applies; project config is ignored.
+  // This is a working-directory boundary, not a filesystem sandbox.
+  "restrictShellWorkdir": true,
   // /brainstorm council. Without "models" the roster is the enabled frontierModels
   // (in order, max 6); set "models" to pin an explicit 2–6 model roster instead.
   // Unavailable models never substitute: a round needs "quorum" successful

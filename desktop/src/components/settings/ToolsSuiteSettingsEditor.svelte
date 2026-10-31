@@ -230,6 +230,9 @@
     <SettingsFieldRow label="Secret redaction notifications" description="Show a warning when secret material is redacted." explicit={has(["secretFirewall", "notify"])} defaultLabel={defaultLabel(["secretFirewall", "notify"])} onReset={() => reset(["secretFirewall", "notify"])}>
       <SettingsSwitch value={bool(["secretFirewall", "notify"])} onChange={(value) => set(["secretFirewall", "notify"], value)} />
     </SettingsFieldRow>
+    <SettingsFieldRow label="Restrict shell working directory" description="Agent Shell/Bash commands may set a working directory only inside the project or a /shell-workdir session grant. Turn off to allow any existing directory. Project config cannot change this; it is not a filesystem sandbox." explicit={has(["restrictShellWorkdir"])} defaultLabel={defaultLabel(["restrictShellWorkdir"])} onReset={() => reset(["restrictShellWorkdir"])}>
+      <SettingsSwitch value={bool(["restrictShellWorkdir"])} onChange={(value) => set(["restrictShellWorkdir"], value)} />
+    </SettingsFieldRow>
   </div>
 {:else if section === "subagents"}
   <div class="px-2.5 py-2.5">
