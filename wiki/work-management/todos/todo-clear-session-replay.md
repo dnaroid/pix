@@ -60,3 +60,5 @@ Keep live todo state authoritative after pix reloads or resumes the current sess
 - Confirmed by SDK types: `appendEntry()` creates a custom session entry excluded from model context specifically for extension state persistence.
 - Confirmed by tests: targeted todo replay/clear tests and the suite/host checks
   pass; avoid treating historical aggregate test counts as part of the contract.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"1111db58915a0bb10064b61d791fd4fc306c5588eb9fccbd831bdfb13a55ce20","checkedAt":"2026-10-31T00:19:47.551Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":56,"reportLanguage":"ru"} -->

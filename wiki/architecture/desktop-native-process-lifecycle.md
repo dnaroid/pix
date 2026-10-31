@@ -157,3 +157,5 @@ host with the GNU Windows Rust target installed,
 --target x86_64-pc-windows-gnu --tests` typechecks the platform module and
 its Windows-only tests without requiring a full Tauri cross-toolchain; this
 does not execute the tests on Windows.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"6169f9c973718a8c904ff04d4d603a014f254676e720036c819deda4f0d0bbde","checkedAt":"2026-10-31T00:07:30.529Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":67,"reportLanguage":"ru"} -->

@@ -58,3 +58,5 @@ Durable completion replay is required, queued follow-ups must become retractable
 or runtime tool-result acceptance requires an acknowledgement beyond successful
 tool execution. Regression coverage is in
 `external/pi-tools-suite/test/async-subagents/completion-delivery.test.ts`.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"e45c9afe4659590b6f722a7f2f62dc20f09b211bdb9b85acd29f3f9f809b467b","checkedAt":"2026-10-30T23:56:26.361Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":65,"reportLanguage":"ru"} -->

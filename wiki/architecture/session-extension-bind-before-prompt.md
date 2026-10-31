@@ -51,3 +51,5 @@ Prevent the first user prompt from bypassing extension input handlers while a ne
 
 - Confirmed by code: session binding may be deferred by one event-loop turn, and prompt submission previously did not await it.
 - Confirmed by tests: the queued-message controller waits for extension readiness before invoking `prompt()`.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"61135c5bbba937d15eedf455f67a0dd7e6abd6fcad08763b2d54aee78206e547","checkedAt":"2026-10-31T00:07:46.069Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":63,"reportLanguage":"ru"} -->

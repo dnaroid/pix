@@ -50,3 +50,5 @@ an empty companion directory alone cannot be transported by Git.
 Run the ACP resource registry tests and typecheck. Confirm companion-only
 edits and removals change status, transfer on push/update, and are removed by
 uninstall/remove without changing other agents.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"7f5546f4ed9c205bce11e465abcfb20f51b3a061f0deaabbd685b2d53fd35e68","checkedAt":"2026-10-31T00:16:46.397Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":54,"reportLanguage":"ru"} -->

@@ -217,3 +217,5 @@ Hold a real shutdown grace window open while attaching a replacement and verify
 the old owner exits before the new broker binds, whose endpoint/process survive.
 The real SDK/ACP subprocess test checks edit-triggered reuse and monitoring without conversation
 messages or an agent turn, not only direct broker-client calls.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"47c0bbbee2319f795ff0e6dd5ba7f2a52d49184587d0f663c7a245acadce82fd","checkedAt":"2026-10-31T00:01:27.262Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":65,"reportLanguage":"ru"} -->

@@ -86,3 +86,5 @@ Anthropic publishes an authoritative reset API, the installed CLI changes the
 response/endpoint, or live account evidence disagrees with these fixtures.
 Also revisit the pinned compatibility User-Agent if Anthropic changes surface
 recognition; do not infer account ineligibility from a surface mismatch.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"f99d754a20726c4971414fb28cc631e3dacebed61fb0c2d28485a6018cab4c63","checkedAt":"2026-10-30T23:57:52.253Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":64,"reportLanguage":"ru"} -->

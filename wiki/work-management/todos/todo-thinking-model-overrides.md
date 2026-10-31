@@ -97,3 +97,5 @@ Allow per-model inclusive Min/Max bounds on todo thinking, including a fixed lev
 - Confirmed by code: todo mutations already pass through `prepareMutation` and model-specific thinking normalization.
 - Verification evidence for Min/Max is recorded with the implementation task;
   earlier fixed-level verification does not establish current range coverage.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"aef5df2112c622f58d427acb2cfe5b11688834ed25021d8170b4a077946d3361","checkedAt":"2026-10-31T00:18:56.278Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":57,"reportLanguage":"ru"} -->

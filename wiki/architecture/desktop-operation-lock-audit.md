@@ -179,3 +179,5 @@ This audit can be retired when:
 4. task/knowledge session creation uses local materialization ownership;
 5. tests cover stale completion and same-ID/workspace replacement for each
    scoped owner.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"730cf9d9c3f3e77f230cd826f7ba94cfedc468f022babe7ac79ec7024fa40308","checkedAt":"2026-10-31T00:06:42.345Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":57,"reportLanguage":"ru"} -->

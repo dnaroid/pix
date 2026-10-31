@@ -186,3 +186,5 @@ trust decision; global config servers run with no gate. `[confirmed by code]`
 4. Determine whether `$PI_CONFIG_DIR` is attacker-controllable in the host (could redirect global config). `[unknown — depends on pi host]`
 5. Add a test confirming `writeTrustStore` file mode (currently umask). `[confirmed by code]`
 6. Add a scenario: project config at `/tmp/.pi/pi-tools-suite.jsonc` with `ctx.cwd=/tmp/project` → confirm it is found and trust is prompted. `[not tested — gap]`
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"950d6d995b5acb8099d61792a651661d1e862fce18245503f85b2149bfaac7c1","checkedAt":"2026-10-31T00:02:01.621Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":60,"reportLanguage":"ru"} -->

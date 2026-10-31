@@ -346,3 +346,5 @@ blocked/incomplete legs. Real Desktop evidence is separate from unit-test succes
 Semantic regressions use deterministic injected embeddings/HTTP responses, never paid
 requests: no-token-overlap matches, incrementality, model isolation, scope/privacy,
 bounded progression, revocation, stale publication, leases and malformed responses.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"7b0d9f64edc15fdf85fd113b9ac48b8a5306590ebea6af6c9117c30d63aa9e4d","checkedAt":"2026-10-31T00:04:09.578Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":61,"reportLanguage":"ru"} -->

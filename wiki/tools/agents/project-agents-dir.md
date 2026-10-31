@@ -188,3 +188,5 @@ available tool. Config tests also cover layered bundled-role disable/re-enable,
 and core tests verify that a same-named project role survives a bundled disable,
 fully replaces omitted built-in fields, and is announced as a project
 replacement in the parent catalog.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"c074ea0f1f8d3ea5993bdfc7c420ec3d2787fd78a942d0192ffb41767661b7da","checkedAt":"2026-10-31T00:20:13.726Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":59,"reportLanguage":"ru"} -->

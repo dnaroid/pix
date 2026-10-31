@@ -88,3 +88,5 @@ Exercise agent sidecar-only edits/additions/removals and skill-tree changes,
 including the direction of additions/removals; verify request validation,
 read-only operation, binary/size handling, error states and stale-workspace
 guards. Run focused backend, ACP and Desktop tests plus their type checks.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"61bc7464fd2f7028206f314f483ce739d36c1717b9b46b6a40b1ab1de15bc1ec","checkedAt":"2026-10-31T00:16:27.830Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":69,"reportLanguage":"ru"} -->

@@ -171,3 +171,5 @@ scope, see [known conflicts](../maintenance/known-conflicts.md).
   DCP emergency-current-turn change document was consolidated into
   [dcp-reliability-mechanisms.md](../context/dcp-reliability-mechanisms.md).
   [dcp.md](../context/dcp.md). Originals remain available in git history.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"7e7382971051f7da43a06d77f127ae900d3b59794286275165f52561e71197dd","checkedAt":"2026-10-31T00:14:11.538Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":74,"reportLanguage":"ru"} -->

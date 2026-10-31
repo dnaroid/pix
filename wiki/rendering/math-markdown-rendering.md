@@ -62,3 +62,5 @@ Render common AI-generated mathematical expressions as formulas instead of expos
 
 - Test Cyrillic DER/JER fractions, inline formulas, narrow terminal wrapping, streaming incompletion, invalid TeX, escaped dollars, and code fences.
 - Run focused renderer tests, Desktop production web build, TUI build and root check.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"798f0df0e048951116d9ff07ed3cfee2fa5c09e8c76d04fc1bb56f1ba67a53f0","checkedAt":"2026-10-31T00:10:33.003Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":61,"reportLanguage":"ru"} -->

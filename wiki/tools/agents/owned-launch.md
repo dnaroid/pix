@@ -319,3 +319,5 @@ or treat approving repeated dialogs as a reproducible test setup.
 - This candidate is **not G1/T3 acceptance**: draft runtime wiring exists,
   but real Pi/provider completion, timeout, force-stop, recovery, and
   concurrency/isolation verification remain open.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"7a1fddb9a5434a75ac9dd40c7f2491d2908710ec55ff4cd99a2fd5a464f49582","checkedAt":"2026-10-31T00:21:20.464Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":59,"reportLanguage":"ru"} -->

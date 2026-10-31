@@ -313,3 +313,5 @@ Focused checks: `node --import tsx --test tests/search-index-cli.test.ts`,
 - `acp/test/search-task-semantic.test.ts`
 - `acp/test/search-mirror-parity.test.ts`
 - `desktop/src/lib/search-index-freshness.test.ts`
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"06df5ddb3c83bf8f359795895e91f69d3a97c72fac3fa729b926731ddd6ca1ac","checkedAt":"2026-10-31T00:03:39.444Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":57,"reportLanguage":"ru"} -->

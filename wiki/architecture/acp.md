@@ -180,3 +180,5 @@ Also compare with the advanced fork
   The RPC protocol of the spawned `pi` binary must stay in sync with this pin.
 - This package is intentionally NOT part of the root `npm run check`
   (it has its own install); run `npm run check:acp` from the repo root.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"c6829daa46f8b4bfbfa39a1c233e5febbf8e46155f4c36c1d346067b84f58dff","checkedAt":"2026-10-31T00:07:04.154Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":66,"reportLanguage":"ru"} -->

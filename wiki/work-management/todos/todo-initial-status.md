@@ -84,3 +84,5 @@ events can be rescored without model calls, preserving original raw assertions
 and recording the final scorer/hash. Incomplete live reports cannot be rescored.
 Criterion checks accept equivalent negative duplicate-charge wording, not merely
 the literal `no duplicate charge`; mentioning duplicate charges alone is not enough.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"ce21e280beee6b9c5f48a85e25fac3a8ee5d7fb210351428c84fb384da491ff4","checkedAt":"2026-10-31T00:19:17.340Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":64,"reportLanguage":"ru"} -->

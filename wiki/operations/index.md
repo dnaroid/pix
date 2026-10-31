@@ -16,3 +16,5 @@ Trust and grants, LSP control, diagnostic logging and harness storage. Unresolve
 - [Project-shared LSP runtime and Desktop/TUI monitoring](lsp-runtime-control.md) — active
 - [lsp trust & command execution (as-is spec)](lsp-trust.md) — active
 - [Session-only shell working directories](shell-workdir-session-grants.md) — active
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"fbb058f69880200a3839a451d5b4dcf096557ac186040345f4baba0f1a48af91","checkedAt":"2026-10-31T00:02:42.123Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":54,"reportLanguage":"ru"} -->

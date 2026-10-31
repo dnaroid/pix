@@ -109,3 +109,5 @@ production restart/persistence or data migration. A permanent QA persistence
 check covers only its own isolated store, not the working app or watcher's
 Restart handoff. Scratch copies may be removed by Clean
 or background TTL cleanup; export anything that must be retained.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"34110dacd39e6317565ef406e5de328ca6221a1a6f3dd82395039865fe1dbf78","checkedAt":"2026-10-31T00:25:17.568Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":62,"reportLanguage":"ru"} -->

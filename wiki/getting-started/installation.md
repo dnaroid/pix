@@ -219,3 +219,5 @@ after the updater exits.
 Packaged Pix Desktop uses the native Tauri updater. Production builds check the
 signed update feed and expose Update/Restart in the application; Desktop does not
 fall back to the TUI/package-manager updater.
+
+<!-- pix:wiki-check {"version":1,"status":"clear","contentHash":"d1115c9de890c909976796af6dbfd8213ffe990712b27f36f8b3577c63ec87ad","checkedAt":"2026-10-31T00:09:07.482Z","modelRef":"zai/glm-5.3-flash","scope":"retrieved-passages","checkedSources":12,"candidateSources":45,"reportLanguage":"ru"} -->
