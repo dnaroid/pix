@@ -27,6 +27,11 @@ export interface PiToolsSuiteConfig {
 	economy: boolean;
 	/** Experimental: omit thinking of earlier turns from model requests (all providers). */
 	pruneHistoricalThinking: boolean;
+	/**
+	 * Model-tools shell aliases accept a workdir only inside the workspace or a session grant.
+	 * Only user-level layers and the environment can turn it off; project config is ignored.
+	 */
+	restrictShellWorkdir: boolean;
 	resourceRegistry: ResourceRegistryConfig;
 }
 
@@ -51,6 +56,7 @@ type MutableConfig = {
 	frontierModels: FrontierModelEntry[];
 	economy: boolean;
 	pruneHistoricalThinking: boolean;
+	restrictShellWorkdir: boolean;
 	resourceRegistry: ResourceRegistryConfig;
 };
 type Env = Record<string, string | undefined>;
@@ -233,7 +239,8 @@ function removeDisabledBuiltinAgents(config: MutableConfig, value: unknown): voi
 	}
 }
 
-function mergeConfigLayer(config: MutableConfig, raw: Record<string, unknown>, knownModules: ReadonlySet<string>): MutableConfig {
+/** `userLayer` is false for a repository's `.pi/pi-tools-suite.jsonc`, which cannot widen agent access. */
+function mergeConfigLayer(config: MutableConfig, raw: Record<string, unknown>, knownModules: ReadonlySet<string>, userLayer = true): MutableConfig {
 	if (typeof raw.enabled === "boolean") config.enabled = raw.enabled;
 	if (typeof raw.todoThinking === "boolean") config.todoThinking = raw.todoThinking;
 	mergeTodoThinkingOverrides(config, raw.todoThinkingOverrides);
@@ -248,6 +255,7 @@ function mergeConfigLayer(config: MutableConfig, raw: Record<string, unknown>, k
 	}
 	if (typeof raw.economy === "boolean") config.economy = raw.economy;
 	if (typeof raw.pruneHistoricalThinking === "boolean") config.pruneHistoricalThinking = raw.pruneHistoricalThinking;
+	if (userLayer && typeof raw.restrictShellWorkdir === "boolean") config.restrictShellWorkdir = raw.restrictShellWorkdir;
 	mergeResourceRegistry(config, raw.resourceRegistry);
 
 	for (const key of DISABLED_LIST_KEYS) addDisabled(config, raw[key], knownModules);
@@ -300,6 +308,9 @@ function applyEnv(config: MutableConfig, env: Env, knownModules: ReadonlySet<str
 	const pruneThinking = boolFromEnv(env.PI_TOOLS_SUITE_PRUNE_HISTORICAL_THINKING);
 	if (pruneThinking !== undefined) config.pruneHistoricalThinking = pruneThinking;
 
+	const restrictShellWorkdir = boolFromEnv(env.PI_TOOLS_SUITE_RESTRICT_SHELL_WORKDIR);
+	if (restrictShellWorkdir !== undefined) config.restrictShellWorkdir = restrictShellWorkdir;
+
 	const todoThinking = boolFromEnv(env.PI_TOOLS_SUITE_TODO_THINKING);
 	if (todoThinking !== undefined) config.todoThinking = todoThinking;
 
@@ -328,6 +339,7 @@ export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: 
 		frontierModels: defaultFrontierConfig().models,
 		economy: false,
 		pruneHistoricalThinking: false,
+		restrictShellWorkdir: true,
 		resourceRegistry: { branch: DEFAULT_RESOURCE_REGISTRY_BRANCH },
 	};
 	if (options.includeUserConfig !== false) {
@@ -340,7 +352,7 @@ export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: 
 	if (piConfigDir) mergeConfigLayer(config, readJsonc(join(piConfigDir, "pi-tools-suite.jsonc")), knownModules);
 
 	const projectConfig = findProjectConfig(options.cwd ?? process.cwd());
-	if (projectConfig) mergeConfigLayer(config, readJsonc(projectConfig), knownModules);
+	if (projectConfig) mergeConfigLayer(config, readJsonc(projectConfig), knownModules, false);
 
 	applyEnv(config, env, knownModules);
 
@@ -356,6 +368,7 @@ export function loadPiToolsSuiteConfig(moduleNames: readonly string[], options: 
 		frontierModels: config.frontierModels.map((entry) => ({ ...entry })),
 		economy: config.economy,
 		pruneHistoricalThinking: config.pruneHistoricalThinking,
+		restrictShellWorkdir: config.restrictShellWorkdir,
 		resourceRegistry: { ...config.resourceRegistry },
 	};
 }
