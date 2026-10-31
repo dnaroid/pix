@@ -18,6 +18,19 @@ describe("pix-actions blocks", () => {
     expect(parseChoiceActions("pix-actions", Array.from({ length: 9 }, (_, i) => `- [ ] ${i}`).join("\n"))).toBeUndefined();
   });
 
+  it("parses plain items as reply buttons and rejects mixed or oversized rows", () => {
+    expect(parseChoiceActions("pix-actions", "- Готово\n- Пропустить")).toEqual({
+      submitLabel: "Continue",
+      items: [{ label: "Готово", checked: false }, { label: "Пропустить", checked: false }],
+      buttons: true,
+    });
+    expect(parseChoiceActions("pix-actions", "- Done\n- [x] Step")).toBeUndefined();
+    expect(parseChoiceActions("pix-actions", `- ${"x".repeat(41)}`)).toBeUndefined();
+    expect(parseChoiceActions("pix-actions", "- A\n- B\n- C\n- D\n- E")).toBeUndefined();
+    expect(parseChoiceActions("pix-actions", "- [x]")).toBeUndefined();
+    expect(parseChoiceActions("pix-actions", "Done")).toBeUndefined();
+  });
+
   it("splits only when enabled and keeps incomplete fences as Markdown", () => {
     const text = "Pick:\n```pix-actions Go\n- [x] A\n- [ ] B\n```\nafter";
     expect(splitHtmlSandboxSegments(text, { actions: true }).map((s) => s.type)).toEqual(["markdown", "actions", "markdown"]);

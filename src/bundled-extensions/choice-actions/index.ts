@@ -44,6 +44,13 @@ export function latestRunChoiceActions(messages: readonly unknown[]): ChoiceActi
 }
 
 export function renderChoiceActionsWidget(actions: ChoiceActions, selected: ReadonlySet<number>): string[] {
+	if (actions.buttons) {
+		const keys = actions.items.length === 1 ? "1/Enter" : `1–${actions.items.length}`;
+		return [
+			actions.items.map((item, index) => `[${index + 1}] ${item.label}`).join("  "),
+			`${keys} send · Esc dismiss · type to write your own`,
+		];
+	}
 	return [
 		...actions.items.map((item, index) => `${selected.has(index) ? "☑" : "☐"} ${index + 1}. ${item.label}`),
 		`1–${actions.items.length} toggle · Enter: ${actions.submitLabel} · Esc dismiss · type to write your own`,
@@ -75,7 +82,17 @@ export default function choiceActionsExtension(pi: ExtensionAPI): void {
 		if (active !== current || data === "\u0003") return undefined;
 		// A non-empty draft owns every key; the checklist only reacts to an empty composer.
 		if (current.ctx.ui.getEditorText() !== "") return undefined;
-		if (/^[1-9]$/.test(data)) {
+		if (current.actions.buttons) {
+			const single = current.actions.items.length === 1 && (data === "\r" || data === "\n");
+			const index = single ? 0 : /^[1-9]$/.test(data) ? Number(data) - 1 : -1;
+			const item = current.actions.items[index];
+			if (item) {
+				hide();
+				pi.sendUserMessage(item.label);
+				return { consume: true };
+			}
+			if (index >= 0 || data === "\r" || data === "\n") return { consume: true };
+		} else if (/^[1-9]$/.test(data)) {
 			const index = Number(data) - 1;
 			if (index >= current.actions.items.length) return { consume: true };
 			if (current.selected.has(index)) current.selected.delete(index);
