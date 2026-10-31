@@ -253,6 +253,8 @@ the selected sources (up to 60 seconds) and returns one combined response. See
   `git_search_history` command leaves Source Control's 30-item history unchanged.
   History examination and candidate selection run off the UI thread, returning
   a bounded candidate list rather than serializing the whole history to the UI.
+  Aborting the search (new query, closed dialog) cancels the backend walk by
+  request id and kills its `git log`; each walk also has a 30-second deadline.
   Fast native lexical matching covers subjects, full hashes and authors;
   selecting either a native or hybrid commit hit opens Source Control and
   the workbench Git Diff tab with that exact commit's read-only patch,

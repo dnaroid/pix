@@ -55,6 +55,7 @@ impl OutputHistory {
         self.bytes.extend(data);
     }
 
+    #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.bytes.len()
     }

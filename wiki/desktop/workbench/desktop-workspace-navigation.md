@@ -289,6 +289,17 @@ establish compatibility requirements.
   are never automatically purged, are excluded from manual and TTL Clean and
   Files tree/search, and nested `.gitignore` files contain `*`. Journals are for
   manual recovery only and are never replayed as executable work after restart.
+  A batch that changes nothing removes its own empty token folder, and a copy
+  whose staged duplicate cannot be moved into place removes that stage (the
+  source is never touched); cleanup failures reach the diagnostic logger.
+- Backend history work is serialized per workspace, not process-wide: the
+  runtime token map is locked only to look up, insert or forget a token, while
+  copies, moves, fsyncs and journal saves hold an in-process lock for the target
+  workspace (plus the source workspace for imports and cross-workspace copies,
+  acquired all-or-nothing) and the storage `flock` that guards other Pix
+  processes. A long copy in one workspace therefore never delays Files
+  mutations, Undo/Redo or Forget in another. Forgetting a token while its
+  Undo/Redo runs lets that replay finish; later replays are refused.
 - File/folder context menus expose **Add to .gitignore** only after a local Git
   check confirms an exact workspace-root repository and a target not already
   matching ignore rules, including tracked files and folders with tracked

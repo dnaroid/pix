@@ -15,7 +15,7 @@ describe("search category presentation", () => {
     expect(source).toContain("searching && !result.results.length");
     expect(source).toContain("busy || intentBusy || ragActive || !!result.pendingSources?.length");
     expect(source).toContain("aria-busy={searching}");
-    expect(source).toContain('"git_search_history", { workspace, query }');
+    expect(source).toContain("commits: (workspace, query, signal) => searchGitHistory(invoke, workspace, query, signal)");
     expect(source).not.toContain("latest 30");
     expect(source).toContain("No results. Check search details.");
   });

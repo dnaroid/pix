@@ -173,12 +173,23 @@ noninteractive argument-vector helpers. See
   expose the working-tree-only code review or mutation actions.
 - [Universal search](../../search/desktop-universal-search.md) uses a separate read-only metadata
   command over all current HEAD ancestors; its candidate cap does not change this
-  panel's 30-entry history. Optional hybrid commit indexing is a separate ACP
+  panel's 30-entry history. Each walk carries a request id: aborting the search
+  calls `git_search_history_cancel`, which kills the `git log` process group
+  (a cancel that overtakes its search is retained briefly and still applies),
+  and every walk has a 30-second deadline, so stale per-query walks cannot pile
+  up in large repositories. Optional hybrid commit indexing is a separate ACP
   search source, not a Source Control history refresh or Git mutation.
 
 Tracked, non-conflicted working-tree rows additionally expose Discard with an explicit irreversible-action confirmation. It restores only the selected file's unstaged changes **from the index**, preserving staged hunks. Untracked files, directory/pattern targets and submodules are not discarded by this command. Literal pathspecs and repository-root confinement are enforced in the backend. There is no clean/reset/force action.
 
 All new Git commands use the existing noninteractive argument-vector process helpers through Tauri `run_blocking`, off the UI thread. Repository-detail responses are bounded and generation-guarded. Operations which reload the project respect the existing unsaved-Preview confirmation.
+
+Network Git operations (Push/Publish, Fetch, Pull and the fetch step of Update project) run through a supervised runner (`desktop/src-tauri/src/git_process.rs`) so a hung remote, SSH session or credential helper cannot hold a blocking worker and the Source Control spinner forever:
+
+- Each command runs in its own process group with stdin closed, a 10-minute deadline and capped stdout (1 MiB) / stderr (256 KiB). On timeout the whole group (git, ssh, credential helpers) is killed and the user sees “Git *operation* timed out after 10 minutes; the remote or a credential helper did not respond…”; the timeout is also logged as `git:network-timeout` (operation name only, no arguments). After normal exit the group is also killed before the output readers join, so a helper that inherited the pipes cannot stall completion; Git's detached auto-gc uses its own session and is unaffected.
+- SSH runs as `ssh -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=15 -o ServerAliveCountMax=4` so it never waits for a passphrase/host-key prompt and detects dead connections. This is set only when neither `GIT_SSH_COMMAND`, `GIT_SSH` nor `GIT_SSH_VARIANT` is in the environment and no `core.sshCommand`/`ssh.variant` is configured; a user's own SSH command always wins.
+- HTTP(S) transfers abort when slower than 1000 B/s for 60 s (`GIT_HTTP_LOW_SPEED_LIMIT`/`_TIME`), unless the environment or any `http.*lowSpeedLimit`/`lowSpeedTime` config sets them. If the transport configuration cannot be read, no transport setting is overridden.
+- There is no user-facing cancel for these operations yet; the deadline and transport guards bound them. The sidebar remote-update probe (`ls-remote`, 5-second deadline) shares the same supervisor.
 
 ## Implementation
 
@@ -201,6 +212,9 @@ Repository commit-author and secondary synchronization dependencies (the broader
 - `desktop/src/app/git-workspace.test.ts`
 - `desktop/src-tauri/src/git_identity.rs`
 - `desktop/src-tauri/src/git_operations.rs`
+- `desktop/src-tauri/src/git_process.rs`
+- `desktop/src-tauri/src/git_history_search.rs`
+- `desktop/src/lib/git-history-search.test.ts`
 - `desktop/scripts/fixtures/GitWorkflowFixture.svelte`
 
 ## Implementation ownership
@@ -217,7 +231,7 @@ Repository commit-author and secondary synchronization dependencies (the broader
 - `desktop/src/app/desktop-sidebar-view-model.svelte.ts`, `desktop-navigation-view-model-services.ts`, `desktop-workbench-git-services.ts` and `desktop-workbench-prop-builders.ts`: workspace-assistant readiness for Source Control and Git Diff, independent of conversation-tab runtime readiness.
 - `desktop/src/lib/acp-client.ts`, `desktop/src/lib/acp-pix-extensions.ts`, `acp/src/acp/desktop-commands.ts` and `acp/src/acp/pix-acp-agent.ts`: cwd-bound Git-assistant request transport and standalone ACP execution without allocating a conversation session.
 - `desktop/src/lib/git-workflow.ts` and `git.ts`: shared policies, types and prompt/draft helpers.
-- `desktop/src-tauri/src/git_operations.rs`: secondary commands and temporary-repository tests; `desktop/src-tauri/src/git_ci.rs`: bounded/cancellable `gh`/`glab` queries and provider normalization; `desktop/src-tauri/src/lib.rs`: repository detection/initialization, command registration and window/app teardown.
+- `desktop/src-tauri/src/git_operations.rs`: secondary commands and temporary-repository tests; `desktop/src-tauri/src/git_process.rs`: supervised (deadline, process-group kill, bounded output, non-interactive transport) runner for network Git; `desktop/src-tauri/src/git_history_search.rs` and `desktop/src/lib/git-history-search.ts`: cancellable full-history commit search; `desktop/src-tauri/src/git_ci.rs`: bounded/cancellable `gh`/`glab` queries and provider normalization; `desktop/src-tauri/src/lib.rs`: repository detection/initialization, command registration and window/app teardown.
 
 ## Verification
 
