@@ -769,6 +769,7 @@ export class PixAcpAgent {
 		this.fileAnnotator = options.fileAnnotator ?? createFileAnnotator({
 			runner: assistRunner,
 			onCacheError: (error) => options.logger.warn(`explanation cache failed: ${stringifyUnknown(error)}`),
+			onUnusableAnswer: (excerpt) => options.logger.warn(`explain answer was unusable: ${JSON.stringify(excerpt)}`),
 		});
 		this.documentTranslator = options.documentTranslator ?? createDocumentTranslator({
 			runner: assistRunner,

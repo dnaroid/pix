@@ -19,10 +19,11 @@ export const EXPLANATION_CACHE_DIRECTORY = ".pi/explanations";
 const EXPLANATION_CACHE_VERSION = 1;
 export const FILE_ANNOTATION_MAX_TEXT = 120_000;
 export const FILE_ANNOTATION_MAX_LINES = 3_000;
-export const FILE_ANNOTATION_MAX_NOTES = 60;
+export const FILE_ANNOTATION_MAX_NOTES = 40;
 const FILE_ANNOTATION_MAX_NOTE_CHARS = 600;
 const FILE_ANNOTATION_MAX_SUMMARY_CHARS = 1_500;
-const FILE_ANNOTATION_MAX_TOKENS = 6_000;
+/** Generous: Cyrillic notes cost about twice the tokens, and a cut-off answer loses its tail. */
+const FILE_ANNOTATION_MAX_TOKENS = 12_000;
 const FILE_ANNOTATION_TIMEOUT_MS = 120_000;
 
 export interface FileAnnotation {
@@ -60,6 +61,8 @@ interface CreateFileAnnotatorOptions {
 	readonly cache?: ProjectJsonCache;
 	/** Cache failures never fail an explanation; they are reported here. */
 	readonly onCacheError?: (error: unknown) => void;
+	/** An answer that yielded nothing usable, for diagnostics (bounded excerpt). */
+	readonly onUnusableAnswer?: (excerpt: string) => void;
 }
 
 interface ExplanationCacheEntry {
@@ -100,7 +103,12 @@ export function createFileAnnotator(options: CreateFileAnnotatorOptions = {}): F
 		});
 		signal.throwIfAborted();
 		const { summary, annotations } = parseFileExplanation(output, visible);
-		if (!summary && annotations.length === 0) throw new Error("The model returned no usable explanation");
+		if (!summary && annotations.length === 0) {
+			options.onUnusableAnswer?.(output.slice(0, 600));
+			throw new Error(output.trim()
+				? "The model's answer could not be read as an explanation."
+				: "The model returned an empty answer.");
+		}
 		const result = { summary, annotations, language: config.language, annotatedLines: visible, totalLines: lines.length };
 		const entry: ExplanationCacheEntry = {
 			version: EXPLANATION_CACHE_VERSION, path: path ?? "", contentHash, language: config.language, createdAt: new Date().toISOString(), result,
@@ -132,10 +140,22 @@ function isCacheEntry(value: unknown): value is ExplanationCacheEntry {
 }
 
 /**
- * Accepts `{ "summary": "...", "notes": [...] }` (optionally fenced or
- * wrapped in prose) or a bare notes array.
+ * Reads the model answer. A well-formed `{ "summary", "notes" }` object (or a
+ * bare notes array), optionally fenced or wrapped in prose, is parsed
+ * strictly. Otherwise — typically an answer cut off at the token limit, raw
+ * newlines inside strings or a stray comma — fields are salvaged one by one,
+ * so every complete note and the summary survive.
  */
 export function parseFileExplanation(output: string, lineCount: number): { summary: string; annotations: FileAnnotation[] } {
+	const strict = parseStrict(output, lineCount);
+	if (strict?.summary) return strict;
+	const salvaged = salvageFileExplanation(output, lineCount);
+	// A complete notes array next to a broken object still loses no summary.
+	if (strict && strict.annotations.length > 0) return { summary: salvaged.summary, annotations: strict.annotations };
+	return salvaged;
+}
+
+function parseStrict(output: string, lineCount: number): { summary: string; annotations: FileAnnotation[] } | undefined {
 	const start = output.indexOf("{");
 	const end = output.lastIndexOf("}");
 	const arrayStart = output.indexOf("[");
@@ -144,17 +164,84 @@ export function parseFileExplanation(output: string, lineCount: number): { summa
 			const parsed = JSON.parse(output.slice(start, end + 1)) as unknown;
 			if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
 				const record = parsed as Record<string, unknown>;
-				const summary = typeof record.summary === "string"
-					? record.summary.replace(/[ \t]+/gu, " ").replace(/\n{3,}/gu, "\n\n").trim().slice(0, FILE_ANNOTATION_MAX_SUMMARY_CHARS)
-					: "";
 				const notes = Array.isArray(record.notes) ? record.notes : Array.isArray(record.annotations) ? record.annotations : [];
-				return { summary, annotations: parseFileAnnotations(JSON.stringify(notes), lineCount) };
+				return { summary: cleanSummary(typeof record.summary === "string" ? record.summary : ""), annotations: normalizeNotes(notes, lineCount) };
 			}
 		} catch {
-			// Fall back to a bare array below.
+			// Not strict JSON; try a bare array, then salvage.
 		}
 	}
-	return { summary: "", annotations: parseFileAnnotations(output, lineCount) };
+	const annotations = parseFileAnnotations(output, lineCount);
+	return annotations.length > 0 ? { summary: "", annotations } : undefined;
+}
+
+const JSON_STRING = String.raw`"((?:[^"\\]|\\.)*)"`;
+const SUMMARY_FIELD = new RegExp(String.raw`"summary"\s*:\s*` + JSON_STRING, "u");
+const SUMMARY_CUT_OFF = /"summary"\s*:\s*"((?:[^"\\]|\\.)*)$/u;
+
+/**
+ * Field-by-field recovery for malformed or truncated JSON answers, with no
+ * guessing about field order: a scanner that understands JSON strings (so
+ * braces and quotes inside note text are ignored) collects every object that
+ * actually closed, repairs raw newlines and trailing commas inside it and
+ * keeps those with a `line` and a `text`/`note`. An object cut off by the
+ * token limit never closes and is dropped. The summary is read from its own
+ * field, even when the answer stops inside it.
+ */
+export function salvageFileExplanation(output: string, lineCount: number): { summary: string; annotations: FileAnnotation[] } {
+	const summaryMatch = SUMMARY_FIELD.exec(output) ?? SUMMARY_CUT_OFF.exec(output);
+	const summary = cleanSummary(summaryMatch ? decodeJsonString(summaryMatch[1]!) : "");
+	const notes: unknown[] = [];
+	for (const object of closedJsonObjects(output)) {
+		try {
+			const parsed = JSON.parse(object) as unknown;
+			if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) && "line" in parsed) notes.push(parsed);
+		} catch {
+			// A malformed note is skipped; the others still count.
+		}
+	}
+	return { summary, annotations: normalizeNotes(notes, lineCount) };
+}
+
+/** Innermost-first source of every `{…}` that closes, with raw control characters in strings escaped and trailing commas removed. */
+function closedJsonObjects(text: string): string[] {
+	const objects: string[] = [];
+	const starts: number[] = [];
+	let sanitized = "";
+	let inString = false;
+	let escaped = false;
+	for (const char of text) {
+		if (inString) {
+			if (escaped) escaped = false;
+			else if (char === "\\") escaped = true;
+			else if (char === "\"") inString = false;
+			else if (char === "\n") { sanitized += "\\n"; continue; }
+			else if (char === "\r") continue;
+			else if (char === "\t") { sanitized += "\\t"; continue; }
+			sanitized += char;
+			continue;
+		}
+		if (char === "\"") inString = true;
+		else if (char === "{") starts.push(sanitized.length);
+		else if (char === "}" && starts.length > 0) {
+			const start = starts.pop()!;
+			objects.push((sanitized.slice(start) + char).replace(/,(\s*[}\]])/gu, "$1"));
+		}
+		sanitized += char;
+	}
+	return objects;
+}
+
+function decodeJsonString(raw: string): string {
+	try {
+		return JSON.parse(`"${raw.replace(/\r?\n/gu, "\\n").replace(/\t/gu, "\\t")}"`) as string;
+	} catch {
+		return raw.replace(/\\n/gu, "\n").replace(/\\(["\\/])/gu, "$1");
+	}
+}
+
+function cleanSummary(summary: string): string {
+	return summary.replace(/[ \t]+/gu, " ").replace(/\n{3,}/gu, "\n\n").trim().slice(0, FILE_ANNOTATION_MAX_SUMMARY_CHARS);
 }
 
 function visibleLineCount(lines: readonly string[]): number {
@@ -168,22 +255,24 @@ function visibleLineCount(lines: readonly string[]): number {
 
 /**
  * Accepts a JSON array (optionally fenced or surrounded by prose) of
- * `{ line, text }` objects; drops invalid items, clamps to known lines and
- * merges notes that target the same line.
+ * `{ line, text }` objects.
  */
 export function parseFileAnnotations(output: string, lineCount: number): FileAnnotation[] {
 	const start = output.indexOf("[");
 	const end = output.lastIndexOf("]");
 	if (start < 0 || end <= start) return [];
-	let parsed: unknown;
 	try {
-		parsed = JSON.parse(output.slice(start, end + 1));
+		const parsed = JSON.parse(output.slice(start, end + 1)) as unknown;
+		return Array.isArray(parsed) ? normalizeNotes(parsed, lineCount) : [];
 	} catch {
 		return [];
 	}
-	if (!Array.isArray(parsed)) return [];
+}
+
+/** Drops invalid items, clamps to known lines and merges notes that target the same line. */
+function normalizeNotes(items: readonly unknown[], lineCount: number): FileAnnotation[] {
 	const byLine = new Map<number, string[]>();
-	for (const item of parsed) {
+	for (const item of items) {
 		if (typeof item !== "object" || item === null) continue;
 		const record = item as Record<string, unknown>;
 		const line = typeof record.line === "number" ? record.line : typeof record.line === "string" ? Number(record.line) : Number.NaN;
@@ -201,9 +290,9 @@ export function parseFileAnnotations(output: string, lineCount: number): FileAnn
 function annotateSystemPrompt(language: string): string {
 	return `You annotate a source file for a developer reading it in a code viewer. Your notes are shown as highlighted inline insertions directly above the line they target.
 Write notes like insightful code-review comments: what a block does and why, non-obvious behaviour, invariants, side effects, edge cases and error handling. Never restate a line literally and skip trivial code (imports, braces, obvious assignments).
-Anchor each note to the first line of the block it explains: the start of a function, class, important statement or branch. Use roughly one note per meaningful block, at most ${FILE_ANNOTATION_MAX_NOTES} notes, each one or two short sentences. Wrap identifiers in backticks.
+Anchor each note to the first line of the block it explains: the start of a function, class, important statement or branch. Use roughly one note per meaningful block, at most ${FILE_ANNOTATION_MAX_NOTES} notes, each one or two short sentences (under 30 words). Wrap identifiers in backticks.
 Also write a module summary shown above the first line: two to four sentences on what the file is for, its main responsibilities and how it fits into the project.
-Return only a JSON object, no prose and no code fences: {"summary": "<module summary>", "notes": [{"line": <line number from the listing>, "text": "<note>"}]}.
+Return only a JSON object, no prose and no code fences: {"summary": "<module summary>", "notes": [{"line": <line number from the listing>, "text": "<note>"}]}. Write "summary" first, then notes in line order. Escape quotes and newlines inside strings as JSON requires.
 Write the summary and notes in the language with this code/name: ${language}.`;
 }
 

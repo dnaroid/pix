@@ -204,7 +204,8 @@
     const russian = annotationState.language === "ru";
     if (annotationState.status === "loading") return { kind: "status", text: "Explaining the file…" };
     if (annotationState.status === "error") {
-      return { kind: "error", label: "Explain failed", text: `${annotationState.error || "The explanation is unavailable."} Click Explain to retry.` };
+      const reason = (annotationState.error || "The explanation is unavailable").trim().replace(/^File annotation failed:\s*/u, "");
+      return { kind: "error", label: "Explain failed", text: `${/[.!?…]$/u.test(reason) ? reason : `${reason}.`} Click Explain to retry.` };
     }
     if (annotationState.status !== "done" || !annotationState.summary) return undefined;
     const coverage = annotationState.annotatedLines < annotationState.totalLines
