@@ -9,7 +9,6 @@
   import { installDesktopContextMenu } from "./lib/desktop-context-menu";
   import { createSelectionAssistStore } from "./app/selection-assist.svelte";
   import SelectionAssistPopover from "./components/SelectionAssistPopover.svelte";
-  import { explainFileTarget } from "./lib/selection-assist-target";
   import { createSessionRename } from "./app/session-rename.svelte";
   import SessionRenameDialog from "./components/SessionRenameDialog.svelte";
   import type { DesktopShortcutPlatform } from "./lib/desktop-commands";
@@ -918,12 +917,6 @@
   });
   const viewModels = createDesktopViewModelServices({
     openBtw: (sessionId) => openBtw(sessionId).catch(reportError),
-    explainFile: (path, content, anchor) => {
-      const open = selectionAssist.state.target;
-      if (open?.action === "explain-file" && open.path === path) { selectionAssist.close(); return; }
-      const target = explainFileTarget(path, content, anchor);
-      if (target) void selectionAssist.run(target);
-    },
     focusComposer: () => promptComposer?.focus(),
     platform: desktopShortcutPlatform,
     workspace: () => workspace,

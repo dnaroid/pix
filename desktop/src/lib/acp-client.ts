@@ -25,7 +25,7 @@ import type { RegistryActionRequest, RegistryDiff, RegistryResourceType, Registr
 import type { AgentControlAction } from "./agent-control";
 import { isRecord, parseQueueState, parseQueuedUserMessage } from "./acp-response-parsers";
 import { AcpIncomingRequestError, AcpJsonRpcConnection } from "./acp-json-rpc";
-import { AcpPixExtensions, type ModelSetupRoles, type ModelSetupSearch, type SelectionAssistRequest, type SelectionAssistDelta, type DocumentTranslateRequest, type DocumentTranslation, SELECTION_ASSIST_DELTA_METHOD } from "./acp-pix-extensions";
+import { AcpPixExtensions, type ModelSetupRoles, type ModelSetupSearch, type SelectionAssistRequest, type SelectionAssistDelta, type DocumentTranslateRequest, type DocumentTranslation, type FileAnnotateRequest, type FileAnnotations, SELECTION_ASSIST_DELTA_METHOD } from "./acp-pix-extensions";
 import { SEARCH_CONFIG_METHOD, SEARCH_QUERY_METHOD, SEARCH_SYNC_METHOD, SEARCH_COMMITS_METHOD, SEARCH_INTENT_METHOD, SEARCH_TASKS_METHOD, type SearchIntentRequest, type SearchIntentResponse, type SearchConfigRequest, type SearchSyncRequest, type SearchStatus, type SearchQueryRequest, type SearchQueryResponse, type SemanticTasksRequest, type SemanticTasksResponse } from "../../../acp/src/search/contract";
 import { SEARCH_RAG_METHOD, SEARCH_RAG_DELTA_METHOD, type RagRequest, type RagResponse, type RagProgress } from "../../../acp/src/search/rag-contract";
 import { KNOWLEDGE_CHECK_METHOD, isKnowledgeCheckResult, type KnowledgeCheckRequest, type KnowledgeCheckResult } from "../../../acp/src/knowledge/contract";
@@ -288,6 +288,10 @@ export class AcpClient {
     } finally {
       this.selectionUpdates.delete(requestId);
     }
+  }
+
+  annotateFile(request: FileAnnotateRequest, signal?: AbortSignal): Promise<FileAnnotations> {
+    return this.pix.annotateFile(request, signal);
   }
 
   /** Progress shares the selection-assist delta channel, keyed by a per-call request id. */

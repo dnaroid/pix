@@ -79,6 +79,4 @@ export type DesktopViewModelServicesOptions = {
   openTasksPanel?: (taskId: string) => void | Promise<void>;
   openClaudeLoginTerminal?: (command: string) => Promise<void>;
   openBtw?: (sessionId: string, question?: string) => void | Promise<void>;
-  /** Opens (or closes, when already showing that file) the whole-file explanation popover. */
-  explainFile?: (path: string, content: string, anchor: { left: number; top: number; bottom: number }) => void;
 };

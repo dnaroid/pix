@@ -34,6 +34,8 @@ export const PIX_SELECTION_ASSIST_METHOD = "pix/selection/assist";
 export const PIX_SELECTION_ASSIST_DELTA_METHOD = "pix/selection/assist_delta";
 /** Whole-document Markdown translation; progress reuses `pix/selection/assist_delta` keyed by requestId. */
 export const PIX_DOCUMENT_TRANSLATE_METHOD = "pix/document/translate";
+/** Inline commentary for a Preview source file: `{ annotations: [{ line, text }] }`. */
+export const PIX_FILE_ANNOTATE_METHOD = "pix/file/annotate";
 export const PIX_BRANCH_USER_MESSAGES_METHOD = "pix/session/branch_user_messages";
 export const PIX_USER_MESSAGE_ACTION_METHOD = "pix/session/user_message_action";
 export const PIX_AGENT_CONTROL_METHOD = "pix/session/agent_control";
@@ -343,7 +345,7 @@ export interface DesktopGitAssistantResponse {
 	readonly text: string;
 }
 
-export type DesktopSelectionAssistAction = "explain" | "explain-file" | "translate";
+export type DesktopSelectionAssistAction = "explain" | "translate";
 
 export interface DesktopSelectionAssistRequest {
 	readonly cwd: string;
@@ -357,6 +359,19 @@ export interface DesktopSelectionAssistRequest {
 
 export interface DesktopSelectionAssistResponse {
 	readonly text: string;
+}
+
+export interface DesktopFileAnnotateRequest {
+	readonly cwd: string;
+	readonly text: string;
+	readonly path?: string;
+}
+
+export interface DesktopFileAnnotateResponse {
+	readonly annotations: readonly { readonly line: number; readonly text: string }[];
+	readonly language: string;
+	readonly annotatedLines: number;
+	readonly totalLines: number;
 }
 
 export interface DesktopDocumentTranslateRequest {
@@ -717,9 +732,9 @@ export function parseDesktopGitAssistantRequest(value: unknown): DesktopGitAssis
 	return { cwd: value.cwd, kind: value.kind, diff: value.diff };
 }
 
-/** Selected text limit; a whole-file explanation accepts a larger, client-truncated file. */
 export const SELECTION_ASSIST_MAX_TEXT = 20_000;
-export const EXPLAIN_FILE_MAX_TEXT = 120_000;
+/** A Preview file sent for annotation; ACP lists at most its first 120,000 characters to the model. */
+export const FILE_ANNOTATE_MAX_TEXT = 2_000_000;
 export const DOCUMENT_TRANSLATE_MAX_TEXT = 400_000;
 
 export function parseDesktopSelectionAssistRequest(value: unknown): DesktopSelectionAssistRequest {
@@ -727,15 +742,15 @@ export function parseDesktopSelectionAssistRequest(value: unknown): DesktopSelec
 		!isRecord(value)
 		|| typeof value.cwd !== "string"
 		|| value.cwd.trim().length === 0
-		|| (value.action !== "explain" && value.action !== "explain-file" && value.action !== "translate")
+		|| (value.action !== "explain" && value.action !== "translate")
 		|| typeof value.text !== "string"
 		|| value.text.trim().length === 0
-		|| value.text.length > (value.action === "explain-file" ? EXPLAIN_FILE_MAX_TEXT : SELECTION_ASSIST_MAX_TEXT)
+		|| value.text.length > SELECTION_ASSIST_MAX_TEXT
 		|| (value.context !== undefined && (typeof value.context !== "string" || value.context.length > 40_000))
 		|| (value.path !== undefined && (typeof value.path !== "string" || value.path.length > 4_096))
 		|| (value.requestId !== undefined && (typeof value.requestId !== "string" || value.requestId.length === 0 || value.requestId.length > 128))
 	) {
-		throw new RequestError(ERROR_INVALID_PARAMS, "pix/selection/assist requires cwd, action and non-empty text up to 20000 characters (120000 for explain-file)");
+		throw new RequestError(ERROR_INVALID_PARAMS, "pix/selection/assist requires cwd, action and non-empty text up to 20000 characters");
 	}
 	return {
 		cwd: value.cwd, action: value.action, text: value.text,
@@ -743,6 +758,21 @@ export function parseDesktopSelectionAssistRequest(value: unknown): DesktopSelec
 		...(typeof value.path === "string" && value.path ? { path: value.path } : {}),
 		...(typeof value.requestId === "string" ? { requestId: value.requestId } : {}),
 	};
+}
+
+export function parseDesktopFileAnnotateRequest(value: unknown): DesktopFileAnnotateRequest {
+	if (
+		!isRecord(value)
+		|| typeof value.cwd !== "string"
+		|| value.cwd.trim().length === 0
+		|| typeof value.text !== "string"
+		|| value.text.trim().length === 0
+		|| value.text.length > FILE_ANNOTATE_MAX_TEXT
+		|| (value.path !== undefined && (typeof value.path !== "string" || value.path.length > 4_096))
+	) {
+		throw new RequestError(ERROR_INVALID_PARAMS, "pix/file/annotate requires cwd and non-empty file text");
+	}
+	return { cwd: value.cwd, text: value.text, ...(typeof value.path === "string" && value.path ? { path: value.path } : {}) };
 }
 
 export function parseDesktopDocumentTranslateRequest(value: unknown): DesktopDocumentTranslateRequest {

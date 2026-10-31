@@ -40,6 +40,8 @@
   import { createPreviewScrollController } from "./preview-scroll-controller.svelte";
   import { createPreviewEvidenceController } from "./preview-evidence-controller.svelte";
   import { createPreviewTranslationController, type PreviewDocumentTranslator } from "./preview-translation-controller.svelte";
+  import { createPreviewAnnotationController, type PreviewFileAnnotator } from "./preview-annotation-controller.svelte";
+  import { insertPreviewAnnotations } from "../lib/preview-annotations";
   import { createDiagnosticLogger } from "../lib/diagnostic-logging";
   import { openExternalHref } from "../lib/external-links";
   import { resolveWikiLink } from "../lib/project-wiki";
@@ -81,7 +83,7 @@
     onResolveKnowledge,
     knowledgeResolving = false,
     onOpenExternalEditor,
-    onExplainFile,
+    onAnnotateFile,
     onTranslateDocument,
     onScrollPositionChange,
     onDirtyChange,
@@ -122,8 +124,8 @@
     onResolveKnowledge?: (result: KnowledgeCheckResult, snapshot: string) => void | Promise<void>;
     knowledgeResolving?: boolean;
     onOpenExternalEditor?: (path: string) => void;
-    /** Whole-file commentary, anchored below the header button. */
-    onExplainFile?: (path: string, content: string, anchor: { left: number; top: number; bottom: number }) => void;
+    /** Inline commentary rendered as highlighted insertions in the source. */
+    onAnnotateFile?: PreviewFileAnnotator;
     /** Whole-document Markdown translation with a project cache. */
     onTranslateDocument?: PreviewDocumentTranslator;
     onScrollPositionChange?: (id: number, position: PreviewScrollPosition) => void;
@@ -188,12 +190,28 @@
     if (translationState.cachedChunks > 0) return `Translation${target} · ${translationState.cachedChunks}/${translationState.chunks} sections from cache`;
     return `Translation${target}`;
   });
-  const canExplainFile = $derived(Boolean(file && highlighted && !file.virtualWikiDirectory && onExplainFile && previewContent.trim()));
-  function explainFile(event: MouseEvent): void {
-    if (!file || !onExplainFile) return;
-    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-    onExplainFile(file.path, previewContent, { left: rect.right - 600, top: rect.top, bottom: rect.bottom });
-  }
+
+  const annotations = createPreviewAnnotationController({
+    annotate: () => onAnnotateFile,
+    onError: (error) => diagnostics.warn("preview:file-annotation-failed", error),
+  });
+  onDestroy(annotations.dispose);
+  $effect(() => { annotations.setSource(`${file?.path ?? ""}\0${highlighted ? previewContent : ""}`); });
+  const annotationState = annotations.state;
+  const canAnnotate = $derived(Boolean(file && highlighted && !file.virtualWikiDirectory && onAnnotateFile && previewContent.trim()));
+  const showingAnnotations = $derived(canAnnotate && annotationState.showing);
+  const sourceHtml = $derived(highlighted
+    ? showingAnnotations && annotationState.annotations.length ? insertPreviewAnnotations(highlighted.html, annotationState.annotations) : highlighted.html
+    : "");
+  const annotationSummary = $derived.by(() => {
+    if (annotationState.status === "error") return annotationState.error || "Comments are unavailable";
+    if (annotationState.status === "loading") return "Reading the file and writing comments…";
+    if (annotationState.status !== "done") return "";
+    const count = annotationState.annotations.length;
+    const coverage = annotationState.annotatedLines < annotationState.totalLines
+      ? ` · first ${annotationState.annotatedLines} of ${annotationState.totalLines} lines` : "";
+    return `${count} ${count === 1 ? "comment" : "comments"}${annotationState.language ? ` · ${annotationState.language}` : ""}${coverage}`;
+  });
 
   const editorController = createPreviewEditorController({
     previewId: () => previewId,
@@ -323,6 +341,7 @@
   }
   function beginEdit(): void {
     translation.showOriginal();
+    annotations.hide();
     editorMode = renderAsMarkdown ? "visual" : "source";
     visualLoadError = null;
     editorController.begin();
@@ -469,15 +488,15 @@
           <WrapText class="h-4 w-4" aria-hidden="true" />
         </button>
       {/if}
-      {#if canExplainFile && !editing}
+      {#if canAnnotate && !editing}
         <button
-          class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          class={["inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+            showingAnnotations ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"]}
           type="button"
-          title="Explain this whole file"
-          aria-label={`Explain ${file?.path ?? "file"}`}
-          onpointerdown={(event) => event.stopPropagation()}
-          onclick={explainFile}
-        ><MessageSquareText class="h-3.5 w-3.5" aria-hidden="true" />Explain</button>
+          aria-pressed={showingAnnotations}
+          title={showingAnnotations ? "Hide inline comments" : "Comment this file inline"}
+          onclick={() => file && annotations.toggle(file.path, previewContent)}
+        ><MessageSquareText class="h-3.5 w-3.5" aria-hidden="true" />Comments</button>
       {/if}
       {#if canTranslate && !editing}
         <button
@@ -532,6 +551,22 @@
         </button>
       {/if}
     </header>
+    {#if showingAnnotations && !editing}
+      <div class="flex min-h-8 shrink-0 items-center gap-2 border-b border-border bg-panel px-3 py-1 text-xs" data-preview-annotations>
+        <MessageSquareText class={["h-3.5 w-3.5 shrink-0", annotationState.status === "error" ? "text-tool-error" : "text-muted-foreground"]} aria-hidden="true" />
+        <span class={["min-w-0 flex-1 truncate", annotationState.status === "error" ? "text-tool-error" : "text-muted-foreground"]} role="status" title={annotationSummary}>{annotationSummary}</span>
+        {#if annotations.running}
+          <button type="button" class="rounded-sm px-2 py-0.5 text-muted-foreground hover:bg-panel-hover hover:text-foreground" onclick={annotations.cancel}>Cancel</button>
+        {:else if file}
+          <button
+            type="button"
+            class="rounded-sm px-2 py-0.5 text-muted-foreground hover:bg-panel-hover hover:text-foreground"
+            onclick={() => file && void annotations.annotate(file.path, previewContent, true)}
+          >{annotationState.status === "error" ? "Retry" : "Regenerate"}</button>
+        {/if}
+        <button type="button" class="rounded-sm px-2 py-0.5 text-muted-foreground hover:bg-panel-hover hover:text-foreground" onclick={annotations.hide}>Hide</button>
+      </div>
+    {/if}
     {#if showingTranslation && !editing}
       <div class="flex min-h-8 shrink-0 items-center gap-2 border-b border-border bg-panel px-3 py-1 text-xs" data-preview-translation>
         <Languages class={["h-3.5 w-3.5 shrink-0", translationState.status === "error" ? "text-tool-error" : "text-muted-foreground"]} aria-hidden="true" />
@@ -716,7 +751,7 @@
         <div
           bind:this={contentScrollElement}
           use:restoreScroll={{ key: previewId, position: scrollPosition }}
-          class="preview-text-surface min-h-0 min-w-0 flex-1 overflow-auto bg-code outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          class="preview-text-surface preview-source-surface min-h-0 min-w-0 flex-1 overflow-auto outline-none [container-type:inline-size] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
           role="region"
           aria-label={`Source for ${file.path}`}
           data-preview-source-path={file.path}
@@ -728,7 +763,7 @@
             : "preview-source m-0 min-h-full min-w-full w-max py-4 font-mono text-foreground"}><code
               class:wrap-lines={wrapLines}
               class="preview-code"
-            >{@html highlighted.html}</code></pre>
+            >{@html sourceHtml}</code></pre>
         </div>
       {/if}
     {:else if attachment}
@@ -798,6 +833,11 @@
    * Source reading typography: 13px Geist Mono with an airy 1.7 rhythm,
    * contextual alternates on, no decorative ligatures, crisp glyphs on dark.
    */
+  .preview-source-surface {
+    background: var(--source-surface);
+    color: var(--sh-identifier);
+  }
+
   .preview-source {
     font-size: 13px;
     line-height: 1.7;
@@ -840,9 +880,9 @@
     display: inline-block;
     width: 3.5rem;
     margin-right: 1.25rem;
-    border-right: 1px solid color-mix(in srgb, var(--code-border) 55%, transparent);
-    background: var(--code);
-    color: color-mix(in srgb, var(--muted-foreground) 62%, transparent);
+    border-right: 1px solid var(--source-gutter-border);
+    background: var(--source-surface);
+    color: var(--source-gutter);
     content: counter(preview-line);
     counter-increment: preview-line;
     font-size: 12px;
@@ -856,16 +896,60 @@
   }
 
   .preview-code :global(.sh__line:hover)::before {
-    background: color-mix(in srgb, var(--foreground) 4%, var(--code));
+    background: color-mix(in srgb, var(--foreground) 4%, var(--source-surface));
     color: var(--foreground);
   }
+
+  /*
+   * Inline comment rows: a highlighted insertion aligned with the code column,
+   * sticky to the left edge while scrolling horizontally, never selected or
+   * copied with the source, and without a line number.
+   */
+  .preview-code :global(.preview-annotation) {
+    position: sticky;
+    left: 0;
+    display: block;
+    width: min(100%, 52rem);
+    max-width: calc(100cqw - 1rem);
+    padding: 0.3rem 1rem 0.35rem 4.75rem;
+    white-space: normal;
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: default;
+  }
+
+  .preview-code :global(.preview-annotation-body) {
+    display: block;
+    border-left: 2px solid var(--annotation-accent);
+    border-radius: 0 6px 6px 0;
+    background: var(--annotation-surface);
+    color: var(--annotation-foreground);
+    padding: 0.35rem 0.75rem;
+    font-family: var(--font-sans);
+    font-size: 12.5px;
+    font-style: normal;
+    font-weight: 400;
+    line-height: 1.5;
+    letter-spacing: 0;
+  }
+
+  .preview-code :global(.preview-annotation-body code) {
+    font-family: var(--font-mono);
+    font-size: 0.92em;
+    padding: 0.02rem 0.28rem;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--annotation-accent) 14%, transparent);
+    color: var(--annotation-code);
+  }
+
+  .preview-code :global(.preview-annotation-body strong) { font-weight: 600; }
 
   .preview-code :global(.sh__line.preview-range-highlight) {
     background: color-mix(in srgb, var(--tool-warning) 18%, transparent);
   }
 
   .preview-code :global(.sh__line.preview-range-highlight)::before {
-    background: color-mix(in srgb, var(--tool-warning) 13%, var(--code));
+    background: color-mix(in srgb, var(--tool-warning) 13%, var(--source-surface));
     color: var(--foreground);
   }
 
