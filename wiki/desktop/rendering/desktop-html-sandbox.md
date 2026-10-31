@@ -164,7 +164,26 @@ Choose what I should do next:
 ```
 ~~~~
 
-Desktop renders a valid block as checkboxes and a submit button. A standalone
+When the agent stops for the user to do something themselves (install a tool,
+sign in, export a file) and then reply, the body may instead contain only plain
+list items without checkboxes — 1–4 short replies of at most 40 characters:
+
+~~~~markdown
+```pix-actions
+- Готово
+- Пропустить
+```
+~~~~
+
+Such a block is a row of reply buttons: the first is the primary action, the
+rest are secondary. Clicking one sends its label verbatim as the user message,
+then the row locks like a submitted checklist. Mixing plain and checkbox items
+makes the block invalid. The opening-line label serves only as the group's
+accessible name. The same activity rules apply; reply buttons produce no
+checkbox receipt. In the Pix TUI the row renders as `[ Готово ]  [ Пропустить ]`
+and the widget sends a button on its digit (or Enter when there is a single one).
+
+Desktop renders a valid checklist as checkboxes and a submit button. A standalone
 title or other non-checklist body content makes the block invalid, so it stays
 ordinary escaped Markdown/code. Only the latest assistant message that contains
 a valid block is interactive, and only when no prompt is running and no later

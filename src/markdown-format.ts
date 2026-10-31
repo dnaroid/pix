@@ -334,10 +334,12 @@ function renderChoiceActionsBlock(
 		const actions = parseChoiceActions(openingFence.info, rawLines.slice(openingLineIndex + 1, index).join("\n"));
 		if (!actions) return undefined;
 		const lines: RenderedMarkdownTextLine[] = [];
-		const logical = [
-			...actions.items.map((item, itemIndex) => `${item.checked ? "☑" : "☐"} ${itemIndex + 1}. ${item.label}`),
-			`↳ ${actions.submitLabel}`,
-		];
+		const logical = actions.buttons
+			? [actions.items.map((item) => `[ ${item.label} ]`).join("  ")]
+			: [
+				...actions.items.map((item, itemIndex) => `${item.checked ? "☑" : "☐"} ${itemIndex + 1}. ${item.label}`),
+				`↳ ${actions.submitLabel}`,
+			];
 		for (const text of logical) {
 			for (const wrapped of wrapRenderedMarkdownLine({ text, segments: [], links: [] }, width, options)) {
 				lines.push({

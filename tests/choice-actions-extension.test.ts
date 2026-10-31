@@ -74,6 +74,7 @@ describe("pix-actions contract", () => {
 		assert.equal(latestRunChoiceActions([...kept, { role: "user", content: "x" }]), undefined);
 		assert.equal(latestRunChoiceActions([{ role: "assistant", content: block }, { role: "user", content: "x" }, { role: "assistant", content: "plain" }]), undefined);
 		assert.ok(CHOICE_ACTIONS_CAPABILITY.includes("no tool calls or further work after it"));
+		assert.ok(CHOICE_ACTIONS_CAPABILITY.includes("one-click reply button"));
 	});
 });
 
@@ -142,10 +143,34 @@ describe("pix-actions TUI extension", () => {
 	});
 });
 
+describe("pix-actions TUI reply buttons", () => {
+	const buttons = "Install it, then reply.\n```pix-actions\n- Готово\n- Пропустить\n```";
+
+	it("sends a button label on its digit and ignores other keys", () => {
+		const h = harness();
+		h.emit("agent_end", reply(buttons));
+		assert.deepEqual(h.widgets[h.widgets.length - 1], ["[1] Готово  [2] Пропустить", "1–2 send · Esc dismiss · type to write your own"]);
+		assert.deepEqual(h.key("\r"), { consume: true });
+		assert.deepEqual(h.key("3"), { consume: true });
+		assert.deepEqual(h.sent, []);
+		assert.deepEqual(h.key("2"), { consume: true });
+		assert.deepEqual(h.sent, ["Пропустить"]);
+		assert.equal(h.subscribed, false);
+	});
+
+	it("sends a single button on Enter", () => {
+		const h = harness();
+		h.emit("agent_end", reply("Do it.\n```pix-actions\n- Готово\n```"));
+		assert.deepEqual(h.key("\r"), { consume: true });
+		assert.deepEqual(h.sent, ["Готово"]);
+	});
+});
+
 describe("pix-actions transcript rendering", () => {
 	it("renders a valid block as a checklist and keeps malformed blocks as code", () => {
 		const lines = renderMarkdownTextLines(block, 80).map((line) => line.text);
 		assert.deepEqual(lines, ["Done.", "☑ 1. Add tests", "☐ 2. Update docs", "↳ Next"]);
+		assert.deepEqual(renderMarkdownTextLines("Ready?\n```pix-actions\n- Готово\n- Пропустить\n```", 80).map((line) => line.text), ["Ready?", "[ Готово ]  [ Пропустить ]"]);
 		const malformed = renderMarkdownTextLines("```pix-actions\n- [x] A\nplain\n```", 80);
 		assert.ok(malformed.every((line) => line.codeBlock));
 	});
